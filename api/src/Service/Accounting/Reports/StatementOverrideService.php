@@ -40,6 +40,7 @@ final class StatementOverrideService
         private readonly LedgerReportRepository $ledger,
         private readonly AccountingPeriodRepository $periods,
         private readonly FinancialStatementService $statements,
+        private readonly StatementFrameworkResolver $frameworkResolver,
     ) {}
 
     /**
@@ -59,6 +60,9 @@ final class StatementOverrideService
             throw new ReportException('period_not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
         }
         $asOf = (string) $period['ends_on'];
+        if ($this->frameworkResolver->context($supplierId, $periodId, $asOf)['framework'] === 'cz_504') {
+            throw new ReportException('statement_mapping_editor_unsupported', 'Editor mapování výkazů pro rámec 504 zatím není k dispozici.');
+        }
         $version = $this->definitions->findVersion($type, $asOf);
         if ($version === null) {
             throw new ReportException('statement_version_missing', 'Pro rozvahový den ' . $asOf . ' neexistuje verze mapování výkazu.');
@@ -546,6 +550,7 @@ final class StatementOverrideService
      */
     private function accounts(int $supplierId, string $type, array $ctx, array $map): array
     {
+        $accountDefinitions=\MyInvoice\Repository\AccountDefinitionRepository::relation($ctx['as_of'],$supplierId);
         $types = self::ACCOUNT_TYPES[$type];
         $balances = $this->ledger->syntheticBalances(
             $supplierId,
@@ -569,8 +574,8 @@ final class StatementOverrideService
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, a.name, a.account_type, a.is_synthetic, a.is_active,
                     p.account_code AS parent_code
-               FROM chart_of_accounts a
-          LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
+               FROM {$accountDefinitions} a
+          LEFT JOIN {$accountDefinitions} p ON p.id = a.parent_id
               WHERE a.supplier_id = ? AND a.account_type IN ({$ph})
               ORDER BY a.account_code"
         );

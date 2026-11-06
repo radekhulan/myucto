@@ -1,10 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import type { RouteLocationRaw } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import Modal from '../ui/Modal.vue'
 import { btnOutline } from '../ui/buttonStyles'
 import { closingApi } from '../../api/closing'
+import { useAccountBalance } from '../../composables/useAccountBalance'
 import FindingRemedyModal from './FindingRemedyModal.vue'
 
 /**
@@ -65,6 +66,7 @@ const props = defineProps<{
 }>()
 
 const { t } = useI18n()
+const { formatBalance } = useAccountBalance()
 const open = ref(false)
 
 /**
@@ -76,6 +78,9 @@ const open = ref(false)
 const liveValue = ref<CheckValue | null>(null)
 const loading = ref(false)
 const loadFailed = ref(false)
+
+// Nový výsledek kontroly: dřívější detail už neplatí a nesmí přebít počet v řádku.
+watch(() => props.value, () => { liveValue.value = null })
 
 async function openDetail() {
   open.value = true
@@ -230,6 +235,19 @@ function issueText(f: Finding): string {
   }).join(' · ')
 }
 
+/** Výsledek testu § 38mb písm. b) ZDP u SVJ; jiné poplatníky 504 se netýká. */
+interface SvjPrecheck {
+  status: 'filing_required' | 'filing_not_required' | 'unassessed'
+  reason: string
+  taxable_source_count: number
+}
+const svjPrecheck = computed<SvjPrecheck | null>(() => {
+  const v = props.value
+  if (v === null || typeof v !== 'object' || Array.isArray(v)) return null
+  const p = (v as { svj_precheck?: SvjPrecheck }).svj_precheck
+  return p && typeof p.status === 'string' ? p : null
+})
+
 // Počet bere přednostně z dat; u starého tvaru bez `count` spadne na délku seznamu,
 // aby nevzniklo „0 nálezů" nad neprázdnou tabulkou.
 const total = computed(() => parsed.value?.count ?? findings.value.length)
@@ -312,6 +330,8 @@ function fmtScalar(key: string, value: unknown): string {
     const v = t(k)
     return v === k ? String(value) : v
   }
+  // Zůstatek účtu (klíč je kód účtu): MD − Dal se znaménkem, zobrazí se se stranou.
+  if (/^\d{3}$/.test(key)) return formatBalance(value)
   return COUNT_LIKE.test(key) ? String(value) : money.format(value)
 }
 
@@ -370,6 +390,8 @@ function docLink(f: Finding): RouteLocationRaw | null {
     // Deník nemá detail route jednoho zápisu — vzor v projektu je seznam s query.
     case 'journal_entry':
       return { name: 'accounting-journal', query: { entry_id: f.doc_id } }
+    case 'other_item':
+      return { name: 'other-item-detail', params: { id: f.doc_id } }
     case 'asset':
       return { name: 'accounting-asset-detail', params: { id: f.doc_id } }
     default:
@@ -381,7 +403,19 @@ function docLink(f: Finding): RouteLocationRaw | null {
 <template>
   <!-- Kontrola bez nálezů nevypisuje NIC. Stav už nese badge vedle; vypisovat
        {"count":0,"items":[]} byl jen šum, který uživateli nic neříkal. -->
-  <template v-if="findings.length > 0 || total > 0">
+  <span v-if="checkKey === 'deferred_tax_assessment'" class="text-sm text-neutral-600">
+    {{ t((value as { applicable?: boolean; complete?: boolean })?.applicable === false ? 'checks.value.not_applicable' : (value as { complete?: boolean })?.complete ? 'checks.value.completed' : 'checks.value.pending') }}
+  </span>
+  <span v-else-if="checkKey === 'nonprofit_tax_assessment'" class="text-sm text-neutral-600">
+    {{ t((value as { complete?: boolean })?.complete ? 'checks.value.completed' : 'checks.value.pending') }}
+    <span v-if="svjPrecheck" data-test="svj-precheck"
+      :class="svjPrecheck.status === 'filing_required' ? 'text-warning-700' : svjPrecheck.status === 'unassessed' ? 'text-danger-600' : ''">
+      <span class="text-neutral-300"> · </span>{{ t('checks.svj_precheck.label') }}:
+      {{ t(`checks.svj_precheck.status.${svjPrecheck.status}`) }}
+      ({{ t(`checks.svj_precheck.reason.${svjPrecheck.reason}`, { count: svjPrecheck.taxable_source_count }) }})
+    </span>
+  </span>
+  <template v-else-if="findings.length > 0 || total > 0">
     <button type="button" class="text-primary-600 hover:underline text-sm" @click="openDetail">
       {{ t('checks.findings_count', { count: total }) }}
     </button>

@@ -134,7 +134,7 @@ final class EmbeddingWriter
                FROM journal_entry_lines jel JOIN chart_of_accounts coa ON coa.id=jel.account_id
               WHERE jel.entry_id=? AND jel.supplier_id=? AND jel.side='debit'
                 AND coa.account_code NOT LIKE '343%'
-                AND coa.account_code NOT REGEXP '^(311|321|314|324|325|33|34|221|211)'
+                AND coa.account_code NOT REGEXP '" . \MyInvoice\Service\Accounting\SettlementAccounts::sqlRegexp() . "'
               ORDER BY jel.amount DESC,jel.id LIMIT 1"
         );
         $account->execute([(int) $row['journal_entry_id'], $supplierId]);

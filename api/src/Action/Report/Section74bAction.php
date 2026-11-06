@@ -44,7 +44,7 @@ final class Section74bAction
         try {
             $result = $this->service->previewAging($supplierId, $year, $month);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
         return Json::ok($response, $result);
     }
@@ -68,7 +68,7 @@ final class Section74bAction
         try {
             $result = $this->service->recordAging($supplierId, $year, $month, $userId);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
         return Json::ok($response, $result);
     }

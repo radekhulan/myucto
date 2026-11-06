@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 use MyInvoice\Repository\Payroll\PayrollRegistrationSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionGuidFactory;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzSoftwareIdentification;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
@@ -218,10 +219,16 @@ final readonly class PayrollRegistrationSubmissionService
      * Zmrazí registraci do odesílatelné podoby: povinnost, podání, část
      * a artefakt s přesnými bajty XML. Neodesílá.
      *
+     * S `$replacesSubmissionId` připraví ze stejné události novou větu
+     * místo zmrazené změny, jejíž ročník mezitím zastaral
+     * ({@see PayrollRegistrationSchemaCatalog::changeVintageExpired()});
+     * původní podání se včas zruší (`cancelled_in_time`).
+     *
      * @return array{
      *   submission_id:int,obligation_id:int,part_id:int,artifact_id:int,
      *   status:string,row_version:int,environment:string,agenda_code:string,
      *   interaction:string,artifact_sha256:string,created:bool,
+     *   vintage_expired:bool,
      *   deadline:array{earliest_registration_on:string,due_on:string,
      *     calendar_basis:string,ruleset_id:string},
      *   problems:list<array{field:?string,code:string,message:string}>
@@ -235,7 +242,15 @@ final readonly class PayrollRegistrationSubmissionService
         ?int $eventId = null,
         bool $fullRegistrationRequested = false,
         bool $startNotKnownInAdvance = false,
+        ?int $replacesSubmissionId = null,
     ): array {
+        if ($replacesSubmissionId !== null && $eventId === null) {
+            throw new PayrollRegistrationXmlException(
+                'registration_reprepare_not_applicable',
+                'Znovu se připravuje jen změna nebo oprava ze schválené'
+                    . ' události. Vyberte událost a podání připravte znovu.',
+            );
+        }
         // Povinnost a lhůta vznikají mimo transakci podání a nezávisle na tom,
         // jestli se podání povede připravit. Kdyby vznikaly až spolu s ním,
         // neúspěšná příprava by po sobě nenechala ani stopu po termínu.
@@ -284,15 +299,32 @@ final readonly class PayrollRegistrationSubmissionService
                 'message' => $pairing['message'],
             ];
         }
+        $replacedEvent = $replacesSubmissionId === null || $eventId === null
+            ? null
+            : $this->events->load($supplierId, $environment, $employmentId, $eventId);
+        if ($replacesSubmissionId !== null) {
+            // Ověří se dřív, než vznikne nová povinnost: bez zastaralého
+            // podání by po sobě nechala povinnost bez podání.
+            $this->requireExpiredChange(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $replacesSubmissionId,
+                $probe['source_hash'],
+                $probe,
+                $replacedEvent,
+            );
+        }
         $obligation = $this->registerObligation(
             $supplierId,
             $environment,
             $context,
             $probe,
             $createdBy,
+            $replacesSubmissionId,
         );
 
-        return $this->submissionRepository->transaction(function () use (
+        $result = $this->submissionRepository->transaction(function () use (
             $supplierId,
             $environment,
             $employmentId,
@@ -303,6 +335,8 @@ final readonly class PayrollRegistrationSubmissionService
             $problems,
             $fullRegistrationRequested,
             $startNotKnownInAdvance,
+            $replacesSubmissionId,
+            $replacedEvent,
         ): array {
             if (!$this->submissionRepository->lockSupplier($supplierId)) {
                 // Výjimka zůstává: chybí firma, za kterou by se podávalo,
@@ -339,11 +373,23 @@ final readonly class PayrollRegistrationSubmissionService
                     $probe['snapshot']->employmentExternalIdentifier['value'] ?? null,
                 );
             }
+            $replaced = $replacesSubmissionId === null
+                ? null
+                : $this->requireExpiredChange(
+                    $supplierId,
+                    $environment,
+                    $employmentId,
+                    $replacesSubmissionId,
+                    $sourceHash,
+                    $probe,
+                    $replacedEvent,
+                );
             $keys = $this->idempotencyKeys(
                 $supplierId,
                 $environment,
                 $employmentId,
                 $sourceHash,
+                $replacesSubmissionId,
             );
             $submission = $this->submissions->prepare(
                 $supplierId,
@@ -365,6 +411,7 @@ final readonly class PayrollRegistrationSubmissionService
                     $submission,
                     $probe,
                     $obligation['id'],
+                    $eventId,
                 ) + ['problems' => $problems];
             }
 
@@ -442,6 +489,17 @@ final readonly class PayrollRegistrationSubmissionService
                 (int) $validated['row_version'],
                 'ready',
             );
+            if ($replaced !== null) {
+                // Zastaralá věta se neodešle nikdy, nahrazuje ji právě
+                // připravená. Ruší se ve stejné transakci, aby nezůstala dvě
+                // odesílatelná podání téže události.
+                $this->submissions->transition(
+                    $supplierId,
+                    $replaced['submission_id'],
+                    $replaced['row_version'],
+                    'cancelled_in_time',
+                );
+            }
             // Neodvozená lhůta (nástup před 1. 7. 2026) do checklistu nejde —
             // checklist pro ni termín záměrně nevede (PayrollChecklistDeadlinePolicy).
             if ($eventId === null && $frozen['deadline']->derived) {
@@ -479,12 +537,35 @@ final readonly class PayrollRegistrationSubmissionService
                 'before_start_choice' => $frozen['before_start_choice'],
                 'artifact_sha256' => (string) $artifact['artifact_sha256'],
                 'created' => true,
+                'vintage_expired' => false,
+                'replaced_submission_id' => $replaced['submission_id'] ?? null,
                 'deadline' => $this->describeDeadline($frozen['deadline']),
                 // Nedostatky, které se registrace zaměstnance netýkají, a tak
                 // ji nesměly zablokovat. Prázdný seznam = všechno sedlo.
                 'problems' => $problems,
             ];
         });
+        if ($replacesSubmissionId === null
+            && $eventId !== null
+            && $result['created'] === false
+            && $result['status'] === 'cancelled_in_time'
+            && ($result['vintage_expired'] ?? false) === true
+        ) {
+            // Zastaralou větu už nahradila nová: opakovaná příprava téže
+            // události vrátí tu novou, ne zrušenou.
+            return $this->prepare(
+                $supplierId,
+                $environment,
+                $employmentId,
+                $createdBy,
+                $eventId,
+                $fullRegistrationRequested,
+                $startNotKnownInAdvance,
+                (int) $result['submission_id'],
+            );
+        }
+
+        return $result;
     }
 
     /**
@@ -691,6 +772,30 @@ final readonly class PayrollRegistrationSubmissionService
             $event,
             $effectiveOn,
         );
+        // Ročník formuláře určuje rozhodné datum události (nástup, skončení,
+        // platnost změny): od 1. 1. 2027 REGZEC27. U A3/A4 bez data skončení
+        // rozhoduje den vyhotovení (PayrollRegistrationSchemaCatalog::versionFor()).
+        // PREZEC ročník nemění (viz PayrollRegistrationSchemaCatalog::documentTypeFor()).
+        $eventData = is_array($event['data'] ?? null) ? $event['data'] : null;
+        $decisiveOn = PayrollRegistrationSchemaCatalog::decisiveDate(
+            $interaction->actionCode,
+            $effectiveOn,
+            $eventData,
+        );
+        $form = (new PayrollRegistrationSchemaCatalog())->documentTypeFor(
+            $interaction->documentType,
+            $decisiveOn,
+            PayrollRegistrationSchemaCatalog::versionFor(
+                $interaction->actionCode,
+                $effectiveOn,
+                $eventData,
+                $this->today(),
+            ),
+        );
+        $specVersion = $form === 'REGZEC27'
+            ? JmhzSpecVersion::V2027
+            : JmhzSpecVersion::V2026;
+        $this->assertFormAccepted($form, $environment, $decisiveOn);
         $payload = $this->payload(
             $snapshot,
             $interaction,
@@ -701,6 +806,7 @@ final readonly class PayrollRegistrationSubmissionService
             $interaction->interaction === 'pre_registration_no_show'
                 ? $preRegistration?->variableSymbol
                 : null,
+            $specVersion,
         );
         $xml = $this->serializer->serialize($payload);
         // Validátor si XML serializuje znovu a porovná bajty; volá se i tady,
@@ -726,7 +832,7 @@ final readonly class PayrollRegistrationSubmissionService
                     'referenced_form_guid' => $referencedGuid,
                 ])))
                 : $this->eventFingerprint($event),
-            'schema_version' => $interaction->documentType,
+            'schema_version' => $form,
             'deadline' => $this->deadlineFor(
                 $interaction,
                 $context,
@@ -884,6 +990,7 @@ final readonly class PayrollRegistrationSubmissionService
         ?array $event,
         ?string $referencedFormGuid = null,
         ?string $preRegistrationVariableSymbol = null,
+        JmhzSpecVersion $specVersion = JmhzSpecVersion::V2026,
     ): PayrollRegistrationXmlPayload {
         $eventEmployer = is_array($event['employer'] ?? null)
             ? $event['employer']
@@ -965,6 +1072,40 @@ final readonly class PayrollRegistrationSubmissionService
                 : null,
             eventSnapshot: $event,
             referencedFormGuid: $referencedFormGuid,
+            specVersion: $specVersion,
+        );
+    }
+
+    /**
+     * REGZEC27 přijímá ostrá ČSSZ od 23. 12. 2026 (ČSSZ, Otázky a odpovědi
+     * k NV2027, odpověď 5: „REGZEC 2027 tak bude umožněno posílat již ode dne
+     * 23. 12. 2026", aby šlo přihlásit před nástupem 1. 1. 2027). REGZEC25
+     * s rozhodným datem od 1. 1. 2027 ČSSZ zamítne (EDV 1.4.0.7, Slovník,
+     * záhlaví REGZEC 2025), takže dřív takovou událost podat nejde vůbec.
+     * Testovací prostředí ČSSZ přijímá REGZEC27 už teď (fáze 2 od 2. 11. 2026).
+     */
+    private function assertFormAccepted(string $form, string $environment, string $decisiveOn): void
+    {
+        if ($form !== 'REGZEC27'
+            || $environment !== 'production'
+            || $this->today() >= JmhzSpecVersion::FIRST_REGZEC27_ACCEPTED_ON
+        ) {
+            return;
+        }
+        throw new PayrollRegistrationXmlException(
+            'registration_regzec27_not_yet_accepted',
+            "Událost s rozhodným datem {$decisiveOn} se hlásí formulářem REGZEC27"
+                . ' (specifikace JMHZ 2027), který ostrá ČSSZ přijímá až od'
+                . ' 23. 12. 2026. Starší formulář REGZEC25 ČSSZ pro takovou událost'
+                . ' odmítne. Podání připravte a odešlete 23. 12. 2026 nebo později;'
+                . ' přihlášku s nástupem v lednu 2027 stihnete i tak, pokud ji'
+                . ' podáte nejpozději před nástupem. Chcete-li přihlásit'
+                . ' zaměstnance s českým občanstvím dřív, podejte částečné'
+                . ' přihlášení PREZEC (nejdřív osm dnů před nástupem).'
+                . ' U zahraničního zaměstnance částečné přihlášení nelze'
+                . ' (§ 19 odst. 2 zákona č. 323/2025 Sb.): přihlášku podejte'
+                . ' 23. 12. 2026 nebo později, vždy před nástupem, při nástupu'
+                . ' 1. 1. 2027 nejpozději téhož dne před začátkem práce.',
         );
     }
 
@@ -1312,6 +1453,7 @@ final readonly class PayrollRegistrationSubmissionService
         array $context,
         array $resolved,
         ?int $createdBy,
+        ?int $replacesSubmissionId = null,
     ): array {
         $interaction = $resolved['interaction'];
         $window = $resolved['deadline'];
@@ -1319,6 +1461,10 @@ final readonly class PayrollRegistrationSubmissionService
             PayrollRegistrationSubmissionRepository::employmentReference(
                 $context['employment_id'],
             );
+        // Nová věta místo zastaralé změny potřebuje vlastní povinnost: na
+        // jednu povinnost připadá jediné řádné podání
+        // (uq_payroll_submissions_regular). Původní povinnost se zrušením
+        // zastaralého podání překlopí do `cancelled`.
         $sourceHash = hash('sha256', CanonicalJson::encode([
             'schema_reference' => 'payroll-registration-obligation.v1',
             'employment_id' => $context['employment_id'],
@@ -1328,7 +1474,10 @@ final readonly class PayrollRegistrationSubmissionService
                 ?? $this->effectiveDate($context),
         ] + (($resolved['deadline_basis'] ?? null) === null
             ? []
-            : ['deadline_basis' => $resolved['deadline_basis']])));
+            : ['deadline_basis' => $resolved['deadline_basis']])
+          + ($replacesSubmissionId === null
+            ? []
+            : ['replaces_submission_id' => $replacesSubmissionId])));
 
         return $this->obligations->register(
             $supplierId,
@@ -1561,6 +1710,7 @@ final readonly class PayrollRegistrationSubmissionService
         array $submission,
         array $resolved,
         int $obligationId,
+        ?int $eventId = null,
     ): array {
         $stored = $this->registrations->registrationBySubmission(
             $supplierId,
@@ -1594,8 +1744,31 @@ final readonly class PayrollRegistrationSubmissionService
             'before_start_choice' => $resolved['before_start_choice'],
             'artifact_sha256' => $stored['artifact_sha256'],
             'created' => false,
+            // Připravená změna bez 10224, kterou by ČSSZ dnes odmítla: UI místo
+            // odeslání nabídne Připravit znovu.
+            'vintage_expired' => $eventId !== null
+                && in_array((string) $submission['status'], ['ready', 'cancelled_in_time'], true)
+                && PayrollRegistrationSchemaCatalog::frozenChangeVintageExpired(
+                    $resolved['interaction']->actionCode,
+                    $this->eventData($supplierId, $environment, $employmentId, $eventId),
+                    $stored['xsd_version'] ?? null,
+                    $this->today(),
+                ),
+            'replaced_submission_id' => null,
             'deadline' => $this->describeDeadline($resolved['deadline']),
         ];
+    }
+
+    /** @return array<string,mixed>|null */
+    private function eventData(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        int $eventId,
+    ): ?array {
+        $event = $this->events->load($supplierId, $environment, $employmentId, $eventId);
+
+        return is_array($event['data'] ?? null) ? $event['data'] : null;
     }
 
     /**
@@ -1716,12 +1889,64 @@ final readonly class PayrollRegistrationSubmissionService
         return hash('sha256', CanonicalJson::encode($event));
     }
 
+    /**
+     * Podání, které má nová věta nahradit: změna nebo oprava téže události
+     * (stejný otisk zdroje), připravená a neodeslaná, jejíž ročník k dnešku
+     * zastaral. Vrací `null`, když už ho nahradila dřívější příprava
+     * (`cancelled_in_time`), takže opakovaný požadavek jen vrátí novou větu.
+     *
+     * @param array<string,mixed> $resolved
+     * @return array{submission_id:int,row_version:int}|null
+     */
+    private function requireExpiredChange(
+        int $supplierId,
+        string $environment,
+        int $employmentId,
+        int $replacesSubmissionId,
+        string $sourceHash,
+        array $resolved,
+        ?array $event,
+    ): ?array {
+        $stored = $this->registrations->registrationBySubmission(
+            $supplierId,
+            $environment,
+            $employmentId,
+            $replacesSubmissionId,
+        );
+        $expired = $stored !== null
+            && hash_equals((string) ($stored['source_snapshot_hash'] ?? ''), $sourceHash)
+            && in_array((string) $stored['status'], ['ready', 'cancelled_in_time'], true)
+            && PayrollRegistrationSchemaCatalog::frozenChangeVintageExpired(
+                $resolved['interaction']->actionCode,
+                is_array($event['data'] ?? null) ? $event['data'] : null,
+                $stored['xsd_version'] ?? null,
+                $this->today(),
+            );
+        if (!$expired) {
+            throw new PayrollRegistrationXmlException(
+                'registration_reprepare_not_needed',
+                'Tohle podání se znovu připravovat nemusí: není to připravená'
+                    . ' změna nebo oprava téže události, jejíž formát by ČSSZ'
+                    . ' dnes odmítla. Odešlete ho, nebo načtěte kartu vztahu'
+                    . ' znovu.',
+            );
+        }
+
+        return $stored['status'] === 'ready'
+            ? [
+                'submission_id' => (int) $stored['submission_id'],
+                'row_version' => (int) ($stored['row_version'] ?? 0),
+            ]
+            : null;
+    }
+
     /** @return array{submission:string,artifact:string} */
     private function idempotencyKeys(
         int $supplierId,
         string $environment,
         int $employmentId,
         string $sourceHash,
+        ?int $replacesSubmissionId = null,
     ): array {
         $base = CanonicalJson::encode([
             'schema_reference' => 'payroll-registration-submission.v1',
@@ -1729,7 +1954,9 @@ final readonly class PayrollRegistrationSubmissionService
             'environment' => $environment,
             'employment_id' => $employmentId,
             'source_hash' => $sourceHash,
-        ]);
+        ] + ($replacesSubmissionId === null
+            ? []
+            : ['replaces_submission_id' => $replacesSubmissionId]));
 
         return [
             'submission' => 'registration-submission:'

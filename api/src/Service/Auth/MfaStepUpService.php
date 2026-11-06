@@ -48,14 +48,20 @@ final class MfaStepUpService
     /**
      * Co smí autorizovat ZÁLOŽNÍ KÓD. Úmyslně užší množina než u skutečných faktorů:
      * kód neprokazuje držení zařízení, jen znalost tajemství z papíru, takže smí
-     * posloužit výhradně k obnově přístupu — odebrat ztracený klíč a zaregistrovat
-     * nový. Vydání API tokenu ani práci s podpisovým certifikátem pro daňová podání
-     * s ním potvrdit nelze; na to musí uživatel nejdřív obnovit reálný faktor.
+     * posloužit výhradně k obnově přístupu — odebrat ztracený klíč a zřídit nový
+     * faktor (passkey nebo TOTP). Vydání API tokenu ani práci s podpisovým
+     * certifikátem pro daňová podání s ním potvrdit nelze; na to musí uživatel
+     * nejdřív obnovit reálný faktor.
+     *
+     * TOTP tu je ze stejného důvodu jako passkey: obnovený faktor pak sice potvrdí
+     * i vydání API tokenu, ale to platí pro nový passkey úplně stejně. Bez TOTP
+     * zůstal uživatel, kterému správce klíčů vrací neplatné ověření, bez cesty ven —
+     * nový passkey by uložil do téhož rozbitého správce.
      *
      * Regenerace sady tu schválně NENÍ: kdo se dostal dovnitř papírovým kódem, si
      * jím nesmí vyrobit novou sadu donekonečna. Nejdřív reálný faktor, pak nové kódy.
      */
-    private const RECOVERY_OPERATIONS = [self::OPERATION_PASSKEY_REGISTER];
+    private const RECOVERY_OPERATIONS = [self::OPERATION_PASSKEY_REGISTER, self::OPERATION_TOTP_ENABLE];
 
     public function __construct(
         private readonly MfaStepUpProofStore $proofs,

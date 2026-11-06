@@ -8,7 +8,12 @@ use GuzzleHttp\ClientInterface;
 use GuzzleHttp\Exception\GuzzleException;
 use Psr\Log\LoggerInterface;
 
-final class FioBankConnector implements BankConnector
+/**
+ * Fio API přes token. Pohyby se stahují ve formátu Fio XML, ne GPC: GPC u zahraničních
+ * plateb ořízne IBAN protistrany a nenese zprávu pro příjemce (#222). Výpis se ukládá
+ * jako kompaktní JSON ({@see FioTransactionParser}) a importuje jako `bank_api`.
+ */
+final class FioBankConnector implements StructuredBankConnector
 {
     private const BASE_URL = 'https://fioapi.fio.cz/v1/rest/';
     private const MAX_STATEMENT_BYTES = 10 * 1024 * 1024;
@@ -19,6 +24,7 @@ final class FioBankConnector implements BankConnector
     public function __construct(
         private readonly ClientInterface $http,
         private readonly ?LoggerInterface $logger = null,
+        private readonly FioTransactionParser $parser = new FioTransactionParser(),
     )
     {
     }
@@ -26,6 +32,34 @@ final class FioBankConnector implements BankConnector
     public function provider(): string
     {
         return 'fio';
+    }
+
+    public function statementFormat(): string
+    {
+        return 'json';
+    }
+
+    /**
+     * Fio přihlašuje jen tokenem; uložený zůstává holý token, takže dřívější napojení
+     * platí beze změny.
+     *
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $account
+     */
+    public function credentials(#[\SensitiveParameter] array $input, array $account, #[\SensitiveParameter] ?string $existing): string
+    {
+        if ($input !== []) {
+            throw new BankConnectorOperationException('credential_format_invalid');
+        }
+        $token = trim((string) $existing);
+        if ($token === '') {
+            throw new BankConnectorOperationException('token_required');
+        }
+        if (preg_match('/^[A-Za-z0-9]{64}$/D', $token) !== 1) {
+            throw new BankConnectorOperationException('token_invalid');
+        }
+
+        return $token;
     }
 
     public function downloadStatement(#[\SensitiveParameter] string $token, string $from, string $to): string
@@ -41,7 +75,7 @@ final class FioBankConnector implements BankConnector
         }
 
         $url = self::BASE_URL . 'periods/' . rawurlencode($token)
-            . '/' . $from . '/' . $to . '/transactions.gpc';
+            . '/' . $from . '/' . $to . '/transactions.xml';
         $stage = 'request';
         $reason = null;
         $response = null;
@@ -50,23 +84,28 @@ final class FioBankConnector implements BankConnector
         try {
             $response = $this->request('GET', $url, [
                 'headers' => [
-                    'Accept' => 'text/plain, application/octet-stream',
+                    'Accept' => 'application/xml, text/xml',
                     'User-Agent' => 'MyUcto-Bank-Connector/1.0',
                 ],
             ], false);
             $stage = 'read';
             $body = $this->readResponse($response, self::MAX_STATEMENT_BYTES, false, $readDiagnostic);
-            $stage = 'gpc';
-            $reason = $this->gpcFailureReason($body);
-            if ($reason !== null) {
+            $stage = 'xml';
+            try {
+                $rows = $this->parser->rows($body);
+                $this->parser->parse($rows);
+            } catch (BankConnectorException $e) {
+                $reason = preg_match('/\(([a-z_]+)\)\.$/', $e->getMessage(), $m) === 1 ? $m[1] : 'xml_invalid';
                 throw new BankConnectorException(
                     BankConnectorException::INVALID_RESPONSE,
-                    'Banka vrátila neplatný formát GPC.',
+                    'Banka vrátila neplatný výpis Fio XML.',
                     false,
                     $response->getStatusCode(),
                 );
             }
-            return $body;
+
+            return json_encode(['provider' => $this->provider(), 'from' => $from, 'to' => $to] + $rows,
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         } catch (BankConnectorException $e) {
             $this->logger?->warning('fio_statement_failed', [
                 'stage' => $stage,
@@ -79,6 +118,22 @@ final class FioBankConnector implements BankConnector
             ] + ($response !== null ? $this->transferHeaders($response) : []));
             throw $e;
         }
+    }
+
+    /** @return array{header:array<string,mixed>,transactions:list<array<string,mixed>>} */
+    public function parseStatement(#[\SensitiveParameter] string $content): array
+    {
+        try {
+            $data = json_decode($content, true, 16, JSON_THROW_ON_ERROR);
+        } catch (\JsonException) {
+            $data = null;
+        }
+        if (!is_array($data) || ($data['provider'] ?? null) !== $this->provider()
+            || !is_array($data['info'] ?? null) || !is_array($data['transactions'] ?? null) || !array_is_list($data['transactions'])) {
+            throw new BankConnectorException(BankConnectorException::INVALID_RESPONSE, 'Neplatný výpis Fio.');
+        }
+
+        return $this->parser->parse(['info' => $data['info'], 'transactions' => $data['transactions']]);
     }
 
     public function submitPaymentOrder(
@@ -328,24 +383,6 @@ final class FioBankConnector implements BankConnector
         }
 
         return $parsed;
-    }
-
-    private function gpcFailureReason(#[\SensitiveParameter] string $gpc): ?string
-    {
-        if (!str_ends_with($gpc, "\r\n")) {
-            return 'line_ending_invalid';
-        }
-
-        $records = explode("\r\n", substr($gpc, 0, -2));
-        $account = substr($records[0], 3, 16);
-        foreach ($records as $index => $record) {
-            $validType = $index === 0 ? str_starts_with($record, '074') : str_starts_with($record, '075');
-            if (strlen($record) !== 128) return 'record_length_invalid';
-            if (!$validType) return 'record_type_invalid';
-            if ($index === 0 && preg_match('/^\d{16}$/D', $account) !== 1) return 'header_account_invalid';
-            if ($index > 0 && substr($record, 3, 16) !== $account) return 'record_account_mismatch';
-        }
-        return null;
     }
 
     private function validateAbo(#[\SensitiveParameter] string $abo): void

@@ -57,8 +57,10 @@ readonly class JmhzDispatchService
     private const AGENDA_SUBMISSION_CLASSES = [
         'JMHZ' => self::SUBMISSION_CLASS,
         'JMHZ25' => self::SUBMISSION_CLASS,
+        'JMHZ27' => self::SUBMISSION_CLASS,
         'PREZEC26' => 'CSSZ_PREZEC',
         'REGZEC25' => 'CSSZ_REGZEC',
+        'REGZEC27' => 'CSSZ_REGZEC',
         // CSSZSubmClasses.pdf: NEMPRI25 i HZUPN20 sdílí CSSZ_NEM_PRI, formulář
         // (eType) proto volající předává zvlášť ({@see JmhzGovTalkRequestShape::forForm()}).
         'NEMPRI' => 'CSSZ_NEM_PRI',
@@ -191,10 +193,18 @@ readonly class JmhzDispatchService
      * Tvar obálky pro druh podání. Formulář je povinný u třídy, kterou sdílí
      * víc formulářů (`CSSZ_NEM_PRI`), a když přijde, musí k třídě patřit.
      */
-    private static function requestShape(string $submissionClass, ?string $form): JmhzGovTalkRequestShape
-    {
+    private static function requestShape(
+        string $submissionClass,
+        ?string $form,
+        ?string $payloadXml = null,
+    ): JmhzGovTalkRequestShape {
         if ($form === null) {
-            return JmhzGovTalkRequestShape::forSubmissionClass($submissionClass);
+            // Odesílá se zmrazená věta: ročník `eType` (JMHZ25/JMHZ27,
+            // REGZEC25/REGZEC27) určuje její jmenný prostor, ne dnešní datum.
+            // Dotaz na stav `eType` do obálky nepíše, tam stačí třída.
+            return $payloadXml === null
+                ? JmhzGovTalkRequestShape::forSubmissionClass($submissionClass)
+                : JmhzGovTalkRequestShape::forPayload($submissionClass, $payloadXml);
         }
         if (JmhzGovTalkRequestShape::classForForm($form) !== $submissionClass) {
             throw new JmhzTransportException(
@@ -314,7 +324,7 @@ readonly class JmhzDispatchService
         // Tvar obálky se odvozuje z druhu podání, ne z JMHZ: `eType` vnořené
         // ČSSZ obálky je pro REGZEC a PREZEC jiné a `documented()` by na ně
         // nalepilo `JMHZ25`. U CSSZ_NEM_PRI rozhoduje formulář.
-        $envelope = new JmhzGovTalkEnvelope(self::requestShape($submissionClass, $form));
+        $envelope = new JmhzGovTalkEnvelope(self::requestShape($submissionClass, $form, $payloadXml));
         $signer = $this->signer($supplierId, $environment);
         $material = $signer->unlock();
         $sealed = $envelope->seal(

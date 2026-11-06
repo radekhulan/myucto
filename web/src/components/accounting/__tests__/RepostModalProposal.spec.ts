@@ -17,6 +17,7 @@ vi.mock('@/api/accounting', () => ({
     repostPlanForLines: vi.fn(() => Promise.resolve(m.plan)),
   },
   postingErrorI18nKey: (code: string) => `err.${code}`,
+  postingErrorMessage: (_t: unknown, e: any) => `err.${e?.response?.data?.error?.code}`,
 }))
 vi.mock('@/components/ui/Modal.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 vi.mock('@/components/accounting/PostingOriginRow.vue', () => ({ default: { template: '<div />' } }))

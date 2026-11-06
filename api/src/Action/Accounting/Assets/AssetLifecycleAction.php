@@ -99,6 +99,8 @@ final class AssetLifecycleAction
             ]);
         } catch (AssetException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (PostingException $e) {
+            return $this->mapPostingError($response, $e);
         } catch (\Throwable $e) {
             return $this->serverError($response, $e, 'Technické zhodnocení se nepodařilo přidat');
         }
@@ -122,6 +124,8 @@ final class AssetLifecycleAction
             $this->service->deleteImprovement($supplierId, $id, $impId);
         } catch (AssetException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (PostingException $e) {
+            return $this->mapPostingError($response, $e);
         } catch (\Throwable $e) {
             return $this->serverError($response, $e, 'Technické zhodnocení se nepodařilo smazat');
         }

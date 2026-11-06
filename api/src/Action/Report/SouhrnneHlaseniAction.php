@@ -83,7 +83,7 @@ final class SouhrnneHlaseniAction
             // download nemutuje) ho spustíme jen když má uživatel WRITE — stejná brána jako
             // posun zámku v archiveru. READ-only nebo když ČNB kurz nezná → tvrdá chyba 422.
             if (!empty($result['missing_rates'])) {
-                if (RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE)) {
+                if (RequestAuthorization::allowsReadSideEffects($request, 'reports.export')) {
                     $this->rateFiller->fill($supplierId, $result['missing_rates']);
                     $result = $this->builder->build($supplierId, $year, $month, $period, $variant, $dZjist);
                 }
@@ -106,7 +106,7 @@ final class SouhrnneHlaseniAction
             $result['xml'], $result['summary'], $userId ?: null,
             // readonly GET/download nesmí mutovat účetní stav — dorevize B8, HIGH#1.
             // (dphshv navíc zámek neposouvá vůbec — viz TaxSubmissionArchiver::VAT_LOCK_FORMS.)
-            RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE),
+            RequestAuthorization::allowsReadSideEffects($request, 'reports.export'),
             // Souhrnné hlášení má vlastní kódovou sadu — EPO u `shvies_forma`
             // povoluje jen [RN]. Výchozí 'B' archivéru je kód z přiznání k DPH
             // a u tohohle formuláře neexistuje; snapshot by tvrdil jiný druh

@@ -402,6 +402,35 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="opening-panel"]').attributes('data-first')).toBe('null')
   })
 
+  /**
+   * Blokace mzdového běhu „chybí počáteční roční úhrny" vede na kartu hlavního
+   * vztahu (`panel=opening_balances`). Karta na povel doskočí na Počáteční
+   * stavy a seznam osob podle `isPrimary` pozná, kterou kartu oslovit.
+   */
+  it('na povel doskočí na počáteční stavy hlavního vztahu', async () => {
+    const wrapper = await mountCard(employment(), {
+      props: {
+        employment: { ...employment(), start_date: '2026-08-01', is_primary: true },
+        canWrite: true,
+        payrollStartPeriod: '2026-08-01',
+      },
+      global: {
+        stubs: {
+          PayrollOpeningBalancesPanel: { template: '<div />' },
+        },
+      },
+    })
+    const target = wrapper.get('[data-test="opening-balances-needed"]').element as HTMLElement
+    const scrolled = vi.fn()
+    target.scrollIntoView = scrolled
+    const exposed = wrapper.vm as unknown as { focusSection: (panel: string) => Promise<void>, isPrimary: boolean }
+
+    await exposed.focusSection('opening_balances')
+
+    expect(exposed.isPrimary).toBe(true)
+    expect(scrolled).toHaveBeenCalled()
+  })
+
   it('u převzatého zaměstnance začíná počáteční stav měsícem nástupu', async () => {
     const wrapper = await mountCard(employment(), {
       props: {

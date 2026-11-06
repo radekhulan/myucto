@@ -70,6 +70,7 @@ const GROUP_LEAVES: Record<string, ReadonlySet<string>> = {
   foreign_worker: new Set([
     'free_access', 'free_access_reason_code', 'permit_type_code',
     'issuing_labour_office_code', 'permit_identifier', 'permit_from', 'permit_to',
+    'stay_valid_from', 'stay_valid_to',
   ]),
 }
 

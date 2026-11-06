@@ -85,7 +85,7 @@ final class PublicApprovalGetAction
                 'Tento odkaz byl již použit nebo není platný.', 404);
         }
 
-        $workReport = $this->workReports->findByInvoice((int) $invoice['id']);
+        $workReport = $this->workReports->findByInvoice((int) $invoice['id'], (int) ($invoice['supplier_id'] ?? 0));
         if ($workReport === null) {
             return Json::error($response, 'no_work_report', 'Faktura nemá výkaz práce.', 404);
         }
@@ -97,6 +97,7 @@ final class PublicApprovalGetAction
             'varsymbol'           => $invoice['varsymbol'],
             'invoice_type'        => $invoice['invoice_type'],
             'currency'            => $invoice['currency'],
+            'prices_include_vat'  => (bool) ($invoice['prices_include_vat'] ?? false),
             'language'            => $invoice['language'],
             'client_company_name' => $invoice['client_company_name'] ?? null,
             'project_name'        => $invoice['project_name'] ?? null,
@@ -108,7 +109,7 @@ final class PublicApprovalGetAction
         return Json::ok($response, [
             'state'            => 'requested',
             'invoice'          => $publicInvoice,
-            'work_report'      => $workReport,
+            'work_report'      => \MyInvoice\Service\WorkReport\WorkReportDisplayOptions::forPublic($workReport),
             'supplier_name'    => $supplierName,
             'branding'         => $this->branding($invoice, $token),
             'captcha_site_key' => (string) $this->config->get('captcha.site_key', ''),

@@ -468,9 +468,11 @@ final class PayrollErasureProposalRepository
             );
         }
 
-        $asOf = (string) $proposal['as_of'];
+        // Návrh s datem v budoucnosti (založený před zavedením kontroly v API) se
+        // posuzuje nejpozději k dnešku, aby lhůty nevypršely předčasně.
+        $asOf = min((string) $proposal['as_of'], substr($this->databaseNow(), 0, 10));
 
-        $summary = ['done' => 0, 'skipped_hold' => 0, 'skipped_changed' => 0];
+        $summary =['done' => 0, 'skipped_hold' => 0, 'skipped_changed' => 0];
 
         // Přeposouzení se dělá JEDNOU, uvnitř transakce, těsně před prvním zásahem.
         // Osoby jsou na sobě nezávislé, takže výmaz jedné posudek ostatních nemění —

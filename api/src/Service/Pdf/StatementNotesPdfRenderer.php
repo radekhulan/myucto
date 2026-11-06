@@ -13,7 +13,7 @@ final class StatementNotesPdfRenderer extends ReportPdfRendererBase
 {
     public function render(array $data): string
     {
-        $body = $this->renderTemplate('statement_notes.twig', $data);
+        $body = $this->renderTemplate(($data['notes']['accounting_framework'] ?? '') === 'cz_504' ? 'statement_notes_504.twig' : 'statement_notes.twig', $data);
         $mpdf = $this->mpdf([
             'format' => 'A4',
             'orientation' => 'P',

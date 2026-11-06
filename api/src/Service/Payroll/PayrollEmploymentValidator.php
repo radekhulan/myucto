@@ -24,6 +24,12 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  *   regular_workplace:?string,
  *   jmhz_workplace_municipality_code:?string,
  *   jmhz_workplace_country_code:?string,
+ *   jmhz_workplace_address_point_code:?string,
+ *   jmhz_workplace_street:?string,
+ *   jmhz_workplace_house_number:?string,
+ *   jmhz_workplace_orientation_number:?string,
+ *   jmhz_workplace_postal_code:?string,
+ *   jmhz_state_prosecutor:?bool,
  *   jmhz_external_codebook_overlay_key:?string,
  *   jmhz_external_codebook_manifest_sha256:?string,
  *   jmhz_apz_contribution_status:string,
@@ -303,6 +309,7 @@ final class PayrollEmploymentValidator
             || !$this->jmhzEvidence->externalCodebooksCover($effectiveFrom)
             ? null
             : $this->jmhzEvidence->externalCodebookProvenance($effectiveFrom);
+        $workplaceAddress = $this->workplaceAddress($input, $municipalityCode);
 
         $apzStatus = $this->verifiedState($input, 'jmhz_apz_contribution_status');
         $apzCode = $this->optionalText($input, 'jmhz_apz_instrument_code', 8);
@@ -371,6 +378,8 @@ final class PayrollEmploymentValidator
             'regular_workplace' => $this->optionalText($input, 'regular_workplace', 255),
             'jmhz_workplace_municipality_code' => $municipalityCode,
             'jmhz_workplace_country_code' => $workplaceCountry,
+            ...$workplaceAddress,
+            'jmhz_state_prosecutor' => $this->optionalBool($input, 'jmhz_state_prosecutor'),
             'jmhz_external_codebook_overlay_key' => $externalCodebook['overlay_key'] ?? null,
             'jmhz_external_codebook_manifest_sha256' => $externalCodebook['manifest_sha256'] ?? null,
             'jmhz_apz_contribution_status' => $apzStatus,
@@ -897,6 +906,70 @@ final class PayrollEmploymentValidator
             throw new \InvalidArgumentException("Pole {$key} musí být boolean.");
         }
         return $value;
+    }
+
+    /**
+     * Ano/ne, na které účetní ještě nemusela odpovědět (`null`). Uložený
+     * řádek vrací TINYINT jako 0/1.
+     *
+     * @param array<string,mixed> $input
+     */
+    private function optionalBool(array $input, string $key): ?bool
+    {
+        $value = $input[$key] ?? null;
+        if ($value === 0 || $value === 1 || $value === '0' || $value === '1') {
+            return (bool) (int) $value;
+        }
+        if ($value !== null && !is_bool($value)) {
+            throw new \InvalidArgumentException("Pole {$key} musí být boolean nebo null.");
+        }
+
+        return $value;
+    }
+
+    /**
+     * Plná adresa místa výkonu práce pro JMHZ 2027 (10550 až 10554, datový
+     * slovník 1.5.0.3; tvar podle XSD 1.5.0.3 `adresaType`). Všechny části
+     * jsou nepovinné; u místa výkonu mimo ČR (kód obce 111111, IN41) ani bez
+     * kódu obce se adresa v ČR uvést nesmí.
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,?string>
+     */
+    private function workplaceAddress(array $input, ?string $municipalityCode): array
+    {
+        $fields = [
+            'jmhz_workplace_address_point_code' => [9, '/^[1-9][0-9]{0,8}$/D', 'Kód adresního místa má nejvýše devět číslic.'],
+            'jmhz_workplace_street' => [50, null, ''],
+            'jmhz_workplace_house_number' => [4, '/^[1-9][0-9]{0,3}$/D', 'Číslo popisné má jednu až čtyři číslice.'],
+            'jmhz_workplace_orientation_number' => [12, '/^[0-9A-Za-z]{1,12}$/D', 'Číslo orientační smí obsahovat jen číslice a písmena.'],
+            'jmhz_workplace_postal_code' => [5, '/^[0-9]{5}$/D', 'PSČ místa výkonu práce má pět číslic.'],
+        ];
+        $address = [];
+        foreach ($fields as $key => [$length, $pattern, $message]) {
+            $raw = $input[$key] ?? null;
+            if (is_int($raw)) {
+                $raw = (string) $raw;
+            }
+            $value = $key === 'jmhz_workplace_postal_code' && is_string($raw)
+                ? str_replace(' ', '', $raw)
+                : $raw;
+            $value = $this->optionalText([$key => $value], $key, $length);
+            if ($value !== null && $pattern !== null && preg_match($pattern, $value) !== 1) {
+                throw new \InvalidArgumentException($message);
+            }
+            $address[$key] = $value;
+        }
+        if (array_filter($address, static fn (?string $value): bool => $value !== null) !== []
+            && ($municipalityCode === null || $municipalityCode === '111111')
+        ) {
+            throw new \InvalidArgumentException(
+                'Adresu místa výkonu práce v ČR lze uvést jen s kódem obce v ČR; u místa výkonu'
+                    . ' mimo ČR (kód obce 111111) se nevyplňuje.',
+            );
+        }
+
+        return $address;
     }
 
     /** @param array<string,mixed> $input */

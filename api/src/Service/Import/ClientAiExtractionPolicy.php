@@ -45,7 +45,10 @@ final class ClientAiExtractionPolicy
     public static function canRouteAcrossSuppliers(Request $request): bool
     {
         $context = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
+        // API token zůstává ve firmě, kterou integrace zvolila: doklad nesmí bez jejího
+        // vědomí skončit v jiné firmě uživatele ani v jejích příchozích dokladech.
         return !RequestAuthorization::isClientType($request)
+            && !RequestAuthorization::isBearerAuth($request)
             && !($context instanceof TenantDomainContext && $context->locksSupplier());
     }
 }

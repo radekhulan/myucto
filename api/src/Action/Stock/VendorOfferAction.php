@@ -12,6 +12,7 @@ use MyInvoice\Repository\StockItemVendorRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\Pricing\PriceRecomputeDispatcher;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -259,6 +260,9 @@ final class VendorOfferAction
             $v = $this->decOrNull($body['purchase_price'], 10);
             if ($v === false) {
                 return $fail('Neplatná nákupní cena.', 'purchase_price');
+            }
+            if (!UnitPricePrecision::isWithinPrecision($v)) {
+                return $fail('Nákupní cena smí mít nejvýše šest desetinných míst.', 'purchase_price');
             }
             $out['purchase_price'] = $v;
         }

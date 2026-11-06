@@ -215,20 +215,20 @@ final readonly class SubmissionOutboxService
             return ['row' => $current, 'dispatched' => false];
         }
 
-        $artifact = $this->artifacts->resolve($supplierId, (string) $claimed['artifact_kind'], (int) $claimed['artifact_id']);
-        if ($artifact === null) {
-            return [
-                'row' => $this->outbox->markFailed(
-                    $supplierId,
-                    $id,
-                    'artifact_missing',
-                    'Podklad k odeslání už v aplikaci není. Vygenerujte ho znovu a zařaďte podání do fronty znovu.',
-                    (int) $claimed['row_version'],
-                ),
-                'dispatched' => false,
-            ];
-        }
         try {
+            $artifact = $this->artifacts->resolve($supplierId, (string) $claimed['artifact_kind'], (int) $claimed['artifact_id']);
+            if ($artifact === null) {
+                return [
+                    'row' => $this->outbox->markFailed(
+                        $supplierId,
+                        $id,
+                        'artifact_missing',
+                        'Podklad k odeslání už v aplikaci není. Vygenerujte ho znovu a zařaďte podání do fronty znovu.',
+                        (int) $claimed['row_version'],
+                    ),
+                    'dispatched' => false,
+                ];
+            }
             $this->validator->assertTransportAuthority(
                 (string) $claimed['artifact_kind'],
                 $artifact,

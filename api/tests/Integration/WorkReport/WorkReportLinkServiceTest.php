@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\WorkReport;
 
+use MyInvoice\Action\WorkReport\PublicWorkReportGetAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\WorkReportLinkRepository;
@@ -11,6 +12,8 @@ use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\WorkReport\WorkReportLinkService;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Factory\ServerRequestFactory;
+use Slim\Psr7\Response;
 
 /**
  * Veřejný sledovací odkaz na výkaz práce (migrace 0112).
@@ -137,7 +140,7 @@ final class WorkReportLinkServiceTest extends TestCase
         )->execute([$this->supplierId, $clientId, $projectId, '2026-06-01', '2026-06-15', $this->currencyId, $this->userId, $status, 'invoice']);
         $invId = (int) $pdo->lastInsertId();
         $this->invoiceIds[] = $invId;
-        $this->workReports->save($invId, $projectId, $title, $items);
+        $this->workReports->save($invId, $this->supplierId, $projectId, $title, $items);
         return $invId;
     }
 
@@ -147,6 +150,33 @@ final class WorkReportLinkServiceTest extends TestCase
             $this->linkIds[] = (int) $link['id'];
         }
         return $link;
+    }
+
+    public function testPreviewRedactsHiddenColumnsAndSuppressesIncompleteGrandTotals(): void
+    {
+        $client = $this->client();
+        $invoice = $this->draftInvoiceWithReport($client, null, 'Pouze čas', [
+            ['description' => 'Analýza', 'work_date' => '2096-06-01', 'hours' => 2, 'rate' => 1234],
+        ]);
+        $this->workReports->saveDisplayOptions($invoice, ['rate' => false, 'amount' => false, 'date' => false], $this->supplierId);
+        $this->draftInvoiceWithReport($client, null, 'S cenou', [['description' => 'Konzultace', 'hours' => 1, 'rate' => 500]]);
+        $link = $this->trackLink($this->service->getOrCreate($this->supplierId, 'client', $client, null, $this->userId));
+        $preview = $this->service->buildPreview($link);
+        self::assertCount(2, $preview['reports']);
+        self::assertSame([], $preview['totals_by_currency']);
+        self::assertSame(3.0, $preview['total_hours']);
+        $report = array_values(array_filter($preview['reports'], static fn (array $row): bool => $row['invoice_id'] === $invoice))[0];
+        self::assertNull($report['items'][0]['work_date']);
+        self::assertNull($report['items'][0]['rate']);
+        self::assertNull($report['items'][0]['total_amount']);
+        self::assertNull($report['total_amount']);
+        self::assertSame(2.0, $report['items'][0]['hours']);
+        self::assertSame(2468.0, $this->workReports->findByInvoice($invoice, $this->supplierId)['total_amount']);
+
+        $this->workReports->saveDisplayOptions($invoice, ['hours' => false], $this->supplierId);
+        $preview = $this->service->buildPreview($link);
+        self::assertNull($preview['total_hours']);
+        self::assertSame(2968.0, $preview['totals_by_currency'][0]['total_amount']);
     }
 
     // ── link lifecycle ───────────────────────────────────────────────────
@@ -227,6 +257,135 @@ final class WorkReportLinkServiceTest extends TestCase
         self::assertNotNull($token, 'Správný kód → session token');
         self::assertMatchesRegularExpression('/^[a-f0-9]{64}$/', (string) $token);
         self::assertTrue($this->service->validateSession($link, (string) $token));
+    }
+
+    /** Ověří e-mail přes ručně vložený kód a vrátí session token. */
+    private function verifiedSession(array $link, string $email): string
+    {
+        $this->links->insertCode((int) $link['id'], $email, hash('sha256', '246810'),
+            (new \DateTimeImmutable('+15 minutes'))->format('Y-m-d H:i:s'), null);
+        $token = $this->service->verifyCode($link, $email, '246810', '127.0.0.1');
+        self::assertNotNull($token);
+        return (string) $token;
+    }
+
+    private function sessionRow(string $token): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM work_report_link_sessions WHERE session_hash = ?');
+        $stmt->execute([hash('sha256', $token)]);
+        return (array) $stmt->fetch(\PDO::FETCH_ASSOC);
+    }
+
+    public function testSessionGetsServerSideExpiryFromLifetime(): void
+    {
+        $c = $this->client('hlavni@example.cz');
+        $link = $this->trackLink($this->service->getOrCreate($this->supplierId, 'client', $c, null, $this->userId));
+        $token = $this->verifiedSession($link, 'hlavni@example.cz');
+
+        $expires = new \DateTimeImmutable((string) $this->sessionRow($token)['expires_at']);
+        $expected = new \DateTimeImmutable('+' . $this->service->sessionLifetimeDays() . ' days');
+        self::assertLessThan(120, abs($expected->getTimestamp() - $expires->getTimestamp()), 'Platnost relace = ověření + session_lifetime_days');
+        self::assertTrue($this->service->validateSession($link, $token));
+    }
+
+    public function testExpiredSessionIsRejected(): void
+    {
+        $c = $this->client('hlavni@example.cz');
+        $link = $this->trackLink($this->service->getOrCreate($this->supplierId, 'client', $c, null, $this->userId));
+        $token = $this->verifiedSession($link, 'hlavni@example.cz');
+
+        $this->db->pdo()->prepare('UPDATE work_report_link_sessions SET expires_at = NOW() - INTERVAL 1 MINUTE WHERE session_hash = ?')
+            ->execute([hash('sha256', $token)]);
+        self::assertFalse($this->service->validateSession($link, $token), 'Po expires_at relace na serveru neplatí');
+    }
+
+    public function testSessionRevokedWhenEmailRemovedFromClientContacts(): void
+    {
+        $c = $this->client('hlavni@example.cz');
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO client_email_contacts (client_id, email, is_active, usages) VALUES (?, ?, 1, '[]')")
+            ->execute([$c, 'Kontakt@Example.cz']);
+        $contactId = (int) $pdo->lastInsertId();
+        $link = $this->trackLink($this->service->getOrCreate($this->supplierId, 'client', $c, null, $this->userId));
+        $token = $this->verifiedSession($link, 'kontakt@example.cz');
+        $mainToken = $this->verifiedSession($link, 'hlavni@example.cz');
+        self::assertTrue($this->service->validateSession($link, $token));
+
+        $pdo->prepare('UPDATE client_email_contacts SET is_active = 0 WHERE id = ?')->execute([$contactId]);
+        self::assertFalse($this->service->validateSession($link, $token), 'Odebraný kontakt už náhled nevidí');
+        self::assertNotNull($this->sessionRow($token)['revoked_at'], 'Relace se trvale zneplatní');
+        self::assertTrue($this->service->validateSession($link, $mainToken), 'Relace jiné povolené adresy platí dál');
+
+        // Ani opětovné přidání adresy starou relaci neobnoví, musí se ověřit znovu.
+        $pdo->prepare('UPDATE client_email_contacts SET is_active = 1 WHERE id = ?')->execute([$contactId]);
+        self::assertFalse($this->service->validateSession($link, $token));
+    }
+
+    public function testSessionRevokedWhenMainEmailChanged(): void
+    {
+        $c = $this->client('hlavni@example.cz');
+        $link = $this->trackLink($this->service->getOrCreate($this->supplierId, 'client', $c, null, $this->userId));
+        $token = $this->verifiedSession($link, 'hlavni@example.cz');
+
+        $this->db->pdo()->prepare('UPDATE clients SET main_email = ? WHERE id = ?')->execute(['novy@example.cz', $c]);
+        self::assertFalse($this->service->validateSession($link, $token));
+    }
+
+    public function testProjectScopeSessionWithProjectEmailStaysValid(): void
+    {
+        $c = $this->client('hlavni@example.cz');
+        $p = $this->project($c, ['zakazka@example.cz']);
+        $link = $this->trackLink($this->service->getOrCreate($this->supplierId, 'project', $c, $p, $this->userId));
+        $token = $this->verifiedSession($link, 'zakazka@example.cz');
+        self::assertTrue($this->service->validateSession($link, $token), 'E-mail zakázky platí u project scope');
+        self::assertTrue($this->service->validateSession($link, $token), 'Opakované použití relace');
+
+        $this->db->pdo()->prepare('DELETE FROM project_billing_emails WHERE project_id = ?')->execute([$p]);
+        self::assertFalse($this->service->validateSession($link, $token), 'Odebraný e-mail zakázky relaci ukončí');
+    }
+
+    public function testSessionOfOtherLinkIsRejected(): void
+    {
+        $c = $this->client('hlavni@example.cz');
+        $p = $this->project($c);
+        $clientLink = $this->trackLink($this->service->getOrCreate($this->supplierId, 'client', $c, null, $this->userId));
+        $projectLink = $this->trackLink($this->service->getOrCreate($this->supplierId, 'project', $c, $p, $this->userId));
+        $token = $this->verifiedSession($clientLink, 'hlavni@example.cz');
+        self::assertFalse($this->service->validateSession($projectLink, $token));
+        self::assertTrue($this->service->validateSession($clientLink, $token));
+    }
+
+    public function testPublicGetActionHonoursCookieSessionLifecycle(): void
+    {
+        $c = $this->client('hlavni@example.cz');
+        $p = $this->project($c, ['zakazka@example.cz']);
+        $this->draftInvoiceWithReport($c, $p, 'Výkaz zakázka', [
+            ['description' => 'Práce A', 'hours' => 2.0, 'rate' => 1000.0],
+        ]);
+        $link = $this->trackLink($this->service->getOrCreate($this->supplierId, 'project', $c, $p, $this->userId));
+        $token = $this->verifiedSession($link, 'zakazka@example.cz');
+
+        $action = Bootstrap::buildContainer()->get(PublicWorkReportGetAction::class);
+        $call = function (?string $cookie) use ($action, $link): array {
+            $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/public/work-report/' . $link['token']);
+            if ($cookie !== null) {
+                $request = $request->withCookieParams([WorkReportLinkService::COOKIE_NAME => $cookie]);
+            }
+            $response = $action($request, new Response(), ['token' => (string) $link['token']]);
+            self::assertSame(200, $response->getStatusCode());
+            return (array) json_decode((string) $response->getBody(), true);
+        };
+
+        $ok = $call($token);
+        self::assertFalse($ok['requires_auth'], 'Ověřený klient vidí náhled');
+        self::assertSame('Výkaz zakázka', $ok['preview']['reports'][0]['title']);
+
+        self::assertTrue($call(null)['requires_auth'], 'Bez cookie je potřeba kód');
+
+        $this->db->pdo()->prepare('DELETE FROM project_billing_emails WHERE project_id = ?')->execute([$p]);
+        $denied = $call($token);
+        self::assertTrue($denied['requires_auth'], 'Po odebrání e-mailu náhled vyžaduje nové ověření');
+        self::assertArrayNotHasKey('preview', $denied);
     }
 
     public function testVerifyCodeRejectsForeignEmail(): void

@@ -83,7 +83,9 @@ Vyplníte údaje o prvním dodavateli (firmě nebo OSVČ), za kterého budete
 fakturovat. Později můžete přidat další, viz [95. Multi-supplier](95_Multi_supplier.md).
 
 1. Zadejte IČO a klikněte vedle na **Načíst z ARES**. Předvyplní se název, DIČ,
-   adresa a právní forma.
+   adresa a právní forma. U aktivní skupinové registrace ARES označí subjekt jako
+   plátce a předvyplní skupinové DIČ, pokud ho registr vrátí. IČO dál označuje
+   konkrétní firmu.
 2. Zkontrolujte a doplňte ostatní pole podle tabulky.
 3. Volitelně zadejte první bankovní účet.
 4. Chcete-li krok přeskočit, zaškrtněte **Vyplnit dodavatele později v Nastavení**.
@@ -93,7 +95,7 @@ fakturovat. Později můžete přidat další, viz [95. Multi-supplier](95_Multi
 | Sekce | Popis |
 |---|---|
 | Firma / jméno OSVČ | Bude v hlavičce všech vystavených PDF |
-| IČO | **Načíst z ARES** předvyplní název, DIČ, adresu a právní formu. ARES je oficiální veřejný registr v ČR. |
+| IČO | **Načíst z ARES** předvyplní název, DIČ, adresu a právní formu. U aktivní skupinové registrace předvyplní skupinové DIČ; ověřte, že odpovídá dokladům firmy. |
 | DIČ | U OSVČ neplátce nechte prázdné |
 | Adresa | Ulice, město, PSČ, země pro fakturační hlavičku |
 | E-mail / telefon | Kontakt pro klienta |
@@ -110,6 +112,8 @@ zaškrtnuto přeskočení.
 > platného testovacího čísla: `1000000005 / 0100`.
 
 ## 7.6 Krok za krokem: ukázková data (volitelné)
+
+Ukázkové účetnictví používá rámec 500. Generování a obnova demo dat ověřují všechna dotčená účetní období; pokud zahrnují rámec 504, účetní data se nevytvoří ani neobnoví.
 
 ![Setup wizard krok 3](img/03_setup_sample.webp)
 

@@ -119,6 +119,54 @@ final class PayrollDispatchGate
     }
 
     /**
+     * Kudy podání odejde: režimy, které jsou pro firmu a prostředí připravené,
+     * a výchozí z nich.
+     *
+     * Primární kanál z katalogu má přednost, pokud je připravený. Když není
+     * (typicky VREP bez zvoleného podpisového certifikátu) a alternativní ano,
+     * výchozím se stane alternativní — jinak by odeslání skončilo chybou
+     * „není zvolený podpisový certifikát", přestože datovou schránkou jde.
+     * Když není připravené nic, zůstává primární: chybu pak pojmenuje jeho
+     * služba a účetní ví, co nastavit.
+     *
+     * @return array{default:string,modes:list<string>}
+     */
+    public function channels(
+        PayrollDispatchCapability $capability,
+        string $environment,
+        bool $signingProfileReady,
+    ): array {
+        $candidates = $capability->alternateMode === null
+            ? [$capability->mode]
+            : [$capability->mode, $capability->alternateMode];
+        $ready = array_values(array_filter(
+            $candidates,
+            static fn (string $mode): bool => self::modeReady($mode, $environment, $signingProfileReady),
+        ));
+        if ($ready === []) {
+            return ['default' => $capability->mode, 'modes' => [$capability->mode]];
+        }
+
+        return ['default' => $ready[0], 'modes' => $ready];
+    }
+
+    private static function modeReady(string $mode, string $environment, bool $signingProfileReady): bool
+    {
+        return match ($mode) {
+            PayrollDispatchCapabilityCatalog::MODE_VREP_JMHZ,
+            PayrollDispatchCapabilityCatalog::MODE_VREP_REGISTRATION => $signingProfileReady,
+            PayrollDispatchCapabilityCatalog::MODE_VREP_CSSZ_FORM => $signingProfileReady
+                && ($environment === 'test' || Vrep\CsszFormVrepTransportService::PRODUCTION_OPEN),
+            // Datovou schránkou jde zařadit vždy: způsob přihlášení (brána,
+            // Mobilní klíč, jméno a heslo, SMS, certifikát) volí účetní až
+            // při odeslání a jméno s heslem nepotřebuje nic uloženého.
+            PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL,
+            PayrollDispatchCapabilityCatalog::MODE_ISDS_HEALTH => true,
+            default => false,
+        };
+    }
+
+    /**
      * Kód důvodu, kterým se značí pokus VĚDOMĚ ZAHOZENÝ ČLOVĚKEM.
      *
      * Nese ho `payroll_submission_transport_attempts.error_code` a je to jediné,

@@ -28,6 +28,7 @@ final class DppoReturnDataProviderNewFieldsTest extends TestCase
         $this->pdo = new PDO('sqlite::memory:');
         $this->pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $this->createSchema();
+        \MyInvoice\Tests\Support\AccountDefinitionSqliteFixture::install($this->pdo);
 
         $config = $this->createStub(\MyInvoice\Infrastructure\Config\Config::class);
         $db = new Connection($config);
@@ -301,6 +302,9 @@ final class DppoReturnDataProviderNewFieldsTest extends TestCase
 
     private function createSchema(): void
     {
+        $this->pdo->exec('CREATE TABLE supplier_accounting_modes (supplier_id INTEGER, effective_from TEXT, accounting_mode TEXT)');
+        $this->pdo->exec("INSERT INTO supplier_accounting_modes VALUES (1, '1900-01-01', 'double_entry'), (2, '1900-01-01', 'double_entry')");
+        $this->pdo->exec('CREATE TABLE supplier_accounting_frameworks (id INTEGER, supplier_id INTEGER, effective_from TEXT, accounting_framework TEXT, created_at TEXT, created_by INTEGER)');
         $this->pdo->exec('CREATE TABLE accounting_periods (id INTEGER, supplier_id INTEGER, fiscal_year INTEGER, starts_on TEXT, ends_on TEXT, status TEXT, closed_at TEXT, created_at TEXT, row_version INTEGER, closed_by INTEGER, approved_at TEXT, approved_by INTEGER, reviewed_at TEXT, reviewed_by INTEGER, approval_body TEXT, approval_decision_ref TEXT, approval_document_hash TEXT, created_reason TEXT)');
         $this->pdo->exec('CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, tax_deductibility TEXT, name TEXT)');
         $this->pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, entry_date TEXT, source_type TEXT, source_id INTEGER, posted_at TEXT, reversed_by INTEGER)');

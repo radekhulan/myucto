@@ -65,7 +65,7 @@ final class PdfAction
             $path = $this->renderer->render($id, $regenerate, $userId, $demo ? $invoice : null);
         } catch (\Throwable $e) {
             ob_end_clean();
-            return Json::error($response, 'pdf_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'pdf_failed', $e->getMessage(), 500);
         }
         ob_end_clean();
 

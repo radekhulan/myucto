@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Ai\AiPostingOverrideResolver;
 
@@ -105,97 +107,103 @@ final class DocumentJournalSync
      */
     public function reconcileForceEdit(int $supplierId, string $sourceType, int $sourceId, array $meta = []): ?array
     {
-        $existing = $this->journal->findBySource($supplierId, $sourceType, $sourceId);
-        if ($existing === null) {
-            return null;
-        }
-        $isPosted   = ($existing['posted_at'] ?? null) !== null;
-        $isReversed = ($existing['reversed_by'] ?? null) !== null;
-        if (!$isPosted || $isReversed) {
-            return null; // koncept ani už stornovaný zápis se nedorovnává
-        }
-        $entryId = (int) $existing['id'];
-        $today   = date('Y-m-d');
+        return TransactionFailure::retrying($this->db->pdo(), fn (): ?array =>
+            (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $sourceType, $sourceId, $meta): ?array {
+                $members = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $sourceId, true);
+                if ($members === []) return null;
+                $owned = DocumentPostingGroup::hasOwnedEntries($members);
+                $entryId = (int) $members[0]['id'];
+                $today = date('Y-m-d');
+                // Storno starého zápisu do DNEŠNÍHO otevřeného období (ne do uzavřeného
+                //    období dokladu). Explicitní entry_date=dnešek obchází default reverse()
+                //    (období originálu), které je tu uzavřené.
+                $reverseMeta = $meta;
+                $reverseMeta['entry_date']  = $today;
+                $reverseMeta['description'] = 'Storno zápisu při opravě dokladu v uzavřeném období (force reconcile)';
+                if ($owned) {
+                    $reversals = $this->posting->reverseDocument($supplierId, $sourceType, $sourceId, $reverseMeta);
+                    $reversalId = $reversals[$entryId] ?? null;
+                } else {
+                    $reversalId = $this->posting->reverse($supplierId, $entryId, $reverseMeta);
+                    // Nativní větev zachovává dosavadní odpojení opraveného originálu.
+                    // Převzatá skupina si uchová historické vlastnictví pro smír i audit.
+                    $this->journal->detachSource($entryId, $supplierId);
+                }
 
-        $pdo = $this->db->pdo();
-        $ownTx = !$pdo->inTransaction();
-        if ($ownTx) {
-            $pdo->beginTransaction();
-        }
-        try {
-            // 1) Storno starého zápisu do DNEŠNÍHO otevřeného období (ne do uzavřeného
-            //    období dokladu). Explicitní entry_date=dnešek obchází default reverse()
-            //    (období originálu), které je tu uzavřené.
-            $reverseMeta = $meta;
-            $reverseMeta['entry_date']  = $today;
-            $reverseMeta['description'] = 'Storno zápisu při opravě dokladu v uzavřeném období (force reconcile)';
-            $reversalId = $this->posting->reverse($supplierId, $entryId, $reverseMeta);
+                // Znovu zaúčtuj opravený doklad do AKTUÁLNÍHO otevřeného období (dnešek).
+                $lines = $sourceType === 'invoice'
+                    ? $this->posting->buildFromInvoice($supplierId, $sourceId, ['entry_date' => $today])
+                    : $this->posting->buildFromPurchaseInvoice($supplierId, $sourceId, array_filter([
+                        'entry_date' => $today,
+                        'debit_account_code' => $this->aiOverrides->debitOverrideForPurchase($supplierId, $sourceId),
+                    ], static fn (mixed $value): bool => $value !== null));
+                $postMeta = $meta;
+                $postMeta['entry_date']  = $today;
+                $postMeta['description'] = 'Oprava dokladu v uzavřeném období — přeúčtování do běžného období';
+                $postMeta['posted']      = true;
+                if ($owned) {
+                    // Nativní zápis se znovu staví z dokladu: stopa starého zápisu by
+                    // vrátila odebrané středisko nebo měnu platnou před opravou.
+                    $postMeta['inherit_line_trace_from'] = array_column($members, 'id');
+                }
+                $newEntryId = $this->posting->postDocument($supplierId, $sourceType, $sourceId, $lines, $postMeta);
 
-            // 2) Uvolni source klíč, ať re-post vloží ČERSTVÝ zápis (findBySource jinak
-            //    najde stornovaný originál a rewriteExisting ho odmítne — 'entry_reversed').
-            $this->journal->detachSource($entryId, $supplierId);
-
-            // 3) Znovu zaúčtuj opravený doklad do AKTUÁLNÍHO otevřeného období (dnešek).
-            $lines = $sourceType === 'invoice'
-                ? $this->posting->buildFromInvoice($supplierId, $sourceId)
-                : $this->posting->buildFromPurchaseInvoice($supplierId, $sourceId, array_filter([
-                    'debit_account_code' => $this->aiOverrides->debitOverrideForPurchase($supplierId, $sourceId),
-                ], static fn (mixed $value): bool => $value !== null));
-            $postMeta = $meta;
-            $postMeta['entry_date']  = $today;
-            $postMeta['description'] = 'Oprava dokladu v uzavřeném období — přeúčtování do běžného období';
-            $postMeta['posted']      = true;
-            $newEntryId = $this->posting->postDocument($supplierId, $sourceType, $sourceId, $lines, $postMeta);
-
-            if ($ownTx) {
-                $pdo->commit();
-            }
-            return [
-                'reversed_entry_id' => $entryId,
-                'reversal_entry_id' => $reversalId,
-                'new_entry_id'      => $newEntryId,
-            ];
-        } catch (\Throwable $e) {
-            if ($ownTx && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
-        }
+                return [
+                    'reversed_entry_id' => $entryId,
+                    'reversal_entry_id' => $reversalId,
+                    'new_entry_id'      => $newEntryId,
+                ];
+            }),
+        );
     }
 
     /**
      * Force-edit v otevřeném období přepíše aktivní zápis in-place přes standardní
-     * PostingService. Zachová ID zápisu i auditní historii a použije nové datum dokladu.
+     * PostingService. Převzatou skupinu opravuje společným stornem a náhradou;
+     * nativnímu zápisu zachová ID. Obě větve použijí nové datum dokladu.
      *
      * @param 'invoice'|'purchase_invoice' $sourceType
      * @param array{entry_date?:string, document_date?:?string, document_no?:?string, description?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string} $meta
      */
     public function repostForceEdit(int $supplierId, string $sourceType, int $sourceId, array $meta = []): ?int
     {
-        $existing = $this->journal->findBySource($supplierId, $sourceType, $sourceId);
-        if ($existing === null
-            || ($existing['posted_at'] ?? null) === null
-            || ($existing['reversed_by'] ?? null) !== null
-        ) {
-            return null;
-        }
+        return TransactionFailure::retrying($this->db->pdo(), fn (): ?int =>
+            (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $sourceType, $sourceId, $meta): ?int {
+                $members = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $sourceId, true);
+                if ($members === []) return null;
+                $existing = $members[0];
 
-        $lines = $sourceType === 'invoice'
-            ? $this->posting->buildFromInvoice($supplierId, $sourceId)
-            : $this->posting->buildFromPurchaseInvoice($supplierId, $sourceId, array_filter([
-                'debit_account_code' => $this->aiOverrides->debitOverrideForPurchase($supplierId, $sourceId),
-            ], static fn (mixed $value): bool => $value !== null));
-        $postMeta = $meta + [
-            'entry_date' => (string) $existing['entry_date'],
-            'document_date' => $existing['document_date'] ?? null,
-            'document_no' => $existing['document_no'] ?? null,
-            'description' => $existing['description'] ?? null,
-            'posted' => true,
-            // Datum zamčené podaným DPH: přepis projde jen jako daňově neutrální přesun,
-            // podmínky ověří PostingService (TaxNeutralReclassification). Jinak date_locked.
-            'tax_neutral_rewrite' => true,
-        ];
-        return $this->posting->postDocument($supplierId, $sourceType, $sourceId, $lines, $postMeta);
+                $lines = $sourceType === 'invoice'
+                    ? $this->posting->buildFromInvoice($supplierId, $sourceId, ['entry_date' => $meta['entry_date'] ?? (string) $existing['entry_date']])
+                    : $this->posting->buildFromPurchaseInvoice($supplierId, $sourceId, array_filter([
+                        'entry_date' => $meta['entry_date'] ?? (string) $existing['entry_date'],
+                        'debit_account_code' => $this->aiOverrides->debitOverrideForPurchase($supplierId, $sourceId),
+                    ], static fn (mixed $value): bool => $value !== null));
+                $postMeta = $meta + [
+                    'entry_date' => (string) $existing['entry_date'],
+                    'document_date' => $existing['document_date'] ?? null,
+                    'document_no' => $existing['document_no'] ?? null,
+                    'description' => $existing['description'] ?? null,
+                    'posted' => true,
+                    // Datum zamčené podaným DPH: přepis projde jen jako daňově neutrální přesun,
+                    // podmínky ověří PostingService (TaxNeutralReclassification). Jinak date_locked.
+                    'tax_neutral_rewrite' => true,
+                ];
+                if (DocumentPostingGroup::hasOwnedEntries($members)
+                    && !DocumentPostingGroup::isSingleDirectEntry($members, $sourceType, $sourceId)) {
+                    // Převzatý předpis může být rozdělený i ponechaný jako jediný ruční člen.
+                    // Force-edit je výslovná oprava; automatický post ho úmyslně nepřepisuje.
+                    // Jediný přímý zápis se přepíše na místě jako nativní (PostingService).
+                    $reverseMeta = $meta;
+                    unset($reverseMeta['entry_date']);
+                    $reverseMeta['description'] = 'Storno převzatého předpisu při opravě dokladu';
+                    $this->posting->reverseDocument($supplierId, $sourceType, $sourceId, $reverseMeta);
+                    unset($postMeta['tax_neutral_rewrite']);
+                    $postMeta['inherit_line_trace_from'] = array_column($members, 'id');
+                }
+                return $this->posting->postDocument($supplierId, $sourceType, $sourceId, $lines, $postMeta);
+            }),
+        );
     }
 
     /**
@@ -203,7 +211,18 @@ final class DocumentJournalSync
      */
     private function reverseActive(int $supplierId, string $sourceType, int $sourceId, array $meta, bool $detachRemaining): void
     {
-        $existing = $this->journal->findBySource($supplierId, $sourceType, $sourceId);
+        $members = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $sourceId, true);
+        if (DocumentPostingGroup::hasOwnedEntries($members)) {
+            $reverseMeta = $meta;
+            unset($reverseMeta['entry_date']);
+            $reverseMeta['description'] ??= 'Storno skupiny při ' . ($detachRemaining ? 'smazání' : 'stornu') . ' dokladu';
+            $this->posting->reverseDocument($supplierId, $sourceType, $sourceId, $reverseMeta);
+            if ($detachRemaining) {
+                $this->detachDocumentSources($supplierId, $sourceType, $sourceId);
+            }
+            return;
+        }
+        $existing = $this->journal->findBySourceForUpdate($supplierId, $sourceType, $sourceId);
         if ($existing === null) {
             return; // doklad nebyl zaúčtován — v deníku není co řešit
         }
@@ -224,7 +243,29 @@ final class DocumentJournalSync
         if ($detachRemaining) {
             // Doklad mizí — odpoj případný zbylý zápis (právě stornovaný originál nebo
             // nezaúčtovaný koncept), ať nezůstane dangling source_id na smazaný doklad.
-            $this->journal->detachSource($entryId, $supplierId);
+            // Doklad s historií převzaté skupiny odpojí i její stornované členy.
+            if ($this->hasPostingGroupHistory($supplierId, $sourceType, $sourceId)) {
+                $this->detachDocumentSources($supplierId, $sourceType, $sourceId);
+            } else {
+                $this->journal->detachSource($entryId, $supplierId);
+            }
         }
+    }
+
+    /** Doklad měl (i stornovanou) převzatou skupinu zaúčtování. */
+    private function hasPostingGroupHistory(int $supplierId, string $sourceType, int $sourceId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT 1 FROM journal_document_postings
+            WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? LIMIT 1');
+        $stmt->execute([$supplierId, $sourceType, $sourceId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /** Po smazání dokladu nesmí source_id viset ani na starších stornovaných předpisech. */
+    private function detachDocumentSources(int $supplierId, string $sourceType, int $sourceId): void
+    {
+        $this->db->pdo()->prepare('UPDATE journal_entries SET source_id = NULL
+            WHERE supplier_id = ? AND source_type = ? AND source_id = ?')
+            ->execute([$supplierId, $sourceType, $sourceId]);
     }
 }

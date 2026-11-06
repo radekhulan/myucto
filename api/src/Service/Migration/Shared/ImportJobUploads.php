@@ -49,7 +49,7 @@ final class ImportJobUploads
     }
 
     /**
-     * Po smazání jobu smaže jeho nahrané soubory, na které už neodkazuje žádný jiný job
+     * Po smazání jobu odstraní jeho report a nahrané soubory, na které už neodkazuje žádný jiný job
      * téhož zdroje a se kterými zrovna nepracuje běžící job.
      *
      * @param array<string,mixed> $deletedJob řádek smazaného jobu
@@ -57,6 +57,7 @@ final class ImportJobUploads
      */
     public static function purgeOrphaned(ImportJobRepository $jobs, array $deletedJob): int
     {
+        ImportJobReportFiles::purge($deletedJob);
         $source = (string) ($deletedJob['source'] ?? '');
         $supplierId = (int) ($deletedJob['supplier_id'] ?? 0);
         $store = self::store($source);

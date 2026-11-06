@@ -211,7 +211,62 @@ final class VatStatusPeriodTest extends TestCase
         self::assertSame('CZ99988777', $dicByInvoice[$withoutSnapshot] ?? null, 'Bez DIČ ve snapshotu se použije živý join (fallback).');
     }
 
+    /**
+     * Přijatý doklad: DIČ uvedené na dokladu (snapshot dodavatele) má přednost, i když ho
+     * karta nemá - jinak plátce s neúplnou kartou spadne v KH z B.2 do B.3. Prázdné DIČ
+     * ve snapshotu kartu nepřebíjí a snapshot jiného kontaktu (přehozený dodavatel) se
+     * nepoužije.
+     */
+    public function testPurchaseCounterpartyDicPrefersDocumentSnapshotOfTheSameVendor(): void
+    {
+        $this->setVatPayerAt($this->db->pdo(), $this->supplierId, '1900-01-01', true);
+        $vendorWithoutDic = $this->client('Dodavatel bez DIČ na kartě', '');
+        $vendorWithDic = $this->client('Dodavatel s DIČ na kartě', 'CZ22233444');
+
+        $documentDic = $this->purchase($vendorWithoutDic, '{"company_name":"Dodavatel","dic":"CZ33344555"}');
+        $emptySnapshotDic = $this->purchase($vendorWithDic, '{"company_name":"Dodavatel","dic":""}');
+        $otherContact = $this->purchase($vendorWithDic, '{"id":' . ($vendorWithDic + 1000) . ',"dic":"CZ44455666"}');
+        $sameContact = $this->purchase($vendorWithDic, '{"id":' . $vendorWithDic . ',"dic":"CZ55566777"}');
+
+        $dicByPurchase = [];
+        foreach ($this->ledger->rows($this->supplierId, '2024-06-01', '2024-06-30') as $row) {
+            if ($row['source'] === 'purchase') {
+                $dicByPurchase[(int) $row['invoice_id']] = $row['counterparty_dic'];
+            }
+        }
+
+        self::assertSame('CZ33344555', $dicByPurchase[$documentDic] ?? null, 'DIČ z dokladu, i když karta DIČ nemá.');
+        self::assertSame('CZ22233444', $dicByPurchase[$emptySnapshotDic] ?? null, 'Prázdné DIČ ve snapshotu nepřebíjí kartu.');
+        self::assertSame('CZ22233444', $dicByPurchase[$otherContact] ?? null, 'Snapshot jiného kontaktu se nepoužije.');
+        self::assertSame('CZ55566777', $dicByPurchase[$sameContact] ?? null, 'Snapshot téhož kontaktu platí.');
+    }
+
     // ── helpers ─────────────────────────────────────────────────────────────────
+
+    /** Přijatá faktura 10 000 + 21 % z 10. 6. 2024 s jednou položkou; vrací purchase_invoice_id. */
+    private function purchase(int $vendorId, string $vendorSnapshotJson): int
+    {
+        $this->seq++;
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO purchase_invoices
+                (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date,
+                 due_date, received_at, received_at_source, currency_id, exchange_rate, reverse_charge,
+                 vendor_snapshot, total_without_vat, total_vat, total_with_vat, status,
+                 vat_classification_code, vat_deduction, created_by)
+             VALUES (?, ?, ?, "invoice", "2024-06-10", "2024-06-10", "2024-06-10", "2024-06-10", "manual", ?, 1, 0, ?,
+                     10000, 2100, 12100, "received", "40", "full", ?)'
+        )->execute([$this->supplierId, $vendorId, 'PDIC-' . $this->seq, $this->currencyId, $vendorSnapshotJson, $this->userId]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO purchase_invoice_items
+                (purchase_invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                 vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index, vat_classification_code)
+             VALUES (?, "Test", 1, "ks", 10000, ?, 21, 10000, 2100, 12100, 0, "40")'
+        )->execute([$id, $this->vatRateId]);
+
+        return $id;
+    }
 
     private function client(string $name, string $dic): int
     {

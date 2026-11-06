@@ -23,6 +23,7 @@ final class PayrollRunIssueGuidance
         'part_time_discount_employment_length_missing' => ['Pro slevu zaměstnavatele chybí délka pracovního poměru v měsíci. Na kartě vztahu ověřte počátek a konec pracovního poměru.', 'employment'],
         'employer_rate_category_unverified' => ['Není ověřena kategorie sazby sociálního pojistného zaměstnavatele. Na kartě vztahu doložte zařazení práce do odpovídající kategorie.', 'employment'],
         'dpp_annual_hours_exceeded' => ['Na dohodách o provedení práce odpracoval zaměstnanec u firmy za rok víc než 300 hodin (§ 75 zákoníku práce), započtené jsou i hodiny převzaté z předchozího programu. Práci nad limit nelze konat na DPP — na kartě zaměstnance uzavřete dohodu o pracovní činnosti nebo pracovní poměr.', 'employment'],
+        'dpp_annual_hours_approaching' => ['Na dohodách o provedení práce se zaměstnanec u firmy blíží ročnímu limitu 300 hodin (§ 75 zákoníku práce), dosáhl prahu upozornění včetně hodin převzatých z předchozího programu. Výpočet běží dál; naplánujte zbývající hodiny, nebo včas na kartě zaměstnance uzavřete dohodu o pracovní činnosti nebo pracovní poměr.', 'employment'],
         'dpc_weekly_average_exceeded' => ['Na dohodě o pracovní činnosti pracuje zaměstnanec v průměru víc než polovinu stanovené týdenní pracovní doby (§ 76 odst. 2 zákoníku práce, posuzuje se za dobu dohody, nejdéle 52 týdnů). V dalších týdnech rozsah práce snižte, nebo na kartě zaměstnance uzavřete pracovní poměr.', 'employment'],
         'agriculture_dpp_discount_requires_manual_review' => ['Je požadována sleva sociálního pojistného u zemědělské DPP, kterou automatický výpočet neumí ověřit. Ověřte nárok na kartě vztahu a předejte jej správci k odbornému posouzení.', 'employment'],
         'risky_savings_pension_company_missing|risky_savings_product_reference_missing' => ['Pro příspěvek na spoření chybí penzijní společnost nebo číslo produktu zaměstnance. Doplňte je v evidenci příspěvku za rizikovou práci.', 'risky_savings'],
@@ -32,8 +33,13 @@ final class PayrollRunIssueGuidance
         'duplicate_employment_reference|duplicate_employment_relationship_reference|employment_person_mismatch|employment_reference_invalid|employment_snapshot_invalid' => ['Uložený podklad mzdy obsahuje neplatný nebo duplicitní pracovní vztah, případně vztah jiné osoby. Předejte správci číslo běhu a revize k ověření vazeb.', 'runs'],
         'statutory_evidence_snapshot_missing_or_mismatched|health_evidence_mapping_failed|social_evidence_mapping_failed|tax_evidence_mapping_failed' => ['Zákonná evidence v uložené revizi chybí nebo neodpovídá zaměstnanci a období. Zkontrolujte aktuální zákonnou evidenci; po opravě založte novou revizi. Pokud evidence sedí, předejte běh správci.', 'statutory'],
         'tax_evidence_invalid' => ['Daňové podklady obsahují neplatnou hodnotu. V zákonné evidenci zkontrolujte platnost prohlášení, rezidenci a uplatněné slevy; pokud údaje odpovídají dokladům, předejte revizi správci.', 'statutory'],
-        'ruleset_not_active|enforcement_ruleset_not_effective_for_whole_year|unsupported_tax_year|risky_savings_ruleset_invalid' => ['Pro datum výpočtu není dostupná platná schválená sada mzdových pravidel. Správce musí v agendě Pravidla mezd ověřit podporu roku a platnost sady. Datum mzdy neměňte jen kvůli obejití kontroly.', 'rulesets'],
-        'invalid_payroll_period|payment_date_outside_ruleset_2026' => ['Období mzdy nebo datum výplaty není platné pro výpočet srážek. Ověřte období a datum výplaty ve mzdovém běhu; správné datum mimo podporované období předejte správci.', 'runs'],
+        // Obě příčiny znamenají totéž: pro rok výplaty není sada exekučních
+        // srážek (nezabavitelné částky se vyhlašují nařízením vlády na každý
+        // rok). Jedna věta, aby u osoby nevznikly dva řádky a žádný neradil
+        // měnit datum výplaty.
+        'enforcement_ruleset_not_effective_for_whole_year|payment_date_outside_ruleset_2026' => ['Pro rok výplaty chybí pravidla exekučních srážek (nezabavitelné částky z nařízení vlády na tento rok). Do jejich doplnění běh nejde schválit, i když zaměstnanec žádnou srážku nemá. Správce je doplní v agendě Pravidla mezd, doména Exekuční srážky. Datum výplaty kvůli tomu neměňte.', 'rulesets'],
+        'ruleset_not_active|unsupported_tax_year|risky_savings_ruleset_invalid' => ['Pro datum výpočtu není dostupná platná schválená sada mzdových pravidel. Správce musí v agendě Pravidla mezd ověřit podporu roku a platnost sady. Datum mzdy neměňte jen kvůli obejití kontroly.', 'rulesets'],
+        'invalid_payroll_period' => ['Období mzdy nebo datum výplaty není platné pro výpočet srážek. Ověřte období a datum výplaty ve mzdovém běhu; správné datum mimo podporované období předejte správci.', 'runs'],
         'negative_assessment_base_requires_period_revision|negative_participation_income_requires_period_revision|negative_relationship_tax_base|prior_period_tax_correction_requires_revision' => ['Záporný základ nebo oprava příjmu z minulého období vyžaduje opravnou revizi původního mzdového běhu. Opravu nezadávejte jako běžný příjem aktuálního měsíce.', 'runs'],
         'foreign_regime_requires_non_applicable_czech_insurer_snapshot' => ['Zaměstnanec je evidován v zahraničním pojištění, ale současně má českou zdravotní pojišťovnu pro odvod. V zákonné evidenci opravte tento rozpor podle doloženého státu pojištění.', 'statutory'],
         'foster_reward_only_exception_relationships_mismatch' => ['Výjimka zdravotního pojištění pro samotnou odměnu pěstouna neodpovídá evidovaným vztahům. Zkontrolujte souběžná zaměstnání a podklad pro výjimku v zákonné evidenci.', 'statutory'],
@@ -55,14 +61,15 @@ final class PayrollRunIssueGuidance
         'payroll_component_invalid|component_mapping_failed|component_treatment_unverified|income_component_tax_treatment_unverified' => ['Mzdová složka nemá platné nebo ověřené zařazení do daně a pojistného. V číselníku Mzdové složky opravte její daňové a pojistné zacházení.', 'components'],
         'component_amount_invalid' => ['Částka mzdové složky není platná. V měsíčních vstupech opravte částku a znovu ji schvalte.', 'inputs'],
         'negative_component_requires_revision|prior_period_component_requires_revision' => ['Vstup obsahuje zápornou částku nebo částku za jiné období. Opravte příslušný původní mzdový běh opravnou revizí; částku nepřidávejte jako běžný příjem tohoto měsíce.', 'runs'],
-        'annual_accumulator_missing' => ['Chybí počáteční nebo průběžné roční součty zaměstnance. V zákonné evidenci doplňte návazné roční základy a daňové součty podle předchozích mezd.', 'statutory'],
-        'annual_accumulator_invalid' => ['Roční součty zaměstnance nejsou platné nebo neodpovídají návazným mzdám. Zkontrolujte počáteční stavy a předchozí schválené měsíce.', 'statutory'],
+        'annual_accumulator_missing' => ['Chybí počáteční roční úhrny zaměstnance (pojistné a daň za měsíce, které jste zpracovali jinde nebo před nástupem). Na kartě jeho hlavního pracovního vztahu je doplňte v části Počáteční stavy; u nového zaměstnance bez dřívější mzdy stačí uložit nulový stav.', 'opening_balances'],
+        'annual_accumulator_invalid' => ['Roční úhrny zaměstnance nejsou platné nebo neodpovídají návazným mzdám. Na kartě jeho hlavního pracovního vztahu zkontrolujte Počáteční stavy a předchozí schválené měsíce.', 'opening_balances'],
         'employment_term_missing|employment_relationship_missing' => ['Pro období mzdy chybí účinné podmínky pracovního vztahu. Na kartě vztahu doplňte podmínky s odpovídající platností.', 'employment'],
         'employment_dates_invalid|relationship_kind_or_dates_invalid' => ['Datum začátku nebo konce pracovního vztahu není platné. Na kartě vztahu opravte jeho časovou platnost.', 'employment'],
         'relationship_kind_missing|relationship_kind_unsupported|relationship_mapping_failed' => ['Druh pracovního vztahu není zadaný nebo jej výpočet neumí zpracovat. Zkontrolujte druh vztahu; je-li správný, požádejte správce o doplnění podpory tohoto druhu.', 'employment'],
         'participation_override_unsupported|tax_regime_override_unsupported' => ['Ruční přepsání účasti na pojištění nebo daňového režimu není podpořené. Na kartě vztahu zkontrolujte podmínky a použijte doloženou zákonnou evidenci místo ručního přepsání.', 'employment'],
         'post_termination_income_attribution_unverified' => ['Příjem je zúčtovaný až po skončení pracovního vztahu. Jde-li o doplatek po skončení zaměstnání, potvrďte na kartě vztahu v části Odložený příjem tento měsíc zúčtování. Jiný odložený příjem podejte opravným hlášením na ePortálu ČSSZ.', 'deferred_income'],
         'post_termination_deferred_income_retroactive_participation_unsupported' => ['Odložený příjem po skončení vztahu, jehož účast na pojištění stojí na výši příjmu (dohoda, zaměstnání malého rozsahu, člen orgánu), může spolu s příjmem posledního měsíce výkonu zpětně založit účast na pojištění. Pak je nutné opravit hlášení za poslední měsíc výkonu (doba a vyměřovací základ důchodového pojištění) a opravu kvůli nemocenskému pojištění je třeba zaslat vždy. To aplikace nesestaví: měsíční hlášení i opravu za tento vztah podejte ručně přes ePortál ČSSZ.', 'deferred_income'],
+        'post_termination_annual_settlement_agreement_unsupported' => ['Roční zúčtování po skončení (odložený příjem typu 4) aplikace sama vykáže jen u pracovního poměru. U dohody o provedení práce nebo o pracovní činnosti mzdový běh měsíc bez příjmu nespočítá. Potvrzení typu 4 u dohody zrušte a hlášení za ni podejte ručně přes ePortál ČSSZ.', 'deferred_income'],
         'income_month_attribution_unverified' => ['U příjmu po skončení vztahu není ověřeno období, do kterého patří. V měsíčních vstupech doplňte původní období příjmu a ověřte jeho přiřazení.', 'inputs'],
         'health_coverage_evidence_missing|health_coverage_evidence_invalid|health_coverage_evidence_conflict' => ['Chybí platné zdravotní pojištění nebo se jeho období překrývají. V zákonné evidenci opravte intervaly pojištění tak, aby jednoznačně pokrývaly měsíc mzdy.', 'statutory'],
         'health_insurer_evidence_unverified|health_insurer_snapshot_unverified' => ['Není ověřena zdravotní pojišťovna zaměstnance. V zákonné evidenci potvrďte pojišťovnu a její platnost pro měsíc mzdy.', 'statutory'],
@@ -113,6 +120,18 @@ final class PayrollRunIssueGuidance
         'court_determined_amount_without_insolvency' => ['Je zadána soudem určená insolvenční srážka bez aktivní insolvence. V agendě Insolvence opravte režim nebo chybnou částku.', 'insolvency'],
     ];
 
+    /**
+     * Sekce zákonné evidence, do které proklik doskočí (`field=statutory.<sekce>`).
+     * Podle ní karta běhu pozná, že nález vyřeší hromadné doplnění výchozích
+     * údajů; ostatní nálezy se zákonnou evidencí ho nenabízejí.
+     */
+    private const STATUTORY_SECTIONS = [
+        'tax_declaration_evidence_missing|tax_declaration_evidence_unverified|tax_declaration_unverified' => 'tax_declarations',
+        'tax_residence_evidence_missing|tax_residence_evidence_unverified|tax_residence_unverified' => 'tax_residences',
+        'social_jurisdiction_evidence_invalid|social_jurisdiction_evidence_missing|social_jurisdiction_evidence_unverified|social_security_jurisdiction_unverified' => 'social_jurisdictions',
+        'working_pensioner_discount_evidence_invalid|working_pensioner_discount_evidence_missing|working_pensioner_discount_evidence_unverified|working_pensioner_discount_unverified' => 'social_discount_claims',
+    ];
+
     public static function describe(string $issue, ?int $employeeId = null, ?int $employmentId = null): array
     {
         $employeeId = self::reference($issue, 'employee') ?? $employeeId;
@@ -154,7 +173,15 @@ final class PayrollRunIssueGuidance
             $query = [];
             if ($employeeId !== null) $query['person'] = $employeeId;
             if ($employmentId !== null) $query['employment'] = $employmentId;
-            if ($target !== 'employment') $query['panel'] = in_array($target, ['dependants', 'deferred_income', 'termination'], true) ? $target : 'statutory_evidence';
+            if ($target !== 'employment') $query['panel'] = in_array($target, ['dependants', 'deferred_income', 'termination', 'opening_balances'], true) ? $target : 'statutory_evidence';
+            if ($target === 'statutory') {
+                foreach (self::STATUTORY_SECTIONS as $codes => $section) {
+                    if (array_intersect(explode('|', $codes), $parts) !== []) {
+                        $query['field'] = 'statutory.' . $section;
+                        break;
+                    }
+                }
+            }
             if ($target === 'employment') {
                 $query['panel'] = 'employment_terms';
                 if (in_array('part_time_discount_weekly_working_time_missing', $parts, true)) $query['field'] = 'weekly_hours';

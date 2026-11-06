@@ -78,6 +78,19 @@ final class DocumentBranchParityGuardsTest extends TestCase
         // explicitním filtrem, vydaný strukturálně — vydaný DDKP je vždy status='paid'
         // (sdílí platební řádek proformy přes invoice_payments.tax_document_invoice_id),
         // takže ho InvoicePaymentService::PAYABLE_TYPES ani nenabídne.
+        // Zálohou na 314 je i samostatný přijatý DDKP (nákup kartou bez zálohové faktury,
+        // SaldoRepository::fetchPaidAdvances), na 324 jen proforma (fetchReceivedAdvances):
+        // vazba konečné faktury na zálohu proto na přijaté straně uznává i DDKP bez rodiče.
+        'Repository/AdvanceDeductionRepository.php' => [
+            'finals'       => 'záloha na 314 může být samostatný přijatý DDKP, na 324 jen proforma (saldokonto)',
+            'advanceDates' => 'záloha na 314 může být samostatný přijatý DDKP, na 324 jen proforma (saldokonto)',
+        ],
+
+        // Vratka poskytnuté zálohy (314) je jen přijatá strana; přijatou zálohu (324) vrací
+        // převod párováním vydané proformy jinou cestou.
+        'Service/Migration/MoneyS3/AdvanceLinker.php' => [
+            'repointCancelledAdvanceRefunds' => 'vratka poskytnuté zálohy - jen přijatá strana (314)',
+        ],
         'Service/Bank/StatementMatcher.php' => [
             'matchPurchase'             => 'vydaný DDKP je vždy paid → nikdy platební cíl',
             'matchPurchaseFuzzy'        => 'vydaný DDKP je vždy paid → nikdy platební cíl',
@@ -118,6 +131,19 @@ final class DocumentBranchParityGuardsTest extends TestCase
             'hasRelatedMap'      => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
             'advanceParentOf'    => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
             'withAdvanceChildren' => 'vydaná větev pokrývá DDKP výčtem, přijatá rozlišuje vazební sloupec',
+        ],
+
+        // Dopočet čerpání poskytnutých záloh (314) z POHODY: odpočet přes přijatý DDKP
+        // a vrácení zálohy. Vydané zálohy POHODA vyúčtuje vazbou proformy na finál, kterou
+        // převod přebírá přímo; dopočet z účtu 314 se jich netýká.
+        'Service/Migration/Pohoda/DocumentLinker.php' => [
+            'inferAdvanceSettlements' => 'dopočet čerpání se týká jen poskytnutých záloh na 314',
+        ],
+
+        // ZDD (daňový doklad k přijaté platbě zálohy) a čerpání zálohy vede ABRA Flexi jen
+        // u přijatých faktur; vydané zálohy převod z ABRA Flexi nepřebírá.
+        'Service/Migration/Abra/AbraDocumentRelationLinker.php' => [
+            'linkAdvanceDeductions' => 'čerpání přijatých záloh a ZDD z ABRA Flexi, vydaná větev v převodu není',
         ],
     ];
 

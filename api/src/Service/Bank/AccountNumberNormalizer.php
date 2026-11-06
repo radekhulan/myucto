@@ -276,11 +276,18 @@ final class AccountNumberNormalizer
         return $canonical === '' ? null : $canonical;
     }
 
-    /** Kód banky z explicitní hodnoty, případně z českého IBANu. */
+    /**
+     * Český kód banky z explicitní hodnoty, případně z českého IBANu. Vodicí nuly navíc
+     * (`00800`) se zahodí. Delší číslo je zahraniční kód (britský sort code, routing
+     * number) a český kód z něj nevznikne: `608464` není banka `8464`.
+     */
     public static function canonicalBankCode(?string $bankCode, ?string $iban = null): ?string
     {
         $digits = preg_replace('/\D/', '', (string) $bankCode) ?? '';
         if ($digits !== '') {
+            if (strlen($digits) > 4 && ltrim(substr($digits, 0, -4), '0') !== '') {
+                return self::czechIbanBankCode(trim((string) $iban));
+            }
             return str_pad(substr($digits, -4), 4, '0', STR_PAD_LEFT);
         }
         return self::czechIbanBankCode(trim((string) $iban));

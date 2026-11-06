@@ -323,7 +323,7 @@ onMounted(async () => {
 </script>
 
 <template>
-  <main class="space-y-5">
+  <div class="space-y-5">
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div><h1 class="text-2xl font-semibold">{{ t('automation.title') }}</h1><p class="text-sm text-neutral-500">{{ t('automation.subtitle') }}</p></div>
       <div class="flex flex-wrap items-center gap-3">
@@ -359,5 +359,5 @@ onMounted(async () => {
     <BulkImpactDialog v-if="preview" :count="preview.count" :supplier-count="preview.supplierCount" :accounts="preview.accounts" :failed="preview.failed" :busy="busy" @confirm="confirmBulkApprove" @close="preview=null" />
     <RejectReasonDialog v-if="rejectTarget" :count="rejectCount" :busy="busy" @confirm="confirmReject" @close="rejectTarget=null" />
     <SourceDetailDrawer v-if="sourceDetail" :item="sourceDetail" @close="sourceDetail=null" />
-  </main>
+  </div>
 </template>

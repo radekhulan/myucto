@@ -22,22 +22,16 @@ namespace MyInvoice\Service\Invoice;
  *    chybějícímu klíči; shovívavost je tu levná a integrace, které dnes data ničí,
  *    začnou fungovat správně. `items: null` se počítá jako „klíč nepřišel" — je to
  *    typický artefakt serializace částečného těla, ne pokyn k mazání.
- * 2. Explicitně poslané PRÁZDNÉ pole na dokladu, který položky MÁ, je vada požadavku,
- *    ne příkaz k vyprázdnění ({@see emptiesExisting()}). Součty dokladu se počítají
- *    výhradně z řádků ({@see InvoiceCalculator::recompute()}, {@see PurchaseInvoiceCalculator}),
- *    takže by vznikl doklad na nulu — v seznamu k nerozeznání od záměrně vystaveného
- *    a v žádném výkazu. Týž závěr si vynutil import vydaných dokladů, který doklad bez
- *    jediné položky rovnou odmítá ({@see \MyInvoice\Service\Import\InvoiceImportService}).
- * 3. Prázdné pole na dokladu, který žádné položky nemá, je no-op — nemá co zničit.
+ * 2. Explicitně poslané prázdné pole smí vyprázdnit existující koncept (`draft`).
+ *    Je to pracovní stav stejně jako nový koncept bez řádků; součty se přepočítají
+ *    z prázdné sady. Vystavení/přijetí a další účetní přechody mají vlastní kontroly.
+ * 3. Doklad mimo koncept nesmí úplnou náhradou přijít o všechny existující řádky
+ *    ({@see emptiesExisting()}). Výjimku neuděluje ani vynucená editace.
+ * 4. Prázdné pole na dokladu, který žádné položky nemá, je no-op — nemá co zničit.
  *
- * ODLIŠNOSTI, které jsou ZÁMĚR:
- *  - ZALOŽENÍ dokladu (POST) tenhle guard nemá: nemá co smazat a oba endpointy zakládají
- *    `draft`, kde je prázdný doklad pracovní stav (týž výklad, jaký import používá pro
- *    přijaté faktury). Doklad bez řádků se zastaví až tam, kde by se stal účetním faktem.
- *  - Dedikovaný `PUT /purchase-invoices/{id}/items` prázdné pole PŘIJÍMÁ: tam je `items`
- *    celý obsah požadavku, takže `[]` je jednoznačný pokyn, a endpoint jede jen nad
- *    draftem. Naopak CHYBĚJÍCÍ klíč je tam vada požadavku, ne „neměň" — viz
- *    {@see \MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceItemsAction}.
+ * Stejná pravidla platí pro obecný PUT vydaného i přijatého dokladu. Dedikovaný
+ * `PUT /purchase-invoices/{id}/items` pracuje pouze s konceptem a prázdné pole také
+ * přijímá; chybějící klíč tam ovšem není částečná aktualizace, ale neplatný vstup.
  */
 final class DocumentItemsPayload
 {
@@ -60,14 +54,15 @@ final class DocumentItemsPayload
     }
 
     /**
-     * Explicitně poslané prázdné pole na dokladu, který nějaké položky má → 422.
+     * Odmítá vyprázdnění existujících řádků mimo koncept; neznámý stav výjimku nemá.
      *
      * @param array<string,mixed>        $body
      * @param array<int,mixed>           $existingItems položky uloženého dokladu
      */
-    public static function emptiesExisting(array $body, array $existingItems): bool
+    public static function emptiesExisting(array $body, array $existingItems, ?string $storedStatus = null): bool
     {
-        return self::replaces($body)
+        return $storedStatus !== 'draft'
+            && self::replaces($body)
             && is_array($body['items'])
             && $body['items'] === []
             && $existingItems !== [];
@@ -76,10 +71,8 @@ final class DocumentItemsPayload
     /** Hláška k {@see EMPTY_ERROR_CODE} — stejná na obou stranách evidence. */
     public static function emptyErrorMessage(): string
     {
-        return 'Doklad by zůstal bez jediné položky. Součty se počítají z řádků, takže by z něj '
-            . 'byl doklad na nulu — v seznamu k nerozeznání od záměrně vystaveného a v žádném '
-            . 'výkazu. Pokud jste položky měnit nechtěli, klíč „items" v požadavku vynechte; '
-            . 'pokud má doklad zaniknout, smažte ho.';
+        return 'Doklad mimo koncept nesmí zůstat bez jediné položky. '
+            . 'Pokud jste položky měnit nechtěli, klíč „items“ v požadavku vynechte.';
     }
 
     /**
@@ -91,12 +84,41 @@ final class DocumentItemsPayload
      * kdežto tělo requestu nese cokoliv od `1` po `"1.000"` — string compare by z formátové
      * neshody udělal účetní změnu a zablokoval legitimní `force_mode=notes_only`.
      *
+     * Klasifikace DPH se dopočítává, jen když v těle chybí. Poslaná je rozhodnutí o řádku
+     * přiznání, takže její změna je změna položky ({@see self::classificationChanged()}).
+     *
      * @param array<int,mixed> $old
      * @param array<int,mixed> $new
      */
     public static function changed(array $old, array $new): bool
     {
-        return self::fingerprint($old) !== self::fingerprint($new);
+        return self::fingerprint($old) !== self::fingerprint($new)
+            || self::classificationChanged($old, $new);
+    }
+
+    /**
+     * Přesune poslaný kód řádek v přiznání a KH? Vynechaný klíč nic neříká, kód se dopočítá
+     * ze zadaných polí a ta hlídá otisk. Řádky se párují pořadím, přidaný nebo ubraný řádek
+     * otisk zachytí sám.
+     *
+     * @param array<int,mixed> $old
+     * @param array<int,mixed> $new
+     */
+    private static function classificationChanged(array $old, array $new): bool
+    {
+        $old = array_values($old);
+        foreach (array_values($new) as $i => $item) {
+            if (!is_array($item) || InvoiceItemKind::isText($item)
+                || !array_key_exists('vat_classification_code', $item)) {
+                continue;
+            }
+            $stored = is_array($old[$i] ?? null) ? ($old[$i]['vat_classification_code'] ?? '') : '';
+            if ((string) ($item['vat_classification_code'] ?? '') !== (string) $stored) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -14,6 +14,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Export\CsvWriter;
+use MyInvoice\Service\Export\ExportFilename;
 use MyInvoice\Service\Export\ExportPeriod;
 use MyInvoice\Service\Export\ExportPeriodResolver;
 use MyInvoice\Service\Export\IsdocExporter;
@@ -117,7 +118,7 @@ final class ExportAction
         } catch (\DomainException $e) {
             return Json::error($response, 'signature_unavailable', $e->getMessage(), 422);
         } catch (\Throwable $e) {
-            return Json::error($response, 'export_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'export_failed', $e->getMessage(), 500);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -139,8 +140,15 @@ final class ExportAction
         $response->getBody()->write($content);
         return $response
             ->withHeader('Content-Type', $mime)
-            ->withHeader('Content-Disposition', 'attachment; filename="' . $filename . '"')
+            ->withHeader('Content-Disposition', self::attachmentDisposition($filename))
             ->withHeader('Content-Length', (string) strlen($content));
+    }
+
+    /** Content-Disposition podle RFC 6266: ASCII `filename` jako záloha a přesný název ve `filename*` (UTF-8). */
+    private static function attachmentDisposition(string $filename): string
+    {
+        $ascii = ExportFilename::sanitize($filename, 'export');
+        return 'attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($filename);
     }
 
     /** @return int[] */

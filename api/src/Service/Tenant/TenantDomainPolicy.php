@@ -64,6 +64,10 @@ final class TenantDomainPolicy
             ];
         }
 
+        if (($path === '/mcp' && in_array($method, ['GET', 'POST', 'DELETE', 'OPTIONS'], true))
+            || (in_array($path, ['/.well-known/oauth-protected-resource', '/.well-known/oauth-protected-resource/mcp'], true)
+                && in_array($method, ['GET', 'HEAD'], true))) return null;
+
         $allowed = str_starts_with($path, '/api/')
             ? $this->clientRoutes->allowsApiRequest($method, $path)
             : ($this->clientRoutes->allowsAuthenticatedPath($path)

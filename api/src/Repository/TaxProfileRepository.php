@@ -5,12 +5,23 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
+use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
+use MyInvoice\Support\Sql\AdvanceSettledSql;
 
 /**
  * Daňové profily (tax_profiles) — per supplier × rok — a agregace příjmů
  * pro daňový optimalizátor. Příjem = zaplacené vystavené faktury přepočtené
  * na CZK (kasová metoda, stejně jako sledování limitu paušálu na dashboardu).
+ *
+ * Rodná čísla dětí a manžela/manželky (H28) se ukládají zapečetěná stejně jako
+ * u vyživovaných osob ve mzdách ({@see \MyInvoice\Repository\Payroll\PayrollDependantRepository}):
+ * šifrový text vázaný na řádek, tenantový otisk a maska. {@see find()} vrací jen
+ * masku a příznak `has_birth_number`, otevřenou hodnotu nikdy. Dešifruje se jen
+ * přes {@see familyBirthNumbers()} s deklarovaným účelem (sestavení XML přiznání,
+ * auditované odhalení), viz {@see \MyInvoice\Service\Tax\TaxFamilyIdentifierService}.
  */
 final class TaxProfileRepository
 {
@@ -21,7 +32,15 @@ final class TaxProfileRepository
         'disability_3_months', 'ztpp_months', 'donations', 'sickness_insured', 'sickness_monthly_base',
     ];
 
-    public function __construct(private readonly Connection $db) {}
+    /** Znak masky; hodnota s ním je maska vrácená klientem, ne nové rodné číslo. */
+    private const MASK_CHAR = '•';
+
+    public const FAMILY_FIELD = PayrollSensitiveField::TAX_FAMILY_IDENTIFIER;
+
+    public function __construct(
+        private readonly Connection $db,
+        private readonly PayrollSensitiveData $sensitiveData,
+    ) {}
 
     /** @return array<string,mixed>|null */
     public function find(int $supplierId, int $year): ?array
@@ -277,8 +296,7 @@ final class TaxProfileRepository
                 AND pi.paid_at IS NOT NULL
                 AND DATE_FORMAT(pi.paid_at, '%Y-%m') = ?
                 AND NOT (COALESCE(pi.document_kind, '') = 'advance'
-                     AND EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                 WHERE adv_s.advance_purchase_invoice_id = pi.id))
+                     AND " . AdvanceSettledSql::purchase('pi') . ")
                 AND COALESCE(pi.document_kind, '') <> 'tax_document'"
         );
         $stmt->execute([$supplierId, $ym]);
@@ -327,7 +345,7 @@ final class TaxProfileRepository
     private function children(int $supplierId, int $year): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, first_name, last_name, birth_number, birth_date,
+            'SELECT id, first_name, last_name, birth_number, birth_number_hash, birth_number_masked, birth_date,
                     shared_household_proved, other_parent_not_claimed_proved, evidence_ref, order_index
                FROM tax_profile_children WHERE supplier_id = ? AND year = ? ORDER BY order_index, id'
         );
@@ -348,7 +366,7 @@ final class TaxProfileRepository
                 'id' => (int) $r['id'],
                 'first_name' => (string) $r['first_name'],
                 'last_name' => (string) $r['last_name'],
-                'birth_number' => $r['birth_number'] === null ? null : (string) $r['birth_number'],
+                ...$this->publicBirthNumber($r),
                 'birth_date' => $r['birth_date'] === null ? null : (string) $r['birth_date'],
                 'shared_household_proved' => (bool) $r['shared_household_proved'],
                 'other_parent_not_claimed_proved' => (bool) $r['other_parent_not_claimed_proved'],
@@ -364,8 +382,9 @@ final class TaxProfileRepository
     private function spouseClaim(int $supplierId, int $year): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, first_name, last_name, birth_number, birth_date, eligible_months, ztpp,
-                    own_income, income_proved, shared_household_proved, child_under_three_proved, evidence_ref
+            'SELECT id, first_name, last_name, birth_number, birth_number_hash, birth_number_masked, birth_date,
+                    eligible_months, ztpp, own_income, income_proved, shared_household_proved,
+                    child_under_three_proved, evidence_ref
                FROM tax_profile_spouse_claims WHERE supplier_id = ? AND year = ?'
         );
         $stmt->execute([$supplierId, $year]);
@@ -377,7 +396,7 @@ final class TaxProfileRepository
             'id' => (int) $r['id'],
             'first_name' => (string) $r['first_name'],
             'last_name' => (string) $r['last_name'],
-            'birth_number' => $r['birth_number'] === null ? null : (string) $r['birth_number'],
+            ...$this->publicBirthNumber($r),
             'birth_date' => $r['birth_date'] === null ? null : (string) $r['birth_date'],
             'eligible_months' => (int) $r['eligible_months'],
             'ztpp' => (bool) $r['ztpp'],
@@ -440,29 +459,52 @@ final class TaxProfileRepository
         }
 
         if (array_key_exists('children', $data) && is_array($data['children'])) {
-            $pdo->prepare('DELETE FROM tax_profile_children WHERE supplier_id = ? AND year = ?')->execute([$supplierId, $year]);
-            $childStmt = $pdo->prepare(
-                'INSERT INTO tax_profile_children
-                    (supplier_id, year, first_name, last_name, birth_number, birth_date,
-                     shared_household_proved, other_parent_not_claimed_proved, evidence_ref, order_index)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            );
-            $monthStmt = $pdo->prepare(
-                'INSERT INTO tax_profile_child_months (child_id, month, child_order, ztpp, claimed) VALUES (?, ?, ?, ?, ?)'
-            );
+            // Řádky dětí se přepisují celé (DELETE + INSERT), takže dostanou nová id.
+            // Šifra je vázaná na id řádku: uložené rodné číslo, které klient neposlal
+            // znovu (dostal jen masku), se proto převezme odhalením a novým zapečetěním.
+            $previous = $this->sealedRows('tax_profile_children', $supplierId, $year);
+            $children = [];
+            $seenHashes = [];
             foreach (array_values($data['children']) as $idx => $child) {
                 if (!is_array($child)) {
                     continue;
                 }
-                $birthNumber = preg_replace('/\D/', '', (string) ($child['birth_number'] ?? '')) ?: null;
+                $birthNumber = $this->incomingBirthNumber($child, $previous, $supplierId);
+                if ($birthNumber !== null) {
+                    $hash = $this->sensitiveData->lookupHash($birthNumber, self::FAMILY_FIELD, $supplierId);
+                    if (isset($seenHashes[$hash])) {
+                        throw new \InvalidArgumentException(
+                            'Stejné rodné číslo je v daňovém profilu u dvou dětí. Každé dítě uveďte jen jednou.',
+                        );
+                    }
+                    $seenHashes[$hash] = true;
+                }
+                $children[] = [$idx, $child, $birthNumber];
+            }
+            $pdo->prepare('DELETE FROM tax_profile_children WHERE supplier_id = ? AND year = ?')->execute([$supplierId, $year]);
+            $childStmt = $pdo->prepare(
+                'INSERT INTO tax_profile_children
+                    (supplier_id, year, first_name, last_name, birth_number_hash, birth_number_masked, birth_date,
+                     shared_household_proved, other_parent_not_claimed_proved, evidence_ref, order_index)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            $monthStmt = $pdo->prepare(
+                'INSERT INTO tax_profile_child_months (child_id, month, child_order, ztpp, claimed) VALUES (?, ?, ?, ?, ?)'
+            );
+            foreach ($children as [$idx, $child, $birthNumber]) {
                 $birthDate = trim((string) ($child['birth_date'] ?? '')) ?: null;
                 $childStmt->execute([
                     $supplierId, $year, trim((string) ($child['first_name'] ?? '')), trim((string) ($child['last_name'] ?? '')),
-                    $birthNumber, $birthDate, !empty($child['shared_household_proved']) ? 1 : 0,
+                    $birthNumber === null ? null : $this->sensitiveData->lookupHash($birthNumber, self::FAMILY_FIELD, $supplierId),
+                    $birthNumber === null ? null : $this->sensitiveData->mask($birthNumber, self::FAMILY_FIELD),
+                    $birthDate, !empty($child['shared_household_proved']) ? 1 : 0,
                     !empty($child['other_parent_not_claimed_proved']) ? 1 : 0,
                     trim((string) ($child['evidence_ref'] ?? '')) ?: null, $idx,
                 ]);
                 $childId = (int) $pdo->lastInsertId();
+                if ($birthNumber !== null) {
+                    $this->sealBirthNumber('tax_profile_children', $supplierId, $childId, $birthNumber);
+                }
                 foreach ((array) ($child['months'] ?? []) as $m) {
                     if (!is_array($m) || empty($m['claimed'])) {
                         continue;
@@ -474,23 +516,31 @@ final class TaxProfileRepository
         }
 
         if (array_key_exists('spouse_claim', $data)) {
-            $pdo->prepare('DELETE FROM tax_profile_spouse_claims WHERE supplier_id = ? AND year = ?')->execute([$supplierId, $year]);
             $s = $data['spouse_claim'];
+            $birthNumber = is_array($s)
+                ? $this->incomingBirthNumber($s, $this->sealedRows('tax_profile_spouse_claims', $supplierId, $year), $supplierId)
+                : null;
+            $pdo->prepare('DELETE FROM tax_profile_spouse_claims WHERE supplier_id = ? AND year = ?')->execute([$supplierId, $year]);
             if (is_array($s) && (int) ($s['eligible_months'] ?? 0) > 0) {
                 $pdo->prepare(
                     'INSERT INTO tax_profile_spouse_claims
-                        (supplier_id, year, first_name, last_name, birth_number, birth_date, eligible_months,
-                         ztpp, own_income, income_proved, shared_household_proved, child_under_three_proved, evidence_ref)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                        (supplier_id, year, first_name, last_name, birth_number_hash, birth_number_masked, birth_date,
+                         eligible_months, ztpp, own_income, income_proved, shared_household_proved,
+                         child_under_three_proved, evidence_ref)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 )->execute([
                     $supplierId, $year, trim((string) ($s['first_name'] ?? '')), trim((string) ($s['last_name'] ?? '')),
-                    preg_replace('/\D/', '', (string) ($s['birth_number'] ?? '')) ?: null,
+                    $birthNumber === null ? null : $this->sensitiveData->lookupHash($birthNumber, self::FAMILY_FIELD, $supplierId),
+                    $birthNumber === null ? null : $this->sensitiveData->mask($birthNumber, self::FAMILY_FIELD),
                     trim((string) ($s['birth_date'] ?? '')) ?: null,
                     max(0, min(12, (int) ($s['eligible_months'] ?? 0))), !empty($s['ztpp']) ? 1 : 0,
                     max(0, (float) ($s['own_income'] ?? 0)), !empty($s['income_proved']) ? 1 : 0,
                     !empty($s['shared_household_proved']) ? 1 : 0, !empty($s['child_under_three_proved']) ? 1 : 0,
                     trim((string) ($s['evidence_ref'] ?? '')) ?: null,
                 ]);
+                if ($birthNumber !== null) {
+                    $this->sealBirthNumber('tax_profile_spouse_claims', $supplierId, (int) $pdo->lastInsertId(), $birthNumber);
+                }
             }
         }
 
@@ -514,6 +564,169 @@ final class TaxProfileRepository
                     isset($m['assessment_base']) && $m['assessment_base'] !== '' ? max(0, (float) $m['assessment_base']) : null,
                     trim((string) ($m['note'] ?? '')) ?: null]);
             }
+        }
+    }
+
+    /**
+     * Otevřená rodná čísla dětí a manžela/manželky za rok, po id řádku.
+     *
+     * Jediná cesta, kudy otevřená hodnota z profilu odchází, a proto bez výchozího
+     * účelu: volající prohlašuje, kam hodnota poteče ({@see PayrollRevealPurpose}).
+     * Řádek ještě nepřevedený migrací 2160 vrátí dosavadní otevřenou hodnotu.
+     * Nesouhlasí-li dešifrovaná hodnota s otiskem, je řádek poškozený nebo
+     * podstrčený a odhalení selže celé.
+     *
+     * @return array{children: array<int,string>, spouse: array<int,string>}
+     */
+    public function familyBirthNumbers(int $supplierId, int $year, PayrollRevealPurpose $purpose): array
+    {
+        $out = ['children' => [], 'spouse' => []];
+        foreach (['children' => 'tax_profile_children', 'spouse' => 'tax_profile_spouse_claims'] as $key => $table) {
+            foreach ($this->sealedRows($table, $supplierId, $year) as $id => $row) {
+                $plain = $this->openRow($row, $supplierId, $purpose);
+                if ($plain !== null) {
+                    $out[$key][$id] = $plain;
+                }
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Veřejná podoba rodného čísla řádku: nikdy otevřená hodnota, jen maska
+     * a příznak, že číslo je uložené. Řádek ještě nepřevedený migrací 2160 se
+     * maskuje za běhu.
+     *
+     * @param array<string,mixed> $row
+     * @return array{birth_number:null, birth_number_masked:?string, has_birth_number:bool}
+     */
+    private function publicBirthNumber(array $row): array
+    {
+        $legacy = $row['birth_number'] ?? null;
+        if ($row['birth_number_hash'] !== null) {
+            return [
+                'birth_number' => null,
+                'birth_number_masked' => $row['birth_number_masked'] === null ? null : (string) $row['birth_number_masked'],
+                'has_birth_number' => true,
+            ];
+        }
+        if (is_string($legacy) && trim($legacy) !== '') {
+            return [
+                'birth_number' => null,
+                'birth_number_masked' => $this->sensitiveData->mask($legacy, self::FAMILY_FIELD),
+                'has_birth_number' => true,
+            ];
+        }
+
+        return ['birth_number' => null, 'birth_number_masked' => null, 'has_birth_number' => false];
+    }
+
+    /**
+     * Uložené rodné číslo řádků roku (šifrový text, otisk, případně dosud otevřená
+     * hodnota před převodem), po id řádku.
+     *
+     * @return array<int,array{id:int,ciphertext:?string,hash:?string,legacy:?string}>
+     */
+    private function sealedRows(string $table, int $supplierId, int $year): array
+    {
+        if (!in_array($table, ['tax_profile_children', 'tax_profile_spouse_claims'], true)) {
+            throw new \LogicException('Neznámá tabulka rodných čísel daňového profilu.');
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, birth_number, birth_number_ciphertext, birth_number_hash
+               FROM {$table} WHERE supplier_id = ? AND year = ? ORDER BY id"
+        );
+        $stmt->execute([$supplierId, $year]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $out[(int) $r['id']] = [
+                'id' => (int) $r['id'],
+                'ciphertext' => $r['birth_number_ciphertext'] === null ? null : (string) $r['birth_number_ciphertext'],
+                'hash' => $r['birth_number_hash'] === null ? null : (string) $r['birth_number_hash'],
+                'legacy' => $r['birth_number'] === null || trim((string) $r['birth_number']) === ''
+                    ? null
+                    : (string) $r['birth_number'],
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Rodné číslo, které se má po uložení u řádku držet.
+     *
+     *  - nové číslo v `birth_number` (ne maska vrácená klientem) → to se zapečetí;
+     *  - `birth_number_clear: true` → číslo se odebere (dítě jen s datem narození);
+     *  - jinak se ponechá uložené číslo řádku se shodným `id`. Klient rodné číslo
+     *    nikdy nedostal, takže ho při běžném uložení profilu ani nepošle;
+     *  - řádek bez `id` (nové dítě) bez čísla zůstane bez čísla.
+     *
+     * Text, ze kterého po odstranění oddělovačů nezbude žádná číslice, číslo
+     * odebere stejně jako dřív.
+     *
+     * @param array<string,mixed> $input
+     * @param array<int,array{id:int,ciphertext:?string,hash:?string,legacy:?string}> $previous
+     */
+    private function incomingBirthNumber(array $input, array $previous, int $supplierId): ?string
+    {
+        $raw = $input['birth_number'] ?? null;
+        $raw = is_scalar($raw) ? trim((string) $raw) : '';
+        if ($raw !== '' && !str_contains($raw, self::MASK_CHAR)) {
+            $digits = preg_replace('/\D/', '', $raw) ?? '';
+
+            return $digits === '' ? null : $digits;
+        }
+        if (!empty($input['birth_number_clear'])) {
+            return null;
+        }
+        $id = isset($input['id']) && is_numeric($input['id']) ? (int) $input['id'] : 0;
+        if ($id <= 0 || !isset($previous[$id])) {
+            return null;
+        }
+
+        return $this->openRow($previous[$id], $supplierId, PayrollRevealPurpose::RESEAL_NEW_VERSION);
+    }
+
+    /**
+     * @param array{id:int,ciphertext:?string,hash:?string,legacy:?string} $row
+     */
+    private function openRow(array $row, int $supplierId, PayrollRevealPurpose $purpose): ?string
+    {
+        if ($row['ciphertext'] === null) {
+            return $row['legacy'];
+        }
+        $plain = $this->sensitiveData->reveal(
+            $row['ciphertext'],
+            self::FAMILY_FIELD,
+            $supplierId,
+            $row['id'],
+            $purpose,
+        );
+        if ($row['hash'] === null
+            || !hash_equals($row['hash'], $this->sensitiveData->lookupHash($plain, self::FAMILY_FIELD, $supplierId))
+        ) {
+            throw new \DomainException('Integrita rodného čísla v daňovém profilu nebyla ověřena.');
+        }
+
+        return $plain;
+    }
+
+    /** Zapečetí rodné číslo právě založeného řádku (šifra je vázaná na jeho id). */
+    private function sealBirthNumber(string $table, int $supplierId, int $rowId, string $plaintext): void
+    {
+        if (!in_array($table, ['tax_profile_children', 'tax_profile_spouse_claims'], true)) {
+            throw new \LogicException('Neznámá tabulka rodných čísel daňového profilu.');
+        }
+        $sealed = $this->sensitiveData->seal($plaintext, self::FAMILY_FIELD, $supplierId, $rowId);
+        $update = $this->db->pdo()->prepare(
+            "UPDATE {$table}
+                SET birth_number = NULL, birth_number_ciphertext = ?, birth_number_hash = ?, birth_number_masked = ?
+              WHERE supplier_id = ? AND id = ?"
+        );
+        $update->execute([$sealed->ciphertext, $sealed->lookupHash, $sealed->masked, $supplierId, $rowId]);
+        if ($update->rowCount() !== 1) {
+            throw new \RuntimeException('Rodné číslo v daňovém profilu se nepodařilo zapečetit.');
         }
     }
 

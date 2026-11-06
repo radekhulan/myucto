@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
@@ -10,7 +10,7 @@ import { crmApi, type CrmKpi, type CrmOverview, type CrmMonthlyRow, type TopClie
   type ExpenseCategoryRow, type RevenueCategoryRow, type ChurnRiskClient,
   type CashFlowResult, type LateRiskClient,
   type ReminderEffectiveness, type PaymentTimeHistogram, type CrmYearlyRow } from '@/api/crm'
-import { formatDate, formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
+import { formatDate, formatMoneyWhole, formatNumber, formatPercent } from '@/composables/useFormat'
 import { apiErrorMessage } from '@/api/errors'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
@@ -42,6 +42,34 @@ const expenses = ref<ExpenseCategoryRow[]>([])
 const revenues = ref<RevenueCategoryRow[]>([])
 const churn = ref<ChurnRiskClient[]>([])
 const cashFlow = ref<CashFlowResult | null>(null)
+const includeDrafts = ref(false)
+const cashFlowLoading = ref(false)
+let cashFlowGeneration = 0
+let confirmedIncludeDrafts = false
+function applyCashFlow(result: CashFlowResult, drafts: boolean, generation: number): void {
+  if (generation !== cashFlowGeneration) return
+  cashFlow.value = result
+  confirmedIncludeDrafts = drafts
+  includeDrafts.value = drafts
+}
+async function reloadCashFlow() {
+  const generation = ++cashFlowGeneration
+  const drafts = includeDrafts.value
+  cashFlowLoading.value = true
+  try {
+    const cur = currencyFilter.value && currencyFilter.value !== ALL_CURRENCIES ? currencyFilter.value : 'CZK'
+    const result = await crmApi.cashFlowForecast(4, cur, drafts)
+    applyCashFlow(result, drafts, generation)
+  } catch (e) {
+    if (generation === cashFlowGeneration) {
+      includeDrafts.value = confirmedIncludeDrafts
+      toast.error(apiErrorMessage(e))
+    }
+  } finally {
+    if (generation === cashFlowGeneration) cashFlowLoading.value = false
+  }
+}
+onBeforeUnmount(() => { cashFlowGeneration++ })
 const lateRisk = ref<LateRiskClient[]>([])
 const reminderEff = ref<ReminderEffectiveness | null>(null)
 const paymentHist = ref<PaymentTimeHistogram | null>(null)
@@ -61,6 +89,9 @@ const displayCurrency = computed(() => currencyFilter.value === ALL_CURRENCIES ?
 const availableCurrencies = computed(() => overview.value?.currencies || [])
 
 async function loadAll() {
+  const cashFlowRequest = ++cashFlowGeneration
+  const drafts = includeDrafts.value
+  cashFlowLoading.value = true
   loading.value = true
   try {
     const ov = await crmApi.overview()
@@ -85,7 +116,7 @@ async function loadAll() {
       crmApi.expenseBreakdown(periodMonths.value, cur),
       crmApi.revenueBreakdown(periodMonths.value, cur),
       crmApi.churnRisk(60, 10),
-      crmApi.cashFlowForecast(4, cur || 'CZK'),
+      crmApi.cashFlowForecast(4, cur || 'CZK', drafts),
       crmApi.lateRisk(10),
       crmApi.reminderEffectiveness(periodMonths.value),
       crmApi.paymentTimeHistogram(periodMonths.value),
@@ -106,14 +137,18 @@ async function loadAll() {
     expenses.value = exp
     revenues.value = rev
     churn.value = ch
-    cashFlow.value = cf
+    applyCashFlow(cf, drafts, cashFlowRequest)
     lateRisk.value = lr
     reminderEff.value = re
     paymentHist.value = ph
     monthly24.value = m24
   } catch (e) {
-    toast.error(apiErrorMessage(e))
+    if (cashFlowRequest === cashFlowGeneration) {
+      includeDrafts.value = confirmedIncludeDrafts
+      toast.error(apiErrorMessage(e))
+    }
   } finally {
+    if (cashFlowRequest === cashFlowGeneration) cashFlowLoading.value = false
     loading.value = false
   }
 }
@@ -472,7 +507,7 @@ onMounted(async () => {
             </svg>
           </div>
           <div class="text-2xl font-bold text-neutral-900 font-mono">
-            {{ formatMoney(expectedThisMonth, displayCurrency) }}
+            {{ formatMoneyWhole(expectedThisMonth, displayCurrency) }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">
             {{ t('crm.kpi.this_month') }}<span v-if="hasPipeline" class="text-neutral-400"> · {{ t('crm.kpi.expected') }}</span>
@@ -486,29 +521,29 @@ onMounted(async () => {
           <div v-if="hasPipeline" class="text-xs mt-3 pt-2 border-t border-neutral-100 space-y-0.5" :title="t('crm.kpi.pipeline_hint')">
             <div class="flex items-center justify-between gap-2 text-neutral-500">
               <span>{{ t('crm.kpi.issued') }} <span class="text-neutral-400">({{ currentMonthKpi?.invoice_count || 0 }} {{ t('crm.kpi.invoices') }})</span></span>
-              <span class="font-mono">{{ formatMoney(currentMonthKpi?.revenue || 0, displayCurrency) }}</span>
+              <span class="font-mono">{{ formatMoneyWhole(currentMonthKpi?.revenue || 0, displayCurrency) }}</span>
             </div>
             <div v-if="pipelineThisMonth.draft" class="flex items-center justify-between gap-2 text-neutral-500">
               <span>+ {{ t('crm.kpi.drafts') }} <span class="text-neutral-400">({{ pipelineThisMonth.draftCount }})</span></span>
-              <span class="font-mono">{{ formatMoney(pipelineThisMonth.draft, displayCurrency) }}</span>
+              <span class="font-mono">{{ formatMoneyWhole(pipelineThisMonth.draft, displayCurrency) }}</span>
             </div>
             <div v-if="pipelineThisMonth.proforma" class="flex items-center justify-between gap-2 text-neutral-500">
               <span>+ {{ t('crm.kpi.proformas') }} <span class="text-neutral-400">({{ pipelineThisMonth.proformaCount }})</span></span>
-              <span class="font-mono">{{ formatMoney(pipelineThisMonth.proforma, displayCurrency) }}</span>
+              <span class="font-mono">{{ formatMoneyWhole(pipelineThisMonth.proforma, displayCurrency) }}</span>
             </div>
           </div>
           <div class="text-xs text-neutral-400 mt-3 pt-2 border-t border-neutral-100 space-y-0.5">
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_12m_hint')">
               <span>{{ t('crm.kpi.last_12m') }}</span>
               <span class="font-mono text-neutral-600">
-                {{ formatMoney(last12mKpi?.revenue || 0, displayCurrency) }}
+                {{ formatMoneyWhole(last12mKpi?.revenue || 0, displayCurrency) }}
                 <span v-if="rev12Yoy.show" class="ml-1" :class="rev12Yoy.cls">{{ rev12Yoy.arrow }}{{ formatPercent(rev12Yoy.abs, 0) }}</span>
               </span>
             </div>
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_ytd_hint')">
               <span>YTD</span>
               <span class="font-mono text-neutral-600">
-                {{ formatMoney(ytdKpi?.revenue || 0, displayCurrency) }}
+                {{ formatMoneyWhole(ytdKpi?.revenue || 0, displayCurrency) }}
                 <span v-if="revYtdYoy.show" class="ml-1" :class="revYtdYoy.cls">{{ revYtdYoy.arrow }}{{ formatPercent(revYtdYoy.abs, 0) }}</span>
               </span>
             </div>
@@ -526,7 +561,7 @@ onMounted(async () => {
             </svg>
           </div>
           <div class="text-2xl font-bold text-neutral-900 font-mono">
-            {{ formatMoney(currentMonthKpi?.costs || 0, displayCurrency) }}
+            {{ formatMoneyWhole(currentMonthKpi?.costs || 0, displayCurrency) }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">
             {{ t('crm.kpi.this_month') }}
@@ -540,14 +575,14 @@ onMounted(async () => {
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_12m_hint')">
               <span>{{ t('crm.kpi.last_12m') }}</span>
               <span class="font-mono text-neutral-600">
-                {{ formatMoney(last12mKpi?.costs || 0, displayCurrency) }}
+                {{ formatMoneyWhole(last12mKpi?.costs || 0, displayCurrency) }}
                 <span v-if="cost12Yoy.show" class="ml-1" :class="cost12Yoy.cls">{{ cost12Yoy.arrow }}{{ formatPercent(cost12Yoy.abs, 0) }}</span>
               </span>
             </div>
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_ytd_hint')">
               <span>YTD</span>
               <span class="font-mono text-neutral-600">
-                {{ formatMoney(ytdKpi?.costs || 0, displayCurrency) }}
+                {{ formatMoneyWhole(ytdKpi?.costs || 0, displayCurrency) }}
                 <span v-if="costYtdYoy.show" class="ml-1" :class="costYtdYoy.cls">{{ costYtdYoy.arrow }}{{ formatPercent(costYtdYoy.abs, 0) }}</span>
               </span>
             </div>
@@ -565,7 +600,7 @@ onMounted(async () => {
           </div>
           <div class="text-2xl font-bold font-mono"
             :class="expectedProfitThisMonth >= 0 ? 'text-success-600' : 'text-danger-500'">
-            {{ formatMoney(expectedProfitThisMonth, displayCurrency) }}
+            {{ formatMoneyWhole(expectedProfitThisMonth, displayCurrency) }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">
             {{ t('crm.kpi.this_month') }}<span v-if="hasPipeline" class="text-neutral-400"> · {{ t('crm.kpi.expected') }}</span>
@@ -577,29 +612,29 @@ onMounted(async () => {
           <div v-if="hasPipeline" class="text-xs mt-3 pt-2 border-t border-neutral-100 space-y-0.5" :title="t('crm.kpi.pipeline_hint')">
             <div class="flex items-center justify-between gap-2 text-neutral-500">
               <span>{{ t('crm.kpi.issued') }}</span>
-              <span class="font-mono">{{ formatMoney(currentMonthKpi?.profit || 0, displayCurrency) }}</span>
+              <span class="font-mono">{{ formatMoneyWhole(currentMonthKpi?.profit || 0, displayCurrency) }}</span>
             </div>
             <div v-if="pipelineThisMonth.draft" class="flex items-center justify-between gap-2 text-neutral-500">
               <span>+ {{ t('crm.kpi.drafts') }} <span class="text-neutral-400">({{ pipelineThisMonth.draftCount }})</span></span>
-              <span class="font-mono">{{ formatMoney(pipelineThisMonth.draft, displayCurrency) }}</span>
+              <span class="font-mono">{{ formatMoneyWhole(pipelineThisMonth.draft, displayCurrency) }}</span>
             </div>
             <div v-if="pipelineThisMonth.proforma" class="flex items-center justify-between gap-2 text-neutral-500">
               <span>+ {{ t('crm.kpi.proformas') }} <span class="text-neutral-400">({{ pipelineThisMonth.proformaCount }})</span></span>
-              <span class="font-mono">{{ formatMoney(pipelineThisMonth.proforma, displayCurrency) }}</span>
+              <span class="font-mono">{{ formatMoneyWhole(pipelineThisMonth.proforma, displayCurrency) }}</span>
             </div>
           </div>
           <div class="text-xs text-neutral-400 mt-3 pt-2 border-t border-neutral-100 space-y-0.5">
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_12m_hint')">
               <span>{{ t('crm.kpi.last_12m') }}</span>
               <span class="font-mono text-neutral-600">
-                {{ formatMoney(last12mKpi?.profit || 0, displayCurrency) }}
+                {{ formatMoneyWhole(last12mKpi?.profit || 0, displayCurrency) }}
                 <span v-if="profit12Yoy.show" class="ml-1" :class="profit12Yoy.cls">{{ profit12Yoy.arrow }}{{ formatPercent(profit12Yoy.abs, 0) }}</span>
               </span>
             </div>
             <div class="flex items-center justify-between gap-2" :title="t('crm.kpi.yoy_ytd_hint')">
               <span>YTD</span>
               <span class="font-mono text-neutral-600">
-                {{ formatMoney(ytdKpi?.profit || 0, displayCurrency) }}
+                {{ formatMoneyWhole(ytdKpi?.profit || 0, displayCurrency) }}
                 <span v-if="profitYtdYoy.show" class="ml-1" :class="profitYtdYoy.cls">{{ profitYtdYoy.arrow }}{{ formatPercent(profitYtdYoy.abs, 0) }}</span>
               </span>
             </div>
@@ -635,17 +670,17 @@ onMounted(async () => {
                 <td class="px-3 py-2 text-right">
                   <RouterLink :to="{ path: '/invoices', query: comparePeriodQuery(row.key) }"
                     class="font-mono text-neutral-900 hover:text-primary-700 hover:underline">
-                    {{ formatMoney(row.revenue, displayCurrency) }}
+                    {{ formatMoneyWhole(row.revenue, displayCurrency) }}
                   </RouterLink>
                 </td>
                 <td class="px-3 py-2 text-right">
                   <RouterLink :to="{ path: '/purchase-invoices', query: comparePeriodQuery(row.key) }"
                     class="font-mono text-danger-500 hover:text-danger-600 hover:underline">
-                    {{ formatMoney(row.costs, displayCurrency) }}
+                    {{ formatMoneyWhole(row.costs, displayCurrency) }}
                   </RouterLink>
                 </td>
                 <td class="px-3 py-2 text-right font-mono" :class="row.profit >= 0 ? 'text-success-600' : 'text-danger-500'">
-                  {{ row.profit >= 0 ? '+' : '' }}{{ formatMoney(row.profit, displayCurrency) }}
+                  {{ row.profit >= 0 ? '+' : '' }}{{ formatMoneyWhole(row.profit, displayCurrency) }}
                 </td>
                 <td class="px-5 py-2 text-right font-mono text-neutral-600">
                   {{ formatPercent(row.margin, 1) }}
@@ -716,16 +751,16 @@ onMounted(async () => {
             <div class="space-y-1">
               <div class="flex items-center gap-2">
                 <div class="bg-success-500 h-3 rounded-sm" :style="{ width: barWidthPct(m.revenue) + '%' }"></div>
-                <span class="font-mono text-neutral-700">{{ formatMoney(m.revenue, m.currency) }}</span>
+                <span class="font-mono text-neutral-700">{{ formatMoneyWhole(m.revenue, m.currency) }}</span>
               </div>
               <div class="flex items-center gap-2">
                 <div class="bg-danger-500 h-3 rounded-sm" :style="{ width: barWidthPct(m.costs) + '%' }"></div>
-                <span class="font-mono text-neutral-700">{{ formatMoney(m.costs, m.currency) }}</span>
+                <span class="font-mono text-neutral-700">{{ formatMoneyWhole(m.costs, m.currency) }}</span>
               </div>
             </div>
             <div class="text-right font-mono"
               :class="m.profit >= 0 ? 'text-success-600' : 'text-danger-500'">
-              {{ m.profit >= 0 ? '+' : '' }}{{ formatMoney(m.profit, m.currency) }}
+              {{ m.profit >= 0 ? '+' : '' }}{{ formatMoneyWhole(m.profit, m.currency) }}
             </div>
           </div>
         </div>
@@ -752,7 +787,7 @@ onMounted(async () => {
                   <div class="text-xs text-neutral-500 mt-0.5">{{ c.invoice_count }} {{ t('crm.kpi.invoices') }}</div>
                 </td>
                 <td class="px-3 py-2.5 text-right font-mono text-neutral-900">
-                  {{ formatMoney(c.revenue, 'CZK') }}
+                  {{ formatMoneyWhole(c.revenue, 'CZK') }}
                 </td>
                 <td class="px-5 py-2.5 text-right text-xs text-neutral-500 font-mono">
                   {{ formatPercent(c.percent_share, 1) }}
@@ -781,7 +816,7 @@ onMounted(async () => {
                   <div class="text-xs text-neutral-500 mt-0.5">{{ v.purchase_count }} {{ t('crm.kpi.purchases') }}</div>
                 </td>
                 <td class="px-3 py-2.5 text-right font-mono text-neutral-900">
-                  {{ formatMoney(v.costs, 'CZK') }}
+                  {{ formatMoneyWhole(v.costs, 'CZK') }}
                 </td>
                 <td class="px-5 py-2.5 text-right text-xs text-neutral-500 font-mono">
                   {{ formatPercent(v.percent_share, 1) }}
@@ -802,7 +837,7 @@ onMounted(async () => {
             </h3>
             <div class="flex items-center gap-3">
               <span class="text-sm font-mono text-neutral-700">
-                {{ formatMoney(agingTotal, displayCurrency) }}
+                {{ formatMoneyWhole(agingTotal, displayCurrency) }}
               </span>
               <RouterLink :to="{ path: '/invoices', query: { year: 'all', overdue: '1' } }"
                 class="text-xs text-primary-600 hover:text-primary-700 hover:underline whitespace-nowrap">
@@ -820,7 +855,7 @@ onMounted(async () => {
                 <span class="text-neutral-500">{{ b.count }} {{ t('crm.kpi.invoices') }}</span>
               </div>
               <div class="text-right font-mono text-neutral-700">
-                {{ formatMoney(b.total, b.currency) }}
+                {{ formatMoneyWhole(b.total, b.currency) }}
               </div>
             </div>
           </div>
@@ -834,7 +869,7 @@ onMounted(async () => {
             </h3>
             <div class="flex items-center gap-3">
               <span class="text-sm font-mono text-neutral-700">
-                {{ formatMoney(agingPayTotal, displayCurrency) }}
+                {{ formatMoneyWhole(agingPayTotal, displayCurrency) }}
               </span>
               <RouterLink :to="{ path: '/purchase-invoices', query: { overdue: '1' } }"
                 class="text-xs text-primary-600 hover:text-primary-700 hover:underline whitespace-nowrap">
@@ -852,7 +887,7 @@ onMounted(async () => {
                 <span class="text-neutral-500">{{ b.count }} {{ t('crm.kpi.invoices') }}</span>
               </div>
               <div class="text-right font-mono text-neutral-700">
-                {{ formatMoney(b.total, b.currency) }}
+                {{ formatMoneyWhole(b.total, b.currency) }}
               </div>
             </div>
           </div>
@@ -974,7 +1009,7 @@ onMounted(async () => {
                 </div>
               </td>
               <!-- revenue breakdown je VŽDY CZK-normalizovaný (server přepočítá ×exchange_rate) → label CZK -->
-              <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoney(r.total, 'CZK') }}</td>
+              <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoneyWhole(r.total, 'CZK') }}</td>
               <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ formatPercent(r.percent, 1) }}</td>
             </tr>
           </tbody>
@@ -1010,7 +1045,7 @@ onMounted(async () => {
                   </div>
                 </td>
                 <!-- expense breakdown je VŽDY CZK-normalizovaný (server přepočítá ×exchange_rate) → label CZK -->
-                <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoney(e.total, 'CZK') }}</td>
+                <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoneyWhole(e.total, 'CZK') }}</td>
                 <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ formatPercent(e.percent, 1) }}</td>
               </tr>
             </tbody>
@@ -1045,7 +1080,7 @@ onMounted(async () => {
                   </span>
                 </td>
                 <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono">
-                  {{ formatMoney(c.total_revenue, c.currency) }}
+                  {{ formatMoneyWhole(c.total_revenue, c.currency) }}
                 </td>
               </tr>
             </tbody>
@@ -1076,7 +1111,7 @@ onMounted(async () => {
                   class="cursor-pointer hover:bg-neutral-50" :title="t('crm.go_to_purchases')"
                   @click="$router.push({ path: '/purchase-invoices', query: { year: String(r.year) } })">
                   <td class="px-4 py-2 font-medium">{{ r.year }}</td>
-                  <td class="px-4 py-2 text-right font-mono text-danger-500">{{ formatMoney(r.costs, r.currency) }}</td>
+                  <td class="px-4 py-2 text-right font-mono text-danger-500">{{ formatMoneyWhole(r.costs, r.currency) }}</td>
                   <td class="px-4 py-2 text-right text-xs text-neutral-500">{{ r.purchase_count }}</td>
                 </tr>
               </tbody>
@@ -1105,7 +1140,7 @@ onMounted(async () => {
                   class="cursor-pointer hover:bg-neutral-50" :title="t('crm.go_to_purchases')"
                   @click="$router.push({ path: '/purchase-invoices', query: monthQuery(row.period) })">
                   <td class="px-4 py-2 font-mono text-neutral-700">{{ row.period }}</td>
-                  <td class="px-4 py-2 text-right font-mono text-danger-500">{{ formatMoney(row.costs, row.currency) }}</td>
+                  <td class="px-4 py-2 text-right font-mono text-danger-500">{{ formatMoneyWhole(row.costs, row.currency) }}</td>
                   <td class="px-4 py-2 text-right text-xs text-neutral-500">{{ row.purchase_count }}</td>
                 </tr>
               </tbody>
@@ -1139,11 +1174,11 @@ onMounted(async () => {
                   <td class="px-4 py-2 text-right">
                     <RouterLink :to="{ path: '/invoices', query: { year: String(r.year) } }"
                       class="font-mono text-neutral-700 hover:text-primary-700 hover:underline" :title="t('crm.go_to_invoices')">
-                      {{ formatMoney(r.revenue, r.currency) }}
+                      {{ formatMoneyWhole(r.revenue, r.currency) }}
                     </RouterLink>
                   </td>
                   <td class="px-4 py-2 text-right font-mono" :class="r.profit >= 0 ? 'text-success-600' : 'text-danger-500'">
-                    {{ r.profit >= 0 ? '+' : '' }}{{ formatMoney(r.profit, r.currency) }}
+                    {{ r.profit >= 0 ? '+' : '' }}{{ formatMoneyWhole(r.profit, r.currency) }}
                   </td>
                   <td class="px-4 py-2 text-right font-mono text-xs text-neutral-500">
                     {{ formatPercent(marginPct(r.profit, r.revenue), 1) }}
@@ -1177,11 +1212,11 @@ onMounted(async () => {
                   <td class="px-4 py-2 text-right">
                     <RouterLink :to="{ path: '/invoices', query: monthQuery(row.period) }"
                       class="font-mono text-neutral-700 hover:text-primary-700 hover:underline" :title="t('crm.go_to_invoices')">
-                      {{ formatMoney(row.revenue, row.currency) }}
+                      {{ formatMoneyWhole(row.revenue, row.currency) }}
                     </RouterLink>
                   </td>
                   <td class="px-4 py-2 text-right font-mono" :class="row.profit >= 0 ? 'text-success-600' : 'text-danger-500'">
-                    {{ row.profit >= 0 ? '+' : '' }}{{ formatMoney(row.profit, row.currency) }}
+                    {{ row.profit >= 0 ? '+' : '' }}{{ formatMoneyWhole(row.profit, row.currency) }}
                   </td>
                   <td class="px-4 py-2 text-right font-mono text-xs text-neutral-500">
                     {{ formatPercent(marginPct(row.profit, row.revenue), 1) }}
@@ -1195,12 +1230,29 @@ onMounted(async () => {
 
       <!-- ═══ Cash flow forecast (4 týdny) ═══ -->
       <div v-if="cashFlow && cashFlow.weeks.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <header class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
+        <header class="px-5 py-3 border-b border-neutral-200 flex flex-wrap gap-3 items-center justify-between">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">
             💰 {{ t('crm.cash_flow.title') }} ({{ cashFlow.currency }})
           </h3>
-          <div class="text-xs text-neutral-500">{{ t('crm.cash_flow.next_n_weeks', { n: cashFlow.weeks.length }) }}</div>
+          <div class="flex flex-wrap items-center gap-3 text-xs text-neutral-500">
+            <span>{{ t('crm.cash_flow.next_n_weeks', { n: cashFlow.weeks.length }) }}</span>
+            <label class="flex items-center gap-2 whitespace-nowrap">
+              <input v-model="includeDrafts" type="checkbox" :disabled="cashFlowLoading || loading" data-test="cashflow-include-drafts"
+                class="rounded border-neutral-300 text-primary-600" @change="reloadCashFlow" />
+              {{ t('crm.cash_flow.include_drafts') }}
+            </label>
+          </div>
         </header>
+        <div v-if="includeDrafts && cashFlow.total_draft_in !== undefined" class="px-5 py-3 text-xs text-neutral-500 space-y-2">
+          <p>{{ t('crm.cash_flow.draft_hint') }}</p>
+          <RouterLink v-if="cashFlow.unscheduled_draft_count && auth.canRead('invoices')"
+            :to="{ name: 'invoices', query: { cashflow_draft_unscheduled: '1', currency: cashFlow.currency, year: 'all' } }"
+            :class="btnOutline('warning')" class="whitespace-nowrap">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.search" /></svg>
+            {{ t('crm.cash_flow.unscheduled_drafts', { count: cashFlow.unscheduled_draft_count }) }}
+          </RouterLink>
+          <p v-else-if="cashFlow.unscheduled_draft_count">{{ t('crm.cash_flow.unscheduled_drafts', { count: cashFlow.unscheduled_draft_count }) }}</p>
+        </div>
         <div class="overflow-x-auto">
         <table class="w-full text-sm min-w-[560px]">
           <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
@@ -1210,6 +1262,9 @@ onMounted(async () => {
               <th class="text-right px-3 py-2">{{ t('crm.cash_flow.out') }}</th>
               <th class="text-right px-3 py-2">{{ t('crm.cash_flow.net') }}</th>
               <th class="text-right px-5 py-2">{{ t('crm.cash_flow.running') }}</th>
+              <th v-if="includeDrafts" class="text-right px-3 py-2 text-warning-600">{{ t('crm.cash_flow.draft_in') }}</th>
+              <th v-if="includeDrafts" class="text-right px-3 py-2 text-warning-600">{{ t('crm.cash_flow.outlook_net') }}</th>
+              <th v-if="includeDrafts" class="text-right px-5 py-2 text-warning-600">{{ t('crm.cash_flow.outlook_running') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -1218,24 +1273,29 @@ onMounted(async () => {
                 <span class="font-medium">{{ formatDate(w.week_start) }}</span>
                 <span class="text-neutral-400"> – {{ formatDate(w.week_end) }}</span>
               </td>
-              <td class="px-3 py-2 text-right font-mono text-success-600">{{ formatMoney(w.in, cashFlow.currency) }}</td>
-              <td class="px-3 py-2 text-right font-mono text-danger-500">−{{ formatMoney(w.out, cashFlow.currency) }}</td>
+              <td class="px-3 py-2 text-right font-mono text-success-600">{{ formatMoneyWhole(w.in, cashFlow.currency) }}</td>
+              <td class="px-3 py-2 text-right font-mono text-danger-500">−{{ formatMoneyWhole(w.out, cashFlow.currency) }}</td>
               <td class="px-3 py-2 text-right font-mono" :class="w.net >= 0 ? 'text-success-600' : 'text-danger-500'">
-                {{ w.net >= 0 ? '+' : '' }}{{ formatMoney(w.net, cashFlow.currency) }}
+                {{ w.net >= 0 ? '+' : '' }}{{ formatMoneyWhole(w.net, cashFlow.currency) }}
               </td>
               <td class="px-5 py-2 text-right font-mono font-medium" :class="w.running >= 0 ? 'text-neutral-700' : 'text-danger-500'">
-                {{ formatMoney(w.running, cashFlow.currency) }}
+                {{ formatMoneyWhole(w.running, cashFlow.currency) }}
               </td>
+              <td v-if="includeDrafts" class="px-3 py-2 text-right font-mono text-warning-600">{{ formatMoneyWhole(w.draft_in ?? 0, cashFlow.currency) }}</td>
+              <td v-if="includeDrafts" class="px-3 py-2 text-right font-mono text-warning-600">{{ formatMoneyWhole(w.outlook_net ?? w.net, cashFlow.currency) }}</td>
+              <td v-if="includeDrafts" class="px-5 py-2 text-right font-mono text-warning-600">{{ formatMoneyWhole(w.outlook_running ?? w.running, cashFlow.currency) }}</td>
             </tr>
           </tbody>
           <tfoot class="bg-neutral-50">
             <tr>
               <td class="px-5 py-2 text-xs font-medium">{{ t('crm.cash_flow.total') }}</td>
-              <td class="px-3 py-2 text-right font-mono text-success-600 font-medium">{{ formatMoney(cashFlow.total_in, cashFlow.currency) }}</td>
-              <td class="px-3 py-2 text-right font-mono text-danger-500 font-medium">−{{ formatMoney(cashFlow.total_out, cashFlow.currency) }}</td>
+              <td class="px-3 py-2 text-right font-mono text-success-600 font-medium">{{ formatMoneyWhole(cashFlow.total_in, cashFlow.currency) }}</td>
+              <td class="px-3 py-2 text-right font-mono text-danger-500 font-medium">−{{ formatMoneyWhole(cashFlow.total_out, cashFlow.currency) }}</td>
               <td colspan="2" class="px-5 py-2 text-right font-mono font-bold" :class="cashFlow.total_net >= 0 ? 'text-success-600' : 'text-danger-500'">
-                {{ cashFlow.total_net >= 0 ? '+' : '' }}{{ formatMoney(cashFlow.total_net, cashFlow.currency) }}
+                {{ cashFlow.total_net >= 0 ? '+' : '' }}{{ formatMoneyWhole(cashFlow.total_net, cashFlow.currency) }}
               </td>
+              <td v-if="includeDrafts" class="px-3 py-2 text-right font-mono text-warning-600 font-medium">{{ formatMoneyWhole(cashFlow.total_draft_in ?? 0, cashFlow.currency) }}</td>
+              <td v-if="includeDrafts" colspan="2" class="px-5 py-2 text-right font-mono text-warning-600 font-bold">{{ formatMoneyWhole(cashFlow.total_outlook_net ?? cashFlow.total_net, cashFlow.currency) }}</td>
             </tr>
           </tfoot>
         </table>

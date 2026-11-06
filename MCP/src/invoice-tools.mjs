@@ -16,6 +16,7 @@
  * (CONFIRM) jsou v `tool-shared.mjs`, který nic dalšího neimportuje.
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { CONFIRM, requireConfirm, confirmed, changed, merged, seg } from './tool-shared.mjs';
 import {
   invoiceLines, loadDraftInvoice, lineForPut, draftPayload, draftResult,
@@ -43,6 +44,8 @@ const TYPE_LABEL = {
   tax_document: 'Daňový doklad k platbě',
   penalty: 'Penalizační faktura',
   payment_calendar: 'Platební kalendář',
+  rent_calendar: 'Splátkový kalendář',
+  advance_calendar: 'Platební kalendář',
 };
 
 const money = (amount, currency) => `${Number(amount ?? 0).toFixed(2)} ${currency ?? ''}`.trim();
@@ -81,11 +84,15 @@ export const PAYMENT_SCHEDULE_INPUT = {
   type: 'array',
   description:
     'Rozpis plateb platebního nebo splátkového kalendáře, jeden řádek = jedna splátka '
-    + 'v měně dokladu. Součet `total_amount` musí sedět na celkovou částku dokladu s DPH.',
+    + 'v měně dokladu. Součet `base_amount`, `vat_amount` i `total_amount` musí sedět na doklad.',
   minItems: 1,
   maxItems: 120,
   items: schema({
     due_on: date('Datum splatnosti splátky (RRRR-MM-DD).'),
+    tax_date: date(
+      'Jen `rent_calendar`: DUZP splátky podle smlouvy (RRRR-MM-DD), bez zadání den splatnosti. '
+      + 'Platební kalendář (`advance_calendar`) DUZP nemá.',
+    ),
     total_amount: num('Splátka celkem včetně DPH. Když chybí, dopočte se jako `base_amount` + `vat_amount`.'),
     base_amount: num('Základ daně splátky.'),
     vat_amount: num('DPH ze splátky.'),
@@ -114,7 +121,7 @@ function optionalAmount(value, row, key) {
  * částku uloží jako nulu, takže chyba v podkladu by se jinak projevila až rozdílem
  * v součtu, bez stopy, který řádek ho způsobil.
  */
-export function normalizeSchedule(rows) {
+export function normalizeSchedule(rows, invoiceType) {
   if (!Array.isArray(rows) || rows.length === 0) {
     throw new Error('Rozpis plateb musí mít aspoň jednu splátku.');
   }
@@ -132,7 +139,8 @@ export function normalizeSchedule(rows) {
         throw new Error(`Splátka ${row}: chybí \`total_amount\` (nebo \`base_amount\` i \`vat_amount\`, ze kterých se dopočte).`);
       }
       total = fromCents(toCents(base) + toCents(vat));
-    } else if (base !== null && vat !== null && toCents(base) + toCents(vat) !== toCents(total)) {
+    } else if (base !== null && vat !== null && Math.abs(toCents(base) + toCents(vat) - toCents(total)) >= 100) {
+      // Rozdíl pod korunu je zaokrouhlení dokladu, to server nechá v poslední splátce.
       throw new Error(
         `Splátka ${row}: základ ${base} + DPH ${vat} nedává celkem ${total}. Oprav částky splátky.`,
       );
@@ -140,6 +148,16 @@ export function normalizeSchedule(rows) {
     if (toCents(total) === 0) throw new Error(`Splátka ${row}: částka splátky je nulová.`);
 
     const out = { due_on: dueOn, total_amount: fromCents(toCents(total)) };
+    const taxDate = String(raw.tax_date ?? '').trim();
+    if (taxDate !== '') {
+      if (invoiceType === 'advance_calendar') {
+        throw new Error(`Splátka ${row}: platební kalendář DUZP nemá, daň vzniká přijetím platby. Pole \`tax_date\` vynech.`);
+      }
+      if (!isIsoDate(taxDate)) {
+        throw new Error(`Splátka ${row}: DUZP „${taxDate}" není platné datum ve tvaru RRRR-MM-DD.`);
+      }
+      out.tax_date = taxDate;
+    }
     if (base !== null) out.base_amount = fromCents(toCents(base));
     if (vat !== null) out.vat_amount = fromCents(toCents(vat));
     const note = String(raw.note ?? '').trim();
@@ -148,32 +166,55 @@ export function normalizeSchedule(rows) {
   });
 }
 
-const scheduleCents = (rows) => rows.reduce((sum, row) => sum + toCents(row.total_amount), 0);
+const scheduleCents = (rows, column = 'total_amount') => rows.reduce((sum, row) => sum + toCents(row[column] ?? 0), 0);
+
+/** Typy, které jdou vystavit; `payment_calendar` zůstává jen u už vystavených dokladů. */
+const CALENDAR_TYPES = ['rent_calendar', 'advance_calendar'];
+
+/** Sloupce rozpisu, které musí sedět na doklad, zrcadlo serverového `payment_schedule_mismatch`. */
+const SCHEDULE_CHECKS = [
+  ['total_amount', 'total_with_vat', 'celková částka'],
+  ['base_amount', 'total_without_vat', 'základ'],
+  ['vat_amount', 'total_vat', 'DPH'],
+];
 
 /** Tělo `create_invoice` se zkontrolovaným rozpisem; bez rozpisu beze změny. */
 export function withPaymentSchedule(a) {
   if (a.payment_schedule === undefined) return a;
-  if (a.invoice_type !== 'payment_calendar') {
-    throw new Error('Rozpis plateb (`payment_schedule`) patří jen dokladu typu `payment_calendar`.');
+  if (!CALENDAR_TYPES.includes(a.invoice_type)) {
+    throw new Error('Rozpis plateb (`payment_schedule`) patří jen dokladu typu `rent_calendar` nebo `advance_calendar`.');
   }
-  return { ...a, payment_schedule: normalizeSchedule(a.payment_schedule) };
+  return { ...a, payment_schedule: normalizeSchedule(a.payment_schedule, a.invoice_type) };
 }
 
 /**
- * Po založení kalendáře porovná rozpis se součtem, který spočítal server. Celkovou
- * částku před založením neznáme (DPH, zaokrouhlení i sleva se počítají na serveru),
- * proto upozornění až teď. Koncept vznikne tak jako tak, oprava je levná.
+ * První sloupec rozpisu, který nesedí na doklad, nebo null. Částky dokladu, které server
+ * nevrátil, se neporovnávají.
+ */
+function scheduleMismatch(rows, doc) {
+  for (const [column, header, label] of SCHEDULE_CHECKS) {
+    if (doc?.[header] === undefined) continue;
+    const sum = scheduleCents(rows, column);
+    const expected = toCents(doc[header]);
+    if (sum !== expected) return { label, sum, expected };
+  }
+  return null;
+}
+
+/**
+ * Po založení kalendáře porovná rozpis se součty, které spočítal server. Částky před
+ * založením neznáme (DPH, zaokrouhlení i sleva se počítají na serveru), proto upozornění
+ * až teď. Koncept vznikne tak jako tak, oprava je levná.
  */
 export function checkCreatedSchedule(body, saved) {
-  if (!Array.isArray(body.payment_schedule) || saved?.total_with_vat === undefined) return saved;
-  const sum = scheduleCents(body.payment_schedule);
-  const total = toCents(saved.total_with_vat);
-  if (sum === total) return saved;
+  if (!Array.isArray(body.payment_schedule)) return saved;
+  const mismatch = scheduleMismatch(body.payment_schedule, saved);
+  if (mismatch === null) return saved;
   return {
     ...saved,
     payment_schedule_warning:
-      `Součet rozpisu plateb (${money(fromCents(sum), saved.currency)}) nesedí na celkovou částku `
-      + `dokladu (${money(saved.total_with_vat, saved.currency)}). Kalendář takhle nepůjde vystavit; `
+      `Součet rozpisu plateb, ${mismatch.label} (${money(fromCents(mismatch.sum), saved.currency)}), nesedí `
+      + `na doklad (${money(fromCents(mismatch.expected), saved.currency)}). Kalendář takhle nepůjde vystavit; `
       + 'oprav rozpis přes `set_invoice_payment_schedule`, nebo položky dokladu.',
   };
 }
@@ -289,6 +330,10 @@ export const INVOICE_TOOLS = [
   // ── Smazání, storno, dobropis ────────────────────────────────────────────
   {
     name: 'delete_invoice_draft',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}'],
+    ],
     title: 'Smazat koncept faktury',
     description:
       'Nevratně smaže KONCEPT vydaného dokladu i s položkami a výkazem práce. Vystavený '
@@ -311,6 +356,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'cancel_invoice',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['POST', '/api/invoices/{id}/cancel'],
+    ],
     title: 'Stornovat fakturu nebo založit dobropis',
     description:
       'Zruší VYSTAVENÝ doklad. NEVRATNÝ KROK S DAŇOVÝM DOPADEM: jen na výslovný pokyn uživatele.\n\n'
@@ -353,6 +402,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'uncancel_invoice',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Zrušit interní storno',
     description:
       'Vrátí omylem interně stornovanou fakturu nebo zálohu do stavu před stornem. Doklad se '
@@ -375,6 +426,9 @@ export const INVOICE_TOOLS = [
   // ── Kopie a záloha ───────────────────────────────────────────────────────
   {
     name: 'clone_invoice',
+    api: [
+      ['POST', '/api/invoices/{id}/clone'],
+    ],
     title: 'Kopie dokladu jako nový koncept',
     description:
       'Založí nový KONCEPT jako kopii existujícího dokladu (odběratel, zakázka, položky). Nic '
@@ -394,6 +448,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_final_invoice_from_proforma',
+    api: [
+      ['POST', '/api/invoices/{id}/issue-final'],
+    ],
     title: 'Finální faktura ze zálohy',
     description:
       'Ze zaplacené (i částečně) zálohové faktury založí KONCEPT finálního daňového dokladu: '
@@ -414,7 +471,65 @@ export const INVOICE_TOOLS = [
     ),
   },
   {
+    name: 'list_invoice_advance_drawdown_candidates',
+    api: [
+      ['GET', '/api/invoices/{id}/advance-drawdown'],
+    ],
+    title: 'Zálohy k postupnému čerpání',
+    description:
+      'Ke KONCEPTU faktury vrátí zálohové faktury téhož odběratele a měny, které mají vystavený '
+      + 'daňový doklad k platbě, s dosud nevyčerpanou částkou (`available`, s DPH). Čerpá se přes '
+      + '`apply_invoice_advance_drawdown`.',
+    inputSchema: schema({ id: id('ID konceptu faktury.') }, ['id']),
+    write: false,
+    run: (c, a, tool) => c.get(`/invoices/${seg(a.id)}/advance-drawdown`, null, tool),
+  },
+  {
+    name: 'apply_invoice_advance_drawdown',
+    api: [
+      ['POST', '/api/invoices/{id}/advance-drawdown'],
+    ],
+    title: 'Odečíst část zálohy na faktuře',
+    description:
+      'Postupné čerpání zálohy (smlouva s milníky): na KONCEPT běžné faktury s vlastními položkami '
+      + 'doplní záporné odpočtové řádky § 37a ZDPH na `amount` (s DPH) z dané zálohy a naváže fakturu '
+      + 'na zálohu. Záloha musí mít vystavený daňový doklad k platbě. Opakované volání odpočet '
+      + 'nahradí. Na rozdíl od `create_final_invoice_from_proforma` nekopíruje položky zálohy a jednu '
+      + 'zálohu může čerpat víc faktur, dokud se nevyčerpá.',
+    inputSchema: schema({
+      id: id('ID konceptu faktury.'),
+      proforma_id: id('ID zálohové faktury.'),
+      amount: num('Čerpaná částka zálohy s DPH v měně dokladu.', { exclusiveMinimum: 0 }),
+    }, ['id', 'proforma_id', 'amount']),
+    write: true,
+    run: (c, a, tool) => c.post(
+      `/invoices/${seg(a.id)}/advance-drawdown`,
+      { proforma_id: a.proforma_id, amount: a.amount },
+      tool,
+    ),
+  },
+  {
+    name: 'remove_invoice_advance_drawdown',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/advance-drawdown'],
+    ],
+    title: 'Odebrat čerpání zálohy z faktury',
+    description: 'Z KONCEPTU faktury odebere odpočtové řádky zálohy i vazbu na zálohovou fakturu. Vyžaduje `confirm: true`.',
+    inputSchema: schema({ id: id('ID konceptu faktury.'), confirm: CONFIRM }, ['id']),
+    write: true,
+    destructive: true,
+    run: async (c, a, tool) => {
+      const invoice = await loadDraftInvoice(c, a.id, tool);
+      requireConfirm(a, 'Odebrat se mají odpočtové řádky zálohy i její vazba', invoiceLabel(invoice, a.id));
+      return c.del(`/invoices/${seg(a.id)}/advance-drawdown`, tool);
+    },
+  },
+  {
     name: 'list_invoice_advance_candidates',
+    api: [
+      ['GET', '/api/invoices/{id}/advance-candidates'],
+    ],
     title: 'Zálohy k propojení s fakturou',
     description:
       'K faktuře vrátí nespárované zálohové faktury téhož odběratele (nejdřív stejná měna '
@@ -425,6 +540,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'list_proforma_final_candidates',
+    api: [
+      ['GET', '/api/invoices/{id}/final-candidates'],
+    ],
     title: 'Faktury k propojení se zálohou',
     description:
       'K zálohové faktuře vrátí nepropojené faktury téhož odběratele. Propojení pak udělá '
@@ -435,6 +553,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'link_invoice_advance',
+    api: [
+      ['POST', '/api/invoices/{id}/link-advance'],
+    ],
     title: 'Propojit fakturu se zálohou',
     description:
       'Ručně propojí fakturu se zálohovou fakturou téhož odběratele a měny. Nemá-li faktura '
@@ -450,19 +571,33 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'unlink_invoice_advance',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/link-advance'],
+    ],
     title: 'Zrušit propojení faktury se zálohou',
     description:
       'Zruší propojení faktury se zálohovou fakturou. Odečtená záloha (`advance_paid_amount`) '
       + 'na faktuře zůstane, případně ji uprav. Nejde u daňového dokladu k platbě ani u finálu '
-      + 's odpočty záloh podle § 37a ZDPH.',
-    inputSchema: schema({ id: id('ID faktury.') }, ['id']),
+      + 's odpočty záloh podle § 37a ZDPH. Bez `confirm: true` pouze ukáže dotčený doklad a ponechanou zálohu.',
+    inputSchema: schema({ id: id('ID faktury.'), confirm: CONFIRM }, ['id']),
     write: true,
-    run: (c, a, tool) => c.del(`/invoices/${seg(a.id)}/link-advance`, tool),
+    destructive: true,
+    run: async (c, a, tool) => {
+      const invoice = await getInvoice(c, a.id, tool);
+      if (!invoice?.parent_invoice_id) throw new Error(`Faktura ${invoiceLabel(invoice, a.id)} nemá vazbu na zálohu.`);
+      requireConfirm(a, 'Zrušit se má vazba na zálohu',
+        `${invoiceLabel(invoice, a.id)}; odečtená záloha ${money(invoice.advance_paid_amount, invoice.currency)} na faktuře zůstane`);
+      return c.del(`/invoices/${seg(a.id)}/link-advance`, tool);
+    },
   },
 
   // ── Penále ───────────────────────────────────────────────────────────────
   {
     name: 'preview_invoice_penalty',
+    api: [
+      ['GET', '/api/invoices/{id}/penalty/preview'],
+    ],
     title: 'Výpočet úroku z prodlení',
     description:
       'Spočítá zákonný úrok z prodlení (NV č. 351/2013 Sb.) k vystavené faktuře po splatnosti: '
@@ -477,6 +612,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_invoice_penalty',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Založit penalizační fakturu',
     description:
       'Založí KONCEPT penalizační faktury na úrok z prodlení (mimo předmět DPH) k vystavené '
@@ -494,6 +631,9 @@ export const INVOICE_TOOLS = [
   // ── Úhrady ───────────────────────────────────────────────────────────────
   {
     name: 'add_invoice_payment',
+    api: [
+      ['POST', '/api/invoices/{id}/payments'],
+    ],
     title: 'Zaevidovat úhradu (i částečnou)',
     description:
       'Zaeviduje úhradu dokladu v jeho měně, i částečnou. Když platby pokryjí celou částku, '
@@ -520,6 +660,11 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'delete_invoice_payment',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/payments/{item_id}'],
+      ['GET', '/api/invoices/{id}/payments'],
+    ],
     title: 'Smazat úhradu',
     description:
       'Nevratně smaže evidovanou úhradu dokladu (ID z `list_invoice_payments`). Když pak doklad '
@@ -552,6 +697,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_payment_tax_document',
+    api: [
+      ['POST', '/api/invoices/{id}/payments/{payment_id}/tax-document'],
+    ],
     title: 'Daňový doklad k přijaté platbě',
     description:
       'K přijaté platbě zálohové faktury založí KONCEPT daňového dokladu k přijaté úplatě '
@@ -566,6 +714,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'unmark_invoice_paid',
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['POST', '/api/invoices/{id}/unmark-paid'],
+    ],
     title: 'Zrušit úhradu dokladu',
     description:
       'Vrátí zaplacený doklad do stavu vystaveno nebo odesláno a SMAŽE všechny jeho evidované '
@@ -588,40 +740,44 @@ export const INVOICE_TOOLS = [
   // ── Platební kalendář ────────────────────────────────────────────────────
   {
     name: 'set_invoice_payment_schedule',
-    title: 'Rozpis plateb platebního kalendáře',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
+    title: 'Rozpis plateb kalendáře',
     description:
-      'Nastaví rozpis plateb KONCEPTU platebního nebo splátkového kalendáře (§ 31 a § 31a ZDPH, '
-      + 'typ `payment_calendar`; typ konceptu změní `update_invoice`). Rozpis se nahrazuje CELÝ: '
+      'Nastaví rozpis plateb KONCEPTU kalendáře: `rent_calendar` je splátkový kalendář k nájmu '
+      + '(§ 31 ZDPH, každá splátka má vlastní DUZP), `advance_calendar` platební kalendář záloh '
+      + '(§ 31a ZDPH, bez DUZP); typ konceptu změní `update_invoice`. Rozpis se nahrazuje CELÝ: '
       + 'pošli všechny splátky. Hlavička a položky dokladu zůstanou beze změny.\n\n'
-      + 'Řádek: `due_on` (datum splatnosti), `total_amount` (splátka s DPH), volitelně `base_amount` '
-      + 'a `vat_amount` (základ a DPH splátky) a `note`. Částky jsou v měně dokladu. Součet '
-      + '`total_amount` musí přesně sedět na celkovou částku dokladu s DPH, jinak nástroj nic '
-      + 'neuloží a vrátí rozdíl; kalendář s nesouhlasným součtem by nešel vystavit.\n\n'
+      + 'Řádek: `due_on` (datum splatnosti), `base_amount` a `vat_amount` (základ a DPH splátky), '
+      + '`total_amount` (splátka s DPH; když chybí, dopočte se), u nájmu `tax_date` (DUZP, bez zadání '
+      + 'den splatnosti) a `note`. Částky jsou v měně dokladu. Součty základu, DPH i celkové částky '
+      + 'musí přesně sedět na doklad, jinak nástroj nic neuloží a vrátí rozdíl; kalendář s nesouhlasným '
+      + 'součtem by nešel vystavit.\n\n'
       + 'Rozpis můžeš sestavit i z podkladu od uživatele (smlouva, tabulka splátek, PDF): přečti ho, '
       + 'splátky převeď na řádky a před uložením je uživateli ukaž ke kontrole.',
     inputSchema: schema({
-      invoice_id: id('ID konceptu platebního kalendáře.'),
+      invoice_id: id('ID konceptu splátkového nebo platebního kalendáře.'),
       payment_schedule: PAYMENT_SCHEDULE_INPUT,
     }, ['invoice_id', 'payment_schedule']),
     write: true,
     run: async (c, a, tool) => {
       const invoiceId = Number(a.invoice_id);
       const invoice = await loadDraftInvoice(c, invoiceId, tool);
-      if (invoice.invoice_type !== 'payment_calendar') {
+      if (!CALENDAR_TYPES.includes(invoice.invoice_type)) {
         throw new Error(
-          `${invoiceLabel(invoice, invoiceId)}: rozpis plateb patří jen platebnímu kalendáři. `
-          + 'Typ konceptu změní `update_invoice` s `invoice_type: "payment_calendar"` (jen na výslovný pokyn).',
+          `${invoiceLabel(invoice, invoiceId)}: rozpis plateb patří jen splátkovému nebo platebnímu kalendáři. `
+          + 'Typ konceptu změní `update_invoice` s `invoice_type: "rent_calendar"` nebo `"advance_calendar"` '
+          + '(jen na výslovný pokyn).',
         );
       }
-      const rows = normalizeSchedule(a.payment_schedule);
-      const sum = scheduleCents(rows);
-      const total = toCents(invoice.total_with_vat);
-      if (sum !== total) {
+      const rows = normalizeSchedule(a.payment_schedule, invoice.invoice_type);
+      const mismatch = scheduleMismatch(rows, invoice);
+      if (mismatch !== null) {
         throw new Error(
-          `NEULOŽENO: součet rozpisu plateb ${money(fromCents(sum), invoice.currency)} nesedí na celkovou `
-          + `částku dokladu ${money(invoice.total_with_vat, invoice.currency)} `
-          + `(rozdíl ${money(fromCents(sum - total), invoice.currency)}). Oprav splátky, nebo nejdřív `
-          + 'položky dokladu, a zavolej nástroj znovu.',
+          `NEULOŽENO: součet rozpisu plateb, ${mismatch.label} ${money(fromCents(mismatch.sum), invoice.currency)}, `
+          + `nesedí na doklad ${money(fromCents(mismatch.expected), invoice.currency)} `
+          + `(rozdíl ${money(fromCents(mismatch.sum - mismatch.expected), invoice.currency)}). Oprav splátky, `
+          + 'nebo nejdřív položky dokladu, a zavolej nástroj znovu.',
         );
       }
 
@@ -642,6 +798,9 @@ export const INVOICE_TOOLS = [
   // ── Export a odeslání ────────────────────────────────────────────────────
   {
     name: 'get_invoice_isdoc',
+    api: [
+      ['GET', '/api/invoices/{id}/isdoc'],
+    ],
     title: 'ISDOC vystavené faktury',
     description:
       'Vrátí ISDOC XML vystaveného dokladu jako text (strojově čitelný formát pro účetní '
@@ -656,6 +815,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'get_invoice_recipients',
+    api: [
+      ['GET', '/api/invoices/{id}/recipients'],
+    ],
     title: 'Příjemci dokladu',
     description:
       'Komu by aplikace doklad poslala: adresy To/Cc/Bcc z kontaktů odběratele a zakázky '
@@ -669,6 +831,8 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'send_invoice_reminders_bulk',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Hromadně poslat upomínky',
     description:
       'Pošle upomínky k více fakturám po splatnosti naráz (nejvýš 50). Každá upomínka je e-mail '
@@ -707,6 +871,9 @@ export const INVOICE_TOOLS = [
   // ── Pravidelná fakturace ─────────────────────────────────────────────────
   {
     name: 'create_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring'],
+    ],
     title: 'Založit pravidelnou fakturaci',
     description:
       'Založí šablonu pravidelné fakturace: z ní aplikace podle rozvrhu generuje faktury. '
@@ -720,6 +887,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'update_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['PUT', '/api/recurring/{id}'],
+    ],
     title: 'Upravit pravidelnou fakturaci',
     description:
       'Změní šablonu pravidelné fakturace. Zadaná pole se změní, ostatní zůstanou; nástroj '
@@ -742,6 +913,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'delete_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['DELETE', '/api/recurring/{id}'],
+    ],
     title: 'Smazat pravidelnou fakturaci',
     description:
       'Nevratně smaže šablonu pravidelné fakturace; další faktury z ní už nevzniknou. Už '
@@ -762,6 +937,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'pause_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring/{id}/pause'],
+    ],
     title: 'Pozastavit pravidelnou fakturaci',
     description: 'Pozastaví šablonu; dokud se neobnoví, žádné faktury z ní nevzniknou.',
     inputSchema: schema({ id: id('ID šablony.') }, ['id']),
@@ -770,6 +948,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'resume_recurring_invoice',
+    api: [
+      ['POST', '/api/recurring/{id}/resume'],
+    ],
     title: 'Obnovit pravidelnou fakturaci',
     description:
       'Obnoví pozastavenou šablonu. Příští faktura vznikne v den `next_run_date` ze šablony; '
@@ -780,6 +961,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'reschedule_recurring_invoice',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['POST', '/api/recurring/{id}/reschedule'],
+    ],
     title: 'Přeplánovat příští fakturu',
     description:
       'Posune datum příští faktury ze šablony (`next_run_date`). Datum musí být od dneška '
@@ -799,6 +984,10 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'run_recurring_invoice_now',
+    api: [
+      ['GET', '/api/recurring/{id}'],
+      ['POST', '/api/recurring/{id}/run-now'],
+    ],
     title: 'Vygenerovat fakturu ze šablony hned',
     description:
       'Vygeneruje fakturu ze šablony hned, mimo rozvrh, a standardně posune rozvrh na další '

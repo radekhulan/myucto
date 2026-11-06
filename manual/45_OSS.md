@@ -51,7 +51,7 @@ používají stejné období; archiv zobrazuje jednotlivá uložená podání. O
 - **Registrace k OSS** u finanční správy. Aplikace ji neřeší, jen si pamatuje,
   odkdy dokdy platí (viz [§ 45.3](#453-krok-za-krokem-zapnuti-oss-a-prvni-nastaveni)).
 - **Licence.** OSS je placený modul. Po skončení zkušební doby bez platné licence
-  položka **OSS přiznání** v menu nebude (viz [Licence a aktivace](105_Licence_a_aktivace.md)).
+  položka **OSS přiznání** v menu nebude (viz [Licence a aktivace](104_Licence_a_aktivace.md)).
 - **Zahraniční sazby DPH** založené v číselníku `Systém → Sazby a číselníky`, záložka **Sazby DPH**,
   například `PL-23`, `SK-23`, `HU-27`. Dbejte, aby měly správný **Stát** (viz
   [§ 45.4](#454-krok-za-krokem-zahranicni-sazby-dph-a-ciselnik-sazeb-statu)).
@@ -900,13 +900,10 @@ je, říká souhrn importu i náhled podání.
 
 #### Haléřové rozdíly u množství větší než jedna
 
-Jednotková cena bez DPH se vede na **dvě desetinná místa**. Když vyjde na víc
-(například 0,2683 EUR za kus) a množství je větší než 1, přenásobením vznikne rozdíl
-proti zdrojovému systému. Na jednom dokladu jde o haléře, na čtvrtletním podání
-o jednotky eur.
-
-Není to chyba importu, je to mez datového modelu. **Při rekonciliaci OSS podání
-proti zdrojovým dokladům tyhle rozdíly očekávejte** a nehledejte za nimi chybu.
+Jednotková cena bez DPH se vede na **šest desetinných míst** (například 0,2683 EUR
+za kus zůstane přesně), částka řádku se zaokrouhlí na haléře. Rozdíl proti zdrojovému
+systému proto vznikne jen tehdy, když zdrojový systém zaokrouhluje řádek jinak, třeba
+až za součtem dokladu. Na jednom dokladu jde o haléře.
 
 #### Země spotřeby se bere z odběratele, ne z měny
 

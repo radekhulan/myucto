@@ -41,9 +41,47 @@ final class PayrollPeopleRepository
         'needs_setup',
         'needs_data',
         'blocking_data',
+        self::FILTER_DPP_HOURS_LIMIT,
     ];
 
+    /**
+     * Osoby, které na DPP v roce dosáhly prahu upozornění nebo překročily
+     * limit 300 h. Součet hodin SQL neumí (převzaté měsíce, hranice začátku
+     * vedení mezd), proto množinu osob dodává volající z
+     * {@see \MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours::employeesNearLimit()}.
+     */
+    public const FILTER_DPP_HOURS_LIMIT = 'dpp_hours_limit';
+
     public const LIST_DEFAULT_FILTER = 'all';
+
+    /**
+     * Řazení seznamu podle sloupce. Klíč je klíč sloupce na obrazovce, hodnota
+     * výraz nad odvozenou tabulkou `people` ({@see self::peopleQuery()}).
+     * Výchozí je příjmení a jméno: tak účetní lidi hledá. Osoba bez
+     * strukturovaného jména se řadí podle celého jména, aby nepropadla na
+     * začátek ani na konec.
+     *
+     * Jména se řadí českou collation (Š za S, Ch za H), sloupce samy jsou
+     * v obecné `unicode_ci`, která háčky přehlíží. Osobní čísla přirozeně
+     * (`Z2` před `Z10`).
+     */
+    public const LIST_SORTS = [
+        'last_name' => "COALESCE(NULLIF(people.last_name, ''), people.full_name) COLLATE utf8mb4_czech_ci",
+        'first_name' => "NULLIF(people.first_name, '') COLLATE utf8mb4_czech_ci",
+        'full_name' => 'people.full_name COLLATE utf8mb4_czech_ci',
+        'personal_number' => "NATURAL_SORT_KEY(NULLIF(people.primary_code, ''))",
+        'status' => 'people.is_active',
+        'relations' => "NULLIF(people.relation_types, '')",
+        'count' => 'people.employment_count',
+        'start_date' => 'people.first_start_on',
+        'end_date' => 'people.last_end_on',
+        'birth_date' => 'people.birth_date',
+        // Názvy pozic jsou v číselníku mimo databázi, řadí se proto podle kódu
+        // CZ-ISCO; příbuzná zaměstnání tak stojí u sebe.
+        'position' => 'people.cz_isco_code',
+    ];
+
+    public const LIST_DEFAULT_SORT = 'last_name';
 
     /**
      * Znak, kterým se v hledání escapuje `%`, `_` a on sám. Zpětné lomítko by
@@ -64,6 +102,9 @@ final class PayrollPeopleRepository
      * stránku, pager by nabízel stránky, na kterých po zúžení nikdo není.
      * Neznámý filtr se chová jako `all`; na hraně HTTP ho odmítá akce.
      *
+     * Neznámý klíč řazení se chová jako výchozí příjmení a jméno; odmítá ho akce.
+     *
+     * @param list<int> $employeeIds množina osob pro filtr {@see self::FILTER_DPP_HOURS_LIMIT}
      * @return array{items: list<array<string,mixed>>, total: int}
      */
     public function listForTenant(
@@ -72,10 +113,13 @@ final class PayrollPeopleRepository
         int $offset = 0,
         string $filter = self::LIST_DEFAULT_FILTER,
         string $search = '',
+        array $employeeIds = [],
+        string $sortKey = self::LIST_DEFAULT_SORT,
+        bool $descending = false,
     ): array {
         $limit = max(1, min(self::LIST_MAX_LIMIT, $limit));
         $offset = max(0, $offset);
-        $narrowing = $this->narrowingClause($filter, $search);
+        $narrowing = $this->narrowingClause($filter, $search, $employeeIds);
 
         $countStmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*) ' . self::fromClause()
@@ -90,7 +134,11 @@ final class PayrollPeopleRepository
         $countStmt->execute();
         $total = (int) $countStmt->fetchColumn();
 
-        $stmt = $this->peopleQuery(paged: true, narrowing: $narrowing['sql']);
+        $stmt = $this->peopleQuery(
+            paged: true,
+            narrowing: $narrowing['sql'],
+            orderBy: self::orderByClause($sortKey, $descending),
+        );
         $position = 1;
         $stmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
         $stmt->bindValue($position++, $supplierId, PDO::PARAM_INT);
@@ -115,9 +163,10 @@ final class PayrollPeopleRepository
      * dostaly ZAROVEŇ. Rozdělené by se dřív nebo později rozešly a pager by
      * hlásil jiné číslo, než kolik jde odklikat.
      *
+     * @param list<int> $employeeIds
      * @return array{sql: string, params: list<string>}
      */
-    private function narrowingClause(string $filter, string $search): array
+    private function narrowingClause(string $filter, string $search, array $employeeIds = []): array
     {
         $sql = '';
         $params = [];
@@ -132,6 +181,15 @@ final class PayrollPeopleRepository
             $sql .= ' AND ' . PayrollPersonDataGapCatalog::gapExpression(
                 PayrollPersonDataGapCatalog::SEVERITY_BLOCKING,
             );
+        } elseif ($filter === self::FILTER_DPP_HOURS_LIMIT) {
+            if ($employeeIds === []) {
+                $sql .= ' AND 1 = 0';
+            } else {
+                $sql .= ' AND employee.id IN (' . implode(', ', array_fill(0, count($employeeIds), '?')) . ')';
+                foreach ($employeeIds as $employeeId) {
+                    $params[] = (string) $employeeId;
+                }
+            }
         }
 
         $search = trim($search);
@@ -150,6 +208,34 @@ final class PayrollPeopleRepository
         }
 
         return ['sql' => $sql, 'params' => $params];
+    }
+
+    /**
+     * ORDER BY z bílé listiny {@see self::LIST_SORTS}; do SQL nejde nic z URL.
+     * Prázdné hodnoty jdou v obou směrech na konec (osoba bez data nástupu
+     * nemá stát nad všemi ostatními). Příjmení, jméno a id na konci drží
+     * pořadí stabilní, aby stránky na sebe navazovaly.
+     */
+    private static function orderByClause(string $sortKey, bool $descending): string
+    {
+        if (!isset(self::LIST_SORTS[$sortKey])) {
+            $sortKey = self::LIST_DEFAULT_SORT;
+        }
+        $direction = $descending ? 'DESC' : 'ASC';
+        $expression = self::LIST_SORTS[$sortKey];
+        $lastName = self::LIST_SORTS['last_name'];
+        $firstName = self::LIST_SORTS['first_name'];
+        $parts = ["({$expression}) IS NULL ASC", "{$expression} {$direction}"];
+        if ($sortKey === 'last_name') {
+            array_push($parts, "({$firstName}) IS NULL ASC", "{$firstName} {$direction}");
+        } elseif ($sortKey === 'first_name') {
+            $parts[] = "{$lastName} ASC";
+        } else {
+            array_push($parts, "{$lastName} ASC", "({$firstName}) IS NULL ASC", "{$firstName} ASC");
+        }
+        $parts[] = 'people.id ASC';
+
+        return ' ORDER BY ' . implode(', ', $parts);
     }
 
     /**
@@ -312,6 +398,76 @@ final class PayrollPeopleRepository
     }
 
     /**
+     * Osoby podle jména nebo osobního čísla ve více firmách naráz — pro globální
+     * hledání (Alt+Q). Hledá jen ve firmách se zapnutými mzdami; o tom, zda
+     * smí uživatel výsledek firmy vidět, rozhoduje VOLAJÍCÍ (tady se jen hledá).
+     * Každé slovo dotazu musí sedět na jméno nebo osobní číslo, takže najde
+     * „Novák Petr" i „Petr Novák".
+     *
+     * @param list<int> $supplierIds
+     * @return list<array{id:int,supplier_id:int,full_name:string,is_active:bool,code:?string}>
+     */
+    public function searchAcrossSuppliers(array $supplierIds, string $search, int $preferredSupplierId, int $limit): array
+    {
+        $supplierIds = array_values(array_unique(array_filter($supplierIds, static fn (int $id): bool => $id > 0)));
+        $tokens = array_slice(array_values(array_filter(
+            preg_split('/\s+/u', trim($search)) ?: [],
+            static fn (string $token): bool => $token !== '',
+        )), 0, 4);
+        if ($supplierIds === [] || $tokens === []) {
+            return [];
+        }
+
+        $params = $supplierIds;
+        $conditions = [];
+        foreach ($tokens as $token) {
+            $conditions[] = '(' . self::fullNameExpression()
+                . " LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'"
+                . ' OR EXISTS (SELECT 1 FROM payroll_employments search_employment'
+                . ' WHERE search_employment.supplier_id = employee.supplier_id'
+                . ' AND search_employment.employee_id = employee.id'
+                . " AND search_employment.code LIKE ? ESCAPE '" . self::LIKE_ESCAPE . "'))";
+            $like = '%' . self::escapeLike(mb_substr($token, 0, 100)) . '%';
+            $params[] = $like;
+            $params[] = $like;
+        }
+        $params[] = $preferredSupplierId;
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT employee.id, employee.supplier_id, employee.is_active,
+                    ' . self::fullNameExpression() . ' AS full_name,
+                    (SELECT employment.code
+                       FROM payroll_employments employment
+                      WHERE employment.supplier_id = employee.supplier_id
+                        AND employment.employee_id = employee.id
+                      ORDER BY employment.is_primary DESC, employment.id ASC
+                      LIMIT 1) AS code
+               FROM payroll_employees employee
+               JOIN supplier ON supplier.id = employee.supplier_id AND supplier.payroll_enabled = 1
+              WHERE employee.supplier_id IN (' . implode(',', array_fill(0, count($supplierIds), '?')) . ')
+                AND ' . implode(' AND ', $conditions) . '
+              ORDER BY employee.supplier_id = ? DESC, employee.is_active DESC,
+                       full_name COLLATE utf8mb4_czech_ci ASC, employee.id ASC
+              LIMIT ' . max(1, min(100, $limit)),
+        );
+        $stmt->execute($params);
+
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $person = $this->normalizeRow($row);
+            $out[] = [
+                'id' => $this->intValue($person, 'id'),
+                'supplier_id' => $this->intValue($person, 'supplier_id'),
+                'full_name' => $this->stringValue($person, 'full_name'),
+                'is_active' => $this->boolValue($person, 'is_active'),
+                'code' => $this->nullableStringValue($person, 'code'),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * @param list<int> $employeeIds
      * @return array<int,string>
      */
@@ -402,10 +558,24 @@ final class PayrollPeopleRepository
     public static function fullNameExpression(string $alias = 'employee'): string
     {
         return sprintf(
+            'COALESCE(%s, %s.full_name)',
+            self::currentIdentityExpression('full_name', $alias),
+            $alias,
+        );
+    }
+
+    /**
+     * Sloupec účinného záznamu historie identit. Tentýž výběr záznamu jako
+     * {@see self::fullNameExpression()}, aby jméno, příjmení i celé jméno
+     * pocházely vždy z téže platné identity. `$column` je pevný název sloupce
+     * z tohoto repozitáře, ne vstup.
+     */
+    private static function currentIdentityExpression(string $column, string $alias = 'employee'): string
+    {
+        return sprintf(
             <<<'SQL'
-            COALESCE(
-                       (
-                           SELECT identity_history.full_name
+            (
+                           SELECT identity_history.%2$s
                              FROM payroll_person_identity_history identity_history
                             WHERE identity_history.supplier_id = %1$s.supplier_id
                               AND identity_history.employee_id = %1$s.id
@@ -417,12 +587,70 @@ final class PayrollPeopleRepository
                             ORDER BY identity_history.effective_from DESC,
                                      identity_history.id DESC
                             LIMIT 1
-                       ),
-                       %1$s.full_name
-                   )
+                       )
             SQL,
             $alias,
+            $column,
         );
+    }
+
+    /**
+     * Popisky vztahů „Jméno (kód)" pro nálezy a hlášky. Jediné místo, odkud je
+     * berou předběžná kontrola běhu, potlačení varování i blokace JMHZ — jinak
+     * by se každá kopie po změně jména nebo kódu rozešla s ostatními.
+     *
+     * @param list<int> $ids
+     * @return array<int,string>
+     */
+    public function employmentLabels(int $supplierId, array $ids): array
+    {
+        $labels = [];
+        foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT employment.id, employment.code,
+                        ' . self::fullNameExpression() . ' AS full_name
+                   FROM payroll_employments employment
+                   JOIN payroll_employees employee
+                     ON employee.id = employment.employee_id
+                    AND employee.supplier_id = employment.supplier_id
+                  WHERE employment.supplier_id = ? AND employment.id IN (' . $placeholders . ')'
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $code = (string) ($row['code'] ?? '');
+                $labels[(int) $row['id']] = $code === ''
+                    ? (string) $row['full_name']
+                    : sprintf('%s (%s)', (string) $row['full_name'], $code);
+            }
+        }
+
+        return $labels;
+    }
+
+    /**
+     * Účinná jména osob podle id zaměstnance.
+     *
+     * @param list<int> $ids
+     * @return array<int,string>
+     */
+    public function personLabels(int $supplierId, array $ids): array
+    {
+        $labels = [];
+        foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT employee.id, ' . self::fullNameExpression() . ' AS full_name
+                   FROM payroll_employees employee
+                  WHERE employee.supplier_id = ? AND employee.id IN (' . $placeholders . ')'
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $labels[(int) $row['id']] = (string) $row['full_name'];
+            }
+        }
+
+        return $labels;
     }
 
     /**
@@ -457,7 +685,22 @@ final class PayrollPeopleRepository
                                )
                                ORDER BY is_primary DESC, id ASC
                                SEPARATOR '\n'
-                           ) AS employment_refs
+                           ) AS employment_refs,
+                           SUBSTRING_INDEX(
+                               GROUP_CONCAT(
+                                   REPLACE(code, CHAR(10 USING utf8mb4), ' ')
+                                   ORDER BY is_primary DESC, id ASC
+                                   SEPARATOR '\n'
+                               ),
+                               '\n',
+                               1
+                           ) AS primary_code,
+                           MIN(CASE WHEN status NOT IN ('archived', 'no_show')
+                                    THEN COALESCE(actual_start_date, start_date) END) AS first_start_on,
+                           CASE WHEN SUM(status NOT IN ('archived', 'no_show') AND end_date IS NULL) > 0
+                                THEN NULL
+                                ELSE MAX(CASE WHEN status NOT IN ('archived', 'no_show') THEN end_date END)
+                           END AS last_end_on
                       FROM payroll_employments
                      WHERE supplier_id = ?
                      GROUP BY supplier_id, employee_id
@@ -467,14 +710,48 @@ final class PayrollPeopleRepository
             SQL;
     }
 
+    /**
+     * Pracovní pozice osoby = kód CZ-ISCO z podmínek hlavního vztahu. Bere se
+     * verze podmínek platná dnes, u vztahu, který teprve začne, ta nejbližší
+     * budoucí. Archivované a nenastoupivší vztahy se nepočítají.
+     */
+    private static function currentPositionExpression(): string
+    {
+        return <<<'SQL'
+            (
+                       SELECT terms.cz_isco_code
+                         FROM payroll_employments position_employment
+                         JOIN payroll_employment_terms terms
+                           ON terms.supplier_id = position_employment.supplier_id
+                          AND terms.employment_id = position_employment.id
+                        WHERE position_employment.supplier_id = employee.supplier_id
+                          AND position_employment.employee_id = employee.id
+                          AND position_employment.status NOT IN ('archived', 'no_show')
+                          AND terms.cz_isco_code IS NOT NULL
+                          AND terms.cz_isco_code <> ''
+                        ORDER BY position_employment.is_primary DESC,
+                                 position_employment.id ASC,
+                                 terms.effective_from > CURRENT_DATE ASC,
+                                 terms.effective_from DESC,
+                                 terms.id DESC
+                        LIMIT 1
+                   )
+            SQL;
+    }
+
     private function peopleQuery(
         bool $single = false,
         bool $paged = false,
         string $narrowing = '',
+        string $orderBy = '',
     ): \PDOStatement {
         $sql = 'SELECT employee.id,
-                   ' . self::fullNameExpression() . <<<'SQL'
-             AS full_name,
+                   ' . self::fullNameExpression() . ' AS full_name,
+                   ' . self::currentIdentityExpression('first_name') . ' AS first_name,
+                   ' . self::currentIdentityExpression('last_name') . ' AS last_name,
+                   COALESCE(' . self::currentIdentityExpression('birth_date') . ', employee.birth_date) AS birth_date,'
+            . <<<'SQL'
+
                    employee.is_active,
                    profile.profile_status,
                    employee.taxpayer_type AS legacy_taxpayer_type,
@@ -482,14 +759,23 @@ final class PayrollPeopleRepository
                    COALESCE(relations.employment_count, 0) AS employment_count,
                    COALESCE(relations.relation_types, '') AS relation_types,
                    COALESCE(relations.employment_refs, '') AS employment_refs,
+                   relations.primary_code,
+                   relations.first_start_on,
+                   relations.last_end_on,
             SQL
+            . "\n                   " . self::currentPositionExpression() . ' AS cz_isco_code,'
             . "\n                   " . PayrollPersonDataGapCatalog::selectColumns()
             . ' ' . self::fromClause() . ' WHERE employee.supplier_id = ?';
         if ($single) {
             $sql .= ' AND employee.id = ?';
         }
         $sql .= $narrowing;
-        $sql .= ' ORDER BY employee.is_active DESC, full_name ASC, employee.id ASC';
+        // Řadí se nad odvozenou tabulkou: klíče řazení jsou výrazy nad aliasy
+        // SELECTu (příjmení s pádem na celé jméno) a ty uvnitř téhož SELECTu
+        // použít nejdou, jen opsat — a opsaný poddotaz by se počítal dvakrát.
+        if ($orderBy !== '') {
+            $sql = 'SELECT people.* FROM (' . $sql . ') people' . $orderBy;
+        }
         if ($paged) {
             $sql .= ' LIMIT ? OFFSET ?';
         }
@@ -531,6 +817,12 @@ final class PayrollPeopleRepository
         return [
             'id' => $this->intValue($row, 'id'),
             'full_name' => $this->stringValue($row, 'full_name'),
+            'first_name' => $this->nullableStringValue($row, 'first_name'),
+            'last_name' => $this->nullableStringValue($row, 'last_name'),
+            'birth_date' => $this->nullableStringValue($row, 'birth_date'),
+            'start_date' => $this->nullableStringValue($row, 'first_start_on'),
+            'end_date' => $this->nullableStringValue($row, 'last_end_on'),
+            'cz_isco_code' => $this->nullableStringValue($row, 'cz_isco_code'),
             'is_active' => $this->boolValue($row, 'is_active'),
             'profile_status' => $profileStatus,
             'legacy_taxpayer_type' => $this->stringValue($row, 'legacy_taxpayer_type'),
@@ -618,6 +910,14 @@ final class PayrollPeopleRepository
         }
 
         throw new \UnexpectedValueException("Databázové pole {$key} není řetězec.");
+    }
+
+    /** @param array<string,string|int|bool|null> $row */
+    private function nullableStringValue(array $row, string $key): ?string
+    {
+        $value = $row[$key] ?? null;
+
+        return $value === null || $value === '' ? null : $this->stringValue($row, $key);
     }
 
     /** @param array<string,string|int|bool|null> $row */

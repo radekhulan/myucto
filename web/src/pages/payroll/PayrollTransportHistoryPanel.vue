@@ -36,6 +36,7 @@ import {
   payrollApi,
   type PayrollJmhzContentCorrectionForm,
   type PayrollJmhzCorrectableComponent,
+  type PayrollJmhzZeroAmendmentCandidates,
   type PayrollJmhzXmlDryRunBlocker,
   type PayrollJmhzContentCorrectionPreparation,
   type PayrollJmhzImportedProtocol,
@@ -64,6 +65,7 @@ import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConf
 import PayrollSubmissionManualAcceptance from '@/components/payroll/PayrollSubmissionManualAcceptance.vue'
 import PayrollPossiblyDeliveredNotice from '@/components/payroll/PayrollPossiblyDeliveredNotice.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { isTestEnvironmentRejection, useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import { jmhzBlockerLabel } from './jmhzBlockerRemediation'
 import JmhzProtocolErrorRemediation from './JmhzProtocolErrorRemediation.vue'
@@ -972,16 +974,23 @@ function useVariableSymbol(value: string) {
  */
 let loadSequence = 0
 
-async function load() {
+/**
+ * `silent` = obnova na pozadí po změně v jiném okně: seznam zůstane vidět,
+ * hlášky poslední akce zůstanou a chyba se jen předá dál, ať se obnova zkusí
+ * při dalším návratu do okna.
+ */
+async function load(silent = false) {
   const sequence = ++loadSequence
   const requestedEnvironment = requestEnvironment.value
-  loading.value = true
-  loadError.value = ''
-  actionError.value = ''
-  success.value = ''
-  // Zapamatovaný rozpad chyb platí pro protokoly, které právě mizí z obrazovky
-  // — po znovunačtení (jiná stránka, nový import) by mohl patřit něčemu jinému.
-  resetProtocolErrors()
+  if (!silent) {
+    loading.value = true
+    loadError.value = ''
+    actionError.value = ''
+    success.value = ''
+    // Zapamatovaný rozpad chyb platí pro protokoly, které právě mizí z obrazovky
+    // — po znovunačtení (jiná stránka, nový import) by mohl patřit něčemu jinému.
+    resetProtocolErrors()
+  }
   try {
     // Obě strany přehledu se načítají naráz a SELHÁNÍ KTERÉKOLI Z NICH je
     // selhání celku. Ukázat jen jednu polovinu a druhou tiše vynechat by
@@ -1010,6 +1019,7 @@ async function load() {
     filterYears.value = history.years ?? []
     imported.value = protocols.protocols ?? []
     importedTotal.value = protocols.total ?? 0
+    loadError.value = ''
   } catch (exception: unknown) {
     if (sequence !== loadSequence) return
     // Odmítnutý test (server je mimo vývoj, i když klient měl starý stav) není
@@ -1020,6 +1030,7 @@ async function load() {
       environment.value = 'production'
       return
     }
+    if (silent) throw exception
     // Stav zůstává NEZNÁMÝ, ne prázdný — šablona podle `loadError` skryje
     // prázdný stav i seznam, aby se selhání nedalo přečíst jako „nic neodešlo".
     attempts.value = []
@@ -1034,7 +1045,7 @@ async function load() {
       t('payroll.submissions.transport.load_failed'),
     )
   } finally {
-    if (sequence === loadSequence) loading.value = false
+    if (sequence === loadSequence && !silent) loading.value = false
   }
   if (sequence !== loadSequence) return
   // Roky zná až odpověď serveru, takže předvolba přijde po prvním načtení
@@ -1186,18 +1197,77 @@ async function deleteAttempt(attempt: PayrollJmhzTransportAttempt) {
  * ukončený). Opravné hlášení pak nese jen stornující formuláře vybraných
  * vztahů, ostatní formuláře zůstávají u ČSSZ platné.
  */
-const cancelMode = ref<'whole' | 'components'>('whole')
+const cancelMode = ref<'whole' | 'components' | 'annul'>('whole')
 const cancelComponents = ref<(PayrollJmhzCorrectableComponent & { employee_name?: string | null })[]>([])
 const cancelComponentsLoading = ref(false)
 const cancelComponentsError = ref('')
 const selectedCancelGuids = ref<string[]>([])
 const cancelComponentsConfirmed = ref(false)
 
-async function chooseCancelMode(submissionId: number, mode: 'whole' | 'components') {
+/*
+ * Anulace měsíce nulovým opravným hlášením: měsíc vztahu, který už netrval
+ * (zapomenutá odhláška, zkrácení vztahu). Po lhůtě storna a za leden až
+ * březen 2026 je to jediná cesta. Situaci účetní potvrzuje výslovně, protože
+ * záměna s řádným nulovým hlášením by zrušila existující pojistný vztah.
+ */
+const annulCandidates = ref<PayrollJmhzZeroAmendmentCandidates | null>(null)
+const annulLoading = ref(false)
+const annulError = ref('')
+const selectedAnnulGuids = ref<string[]>([])
+const annulSituationConfirmed = ref(false)
+const annulImpactConfirmed = ref(false)
+
+async function loadAnnulCandidates(submissionId: number) {
+  annulLoading.value = true
+  annulError.value = ''
+  try {
+    const result = await payrollApi.jmhzZeroAmendmentCandidates(submissionId, requestEnvironment.value)
+    if (cancellingId.value !== submissionId) return
+    annulCandidates.value = result
+  } catch (exception: unknown) {
+    annulError.value = apiErrorMessage(exception, t('payroll.jmhz_gate.zero_amendment.load_failed'))
+  } finally {
+    annulLoading.value = false
+  }
+}
+
+async function confirmAnnul(submissionId: number) {
+  if (!canWrite.value || busy.value || selectedAnnulGuids.value.length === 0
+    || !annulSituationConfirmed.value || !annulImpactConfirmed.value
+  ) return
+  cancelPendingId.value = submissionId
+  actionError.value = ''
+  success.value = ''
+  try {
+    const result = await payrollApi.freezeJmhzZeroAmendment(
+      submissionId,
+      requestEnvironment.value,
+      [...new Set(selectedAnnulGuids.value)],
+    )
+    cancellingId.value = null
+    await load()
+    success.value = result.created
+      ? t('payroll.jmhz_gate.zero_amendment.frozen', { id: result.submission_id })
+      : t('payroll.jmhz_gate.zero_amendment.already', { id: result.submission_id })
+  } catch (exception: unknown) {
+    actionError.value = apiErrorMessage(exception, t('payroll.jmhz_gate.zero_amendment.failed'))
+  } finally {
+    cancelPendingId.value = null
+  }
+}
+
+async function chooseCancelMode(submissionId: number, mode: 'whole' | 'components' | 'annul') {
   cancelMode.value = mode
   selectedCancelGuids.value = []
   cancelComponentsConfirmed.value = false
   cancelComponentsError.value = ''
+  selectedAnnulGuids.value = []
+  annulSituationConfirmed.value = false
+  annulImpactConfirmed.value = false
+  if (mode === 'annul') {
+    if (annulCandidates.value === null) await loadAnnulCandidates(submissionId)
+    return
+  }
   if (mode !== 'components' || cancelComponents.value.length > 0) return
   cancelComponentsLoading.value = true
   try {
@@ -1248,6 +1318,11 @@ function askToCancel(submissionId: number) {
   selectedCancelGuids.value = []
   cancelComponentsConfirmed.value = false
   cancelComponentsError.value = ''
+  annulCandidates.value = null
+  annulError.value = ''
+  selectedAnnulGuids.value = []
+  annulSituationConfirmed.value = false
+  annulImpactConfirmed.value = false
   if (busy.value) return
   closeCorrection()
   cancellingId.value = submissionId
@@ -1564,8 +1639,12 @@ watch(environment, () => {
   void loadVariableSymbols()
 })
 
-onMounted(load)
+onMounted(() => load())
 onMounted(loadVariableSymbols)
+// Podání odeslané v jiném okně (měsíční přehled, fronta, datová schránka)
+// patří do Odesláno; rozepsané storno, oprava ani výmaz se nepřepisují.
+useWindowRefresh(() => load(true), () => !busy.value && cancellingId.value === null
+  && correctingId.value === null && correctionPreparationId.value === null && deletingId.value === null)
 </script>
 
 <template>
@@ -1609,7 +1688,7 @@ onMounted(loadVariableSymbols)
             data-test="transport-reload"
             :class="btnOutline('neutral')"
             :disabled="busy"
-            @click="load"
+            @click="load()"
           >
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
               <path :d="ICONS.cycle" />
@@ -1999,7 +2078,7 @@ onMounted(loadVariableSymbols)
                 :submission-status="entry.group.submissionStatus"
                 :summary="manualAcceptances[entry.group.submissionId] ?? null"
                 :can-write="canWrite"
-                @accepted="load"
+                @accepted="load()"
               />
               <span
                 v-if="entry.replacement"
@@ -2339,10 +2418,101 @@ onMounted(loadVariableSymbols)
                 >
                 {{ t('payroll.jmhz_gate.cancel_components.mode_components') }}
               </label>
+              <label class="flex cursor-pointer items-center gap-2">
+                <input
+                  type="radio"
+                  name="jmhz-cancel-mode"
+                  value="annul"
+                  :checked="cancelMode === 'annul'"
+                  :data-test="`transport-cancel-mode-annul-${actionTarget(entry.group)}`"
+                  @change="chooseCancelMode(actionTarget(entry.group), 'annul')"
+                >
+                {{ t('payroll.jmhz_gate.zero_amendment.mode') }}
+              </label>
             </fieldset>
             <p v-if="cancelMode === 'whole'" class="mt-1 text-sm text-danger-700">
               {{ t('payroll.submissions.transport.storno.confirm_text') }}
             </p>
+            <div
+              v-else-if="cancelMode === 'annul'"
+              class="mt-2"
+              :data-test="`transport-annul-${actionTarget(entry.group)}`"
+            >
+              <p class="text-sm text-neutral-800">{{ t('payroll.jmhz_gate.zero_amendment.description') }}</p>
+              <p
+                v-if="annulCandidates && annulCandidates.cancellation_allowed"
+                class="mt-2 rounded-lg border border-warning-500/30 bg-surface p-2 text-sm text-warning-700"
+              >
+                {{ t('payroll.jmhz_gate.zero_amendment.cancellation_still_allowed') }}
+              </p>
+              <p v-if="annulLoading" class="mt-2 text-sm text-neutral-600" role="status">
+                {{ t('common.loading') }}
+              </p>
+              <p v-if="annulError" class="mt-2 rounded-lg border border-danger-500/30 bg-surface p-2 text-sm text-danger-700">
+                {{ annulError }}
+              </p>
+              <div v-if="annulCandidates?.forms.length" class="mt-2 max-h-80 space-y-2 overflow-y-auto pr-1">
+                <label
+                  v-for="form in annulCandidates.forms"
+                  :key="form.form_guid"
+                  class="flex items-start gap-3 rounded-lg border bg-surface p-3"
+                  :class="form.annullable ? 'cursor-pointer border-warning-500/40' : 'border-neutral-200 opacity-80'"
+                  :data-test="`transport-annul-form-${form.employment_external_identifier}`"
+                >
+                  <input
+                    v-model="selectedAnnulGuids"
+                    type="checkbox"
+                    :value="form.form_guid"
+                    :disabled="!form.annullable"
+                    class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-warning-700 focus:ring-warning-500"
+                  >
+                  <span class="min-w-0 flex-1">
+                    <span class="block text-sm font-medium text-neutral-900">
+                      {{ form.employee_name ?? t('payroll.submissions.transport.correction.employee_unknown') }}
+                    </span>
+                    <span class="mt-0.5 block text-xs text-neutral-600">
+                      {{ t('payroll.jmhz_gate.zero_amendment.employment_period', {
+                        start: form.employment_start ? formatDate(form.employment_start) : '—',
+                        end: form.employment_end ? formatDate(form.employment_end) : '—',
+                      }) }}
+                    </span>
+                    <span v-if="form.blocker" class="mt-1 block text-xs text-neutral-700">
+                      {{ jmhzBlockerLabel(t, te, {
+                        code: form.blocker.code,
+                        reason: form.blocker.message,
+                        entity_type: 'employment',
+                        entity_id: form.employment_id,
+                        attribute_ids: [],
+                      }) }}
+                    </span>
+                  </span>
+                </label>
+              </div>
+              <label class="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/40 bg-surface p-3">
+                <input
+                  v-model="annulSituationConfirmed"
+                  type="checkbox"
+                  :data-test="`transport-annul-situation-${actionTarget(entry.group)}`"
+                  class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-warning-700 focus:ring-warning-500"
+                >
+                <span class="text-sm text-neutral-800">{{ t('payroll.jmhz_gate.zero_amendment.situation') }}</span>
+              </label>
+              <label class="mt-2 flex cursor-pointer items-start gap-3 rounded-lg border border-warning-500/40 bg-surface p-3">
+                <input
+                  v-model="annulImpactConfirmed"
+                  type="checkbox"
+                  :data-test="`transport-annul-impact-${actionTarget(entry.group)}`"
+                  class="mt-0.5 h-4 w-4 rounded border-neutral-300 text-warning-700 focus:ring-warning-500"
+                >
+                <span class="text-sm text-neutral-800">{{ t('payroll.jmhz_gate.zero_amendment.impact') }}</span>
+              </label>
+              <p
+                v-if="selectedAnnulGuids.length === 0 || !annulSituationConfirmed || !annulImpactConfirmed"
+                class="mt-1 text-xs text-warning-700"
+              >
+                {{ t('payroll.jmhz_gate.zero_amendment.disabled_reason') }}
+              </p>
+            </div>
             <div v-else class="mt-2" :data-test="`transport-cancel-components-${actionTarget(entry.group)}`">
               <p class="text-sm text-danger-700">{{ t('payroll.jmhz_gate.cancel_components.description') }}</p>
               <p v-if="cancelComponentsLoading" class="mt-2 text-sm text-neutral-600" role="status">
@@ -2403,6 +2573,19 @@ onMounted(loadVariableSymbols)
                 @click="confirmCancel(actionTarget(entry.group))"
               >
                 {{ t('payroll.submissions.transport.storno.confirm') }}
+              </button>
+              <button
+                v-else-if="cancelMode === 'annul'"
+                type="button"
+                :data-test="`transport-annul-submit-${actionTarget(entry.group)}`"
+                :class="btnFilled('warning')"
+                :disabled="busy || selectedAnnulGuids.length === 0 || !annulSituationConfirmed || !annulImpactConfirmed"
+                @click="confirmAnnul(actionTarget(entry.group))"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.uturn" />
+                </svg>
+                {{ t('payroll.jmhz_gate.zero_amendment.confirm', { count: selectedAnnulGuids.length }) }}
               </button>
               <button
                 v-else

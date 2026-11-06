@@ -424,7 +424,7 @@ final class AttachmentCheckRepository
     private static function issuedKind(string $invoiceType): string
     {
         return match ($invoiceType) {
-            'proforma', 'payment_calendar' => 'advance',
+            'proforma', 'payment_calendar', 'rent_calendar', 'advance_calendar' => 'advance',
             'credit_note', 'cancellation' => 'credit_note',
             'tax_document' => 'tax_document',
             default => 'invoice',

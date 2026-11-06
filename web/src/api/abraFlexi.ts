@@ -1,6 +1,8 @@
 import { api } from './client'
+import type { MigrationNonprofitNotice } from './migrationApi'
 
 export interface AbraFlexiConnection {
+  nonprofit_notice?: MigrationNonprofitNotice
   configured: boolean
   imported: boolean
   years: Array<{ year: number; starts_on: string; ends_on: string }>
@@ -11,6 +13,8 @@ export interface AbraFlexiConnection {
   active_job_id: number | null
   warnings: string[]
   source_company: { name: string; ico: string } | null
+  target_company?: { name: string; ico: string }
+  ico_mismatch?: boolean
 }
 
 export interface AbraFlexiCredentials {

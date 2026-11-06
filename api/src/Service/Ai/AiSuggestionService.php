@@ -12,6 +12,9 @@ use PDO;
 
 final class AiSuggestionService
 {
+    /** Pod touto jistotou se automatický návrh kontace od LLM neukládá. */
+    private const MIN_LLM_CONFIDENCE = 0.2;
+
     public function __construct(
         private readonly Connection $db,
         private readonly AiPayloadSanitizer $sanitizer,
@@ -64,6 +67,11 @@ final class AiSuggestionService
         if ($this->matchesActiveRule($supplierId, $tx)) {
             return ['ok' => false, 'error' => 'rule_matched'];
         }
+        // Pohyb, ke kterému existuje doklad (spárovaný, nebo navržený k párování), se účtuje
+        // přes doklad. Kontace z popisu by tu byla jen šum, typicky náklad místo 321.
+        if ($userQuery === null && $this->awaitsDocument($supplierId, $tx)) {
+            return ['ok' => false, 'error' => 'document_match'];
+        }
         $pending = $this->bankSuggestions->pendingForTx($supplierId, $txId);
         if ($pending !== null && $userQuery === null) {
             return ['ok' => true, 'suggestion' => $pending];
@@ -111,6 +119,11 @@ final class AiSuggestionService
         }
         if (($result['ok'] ?? false) !== true) {
             return $result;
+        }
+        // Model sám přiznal, že účel platby nepozná. Takový návrh účetní jen odmítá,
+        // proto se automaticky neukládá; na výslovný dotaz se ukáže vždy.
+        if ($userQuery === null && $source === 'llm' && (float) ($result['confidence'] ?? 0) < self::MIN_LLM_CONFIDENCE) {
+            return ['ok' => false, 'error' => 'low_confidence'];
         }
         // §12a — i uživatelský dotaz „Zeptat se AI" se persistuje stejnou cestou (createIfNoPending),
         // aby existoval audit trail (co AI navrhla + na jaký dotaz v note). Idempotence pending návrhů
@@ -292,6 +305,28 @@ final class AiSuggestionService
      * Má tx živý (nestornovaný) zápis v deníku? Stejná podmínka jako guard
      * `already_posted` v BankPostingService::handleTransactionInTransaction().
      */
+    /**
+     * Čeká pohyb na doklad? Už spárovaný, nebo k němu párování našlo kandidáta ke kontrole
+     * (důvod `*_requires_review`), případně je otevřený návrh párování.
+     *
+     * @param array<string,mixed> $tx
+     */
+    private function awaitsDocument(int $supplierId, array $tx): bool
+    {
+        if ((string) ($tx['match_status'] ?? 'unmatched') !== 'unmatched'
+            || str_ends_with((string) ($tx['match_reason'] ?? ''), '_requires_review')) {
+            return true;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM payment_matches WHERE supplier_id = ? AND bank_transaction_id = ?
+             UNION ALL
+             SELECT 1 FROM bank_match_suggestions WHERE supplier_id = ? AND bank_transaction_id = ? AND status = 'pending'
+             LIMIT 1"
+        );
+        $stmt->execute([$supplierId, (int) $tx['id'], $supplierId, (int) $tx['id']]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     private function hasLiveEntry(int $supplierId, int $txId): bool
     {
         $stmt = $this->db->pdo()->prepare(
@@ -325,6 +360,7 @@ final class AiSuggestionService
             'description'          => isset($tx['description']) ? (string) $tx['description'] : null,
             'counterparty_name'    => isset($tx['counterparty_name']) ? (string) $tx['counterparty_name'] : null,
         ];
+        $matchTx = (new \MyInvoice\Service\Accounting\Bank\StatementOwnAccount($this->db))->withOwnAccount($supplierId, $matchTx, $tx);
         foreach ($this->bankRules->findActive($supplierId, $amount > 0 ? 'incoming' : 'outgoing') as $rule) {
             if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== $currency) {
                 continue;
@@ -390,7 +426,7 @@ final class AiSuggestionService
 
     private function validPurchaseDebit(int $supplierId, string $debit): bool
     {
-        if (preg_match('/^(?:311|321|314|324|325|33|34|221|211)/', $debit) === 1) {
+        if (\MyInvoice\Service\Accounting\SettlementAccounts::isSettlement($debit)) {
             return false;
         }
         $stmt = $this->db->pdo()->prepare(

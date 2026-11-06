@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Import\Jmhz;
 
+use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
+
 /**
  * Co se z hlášení propíše do zákonné evidence osoby — prohlášení poplatníka,
  * nepřenositelné slevy a slevu pracujícího důchodce.
@@ -23,14 +26,33 @@ namespace MyInvoice\Service\Payroll\Import\Jmhz;
  */
 final class JmhzStatutoryChanges
 {
-    public const CREDIT_KINDS = ['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p'];
+    public const CREDIT_KINDS = [
+        'taxpayer',
+        'disability-basic',
+        'disability-extended',
+        'ztp-p',
+        'student',
+        'student-doctoral',
+    ];
 
     public const CREDIT_LABELS = [
         'taxpayer' => 'Sleva na poplatníka',
         'disability-basic' => 'Sleva na invaliditu I. a II. stupně',
         'disability-extended' => 'Sleva na invaliditu III. stupně',
         'ztp-p' => 'Sleva na držitele průkazu ZTP/P',
+        'student' => 'Sleva na studenta',
+        'student-doctoral' => 'Sleva na studenta (doktorské studium)',
     ];
+
+    /**
+     * Druh slevy na studenta podle hlášení: 10565 výše slevy, 10566 příznak
+     * doktorského studijního programu (StudentTaxCredit drží obě podoby jako
+     * samostatné druhy, liší se věkovou hranicí).
+     */
+    public static function studentCreditKind(bool $doctoral): string
+    {
+        return $doctoral ? TaxCreditKind::StudentDoctoral->value : TaxCreditKind::Student->value;
+    }
 
     /**
      * @param array<string,list<array<string,mixed>>> $sections
@@ -69,6 +91,12 @@ final class JmhzStatutoryChanges
      * doklad začíná `jmhz-import:`); ručně zapsanou slevu jen ohlásí.
      *
      * @param array<string,list<array<string,mixed>>> $sections
+     * Sleva na studenta má interval nároku vždy ukončený věkovou hranicí
+     * (§ 35bc odst. 2 ZDP, {@see StudentTaxCredit::intervalProblem()}). Nově
+     * založený řádek proto končí nejpozději posledním měsícem nároku podle
+     * data narození; bez data narození, mimo věkovou hranici nebo před
+     * účinností slevy se nepřevezme a import to ohlásí.
+     *
      * @param array<string,int> $claims druh => částka nároku z hlášení
      * @return array{sections:array<string,list<array<string,mixed>>>,changes:list<array{kind:string,action:string,current:?string}>,warnings:list<string>}
      */
@@ -78,6 +106,7 @@ final class JmhzStatutoryChanges
         string $monthStart,
         array $claims,
         string $reference,
+        ?string $birthDate = null,
     ): array {
         $rows = $sections['tax_credit_claims'] ?? [];
         $changes = [];
@@ -92,6 +121,19 @@ final class JmhzStatutoryChanges
                     $others[] = $row;
                 }
             }
+            $creditKind = TaxCreditKind::from($kind);
+            $studentLimit = null;
+            if (($claims[$kind] ?? 0) > 0 && StudentTaxCredit::isStudent($creditKind)) {
+                $studentLimit = self::studentClaimLimit($creditKind, $monthStart, $birthDate);
+                if ($studentLimit === null) {
+                    $warnings[] = self::CREDIT_LABELS[$kind] . ' z hlášení za ' . substr($monthStart, 0, 7)
+                        . ' se nepřevzala: bez data narození zaměstnance, mimo věkovou hranici nebo před'
+                        . ' účinností slevy (§ 35bc ZDP) nejde nárok doložit. Zapište ji ručně v zákonné'
+                        . ' evidenci osoby.';
+                    $rows = [...$others, ...$series];
+                    continue;
+                }
+            }
             if (($claims[$kind] ?? 0) > 0) {
                 $result = JmhzEvidenceTimeline::setFrom(
                     $series,
@@ -101,6 +143,15 @@ final class JmhzStatutoryChanges
                     false,
                     $frozenThrough,
                 );
+                if ($studentLimit !== null) {
+                    $result['rows'] = array_map(
+                        static fn (array $row): array => ($row['id'] ?? null) === null
+                            && ($row['effective_to'] === null || (string) $row['effective_to'] > $studentLimit)
+                                ? ['effective_to' => $studentLimit] + $row
+                                : $row,
+                        $result['rows'],
+                    );
+                }
                 if ($result['changed']) {
                     $changes[] = [
                         'kind' => $kind,
@@ -133,6 +184,23 @@ final class JmhzStatutoryChanges
         $sections['tax_credit_claims'] = $rows;
 
         return ['sections' => $sections, 'changes' => $changes, 'warnings' => array_values(array_unique($warnings))];
+    }
+
+    /**
+     * Poslední den nároku na slevu na studenta pro řádek založený od
+     * `$monthStart`, nebo `null`, když nárok v tom měsíci doložit nejde.
+     */
+    private static function studentClaimLimit(TaxCreditKind $kind, string $monthStart, ?string $birthDate): ?string
+    {
+        if ($birthDate === null
+            || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $birthDate) !== 1
+            || $monthStart < StudentTaxCredit::EFFECTIVE_FROM
+            || !StudentTaxCredit::isAgeEligibleMonth($birthDate, $kind, $monthStart)
+        ) {
+            return null;
+        }
+
+        return StudentTaxCredit::latestEffectiveTo($birthDate, $kind);
     }
 
     /**

@@ -506,6 +506,51 @@ final class PayrollAbsenceRepository
     }
 
     /**
+     * Má vztah v měsíci vůbec nějakou publikovanou směnu?
+     *
+     * Jediné místo, které rozhoduje, zda se doba nepřítomnosti v měsíci měří
+     * směnami, nebo pracovním kalendářem vztahu. Čte ho krácení mzdy
+     * ({@see \MyInvoice\Service\Payroll\Absence\PayrollWageProrationService}) i hodiny
+     * nepřítomnosti v pracovním souhrnu JMHZ
+     * ({@see \MyInvoice\Service\Payroll\Time\PayrollJmhzWorkMonthSummaryBuilder}).
+     * Kdyby se rozhodovaly každá zvlášť, hlásily by se ČSSZ jiné hodiny, než ze
+     * kterých se krátila mzda.
+     *
+     * Rozhoduje se za celý měsíc, ne za jednotlivou nepřítomnost: rozvrh se
+     * publikuje po měsících a míchat v jednom měsíci dva způsoby měření by
+     * znamenalo, že táž doba vychází různě podle toho, na který den padne.
+     * Rozsah je o den širší na obě strany, ať noční směna přes půlnoc měsíc
+     * nepodstřelí — nejistota se tu vyhodnocuje ve prospěch přísnější
+     * směnové cesty.
+     *
+     * @param string $periodEnd poslední den měsíce (včetně)
+     */
+    public function hasPublishedShiftsInMonth(
+        int $supplierId,
+        int $employmentId,
+        string $periodStart,
+        string $periodEnd,
+    ): bool {
+        if (!$this->db->hasTable('payroll_shifts')) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM payroll_shifts
+              WHERE supplier_id = ? AND employment_id = ? AND status = 'published'
+                AND starts_at_utc < ? AND ends_at_utc > ?
+              LIMIT 1"
+        );
+        $stmt->execute([
+            $supplierId,
+            $employmentId,
+            (new \DateTimeImmutable($periodEnd))->modify('+2 days')->format('Y-m-d 00:00:00'),
+            (new \DateTimeImmutable($periodStart))->modify('-1 day')->format('Y-m-d 00:00:00'),
+        ]);
+
+        return $stmt->fetchColumn() !== false;
+    }
+
+    /**
      * @return list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}>
      */
     public function publishedShiftSegments(

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting\Card;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\CardClearingSettingsRepository;
+use MyInvoice\Repository\AccountDefinitionRepository;
 use MyInvoice\Repository\PaymentCardRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use PDO;
@@ -46,7 +47,7 @@ final class CardClearingSettingsService
         $settings = $this->repo->find($supplierId);
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, account_code, name, account_type, is_synthetic, parent_id, tax_deductibility
-               FROM chart_of_accounts
+               FROM " . AccountDefinitionRepository::relation(date('Y-m-d'), $supplierId) . " a
               WHERE supplier_id = ? AND is_active = 1
                 AND (account_code LIKE '5%' OR account_code LIKE '6%' OR account_code LIKE '335%'
                      OR account_code IN ('378', '261', '395'))
@@ -257,7 +258,7 @@ final class CardClearingSettingsService
     public function defaultWriteoffCode(int $supplierId): string
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT account_code FROM chart_of_accounts
+            "SELECT account_code FROM " . AccountDefinitionRepository::relation(date('Y-m-d'), $supplierId) . " a
               WHERE supplier_id = ? AND is_active = 1 AND account_code LIKE '548.%'
                 AND tax_deductibility = 'non_deductible'
               ORDER BY account_code LIMIT 1"
@@ -291,7 +292,7 @@ final class CardClearingSettingsService
     private function assertAccount(int $supplierId, int $id, array $prefixes, string $field): void
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT account_code FROM chart_of_accounts WHERE id = ? AND supplier_id = ? AND is_active = 1'
+            'SELECT account_code FROM ' . AccountDefinitionRepository::relation(date('Y-m-d'), $supplierId, $this->db->pdo()->inTransaction()) . ' a WHERE id = ? AND supplier_id = ? AND is_active = 1'
         );
         $stmt->execute([$id, $supplierId]);
         $code = $stmt->fetchColumn();

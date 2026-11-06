@@ -189,6 +189,11 @@ final readonly class PayrollMigrationTakeoverFacts
             sicknessExcludedDays: $mz === [] || PohodaXml::text($mz, 'NahrDoby') === ''
                 ? null
                 : max(0, min((int) round(PohodaXml::num($mz, 'NahrDoby')), 31)),
+            // `KcSocZak` je příjem pro pojistné i v měsíci bez účasti (DPP pod rozhodným
+            // příjmem, jednatel), tedy příjem včetně nepojištěné činnosti (JMHZ 10476).
+            uninsuredIncomeMinor: PohodaXml::text($mz, 'KcSocZak') === ''
+                ? null
+                : max(0, (int) round(PohodaXml::num($mz, 'KcSocZak') * 100)),
             oldAgeSavingsContributionMinor: self::pamicaOldAgeSavings($mz),
         );
     }

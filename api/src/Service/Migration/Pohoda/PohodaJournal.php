@@ -85,6 +85,17 @@ final class PohodaJournal
     }
 
     /**
+     * Partner řádku deníku: `act:address` v XML (accountancy.xsd), v datovém souboru `pUD.Firma`,
+     * `Jmeno`, `ParICO` a navíc vazba na adresář `RefAD`.
+     *
+     * @return array{pohoda_id:string,name:string,ico:string,dic:string,street:string,city:string,zip:string,country:string}
+     */
+    public static function partner(array $item): array
+    {
+        return PartnerImporter::snapshot(['id' => PohodaXml::text($item, 'addressbookId'), 'address' => PohodaXml::get($item, 'address')]);
+    }
+
+    /**
      * Zkratka agendy do popisu zápisu v deníku. Zrcadlí zkratky, kterými doklady
      * pojmenovává {@see \MyInvoice\Service\Accounting\JournalDescriptionBuilder}, ať
      * se převzatý zápis čte stejně jako zápis vzniklý v MyÚčtu. Neznámá agenda si
@@ -111,6 +122,23 @@ final class PohodaJournal
             self::CASH => 'cash',
             default => 'manual', // interní doklady, ostatní pohledávky a závazky, majetek
         };
+    }
+
+    /**
+     * Párovací symbol strany řádku na saldokontním účtu. Saldo POHODY páruje podle `ParSym`,
+     * u zápočtu zálohy nese účet zálohy druhý symbol `ParSym2` (MD 321 / D 314: symbol faktury
+     * na 321, symbol zálohy na 314). Na ostatních účtech je `null`.
+     */
+    public static function pairingSymbol(array $item, string $account): ?string
+    {
+        $synthetic = substr($account, 0, 3);
+        if (!in_array($synthetic, ['311', '314', '315', '321', '324', '325'], true)) {
+            return null;
+        }
+        $advance = PohodaXml::text($item, 'pairing/advance');
+        $symbol = in_array($synthetic, ['314', '324'], true) && $advance !== '' ? $advance : PohodaXml::text($item, 'pairing/symbol');
+        $symbol = mb_substr(trim($symbol), 0, 40);
+        return $symbol === '' ? null : $symbol;
     }
 
     /**

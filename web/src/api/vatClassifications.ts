@@ -9,6 +9,7 @@ export interface VatClassification {
   label: string
   direction: VatDirection
   dphdp3_line: string | null
+  dphdp3_line_secondary?: string | null
   kh_section: string | null
   vat_rate: number | null
   is_reverse_charge: boolean

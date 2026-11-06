@@ -130,7 +130,7 @@ final class TransitionReportService
              LEFT JOIN clients cl    ON cl.id = i.client_id
                  WHERE i.supplier_id = ?
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
-                   AND i.invoice_type <> 'proforma'
+                   AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
                    AND i.issue_date <= ?
               ) t
              WHERE t.invoice_type NOT IN ('invoice', 'proforma', 'tax_document')
@@ -155,7 +155,7 @@ final class TransitionReportService
         $sql = "
             SELECT pi.id, COALESCE(pi.vendor_invoice_number, '') AS doc_no, COALESCE(v.company_name, '') AS partner,
                    COALESCE(cur.code, 'CZK') AS currency,
-                   GREATEST(COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) -
+                   GREATEST(COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) - pi.settled_outside_amount -
                      COALESCE((SELECT SUM(pm.amount) FROM payment_matches pm
                                 JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
                                WHERE pm.purchase_invoice_id = pi.id AND bt.posted_at <= ?), 0), 0) AS amount,

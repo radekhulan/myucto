@@ -191,7 +191,15 @@ export interface AdminBankRuleTemplateCatalog {
   }>
 }
 
+export interface TechnicalSupplierScope {
+  all_suppliers: boolean
+  supplier_ids: number[]
+  suppliers: Array<{ supplier_id: number; name: string }>
+}
+
 export const adminApi = {
+  getTechnicalSuppliers: (id: number) => api.get<TechnicalSupplierScope>(`/admin/users/${id}/technical-suppliers`).then(r => r.data),
+  setTechnicalSuppliers: (id: number, scope: Pick<TechnicalSupplierScope, 'all_suppliers' | 'supplier_ids'>) => api.put<TechnicalSupplierScope>(`/admin/users/${id}/technical-suppliers`, scope).then(r => r.data),
   activityLog: (params: { action?: string; user_id?: number; entity_type?: string; entity_id?: number; limit?: number; offset?: number } = {}) =>
     api.get<ActivityLogResponse>('/admin/activity-log', { params }).then(r => r.data),
 
@@ -371,7 +379,8 @@ export interface CronJobsResponse {
   /** Úlohy, které instalace nehlídá, protože nemají co dělat: skript => důvod. */
   inactive?: Record<string, string> | []
   server_time: string
-  install?: CronInstallContext
+  /** Ve spravovaném provozu null: cesty serveru nájemníkovi nepatří. */
+  install?: CronInstallContext | null
   schedule?: CronScheduleContext
 }
 
@@ -402,7 +411,6 @@ export interface ApprovalInboxItem {
   total_with_vat: number
   amount_to_pay: number
   approval_status: 'none' | 'requested' | 'approved' | 'rejected'
-  approval_token: string | null
   approval_token_expires_at: string | null
   approval_requested_at: string | null
   approval_decided_at: string | null

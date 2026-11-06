@@ -22,6 +22,8 @@ final class DocumentTextExtractor
     private const MAX_TEXT_BYTES = 1_000_000;
     /** Nad tento strop PDF neparsujeme (smalot/pdfparser je na velkých PDF velmi pomalý). */
     private const MAX_PDF_BYTES = 25 * 1024 * 1024;
+    /** Kolik rozbalených bajtů XML z OOXML/ODF balíku přečteme celkem (všechny části). */
+    private const MAX_OOXML_READ_BYTES = 16 * 1024 * 1024;
 
     /**
      * @return array{status:'extracted'|'unsupported'|'failed', text:?string}
@@ -83,12 +85,20 @@ final class DocumentTextExtractor
         if ($zip->open($path) !== true) return null;
 
         $chunks = [];
-        for ($i = 0; $i < $zip->numFiles; $i++) {
+        $budget = self::MAX_OOXML_READ_BYTES;
+        for ($i = 0; $i < $zip->numFiles && $budget > 0; $i++) {
             $name = (string) $zip->getNameIndex($i);
             foreach ($targets as $t) {
                 $matches = str_ends_with($t, '/') ? str_starts_with($name, $t) : $name === $t;
                 if ($matches && str_ends_with($name, '.xml')) {
-                    $xml = (string) $zip->getFromIndex($i);
+                    // Zip-bomb guard: getFromIndex() bez délky alokuje celou
+                    // deklarovanou rozbalenou velikost najednou a fatal z
+                    // vyčerpané paměti není \Throwable. Čte se jen omezený začátek
+                    // (fulltext stejně ořezává na MAX_TEXT_BYTES).
+                    $stat = $zip->statIndex($i);
+                    $size = is_array($stat) ? (int) ($stat['size'] ?? 0) : 0;
+                    $xml = $size > 0 ? (string) $zip->getFromIndex($i, min($size, $budget)) : '';
+                    $budget -= strlen($xml);
                     if ($xml !== '') {
                         // Mezi tagy vlož mezeru, ať se slova nespojí.
                         $chunks[] = strip_tags(str_replace('<', ' <', $xml));

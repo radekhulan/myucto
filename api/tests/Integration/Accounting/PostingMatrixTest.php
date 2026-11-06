@@ -76,6 +76,16 @@ final class PostingMatrixTest extends BankPostingTestCase
                 . 'jako přijatá záloha, § 20a); zaúčtovat kalendář jako celek by vykázalo výnos i daň '
                 . 'dřív, než vznikly. Stejný důvod jako u proformy. V kasové bázi je příjmem až platba.',
         ],
+        'rent_calendar' => [
+            'journal'    => ['error' => 'document_not_postable'],
+            'cash_basis' => ['income' => true],
+            'note'       => 'Splátkový kalendář (§ 31) se neúčtuje, předpis 311/602/343 nesou doklady jeho splátek.',
+        ],
+        'advance_calendar' => [
+            'journal'    => ['error' => 'document_not_postable'],
+            'cash_basis' => ['income' => true],
+            'note'       => 'Platební kalendář (§ 31a) se neúčtuje, inkaso i daň nesou splátky a daňové doklady k jejich úhradě.',
+        ],
         'credit_note' => [
             'journal'    => ['debit' => ['602', '343.200'], 'credit' => ['311']],
             'cash_basis' => ['income' => true],

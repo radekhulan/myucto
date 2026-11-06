@@ -10,6 +10,7 @@ use MyInvoice\Repository\StockItemPromoPriceRepository;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Repository\StockItemVendorRepository;
 use MyInvoice\Service\Eshop\Pricing\PriceWriteService;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Stock\StockItemIntrastatValidator;
 use MyInvoice\Support\Slugifier;
 
@@ -135,13 +136,20 @@ final class ProductEditorService
             throw new EshopException('sku_taken', 'Skladová karta s tímto SKU už existuje.', 409);
         }
         $itemType = (string) (array_key_exists('item_type', $input) ? ($input['item_type'] ?? 'goods') : ($existing['item_type'] ?? 'goods'));
-        if (!in_array($itemType, ['material', 'goods', 'product'], true)) {
+        if (!in_array($itemType, ['material', 'goods', 'product', 'service'], true)) {
             throw new EshopException('validation_failed', 'Neplatný typ skladové karty.', 400);
+        }
+        if ($itemType === 'service' && ($existing['item_type'] ?? '') !== 'service' && $itemId > 0
+            && $this->items->hasMovements($supplierId, $itemId)) {
+            throw new EshopException('item_has_movements', 'Kartu se skladovými pohyby nelze změnit na službu.', 409);
         }
         $unit = trim((string) (array_key_exists('unit', $input) ? ($input['unit'] ?? 'ks') : ($existing['unit'] ?? 'ks')));
         $trackingMode = (string) ($input['tracking_mode'] ?? $existing['tracking_mode'] ?? 'none');
         if (!in_array($trackingMode, ['none', 'lot', 'serial'], true)) {
             throw new EshopException('validation_failed', 'Neplatný režim sledování skladové karty.', 400);
+        }
+        if ($itemType === 'service') {
+            $trackingMode = 'none';
         }
         if ($trackingMode !== ($existing['tracking_mode'] ?? 'none')) {
             $stmt = $this->db->pdo()->prepare('SELECT 1 FROM stock_tracking_units WHERE supplier_id = ? AND stock_item_id = ? LIMIT 1');
@@ -164,7 +172,7 @@ final class ProductEditorService
             'tracking_mode' => $trackingMode,
             'ean' => $this->stringOrNull($pick('ean')),
             'vat_rate_id' => $this->intOrNull($pick('vat_rate_id')),
-            'sale_price_without_vat' => $this->decimalOrNull($pick('sale_price_without_vat')),
+            'sale_price_without_vat' => $this->unitPriceOrNull($pick('sale_price_without_vat')),
             'min_qty' => $this->decimalOrNull($pick('min_qty')),
             ...$this->intrastat->normalize($input, $existing),
             'is_active' => (bool) (array_key_exists('is_active', $input) ? ($input['is_active'] ?? true) : ($existing['is_active'] ?? true)),
@@ -179,6 +187,15 @@ final class ProductEditorService
         }
         $string = trim((string) $value);
         return $string === '' ? null : $string;
+    }
+
+    private function unitPriceOrNull(mixed $value): ?string
+    {
+        $number = $this->decimalOrNull($value);
+        if ($number !== null && !UnitPricePrecision::isWithinPrecision($number)) {
+            throw new EshopException('validation_failed', 'Prodejní cena smí mít nejvýše šest desetinných míst.', 400);
+        }
+        return $number;
     }
 
     private function decimalOrNull(mixed $value): ?string

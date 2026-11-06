@@ -10,8 +10,10 @@ final class JmhzOrdinaryEvidenceCompatibility
      * Dřívější připnuté specifikace, jejichž potvrzení zůstává použitelné.
      * Katalog 1.4.2.9 změnil jen text hlášky kontroly 238 a 1.4.2.10 přidal
      * kontrolu 22 (duplicitní GUID podání, rozhoduje evidence ČSSZ) a upřesnil
-     * kontrolu 290 nad pozdě podaným hlášením. Ani jedno se nedotýká atributů
-     * 10116 a 10546, na kterých potvrzení stojí.
+     * kontrolu 290 nad pozdě podaným hlášením. Katalog 1.4.2.11 přidal kontroly
+     * ELDP 368 a 369, informativní kontrolu cizinců 371 a opravil atributy
+     * kontroly 333 na 10495 a 10016. Nic z toho se nedotýká atributů 10116
+     * a 10546, na kterých potvrzení stojí.
      */
     private const PREVIOUS_SPECIFICATIONS = [
         [
@@ -30,15 +32,23 @@ final class JmhzOrdinaryEvidenceCompatibility
             'control_catalog_key' => 'jmhz-controls-1.4.2.9-source-v4',
             'control_manifest_sha256' => '65ccaa12d3ac0485f5b901f91b8a7a4398486aadafc3b33fe6a79bd30a76c2e7',
         ],
+        [
+            'package_key' => 'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1',
+            'spec_manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
+            'scenario_catalog_key' => 'jmhz-scenario-requirements-1.4.0.2-source-v1',
+            'scenario_manifest_sha256' => 'e73c6e96bafe3b2c36ebfc96f299d64e83df2b1deeb0910df42ca7299c452aa7',
+            'control_catalog_key' => 'jmhz-controls-1.4.2.10-source-v4',
+            'control_manifest_sha256' => '565bfb145efd1e7c0893e81c26b3d865c486929dc44cef72620340b663b4e493',
+        ],
     ];
 
     private const COMPATIBLE_TARGET = [
-        'package_key' => 'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1',
-        'spec_manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
+        'package_key' => 'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.11_manifest-v1',
+        'spec_manifest_sha256' => '39bb516b4fff204c44f0b8a6b9e0ec40601ef73af79460bdf937777e046c00d8',
         'scenario_catalog_key' => 'jmhz-scenario-requirements-1.4.0.2-source-v1',
-        'scenario_manifest_sha256' => 'e73c6e96bafe3b2c36ebfc96f299d64e83df2b1deeb0910df42ca7299c452aa7',
-        'control_catalog_key' => 'jmhz-controls-1.4.2.10-source-v4',
-        'control_manifest_sha256' => '565bfb145efd1e7c0893e81c26b3d865c486929dc44cef72620340b663b4e493',
+        'scenario_manifest_sha256' => 'fb631105f714f9d4ba757259d58a83e04096f07df5371511a8872afb3b75ed85',
+        'control_catalog_key' => 'jmhz-controls-1.4.2.11-source-v4',
+        'control_manifest_sha256' => '05e26c2722a72c989282ed72939faa3cedc02789239b0a798f4ecd33b4dca195',
     ];
 
     /** Atributy, na kterých potvrzení běžné evidence stojí. */
@@ -65,6 +75,36 @@ final class JmhzOrdinaryEvidenceCompatibility
         ksort($requirements, SORT_STRING);
 
         return $requirements;
+    }
+
+    /**
+     * Ročník specifikace zmrazeného potvrzení podle klíče jeho balíku;
+     * `null` u neznámého klíče.
+     */
+    public static function specVersionOf(array $spec): ?JmhzSpecVersion
+    {
+        $packageKey = $spec['package_key'] ?? null;
+
+        return is_string($packageKey) ? JmhzSpecPackageCatalog::versionOf($packageKey) : null;
+    }
+
+    /**
+     * Potvrzení musí patřit téže verzi jako hlášení, ke kterému se váže:
+     * potvrzení postavené nad slovníkem 2026 se pro období 2027 nepoužije
+     * a naopak. Pro verzi 2027 zatím neplatí žádné potvrzení: katalog
+     * scénářů a kontrol 1.5 ještě není připnutý (WP-1, WP-4), takže by
+     * nebylo s čím porovnat řádky matice.
+     */
+    public static function acceptsSpecificationFor(array $spec, JmhzSpecVersion $version): bool
+    {
+        if (self::specVersionOf($spec) !== $version) {
+            return false;
+        }
+
+        return match ($version) {
+            JmhzSpecVersion::V2026 => self::acceptsSpecification($spec),
+            JmhzSpecVersion::V2027 => false,
+        };
     }
 
     public static function acceptsSpecification(array $spec): bool

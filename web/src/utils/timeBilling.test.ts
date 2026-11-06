@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatDuration, isTimeItem, itemQuantity, parseDuration, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workAmount, workHours, workRowTotal } from './timeBilling'
+import { formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity, unitPriceForAmount, parseDuration, syncCreditNoteItemSign, timeItemTotals, validateDurationInputs, workAmount, workHours, workRowTotal } from './timeBilling'
 
 describe('time billing', () => {
   it('synchronizes exact minutes with the credit-note quantity sign', () => {
@@ -66,6 +66,19 @@ describe('time billing', () => {
     expect(isTimeItem({ unit: 'hod', stock_item_id: 7 })).toBe(false)
     expect(itemQuantity({ quantity: 2, duration_minutes: 1, unit: 'ks' })).toBe(2)
     expect(isTimeItem({ unit: 'min' })).toBe(false)
+  })
+  it('treats sub-cent unit prices of bulk items as precise', () => {
+    const caps = { unit: 'ks', stock_item_id: 7, quantity: 250000, unit_price_without_vat: 0.004 }
+    expect(isPreciseUnitPrice(caps)).toBe(true)
+    expect(timeItemTotals(caps, 21, false)).toEqual({ base: 1000, vat: 210, with: 1210 })
+    expect(isPreciseUnitPrice({ unit: 'ks', quantity: 3, unit_price_without_vat: 12.5 })).toBe(false)
+    expect(isPreciseUnitPrice({ unit: 'h', quantity: 1, unit_price_without_vat: 333.333333 })).toBe(true)
+  })
+  it('derives a unit price from the line amount without losing it', () => {
+    expect(unitPriceForAmount(1000, 250000)).toBe(0.004)
+    expect(unitPriceForAmount(2700, 250000)).toBe(0.0108)
+    expect(unitPriceForAmount(1000, 3)).toBe(333.333333)
+    expect(unitPriceForAmount(1210, 2)).toBe(605)
   })
   it('rejects invalid duration without silently rounding it', () => {
     for (const value of ['1:60', '1:2', '1:20:30', 'abc', '1e8', 'Infinity']) {

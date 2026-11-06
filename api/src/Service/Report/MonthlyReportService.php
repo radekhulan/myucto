@@ -40,10 +40,14 @@ final class MonthlyReportService
     private const SALDO_TOP_N = 10;
 
     /**
+     * `$accrualSpread` = průběžné časové rozlišení mimo deník ve výsledovce i rozvaze. Měsíc je
+     * dál rozdíl dvou YTD snímků, každý s rozlišením ke svému dni, takže za měsíc vyjde
+     * poměrná část dokladu za ten měsíc. Rámec 504 volbu neuplatní (viz FinancialStatementService).
+     *
      * @return array<string,mixed>
      * @throws ReportException 404 pokud firma nebo účetní období neexistuje
      */
-    public function build(int $supplierId, int $year, int $month, ?string $comment = null): array
+    public function build(int $supplierId, int $year, int $month, ?string $comment = null, bool $accrualSpread = false): array
     {
         if ($month < 1 || $month > 12) {
             throw new ReportException('invalid_month', 'Měsíc musí být 1–12.', 422);
@@ -61,13 +65,16 @@ final class MonthlyReportService
 
         $entity = $this->loadEntity($supplierId);
 
-        $incomeYtd = $this->statements->incomeStatement($supplierId, $periodId, $asOf, 'auto');
+        $incomeYtd = $this->statements->incomeStatement($supplierId, $periodId, $asOf, 'auto', null, $accrualSpread);
+        $is504 = ($incomeYtd['accounting_framework'] ?? '') === 'cz_504';
         $prevAsOf = (new \DateTimeImmutable($monthStart))->modify('-1 day')->format('Y-m-d');
         $incomeMonth = $prevAsOf >= (string) $period['starts_on']
-            ? $this->monthOnlyRows($incomeYtd, $this->statements->incomeStatement($supplierId, $periodId, $prevAsOf, 'auto'))
+            ? $this->monthOnlyRows($incomeYtd, $this->statements->incomeStatement($supplierId, $periodId, $prevAsOf, 'auto', null, $accrualSpread))
             : $incomeYtd['rows']; // leden fiskálního roku = měsíc == YTD
 
-        $balanceSheet = $this->statements->balanceSheet($supplierId, $periodId, $asOf, 'auto');
+        $balanceSheet = $is504
+            ? $this->statements->accountView($supplierId, $periodId, $asOf)
+            : $this->statements->balanceSheet($supplierId, $periodId, $asOf, 'auto', null, $accrualSpread);
 
         $saldoData = $this->saldo->build($supplierId, $periodId, $asOf);
         $receivables = $this->topOverdue($saldoData, ['311']);
@@ -76,7 +83,7 @@ final class MonthlyReportService
         $vat = $this->buildVatSection($supplierId, $year, $month);
         $upcomingDeadlines = $this->advances->upcoming($supplierId, 8);
 
-        return [
+        return ($is504 ? ['accounting_framework' => 'cz_504', 'view_kind' => 'management'] : []) + [
             'entity'              => $entity,
             'period'              => ['year' => $year, 'month' => $month, 'as_of' => $asOf],
             'generated_at'        => date('Y-m-d H:i'),
@@ -102,6 +109,9 @@ final class MonthlyReportService
      */
     private function monthOnlyRows(array $ytd, array $prev): array
     {
+        if (($ytd['accounting_framework'] ?? '') === 'cz_504') {
+            return \MyInvoice\Service\Accounting\Reports\Statement504PeriodComparison::difference($ytd, $prev);
+        }
         $prevByCode = [];
         foreach ((array) $prev['rows'] as $r) {
             $prevByCode[(string) $r['row_code']] = (float) $r['amount'];

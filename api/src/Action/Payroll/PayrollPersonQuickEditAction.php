@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmploymentConflictException;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
+use MyInvoice\Repository\Payroll\PayrollPersonIdentifierCollisionException;
 use MyInvoice\Repository\Payroll\PayrollPersonNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileConflictException;
 use MyInvoice\Security\AccessLevel;
@@ -15,6 +16,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPersonQuickEditService;
+use MyInvoice\Service\Payroll\Security\PayrollIdentifierProbeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -26,6 +28,7 @@ final class PayrollPersonQuickEditAction
         private readonly PayrollPersonQuickEditService $service,
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
+        private readonly PayrollIdentifierProbeGuard $identifierProbes,
     ) {}
 
     /** @param array{id:string} $args */
@@ -57,6 +60,18 @@ final class PayrollPersonQuickEditAction
             );
         } catch (\DomainException $e) {
             return Json::error($response, 'invalid_change', $e->getMessage(), 409);
+        } catch (PayrollPersonIdentifierCollisionException $e) {
+            $this->identifierProbes->recordCollision(
+                $request,
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $e->identifierType,
+                'quick_edit',
+                false,
+                $this->userId($request),
+                $this->ip($request),
+            );
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\PDOException $e) {

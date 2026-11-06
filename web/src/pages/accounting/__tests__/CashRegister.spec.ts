@@ -28,7 +28,7 @@ vi.mock('@/api/cash', () => ({
     documentPdfUrl: (id: number) => `/pdf/${id}`,
   },
 }))
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: m.canWrite }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: m.canWrite, canRead: () => false }) }))
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ success: m.toastSuccess, error: m.toastError, warning: m.toastWarning }),
 }))

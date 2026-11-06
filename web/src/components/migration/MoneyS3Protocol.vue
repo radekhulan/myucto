@@ -125,6 +125,7 @@ function levelClass(level: string): string {
       <span v-if="protocol.error"> - {{ protocol.error }}</span>
     </div>
 
+    <slot name="steps" :steps="protocol.steps">
     <section>
       <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t(k('protocol.steps_title')) }}</h4>
       <div class="overflow-x-auto rounded-lg border border-neutral-200">
@@ -142,6 +143,9 @@ function levelClass(level: string): string {
       </div>
     </section>
 
+    </slot>
+
+    <slot name="messages" :messages="messages">
     <section v-if="messages.length">
       <h4 class="mb-2 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t(k('protocol.messages')) }}</h4>
       <ul class="space-y-2">
@@ -150,6 +154,7 @@ function levelClass(level: string): string {
         </li>
       </ul>
     </section>
+    </slot>
 
     <section v-if="taxRecords.length" data-testid="tax-records-reconciliation">
       <h4 class="mb-1 text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t(k('protocol.tax_records_title')) }}</h4>
@@ -212,7 +217,7 @@ function levelClass(level: string): string {
           <p v-if="year.unmapped" class="mb-3 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-700" data-testid="unmapped-accounts">
             {{ t(k('protocol.unmapped_accounts'), { accounts: year.unmapped }) }}
           </p>
-          <div class="overflow-x-auto">
+          <div v-if="year.documents.length" class="overflow-x-auto">
             <p class="mb-1 text-sm font-medium">{{ t(k('protocol.documents_title')) }}</p>
             <table class="min-w-full text-sm">
               <thead class="text-left text-xs text-neutral-500">

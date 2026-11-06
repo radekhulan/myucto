@@ -26,10 +26,20 @@ import { formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import AccrualSpreadToggle from '@/components/accounting/AccrualSpreadToggle.vue'
+import AccrualSpreadNote from '@/components/accounting/AccrualSpreadNote.vue'
+import { useAccrualSpread } from '@/composables/useAccrualSpread'
 
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+const accrualSpread = useAccrualSpread()
+const accrualSpreadOn = accrualSpread.enabled
+
+function onAccrualSpread(value: boolean) {
+  accrualSpread.set(value)
+  void load()
+}
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<IncomeStatementReport | null>(null)
@@ -64,6 +74,7 @@ async function load() {
       period_id: Number(filters.period_id),
       as_of: filters.as_of || undefined,
       scope: filters.scope,
+      ...accrualSpread.param(),
     })
   } catch (e: any) {
     // `function_map_incomplete` NENÍ technická chyba — je to sdělení, že chybí vstup.
@@ -108,6 +119,7 @@ async function exportFile(format: 'pdf' | 'xlsx'): Promise<void> {
       period_id: Number(filters.period_id),
       as_of: filters.as_of || undefined,
       scope: filters.scope,
+      ...accrualSpread.param(),
       format,
     })
     downloadBlob(r.data as unknown as Blob, `vysledovka-ucelova-${report.value.as_of}.${format}`)
@@ -149,6 +161,7 @@ const actions = computed<ActionItem[]>(() => [
 ])
 
 onMounted(async () => {
+  await accrualSpread.restore()
   try {
     periods.value = await accountingApi.listPeriods()
     if (periods.value.length > 0) {
@@ -172,6 +185,7 @@ onMounted(async () => {
         <select v-model.number="filters.period_id" class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm">
           <option v-for="p in periods" :key="p.id" :value="p.id">{{ p.fiscal_year }}</option>
         </select>
+        <AccrualSpreadToggle :model-value="accrualSpreadOn" @update:model-value="onAccrualSpread" />
       </div>
     </div>
 
@@ -247,6 +261,7 @@ onMounted(async () => {
     </div>
 
     <!-- Výkaz -->
+    <AccrualSpreadNote v-if="!loading && report?.accrual_spread" :spread="report.accrual_spread" :format="formatMoney" />
     <div v-if="loading" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-8 text-center text-neutral-400">
       {{ t('common.loading') }}…
     </div>

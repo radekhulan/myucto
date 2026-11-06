@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission;
 
+use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionQueueRepository;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceIsdsSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Isds\PayrollIsdsSubmissionService;
@@ -57,6 +58,7 @@ final class PayrollSubmissionQueueService
         private readonly PayrollIsdsSubmissionService $isds,
         private readonly HealthInsuranceIsdsSubmissionService $healthIsds,
         private readonly CsszFormVrepTransportService $csszForms,
+        private readonly PayrollSigningProfileRepository $signingProfiles,
     ) {}
 
     /**
@@ -103,6 +105,7 @@ final class PayrollSubmissionQueueService
         );
 
         $summary = ['total' => $page['total'], 'ready' => 0, 'blocked' => 0, 'overdue' => 0];
+        $signingReady = $this->signingProfileReady($supplierId, $environment);
         $decorated = [];
         foreach ($items as $item) {
             $submissionId = (int) $item['submission_id'];
@@ -131,9 +134,12 @@ final class PayrollSubmissionQueueService
             }
 
             $item['deadline'] = $deadline->toArray();
+            $channels = $this->gate->channels($capability, $environment, $signingReady);
             $item['dispatch'] = [
                 'mode' => $capability->mode,
                 'alternate_mode' => $capability->alternateMode,
+                'default_mode' => $channels['default'],
+                'modes' => $channels['modes'],
                 'dispatchable' => $blockedReason === null,
                 'blocked_reason' => $blockedReason,
             ];
@@ -191,7 +197,7 @@ final class PayrollSubmissionQueueService
      * dávka sdílela jeden klíč, druhá položka by se transportu jevila jako
      * opakování první a tiše by se neodeslala.
      *
-     * @param list<array{submission_id:int,idempotency_key:string}> $items
+     * @param list<array{submission_id:int,idempotency_key:string,mode?:?string}> $items
      * @return array{
      *   results:list<array<string,mixed>>,
      *   summary:array{requested:int,sent:int,failed:int}
@@ -231,6 +237,7 @@ final class PayrollSubmissionQueueService
                     $submissionId,
                     (string) $item['idempotency_key'],
                     $userId,
+                    $item['mode'] ?? null,
                 );
                 $results[] = ['ok' => true, ...$result];
                 ++$sent;
@@ -273,6 +280,10 @@ final class PayrollSubmissionQueueService
      * Odeslání jednoho podání z fronty. Vrací normalizovaný výsledek, aby UI
      * nemuselo rozlišovat čtyři různé tvary odpovědi podle kanálu.
      *
+     * `$mode` je volba účetní mezi primárním a alternativním kanálem agendy;
+     * `null` znamená výchozí podle {@see PayrollDispatchGate::channels()}.
+     * Jiný režim, než jaký agenda v katalogu má, se odmítne.
+     *
      * @return array<string,mixed>
      */
     public function dispatch(
@@ -281,6 +292,7 @@ final class PayrollSubmissionQueueService
         int $submissionId,
         string $idempotencyKey,
         ?int $userId,
+        ?string $mode = null,
     ): array {
         $row = $this->requireQueuedRow($supplierId, $environment, $submissionId);
         $capability = $this->capabilities->forAgenda(
@@ -302,8 +314,20 @@ final class PayrollSubmissionQueueService
             // odeslat by znamenalo obejít bránu, kterou UI respektuje.
             throw new \DomainException($blockedReason);
         }
+        if ($mode === null) {
+            $mode = $this->gate->channels(
+                $capability,
+                $environment,
+                $this->signingProfileReady($supplierId, $environment),
+            )['default'];
+        } elseif ($mode !== $capability->mode && $mode !== $capability->alternateMode) {
+            throw new \InvalidArgumentException(
+                'Tuhle agendu nejde odeslat zvoleným způsobem. Vyberte kanál,'
+                    . ' který fronta u podání nabízí.',
+            );
+        }
 
-        return match ($capability->mode) {
+        return match ($mode) {
             PayrollDispatchCapabilityCatalog::MODE_VREP_JMHZ
                 => $this->dispatchJmhz(
                     $supplierId,
@@ -343,9 +367,14 @@ final class PayrollSubmissionQueueService
                     $userId,
                 ),
             default => throw new \LogicException(
-                'Neznámý režim odeslání: ' . $capability->mode,
+                'Neznámý režim odeslání: ' . $mode,
             ),
         };
+    }
+
+    private function signingProfileReady(int $supplierId, string $environment): bool
+    {
+        return $this->signingProfiles->find($supplierId, $environment) !== null;
     }
 
     /** @return array<string,mixed> */

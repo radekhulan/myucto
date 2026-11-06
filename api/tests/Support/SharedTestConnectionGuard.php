@@ -28,10 +28,50 @@ use PHPUnit\TextUI\Configuration\Configuration;
  */
 final class SharedTestConnectionGuard implements Extension
 {
+    /** @internal volá jen odběratel začátku testu */
+    public static function setRunningClass(?string $class): void
+    {
+        self::$runningClass = $class;
+    }
+
+    /** Třída právě spuštěného testu; pomocná instance jiné třídy (fixtura přes reflexi) sdílený základ nepoužije. */
+    private static ?string $runningClass = null;
+
+    public static function runningClass(): ?string
+    {
+        return self::$runningClass;
+    }
+
+    /** Třída, jejíž transakce se sdíleným základem ({@see SharedFixtureSavepointTrait}) má přežít konec testu. */
+    private static ?string $fixtureHolder = null;
+
+    public static function fixtureHolder(): ?string
+    {
+        return self::$fixtureHolder;
+    }
+
+    public static function setFixtureHolder(?string $class): void
+    {
+        self::$fixtureHolder = $class;
+    }
+
     public function bootstrap(Configuration $configuration, Facade $facade, ParameterCollection $parameters): void
     {
+        $facade->registerSubscriber(new class implements \PHPUnit\Event\Test\PreparationStartedSubscriber {
+            public function notify(\PHPUnit\Event\Test\PreparationStarted $event): void
+            {
+                $test = $event->test();
+                SharedTestConnectionGuard::setRunningClass($test instanceof \PHPUnit\Event\Code\TestMethod ? $test->className() : null);
+            }
+        });
         $facade->registerSubscriber(new class((int) ini_get('max_execution_time')) implements FinishedSubscriber {
             public function __construct(private readonly int $executionTimeLimit) {}
+
+            /** Třída se sdíleným základem drží transakci až do tearDownAfterClass(). */
+            private static function keepsClassTransaction(\PHPUnit\Event\Code\Test $test): bool
+            {
+                return $test instanceof \PHPUnit\Event\Code\TestMethod && SharedTestConnectionGuard::fixtureHolder() === $test->className();
+            }
 
             public function notify(Finished $event): void
             {
@@ -39,7 +79,7 @@ final class SharedTestConnectionGuard implements Extension
                     set_time_limit($this->executionTimeLimit);
                 }
                 ParallelRuntime::restore();
-                foreach (Connection::resetSharedTestSessions() as $dsn) {
+                foreach (Connection::resetSharedTestSessions(self::keepsClassTransaction($event->test())) as $dsn) {
                     EventFacade::emitter()->testTriggeredPhpunitError(
                         $event->test(),
                         sprintf(

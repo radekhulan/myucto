@@ -27,7 +27,8 @@ final class PayrollDeductionAgreementRepository
 
     private const COLUMNS = 'agreement.id, agreement.supplier_id, agreement.employee_id,
         agreement.agreement_reference, agreement.title, agreement.deduction_kind,
-        agreement.legal_basis, agreement.status, agreement.priority_no, agreement.requested_minor,
+        agreement.legal_basis, agreement.creditor_is_employer, agreement.jmhz_target,
+        agreement.status, agreement.priority_no, agreement.requested_minor,
         agreement.basis_points, agreement.basis_amount_minor,
         agreement.total_limit_minor, agreement.withheld_total_minor,
         agreement.taken_over_withheld_minor,
@@ -220,11 +221,12 @@ final class PayrollDeductionAgreementRepository
                 $stmt = $this->db->pdo()->prepare(
                     'INSERT INTO payroll_deduction_agreements
                         (supplier_id, employee_id, agreement_reference, title,
-                         deduction_kind, legal_basis, status, priority_no, requested_minor,
+                         deduction_kind, legal_basis, creditor_is_employer, jmhz_target,
+                         status, priority_no, requested_minor,
                          basis_points, basis_amount_minor, total_limit_minor,
                          valid_from, valid_to, delivered_on, recipient_reference,
                          note, taken_over_withheld_minor, version_no, created_by, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)'
                 );
                 $stmt->execute([
                     $supplierId,
@@ -233,6 +235,8 @@ final class PayrollDeductionAgreementRepository
                     $terms->title,
                     $terms->deductionKind,
                     $terms->legalBasis,
+                    $terms->creditorIsEmployer === null ? null : (int) $terms->creditorIsEmployer,
+                    $terms->jmhzTarget,
                     $status->value,
                     $terms->priorityNo,
                     $terms->requestedMinor,
@@ -335,6 +339,8 @@ final class PayrollDeductionAgreementRepository
             $stmt = $this->db->pdo()->prepare(
                 'UPDATE payroll_deduction_agreements
                     SET title = ?, deduction_kind = ?, legal_basis = ?,
+                        creditor_is_employer = IF(?, ?, creditor_is_employer),
+                        jmhz_target = IF(?, ?, jmhz_target),
                         priority_no = ?, requested_minor = ?, basis_points = ?,
                         basis_amount_minor = ?, total_limit_minor = ?,
                         valid_from = ?, valid_to = ?, delivered_on = ?,
@@ -347,6 +353,10 @@ final class PayrollDeductionAgreementRepository
                 $terms->title,
                 $terms->deductionKind,
                 $terms->legalBasis,
+                (int) $terms->jmhzClassificationProvided,
+                $terms->creditorIsEmployer === null ? null : (int) $terms->creditorIsEmployer,
+                (int) $terms->jmhzClassificationProvided,
+                $terms->jmhzTarget,
                 $terms->priorityNo,
                 $terms->requestedMinor,
                 $terms->basisPoints,
@@ -472,7 +482,8 @@ final class PayrollDeductionAgreementRepository
     public function versions(int $supplierId, int $agreementId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, version_no, change_kind, title, deduction_kind, legal_basis, status,
+            'SELECT id, version_no, change_kind, title, deduction_kind, legal_basis,
+                    creditor_is_employer, jmhz_target, status,
                     priority_no, requested_minor, basis_points, basis_amount_minor,
                     total_limit_minor, withheld_total_minor, valid_from, valid_to,
                     delivered_on, recipient_reference, note, effective_from, reason,
@@ -497,6 +508,9 @@ final class PayrollDeductionAgreementRepository
                 ] as $field) {
                     $row[$field] = $row[$field] === null ? null : (int) $row[$field];
                 }
+                $row['creditor_is_employer'] = $row['creditor_is_employer'] === null
+                    ? null
+                    : (bool) (int) $row['creditor_is_employer'];
 
                 return $row;
             },
@@ -588,12 +602,13 @@ final class PayrollDeductionAgreementRepository
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO payroll_deduction_agreement_versions
                 (supplier_id, agreement_id, employee_id, version_no, change_kind,
-                 title, deduction_kind, legal_basis, status, priority_no, requested_minor,
+                 title, deduction_kind, legal_basis, creditor_is_employer, jmhz_target,
+                 status, priority_no, requested_minor,
                  basis_points, basis_amount_minor, total_limit_minor,
                  withheld_total_minor, taken_over_withheld_minor, valid_from, valid_to, delivered_on,
                  recipient_reference, note, effective_from, reason, actor_user_id)
              SELECT supplier_id, id, employee_id, version_no, ?, title,
-                    deduction_kind, legal_basis, status, priority_no, requested_minor,
+                    deduction_kind, legal_basis, creditor_is_employer, jmhz_target, status, priority_no, requested_minor,
                     basis_points, basis_amount_minor, total_limit_minor,
                     withheld_total_minor, taken_over_withheld_minor, valid_from, valid_to, delivered_on,
                     recipient_reference, note, ?, ?, ?
@@ -628,6 +643,9 @@ final class PayrollDeductionAgreementRepository
         foreach (['basis_points', 'basis_amount_minor', 'total_limit_minor'] as $field) {
             $row[$field] = $row[$field] === null ? null : (int) $row[$field];
         }
+        $row['creditor_is_employer'] = ($row['creditor_is_employer'] ?? null) === null
+            ? null
+            : (bool) (int) $row['creditor_is_employer'];
         $row['remaining_limit_minor'] = $row['total_limit_minor'] === null
             ? null
             : max(0, $row['total_limit_minor'] - $row['withheld_total_minor'] - $row['taken_over_withheld_minor']);

@@ -155,7 +155,7 @@ final class BankIgnoreNoteTest extends TestCase
     #[DataProvider('unmatchCases')]
     public function testUnmatchClearsPersistedIgnoreNote(bool $closed): void
     {
-        $sqlite = new PDO('sqlite::memory:');
+        $sqlite = new \Pdo\Sqlite('sqlite::memory:');
         $sqlite->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $sqlite->exec('CREATE TABLE bank_transactions (id INTEGER, statement_id INTEGER, match_status TEXT, matched_invoice_id INTEGER, ignore_note TEXT, posted_at TEXT, matched_at TEXT, matched_by INTEGER, ignore_origin TEXT)');
         $sqlite->exec("INSERT INTO bank_transactions VALUES (1, 2, 'ignored', NULL, 'Test note', '2099-01-01', NULL, NULL, 'manual')");
@@ -163,9 +163,12 @@ final class BankIgnoreNoteTest extends TestCase
         $sqlite->exec('INSERT INTO bank_statements VALUES (2, 0)');
         $sqlite->exec('CREATE TABLE activity_log (supplier_id, user_id, action, entity_type, entity_id, payload, ip, user_agent)');
 
-        $sqlite->exec('CREATE TABLE invoice_payments (id INTEGER, source TEXT, bank_transaction_id INTEGER, tax_document_invoice_id INTEGER)');
+        $sqlite->exec('CREATE TABLE invoice_payments (id INTEGER, invoice_id INTEGER, source TEXT, bank_transaction_id INTEGER, tax_document_invoice_id INTEGER)');
         $sqlite->exec('CREATE TABLE invoices (id INTEGER, status TEXT)');
         $sqlite->exec('CREATE TABLE payment_matches (bank_transaction_id INTEGER, supplier_id INTEGER, purchase_invoice_id INTEGER, invoice_id INTEGER)');
+        $sqlite->exec('CREATE TABLE journal_entries (supplier_id INTEGER, source_type TEXT, source_id INTEGER, reversed_by INTEGER, posted_at TEXT)');
+        $sqlite->exec('CREATE TABLE other_item_allocations (supplier_id INTEGER, bank_transaction_id INTEGER, reversed_on TEXT)');
+        $sqlite->createFunction('CURDATE', static fn (): string => '2099-01-01', 0);
 
         // MariaDB ownership SQL is covered separately; all writes execute against SQLite.
         $scope = $this->createStub(\PDOStatement::class);
@@ -202,6 +205,8 @@ final class BankIgnoreNoteTest extends TestCase
             $posting,
             // Zrušení párování se politiky automatiky neptá (jen předběžná kontrola smazání výpisu).
             (new \ReflectionClass(\MyInvoice\Service\Accounting\AutoPostingPolicyService::class))->newInstanceWithoutConstructor(),
+            new \MyInvoice\Service\PurchaseInvoice\PurchasePaidStatusRestore($db, new \MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus($db)),
+            new ActivityLogger($db),
         ));
         $matchReflection = new \ReflectionClass(\MyInvoice\Service\Bank\Match\MatchSuggestionService::class);
         $reflection->getProperty('matchV2')->setValue($action, $matchReflection->newInstanceWithoutConstructor());
@@ -262,9 +267,10 @@ final class BankIgnoreNoteTest extends TestCase
 
     private function createAllocationTables(PDO $sqlite): void
     {
-        foreach (['invoice_payments', 'payment_matches', 'payroll_payment_matches', 'other_item_allocations'] as $table) {
+        foreach (['invoice_payments', 'payment_matches', 'payroll_payment_matches'] as $table) {
             $sqlite->exec('CREATE TABLE ' . $table . ' (bank_transaction_id INTEGER)');
         }
+        $sqlite->exec('CREATE TABLE other_item_allocations (bank_transaction_id INTEGER, reversed_on TEXT)');
         $sqlite->exec('CREATE TABLE tax_advance_schedules (matched_transaction_id INTEGER)');
         $sqlite->exec('CREATE TABLE bank_transfer_matches (in_transaction_id INTEGER, out_transaction_id INTEGER)');
         $sqlite->exec('CREATE TABLE gopay_clearings (bank_transaction_id INTEGER, payout_match_transaction_id INTEGER)');

@@ -14,7 +14,7 @@ import { journalAmount } from '@/utils/journalAmount'
 import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  accountingApi, postingErrorI18nKey,
+  accountingApi, postingErrorMessage,
   type PostingPreview, type ChartAccount, type JournalTemplateSummary,
 } from '@/api/accounting'
 import Modal from '../ui/Modal.vue'
@@ -193,7 +193,7 @@ async function load(): Promise<void> {
     preview.value = await accountingApi.postingPreview(props.source, props.docId)
     description.value = ''
   } catch (e: any) {
-    error.value = t(postingErrorI18nKey(e?.response?.data?.error?.code))
+    error.value = postingErrorMessage(t, e)
   } finally {
     loading.value = false
   }
@@ -256,7 +256,7 @@ async function confirmPost(): Promise<void> {
     emit('posted')
     emit('close')
   } catch (e: any) {
-    error.value = t(postingErrorI18nKey(e?.response?.data?.error?.code))
+    error.value = postingErrorMessage(t, e)
   } finally {
     posting.value = false
   }

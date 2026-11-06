@@ -47,6 +47,20 @@ Funguje jen s doklady v **CZK** a jen v podvojném účetnictví.
 **Jak poznáte, že je hotovo:** Dohoda má stav **Potvrzeno**, aplikace ohlásila **Zápočet potvrzen
 a zaúčtován** a zápis je v deníku dohledatelný podle čísla ZAP.
 
+### Zápočet předvyplněný z jiné obrazovky
+
+Akce **Vzájemný zápočet** otevře stránku Zápočty s rozpracovaným zápočtem: partner je vybraný, doklady
+z odkazu jsou zaškrtnuté a mají částku (nejvýš otevřenou částku dokladu, doklad bez částky celou).
+Ostatní doklady doplníte ručně a dál postupujete od kroku 3. Akci najdete:
+
+- v detailu neuhrazené vydané i přijaté faktury v Kč (předvyplní partnera a tento doklad),
+- v [Saldokontu](60_Saldokonto.md) u výběru pohledávek i závazků jednoho partnera (částky jsou
+  vyrovnané na menší ze stran, takže se součty hned rovnají),
+- v dialogu **Vyrovnat** saldokonta na kartě **Zápočet / odpis** jako **Vzájemný zápočet s partnerem**.
+
+Akce se zobrazí jen s oprávněním k vytváření zápočtů. Doklad z odkazu, který partner už otevřený nemá
+(mezitím uhrazený), se nepředvyplní a aplikace na to upozorní.
+
 > [!WARNING]
 > Zápočet řeší účetní vyrovnání dokladů. Neprokazuje automaticky doručení, přijetí nebo právní účinnost
 > dohody protistranou. Příslušné podklady archivujte spolu s PDF.

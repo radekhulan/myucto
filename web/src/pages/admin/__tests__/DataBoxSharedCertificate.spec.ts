@@ -201,7 +201,27 @@ describe('výběr certifikátu ze sdíleného trezoru', () => {
       .toContain('databox.access.sharedCertificateExpired')
   })
 
+  it('firmě bez uloženého přístupu předvybere platný certifikát z trezoru', async () => {
+    const wrapper = await mountPage()
+
+    const select = wrapper.find('[data-test="databox-shared-certificate"]').element as HTMLSelectElement
+    expect(select.value).toBe('7')
+    expect((wrapper.find('[data-test="databox-cert-source-vault"]').element as HTMLInputElement).checked).toBe(true)
+
+    await fillIdentification(wrapper)
+    await save(wrapper)
+    expect((m.saveCredential.mock.calls[0][0] as FormData).get('credential_id')).toBe('7')
+  })
+
+  it('prošlý certifikát nepředvybere', async () => {
+    m.sharedCertificates.mockResolvedValue([expired])
+    const wrapper = await mountPage()
+
+    expect((wrapper.find('[data-test="databox-shared-certificate"]').element as HTMLSelectElement).value).not.toBe('8')
+  })
+
   it('bez vybraného certifikátu neuloží nic a řekne proč', async () => {
+    m.sharedCertificates.mockResolvedValue([expired])
     const wrapper = await mountPage()
 
     await fillIdentification(wrapper)
@@ -234,6 +254,9 @@ describe('výběr certifikátu ze sdíleného trezoru', () => {
 
     expect(wrapper.find('[data-test="databox-shared-certificate"]').exists()).toBe(false)
     expect(wrapper.find('input[type="file"]').exists()).toBe(true)
+    // Zablokovaná volba trezoru musí říct proč, jinak působí jako rozbitá.
+    expect(wrapper.find('[data-test="databox-shared-certificate-unavailable"]').text())
+      .toContain('databox.access.sharedCertificateEmpty')
   })
 
   it('osiřelý odkaz přizná karta, ne až odmítnuté podání', async () => {

@@ -447,7 +447,14 @@ final class PayrollRunSnapshotBuilder
                 }
             }
             $absences = $this->absences($absenceRows[$employmentId] ?? []);
-            if ($inputs === []) {
+            // Odložený příjem bez zúčtovaného příjmu (roční zúčtování po
+            // skončení, typ 4) vstup mít nemá; výzva k nule by tu jen mátla.
+            $deferredWithoutIncome = $deferredIncome !== null && in_array(
+                $deferredIncome['deferred_type'],
+                \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
+                true,
+            );
+            if ($inputs === [] && !$deferredWithoutIncome) {
                 // Vztah bez složky je většinou chyba zadání (zapomenutá mzda).
                 // Výjimku (override) tu NEnabízíme: když měsíc bez vstupu
                 // nevysvětluje schválená nepřítomnost, zastaví vztah zákonný
@@ -567,6 +574,10 @@ final class PayrollRunSnapshotBuilder
                         $row['jmhz_workplace_municipality_code'],
                     'jmhz_workplace_country_code' =>
                         $row['jmhz_workplace_country_code'],
+                    // Plná adresa místa výkonu a státní zástupce (JMHZ 2027,
+                    // migrace 2213); bez zadaných údajů klíče chybí a snímek
+                    // zůstává stejný jako dřív.
+                    ...self::jmhz2027TermFacts($row),
                     'jmhz_external_codebook_overlay_key' =>
                         $row['jmhz_external_codebook_overlay_key'],
                     'jmhz_external_codebook_manifest_sha256' =>
@@ -611,6 +622,9 @@ final class PayrollRunSnapshotBuilder
                         $statutoryEvidence[$employeeId] ?? null,
                         $row,
                     ),
+                    // Den podpisu prohlášení (JMHZ 10575); bez něj klíč chybí
+                    // a snímek zůstává stejný jako dřív.
+                    ...self::taxDeclarationSignedOn($statutoryEvidence[$employeeId] ?? null),
                     'risky_work' => (bool) $row['risky_work'],
                     'social_employer_rate_category' =>
                         (string) $row['social_employer_rate_category'],
@@ -925,6 +939,51 @@ final class PayrollRunSnapshotBuilder
         }
 
         return (bool) $row['tax_declaration_signed'];
+    }
+
+    /**
+     * Adresa místa výkonu (10550 až 10554) jde do snímku celá, jakmile je
+     * zadaná aspoň jedna její část: chybějící číslo popisné je pak doložené
+     * „nemá" (kontrakt JMHZ 2027), ne neznámé. Státní zástupce (10587) jen
+     * s odpovědí.
+     *
+     * @param array<string,mixed> $row
+     * @return array<string,string|bool|null>
+     */
+    private static function jmhz2027TermFacts(array $row): array
+    {
+        $address = [];
+        foreach ([
+            'jmhz_workplace_address_point_code',
+            'jmhz_workplace_street',
+            'jmhz_workplace_house_number',
+            'jmhz_workplace_orientation_number',
+            'jmhz_workplace_postal_code',
+        ] as $key) {
+            $value = $row[$key] ?? null;
+            $address[$key] = $value === null || $value === '' ? null : (string) $value;
+        }
+        $facts = array_filter($address, static fn (?string $value): bool => $value !== null) === []
+            ? []
+            : $address;
+        $prosecutor = $row['jmhz_state_prosecutor'] ?? null;
+        if ($prosecutor !== null) {
+            $facts['jmhz_state_prosecutor'] = (bool) $prosecutor;
+        }
+
+        return $facts;
+    }
+
+    /** @return array{tax_declaration_signed_on?:string} */
+    private static function taxDeclarationSignedOn(mixed $evidence): array
+    {
+        $incomeTax = is_array($evidence) ? ($evidence['income_tax'] ?? null) : null;
+        $declaration = is_array($incomeTax) ? ($incomeTax['declaration'] ?? null) : null;
+        $signedOn = is_array($declaration) && ($declaration['status'] ?? null) === 'signed'
+            ? ($declaration['signed_on'] ?? null)
+            : null;
+
+        return is_string($signedOn) ? ['tax_declaration_signed_on' => $signedOn] : [];
     }
 
     /**
@@ -1249,6 +1308,12 @@ final class PayrollRunSnapshotBuilder
                     term.work_place,
                     term.jmhz_workplace_municipality_code,
                     term.jmhz_workplace_country_code,
+                    term.jmhz_workplace_address_point_code,
+                    term.jmhz_workplace_street,
+                    term.jmhz_workplace_house_number,
+                    term.jmhz_workplace_orientation_number,
+                    term.jmhz_workplace_postal_code,
+                    term.jmhz_state_prosecutor,
                     term.jmhz_external_codebook_overlay_key,
                     term.jmhz_external_codebook_manifest_sha256,
                     term.jmhz_apz_contribution_status,
@@ -1433,6 +1498,19 @@ final class PayrollRunSnapshotBuilder
                            AND post_termination_input.period_start = ?
                            AND post_termination_input.status <> "cancelled"
                     )
+                    OR EXISTS (
+                        SELECT 1
+                          FROM payroll_employment_deferred_incomes deferred_without_income
+                         WHERE deferred_without_income.supplier_id =
+                               employment.supplier_id
+                           AND deferred_without_income.employment_id =
+                               employment.id
+                           AND deferred_without_income.period_start = ?
+                           AND deferred_without_income.deferred_type IN (' . implode(', ', array_map(
+                               static fn (string $type): string => '"' . $type . '"',
+                               \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
+                           )) . ')
+                    )
                 )
                 AND ' . $officeSql . '
               ORDER BY employment.employee_id, employment.id'
@@ -1454,6 +1532,7 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
             $periodStart,
             $periodEnd,
+            $periodStart,
             $periodStart,
             $periodStart,
             ...($officeId === null ? [] : [$officeId]),
@@ -1685,6 +1764,13 @@ final class PayrollRunSnapshotBuilder
         );
     }
 
+    /** @param array<string,mixed> $data */
+    public static function officeRegistrationHash(array $data): string
+    {
+        unset($data['sha256']);
+        return hash('sha256', CanonicalJson::encode($data));
+    }
+
     /** @return array<string,mixed>|null */
     private function officeRegistration(int $supplierId, int $officeId, string $onDate): ?array
     {
@@ -1709,7 +1795,7 @@ final class PayrollRunSnapshotBuilder
             'office_code' => (string) $row['code'],
             'office_name' => (string) $row['name'],
         ];
-        $data['sha256'] = hash('sha256', CanonicalJson::encode($data));
+        $data['sha256'] = self::officeRegistrationHash($data);
         return $data;
     }
 
@@ -1749,9 +1835,11 @@ final class PayrollRunSnapshotBuilder
      *    neuplatní. Ve výsledku běhu je to jen „nedoložený nárok"; odsud se
      *    dozví, KTERÉ podání chybí.
      * 2. **Přechodné pravidlo pro 01–03/2026.** Kontroly 164, 290 a 333 vážou
-     *    slevu za tahle období na 30. 6. 2026 a všechny tři jsou v evaluátoru
-     *    `NotEvaluable`, protože potřebují datum přijetí podání od ČSSZ.
-     *    Uživatel tedy z kontrol nedostane varování žádné.
+     *    slevu za tahle období na 30. 6. 2026. Evaluátor hranici z hotového
+     *    XML nevyhodnotí: 164 potřebuje datum přijetí podání od ČSSZ, 290 hlásí
+     *    jen podání po splatnosti a 333 má od katalogu 1.4.2.11 v pravidle
+     *    povinnost příznaku primárního vztahu. Uživatel tedy z kontrol
+     *    varování o téhle hranici nedostane.
      *
      * 3. **Neevidované poučení zaměstnance.** § 23d odst. 2 ukládá zaměstnavateli
      *    informovat zaměstnance písemně PŘED prvním uplatněním slevy; porušení
@@ -2497,6 +2585,15 @@ final class PayrollRunSnapshotBuilder
                 ...((($row['legal_basis'] ?? 'agreement') === 'agreement')
                     ? []
                     : ['legal_basis' => (string) $row['legal_basis']]),
+                // Věřitel a zařazení srážky pro JMHZ 10349 až 10353 (IN24/IN28).
+                // Jen u rozhodnuté dohody, nerozhodnuté a starší snímky zůstávají
+                // bajtově stejné; nerozhodnutou pozná JmhzOrdinaryEvidenceBuilder.
+                ...(($row['creditor_is_employer'] ?? null) === null ? [] : [
+                    'creditor_is_employer' => (int) $row['creditor_is_employer'] === 1,
+                    ...(($row['jmhz_target'] ?? null) === null
+                        ? []
+                        : ['jmhz_target' => (string) $row['jmhz_target']]),
+                ]),
             ],
             $rows,
         );

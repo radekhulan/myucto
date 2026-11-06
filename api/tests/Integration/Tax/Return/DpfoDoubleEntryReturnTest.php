@@ -10,6 +10,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Tax\Return\DpfoReturnDataProvider;
+use MyInvoice\Service\Tax\Return\TaxReturnService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -28,6 +29,7 @@ final class DpfoDoubleEntryReturnTest extends TestCase
     private Connection $db;
     private PostingService $posting;
     private DpfoReturnDataProvider $provider;
+    private TaxReturnService $returns;
     private AccountingPeriodRepository $periods;
 
     private int $supplierId = 0;
@@ -45,6 +47,7 @@ final class DpfoDoubleEntryReturnTest extends TestCase
             $this->db       = $c->get(Connection::class);
             $this->posting  = $c->get(PostingService::class);
             $this->provider = $c->get(DpfoReturnDataProvider::class);
+            $this->returns  = $c->get(TaxReturnService::class);
             $this->periods  = $c->get(AccountingPeriodRepository::class);
             $seeder         = $c->get(ChartOfAccountsSeeder::class);
         } catch (\Throwable $e) {
@@ -88,6 +91,23 @@ final class DpfoDoubleEntryReturnTest extends TestCase
             }
             $this->db->close();
         }
+    }
+
+    /** Čtení přes API token koncept přiznání nezakládá; náhled v aplikaci ano. */
+    public function testReadWithoutSideEffectsDoesNotCreateDraft(): void
+    {
+        $count = fn (): int => (int) $this->db->pdo()
+            ->query('SELECT COUNT(*) FROM income_tax_returns WHERE supplier_id = ' . $this->supplierId)
+            ->fetchColumn();
+
+        $read = $this->returns->getReturn($this->supplierId, self::YEAR, 'fo', $this->userId, sideEffects: false);
+
+        self::assertSame('draft', $read['return']['status']);
+        self::assertSame(0, $read['return']['row_version']);
+        self::assertSame(0, $count(), 'Neuložený řádek: čtení nic nezapsalo.');
+
+        $this->returns->getReturn($this->supplierId, self::YEAR, 'fo', $this->userId);
+        self::assertSame(1, $count(), 'Náhled v aplikaci koncept založí jako dosud.');
     }
 
     public function testSection7DerivedFromProfitAndLoss(): void
@@ -193,6 +213,15 @@ final class DpfoDoubleEntryReturnTest extends TestCase
 
         $result = $this->provider->gather($this->supplierId, self::YEAR);
         self::assertEqualsWithDelta(100000.0, $result['s7_income'], 0.001, 'Uzávěrkový převod se z §7 vylučuje.');
+    }
+
+    public function testYearLossFinalizesAndReopensWithoutInventingDppoPeriodProof(): void
+    {
+        $this->manual([['account_code'=>'518','side'=>'debit','amount'=>400000.00],['account_code'=>'321','side'=>'credit','amount'=>400000.00]],self::YEAR.'-06-01');
+        $draft=$this->returns->getReturn($this->supplierId,self::YEAR,'fo',$this->userId);self::assertGreaterThan(0,$draft['computed']['summary']['year_tax_loss']);
+        $final=$this->returns->finalize($this->supplierId,self::YEAR,'fo',$draft['return']['row_version'],$this->userId);self::assertSame('final',$final['return']['status']);
+        $q=$this->db->pdo()->prepare('SELECT period_proof_kind,period_proof_hash FROM tax_losses WHERE supplier_id=? AND taxpayer_type="fo" AND origin_year=?');$q->execute([$this->supplierId,self::YEAR]);self::assertSame(['period_proof_kind'=>null,'period_proof_hash'=>null],$q->fetch(PDO::FETCH_ASSOC));
+        self::assertSame('draft',$this->returns->reopen($this->supplierId,self::YEAR,'fo',$final['return']['row_version'],$this->userId)['return']['status']);
     }
 
     /** @param list<array{account_code:string,side:string,amount:float}> $lines */

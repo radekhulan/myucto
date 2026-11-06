@@ -26,6 +26,72 @@ final class JmhzSchemaBundleTest extends TestCase
         yield 'DZMH' => ['dzmh-1.1/DZMH25.xsd'];
         yield 'OREZAM' => ['orezam-zrezam-1.0/OREZAM26.xsd'];
         yield 'ZREZAM' => ['orezam-zrezam-1.0/ZREZAM26.xsd'];
+        yield 'JMHZ 2027' => ['jmhz-1.5.0.3/jmhzPodani.xsd'];
+        yield 'JMHZ 2027 simpleTypes' => ['jmhz-1.5.0.3/simpleTypes.xsd'];
+        yield 'REGZEC 2027' => ['regzec-1.5/REGZEC27_1_5.xsd'];
+        yield 'PREZEC 2027' => ['prezec-1.5/PREZEC26_1_5.xsd'];
+        yield 'DZMH 2027' => ['dzmh-1.5/DZMH25_1_5.xsd'];
+        yield 'ZREZAM 2027' => ['zrezam-1.5/ZREZAM27_1_5.xsd'];
+    }
+
+    /**
+     * Jmenné prostory a `version` schémat 2027, na které se napojí přepínač verzí
+     * (podání se volí podle vykazovaného období). Změna kterékoli hodnoty musí být
+     * vědomá, proto je test připíná.
+     *
+     * @return iterable<string, array{string, string, string}>
+     */
+    public static function namespaces2027(): iterable
+    {
+        yield 'JMHZ podani' => ['jmhz-1.5.0.3/jmhzPodani.xsd', 'http://schemas.cssz.cz/JMHZ/podani/2027', '1.5.0.3'];
+        yield 'JMHZ form' => ['jmhz-1.5.0.3/form.xsd', 'http://schemas.cssz.cz/JMHZ/form/2027', '1.5.0.3'];
+        yield 'JMHZ simpleTypes' => ['jmhz-1.5.0.3/simpleTypes.xsd', 'http://schemas.cssz.cz/JMHZ/simpleTypes/2027', '1.5.0.3'];
+        yield 'JMHZ souhrn' => ['jmhz-1.5.0.3/souhrn.xsd', 'http://schemas.cssz.cz/JMHZ/souhrn/2027', '1.5.0.3'];
+        yield 'JMHZ PVPOJ' => ['jmhz-1.5.0.3/PVPOJ.xsd', 'http://schemas.cssz.cz/JMHZ/PVPOJ/2027', '1.5.0.3'];
+        yield 'REGZEC27' => ['regzec-1.5/REGZEC27_1_5.xsd', 'http://schemas.cssz.cz/REGZEC/2027', '1.5.0.0'];
+        yield 'PREZEC' => ['prezec-1.5/PREZEC26_1_5.xsd', 'http://schemas.cssz.cz/PREZEC/2026', '1.5.0.0'];
+        yield 'DZMH' => ['dzmh-1.5/DZMH25_1_5.xsd', 'http://schemas.cssz.cz/JMHZ/dotazNaStav/2025', '1.5.0.0'];
+        yield 'ZREZAM27' => ['zrezam-1.5/ZREZAM27_1_5.xsd', 'http://schemas.cssz.cz/ZREZAM/2027', '1.5.0.0'];
+    }
+
+    #[DataProvider('namespaces2027')]
+    public function testSchemas2027PinTargetNamespaceAndVersion(string $relativePath, string $namespace, string $version): void
+    {
+        $document = new DOMDocument();
+        self::assertTrue($document->load(self::ROOT . '/' . $relativePath, LIBXML_NONET));
+        $schema = $document->documentElement;
+        self::assertNotNull($schema);
+        self::assertSame($namespace, $schema->getAttribute('targetNamespace'));
+        self::assertSame($version, $schema->getAttribute('version'));
+    }
+
+    /** Schéma 2027 se musí dát zkompilovat (include/import + typy), ne jen načíst jako XML. */
+    #[DataProvider('entryPoints')]
+    public function testEntryPointCompilesAsAnXmlSchema(string $relativePath): void
+    {
+        $instance = new DOMDocument();
+        $instance->loadXML('<x xmlns="urn:myucto:no-such-namespace"/>');
+        $previous = libxml_use_internal_errors(true);
+        libxml_clear_errors();
+        try {
+            $instance->schemaValidate(self::ROOT . '/' . $relativePath);
+            $messages = array_map(
+                static fn (\LibXMLError $error): string => trim($error->message),
+                libxml_get_errors(),
+            );
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+
+        // Instance schválně nevaliduje; chyby kompilace schématu ale mají jiný text
+        // než "No matching global declaration".
+        foreach ($messages as $message) {
+            self::assertStringNotContainsString('Schemas parser error', $message, $relativePath);
+            self::assertStringNotContainsString('failed to load', $message, $relativePath);
+            self::assertStringNotContainsString('WXS schema', $message, $relativePath);
+        }
+        self::assertNotSame([], $messages, 'Instance cizího jmenného prostoru musí být zamítnuta.');
     }
 
     #[DataProvider('entryPoints')]
@@ -37,7 +103,7 @@ final class JmhzSchemaBundleTest extends TestCase
     public function testEverySchemaIsWellFormedAndHasCompleteLocalDependencies(): void
     {
         $files = $this->schemaFiles();
-        self::assertCount(25, $files);
+        self::assertCount(48, $files);
 
         foreach ($files as $file) {
             $document = new DOMDocument();

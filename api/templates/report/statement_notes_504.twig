@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<style>
+    body { font-family: dejavusans, sans-serif; font-size: 9.5pt; color: #1a1a1a; }
+    h1 { font-size: 15pt; margin: 0 0 1mm; }
+    h2 { font-size: 11pt; margin: 6mm 0 1mm; padding-bottom: 1mm; border-bottom: 1.5px solid #333; }
+    .sub { color: #555; font-size: 9pt; margin-bottom: 4mm; }
+    .legal-intro { font-size: 9pt; color: #444; margin: 2mm 0 1mm; }
+    .category { font-size: 9pt; color: #444; margin-bottom: 5mm; }
+    .section-legal { font-size: 8pt; color: #777; margin: 0 0 2mm; font-style: italic; }
+    .content { margin: 0 0 2mm; }
+    .note-section { page-break-inside: avoid; }
+    .missing { color: #a11; font-weight: bold; }
+    .warning-box { margin-top: 6mm; padding: 2.5mm 3mm; border: 1px solid #a11; color: #a11; font-size: 9pt; }
+    .signature { margin-top: 14mm; }
+    .signature td { width: 50%; padding-top: 10mm; font-size: 9pt; color: #444; }
+    .sigline { border-top: 0.5px solid #666; padding-top: 1mm; margin-right: 20mm; }
+    .disclaimer { margin-top: 8mm; font-size: 8pt; color: #777; border-top: 0.5px solid #ccc; padding-top: 2mm; }
+</style>
+</head>
+<body>
+    <div class="sub">
+        {% for section in notes.sections %}{% if section.key == 'n504_identification' %}{{ section.content|nl2br }}{% endif %}{% endfor %}
+    </div>
+
+    <h1>Příloha k účetní závěrce</h1>
+    <div class="sub">za účetní období od {{ period.starts_on|cz_date }} do {{ period.ends_on|cz_date }}</div>
+
+    <div class="legal-intro">
+        Sestaveno podle § 18 odst. 1 písm. c) zákona č. 563/1991 Sb., o účetnictví, a § 29 a § 30 vyhlášky č. 504/2002 Sb.
+        {{ notes.scope == 'full' ? 'Plný rozsah.' : 'Zkrácený rozsah podle § 30 odst. 7.' }} Peněžní údaje jsou v Kč, není-li u údaje uvedeno jinak.
+    </div>
+    <div class="category">Kategorie účetní jednotky: {{ notes.category_label }}</div>
+
+    {% for s in notes.sections %}
+    <div class="note-section">
+    <h2>{{ s.label }}</h2>
+    <div class="section-legal">{{ s.legal }}</div>
+    <div class="content">
+        {% if s.filled %}
+            {{ s.content|nl2br }}
+        {% else %}
+            <span class="missing">*** NEVYPLNĚNO - povinný údaj přílohy ***</span>
+        {% endif %}
+    </div>
+    </div>
+    {% endfor %}
+
+    {% if notes.missing|length %}
+    <div class="warning-box">
+        Upozornění: příloha není úplná - chybí {{ notes.missing|length }} povinných sekcí.
+        Doplňte je v aplikaci (Účetnictví → Příloha k účetní závěrce) a balíček vygenerujte znovu.
+    </div>
+    {% endif %}
+
+    <table class="signature">
+        <tr>
+            <td><div class="sigline">Sestaveno dne</div></td>
+            <td><div class="sigline">Podpis statutárního orgánu</div></td>
+        </tr>
+    </table>
+
+    <div class="disclaimer">
+        Vygenerováno systémem MyÚčto.cz. „Vyplněno" znamená, že sekce obsahuje text -
+        věcnou správnost formulací ověřte s účetní / daňovým poradcem.
+    </div>
+</body>
+</html>

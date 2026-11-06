@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -52,7 +51,7 @@ final class PayrollSicknessCompensationChainTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
             $this->absences = $container->get(PayrollAbsenceRepository::class);
@@ -190,13 +189,15 @@ final class PayrollSicknessCompensationChainTest extends TestCase
     }
 
     /**
-     * DPN-01: část navazující přes konec čtvrtletí počítá z průměru a pravidel první
-     * části — stejně jako neschopnost zapsaná jedním řádkem přes 31. 3. Vlastní průměr
-     * za další čtvrtletí nepotřebuje a okno pokračuje (25.–31. 3. je 7 dnů, zbývá 1.–7. 4.).
+     * DPN-01: část navazující přes konec čtvrtletí pokračuje v okně první části
+     * (25.–31. 3. je 7 dnů, zbývá 1.–7. 4.) s jejími pravidly, ale dny v dubnu berou
+     * průměr 2. čtvrtletí: průměrný výdělek platí po celé čtvrtletí, ke kterému byl
+     * zjištěn (§ 351 a § 354 odst. 1 ZP). Shodně počítají podaná hlášení PAMICA.
      */
-    public function testContinuationInNextQuarterUsesFirstPartAverage(): void
+    public function testContinuationInNextQuarterUsesThatQuarterAverage(): void
     {
         $averageQ1 = $this->createApprovedAverage(2026, 1);
+        $this->createApprovedAverage(2026, 2, 15_000_000);
         $this->publishWeekdayShifts('2026-03-23', '2026-04-17');
         $this->approve($this->createDpn('2026-03-25', '2026-03-31', $averageQ1));
 
@@ -209,6 +210,22 @@ final class PayrollSicknessCompensationChainTest extends TestCase
             ['2026-04-01', '2026-04-02', '2026-04-03', '2026-04-06', '2026-04-07'],
             array_column($second['calculation']['segments'], 'local_date'),
         );
+        self::assertSame([93_750], array_values(array_unique(array_column($second['calculation']['segments'], 'hourly_average_minor'))));
+    }
+
+    /**
+     * Průměr 2. čtvrtletí vzniká až ze mzdy za březen; neschopnost schválená dřív
+     * na něj nečeká a dny v dubnu počítá z průměru 1. čtvrtletí.
+     */
+    public function testContinuationInNextQuarterFallsBackToFirstPartAverageUntilApproved(): void
+    {
+        $averageQ1 = $this->createApprovedAverage(2026, 1);
+        $this->publishWeekdayShifts('2026-03-23', '2026-04-17');
+        $this->approve($this->createDpn('2026-03-25', '2026-03-31', $averageQ1));
+
+        $second = $this->approve($this->createDpn('2026-04-01', '2026-04-15', null));
+
+        self::assertSame([75_000], array_values(array_unique(array_column($second['calculation']['segments'], 'hourly_average_minor'))));
     }
 
     /**
@@ -484,7 +501,7 @@ final class PayrollSicknessCompensationChainTest extends TestCase
         }
     }
 
-    private function createApprovedAverage(int $year, int $quarter): int
+    private function createApprovedAverage(int $year, int $quarter, int $grossMinor = 12_000_000): int
     {
         $applicationStart = new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, (($quarter - 1) * 3) + 1));
         $response = $this->action->createAverage(
@@ -494,7 +511,7 @@ final class PayrollSicknessCompensationChainTest extends TestCase
                 'applicable_quarter' => $quarter,
                 'decisive_from' => $applicationStart->modify('-3 months')->format('Y-m-d'),
                 'decisive_to' => $applicationStart->modify('-1 day')->format('Y-m-d'),
-                'gross_earnings_minor' => 12_000_000,
+                'gross_earnings_minor' => $grossMinor,
                 'longer_period_allocated_minor' => 0,
                 'worked_minutes' => 9_600,
                 'worked_days' => 60,

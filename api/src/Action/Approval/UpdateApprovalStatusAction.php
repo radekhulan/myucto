@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Approval;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AutoIssueAndSendService;
 use MyInvoice\Service\IpMatcher;
@@ -30,11 +32,14 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class UpdateApprovalStatusAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly AutoIssueAndSendService $autoIssue,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -81,6 +86,15 @@ final class UpdateApprovalStatusAction
                 'decided_by_email' => $user['email'] ?? null,
             ], $ip, $ua);
             return Json::ok($response, ['invoice' => $this->repo->find($id)]);
+        }
+
+        // Schválení konceptu ho rovnou vystaví (číslo, DUZP, zaúčtování), proto platí
+        // stejný zámek období jako u ručního vystavení: klient 403 v uzavíraném
+        // i uzavřeném období, účetní 409 v uzavřeném, správce jen s ?force=1 z relace.
+        // Kontrola je před zápisem rozhodnutí, aby odmítnutí nezanechalo schválený koncept.
+        if (($invoice['status'] ?? '') === 'draft'
+            && ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($invoice), 'invoice', $id))) {
+            return $deny;
         }
 
         // approved → uložit status (volitelný komentář sdílí sloupec rejection_reason),

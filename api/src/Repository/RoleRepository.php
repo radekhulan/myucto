@@ -7,6 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\PermissionCatalog;
+use MyInvoice\Service\License\SeatPolicy;
 
 final class RoleRepository
 {
@@ -162,9 +163,7 @@ final class RoleRepository
             return;
         }
         foreach ($levels as $key => $level) {
-            // Vlastní profil je zápis i u role jen pro čtení — jinak by si
-            // uživatel nezměnil ani heslo. Licenční místo z toho neplyne.
-            if ($key === 'profile') {
+            if (SeatPolicy::isSelfServicePermission((string) $key)) {
                 continue;
             }
             if ($level >= AccessLevel::WRITE->value) {
@@ -176,7 +175,8 @@ final class RoleRepository
     /** @param array<string, mixed> $role */
     private function isLockedSystemRole(array $role): bool
     {
-        return in_array($role['system_key'] ?? null, ['superadmin', 'admin', 'admin_plus'], true);
+        return ($role['role_type'] ?? null) === 'instance_admin'
+            || in_array($role['system_key'] ?? null, ['superadmin', 'admin', 'admin_plus', 'instance_admin'], true);
     }
 
     /** @param array<string, int|string|AccessLevel> $permissions @return array<string, int> */
@@ -192,6 +192,11 @@ final class RoleRepository
             if ($level !== AccessLevel::NONE) $out[(string) $key] = $level->value;
         }
         if ($roleType === 'client') {
+            // Podávání vždy zpřístupní i archiv připravených výkazů; obecný zápis
+            // do výkazů tím klient nezíská, odeslání má samostatné oprávnění.
+            if (isset($out['reports.submissions']) || isset($out['reports.submit'])) {
+                $out['reports.submissions'] = AccessLevel::READ->value;
+            }
             // Klientský sklad nemá obecný zápis; správa karet a expedice jsou
             // samostatné akce, které potřebují čtení jejich podkladů.
             if (isset($out['stock']) || isset($out['stock.items.write']) || isset($out['stock.fulfillment.write'])) {

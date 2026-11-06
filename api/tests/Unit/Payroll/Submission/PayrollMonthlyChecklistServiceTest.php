@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollDeadlineOverviewService;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpStatementService;
 use MyInvoice\Service\Payroll\Submission\HealthInsurance\HealthInsuranceSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessment;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollDeadlineAssessmentService;
 use MyInvoice\Service\Payroll\Submission\PayrollMonthlyAgendaDutyService;
 use MyInvoice\Service\Payroll\Submission\PayrollMonthlyChecklistService;
@@ -60,11 +62,12 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
     }
 
     /**
-     * Bez brány a bez doložené datové schránky appka slib odeslání dát
-     * NEMŮŽE — položka proto musí nést jednovětý DŮVOD, ne prázdné
-     * „nepodporováno".
+     * Bez brány a bez uloženého Mobilního klíče se datovkou odeslat DÁ:
+     * jménem a heslem nebo SMS kódem bez čehokoli uloženého. Dřív tu svítilo
+     * „firma nemá odesílací bránu — odešlete ručně" a tlačítko Odeslat
+     * spadlo na chybějící podpisový certifikát VREP.
      */
-    public function testGeneratedJmhzWithoutTransportIsManualWithReason(): void
+    public function testGeneratedJmhzWithoutCertificateIsSentViaDataBox(): void
     {
         $service = $this->service(
             submissionRows: [$this->submissionRow(
@@ -75,9 +78,34 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         );
 
         $item = $this->onlyItem($service, 'submission');
-        self::assertSame('manual', $item['action']['kind']);
-        self::assertNotNull($item['action']['reason']);
-        self::assertStringContainsString('ručně', $item['action']['reason']);
+        self::assertSame('send', $item['action']['kind']);
+        self::assertNull($item['action']['reason']);
+        self::assertSame(PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL, $item['dispatch_mode']);
+        self::assertSame([PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL], $item['dispatch_modes']);
+        self::assertSame('datová schránka', $item['channel']['label']);
+    }
+
+    /**
+     * Se zvoleným podpisovým certifikátem zůstává výchozí VREP a datovka je
+     * na výběr. Sloupec „Jakou cestou" pak nesmí tvrdit datovou schránku.
+     */
+    public function testJmhzWithCertificateDefaultsToVrepAndOffersDataBox(): void
+    {
+        $service = $this->service(
+            submissionRows: [$this->submissionRow(
+                agendaCode: JmhzSubmissionBridgeService::AGENDA_CODE,
+                latestSubmissionStatus: 'ready',
+            )],
+            signingProfile: true,
+        );
+
+        $item = $this->onlyItem($service, 'submission');
+        self::assertSame(PayrollDispatchCapabilityCatalog::MODE_VREP_JMHZ, $item['dispatch_mode']);
+        self::assertSame(
+            [PayrollDispatchCapabilityCatalog::MODE_VREP_JMHZ, PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL],
+            $item['dispatch_modes'],
+        );
+        self::assertStringContainsString('VREP', $item['channel']['label']);
     }
 
     /** ELDP nemá zapojený transport vůbec — appka XML jen sestaví. */
@@ -122,10 +150,10 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
     }
 
     /**
-     * A když firma ani bránu, ani doloženou schránku nemá, je to `manual`
-     * s jednou konkrétní větou — ne prázdné „nepodporováno".
+     * Ani bez brány a doložené schránky to není `manual`: jménem a heslem
+     * nebo SMS se k datovce přihlásí kdokoli, kdo ke schránce má přístup.
      */
-    public function testPreparedHzupnWithoutTransportIsManualWithReason(): void
+    public function testPreparedHzupnWithoutStoredTransportStillOffersSend(): void
     {
         $service = $this->service(
             submissionRows: [$this->submissionRow(agendaCode: 'HZUPN', latestSubmissionStatus: 'ready')],
@@ -133,9 +161,9 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         );
 
         $item = $this->onlyItem($service, 'submission');
-        self::assertSame('manual', $item['action']['kind']);
+        self::assertSame('send', $item['action']['kind']);
         self::assertSame('/payroll/submissions/sickness', $item['action']['path']);
-        self::assertStringContainsString('ručně', $item['action']['reason']);
+        self::assertStringContainsString('zvolíte při odeslání', $item['channel']['note']);
     }
 
     /**
@@ -523,6 +551,22 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         self::assertTrue($this->onlyItem($service, 'submission')['done']);
     }
 
+    /** JMHZ podané přes VREP nemá odchozí zprávu; sloupec nesmí tvrdit datovou schránku. */
+    public function testFiledJmhzShowsTheChannelItActuallyWentThrough(): void
+    {
+        $row = $this->submissionRow(
+            agendaCode: JmhzSubmissionBridgeService::AGENDA_CODE,
+            latestSubmissionStatus: 'accepted',
+            obligationStatus: 'fulfilled',
+        );
+        $row['latest_submission']['channel'] = 'vrep_apep';
+
+        $item = $this->onlyItem($this->service(submissionRows: [$row]), 'submission');
+
+        self::assertStringContainsString('VREP', (string) $item['channel']['label']);
+        self::assertStringNotContainsString('datová schránka', (string) $item['channel']['label']);
+    }
+
     /**
      * Odeslaný přehled VZP: dřív u něj svítila věta „firma nemá nastavenou
      * odesílací bránu ani datovou schránku", přestože zpráva právě odešla
@@ -662,6 +706,7 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
         array $agendaDuties = [],
         array $outboxes = [],
         array $healthRows = [],
+        bool $signingProfile = false,
     ): PayrollMonthlyChecklistService {
         $submissions = $this->createStub(PayrollSubmissionRepository::class);
         $submissions->method('listOverview')->willReturnCallback(
@@ -703,7 +748,16 @@ final class PayrollMonthlyChecklistServiceTest extends TestCase
             new PayrollStatutoryAgendaCatalog(),
             $transportAvailability,
             $duties,
+            signingProfiles: $this->signingProfiles($signingProfile),
         );
+    }
+
+    private function signingProfiles(bool $present): PayrollSigningProfileRepository
+    {
+        $profiles = $this->createStub(PayrollSigningProfileRepository::class);
+        $profiles->method('find')->willReturn($present ? ['credential_id' => 1] : null);
+
+        return $profiles;
     }
 
     /** @return array<string,mixed> */

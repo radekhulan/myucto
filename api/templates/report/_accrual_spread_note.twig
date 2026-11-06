@@ -1,0 +1,7 @@
+{# Poznámka k výkazu s průběžným časovým rozlišením mimo deník (volba výkazu). #}
+{% if accrual_spread is defined and accrual_spread and accrual_spread.applied %}
+<div class="header-scope"><strong>Průběžné časové rozlišení mimo deník.</strong>
+Náklady a výnosy dokladů s obdobím od–do jsou rozložené poměrně podle dnů do rozvahového dne, zbytek je vykázán jako
+náklady příštích období ({{ accrual_spread.prepaid_expense|cz_money }} Kč) a výnosy příštích období ({{ accrual_spread.deferred_revenue|cz_money }} Kč).
+Úprava není zaúčtovaná v deníku, nejde o výkaz účetní závěrky.</div>
+{% endif %}

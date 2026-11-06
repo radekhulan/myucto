@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -44,7 +43,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
         } catch (\Throwable $e) {
@@ -235,6 +234,134 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         ]);
 
         self::assertSame(409, $response['status']);
+    }
+
+    /**
+     * Průměr na čtvrtletí, kdy vztah vůbec netrval (vztah od 10. 5. 2026, průměr
+     * pro 1. čtvrtletí), je omyl: JMHZ ho nepoužije a u správného vztahu chybí.
+     */
+    public function testAverageForQuarterBeforeEmploymentStartIsRejected(): void
+    {
+        $this->startEmploymentOn('2026-05-10');
+
+        $response = $this->call('createAverage', 'POST', $this->averageBody(2026, 1));
+
+        self::assertSame(422, $response['status']);
+        self::assertSame('validation_failed', $response['body']['error']['code'] ?? $response['body']['error'] ?? null);
+        self::assertStringContainsString('10. 5. 2026', json_encode($response['body'], JSON_UNESCAPED_UNICODE));
+        self::assertStringContainsString('1. 1. 2026', json_encode($response['body'], JSON_UNESCAPED_UNICODE));
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM payroll_average_earning_snapshots WHERE employment_id = ?');
+        $count->execute([$this->employmentId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+    }
+
+    public function testAverageForQuarterAfterEmploymentEndIsRejected(): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments SET end_date = "2025-12-31" WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, $this->employmentId]);
+
+        self::assertSame(422, $this->call('createAverage', 'POST', $this->averageBody(2026, 1))['status']);
+        self::assertSame(201, $this->call('createAverage', 'POST', $this->averageBody(2025, 4))['status']);
+    }
+
+    public function testBulkSkipsEmploymentThatDoesNotExistInTheQuarter(): void
+    {
+        $this->startEmploymentOn('2026-05-10');
+
+        $response = $this->call('createAutomaticAverages', 'POST', [
+            'year' => 2026,
+            'quarter' => 1,
+            'items' => [[
+                'employment_id' => $this->employmentId,
+                'input_version' => str_repeat('0', 64),
+            ]],
+        ]);
+
+        self::assertSame(201, $response['status']);
+        self::assertSame([], $response['body']['averages']);
+    }
+
+    /**
+     * Chybějící schválený průměr se musí ukázat PŘED během, ne až u zmrazení JMHZ.
+     */
+    public function testReadinessProbeReportsMissingAverageWithEmployeeName(): void
+    {
+        $probe = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
+        $entry = static fn (int $employmentId, ?array $average): array => [
+            'employment' => ['id' => $employmentId],
+            'inputs' => [['amount_minor' => 100_000]],
+            'average_earning' => $average,
+        ];
+        $snapshot = ['people' => [[
+            'employee' => ['id' => $this->employeeId],
+            'employments' => [$entry($this->employmentId, null)],
+        ]]];
+
+        $findings = $probe->inspect($this->supplierId, '2026-01-01', $snapshot);
+        $found = array_values(array_filter(
+            $findings,
+            static fn (array $finding): bool => $finding['code'] === 'jmhz_average_hourly_earning_missing',
+        ));
+
+        self::assertCount(1, $found);
+        self::assertSame('warning', $found[0]['severity']);
+        self::assertStringContainsString('Syntetický zaměstnanec', $found[0]['message']);
+        self::assertSame(
+            '/payroll/absences?tab=averages&year=2026&quarter=1',
+            $found[0]['remediation_path'],
+        );
+
+        // Existující průměr nález nevyvolá.
+        $snapshot['people'][0]['employments'][0] = $entry($this->employmentId, ['id' => 1]);
+        $withAverage = $probe->inspect($this->supplierId, '2026-01-01', $snapshot);
+        self::assertSame([], array_filter(
+            $withAverage,
+            static fn (array $finding): bool => $finding['code'] === 'jmhz_average_hourly_earning_missing',
+        ));
+    }
+
+    /**
+     * Formulář `cinnostKS` (scénář 3, společník s. r. o.) pole 10345 nemá a zmrazení
+     * ho nežádá. Předběžná kontrola se nesmí ptát na průměr, který hlášení nepotřebuje.
+     */
+    public function testReadinessProbeSkipsMissingAverageWhenScenarioHasNoSuchField(): void
+    {
+        $probe = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
+        $snapshot = fn (string $activityCode, ?string $detailCode): array => ['people' => [[
+            'employee' => ['id' => $this->employeeId],
+            'employments' => [[
+                'employment' => ['id' => $this->employmentId],
+                'term' => ['activity_code' => $activityCode, 'jmhz_relationship_detail_code' => $detailCode],
+                'inputs' => [['amount_minor' => 450_000]],
+                'average_earning' => null,
+            ]],
+        ]]];
+        $missing = static fn (array $findings): array => array_values(array_filter(
+            $findings,
+            static fn (array $finding): bool => $finding['code'] === 'jmhz_average_hourly_earning_missing',
+        ));
+
+        self::assertSame([], $missing($probe->inspect($this->supplierId, '2026-10-01', $snapshot('S', '1'))));
+        self::assertCount(1, $missing($probe->inspect($this->supplierId, '2026-10-01', $snapshot('A', null))));
+    }
+
+    /** @return array<string,mixed> */
+    private function averageBody(int $year, int $quarter): array
+    {
+        $from = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, (($quarter - 1) * 3) + 1)))->modify('-3 months');
+
+        return [
+            'employment_id' => $this->employmentId,
+            'applicable_year' => $year,
+            'applicable_quarter' => $quarter,
+            'decisive_from' => $from->format('Y-m-d'),
+            'decisive_to' => $from->modify('+2 months')->modify('last day of this month')->format('Y-m-d'),
+            'gross_earnings_minor' => 13_500_000,
+            'longer_period_allocated_minor' => 0,
+            'worked_minutes' => 10_800,
+            'worked_days' => 24,
+        ];
     }
 
     public function testUnknownEmploymentIsRejected(): void

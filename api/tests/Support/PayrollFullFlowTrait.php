@@ -74,7 +74,7 @@ trait PayrollFullFlowTrait
 
     private function bootPayrollFullFlow(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $absences = $this->container->get(PayrollAbsenceAction::class);
         $time = $this->container->get(PayrollTimeAction::class);
@@ -797,10 +797,13 @@ trait PayrollFullFlowTrait
         int $dailyMinutes = 480,
     ): ResponseInterface {
         $this->ensureRegularCalendar($employmentId, $dailyMinutes);
-        $monthVersion = $workedDates === []
-            ? $this->timeMonthRowVersion($employmentId, $period)
-            : $this->recordWorkedDays($employmentId, $workedDates, $dailyMinutes);
-        $preview = $this->timeMonthPreview($employmentId, $period);
+        // Mřížka docházky vrací po uložení přenačtený měsíc, náhled se proto bere z něj.
+        $item = $workedDates === []
+            ? $this->timeMonthItem($employmentId, $period)
+            : $this->recordWorkedDaysItem($employmentId, $workedDates, $dailyMinutes);
+        $monthVersion = (int) ($item['month']['row_version'] ?? 0);
+        $preview = $item['jmhz_work_summary']['preview'] ?? null;
+        self::assertIsArray($preview, "Měsíc {$period} vztahu {$employmentId} nemá náhled pracovního souhrnu.");
         $suggestions = $preview['suggestions'];
         $summary = [
             'source_snapshot_sha256' => $preview['source_snapshot_sha256'],
@@ -884,31 +887,59 @@ trait PayrollFullFlowTrait
      */
     private function recordWorkedDays(int $employmentId, array $dates, int $workedMinutes = 480): int
     {
+        if ($dates === []) {
+            return 0;
+        }
+
+        return (int) ($this->recordWorkedDaysItem($employmentId, $dates, $workedMinutes)['month']['row_version'] ?? 0);
+    }
+
+    /**
+     * Dny měsíce jedním uložením mřížky docházky, jak je účetní vyplní v měsíčním
+     * přehledu. Každý den je dál vlastní zápis přes saveEntry(); vrací položku
+     * přenačteného měsíce vztahu.
+     *
+     * @param list<string> $dates neprázdné, dny jednoho měsíce
+     * @return array<string,mixed>
+     */
+    private function recordWorkedDaysItem(int $employmentId, array $dates, int $workedMinutes = 480): array
+    {
+        $period = substr($dates[0], 0, 7);
         // Měsíc už může mít verzi (např. kalendář založený v témže měsíci).
-        $monthVersion = $dates === [] ? 0 : $this->timeMonthRowVersion($employmentId, substr($dates[0], 0, 7));
+        $monthVersion = $this->timeMonthRowVersion($employmentId, $period);
+        $cells = [];
         foreach ($dates as $date) {
             // Posun podle data: v zimních měsících platí +01:00, v letních +02:00.
             $start = new \DateTimeImmutable("{$date} 08:00:00", new \DateTimeZone('Europe/Prague'));
             $end = $start->modify('+' . ($workedMinutes + 30) . ' minutes');
-            $entry = $this->time->entry(
-                $this->request('POST', '/api/payroll/time/entries')->withParsedBody([
-                    'employment_id' => $employmentId,
-                    'starts_at' => $start->format('Y-m-d\TH:i:sP'),
-                    'ends_at' => $end->format('Y-m-d\TH:i:sP'),
-                    'timezone' => 'Europe/Prague',
-                    'category' => 'regular',
-                    'break_minutes' => 30,
-                    'row_version' => 0,
-                    'month_row_version' => $monthVersion,
-                    'supersedes_id' => null,
-                ]),
-                new Response(),
-            );
-            self::assertSame(201, $entry->getStatusCode(), (string) $entry->getBody());
-            $monthVersion = (int) $this->json($entry)['month']['row_version'];
+            $cells[] = [
+                'employment_id' => $employmentId,
+                'starts_at' => $start->format('Y-m-d\TH:i:sP'),
+                'ends_at' => $end->format('Y-m-d\TH:i:sP'),
+                'timezone' => 'Europe/Prague',
+                'category' => 'regular',
+                'break_minutes' => 30,
+                'row_version' => 0,
+                'month_row_version' => $monthVersion,
+                'supersedes_id' => null,
+            ];
         }
-
-        return $monthVersion;
+        $batch = $this->time->entryBatch(
+            $this->request('POST', '/api/payroll/time/entries/batch')
+                ->withQueryParams(['period' => $period, 'employment_id' => (string) $employmentId])
+                ->withParsedBody(['period' => $period, 'cells' => $cells]),
+            new Response(),
+        );
+        self::assertSame(200, $batch->getStatusCode(), (string) $batch->getBody());
+        $body = $this->json($batch);
+        self::assertSame([], $body['failures'], CanonicalJson::encode($body['failures']));
+        self::assertSame(count($dates), $body['saved']);
+        foreach ($body['month']['items'] as $candidate) {
+            if (($candidate['employment']['id'] ?? null) === $employmentId) {
+                return $candidate;
+            }
+        }
+        self::fail("Měsíc {$period} neobsahuje vztah {$employmentId}.");
     }
 
     /** @return array<string,mixed> položka měsíce pro vztah */
@@ -916,7 +947,7 @@ trait PayrollFullFlowTrait
     {
         $overview = $this->time->month(
             $this->request('GET', '/api/payroll/time/month')
-                ->withQueryParams(['period' => $period]),
+                ->withQueryParams(['period' => $period, 'employment_id' => (string) $employmentId]),
             new Response(),
         );
         self::assertSame(200, $overview->getStatusCode(), (string) $overview->getBody());

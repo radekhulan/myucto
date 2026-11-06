@@ -49,6 +49,15 @@ final class PohodaPayrollNamedComponentsTest extends TestCase
         self::assertSame('unknown', PohodaPayrollCatalog::component('J08', 'Proplacení nevyčerpané dovolené (dny)', false)['meaning']);
     }
 
+    /** Odměna z dohody: hodinovou sazbou (D02, D04) i částkou (D01, D03), s pojištěním i bez něj. */
+    public function testAgreementRewardIsAWageComponent(): void
+    {
+        foreach (['D02' => 'hourly_wage', 'D04' => 'hourly_wage', 'D01' => 'task_wage', 'D03' => 'task_wage'] as $number => $kind) {
+            $c = PohodaPayrollCatalog::component($number, 'Dohoda', false);
+            self::assertSame(['component', $kind, 'PAM_' . $number], [$c['meaning'], $c['kind'], $c['code']], $number);
+        }
+    }
+
     /** Doplatek do minima a přeplatek z ročního zúčtování nejsou mzdové složky. */
     public function testComputedOrSettledItemsAreDeliberatelyIgnored(): void
     {

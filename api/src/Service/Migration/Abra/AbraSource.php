@@ -9,6 +9,33 @@ use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
 /** Normalizace hodnot z JSON odpovědí ABRA Flexi. */
 final class AbraSource
 {
+    /** Evidence dokladů: faktury, prodejky a ostatní pohledávky a závazky. */
+    public const DOCUMENT_EVIDENCES = ['faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka'];
+
+    /**
+     * Úvěrový účet: ABRA ho vede jako bankovní účet, ale jeho „zůstatek" je nesplacená
+     * jistina (231, 232, 461). Peníze firmy to nejsou, proto se nepřevádí do banky.
+     */
+    public static function isLoanAccount(mixed $account): bool
+    {
+        return in_array(substr(self::reference($account), 0, 3), ['231', '232', '461'], true);
+    }
+
+    /**
+     * Druh v mapě převodu pro ostatní pohledávku či závazek. Liší se od druhu evidence,
+     * protože {@see \MyInvoice\Service\Accounting\TakenOverRecord} pozná převzatou fakturu
+     * jen podle druhu (`zavazek` = přijatá faktura) a id ostatní položky by si s ní spletl.
+     */
+    public static function otherItemMapKind(string $evidence): string
+    {
+        return 'ostatni-' . $evidence;
+    }
+
+    public static function evidenceOfMapKind(string $kind): string
+    {
+        return str_starts_with($kind, 'ostatni-') ? substr($kind, 8) : $kind;
+    }
+
     /** @return list<array<string,mixed>> */
     public static function rows(array $snapshot, string $evidence, string ...$aliases): array
     {
@@ -53,6 +80,22 @@ final class AbraSource
             return $fallback;
         }
         return '';
+    }
+
+    /**
+     * Zdrojová firma ABRA a cílová firma jsou tatáž účetní jednotka. Chybějící IČO
+     * na kterékoli straně shodu neprokazuje.
+     */
+    public static function sameIco(mixed $source, mixed $target): bool
+    {
+        $source = self::ico($source);
+        $target = self::ico($target);
+        return $source !== '' && $target !== '' && hash_equals($target, $source);
+    }
+
+    public static function ico(mixed $value): string
+    {
+        return ltrim(preg_replace('/\D+/', '', (string) $value) ?: '', '0');
     }
 
     /** `code:EUR`, `ucetni-osnova/311100` a relation objekty převede na vlastní hodnotu. */

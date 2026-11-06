@@ -10,6 +10,8 @@ export const LOCATABLE: Record<string, { type: string, query?: string }> = {
   'document-detail': { type: 'document' },
   'other-item-detail': { type: 'other_item' },
   'other-item-edit': { type: 'other_item' },
+  'accounting-internal-document-detail': { type: 'internal_document' },
+  'accounting-internal-document-edit': { type: 'internal_document' },
   'accounting-cash-edit': { type: 'cash_document' },
   'stock-document-detail': { type: 'stock_document' },
   'stock-sales-order-detail': { type: 'sales_order' },

@@ -1655,11 +1655,18 @@ final class KontrolniHlaseniBuilder
     public static function a2Identification(?string $countryIso2, bool $countryIsEu, ?string $vatId): array
     {
         $none = ['k_stat' => '', 'vatid_dod' => ''];
+        // Identifikační číslo zvláštního režimu OSS pro osoby mimo EU („EU372041333") není
+        // DIČ registrace v členském státě a do A.2 nepatří (dodavatel bez EU registrace).
+        if (preg_match('/^EU\d+$/', preg_replace('/[^A-Z0-9]/', '', strtoupper(trim((string) $vatId))) ?? '') === 1) {
+            return $none;
+        }
         // Sídlo v EU: `k_stat` i číslo bez prefixu určuje registrace ({@see euVatRegistration()}),
         // ne adresa — dodavatel se sídlem v DE registrovaný v AT má `k_stat` AT a číslo U….
         if ($countryIsEu && self::khCountryCode($countryIso2) !== '') {
             $reg = self::euVatRegistration($vatId, $countryIso2);
-            return $reg['vat_id'] === '' ? $none : ['k_stat' => $reg['k_stat'], 'vatid_dod' => $reg['vat_id']];
+            // A.2 je plnění od osoby neusazené v tuzemsku: české DIČ (typicky chybně
+            // vyplněná země kontaktu) identifikací zahraničního dodavatele není.
+            return $reg['vat_id'] === '' || $reg['k_stat'] === 'CZ' ? $none : ['k_stat' => $reg['k_stat'], 'vatid_dod' => $reg['vat_id']];
         }
         // Sídlo mimo EU (nebo neznámé): jediná použitelná identifikace je registrace
         // v členském státě, kterou nese prefix samotného VAT ID.

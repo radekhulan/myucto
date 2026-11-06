@@ -152,7 +152,8 @@ export interface AiProviderInfo {
   deployment?: string | null     // azure_openai
   api_version?: string | null    // azure_openai
   base_url?: string | null       // openai (EU: eu.api.openai.com), ollama
-  has_api_key?: boolean          // ollama (klíč je volitelný; hodnota se nikdy nevrací)
+  workspace_id?: string | null   // anthropic (jen klíč bez přiřazeného workspace)
+  has_api_key?: boolean         // ollama (klíč je volitelný; hodnota se nikdy nevrací)
 }
 
 /** Míra uvažování AI. `default` = neposílat providerovi nic navíc. */
@@ -208,6 +209,8 @@ export interface AiCredentialsPayload {
   api_version?: string
   // openai
   base_url?: string
+  /** anthropic: prázdné = smazat (hlavička anthropic-workspace-id se neposílá). */
+  workspace_id?: string
   // ollama: `base_url` + `default_model` povinné, `api_key` volitelný
   clear_api_key?: boolean
   /** Rozkopírovat do dalších firem uživatele (cílové firmy určuje server). */

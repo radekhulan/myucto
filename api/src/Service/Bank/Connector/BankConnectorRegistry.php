@@ -26,7 +26,7 @@ final class BankConnectorRegistry
                 'label' => 'Česká spořitelna Premium API',
                 'implemented' => isset($this->connectors['csas']),
                 'bank_codes' => ['0800'],
-                'capabilities' => ['statement_import' => true, 'payment_order_submission' => false],
+                'capabilities' => ['statement_import' => true, 'payment_order_submission' => true],
             ],
             [
                 'code' => 'fio',
@@ -80,6 +80,13 @@ final class BankConnectorRegistry
             throw new BankConnectorOperationException('provider_not_implemented');
         }
         return $connector;
+    }
+
+    /** @return list<string> poskytovatelé, jejichž dávka se podepisuje v bance a stav se zjišťuje dotazem */
+    public function signableProviders(): array
+    {
+        return array_values(array_keys(array_filter($this->connectors,
+            static fn (BankConnector $connector): bool => $connector instanceof SignableBankPaymentConnector)));
     }
 
     public function supportsBankCode(string $provider, string $bankCode): bool

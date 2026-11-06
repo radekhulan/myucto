@@ -28,10 +28,13 @@ use MyInvoice\Service\Report\CzechWorkingDays;
  *   její odečtení z pojistného; vykázání v hlášení po 30. 6. 2026 už řádným
  *   uplatněním není.
  *
- * Obě kontroly (164 i 333) jsou v evaluátoru vedené jako `NotEvaluable`,
- * protože potřebují atribut 10006 (datum přijetí podání), který přiděluje až
- * ČSSZ. Uživatel z nich tedy nedostane VŮBEC ŽÁDNÉ varování — tahle třída je
- * to jediné místo, kde se hranice dá vyhodnotit dopředu.
+ * Kontrola 164 je v evaluátoru vedená jako `NotEvaluable`, protože potřebuje
+ * atribut 10006 (datum přijetí podání), který přiděluje až ČSSZ. Kontrola 333
+ * má od katalogu 1.4.2.11 v atributech a pravidle povinnost příznaku
+ * primárního vztahu (shodně s 332) a evaluátor ji vyhodnocuje podle pravidla;
+ * časové omezení slevy, o kterém mluví její název a hláška, z hotového XML
+ * nevyhodnotí. Uživatel o hranici 30. 6. 2026 tedy jinak nedostane žádné
+ * varování — tahle třída je to jediné místo, kde se dá vyhodnotit dopředu.
  */
 final class OzuspojClaimDeadlinePolicy
 {

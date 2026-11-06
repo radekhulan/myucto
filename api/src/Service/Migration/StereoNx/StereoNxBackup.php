@@ -14,6 +14,7 @@ final class StereoNxBackup
     private const MAX_TABLE_BYTES = 64 * 1024 * 1024;
     private const MAX_TOTAL_BYTES = 1024 * 1024 * 1024;
     private ?array $companyIdentityCache = null;
+    private bool $matchBankAccountSeries = false;
 
     private function __construct(
         private readonly Nx1Database $database,
@@ -107,13 +108,67 @@ final class StereoNxBackup
         return (int) substr($this->prefix, strlen('Firma_'), -1);
     }
 
+    /** @return array{requires_confirmation:bool,ambiguous:bool,assignments:list<array{account_index:int,account_label:string,series:string}>,missing_accounts:int,unmatched_series:list<string>} */
+    public function bankAccountSeriesPlan(): array
+    {
+        $read = fn (string $table): array => $this->database->hasTable($table)
+            ? iterator_to_array($this->database->table($table)->rows(), false) : [];
+        return StereoNxBankAccountSeries::plan($read('LFirmaUc'), $read('CBanka'));
+    }
+
+    public function withBankAccountSeriesMatching(bool $confirmed): self
+    {
+        $copy = clone $this;
+        $copy->matchBankAccountSeries = $confirmed;
+        if ($confirmed) $copy->assertBankAccountSeriesReady();
+        return $copy;
+    }
+
+    /** @return list<array{level:string,code:string,message:string}> */
+    public function bankAccountSeriesWarnings(): array
+    {
+        if (!$this->matchBankAccountSeries) return [];
+        $warnings = [];
+        foreach ($this->bankAccountSeriesPlan()['assignments'] as $assignment) {
+            $warnings[] = ['level' => 'warning', 'code' => 'bank_account_series_confirmed',
+                'message' => sprintf('Potvrzeno přiřazení bankovní řady „%s“ ke zdrojovému účtu „%s“.',
+                    $assignment['series'], $assignment['account_label'])];
+        }
+        return $warnings;
+    }
+
+    /** Volá příprava importu; samotné čtení nepotvrzené zálohy zůstává beze změn. */
+    public function assertBankAccountSeriesReady(): void
+    {
+        $plan = $this->bankAccountSeriesPlan();
+        if ($plan['ambiguous']) {
+            throw new StereoNxException('bank_account_series_ambiguous',
+                'Bankovní řady nelze jednoznačně přiřadit vlastním účtům. Doplňte nebo opravte řady účtů ve zdrojové firmě Stereo NX a vytvořte novou zálohu.');
+        }
+        if ($plan['requires_confirmation'] && !$this->matchBankAccountSeries) {
+            throw new StereoNxException('bank_account_series_confirmation_required',
+                'Vlastnímu bankovnímu účtu chybí řada výpisů. Před importem potvrďte navržené přiřazení řady ke zdrojovému účtu.');
+        }
+    }
+
     /** @return \Generator<array<string,mixed>> */
     public function rows(string $table): \Generator
     {
         if (!$this->database->hasTable($table)) {
             throw new StereoNxException('table_missing', 'Chybí požadovaná tabulka Stereo NX: ' . $table);
         }
-        yield from $this->database->table($table)->rows();
+        if ($table !== 'LFirmaUc' || !$this->matchBankAccountSeries) {
+            yield from $this->database->table($table)->rows();
+            return;
+        }
+        $this->assertBankAccountSeriesReady();
+        $assignments = array_column($this->bankAccountSeriesPlan()['assignments'], 'series', 'account_index');
+        $index = 0;
+        foreach ($this->database->table($table)->rows() as $row) {
+            if (isset($assignments[$index])) $row['DoklRada'] = $assignments[$index];
+            yield $row;
+            $index++;
+        }
     }
 
     /** Historické sazby patří programu, nikoli vybrané firmě. Starší záloha je nemusí obsahovat.

@@ -197,6 +197,49 @@ final class PayrollEmploymentValidatorTest extends TestCase
         );
     }
 
+    /**
+     * Plná adresa místa výkonu (JMHZ 2027, 10550 až 10554) ve tvaru XSD 1.5.0.3;
+     * bez kódu obce v ČR se uvést nesmí. Státní zástupce (10587) je ano/ne/neuvedeno.
+     */
+    public function testWorkplaceAddressAndStateProsecutorFollowTheDataSentence(): void
+    {
+        $terms = $this->terms();
+        $terms['work_place'] = 'Hlavní město Praha';
+        $terms['jmhz_workplace_municipality_code'] = '554782';
+        $terms['jmhz_workplace_country_code'] = 'CZ';
+        $terms['jmhz_workplace_street'] = ' Na Příkopě ';
+        $terms['jmhz_workplace_house_number'] = '858';
+        $terms['jmhz_workplace_orientation_number'] = '20';
+        $terms['jmhz_workplace_postal_code'] = '110 00';
+        $terms['jmhz_state_prosecutor'] = 1;
+
+        $result = $this->validator()->terms($terms);
+
+        self::assertSame('Na Příkopě', $result['jmhz_workplace_street']);
+        self::assertSame('858', $result['jmhz_workplace_house_number']);
+        self::assertSame('11000', $result['jmhz_workplace_postal_code']);
+        self::assertNull($result['jmhz_workplace_address_point_code']);
+        self::assertTrue($result['jmhz_state_prosecutor']);
+        self::assertNull($this->validator()->terms($this->terms())['jmhz_state_prosecutor']);
+
+        foreach ([
+            ['jmhz_workplace_postal_code', '1100'],
+            ['jmhz_workplace_house_number', '0'],
+        ] as [$key, $value]) {
+            $invalid = $terms;
+            $invalid[$key] = $value;
+            try {
+                $this->validator()->terms($invalid);
+                self::fail("{$key} = {$value} neměl projít.");
+            } catch (\InvalidArgumentException) {
+            }
+        }
+        $withoutMunicipality = $this->terms();
+        $withoutMunicipality['jmhz_workplace_postal_code'] = '11000';
+        $this->expectException(\InvalidArgumentException::class);
+        $this->validator()->terms($withoutMunicipality);
+    }
+
     public function testFutureJmhzEvidenceCanBePlannedButPredatesOverlayCannot(): void
     {
         $future = $this->terms();

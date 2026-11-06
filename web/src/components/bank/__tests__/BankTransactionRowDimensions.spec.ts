@@ -106,6 +106,19 @@ describe('BankTransactionRow — dimenze pohybu', () => {
     wrapper.unmount()
   })
 
+  it.each(['desktop', 'mobile'] as const)('pohyb přiřazený ostatní položce ukáže položku místo „Bez dokladu" (%s)', async layout => {
+    const row = tx()
+    row.posting = { status: 'posted', outside_saldo: true, journal_entry_id: 9 }
+    row.matched_other_items = [{ other_item_id: 4, document_no: 'NAJ00006/2026', side: 'payable', partner_name: 'Syntetický dopravce', amount: 1210 }]
+    const wrapper = mountRow(layout, row)
+    await flushPromises()
+    expect(wrapper.text()).toContain('bank.match_status.other_item')
+    expect(wrapper.text()).not.toContain('bank.match_status.outside_saldo')
+    expect(wrapper.get('[data-test="tx-other-item"] a').attributes('href')).toBe('/other-items/4')
+    expect(wrapper.text()).toContain('NAJ00006/2026')
+    wrapper.unmount()
+  })
+
   it('při vypnutých dimenzích nic nenabízí ani neukazuje', async () => {
     m.enabled = false
     const wrapper = mountRow('desktop', tx({ 1: 5 }))

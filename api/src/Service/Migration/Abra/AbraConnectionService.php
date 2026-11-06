@@ -107,6 +107,7 @@ final class AbraConnectionService
         foreach ($jobs as $job) {
             if (in_array($job['status'], ['queued', 'running'], true)) { $active = (int) $job['id']; break; }
         }
+        $target = $this->targetCompany($supplierId);
         return [
             'configured' => $row !== null,
             'imported' => $row !== null && $row['imported_at'] !== null,
@@ -117,6 +118,8 @@ final class AbraConnectionService
             'active_job_id' => $active,
             'warnings' => array_slice(array_values(array_unique(array_merge($discoveryWarnings, $syncState['warnings'] ?? []))), 0, 50),
             'source_company' => $discovery['source_company'] ?? null,
+            'target_company' => $target,
+            'ico_mismatch' => $row !== null && !AbraSource::sameIco($discovery['source_company']['ico'] ?? '', $target['ico']),
             'connection_version' => (int) ($row['connection_version'] ?? 0),
             'sync_state' => $syncState,
             'catalog' => $syncState['addons']['catalog'] ?? null,
@@ -212,6 +215,15 @@ final class AbraConnectionService
             'base_currency' => strtoupper(preg_replace('/^code:/', '', (string) ($settings['mena'] ?? '')))];
         if ($company['ico'] === '') $warnings[] = 'Zdroj neposkytl IČO firmy. Před převodem je nutné ověřit identitu účetní jednotky.';
         return ['years' => array_values($years), 'source_company' => $company, 'warnings' => array_values(array_unique($warnings))];
+    }
+
+    /** @return array{name:string,ico:string} */
+    private function targetCompany(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT company_name, ic FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        return ['name' => (string) ($row['company_name'] ?? ''), 'ico' => (string) ($row['ic'] ?? '')];
     }
 
     private function row(int $supplierId): ?array

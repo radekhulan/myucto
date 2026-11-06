@@ -48,7 +48,7 @@ final class DphBookAction
         try {
             $result = $this->builder->build($supplierId, $year, $month, $this->parsePeriodType($request));
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
         return Json::ok($response, $result);
     }
@@ -68,7 +68,7 @@ final class DphBookAction
             $data = $this->builder->build($supplierId, $year, $month, $this->parsePeriodType($request));
             $pdf = $this->renderer->render($data);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
         $userId = (int) ($user['id'] ?? 0);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

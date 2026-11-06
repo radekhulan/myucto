@@ -81,6 +81,7 @@ final class CzechPayrollRulesets2026
             self::compensationAverages($technicalReview),
             self::travelAllowancesUntilMay($technicalReview),
             self::travelAllowancesFromJune($technicalReview),
+            self::travelAllowancesFromOctober($technicalReview),
             self::enforcementDeductions($technicalReview),
             ...self::deadlines($technicalReview),
             self::codebooks($technicalReview),
@@ -459,7 +460,8 @@ final class CzechPayrollRulesets2026
      * Tuzemské cestovní náhrady. Časová pásma, krácení za bezplatné jídlo a
      * zaokrouhlení plynou přímo ze zákoníku práce, peněžní sazby z vyhlášky
      * č. 573/2025 Sb. Novela č. 78/2026 Sb. zvedla od 1. 6. 2026 průměrnou cenu
-     * motorové nafty, proto má rok dvě neprolínající se účinné verze.
+     * motorové nafty a novela č. 175/2026 Sb. od 1. 10. 2026 průměrnou cenu
+     * benzinu 95, proto má rok tři neprolínající se účinné verze.
      */
     private static function travelAllowancesUntilMay(
         RulesetTechnicalReview $technicalReview,
@@ -470,6 +472,7 @@ final class CzechPayrollRulesets2026
             '2026-01-01',
             '2026-05-31',
             3_410,
+            3_470,
             [self::labourCodeTravel(), self::travelAllowanceDecree2026()],
             $technicalReview,
         );
@@ -482,12 +485,33 @@ final class CzechPayrollRulesets2026
             'cz-payroll-2026.travel-allowances.v2',
             '2026.2.0',
             '2026-06-01',
-            '2026-12-31',
+            '2026-09-30',
             4_450,
+            3_470,
             [
                 self::labourCodeTravel(),
                 self::travelAllowanceDecree2026(),
                 self::travelAllowanceDieselAmendment2026(),
+            ],
+            $technicalReview,
+        );
+    }
+
+    private static function travelAllowancesFromOctober(
+        RulesetTechnicalReview $technicalReview,
+    ): PayrollRulesetVersion {
+        return self::travelAllowances(
+            'cz-payroll-2026.travel-allowances.v3',
+            '2026.3.0',
+            '2026-10-01',
+            '2026-12-31',
+            4_450,
+            4_180,
+            [
+                self::labourCodeTravel(),
+                self::travelAllowanceDecree2026(),
+                self::travelAllowanceDieselAmendment2026(),
+                self::travelAllowancePetrolAmendment2026(),
             ],
             $technicalReview,
         );
@@ -500,6 +524,7 @@ final class CzechPayrollRulesets2026
         string $effectiveFrom,
         string $effectiveTo,
         int $dieselPerLitreMinor,
+        int $petrol95PerLitreMinor,
         array $sources,
         RulesetTechnicalReview $technicalReview,
     ): PayrollRulesetVersion {
@@ -510,7 +535,7 @@ final class CzechPayrollRulesets2026
             ),
             'fuel.average_price.diesel_per_litre' => PayrollRuleValue::moneyMinor($dieselPerLitreMinor),
             'fuel.average_price.electricity_per_kwh' => PayrollRuleValue::moneyMinor(720),
-            'fuel.average_price.petrol_95_per_litre' => PayrollRuleValue::moneyMinor(3_470),
+            'fuel.average_price.petrol_95_per_litre' => PayrollRuleValue::moneyMinor($petrol95PerLitreMinor),
             'fuel.average_price.petrol_98_per_litre' => PayrollRuleValue::moneyMinor(3_900),
             'meal_allowance.band_1.free_meal_reduction_rate' => PayrollRuleValue::rate('0.70'),
             'meal_allowance.band_1.minimum' => PayrollRuleValue::moneyMinor(15_500),
@@ -959,6 +984,16 @@ final class CzechPayrollRulesets2026
             'MPSV: vyhláška č. 78/2026 Sb. — změna průměrné ceny motorové nafty od 1. 6. 2026',
             'https://mpsv.gov.cz/rust-cen-nafty-se-promita-do-cestovnich-nahrad-mpsv-aktualizuje-vyhlasku',
             self::RETRIEVED_ON,
+        );
+    }
+
+    private static function travelAllowancePetrolAmendment2026(): RulesetSource
+    {
+        return new RulesetSource(
+            'mpsv-travel-allowance-petrol-2026',
+            'MPSV: vyhláška č. 175/2026 Sb. — změna průměrné ceny benzinu 95 od 1. 10. 2026',
+            'https://www.zakonyprolidi.cz/cs/2026-175',
+            '2026-10-28',
         );
     }
 

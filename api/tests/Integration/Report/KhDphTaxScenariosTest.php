@@ -2069,6 +2069,79 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertStringNotContainsString('TEXT-ROW-0 obsahuje neklasifikovaný', implode(' | ', $result['warnings']));
     }
 
+    /**
+     * Prodej víceúčelového poukazu (§ 37c, skladová karta `stored_value`, sazba 0 %) není
+     * předmětem daně: nejde do přiznání a není to zapomenutá klasifikace. Varování
+     * „neklasifikovaný řádek" se ho netýká, běžný řádek téhož dokladu se vykáže dál.
+     */
+    public function testMultiPurposeVoucherSaleIsOutsideVatWithoutWarning(): void
+    {
+        $d = sprintf('%04d-%02d-15', self::YEAR, self::MONTH);
+        $customer = $this->client('Odběratel poukazu', $this->czId, 'CZ58585858', customer: true);
+        $this->sale('VOUCHER-0', $customer, null, false, $d, $d, [[700, 147, 21]]);
+        $id = end($this->invoiceIds);
+        $pdo = $this->db->pdo();
+        $rate = (int) $pdo->query('SELECT vat_rate_id FROM invoice_items WHERE invoice_id = ' . (int) $id)->fetchColumn();
+        $pdo->prepare("INSERT INTO stock_items (supplier_id, sku, name, eet_item_kind) VALUES (?, ?, 'Poukaz 1000 Kč', 'stored_value')")
+            ->execute([$this->supplierId, uniqid('POUKAZ-')]);
+        $stockItemId = (int) $pdo->lastInsertId();
+        try {
+            $pdo->prepare(
+                "INSERT INTO invoice_items (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                                            vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index, stock_item_id)
+                 VALUES (?, 'Poukaz 1000 Kč', 1, 'ks', 1000, ?, 0, 1000, 0, 1000, 1, ?)"
+            )->execute([$id, $rate, $stockItemId]);
+
+            $result = $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+
+            $this->assertStringNotContainsString('VOUCHER-0 obsahuje neklasifikovaný', implode(' | ', $result['warnings']));
+            $dp = (new \SimpleXMLElement($result['xml']))->DPHDP3;
+            $this->assertSame('700', (string) $dp->Veta1['obrat23']);
+            $this->assertSame('', (string) $dp->Veta4['pln_osv']);
+        } finally {
+            $pdo->prepare('DELETE FROM invoice_items WHERE stock_item_id = ?')->execute([$stockItemId]);
+            $pdo->prepare('DELETE FROM stock_items WHERE id = ?')->execute([$stockItemId]);
+        }
+    }
+
+    /**
+     * Řádek víceúčelového poukazu do evidence DPH nevstoupí ani s kódem klasifikace
+     * (data z doby před validací), ani přes kód hlavičky. Hodnota dokladu pro limit KH
+     * je hodnota plnění: poukaz za 10 000 Kč nepřesune nápoj za 847 Kč do A.4.
+     */
+    public function testMultiPurposeVoucherLineNeverReachesReturnOrKhLimit(): void
+    {
+        $d = sprintf('%04d-%02d-16', self::YEAR, self::MONTH);
+        $customer = $this->client('Odběratel poukazu s DIČ', $this->czId, 'CZ11111118', customer: true);
+        $this->sale('VOUCHER-1', $customer, '1', false, $d, $d, [[700, 147, 21]]);
+        $id = (int) end($this->invoiceIds);
+        $pdo = $this->db->pdo();
+        $rate = (int) $pdo->query('SELECT vat_rate_id FROM invoice_items WHERE invoice_id = ' . $id)->fetchColumn();
+        $pdo->prepare("INSERT INTO stock_items (supplier_id, sku, name, eet_item_kind) VALUES (?, ?, 'Poukaz 10 000 Kč', 'stored_value')")
+            ->execute([$this->supplierId, uniqid('POUKAZ-')]);
+        $stockItemId = (int) $pdo->lastInsertId();
+        try {
+            $pdo->prepare(
+                "INSERT INTO invoice_items (invoice_id, description, quantity, unit, unit_price_without_vat, vat_rate_id,
+                                            vat_rate_snapshot, total_without_vat, total_vat, total_with_vat, order_index,
+                                            vat_classification_code, stock_item_id)
+                 VALUES (?, 'Poukaz 10 000 Kč', 1, 'ks', 10000, ?, 0, 10000, 0, 10000, 1, '1', ?)"
+            )->execute([$id, $rate, $stockItemId]);
+            $pdo->prepare('UPDATE invoices SET total_without_vat = total_without_vat + 10000, total_with_vat = total_with_vat + 10000 WHERE id = ?')
+                ->execute([$id]);
+
+            $dp = (new \SimpleXMLElement($this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly')['xml']))->DPHDP3;
+            $this->assertSame('700', (string) $dp->Veta1['obrat23'], 'Poukaz s kódem 1 nesmí na ř. 1.');
+
+            $kh = (new \SimpleXMLElement($this->kh->build($this->supplierId, self::YEAR, self::MONTH)['xml']))->DPHKH1;
+            $this->assertCount(0, $kh->VetaA4, 'Doklad s plněním 847 Kč patří do A.5, poukaz limit nezvedá.');
+            $this->assertSame('700.00', (string) $kh->VetaA5['zakl_dane1']);
+        } finally {
+            $pdo->prepare('DELETE FROM invoice_items WHERE stock_item_id = ?')->execute([$stockItemId]);
+            $pdo->prepare('DELETE FROM stock_items WHERE id = ?')->execute([$stockItemId]);
+        }
+    }
+
     public function testCreditNoteAndUnclassifiedZeroRateProduceWarnings(): void
     {
         $d = sprintf('%04d-%02d-14', self::YEAR, self::MONTH);
@@ -2414,9 +2487,10 @@ final class KhDphTaxScenariosTest extends TestCase
     }
 
     /**
-     * Ř. 43 (odpočet ze samovyměření) EPO kontroluje proti součtu ř. 3–13 TAK, JAK JSOU
-     * VYPLNĚNÉ, tedy zaokrouhlených na celé Kč (propustná chyba č. 90). Hlášený případ:
-     * ř. 5 = 50 646 a ř. 12 = 539, ale ř. 43 = round(51 185,53) = 51 186.
+     * Ř. 43 (odpočet ze samovyměření) je ve výši daně přiznané na ř. 3–13 TAK, JAK JSOU
+     * VYPLNĚNÉ, tedy zaokrouhlených na celé Kč (§ 72 odst. 2, § 73 odst. 1 písm. b) ZDPH).
+     * Hlášený případ: ř. 5 = 50 646 a ř. 12 = 539, aplikace dřív dávala ř. 43 =
+     * round(51 185,53) = 51 186.
      */
     public function testSelfAssessmentDeductionEqualsSumOfRoundedOutputLines(): void
     {
@@ -2446,6 +2520,40 @@ final class KhDphTaxScenariosTest extends TestCase
         $this->assertSame((string) $dp->Veta6['dan_zocelk'], (string) $dp->Veta6['odp_zocelk'],
             'samovyměření se musí vyrušit (ř. 62 = ř. 63)');
         $this->assertFalse(isset($dp->Veta6['dano_da']), 'žádná vlastní daň z pouhého samovyměření');
+        $this->assertSame([], array_values(array_filter(
+            $res['warnings'],
+            static fn (string $w): bool => str_starts_with($w, 'Ř. 43'),
+        )), 'ze základu vyjde totéž (243 740 × 21 % = 51 185), EPO nic nevytkne');
+    }
+
+    /**
+     * #264: ř. 3 = 5 158 / 1 083 a ř. 5 = 107 / 22. Odpočet zůstává 1 105 (přiznaná daň),
+     * EPO ze základu počítá 5 265 × 21 % = 1 106 a vytkne propustnou chybu. Náhled to
+     * řekne předem a hodnotu nemění.
+     */
+    public function testSelfAssessmentDeductionWarnsAboutEpoBaseRecalculation(): void
+    {
+        $d = fn (int $day) => sprintf('%04d-%02d-%02d', self::YEAR, self::MONTH, $day);
+        $goods = $this->client('DE zboží zaokrouhlení', $this->deId, 'DE123456781', vendor: true);
+        $service = $this->client('DE služba zaokrouhlení 264', $this->deId, 'DE123456782', vendor: true);
+        $this->purchase('P-2099-2641', $goods, '23', true, 'invoice', $d(10), $d(10), [[5157.60, 0, 21]]);
+        $this->purchase('P-2099-2642', $service, '24e', false, 'invoice', $d(10), $d(10), [[106.80, 0, 21]]);
+
+        $res = $this->dph->build($this->supplierId, self::YEAR, self::MONTH, 'monthly');
+        $dp = (new \SimpleXMLElement($res['xml']))->DPHDP3;
+        $this->assertSame('1083', (string) $dp->Veta1['dan_pzb23']);
+        $this->assertSame('22', (string) $dp->Veta1['dan_psl23_e']);
+        $this->assertSame('5265', (string) $dp->Veta4['nar_zdp23']);
+        $this->assertSame('1105', (string) $dp->Veta4['od_zdp23'], 'odpočet = přiznaná daň, ne 21 % ze základu');
+
+        $notes = array_values(array_filter(
+            $res['warnings'],
+            static fn (string $w): bool => str_starts_with($w, 'Ř. 43'),
+        ));
+        $this->assertCount(1, $notes);
+        $this->assertStringContainsString('1 105 Kč', $notes[0]);
+        $this->assertStringContainsString('5 265 Kč × 21 % = 1 106 Kč', $notes[0]);
+        $this->assertStringContainsString('propustnou', $notes[0]);
     }
 
     /**

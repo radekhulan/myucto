@@ -174,6 +174,73 @@ final class PasskeySessionTransitionServiceTest extends TestCase
         self::assertSame(2, $savepointCalls);
     }
 
+    /**
+     * Klíč, kterým správce po registraci neumí ověřit, se odvolá v téže
+     * transakci a ceremonie zůstane spotřebovaná (#225).
+     */
+    public function testFailedCredentialTestRevokesUnverifiedPasskey(): void
+    {
+        $flowToken = str_repeat('a', 43);
+        $cutoff = SecurityTime::fromDateTime(new \DateTimeImmutable('2026-07-24 12:00:00 UTC'));
+        $userStatement = $this->createMock(PDOStatement::class);
+        $userStatement->method('execute')->willReturn(true);
+        $userStatement->method('fetch')->willReturn([
+            'id' => 17, 'email' => 'synthetic@example.invalid', 'name' => 'Synthetic User',
+            'role' => 'admin', 'locale' => 'cs', 'password_hash' => 'synthetic', 'totp_enabled' => 0,
+        ]);
+        $sessionStatement = $this->createMock(PDOStatement::class);
+        $sessionStatement->method('execute')->willReturn(true);
+        $sessionStatement->method('fetchColumn')->willReturn('session-row');
+        $pdo = $this->createMock(PDO::class);
+        $pdo->expects(self::once())->method('beginTransaction')->willReturn(true);
+        $pdo->method('prepare')->willReturnOnConsecutiveCalls($userStatement, $sessionStatement);
+        $pdo->expects(self::once())->method('commit')->willReturn(true);
+        $pdo->expects(self::never())->method('rollBack');
+        $statements = [];
+        $pdo->method('exec')->willReturnCallback(static function (string $sql) use (&$statements): int {
+            $statements[] = $sql;
+            return 0;
+        });
+
+        $ceremonies = $this->createMock(WebAuthnCeremonyStore::class);
+        $ceremonies->expects(self::once())
+            ->method('consumeInTransaction')
+            ->with($pdo, $cutoff, $flowToken, WebAuthnCeremonyStore::PURPOSE_CREDENTIAL_TEST, 17, 'session', 'passkey.test:5')
+            ->willReturn(new WebAuthnCeremony(
+                WebAuthnCeremonyStore::PURPOSE_CREDENTIAL_TEST, 17, 'passkey.test:5', random_bytes(32), ['challenge' => 'synthetic'],
+            ));
+        $stored = new \MyInvoice\Service\Auth\StoredPasskeyCredential(
+            5, 17, 'Synthetic key', $this->createMock(\Webauthn\CredentialRecord::class), null, null, null,
+        );
+        $credentials = $this->createMock(PasskeyCredentialRepository::class);
+        $credentials->expects(self::once())->method('findActiveForUserByIdForUpdate')->with($pdo, 17, 5)->willReturn($stored);
+        $credentials->expects(self::never())->method('updateAfterAssertionInTransaction');
+        $credentials->expects(self::once())
+            ->method('revokeUnverifiedInTransaction')
+            ->with($pdo, 17, 5, $cutoff, PasskeySessionTransitionService::CREDENTIAL_TEST_WINDOW_SECONDS)
+            ->willReturn(true);
+        $passkeys = $this->createMock(PasskeyService::class);
+        $passkeys->method('verifyAssertion')->willThrowException(new PasskeyVerificationException(
+            reason: PasskeyVerificationException::REASON_ASSERTION_INVALID,
+        ));
+        $sessions = $this->createMock(SessionManager::class);
+        $sessions->expects(self::once())
+            ->method('demoteToSetupInTransaction')
+            ->with($pdo, 'session', 17, 5)
+            ->willReturn(true);
+
+        $result = $this->service($pdo, $cutoff, $ceremonies, $passkeys, $credentials, $sessions)
+            ->completeCredentialTest($flowToken, ['rawId' => 'synthetic'], 17, 'session', 5);
+
+        self::assertFalse($result['verified']);
+        self::assertTrue($result['revoked']);
+        self::assertSame(PasskeyVerificationException::REASON_ASSERTION_INVALID, $result['error']->reason);
+        self::assertSame(
+            ['SAVEPOINT webauthn_ceremony_consumed', 'ROLLBACK TO SAVEPOINT webauthn_ceremony_consumed'],
+            $statements,
+        );
+    }
+
     private function transactionPdo(PDOStatement $userStatement): PDO
     {
         $pdo = $this->createMock(PDO::class);
@@ -190,6 +257,8 @@ final class PasskeySessionTransitionServiceTest extends TestCase
         SecurityTime $cutoff,
         WebAuthnCeremonyStore $ceremonies,
         ?PasskeyService $passkeys = null,
+        ?PasskeyCredentialRepository $credentials = null,
+        ?SessionManager $sessions = null,
     ): PasskeySessionTransitionService {
         $db = $this->createMock(Connection::class);
         $db->method('pdo')->willReturn($pdo);
@@ -200,9 +269,9 @@ final class PasskeySessionTransitionServiceTest extends TestCase
             $db,
             $clock,
             $passkeys ?? $this->createMock(PasskeyService::class),
-            $this->createMock(PasskeyCredentialRepository::class),
+            $credentials ?? $this->createMock(PasskeyCredentialRepository::class),
             $ceremonies,
-            $this->createMock(SessionManager::class),
+            $sessions ?? $this->createMock(SessionManager::class),
             $this->createMock(MfaStepUpService::class),
             $this->createMock(MfaStepUpProofStore::class),
         );

@@ -18,6 +18,10 @@ const m = vi.hoisted(() => ({
   setSessionCsrfToken: vi.fn(),
   passkeyStepUpOptions: vi.fn(),
   passkeyStepUpVerify: vi.fn(),
+  passkeyRegisterOptions: vi.fn(),
+  passkeyRegisterVerify: vi.fn(),
+  passkeyTestOptions: vi.fn(),
+  passkeyTestVerify: vi.fn(),
   getCredential: vi.fn(),
   refresh: vi.fn(),
   logout: vi.fn(),
@@ -42,8 +46,10 @@ vi.mock('@/api/auth', () => ({
     totpSetup: m.totpSetup,
     totpEnable: m.totpEnable,
     totpStepUp: vi.fn(),
-    passkeyRegisterOptions: vi.fn(),
-    passkeyRegisterVerify: vi.fn(),
+    passkeyRegisterOptions: m.passkeyRegisterOptions,
+    passkeyRegisterVerify: m.passkeyRegisterVerify,
+    passkeyTestOptions: m.passkeyTestOptions,
+    passkeyTestVerify: m.passkeyTestVerify,
     passkeyStepUpOptions: m.passkeyStepUpOptions,
     passkeyStepUpVerify: m.passkeyStepUpVerify,
   },
@@ -70,6 +76,8 @@ vi.mock('@/security/domainLogin', () => ({
   advanceCanonicalDomainLoginSession: m.advanceSession,
   hasPendingCanonicalDomainLogin: m.pendingDomainLogin,
   authorizePendingDomainLogin: m.authorizeDomainLogin,
+  isDomainLoginConfirmationRequired: (e: any) => e?.response?.data?.error?.code === 'domain_login_confirmation_required',
+  pendingCanonicalDomainLoginQuery: () => ({ domain_login_request: 'r'.repeat(43), state: 's'.repeat(43) }),
 }))
 vi.mock('vue-router', () => ({
   useRoute: () => ({ query: {} }),
@@ -328,6 +336,78 @@ describe('ForcedMfaSetup — portal return after saving recovery codes', () => {
     await flushPromises()
     expect(m.authorizeDomainLogin).toHaveBeenCalledTimes(2)
     expect(m.totpEnable).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
+
+  it('nepotvrzené předání přihlášení pošle na potvrzovací obrazovku přihlášení', async () => {
+    m.refresh.mockResolvedValue(true)
+    m.totpEnable.mockResolvedValue({ enabled: true, recovery_codes: ['AAAA-BBBB'] })
+    m.authorizeDomainLogin.mockRejectedValueOnce({
+      response: { status: 409, data: { error: { code: 'domain_login_confirmation_required' } } },
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="totp-current-password"]').setValue('Synthetic-test-password-42')
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+    const input = wrapper.get('input[autocomplete="one-time-code"]')
+    await input.setValue('123456')
+    await input.trigger('keydown.enter')
+    await flushPromises()
+    m.pendingDomainLogin.mockReturnValue(true)
+    await wrapper.get('[data-recovery-once-confirm]').trigger('click')
+    await flushPromises()
+    expect(m.replace).toHaveBeenCalledWith({
+      name: 'login',
+      query: { domain_login_request: 'r'.repeat(43), state: 's'.repeat(43) },
+    })
+    expect(wrapper.text()).not.toContain('domain_login.authorize_failed')
+    wrapper.unmount()
+  })
+
+  it('klíč, který po registraci neprojde ověřením, odvolá a do aplikace nepustí', async () => {
+    m.store.allowedMfaMethods = ['passkey']
+    m.store.mustSetupMfa = true
+    m.passkeyRegisterOptions.mockResolvedValue({ flow_token: 'reg-flow', public_key: {} })
+    m.passkeyRegisterVerify.mockResolvedValue({ credential: { id: 9 } })
+    m.passkeyTestOptions.mockResolvedValue({ flow_token: 'test-flow', public_key: {} })
+    m.getCredential.mockResolvedValue({ id: 'assertion' })
+    m.passkeyTestVerify.mockRejectedValue({ response: { data: { error: { code: 'passkey_test_failed', revoked: true } } } })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('input[type="password"]').setValue('Synthetic-password-42')
+    const create = wrapper.findAll('button').find(b => b.text() === 'mfa_setup.create_passkey')!
+    await create.trigger('click')
+    await flushPromises()
+
+    expect(m.passkeyTestVerify).toHaveBeenCalledWith(9, 'test-flow', { id: 'assertion' })
+    expect(wrapper.text()).toContain('passkeys.test_revoked')
+    expect(m.replace).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('po odvolaném klíči ukáže záložní kódy a po potvrzení nabídne nový pokus', async () => {
+    m.store.allowedMfaMethods = ['passkey']
+    m.store.mustSetupMfa = true
+    m.passkeyRegisterOptions.mockResolvedValue({ flow_token: 'reg-flow', public_key: {} })
+    m.passkeyRegisterVerify.mockResolvedValue({ credential: { id: 9 }, recovery_codes: ['AAAA-BBBB'] })
+    m.passkeyTestOptions.mockResolvedValue({ flow_token: 'test-flow', public_key: {} })
+    m.getCredential.mockResolvedValue({ id: 'assertion' })
+    m.passkeyTestVerify.mockRejectedValue({ response: { data: { error: { code: 'passkey_test_failed', revoked: true } } } })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('input[type="password"]').setValue('Synthetic-password-42')
+    await wrapper.findAll('button').find(b => b.text() === 'mfa_setup.create_passkey')!.trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-recovery-once-confirm]').trigger('click')
+    await flushPromises()
+
+    expect(m.replace).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-recovery-once-confirm]').exists()).toBe(false)
+    expect(wrapper.findAll('button').some(b => b.text() === 'mfa_setup.create_passkey')).toBe(true)
+    expect(wrapper.text()).toContain('passkeys.test_revoked')
     wrapper.unmount()
   })
 })

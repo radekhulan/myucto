@@ -8,6 +8,7 @@ use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Accounting\Reports\StatementMetrics;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 
 /**
@@ -87,25 +88,25 @@ final class CrossCheckSuite
             'balance_sheet_sides',
             'Rozvaha: aktiva = pasiva (§ 18–20 ZoÚ)',
             'aktiva netto',
-            $this->totalOf($balance, 'assets_net'),
+            StatementMetrics::balanceTotal($balance, 'assets_net'),
             'pasiva netto',
-            $this->totalOf($balance, 'liabilities_total'),
+            StatementMetrics::balanceTotal($balance, 'liabilities_total'),
         );
 
         $results[] = $this->compare(
             'profit_balance_vs_income',
             'VH v rozvaze = VH ve výsledovce',
             'VH v rozvaze',
-            $this->profitFromBalanceSheet($balance),
+            StatementMetrics::balanceProfit($balance),
             'VH ve VZZ',
-            $this->profitFromIncomeStatement($income),
+            StatementMetrics::incomeProfit($income),
         );
 
         $results[] = $this->compare(
             'income_statement_vs_ledger',
             'VZZ = obratová předvaha (výnosy − náklady)',
             'VH ve VZZ',
-            $this->profitFromIncomeStatement($income),
+            StatementMetrics::incomeProfit($income),
             'z hlavní knihy',
             $this->profitFromLedger($supplierId, (string) $period['starts_on'], (string) $period['ends_on']),
         );
@@ -238,6 +239,7 @@ final class CrossCheckSuite
           LEFT JOIN invoice_items ii ON ii.invoice_id = i.id
               WHERE i.supplier_id = ?
                 AND i.status <> 'draft'
+                AND i.invoice_type NOT IN ('rent_calendar','advance_calendar')
                 AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
                 AND (ii.vat_classification_code IN ('1m', '2m')
                      OR i.vat_classification_code IN ('1m', '2m'))"
@@ -331,75 +333,6 @@ final class CrossCheckSuite
             'a_label' => '', 'a' => null, 'b_label' => '', 'b' => null,
             'difference' => null, 'note' => $reason, 'skipped' => true,
         ];
-    }
-
-    /**
-     * Součet ze sestavy — a když klíč NEEXISTUJE, výjimka místo nuly.
-     *
-     * Tichá nula tu byla nejhorší možná varianta: `assets_total` ani `liabilities_total`
-     * na nejvyšší úrovni rozvahy nikdy nebyly (leží v `checks` jako `assets_net`
-     * a `liabilities_total`), takže kontrola „aktiva = pasiva" porovnávala 0,00 s 0,00
-     * a hlásila OK i nad rozvahou v řádu milionů — kontrola by neselhala, ani kdyby
-     * se rozvaha rozešla o desítky milionů.
-     *
-     * Stejnou pojistku má {@see profitFromIncomeStatement()}; právě tady chyběla.
-     *
-     * @param array<string,mixed> $statement
-     */
-    private function totalOf(array $statement, string $key): float
-    {
-        $value = $statement[$key] ?? $statement['checks'][$key] ?? null;
-        if ($value === null) {
-            throw new \RuntimeException(sprintf(
-                'Rozvaha neobsahuje „%s" — křížová kontrola by jinak porovnávala nulu.',
-                $key,
-            ));
-        }
-        if (is_array($value)) {
-            return (float) ($value['net'] ?? $value['amount'] ?? 0.0);
-        }
-
-        return (float) $value;
-    }
-
-    /**
-     * VH z rozvahy (P.A.V. Výsledek hospodaření běžného účetního období).
-     *
-     * @param array<string,mixed> $balance
-     */
-    private function profitFromBalanceSheet(array $balance): float
-    {
-        foreach ((array) ($balance['liabilities'] ?? []) as $row) {
-            if (str_starts_with((string) ($row['row_code'] ?? ''), 'P.A.V.')) {
-                return (float) ($row['net'] ?? $row['amount'] ?? 0.0);
-            }
-        }
-        throw new \RuntimeException(
-            'Rozvaha nemá řádek P.A.V. (VH běžného období) — křížová kontrola by jinak '
-                . 'porovnávala nulu a tvářila se, že hlídá.',
-        );
-    }
-
-    /**
-     * VH z výsledovky — řádek `VH` (computed, „Výsledek hospodaření za účetní období").
-     *
-     * Chybějící řádek je tvrdá chyba, ne nula: první verze téhle metody hledala kódy
-     * `***`/`**` (konvence jiných systémů), nenašla nic a vracela 0,00. Kontrola pak
-     * hlásila rozdíl v plné výši VH a vypadala jako účetní nález, přestože šlo o vadu
-     * kontroly. Tichá nula je u křížové kontroly nejhorší možná odpověď.
-     *
-     * @param array<string,mixed> $income
-     */
-    private function profitFromIncomeStatement(array $income): float
-    {
-        foreach ((array) ($income['rows'] ?? []) as $row) {
-            if ((string) ($row['row_code'] ?? '') === 'VH') {
-                return (float) ($row['amount'] ?? 0.0);
-            }
-        }
-        throw new \RuntimeException(
-            'Výsledovka nemá řádek VH — křížová kontrola by jinak porovnávala nulu.',
-        );
     }
 
     /**

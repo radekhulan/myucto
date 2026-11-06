@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Repository\Payroll\JmhzDeferralRepository;
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -91,6 +92,8 @@ final readonly class JmhzSubmissionBridgeService
          * Volitelný stejně jako historie podání předchozím programem.
          */
         private ?PayrollRegistrationChangeSettlement $registrationSettlement = null,
+        /** Jména dotčených osob v hlášce o blokaci; bez něj zůstane jen počet. */
+        private ?PayrollPeopleRepository $people = null,
     ) {}
 
     /**
@@ -202,11 +205,22 @@ final readonly class JmhzSubmissionBridgeService
             $preparationId,
             $officeId,
         );
+        // Ročník hlášení určuje vykazované období, ne den odeslání. Verze bez
+        // připnuté specifikace se nezmrazí a nezaloží ani povinnost. Brána
+        // běží před výčtem blokací přípravy: za 01/2027 má účetní slyšet, že
+        // verze 2027 ještě není, ne nálezy, po jejichž opravě by skončila tady.
+        $candidatePeriod = $resolution->candidate?->payload['scope']['period_start'] ?? null;
+        if (is_string($candidatePeriod) && preg_match('/^\d{4}-\d{2}-\d{2}$/D', $candidatePeriod) === 1) {
+            JmhzSpecPackageCatalog::requireBuildable(JmhzSpecVersion::forPeriodStart($candidatePeriod));
+        }
         if ($resolution->status() !== 'resolved') {
             throw new JmhzXmlException(
                 'jmhz_submission_preparation_blocked',
                 'Příprava JMHZ není úplná, podání se nezakládá: '
-                    . JmhzBlockerExplainer::describe($resolution->blockers),
+                    . ($this->people === null
+                        ? JmhzBlockerExplainer::describe($resolution->blockers)
+                        : JmhzBlockerExplainer::describeNamed($resolution->blockers, $this->people, $supplierId)),
+                JmhzBlockerRemediationPath::payload($resolution->blockers, $this->people, $supplierId),
             );
         }
         $document = $resolution->requireResolvedDocument();

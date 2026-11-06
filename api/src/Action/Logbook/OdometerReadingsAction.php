@@ -60,7 +60,7 @@ final class OdometerReadingsAction
         }
         $odometer = (int) round((float) $raw);
 
-        $bounds = $this->repo->bounds($supplierId, $carId, $date, 'manual');
+        $bounds = $this->repo->bounds($supplierId, $carId, $date);
         if (($bounds['before'] !== null && $odometer < $bounds['before'])
             || ($bounds['after'] !== null && $odometer > $bounds['after'])) {
             return Json::error($response, 'odometer_regression',

@@ -1184,6 +1184,34 @@ final class PayrollPostingLineBuilderTest extends TestCase
     }
 
     /**
+     * Od roku 2027 je daň ze samostatného základu podle § 6 odst. 4 ZDP
+     * zálohou (zák. č. 360/2025 Sb.), odvádí se se zálohami (§ 38hb) a patří na
+     * účet zálohové daně, ne na analytiku srážkové daně 342.200.
+     */
+    public function testSeparateBaseAdvance2027PostsToTheAdvanceAccount(): void
+    {
+        $sets = $this->statutorySets();
+        $person = &$sets['income_tax']['people'][0]['result_snapshot'];
+        $person['advance_tax']['tax_after_credits_minor_units'] = 40_000;
+        $person['withholding_tax_minor_units'] = 10_000;
+        $person['calculation_date'] = '2027-01-31';
+        $person['separate_base_regime'] = 'separate-advance';
+        $person['separate_base_income_minor_units'] = 66_600;
+        unset($person);
+
+        $lines = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $sets,
+            PayrollAccountingDefaults::codes(),
+        )->lines;
+        $lineMap = $this->lineMap($lines);
+
+        self::assertSame(50_000, $lineMap['342.100|credit'], 'záloha i záloha ze samostatného základu');
+        self::assertArrayNotHasKey('342.200|credit', $lineMap);
+    }
+
+    /**
      * Ú-19: ZÁPORNÁ delta opravné revize. Snížení pojistného musí obrátit obě
      * strany zápisu — 524 na D a 336.100 na MD — jinak by oprava směrem dolů
      * náklad ještě zvýšila.

@@ -12,7 +12,8 @@ use PDO;
  * R13). Řádek řady vzniká lazy při prvním výdeji čísla (ensure); výdej drží
  * zámek SELECT ... FOR UPDATE v transakci volajícího (DocumentSeriesService).
  * UNIQUE (supplier_id, series_code, fiscal_year, register_id), kde register_id = 0
- * je společná řada firmy a >0 vlastní řada pokladny (L-3, migrace 1506).
+ * je společná řada firmy a >0 vlastní řada: pokladny u cash_in/cash_out (L-3, migrace
+ * 1506), druhu ostatní položky u other_receivable/other_payable (migrace 2228).
  */
 final class DocumentSeriesRepository
 {
@@ -82,12 +83,16 @@ final class DocumentSeriesRepository
     public function list(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT s.id, s.supplier_id, s.series_code, s.register_id, s.fiscal_year, s.prefix,
-                    s.number_format, s.next_number, s.created_at, s.updated_at, r.name AS register_name
+            "SELECT s.id, s.supplier_id, s.series_code, s.register_id, s.fiscal_year, s.prefix,
+                    s.number_format, s.next_number, s.created_at, s.updated_at, r.name AS register_name,
+                    k.name AS kind_name, k.builtin_code AS kind_builtin_code
                FROM accounting_document_series s
           LEFT JOIN cash_registers r ON r.id = s.register_id AND r.supplier_id = s.supplier_id
+                AND s.series_code IN ('cash_in', 'cash_out')
+          LEFT JOIN other_item_kinds k ON k.id = s.register_id AND k.supplier_id = s.supplier_id
+                AND s.series_code IN ('other_receivable', 'other_payable')
               WHERE s.supplier_id = ?
-              ORDER BY s.fiscal_year DESC, s.series_code, s.register_id'
+              ORDER BY s.fiscal_year DESC, s.series_code, s.register_id"
         );
         $stmt->execute([$supplierId]);
         return array_map(static function (array $r): array {
@@ -98,6 +103,14 @@ final class DocumentSeriesRepository
             $r['next_number'] = (int) $r['next_number'];
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /** Smaže všechny roky jedné vlastní řady (register_id > 0). */
+    public function deleteScope(int $supplierId, string $seriesCode, int $registerId): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM accounting_document_series WHERE supplier_id = ? AND series_code = ? AND register_id = ?'
+        )->execute([$supplierId, $seriesCode, $registerId]);
     }
 
     /**

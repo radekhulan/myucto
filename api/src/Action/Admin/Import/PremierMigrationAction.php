@@ -21,6 +21,7 @@ use MyInvoice\Service\Migration\Premier\PremierImportJobService;
 use MyInvoice\Service\Migration\Premier\PremierUploads;
 use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
 use MyInvoice\Service\Migration\Shared\MigrationUploadLimits;
+use MyInvoice\Service\Migration\Shared\NonprofitMigrationNotice;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -132,12 +133,12 @@ final class PremierMigrationAction extends AbstractMigrationAction
                     'message' => $e instanceof PremierException ? $e->getMessage() : 'Zálohu nejde přečíst.', 'context' => []]];
             }
         }
-        return Json::ok($response, $meta + [
+        return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $meta + [
             'status' => PremierUploads::STATUS_READY,
             'supplier_ico' => $supplierIco,
             'default_year' => $defaultYear,
             'preflight' => (object) $preflight,
-        ]);
+        ]));
     }
 
     /** @param array<string,string> $args */

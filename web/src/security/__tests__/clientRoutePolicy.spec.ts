@@ -8,6 +8,7 @@ vi.mock('@/i18n', () => ({
 
 import routePolicy from '@shared/client-route-policy.json'
 import appLayoutSourceRaw from '@/components/layout/AppLayout.vue?raw'
+import userMenuSource from '@/components/layout/AppUserMenu.vue?raw'
 import routerSourceRaw from '@/router/index.ts?raw'
 import { router } from '@/router'
 import {
@@ -127,7 +128,7 @@ function deriveClientRouteParity(): ClientRouteParitySnapshot {
     .filter(route => typeof route.name === 'string'
       && ((typeof route.meta.permission === 'string' && isClientPermission(route.meta.permission as PermissionKey))
         || route.meta.permissionAny?.some(isClientPermission))
-      && route.meta.superadminOnly !== true && route.meta.staffOnly !== true)
+      && route.meta.superadminOnly !== true && route.meta.staffOnly !== true && route.meta.canonicalOnly !== true)
     .map(route => String(route.name))
 
   const explicitSelfService = explicitSelfServiceRouteNames()
@@ -286,8 +287,9 @@ function clientRouteParityErrors(manifestRoutes: readonly ManifestRoute[]): stri
 
 describe('sdílená klientská plocha vlastní domény', () => {
   it('obsahuje auditovanou klientskou plochu včetně nastavení firmy a legacy aliasů', () => {
-    expect(clientDomainRoutes).toHaveLength(58)
-    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(58)
+    // Archiv podání a klientské MCP přidávají dvě samostatné auditované routy.
+    expect(clientDomainRoutes).toHaveLength(61)
+    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(61)
     expect(clientDomainRoutes.slice(-3).map(route => route.name))
       .toEqual(['data-exchange', 'admin-export', 'admin-import'])
   })
@@ -309,7 +311,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       if (route!.path.includes(':')) parameterized.push(definition.name)
     }
 
-    expect(rendered).toHaveLength(50)
+    expect(rendered).toHaveLength(53)
     expect(redirects).toEqual([
       'profile-totp',
       'profile-shortcuts',
@@ -340,10 +342,17 @@ describe('sdílená klientská plocha vlastní domény', () => {
     }
     expect(Object.fromEntries(kindCounts)).toEqual({
       client_redirect: 4,
-      permission: 43,
+      permission: 45,
       router_redirect: 8,
-      self_service: 3,
+      self_service: 4,
     })
+  })
+
+  it('OAuth pokračování vyžaduje canonical origin i pro klientský účet', () => {
+    const route = router.resolve('/oauth/continue')
+    expect(route.meta.canonicalOnly).toBe(true)
+    expect(route.meta.permission).toBe('profile')
+    expect(isClientDomainRouteName(route.name)).toBe(false)
   })
 
   it('klasifikuje veřejné, přihlašovací a statické plochy mimo autentizovaný manifest', () => {
@@ -360,6 +369,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       'login',
       'payroll-document-access',
       'purchase-approval-public',
+      'receipt-public',
       'reset',
       'setup',
       'work-report-tracking',
@@ -409,7 +419,11 @@ describe('sdílená klientská plocha vlastní domény', () => {
         continue
       }
       if (!definition.permission) continue
-      expect(route?.meta.permission, definition.name).toBe(definition.permission)
+      if (route?.meta.permissionAny) {
+        expect(route.meta.permissionAny.filter(isClientPermission), definition.name).toEqual([definition.permission])
+      } else {
+        expect(route?.meta.permission, definition.name).toBe(definition.permission)
+      }
       expect(route?.meta.access, definition.name).toBe(definition.access)
       expect(isClientPermission(definition.permission), definition.name).toBe(true)
     }
@@ -418,7 +432,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       .filter(route => typeof route.name === 'string'
         && ((typeof route.meta.permission === 'string' && isClientPermission(route.meta.permission as PermissionKey))
           || route.meta.permissionAny?.some(isClientPermission))
-        && route.meta.superadminOnly !== true && route.meta.staffOnly !== true)
+        && route.meta.superadminOnly !== true && route.meta.staffOnly !== true && route.meta.canonicalOnly !== true)
       .map(route => String(route.name))
       .sort()
 
@@ -456,18 +470,20 @@ describe('sdílená klientská plocha vlastní domény', () => {
 
   it('pokrývá každý literální cíl klientské navigace manifestem a routerem', () => {
     const paths = [...new Set(clientNavigationPaths())]
-    expect(paths).toHaveLength(23)
+    expect(paths).toHaveLength(26)
 
     const routeNames = new Set(clientDomainRoutes.map(route => route.name))
     for (const path of paths) {
       expect(isClientDomainAuthenticatedPath(path), path).toBe(true)
       const resolved = router.resolve(path)
       expect(routeNames.has(String(resolved.name)), path).toBe(true)
-      expect(resolved.meta.permissionAny?.some(isClientPermission) || isClientPermission(resolved.meta.permission as PermissionKey), path).toBe(true)
+      expect(resolved.meta.permissionAny?.some(isClientPermission) || isClientPermission(resolved.meta.permission as PermissionKey)
+        || explicitSelfServiceRouteNames().includes(String(resolved.name)), path).toBe(true)
     }
 
     expect([...new Set(paths.map(path => String(router.resolve(path).name)))].sort()).toEqual([
       'admin-price-list',
+      'admin-work-report-billing-templates',
       'bank-statements',
       'client-new',
       'clients',
@@ -477,6 +493,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       'portal',
       'portal-company-settings',
       'portal-document-requests',
+      'portal-mcp',
       'portal-purchase-invoice-submissions',
       'project-new',
       'projects',
@@ -485,6 +502,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       'purchase-invoices',
       'recurring',
       'recurring-new',
+      'reports-submissions',
       'stock-fulfillment',
       'stock-item-new',
       'stock-items',
@@ -499,7 +517,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
     // toho, kdo odesílání spustil; kdyby tu nebyla, návrat z brány by na klientské
     // doméně skončil přesměrováním na canonical origin i s tokeny v query.
     expect(clientDomainRoutes.filter(route => route.kind === 'self_service').map(route => route.name))
-      .toEqual(['profile-password', 'isds-gateway-callback', 'setup-mfa'])
+      .toEqual(['portal-mcp', 'profile-password', 'isds-gateway-callback', 'setup-mfa'])
     expect(clientDomainRoutes.filter(route => route.kind === 'router_redirect').slice(0, 5)
       .map(route => route.name))
       .toEqual([
@@ -510,9 +528,11 @@ describe('sdílená klientská plocha vlastní domény', () => {
         'setup-totp',
       ])
 
-    const profileMenuPaths = [...appLayoutSource.matchAll(
-      /<(?:RouterLink|WorkspaceNavLink)[^>]*\bto="(?<path>\/profile\/password[^"]*)"/g,
-    )].map(item => item.groups!.path)
+    const profileMenuPaths = [
+      '/profile/password',
+      ...[...userMenuSource.matchAll(/:to="`\$\{profilePath\}(?<query>\?tab=[a-z-]+)`"/g)]
+        .map(item => `/profile/password${item.groups!.query}`),
+    ]
     expect([...new Set(profileMenuPaths)].sort()).toEqual([
       '/profile/password',
       '/profile/password?tab=passkeys',

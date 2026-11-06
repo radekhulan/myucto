@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Component\PayrollInputImportService;
@@ -44,7 +43,7 @@ final class PayrollInputImportServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $imports = $this->container->get(PayrollInputImportService::class);
         if (!$db instanceof Connection || !$imports instanceof PayrollInputImportService) {

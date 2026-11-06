@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed, watch } from 'vue'
+import { ref, onMounted, reactive, computed, watch, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import {
@@ -19,10 +19,20 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import SaldoAdvanceInfo from '@/components/accounting/SaldoAdvanceInfo.vue'
+import { useAuthStore } from '@/stores/auth'
+import { ADVANCE_ACCOUNTS, SUGGEST_ACCOUNTS, isAdvanceAccount, isOffsetable, isSettleable, type SaldoSettleTarget } from '@/components/accounting/saldoSettle'
+import { balancedOffsetDocs, offsetRoute } from '@/components/accounting/offsetLink'
+import SaldoAdvanceIssues from '@/components/accounting/SaldoAdvanceIssues.vue'
+
+const SaldoSettleDialog = defineAsyncComponent(() => import('@/components/accounting/SaldoSettleDialog.vue'))
+const SaldoAdvanceSettleDialog = defineAsyncComponent(() => import('@/components/accounting/SaldoAdvanceSettleDialog.vue'))
+const SaldoResidualDialog = defineAsyncComponent(() => import('@/components/accounting/SaldoResidualDialog.vue'))
+const SaldoSuggestionsDialog = defineAsyncComponent(() => import('@/components/accounting/SaldoSuggestionsDialog.vue'))
 
 const { t } = useI18n()
 const toast = useToast()
 const route = useRoute()
+const auth = useAuthStore()
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<SaldoReport | null>(null)
@@ -175,6 +185,7 @@ function showMore(side: string, hidden: number) {
 watch([report, filteredFlatRows], () => {
   for (const k of Object.keys(shown)) delete shown[k]
 })
+watch(report, () => { selectedRows.value = new Set() })
 
 // ── Task #3: as_of napříč obdobími — UI upozornění, když se liší od výběru ──
 const asOfPeriodNote = computed(() => {
@@ -192,11 +203,30 @@ function switchToAsOfPeriod() {
   load()
 }
 
+/**
+ * Všechny účty se načítají souběžně po jednom: server počítá každý účet zvlášť a na
+ * velké firmě trvá jeden účet i sekundu, takže sestava naráz by čekala na součet.
+ * Skládá se stejně jako na serveru: pořadí účtů a vynechané účty bez zůstatku i položek.
+ */
+async function fetchReport(): Promise<SaldoReport> {
+  const params = queryParams()
+  if (params.account !== 'all') return accountingApi.getSaldo(params)
+  const parts = await Promise.all(
+    ACCOUNT_OPTIONS.filter(a => a !== 'all').map(account => accountingApi.getSaldo({ ...params, account })),
+  )
+  return {
+    ...parts[0],
+    accounts: parts
+      .flatMap(p => p.accounts)
+      .filter(b => Math.round(b.gl_balance * 100) !== 0 || b.partners.length > 0 || (b.advance_deduction_issues?.length ?? 0) > 0),
+  }
+}
+
 async function load() {
   if (!filters.period_id) return
   loading.value = true
   try {
-    report.value = await accountingApi.getSaldo(queryParams())
+    report.value = await fetchReport()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
@@ -238,6 +268,94 @@ function docLink(it: SaldoItem) {
     ? { name: 'purchase-invoice-detail', params: { id: it.doc_id } }
     : { name: 'invoice-detail', params: { id: it.doc_id } }
 }
+
+// ── Vyrovnání položky zápisem v deníku ─────────────────────────────────────
+// Vyrovnání je vždy navázané na řádek zápisu (rozpad řádku na doklady, nebo ostatní
+// položka ze zůstatku bez dokladu), aby konfrontace s hlavní knihou dál platila.
+const canSettle = computed(() => auth.canWrite('accounting.journal.write'))
+const canResidual = computed(() => canSettle.value && auth.canWrite('other_items'))
+const settleTargets = ref<SaldoSettleTarget[] | null>(null)
+const residualFor = ref<{ code: string; name: string } | null>(null)
+const suggestionsOpen = ref(false)
+
+function settleTarget(it: SaldoItem, accountCode: string, partnerId: number, partnerName: string): SaldoSettleTarget {
+  return {
+    doc_type: it.doc_type as SaldoSettleTarget['doc_type'],
+    doc_id: it.doc_id,
+    doc_no: it.doc_no,
+    partner_id: partnerId,
+    partner_name: partnerName,
+    account_code: accountCode,
+    currency_code: it.currency_code,
+    remaining_czk: it.remaining_czk,
+  }
+}
+
+function rowKey(it: { account_code: string; doc_type: string; doc_id: number }) {
+  return `${it.account_code}-${it.doc_type}-${it.doc_id}`
+}
+
+/** Označené položky plochého pohledu; hromadně jde vyrovnat jen jeden partner a jeden účet. */
+const selectedRows = ref<Set<string>>(new Set())
+const selectedItems = computed(() => flatRows.value.filter(r => selectedRows.value.has(rowKey(r))))
+const bulkValid = computed(() => {
+  const rows = selectedItems.value
+  return rows.length > 0
+    && rows.every(r => r.partner_id === rows[0].partner_id && r.account_code === rows[0].account_code)
+})
+
+function toggleRow(row: FlatRow) {
+  const next = new Set(selectedRows.value)
+  const key = rowKey(row)
+  if (next.has(key)) next.delete(key)
+  else next.add(key)
+  selectedRows.value = next
+}
+
+function openSettle(rows: FlatRow[]) {
+  settleTargets.value = rows.map(r => settleTarget(r, r.account_code, r.partner_id, r.partner_name))
+}
+
+function openSettlePartner(it: SaldoItem, b: SaldoAccountBlock, partnerId: number, partnerName: string) {
+  settleTargets.value = [settleTarget(it, b.account.code, partnerId, partnerName)]
+}
+
+function canSettleItem(it: SaldoItem, accountCode: string) {
+  return canSettle.value && isSettleable(it, accountCode)
+}
+
+// ── Vzájemný zápočet z výběru (pohledávky i závazky jednoho partnera) ───────
+const canMutualOffset = computed(() => auth.canWrite('accounting.offsets'))
+/** Výběr řádků nabízí vyrovnání zápisem i zápočet; zaškrtávátko stačí jedno z práv. */
+const canPick = computed(() => canSettle.value || canMutualOffset.value)
+
+function pickable(it: FlatRow): boolean {
+  return (canSettle.value && isSettleable(it, it.account_code)) || (canMutualOffset.value && isOffsetable(it, it.account_code))
+}
+
+const mutualOffsetLink = computed(() => {
+  if (!canMutualOffset.value) return null
+  const rows = selectedItems.value
+  if (rows.length === 0 || !rows.every(r => r.partner_id === rows[0].partner_id && isOffsetable(r, r.account_code))) return null
+  const receivables = rows.filter(r => r.doc_type === 'invoice').map(r => ({ doc_id: r.doc_id, remaining: r.remaining_czk }))
+  const payables = rows.filter(r => r.doc_type === 'purchase_invoice').map(r => ({ doc_id: r.doc_id, remaining: r.remaining_czk }))
+  if (receivables.length === 0 || payables.length === 0) return null
+  return offsetRoute(rows[0].partner_id, balancedOffsetDocs(receivables, payables))
+})
+
+function onSettleDone() {
+  settleTargets.value = null
+  residualFor.value = null
+  suggestionsOpen.value = false
+  selectedRows.value = new Set()
+  load()
+}
+
+/** Záloha na 314/324 se vyrovnává čerpáním konečnou fakturou, ne rozpadem zápisu. */
+const settleAdvance = computed(() => !!settleTargets.value?.length && isAdvanceAccount(settleTargets.value[0].account_code))
+
+const suggestAccount = computed(() => SUGGEST_ACCOUNTS.includes(filters.account) ? filters.account : 'all')
+const showSuggest = computed(() => canSettle.value && (filters.account === 'all' || SUGGEST_ACCOUNTS.includes(filters.account)))
 
 // ── Podklad pro banky: PDF s členěním podle doby po splatnosti ───────────────
 // Volba i hranice se pamatují per uživatel (každá banka chce jiné rozmezí, ale účetní
@@ -371,6 +489,11 @@ onMounted(async () => {
             {{ t('accounting.saldo.view_by_partner') }}
           </button>
         </div>
+        <button v-if="showSuggest" type="button" :disabled="!report || loading" @click="suggestionsOpen = true"
+          :class="[btnOutline('success'), 'whitespace-nowrap']" data-testid="saldo-suggest">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
+          {{ t('accounting.saldo_settle.suggest') }}
+        </button>
         <button :disabled="!report || exporting" @click="exportFile('pdf')" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
           {{ t('accounting.saldo.export_pdf') }}
@@ -491,18 +614,39 @@ onMounted(async () => {
                 </div>
               </div>
             </div>
-            <div v-if="!b.matches" class="px-4 py-2 text-xs text-danger-600 bg-danger-50 border-t border-danger-500/20">
-              {{ t('accounting.saldo.difference_hint') }}
+            <div v-if="!b.matches" class="px-4 py-2 text-xs text-danger-600 bg-danger-50 border-t border-danger-500/20 flex flex-wrap items-center gap-2">
+              <span class="flex-1 min-w-[12rem]">{{ t('accounting.saldo.difference_hint') }}</span>
+              <button v-if="canResidual" type="button" :class="[btnOutline('primary'), 'h-7 px-2 text-xs whitespace-nowrap']"
+                @click="residualFor = { code: b.account.code, name: b.account.name }">
+                <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+                {{ t('accounting.saldo_settle.residual_open') }}
+              </button>
             </div>
+            <SaldoAdvanceIssues v-if="b.advance_deduction_issues?.length && ADVANCE_ACCOUNTS[b.account.code]"
+              :issues="b.advance_deduction_issues" :doc-type="ADVANCE_ACCOUNTS[b.account.code]" />
           </div>
         </div>
 
         <EmptyState v-if="s.rows.length === 0" boxed accent="neutral" icon="search" :title="t('accounting.saldo.flat_empty')" />
-        <div v-else class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+        <div v-if="canPick && selectedItems.some(r => r.side === s.side)" class="flex flex-wrap items-center gap-2 mb-2 text-sm">
+          <span>{{ t('accounting.saldo_settle.selected', { count: selectedItems.length }) }}</span>
+          <button v-if="canSettle" type="button" :disabled="!bulkValid" :class="[btnFilled('success'), 'whitespace-nowrap']" @click="openSettle(selectedItems)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('accounting.saldo_settle.settle_selected') }}
+          </button>
+          <span v-if="canSettle && !bulkValid" class="text-xs text-neutral-500">{{ t('accounting.saldo_settle.selected_mixed') }}</span>
+          <RouterLink v-if="mutualOffsetLink" :to="mutualOffsetLink" :class="[btnOutline('primary'), 'whitespace-nowrap']" data-testid="saldo-mutual-offset">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.swap" /></svg>
+            {{ t('accounting.saldo_settle.mutual_offset') }}
+          </RouterLink>
+          <button type="button" :class="[btnOutline('neutral'), 'whitespace-nowrap']" @click="selectedRows = new Set()">{{ t('accounting.saldo_settle.clear_selection') }}</button>
+        </div>
+        <div v-if="s.rows.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
           <div class="overflow-x-auto">
             <table class="w-full text-sm">
               <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                 <tr>
+                  <th v-if="canPick" class="px-3 py-2 w-8"><span class="sr-only">{{ t('accounting.saldo_settle.col_pick') }}</span></th>
                   <SortableTh :label="t('accounting.saldo.col_account')" sort-key="account_code" :sort="sort" @toggle="toggleSort" />
                   <SortableTh :label="t('accounting.saldo.col_partner')" sort-key="partner_name" :sort="sort" @toggle="toggleSort" />
                   <SortableTh :label="t('accounting.saldo.col_doc')" sort-key="doc_no" :sort="sort" @toggle="toggleSort" />
@@ -512,16 +656,22 @@ onMounted(async () => {
                   <SortableTh :label="t('accounting.saldo.col_amount')" sort-key="booked_czk" :sort="sort" align="right" @toggle="toggleSort" />
                   <SortableTh :label="t('accounting.saldo.col_paid')" sort-key="paid_czk" :sort="sort" align="right" @toggle="toggleSort" />
                   <SortableTh :label="t('accounting.saldo.col_remaining')" sort-key="remaining_czk" :sort="sort" align="right" @toggle="toggleSort" />
+                  <th v-if="canSettle" class="px-3 py-2"><span class="sr-only">{{ t('accounting.saldo_settle.col_actions') }}</span></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-neutral-100">
                 <tr v-for="it in s.visible" :key="`${it.account_code}-${it.doc_type}-${it.doc_id}`" class="hover:bg-neutral-50">
+                  <td v-if="canPick" class="px-3 py-2">
+                    <input v-if="pickable(it)" type="checkbox" class="rounded border-neutral-300"
+                      :checked="selectedRows.has(rowKey(it))" :aria-label="t('accounting.saldo_settle.select_aria', { doc: it.doc_no })" @change="toggleRow(it)" />
+                  </td>
                   <td class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ it.account_code }}</td>
                   <td class="px-3 py-2">{{ it.partner_name }}</td>
                   <td class="px-3 py-2">
                     <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
                       {{ it.doc_no }}
                     </RouterLink>
+                    <span v-if="it.other_doc_no" class="ml-1 font-mono text-xs text-neutral-500 whitespace-nowrap" data-testid="saldo-other-doc-no">· {{ it.other_doc_no }}</span>
                     <SaldoAdvanceInfo v-if="it.kind === 'advance_pending'" :item="it" :side="it.side" />
                   </td>
                   <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>
@@ -542,11 +692,18 @@ onMounted(async () => {
                     </span>
                   </td>
                   <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.remaining_czk) }}</td>
+                  <td v-if="canSettle" class="px-3 py-2 text-right">
+                    <button v-if="canSettleItem(it, it.account_code)" type="button" :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                      :aria-label="t('accounting.saldo_settle.settle_aria', { doc: it.doc_no })" @click="openSettle([it])">
+                      <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                      {{ t('accounting.saldo_settle.settle') }}
+                    </button>
+                  </td>
                 </tr>
               </tbody>
               <tfoot class="bg-neutral-50 text-sm font-semibold">
                 <tr v-if="s.hidden > 0" class="font-normal">
-                  <td class="px-3 py-2 text-center" colspan="9">
+                  <td class="px-3 py-2 text-center" :colspan="9 + (canPick ? 1 : 0) + (canSettle ? 1 : 0)">
                     <button type="button" :class="btnOutlineSm" @click="showMore(s.side, s.hidden)">
                       {{ t('accounting.saldo.show_more', { count: Math.min(s.hidden, ROW_CHUNK) }) }}
                     </button>
@@ -556,8 +713,9 @@ onMounted(async () => {
                   </td>
                 </tr>
                 <tr>
-                  <td class="px-3 py-2" colspan="8">{{ t(`accounting.saldo.side_${s.side}_total`) }}</td>
+                  <td class="px-3 py-2" :colspan="canPick ? 9 : 8">{{ t(`accounting.saldo.side_${s.side}_total`) }}</td>
                   <td class="px-3 py-2 text-right font-mono">{{ formatMoney(s.total) }}</td>
+                  <td v-if="canSettle"></td>
                 </tr>
               </tfoot>
             </table>
@@ -599,9 +757,16 @@ onMounted(async () => {
           </div>
         </div>
 
-        <div v-if="!b.matches" class="px-4 py-2 text-xs text-danger-600 bg-danger-50 border-b border-danger-500/20">
-          {{ t('accounting.saldo.difference_hint') }}
+        <div v-if="!b.matches" class="px-4 py-2 text-xs text-danger-600 bg-danger-50 border-b border-danger-500/20 flex flex-wrap items-center gap-2">
+          <span class="flex-1 min-w-[12rem]">{{ t('accounting.saldo.difference_hint') }}</span>
+          <button v-if="canResidual" type="button" :class="[btnOutline('primary'), 'h-7 px-2 text-xs whitespace-nowrap']"
+            @click="residualFor = { code: b.account.code, name: b.account.name }">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+            {{ t('accounting.saldo_settle.residual_open') }}
+          </button>
         </div>
+        <SaldoAdvanceIssues v-if="b.advance_deduction_issues?.length && ADVANCE_ACCOUNTS[b.account.code]"
+          :issues="b.advance_deduction_issues" :doc-type="ADVANCE_ACCOUNTS[b.account.code]" />
 
         <EmptyState v-if="b.partners.length === 0" dense accent="success" icon="checkCircle" :title="t('accounting.saldo.no_open_items')" />
 
@@ -618,6 +783,7 @@ onMounted(async () => {
                 <th class="px-3 py-2 text-right font-medium">{{ t('accounting.saldo.col_amount') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('accounting.saldo.col_paid') }}</th>
                 <th class="px-3 py-2 text-right font-medium">{{ t('accounting.saldo.col_remaining') }}</th>
+                <th v-if="canSettle" class="px-3 py-2"><span class="sr-only">{{ t('accounting.saldo_settle.col_actions') }}</span></th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
@@ -629,6 +795,7 @@ onMounted(async () => {
                   </td>
                   <td class="px-3 py-2" colspan="7">{{ p.partner_name }}</td>
                   <td class="px-3 py-2 text-right font-mono">{{ formatMoney(p.total_remaining) }}</td>
+                  <td v-if="canSettle"></td>
                 </tr>
                 <template v-if="expanded[partnerKey(b.account.code, p.partner_id)]">
                   <tr v-for="it in p.items" :key="`${it.doc_type}-${it.doc_id}`" class="hover:bg-neutral-50">
@@ -638,6 +805,7 @@ onMounted(async () => {
                       <RouterLink :to="docLink(it)" class="text-primary-600 hover:text-primary-700 hover:underline font-mono">
                         {{ it.doc_no }}
                       </RouterLink>
+                      <span v-if="it.other_doc_no" class="ml-1 font-mono text-xs text-neutral-500 whitespace-nowrap" data-testid="saldo-other-doc-no">· {{ it.other_doc_no }}</span>
                       <SaldoAdvanceInfo v-if="it.kind === 'advance_pending'" :item="it" :side="sideOfAccount(b.account.normal_side)" />
                     </td>
                     <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.issue_date) }}</td>
@@ -658,6 +826,13 @@ onMounted(async () => {
                       </span>
                     </td>
                     <td class="px-3 py-2 text-right font-mono">{{ formatMoney(it.remaining_czk) }}</td>
+                    <td v-if="canSettle" class="px-3 py-2 text-right">
+                      <button v-if="canSettleItem(it, b.account.code)" type="button" :class="[btnOutlineSm('success'), 'whitespace-nowrap']"
+                        :aria-label="t('accounting.saldo_settle.settle_aria', { doc: it.doc_no })" @click="openSettlePartner(it, b, p.partner_id, p.partner_name)">
+                        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                        {{ t('accounting.saldo_settle.settle') }}
+                      </button>
+                    </td>
                   </tr>
                 </template>
               </template>
@@ -667,5 +842,14 @@ onMounted(async () => {
         </div>
       </div>
     </div>
+
+    <SaldoAdvanceSettleDialog v-if="settleTargets && report && settleAdvance" :items="settleTargets" :as-of="report.as_of"
+      @close="settleTargets = null" @done="onSettleDone" />
+    <SaldoSettleDialog v-else-if="settleTargets && report" :items="settleTargets" :as-of="report.as_of"
+      @close="settleTargets = null" @done="onSettleDone" />
+    <SaldoResidualDialog v-if="residualFor && report" :account-code="residualFor.code" :account-name="residualFor.name" :as-of="report.as_of"
+      @close="residualFor = null" @done="onSettleDone" />
+    <SaldoSuggestionsDialog v-if="suggestionsOpen && report" :period-id="Number(filters.period_id)" :as-of="report.as_of" :account="suggestAccount"
+      @close="suggestionsOpen = false" @done="onSettleDone" />
   </div>
 </template>

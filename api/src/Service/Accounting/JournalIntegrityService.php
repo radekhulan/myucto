@@ -17,7 +17,8 @@ use PDO;
  * Kontroly (per supplier v podvojném účetnictví):
  *   - orphan_entry         — aktivní zaúčtovaný zápis odkazuje na zdroj, který už
  *                            neexistuje: vydaná/přijatá faktura, pokladní doklad nebo
- *                            bankovní pohyb (bank, vypořádání a uzavření platby kartou).
+ *                            bankovní pohyb (bank, vypořádání a uzavření platby kartou),
+ *                            nebo zápis skupiny zaúčtování smazaného dokladu.
  *   - unbalanced_entry     — Σ MD ≠ Σ D na řádcích jednoho zápisu (v haléřích).
  *                            PostingService to jinak vynucuje — pojistka proti
  *                            přímým DB zásahům.
@@ -277,8 +278,9 @@ final class JournalIntegrityService
             static fn (string $t): string => "'{$t}'",
             BankTransactionReleaseService::TRANSACTION_SOURCE_TYPES,
         ));
-        $sql =
-            "FROM journal_entries je
+        $direct =
+            "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no, je.entry_date
+               FROM journal_entries je
              LEFT JOIN invoices i          ON je.source_type = 'invoice'          AND i.id  = je.source_id AND i.supplier_id = je.supplier_id
              LEFT JOIN purchase_invoices p ON je.source_type = 'purchase_invoice' AND p.id  = je.source_id AND p.supplier_id = je.supplier_id
              LEFT JOIN cash_documents cd   ON je.source_type = 'cash'             AND cd.id = je.source_id AND cd.supplier_id = je.supplier_id
@@ -294,10 +296,26 @@ final class JournalIntegrityService
                  OR (je.source_type = 'purchase_invoice' AND p.id IS NULL)
                  OR (je.source_type = 'cash'             AND cd.id IS NULL)
                  OR (je.source_type IN ({$bankTypes})    AND bs.id IS NULL))";
-        $select =
-            "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no, je.entry_date " . $sql
-            . " ORDER BY je.id LIMIT " . self::DETAIL_LIMIT;
-        return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select);
+        // Vlastnictví skupiny zaúčtování přežívá smazání dokladu ({@see DocumentPostingGroup}),
+        // vlastněný zápis ale zdroj dokladu nenese. Bez téhle větve by po smazání převzatého
+        // dokladu zůstal v deníku jeho zápis DPH nebo základu a kontrola by ho neviděla.
+        // Přímý člen skupiny už hlásí větev výše, proto se tady vynechává.
+        $owned =
+            "SELECT je.id, jdp.doc_type, jdp.doc_id, je.document_no, je.entry_date
+               FROM journal_document_postings jdp FORCE INDEX (uq_jdp_doc_entry)
+               JOIN journal_entries je ON je.supplier_id = jdp.supplier_id AND je.id = jdp.entry_id
+             LEFT JOIN invoices i          ON jdp.doc_type = 'invoice'          AND i.id = jdp.doc_id AND i.supplier_id = jdp.supplier_id
+             LEFT JOIN purchase_invoices p ON jdp.doc_type = 'purchase_invoice' AND p.id = jdp.doc_id AND p.supplier_id = jdp.supplier_id
+             WHERE jdp.supplier_id = :sid2
+               AND je.posted_at IS NOT NULL
+               AND je.reversed_by IS NULL
+               AND NOT (je.source_type = jdp.doc_type AND je.source_id <=> jdp.doc_id)
+               AND ((jdp.doc_type = 'invoice'          AND i.id IS NULL)
+                 OR (jdp.doc_type = 'purchase_invoice' AND p.id IS NULL))";
+        $sql = "FROM ({$direct} UNION ALL {$owned}) orphan";
+        $select = "SELECT orphan.entry_id, orphan.source_type, orphan.source_id, orphan.document_no, orphan.entry_date "
+            . $sql . " ORDER BY orphan.entry_id LIMIT " . self::DETAIL_LIMIT;
+        return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select, ['sid' => $supplierId, 'sid2' => $supplierId]);
     }
 
     /**
@@ -361,15 +379,8 @@ final class JournalIntegrityService
                     AND p.status <> 'cancelled'
                     AND p.document_kind <> 'advance'
              ) d
-             WHERE NOT EXISTS (
-                 SELECT 1 FROM journal_entries je
-                  WHERE je.supplier_id = :sid3
-                    AND je.source_type = d.source_type
-                    AND je.source_id   = d.source_id
-                    AND je.posted_at IS NOT NULL
-                    AND je.reversed_by IS NULL
-             )";
-        $params = ['sid' => $supplierId, 'sid2' => $supplierId, 'sid3' => $supplierId];
+             WHERE NOT " . DocumentPostingGroup::activePostingExistsSql('d.source_type', 'd.source_id', (string) $supplierId);
+        $params = ['sid' => $supplierId, 'sid2' => $supplierId];
         $select = "SELECT d.source_type, d.source_id, d.document_no, d.booked_at " . $sql
             . " ORDER BY d.source_type, d.source_id LIMIT " . self::DETAIL_LIMIT;
         return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select, $params);
@@ -381,19 +392,18 @@ final class JournalIntegrityService
     private function checkEntryWithoutBooked(int $supplierId): array
     {
         $sql =
-            "FROM journal_entries je
+            "FROM (" . DocumentPostingGroup::activeReferencesSql($supplierId) . ") active
+             JOIN journal_entries je ON je.supplier_id = :sid3 AND je.id = active.entry_id
              JOIN (
                  SELECT 'invoice' AS source_type, i.id AS source_id FROM invoices i
                   WHERE i.supplier_id = :sid AND i.booked_at IS NULL
                  UNION ALL
                  SELECT 'purchase_invoice', p.id FROM purchase_invoices p
                   WHERE p.supplier_id = :sid2 AND p.booked_at IS NULL
-             ) d ON d.source_type = je.source_type AND d.source_id = je.source_id
-             WHERE je.supplier_id = :sid3
-               AND je.posted_at IS NOT NULL
-               AND je.reversed_by IS NULL";
+             ) d ON d.source_type = active.doc_type AND d.source_id = active.doc_id
+             WHERE je.posted_at IS NOT NULL AND je.reversed_by IS NULL";
         $params = ['sid' => $supplierId, 'sid2' => $supplierId, 'sid3' => $supplierId];
-        $select = "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no " . $sql
+        $select = "SELECT je.id AS entry_id, d.source_type, d.source_id, je.document_no " . $sql
             . " ORDER BY je.id LIMIT " . self::DETAIL_LIMIT;
         return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select, $params);
     }
@@ -411,7 +421,8 @@ final class JournalIntegrityService
     private function checkCancelledWithEntry(int $supplierId): array
     {
         $sql =
-            "FROM journal_entries je
+            "FROM (" . DocumentPostingGroup::activeReferencesSql($supplierId) . ") active
+             JOIN journal_entries je ON je.supplier_id = :sid3 AND je.id = active.entry_id
              JOIN (
                  SELECT 'invoice' AS source_type, i.id AS source_id, i.varsymbol AS document_no,
                         i.cancelled_at
@@ -421,12 +432,10 @@ final class JournalIntegrityService
                  SELECT 'purchase_invoice', p.id, p.varsymbol, p.cancelled_at
                    FROM purchase_invoices p
                   WHERE p.supplier_id = :sid2 AND p.status = 'cancelled'
-             ) d ON d.source_type = je.source_type AND d.source_id = je.source_id
-             WHERE je.supplier_id = :sid3
-               AND je.posted_at IS NOT NULL
-               AND je.reversed_by IS NULL";
+             ) d ON d.source_type = active.doc_type AND d.source_id = active.doc_id
+             WHERE je.posted_at IS NOT NULL AND je.reversed_by IS NULL";
         $params = ['sid' => $supplierId, 'sid2' => $supplierId, 'sid3' => $supplierId];
-        $select = "SELECT je.id AS entry_id, je.source_type, je.source_id, d.document_no,
+        $select = "SELECT je.id AS entry_id, d.source_type, d.source_id, d.document_no,
                           d.cancelled_at, je.entry_date " . $sql
             . " ORDER BY je.id LIMIT " . self::DETAIL_LIMIT;
         return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select, $params);
@@ -437,11 +446,11 @@ final class JournalIntegrityService
      */
     private function checkAmountMismatch(int $supplierId): array
     {
-        $sql    = 'FROM ' . $this->amountMismatchFrom();
+        $sql    = 'FROM ' . $this->amountMismatchFrom($supplierId);
         $params = $this->amountMismatchParams($supplierId);
-        $select = "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no,
-                          ROUND(doc.expected, 2) AS expected " . $sql
-            . " ORDER BY je.id LIMIT " . self::DETAIL_LIMIT;
+        $select = "SELECT mm.entry_id, mm.source_type, mm.source_id, mm.document_no,
+                          ROUND(mm.expected, 2) AS expected " . $sql
+            . " ORDER BY mm.entry_id LIMIT " . self::DETAIL_LIMIT;
         return $this->countAndSample($supplierId, "SELECT COUNT(*) " . $sql, $select, $params);
     }
 
@@ -455,8 +464,8 @@ final class JournalIntegrityService
     public function amountMismatchEntryIds(int $supplierId, int $limit = 1000): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT je.id FROM ' . $this->amountMismatchFrom()
-            . ' ORDER BY je.entry_date DESC, je.id DESC LIMIT ' . max(1, $limit)
+            'SELECT mm.entry_id FROM ' . $this->amountMismatchFrom($supplierId)
+            . ' ORDER BY mm.entry_date DESC, mm.entry_id DESC LIMIT ' . max(1, $limit)
         );
         $stmt->execute($this->amountMismatchParams($supplierId));
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN) ?: []);
@@ -501,10 +510,111 @@ final class JournalIntegrityService
      * Vydaná větev: invoice_type='tax_document'; přijatá: document_kind='tax_document'
      * (PostingService::buildPurchaseAdvanceVatDocumentLines). Symetrii hlídá
      * Architecture\DocumentBranchParityGuardsTest.
+     *
+     * Doklad se skupinou zaúčtování ({@see DocumentPostingGroup}) se kontroluje jako
+     * celek: tři tvary se vyhodnotí nad řádky všech aktivních členů dohromady. Skupina
+     * typicky rozdělí saldokonto mezi zápis základu a zápis DPH, takže jednotlivý člen
+     * celkovou částku nenese. Po stornu přímého člena se doklad kontroluje přes zbylé
+     * členy. Nález nese jeden zápis za doklad (nejnižší id aktivního člena), aby počet
+     * na dashboardu a filtr deníku počítaly doklady stejně jako u nativních dokladů.
+     * Doklad bez skupiny jde dál po jednotlivém přímém zápisu beze změny.
      */
-    private function amountMismatchFrom(): string
+    private function amountMismatchFrom(int $supplierId): string
     {
-        $docExpr =
+        // DECIMAL aritmetika je přesná, ROUND na haléře jen srovná měřítko po
+        // násobení kurzem (jinak by 0,67 vs 0,67 selhalo na 15. desetinném místě).
+        $matches = static fn(string $amount, string $doc = 'doc'): string =>
+            "ABS(ROUND(ABS($amount), 2) - ROUND(ABS({$doc}.expected), 2)) <= ROUND({$doc}.tol, 2)";
+
+        $native =
+            "SELECT je.id AS entry_id, je.source_type, je.source_id, je.document_no, je.entry_date, doc.expected
+               FROM journal_entries je
+               JOIN ( " . $this->amountMismatchDocsSql(':sid', ':sid2') . " ) doc
+                 ON doc.source_type = je.source_type AND doc.source_id = je.source_id
+              WHERE je.supplier_id = :sid3
+                AND je.source_type IN ('invoice','purchase_invoice')
+                AND je.posted_at IS NOT NULL
+                AND je.reversed_by IS NULL
+                AND doc.unsettled > doc.tol
+                AND NOT EXISTS (
+                    SELECT 1 FROM journal_document_postings jdp FORCE INDEX (uq_jdp_doc_entry)
+                     WHERE jdp.supplier_id = {$supplierId} AND jdp.doc_type = je.source_type
+                       AND jdp.doc_id = je.source_id
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM journal_entry_lines l
+                     WHERE l.entry_id = je.id
+                       AND " . $matches('l.amount') . "
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM journal_entry_lines l
+                     WHERE l.entry_id = je.id
+                     GROUP BY l.account_id, l.side
+                    HAVING " . $matches('SUM(l.signed_amount)') . "
+                )
+                AND NOT EXISTS (
+                    SELECT 1 FROM journal_entry_lines l
+                     WHERE l.entry_id = je.id
+                     GROUP BY l.account_id
+                    HAVING " . $matches("SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END)") . "
+                )";
+
+        $members = DocumentPostingGroup::groupedActiveMembersSql($supplierId);
+        $groupedDocs = $this->amountMismatchDocsSql(
+            (string) $supplierId,
+            (string) $supplierId,
+            " AND i.id IN (SELECT jdp.doc_id FROM journal_document_postings jdp FORCE INDEX (uq_jdp_doc_entry)
+                            WHERE jdp.supplier_id = {$supplierId} AND jdp.doc_type = 'invoice')",
+            " AND p.id IN (SELECT jdp.doc_id FROM journal_document_postings jdp FORCE INDEX (uq_jdp_doc_entry)
+                            WHERE jdp.supplier_id = {$supplierId} AND jdp.doc_type = 'purchase_invoice')",
+        );
+        // Součty účtu po stranách nesou NULL, když strana nemá řádek: tvar 2 se pak
+        // nevyhodnotí nad prázdnou skupinou, stejně jako GROUP BY v nativní větvi.
+        $groupedMatching =
+            "SELECT acc.doc_type, acc.doc_id
+               FROM (SELECT am.doc_type, am.doc_id, l.account_id,
+                            MAX(adoc.expected) AS expected, MAX(adoc.tol) AS tol,
+                            MAX(CASE WHEN " . $matches('l.amount', 'adoc') . " THEN 1 ELSE 0 END) AS line_match,
+                            SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount END) AS debit_sum,
+                            SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount END) AS credit_sum
+                       FROM ( {$members} ) am
+                       JOIN ( {$groupedDocs} ) adoc ON adoc.source_type = am.doc_type AND adoc.source_id = am.doc_id
+                       JOIN journal_entry_lines l FORCE INDEX (idx_jel_supplier_entry)
+                         ON l.supplier_id = {$supplierId} AND l.entry_id = am.entry_id
+                      GROUP BY am.doc_type, am.doc_id, l.account_id) acc
+              WHERE acc.line_match = 1
+                 OR " . $matches('acc.debit_sum', 'acc') . "
+                 OR " . $matches('acc.credit_sum', 'acc') . "
+                 OR " . $matches('COALESCE(acc.debit_sum, 0) - COALESCE(acc.credit_sum, 0)', 'acc') . "
+              GROUP BY acc.doc_type, acc.doc_id";
+
+        $grouped =
+            "SELECT gm.entry_id, gm.doc_type AS source_type, gm.doc_id AS source_id,
+                    rep.document_no, rep.entry_date, gdoc.expected
+               FROM (SELECT am.doc_type, am.doc_id, MIN(am.entry_id) AS entry_id
+                       FROM ( {$members} ) am
+                      GROUP BY am.doc_type, am.doc_id) gm
+               JOIN ( {$groupedDocs} ) gdoc ON gdoc.source_type = gm.doc_type AND gdoc.source_id = gm.doc_id
+               JOIN journal_entries rep ON rep.supplier_id = {$supplierId} AND rep.id = gm.entry_id
+               LEFT JOIN ( {$groupedMatching} ) ok ON ok.doc_type = gm.doc_type AND ok.doc_id = gm.doc_id
+              WHERE gdoc.unsettled > gdoc.tol
+                AND ok.doc_id IS NULL";
+
+        return "( {$native} UNION ALL {$grouped} ) mm";
+    }
+
+    /**
+     * Očekávaná částka a tolerance dokladů pro {@see amountMismatchFrom}. Firma se
+     * předává jako SQL výraz (pojmenovaný parametr nebo celé číslo), filtry zužují
+     * doklady na jedné či druhé straně.
+     */
+    private function amountMismatchDocsSql(
+        string $invoiceSupplierSql,
+        string $purchaseSupplierSql,
+        string $invoiceFilter = '',
+        string $purchaseFilter = '',
+    ): string {
+        return
             "SELECT 'invoice' AS source_type, i.id AS source_id,
                     (CASE WHEN i.invoice_type = 'tax_document' THEN i.total_vat ELSE i.total_with_vat END)
                     * (CASE WHEN ci.code = 'CZK' OR ci.code IS NULL THEN 1 ELSE COALESCE(i.exchange_rate, 1) END) AS expected,
@@ -513,7 +623,7 @@ final class JournalIntegrityService
                     ABS(COALESCE(i.total_with_vat, 0)) - ABS(COALESCE(i.advance_paid_amount, 0)) AS unsettled
                FROM invoices i
                LEFT JOIN currencies ci ON ci.id = i.currency_id
-              WHERE i.supplier_id = :sid
+              WHERE i.supplier_id = {$invoiceSupplierSql}{$invoiceFilter}
              UNION ALL
              SELECT 'purchase_invoice', p.id,
                     (CASE WHEN p.document_kind = 'tax_document' THEN p.total_vat ELSE p.total_with_vat END)
@@ -523,39 +633,7 @@ final class JournalIntegrityService
                     ABS(COALESCE(p.total_with_vat, 0)) - ABS(COALESCE(p.advance_paid_amount, 0))
                FROM purchase_invoices p
                LEFT JOIN currencies cp ON cp.id = p.currency_id
-              WHERE p.supplier_id = :sid2";
-
-        // DECIMAL aritmetika je přesná, ROUND na haléře jen srovná měřítko po
-        // násobení kurzem (jinak by 0,67 vs 0,67 selhalo na 15. desetinném místě).
-        $matches = static fn(string $amount): string =>
-            "ABS(ROUND(ABS($amount), 2) - ROUND(ABS(doc.expected), 2)) <= ROUND(doc.tol, 2)";
-
-        return
-            "journal_entries je
-             JOIN ( " . $docExpr . " ) doc
-               ON doc.source_type = je.source_type AND doc.source_id = je.source_id
-             WHERE je.supplier_id = :sid3
-               AND je.source_type IN ('invoice','purchase_invoice')
-               AND je.posted_at IS NOT NULL
-               AND je.reversed_by IS NULL
-               AND doc.unsettled > doc.tol
-               AND NOT EXISTS (
-                   SELECT 1 FROM journal_entry_lines l
-                    WHERE l.entry_id = je.id
-                      AND " . $matches('l.amount') . "
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM journal_entry_lines l
-                    WHERE l.entry_id = je.id
-                    GROUP BY l.account_id, l.side
-                   HAVING " . $matches('SUM(l.signed_amount)') . "
-               )
-               AND NOT EXISTS (
-                   SELECT 1 FROM journal_entry_lines l
-                    WHERE l.entry_id = je.id
-                    GROUP BY l.account_id
-                   HAVING " . $matches("SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END)") . "
-               )";
+              WHERE p.supplier_id = {$purchaseSupplierSql}{$purchaseFilter}";
     }
 
     // ── EP-11: tenantové/strukturální invarianty (read-only SQL) ───────────────

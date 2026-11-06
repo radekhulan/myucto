@@ -370,7 +370,8 @@ final class JournalDescriptionBuilder
             'proforma'         => 'Proforma',
             'tax_document'     => 'DD k platbě',
             'penalty'          => 'Penalizační FV',
-            'payment_calendar' => 'Splátkový kalendář',
+            'payment_calendar', 'rent_calendar' => 'Splátkový kalendář',
+            'advance_calendar' => 'Platební kalendář',
             default            => 'FV',
         };
     }

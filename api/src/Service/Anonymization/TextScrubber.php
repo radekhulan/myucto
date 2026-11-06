@@ -36,6 +36,7 @@ final class TextScrubber
      * @var array<string,string>
      */
     private const JSON_KEYS = [
+        'costcenter' => 'cost_center',
         'companyname' => 'party_name', 'displayname' => 'party_name', 'partnername' => 'party_name',
         'vendorname' => 'party_name', 'buyername' => 'party_name', 'customername' => 'party_name',
         'counterpartyname' => 'party_name', 'payername' => 'party_name', 'payeename' => 'party_name',
@@ -166,6 +167,7 @@ final class TextScrubber
             'web' => $this->pseudonymizer->web($value),
             'host' => $this->pseudonymizer->host($value),
             'login' => $this->pseudonymizer->login($value),
+            'cost_center' => $this->pseudonymizer->costCenter($value),
             'shape' => $this->pseudonymizer->shape($value),
             'shape_digits' => $this->pseudonymizer->shapeDigits($value),
             'symbol' => $this->pseudonymizer->symbol($value),
@@ -180,6 +182,13 @@ final class TextScrubber
     private function walk(mixed $node, ?string $key, bool &$changed): mixed
     {
         if ($node instanceof \stdClass) {
+            if (($node->type ?? null) === 'cost_center' && isset($node->code) && is_string($node->code)) {
+                $code = $this->byStrategy('cost_center', $node->code);
+                if ($code !== $node->code) {
+                    $node->code = $code;
+                    $changed = true;
+                }
+            }
             foreach (get_object_vars($node) as $k => $v) {
                 $node->{$k} = $this->walk($v, (string) $k, $changed);
             }

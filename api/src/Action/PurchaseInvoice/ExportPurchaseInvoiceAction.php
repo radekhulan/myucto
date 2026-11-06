@@ -35,7 +35,7 @@ final class ExportPurchaseInvoiceAction
         } catch (\RuntimeException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);
         } catch (\Throwable $e) {
-            return Json::error($response, 'export_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'export_failed', $e->getMessage(), 500);
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
@@ -60,7 +60,7 @@ final class ExportPurchaseInvoiceAction
         } catch (\RuntimeException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);
         } catch (\Throwable $e) {
-            return Json::error($response, 'export_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'export_failed', $e->getMessage(), 500);
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

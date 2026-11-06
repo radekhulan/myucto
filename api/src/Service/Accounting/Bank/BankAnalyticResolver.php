@@ -123,15 +123,15 @@ final class BankAnalyticResolver
      *
      * @param array<string,mixed> $tx
      */
-    public function existingAnalyticCodeFor(int $supplierId, array $tx): ?string
+    public function existingAnalyticCodeFor(int $supplierId, array $tx, bool $currentRead = false): ?string
     {
         $account = trim((string) ($tx['recipient_account'] ?? ''));
-        if ($account === '') {
+        if ($account === '' && !$currentRead) {
             return null;
         }
         $bankRaw = $tx['recipient_bank'] ?? null;
         $bank = ($bankRaw === null || (string) $bankRaw === '') ? null : (string) $bankRaw;
-        $own = $this->ownAccount(
+        $own = $currentRead ? $this->bankAccounts->matchCounterparty($supplierId, $account, $bank, false, true) : $this->ownAccount(
             $supplierId . '|' . $account . '|' . ($bank ?? ''),
             $supplierId,
             $account,
@@ -141,6 +141,9 @@ final class BankAnalyticResolver
             return null;
         }
         if (($own['kind'] ?? null) === BankAnalyticAssigner::CREDIT_CARD_KIND) {
+            if ($currentRead) {
+                throw new \MyInvoice\Service\Accounting\PostingException('property_payment_unsupported_source', 'Úvěrový účet kreditní karty není podporovaným zdrojem tohoto vypořádání.', 422);
+            }
             return $this->creditCards->existingCodeForBankAccount($supplierId, $own);
         }
         $suffix = $own['analytic_suffix'] ?? null;

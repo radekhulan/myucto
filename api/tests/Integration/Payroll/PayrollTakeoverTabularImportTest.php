@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollMigrationReconciliationRepository;
 use MyInvoice\Service\Payroll\Import\Takeover\TakeoverTabularImportService;
@@ -40,7 +39,7 @@ final class PayrollTakeoverTabularImportTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer()
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build()
             ?? throw new \RuntimeException('DI kontejner není dostupný.');
         $db = $container->get(Connection::class);
         $imports = $container->get(TakeoverTabularImportService::class);

@@ -34,6 +34,11 @@ final class AiCredentialsBulkApplier
 {
     public const PERMISSION = 'settings.ai_provider';
 
+    public const STATUS_UPDATED = 'updated';
+    public const STATUS_CONFIGURED = 'configured';
+    public const STATUS_FORBIDDEN = 'forbidden';
+    public const STATUS_EU_RESIDENCY = 'eu_residency';
+
     public function __construct(
         private readonly AnthropicClient $anthropic,
         private readonly AzureOpenAiClient $azure,
@@ -65,19 +70,10 @@ final class AiCredentialsBulkApplier
         string $userAgent = '',
     ): array {
         $out = ['updated' => [], 'skipped_configured' => [], 'skipped_forbidden' => [], 'skipped_constraint' => []];
-
-        $client = $this->clientFor($provider);
-        $creds  = $client->getCredentials($sourceSupplierId);
-        if ($creds === null) {
-            throw new \DomainException('Aktuální firma nemá pro poskytovatele uložený klíč.');
-        }
-        $source       = $this->gatewayRow($sourceSupplierId);
-        $sourceRegion = $client->capabilities($sourceSupplierId)->dataRegion;
-        $hasEffort    = $this->db->hasColumn('supplier', 'ai_effort');
+        $source = $this->sourceFor($sourceSupplierId, $provider);
 
         $user   = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
-        $residency = new ResidencyPolicy();
 
         foreach ($this->candidateIds($request, $userId) as $targetId) {
             if ($targetId === $sourceSupplierId) continue;
@@ -89,76 +85,220 @@ final class AiCredentialsBulkApplier
             if ($target === null) continue;
             $entry = ['id' => $targetId, 'name' => $target['name']];
 
-            if (!$role->isActive || $role->isClientType()
-                || !$this->checker->allows($role, self::PERMISSION, AccessLevel::WRITE)) {
-                $out['skipped_forbidden'][] = $entry;
-                continue;
-            }
-
-            // „Nastavená AI" = aktivní poskytovatel firmy má použitelný klíč — stejná
-            // definice jako odznak „Aktivní" v UI.
-            if ($onlyUnconfigured
-                && $this->clientFor($target['ai_provider'])->getCredentials($targetId) !== null) {
-                $out['skipped_configured'][] = $entry;
-                continue;
-            }
-
-            // EU rezidence se nikdy nesnižuje: firma, která ji vyžaduje, ji vyžaduje dál.
-            $euRequired = $source['ai_eu_residency_required'] || $target['ai_eu_residency_required'];
-            if ($euRequired && strtolower($sourceRegion) !== 'eu') {
-                $out['skipped_constraint'][] = $entry + ['reason' => 'eu_residency'];
-                continue;
-            }
-
-            // Každá firma atomicky; uvnitř cizí transakce přes savepoint, aby šlo
-            // vrátit jen tuhle firmu.
-            $pdo = $this->db->pdo();
-            $ownsTransaction = !$pdo->inTransaction();
-            $ownsTransaction ? $pdo->beginTransaction() : $pdo->exec('SAVEPOINT ai_bulk_target');
-            $rollback = static function () use ($pdo, $ownsTransaction): void {
-                if ($ownsTransaction) {
-                    if ($pdo->inTransaction()) $pdo->rollBack();
-                } elseif ($pdo->inTransaction()) {
-                    $pdo->exec('ROLLBACK TO SAVEPOINT ai_bulk_target');
-                }
+            $status = $this->applyToTarget(
+                $source,
+                $targetId,
+                $target,
+                $role,
+                $onlyUnconfigured,
+                $userId,
+                ['provider' => $provider, 'bulk_source_supplier_id' => $sourceSupplierId],
+                $ip,
+                $userAgent,
+            );
+            match ($status) {
+                self::STATUS_UPDATED    => $out['updated'][] = $entry,
+                self::STATUS_CONFIGURED => $out['skipped_configured'][] = $entry,
+                self::STATUS_FORBIDDEN  => $out['skipped_forbidden'][] = $entry,
+                default                 => $out['skipped_constraint'][] = $entry + ['reason' => 'eu_residency'],
             };
-            try {
-                $this->persist($provider, $targetId, $creds);
-                $sets   = ['ai_provider = ?', 'ai_data_region = ?', 'ai_eu_residency_required = ?'];
-                $params = [$provider, $source['ai_data_region'], (int) $euRequired];
-                if ($hasEffort) {
-                    $sets[]   = 'ai_effort = ?';
-                    $params[] = $source['ai_effort'];
-                }
-                $params[] = $targetId;
-                $pdo->prepare('UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($params);
-
-                // Pojistka po zápisu: region se počítá z uložené konfigurace cílové firmy.
-                $residency->assertAllowed($provider, $client->capabilities($targetId)->dataRegion, $euRequired);
-
-                $this->logger->log(
-                    'import.ai_credentials_set',
-                    $userId,
-                    'supplier',
-                    $targetId,
-                    ['provider' => $provider, 'bulk_source_supplier_id' => $sourceSupplierId],
-                    $ip,
-                    $userAgent,
-                    $targetId,
-                );
-                $ownsTransaction ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT ai_bulk_target');
-            } catch (ResidencyViolationException) {
-                $rollback();
-                $out['skipped_constraint'][] = $entry + ['reason' => 'eu_residency'];
-                continue;
-            } catch (\Throwable $e) {
-                $rollback();
-                throw $e;
-            }
-            $out['updated'][] = $entry;
         }
 
         return $out;
+    }
+
+    /**
+     * Převzetí do jedné výslovně určené firmy, typicky právě založené.
+     *
+     * Cíl se nebere z přepínače firem: superadmin bez členství v nové firmě v ní
+     * žádný řádek `user_suppliers` nemá, a přesto ji má dostat. Oprávnění se ale
+     * vyhodnotí stejně jako u hromadné akce, tedy rolí přepnutou do cílové firmy.
+     *
+     * @return self::STATUS_* výsledek; firma mimo dosah resoluce = STATUS_FORBIDDEN
+     */
+    public function applyToSupplier(
+        Request $request,
+        int $sourceSupplierId,
+        string $provider,
+        int $targetSupplierId,
+        ?string $ip = null,
+        string $userAgent = '',
+    ): string {
+        $source = $this->sourceFor($sourceSupplierId, $provider);
+        $user   = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $userId = (int) ($user['id'] ?? 0);
+        $role   = $this->scopedRole($request, $targetSupplierId);
+        $target = $this->gatewayRow($targetSupplierId);
+        if ($role === null || $target === null || $targetSupplierId === $sourceSupplierId) {
+            return self::STATUS_FORBIDDEN;
+        }
+
+        return $this->applyToTarget(
+            $source,
+            $targetSupplierId,
+            $target,
+            $role,
+            false,
+            $userId,
+            ['provider' => $provider, 'carry_over_source_supplier_id' => $sourceSupplierId],
+            $ip,
+            $userAgent,
+        );
+    }
+
+    /**
+     * Mají všechny zadané firmy, které AI nastavenou mají, totéž nastavení?
+     *
+     * „Nastavená AI" = aktivní poskytovatel firmy má použitelný klíč (stejně jako
+     * odznak „Aktivní" v UI). Porovnává se dešifrovaný klíč, model nebo endpoint
+     * poskytovatele, region, EU rezidence a effort. Hodnoty zůstávají v paměti
+     * serveru; ven jde jen poskytovatel a seznam firem.
+     *
+     * @param list<int> $supplierIds
+     * @return array{status:'none'|'different'|'same', provider:?string, source_supplier_id:?int, supplier_ids:list<int>}
+     */
+    public function uniformConfiguration(array $supplierIds): array
+    {
+        $configured = [];
+        $fingerprints = [];
+        $provider = null;
+        foreach ($supplierIds as $supplierId) {
+            $row = $this->gatewayRow($supplierId);
+            if ($row === null) continue;
+            $creds = $this->clientFor($row['ai_provider'])->getCredentials($supplierId);
+            if ($creds === null) continue;
+            ksort($creds);
+            $fingerprints[hash('sha256', json_encode([
+                $row['ai_provider'],
+                $creds,
+                $row['ai_data_region'],
+                $row['ai_eu_residency_required'],
+                $row['ai_effort'],
+            ], JSON_THROW_ON_ERROR))] = true;
+            $configured[] = $supplierId;
+            $provider ??= $row['ai_provider'];
+        }
+
+        $status = match (true) {
+            $configured === []       => 'none',
+            count($fingerprints) > 1 => 'different',
+            default                  => 'same',
+        };
+
+        return [
+            'status'             => $status,
+            'provider'           => $status === 'same' ? $provider : null,
+            'source_supplier_id' => $status === 'same' ? $configured[0] : null,
+            'supplier_ids'       => $configured,
+        ];
+    }
+
+    /**
+     * @return array{provider:string, client:LlmGatewayInterface, creds:array<string,string>, row:array{name:string, ai_provider:string, ai_data_region:string, ai_eu_residency_required:bool, ai_effort:string}, region:string}
+     */
+    private function sourceFor(int $sourceSupplierId, string $provider): array
+    {
+        $client = $this->clientFor($provider);
+        $creds  = $client->getCredentials($sourceSupplierId);
+        $row    = $this->gatewayRow($sourceSupplierId);
+        if ($creds === null || $row === null) {
+            throw new \DomainException('Aktuální firma nemá pro poskytovatele uložený klíč.');
+        }
+
+        return [
+            'provider' => $provider,
+            'client'   => $client,
+            'creds'    => $creds,
+            'row'      => $row,
+            'region'   => $client->capabilities($sourceSupplierId)->dataRegion,
+        ];
+    }
+
+    /**
+     * Zápis do jedné cílové firmy: oprávnění, EU rezidence, šifrovaná kopie klíče
+     * a nastavení brány, audit. Firma atomicky; uvnitř cizí transakce přes savepoint.
+     *
+     * @param array{provider:string, client:LlmGatewayInterface, creds:array<string,string>, row:array{name:string, ai_provider:string, ai_data_region:string, ai_eu_residency_required:bool, ai_effort:string}, region:string} $source
+     * @param array{name:string, ai_provider:string, ai_data_region:string, ai_eu_residency_required:bool, ai_effort:string} $target
+     * @param array<string,mixed> $auditPayload
+     * @return self::STATUS_*
+     */
+    private function applyToTarget(
+        array $source,
+        int $targetId,
+        array $target,
+        EffectiveRole $role,
+        bool $onlyUnconfigured,
+        int $userId,
+        array $auditPayload,
+        ?string $ip,
+        string $userAgent,
+    ): string {
+        $provider = $source['provider'];
+        $client   = $source['client'];
+
+        if (!$role->isActive || $role->isClientType()
+            || !$this->checker->allows($role, self::PERMISSION, AccessLevel::WRITE)) {
+            return self::STATUS_FORBIDDEN;
+        }
+
+        // „Nastavená AI" = aktivní poskytovatel firmy má použitelný klíč — stejná
+        // definice jako odznak „Aktivní" v UI.
+        if ($onlyUnconfigured
+            && $this->clientFor($target['ai_provider'])->getCredentials($targetId) !== null) {
+            return self::STATUS_CONFIGURED;
+        }
+
+        // EU rezidence se nikdy nesnižuje: firma, která ji vyžaduje, ji vyžaduje dál.
+        $euRequired = $source['row']['ai_eu_residency_required'] || $target['ai_eu_residency_required'];
+        if ($euRequired && strtolower($source['region']) !== 'eu') {
+            return self::STATUS_EU_RESIDENCY;
+        }
+
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        $ownsTransaction ? $pdo->beginTransaction() : $pdo->exec('SAVEPOINT ai_bulk_target');
+        $rollback = static function () use ($pdo, $ownsTransaction): void {
+            if ($ownsTransaction) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+            } elseif ($pdo->inTransaction()) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ai_bulk_target');
+            }
+        };
+        try {
+            $this->persist($provider, $targetId, $source['creds']);
+            $sets   = ['ai_provider = ?', 'ai_data_region = ?', 'ai_eu_residency_required = ?'];
+            $params = [$provider, $source['row']['ai_data_region'], (int) $euRequired];
+            if ($this->db->hasColumn('supplier', 'ai_effort')) {
+                $sets[]   = 'ai_effort = ?';
+                $params[] = $source['row']['ai_effort'];
+            }
+            $params[] = $targetId;
+            $pdo->prepare('UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?')->execute($params);
+
+            // Pojistka po zápisu: region se počítá z uložené konfigurace cílové firmy.
+            (new ResidencyPolicy())->assertAllowed($provider, $client->capabilities($targetId)->dataRegion, $euRequired);
+
+            $this->logger->log(
+                'import.ai_credentials_set',
+                $userId,
+                'supplier',
+                $targetId,
+                $auditPayload,
+                $ip,
+                $userAgent,
+                $targetId,
+            );
+            $ownsTransaction ? $pdo->commit() : $pdo->exec('RELEASE SAVEPOINT ai_bulk_target');
+        } catch (ResidencyViolationException) {
+            $rollback();
+            return self::STATUS_EU_RESIDENCY;
+        } catch (\Throwable $e) {
+            $rollback();
+            throw $e;
+        }
+
+        return self::STATUS_UPDATED;
     }
 
     /** @return list<int> */
@@ -184,11 +324,13 @@ final class AiCredentialsBulkApplier
         return $this->permissions->resolve($scoped);
     }
 
-    /** @param array<string,string> $creds */
+    /** @param array<string,?string> $creds */
     private function persist(string $provider, int $supplierId, array $creds): void
     {
         match ($provider) {
-            'anthropic'    => $this->anthropic->setCredentials($supplierId, $creds['api_key'], $creds['default_model'] ?? null),
+            'anthropic'    => $this->anthropic->setCredentials(
+                $supplierId, $creds['api_key'], $creds['default_model'] ?? null, (string) ($creds['workspace_id'] ?? ''),
+            ),
             'azure_openai' => $this->azure->setCredentials(
                 $supplierId, $creds['api_key'], $creds['endpoint'] ?? null, $creds['deployment'] ?? null, $creds['api_version'] ?? null,
             ),

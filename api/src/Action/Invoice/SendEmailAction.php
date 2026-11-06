@@ -48,6 +48,9 @@ final class SendEmailAction
         if ($invoice['invoice_type'] === 'cancellation') {
             return Json::error($response, 'cannot_send_cancellation', 'Interní storno se klientovi neposílá.', 409);
         }
+        if (!empty($invoice['calendar_id'])) {
+            return Json::error($response, 'calendar_instalment_not_sendable', 'Doklad splátky je interní, odběrateli se posílá kalendář.', 409);
+        }
 
         $body = (array) ($request->getParsedBody() ?? []);
         $overrideTo = isset($body['to']) && is_array($body['to']) ? array_filter(array_map('trim', $body['to'])) : null;
@@ -103,7 +106,7 @@ final class SendEmailAction
         try {
             $pdfPath = $this->renderer->render($id, false, $userId);
         } catch (\Throwable $e) {
-            return Json::error($response, 'pdf_failed', 'Nepodařilo se vygenerovat PDF: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'pdf_failed', 'Nepodařilo se vygenerovat PDF: ' . $e->getMessage(), 500);
         }
 
         $locale = (string) ($invoice['language'] ?? 'cs');

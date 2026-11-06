@@ -81,7 +81,37 @@ final class CreditasTransactionParser
             'counterparty_name' => $this->optional($partner, 'partnerName', 190),
             'description' => $this->description($transaction),
             'bank_ref' => strlen($id) <= 40 ? $id : 'creditas:' . substr(hash('sha256', $id), 0, 32),
+            ...$this->original($transaction, $amount['currency'], $type === 'DEBIT'),
             'metadata' => $transaction,
+        ];
+    }
+
+    /**
+     * Původní částka nákupu kartou v jiné měně, než je měna pohybu (eurový účet,
+     * dolarová služba). Shodnou měnu ani nečitelnou hodnotu neukládá.
+     *
+     * @param array<string,mixed> $transaction
+     * @return array{original_amount?: float, original_currency?: string}
+     */
+    private function original(array $transaction, string $currency, bool $debit): array
+    {
+        $original = $transaction['originalAmount'] ?? null;
+        if (!is_array($original)
+            || !is_string($original['value'] ?? null)
+            || !is_string($original['currency'] ?? null)
+            || preg_match('/^[A-Z]{3}$/D', $original['currency']) !== 1
+            || $original['currency'] === $currency
+        ) {
+            return [];
+        }
+        try {
+            $value = abs($this->amount($original['value']));
+        } catch (\InvalidArgumentException) {
+            return [];
+        }
+        return [
+            'original_amount' => round($debit ? -$value : $value, 2),
+            'original_currency' => $original['currency'],
         ];
     }
 

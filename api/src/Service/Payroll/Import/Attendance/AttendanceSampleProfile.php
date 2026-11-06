@@ -31,6 +31,7 @@ namespace MyInvoice\Service\Payroll\Import\Attendance;
  */
 final class AttendanceSampleProfile
 {
+    public const KEY = 'giriton';
     public const NAME = 'Vzor GIRITON';
     /*
      * 4: „Suma hodinovky NOC" je v podkladech částka, kterou mzdy vyplácejí

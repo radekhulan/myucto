@@ -186,6 +186,154 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
     }
 
     /**
+     * Odečítané doby po dovršení důchodového věku (IN04): sekce s kódem D nese
+     * `odecitaneDny` za `vylouceneDny`, s úhrnem 10375 a jen nenulovými
+     * složkami. Dny pojištění jsou interval minus odečtené doby, takže výstup
+     * projde XSD i kontrolami 59, 98, 135, 307, 309 a 328.
+     */
+    public function testDeductedDaysAreReportedAfterExcludedDays(): void
+    {
+        $xml = (string) preg_replace('/>\s+</', '><', (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($this->payloadWithDeductedDays()),
+            $this->envelope(),
+        )['xml']);
+
+        self::assertStringContainsString(
+            '<form:kod>1D+</form:kod><form:platnostOd>2026-07-01</form:platnostOd>'
+                . '<form:platnostDo>2026-07-31</form:platnostDo><form:pocetDnu>24</form:pocetDnu>',
+            $xml,
+        );
+        self::assertStringContainsString(
+            '</form:vylouceneDny>'
+                . '<form:odecitaneDny><form:odecitaneDobyCelkem>7</form:odecitaneDobyCelkem>'
+                . '<form:neplaceneVolno>5</form:neplaceneVolno>'
+                . '<form:neomluveneAbsence>2</form:neomluveneAbsence></form:odecitaneDny>',
+            $xml,
+        );
+        self::assertSame([], $this->failedControls($xml, [59, 98, 135, 307, 309, 328]));
+
+        // Kontroly čtou 10375 z projekce vygenerovaného XML: vynulovaný úhrn
+        // při vyplněné složce padá na 328, dny bez odečtení u činnosti T až Z
+        // na 309, odečtené doby bez kódu na 307.
+        self::assertSame([328], $this->failedControls(
+            str_replace('<form:odecitaneDobyCelkem>7<', '<form:odecitaneDobyCelkem>0<', $xml),
+            [328],
+        ));
+        $outsideActivity = str_replace('<form:kod>1D+<', '<form:kod>XD+<', $xml);
+        self::assertSame([], $this->failedControls($outsideActivity, [309]));
+        self::assertSame([309], $this->failedControls(
+            str_replace('<form:pocetDnu>24<', '<form:pocetDnu>31<', $outsideActivity),
+            [309],
+        ));
+        self::assertSame([307], $this->failedControls(
+            (string) preg_replace(
+                '#<form:kod>1D\+</form:kod><form:platnostOd>[^<]+</form:platnostOd><form:platnostDo>[^<]+</form:platnostDo>'
+                    . '<form:pocetDnu>24</form:pocetDnu><form:vymerovaciZaklad>[^<]+</form:vymerovaciZaklad>'
+                    . '<form:vylouceneDny>.*?</form:vylouceneDny>#',
+                '<form:pocetDnu>0</form:pocetDnu>',
+                $xml,
+            ),
+            [307],
+        ));
+    }
+
+    /**
+     * Nekonzistentní odečítané doby se nezapíšou: součet složek musí dát
+     * 10375 (Pravidla podání kap. 4), kladný úhrn potřebuje aspoň jednu
+     * složku a element patří jen do sekce s kódem D.
+     */
+    public function testInconsistentDeductedDaysAreRefused(): void
+    {
+        foreach ([
+            [['deducted_days_total' => 8], 'jmhz_xml_eldp_deducted_days_sum_mismatch'],
+            [['deducted_days' => ['neplaceneVolno' => 0]], 'jmhz_xml_eldp_deducted_days_sum_mismatch'],
+            [['deducted_days' => null], 'jmhz_xml_attribute_unresolved'],
+            [['deducted_days' => ['vyloucenePar16' => 7]], 'jmhz_xml_attribute_unresolved'],
+            [['code' => '1++'], 'jmhz_xml_eldp_deducted_days_without_code'],
+        ] as [$change, $code]) {
+            $payload = $this->payloadWithDeductedDays();
+            $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+            $section = $change + $section;
+            unset($section);
+            try {
+                $this->refuse($payload);
+                self::fail('Nekonzistentní odečítané doby se nesmí zapsat: ' . json_encode($change));
+            } catch (JmhzXmlException $exception) {
+                self::assertSame($code, $exception->validationCode);
+            }
+        }
+    }
+
+    /**
+     * Formulář vězně (`odecitaneDnyVezenType`) vede z odečítaných dob jen
+     * pracovní neschopnost a mateřství. Ty se zapíší a projdou XSD; jiná
+     * složka by se tiše ztratila, proto je to vada.
+     */
+    public function testPrisonerDeductedDaysCarryOnlySicknessAndMaternity(): void
+    {
+        $payload = $this->specialScenarioPayload('scenario_4', '1', '2');
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['code'] = '1D+';
+        $section['insurance_days'] = 28;
+        $section['excluded_days_total'] = 3;
+        $section['excluded_days'] = [
+            'docasNeschopnost' => 3,
+            'penezitaPomocMaterstvi' => 0,
+            'osetrovaniClenaRodiny' => 0,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        $section['deducted_days_total'] = 3;
+        $section['deducted_days'] = ['pracovniNeschopnost' => 3];
+        unset($section);
+
+        $xml = (string) preg_replace(
+            '/>\s+</',
+            '><',
+            (new JmhzScenario1XmlValidator())->dryRun($this->resolutionFor($payload), $this->envelope())['xml'],
+        );
+        self::assertStringContainsString(
+            '</form:vylouceneDny><form:odecitaneDny><form:odecitaneDobyCelkem>3</form:odecitaneDobyCelkem>'
+                . '<form:pracovniNeschopnost>3</form:pracovniNeschopnost></form:odecitaneDny>',
+            $xml,
+        );
+
+        $payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0]['deducted_days'] = ['neplaceneVolno' => 3];
+        $this->expectExceptionObject(new JmhzXmlException(
+            'jmhz_xml_prisoner_deducted_days_unsupported',
+            'Formulář vězně nemá kam zapsat odečítané doby atributu 10468.',
+        ));
+        $this->refuse($payload);
+    }
+
+    /**
+     * Sekce 1D+ za červenec 2026: neplacené volno 5 dnů a neomluvená absence
+     * 2 dny (10375 = 7), dny pojištění 31 − 7 = 24, bez vyloučených dob.
+     *
+     * @return array<string,mixed>
+     */
+    private function payloadWithDeductedDays(): array
+    {
+        $payload = $this->payload();
+        $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+        $section['code'] = '1D+';
+        $section['insurance_days'] = 24;
+        $section['excluded_days'] = [
+            'docasNeschopnost' => 0,
+            'penezitaPomocMaterstvi' => 0,
+            'osetrovaniClenaRodiny' => 0,
+            'otcovska' => 0,
+            'vyloucenePar16' => 0,
+        ];
+        $section['excluded_days_total'] = 0;
+        $section['deducted_days_total'] = 7;
+        $section['deducted_days'] = ['neplaceneVolno' => 5, 'neomluveneAbsence' => 2];
+        unset($section);
+
+        return $payload;
+    }
+
+    /**
      * Vyloučené dny podle § 18 odst. 7 zákona č. 187/2006 Sb. krátí rozhodné
      * období denního vyměřovacího základu nemocenských dávek. Bez nich počítá
      * ČSSZ dávku i z měsíce, ve kterém zaměstnanec kvůli neplacenému volnu
@@ -1114,6 +1262,54 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         return $payload;
     }
 
+    /**
+     * Rodné číslo dítěte (10438) jde vedle data narození (10437), jak ho
+     * uvádějí ostatní mzdové programy (PAMICA, Premier, Money S3, ABRA,
+     * AVENSIO); podle něj se dítě páruje mezi poplatníky.
+     */
+    public function testChildBirthNumberIsReportedNextToBirthDate(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $payload['people'][0]['child_credit_evidence']['children'][0]['identity']['birth_number'] = '1504110003';
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+        $xml = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+
+        self::assertStringContainsString(
+            '<form:dite><form:jmeno>Jana</form:jmeno><form:prijmeni>Nováková</form:prijmeni>'
+                . '<form:datumNarozeni>2015-04-11</form:datumNarozeni><form:rodneCislo>1504110003</form:rodneCislo></form:dite>',
+            $xml,
+        );
+    }
+
+    /** Jiná osoba vyživující tytéž děti nese rodné číslo (10434) vedle data narození (10433). */
+    public function testOtherCaregiverBirthNumberIsReportedNextToBirthDate(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $payload['people'][0]['child_credit_evidence']['other_household_caregiver_status'] = 'present';
+        $payload['people'][0]['child_credit_evidence']['other_household_caregivers'] = [[
+            'given_name' => 'Petr',
+            'family_name' => 'Novák',
+            'birth_date' => '1980-01-01',
+            'birth_number' => '8001010006',
+        ]];
+
+        $result = (new JmhzScenario1XmlValidator())->dryRun(
+            $this->resolutionFor($payload),
+            $this->envelope(),
+        );
+        $xml = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+
+        self::assertStringContainsString(
+            '<form:jinaOsoba><form:jmeno>Petr</form:jmeno><form:prijmeni>Novák</form:prijmeni>'
+                . '<form:datumNarozeni>1980-01-01</form:datumNarozeni><form:rodneCislo>8001010006</form:rodneCislo></form:jinaOsoba>',
+            $xml,
+        );
+    }
+
     public function testCreditWithoutSignedDeclarationIsRefused(): void
     {
         $payload = $this->payload();
@@ -1156,7 +1352,12 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringNotContainsString('<form:danBonus>', $result['xml']);
     }
 
-    public function testTaxBonusElementStaysWithSignedDeclaration(): void
+    /**
+     * Nulový bonus se nepíše ani s podepsaným prohlášením (XSD `minOccurs=0`):
+     * PAMICA ho v hlášeních přijatých ČSSZ vynechává a přítomnost elementu
+     * ČSSZ bere za vyplnění (třída chyb 40244).
+     */
+    public function testZeroTaxBonusIsOmittedEvenWithSignedDeclaration(): void
     {
         $payload = $this->payload();
         $payload['people'][0]['employments'][0]['term']
@@ -1171,7 +1372,8 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             '<form:prohlaseniPoplatnika>true</form:prohlaseniPoplatnika>',
             $result['xml'],
         );
-        self::assertStringContainsString('<form:danBonus>', $result['xml']);
+        self::assertStringContainsString('<form:danZalohaPoSleve>', $result['xml']);
+        self::assertStringNotContainsString('<form:danBonus>', $result['xml']);
     }
 
     /**
@@ -1577,8 +1779,15 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         self::assertStringNotContainsString('<form:castkaOdvodPojistneho>', $result['xml']);
         self::assertStringNotContainsString('<form:kod>', $result['xml']);
         self::assertStringNotContainsString('<form:platnostOd>', $result['xml']);
-        self::assertStringNotContainsString('<form:pojisteniZamestnanec>', $result['xml']);
-        self::assertStringNotContainsString('<form:pojisteniZamestnavatel>', $result['xml']);
+        // Matice datových scénářů 1.4.0.2 vede 10370 i 10481 jako povinné
+        // bez podmínky a ukázka MPSV „Jedna DPP do 11499" je u dohody bez
+        // účasti vyplňuje nulou; kontrola 341 chybějící povinný údaj odmítne.
+        $compact = preg_replace('/>\s+</', '><', $result['xml']) ?? '';
+        self::assertStringContainsString(
+            '<form:pojisteniZamestnanec><form:socialniPojisteni>0</form:socialniPojisteni></form:pojisteniZamestnanec>'
+                . '<form:pojisteniZamestnavatel><form:socialniPojisteni>0</form:socialniPojisteni></form:pojisteniZamestnavatel>',
+            $compact,
+        );
     }
 
     public function testNonUuidV7GuidIsRefused(): void
@@ -2527,7 +2736,16 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                 'settlement_difference_czk' => 1_500,
                 'tax_difference_czk' => 1_000,
                 'bonus_difference_czk' => 500,
-                'spouse_credit_claimed' => false,
+                'spouse_credit_claimed' => true,
+                'spouse_credit_details' => [
+                    'partner' => ['given_name' => 'Petra', 'family_name' => 'Nováková', 'birth_date' => '1991-02-03', 'birth_number' => null],
+                    'children' => [
+                        ['given_name' => 'Ema', 'family_name' => 'Nováková', 'birth_date' => '2024-05-15', 'birth_number' => null],
+                    ],
+                    'ztp_p' => true,
+                    'months' => 12,
+                    'ztp_p_months' => 3,
+                ],
                 'child_credit_claimed' => true,
                 'child_credit_details' => [
                     'other_household_caregiver' => true,
@@ -2606,7 +2824,14 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             $monthly . 'vyzivovaneDeti/vyzivovaneDite/poradi' => ['1', '2'],
             $result . 'danPreplatekRok' => '1000',
             $result . 'danBonusPreplatekRok' => '500',
-            $result . 'uplatnenaSlevaNaPartnera' => 'false',
+            $result . 'uplatnenaSlevaNaPartnera' => 'true',
+            $result . 'slevaNaPartnera/partner/partnerUdaje/jmeno' => 'Petra',
+            $result . 'slevaNaPartnera/partner/partnerUdaje/datumNarozeni' => '1991-02-03',
+            $result . 'slevaNaPartnera/partner/deti/dite/jmeno' => 'Ema',
+            $result . 'slevaNaPartnera/partner/deti/dite/datumNarozeni' => '2024-05-15',
+            $result . 'slevaNaPartnera/partner/prukazZtpp' => 'true',
+            $result . 'slevaNaPartnera/partner/slevaPocetMesicu' => '12',
+            $result . 'slevaNaPartnera/partner/slevaPocetMesicuZtpp' => '3',
             $result . 'uplatnenoZvyhodneniNaDeti' => 'true',
             $annualChildren . 'vyzivujeJinaOsoba' => 'true',
             $annualChildren . 'jineOsoby/jinaOsoba/osoba/jmeno' => 'Petr',
@@ -2659,6 +2884,220 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
                 "{$body}: {$path}",
             );
         }
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function ozpWageFormBodies(): iterable
+    {
+        yield 'bezPriznaku' => ['bezPriznaku'];
+        yield 'odlozenyPrijem' => ['odlozenyPrijem'];
+    }
+
+    /**
+     * Výdělek osob OZP (IN28: 10347 až 10349) a srážky ve prospěch
+     * zaměstnavatele (IN24: 10350 až 10353) z ordinary evidence primárního
+     * vztahu. Bloky stojí v čisté mzdě za 10116 v pořadí XSD 1.4.3.6
+     * (`mzdaCistaBezPriznakuType`, `mzdaCistaOdlozenyPrijemType`), nulová
+     * částka se nevypisuje a kontrola 258 projde. Dřív serializér bloky
+     * nevypsal nikdy a resolver měl IN28 natvrdo Ne.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('ozpWageFormBodies')]
+    public function testOzpWageAndEmployerDeductionsAreSerializedFromOrdinaryEvidence(string $body): void
+    {
+        $document = $this->summaryMatrixDocument($body, 7, self::withOzpWage([
+            '10350' => 50_000,
+            '10351' => 30_000,
+            '10352' => 120_000,
+            '10353' => 25_000,
+        ]));
+        self::assertTrue($document['interactions']['IN28']);
+        self::assertTrue($document['interactions']['IN24']);
+        $xml = $this->summaryMatrixXml($document);
+        $xpath = $this->summaryMatrixXpath($document);
+
+        foreach ([
+            'souhrnDataZec/mzdaCista/vydelekOZP/mzdaOzpUhradaDatum' => ['2026-08-04'],
+            'souhrnDataZec/mzdaCista/vydelekOZP/mzdaOzpHotovost' => ['true'],
+            'souhrnDataZec/mzdaCista/vydelekOZP/mzdaOzpSrazka' => ['true'],
+            'souhrnDataZec/mzdaCista/srazky/srazkaPlneniZel' => ['500'],
+            'souhrnDataZec/mzdaCista/srazky/srazkaSkodaZec' => ['300'],
+            'souhrnDataZec/mzdaCista/srazky/srazkaStrava' => ['1200'],
+            'souhrnDataZec/mzdaCista/srazky/srazkaZavazkyZec' => ['250'],
+        ] as $path => $expected) {
+            self::assertSame(
+                $expected,
+                array_map(
+                    static fn (\DOMNode $node): string => $node->textContent,
+                    iterator_to_array($xpath->query(self::formQuery($body, $path))),
+                ),
+                "{$body}: {$path}",
+            );
+        }
+        self::assertSame([JmhzControlOutcome::Passed], $this->controlOutcomes($xml, 258));
+    }
+
+    /**
+     * Bez srážky ve prospěch zaměstnavatele je 10349 Ne a blok `srazky` se
+     * nevypisuje (IN24 se nespustí). Výdělek OZP bez IN28 se nevypisuje vůbec.
+     */
+    public function testOzpWageWithoutEmployerDeductionsOmitsTheDeductionBlock(): void
+    {
+        $document = $this->summaryMatrixDocument('bezPriznaku', 7, self::withOzpWage([]));
+        self::assertTrue($document['interactions']['IN28']);
+        self::assertArrayNotHasKey('IN24', $document['interactions']);
+        $xpath = $this->summaryMatrixXpath($document);
+        $read = static fn (string $path): array => array_map(
+            static fn (\DOMNode $node): string => $node->textContent,
+            iterator_to_array($xpath->query(self::formQuery('bezPriznaku', $path))),
+        );
+
+        self::assertSame(['false'], $read('souhrnDataZec/mzdaCista/vydelekOZP/mzdaOzpSrazka'));
+        self::assertSame([], $read('souhrnDataZec/mzdaCista/srazky'));
+
+        $plain = $this->summaryMatrixDocument('bezPriznaku');
+        self::assertFalse($plain['interactions']['IN28']);
+        self::assertArrayNotHasKey('ozp_wage', $plain['people'][0]['summary']);
+        self::assertSame([], array_map(
+            static fn (\DOMNode $node): string => $node->textContent,
+            iterator_to_array($this->summaryMatrixXpath($plain)->query(
+                self::formQuery('bezPriznaku', 'souhrnDataZec/mzdaCista/vydelekOZP'),
+            )),
+        ));
+    }
+
+    /**
+     * Kontrola 258 (katalog MH 1.4.2.10, nepropustná): 10349 = ANO bez jediné
+     * částky 10350 až 10353 neprojde. Dřív kontrola mezi implementovanými
+     * nebyla vůbec.
+     */
+    public function testControl258RejectsFlaggedDeductionsWithoutAmounts(): void
+    {
+        $xml = $this->summaryMatrixXml(
+            $this->summaryMatrixDocument('bezPriznaku', 7, self::withOzpWage(['10351' => 30_000])),
+        );
+        $dom = new \DOMDocument();
+        $dom->loadXML($xml);
+        $deductions = $dom->getElementsByTagNameNS('http://schemas.cssz.cz/JMHZ/form/1.0', 'srazky');
+        self::assertSame(1, $deductions->length);
+        $deductions->item(0)->parentNode->removeChild($deductions->item(0));
+
+        self::assertSame([JmhzControlOutcome::Failed], $this->controlOutcomes($dom->saveXML(), 258));
+    }
+
+    /** Serializér nevypíše 10349 = ANO bez částky, ani obráceně. */
+    public function testOzpDeductionFlagInconsistentWithAmountsIsRefused(): void
+    {
+        $document = $this->summaryMatrixDocument('bezPriznaku', 7, self::withOzpWage([]));
+        $document['people'][0]['summary']['ozp_wage']['employer_deductions_made'] = true;
+
+        try {
+            $this->summaryMatrixXml($document);
+            self::fail('10349 = ANO bez částky 10350 až 10353 se nesmí vypsat.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_xml_ozp_deductions_inconsistent', $exception->validationCode);
+        }
+    }
+
+    /**
+     * Formulář vězně výdělek OZP nevede (`mzdaCistaType` bez rozšíření), takže
+     * se na něm hlášení s IN28 zastaví, místo aby se údaj tiše ztratil.
+     */
+    public function testOzpWageOnPrisonerFormIsRefused(): void
+    {
+        $document = $this->summaryMatrixDocument('vezen', 7, self::withOzpWage([]));
+
+        try {
+            $this->summaryMatrixXml($document);
+            self::fail('Výdělek OZP na formuláři vězně se nesmí ztratit.');
+        } catch (JmhzXmlException $exception) {
+            self::assertSame('jmhz_xml_ozp_wage_form_unsupported', $exception->validationCode);
+        }
+    }
+
+    /**
+     * Souhrn (10347 až 10353) nese jen primární vztah (kontroly 248 a 321).
+     * Podpora OZP jen u vedlejšího vztahu by se do hlášení nedostala, proto
+     * resolver hlášení zastaví. Haléřový zbytek srážky se nezaokrouhluje.
+     */
+    public function testOzpWageOnlyOnSecondaryEmploymentOrInHellersBlocks(): void
+    {
+        $payload = $this->payloadWithChildCredit();
+        $secondary = $payload['people'][0]['employments'][0];
+        $secondary['employment_id'] = 102;
+        $secondary['employment']['is_primary'] = false;
+        $payload['people'][0]['employments'][] = $secondary;
+        $payload['ordinary_evidence'][] = [
+            'scope' => ['employee_id' => 11, 'employment_id' => 102],
+            'attribute_values' => ['10116' => false, '10546' => false],
+            'ozp_wage' => self::ozpWage([]),
+        ];
+        $codes = array_map(
+            static fn ($blocker): string => $blocker->code,
+            $this->resolutionFor($payload)->blockers,
+        );
+        self::assertContains('jmhz_ozp_wage_primary_mismatch', $codes);
+
+        $payload = $this->payloadWithChildCredit();
+        self::withOzpWage(['10352' => 120_050])($payload);
+        $blockers = array_values(array_filter(
+            $this->resolutionFor($payload)->blockers,
+            static fn ($blocker): bool => $blocker->code === 'jmhz_scenario1_whole_czk_required',
+        ));
+        self::assertCount(1, $blockers);
+        self::assertSame(['10352'], $blockers[0]->attributeIds);
+    }
+
+    /**
+     * @param array<string,int> $deductions
+     * @return callable(array<string,mixed>&):void
+     */
+    private static function withOzpWage(array $deductions): callable
+    {
+        return static function (array &$payload) use ($deductions): void {
+            $payload['ordinary_evidence'][0]['ozp_wage'] = self::ozpWage($deductions);
+        };
+    }
+
+    /**
+     * @param array<string,int> $deductions
+     * @return array<string,mixed>
+     */
+    private static function ozpWage(array $deductions): array
+    {
+        return [
+            'payment_date' => '2026-08-04',
+            'cash_paid' => true,
+            'employer_deductions_made' => $deductions !== [],
+            'employer_deductions_minor' => $deductions,
+            'employer_deduction_sources' => [],
+        ];
+    }
+
+    /**
+     * Roční výsledek se slevou na manžela (IN19): blok slevaNaPartnera stojí
+     * mezi 10420 a 10454 a celé hlášení projde XSD 1.4.3.6.
+     */
+    public function testAnnualSpouseCreditBlockIsXsdValid(): void
+    {
+        $xml = $this->summaryMatrixXml($this->summaryMatrixDocument('bezPriznaku'));
+        self::assertStringContainsString('<form:slevaNaPartnera>', $xml);
+        $dom = new \DOMDocument();
+        self::assertTrue($dom->loadXML($xml));
+        $previous = libxml_use_internal_errors(true);
+        try {
+            $valid = $dom->schemaValidate(
+                (new \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog())->entryPoint()['path'],
+            );
+            $errors = array_map(
+                static fn (\LibXMLError $error): string => trim($error->message),
+                libxml_get_errors(),
+            );
+        } finally {
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+        }
+        self::assertTrue($valid, implode("
+", $errors));
     }
 
     /**
@@ -2969,6 +3408,129 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         )['xml'];
     }
 
+    /** @return iterable<string,array{string}> */
+    public static function deductedDaysFormBodies(): iterable
+    {
+        foreach (['bezPriznaku', 'cinnostKS', 'vezen'] as $body) {
+            yield $body => [$body];
+        }
+    }
+
+    /**
+     * Odečítané doby (IN04) v každém formuláři, jehož matice je vede: úhrn
+     * 10375 a všechny složky 10462–10469 (u vězně jen 10462 a 10463,
+     * `odecitaneDnyVezenType`) v pořadí XSD, celé kladné číslo bez úvodní
+     * nuly. Dokument projde XSD (dry run validuje proti připnutému schématu).
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('deductedDaysFormBodies')]
+    public function testEveryFormBodyCarriesDeductedDays(string $body): void
+    {
+        $prisoner = $body === 'vezen';
+        $components = $prisoner
+            ? ['pracovniNeschopnost' => 2, 'materstvi' => 1]
+            : [
+                'pracovniNeschopnost' => 2,
+                'materstvi' => 1,
+                'osetrovaniSNarokem' => 3,
+                'osetrovaniBezNaroku' => 1,
+                'otcovska' => 4,
+                'neplaceneVolno' => 5,
+                'neomluveneAbsence' => 2,
+            ];
+        $total = array_sum($components);
+        $document = $this->summaryMatrixDocument($body, 7, static function (array &$payload) use ($components, $total): void {
+            $section = &$payload['people'][0]['employments'][0]['eldp']['eldp_sections'][0];
+            $section['code'] = '1D+';
+            $section['insurance_days'] = 31 - $total;
+            $section['deducted_days_total'] = $total;
+            $section['deducted_days'] = $components;
+            unset($section);
+        });
+
+        $xpath = $this->summaryMatrixXpath($document);
+        $block = iterator_to_array($xpath->query(self::formQuery($body, 'pojisteni/eldpSeznam/eldp/odecitaneDny/*')));
+        self::assertSame(
+            ['odecitaneDobyCelkem' => (string) $total] + array_map('strval', $components),
+            array_combine(
+                array_map(static fn (\DOMNode $node): string => (string) $node->localName, $block),
+                array_map(static fn (\DOMNode $node): string => $node->textContent, $block),
+            ),
+            $body,
+        );
+        self::assertSame(
+            [(string) (31 - $total)],
+            array_map(
+                static fn (\DOMNode $node): string => $node->textContent,
+                iterator_to_array($xpath->query(self::formQuery($body, 'pojisteni/eldpSeznam/eldp/pocetDnu'))),
+            ),
+        );
+    }
+
+    /**
+     * Roční zúčtování po skončení (odložený příjem typu 4) podle vzorového
+     * hlášení MPSV `TEST_odložený příjem_1.1.2026.xlsx`, list SLOVNÍK,
+     * sloupec P: únor 2026, 10319 a 10320 ANO, přeplatek 7 710 Kč, 10356 = 0,
+     * kód ELDP se neuvádí, 10476 = 0 (Pravidla podání JMHZ 1.4.5, kap. 6
+     * bod 3 c). Dokument projde XSD.
+     */
+    public function testDeferredAnnualSettlementAfterTerminationCarriesSettlementResult(): void
+    {
+        $document = $this->summaryMatrixDocument('odlozenyPrijem', 2);
+        $employment = &$document['people'][0]['employments'][0];
+        $employment['eldp']['deferred_income'] = [
+            'type' => '4',
+            'periods' => [['month' => 2, 'year' => 2026]],
+        ];
+        $employment['eldp']['eldp_sections'] = [[
+            'ordinal' => 1,
+            'code' => null,
+            'valid_from' => null,
+            'valid_to' => null,
+            'insurance_days' => 0,
+            'assessment_base_czk' => null,
+            'excluded_days' => null,
+            'excluded_days_total' => null,
+            'section18_days' => null,
+            'section18_days_total' => null,
+            'deducted_days_total' => null,
+        ]];
+        $employment['social_base']['assessment_base_czk'] = 0;
+        $employment['social_base']['reported_income_czk'] = 0;
+        unset($employment);
+        $document['people'][0]['summary']['annual'] = [
+            'requested' => true,
+            'performed' => true,
+            'result' => [
+                'settlement_difference_czk' => 7_710,
+                'tax_difference_czk' => 7_710,
+                'bonus_difference_czk' => 0,
+                'spouse_credit_claimed' => false,
+                'child_credit_claimed' => false,
+            ],
+            'withholding' => null,
+        ];
+
+        $xpath = $this->summaryMatrixXpath($document);
+        $value = static fn (string $path): array => array_map(
+            static fn (\DOMNode $node): string => $node->textContent,
+            iterator_to_array($xpath->query(self::formQuery('odlozenyPrijem', $path))),
+        );
+
+        self::assertSame(['4'], $value('typ'));
+        self::assertSame(['2'], $value('pojisteni/eldpObdobi/obdobi/mesic'));
+        self::assertSame(['2026'], $value('pojisteni/eldpObdobi/obdobi/rok'));
+        self::assertSame(['0'], $value('pojisteni/eldpObdobi/obdobi/eldpSeznam/eldp/pocetDnu'));
+        self::assertSame([], $value('pojisteni/eldpObdobi/obdobi/eldpSeznam/eldp/kod'));
+        self::assertSame([], $value('pojisteni/eldpObdobi/obdobi/eldpSeznam/eldp/vymerovaciZaklad'));
+        self::assertSame(['0'], $value('pojisteni/vymerovaciZaklad/prijemNepojistenaCinnost'));
+        self::assertSame(['0'], $value('pojisteni/vymerovaciZaklad/castkaOdvodPojistneho'));
+        self::assertSame(['true'], $value('souhrnDataZec/rocniUhrny/rocniZuctovaniZadost'));
+        self::assertSame(['true'], $value('souhrnDataZec/rocniUhrny/rocniZuctovaniProvedeno'));
+        self::assertSame(['7710'], $value('souhrnDataZec/rocniUhrny/vysledekRocnihoZuctovani/preplatekRok'));
+        self::assertSame(['7710'], $value('souhrnDataZec/rocniUhrny/vysledekRocnihoZuctovani/danPreplatekRok'));
+        self::assertSame(['0'], $value('souhrnDataZec/rocniUhrny/vysledekRocnihoZuctovani/danBonusPreplatekRok'));
+    }
+
     /** @param array<string,mixed> $document */
     private function summaryMatrixXpath(array $document): \DOMXPath
     {
@@ -3092,7 +3654,15 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
             $result . 'preplatekRok' => '1500',
             $result . 'danPreplatekRok' => '1000',
             $result . 'danBonusPreplatekRok' => '500',
-            $result . 'uplatnenaSlevaNaPartnera' => 'false',
+            $result . 'uplatnenaSlevaNaPartnera' => 'true',
+            $result . 'slevaNaPartnera/partner/partnerUdaje/jmeno' => 'Petra',
+            $result . 'slevaNaPartnera/partner/partnerUdaje/prijmeni' => 'Nováková',
+            $result . 'slevaNaPartnera/partner/partnerUdaje/datumNarozeni' => '1991-02-03',
+            $result . 'slevaNaPartnera/partner/deti/dite/jmeno' => 'Ema',
+            $result . 'slevaNaPartnera/partner/deti/dite/datumNarozeni' => '2024-05-15',
+            $result . 'slevaNaPartnera/partner/prukazZtpp' => 'true',
+            $result . 'slevaNaPartnera/partner/slevaPocetMesicu' => '12',
+            $result . 'slevaNaPartnera/partner/slevaPocetMesicuZtpp' => '3',
             $result . 'uplatnenoZvyhodneniNaDeti' => 'true',
             $annualChildren . 'vyzivujeJinaOsoba' => 'true',
             $annualChildren . 'jineOsoby/jinaOsoba/osoba/jmeno' => ['Petr', 'Karel'],
@@ -3326,6 +3896,26 @@ final class JmhzScenario1XmlSerializerTest extends TestCase
         }
         $xml = $this->summaryMatrixXml($document);
         self::assertSame([JmhzControlOutcome::Passed], $this->controlOutcomes($xml, 283), $body);
+    }
+
+    /**
+     * Měsíc bez zdanitelného příjmu zálohu nemá: zcela nulový blok
+     * `zalohaNaDan` se vynechává i bez srážkové daně, jako v hlášeních
+     * PAMICA, která ČSSZ přijala.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('summaryFormBodies')]
+    public function testZeroAdvanceBlockIsOmitted(string $body): void
+    {
+        $document = $this->summaryMatrixDocument($body);
+        $summary = &$document['people'][0]['summary'];
+        $summary['income_total_czk'] = 0;
+        $summary['employer_contributions_czk'] = [];
+        $summary['advance_tax_czk'] = ['base' => 0, 'computed' => 0, 'after_credits' => 0, 'bonus' => 0];
+        $summary['withholding_tax_czk'] = null;
+        unset($summary);
+        $xpath = $this->summaryMatrixXpath($document);
+
+        self::assertSame(0, $xpath->query(self::formQuery($body, 'souhrnDataZec/zalohaNaDan'))->length, $body);
     }
 
     /**

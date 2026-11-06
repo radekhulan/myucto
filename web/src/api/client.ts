@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { domainLoginContinuationQuery, domainLoginRequestContext } from '@/security/domainLoginContext'
 import { readStorageQuotaHeaders } from '@/api/storageQuota'
 import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 import { safeReturnPath } from '@/utils/returnPath'
@@ -32,13 +33,20 @@ export function setCsrfToken(token: string | null) {
 }
 export function setDomainSupplierLock(supplierId: number | null) {
   domainSupplierLock = supplierId && supplierId > 0 ? supplierId : null
-  if (domainSupplierLock !== null && !getWindowSupplierScope()) localStorage.removeItem('myinvoice.current_supplier_id')
+  if (domainSupplierLock !== null && !domainLoginRequestContext() && !getWindowSupplierScope()) localStorage.removeItem('myinvoice.current_supplier_id')
 }
 export function setForbiddenPermissionHandler(handler: () => void | Promise<void>) {
   forbiddenPermissionHandler = handler
 }
 
 api.interceptors.request.use((config) => {
+  const flow = domainLoginRequestContext()
+  // Veřejný bootstrap musí fungovat i po expiraci toku, aby šel zopakovat úklid.
+  const publicDomainMetadata = ['/auth/setup-status', '/auth/domain-context'].includes(config.url ?? '')
+  if (flow && !publicDomainMetadata) {
+    config.headers.set('X-Domain-Login-Request', flow.requestToken)
+    config.headers.set('X-Domain-Login-State', flow.state)
+  }
   if (csrfToken && config.method && config.method.toUpperCase() !== 'GET'
       && !config.headers.has('X-CSRF-Token')) {
     config.headers.set('X-CSRF-Token', csrfToken)
@@ -51,7 +59,7 @@ api.interceptors.request.use((config) => {
   // Multi-supplier — aktuální supplier z localStorage (Pinia persist).
   // Když chybí/neplatný, server použije výchozí firmu účtu (users.default_supplier_id).
   const windowScope = getWindowSupplierScope()
-  if (domainSupplierLock !== null && !windowScope) {
+  if (flow || (domainSupplierLock !== null && !windowScope)) {
     config.headers.delete('X-Supplier-Id')
   } else {
     const sid = requestSupplierId()
@@ -62,16 +70,26 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+/** Příznak pro přihlašovací stránku: relaci ukončilo novější přihlášení jinde. */
+export const SESSION_SUPERSEDED_KEY = 'myucto:session-superseded'
+
 // 401 → redirect na /login (kromě situace kdy už jsme na /login nebo /setup)
 api.interceptors.response.use(
   (response) => {
     // H-10: stav diskové kvóty jede v hlavičkách každé odpovědi, ať se admin
     // o blížícím se zámku dozví dřív, než mu přestane jít uložit doklad.
     readStorageQuotaHeaders(response.headers)
-    const scope = getWindowSupplierScope()
-    if (scope && !['get', 'head', 'options'].includes(response.config.method?.toLowerCase() ?? 'get')) {
-      const resource = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\//, '/').split('/')[1]
-      if (resource && /^[a-z0-9-]+$/.test(resource)) postWindowFrameMessage({ type: 'myucto-window-mutation', id: scope.windowId, resource })
+    // Zapisující požadavek ohlásí změnu dat správci oken, který podle cesty pozná
+    // dotčená okna (`workspace/dataDependencies.ts`). Okno v iframe mu ji pošle,
+    // hlavní dokument ji vyvolá jako událost.
+    if (!['get', 'head', 'options'].includes(response.config.method?.toLowerCase() ?? 'get')) {
+      const path = new URL(response.config.url ?? '', window.location.origin).pathname.replace(/^\/api\//, '/')
+      const resource = path.split('/')[1]
+      if (resource && /^[a-z0-9-]+$/.test(resource)) {
+        const scope = getWindowSupplierScope()
+        if (scope) postWindowFrameMessage({ type: 'myucto-window-mutation', id: scope.windowId, resource, path })
+        else window.dispatchEvent(new CustomEvent('myucto:data-mutation', { detail: { resource, path } }))
+      }
     }
     return response
   },
@@ -91,7 +109,12 @@ api.interceptors.response.use(
       'session_expired',
       'invalid_token',
       'mfa_reauthentication_required',
+      'session_superseded',
     ].includes(code)) {
+      // Přihlašovací stránka pak řekne, proč relace skončila (limit relací podle licence).
+      if (code === 'session_superseded') {
+        try { sessionStorage.setItem(SESSION_SUPERSEDED_KEY, '1') } catch { /* soukromé okno */ }
+      }
       const windowScope = getWindowSupplierScope()
       if (windowScope) {
         postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: '/login' })
@@ -119,9 +142,14 @@ api.interceptors.response.use(
         const safe = domainSupplierLock !== null && isClientDomainAuthenticatedPath(returnPath)
           ? returnPath
           : (domainSupplierLock !== null ? '' : safeReturnPath(returnPath, ''))
-        window.location.href = safe === ''
-          ? '/login'
-          : `/login?return_to=${encodeURIComponent(safe)}`
+        const continuation = domainLoginContinuationQuery()
+        if (continuation) {
+          window.location.href = `/login?${new URLSearchParams(continuation)}`
+        } else {
+          window.location.href = safe === ''
+            ? '/login'
+            : `/login?return_to=${encodeURIComponent(safe)}`
+        }
       }
     }
     if (status === 423 && code === 'session_locked') {
@@ -162,7 +190,7 @@ api.interceptors.response.use(
     // (interceptor hlavičku posílá vždy) a uživatel by se do aplikace vůbec nedostal.
     // Smaž stale výběr a reloadni — server bez hlavičky fallbackne na první přiřazenou
     // firmu. Reload jen když klíč existoval → žádná smyčka.
-    if (status === 403 && code === 'forbidden_supplier') {
+    if (status === 403 && code === 'forbidden_supplier' && !domainLoginRequestContext()) {
       const windowScope = getWindowSupplierScope()
       if (windowScope) {
         postWindowFrameMessage({ type: 'myucto-window-error', id: windowScope.windowId, code: 'access-revoked' })
@@ -171,7 +199,7 @@ api.interceptors.response.use(
         window.location.reload()
       }
     }
-    if (status === 403 && code === 'forbidden_permission') {
+    if (status === 403 && code === 'forbidden_permission' && !domainLoginRequestContext()) {
       void forbiddenPermissionHandler?.()
     }
 

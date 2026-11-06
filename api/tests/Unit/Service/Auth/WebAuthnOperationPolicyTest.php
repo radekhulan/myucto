@@ -15,8 +15,8 @@ final class WebAuthnOperationPolicyTest extends TestCase
         $policy = new WebAuthnOperationPolicy();
         $inventory = $policy->inventory();
 
-        self::assertCount(12, $inventory);
-        self::assertCount(12, array_unique(array_map(
+        self::assertCount(14, $inventory);
+        self::assertCount(14, array_unique(array_map(
             static fn (array $operation): string => $operation['method'] . ' ' . $operation['route_pattern'],
             $inventory,
         )));

@@ -93,7 +93,7 @@ final class StockReceiptService
                 $remaining = 0.0;
             }
 
-            if ($it['stock_item_id'] !== null) {
+            if ($it['stock_item_id'] !== null && $it['item_type'] !== 'service') {
                 $unitCost = $this->costs->unitCost($costContext, ['quantity' => $it['base_quantity']] + $it);
                 $stockLines[] = [
                     'purchase_invoice_item_id' => (int) $it['id'],
@@ -285,9 +285,10 @@ final class StockReceiptService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id, pii.stock_item_id, pii.purchase_order_line_id, pii.description,
-                    pii.quantity, pii.unit, pii.total_without_vat, pii.total_with_vat
+                    pii.quantity, pii.unit, pii.total_without_vat, pii.total_with_vat, si.item_type
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+          LEFT JOIN stock_items si ON si.id = pii.stock_item_id AND si.supplier_id = pi.supplier_id
               WHERE pi.supplier_id = ? AND pii.purchase_invoice_id = ?
               ORDER BY pii.order_index ASC, pii.id ASC'
         );

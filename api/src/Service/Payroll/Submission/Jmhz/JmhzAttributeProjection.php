@@ -41,6 +41,37 @@ final class JmhzAttributeProjection
      */
     private const IGNORED_ROOT_LEAVES = ['VENDOR', 'SENDER'];
 
+    /**
+     * Volné atributy hlavičky formuláře ve verzi 2027 (`CustomAtribut1` až 5,
+     * ID 10582 až 10586). Slovník 1.5.0.3 je nemapuje na XSD a žádná kontrola
+     * se jich netýká; nesou údaje odesílatele, ne vykazovanou skutečnost.
+     */
+    private const IGNORED_FORM_HEADER_LEAVES_2027 = [
+        'hlavicka.CustomAtribut1', 'hlavicka.CustomAtribut2', 'hlavicka.CustomAtribut3',
+        'hlavicka.CustomAtribut4', 'hlavicka.CustomAtribut5',
+    ];
+
+    /**
+     * Názvy kontejnerů součástí podle ročníku: verze 2026 má
+     * `formulareOsob/formularOsoby`, verze 2027 `formulareZamestnani/formularZamestnani`.
+     *
+     * @var array<string, array{list:string,form:string,form_namespace:string}>
+     */
+    private const FORM_CONTAINERS = [
+        '2026' => [
+            'list' => 'formulareOsob',
+            'form' => 'formularOsoby',
+            'form_namespace' => JmhzSchemaCatalog::NS_FORM,
+        ],
+        '2027' => [
+            'list' => 'formulareZamestnani',
+            'form' => 'formularZamestnani',
+            'form_namespace' => JmhzSchemaCatalog::NS_FORM_2027,
+        ],
+    ];
+
+    private JmhzSpecVersion $version = JmhzSpecVersion::V2026;
+
     private JmhzAttributeScope $submission;
 
     private JmhzAttributeScope $summary;
@@ -64,9 +95,17 @@ final class JmhzAttributeProjection
         $this->pvpoj = new JmhzAttributeScope(self::PART_PVPOJ);
     }
 
-    public static function fromXml(string $xml, ?string $resourceRoot = null): self
-    {
-        $projection = new self(self::dictionaryPaths($resourceRoot));
+    /**
+     * Ročník slovníku se bere z jmenného prostoru kořene datové věty. Volající,
+     * který ročník zná (validátor ročníku), ho předá a projekce odmítne XML
+     * jiného ročníku; promítnout hlášení 2027 přes slovník 2026 by tiše
+     * přiřadilo cesty jiným atributům.
+     */
+    public static function fromXml(
+        string $xml,
+        ?string $resourceRoot = null,
+        ?JmhzSpecVersion $version = null,
+    ): self {
         $dom = new DOMDocument();
         $previous = libxml_use_internal_errors(true);
         libxml_clear_errors();
@@ -79,10 +118,27 @@ final class JmhzAttributeProjection
                 'XML měsíčního hlášení nelze načíst pro promítnutí na atributy.',
             );
         }
+        $documentVersion = JmhzSpecVersion::fromDocumentNamespace(
+            (string) $dom->documentElement->namespaceURI,
+        ) ?? JmhzSpecVersion::V2026;
+        if ($version !== null && $version !== $documentVersion) {
+            throw new JmhzXmlException(
+                'jmhz_projection_version_mismatch',
+                'XML měsíčního hlášení patří ke specifikaci ' . $documentVersion->label()
+                    . ', kontroly se ale vyhodnocují podle ' . $version->label() . '.',
+            );
+        }
+        $projection = new self(self::dictionaryPaths($resourceRoot, $documentVersion));
+        $projection->version = $documentVersion;
         $projection->walk($dom->documentElement, $dom->documentElement, '', []);
         $projection->sortForms();
 
         return $projection;
+    }
+
+    public function version(): JmhzSpecVersion
+    {
+        return $this->version;
     }
 
     public function submission(): JmhzAttributeScope
@@ -170,7 +226,7 @@ final class JmhzAttributeProjection
         foreach ($children as $child) {
             $name = $child->localName ?? '';
             $seen[$name] = ($seen[$name] ?? 0) + 1;
-            if ($name === 'formularOsoby') {
+            if ($name === $this->formElement()) {
                 $this->formOrdinals[spl_object_id($child)] = $seen[$name] - 1;
             }
             [$childRoot, $childPrefix] = $this->descend($child, $root, $prefix, $name);
@@ -193,20 +249,26 @@ final class JmhzAttributeProjection
         string $prefix,
         string $name,
     ): array {
-        if (in_array($name, ['souhrn', 'PVPOJ', 'formularOsoby'], true)) {
+        $containers = self::FORM_CONTAINERS[$this->version->value];
+        if (in_array($name, ['souhrn', 'PVPOJ', $containers['form']], true)) {
             return [$child, ''];
         }
         // Součást individualizované části je `xs:choice` z osmi typů formuláře.
         // Kořenem cest slovníku je vždy ten zvolený typ, ne jeho jméno — proto
         // se rozpoznává podle umístění a jmenného prostoru, ne podle výčtu.
-        if (($root->localName ?? '') === 'formularOsoby'
-            && $child->namespaceURI === JmhzSchemaCatalog::NS_FORM
+        // Ve verzi 2027 je hlavička součásti ve stejném jmenném prostoru jako
+        // formuláře, proto se vylučuje jménem a formulářem je jen přímé dítě
+        // součásti, ne prvky uvnitř hlavičky.
+        if (($root->localName ?? '') === $containers['form']
+            && $child->namespaceURI === $containers['form_namespace']
+            && $name !== 'hlavicka'
+            && $child->parentNode === $root
         ) {
             $this->formScope($child)->noteBody($name);
 
             return [$child, ''];
         }
-        if ($name === 'formulareOsob') {
+        if ($name === $containers['list']) {
             return [$root, $prefix];
         }
 
@@ -223,6 +285,12 @@ final class JmhzAttributeProjection
         if ($path === '' || in_array($path, self::IGNORED_ROOT_LEAVES, true)) {
             return;
         }
+        if ($this->version === JmhzSpecVersion::V2027
+            && ($root->localName ?? '') === $this->formElement()
+            && in_array($path, self::IGNORED_FORM_HEADER_LEAVES_2027, true)
+        ) {
+            return;
+        }
         // Prázdný kontejner (`<eldpSeznam/>`, `<zalohaNaDan/>`) vypadá jako list,
         // ale žádnou hodnotu nenese. Přeskakuje se jen tehdy, když je opravdu
         // prázdný A jeho cesta ve slovníku není — vypsaná hodnota na neznámé
@@ -235,7 +303,9 @@ final class JmhzAttributeProjection
 
             throw new JmhzXmlException(
                 'jmhz_projection_path_unknown',
-                "Element {$path} nemá ve slovníku JMHZ 1.4.1.6 protějšek.",
+                "Element {$path} nemá ve slovníku JMHZ "
+                    . ($this->version === JmhzSpecVersion::V2027 ? '1.5.0.3' : '1.4.1.6')
+                    . ' protějšek.',
             );
         }
         $this->scopeFor($root)->add(new JmhzAttributeOccurrence(
@@ -287,8 +357,9 @@ final class JmhzAttributeProjection
             return $this->pvpoj;
         }
         $parent = $root->parentNode;
-        if ($name === 'formularOsoby'
-            || ($parent instanceof DOMElement && ($parent->localName ?? '') === 'formularOsoby')
+        $form = $this->formElement();
+        if ($name === $form
+            || ($parent instanceof DOMElement && ($parent->localName ?? '') === $form)
         ) {
             return $this->formScope($root);
         }
@@ -303,8 +374,9 @@ final class JmhzAttributeProjection
      */
     private function formScope(DOMElement $root): JmhzAttributeScope
     {
+        $form = $this->formElement();
         $holder = $root;
-        while ($holder instanceof DOMElement && ($holder->localName ?? '') !== 'formularOsoby') {
+        while ($holder instanceof DOMElement && ($holder->localName ?? '') !== $form) {
             $parent = $holder->parentNode;
             $holder = $parent instanceof DOMElement ? $parent : null;
         }
@@ -319,7 +391,7 @@ final class JmhzAttributeProjection
         if ($ordinal === null) {
             $ordinal = 0;
             for ($node = $holder->previousSibling; $node !== null; $node = $node->previousSibling) {
-                if ($node instanceof DOMElement && ($node->localName ?? '') === 'formularOsoby') {
+                if ($node instanceof DOMElement && ($node->localName ?? '') === $form) {
                     ++$ordinal;
                 }
             }
@@ -333,6 +405,11 @@ final class JmhzAttributeProjection
         $this->forms[] = $scope;
 
         return $scope;
+    }
+
+    private function formElement(): string
+    {
+        return self::FORM_CONTAINERS[$this->version->value]['form'];
     }
 
     private function sortForms(): void
@@ -376,13 +453,12 @@ final class JmhzAttributeProjection
      *
      * @return array<string, string>
      */
-    private static function dictionaryPaths(?string $resourceRoot): array
+    private static function dictionaryPaths(?string $resourceRoot, JmhzSpecVersion $version): array
     {
         $root = $resourceRoot ?? dirname(__DIR__, 5) . '/resources/payroll/jmhz';
-        $manifest = (new JmhzSpecPackageCatalog($root))->load(
-            JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
-            JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
-        );
+        $packages = new JmhzSpecPackageCatalog($root);
+        $pin = $packages->requirePin($version);
+        $manifest = $packages->load($pin['package_key'], $pin['manifest_sha256']);
         $paths = [];
         foreach ($manifest['payload']['dictionary_attributes'] ?? [] as $attribute) {
             if (!is_array($attribute)) {

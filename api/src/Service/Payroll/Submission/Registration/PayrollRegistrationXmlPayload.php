@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
+
 final readonly class PayrollRegistrationXmlPayload
 {
     public function __construct(
@@ -33,5 +35,20 @@ final readonly class PayrollRegistrationXmlPayload
          * podání se nepoužívá a formulář nese vlastní `formGuid`.
          */
         public ?string $referencedFormGuid = null,
+        /*
+         * Verze specifikace (ročník datové věty) podle rozhodného data události,
+         * viz {@see PayrollRegistrationSchemaCatalog::decisiveDate()}. Agenda
+         * zůstává `REGZEC25`; ve verzi 2027 se věta skládá jako REGZEC27.
+         */
+        public JmhzSpecVersion $specVersion = JmhzSpecVersion::V2026,
     ) {}
+
+    /** Formulář datové věty: `REGZEC25`, `REGZEC27` nebo `PREZEC26`. */
+    public function form(): string
+    {
+        return PayrollRegistrationSchemaCatalog::formFor(
+            $this->interaction->documentType,
+            $this->specVersion,
+        );
+    }
 }

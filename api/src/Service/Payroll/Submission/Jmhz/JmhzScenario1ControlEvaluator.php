@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\CzechBirthNumber;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Xml2027\Jmhz2027DocumentContract;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationIdentityService;
 
 /**
  * Vykonávací implementace kontrol katalogu ČSSZ nad prvním profilem měsíčního
  * hlášení (`scenario_1`, `form:bezPriznaku`, řádné podání).
  *
- * Katalog 1.4.2.10 popisuje 200 kontrol textem, ne strojově. Tahle třída je
+ * Katalog 1.4.2.11 popisuje 203 kontrol textem, ne strojově. Tahle třída je
  * jediné místo, kde se text překládá do kódu, a drží tři pravidla:
  *
  * 1. **Sazby se nezadrátovávají.** Každý koeficient se bere z parametrických
@@ -84,18 +85,23 @@ final class JmhzScenario1ControlEvaluator
             . ' takže by se musel uhodnout; shodu s registrem zaměstnavatelů'
             . ' ČSSZ navíc lokálně ověřit nelze.',
         164 => 'Lhůta splatnosti se odvozuje od data přijetí podání (10006),'
-            . ' které přiděluje až ČSSZ; od verze 1.4.2.8 kontrola platí jen'
-            . ' od období 04/2026 a první přijatou pojistnou část zná evidence ČSSZ.',
+            . ' které přiděluje až ČSSZ; podle katalogu 1.4.2.11 kontrola platí'
+            . ' jen od období 04/2026 (pojistné je splatné do 20. dne'
+            . ' následujícího měsíce, o víkendu a svátku nejbližší pracovní den)'
+            . ' a první přijatou pojistnou část zná evidence ČSSZ.',
         217 => 'Odkaz na GUID jiného podání ověří jen evidence ČSSZ.',
         218 => 'Existenci GUID stornovaného podání ověří jen evidence ČSSZ.',
         220 => 'Existenci GUID stornované součásti ověří jen evidence ČSSZ.',
         221 => 'O zamítnutí celého podání rozhoduje výsledek zpracování všech'
             . ' součástí na straně ČSSZ.',
         226 => 'Porovnání počtu součástí s registrem ČSSZ je možné až na straně'
-            . ' ČSSZ; nesoulad vede k částečnému přijetí a formální výzvě.',
+            . ' ČSSZ (formuláře odloženého příjmu se do počtu nezapočítávají);'
+            . ' nesoulad vede k částečnému přijetí a formální výzvě.',
         225 => 'Chybějící první dílčí podání se pozná až porovnáním došlých'
             . ' balíků na straně ČSSZ.',
         228 => 'Počet skutečně došlých dílčích podání zná jen ČSSZ.',
+        // Katalog 1.4.2.11 sloučil v hlášce větve a1/a2 do jedné (nový řádný
+        // formulář s novým GUID); pravidlo zůstává.
         238 => 'Shodu klíčů s předchozím řádným podáním drží evidence ČSSZ.',
         241 => 'Shodu metaatributů se stornovaným podáním drží evidence ČSSZ.',
         242 => 'Rozlišení rezidenta a nerezidenta stojí na atributu 10068,'
@@ -109,7 +115,13 @@ final class JmhzScenario1ControlEvaluator
         262 => 'Existenci ID PPV ověřuje pouze registr ČSSZ.',
         263 => 'Existenci IK MPSV ověřuje pouze registr ČSSZ.',
         264 => 'Existenci dvojice IK MPSV a ID PPV ověřuje pouze registr ČSSZ.',
-        291 => 'Platnost oznámeného záměru uplatňovat slevu (OZUSPOJ) eviduje ČSSZ.',
+        // Katalog 1.4.2.11 změnil hlášku: slevu, kterou zaměstnavatel po lhůtě
+        // opravným hlášením snížil, nelze v dalším opravném podání vykázat
+        // vyšší než v posledním hlášení s akceptovanou pojistnou částí.
+        // Pravidlo kontroly (L) zůstává nad záměrem OZUSPOJ.
+        291 => 'Platnost oznámeného záměru uplatňovat slevu (OZUSPOJ) eviduje ČSSZ'
+            . ' a slevu z posledního hlášení s akceptovanou pojistnou částí, se'
+            . ' kterou ČSSZ porovná slevu sníženou po lhůtě, zná jen její evidence.',
         323 => 'Detekce duplicitního přijetí se opírá o identifikátor zprávy'
             . ' a čas přijetí, které přiděluje až ČSSZ.',
         348 => 'Nekritická kontrola integrity se opírá o dotazy do registru'
@@ -127,11 +139,14 @@ final class JmhzScenario1ControlEvaluator
             . ' který první profil nevykazuje; podmínka se vynucuje před serializací.',
         326 => 'Jedinečnost řádného podání za období se rozhoduje nad evidencí'
             . ' podání, ne nad obsahem jednoho XML.',
-        333 => 'Oficiální katalog 1.4.2.10 má u kontroly časového omezení slevy'
-            . ' rozporné odkazy na atributy. Věcný výsledek navíc závisí na datu'
-            . ' přijetí podání, které přiděluje až ČSSZ; lokálně se proto'
-            . ' neodhaduje a rozhodne protokol ČSSZ.',
         334 => 'Ztotožnění osoby provádí kmenová evidence ČSSZ.',
+        // Nová informativní kontrola katalogu 1.4.2.11 (cJMHZ, propustná,
+        // kategorie I1). Chybějící údaje cizinců (10414, 10105 až 10110)
+        // hledá ČSSZ v registru zaměstnanců, ne v měsíčním hlášení, a hláška
+        // podání neznehodnocuje: vyzývá k doplnění přes REGZEC A3.
+        371 => 'Úplnost údajů o zaměstnávání cizinců (10414, 10105 až 10110)'
+            . ' ověřuje cJMHZ nad registrem zaměstnanců, ne nad obsahem hlášení;'
+            . ' jde o informativní výzvu k aktualizaci registrace (REGZEC A3).',
     ];
 
     /**
@@ -210,34 +225,101 @@ final class JmhzScenario1ControlEvaluator
         ],
     ];
 
+    /** Kód obce „Mimo ČR" v číselníku obcí od verze 2027 (ZP 070, kontrola 385). */
+    private const MUNICIPALITY_ABROAD_2027 = '111111';
+
+    /** Kontroly, které katalog 1.5.0.4 proti 1.4.2.11 zrušil. */
+    private const REMOVED_IN_2027 = [109];
+
+    /**
+     * Nové kontroly katalogu 1.5.0.4 s vykonávací implementací. Ostatní nové
+     * kontroly jsou v {@see self::NOT_EVALUABLE_2027}.
+     */
+    private const IMPLEMENTED_2027 = [347, 350, 351, 362, 363, 366, 370, 378, 379, 383, 384, 385, 386, 387, 388];
+
+    /**
+     * Lokálně neověřitelné kontroly ve verzi 2027. Doplňují a přepisují
+     * {@see self::NOT_EVALUABLE}; ve verzi 2026 se nepoužijí.
+     */
+    private const NOT_EVALUABLE_2027 = [
+        // Katalog 1.5.0.4 vrátil kontrole 333 původní význam: časové omezení
+        // slevy za 01 až 03/2026 podle data přijetí (10006), které přiděluje ČSSZ.
+        333 => 'Časové omezení slevy za 01 až 03/2026 se odvozuje od data přijetí'
+            . ' podání (10006), které přiděluje až ČSSZ.',
+        245 => 'Kontrola platí jen pro zaměstnavatele s jedinou mzdovou účtárnou'
+            . ' (10221) a sčítá příjmy všech vztahů osoby; ani jedno z jednoho'
+            . ' podání zjistit nelze.',
+        325 => 'Kontrola platí jen pro zaměstnavatele s jedinou mzdovou účtárnou'
+            . ' (10221) a sčítá příjmy všech vztahů osoby; ani jedno z jednoho'
+            . ' podání zjistit nelze.',
+        365 => 'Že byl pracovněprávní vztah ukončen nejpozději posledním dnem'
+            . ' rozhodného období, ověří cJMHZ proti registru.',
+        380 => 'Kontrola platí jen pro zaměstnavatele s jedinou mzdovou účtárnou'
+            . ' (10221) a sčítá příjmy všech dohod o provedení práce osoby;'
+            . ' ani jedno z jednoho podání zjistit nelze.',
+        381 => 'Kontrola platí jen pro zaměstnavatele s jedinou mzdovou účtárnou'
+            . ' (10221) a sčítá příjmy všech vztahů osoby mimo DPP; ani jedno'
+            . ' z jednoho podání zjistit nelze.',
+        382 => 'Kontrola platí jen pro zaměstnavatele s jedinou mzdovou účtárnou'
+            . ' (10221) a sčítá příjmy všech vztahů osoby; ani jedno z jednoho'
+            . ' podání zjistit nelze.',
+    ];
+
     public function __construct(
         private readonly JmhzControlParameterCatalog $parameters,
         private readonly JmhzDeadlinePolicy $deadlines,
         private readonly ?JmhzExternalCodebookCatalog $externalCodebooks = null,
         private readonly ?JmhzCodebookCatalog $codebooks = null,
+        private readonly JmhzSpecVersion $version = JmhzSpecVersion::V2026,
     ) {}
+
+    /** Ročník specifikace, jehož katalog kontrol evaluátor vykonává. */
+    public function version(): JmhzSpecVersion
+    {
+        return $this->version;
+    }
 
     /** @return list<int> */
     public function implementedControlIds(): array
     {
+        $ids = $this->implemented2026ControlIds();
+        if ($this->version !== JmhzSpecVersion::V2027) {
+            return $ids;
+        }
+        $ids = array_values(array_diff(
+            $ids,
+            self::REMOVED_IN_2027,
+            array_keys(self::NOT_EVALUABLE_2027),
+        ));
+
+        return [...$ids, ...self::IMPLEMENTED_2027];
+    }
+
+    /** @return list<int> */
+    private function implemented2026ControlIds(): array
+    {
         return [
             1, 3, 4, 7, 8, 9, 10, 11, 12, 13, 20, 23, 29, 31, 36, 37, 43, 44, 45, 50, 56, 57, 58,
-            59, 60, 61, 62, 72, 74, 78, 79, 81, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
+            59, 60, 61, 62, 72, 74, 78, 79, 81, 82, 84, 87, 88, 90, 93, 94, 95, 96, 97, 98, 99, 100,
             103, 109, 110, 112, 113, 114, 118, 121, 124, 126, 127, 128, 129, 131, 132, 134, 135, 137, 138, 142, 144, 145, 152,
             150, 151, 153, 154, 155, 156, 157, 158, 159, 162, 165, 167, 168, 170, 188, 194,
             204, 207, 208, 209, 213, 214, 215,
             191, 192, 193, 211, 216, 227, 229, 230, 232, 233, 235,
-            236, 237, 240, 244, 248, 251,
+            236, 237, 240, 244, 248, 251, 258,
             253, 255, 260, 265, 267, 269, 270, 271, 272, 273, 275, 282, 283, 284, 286, 290,
             296, 297, 298, 299, 300, 301, 302, 303, 304, 306, 307, 309, 310, 312, 315, 328, 329, 330, 331, 332,
-            335, 336, 337, 338, 339, 341, 342, 343, 354, 355,
+            333, 335, 336, 337, 338, 339, 341, 342, 343, 354, 355, 368, 369,
         ];
     }
 
     /** @return array<int, string> */
     public function notEvaluableControlIds(): array
     {
-        return self::NOT_EVALUABLE;
+        if ($this->version !== JmhzSpecVersion::V2027) {
+            return self::NOT_EVALUABLE;
+        }
+
+        return array_replace(self::NOT_EVALUABLE, self::NOT_EVALUABLE_2027);
     }
 
     /**
@@ -257,11 +339,7 @@ final class JmhzScenario1ControlEvaluator
      */
     public function documentedDeviations(): array
     {
-        return [
-            134 => 'Katalog píše „počet dnů <= datum do minus datum od", tedy'
-                . ' rozdíl dat. Celý měsíc má ale o den víc, než je rozdíl jeho'
-                . ' krajních dnů, takže by doslovné znění neprošlo ani bezvadné'
-                . ' hlášení za celý měsíc. Interval se počítá včetně krajních dnů.',
+        $deviations = [
             168 => 'Vedle tolerance žádá katalog i dolní mez 7,171 % z úhrnu'
                 . ' vyměřovacích základů. Na minimálním případě (základ 1 000 Kč,'
                 . ' pojistné 71 Kč) by ji neprošlo ani zcela správné podání,'
@@ -276,11 +354,21 @@ final class JmhzScenario1ControlEvaluator
                 . ' žádá katalog dolní mez 7,171 %, která by odmítla i správné'
                 . ' podání. Vynucuje se jen tolerance.',
         ];
+        if ($this->version !== JmhzSpecVersion::V2027) {
+            return $deviations;
+        }
+
+        return $deviations + [
+            370 => 'Katalog omezuje příspěvek na spoření (10417) částkou za'
+                . ' kalendářní rok. Z jednoho hlášení je vidět jen měsíc, proto'
+                . ' se vynucuje jen to, že mez nepřekročí měsíční hodnota; součet'
+                . ' za rok porovná ČSSZ.',
+        ];
     }
 
     public function handles(int $controlId): bool
     {
-        return isset(self::NOT_EVALUABLE[$controlId])
+        return isset($this->notEvaluableControlIds()[$controlId])
             || isset(self::OUT_OF_PROFILE[$controlId])
             || in_array($controlId, $this->implementedControlIds(), true);
     }
@@ -293,6 +381,21 @@ final class JmhzScenario1ControlEvaluator
      * @return array<int, list<string>>
      */
     public function declaredParameterKeys(): array
+    {
+        $keys = $this->declared2026ParameterKeys();
+        if ($this->version !== JmhzSpecVersion::V2027) {
+            return $keys;
+        }
+
+        return $keys + [
+            370 => ['source_row_25'],
+            379 => ['source_row_26', 'source_row_27', 'source_row_28', 'source_row_29', 'source_row_30'],
+            383 => ['source_row_31'],
+        ];
+    }
+
+    /** @return array<int, list<string>> */
+    private function declared2026ParameterKeys(): array
     {
         return [
             3 => ['source_row_6'],
@@ -338,7 +441,7 @@ final class JmhzScenario1ControlEvaluator
         JmhzAttributeProjection $projection,
         JmhzControlContext $context,
     ): array {
-        $reason = self::NOT_EVALUABLE[$controlId] ?? null;
+        $reason = $this->notEvaluableControlIds()[$controlId] ?? null;
         if ($reason !== null) {
             return [JmhzControlVerdict::notEvaluable(
                 JmhzAttributeProjection::PART_SUBMISSION,
@@ -349,9 +452,16 @@ final class JmhzScenario1ControlEvaluator
         if ($outOfProfile !== null) {
             return [$outOfProfile];
         }
+        if ($this->version === JmhzSpecVersion::V2027) {
+            $verdicts = $this->evaluate2027($controlId, $projection);
+            if ($verdicts !== null) {
+                return $verdicts;
+            }
+        }
 
         return match ($controlId) {
             1 => $this->employerDiscountHeadcount($projection),
+            82 => $this->payoutDateForSpecificLegalFact($projection),
             3 => $this->employerDiscountAmount($projection),
             4 => $this->insurancePayable($projection),
             45 => $this->shorterWorkingTimeWithinLimit($projection),
@@ -359,18 +469,23 @@ final class JmhzScenario1ControlEvaluator
             138 => $this->shorterWorkingTimeRequiredForReason($projection),
             156 => $this->riskCategorizationFromCodebook($projection),
             331 => $this->deferredIncomeTypeFromCodebook($projection),
+            // Katalog 1.4.2.11 v 336 vyjmenovává jen příjem a roční zúčtování po
+            // skončení a jejich součet; typy s „PPV dále neprobíhá" pokrývá 339.
+            // Výsledek pro typy mimo výčet je tentýž (rozhoduje registr), proto
+            // seznam zůstává; aplikace sama tvoří jen typ 1.
             336 => $this->deferredIncomeRegistryCheck(
                 $projection,
                 ['1', '2', '4', '5', '6'],
-                'Že je pracovněprávní vztah v rozhodném období již ukončený, ověří'
-                    . ' cJMHZ proti registru; aplikace odložený příjem připouští jen'
-                    . ' u vztahu skončeného před vykazovaným měsícem.',
+                'Že je pracovněprávní vztah uzavřený a datum skončení (10224) leží'
+                    . ' před rozhodným obdobím, ověří cJMHZ proti registru; aplikace'
+                    . ' odložený příjem připouští jen u vztahu skončeného před'
+                    . ' vykazovaným měsícem.',
             ),
             337 => $this->deferredIncomeRegistryCheck(
                 $projection,
                 ['3'],
-                'Že pracovněprávní vztah k poslednímu dni měsíce trvá, ověří cJMHZ'
-                    . ' proti registru.',
+                'Že pracovněprávní vztah v období určeném měsícem a rokem hlášení'
+                    . ' (10010, 10011) stále trvá, ověří cJMHZ proti registru.',
             ),
             338 => $this->deferredIncomeEldpCodeSecondPosition($projection),
             339 => $this->deferredIncomeRegistryCheck(
@@ -503,6 +618,7 @@ final class JmhzScenario1ControlEvaluator
             343 => $this->formTypeMatchesActivity($projection),
             244 => $this->noCreditsWithoutDeclaration($projection),
             248 => $this->summaryDataOnlyOnPrimary($projection),
+            258 => $this->employerDeductionAmountsWhenFlagged($projection),
             251 => $this->employmentIdentifierUniqueAcrossReport($projection),
             267 => $this->wageBreakdownEmptyWhenWageZero($projection),
             282 => $this->riskyHoursEmptyWhenNoWorkedHours($projection),
@@ -513,7 +629,13 @@ final class JmhzScenario1ControlEvaluator
             307 => $this->eldpDetailEmptyWithoutCode($projection),
             309 => $this->insuranceDaysAgainstDeductedTime($projection),
             330 => $this->eldpCodeRequiredWithDays($projection),
-            332 => $this->primaryFlagRequired($projection),
+            // Katalog 1.4.2.11 opravil u kontroly 333 atributy na 10495 a 10016
+            // a pravidlo (L) je doslova totéž jako u kontroly 332. Název a hláška
+            // řádku dál mluví o časovém omezení slevy za 01 až 03/2026, které
+            // pravidlo neobsahuje; vyhodnocuje se pravidlo, ne název.
+            332, 333 => $this->primaryFlagRequired($projection),
+            368 => $this->eldpDaysWithinCodeValidity($projection),
+            369 => $this->eldpCodeValidityRequired($projection),
             31, 131 => $this->periodNotBeforeStart($projection),
             37 => $this->personIdentifierChecksum($projection),
             50 => $this->assessmentBaseNotNegative($projection),
@@ -523,6 +645,8 @@ final class JmhzScenario1ControlEvaluator
             290 => $this->lateSubmissionDiscount($projection, $context),
             94 => $this->nonNegativeScaled($projection, '10259'),
             95 => $this->nonNegativeScaled($projection, '10260'),
+            // Katalog 1.4.2.11 zmírnil 96 na „(10261) >= 0": nulová týdenní doba
+            // projde, jak ji kontrola vyhodnocovala už dřív.
             96 => $this->nonNegativeScaled($projection, '10261'),
             100 => $this->eldpValidityOrdering($projection),
             129 => $this->monthInRange($projection),
@@ -1667,6 +1791,57 @@ final class JmhzScenario1ControlEvaluator
         });
     }
 
+    /**
+     * Kontrola 82 — výplatní termín (10410) při specifické právní skutečnosti
+     * (10408).
+     *
+     * Katalog 1.4.2.11: je-li uvedena jakákoli skutečnost 10408, musí mít
+     * výplatní termín každá součást podání. Katalog 1.5.0.4 (od 1/2027): jen
+     * při 10408 = 8 (úpadek), jinak 10410 nesmí nabývat hodnot. Aplikace
+     * specifickou právní skutečnost (IN13) dnes nevykazuje, takže kontrola
+     * vychází „nepoužitelná"; je to pojistka pro budoucí implementaci IN13.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function payoutDateForSpecificLegalFact(JmhzAttributeProjection $projection): array
+    {
+        $fact = $projection->summary()->value('10408');
+        $required = $this->version === JmhzSpecVersion::V2027
+            ? Jmhz2027DocumentContract::payoutDateRequired($fact)
+            : $fact !== null;
+        $forbidden = $this->version === JmhzSpecVersion::V2027 && !$required;
+        $verdicts = [];
+        $evaluated = $fact !== null;
+        foreach ($projection->forms() as $form) {
+            $has = $form->has('10410');
+            $evaluated = $evaluated || $has;
+            if ($required && !$has) {
+                $verdicts[] = JmhzControlVerdict::failed(
+                    JmhzAttributeProjection::PART_FORM,
+                    $form->ordinal,
+                    'Výplatní termín musí být uveden.',
+                );
+            } elseif ($forbidden && $has) {
+                $verdicts[] = JmhzControlVerdict::failed(
+                    JmhzAttributeProjection::PART_FORM,
+                    $form->ordinal,
+                    'Výplatní termín se uvádí jen při specifické právní skutečnosti'
+                        . ' „účinnost rozhodnutí o úpadku" (10408 = 8).',
+                );
+            }
+        }
+        if (!$evaluated) {
+            return [JmhzControlVerdict::notApplicable(
+                JmhzAttributeProjection::PART_FORM,
+                'Podání neuvádí specifickou právní skutečnost ani výplatní termín.',
+            )];
+        }
+
+        return $verdicts === []
+            ? [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_FORM)]
+            : $verdicts;
+    }
+
     /** @return list<JmhzControlVerdict> */
     private function obstacleWithinAgreedFund(
         JmhzAttributeProjection $projection,
@@ -1769,10 +1944,12 @@ final class JmhzScenario1ControlEvaluator
     /**
      * Kontrola 134 — počet dnů pojištění v ELDP sekci proti intervalu trvání.
      *
-     * Katalog píše `10356 <= 10355 - 10354`, což je rozdíl dat. Celý červenec
-     * (1. až 31. 7.) má ale 31 dnů pojištění, ne 30, takže doslovné znění by
-     * neprošlo ani u bezvadného hlášení za celý měsíc. Počítá se proto interval
-     * včetně obou krajních dnů.
+     * Katalog píše `10356 <= 10355 - 10354`. „Pojištění do" je podle Pokynů
+     * k vyplnění MH 1.4.14 poslední den trvání (u celého měsíce jeho poslední
+     * den), takže výraz je zkratka pro počet dnů intervalu včetně obou
+     * krajních dnů: celý červenec má 31 dnů pojištění. Vzorová hlášení
+     * v Příloze A Pokynů to tak počítají a referenční hlášení za 07/2026
+     * prošlo protokolem ČSSZ; nejde o odchylku.
      *
      * @return list<JmhzControlVerdict>
      */
@@ -1796,6 +1973,72 @@ final class JmhzScenario1ControlEvaluator
                 if ((int) $days > $span) {
                     return "Počet dnů pojištění {$days} překračuje délku intervalu"
                         . " {$from} až {$to} ({$span} dnů).";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 368 (katalog 1.4.2.11) — počet dnů pojištění v ELDP sekci
+     * (10356) proti intervalu platnosti jejího kódu (10241 až 10242).
+     *
+     * Interval se počítá včetně obou krajních dnů. „Platnost do" je podle
+     * Pokynů k vyplnění MH 1.4.14 den, do kterého kód platí, a vzorová hlášení
+     * v Příloze A Pokynů uvádějí 10241 1. 2. až 10242 28. 2. s 10356 = 28
+     * (a 15. 2. až 28. 2. s 10356 = 14). Výraz katalogu „10242 - 10241" je
+     * zkratka pro počet dnů intervalu, kontrola vznikla jako analogie
+     * kontroly 134; nejde o odchylku. Sekci bez úplné platnosti hlídá
+     * kontrola 369.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function eldpDaysWithinCodeValidity(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            foreach ($form->groupedBy(['10241', '10242', '10356'], self::ELDP_SECTION_DEPTH) as $section) {
+                $days = $section['10356'] ?? null;
+                $from = $section['10241'] ?? null;
+                $to = $section['10242'] ?? null;
+                if ($days === null || $from === null || $to === null) {
+                    continue;
+                }
+                $span = self::intervalDays($from, $to);
+                if ($span === null) {
+                    continue;
+                }
+                if ((int) $days > $span) {
+                    return "Počet dnů pojištění {$days} překračuje platnost kódu ELDP"
+                        . " {$from} až {$to} ({$span} dnů).";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 369 (katalog 1.4.2.11) — ELDP sekce s kódem (10240) musí mít
+     * vyplněnou platnost od (10241) i do (10242).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function eldpCodeValidityRequired(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            foreach ($form->groupedBy(['10240', '10241', '10242'], self::ELDP_SECTION_DEPTH) as $section) {
+                $code = $section['10240'] ?? null;
+                if ($code === null) {
+                    continue;
+                }
+                $missing = array_values(array_filter(
+                    ['10241', '10242'],
+                    static fn (string $id): bool => ($section[$id] ?? '') === '',
+                ));
+                if ($missing !== []) {
+                    return "Kód ELDP {$code} nemá vyplněnou platnost "
+                        . implode(' ani ', $missing) . '.';
                 }
             }
 
@@ -1899,12 +2142,15 @@ final class JmhzScenario1ControlEvaluator
             )];
         }
         $validOn = $this->periodStart($projection);
+        // Od verze 2027 (ZP 070) je v číselníku obcí hodnota 111111 „Mimo ČR";
+        // CISOB ji nezná, adresu v zahraničí hlídá kontrola 385.
+        $abroadCode = $this->version === JmhzSpecVersion::V2027 ? self::MUNICIPALITY_ABROAD_2027 : null;
 
         return $this->perForm(
             $projection,
-            static function (JmhzAttributeScope $form) use ($catalog, $validOn): ?string {
+            static function (JmhzAttributeScope $form) use ($catalog, $validOn, $abroadCode): ?string {
                 $code = $form->value('10230');
-                if ($code === null) {
+                if ($code === null || $code === $abroadCode) {
                     return null;
                 }
                 // Porovnává se KÓD, ne název. Katalog žádá, aby hodnota byla
@@ -4880,6 +5126,34 @@ final class JmhzScenario1ControlEvaluator
      * @param list<string> $dependents
      * @return list<JmhzControlVerdict>
      */
+    /**
+     * Kontrola 258 (katalog MH 1.4.2.10, nepropustná): „Pokud jsou Provedeny
+     * srážky ze mzdy nebo platu určené k uspokojení plnění zaměstnavatele
+     * (10349) = ANO, pak musí být uvedena alespoň jedna hodnota z: 10350,
+     * 10351, 10352, 10353."
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function employerDeductionAmountsWhenFlagged(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form): ?string {
+                if ($form->boolean('10349') !== true) {
+                    return null;
+                }
+                foreach (['10350', '10351', '10352', '10353'] as $attributeId) {
+                    if ($form->has($attributeId)) {
+                        return null;
+                    }
+                }
+
+                return 'Atribut 10349 (srážky ve prospěch zaměstnavatele) je ANO, ale žádná'
+                    . ' z částek 10350 až 10353 není uvedena.';
+            },
+        );
+    }
+
     private function emptyWhenZero(
         JmhzAttributeProjection $projection,
         string $triggerId,
@@ -5031,6 +5305,722 @@ final class JmhzScenario1ControlEvaluator
         return $verdicts === []
             ? [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_FORM)]
             : $verdicts;
+    }
+
+    // --- verze 2027 (katalog 1.5.0.4) ------------------------------------
+
+    /**
+     * Kontroly, které katalog 1.5.0.4 přidal nebo věcně změnil. `null` znamená,
+     * že kontrola ve verzi 2027 platí beze změny a vyhodnotí ji společná větev.
+     * Věcné změny proti 1.4.2.11 jsou u každé metody; změny jen v textu,
+     * názvu nebo legendě atributů se tu neopakují.
+     *
+     * @return list<JmhzControlVerdict>|null
+     */
+    private function evaluate2027(int $controlId, JmhzAttributeProjection $projection): ?array
+    {
+        return match ($controlId) {
+            57 => $this->riskyHoursSumWithinWorkedHours2027($projection),
+            78 => $this->annualSettlementSum2027($projection),
+            79 => $this->annualSettlementResultRequired2027($projection),
+            193 => $this->onlyInMonth2027(
+                $projection,
+                1,
+                ['10313', '10317', '10316', '10318', '10311', '10312', '10577'],
+                'lednovém',
+            ),
+            194 => $this->onlyInMonth2027($projection, 12, ['10452', '10038', '10039', '10220'], 'prosincovém'),
+            244 => $this->noCreditsWithoutDeclaration2027($projection),
+            248 => $this->summaryDataOnlyOnPrimary2027($projection),
+            282 => $this->emptyWhenZero(
+                $projection,
+                '10268',
+                ['10269', '10270', '10271', '10272', '10273', '10274', '10580'],
+            ),
+            283 => $this->emptyWhenZero($projection, '10286', ['10289', '10417', '10308', '10309']),
+            304 => $this->taxIncomeSplit2027($projection),
+            369 => $this->eldpCodeDetailsRequired2027($projection),
+            347 => $this->deferredIncomePeriodsUnique2027($projection),
+            350 => $this->deferredIncomePeriodsFromJmhzStart2027($projection),
+            351 => $this->deferredIncomePeriodsByType2027($projection),
+            362 => $this->deferredIncomeSingleEldpPeriod2027($projection),
+            363 => $this->deferredIncomeAfterTerminationHasNoDays2027($projection),
+            366 => $this->studentCreditEligibility2027($projection),
+            370 => $this->savingsContributionWithinLimit2027($projection),
+            378 => $this->bonusTopUpWithoutChildCredit2027($projection),
+            379 => $this->monthlyCreditLimits2027($projection),
+            383 => $this->annualSettlementTopUpMinimum2027($projection),
+            384 => $this->withheldTaxTotal2027($projection),
+            385 => $this->workplaceAddress2027($projection),
+            386 => $this->riskyShiftsRequired2027($projection),
+            387 => $this->riskCategoriesUnique2027($projection),
+            388 => $this->stateAttorneyDetails2027($projection),
+            default => null,
+        };
+    }
+
+    /** Typy odloženého příjmu (10548) bez měsíce odloženého příjmu: po skončení, výsledek ročního zúčtování a jejich součet. */
+    private const DEFERRED_WITHOUT_PERIOD_2027 = ['1', '4', '5'];
+
+    /** Typy odloženého příjmu s měsícem odloženého příjmu (náhrady mzdy při neplatném skončení). */
+    private const DEFERRED_WITH_PERIOD_2027 = ['2', '3', '6'];
+
+    /** Typy „příjem po skončení" a „příjem po skončení + roční zúčtování" (kontrola 363). */
+    private const DEFERRED_AFTER_TERMINATION_2027 = ['1', '5'];
+
+    /**
+     * Kontrola 57 ve verzi 2027: rizikových prací může být v součásti víc
+     * (blok `riziko` se opakuje podle kategorie), proto se s odpracovanými
+     * hodinami porovnává jejich součet ∑(10273).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function riskyHoursSumWithinWorkedHours2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $occurrences = $form->all('10273');
+            $worked = $form->scaled('10268');
+            if ($occurrences === [] || $worked === null) {
+                return null;
+            }
+            $sum = [0, 3];
+            foreach ($occurrences as $occurrence) {
+                $value = self::scaledText($occurrence->value);
+                if ($value === null) {
+                    return "Hodiny v rizikové práci {$occurrence->value} nejsou číslo.";
+                }
+                $sum = self::addScaled($sum, $value);
+            }
+            if (self::compareScaled($sum, JmhzWholeHours::ceilScaled($worked)) > 0) {
+                return 'Součet hodin v rizikové práci překračuje počet odpracovaných hodin.';
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 78 ve verzi 2027: výjimka pro mezinárodní pronájem pracovní
+     * síly (10239 = 12) z katalogu vypadla, součet platí pro každý formulář.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function annualSettlementSum2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $total = $form->integer('10321');
+            $tax = $form->integer('10322');
+            $bonus = $form->integer('10323');
+            if ($total === null && $tax === null && $bonus === null) {
+                return null;
+            }
+            if ($total === null || $tax === null || $bonus === null) {
+                return 'Výsledek ročního zúčtování 10321–10323 není úplný.';
+            }
+
+            return $total === $tax + $bonus
+                ? null
+                : "Výsledek 10321 = {$total} není součtem 10322 + 10323 ({$tax} + {$bonus}).";
+        });
+    }
+
+    /**
+     * Kontrola 79 ve verzi 2027: provedené roční zúčtování vyžaduje 10321,
+     * 10322, 10323, 10420 a 10454 u každého formuláře; zvláštní pravidlo pro
+     * scénář 12 katalog 1.5.0.4 vypustil.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function annualSettlementResultRequired2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->boolean('10320') !== true) {
+                return null;
+            }
+            foreach (['10321', '10322', '10323', '10420', '10454'] as $attributeId) {
+                if (!$form->has($attributeId)) {
+                    return "Pro provedené roční zúčtování chybí atribut {$attributeId}.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontroly 193 a 194 ve verzi 2027: k lednovým atributům přibyl úhrn
+     * vyplacených měsíčních bonusů (10577), z prosincových vypadl typ
+     * kolektivní smlouvy (10214), který se nově vykazuje každý měsíc.
+     *
+     * @param list<string> $attributeIds
+     * @return list<JmhzControlVerdict>
+     */
+    private function onlyInMonth2027(
+        JmhzAttributeProjection $projection,
+        int $allowedMonth,
+        array $attributeIds,
+        string $label,
+    ): array {
+        $month = $projection->submission()->integer('10010');
+        $present = array_values(array_filter(
+            $attributeIds,
+            static fn (string $id): bool => $projection->has($id),
+        ));
+        if ($present === []) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+        if ($month === null || $month === $allowedMonth) {
+            return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUBMISSION)];
+        }
+
+        return [JmhzControlVerdict::failed(
+            JmhzAttributeProjection::PART_SUBMISSION,
+            null,
+            "Atribut {$present[0]} smí být uveden jen v {$label} podání.",
+        )];
+    }
+
+    /**
+     * Kontrola 244 ve verzi 2027: bez podepsaného prohlášení nesmí být
+     * vyplněn ani nový datum podpisu prohlášení (10575).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function noCreditsWithoutDeclaration2027(JmhzAttributeProjection $projection): array
+    {
+        $forbidden = [
+            '10299', '10300', '10301', '10302', '10303', '10453', '10431',
+            '10432', '10433', '10434', '10435', '10436', '10437', '10438',
+            '10439', '10440', '10304', '10306', '10575',
+        ];
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($forbidden): ?string {
+                if ($form->boolean('10419') !== false) {
+                    return null;
+                }
+                foreach ($forbidden as $attributeId) {
+                    if ($form->has($attributeId)) {
+                        return 'Bez podepsaného prohlášení poplatníka nesmí být'
+                            . " uplatněna sleva ani zvýhodnění ({$attributeId}).";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Kontrola 248 ve verzi 2027: souhrnná data zaměstnance podle katalogu
+     * 1.5.0.4. Zrušené atributy (10292 až 10296, 10310, 10347, 10416, 10418)
+     * vypadly, přibyly 10565, 10566, 10570, 10571, 10575, 10577, 10579 a 10589.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function summaryDataOnlyOnPrimary2027(JmhzAttributeProjection $projection): array
+    {
+        $summaryAttributes = [
+            '10286', '10289', '10417', '10419', '10297', '10298', '10299',
+            '10300', '10301', '10302', '10303', '10453', '10431', '10432',
+            '10433', '10434', '10435', '10436', '10437', '10438', '10439',
+            '10440', '10304', '10305', '10306', '10307', '10308', '10309',
+            '10313', '10317', '10316', '10318', '10311', '10312',
+            '10319', '10320', '10321', '10322', '10323', '10420', '10421',
+            '10422', '10423', '10424', '10425', '10426', '10430', '10539',
+            '10540', '10541', '10542', '10454', '10455', '10441', '10442',
+            '10443', '10444', '10445', '10446', '10447', '10448', '10449',
+            '10450', '10451', '10344', '10116', '10348', '10349',
+            '10350', '10351', '10352', '10353', '10482', '10371',
+            '10565', '10566', '10570', '10571', '10575', '10577', '10579', '10589',
+        ];
+
+        return $this->perForm(
+            $projection,
+            static function (JmhzAttributeScope $form) use ($summaryAttributes): ?string {
+                if ($form->boolean('10495') !== false) {
+                    return null;
+                }
+                foreach ($summaryAttributes as $attributeId) {
+                    if ($form->has($attributeId)) {
+                        return 'Souhrnná data zaměstnance patří jen k primárnímu'
+                            . " pracovněprávnímu vztahu; vykázán atribut {$attributeId}.";
+                    }
+                }
+
+                return null;
+            },
+        );
+    }
+
+    /**
+     * Kontrola 304 ve verzi 2027: příjem pro zálohu (10535) a příjem podle
+     * § 6 odst. 4 ZDP (10555) se uvádějí oba a kladný smí být nejvýš jeden.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function taxIncomeSplit2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $advance = $form->integer('10535');
+            $separate = $form->integer('10555');
+            if ($advance === null && $separate === null) {
+                return null;
+            }
+            if ($advance === null || $separate === null) {
+                return 'Příjem pro výpočet zálohy (10535) a příjem podle § 6 odst. 4'
+                    . ' ZDP (10555) musí být uvedeny oba.';
+            }
+            if ($advance > 0 && $separate > 0) {
+                return 'Příjem pro výpočet zálohy (10535) a příjem podle § 6 odst. 4'
+                    . ' ZDP (10555) nesmí být kladné zároveň.';
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 369 ve verzi 2027: s kódem ELDP musí být uvedena platnost od
+     * a do i vyměřovací základ (10245).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function eldpCodeDetailsRequired2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            foreach ($form->groupedBy(['10240', '10241', '10242', '10245'], self::ELDP_SECTION_DEPTH) as $section) {
+                $code = $section['10240'] ?? null;
+                if ($code === null) {
+                    continue;
+                }
+                $missing = array_values(array_filter(
+                    ['10241', '10242', '10245'],
+                    static fn (string $id): bool => ($section[$id] ?? '') === '',
+                ));
+                if ($missing !== []) {
+                    return "Kód ELDP {$code} nemá vyplněno " . implode(', ', $missing) . '.';
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Měsíce odloženého příjmu (10537, 10538) jedné součásti, po obdobích ELDP.
+     *
+     * @return list<array{month:?string,year:?string}>
+     */
+    private static function deferredIncomePeriods(JmhzAttributeScope $form): array
+    {
+        $periods = [];
+        foreach ($form->groupedBy(['10537', '10538']) as $group) {
+            $periods[] = ['month' => $group['10537'] ?? null, 'year' => $group['10538'] ?? null];
+        }
+
+        return $periods;
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function deferredIncomePeriodsUnique2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $seen = [];
+            foreach (self::deferredIncomePeriods($form) as $period) {
+                if ($period['month'] === null || $period['year'] === null) {
+                    continue;
+                }
+                $key = sprintf('%04d-%02d', (int) $period['year'], (int) $period['month']);
+                if (isset($seen[$key])) {
+                    return "Měsíc odloženého příjmu {$key} je v sekci ELDP uveden víckrát.";
+                }
+                $seen[$key] = true;
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function deferredIncomePeriodsFromJmhzStart2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            foreach (self::deferredIncomePeriods($form) as $period) {
+                if ($period['month'] === null || $period['year'] === null) {
+                    continue;
+                }
+                if ((int) $period['year'] * 100 + (int) $period['month'] < 202601) {
+                    return 'Odložený příjem lze uplatnit jen za období 01/2026 a pozdější,'
+                        . " uvedeno {$period['month']}/{$period['year']}.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function deferredIncomePeriodsByType2027(JmhzAttributeProjection $projection): array
+    {
+        $period = $this->period($projection);
+
+        return $this->perForm($projection, static function (JmhzAttributeScope $form) use ($period): ?string {
+            $type = $form->value('10548');
+            if ($type === null) {
+                return null;
+            }
+            $periods = self::deferredIncomePeriods($form);
+            if (in_array($type, self::DEFERRED_WITHOUT_PERIOD_2027, true)) {
+                return $periods === []
+                    ? null
+                    : "Odložený příjem typu {$type} nesmí uvádět měsíc a rok odloženého příjmu (10537, 10538).";
+            }
+            if (!in_array($type, self::DEFERRED_WITH_PERIOD_2027, true)) {
+                return null;
+            }
+            if ($periods === []) {
+                return "Odložený příjem typu {$type} musí uvádět měsíc a rok odloženého příjmu (10537, 10538).";
+            }
+            foreach ($periods as $item) {
+                if ($item['month'] === null || $item['year'] === null) {
+                    return "Odložený příjem typu {$type} musí uvádět měsíc i rok odloženého příjmu.";
+                }
+                if ($period !== null
+                    && (int) $item['year'] * 100 + (int) $item['month'] >= $period[0] * 100 + $period[1]
+                ) {
+                    return "Měsíc odloženého příjmu {$item['month']}/{$item['year']} musí předcházet"
+                        . ' rozhodnému období.';
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 362: u typů 1, 4 a 5 je ELDP blok právě jeden. Bloky se
+     * rozlišují podle obdobi ELDP (`eldpObdobi.obdobi[n]`), ve kterém leží.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function deferredIncomeSingleEldpPeriod2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $type = $form->value('10548');
+            if ($type === null || !in_array($type, self::DEFERRED_WITHOUT_PERIOD_2027, true)) {
+                return null;
+            }
+            $blocks = [];
+            foreach (['10240', '10241', '10242', '10245', '10356'] as $attributeId) {
+                foreach ($form->all($attributeId) as $occurrence) {
+                    $key = preg_match('/^(.*?obdobi\[\d+\])/', $occurrence->groupKey, $match) === 1
+                        ? $match[1]
+                        : (preg_match('/^(.*?eldpSeznam\[\d+\])/', $occurrence->groupKey, $match) === 1
+                            ? $match[1]
+                            : $occurrence->groupKey);
+                    $blocks[$key] = true;
+                }
+            }
+
+            return count($blocks) === 1
+                ? null
+                : "Odložený příjem typu {$type} musí mít právě jeden blok ELDP, uvedeno " . count($blocks) . '.';
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function deferredIncomeAfterTerminationHasNoDays2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $type = $form->value('10548');
+            if ($type === null || !in_array($type, self::DEFERRED_AFTER_TERMINATION_2027, true)) {
+                return null;
+            }
+            foreach ($form->all('10356') as $occurrence) {
+                if ((int) $occurrence->value !== 0) {
+                    return "Příjem po skončení zaměstnání musí mít nulový počet dnů pojištění, uvedeno {$occurrence->value}.";
+                }
+            }
+            foreach ($form->all('10240') as $occurrence) {
+                if (self::eldpPosition($occurrence->value, 2) !== 'P') {
+                    return "Příjem po skončení zaměstnání musí mít na druhé pozici kódu ELDP „P\", uvedeno {$occurrence->value}.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 366: slevu na studenta (10565) jen s podepsaným prohlášením
+     * (10419) a jen do 26 let, v doktorském studiu (10566) do 28 let. Kdo
+     * dosáhne věku prvním dnem měsíce, za ten měsíc slevu nemá.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function studentCreditEligibility2027(JmhzAttributeProjection $projection): array
+    {
+        $monthStart = self::calendarDay($this->periodStart($projection));
+
+        return $this->perForm($projection, static function (JmhzAttributeScope $form) use ($monthStart): ?string {
+            $credit = $form->integer('10565');
+            if ($credit === null || $credit <= 0) {
+                return null;
+            }
+            if ($form->boolean('10419') !== true) {
+                return 'Slevu na studenta lze uplatnit jen s podepsaným prohlášením poplatníka (10419).';
+            }
+            $birthDate = self::calendarDay($form->value('10056'));
+            if ($birthDate === null || $monthStart === null) {
+                return 'Pro kontrolu věku studenta chybí platné datum narození (10056).';
+            }
+            $limit = $form->boolean('10566') === true ? 28 : 26;
+            if ($birthDate->modify("+{$limit} years") <= $monthStart) {
+                return "Student dosáhl {$limit} let nejpozději první den vykazovaného měsíce.";
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function savingsContributionWithinLimit2027(JmhzAttributeProjection $projection): array
+    {
+        $limit = $this->parameters->integerValue('source_row_25', $this->periodStart($projection));
+
+        return $this->perForm($projection, static function (JmhzAttributeScope $form) use ($limit): ?string {
+            $amount = $form->integer('10417');
+            if ($amount === null || $amount <= $limit) {
+                return null;
+            }
+
+            return "Příspěvek zaměstnavatele na produkty spoření {$amount} Kč překračuje roční mez {$limit} Kč.";
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function bonusTopUpWithoutChildCredit2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if ($form->boolean('10454') !== false) {
+                return null;
+            }
+            $topUp = $form->integer('10323');
+            if ($topUp === null || $topUp === 0) {
+                return null;
+            }
+
+            return "Bez uplatněného zvýhodnění na děti musí být doplatek daňového bonusu (10323) nulový, uvedeno {$topUp} Kč.";
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function monthlyCreditLimits2027(JmhzAttributeProjection $projection): array
+    {
+        $onDate = $this->periodStart($projection);
+        $limits = [];
+        foreach (['10299' => 'source_row_26', '10300' => 'source_row_27', '10301' => 'source_row_28',
+            '10302' => 'source_row_29', '10565' => 'source_row_30'] as $attributeId => $parameter
+        ) {
+            $limits[$attributeId] = $this->parameters->integerValue($parameter, $onDate);
+        }
+
+        return $this->perForm($projection, static function (JmhzAttributeScope $form) use ($limits): ?string {
+            if ($form->boolean('10579') !== false) {
+                return null;
+            }
+            foreach ($limits as $attributeId => $limit) {
+                $amount = $form->integer((string) $attributeId);
+                if ($amount !== null && $amount > $limit) {
+                    return "Sleva {$attributeId} = {$amount} Kč překračuje měsíční mez {$limit} Kč.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function annualSettlementTopUpMinimum2027(JmhzAttributeProjection $projection): array
+    {
+        $minimum = $this->parameters->integerValue('source_row_31', $this->periodStart($projection));
+
+        return $this->perForm($projection, static function (JmhzAttributeScope $form) use ($minimum): ?string {
+            $amount = $form->integer('10321');
+            if ($amount === null || $amount === 0 || $amount > $minimum) {
+                return null;
+            }
+
+            return "Doplatek z ročního zúčtování {$amount} Kč musí být nulový nebo vyšší než {$minimum} Kč.";
+        });
+    }
+
+    /**
+     * Kontrola 384: úhrn sražených záloh v souhrnu (10034) se rovná součtu
+     * sražených záloh po slevách (10305) a srážek ze samostatného základu
+     * (10309) ze všech součástí podání.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function withheldTaxTotal2027(JmhzAttributeProjection $projection): array
+    {
+        $total = $projection->summary()->integer('10034');
+        if ($total === null || $projection->forms() === []) {
+            return [JmhzControlVerdict::notApplicable(JmhzAttributeProjection::PART_SUMMARY)];
+        }
+        $sum = 0;
+        foreach ($projection->forms() as $form) {
+            $sum += ($form->integer('10305') ?? 0) + ($form->integer('10309') ?? 0);
+        }
+        if ($total === $sum) {
+            return [JmhzControlVerdict::passed(JmhzAttributeProjection::PART_SUMMARY)];
+        }
+
+        return [JmhzControlVerdict::failed(
+            JmhzAttributeProjection::PART_SUMMARY,
+            null,
+            "Úhrn sražených záloh 10034 = {$total} Kč neodpovídá součtu 10305 a 10309 ze součástí ({$sum} Kč).",
+        )];
+    }
+
+    /**
+     * Kontrola 385: kód obce „Mimo ČR" (111111) vyžaduje stát a zakazuje
+     * adresu v ČR (10550 až 10554); u ostatních kódů obce je povinné číslo
+     * popisné (10552) a PSČ (10554).
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function workplaceAddress2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $municipality = $form->value('10230');
+            if ($municipality === null) {
+                return null;
+            }
+            if ($municipality === self::MUNICIPALITY_ABROAD_2027) {
+                if (!$form->has('10231')) {
+                    return 'U místa výkonu práce mimo ČR musí být uveden stát (10231).';
+                }
+                foreach (['10550', '10551', '10552', '10553', '10554'] as $attributeId) {
+                    if ($form->has($attributeId)) {
+                        return "U místa výkonu práce mimo ČR nesmí být uvedena adresa v ČR ({$attributeId}).";
+                    }
+                }
+
+                return null;
+            }
+            foreach (['10552', '10554'] as $attributeId) {
+                if (!$form->has($attributeId)) {
+                    return "U místa výkonu práce v ČR chybí atribut {$attributeId}.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function riskyShiftsRequired2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            foreach ($form->groupedBy(['10273', '10274', '10580']) as $risk) {
+                $hours = self::scaledText($risk['10273'] ?? '');
+                $required = ($risk['10274'] ?? null) === '1' && $hours !== null && $hours[0] > 0;
+                $present = isset($risk['10580']);
+                if ($required && !$present) {
+                    return 'U rizikové práce kategorie 4 s odpracovanými hodinami chybí počet směn (10580).';
+                }
+                if (!$required && $present) {
+                    return 'Počet směn při rizikové práci (10580) smí být uveden jen u kategorie 4'
+                        . ' s odpracovanými hodinami.';
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /** @return list<JmhzControlVerdict> */
+    private function riskCategoriesUnique2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            $seen = [];
+            foreach ($form->all('10274') as $occurrence) {
+                if (isset($seen[$occurrence->value])) {
+                    return "Kategorizace rizika {$occurrence->value} je ve formuláři uvedena víckrát.";
+                }
+                $seen[$occurrence->value] = true;
+            }
+
+            return null;
+        });
+    }
+
+    /**
+     * Kontrola 388 (katalog 1.5.0.4, pokrytí interakce IN43).
+     *
+     * Státní zástupce (10587 = ANO) musí mít 10265, 10268, 10329 a 10345.
+     * Věta „v ostatních případech nesmí být tyto atributy vyplněny" platí jen
+     * ve formuláři, který 10587 nese, tedy `cinnostKS` (XSD 1.5.0.3
+     * formCinnostKS.xsd, scénář K-S): tam se 10265, 10268, 10276, 10329
+     * a 10345 zpřístupňují výhradně přes IN43, takže při 10587 = NE být
+     * nesmí. 10276 je v atributech kontroly a v IN43 („N"), proto patří do
+     * zákazu, i když ho věta o povinnosti nejmenuje. Formulář bez 10587
+     * (běžný scénář, kde jsou atributy CORE DATA) kontrola neposuzuje.
+     *
+     * @return list<JmhzControlVerdict>
+     */
+    private function stateAttorneyDetails2027(JmhzAttributeProjection $projection): array
+    {
+        return $this->perForm($projection, static function (JmhzAttributeScope $form): ?string {
+            if (!$form->has('10587')) {
+                return null;
+            }
+            if ($form->boolean('10587') === true) {
+                foreach (['10265', '10268', '10329', '10345'] as $attributeId) {
+                    if (!$form->has($attributeId)) {
+                        return "U státního zástupce chybí atribut {$attributeId}.";
+                    }
+                }
+
+                return null;
+            }
+            foreach (['10265', '10268', '10276', '10329', '10345'] as $attributeId) {
+                if ($form->has($attributeId)) {
+                    return "U zaměstnance, který není státní zástupce, nesmí být vyplněn atribut {$attributeId}.";
+                }
+            }
+
+            return null;
+        });
+    }
+
+    /** @return array{0:int,1:int}|null */
+    private static function scaledText(string $value): ?array
+    {
+        if (preg_match('/^(-?\d+)(?:\.(\d+))?$/D', $value, $match) !== 1) {
+            return null;
+        }
+        $fraction = $match[2] ?? '';
+
+        return [(int) ($match[1] . $fraction), strlen($fraction)];
+    }
+
+    /**
+     * @param array{0:int,1:int} $left
+     * @param array{0:int,1:int} $right
+     * @return array{0:int,1:int}
+     */
+    private static function addScaled(array $left, array $right): array
+    {
+        $scale = max($left[1], $right[1]);
+
+        return [
+            $left[0] * 10 ** ($scale - $left[1]) + $right[0] * 10 ** ($scale - $right[1]),
+            $scale,
+        ];
     }
 
     /** @return array{0:int,1:int}|null */

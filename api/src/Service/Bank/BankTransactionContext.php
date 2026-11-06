@@ -15,13 +15,24 @@ final class BankTransactionContext
 
     private function lockContext(int $supplierId): void
     {
-        (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->acquire($supplierId);
     }
 
     /** @return array<string,mixed>|null */
     public function statement(int $supplierId, int $statementId): ?array
     {
         $this->lockContext($supplierId);
+        return $this->findStatement($supplierId, $statementId);
+    }
+
+    public function mutableStatement(int $supplierId, int $statementId): ?array
+    {
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertBankStatementMutable($supplierId, $statementId);
+        return $this->findStatement($supplierId, $statementId);
+    }
+
+    private function findStatement(int $supplierId, int $statementId): ?array
+    {
         $stmt = $this->db->pdo()->prepare(
             'SELECT bs.* FROM bank_statements bs WHERE bs.id = ? AND '
                 . BankStatementOwnershipResolver::sql('bs', true) . ' FOR UPDATE'
@@ -35,6 +46,17 @@ final class BankTransactionContext
     public function lock(int $supplierId, int $txId): ?array
     {
         $this->lockContext($supplierId);
+        return $this->findOwned($supplierId, $txId);
+    }
+
+    public function mutableTransaction(int $supplierId, int $txId): ?array
+    {
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertSourceMutable($supplierId, 'bank', $txId);
+        return $this->findOwned($supplierId, $txId);
+    }
+
+    private function findOwned(int $supplierId, int $txId): ?array
+    {
         if (!(new BankStatementOwnershipResolver($this->db))->transactionOwned($txId, $supplierId, true)) {
             return null;
         }

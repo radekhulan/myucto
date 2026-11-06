@@ -69,6 +69,9 @@ final class JournalForDocumentAction
         if ($entries === []) {
             $entries = $this->advanceEntries($supplierId, $sourceType, $docId);
         }
+        if ($sourceType === 'invoice') {
+            array_push($entries, ...$this->otherItemEntries($supplierId, $docId));
+        }
         if ($entries !== []) {
             $accMap = $this->accounts->idToAccountMap($supplierId);
             // Dimenze řádků (Firma → Dimenze) — štítky v sekci Zaúčtování.
@@ -91,6 +94,37 @@ final class JournalForDocumentAction
         }
 
         return Json::ok($response, ['items' => $entries]);
+    }
+
+    /**
+     * Faktura krytá ostatní pohledávkou (migrace 2246) vlastní zápis nemá, účtuje ji živý
+     * zápis pohledávky. Sekce ho ukáže jen ke čtení, opravuje se v detailu pohledávky.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function otherItemEntries(int $supplierId, int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT oi.id, oi.document_no FROM invoices i
+               JOIN other_items oi ON oi.supplier_id = i.supplier_id AND oi.id = i.other_item_id
+              WHERE i.id = ? AND i.supplier_id = ?'
+        );
+        $stmt->execute([$invoiceId, $supplierId]);
+        $item = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($item === false) {
+            return [];
+        }
+        $out = [];
+        foreach ($this->journal->listBySourceWithLines($supplierId, 'other_item', (int) $item['id']) as $entry) {
+            if ($entry['reversed_by'] !== null || $entry['posted_at'] === null || $entry['source_id'] === null) {
+                continue;
+            }
+            $entry['relation'] = 'other_item';
+            $entry['other_item_id'] = (int) $item['id'];
+            $entry['other_item_document_no'] = $item['document_no'];
+            $out[] = $entry;
+        }
+        return $out;
     }
 
     /**

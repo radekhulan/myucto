@@ -5,7 +5,7 @@ declare(strict_types=1);
 $fixture = (string) getenv('AUDIT_GATE_FIXTURE');
 $config = json_decode((string) file_get_contents($fixture . '/scenario.json'), true, flags: JSON_THROW_ON_ERROR);
 $script = basename(str_replace('\\', '/', $argv[1] ?? ''));
-$greenCheck = $script === 'test-parallel.php' && in_array('--green-check', $argv, true);
+$greenCheck = $script === 'test-parallel.php' && (in_array('--audit-check', $argv, true) || in_array('--green-check', $argv, true));
 $allowed = ['test-parallel.php', 'check-invariants.php', 'cross-check.php', 'check-schema.php', 'compare_dph.php', 'checks_shape_sweep.php'];
 if (!in_array($script, $allowed, true)) {
     fwrite(STDERR, 'Unexpected audit command: ' . $script);

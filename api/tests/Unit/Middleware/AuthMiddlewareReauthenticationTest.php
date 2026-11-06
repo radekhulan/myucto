@@ -104,6 +104,7 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
             new SessionLockPolicy($config),
             $this->roleProfileStub(),
             $this->createMock(\MyInvoice\Service\Auth\MfaStepUpService::class),
+            $this->createStub(\MyInvoice\Service\License\LicenseConsistency::class),
         );
         $terminal = new class ($issuer, $context) implements RequestHandlerInterface {
             public function __construct(
@@ -188,6 +189,7 @@ final class AuthMiddlewareReauthenticationTest extends TestCase
     public static function otherFreshAuthenticationEndpoints(): iterable
     {
         yield 'setup status' => ['GET', '/api/auth/setup-status'];
+        yield 'domain context' => ['GET', '/api/auth/domain-context'];
         yield 'passkey options' => ['POST', '/api/auth/webauthn/login/options'];
         yield 'passkey verification' => ['POST', '/api/auth/webauthn/login/verify'];
     }

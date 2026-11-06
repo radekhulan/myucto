@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollAnnualSettlementAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -30,7 +29,7 @@ final class PayrollAnnualSettlementActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('Aplikační kontejner není dostupný.');
         }
@@ -300,7 +299,142 @@ final class PayrollAnnualSettlementActionTest extends TestCase
         self::assertCount(1, $warnings);
     }
 
+    /**
+     * Regrese: náhled osoby bez založené žádosti vracel `row_version` 1. Klient
+     * ji poslal zpět a první uložení skončilo 409 „mezitím zanikla", takže
+     * stav žádosti nešel u nikoho poprvé zapsat a JMHZ zůstalo zablokované.
+     */
+    public function testFirstSaveWithVersionFromPreviewSucceeds(): void
+    {
+        $previewRequest = $this->saveRequestFor([])
+            ->withMethod('GET')
+            ->withAttribute('auth.effective_role', new EffectiveRole(
+                1,
+                'Syntetická mzdová role',
+                'staff',
+                true,
+                ['payroll.documents' => AccessLevel::WRITE->value, 'payroll' => AccessLevel::WRITE->value],
+            ));
+        $preview = $this->action->preview(
+            $previewRequest,
+            new Response(),
+            ['year' => '2025', 'employeeId' => (string) $this->employeeId],
+        );
+        self::assertSame(200, $preview->getStatusCode());
+        $loaded = $this->body($preview)['request'] ?? null;
+        self::assertIsArray($loaded);
+        self::assertSame('unknown', $loaded['request_status'] ?? null);
+
+        $body = [
+            'request_status' => 'not_requested',
+            'prior_employers' => 'unknown',
+            'filing_obligation' => 'unknown',
+            'annual_claims' => 'unknown',
+        ];
+        // Klient posílá verzi stejně jako PayrollAnnualSettlement.vue: jen kladnou.
+        if ((int) ($loaded['row_version'] ?? 0) > 0) {
+            $body['row_version'] = $loaded['row_version'];
+        }
+        $response = $this->action->saveRequest(
+            $this->saveRequestFor($body),
+            new Response(),
+            ['year' => '2025', 'employeeId' => (string) $this->employeeId],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $saved = $this->body($response)['request'] ?? null;
+        self::assertIsArray($saved);
+        self::assertSame('not_requested', $saved['request_status'] ?? null);
+    }
+
     /** @param array<string,mixed> $body */
+    /** Hromadné nastavení: založí chybějící řádky, existující jen přepíše stav a zvýší verzi. */
+    public function testBulkSetsRequestStatusCreatesAndUpdatesOnlyTheStatus(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_employees
+                (supplier_id, full_name, taxpayer_type, is_active)
+             VALUES (?, "Druhá syntetická osoba", "employee", 1)',
+        )->execute([$this->supplierId]);
+        $secondId = (int) $pdo->lastInsertId();
+
+        $existing = $this->action->saveRequest(
+            $this->saveRequestFor([
+                'request_status' => 'unknown',
+                'prior_employers' => 'none',
+                'filing_obligation' => 'none',
+                'annual_claims' => 'none',
+                'note' => 'Zůstane beze změny.',
+            ]),
+            new Response(),
+            ['year' => '2026', 'employeeId' => (string) $this->employeeId],
+        );
+        self::assertSame(200, $existing->getStatusCode());
+        $before = $this->body($existing)['request'];
+
+        $response = $this->action->saveRequestsBulk(
+            $this->saveRequestFor([
+                'employee_ids' => [$this->employeeId, $secondId, $secondId],
+                'request_status' => 'not_requested',
+            ]),
+            new Response(),
+            ['year' => '2026'],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        $body = $this->body($response);
+        self::assertSame(1, $body['created'] ?? null);
+        self::assertSame(1, $body['updated'] ?? null);
+
+        $repository = new \MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository($this->db);
+        $after = $repository->findRequest($this->supplierId, $this->employeeId, 2026);
+        self::assertIsArray($after);
+        self::assertSame('not_requested', $after['request_status']);
+        self::assertSame($before['row_version'] + 1, $after['row_version']);
+        self::assertSame('Zůstane beze změny.', $after['note']);
+        self::assertSame('none', $after['prior_employers']);
+
+        $created = $repository->findRequest($this->supplierId, $secondId, 2026);
+        self::assertIsArray($created);
+        self::assertSame('not_requested', $created['request_status']);
+        self::assertSame('unknown', $created['prior_employers']);
+        self::assertSame(1, $created['row_version']);
+    }
+
+    /** Cizí ID celou dávku odmítne a nic nezapíše. */
+    public function testBulkRejectsForeignEmployeeIdWithoutWritingAnything(): void
+    {
+        $response = $this->action->saveRequestsBulk(
+            $this->saveRequestFor([
+                'employee_ids' => [$this->employeeId, 999999999],
+                'request_status' => 'requested',
+            ]),
+            new Response(),
+            ['year' => '2026'],
+        );
+
+        self::assertSame(422, $response->getStatusCode());
+        $repository = new \MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository($this->db);
+        self::assertNull($repository->findRequest($this->supplierId, $this->employeeId, 2026));
+    }
+
+    public function testBulkRejectsInvalidInput(): void
+    {
+        foreach ([
+            ['employee_ids' => [], 'request_status' => 'requested'],
+            ['employee_ids' => ['x'], 'request_status' => 'requested'],
+            ['employee_ids' => [$this->employeeId], 'request_status' => 'withdrawn'],
+        ] as $body) {
+            $response = $this->action->saveRequestsBulk(
+                $this->saveRequestFor($body),
+                new Response(),
+                ['year' => '2026'],
+            );
+            self::assertSame(422, $response->getStatusCode());
+        }
+    }
+
     private function saveRequestFor(array $body): \Psr\Http\Message\ServerRequestInterface
     {
         return (new ServerRequestFactory())

@@ -34,7 +34,12 @@ final class BankPaymentOrderSubmissionService
                     throw new BankConnectorOperationException('payment_order_not_found');
                 }
                 $this->assertOrder($order, $connection);
-                $file = $this->paymentOrders->download($orderId, $supplierId, 'abo');
+                self::assertDomesticItems((array) ($order['items'] ?? []));
+                try {
+                    $file = $this->paymentOrders->download($orderId, $supplierId, 'abo');
+                } catch (\RuntimeException) {
+                    throw new BankConnectorOperationException('payment_order_invalid');
+                }
                 if ($file === null) {
                     throw new BankConnectorOperationException('payment_order_not_found');
                 }
@@ -56,6 +61,11 @@ final class BankPaymentOrderSubmissionService
         ) {
             throw new BankConnectorOperationException('payment_order_account_mismatch');
         }
+        // Archivovaný příkaz uživatel potvrdil jako zrušený v bance a mohl ho nahradit novým;
+        // přerušené odeslání se u něj nesmí dokončit (stejný kód jako zahozená mzdová dávka).
+        if (($order['archived_at'] ?? null) !== null) {
+            throw new BankConnectorOperationException('payment_order_no_longer_payable');
+        }
         if ((bool) ($order['mark_paid'] ?? false)) {
             throw new BankConnectorOperationException('payment_order_mark_paid_forbidden');
         }
@@ -64,6 +74,29 @@ final class BankPaymentOrderSubmissionService
         }
         if (!$this->orders->allItemsStillPayable((int) $order['id'], (int) $order['supplier_id'], 'CZK')) {
             throw new BankConnectorOperationException('payment_order_items_not_payable');
+        }
+    }
+
+    /**
+     * Přímo do banky jdou jen tuzemské platby v CZK na český účet (číslo účtu a kód banky).
+     * Položka jen s IBAN nebo cizí měnou (SEPA, zahraniční platba) se odmítne dřív, než
+     * vznikne pokus o odeslání; dřív by skončila chybou sestavení ABO.
+     *
+     * @param list<array<string,mixed>> $items
+     */
+    public static function assertDomesticItems(array $items): void
+    {
+        if ($items === []) {
+            throw new BankConnectorOperationException('payment_order_invalid');
+        }
+        foreach ($items as $item) {
+            $iban = strtoupper(trim((string) ($item['payee_iban'] ?? '')));
+            if (strtoupper((string) ($item['currency'] ?? '')) !== 'CZK'
+                || trim((string) ($item['payee_account_number'] ?? '')) === ''
+                || !preg_match('/^\d{4}$/D', trim((string) ($item['payee_bank_code'] ?? '')))
+                || ($iban !== '' && !str_starts_with($iban, 'CZ'))) {
+                throw new BankConnectorOperationException('payment_order_not_domestic');
+            }
         }
     }
 

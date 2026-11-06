@@ -267,6 +267,14 @@ final class DocumentsAction
                 return Json::error($response, 'not_found', 'Propojená entita nenalezena.', 404);
             }
         }
+        if ($type === 'internal_document') {
+            if (!RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
+                return Json::error($response, 'forbidden', 'Chybí oprávnění k účetnictví.', 403);
+            }
+            if (!$this->links->entityBelongsToSupplier($type, $eid, $sid)) {
+                return Json::error($response, 'not_found', 'Propojená entita nenalezena.', 404);
+            }
+        }
         return Json::ok($response, ['documents' => $this->documents->listByEntity($sid, $type, $eid, $this->viewer($request))]);
     }
 
@@ -293,6 +301,9 @@ final class DocumentsAction
         if ($type === 'other_item' && !RequestAuthorization::allows($request, 'other_items', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Chybí oprávnění k ostatním položkám.', 403);
         }
+        if ($type === 'internal_document' && !RequestAuthorization::allows($request, 'accounting.journal.write', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Chybí oprávnění k interním dokladům.', 403);
+        }
         // Ověř, že cílová entita patří aktuálnímu dodavateli — jinak by vznikla
         // dangling/cizí vazba (read-back je sice scoped, ale nezakládáme smetí).
         if (!$this->links->entityBelongsToSupplier($type, $eid, $sid)) {
@@ -317,6 +328,9 @@ final class DocumentsAction
         if ($type === 'other_item' && !RequestAuthorization::allows($request, 'other_items', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Chybí oprávnění k ostatním položkám.', 403);
         }
+        if ($type === 'internal_document' && !RequestAuthorization::allows($request, 'accounting.journal.write', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Chybí oprávnění k interním dokladům.', 403);
+        }
         $this->links->detach($sid, $id, $type, $eid);
         return Json::ok($response, ['links' => $this->links->linksForDocument($id, $sid, self::redactedLinkTypes($request), self::hiddenLinkTypes($request))]);
     }
@@ -332,10 +346,13 @@ final class DocumentsAction
         return RequestAuthorization::allows($request, 'cash', AccessLevel::READ) ? [] : ['cash_document'];
     }
 
-    /** Ostatní položky bez práva čtení neodhalují ani existenci vazby. */
+    /** Ostatní položky a interní doklady bez práva čtení neodhalují ani existenci vazby. */
     private static function hiddenLinkTypes(Request $request): array
     {
-        return RequestAuthorization::allows($request, 'other_items', AccessLevel::READ) ? [] : ['other_item'];
+        return array_values(array_filter([
+            RequestAuthorization::allows($request, 'other_items', AccessLevel::READ) ? null : 'other_item',
+            RequestAuthorization::allows($request, 'accounting', AccessLevel::READ) ? null : 'internal_document',
+        ]));
     }
 
     /** GET /api/documents/trash */
@@ -460,6 +477,26 @@ final class DocumentsAction
         $folderIds = array_values(array_filter(array_map('intval', (array) ($body['folder_ids'] ?? []))));
         if ($ids === [] && $folderIds === []) {
             return Json::error($response, 'no_ids', 'Nebyly vybrány žádné položky.', 400);
+        }
+
+        // Jedna trasa, víc operací: každá vyžaduje TOTÉŽ právo jako její
+        // jednotlivá podoba (přesun, smazání, úprava štítků v detailu).
+        $permission = match ($action) {
+            'move' => 'documents.move',
+            'delete' => 'documents.delete',
+            'tag' => 'documents',
+            default => null,
+        };
+        if ($permission !== null
+            && !RequestAuthorization::allows($request, $permission, AccessLevel::WRITE)
+        ) {
+            return Json::error(
+                $response,
+                'forbidden_permission',
+                'Pro tuto hromadnou akci nemáte oprávnění.',
+                403,
+                ['permission' => $permission, 'required_level' => 'write'],
+            );
         }
 
         $userId = $this->userId($request);

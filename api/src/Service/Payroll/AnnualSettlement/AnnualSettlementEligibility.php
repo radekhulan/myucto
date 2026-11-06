@@ -94,9 +94,11 @@ final class AnnualSettlementEligibility
                 [...$blockers, AnnualSettlementBlocker::FilingObligationUnknown],
         };
 
-        // § 38h odst. 6: položky uplatňované až ročně, které modul neumí.
+        // § 38h odst. 6: položky uplatňované až ročně. Evidované (`Present`)
+        // posoudí výpočet; soulad žádosti s evidencí hlídá služba zúčtování.
         $blockers = match ($request->annualClaims) {
-            AnnualSettlementAnnualClaims::None => $blockers,
+            AnnualSettlementAnnualClaims::None,
+            AnnualSettlementAnnualClaims::Present => $blockers,
             AnnualSettlementAnnualClaims::PresentUnsupported =>
                 [...$blockers, AnnualSettlementBlocker::AnnualOnlyClaimsUnsupported],
             AnnualSettlementAnnualClaims::Unknown =>

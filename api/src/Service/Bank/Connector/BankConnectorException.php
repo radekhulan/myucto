@@ -26,6 +26,8 @@ final class BankConnectorException extends \RuntimeException
         public readonly ?int $remoteHttpStatus = null,
         public readonly ?int $acceptedCount = null,
         public readonly ?int $rejectedCount = null,
+        /** Bezpečné podrobnosti pro uživatele (např. čísla řádků příkazu), nikdy data banky. */
+        public readonly array $details = [],
     ) {
         parent::__construct($message);
     }

@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\IncomeTax\ChildCreditClaimWindow;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\PayrollDependantCreditPreview;
 use MyInvoice\Service\Payroll\PayrollDependantValidator;
+use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use PDO;
@@ -710,11 +711,16 @@ final class PayrollDependantRepository
                             other_caregiver_given_name = ?,
                             other_caregiver_family_name = ?,
                             other_caregiver_birth_date = ?,
+                            other_caregiver_birth_number_ciphertext = IF(? = 1, other_caregiver_birth_number_ciphertext, NULL),
+                            other_caregiver_birth_number_hash = IF(? = 1, other_caregiver_birth_number_hash, NULL),
+                            other_caregiver_birth_number_masked = IF(? = 1, other_caregiver_birth_number_masked, NULL),
                             effective_from = ?, effective_to = ?,
                             updated_by = ?, row_version = row_version + 1
                       WHERE supplier_id = ? AND employee_id = ?
                         AND dependant_id = ? AND id = ? AND row_version = ?'
                 );
+                // Rodné číslo jiné osoby zůstává jen u kladné odpovědi; nové ho po úpravě zapečetí.
+                $keepBirthNumber = (int) ($data['other_household_caregiver_status'] === 'present');
                 $update->execute([
                     $data['child_order'],
                     $data['credit_status'],
@@ -728,6 +734,9 @@ final class PayrollDependantRepository
                     $data['other_caregiver_given_name'],
                     $data['other_caregiver_family_name'],
                     $data['other_caregiver_birth_date'],
+                    $keepBirthNumber,
+                    $keepBirthNumber,
+                    $keepBirthNumber,
                     $data['effective_from'],
                     $data['effective_to'],
                     $userId,
@@ -747,6 +756,7 @@ final class PayrollDependantRepository
                         )['row_version'],
                     );
                 }
+                $this->sealCaregiverBirthNumber($supplierId, $employeeId, $claimId, $data);
                 $this->activityLogger->log(
                     'payroll.dependant_claim.updated',
                     $userId,
@@ -820,6 +830,20 @@ final class PayrollDependantRepository
 
         $replacement = $data;
         $replacement['effective_from'] = $nextFrom;
+        // Šifra rodného čísla je vázaná na řádek nároku; nová verze ho od předchozí
+        // převezme jen přezapečetěním, pokud ho úprava sama nenese.
+        if (($replacement['other_caregiver_birth_number'] ?? null) === null
+            && $replacement['other_household_caregiver_status'] === 'present'
+            && is_string($claim['other_caregiver_birth_number_ciphertext'] ?? null)
+        ) {
+            $replacement['other_caregiver_birth_number'] = $this->sensitiveData->reveal(
+                (string) $claim['other_caregiver_birth_number_ciphertext'],
+                PayrollSensitiveField::PERSONAL_IDENTIFIER,
+                $supplierId,
+                $claimId,
+                PayrollRevealPurpose::RESEAL_NEW_VERSION,
+            );
+        }
         $this->assertClaimable(
             $supplierId,
             $employeeId,
@@ -901,8 +925,45 @@ final class PayrollDependantRepository
             $userId,
             $userId,
         ]);
+        $id = (int) $this->db->pdo()->lastInsertId();
+        $this->sealCaregiverBirthNumber($supplierId, $employeeId, $id, $data);
 
-        return (int) $this->db->pdo()->lastInsertId();
+        return $id;
+    }
+
+    /**
+     * Rodné číslo jiné osoby vyživující tytéž děti (JMHZ 10434), šifrované pro daný
+     * řádek nároku. Bez rodného čísla v úpravě se uložené nemění.
+     *
+     * @param ClaimInput $data
+     */
+    private function sealCaregiverBirthNumber(int $supplierId, int $employeeId, int $claimId, array $data): void
+    {
+        $plaintext = $data['other_caregiver_birth_number'] ?? null;
+        if (!is_string($plaintext) || $data['other_household_caregiver_status'] !== 'present') {
+            return;
+        }
+        $sealed = $this->sensitiveData->seal(
+            $plaintext,
+            PayrollSensitiveField::PERSONAL_IDENTIFIER,
+            $supplierId,
+            $claimId,
+        );
+        $update = $this->db->pdo()->prepare(
+            'UPDATE payroll_person_tax_child_claims
+                SET other_caregiver_birth_number_ciphertext = ?,
+                    other_caregiver_birth_number_hash = ?,
+                    other_caregiver_birth_number_masked = ?
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?'
+        );
+        $update->execute([
+            $sealed->ciphertext,
+            $sealed->lookupHash,
+            $sealed->masked,
+            $supplierId,
+            $employeeId,
+            $claimId,
+        ]);
     }
 
     private function childReference(int $dependantId): string
@@ -1252,7 +1313,7 @@ final class PayrollDependantRepository
                     evidence_status, evidence_reference, shared_household_confirmed,
                     other_claimant_excluded, other_household_caregiver_status,
                     other_caregiver_given_name, other_caregiver_family_name,
-                    other_caregiver_birth_date,
+                    other_caregiver_birth_date, other_caregiver_birth_number_ciphertext,
                     effective_from, effective_to,
                     superseded_by_id, row_version
                FROM payroll_person_tax_child_claims
@@ -1278,6 +1339,7 @@ final class PayrollDependantRepository
                     shared_household_confirmed, other_claimant_excluded,
                     other_household_caregiver_status, other_caregiver_given_name,
                     other_caregiver_family_name, other_caregiver_birth_date,
+                    other_caregiver_birth_number_masked,
                     effective_from, effective_to, superseded_by_id, row_version
                FROM payroll_person_tax_child_claims
               WHERE supplier_id = ? AND employee_id = ? AND dependant_id IS NOT NULL
@@ -1382,6 +1444,10 @@ final class PayrollDependantRepository
                 $claim['other_caregiver_birth_date'] === null
                     ? null
                     : (string) $claim['other_caregiver_birth_date'],
+            'other_caregiver_birth_number_masked' =>
+                ($claim['other_caregiver_birth_number_masked'] ?? null) === null
+                    ? null
+                    : (string) $claim['other_caregiver_birth_number_masked'],
             'effective_from' => $from,
             'effective_to' => $to,
             'superseded_by_id' => $claim['superseded_by_id'] === null

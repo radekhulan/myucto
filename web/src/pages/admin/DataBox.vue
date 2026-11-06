@@ -38,6 +38,7 @@ import {
   type InboxMessage,
   type InboxPollState,
   type OutboxAttempt,
+  type InboxPollResult,
   type OutboxSubmission,
   type ReceiptBatchResult,
   type ReceiptCandidate,
@@ -50,6 +51,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { formatUtcDateTime } from '@/composables/useFormat'
 import { useAutoSlug } from '@/composables/useAutoSlug'
 import { useToast } from '@/composables/useToast'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { useSupplierStore } from '@/stores/supplier'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -368,6 +370,21 @@ async function setInboxRead(message: InboxMessage, read: boolean) {
   }
 }
 
+const inboxMarkingAllRead = ref(false)
+
+async function markAllInboxRead() {
+  inboxMarkingAllRead.value = true
+  try {
+    const count = await dataBoxApi.markAllInboxRead({ ...inboxBrowseParams(), environment: environment.value })
+    toast.success(t('databox.inboxBrowse.markedAllRead', { count }))
+    await reloadInbox()
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    inboxMarkingAllRead.value = false
+  }
+}
+
 /** Otevření zprávy ji označí jako přečtenou; navigaci to nesmí zdržet ani zastavit. */
 function openInboxMessage(message: InboxMessage) {
   if (inboxSupportsCategories.value && !message.read_at) {
@@ -590,6 +607,29 @@ function acceptanceTone(state: AcceptanceState): string {
   }
 }
 
+/** Dodáním splněná povinnost: úřad se nevyjádří a nikdo na něj nečeká. */
+function settledByDelivery(row: OutboxSubmission): boolean {
+  return row.settles_on_delivery === true
+    && row.dispatch_state === 'delivered'
+    && row.acceptance_state === 'unknown'
+}
+
+function outboxAcceptanceLabel(row: OutboxSubmission): string {
+  if (settledByDelivery(row)) return t('databox.acceptance.settled_by_delivery')
+  if (row.settles_on_delivery === true && row.acceptance_state === 'unknown') {
+    return t('databox.acceptance.no_authority_result')
+  }
+  return t(`databox.acceptance.${row.acceptance_state}`)
+}
+
+function outboxAcceptanceTone(row: OutboxSubmission): string {
+  return acceptanceTone(settledByDelivery(row) ? 'accepted' : row.acceptance_state)
+}
+
+function scrollToReceiptsBatch() {
+  document.querySelector('[data-test="outbox-receipts-batch"]')?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+
 /**
  * Právě jedna plná primární akce podle stavu — zbytek outline.
  *
@@ -658,6 +698,16 @@ async function loadAll() {
     if (linked !== null && certCredentialId.value === null) {
       certCredentialId.value = linked
       certSource.value = 'vault'
+    }
+    // Firma bez uloženého přístupu: certifikát povolený z trezoru se rovnou
+    // předvybere, ať se u každé z desítek firem nemusí vybírat znovu.
+    const hasCredential = creds.some(c => c.environment === environment.value)
+    if (!hasCredential && certCredentialId.value === null) {
+      const preferred = shared.find(c => c.valid_now && !c.expired) ?? shared.find(c => !c.expired) ?? null
+      if (preferred) {
+        certCredentialId.value = preferred.id
+        certSource.value = 'vault'
+      }
     }
     recipients.value = recips
     outbox.value = out.items
@@ -1215,11 +1265,13 @@ async function forgetMobileCredential() {
   }
 }
 
-async function finishInboxPoll(result: { stored: number; failed: number; error?: string | null }) {
+async function finishInboxPoll(result: InboxPollResult) {
+  const attached = result.receipts?.attached ?? 0
+  const receipts = attached > 0 ? ` ${t('databox.outbox.receiptsBatch.done', { attached })}` : ''
   if (result.failed > 0 || result.error) {
-    toast.warning(t('databox.inbox.polledWithErrors', { stored: result.stored, failed: result.failed }))
+    toast.warning(t('databox.inbox.polledWithErrors', { stored: result.stored, failed: result.failed }) + receipts)
   } else {
-    toast.success(t('databox.inbox.polled', { count: result.stored }))
+    toast.success(t('databox.inbox.polled', { count: result.stored }) + receipts)
   }
   inboxAcknowledged.value = false
   resetInboxAuth()
@@ -1711,6 +1763,29 @@ const outboxNeedsAttention = computed(() => outbox.value.some(row =>
 
 onUnmounted(clearMobileStatusTimer)
 onUnmounted(clearReceiptsTimer)
+
+/*
+ * Tichá obnova po změně v jiném okně: mzdové nebo daňové podání odeslané
+ * jinde přidá zprávu do odchozích, doručenka do příchozích. Obnovují se jen
+ * seznamy, ne přístup ani nastavení, takže rozepsané přihlášení zůstane.
+ * Během odesílání a jiných akcí se čeká, ať se řádek nepřepíše pod rukama.
+ */
+async function refreshLists() {
+  const [out, inb, unmatched] = await Promise.all([
+    dataBoxApi.outbox(environment.value, outboxPageSize, outboxOffset.value, outboxYear.value, outboxMonth.value),
+    dataBoxApi.browseInbox(environment.value, inboxBrowseParams()),
+    dataBoxApi.unmatchedReceipts(environment.value).catch(() => [] as InboxMessage[]),
+  ])
+  outbox.value = out.items
+  outboxTotal.value = out.total
+  outboxYears.value = out.years ?? []
+  applyInboxResult(inb)
+  unmatchedReceipts.value = unmatched
+  await loadNotices()
+}
+
+useWindowRefresh(refreshLists, () => !loading.value && !saving.value && !inboxLoading.value
+  && !receiptsBusy.value && !assignBusy.value && busyId.value === null && sendOpenFor.value === null)
 </script>
 
 <template>
@@ -1882,6 +1957,13 @@ onUnmounted(clearReceiptsTimer)
               <span>{{ t('databox.access.certificateFromFile') }}</span>
             </label>
           </div>
+          <p
+            v-if="sharedCertificates.length === 0"
+            class="mt-2 text-xs text-warning-700"
+            data-test="databox-shared-certificate-unavailable"
+          >
+            {{ t('databox.access.sharedCertificateEmpty') }}
+          </p>
         </fieldset>
 
         <div v-if="certSource === 'vault'" class="mt-3 grid gap-3 sm:grid-cols-2">
@@ -1898,11 +1980,8 @@ onUnmounted(clearReceiptsTimer)
               </option>
             </select>
           </label>
-          <p v-if="sharedCertificates.length === 0" class="text-sm text-neutral-500 sm:col-span-2">
-            {{ t('databox.access.sharedCertificateEmpty') }}
-          </p>
           <div
-            v-else-if="selectedSharedCertificate"
+            v-if="selectedSharedCertificate"
             class="text-xs text-neutral-500 sm:col-span-2"
             data-test="databox-shared-certificate-detail"
           >
@@ -2073,6 +2152,19 @@ onUnmounted(clearReceiptsTimer)
       </div>
 
       <div class="flex flex-wrap gap-2">
+        <button
+          v-if="receiptsAwaiting.length"
+          type="button"
+          class="whitespace-nowrap"
+          :class="btnFilled('primary')"
+          data-test="outbox-receipts-batch-jump"
+          @click="scrollToReceiptsBatch"
+        >
+          <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" />
+          </svg>
+          {{ t('databox.outbox.receiptsBatch.title') }} ({{ receiptsAwaiting.length }})
+        </button>
         <button type="button" :class="btnOutline('neutral')" :disabled="saving" @click="openReceiptPicker(null)">
           <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" />
@@ -2142,15 +2234,22 @@ onUnmounted(clearReceiptsTimer)
             <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="dispatchTone(row.dispatch_state)">
               {{ t(`databox.dispatch.${row.dispatch_state}`) }}
             </span>
-            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="acceptanceTone(row.acceptance_state)">
-              {{ t(`databox.acceptance.${row.acceptance_state}`) }}
+            <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="outboxAcceptanceTone(row)" data-test="outbox-acceptance">
+              {{ outboxAcceptanceLabel(row) }}
             </span>
           </div>
         </div>
 
         <!-- Věta, podle které se dá jednat -->
         <p
-          v-if="row.dispatch_state === 'delivered' && row.acceptance_state === 'unknown'"
+          v-if="settledByDelivery(row)"
+          class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
+          data-test="outbox-settled-by-delivery"
+        >
+          {{ t('databox.outbox.settledByDelivery') }}
+        </p>
+        <p
+          v-else-if="row.dispatch_state === 'delivered' && row.acceptance_state === 'unknown'"
           class="mt-3 rounded-md bg-neutral-50 p-2 text-sm text-neutral-600"
         >
           {{ t('databox.outbox.deliveredNotProcessed') }}
@@ -2892,6 +2991,18 @@ onUnmounted(clearReceiptsTimer)
                     <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.archive" />
                   </svg>
                   {{ t('databox.inbox.privacy.hiddenList') }}
+                </button>
+                <button
+                  type="button"
+                  :class="[btnOutline('success'), 'whitespace-nowrap']"
+                  :disabled="loading || inboxMarkingAllRead || !(inboxFacets?.unread ?? 0)"
+                  data-test="inbox-mark-all-read"
+                  @click="markAllInboxRead"
+                >
+                  <svg class="h-4 w-4" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" />
+                  </svg>
+                  {{ t('databox.inboxBrowse.markAllRead') }}
                 </button>
               </div>
             </template>

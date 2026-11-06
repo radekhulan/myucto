@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Payroll\PayrollPersonNotFoundException;
+use MyInvoice\Repository\Payroll\PayrollPersonIdentifierCollisionException;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileConflictException;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Security\AccessLevel;
@@ -16,6 +17,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
+use MyInvoice\Service\Payroll\Security\PayrollIdentifierProbeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -36,6 +38,7 @@ final class PayrollPersonProfileAction
         // Z uložené karty odvodí výplatní pravidlo, plyne-li z ní jednoznačně
         // — viz komentář na konci put().
         private readonly \MyInvoice\Service\Payroll\Net\PayrollPayoutRuleDefaultsService $payoutDefaults,
+        private readonly PayrollIdentifierProbeGuard $identifierProbes,
     ) {}
 
     /** @param array{id:string} $args */
@@ -118,6 +121,22 @@ final class PayrollPersonProfileAction
             return Json::error($response, 'validation_failed', 'dry_run musí být boolean.', 422);
         }
 
+        // Shoda identifikátoru je porovnání proti maskovanému údaji. Zkouška
+        // nanečisto nic nezapíše, takže bez práva na odhalení se omezuje stejně
+        // jako odhalení samotné.
+        $retryAfter = $this->identifierProbes->throttle(
+            $request,
+            $dryRun && PayrollIdentifierProbeGuard::submitsIdentifierValue($body['identifiers'] ?? null),
+        );
+        if ($retryAfter !== null) {
+            return Json::error(
+                $response->withHeader('Retry-After', (string) $retryAfter),
+                'rate_limited',
+                'Příliš mnoho pokusů o zadání identifikátoru. Zkuste to později.',
+                429,
+            );
+        }
+
         $supplierId = $this->currentSupplierId($request);
         $employeeId = (int) $args['id'];
         $pdo = $this->db->pdo();
@@ -170,6 +189,22 @@ final class PayrollPersonProfileAction
             return Json::error($response, 'row_version_conflict', $e->getMessage(), 409, [
                 'current_row_version' => $e->currentVersion,
             ]);
+        } catch (PayrollPersonIdentifierCollisionException $e) {
+            $this->rollBackRehearsal($rehearsal, $rehearsalOwnsTransaction);
+            // Až po návratu zkoušky, jinak by ji rollback smazal i se záznamem.
+            $this->identifierProbes->recordCollision(
+                $request,
+                $supplierId,
+                $employeeId,
+                $e->identifierType,
+                'profile',
+                $dryRun,
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest(
+                    $this->stringKeyedArray($request->getServerParams()),
+                ),
+            );
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\InvalidArgumentException $e) {
             $this->rollBackRehearsal($rehearsal, $rehearsalOwnsTransaction);
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

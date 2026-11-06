@@ -16,6 +16,7 @@ use MyInvoice\Service\Migration\Abra\AbraConnectionService;
 use MyInvoice\Service\Migration\Abra\AbraException;
 use MyInvoice\Service\Migration\Abra\AbraImportJobService;
 use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
+use MyInvoice\Service\Migration\Shared\NonprofitMigrationNotice;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -38,7 +39,8 @@ final class AbraMigrationAction extends AbstractMigrationAction
     public function status(Request $request, Response $response): Response
     {
         if (($denied = $this->deny($request, $response, AccessLevel::WRITE)) !== null) return $denied;
-        return Json::ok($response, $this->connection->status(SupplierGuard::currentId($request)));
+        $supplierId = SupplierGuard::currentId($request);
+        return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $this->connection->status($supplierId)));
     }
     public function update(Request $request, Response $response): Response
     {
@@ -59,7 +61,8 @@ final class AbraMigrationAction extends AbstractMigrationAction
     public function discover(Request $request, Response $response): Response
     {
         if (($denied = $this->deny($request, $response, AccessLevel::WRITE)) !== null) return $denied;
-        try { return Json::ok($response, $this->connection->discover(SupplierGuard::currentId($request))); }
+        $supplierId = SupplierGuard::currentId($request);
+        try { return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $this->connection->discover($supplierId))); }
         catch (AbraException $e) { return $this->sourceError($response, $e); }
     }
     public function start(Request $request, Response $response): Response { return $this->enqueue($request, $response, false); }
@@ -113,6 +116,11 @@ final class AbraMigrationAction extends AbstractMigrationAction
             $this->connection->assertIdle($supplierId);
             $status = $this->connection->status($supplierId);
             if (!$status['configured']) throw new AbraException('not_configured', 'Nejprve nastavte připojení k ABRA Flexi.');
+            if ($status['ico_mismatch']) {
+                throw new AbraException('source_target_ico_mismatch', sprintf(
+                    'Připojená firma v ABRA Flexi (IČO %s) není firma, do které převádíte (IČO %s). Přepněte se do správné firmy, případně ji založte, nebo připojte jinou firmu v ABRA Flexi.',
+                    ($status['source_company']['ico'] ?? '') ?: '?', $status['target_company']['ico'] ?: '?'), [], 409);
+            }
             if ($status['imported'] !== $sync) {
                 throw new AbraException('invalid_mode', $sync ? 'Nejprve proveďte první převod.' : 'Firma již byla převzata. Použijte Načíst nová data.', [], 409);
             }

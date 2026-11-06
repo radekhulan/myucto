@@ -20,6 +20,7 @@ final class GetInvoiceAction
         private readonly ExchangeRateApplier $rateApplier,
         private readonly DocumentLockService $locks,
         private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
+        private readonly \MyInvoice\Service\Invoice\InvoiceOtherItemLinkService $otherItemLinks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -52,6 +53,6 @@ final class GetInvoiceAction
 
         $invoice['cash_documents'] = $this->repo->cashDocumentsForInvoice($sid, $id);
 
-        return Json::ok($response, $invoice);
+        return Json::ok($response, $this->otherItemLinks->withLink($sid, $invoice));
     }
 }

@@ -38,6 +38,31 @@ final class JmhzBlockerExplainerTest extends TestCase
         self::assertStringNotContainsString('10228', $message);
     }
 
+    /**
+     * Účetní se 200 brigádníky dostala „Dotčeno: 1 zaměstnanec" a musela je
+     * procházet ručně, aby našla toho jednoho. Hláška teď jmenuje.
+     */
+    public function testNamesAffectedPeopleAndCapsTheList(): void
+    {
+        $blockers = [new JmhzScenario1Blocker('jmhz_annual_request_source_missing', 'person', 5)];
+        $people = [5 => 'Jana Syntetická'];
+        $employments = [];
+        for ($id = 1; $id <= 12; ++$id) {
+            $blockers[] = new JmhzScenario1Blocker('jmhz_average_hourly_earning_missing', 'employment', $id);
+            $employments[$id] = "Osoba {$id} (D{$id})";
+        }
+
+        $message = JmhzBlockerExplainer::describe($blockers, [
+            'person' => $people,
+            'employment' => $employments,
+        ]);
+
+        self::assertStringContainsString('Dotčeno: 1 zaměstnanec (Jana Syntetická).', $message);
+        self::assertStringContainsString('Dotčeno: 12 pracovních vztahů (Osoba 1 (D1), ', $message);
+        self::assertStringContainsString('Osoba 10 (D10) a další 2).', $message);
+        self::assertStringNotContainsString('Osoba 11', $message);
+    }
+
     public function testUnknownBlockerStillHasActionableCzechFallback(): void
     {
         $message = JmhzBlockerExplainer::describe([

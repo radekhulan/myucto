@@ -300,6 +300,14 @@ onMounted(loadPreview)
               <span v-if="recordUnsigned" class="mt-1 block text-xs font-semibold">{{ t('payroll.statutory_bulk.declaration_on') }}</span>
             </span>
           </label>
+          <RouterLink
+            :to="{ name: 'payroll-people', query: { bulk: 'declaration_signed' } }"
+            :class="[btnOutlineSm('success'), 'mt-2 inline-flex']"
+            data-test="statutory-bulk-declaration-signed-link"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.link" /></svg>
+            {{ t('payroll.statutory_bulk.declaration_signed_link') }}
+          </RouterLink>
           <div
             v-if="preview.unsigned_declaration_withholding_risk.length"
             class="mt-3 rounded-md border border-danger-500/40 bg-surface p-2 text-xs text-danger-700"

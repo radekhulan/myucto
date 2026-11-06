@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   detectPayrollChangesForCompany: vi.fn(),
   submissionDetail: vi.fn(),
   downloadSubmissionArtifact: vi.fn(),
+  credentials: vi.fn(),
 }))
 
 vi.mock('@/api/payroll', () => ({
@@ -18,6 +19,10 @@ vi.mock('@/api/payroll', () => ({
     submissionDetail: m.submissionDetail,
     downloadSubmissionArtifact: m.downloadSubmissionArtifact,
   },
+}))
+
+vi.mock('@/api/dataBox', () => ({
+  dataBoxApi: { credentials: m.credentials, gatewayStartPayroll: vi.fn() },
 }))
 
 vi.mock('@/api/errors', () => ({
@@ -64,6 +69,8 @@ function item(overrides: Record<string, unknown> = {}): Record<string, unknown> 
     dispatch: {
       mode: 'vrep_registration',
       alternate_mode: null,
+      default_mode: 'vrep_registration',
+      modes: ['vrep_registration'],
       dispatchable: true,
       blocked_reason: null,
     },
@@ -94,11 +101,33 @@ function queueResponse(items: Record<string, unknown>[]): Record<string, unknown
   }
 }
 
+const IsdsBatchStub = {
+  name: 'IsdsBatchSendMethods',
+  props: { outboxIds: Array, environment: String, transport: Object, gatewayStart: Function },
+  emits: ['sent'],
+  template: '<div data-test="isds-batch-stub" />',
+}
+
+function jmhzItem(dispatch: Record<string, unknown>): Record<string, unknown> {
+  return item({
+    submission_id: 5,
+    agenda_code: 'JMHZ25',
+    dispatch: {
+      mode: 'vrep_jmhz',
+      alternate_mode: 'isds_payroll',
+      dispatchable: true,
+      blocked_reason: null,
+      ...dispatch,
+    },
+  })
+}
+
 function mountPanel() {
   return mount(PayrollSubmissionQueuePanel, {
     props: { environment: 'test' },
     global: {
       stubs: {
+        IsdsBatchSendMethods: IsdsBatchStub,
         EnvironmentSwitch: true,
         PaginationBar: true,
         EmptyState: true,
@@ -117,6 +146,84 @@ describe('PayrollSubmissionQueuePanel', () => {
       results: [{ ok: true, submission_id: 1, dispatched: true, message: 'hotovo' }],
       summary: { requested: 1, sent: 1, failed: 0 },
     })
+  })
+
+  /**
+   * Bez podpisového certifikátu fronta posílala JMHZ přes VREP a padala na
+   * „není zvolený podpisový certifikát". Teď odejde datovkou a hned nabídne
+   * výběr způsobu přihlášení k datové schránce.
+   */
+  it('JMHZ bez certifikátu pošle datovkou a nabídne způsoby přihlášení', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      jmhzItem({ default_mode: 'isds_payroll', modes: ['isds_payroll'] }),
+    ]))
+    m.dispatchSubmissionBatch.mockResolvedValue({
+      environment: 'test',
+      results: [{
+        ok: true,
+        submission_id: 5,
+        dispatched: true,
+        message: 'zařazeno',
+        mode: 'isds_payroll',
+        outbox: {
+          id: 900,
+          created: true,
+          recipient: null,
+          subject: 'JMHZ',
+          transport: { automatic: false, channel: 'manual_upload', reason: null },
+        },
+      }],
+      summary: { requested: 1, sent: 1, failed: 0 },
+    })
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="dispatch-mode-fallback"]').text()).toContain('payroll.dispatch_mode.fallback')
+    expect(wrapper.find('[data-test="dispatch-mode-select"]').exists()).toBe(false)
+    await wrapper.get('[data-test="queue-send"]').trigger('click')
+    await flushPromises()
+
+    expect(m.dispatchSubmissionBatch).toHaveBeenCalledWith('test', [
+      { submission_id: 5, idempotency_key: expect.any(String), mode: 'isds_payroll' },
+    ])
+    expect(wrapper.find('[data-test="queue-isds-pending"]').exists()).toBe(true)
+    expect(wrapper.getComponent(IsdsBatchStub).props('outboxIds')).toEqual([900])
+  })
+
+  it('se zvoleným certifikátem nabídne VREP i datovku a pošle zvolený kanál', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      jmhzItem({ default_mode: 'vrep_jmhz', modes: ['vrep_jmhz', 'isds_payroll'] }),
+    ]))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    const select = wrapper.get('[data-test="dispatch-mode-select"]')
+    expect((select.element as HTMLSelectElement).value).toBe('vrep_jmhz')
+    await select.setValue('isds_payroll')
+    await wrapper.get('[data-test="queue-send"]').trigger('click')
+    await flushPromises()
+
+    expect(m.dispatchSubmissionBatch).toHaveBeenCalledWith('test', [
+      { submission_id: 5, idempotency_key: expect.any(String), mode: 'isds_payroll' },
+    ])
+  })
+
+  it('zprávu čekající v odchozí frontě datovky dá dokončit přímo z řádku', async () => {
+    m.submissionQueue.mockResolvedValue(queueResponse([
+      jmhzItem({
+        default_mode: 'isds_payroll',
+        modes: ['isds_payroll'],
+        dispatchable: false,
+        blocked_reason: 'Podání už čeká v odchozí frontě datové schránky.',
+      }),
+    ].map(entry => ({ ...entry, outbox: { id: 901, dispatch_state: 'ready', acceptance_state: 'none', correlation_reference: null } }))))
+    const wrapper = mountPanel()
+    await flushPromises()
+
+    await wrapper.get('[data-test="queue-isds-continue"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.getComponent(IsdsBatchStub).props('outboxIds')).toEqual([901])
   })
 
   /** Q15-28: přihláška agendou REGZEC se nesmí tvářit jako změna v registraci. */

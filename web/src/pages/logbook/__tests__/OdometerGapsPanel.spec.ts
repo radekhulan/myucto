@@ -21,7 +21,7 @@ vi.mock('@/api/logbook', async (importOriginal) => ({
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: (p: string) => !m.denied.includes(p) }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: m.toastSuccess, error: m.toastError }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, te: () => false, locale: { value: 'cs' } }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (d: string) => d }))
 
 import OdometerGapsPanel from '@/pages/logbook/OdometerGapsPanel.vue'

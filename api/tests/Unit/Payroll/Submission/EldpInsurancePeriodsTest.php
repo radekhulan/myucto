@@ -79,7 +79,9 @@ final class EldpInsurancePeriodsTest extends TestCase
         $revisions = $this->year([
             ['id' => 101, 'relation' => 'employment', 'code' => '1', 'start' => '2020-01-01', 'end' => null],
         ]);
-        $pension = ['full_pension_paid_from' => '2025-01'] + self::NO_PENSION;
+        // Výplata od prosince 2024: list se vede do prosince 2024 včetně, za rok
+        // 2025 už žádný měsíc (Metodická pomůcka ELDP, příklad 8a).
+        $pension = ['full_pension_paid_from' => '2024-12'] + self::NO_PENSION;
 
         $periods = (new EldpAnnualStatementBuilder())->insurancePeriods(7, 101, 2025, $revisions, $pension);
 

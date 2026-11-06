@@ -21,9 +21,10 @@ declare(strict_types=1);
  *     volá AI extract + vytvoří draft
  *   - Jinak skipne s důvodem
  *
- * **Multi-tenant**: scan běží **per supplier_id** (každý tenant má vlastní inbox_dir
- * konfiguraci v cfg per environment, nebo sdílený root s subadresáři).
- * Default supplier_id z cfg.app.default_supplier_id (typically 1 pro single-tenant).
+ * Globální inbox_dir patří právě jedné firmě: purchase_invoice.cron_supplier_id.
+ * Bez něj se použije explicitní app.default_supplier_id (jen bez scan_all_suppliers),
+ * nebo jediná existující firma. Více firem bez určení vlastníka je chyba konfigurace.
+ * Podadresáře neurčují vlastníka; sdílený inbox se nikdy neskenuje za všechny firmy.
  *
  * Idempotent: SHA-256 dedup zaručuje, že stejný soubor se nezpracuje 2×.
  * Cron může běžet libovolně často (typicky každých 5-15 min).
@@ -36,6 +37,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Cron\CronRun;
+use MyInvoice\Service\Cron\PurchaseInboxSupplierScope;
 use MyInvoice\Service\Import\PurchaseInvoiceInboxScanner;
 
 $rootDir = Bootstrap::rootDir();
@@ -50,21 +52,25 @@ if ($inboxDir === '' || !is_dir($inboxDir)) {
     exit(0);
 }
 
-// Multi-supplier scan: pokud cfg.app.scan_all_suppliers=true, projeď všechny
-// active suppliers. Default: jen default_supplier_id (single-tenant scenario).
-$scanAll = (bool) $config->get('app.scan_all_suppliers', false);
 $pdo = $conn->pdo();
-if ($scanAll) {
-    $supplierIds = array_map('intval', $pdo->query("SELECT id FROM supplier")->fetchAll(\PDO::FETCH_COLUMN));
-} else {
-    $defaultSupplierId = (int) $config->get('app.default_supplier_id', 1);
-    $supplierIds = [$defaultSupplierId];
+$scope = new PurchaseInboxSupplierScope();
+try {
+    $supplierId = $scope->resolve($pdo, $config);
+} catch (\Throwable $e) {
+    fwrite(STDERR, "[scan-purchase-inbox] " . $e->getMessage() . "\n");
+    $run->finish('error', ['error' => $e->getMessage()]);
+    exit(1);
 }
 
-if (empty($supplierIds)) {
+if ($supplierId === null) {
     fwrite(STDERR, "[scan-purchase-inbox] Žádní suppliers ke skenování.\n");
     $run->finish('ok', ['skipped' => 'no suppliers']);
     exit(0);
+}
+$supplierIds = [$supplierId];
+if ($scope->warning !== null) {
+    fwrite(STDERR, "[scan-purchase-inbox] WARN: {$scope->warning}
+");
 }
 
 // Cron user — actions ho použijí pro created_by audit (FK users.id).
@@ -98,6 +104,9 @@ $scanner   = $container->get(PurchaseInvoiceInboxScanner::class);
 
 $started      = microtime(true);
 $totalSummary = ['suppliers' => 0, 'created' => 0, 'skipped' => 0, 'failed' => 0, 'details' => []];
+// Selhání celého skenu (výjimka) je chyba úlohy. Jednotlivý vadný soubor ne: zůstane
+// v přehledu non_imported, jinak by jedna rozbitá PDF shazovala každý běh cronu.
+$scanErrors = 0;
 
 // Live progress callback — píše per-file na STDOUT s explicit fflush,
 // protože PHP stdout je full-buffered když je pipnutý (Tee-Object).
@@ -134,6 +143,9 @@ foreach ($supplierIds as $sid) {
         $result = $scanner->scan($sid, $cronUserId, false, $progress);
     } catch (\Throwable $e) {
         fwrite(STDERR, "[scan-purchase-inbox] supplier {$sid}: " . $e->getMessage() . "\n");
+        $totalSummary['failed']++;
+        $scanErrors++;
+        $totalSummary['details'][] = ['supplier_id' => $sid, 'status' => 'failed', 'reason' => $e->getMessage()];
         continue;
     }
     $totalSummary['suppliers']++;
@@ -190,7 +202,7 @@ $detailsForReport = array_slice(array_map(static function (array $d) use ($inbox
     ];
 }, $totalSummary['details']), 0, 50);
 
-$run->finish('ok', [
+$run->finish($scanErrors > 0 ? 'error' : 'ok', [
     'suppliers'           => $totalSummary['suppliers'],
     'created'             => $totalSummary['created'],
     'skipped'             => $totalSummary['skipped'],
@@ -199,4 +211,5 @@ $run->finish('ok', [
     'non_imported_count'  => count($totalSummary['details']),
     'non_imported'        => $detailsForReport,
     'non_imported_truncated' => count($totalSummary['details']) > count($detailsForReport),
-]);
+] + ($scope->warning !== null ? ['warning' => $scope->warning] : []));
+exit($scanErrors > 0 ? 1 : 0);

@@ -18,14 +18,17 @@ final class JournalEntryLinkerTest extends SharedMigrationDbTestCase
         $first = $this->entry($supplier, $period, 'purchase_invoice');
         $second = $this->entry($supplier, $period, 'purchase_invoice');
         $linker = new JournalEntryLinker($this->db, 'Pohody');
+        $doc = $this->document($supplier, 'purchase_invoice');
 
-        self::assertTrue($linker->attach($supplier, null, 'purchase_invoice', 'purchase_invoice', 'purchase_invoice', 501, [$first, $second]));
-        self::assertSame(['source_type' => 'purchase_invoice', 'source_id' => 501], $this->source($first));
+        self::assertTrue($linker->attach($supplier, null, 'purchase_invoice', 'purchase_invoice', 'purchase_invoice', $doc, [$first, $second]));
+        self::assertSame(['source_type' => 'purchase_invoice', 'source_id' => $doc], $this->source($first));
         self::assertNull($this->source($second)['source_id']);
-        $links = $this->rows('SELECT entry_id, note FROM journal_entry_document_links WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? ORDER BY entry_id', [$supplier, 'purchase_invoice', 501]);
+        $links = $this->rows('SELECT entry_id, note FROM journal_entry_document_links WHERE supplier_id = ? AND doc_type = ? AND doc_id = ? ORDER BY entry_id', [$supplier, 'purchase_invoice', $doc]);
         self::assertSame([[$first, 'Převzato z Pohody'], [$second, 'Převzato z Pohody']], array_map(static fn (array $l): array => [(int) $l['entry_id'], $l['note']], $links));
+        self::assertSame([$first, $second], $this->postingIds($supplier, 'purchase_invoice', $doc), 'Vlastní předpis tvoří všechny zápisy převzatého dokladu.');
 
-        self::assertFalse($linker->attach($supplier, null, 'purchase_invoice', 'purchase_invoice', 'purchase_invoice', 501, [$first, $second]), 'opakované navázání není nová vazba');
+        self::assertFalse($linker->attach($supplier, null, 'purchase_invoice', 'purchase_invoice', 'purchase_invoice', $doc, [$first, $second]), 'opakované navázání není nová vazba');
+        self::assertSame([$first, $second], $this->postingIds($supplier, 'purchase_invoice', $doc));
     }
 
     public function testAttachRetypesOnlyEntryWithExpectedSource(): void
@@ -33,14 +36,50 @@ final class JournalEntryLinkerTest extends SharedMigrationDbTestCase
         $supplier = $this->supplier();
         $period = $this->period($supplier, 2025);
         $manual = $this->entry($supplier, $period, 'manual');
+        $second = $this->entry($supplier, $period, 'manual');
         $bank = $this->entry($supplier, $period, 'bank');
         $linker = new JournalEntryLinker($this->db, 'PREMIER', true);
+        $doc = $this->document($supplier, 'invoice');
 
-        self::assertTrue($linker->attach($supplier, null, 'invoice', 'manual', 'invoice', 7, [$manual]));
-        self::assertSame(['source_type' => 'invoice', 'source_id' => 7], $this->source($manual));
+        self::assertTrue($linker->attach($supplier, null, 'invoice', 'manual', 'invoice', $doc, [$manual, $second]));
+        self::assertSame(['source_type' => 'invoice', 'source_id' => $doc], $this->source($manual));
+        self::assertNull($this->source($second)['source_id']);
+        self::assertSame([$manual, $second], $this->postingIds($supplier, 'invoice', $doc));
 
         $linker->attach($supplier, null, 'invoice', 'manual', 'invoice', 8, [$bank]);
         self::assertSame(['source_type' => 'bank', 'source_id' => null], $this->source($bank), 'zápis s jiným zdrojem se nepřeznačí');
+        self::assertSame([], $this->postingIds($supplier, 'invoice', 8));
+    }
+
+    public function testInvoiceGroupExcludesPaymentsOpeningEntriesAndOtherAgendas(): void
+    {
+        $supplier = $this->supplier();
+        $period = $this->period($supplier, 2025);
+        $doc = $this->document($supplier, 'invoice');
+        $prescription = $this->entry($supplier, $period, 'invoice');
+        $bank = $this->entry($supplier, $period, 'bank');
+        $cash = $this->entry($supplier, $period, 'cash');
+        $opening = $this->entry($supplier, $period, 'opening', $period);
+        $manual = $this->entry($supplier, $period, 'manual');
+        $linker = new JournalEntryLinker($this->db, 'Pohody');
+
+        $linker->attach($supplier, null, 'invoice', 'invoice', 'invoice', $doc, [$prescription, $bank, $cash, $opening, $manual]);
+        self::assertSame([$prescription], $this->postingIds($supplier, 'invoice', $doc));
+        self::assertCount(5, $this->rows('SELECT entry_id FROM journal_entry_document_links WHERE supplier_id=? AND doc_type=? AND doc_id=?', [$supplier, 'invoice', $doc]), 'Informativní souvislosti se zachovají i bez vlastnictví.');
+        self::assertSame(['source_type' => 'manual', 'source_id' => null], $this->source($manual), 'Ruční zápis z jiné agendy není doložený předpis faktury.');
+    }
+
+    public function testPaymentSourceWithInvoiceLinkDoesNotCreatePostingGroup(): void
+    {
+        $supplier = $this->supplier();
+        $period = $this->period($supplier, 2025);
+        $doc = $this->document($supplier, 'invoice');
+        $entry = $this->entry($supplier, $period, 'manual');
+        (new JournalEntryLinker($this->db, 'PREMIER'))->attach($supplier, null, 'bank', 'manual', 'invoice', $doc, [$entry]);
+
+        self::assertSame(['source_type' => 'bank', 'source_id' => $doc], $this->source($entry));
+        self::assertSame([], $this->postingIds($supplier, 'invoice', $doc));
+        self::assertCount(1, $this->rows('SELECT entry_id FROM journal_entry_document_links WHERE supplier_id=? AND entry_id=?', [$supplier, $entry]));
     }
 
     public function testNewFlagDiffersOnlyWhenSourceIsNotChanged(): void
@@ -74,6 +113,7 @@ final class JournalEntryLinkerTest extends SharedMigrationDbTestCase
                 $this->row('SELECT entry_id, note FROM journal_entry_document_links WHERE supplier_id = ? AND doc_type = ? AND doc_id = ?', [$supplier, 'invoice', 11])
             ),
         );
+        self::assertSame([], $this->postingIds($supplier, 'invoice', 11));
     }
 
     public function testCashDocumentGetsFirstEntry(): void
@@ -117,10 +157,41 @@ final class JournalEntryLinkerTest extends SharedMigrationDbTestCase
         self::assertSame(0, $linker->markBankBookedWithoutDocument($supplier, null, [], 'pohoda_booked', 'x'));
     }
 
+    /** Skutečný syntetický doklad ověřuje i vlastnictví firmy, nikoli jen číslo v měkké vazbě. */
+    private function document(int $supplier, string $type): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id)
+            SELECT id, 'Syntetický partner', 'Test 1', 'Brno', '60200', country_id, default_currency_id FROM supplier WHERE id=?")
+            ->execute([$supplier]);
+        $client = (int) $pdo->lastInsertId();
+        $currency = (int) $this->row('SELECT default_currency_id FROM supplier WHERE id=?', [$supplier])['default_currency_id'];
+        if ($type === 'invoice') {
+            $pdo->prepare("INSERT INTO invoices (supplier_id, client_id, currency_id, varsymbol, issue_date, tax_date, due_date, created_by)
+                VALUES (?, ?, ?, 'TEST-LINK', '2025-03-01', '2025-03-01', '2025-03-15', ?)")
+                ->execute([$supplier, $client, $currency, $this->userId]);
+        } else {
+            $pdo->prepare("INSERT INTO purchase_invoices (supplier_id, vendor_id, currency_id, varsymbol, vendor_invoice_number,
+                vendor_snapshot, issue_date, tax_date, due_date, received_at, created_by)
+                VALUES (?, ?, ?, 'TEST-LINK', 'TEST-LINK', '{}', '2025-03-01', '2025-03-01', '2025-03-15', '2025-03-01', ?)")
+                ->execute([$supplier, $client, $currency, $this->userId]);
+        }
+        return (int) $pdo->lastInsertId();
+    }
+
     /** @return array{source_type:string,source_id:?int} */
     private function source(int $entryId): array
     {
         $r = $this->row('SELECT source_type, source_id FROM journal_entries WHERE id = ?', [$entryId]);
         return ['source_type' => (string) $r['source_type'], 'source_id' => $r['source_id'] !== null ? (int) $r['source_id'] : null];
+    }
+
+    /** @return list<int> */
+    private function postingIds(int $supplier, string $type, int $doc): array
+    {
+        return array_map(static fn (array $row): int => (int) $row['entry_id'], $this->rows(
+            'SELECT entry_id FROM journal_document_postings WHERE supplier_id=? AND doc_type=? AND doc_id=? ORDER BY entry_id',
+            [$supplier, $type, $doc],
+        ));
     }
 }

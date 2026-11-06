@@ -124,6 +124,9 @@ final class BankEmailNoticeRepository
             'ingest_notices' => array_key_exists('ingest_notices', $body)
                 ? (int) (bool) $body['ingest_notices']
                 : (int) (bool) ($current['ingest_notices'] ?? 1),
+            'mark_seen_after_import' => array_key_exists('mark_seen_after_import', $body)
+                ? (int) (bool) $body['mark_seen_after_import']
+                : (int) (bool) ($current['mark_seen_after_import'] ?? 0),
             // Načítání PDF faktur z příloh — opt-in, mimo jiné proto, že jako jediné
             // nastavení účtu si z IMAPu tahá obsah příloh (paměť + čas skenu).
             'ingest_pdf_invoices' => array_key_exists('ingest_pdf_invoices', $body)
@@ -159,6 +162,7 @@ final class BankEmailNoticeRepository
                        SET name = :name, enabled = :enabled, host = :host, port = :port, encryption = :encryption,
                            validate_cert = :validate_cert, require_email_auth = :require_email_auth,
                            allow_forwarded = :allow_forwarded, ingest_notices = :ingest_notices,
+                           mark_seen_after_import = :mark_seen_after_import,
                            ingest_pdf_invoices = :ingest_pdf_invoices,
                            ingest_pdf_statements = :ingest_pdf_statements,
                            distribute_to_suppliers = :distribute_to_suppliers,
@@ -177,12 +181,12 @@ final class BankEmailNoticeRepository
         }
 
         $sql = 'INSERT INTO bank_email_imap_settings
-                  (supplier_id, name, enabled, host, port, encryption, validate_cert, require_email_auth, allow_forwarded, ingest_notices, ingest_pdf_invoices, ingest_pdf_statements, distribute_to_suppliers, distribute_user_id, forwarded_from, email_auth_serv_id,
+                  (supplier_id, name, enabled, host, port, encryption, validate_cert, require_email_auth, allow_forwarded, ingest_notices, mark_seen_after_import, ingest_pdf_invoices, ingest_pdf_statements, distribute_to_suppliers, distribute_user_id, forwarded_from, email_auth_serv_id,
                    username, password_enc, folder,
                    max_messages_per_run, process_from_date, success_action, success_flag, success_move_folder,
                    failure_action, failure_flag, failure_move_folder, retry_failed, max_attempts)
                 VALUES
-                  (:supplier_id, :name, :enabled, :host, :port, :encryption, :validate_cert, :require_email_auth, :allow_forwarded, :ingest_notices, :ingest_pdf_invoices, :ingest_pdf_statements, :distribute_to_suppliers, :distribute_user_id, :forwarded_from, :email_auth_serv_id,
+                  (:supplier_id, :name, :enabled, :host, :port, :encryption, :validate_cert, :require_email_auth, :allow_forwarded, :ingest_notices, :mark_seen_after_import, :ingest_pdf_invoices, :ingest_pdf_statements, :distribute_to_suppliers, :distribute_user_id, :forwarded_from, :email_auth_serv_id,
                    :username, :password_enc, :folder,
                    :max_messages_per_run, :process_from_date, :success_action, :success_flag, :success_move_folder,
                    :failure_action, :failure_flag, :failure_move_folder, :retry_failed, :max_attempts)';
@@ -781,6 +785,7 @@ final class BankEmailNoticeRepository
             'allow_forwarded' => false,
             'ingest_pdf_invoices' => false,
             'ingest_notices' => true,
+            'mark_seen_after_import' => false,
             'ingest_pdf_statements' => false,
             'distribute_to_suppliers' => false,
             'distribute_user_id' => null,
@@ -903,6 +908,7 @@ final class BankEmailNoticeRepository
         $row['allow_forwarded'] = (bool) ($row['allow_forwarded'] ?? false);
         $row['ingest_pdf_invoices'] = (bool) ($row['ingest_pdf_invoices'] ?? false);
         $row['ingest_notices'] = (bool) ($row['ingest_notices'] ?? true);
+        $row['mark_seen_after_import'] = (bool) ($row['mark_seen_after_import'] ?? false);
         $row['ingest_pdf_statements'] = (bool) ($row['ingest_pdf_statements'] ?? false);
         $row['distribute_to_suppliers'] = (bool) ($row['distribute_to_suppliers'] ?? false);
         $row['distribute_user_id'] = isset($row['distribute_user_id']) ? (int) $row['distribute_user_id'] : null;

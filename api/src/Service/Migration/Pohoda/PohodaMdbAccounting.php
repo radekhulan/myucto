@@ -255,6 +255,12 @@ final class PohodaMdbAccounting
                 'text' => $r['SText'] ?? '',
                 'homeCurrency' => ['priceSum' => $r['Kc'] ?? '0'],
                 'accounting' => ['credit' => $r['UMD'] ?? '', 'debit' => $r['UD'] ?? ''],
+                'centre' => $this->centre($r['RefStr'] ?? ''),
+                // Partner řádku v tvaru `act:address` z XML. Vazbu na adresář XML nenese, starší
+                // převodník tyto sloupce neexportoval.
+                'address' => ['company' => $r['Firma'] ?? '', 'name' => $r['Jmeno'] ?? '', 'ico' => $r['ParICO'] ?? ''],
+                'addressbookId' => ($r['RefAD'] ?? '') === '0' ? '' : ($r['RefAD'] ?? ''),
+                'pairing' => ['symbol' => $r['ParSym'] ?? '', 'advance' => $r['ParSym2'] ?? ''],
             ];
         } elseif ($key === 'chart') {
             return ['@code' => $r['Ucet'] ?? '', '@name' => $r['Nazev'] ?? ''];
@@ -377,7 +383,7 @@ final class PohodaMdbAccounting
             }
             $tag = $advance ? 'invoiceAdvancePaymentItem' : $prefix . 'Item';
             $d[$prefix . 'Detail'][$tag][] = $item;
-            if ($prefix === 'intDoc' && in_array((int) ($it['RelAgID'] ?? 0), [2, 3, 18, 19], true)) {
+            if ($prefix === 'intDoc' && in_array((int) ($it['RelAgID'] ?? 0), [2, 3, 18, 19, 43, 44], true)) {
                 $linked = $this->lookup('FA', $it['RefPol'] ?? '');
                 if ($linked !== []) {
                     $d['linkedDocuments']['link'][] = [
@@ -506,6 +512,16 @@ final class PohodaMdbAccounting
             $out['accountingType'] = 'withoutAccounting';
         }
         return $out;
+    }
+
+    /** Středisko řádku deníku. Starší export středisko nenese a číselník v něm být nemusí. */
+    private function centre(string $id): array
+    {
+        if ($id === '' || $id === '0' || !$this->tables->has('sSTR')) {
+            return [];
+        }
+        $r = $this->lookup('sSTR', $id);
+        return ['ids' => $r['IDS'] ?? '', 'name' => $r['SText'] ?? ''];
     }
 
     private function reference(string $table, string $id): array

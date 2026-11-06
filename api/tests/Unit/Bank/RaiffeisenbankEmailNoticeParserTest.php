@@ -118,6 +118,87 @@ TEXT;
         self::assertSame(98765.43, $parsed->balance);
     }
 
+    /** #234: úhrada bez VS, jen se zprávou pro příjemce, nesmí propadnout jako parse_failed. */
+    public function testParsesOutgoingTransferWithoutVariableSymbol(): void
+    {
+        $text = <<<TEXT
+Pohyb na účtě
+na účtě byla provedena následující odchozí platba:
+Datum a čas                        24. 09. 2026 01:03
+Z účtu                             1000000005/5500
+Částka v měně účtu                 -1.000,00 CZK
+Kategorie pohybu                   Platba
+Typ pohybu                         Odchozí okamžitá úhrada
+Na účet                            2000000018/0300
+Zpráva pro příjemce                Nájem září
+Zpráva pro mne                     Kancelář
+Disponibilní zůstatek po pohybu    +957,62 CZK
+TEXT;
+
+        $parser = new RaiffeisenbankEmailNoticeParser();
+        $provider = $parser->defaultProvider();
+        self::assertInstanceOf(BankEmailNoticeProvider::class, $provider);
+        self::assertMatchesRegularExpression('/' . $provider->bodyPattern . '/iu', $text);
+        $message = $this->message(4, '2026-09-24 01:03:00', $text);
+        self::assertTrue($parser->supports($message, $provider));
+
+        $parsed = $parser->parse($message, $provider);
+
+        self::assertSame('', $parsed->variableSymbol);
+        self::assertSame(-1000.0, $parsed->amount);
+        self::assertSame('2026-09-24', $parsed->postedAt);
+        self::assertSame('1000000005/5500', $parsed->recipientAccount);
+        self::assertSame('2000000018', $parsed->counterpartyAccount);
+        self::assertSame('0300', $parsed->counterpartyBank);
+        self::assertNull($parsed->counterpartyName);
+        self::assertSame('Nájem září', $parsed->message);
+        self::assertSame(957.62, $parsed->balance);
+    }
+
+    /** #234: karetní platba uvádí datum jako opakovaný ISO timestamp. */
+    public function testParsesCardTransactionWithRepeatedIsoDate(): void
+    {
+        $text = <<<TEXT
+Vážená klientko, vážený kliente,
+na účtě byla provedena následující odchozí karetní transakce:
+Datum a čas                        2026-10-20T14:23. 2026-10-20T14:23. 2026-10-20T14:23
+Účet                               1000000005/5500Firma Test s.r.o.
+Debetní karta                      123456XXXXXX7890
+Částka v měně účtu                 -1.000,00 CZK
+Kategorie pohybu                   Platba kartou
+Typ pohybu                         Platba kartou
+Detaily                            DEMO OBCHOD; BRNO; CZE
+Disponibilní zůstatek po pohybu    +25.944,42 CZK
+TEXT;
+
+        $parser = new RaiffeisenbankEmailNoticeParser();
+        $provider = $parser->defaultProvider();
+        self::assertInstanceOf(BankEmailNoticeProvider::class, $provider);
+        $message = $this->message(5, '2026-10-20 14:23:00', $text);
+        self::assertTrue($parser->supports($message, $provider));
+
+        $parsed = $parser->parse($message, $provider);
+
+        self::assertSame('2026-10-20', $parsed->postedAt);
+        self::assertSame(-1000.0, $parsed->amount);
+        self::assertSame('1000000005/5500', $parsed->recipientAccount);
+        self::assertSame('DEMO OBCHOD; BRNO; CZE', $parsed->counterpartyName);
+        self::assertSame(25944.42, $parsed->balance);
+    }
+
+    private function message(int $uid, string $date, string $text): BankEmailNoticeMessage
+    {
+        return new BankEmailNoticeMessage(
+            uid: $uid,
+            messageId: '<sanitized-' . $uid . '@rb.cz>',
+            date: new \DateTimeImmutable($date),
+            sender: 'Raiffeisenbank <info@rb.cz>',
+            subject: 'Pohyb na účtě',
+            text: $text,
+            raw: $text,
+        );
+    }
+
     public function testParsesOutgoingCardTransactionWithoutVariableSymbolOrCounterpartyAccount(): void
     {
         $text = <<<TEXT

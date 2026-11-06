@@ -106,6 +106,10 @@ final readonly class PayrollMigrationReferenceTotals
             throw new \InvalidArgumentException('Mzda z původního systému nemá platný měsíc.');
         }
         $minor = static fn (string $key): int => self::minor(PohodaXml::num($mz, self::FIELDS[$key]));
+        // `KcSocZak` vyplňuje PAMICA i v měsíci bez účasti na pojištění (DPP pod rozhodným
+        // příjmem, jednatel bez odměny). Vyměřovacím základem (JMHZ 10477) ale není; jako
+        // příjem včetně nepojištěné činnosti (10476) ho nese PayrollMigrationTakeoverFacts.
+        $insured = PohodaXml::text($mz, 'JeSocPP') === '' || PohodaXml::num($mz, 'JeSocPP') > 0.0;
 
         return new self(
             sprintf('%04d-%02d', $year, $month),
@@ -114,8 +118,8 @@ final readonly class PayrollMigrationReferenceTotals
             $employeeId,
             $employmentId,
             $minor('gross'),
-            $minor('net'),
-            $minor('social_base'),
+            self::minor(self::pohodaNet($mz)),
+            $insured ? $minor('social_base') : 0,
             $minor('health_base'),
             $minor('employee_social'),
             $minor('employee_health'),
@@ -126,6 +130,18 @@ final readonly class PayrollMigrationReferenceTotals
             $minor('tax_bonus'),
             PayrollMigrationTakeoverFacts::fromPohodaMz($mz, $relationType, $activityCode),
         );
+    }
+
+    /**
+     * Čistá mzda záznamu `MZ` tak, jak ji vykazuje měsíční hlášení (JMHZ 10344): `KcCistaM`
+     * a náhrada mzdy za dočasnou pracovní neschopnost (`KcNahrNem`), kterou PAMICA do
+     * `KcCistaM` nezapočítává, ale vyplácí ji (`KcVyuct`) a hlásí v čisté mzdě.
+     *
+     * @param array<string,mixed> $mz
+     */
+    public static function pohodaNet(array $mz): float
+    {
+        return PohodaXml::num($mz, self::FIELDS['net']) + PohodaXml::num($mz, 'KcNahrNem');
     }
 
     /**

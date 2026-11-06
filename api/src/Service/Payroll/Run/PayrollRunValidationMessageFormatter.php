@@ -23,7 +23,11 @@ final class PayrollRunValidationMessageFormatter
         $details = [];
         foreach ($issues as $issue) {
             if (is_string($issue) && $issue !== '') {
-                $details[$issue] = PayrollRunIssueGuidance::describe($issue, $employeeId);
+                $detail = PayrollRunIssueGuidance::describe($issue, $employeeId);
+                // Klíčem je to, co účetní uvidí: dvě příčiny téže věci (chybějící
+                // sada exekučních srážek) by jinak daly u osoby dva stejné řádky.
+                $key = $detail['entity_type'] . ':' . $detail['entity_id'] . ':' . $detail['remediation_path'] . ':' . $detail['message'];
+                $details[$key] = $detail;
             }
         }
         return array_values($details === []
@@ -156,7 +160,7 @@ final class PayrollRunValidationMessageFormatter
                 ? 'Další kontrola vyžaduje doplnění zákonných údajů.'
                 : sprintf('Dalších %d kontrol vyžaduje doplnění zákonných údajů.', $unknown);
         }
-        $parts[] = 'Opravte uvedené podklady a otevřete novou revizi mzdového běhu.';
+        $parts[] = 'Opravte uvedené podklady a v mzdovém běhu klikněte na Obnovit podklady.';
 
         return self::message($parts);
     }

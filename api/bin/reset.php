@@ -70,6 +70,7 @@ use MyInvoice\Service\Config\CfgLocalWriter;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Service\System\GlobalSeedTables;
 use MyInvoice\Service\System\ResetStorageScope;
+use MyInvoice\Service\Property\PropertyResetCleanup;
 
 $args = array_flip(array_slice($argv, 1));
 $autoYes   = isset($args['--yes']) || isset($args['-y']);
@@ -151,6 +152,18 @@ if ($keepUsersSupplier) {
     ['keep' => $keep, 'partial' => $partial] = GlobalSeedTables::resetKeepUsersSupplier($keepCache);
 }
 
+$propertyPlan = null;
+if ($keepUsersSupplier) {
+    try {
+        $propertyPlan = PropertyResetCleanup::plan($pdo);
+        printf("[reset] Registr SVJ: odstraní %d typů, %d hodnot a %d souvisejících alokačních klíčů.\n",
+            count($propertyPlan['type_ids']), count($propertyPlan['value_ids']), count($propertyPlan['key_ids']));
+    } catch (\Throwable $e) {
+        fwrite(STDERR, '[reset] ' . $e->getMessage() . "\n");
+        exit(1);
+    }
+}
+
 // Firmy TÉTO databáze. Soubory se mažou jen v jejich adresářích (sup-N / supplier-N),
 // protože storage/ může sdílet víc databází (dev stroj bez MYINVOICE_DATA_DIR).
 $ownSupplierIds = array_map('intval', $pdo->query('SELECT id FROM supplier')->fetchAll(\PDO::FETCH_COLUMN));
@@ -226,6 +239,15 @@ foreach ($allTables as $t) {
 
 if (!$dryRun) {
     $pdo->exec('SET FOREIGN_KEY_CHECKS = 1');
+}
+
+if (!$dryRun && $propertyPlan !== null) {
+    try {
+        PropertyResetCleanup::apply($pdo, $propertyPlan);
+    } catch (\Throwable $e) {
+        fwrite(STDERR, '[reset] ' . $e->getMessage() . "\n");
+        $failed++;
+    }
 }
 
 // Značky „ukázka už byla založena" zůstávají se supplierem. Vynulovat se smí jen ta,

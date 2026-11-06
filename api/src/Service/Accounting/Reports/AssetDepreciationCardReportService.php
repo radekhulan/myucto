@@ -90,6 +90,7 @@ final class AssetDepreciationCardReportService
         do {
             $res = $this->assets->list($supplierId, ['per_page' => 200, 'page' => $page]);
             $total = (int) ($res['total'] ?? 0);
+            $pageCards = [];
             foreach ($res['items'] as $a) {
                 $acqDate = (string) ($a['acquisition_date'] ?? '');
                 if ($acqDate === '' || $acqDate > $endsOn) {
@@ -98,6 +99,13 @@ final class AssetDepreciationCardReportService
                 $disposalDate = $a['disposal_date'] ?? null;
                 if ($disposalDate !== null && (string) $disposalDate <= $endsOn) {
                     continue; // vyřazeno do rozvahového dne včetně — už není v soupisu
+                }
+                $pageCards[] = $a;
+            }
+            $plans = $this->assets->importedPlansForAssets($supplierId, array_column($pageCards, 'id'));
+            foreach ($pageCards as $a) {
+                if (isset($plans[(int) $a['id']])) {
+                    $a['imported_depreciation_plan'] = $plans[(int) $a['id']];
                 }
                 $matched[] = $a;
             }

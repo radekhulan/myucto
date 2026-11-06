@@ -48,8 +48,11 @@ final class SupplierBankAccountRepository
         return $row === false ? null : $this->cast($row);
     }
 
-    public function matchCounterparty(int $supplierId, string $counterpartyAccount, ?string $counterpartyBank, bool $includeInactive = false): ?array
+    public function matchCounterparty(int $supplierId, string $counterpartyAccount, ?string $counterpartyBank, bool $includeInactive = false, bool $currentRead = false): ?array
     {
+        if ($currentRead && !$this->db->pdo()->inTransaction()) {
+            throw new \LogicException('Current bank account reads require a transaction.');
+        }
         $canonical = AccountNumberNormalizer::canonical($counterpartyAccount);
         if ($canonical === null) {
             return null;
@@ -68,7 +71,7 @@ final class SupplierBankAccountRepository
         } else {
             $sql .= " ORDER BY {$activeFirst}id ASC";
         }
-        $stmt = $this->db->pdo()->prepare($sql);
+        $stmt = $this->db->pdo()->prepare($sql . ($currentRead ? ' FOR UPDATE' : ''));
         $stmt->execute($params);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         if ($rows === []) {

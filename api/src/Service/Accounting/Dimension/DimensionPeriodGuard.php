@@ -73,8 +73,13 @@ final class DimensionPeriodGuard
         return $statuses;
     }
 
-    /** @param list<int> $entryIds @return array<int,array<string,mixed>> */
-    public function lockEntries(int $supplierId, array $entryIds): array
+    /**
+     * @param list<int> $entryIds
+     * @param bool $withDimensionFreeze zjistit i zmrazení dimenzí uzávěrkou; volající, který dimenze
+     *        nemění, ho nechce (zámek období ho před souběžnou uzávěrkou chrání i bez toho)
+     * @return array<int,array<string,mixed>>
+     */
+    public function lockEntries(int $supplierId, array $entryIds, bool $withDimensionFreeze = true): array
     {
         $pdo = $this->db->pdo();
         if (!$pdo->inTransaction()) {
@@ -98,14 +103,19 @@ final class DimensionPeriodGuard
             array_push($entryRows, ...$entries->fetchAll(PDO::FETCH_ASSOC));
         }
         $out = [];
-        $closing = $pdo->prepare(
-            "SELECT id FROM journal_entries FORCE INDEX (idx_je_supplier_period) WHERE supplier_id = ? AND period_id = ?
-                AND source_type = 'closing' AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1 FOR UPDATE"
-        );
         $frozen = [];
-        foreach ($statuses as $periodId => $_) {
-            $closing->execute([$supplierId, $periodId]);
-            $frozen[$periodId] = $closing->fetchColumn() !== false;
+        if ($withDimensionFreeze) {
+            $closing = $pdo->prepare(
+                "SELECT id FROM journal_entries FORCE INDEX (idx_je_supplier_period_source) WHERE supplier_id = ? AND period_id = ?
+                    AND source_type = 'closing' AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1 FOR UPDATE"
+            );
+            $entryPeriods = array_flip(array_map('intval', array_column($entryRows, 'period_id')));
+            foreach ($statuses as $periodId => $_) {
+                if (isset($entryPeriods[$periodId])) {
+                    $closing->execute([$supplierId, $periodId]);
+                    $frozen[$periodId] = $closing->fetchColumn() !== false;
+                }
+            }
         }
         foreach ($entryRows as $entry) {
             $periodId = (int) $entry['period_id'];
@@ -113,7 +123,9 @@ final class DimensionPeriodGuard
                 throw new DimensionException('period_not_open', 'Účetní období zápisu se změnilo. Obnovte data.', 409);
             }
             $entry['period_status'] = $statuses[$periodId];
-            $entry['dimensions_frozen'] = $frozen[$periodId];
+            if ($withDimensionFreeze) {
+                $entry['dimensions_frozen'] = $frozen[$periodId];
+            }
             $out[(int) $entry['id']] = $entry;
         }
         return $out;
@@ -122,6 +134,9 @@ final class DimensionPeriodGuard
     /** @param array<string,mixed> $entry */
     public function assertMutable(array $entry): void
     {
+        if (!array_key_exists('dimensions_frozen', $entry)) {
+            throw new \LogicException('Zápis byl zamčen bez zjištění zmrazení dimenzí.');
+        }
         if (AccountingPeriodStatus::isClosed((string) $entry['period_status']) || !empty($entry['dimensions_frozen'])) {
             throw new DimensionException('period_not_open', 'Dimenze uzavřeného účetního období nelze měnit. Nejprve znovu otevřete účetní knihy.', 409);
         }

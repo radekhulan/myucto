@@ -21,12 +21,16 @@ import WhyChip from '@/components/automation/WhyChip.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import { manualMovementDimensions } from './ruleDimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import type { DimensionMap } from '@/api/dimensions'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import { BTN_ICON_SM_BASE, OUTLINE, ICONS } from '@/components/ui/buttonStyles'
 import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
+import { useSupplierStore } from '@/stores/supplier'
+import { hasFrameworkScope } from '@/security/frameworkScope'
+import { usePropertyBankLinks } from './usePropertyBankLinks'
 
 /** Náš zdrojový účet (jen scope='all' u „Všechny pohyby" — viz UnpostedBankTransaction). */
 type RowTx = BankTransaction & {
@@ -113,19 +117,40 @@ const outsideSaldo = computed(() => props.tx.match_status === 'unmatched'
   && (props.tx.resolution === 'outside_saldo' || props.tx.posting?.outside_saldo === true))
 // Avízo, jehož pohyb převzal oficiální výpis: je vyřešené, úhradu nese výpis.
 const supersededNotice = computed(() => props.tx.notice_superseded === true)
-const noInvoiceExpected = computed(() => payrollMatched.value || ownTransfer.value || outsideSaldo.value || supersededNotice.value)
+// Pohyb přiřazený ostatní pohledávce či závazku: doklad má, jen to není faktura.
+const otherItems = computed(() => props.tx.match_status === 'unmatched' ? props.tx.matched_other_items ?? [] : [])
+const otherItemMatched = computed(() => otherItems.value.length > 0)
+const otherItemLinks = computed(() => auth.canRead('other_items') ? otherItems.value : [])
+const noInvoiceExpected = computed(() => payrollMatched.value || ownTransfer.value || outsideSaldo.value || supersededNotice.value || otherItemMatched.value)
+// Úhrady jednotek SVJ: řádek se jen přihlásí o vazbu, dotaz jde jednou za dávku řádků.
+// Firma bez profilu SVJ se neptá vůbec, SVJ bez povolených vazeb jen jednou (usePropertyBankLinks).
+const supplierStore = useSupplierStore()
+const propertyLinks = usePropertyBankLinks()
+const propertyReadable = computed(() => !auth.isClientRole && auth.canRead('property') && props.tx.amount > 0
+  && hasFrameworkScope(supplierStore.currentSupplier, 'svj'))
+watch(() => props.tx.id, id => { if (propertyReadable.value) propertyLinks.track(supplierStore.currentSupplierId, id) }, { immediate: true })
+const propertyLink = computed(() => propertyReadable.value ? propertyLinks.link(supplierStore.currentSupplierId, props.tx.id) : null)
+const propertyUsed = computed(() => !!propertyLink.value?.source)
+const propertyMatchable = computed(() => propertyReadable.value && propertyLinks.enabled(supplierStore.currentSupplierId)
+  && !propertyUsed.value && props.tx.match_status === 'unmatched' && !noInvoiceExpected.value && props.tx.source !== 'email_notice')
+const propertyProposal = computed(() => propertyMatchable.value ? propertyLink.value?.proposal ?? null : null)
+const propertyPaymentTo = computed<RouteLocationRaw>(() => ({ path: '/property/payments', query: { tab: 'receive', bank_transaction: String(props.tx.id) } }))
 const statusText = computed(() => supersededNotice.value
   ? t('bank.match_status.superseded')
   : payrollMatched.value ? t('bank.match_status.payroll')
     : ownTransfer.value ? t('bank.match_status.transfer')
-      : outsideSaldo.value ? t('bank.match_status.outside_saldo') : statusLabel(props.tx.match_status))
-const statusBadgeClass = computed(() => statusBadge(supersededNotice.value || outsideSaldo.value
+      : otherItemMatched.value ? t('bank.match_status.other_item')
+        : outsideSaldo.value ? t('bank.match_status.outside_saldo') : statusLabel(props.tx.match_status))
+const statusBadgeClass = computed(() => statusBadge(otherItemMatched.value
+  ? 'manual'
+  : supersededNotice.value || outsideSaldo.value
   ? 'ignored'
   : noInvoiceExpected.value ? 'auto_exact' : props.tx.match_status))
 // Štítek „Nespárováno" je zkratka k párování — stejná podmínka jako akce „Spárovat" v menu.
 const badgeMatchable = computed(() => !noInvoiceExpected.value && props.actions.canRunDetailAction(props.tx, 'match'))
 const statusTitle = computed(() => supersededNotice.value
   ? t('bank.notice_superseded_hint')
+  : otherItemMatched.value ? t('bank.other_item_matched_hint')
   : outsideSaldo.value ? t('bank.outside_saldo_hint')
     : badgeMatchable.value ? t('bank.match_badge_hint') : undefined)
 // Dialog přeúčtování drží řádek, ne PostingRowActions: řádek se vykresluje ve
@@ -156,6 +181,9 @@ const rulePrefill = computed<BankPostingRulePayload>(() => ({
   credit_account_code: props.tx.posting?.credit_account_code || (props.tx.amount > 0 ? '' : '221'),
   description: null,
   mode: 'suggest',
+  // Omezení na vlastní účet je volba ve formuláři, ne výchozí stav.
+  bank_account_id: null,
+  dimensions: manualMovementDimensions(props.tx),
 }))
 
 const {
@@ -263,6 +291,14 @@ function matchActions(tx: BankTransaction): RowAction[] {
       show: !tx.matched_invoice_id && !!tx.matched_purchase_invoice_id && auth.canRead('purchase_invoices'),
     },
     {
+      key: 'property-unit', label: t('bank.property_payment.match_unit'), icon: 'link', variant: 'primary',
+      to: propertyPaymentTo.value, show: propertyMatchable.value,
+    },
+    {
+      key: 'property-payment', label: t('bank.property_payment.open'), icon: 'doc', variant: 'neutral',
+      to: propertyPaymentTo.value, show: propertyUsed.value,
+    },
+    {
       key: 'match', label: t('bank.match'), icon: 'link', variant: 'primary',
       run: () => startMatch(tx),
       show: canMatch && (st === 'unmatched' || st === 'auto_partial'),
@@ -337,36 +373,36 @@ function candidateReject() {
 <template>
   <template v-if="layout === 'desktop'">
     <tr :data-tx-id="tx.id" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
-      <td class="px-3 py-2 text-xs">
+      <td class="px-3 py-2 whitespace-nowrap">
         {{ formatDate(tx.posted_at) }}
         <RouterLink v-if="showStatementLink" :to="`/bank/${tx.statement_id}?posting_status=unposted`"
-          class="block text-neutral-400 hover:text-primary-600 hover:underline whitespace-nowrap">
+          class="block text-xs text-neutral-400 hover:text-primary-600 hover:underline whitespace-nowrap">
           {{ t('bank.statement') }} #{{ tx.statement_id }}
         </RouterLink>
       </td>
-      <td class="px-3 py-2 text-right font-mono text-xs"
+      <td class="px-3 py-2 text-right font-mono"
         :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
         {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
       </td>
-      <td v-if="showAccount" class="px-3 py-2 text-xs">
+      <td v-if="showAccount" class="px-3 py-2">
         <div class="font-mono text-neutral-700 whitespace-nowrap">{{ formatAccountNumber(tx.account_number, tx.bank_code) }}</div>
-        <div v-if="tx.account_label" class="text-neutral-500 truncate">{{ tx.account_label }}</div>
+        <div v-if="tx.account_label" class="text-xs text-neutral-500 truncate">{{ tx.account_label }}</div>
       </td>
       <td class="px-3 py-2 font-mono text-xs">
         <span v-if="tx.variable_symbol">{{ tx.variable_symbol }}</span>
         <span v-else class="text-neutral-400">—</span>
         <span v-if="tx.constant_symbol" class="text-neutral-400 ml-1">/ {{ tx.constant_symbol }}</span>
       </td>
-      <td class="px-3 py-2 text-xs">
-        <div class="font-mono text-neutral-600">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
+      <td class="px-3 py-2">
+        <div class="font-mono text-xs text-neutral-600">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
         <div v-if="tx.counterparty_name" class="text-neutral-600">{{ tx.counterparty_name }}</div>
-        <div v-if="tx.card_last4" class="text-neutral-600" data-test="tx-card">
+        <div v-if="tx.card_last4" class="text-xs text-neutral-600" data-test="tx-card">
           {{ t('payment_cards.tx_card', { last4: tx.card_last4 }) }}<template v-if="tx.card"> · {{ tx.card.holder || tx.card.label }}</template>
         </div>
-        <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
-        <div v-if="tx.description" class="text-neutral-500 truncate max-w-xs">{{ tx.description }}</div>
+        <div v-if="tx.match_status === 'ignored' && tx.ignore_note" class="text-xs text-neutral-600 whitespace-pre-wrap break-words max-w-xs">{{ t('bank.ignore_note_label') }}: {{ tx.ignore_note }}</div>
+        <div v-if="tx.description" class="text-xs text-neutral-500 truncate max-w-xs">{{ tx.description }}</div>
         <button v-for="n in journalNotes" :key="n.id" type="button" data-test="tx-journal-note"
-          class="mt-1 flex max-w-xs items-start gap-1 text-left cursor-pointer disabled:cursor-default"
+          class="mt-1 flex max-w-xs items-start gap-1 text-left text-xs cursor-pointer disabled:cursor-default"
           :class="n.pinned ? 'text-warning-600' : 'text-neutral-700'"
           :title="t('bank.note.from_journal')" :disabled="!canWriteNote" @click="openNote">
           <svg class="mt-0.5 h-3 w-3 shrink-0 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
@@ -378,7 +414,7 @@ function candidateReject() {
           <DimensionChips :dimensions="txDimensions" />
         </button>
       </td>
-      <td class="px-3 py-2 text-xs">
+      <td class="px-3 py-2">
         <template v-if="(tx.matched_invoices?.length ?? 0) > 1 && auth.canRead('invoices')">
           <RouterLink v-for="mi in tx.matched_invoices" :key="mi.invoice_id" :to="`/invoices/${mi.invoice_id}`"
             class="text-primary-600 hover:underline block">
@@ -403,6 +439,14 @@ function candidateReject() {
             class="text-primary-600 hover:underline">
             {{ tx.matched_purchase_ref || `#${tx.matched_purchase_invoice_id}` }}
           </RouterLink>
+          <template v-else-if="otherItemLinks.length > 0">
+            <div v-for="item in otherItemLinks" :key="item.other_item_id" data-test="tx-other-item">
+              <RouterLink :to="`/other-items/${item.other_item_id}`" class="text-primary-600 hover:underline">
+                {{ item.document_no || `#${item.other_item_id}` }}
+              </RouterLink>
+              <div v-if="item.partner_name" class="text-neutral-500 text-xs">{{ item.partner_name }}</div>
+            </div>
+          </template>
           <span v-else class="text-neutral-400">—</span>
           <div v-if="tx.matched_client_name" class="text-neutral-500 text-xs">{{ tx.matched_client_name }}</div>
           <div v-else-if="tx.matched_vendor_name" class="text-neutral-500 text-xs">{{ tx.matched_vendor_name }}</div>
@@ -426,6 +470,14 @@ function candidateReject() {
           @click="toggleSuggestion(tx.id)">
           ⏳ {{ t('bank.match_v2.badge') }}
         </button>
+        <RouterLink v-if="propertyUsed" :to="propertyPaymentTo" data-test="tx-property-payment"
+          class="mt-1 block text-[11px] text-primary-600 hover:underline whitespace-nowrap">
+          {{ propertyLink?.workflow_id ? t('bank.property_payment.used_workflow', { id: propertyLink.workflow_id }) : t('bank.property_payment.used') }}
+        </RouterLink>
+        <RouterLink v-else-if="propertyProposal && propertyProposal.status !== 'unidentified'" :to="propertyPaymentTo" data-test="tx-property-proposal"
+          class="mt-1 mx-auto inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600 hover:underline">
+          {{ t(`bank.property_payment.proposal.${propertyProposal.status}`) }}
+        </RouterLink>
         <PostingStatusBadge v-if="isDoubleEntry" class="block"
           :posting="tx.posting" :currency="currency()" />
         <span v-if="isDoubleEntry && tx.period_closed" class="mt-1 inline-flex text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-500">
@@ -444,7 +496,8 @@ function candidateReject() {
         {{ tx.posting?.counter_account_codes?.join(', ') || '-' }}
       </td>
       <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
-        <div class="flex flex-wrap items-center justify-end gap-1">
+        <!-- Šířka pro „Zrušit zaúčtování" a dvě ikony na jednom řádku: akce zaberou nejvýš dva řádky. -->
+        <div class="flex flex-wrap items-center justify-end gap-1 min-w-60">
           <BankTransactionJournalLink :tx="tx" />
           <PostingRowActions v-if="isDoubleEntry"
             :tx="tx" :currency="currency()"
@@ -466,6 +519,9 @@ function candidateReject() {
     <tr v-if="expandedDocs.has(tx.id)">
       <td :colspan="colspan" class="bg-neutral-50 px-4 py-3">
         <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
+        <LinkedDocumentsPanel v-if="tx.posting?.journal_entry_id" class="mt-3 block"
+          entity-type="journal_entry" :entity-id="tx.posting.journal_entry_id" readonly
+          :title="t('bank.journal_documents')" />
       </td>
     </tr>
     <!-- Dimenze pohybu (Firma → Dimenze) — promítnou se i do jeho zaúčtování. -->
@@ -478,7 +534,7 @@ function candidateReject() {
 
   <div v-else class="p-3 space-y-2" :class="{ 'opacity-50': tx.match_status === 'ignored' }">
     <div class="flex items-baseline justify-between gap-2">
-      <div class="font-mono text-base font-semibold whitespace-nowrap"
+      <div class="font-mono text-sm font-semibold whitespace-nowrap"
         :class="tx.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
         {{ tx.amount > 0 ? '+' : '' }}{{ formatMoney(tx.amount, currency()) }}
       </div>
@@ -500,6 +556,14 @@ function candidateReject() {
           @click="toggleSuggestion(tx.id)">
           ⏳ {{ t('bank.match_v2.badge') }}
         </button>
+        <RouterLink v-if="propertyUsed" :to="propertyPaymentTo" data-test="tx-property-payment"
+          class="text-[11px] text-primary-600 hover:underline whitespace-nowrap">
+          {{ propertyLink?.workflow_id ? t('bank.property_payment.used_workflow', { id: propertyLink.workflow_id }) : t('bank.property_payment.used') }}
+        </RouterLink>
+        <RouterLink v-else-if="propertyProposal && propertyProposal.status !== 'unidentified'" :to="propertyPaymentTo" data-test="tx-property-proposal"
+          class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap bg-warning-50 text-warning-600 hover:underline">
+          {{ t(`bank.property_payment.proposal.${propertyProposal.status}`) }}
+        </RouterLink>
         <PostingStatusBadge v-if="isDoubleEntry" :posting="tx.posting" :currency="currency()" />
         <span v-if="isDoubleEntry && tx.period_closed" class="inline-flex text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-500">
           {{ t('bank.posting.period_closed_badge') }}
@@ -536,7 +600,7 @@ function candidateReject() {
     </RouterLink>
     <div class="text-xs">
       <div class="font-mono text-neutral-600 truncate">{{ tx.counterparty_account }}<span v-if="tx.counterparty_bank">/{{ tx.counterparty_bank }}</span></div>
-      <div v-if="tx.counterparty_name" class="text-neutral-600 truncate">{{ tx.counterparty_name }}</div>
+      <div v-if="tx.counterparty_name" class="text-sm font-medium text-neutral-900 truncate">{{ tx.counterparty_name }}</div>
       <div v-if="tx.card_last4" class="text-neutral-600 truncate">
         {{ t('payment_cards.tx_card', { last4: tx.card_last4 }) }}<template v-if="tx.card"> · {{ tx.card.holder || tx.card.label }}</template>
       </div>
@@ -583,11 +647,23 @@ function candidateReject() {
       </RouterLink>
       <span v-if="tx.matched_vendor_name" class="text-neutral-500 ml-2">{{ tx.matched_vendor_name }}</span>
     </div>
+    <div v-else-if="otherItemLinks.length > 0" class="text-xs">
+      <div v-for="item in otherItemLinks" :key="item.other_item_id" data-test="tx-other-item">
+        <RouterLink :to="`/other-items/${item.other_item_id}`" class="text-primary-600 hover:underline font-mono">
+          {{ item.document_no || `#${item.other_item_id}` }}
+        </RouterLink>
+        <span v-if="item.partner_name" class="text-neutral-500 ml-2">{{ item.partner_name }}</span>
+      </div>
+    </div>
     <MatchSuggestionPanel v-if="!payrollMatched && expandedSuggestions.has(tx.id) && suggestionFor(tx.id)" variant="inline"
       :suggestion="suggestionFor(tx.id)!" :reviewing="reviewingSuggestion"
       :can-review="actions.canReviewSuggestion(suggestionFor(tx.id)!)" :can-accept-candidate="actions.canAcceptCandidate" @accept="candidateAccept" @reject="candidateReject" />
     <div v-if="expandedDocs.has(tx.id)" class="pt-1">
       <LinkedDocumentsPanel entity-type="bank_transaction" :entity-id="tx.id" />
+      <!-- Dokument připojený v deníku k zápisu pohybu patří i k pohybu; připojuje se tam. -->
+      <LinkedDocumentsPanel v-if="tx.posting?.journal_entry_id" class="mt-3 block"
+        entity-type="journal_entry" :entity-id="tx.posting.journal_entry_id" readonly
+        :title="t('bank.journal_documents')" />
     </div>
     <DocumentDimensionsPanel v-if="dimensionsAvailable && dimensionsOpen" class="mt-1"
       doc-type="bank-transactions" :doc-id="tx.id" :prefill="dimensionPrefill" @saved="savedDimensions = $event" />

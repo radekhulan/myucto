@@ -508,7 +508,8 @@ final class PurchaseOrderService
             $lines[] = [
                 'id' => (int) ($rl['id'] ?? 0),
                 'line_no'       => $lineNo++,
-                'stock_item_id' => $itemId > 0 ? $itemId : null,
+                // Služba se nepřijímá na sklad: zůstane řádkem bez karty s jejím popisem.
+                'stock_item_id' => $itemId > 0 && $items[$itemId]['item_type'] !== 'service' ? $itemId : null,
                 'warehouse_id'  => (int) ($rl['warehouse_id'] ?? 0) > 0 ? (int) $rl['warehouse_id'] : null,
                 'vendor_sku'    => self::trimOrNull($rl['vendor_sku'] ?? null, 80),
                 'description'   => mb_substr($description, 0, 500),
@@ -654,7 +655,7 @@ final class PurchaseOrderService
         }
         $place = implode(',', array_fill(0, count($ids), '?'));
         $stmt  = $this->db->pdo()->prepare(
-            "SELECT id, sku, name, unit FROM stock_items WHERE supplier_id = ? AND id IN ($place)"
+            "SELECT id, sku, name, unit, item_type FROM stock_items WHERE supplier_id = ? AND id IN ($place)"
         );
         $stmt->execute([$supplierId, ...$ids]);
 
@@ -664,6 +665,7 @@ final class PurchaseOrderService
                 'sku'  => (string) $r['sku'],
                 'name' => (string) $r['name'],
                 'unit' => (string) $r['unit'],
+                'item_type' => (string) $r['item_type'],
             ];
         }
 

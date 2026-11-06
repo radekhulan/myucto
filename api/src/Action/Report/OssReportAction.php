@@ -53,7 +53,7 @@ final class OssReportAction
         try {
             return Json::ok($response, $this->oss->preview($supplierId, $year, $quarter));
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
     }
 
@@ -78,7 +78,7 @@ final class OssReportAction
         try {
             return Json::ok($response, $this->threshold->progress($supplierId, $year));
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
     }
 
@@ -104,7 +104,7 @@ final class OssReportAction
         try {
             $result = $this->xmlExporter->build($supplierId, $year, $quarter);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
 
         $userId = (int) ($user['id'] ?? 0);
@@ -125,17 +125,20 @@ final class OssReportAction
         // chyba jde do activity logu vedle samotného podání.
         $evidenceCount = 0;
         $evidenceError = null;
-        try {
-            $evidenceCount = $this->evidence->capture(
-                $supplierId,
-                (int) $archived['submission_id'],
-                $year,
-                $quarter,
-                $result['preview'],
-                $userId ?: null,
-            );
-        } catch (\Throwable $e) {
-            $evidenceError = $e->getMessage();
+        // Bez archivovaného podání (ukázka) není k čemu evidenci navázat.
+        if ($archived['submission_id'] !== null) {
+            try {
+                $evidenceCount = $this->evidence->capture(
+                    $supplierId,
+                    (int) $archived['submission_id'],
+                    $year,
+                    $quarter,
+                    $result['preview'],
+                    $userId ?: null,
+                );
+            } catch (\Throwable $e) {
+                $evidenceError = $e->getMessage();
+            }
         }
 
         $this->logger->log('report.ossei1_downloaded', $userId, null, null, [

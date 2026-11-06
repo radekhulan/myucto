@@ -12,6 +12,7 @@ export type DphCrossCheck343Reason = 'timing_73' | 'value_mismatch' | 'missing_e
 
 export interface DphCrossCheckDocument {
   invoice_id: number
+  doc_type?: 'invoice' | 'purchase_invoice' | 'cash' | 'journal_entry'
   doc_number: string | null
   source: string
   declared: number
@@ -265,6 +266,24 @@ export interface KhPreview {
   }
   warnings: string[]
   cross_check?: DphCrossCheckFinding[]
+  post_filing_changes?: KhPostFilingChanges
+}
+
+/** Rozdíl dnešního kontrolního hlášení proti podanému XML; částky jsou základ a daň. */
+export interface KhPostFilingDocument {
+  section: string
+  status: 'amount_diff' | 'only_submitted' | 'only_current'
+  doc_number: string
+  is_aggregate: boolean
+  filed: { base: number; vat: number } | null
+  current: { base: number; vat: number } | null
+}
+
+export interface KhPostFilingChanges {
+  has_filing: boolean
+  snapshot_available: boolean
+  submission: { id: number; generated_at: string; form_variant: string } | null
+  documents: KhPostFilingDocument[]
 }
 
 export interface OssPreview {
@@ -420,7 +439,7 @@ export type ClosingPackagePart =
   | 'balance_sheet' | 'income_statement' | 'general_ledger'
   | 'trial_balance' | 'journal' | 'balance_inventory' | 'dph_book' | 'income_tax' | 'income_tax_report' | 'income_tax_advances'
   | 'asset_inventory' | 'saldo_over_1y' | 'accruals' | 'statement_notes'
-  | 'cash_flow' | 'equity_changes'
+  | 'cash_flow' | 'equity_changes' | 'open_items'
 
 /**
  * EP-6: POVINNÉ jádro balíčku — bez těchto částí je balíček `failed`, ne `completed`.
@@ -435,6 +454,7 @@ export const CLOSING_PACKAGE_REQUIRED_PARTS: ClosingPackagePart[] = [
 ]
 
 export interface ClosingPackagePreview {
+  accounting_framework?: 'cz_504'
   period_id: number
   fiscal_year: number
   counts: Record<ClosingPackagePart, number>

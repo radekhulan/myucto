@@ -7,20 +7,28 @@ import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import {
   payrollApi,
   type PayrollJmhzOrdinaryEvidenceScope,
+  type PayrollJmhzOzpWage,
   type PayrollRun,
 } from '@/api/payroll'
 import ExpandableList from '@/components/ui/ExpandableList.vue'
-import { btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import DateInput from '@/components/ui/DateInput.vue'
+import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import { formatPeriod } from '@/composables/useFormat'
+import { useAuthStore } from '@/stores/auth'
 
 const props = defineProps<{ runs: PayrollRun[] }>()
 const { t } = useI18n()
+const auth = useAuthStore()
+// Potvrzení výdělku OZP zapisuje (POST jmhz-ordinary-evidence vyžaduje zápis podání).
+const canWrite = computed(() => auth.canWrite('payroll.submissions'))
 
 interface EvidenceState {
   loading: boolean
   error: string
   failure?: { code: string, technical: string }
   scopes: PayrollJmhzOrdinaryEvidenceScope[]
+  /** Potvrzené výdělky OZP revize (10347 až 10353) k přehledu. */
+  ozpWages?: Array<{ employment_id: number, wage: PayrollJmhzOzpWage }>
 }
 
 type Guidance = ReturnType<typeof jmhzEvidenceGuidance>
@@ -137,6 +145,109 @@ function loadFailureGuidance(code: string, run: PayrollRun) {
   return guidance
 }
 
+/**
+ * Výdělek OZP (10347 datum úhrady mzdy včetně pojistného, 10348 hotovost) zadává
+ * účetní u vztahu s podporou zaměstnávání OZP. Srážky 10349 až 10353 odvodí
+ * server ze zmrazené revize, proto se tu nevyplňují.
+ */
+interface OzpWageForm {
+  payment_date: string
+  cash_paid: '' | 'yes' | 'no'
+  /** Dny odvodu pojistného 10570 a 10571 (hlášení od 01/2027); posílají se jen oba. */
+  social_insurance_paid_on: string
+  health_insurance_paid_on: string
+  saving: boolean
+  error: string
+}
+
+const ozpForms = ref<Record<string, OzpWageForm>>({})
+
+/** Počet směn při rizikové práci (10580, hlášení od 01/2027) zadává účetní. */
+interface RiskShiftForm {
+  /** Vstup typu number vrací číslo, prázdný řetězec. */
+  count: string | number
+  saving: boolean
+  error: string
+}
+
+const riskShiftForms = ref<Record<string, RiskShiftForm>>({})
+
+function riskShiftForm(run: PayrollRun, scope: PayrollJmhzOrdinaryEvidenceScope): RiskShiftForm | null {
+  const id = revisionId(run)
+  return id === null ? null : riskShiftForms.value[ozpKey(id, scope.employment_id)] ?? null
+}
+
+function validShiftCount(value: string | number): boolean {
+  return /^\d{1,3}$/.test(String(value).trim())
+}
+
+async function confirmRiskShifts(run: PayrollRun, scope: PayrollJmhzOrdinaryEvidenceScope) {
+  const id = revisionId(run)
+  const current = riskShiftForm(run, scope)
+  if (id === null || current === null || !validShiftCount(current.count)) return
+  current.saving = true
+  current.error = ''
+  try {
+    await payrollApi.confirmJmhzOrdinaryEvidence(
+      id,
+      scope.employment_id,
+      globalThis.crypto?.randomUUID?.() ?? `jmhz-shifts-${id}-${scope.employment_id}-${Date.now()}`,
+      undefined,
+      Number.parseInt(String(current.count).trim(), 10),
+    )
+    await loadRun(run)
+  } catch (exception) {
+    current.error = apiErrorMessage(exception) || t('payroll.submissions.overview.jmhz_risk_shifts.failed')
+  } finally {
+    current.saving = false
+  }
+}
+
+function ozpKey(revision: number, employmentId: number): string {
+  return `${revision}:${employmentId}`
+}
+
+function ozpForm(run: PayrollRun, scope: PayrollJmhzOrdinaryEvidenceScope): OzpWageForm | null {
+  const id = revisionId(run)
+  return id === null ? null : ozpForms.value[ozpKey(id, scope.employment_id)] ?? null
+}
+
+/** Odvozené srážky ve prospěch zaměstnavatele v celých korunách podle atributu. */
+function ozpDeductions(wage: PayrollJmhzOzpWage): Array<{ attribute: string, czk: number }> {
+  const sums = Array.isArray(wage.employer_deductions_minor) ? {} : wage.employer_deductions_minor
+  return Object.entries(sums).map(([attribute, minor]) => ({ attribute, czk: (minor ?? 0) / 100 }))
+}
+
+async function confirmOzpWage(run: PayrollRun, scope: PayrollJmhzOrdinaryEvidenceScope) {
+  const id = revisionId(run)
+  const current = ozpForm(run, scope)
+  if (id === null || current === null || current.cash_paid === '' || current.payment_date === '') return
+  current.saving = true
+  current.error = ''
+  try {
+    await payrollApi.confirmJmhzOrdinaryEvidence(
+      id,
+      scope.employment_id,
+      globalThis.crypto?.randomUUID?.() ?? `jmhz-ozp-${id}-${scope.employment_id}-${Date.now()}`,
+      {
+        payment_date: current.payment_date,
+        cash_paid: current.cash_paid === 'yes',
+        ...(current.social_insurance_paid_on !== '' && current.health_insurance_paid_on !== ''
+          ? {
+              social_insurance_paid_on: current.social_insurance_paid_on,
+              health_insurance_paid_on: current.health_insurance_paid_on,
+            }
+          : {}),
+      },
+    )
+    await loadRun(run)
+  } catch (exception) {
+    current.error = apiErrorMessage(exception) || t('payroll.submissions.overview.jmhz_ozp_wage.failed')
+  } finally {
+    current.saving = false
+  }
+}
+
 async function loadRun(run: PayrollRun) {
   const id = revisionId(run)
   if (id === null) return
@@ -144,7 +255,29 @@ async function loadRun(run: PayrollRun) {
   try {
     // Vztahy se jen čtou a celé se nahrazují; hluboké proxy nad stovkami
     // řádků by jen zdržovaly každé překreslení.
-    states.value[id].scopes = markRaw((await payrollApi.jmhzOrdinaryEvidence(id)).scopes)
+    const loaded = await payrollApi.jmhzOrdinaryEvidence(id)
+    states.value[id].scopes = markRaw(loaded.scopes)
+    states.value[id].ozpWages = markRaw((loaded.evidences ?? []).flatMap(evidence => evidence.ozp_wage
+      ? [{ employment_id: evidence.employment_id, wage: evidence.ozp_wage }]
+      : []))
+    for (const scope of states.value[id].scopes) {
+      const key = ozpKey(id, scope.employment_id)
+      if (scope.attention_code === 'jmhz_ordinary_evidence_ozp_wage_required' && !ozpForms.value[key]) {
+        ozpForms.value[key] = {
+          payment_date: '',
+          cash_paid: '',
+          social_insurance_paid_on: '',
+          health_insurance_paid_on: '',
+          saving: false,
+          error: '',
+        }
+      }
+      if ((scope.attention_code === 'jmhz_ordinary_evidence_risk_shifts_required'
+        || scope.attention_code === 'jmhz_ordinary_evidence_risk_shifts_invalid')
+        && !riskShiftForms.value[key]) {
+        riskShiftForms.value[key] = { count: '', saving: false, error: '' }
+      }
+    }
   } catch (exception) {
     const code = apiErrorCode(exception)
     states.value[id].failure = { code, technical: apiErrorMessage(exception) }
@@ -223,6 +356,23 @@ watch(
               {{ t('payroll.submissions.overview.jmhz_evidence_confirmed_count', view(run)!.confirmed) }}
             </span>
           </div>
+          <ul
+            v-if="state(run)?.ozpWages?.length"
+            class="mt-3 space-y-1 rounded-lg border border-neutral-200 bg-neutral-50 p-3 text-sm text-neutral-700"
+            data-test="jmhz-ozp-wage-summary"
+          >
+            <li v-for="item in state(run)!.ozpWages" :key="item.employment_id">
+              {{ t('payroll.submissions.overview.jmhz_ozp_wage.summary', {
+                employment: item.employment_id,
+                date: item.wage.payment_date,
+                cash: t(item.wage.cash_paid ? 'payroll.submissions.overview.jmhz_ozp_wage.cash_yes' : 'payroll.submissions.overview.jmhz_ozp_wage.cash_no'),
+              }) }}
+              <span v-if="!item.wage.employer_deductions_made">{{ t('payroll.submissions.overview.jmhz_ozp_wage.no_deductions') }}</span>
+              <span v-for="deduction in ozpDeductions(item.wage)" :key="deduction.attribute" class="ml-2">
+                {{ t('payroll.submissions.overview.jmhz_ozp_wage.deduction', { attribute: deduction.attribute, amount: deduction.czk }) }}
+              </span>
+            </li>
+          </ul>
           <p
             v-if="view(run)!.attention > 0"
             class="mt-3 text-sm font-medium text-warning-700"
@@ -284,6 +434,97 @@ watch(
                       </RouterLink>
                     </div>
                   </div>
+                  <form
+                    v-if="canWrite && entry.guidance.ozpWageForm && ozpForm(run, entry.scope)"
+                    class="mt-2 flex flex-wrap items-end gap-3"
+                    :data-test="`jmhz-ozp-wage-form-${entry.scope.employment_id}`"
+                    @submit.prevent="confirmOzpWage(run, entry.scope)"
+                  >
+                    <p class="w-full text-xs text-neutral-600">{{ t('payroll.submissions.overview.jmhz_ozp_wage.hint') }}</p>
+                    <label class="text-xs font-medium text-neutral-600">
+                      {{ t('payroll.submissions.overview.jmhz_ozp_wage.payment_date') }}
+                      <DateInput
+                        v-model="ozpForm(run, entry.scope)!.payment_date"
+                        required
+                        :data-test="`jmhz-ozp-payment-date-${entry.scope.employment_id}`"
+                        class="mt-1 block rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label class="text-xs font-medium text-neutral-600">
+                      {{ t('payroll.submissions.overview.jmhz_ozp_wage.cash_paid') }}
+                      <select
+                        v-model="ozpForm(run, entry.scope)!.cash_paid"
+                        required
+                        :data-test="`jmhz-ozp-cash-${entry.scope.employment_id}`"
+                        class="mt-1 block rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+                      >
+                        <option value="" disabled>{{ t('payroll.submissions.overview.jmhz_ozp_wage.cash_select') }}</option>
+                        <option value="no">{{ t('payroll.submissions.overview.jmhz_ozp_wage.cash_no') }}</option>
+                        <option value="yes">{{ t('payroll.submissions.overview.jmhz_ozp_wage.cash_yes') }}</option>
+                      </select>
+                    </label>
+                    <p class="w-full text-xs text-neutral-600">{{ t('payroll.submissions.overview.jmhz_ozp_wage.dates_hint') }}</p>
+                    <label class="text-xs font-medium text-neutral-600">
+                      {{ t('payroll.submissions.overview.jmhz_ozp_wage.social_paid_on') }}
+                      <DateInput
+                        v-model="ozpForm(run, entry.scope)!.social_insurance_paid_on"
+                        :data-test="`jmhz-ozp-social-date-${entry.scope.employment_id}`"
+                        class="mt-1 block rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <label class="text-xs font-medium text-neutral-600">
+                      {{ t('payroll.submissions.overview.jmhz_ozp_wage.health_paid_on') }}
+                      <DateInput
+                        v-model="ozpForm(run, entry.scope)!.health_insurance_paid_on"
+                        :data-test="`jmhz-ozp-health-date-${entry.scope.employment_id}`"
+                        class="mt-1 block rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      :class="[btnFilled('success'), 'whitespace-nowrap']"
+                      :disabled="ozpForm(run, entry.scope)!.saving || ozpForm(run, entry.scope)!.payment_date === '' || ozpForm(run, entry.scope)!.cash_paid === ''"
+                      :data-test="`jmhz-ozp-confirm-${entry.scope.employment_id}`"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+                      {{ t('payroll.submissions.overview.jmhz_ozp_wage.confirm') }}
+                    </button>
+                    <p v-if="ozpForm(run, entry.scope)!.error" class="w-full text-sm text-danger-700" role="alert">
+                      {{ ozpForm(run, entry.scope)!.error }}
+                    </p>
+                  </form>
+                  <form
+                    v-if="canWrite && entry.guidance.riskShiftForm && riskShiftForm(run, entry.scope)"
+                    class="mt-2 flex flex-wrap items-end gap-3"
+                    :data-test="`jmhz-risk-shifts-form-${entry.scope.employment_id}`"
+                    @submit.prevent="confirmRiskShifts(run, entry.scope)"
+                  >
+                    <label class="text-xs font-medium text-neutral-600">
+                      {{ t('payroll.submissions.overview.jmhz_risk_shifts.label') }}
+                      <input
+                        v-model="riskShiftForm(run, entry.scope)!.count"
+                        type="number"
+                        min="0"
+                        max="999"
+                        step="1"
+                        required
+                        :data-test="`jmhz-risk-shifts-count-${entry.scope.employment_id}`"
+                        class="mt-1 block w-28 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
+                      >
+                    </label>
+                    <button
+                      type="submit"
+                      :class="[btnFilled('success'), 'whitespace-nowrap']"
+                      :disabled="riskShiftForm(run, entry.scope)!.saving || !validShiftCount(String(riskShiftForm(run, entry.scope)!.count))"
+                      :data-test="`jmhz-risk-shifts-confirm-${entry.scope.employment_id}`"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+                      {{ t('payroll.submissions.overview.jmhz_risk_shifts.confirm') }}
+                    </button>
+                    <p v-if="riskShiftForm(run, entry.scope)!.error" class="w-full text-sm text-danger-700" role="alert">
+                      {{ riskShiftForm(run, entry.scope)!.error }}
+                    </p>
+                  </form>
                   <details class="mt-2 text-xs text-neutral-500">
                     <summary class="cursor-pointer">{{ t('payroll.submissions.overview.jmhz_guidance.technical_details') }}</summary>
                     <p class="mt-2 break-words">{{ entry.scope.attention_code }}</p>

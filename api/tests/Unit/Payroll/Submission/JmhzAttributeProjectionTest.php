@@ -120,6 +120,91 @@ final class JmhzAttributeProjectionTest extends TestCase
         self::assertContains(10495, $projection->presentAttributeIds());
     }
 
+    /**
+     * XML ve jmenném prostoru 2027 se promítá přes slovník 1.5.0.3: součástí
+     * je `formularZamestnani` a jeho hlavička leží ve jmenném prostoru
+     * formuláře (form.xsd 1.5.0.3). Nové atributy (10575, 10587, 10580,
+     * 10555) se najdou, primární PPV zůstává v hlavičce součásti.
+     */
+    public function testVersion2027DocumentProjectsThroughDictionary2027(): void
+    {
+        $xml = <<<'XML'
+            <?xml version="1.0" encoding="UTF-8"?>
+            <jmhzPodani xmlns="http://schemas.cssz.cz/JMHZ/podani/2027"
+                        xmlns:form="http://schemas.cssz.cz/JMHZ/form/2027">
+              <hlavicka>
+                <mesic>1</mesic>
+                <rok>2027</rok>
+              </hlavicka>
+              <formulareZamestnani>
+                <form:formularZamestnani>
+                  <form:hlavicka>
+                    <form:primarniPpv>true</form:primarniPpv>
+                  </form:hlavicka>
+                  <form:bezPriznaku>
+                    <form:identifikace>
+                      <form:ikMpsv>1000000001</form:ikMpsv>
+                    </form:identifikace>
+                    <form:souhrnDataZec>
+                      <form:zalohaNaDan>
+                        <form:prohlaseniPoplatnikaDane>
+                          <form:datumPodpisu>2026-12-15</form:datumPodpisu>
+                        </form:prohlaseniPoplatnikaDane>
+                      </form:zalohaNaDan>
+                    </form:souhrnDataZec>
+                    <form:prubehZamestnani>
+                      <form:statniZastupce>false</form:statniZastupce>
+                      <form:odpracovaneHodiny>
+                        <form:rozpad>
+                          <form:riziko>
+                            <form:hodinyOdpracovanePocet>143</form:hodinyOdpracovanePocet>
+                            <form:smenyOdpracovanePocet>18</form:smenyOdpracovanePocet>
+                            <form:kategorizaceRizika>1</form:kategorizaceRizika>
+                          </form:riziko>
+                        </form:rozpad>
+                      </form:odpracovaneHodiny>
+                    </form:prubehZamestnani>
+                    <form:prijem>
+                      <form:dan>
+                        <form:prijemPar6>0</form:prijemPar6>
+                      </form:dan>
+                    </form:prijem>
+                  </form:bezPriznaku>
+                </form:formularZamestnani>
+              </formulareZamestnani>
+            </jmhzPodani>
+            XML;
+
+        $projection = JmhzAttributeProjection::fromXml($xml);
+
+        self::assertSame(1, $projection->submission()->integer('10010'));
+        self::assertSame(2027, $projection->submission()->integer('10011'));
+        self::assertFalse($projection->submission()->has('10495'));
+        self::assertCount(1, $projection->forms());
+        $form = $projection->forms()[0];
+        self::assertTrue($form->boolean('10495'));
+        self::assertSame('1000000001', $form->value('10051'));
+        self::assertSame('2026-12-15', $form->value('10575'));
+        self::assertFalse($form->boolean('10587'));
+        self::assertSame(143, $form->integer('10273'));
+        self::assertSame(18, $form->integer('10580'));
+        self::assertSame(0, $form->integer('10555'));
+    }
+
+    /** Element 2027 v dokumentu 2026 nemá ve slovníku 1.4.1.6 protějšek. */
+    public function testVersion2027ElementInVersion2026DocumentFailsClosed(): void
+    {
+        $xml = str_replace(
+            '<mesic>7</mesic>',
+            '<mesic>7</mesic><statniZastupce>false</statniZastupce>',
+            JmhzXmlSample::minimal(),
+        );
+
+        $this->expectException(JmhzXmlException::class);
+        $this->expectExceptionMessageMatches('/nemá ve slovníku JMHZ 1\.4\.1\.6/');
+        JmhzAttributeProjection::fromXml($xml);
+    }
+
     private static function compactForm(int $ordinal): string
     {
         $personId = sprintf('%010d', 1_000_000_000 + $ordinal);

@@ -64,6 +64,33 @@ final class WithholdingTaxCalculatorTest extends TestCase
     }
 
     /**
+     * Od roku 2027 je DPP pod rozhodnou částkou bez prohlášení samostatným
+     * základem ZÁLOHY (§ 6 odst. 4 a 18 ZDP) — zaokrouhlení nahoru, odvod se
+     * zálohami, roční zúčtování. Zjednodušená rekapitulace to neumí, takže rok
+     * 2027 odmítne, místo aby ho tiše spočítala jako srážku dolů.
+     */
+    public function testDppBelowThresholdFrom2027IsRefusedInTheSimplifiedRecap(): void
+    {
+        $c2027 = ['year' => 2027, 'dpp_withholding_limit' => 12500] + self::EXCLUSIVE;
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('Od roku 2027 se z DPP pod rozhodnou částkou nesráží srážková daň');
+
+        W::applies(W::REASON_DPP, 12499.0, $c2027);
+    }
+
+    /** Rok 2026 a nad rozhodnou částkou 2027 zůstává chování beze změny. */
+    public function testYear2026AndOverLimit2027AreUnchanged(): void
+    {
+        $c2026 = ['year' => 2026, 'dpp_withholding_limit' => 12000] + self::EXCLUSIVE;
+        self::assertTrue(W::applies(W::REASON_DPP, 11999.0, $c2026));
+        self::assertSame(1799, W::compute(W::REASON_DPP, 11999.0, $c2026)['tax']);
+
+        $c2027 = ['year' => 2027, 'dpp_withholding_limit' => 12500] + self::EXCLUSIVE;
+        self::assertFalse(W::applies(W::REASON_DPP, 12500.0, $c2027));
+        self::assertFalse(W::applies(W::REASON_DPP, 9000.0, $c2027, true));
+    }
+
+    /**
      * Do 31. 12. 2024 byla hranice „do" — odměna přesně na ní se ještě srazila.
      * § 6 odst. 4 písm. a) ZDP tehdy zněl „nepřesáhne … 10 000 Kč".
      */

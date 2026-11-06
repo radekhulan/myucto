@@ -15,6 +15,8 @@ import {
 import { usePaneDom } from '@/composables/usePaneDom'
 import { requestSupplierId } from '@/workspace/supplierContext'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
+import { hasFrameworkScope } from '@/security/frameworkScope'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatDateTime, formatMoney } from '@/composables/useFormat'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
@@ -42,7 +44,8 @@ import { useLockedPeriodAck } from '@/composables/useLockedPeriodAck'
 import { journalSourceLink } from '@/utils/journalSourceLink'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import VatBreakdownCell from '@/components/ui/VatBreakdownCell.vue'
 import { useDimensions } from '@/composables/useDimensions'
 
@@ -95,7 +98,7 @@ const filters = reactive({
   // ukázat jen JEDEN zápis a u víc nálezů skončí na nefiltrovaném deníku.
   integrity: '' as '' | 'amount_mismatch',
   // Hodnota dimenze (Firma → Dimenze) včetně podřízených, stejně jako u sestav.
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
 })
 
@@ -113,10 +116,14 @@ function accountName(code: string): string {
 
 const SOURCE_TYPES = [
   'manual', 'invoice', 'purchase_invoice', 'other_item', 'bank', 'gopay', 'cash',
-  'depreciation', 'asset', 'asset_disposal',
+  'depreciation', 'asset', 'asset_disposal', 'unit_charge',
   'closing', 'opening', 'fx_revaluation', 'stock',
   'offset', 'settlement', 'vat_clearing', 'card_settlement', 'card_writeoff',
 ] as const
+// Předpis SVJ vzniká jen u SVJ; proklik z URL ho přijme i jinde, výběr ho nenabízí.
+const supplierStore = useSupplierStore()
+const sourceTypeOptions = computed(() => SOURCE_TYPES.filter(type =>
+  type !== 'unit_charge' || hasFrameworkScope(supplierStore.currentSupplier, 'svj')))
 
 // Drill-down z detailu dokladu (FV/PF): ?source_type=&source_id= → filtruje deník na
 // zápis(y) přesně tohoto dokladu. Deep-link, ne uživatelský ovladač → mimo saved filters;
@@ -161,7 +168,7 @@ async function load(reset = true): Promise<boolean> {
       amount_from: filters.amount_from === '' ? undefined : Number(filters.amount_from),
       amount_to: filters.amount_to === '' ? undefined : Number(filters.amount_to),
       integrity: filters.integrity || undefined,
-      dimension_value_id: filters.dimension_value_id ?? undefined,
+      dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
       dimension_descendants: filters.dimension_descendants,
       sort_key: tbl.sort.value?.key,
       sort_dir: tbl.sort.value?.dir,
@@ -176,10 +183,11 @@ async function load(reset = true): Promise<boolean> {
     total.value = r.total
     perPage.value = r.per_page
     return true
-  } catch (e) {
+  } catch (e: any) {
     if (seq === loadSeq && !disposed && supplierId === requestSupplierId()) {
       if (!reset) page.value--
-      toast.error(t('common.error'))
+      // Neplatný filtr (např. rozsah účtů 6 až 5) vrací server jako 422 s hláškou.
+      toast.error(e?.response?.data?.error?.message || t('common.error'))
     }
     return false
   } finally {
@@ -227,15 +235,15 @@ function resetFilters() {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
-  filters.dimension_value_id = null
+  filters.dimension_value_ids = []
   filters.dimension_descendants = true
   sourceIdFilter.value = ''
   entryIdFilter.value = ''
   applyFilters()
 }
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   applyFilters()
 }
 function onDimensionDescendants(value: boolean) {
@@ -259,8 +267,8 @@ function buildQuery(): Record<string, string> {
   if (filters.amount_from !== '') q.amount_from = String(filters.amount_from)
   if (filters.amount_to !== '') q.amount_to = String(filters.amount_to)
   if (filters.integrity) q.integrity = filters.integrity
-  if (filters.dimension_value_id) {
-    q.dimension_value_id = String(filters.dimension_value_id)
+  if (filters.dimension_value_ids.length > 0) {
+    q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = '0'
   }
   return q
@@ -307,8 +315,7 @@ function hydrateFilters(q: Record<string, unknown>) {
   filters.amount_from = numberValue('amount_from')
   filters.amount_to = numberValue('amount_to')
   filters.integrity = value('integrity') === 'amount_mismatch' ? 'amount_mismatch' : ''
-  const dimensionValueId = numberValue('dimension_value_id')
-  filters.dimension_value_id = dimensionValueId !== '' && dimensionValueId > 0 ? dimensionValueId : null
+  filters.dimension_value_ids = parseDimensionValueIds(value('dimension_value_id'))
   filters.dimension_descendants = value('dimension_descendants') !== '0'
 }
 
@@ -343,7 +350,7 @@ const activeFilterCount = computed(() => {
   if (filters.account_from || filters.account_to) n++
   if (filters.amount_from !== '' || filters.amount_to !== '') n++
   if (filters.integrity) n++
-  if (filters.dimension_value_id) n++
+  if (filters.dimension_value_ids.length > 0) n++
   return n
 })
 
@@ -374,12 +381,19 @@ const filterChips = computed<FilterChip[]>(() => {
     chips.push({ key: 'amount_range', label: t('accounting.journal.filter_amount_from'), value: `${filters.amount_from !== '' ? filters.amount_from : '…'} – ${filters.amount_to !== '' ? filters.amount_to : '…'}` })
   }
   if (filters.integrity) chips.push({ key: 'integrity', value: t('accounting.journal.filter_integrity') })
-  if (filters.dimension_value_id) {
-    const value = dims.valueById.value.get(filters.dimension_value_id)
+  if (filters.dimension_value_ids.length > 0) {
+    const ids = filters.dimension_value_ids
+    const first = dims.valueById.value.get(ids[0])
+    const typeName = (id: number) => {
+      const value = dims.valueById.value.get(id)
+      return value ? dims.typeById.value.get(value.type_id)?.name : undefined
+    }
     chips.push({
       key: 'dimension',
-      label: (value && dims.typeById.value.get(value.type_id)?.name) || t('dimensions.filter_value'),
-      value: dims.valueLabel(filters.dimension_value_id)
+      label: (ids.length === 1 && first && typeName(ids[0])) || t('dimensions.filter_type'),
+      value: (ids.length === 1
+        ? dims.valueLabel(ids[0])
+        : ids.map(id => [typeName(id), dims.valueLabel(id)].filter(Boolean).join(': ')).join(' · '))
         + (filters.dimension_descendants ? '' : ` (${t('accounting.journal.filter_dimension_only_value')})`),
     })
   }
@@ -399,7 +413,7 @@ function clearFilter(key: string) {
     case 'account_range': filters.account_from = ''; filters.account_to = ''; break
     case 'amount_range': filters.amount_from = ''; filters.amount_to = ''; break
     case 'integrity': filters.integrity = ''; break
-    case 'dimension': filters.dimension_value_id = null; filters.dimension_descendants = true; break
+    case 'dimension': filters.dimension_value_ids = []; filters.dimension_descendants = true; break
   }
   applyFilters()
 }
@@ -545,8 +559,8 @@ function exportQueryParams(): Record<string, string | number> {
   if (filters.amount_from !== '') q.amount_from = filters.amount_from
   if (filters.amount_to !== '') q.amount_to = filters.amount_to
   if (filters.integrity) q.integrity = filters.integrity
-  if (filters.dimension_value_id) {
-    q.dimension_value_id = filters.dimension_value_id
+  if (filters.dimension_value_ids.length > 0) {
+    q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = 0
   }
   return q
@@ -789,7 +803,7 @@ async function focusEntry(entryId: number): Promise<boolean> {
   filters.amount_from = ''
   filters.amount_to = ''
   filters.integrity = ''
-  filters.dimension_value_id = null
+  filters.dimension_value_ids = []
   filters.dimension_descendants = true
   sourceIdFilter.value = ''
   entryIdFilter.value = entryId
@@ -976,7 +990,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
           <select v-model="filters.source_type" @change="applyFilters"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
             <option value="">{{ t('common.all') }}</option>
-            <option v-for="s in SOURCE_TYPES" :key="s" :value="s">{{ sourceLabel(s) }}</option>
+            <option v-for="s in sourceTypeOptions" :key="s" :value="s">{{ sourceLabel(s) }}</option>
           </select>
         </div>
         <div>
@@ -1016,7 +1030,6 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             <option value="">{{ t('common.all') }}</option>
             <option value="amount_mismatch">{{ t('accounting.journal.filter_integrity_amount_mismatch') }}</option>
           </select>
-          <p class="text-[11px] text-neutral-500 mt-1">{{ t('accounting.journal.filter_integrity_hint') }}</p>
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>
@@ -1048,9 +1061,9 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
         </div>
       </div>
       <!-- Hodnota dimenze: jen u firmy se zapnutými dimenzemi (komponenta se jinak nevykreslí). -->
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
       <template #actions>
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.journal.reset_filters') }}</button>
         <SavedFiltersMenu :ctrl="saved" />
@@ -1111,6 +1124,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                   <div v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
                        class="text-[10px] text-neutral-400 whitespace-nowrap"
                        :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</div>
+                  <RouterLink v-if="e.internal_document" :to="{ name: 'accounting-internal-document-detail', params: { id: e.internal_document.id } }"
+                    class="block whitespace-nowrap font-sans text-[10px] text-primary-700 hover:underline" data-test="journal-internal-document" @click.stop>
+                    {{ t(e.internal_document.role === 'reversal' ? 'accounting.journal.internal_document_reversal_badge' : 'accounting.journal.internal_document_badge') }}
+                  </RouterLink>
                 </td>
                 <td v-else-if="c.key === 'document_date'" :data-custom-color="!!colors.color('document_date')" :style="colors.cellStyle('document_date')" class="px-3 py-2 whitespace-nowrap">{{ e.document_date ? formatDate(e.document_date) : '—' }}</td>
                 <td v-else-if="c.key === 'description'" :data-custom-color="!!colors.color('description')" :style="colors.cellStyle('description')" class="px-3 py-2 wrap-cell" :title="e.description || undefined">
@@ -1227,6 +1244,10 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                 <span v-if="e.source_bank_ref && e.source_bank_ref !== e.document_no"
                       class="font-mono text-[10px] text-neutral-400 truncate"
                       :title="t('accounting.journal.bank_ref_hint', { ref: e.source_bank_ref })">{{ e.source_bank_ref }}</span>
+                <RouterLink v-if="e.internal_document" :to="{ name: 'accounting-internal-document-detail', params: { id: e.internal_document.id } }"
+                  class="whitespace-nowrap text-[10px] text-primary-700 hover:underline" @click.stop>
+                  {{ t(e.internal_document.role === 'reversal' ? 'accounting.journal.internal_document_reversal_badge' : 'accounting.journal.internal_document_badge') }}
+                </RouterLink>
               </span>
               <span class="font-mono text-sm font-semibold whitespace-nowrap" :data-custom-color="!!colors.color('amount')" :style="colors.cellStyle('amount')">
                 {{ formatMoney(e.amount ?? 0) }}

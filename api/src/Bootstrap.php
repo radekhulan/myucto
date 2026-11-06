@@ -14,6 +14,7 @@ use MyInvoice\Middleware\ApiRequestLogMiddleware;
 use MyInvoice\Middleware\ApiScopeMiddleware;
 use MyInvoice\Middleware\ApiVersionRewriteMiddleware;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\DomainLoginSessionMiddleware;
 use MyInvoice\Middleware\CsrfMiddleware;
 use MyInvoice\Middleware\DemoReadOnlyMiddleware;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
@@ -30,6 +31,7 @@ use MyInvoice\Middleware\TenantDomainMiddleware;
 use MyInvoice\Middleware\WebAuthnBodyLimitMiddleware;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Auth\PasskeyService;
+use MyInvoice\Service\Auth\PepperPolicy;
 use MyInvoice\Service\Auth\DatabaseSecurityClock;
 use MyInvoice\Service\Auth\SecurityClock;
 use MyInvoice\Service\Auth\WebAuthnConfigProvider;
@@ -72,11 +74,15 @@ final class Bootstrap
         $rootDir = self::rootDir();
         $config  = Config::load($rootDir);
 
-        // Bezpečnostní guard: v produkci pepper musí být nastavený (jinak hesla nemají druhotnou ochranu)
+        // Bezpečnostní guard: v produkci pepper musí být nastavený a skutečně tajný
+        // (jinak hesla nemají druhotnou ochranu a HKDF fallback šifruje veřejným klíčem).
         $env    = (string) $config->get('app.env', 'production');
         $pepper = (string) $config->get('app.pepper', '');
-        if ($env === 'production' && $pepper === '') {
-            throw new \RuntimeException('cfg.app.pepper není nastaven (vygeneruj: openssl rand -base64 32). V produkci je povinný.');
+        if ($env === 'production') {
+            $pepperProblem = PepperPolicy::productionProblem($pepper);
+            if ($pepperProblem !== null) {
+                throw new \RuntimeException($pepperProblem);
+            }
         }
 
         date_default_timezone_set((string) $config->get('app.timezone', 'Europe/Prague'));
@@ -119,6 +125,20 @@ final class Bootstrap
             // bere SecurityClock z databáze a zbytek se normalizuje na UTC explicitně.
             ClockInterface::class => fn () => new \Symfony\Component\Clock\NativeClock(),
             SecurityClock::class => fn () => new DatabaseSecurityClock(),
+            // Limit souběžných relací a licenční brána tokenů jsou v konstruktoru
+            // volitelné (přímo sestavené testy je nepotřebují), a PHP-DI volitelný
+            // parametr nevyplní. Proto explicitní bindy, jinak by v provozu chyběly.
+            \MyInvoice\Service\Auth\SessionManager::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Auth\SessionManager(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(SecurityClock::class),
+                $c->get(\MyInvoice\Service\License\SessionConcurrencyPolicy::class),
+            ),
+            \MyInvoice\Service\Auth\ApiTokenService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Auth\ApiTokenService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Infrastructure\Cache\RedisFactory::class),
+                $c->get(\MyInvoice\Service\License\LicenseCapacityGate::class),
+            ),
 
             LoggerInterface::class => function (ContainerInterface $c) use ($config): LoggerInterface {
                 $logger = new Logger('myinvoice');
@@ -170,6 +190,10 @@ final class Bootstrap
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifier::class,
                 ),
+            \MyInvoice\Service\Eet\Transport\EetTransportInterface::class =>
+                fn () => new \MyInvoice\Service\Eet\Transport\SoapEetTransport(),
+            \MyInvoice\Service\Eet\EetCredentialProvider::class =>
+                fn (ContainerInterface $c) => $c->get(\MyInvoice\Service\Eet\EetCertificateVault::class),
             \MyInvoice\Service\Submission\SubmissionInboxMessageProcessor::class =>
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Service\Submission\CompositeSubmissionInboxMessageProcessor::class,
@@ -207,6 +231,9 @@ final class Bootstrap
                 \DI\autowire()->constructorParameter(
                     'purchaseApprovals',
                     \DI\get(\MyInvoice\Repository\PurchaseInvoiceApprovalRepository::class),
+                )->constructorParameter(
+                    'frameworkScope',
+                    \DI\get(\MyInvoice\Security\FrameworkScopePolicy::class),
                 ),
             // Historie podání předchozím programem je nepovinná kvůli testům mostu;
             // bez výslovného předání by kontrola duplicitního řádného hlášení neběžela.
@@ -217,6 +244,9 @@ final class Bootstrap
                 )->constructorParameter(
                     'registrationSettlement',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationChangeSettlement::class),
+                )->constructorParameter(
+                    'people',
+                    \DI\get(\MyInvoice\Repository\Payroll\PayrollPeopleRepository::class),
                 ),
             // Nepodané hlášení JMHZ za převzatý měsíc (Q15-17) — nepovinné kvůli
             // jednotkovým testům přehledů, v aplikaci se předává výslovně.
@@ -227,6 +257,9 @@ final class Bootstrap
                 )->constructorParameter(
                     'awaitingRuns',
                     \DI\get(\MyInvoice\Service\Payroll\Submission\PayrollAwaitingRunDutyService::class),
+                )->constructorParameter(
+                    'signingProfiles',
+                    \DI\get(\MyInvoice\Repository\Payroll\PayrollSigningProfileRepository::class),
                 ),
             \MyInvoice\Service\Payroll\Submission\Sickness\SicknessCaseFromAbsenceService::class =>
                 \DI\autowire()->constructorParameter(
@@ -541,6 +574,7 @@ final class Bootstrap
                 // Nezaúčtované odpisy roku do projekce uzávěrky — bez bindu by je náhled DPPO
                 // v produkci tiše vynechal.
                 $c->get(\MyInvoice\Service\Accounting\Assets\DepreciationPostingService::class),
+                $c->get(\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider::class),
             ),
             // JMHZ transport — poslední dva argumenty jsou volitelné kvůli
             // testovacím dvojníkům (falešný VREP, mockovaný ledger), ale
@@ -652,6 +686,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Repository\EmailProfileRepository::class),
                 $c->get(\MyInvoice\Service\Mail\SentMailImapAppender::class),
                 invoiceIsdoc: $c->get(\MyInvoice\Service\Mail\InvoiceIsdocAttachments::class),
+                activity: $c->get(\MyInvoice\Service\ActivityLogger::class),
             ),
             \MyInvoice\Service\Bank\EmailNotice\ImapMailboxClientInterface::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Bank\EmailNotice\WebklexImapMailboxClient(
                 $c->get(\MyInvoice\Service\Bank\EmailNotice\EmailNoticeTextNormalizer::class),
@@ -680,6 +715,15 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
                 $c->get(\MyInvoice\Service\Bank\MatchedInvoicePaymentRepair::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\TransferPairService::class),
+                $c->get(\MyInvoice\Service\Accounting\OtherItemAutoMatcher::class),
+            ),
+            // ?ActivityLogger je optional class-param, autowire ho nevyplní; bez něj by
+            // automatické přiřazení úhrady chybělo v aktivitě položky.
+            \MyInvoice\Service\Accounting\OtherItemAutoMatcher::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Accounting\OtherItemAutoMatcher(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Accounting\OtherItemBankMatchService::class),
+                $c->get(\MyInvoice\Repository\OtherItemRepository::class),
+                $c->get(\MyInvoice\Service\ActivityLogger::class),
             ),
 
             // Autowire by optional ?PayrollBankEvidenceGuard nevyplnil (nullable
@@ -745,6 +789,8 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Accounting\Card\CardSettlementService::class),
                 // Dorovnání zúčtování zálohy na konečné faktuře po změně úhrady zálohy.
                 $c->get(\MyInvoice\Service\Accounting\AdvanceSettlementSync::class),
+                // Pravidlo s cílovou ostatní položkou pohyb zároveň přiřadí položce.
+                $c->get(\MyInvoice\Service\Accounting\OtherItemService::class),
             ),
 
             // Ú-16 — protizápis úhrady mzdového závazku. ?BankAnalyticResolver je
@@ -806,6 +852,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollPaymentSettlementRecognizer::class),
                 $c->get(LoggerInterface::class),
                 $c->get(\MyInvoice\Service\TaxEvidence\TaxEvidenceBankRules::class),
+                $c->get(\MyInvoice\Service\Property\Payments\BankProposalService::class),
             ),
 
             // EntityCache je v obou službách volitelný class-param (kvůli testovacím
@@ -824,6 +871,7 @@ final class Bootstrap
                 // zaplacené služby ale musí být TÁŽ instance jako všude jinde —
                 // jinak by se po zápisu nového rozsahu nezahodila jeho cache.
                 entitlement: $c->get(\MyInvoice\Service\System\InstanceEntitlement::class),
+                consistency: $c->get(\MyInvoice\Service\License\LicenseConsistency::class),
             ),
             \MyInvoice\Service\Tenant\SupplierAccessResolver::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Tenant\SupplierAccessResolver(
                 $c->get(Connection::class),
@@ -851,6 +899,15 @@ final class Bootstrap
                 $c->get(LoggerInterface::class),
                 $c->get(\MyInvoice\Service\Vat\VatStatusService::class),
                 $c->get(\MyInvoice\Service\Tenant\TenantUrlResolver::class),
+            ),
+            \MyInvoice\Action\Mcp\HostedMcpSettingsAction::class => \DI\autowire()->constructorParameter(
+                'resources', \DI\get(\MyInvoice\Service\Mcp\McpResourcePolicy::class),
+            ),
+            \MyInvoice\Action\Mcp\HostedMcpEndpointAction::class => \DI\autowire()->constructorParameter(
+                'clientTools', \DI\get(\MyInvoice\Service\Mcp\ClientMcpToolPolicy::class),
+            ),
+            AuthMiddleware::class => \DI\autowire()->constructorParameter(
+                'mcpResources', \DI\get(\MyInvoice\Service\Mcp\McpResourcePolicy::class),
             ),
             \MyInvoice\Security\UserRoleProfile::class => fn (ContainerInterface $c) => new \MyInvoice\Security\UserRoleProfile(
                 $c->get(Connection::class),
@@ -881,6 +938,10 @@ final class Bootstrap
                 ->constructorParameter(
                     'probe',
                     \DI\get(\MyInvoice\Service\System\InstanceHealthProbe::class),
+                )
+                ->constructorParameter(
+                    'securityConfig',
+                    \DI\get(\MyInvoice\Service\System\InstanceSecurityConfigurationCheck::class),
                 ),
 
             // Licenční klient (E4) má volitelný `?GuzzleHttp\Client $http = null` (test
@@ -1164,6 +1225,19 @@ final class Bootstrap
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('kb_plus'),
                     $c->get(ClockInterface::class),
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->diagnosticLogger()),
+            \MyInvoice\Service\Logbook\OdometerSource\Bmw\BmwCarDataClient::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Logbook\OdometerSource\Bmw\BmwCarDataClient(new \GuzzleHttp\Client()),
+            // Zdroje automatického stavu tachometru; nový zdroj se přidá sem.
+            \MyInvoice\Service\Logbook\OdometerSource\OdometerSourceRegistry::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\Logbook\OdometerSource\OdometerSourceRegistry([
+                    $c->get(\MyInvoice\Service\Logbook\OdometerSource\Bmw\BmwCarDataProvider::class),
+                ]),
+            // Handlery společného OAuth callbacku (/api/oauth/callback); nová doména se přidá sem.
+            \MyInvoice\Service\OAuth\OAuthCallbackRegistry::class => fn (ContainerInterface $c)
+                => new \MyInvoice\Service\OAuth\OAuthCallbackRegistry([
+                    $c->get(\MyInvoice\Service\Logbook\OdometerSource\OdometerOAuthCallbackHandler::class),
+                    $c->get(\MyInvoice\Service\Bank\Connector\BankOAuthCallbackHandler::class),
+                ]),
             \MyInvoice\Service\Bank\Connector\CsasApiClient::class => fn (ContainerInterface $c)
                 => new \MyInvoice\Service\Bank\Connector\CsasApiClient(
                     $c->get(\MyInvoice\Service\Bank\Connector\BankHttpClientFactory::class)->create('csas'),
@@ -1229,7 +1303,7 @@ final class Bootstrap
 
         // Slim 4 LIFO: poslední `add()` = NEJVĚTŠÍ vrstva = běží JAKO PRVNÍ.
         // Cílový order běhu (outside → inside):
-        //   ApiVersionRewrite → MaintenanceMode → IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → StorageQuotaReadOnly → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → SubmissionEnvironment → Action
+        //   InternalErrorRedaction → ApiVersionRewrite → MaintenanceMode → IpAllowlist → FirstRunLock → TenantDomain → Auth → ApiRequestLog → SessionLock → RequireMfa → License → StorageQuotaReadOnly → DemoReadOnly → SupplierScope → Permission → ApiScope → RateLimit → CSRF → WebAuthnBodyLimit → Routing → BodyParsing → SubmissionEnvironment → Action
         // → add() v opačném pořadí (innermost první):
         //
         // ⚠️ Middleware se předávají jako CLASS-STRING, ne jako instance. Slim je pak
@@ -1261,6 +1335,7 @@ final class Bootstrap
         $app->add(SessionLockMiddleware::class);                     // autoritativní idle/manual lock browser session
         $app->add(ApiRequestLogMiddleware::class);                   // bearer-only: per-request log do api_request_log (nad scope/právy, ať jsou vidět i zamítnutá volání)
         $app->add(AuthMiddleware::class);                            // načte session nebo bearer token
+        $app->add(DomainLoginSessionMiddleware::class);             // oddělená session klientského přihlášení
         $app->add(TenantDomainMiddleware::class);                   // Host autoritativně určí tenant před autentizací
         $app->add(FirstRunLockMiddleware::class);                    // 423 pokud users prázdná
         $app->add(IpAllowlistMiddleware::class);                     // outermost user mw
@@ -1269,6 +1344,9 @@ final class Bootstrap
         // na už přepsané cestě (jinak by /api/v1/health v údržbě spadlo na 503).
         $app->add(MaintenanceModeMiddleware::class);                 // 503 + Retry-After na vše kromě /api/health
         $app->add(new ApiVersionRewriteMiddleware());                // /api/v1/* → /api/* před vším ostatním
+        // Nejvnější uživatelská vrstva: v produkci skryje text výjimky v 500
+        // odpovědích všech vrstev pod ní a detail zaloguje pod request id.
+        $app->add(\MyInvoice\Middleware\InternalErrorRedactionMiddleware::class);
 
         // Stack trace v odpovědích API na cizí infrastruktuře nemá co dělat,
         // takže `app.debug` ve spravované instalaci neplatí, i kdyby se do
@@ -1277,7 +1355,12 @@ final class Bootstrap
             \MyInvoice\Service\System\ManagedModeGuard::KEY_APP_DEBUG,
             (bool) $config->get('app.debug', false),
         );
-        $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
+        $errors = $app->addErrorMiddleware($displayErrors, true, true, $container->get(LoggerInterface::class));
+        $errors->setErrorHandler(
+            \PDOException::class,
+            new \MyInvoice\Http\ForeignKeyConflictHandler($app->getResponseFactory(), $errors->getDefaultErrorHandler()),
+            true,
+        );
 
         return $app;
     }

@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Expense;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Accounting\DocumentRepostService;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\PostingException;
@@ -64,13 +65,27 @@ final class PurchaseDiscountReclass
             $sql .= ' AND pi.supplier_id = ?';
             $params[] = $supplierId;
         }
-        $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY pi.supplier_id, pi.id');
+        // Výběr zahrnuje i historii přímého zápisu (nativní přeúčtování stornem).
+        // Vlastněné členy přidáváme samostatně, aby obě cesty používaly svůj index.
+        $sql .= " UNION SELECT DISTINCT pi.supplier_id, pi.id
+                   FROM purchase_invoices pi
+                   JOIN purchase_invoice_items pii ON pii.purchase_invoice_id = pi.id
+                   JOIN journal_document_postings jdp ON jdp.supplier_id = pi.supplier_id
+                        AND jdp.doc_type = 'purchase_invoice' AND jdp.doc_id = pi.id
+                   JOIN journal_entries je ON je.supplier_id = jdp.supplier_id AND je.id = jdp.entry_id
+                   JOIN accounting_periods p ON p.id = je.period_id AND p.supplier_id = je.supplier_id AND p.status = 'open'
+                  WHERE pii.total_without_vat < 0";
+        if ($supplierId !== null) {
+            $sql .= ' AND pi.supplier_id = ?';
+            $params[] = $supplierId;
+        }
+        $stmt = $this->db->pdo()->prepare($sql . ' ORDER BY supplier_id, id');
         $stmt->execute($params);
 
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $report = $this->run((int) $row['supplier_id'], (int) $row['id'], false);
-            if ($report['discount_lines'] > 0 && ($report['state'] === 'taken_over' || $report['posting_changes']
+            if ($report['discount_lines'] > 0 && (in_array($report['state'], ['taken_over', 'posting_group_requires_repost'], true) || $report['posting_changes']
                 || $report['classification_changes'] > 0 || $report['trace_fixes'] > 0)) {
                 $out[] = $report;
             }
@@ -110,13 +125,16 @@ final class PurchaseDiscountReclass
         $commit = false;
         try {
             if ($apply) {
-                (new DimensionPeriodGuard($this->db))->lockSources($supplierId, [['purchase_invoice', $purchaseInvoiceId]]);
+                (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertSourcesMutable($supplierId, [['purchase_invoice', $purchaseInvoiceId]]);
             }
-            $live = null;
+            $active = (new DocumentPostingGroup($this->db))->active($supplierId, 'purchase_invoice', $purchaseInvoiceId, $apply);
+            $owned = DocumentPostingGroup::hasOwnedEntries($active);
+            $live = $active === [] ? null : $active[array_key_last($active)];
             $reversed = false;
             foreach ($this->entries($supplierId, $purchaseInvoiceId, $apply) as $entry) {
                 if ($entry['reversed_by'] === null) {
-                    $live = $entry;
+                    // Původní nativní chování zahrnuje i koncept zápisu.
+                    if (!$owned) $live = $entry;
                 } else {
                     $reversed = true;
                 }
@@ -133,7 +151,13 @@ final class PurchaseDiscountReclass
                 return $report;
             }
 
-            $built = $this->posting->buildFromPurchaseInvoice($supplierId, $purchaseInvoiceId);
+            if ($owned
+                && !DocumentPostingGroup::isSingleDirectEntry($active, 'purchase_invoice', $purchaseInvoiceId)) {
+                $report['state'] = 'posting_group_requires_repost';
+                $report['message'] = 'Přeúčtujte celou skupinu zápisů z detailu dokladu.';
+                return $report;
+            }
+            $built = $this->posting->buildFromPurchaseInvoice($supplierId, $purchaseInvoiceId, ['entry_date' => (string) $live['entry_date']]);
             $report['before'] = $this->describe($this->liveLines($supplierId, (int) $live['id']));
             $report['after'] = $this->describe($built, true, $supplierId);
             $report['posting_changes'] = $this->key($report['before']) !== $this->key($report['after']);
@@ -204,7 +228,11 @@ final class PurchaseDiscountReclass
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
-    /** @return list<array<string,mixed>> */
+    /**
+     * Přímá historie slouží jen k rozpoznání nativního přeúčtování stornem a konceptu;
+     * aktivní zaúčtování včetně vlastněných členů určuje DocumentPostingGroup.
+     * @return list<array<string,mixed>>
+     */
     private function entries(int $supplierId, int $purchaseInvoiceId, bool $currentRead = false): array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -257,6 +285,7 @@ final class PurchaseDiscountReclass
     {
         $fixed = 0;
         $guard = new DimensionPeriodGuard($this->db);
+        if ($apply) (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims($supplierId);
         $entry = $apply ? ($guard->lockEntries($supplierId, [$entryId])[$entryId] ?? null) : null;
         $update = $this->db->pdo()->prepare(
             'UPDATE journal_entry_lines SET currency_code = ?, fx_rate = ?, amount_foreign = ?
@@ -283,6 +312,8 @@ final class PurchaseDiscountReclass
                     } catch (DimensionException $e) {
                         throw new PostingException($e->errorCode, 'Uzavřené účetní knihy nelze měnit. Nejprve je znovu otevřete.', $e->httpStatus);
                     }
+                    (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingLinesMutable($supplierId, [(int) $line['id']]);
+                    (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertLinesMutable($supplierId, [(int) $line['id']]);
                     $update->execute([$b['currency_code'], $b['fx_rate'] ?? null,
                         isset($b['amount_foreign']) ? JournalLineAmount::decimal($b['amount_foreign']) : null,
                         (int) $line['id'], $supplierId]);

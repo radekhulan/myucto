@@ -50,7 +50,7 @@ final class Section46Action
         try {
             $rows = $this->service->previewCandidates($supplierId, $asOf);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
 
         return Json::ok($response, ['as_of' => $asOf, 'rows' => $rows]);
@@ -97,7 +97,7 @@ final class Section46Action
             // Nesplněná podmínka § 46 je chyba vstupu, ne selhání serveru.
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
 
         return Json::ok($response, $result);
@@ -117,7 +117,7 @@ final class Section46Action
         try {
             $result = $this->service->previewRestorations($supplierId, $year, $month);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
 
         return Json::ok($response, $result);
@@ -142,7 +142,7 @@ final class Section46Action
         try {
             $result = $this->service->recordRestorations($supplierId, $year, $month, $userId);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
 
         return Json::ok($response, $result);

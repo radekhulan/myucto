@@ -42,7 +42,11 @@ return [
         'pepper' => 'CHANGE-ME',                     // doplňková sůl k password_hash, 32B base64: openssl rand -base64 32
         'secret_encryption_key' => '',               // 32B base64 pro AES-256-GCM (TOTP secrets); openssl rand -base64 32. Pokud prázdné, fallback HKDF z pepperu.
         'secret_encryption_previous_keys' => [],      // při rotaci sem dočasně vlož staré 32B base64 klíče; nové zápisy používají pouze aktuální klíč
-        'payroll_hash_key' => '',                    // volitelný oddělený 32B base64 klíč pro HMAC citlivých mzdových identifikátorů; fallback je doménově oddělený HKDF z pepperu
+        // Oddělený 32B base64 klíč pro HMAC citlivých mzdových identifikátorů (openssl rand -base64 32).
+        // NOVÁ instalace: vyplň (setup wizard i api/bin/setup.php ho doplní samy do cfg.local.php, když chybí).
+        // EXISTUJÍCÍ instalace s mzdovými daty: NEMĚŇ a nedoplňuj, uložené otisky by přestaly platit;
+        // prázdná hodnota = doménově oddělený HKDF z pepperu (pepper pak chraň stejně jako tento klíč).
+        'payroll_hash_key' => '',
         'timezone' => 'Europe/Prague',               // PHP date_default_timezone_set
         'locale_default' => 'cs',                    // jazyk UI při prvním načtení (před přihlášením)
 
@@ -86,6 +90,15 @@ return [
         // (tedy vedle cfg.local.php, mimo veřejný datový prostor).
         'lock_file'    => '',
         'retry_after'  => 300,                       // sekundy do hlavičky Retry-After u 503
+    ],
+
+    // Ohlášení plánované údržby. Úloha cron-maintenance-notice stahuje hlášky
+    // provozovatele (od-do, text) a aplikace je ukazuje v pruhu nahoře. Ve
+    // spravovaném provozu běží vždy, tady si ji zapínáte sami. Hlášku lze zadat
+    // i lokálně souborem ${MYINVOICE_DATA_DIR}/storage/maintenance-notice.json.
+    'maintenance_notice' => [
+        'enabled' => false,
+        'url'     => '',                              // prázdné = license.server_url + /api/maintenance-notice
     ],
     'epo' => [
         // Spravovaný PEM bundle pro ověřování pečeti dodejek EPO. V ostrém provozu
@@ -201,7 +214,7 @@ return [
         // warning `session_lock_without_unlock_method`; jejich jediná cesta ven je logout.
         'lock_after_minutes' => 0,
         'cookie_name'   => '__Host-myinvoice_session', // __Host- prefix → vyžaduje Secure + Path=/ + bez Domain (přísnější CSRF). Pro HTTP dev změnit na 'myinvoice_session' a cookie_secure=false.
-        'cookie_secure' => true,                     // true vyžaduje HTTPS — false jen pro lokální HTTP dev (a __Host- nebude fungovat)
+        'cookie_secure' => true,                     // true vyžaduje HTTPS, false jen pro lokální HTTP instalaci (a __Host- nebude fungovat); při https app.url a false hlásí diagnostika varování
         'cookie_samesite' => 'Lax',                  // 'Lax' | 'Strict' | 'None' (None vyžaduje secure=true)
     ],
     'auth' => [
@@ -590,6 +603,10 @@ return [
     // Plain PDF (bez embedded ISDOC) se ve fázi 1 přeskakují — AI extrakce v fázi 2c je doplní.
     'purchase_invoice' => [
         'inbox_dir'         => '',                   // absolutní cesta (např. 'C:/inetpub/wwwroot/myucto.cz/inbox' nebo '/var/lib/myucto/inbox'); prázdné = scan vypnutý
+        // Jen automatický cron: vlastník společného inbox_dir (kladné ID existující firmy).
+        // null = nenastaveno: explicitní app.default_supplier_id bez scan_all_suppliers,
+        // jinak jediná firma v DB; u více firem firma 1 s varováním. Ruční sken volí firma v UI.
+        'cron_supplier_id'  => null,
         'inbox_recursive'   => true,                 // procházet i podadresáře
         'allowed_exts'      => ['pdf', 'isdoc', 'xml'],  // jen tyto přípony se zpracují (.xml = ISDOC payload bez wrapping PDF)
         'move_processed_to' => '',                   // volitelný podadresář (např. 'processed'); prázdné = soubory zůstanou na místě a budou skipnuté při dalším scanu díky pdf_hash dedup

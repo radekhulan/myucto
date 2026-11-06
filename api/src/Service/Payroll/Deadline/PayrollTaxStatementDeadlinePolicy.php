@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Deadline;
 
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\TaxStatement\TaxStatementService;
 use MyInvoice\Service\Report\CzechWorkingDays;
@@ -58,6 +59,27 @@ final class PayrollTaxStatementDeadlinePolicy
     /** Horní mez je tatáž jako u tiskopisů, ať se meze nerozejdou. */
     public const SUPPORTED_TO_YEAR = 2199;
 
+    /**
+     * Poslední zdaňovací období, za které se vyúčtování ze mzdového modulu
+     * podává.
+     *
+     * Zákon č. 360/2025 Sb., čl. VI bod 80 (účinnost 1. 1. 2027 podle
+     * čl. XXXIV písm. f) zrušil § 38j odst. 4 až 9 ZDP — vyúčtování daně ze
+     * závislé činnosti nahradilo hlášení k záloze v jednotném měsíčním hlášení
+     * zaměstnavatele (§ 38ha). Srážková daň ze závislé činnosti zanikla týmž
+     * zákonem (čl. VI body 10 a 36): od roku 2027 se z příjmů podle § 6 odst. 4
+     * sráží záloha ({@see SeparateTaxBaseRegime}), takže mzdy do vyúčtování
+     * daně vybírané srážkou (§ 38d odst. 8) nemají co přispět.
+     *
+     * Za rok 2026 se obě vyúčtování podávají v roce 2027 ještě podle dosavadního
+     * znění — čl. VII bod 6 téhož zákona: „Pro daňové povinnosti u daně z příjmů
+     * za zdaňovací období započaté přede dnem nabytí účinnosti čl. VI bodu 1
+     * tohoto zákona, jakož i pro práva a povinnosti s nimi související, se
+     * použije zákon č. 586/1992 Sb., ve znění účinném přede dnem nabytí
+     * účinnosti čl. VI bodu 1 tohoto zákona."
+     */
+    public const LAST_STATEMENT_TAX_YEAR = SeparateTaxBaseRegime::FIRST_SEPARATE_ADVANCE_TAX_YEAR - 1;
+
     private const RULESET_ID = 'cz-payroll-tax-statement-deadline-2011-01.v1';
 
     private const SOURCES = [
@@ -66,6 +88,12 @@ final class PayrollTaxStatementDeadlinePolicy
         'counting' => '280/2009 Sb. § 33 odst. 1 a 4',
         'holidays' => '245/2000 Sb.',
     ];
+
+    /** Podává se za tohle zdaňovací období ještě roční vyúčtování? */
+    public static function statementRequiredForYear(int $year): bool
+    {
+        return $year <= self::LAST_STATEMENT_TAX_YEAR;
+    }
 
     /**
      * Lhůta jednoho tiskopisu za jedno zdaňovací období.

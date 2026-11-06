@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Payment;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryResultRepository;
 use MyInvoice\Service\Payroll\Deadline\PayrollLevyDeadlinePolicy;
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Security\PayrollRevealPurpose;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
@@ -407,6 +408,7 @@ final class PayrollIncomeTaxLiabilityMaterializer
 
         $advance = 0;
         $withholding = 0;
+        $separateAdvance = 0;
         $bonus = 0;
         $actualPeople = [];
         $personHashes = [];
@@ -478,13 +480,18 @@ final class PayrollIncomeTaxLiabilityMaterializer
                     ),
                 );
             }
-            $withholding = $this->add(
-                $withholding,
-                $this->nonNegativeInt(
-                    $result['withholding_tax_minor_units'] ?? null,
-                    "srážková daň {$reference}",
-                ),
+            $separateBaseTax = $this->nonNegativeInt(
+                $result['withholding_tax_minor_units'] ?? null,
+                "srážková daň {$reference}",
             );
+            $withholding = $this->add($withholding, $separateBaseTax);
+            // Od roku 2027 je daň ze samostatného základu podle § 6 odst. 4
+            // ZÁLOHOU (§ 38h), splatnou spolu s ostatními zálohami v poslední
+            // den lhůty pro hlášení k záloze (§ 38hb). Na účet srážkové daně
+            // (§ 38d) už nepatří — odvádí se jedním převodem se zálohou.
+            if (SeparateTaxBaseRegime::fromResultSnapshot($result)->isAdvance()) {
+                $separateAdvance = $this->add($separateAdvance, $separateBaseTax);
+            }
             $actualPeople[$reference] = true;
             $personHashes[$reference] = $resultHash;
         }
@@ -511,8 +518,8 @@ final class PayrollIncomeTaxLiabilityMaterializer
         }
 
         return [
-            'advance_tax' => $advance,
-            'withholding_tax' => $withholding,
+            'advance_tax' => $this->add($advance, $separateAdvance),
+            'withholding_tax' => $this->subtract($withholding, $separateAdvance),
             'tax_bonus' => $bonus,
             'people_hash' => hash(
                 'sha256',

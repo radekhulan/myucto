@@ -210,7 +210,7 @@ final class CnbRateDeviationChecker
               WHERE i.supplier_id = ? AND cur.code <> 'CZK'
                 AND i.exchange_rate IS NOT NULL AND i.exchange_rate > 0
                 AND i.status NOT IN ('draft','cancelled')
-                AND i.invoice_type NOT IN ('proforma','cancellation')
+                AND i.invoice_type NOT IN ('proforma','cancellation','rent_calendar','advance_calendar')
                 AND i.effective_tax_date BETWEEN ? AND ?
              UNION ALL
              SELECT 'purchase_invoice' AS doc_type, pi.id AS id, pi.varsymbol AS doc_no, cur2.code AS currency,

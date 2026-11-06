@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -72,7 +73,7 @@ final class StockItemPriceRepository
         $stmt->execute(array_merge([$supplierId, strtoupper($currency)], $ids));
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
-            $out[(int) $r['stock_item_id']] = (string) $r['computed_price'];
+            $out[(int) $r['stock_item_id']] = (string) UnitPricePrecision::toDecimalString($r['computed_price']);
         }
         return $out;
     }
@@ -176,6 +177,8 @@ final class StockItemPriceRepository
         $r['computed_context'] = $r['computed_context'] === null
             ? null : json_decode((string) $r['computed_context'], true, 512, JSON_THROW_ON_ERROR);
         // markup_pct, fixed_price, computed_* zůstávají string (money-safe).
+        $r['fixed_price'] = UnitPricePrecision::toDecimalString($r['fixed_price']);
+        $r['computed_price'] = UnitPricePrecision::toDecimalString($r['computed_price']);
         return $r;
     }
 }

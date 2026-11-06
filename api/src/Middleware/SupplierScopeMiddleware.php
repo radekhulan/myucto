@@ -8,6 +8,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Cache\SupplierWriteGenerations;
 use MyInvoice\Http\RequestPath;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
+use MyInvoice\Security\InstanceAdminRoutePolicy;
+use MyInvoice\Security\RequestAuthorization;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -47,6 +49,19 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
         // Normalizovaná cesta (viz RequestPath) — výjimky musí platit přesně tam,
         // kam router request doručí.
         $path = RequestPath::normalize($request->getUri()->getPath());
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        if (InstanceAdminRoutePolicy::isTechnicalUser($user)) {
+            if (!RequestAuthorization::isSessionAuth($request)
+                || !InstanceAdminRoutePolicy::allows($request->getMethod(), $path)) {
+                return Json::error($this->responseFactory->createResponse(403),
+                    'forbidden_permission', 'Pro tuto akci nemáš oprávnění.', 403);
+            }
+            return $handler->handle($request->withAttribute(self::ATTR_CURRENT_ID, 0));
+        }
+        if (InstanceAdminRoutePolicy::isTechnicalEndpoint($request->getMethod(), $path)) {
+            // Technické rozhraní autorizuje vlastní roli; běžné členství zde nemá význam.
+            return $handler->handle($request->withAttribute(self::ATTR_CURRENT_ID, 0));
+        }
         if (str_starts_with($path, '/api/auth/webauthn/')
             || str_starts_with($path, '/api/auth/mfa/')
             || str_starts_with($path, '/api/auth/session/')

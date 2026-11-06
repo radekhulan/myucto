@@ -17,6 +17,8 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import Modal from '@/components/ui/Modal.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
+defineProps<{ embedded?: boolean }>()
+
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
@@ -205,8 +207,8 @@ function criteria(item: AdminBankRuleTemplate): string {
              SAMOSTATNÁ stránka, takže dřív neměla vůbec nadpis první úrovně —
              stránce chyběl display font, který ostatní tituly nesou, a čtečka
              obrazovky začínala rovnou druhou úrovní. -->
-        <h1 class="text-2xl font-semibold">{{ t('bank_template_admin.title') }}</h1>
-        <p class="text-sm text-neutral-500 mt-1">{{ t('bank_template_admin.subtitle') }}</p>
+        <h1 v-if="!embedded" class="text-2xl font-semibold">{{ t('bank_template_admin.title') }}</h1>
+        <p class="text-sm text-neutral-500" :class="embedded ? '' : 'mt-1'">{{ t('bank_template_admin.subtitle') }}</p>
       </div>
       <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="startNew">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>

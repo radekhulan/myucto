@@ -9,6 +9,8 @@ const m = vi.hoisted(() => ({
   getBalanceInventory: vi.fn(),
   saveClosingInventory: vi.fn(),
   exportReport: vi.fn(),
+  getOpenItemsList: vi.fn(),
+  query: {} as Record<string, string>,
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
   toastWarning: vi.fn(),
@@ -21,6 +23,7 @@ vi.mock('@/api/accounting', () => ({
     getBalanceInventory: m.getBalanceInventory,
     saveClosingInventory: m.saveClosingInventory,
     exportReport: m.exportReport,
+    getOpenItemsList: m.getOpenItemsList,
   },
 }))
 
@@ -30,10 +33,11 @@ vi.mock('@/composables/useToast', () => ({
 
 vi.mock('@/composables/useFormat', () => ({
   formatMoney: (v: number) => String(v),
+  formatDate: (v: string) => v,
 }))
 
 vi.mock('@/components/ui/buttonStyles', () => ({
-  ICONS: { download: 'M0 0' },
+  ICONS: { download: 'M0 0', search: 'M0 0', check: 'M0 0' },
   btnOutline: () => 'btn-outline',
   btnFilled: () => 'btn-filled',
 }))
@@ -49,6 +53,7 @@ vi.mock('vue-i18n', () => ({
 
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
+  useRoute: () => ({ query: m.query }),
 }))
 
 import BalanceInventory from '@/pages/accounting/BalanceInventory.vue'
@@ -79,6 +84,9 @@ function makeReport(overrides: Partial<BalanceInventoryReport> = {}): BalanceInv
 describe('BalanceInventory.vue', () => {
   beforeEach(() => {
     m.listPeriods.mockReset()
+    m.getOpenItemsList.mockReset()
+    m.getOpenItemsList.mockResolvedValue({ as_of: '2093-12-31', accounts: [], totals: { open_count: 0, open_md: 0, open_d: 0, unmatched: 0 } })
+    for (const k of Object.keys(m.query)) delete m.query[k]
     m.getClosingInventory.mockReset()
     m.getBalanceInventory.mockReset()
     m.saveClosingInventory.mockReset()
@@ -175,6 +183,75 @@ describe('BalanceInventory.vue', () => {
 
     const acc411 = m.saveClosingInventory.mock.calls[0][1].items.find((i: any) => i.account_id === 12)
     expect(acc411.counted_balance).toBe(-1000)
+  })
+
+  function analyticReport(): BalanceInventoryReport {
+    const row = (id: number, code: string, md: number, d: number) => ({
+      account_id: id, account_code: code, name: `Analytika ${code}`, account_type: 'asset' as any, normal_side: 'debit' as any,
+      parent_id: 20, parent_code: '221', parent_name: 'Banka', parent_normal_side: 'debit' as any,
+      ks_md: md, ks_d: d, documentation_hint: 'Výpis', book_balance: md - d, counted_balance: null, difference: null, resolution: 'open' as const, item_note: null, resolved: false,
+    })
+    return makeReport({ rows: [row(21, '221001', 5000, 0), row(22, '221002', 0, 2000), row(23, '221003', 0, 0)], count: 3 })
+  }
+
+  it('(f) analytiky mají vlastní řádky a nad nimi součet syntetiky', async () => {
+    m.getClosingInventory.mockResolvedValue(analyticReport())
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+
+    const inputs = wrapper.findAll('tbody input[inputmode="decimal"]')
+    expect(inputs).toHaveLength(3)
+    const summary = wrapper.get('[data-test="inventory-summary-221"]')
+    expect(summary.text()).toContain('3000')
+
+    // Součet skutečného stavu vznikne, až když jsou napočítané všechny analytiky.
+    await inputs[0].setValue('5000')
+    expect(summary.findAll('td')[4].text()).toBe('')
+    await inputs[1].setValue('-1900')
+    await inputs[2].setValue('0')
+    expect(summary.findAll('td')[4].text()).toBe('3100')
+    expect(summary.findAll('td')[5].text()).toBe('100')
+  })
+
+  it('(g) tlačítko potvrdí jen prázdné nulové účty', async () => {
+    m.getClosingInventory.mockResolvedValue(analyticReport())
+    m.saveClosingInventory.mockResolvedValue({ status: 'in_progress', unresolved_count: 2, item_count: 3, completed: false, ok: false, row_version: 4 })
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+
+    await wrapper.get('[data-test="inventory-confirm-zero"]').trigger('click')
+    await wrapper.findAll('button').find(b => b.text() === 'accounting.balance_inventory.save')!.trigger('click')
+    await flushPromises()
+
+    const items = m.saveClosingInventory.mock.calls[0][1].items
+    expect(items.find((i: any) => i.account_id === 23).counted_balance).toBe(0)
+    expect(items.find((i: any) => i.account_id === 23).resolution).toBe('resolved')
+    expect(items.find((i: any) => i.account_id === 21).counted_balance).toBeNull()
+  })
+
+  it('(h) období a účet přijdou z prokliku z inventury účtu', async () => {
+    m.query.period_id = '6'
+    m.query.account = '11'
+    m.listPeriods.mockResolvedValue([
+      { id: 5, supplier_id: 1, fiscal_year: 2093, starts_on: '2093-01-01', ends_on: '2093-12-31', status: 'open', closed_at: null, created_at: '' },
+      { id: 6, supplier_id: 1, fiscal_year: 2092, starts_on: '2092-01-01', ends_on: '2092-12-31', status: 'closed', closed_at: null, created_at: '' },
+    ])
+    m.getClosingInventory.mockResolvedValue(makeReport())
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+
+    expect(m.getClosingInventory).toHaveBeenCalledWith(6)
+    expect(wrapper.get('[data-test="inventory-row-221"]').classes()).toContain('ring-1')
+    expect(wrapper.get('[data-test="inventory-row-411"]').classes()).not.toContain('ring-1')
+  })
+
+  it('(i) načte soupis otevřených položek k rozvahovému dni', async () => {
+    m.getClosingInventory.mockResolvedValue(makeReport())
+    const wrapper = mount(BalanceInventory)
+    await flushPromises()
+
+    expect(m.getOpenItemsList).toHaveBeenCalledWith({ as_of: '2093-12-31', codes: undefined })
+    expect(wrapper.find('[data-test="open-items-list"]').exists()).toBe(true)
   })
 
   it('(c) dokončení s nevyřešeným rozdílem → backend vrací completed:false → warning', async () => {

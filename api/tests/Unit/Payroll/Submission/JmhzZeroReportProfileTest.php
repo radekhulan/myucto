@@ -98,12 +98,12 @@ final class JmhzZeroReportProfileTest extends TestCase
     }
 
     /**
-     * Druhý zaměnitelný rozdíl: anulační hlášení ELDP blok ani místo výkonu
-     * práce neuvádí, protože opravovat je nemá smysl, když vztah neexistoval.
+     * Druhý zaměnitelný rozdíl: anulační hlášení kód ELDP, jeho platnost
+     * ani vyměřovací základ neuvádí, protože vztah neexistoval.
      */
-    public function testEldpAndWorkplaceAreOmittedOnlyWhenAnnulling(): void
+    public function testEldpIsOmittedOnlyWhenAnnulling(): void
     {
-        foreach (['10240', '10241', '10242', '10245', '10229', '10230', '10231'] as $attributeId) {
+        foreach (['10240', '10241', '10242', '10245'] as $attributeId) {
             self::assertSame(
                 JmhzZeroReportProfile::RULE_OMIT,
                 JmhzZeroReportProfile::rule(
@@ -119,6 +119,26 @@ final class JmhzZeroReportProfileTest extends TestCase
                     $attributeId,
                 ),
                 "Atribut {$attributeId} se v řádném nulovém hlášení uvádí.",
+            );
+        }
+    }
+
+    /**
+     * Pravidla podání 1.4.5, ř. 564-593: místo výkonu práce, stanovený fond,
+     * prohlášení poplatníka a roční zúčtování se v anulačním formuláři
+     * „neopravují". Jsou povinné (P), takže je nejde vynechat; opravný
+     * formulář nese hodnotu z opravovaného.
+     */
+    public function testMandatoryAttributesAreCarriedOverWhenAnnulling(): void
+    {
+        foreach (['10419', '10319', '10320', '10229', '10230', '10231', '10259'] as $attributeId) {
+            self::assertSame(
+                JmhzZeroReportProfile::RULE_UNCHANGED,
+                JmhzZeroReportProfile::rule(
+                    JmhzZeroReportProfile::SITUATION_AMENDMENT_UNREPORTABLE_MONTH,
+                    $attributeId,
+                ),
+                "Atribut {$attributeId} se v anulačním hlášení neopravuje.",
             );
         }
     }

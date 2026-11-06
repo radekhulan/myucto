@@ -43,12 +43,29 @@ final class LogbookSourcePermissionTest extends TestCase
         foreach (['cash_document' => 'cash', 'bank_transaction' => 'bank', 'journal_entry' => 'accounting'] as $type => $permission) {
             $query = ['type' => $type, 'date' => '2099-03-05'];
             self::assertSame(403, $action->linkCandidates($this->request()->withQueryParams($query), new Response())->getStatusCode());
-            self::assertSame(200, $action->linkCandidates($this->request([$permission => 1])->withQueryParams($query), new Response())->getStatusCode());
+            self::assertSame(200, $action->linkCandidates($this->request([$permission => 1], $permission === 'bank' ? 'client' : 'staff')->withQueryParams($query), new Response())->getStatusCode());
         }
         foreach (['source_cash_document_id', 'source_bank_transaction_id', 'source_journal_entry_id', 'source_purchase_invoice_id', 'source_item_id'] as $key) {
             self::assertSame(403, $action->create($this->request()->withParsedBody($body + [$key => 1]), new Response())->getStatusCode(), $key);
         }
         self::assertSame(0, $this->fuelingCount($this->supplierA));
+    }
+
+    /**
+     * `cash` a `accounting` jsou v katalogu práv jen pro zaměstnanecké role. Klientská role,
+     * která je má uložené, je přes RequestAuthorization::allows nedostane, ani u kandidátů
+     * zdroje knihy jízd.
+     */
+    public function testClientRoleWithStaffOnlyGrantIsRejected(): void
+    {
+        $action = $this->container->get(FuelingsAction::class);
+        foreach (['cash_document' => 'cash', 'journal_entry' => 'accounting'] as $type => $permission) {
+            $query = ['type' => $type, 'date' => '2099-03-05'];
+            $client = $this->request([$permission => 1], 'client')->withQueryParams($query);
+            self::assertSame(403, $action->linkCandidates($client, new Response())->getStatusCode(), $permission);
+            $staff = $this->request([$permission => 1], 'staff')->withQueryParams($query);
+            self::assertSame(200, $action->linkCandidates($staff, new Response())->getStatusCode(), $permission);
+        }
     }
 
     public function testGrantedCashLinkStillRequiresOwnTenantAndRevocationPreservesStoredLink(): void
@@ -57,7 +74,7 @@ final class LogbookSourcePermissionTest extends TestCase
         $foreign = $this->cashDocument($this->supplierB, 'Cizí syntetická účtenka', 1000);
         $action = $this->container->get(FuelingsAction::class);
         $body = ['fueled_date' => '2099-03-05', 'amount_with_vat' => 1000];
-        $allowed = $this->request(['cash' => 1]);
+        $allowed = $this->request(['cash' => 1], 'staff');
         self::assertSame(400, $action->create($allowed->withParsedBody($body + ['source_cash_document_id' => $foreign]), new Response())->getStatusCode());
         $created = $action->create($allowed->withParsedBody($body + ['source_cash_document_id' => $own]), new Response());
         self::assertSame(201, $created->getStatusCode());
@@ -78,12 +95,12 @@ final class LogbookSourcePermissionTest extends TestCase
         self::assertNull($list['data'][0]['source_cash_document_number']);
     }
 
-    private function request(array $extra = []): ServerRequestInterface
+    private function request(array $extra = [], string $roleType = 'client'): ServerRequestInterface
     {
         return (new ServerRequestFactory())->createServerRequest('GET', '/api/logbook/fuelings')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client'])
-            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Delegovaná role', 'client', true,
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $roleType === 'client' ? 'client' : 'accountant'])
+            ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Delegovaná role', $roleType, true,
                 $extra + ['logbook' => 1, 'logbook.write' => 2], 'custom'));
     }
 

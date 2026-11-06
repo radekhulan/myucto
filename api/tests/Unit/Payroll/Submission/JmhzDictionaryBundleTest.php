@@ -10,7 +10,7 @@ use PHPUnit\Framework\TestCase;
 final class JmhzDictionaryBundleTest extends TestCase
 {
     private const MANIFEST_SHA256 =
-        'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d';
+        '39bb516b4fff204c44f0b8a6b9e0ec40601ef73af79460bdf937777e046c00d8';
 
     public function testOfficialDictionaryPackageIsPinnedAndSelfConsistent(): void
     {

@@ -112,18 +112,31 @@ final class SampleDimensionGenerator
                 }
             }
         }
-        $lines = $this->rows('SELECT DISTINCT l.id, je.source_type, je.source_id FROM journal_entry_lines l JOIN journal_entries je ON je.id=l.entry_id AND je.supplier_id=l.supplier_id JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id JOIN sample_data_entries s ON s.supplier_id=je.supplier_id AND ((s.entity_type="journal_entry" AND s.entity_id=je.id) OR (s.entity_id=je.source_id AND (s.entity_type=je.source_type OR (s.entity_type="credit_note" AND je.source_type="invoice")))) WHERE l.supplier_id=? AND a.account_code REGEXP "^[56]" ORDER BY l.id', [$supplierId]);
+        $lines = $this->rows('SELECT l.id, je.source_type, je.source_id FROM journal_entry_lines l JOIN journal_entries je ON je.id=l.entry_id AND je.supplier_id=l.supplier_id JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id WHERE l.supplier_id=? AND a.account_code REGEXP "^[56]"
+            AND (EXISTS (SELECT 1 FROM sample_data_entries s WHERE s.supplier_id=je.supplier_id AND s.entity_type="journal_entry" AND s.entity_id=je.id)
+              OR EXISTS (SELECT 1 FROM sample_data_entries s WHERE s.supplier_id=je.supplier_id AND s.entity_type=je.source_type AND s.entity_id=je.source_id)
+              OR (je.source_type="invoice" AND EXISTS (SELECT 1 FROM sample_data_entries s WHERE s.supplier_id=je.supplier_id AND s.entity_type="credit_note" AND s.entity_id=je.source_id)))
+            ORDER BY l.id', [$supplierId]);
+        $lineIds = array_column($lines, 'id');
+        $currentDimensions = $this->assignments->lineDimensions($supplierId, $lineIds);
+        $currentSplits = $this->assignments->lineSplits($supplierId, $lineIds);
+        $newAssignments = [];
         foreach ($lines as $line) {
             $lineId = (int) $line['id'];
-            $current = $this->assignments->lineDimensions($supplierId, [$lineId])[$lineId] ?? [];
-            $splits = $this->assignments->lineSplits($supplierId, [$lineId])[$lineId] ?? [];
+            $current = $currentDimensions[$lineId] ?? [];
+            $splits = $currentSplits[$lineId] ?? [];
             $dims = $documentMaps[$line['source_type'] . ':' . $line['source_id']] ?? $centerOnly;
             $new = array_intersect_key(array_diff_key($dims, $current, $splits), $map);
             $new = array_filter($new, static fn (int $id): bool => in_array($id, $map, true));
             if ($new === []) continue;
-            $this->assignments->insertLineDimensions($supplierId, $lineId, $new);
-            $track('dim_line', $lineId);
-            $counts['dimension_journal_lines']++;
+            $newAssignments[$lineId] = ['dimensions' => $new];
+        }
+        foreach (array_chunk($newAssignments, 500, true) as $batch) {
+            $this->assignments->insertLineAssignments($supplierId, $batch);
+            foreach (array_keys($batch) as $lineId) {
+                $track('dim_line', $lineId);
+                $counts['dimension_journal_lines']++;
+            }
         }
         return $counts;
     }

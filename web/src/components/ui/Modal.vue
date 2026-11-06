@@ -26,7 +26,7 @@ const paneId = usePaneId()
 let scrollLocked = false
 
 /**
- * Otevřený náhled originálu vpravo (DocumentSidePreview) modál nezakrývá: backdrop
+ * Otevřený náhled originálu vedle formuláře (DocumentPreviewSplit) modál nezakrývá: backdrop
  * končí na jeho levé hraně a dialog se centruje do zbylé části, aby šel doklad
  * při potvrzování vizuálně kontrolovat.
  */

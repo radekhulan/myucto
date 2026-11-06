@@ -208,6 +208,36 @@ final class PurchaseInboxPdfIsdocPairingTest extends TestCase
         self::assertSame('Již importováno', $second['details'][0]['reason'] ?? '');
     }
 
+    /**
+     * Stornovaný doklad dedup neblokuje: znovu naskenovaný originál po stornu založí nový
+     * doklad (s dalším pořadím čísla dodavatele), nestornovaný dál blokuje jako dřív.
+     */
+    public function testRescanAfterCancellationCreatesNewInvoice(): void
+    {
+        $vs = $this->vsPrefix . '5';
+        $this->write('faktura-storno.isdoc', $this->minimalIsdoc($vs, '1210.00'));
+
+        self::assertSame(1, $this->scanner->scan($this->supplierId, $this->userId)['created']);
+        $first = $this->loadCreated($vs);
+        self::assertNotNull($first);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET status = 'cancelled' WHERE id = ?")->execute([(int) $first['id']]);
+
+        $second = $this->scanner->scan($this->supplierId, $this->userId);
+        self::assertSame(1, $second['created'], 'po stornu vznikne nový doklad: ' . json_encode($second['details'], JSON_UNESCAPED_UNICODE));
+        $rows = $this->db->pdo()->prepare(
+            'SELECT status, vendor_number_seq FROM purchase_invoices WHERE supplier_id = ? AND vendor_invoice_number = ? ORDER BY id'
+        );
+        $rows->execute([$this->supplierId, $vs]);
+        self::assertSame([['cancelled', 0], ['draft', 1]], array_map(
+            static fn (array $r): array => [(string) $r['status'], (int) $r['vendor_number_seq']],
+            $rows->fetchAll(PDO::FETCH_ASSOC),
+        ));
+
+        $third = $this->scanner->scan($this->supplierId, $this->userId);
+        self::assertSame(0, $third['created'], 'nestornovaný duplikát dál blokuje');
+        self::assertSame('Již importováno', $third['details'][0]['reason'] ?? '');
+    }
+
     /** Samotné PDF bez sourozence se chová jako dřív — přes AI (tady nenakonfigurovanou). */
     public function testStandalonePdfWithoutSiblingStillGoesTheOldWay(): void
     {

@@ -126,7 +126,7 @@ XML a výpisy lze kombinovat. Pohyb, který už eviduje dříve načtené vyúč
 | „Číslo výplatního účtu GoPay nemá platný český formát“, „Kód banky GoPay musí mít čtyři číslice“ nebo „Tolerance data musí být 0 až 14 dní“ | Chybně vyplněné pole nastavení | Opravte **Účet odesílatele GoPay**, **Kód banky** nebo toleranci a uložte. |
 | Pro import potřebujete oprávnění k importu a účtování banky | Chybí oprávnění | Požádejte administrátora o doplnění oprávnění. |
 | Soubor není platné GoPay XML, nebo XML nemá očekávaný formát GoPay Clearing | Soubor není Clearing XML z GoPay | Stáhněte znovu Clearing XML z administrace GoPay. |
-| Soubor překračuje limit 2 MB | Příliš velký soubor | Použijte vyúčtování za kratší období. |
+| Soubor překračuje limit (XML 32 MB, výpis XLS/XLSX 2 MB) | Příliš velký soubor | Použijte vyúčtování nebo výpis za kratší období. |
 | „PDF překračuje limit 10 MiB“ | Příliš velké PDF | Přiložte menší PDF (například znovu stažené z administrace GoPay). |
 | „Soubor obsahuje nepodporovaný typ pohybu“ nebo „Ze souboru nelze bezpečně určit měnu“ | Soubor obsahuje údaje, které aplikace neumí bezpečně zpracovat | Nic se neuložilo. Zkuste Clearing XML místo výpisu, případně kontaktujte podporu. |
 | „Stejné vyúčtování už existuje s jinými údaji“ | Vyúčtování se stejným číslem už je načtené s jiným obsahem | Zkontrolujte, že nahráváte správný soubor. Původní import případně nejdřív smažte. |

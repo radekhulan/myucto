@@ -97,6 +97,7 @@ declare(strict_types=1);
 require __DIR__ . '/../vendor/autoload.php';
 
 use MyInvoice\Bootstrap;
+use MyInvoice\Http\AfterResponseTasks;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Http\MaintenanceResponse;
 use MyInvoice\Http\RequestPath;
@@ -202,6 +203,8 @@ try {
 
     $app = Bootstrap::buildApp();
     $app->run();
+    // Práce, jejíž délka nesmí být znát na odpovědi (např. e-mail obnovy hesla).
+    AfterResponseTasks::runPending();
 } catch (\Throwable $e) {
     // Pre-bootstrap chyba (typicky chybějící cfg.php nebo nedostupná DB).
     http_response_code(503);

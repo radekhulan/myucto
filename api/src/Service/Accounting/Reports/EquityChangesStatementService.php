@@ -38,6 +38,7 @@ final class EquityChangesStatementService
     public function __construct(
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
+        private readonly StatementSupplementPolicy $supplements,
     ) {}
 
     /**
@@ -50,6 +51,7 @@ final class EquityChangesStatementService
      */
     public function build(int $supplierId, int $periodId): array
     {
+        $this->supplements->assert500Supplement($supplierId, $periodId);
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
             throw new ReportException('period_not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);

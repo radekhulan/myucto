@@ -179,7 +179,15 @@ final class PayrollPersonCreateValidator
                 'contract_signed_on' => null,
                 'planned_start_on' => $plannedStart,
                 'actual_start_on' => null,
-                'fixed_term_end_on' => null,
+                /*
+                 * Sjednaný konec a pravděpodobný výdělek jsou nepovinné (posílá je
+                 * import docházky). Tvar, pořadí dat i povinné odůvodnění výdělku
+                 * hlídá `PayrollEmploymentValidator::terms()`; konec se při
+                 * založení propíše i do `payroll_employments.end_date`.
+                 */
+                'fixed_term_end_on' => $input['fixed_term_end_on'] ?? null,
+                'probable_hourly_earning_minor' => $input['probable_hourly_earning_minor'] ?? null,
+                'probable_earning_rationale' => $input['probable_earning_rationale'] ?? null,
                 'weekly_hours' => $weeklyHours ?? '40.00',
                 /*
                  * Úvazek se dosazoval natvrdo na 10 000 bazických bodů, takže

@@ -6,7 +6,10 @@ namespace MyInvoice\Tests\Unit\Action\Recurring;
 
 use MyInvoice\Action\Recurring\RecurringTemplateAction;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\RecurringTemplateRepository;
+use MyInvoice\Service\Accounting\DocumentLock;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\RecurringInvoiceGenerator;
 use MyInvoice\Service\IpMatcher;
@@ -26,8 +29,17 @@ final class RecurringScheduleTest extends TestCase
         ], $overrides);
     }
 
-    private function action(RecurringTemplateRepository $repo, ?RecurringInvoiceGenerator $generator = null, ?ActivityLogger $logger = null): RecurringTemplateAction
+    private static function periodLock(?string $status): DocumentLock
     {
+        return new DocumentLock(false, null, false, null, in_array($status, ['closed', 'approved'], true), $status === 'closing', $status);
+    }
+
+    private function action(RecurringTemplateRepository $repo, ?RecurringInvoiceGenerator $generator = null, ?ActivityLogger $logger = null, ?DocumentLockService $locks = null): RecurringTemplateAction
+    {
+        if ($locks === null) {
+            $locks = $this->createStub(DocumentLockService::class);
+            $locks->method('forDate')->willReturn(self::periodLock('open'));
+        }
         $reflection = new \ReflectionClass(RecurringTemplateAction::class);
         $args = [];
         foreach ($reflection->getConstructor()->getParameters() as $parameter) {
@@ -37,6 +49,7 @@ final class RecurringScheduleTest extends TestCase
                 RecurringInvoiceGenerator::class => $generator ?? $this->createStub($type),
                 ActivityLogger::class => $logger ?? $this->createStub($type),
                 IpMatcher::class => new IpMatcher(),
+                DocumentLockService::class => $locks,
                 default => $this->createStub($type),
             };
         }
@@ -136,5 +149,64 @@ final class RecurringScheduleTest extends TestCase
             'issue_date' => '2090-01-01', 'draft' => true, 'advance_schedule' => false,
         ]), (new ResponseFactory())->createResponse(), ['id' => 12]);
         self::assertSame(201, $result->getStatusCode());
+    }
+
+    /**
+     * „Spustit teď" s datem v uzavřeném období nesmí fakturu vytvořit ani vystavit:
+     * zámek platí stejně jako u ručního založení a vystavení (účetní 409, klient 403
+     * už v uzavíraném období). Rozhoduje DUZP, které šablona z data odvodí.
+     */
+    public function testRunNowRespectsPeriodLockOfDerivedTaxDate(): void
+    {
+        $repo = $this->createStub(RecurringTemplateRepository::class);
+        $repo->method('find')->willReturn($this->template(['tax_date_mode' => 'previous_month_last_day', 'invoice_type' => 'invoice']));
+        $generator = $this->createMock(RecurringInvoiceGenerator::class);
+        $generator->expects(self::never())->method('generate');
+        $locks = $this->createMock(DocumentLockService::class);
+        $locks->expects(self::exactly(2))->method('forDate')->with(7, '2089-12-31')->willReturn(self::periodLock('closed'));
+        $action = $this->action($repo, $generator, null, $locks);
+
+        $staff = $this->request(['issue_date' => '2090-01-05'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 3, 'role' => 'accountant']);
+        $result = $action->runNow($staff, (new ResponseFactory())->createResponse(), ['id' => 12]);
+        self::assertSame(409, $result->getStatusCode());
+        self::assertStringContainsString('period_closed', (string) $result->getBody());
+
+        $client = $this->request(['issue_date' => '2090-01-05'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 4, 'role' => 'client']);
+        $result = $action->runNow($client, (new ResponseFactory())->createResponse(), ['id' => 12]);
+        self::assertSame(403, $result->getStatusCode());
+        self::assertStringContainsString('document_locked', (string) $result->getBody());
+    }
+
+    public function testRunNowClientIsLockedAlreadyInClosingPeriodButStaffIsNot(): void
+    {
+        $repo = $this->createStub(RecurringTemplateRepository::class);
+        $repo->method('find')->willReturn($this->template());
+        $generator = $this->createMock(RecurringInvoiceGenerator::class);
+        $generator->expects(self::once())->method('generate')->willReturn([]);
+        $locks = $this->createStub(DocumentLockService::class);
+        $locks->method('forDate')->willReturn(self::periodLock('closing'));
+        $action = $this->action($repo, $generator, null, $locks);
+
+        $client = $this->request([])->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 4, 'role' => 'client']);
+        self::assertSame(403, $action->runNow($client, (new ResponseFactory())->createResponse(), ['id' => 12])->getStatusCode());
+
+        $staff = $this->request([])->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 3, 'role' => 'accountant']);
+        self::assertSame(201, $action->runNow($staff, (new ResponseFactory())->createResponse(), ['id' => 12])->getStatusCode());
+    }
+
+    public function testRunNowRejectsInvalidIssueDate(): void
+    {
+        $repo = $this->createStub(RecurringTemplateRepository::class);
+        $repo->method('find')->willReturn($this->template());
+        $generator = $this->createMock(RecurringInvoiceGenerator::class);
+        $generator->expects(self::never())->method('generate');
+        $result = $this->action($repo, $generator)->runNow(
+            $this->request(['issue_date' => '2090-02-31']),
+            (new ResponseFactory())->createResponse(),
+            ['id' => 12],
+        );
+        self::assertSame(400, $result->getStatusCode());
     }
 }

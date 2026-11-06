@@ -108,7 +108,7 @@ final class SupplierDeleteDependencyTest extends TestCase
             // v databázi osiřelý (viz ForeignKeyChecksGuardTest).
             try {
                 $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
-                foreach (['assets', 'cash_registers', 'accounting_supplier_settings',
+                foreach (['accounting_account_definition_history', 'assets', 'cash_registers', 'accounting_supplier_settings',
                           'invoice_counters', 'currencies', 'activity_log',
                           'payment_orders', 'document_folders', 'document_tags', 'work_report_links'] as $t) {
                     $pdo->prepare("DELETE FROM `$t` WHERE supplier_id = ?")->execute([$this->supplierC]);
@@ -192,6 +192,26 @@ final class SupplierDeleteDependencyTest extends TestCase
             (int) $pdo->query('SELECT COUNT(*) FROM payment_orders WHERE supplier_id = ' . $this->supplierC)->fetchColumn(),
             'Příkaz k úhradě nesmí zůstat osiřelý ani smazaný bez firmy'
         );
+    }
+
+    public function testDatedAccountDefinitionsBlockSupplierDeletionWithoutAConstraintError(): void
+    {
+        $token=$this->mkAdminToken();
+        $container=Bootstrap::buildContainer();
+        $container->set(Connection::class,$this->db);
+        $container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierC);
+        $chart=$container->get(\MyInvoice\Repository\ChartOfAccountsRepository::class);
+        $account=$chart->findByCode($this->supplierC,'511');
+        $definitions=new \MyInvoice\Repository\AccountDefinitionRepository($this->db);
+        $definitions->change($this->supplierC,(int)$account['id'],'2026-01-01',['name'=>'Synthetic dated account definition'],$definitions->stateHash($this->supplierC,(int)$account['id']),$this->userIds[0],'Synthetic account configuration evidence');
+        $before=$this->db->pdo()->query('SELECT * FROM accounting_account_definition_history WHERE supplier_id='.$this->supplierC.' ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertNotEmpty($before);
+        self::assertSame(0,(int)$this->db->pdo()->query('SELECT COUNT(*) FROM journal_entries WHERE supplier_id='.$this->supplierC)->fetchColumn());
+        $res=$this->request('DELETE','/api/suppliers/'.$this->supplierC,$token);
+        self::assertSame(409,$res->getStatusCode());
+        self::assertSame('has_dependencies',$this->json($res)['error']['code']??null);
+        self::assertSame($before,$this->db->pdo()->query('SELECT * FROM accounting_account_definition_history WHERE supplier_id='.$this->supplierC.' ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC));
+        self::assertSame(1,(int)$this->db->pdo()->query('SELECT COUNT(*) FROM supplier WHERE id='.$this->supplierC)->fetchColumn());
     }
 
     public function testEmptySupplierWithMetadataCleansUpWithoutOrphans(): void

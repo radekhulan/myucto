@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\PohodaXml;
+use MyInvoice\Service\Payroll\CzechBirthNumber;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzAttributeDocument;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
@@ -251,9 +252,13 @@ final class PohodaPayrollJmhzWriter
                 $this->part($protocol, $step, (string) $record['personal_number'], 'Děti z hlášení',
                     fn (): array => self::prefixed('jmhz_', $this->people->children($supplierId, $employeeId, $takeover, $userId, $policy)));
             }
-            if (self::otherCaregiver($person['months']) === false) {
+            $otherCaregiver = self::otherCaregiver($person['months']);
+            if ($otherCaregiver === false) {
                 $this->part($protocol, $step, (string) $record['personal_number'], 'Jiná osoba vyživující děti (10453)',
                     fn (): array => self::prefixed('jmhz_', $this->people->otherCaregiverNone($supplierId, $employeeId, $userId)));
+            } elseif ($otherCaregiver === true && ($caregiver = self::otherCaregiverPerson($person['months'])) !== null) {
+                $this->part($protocol, $step, (string) $record['personal_number'], 'Jiná osoba vyživující děti (10453)',
+                    fn (): array => self::prefixed('jmhz_', $this->people->otherCaregiverPresent($supplierId, $employeeId, $caregiver, $userId)));
             }
         }
         if ($unconfirmed > 0) {
@@ -504,6 +509,54 @@ final class PohodaPayrollJmhzWriter
         }
 
         return $answer;
+    }
+
+    /**
+     * Druhá osoba vyživující tytéž děti (10431 až 10434) z posledního formuláře, který ji
+     * jmenuje. Datum narození z hlášení, jinak z rodného čísla; bez něj `null`.
+     *
+     * @param array<string,list<JmhzReportForm>> $months období => formuláře osoby
+     * @return array{given_name:string,family_name:string,birth_date:string,birth_number:?string}|null
+     */
+    public static function otherCaregiverPerson(array $months): ?array
+    {
+        ksort($months, SORT_STRING);
+        $person = null;
+        foreach ($months as $forms) {
+            foreach ($forms as $form) {
+                if (($form->childCredit['other_caregiver'] ?? null) !== true) {
+                    continue;
+                }
+                $caregiver = $form->childCredit['caregivers'][0] ?? null;
+                if (is_array($caregiver)) {
+                    $person = $caregiver;
+                }
+            }
+        }
+        if ($person === null) {
+            return null;
+        }
+        $birthDate = is_string($person['birth_date'] ?? null) ? $person['birth_date'] : null;
+        $birthNumber = null;
+        if (is_string($person['birth_number'] ?? null)) {
+            try {
+                $birthNumber = CzechBirthNumber::normalize($person['birth_number']);
+                $birthDate ??= CzechBirthNumber::birthDate($birthNumber);
+            } catch (\InvalidArgumentException) {
+                $birthNumber = null;
+            }
+        }
+        // Rodné číslo, které nesedí na datum narození z hlášení, se nepřebírá.
+        if ($birthNumber !== null && $birthDate !== CzechBirthNumber::birthDate($birthNumber)) {
+            $birthNumber = null;
+        }
+
+        return $birthDate === null ? null : [
+            'given_name' => (string) $person['given_name'],
+            'family_name' => (string) $person['family_name'],
+            'birth_date' => $birthDate,
+            'birth_number' => $birthNumber,
+        ];
     }
 
     /**

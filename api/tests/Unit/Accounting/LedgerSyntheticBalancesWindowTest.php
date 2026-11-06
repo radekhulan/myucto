@@ -31,6 +31,9 @@ final class LedgerSyntheticBalancesWindowTest extends TestCase
             INSERT INTO chart_of_accounts VALUES (1,'221','asset',NULL,'Banka'),(2,'518','expense',NULL,'Služby'),
                 (3,'602','revenue',NULL,'Tržby'),(4,'702','closing',NULL,'Počáteční účet rozvažný'),(5,'999','offbalance',NULL,'Podrozvaha');
             INSERT INTO accounting_periods VALUES (1,1,'2024-01-01'),(2,1,'2025-01-01'),(3,2,'2024-01-01'),(4,2,'2025-01-01');");
+        \MyInvoice\Tests\Support\AccountDefinitionSqliteFixture::install($this->pdo);
+        $this->pdo->exec("INSERT INTO chart_of_accounts (id,supplier_id,account_code,account_type,parent_id,name)
+            SELECT id+100,2,account_code,account_type,CASE WHEN parent_id IS NULL THEN NULL ELSE parent_id+100 END,name FROM chart_of_accounts WHERE supplier_id=1");
         $db = new Connection(new Config([]));
         (new \ReflectionProperty($db, 'pdo'))->setValue($db, $this->pdo);
         $this->ledger = new LedgerReportRepository($db);
@@ -97,7 +100,7 @@ final class LedgerSyntheticBalancesWindowTest extends TestCase
             ->execute([$id, $supplierId, $periodId, $type, null, null, $date, $date]);
         foreach ($lines as [$account, $side, $amount]) {
             $this->pdo->prepare('INSERT INTO journal_entry_lines VALUES (?,?,?,?,?)')
-                ->execute([$id, $supplierId, $account, $side, $amount]);
+                ->execute([$id, $supplierId, $supplierId === 2 ? $account + 100 : $account, $side, $amount]);
         }
     }
 }

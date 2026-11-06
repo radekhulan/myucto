@@ -7,6 +7,7 @@ namespace MyInvoice\Tests\Unit\Payroll;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfile;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -35,14 +36,15 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
     ];
 
     /**
-     * Kódy, které do výchozího číselníku přibyly až PO přechodu na balík 1903,
-     * a dorovnává je proto vlastní pozdější migrace (viz {@see self::MIGRATIONS}).
+     * Kódy, které do výchozího číselníku přibyly až PO posledním přechodu
+     * balíku, a dorovnává je proto vlastní pozdější migrace (viz
+     * {@see self::MIGRATIONS}). Přechod 2210 na balík 1.4.2.11 nese všechny.
      *
      * @var list<string>
      */
-    private const AFTER_PACKAGE_TRANSITION = ['ODMENA_POHOTOVOST', 'NAHRADA_MZDY_DOVOLENA_VYROVNANI', 'PRISPEVEK_STRAVOVANI_ZDANITELNY'];
+    private const AFTER_PACKAGE_TRANSITION = [];
 
-    private const PACKAGE_TRANSITION = '1903_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
+    private const PACKAGE_TRANSITION = '2210_payroll_component_jmhz_catalog_1_4_2_11_package.sql';
 
     /**
      * Výchozí zařazení, která backfill 1839/1903 ještě dělal, ale pravidlo pro
@@ -222,10 +224,10 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
     }
 
     /**
-     * Přechod na balík s katalogem 1.4.2.10 (migrace 1903) doplňuje výchozí
-     * zařazení znovu, do nového balíku. Pravidlo musí být doslova totéž jako
-     * v 1839 a 1847, jinak by firmy zařazené před přechodem a po něm dostaly
-     * různé cíle.
+     * Přechod na balík s katalogem 1.4.2.11 (migrace 2210, dříve 1903 pro
+     * 1.4.2.10) doplňuje výchozí zařazení znovu, do nového balíku. Pravidlo
+     * musí být doslova totéž jako v 1839 a 1847, jinak by firmy zařazené před
+     * přechodem a po něm dostaly různé cíle.
      */
     public function testPackageTransitionRepeatsTheSameDefaultRule(): void
     {
@@ -246,7 +248,9 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         self::assertSame($expected, $codes);
         self::assertSame(self::kindClauses($original), self::kindClauses($transition));
         self::assertStringContainsString('existing.component_definition_id = target.id', $transition);
-        self::assertStringContainsString("controls-source-1.4.2.10_manifest-v1", $transition);
+        self::assertStringContainsString("controls-source-1.4.2.11_manifest-v1", $transition);
+        self::assertStringContainsString(JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY, $transition);
+        self::assertStringContainsString(JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256, $transition);
     }
 
     /**

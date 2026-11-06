@@ -112,6 +112,9 @@ final class CashBankImporter
                 $p->count(self::STEP_CASH, 'existing');
                 continue;
             }
+            if ($ctx->skipsNew(self::STEP_CASH)) {
+                continue;
+            }
             if ($ctx->skipsDate($issue)) {
                 $p->count(self::STEP_CASH, 'later_year_skipped');
                 continue;
@@ -289,6 +292,17 @@ final class CashBankImporter
             } else {
                 $p->warn(self::STEP_BANK, 'account_without_analytic', "Bankovní účet {$code} nemá v Pohodě analytiku 221, výpisy jsou bez počátečního stavu.");
             }
+            // Stavy převzatých výpisů mohl dorovnat výpis banky ({@see \MyInvoice\Service\Bank\ImportedStatementRebase}):
+            // nové výpisy navazují na první už převzatý, ne na deník.
+            $firstExisting = $existingStatements['stmt|' . $code . '|' . $ctx->year() . '|' . array_key_first($statements)] ?? null;
+            if ($firstExisting !== null) {
+                $opening = $this->db->pdo()->prepare('SELECT prev_balance FROM bank_statements WHERE id = ? AND supplier_id = ?');
+                $opening->execute([$firstExisting, $ctx->supplierId]);
+                $prev = $opening->fetchColumn();
+                if ($prev !== false && $prev !== null) {
+                    $running = StatementBalanceService::cents((string) $prev);
+                }
+            }
 
             foreach ($statements as $statementNo => $rows) {
                 $dates = [];
@@ -302,6 +316,9 @@ final class CashBankImporter
                 $mapKey = 'stmt|' . $code . '|' . $ctx->year() . '|' . $statementNo;
                 $statementId = $existingStatements[$mapKey] ?? null;
                 $isNewStatement = $statementId === null;
+                if ($isNewStatement && $ctx->skipsNew(self::STEP_BANK)) {
+                    continue;
+                }
                 if ($isNewStatement) {
                     $statementId = $writer->createStatement(
                         $ctx->supplierId, $mapKey, sprintf('%s %s/%d', $code, $statementNo, $ctx->year()), $meta['number'] !== '' ? $meta['number'] : (string) $code,
@@ -337,6 +354,9 @@ final class CashBankImporter
                         $ctx->bankTransactions[$number][] = ['id' => $existingTx[$txKey], 'date' => $date];
                         self::rememberReferences($ctx, $r, $existingTx[$txKey]);
                         $p->count(self::STEP_BANK, 'existing');
+                        continue;
+                    }
+                    if ($ctx->skipsNew(self::STEP_BANK)) {
                         continue;
                     }
                     [$vs, $description] = self::symbolAndDescription($h);

@@ -67,7 +67,7 @@ final class CloneInvoiceAction
         try {
             $newId = $this->bulk->cloneOne($id, $issueDate, $incrementMonth, $userId);
         } catch (\Throwable $e) {
-            return Json::error($response, 'clone_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'clone_failed', $e->getMessage(), 500);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

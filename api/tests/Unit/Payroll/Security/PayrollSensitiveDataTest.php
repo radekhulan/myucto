@@ -380,6 +380,7 @@ final class PayrollSensitiveDataTest extends TestCase
             PayrollRevealPurpose::SUBMISSION_CSSZ_REGISTRATION,
             PayrollRevealPurpose::SUBMISSION_CSSZ_SICKNESS,
             PayrollRevealPurpose::SUBMISSION_HEALTH_BULK_NOTIFICATION,
+            PayrollRevealPurpose::SUBMISSION_INCOME_TAX_RETURN,
         ] as $purpose) {
             self::assertTrue(
                 $purpose->isStatutoryOutput(),
@@ -391,6 +392,8 @@ final class PayrollSensitiveDataTest extends TestCase
             PayrollRevealPurpose::PAYMENT_LIABILITY_ACCOUNT,
             PayrollRevealPurpose::PAYMENT_BATCH,
             PayrollRevealPurpose::PERSON_SENSITIVE_REVEAL,
+            PayrollRevealPurpose::TAX_FAMILY_REVEAL,
+            PayrollRevealPurpose::MIGRATION_VERIFY,
         ] as $purpose) {
             self::assertFalse(
                 $purpose->isStatutoryOutput(),
@@ -416,6 +419,37 @@ final class PayrollSensitiveDataTest extends TestCase
         self::assertSame('••••••••34', $masked);
         self::assertStringNotContainsString('1234', $masked);
         self::assertStringNotContainsString('900101', $masked);
+    }
+
+    /**
+     * Rodné číslo z daňového profilu (H28) se maskuje stejně přísně jako mzdové,
+     * ale šifra ani otisk se s mzdovou evidencí nepotkají: jiný kontext šifry
+     * nedovolí podstrčit cizí řádek a jiný otisk nedovolí obě evidence spárovat.
+     */
+    public function testTaxFamilyIdentifierIsMaskedLikeBirthNumberButSeparatedFromPayroll(): void
+    {
+        self::assertSame(
+            '••••••••34',
+            $this->service->mask('900101/1234', PayrollSensitiveField::TAX_FAMILY_IDENTIFIER),
+        );
+        self::assertNotSame(
+            $this->service->lookupHash('9001011234', PayrollSensitiveField::PERSONAL_IDENTIFIER, 10),
+            $this->service->lookupHash('9001011234', PayrollSensitiveField::TAX_FAMILY_IDENTIFIER, 10),
+        );
+        self::assertSame(
+            $this->service->lookupHash('900101/1234', PayrollSensitiveField::TAX_FAMILY_IDENTIFIER, 10),
+            $this->service->lookupHash('9001011234', PayrollSensitiveField::TAX_FAMILY_IDENTIFIER, 10),
+        );
+
+        $sealed = $this->service->seal('9001011234', PayrollSensitiveField::PERSONAL_IDENTIFIER, 10, 7);
+        $this->expectException(\Throwable::class);
+        $this->service->reveal(
+            $sealed->ciphertext,
+            PayrollSensitiveField::TAX_FAMILY_IDENTIFIER,
+            10,
+            7,
+            PayrollRevealPurpose::SUBMISSION_INCOME_TAX_RETURN,
+        );
     }
 
     /** Číslo účtu ani telefon se nezkracují — u nich rekonstrukce z jiných polí nehrozí. */

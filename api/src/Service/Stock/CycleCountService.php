@@ -41,6 +41,7 @@ final class CycleCountService
         $own = !$pdo->inTransaction();
         if ($own) $pdo->beginTransaction();
         try {
+            StockHistoryImportService::assertNotRunning($pdo, $supplierId, 'Probíhá převzetí nebo vrácení historie skladu. Cyklickou inventuru spusťte po jeho dokončení.');
             $this->warehouses->lockForStockOperation($supplierId, [$warehouseId]);
             $open = $pdo->prepare("SELECT id FROM stock_cycle_counts WHERE supplier_id = ? AND warehouse_id = ? AND (location_id <=> ?) AND status IN ('draft','queued','running','counting') LIMIT 1 FOR UPDATE");
             $open->execute([$supplierId, $warehouseId, $locationId]);

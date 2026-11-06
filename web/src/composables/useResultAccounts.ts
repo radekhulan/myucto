@@ -1,6 +1,7 @@
 import { computed, ref } from 'vue'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useSupplierStore } from '@/stores/supplier'
+import { isSettlementAccount } from '@/utils/settlementAccounts'
 
 /**
  * Výsledkové účty firmy pro výchozí účet produktu, kategorie a položky dokladu
@@ -21,6 +22,10 @@ export function useResultAccounts() {
     accounts.value.filter(a => a.account_type === 'revenue' && a.account_code.startsWith('6')))
   const expenseAccounts = computed(() =>
     accounts.value.filter(a => a.account_type === 'expense' && a.account_code.startsWith('5')))
+  // Položka vydané faktury smí nést i rozvahový účet (přefakturace, poukazy), jen ne
+  // saldokontní, daňový ani peněžní (ProductPostingDefaults::validateIssuedItemAccount).
+  const issuedItemAccounts = computed(() =>
+    accounts.value.filter(a => a.is_active && !isSettlementAccount(a.account_code)))
 
   async function load(): Promise<void> {
     if (!doubleEntry.value || loaded.value) return
@@ -33,5 +38,5 @@ export function useResultAccounts() {
     }
   }
 
-  return { accounts, loaded, available, doubleEntry, revenueAccounts, expenseAccounts, load }
+  return { accounts, loaded, available, doubleEntry, revenueAccounts, expenseAccounts, issuedItemAccounts, load }
 }

@@ -14,6 +14,7 @@ import {
   personHasIdentifier,
   buildAttendanceLinks,
   buildPersonsPayload,
+  personCreateDetails,
   buildRegistrationPairs,
   buildRelationChoices,
   chunk,
@@ -655,12 +656,47 @@ describe('osoby a vazby', () => {
     expect(payload).toEqual([
       {
         person_key: 'eva', full_name: 'Eva Vzorová', first_name: 'Eva', last_name: 'Vzorová', birth_number: null,
-        relation_type: 'dpp', weekly_hours: '37.5', monthly_gross: 42000, planned_start_on: '2026-06-01', personal_number: 'Z001', activate: true,
+        relation_type: 'dpp', weekly_hours: '37.5', monthly_gross: 42000, planned_start_on: '2026-06-01',
+        hourly_rate: null, fixed_term_end_on: null, personal_number: 'Z001', activate: true,
       },
       {
         person_key: 'petr', full_name: 'Petr Zkušební', first_name: 'Petr', last_name: 'Zkušební', birth_number: null,
-        relation_type: 'dpp', weekly_hours: '40', monthly_gross: null, planned_start_on: '2026-06-01', personal_number: null, activate: true,
+        relation_type: 'dpp', weekly_hours: '40', monthly_gross: null, planned_start_on: '2026-06-01',
+        hourly_rate: null, fixed_term_end_on: null, personal_number: null, activate: true,
       },
+    ])
+  })
+
+  it('předá hodinovou sazbu a konec dohody tak, jak jsou v podkladech; číslo účtu ne', () => {
+    const dpp = person('alena', {
+      display_name: 'Sazbová Alena', hourly_rate: ' 180,50 ', end_date: '31. 12. 2026', agreed_end_on: '2026-12-31',
+      bank_account_masked: '••••••0005/0100',
+    })
+    const [payload] = buildPersonsPayload(
+      [dpp],
+      {},
+      { relation_type: 'dpp', weekly_hours: '', planned_start_on: '2026-06-01', activate: true },
+    )
+    expect(payload).toMatchObject({ hourly_rate: '180,50', fixed_term_end_on: '31. 12. 2026' })
+    expect(payload).not.toHaveProperty('bank_account')
+  })
+
+  it('náhled zakládání ukáže převzaté údaje a nečitelné označí', () => {
+    const dpp = person('alena', {
+      display_name: 'Sazbová Alena', hourly_rate: '180,50 Kč', end_date: '31. 12. 2026', agreed_end_on: '2026-12-31',
+      monthly_wage: null, bank_account_masked: '••••••0005/0100',
+    })
+    expect(personCreateDetails(dpp, '2026-06-01')).toEqual([
+      { key: 'start_on', value: '2026-06-01', invalid: false },
+      { key: 'agreed_end_on', value: '2026-12-31', invalid: false },
+      { key: 'hourly_rate', value: '180.5', invalid: false },
+      { key: 'bank_account', value: '••••••0005/0100', invalid: false },
+    ])
+    const unreadable = person('bela', { display_name: 'Chybná Běla', hourly_rate: 'dle dohody', end_date: 'do odvolání', agreed_end_on: null, start_on: '2026-06-15' })
+    expect(personCreateDetails(unreadable, '2026-06-01')).toEqual([
+      { key: 'start_on', value: '2026-06-15', invalid: false },
+      { key: 'agreed_end_on', value: 'do odvolání', invalid: true },
+      { key: 'hourly_rate', value: 'dle dohody', invalid: true },
     ])
   })
 

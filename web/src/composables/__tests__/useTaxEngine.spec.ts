@@ -40,6 +40,14 @@ const constants = (over: Partial<TaxConstantsData> = {}): TaxConstantsData => ({
   child_bonus_min: 6000,
   fixed_asset_limit: 80000,
   transition_receivables_max_years: 3,
+  nonprofit_reduction_rate: 0.30,
+  nonprofit_reduction_min: 300000,
+  nonprofit_reduction_max: 1000000,
+  nonprofit_reduction_university_min: 1000000,
+  nonprofit_reduction_university_max: 3000000,
+  tax_loss_carry_years: 5,
+  tax_loss_carryback_years: 2,
+  tax_loss_carryback_limit: 30000000,
   ...over,
 })
 

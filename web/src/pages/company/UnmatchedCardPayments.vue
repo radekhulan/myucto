@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRouter } from 'vue-router'
@@ -199,11 +200,11 @@ const INPUT = 'h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface'
     <form class="flex flex-wrap items-end gap-2 mb-4" @submit.prevent="load">
       <label class="flex flex-col text-xs text-neutral-600">
         {{ t('payment_cards.unmatched.from') }}
-        <input v-model="from" type="date" :class="INPUT" required />
+        <DateInput v-model="from" :class="INPUT" required />
       </label>
       <label class="flex flex-col text-xs text-neutral-600">
         {{ t('payment_cards.unmatched.to') }}
-        <input v-model="to" type="date" :class="INPUT" required />
+        <DateInput v-model="to" :class="INPUT" required />
       </label>
       <button type="submit" :class="[BTN_BASE, OUTLINE.primary]" class="whitespace-nowrap" :disabled="loading">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

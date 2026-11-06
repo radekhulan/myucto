@@ -66,7 +66,7 @@ final class RequestApprovalTestAction
         try {
             $pdfPath = $this->renderer->render($id, $userId);
         } catch (\Throwable $e) {
-            return Json::error($response, 'pdf_failed', 'Nepodařilo se vygenerovat PDF výkazu: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'pdf_failed', 'Nepodařilo se vygenerovat PDF výkazu: ' . $e->getMessage(), 500);
         }
 
         $locale = (string) ($invoice['language'] ?? 'cs');

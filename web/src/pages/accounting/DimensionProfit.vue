@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -8,8 +9,10 @@ import {
   type DimensionCashFlowReport,
   type DimensionProfitParams,
   type DimensionProfitReport,
+  type DimensionProfitRow,
 } from '@/api/dimensions'
 import { useDimensions } from '@/composables/useDimensions'
+import { dimensionValueLabel, dimensionValueName } from '@/utils/dimensionValueLabel'
 import { useToast } from '@/composables/useToast'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatMoney } from '@/composables/useFormat'
@@ -28,7 +31,7 @@ import DimensionCashFlowPanel from '@/components/dimensions/DimensionCashFlowPan
  * Globální typ jde sečíst za všechny firmy skupiny, ke kterým má uživatel přístup.
  * Rozvaha, předvaha a hlavní kniha po dimenzi jsou filtrem přímo u těch výkazů.
  */
-const { t } = useI18n()
+const { t, te } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
@@ -267,6 +270,10 @@ const report = computed(() => (tab.value === 'profit' ? profitReport.value : cas
 function money(v: number) {
   return formatMoney(v, 'CZK')
 }
+
+function rowLabel(row: DimensionProfitRow): string {
+  return dimensionValueLabel({ t, te }, row, profitReport.value?.type.system_key, ' ', profitReport.value?.rows)
+}
 </script>
 
 <template>
@@ -334,11 +341,11 @@ function money(v: number) {
           @update:value-id="cashFlowForm.valueId = $event" @update:descendants="cashFlowForm.descendants = $event" />
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.profit_from') }}</label>
-          <input v-model="from" type="date" class="h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="from" class="h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.profit_to') }}</label>
-          <input v-model="to" type="date" class="h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          <DateInput v-model="to" class="h-10 px-3 border border-neutral-300 rounded-md text-sm" />
         </div>
         <label v-if="tab === 'profit'" class="flex items-center gap-2 h-10 text-sm text-neutral-700 whitespace-nowrap">
           <input v-model="profitForm.accounts" type="checkbox" class="rounded border-neutral-300" data-test="profit-accounts" />
@@ -384,7 +391,7 @@ function money(v: number) {
           <p class="text-xs text-neutral-500 mb-3">{{ t('dimensions.profit_comparison_own') }}</p>
           <div class="space-y-2">
             <div v-for="row in topValues" :key="row.value_id" class="grid grid-cols-[minmax(7rem,12rem)_1fr_auto] items-center gap-3 text-sm">
-              <span class="truncate" :title="row.code === row.name ? row.name : `${row.code} ${row.name}`">{{ row.code === row.name ? row.name : `${row.code} ${row.name}` }}</span>
+              <span class="truncate" :title="rowLabel(row)">{{ rowLabel(row) }}</span>
               <div class="h-3 bg-neutral-100 rounded-full overflow-hidden">
                 <div class="h-full rounded-full" :class="row.own.result < 0 ? 'bg-danger-500' : 'bg-success-500'"
                      :style="{ width: `${Math.abs(row.own.result) / topValueScale * 100}%` }" />
@@ -394,7 +401,7 @@ function money(v: number) {
           </div>
         </div>
 
-        <DimensionProfitMatrix v-if="profitReport.matrix" :matrix="profitReport.matrix" :cash-journal="profitReport.basis === 'cash_journal'" />
+        <DimensionProfitMatrix v-if="profitReport.matrix" :matrix="profitReport.matrix" :cash-journal="profitReport.basis === 'cash_journal'" :system-key="profitReport.type.system_key" />
 
         <div v-if="!profitReport.matrix && visibleRows.length === 0 && !hasActivity(profitReport.unassigned)" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6 text-sm text-neutral-500" data-test="profit-no-activity">{{ t('dimensions.profit_no_activity') }}</div>
         <div v-else-if="!profitReport.matrix" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
@@ -418,8 +425,8 @@ function money(v: number) {
                       <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': !collapsed.has(row.value_id) }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
                     </button>
                     <span v-else class="w-5" />
-                    <span class="font-mono text-xs text-neutral-500">{{ row.code }}</span>
-                    <span v-if="row.name !== row.code" class="truncate">{{ row.name }}</span>
+                    <span v-if="!row.semantic_key" class="font-mono text-xs text-neutral-500">{{ row.code }}</span>
+                    <span v-if="row.semantic_key || row.name !== row.code" class="truncate">{{ dimensionValueName({ t, te }, row, profitReport.type.system_key, profitReport.rows) }}</span>
                   </div>
                 </td>
                 <td v-if="otherReports.length" class="px-4 py-2">

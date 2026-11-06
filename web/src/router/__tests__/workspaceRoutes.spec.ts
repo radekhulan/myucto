@@ -77,6 +77,21 @@ describe('workspace route factory', () => {
     })
   })
 
+  it('pouští registr SVJ s právem property READ bez podmínky na účetní režim nebo právní formu', () => {
+    const records: RouteRecordRaw[] = [{ path: '/', meta: { requiresAuth: true }, children: createWorkspaceRoutes() }]
+    applyAuthorizationMeta(records)
+    const route = (records[0]!.children ?? []).find(item => item.name === 'property-registry')!
+
+    expect(route.path).toBe('property/registry')
+    expect(route.meta).toMatchObject({ permission: 'property', access: 'read', requiresSupplier: true, commercialOnly: true })
+    for (const item of (records[0]!.children ?? []).filter(child => String(child.name).startsWith('property-'))) {
+      expect(item.meta?.commercialOnly, String(item.name)).toBe(true)
+    }
+    for (const gate of ['requiresDoubleEntry', 'requiresAccountingMode', 'requiresTaxEvidence', 'requiresVat', 'adminPlusOnly', 'superadminOnly']) {
+      expect(route.meta?.[gate], gate).toBeUndefined()
+    }
+  })
+
   it('řídí importy a firemní číselníky jejich skutečnými oprávněními', () => {
     const records: RouteRecordRaw[] = [{
       path: '/',
@@ -131,6 +146,10 @@ describe('workspace route factory', () => {
     expect(byName.get('admin-bank-rule-templates')?.meta?.superadminOnly).not.toBe(true)
     expect(byName.get('admin-suppliers')?.meta).toMatchObject({ adminPlusOnly: true })
     expect(byName.get('admin-suppliers')?.meta?.superadminOnly).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta).toMatchObject({ permission: 'price_list', access: 'read', requiresSupplier: true })
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.requiresNoStock).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.companyAdminOnly).not.toBe(true)
+    expect(byName.get('admin-work-report-billing-templates')?.meta?.superadminOnly).not.toBe(true)
     for (const name of ['admin-price-list', 'admin-price-list-view', 'admin-price-list-new', 'admin-price-list-edit']) {
       expect(byName.get(name)?.meta).toMatchObject({
         permission: 'price_list',

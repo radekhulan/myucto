@@ -21,6 +21,7 @@ use MyInvoice\Security\PermissionChecker;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Mcp\HostedMcp;
+use MyInvoice\Service\License\LicenseSeatLimitExceeded;
 use MyInvoice\Service\Mcp\McpOAuth;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -42,13 +43,14 @@ final class McpOAuthAction
         private readonly PasskeyCredentialRepository $credentials,
         private readonly MfaPolicyService $mfaPolicy,
         private readonly MfaStepUpService $stepUp,
+        private readonly \MyInvoice\Service\Mcp\McpResourcePolicy $resources,
     ) {}
 
     public function protectedResource(Request $request, Response $response): Response
     {
         if (!$this->hosted->enabled()) return $response->withStatus(404);
         return Json::ok($response, [
-            'resource' => $this->hosted->endpoint(),
+            'resource' => $this->resources->endpoint($request),
             'authorization_servers' => [$this->base()],
             'bearer_methods_supported' => ['header'],
             'scopes_supported' => ['read', 'read_write', 'offline_access'],
@@ -130,12 +132,13 @@ final class McpOAuthAction
         $state = (string) ($params['state'] ?? '');
         $resource = (string) ($params['resource'] ?? $this->hosted->endpoint());
         $scope = $this->scope((string) ($params['scope'] ?? 'read'));
+        $target = $this->resources->resolve($resource);
         if ($client === null
             || !in_array($redirect, $client['redirect_uris'], true)
             || ($params['response_type'] ?? '') !== 'code'
             || ($params['code_challenge_method'] ?? '') !== 'S256'
             || preg_match('/^[A-Za-z0-9_-]{43,128}$/D', $challenge) !== 1
-            || strlen($state) > 512 || $resource !== $this->hosted->endpoint()
+            || strlen($state) > 512 || $target === null
             || $scope === null
         ) {
             return $this->html($response, '<h1>Neplatný požadavek na připojení MCP.</h1>', 400);
@@ -162,16 +165,19 @@ final class McpOAuthAction
             : $this->memberships->listForUser((int) $user['id']);
         foreach ($available as $choice) {
             $candidateId = (int) $choice['supplier_id'];
+            if ($target['supplier_id'] !== null && $target['supplier_id'] !== $candidateId) continue;
             $candidateRequest = $request->withQueryParams(['supplier_id' => $candidateId]);
             $access = $this->suppliers->resolve($candidateRequest);
             if (!$access->denied && $access->supplierId === $candidateId) {
                 $accessibleCount++;
                 $role = $this->roles->resolve($candidateRequest);
-                if ($this->permissions->allows($role, 'profile.tokens', AccessLevel::READ)) {
+                if ($target['supplier_id'] !== null
+                    ? $this->resources->allowsGrant($resource, (int) $user['id'], $candidateId, 'read')
+                    : $this->permissions->allows($role, 'profile.tokens', AccessLevel::READ)) {
                     $choices[] = $choice;
-                    $canGrantWrite = $canGrantWrite || $this->permissions->allows(
-                        $role, 'profile.tokens', AccessLevel::WRITE,
-                    );
+                    $canGrantWrite = $canGrantWrite || ($target['supplier_id'] !== null
+                        ? $this->resources->allowsGrant($resource, (int) $user['id'], $candidateId, 'read_write')
+                        : $this->permissions->allows($role, 'profile.tokens', AccessLevel::WRITE));
                 }
             }
         }
@@ -220,12 +226,16 @@ final class McpOAuthAction
                 $verification = '<p class="field-hint">Jste přihlášeni. Pro připojení stačí potvrdit přístup.</p>';
             }
             $permission = $scope === 'read_write' ? 'čtení a zápis' : 'pouze čtení';
+            $bindingNotice = $target['supplier_id'] !== null
+                ? '<p class="muted">Přístup platí pouze pro firmu ' . self::escape((string) ($choices[0]['name'] ?? $choices[0]['supplier_name'] ?? $target['supplier_id']))
+                    . ' na adrese ' . self::escape($resource) . '. Další firmy přidělené uživateli se nezpřístupní. Přístup můžete odvolat v klientském portálu v části MCP.</p>'
+                : '<p class="muted">Přístup se vztahuje na všechny firmy, ke kterým máte práva, včetně těch přidaných později. Aktuálně jich můžete použít '
+                    . $accessibleCount . '. Práva ke každé firmě se kontrolují při každém volání. Přístup můžete kdykoli odvolat na stránce Firma → MCP server.</p>';
             $content = '<h1>Připojit MyÚčto k AI asistentovi</h1>'
                 . '<p class="lead">Aplikace <strong>' . self::escape((string) $client['client_name']) . '</strong> ('
                 . self::escape((string) $host) . ') žádá o přístup k vašim datům.</p>'
                 . '<div class="access-summary"><span>Asistent požaduje nejvýše</span><strong>' . $permission . '</strong></div>'
-                . '<p class="muted">Přístup se vztahuje na všechny firmy, ke kterým máte práva, včetně těch přidaných později. Aktuálně jich můžete použít '
-                . $accessibleCount . '. Práva ke každé firmě se kontrolují při každém volání. Přístup můžete kdykoli odvolat na stránce Firma → MCP server.</p>'
+                . $bindingNotice
                 . '<form id="mcp-consent-form" method="post" action="/oauth/authorize">' . $fields . $grantChoice
                 . '<div class="verification"><h2>Ověření identity</h2>'
                 . ($passkeyAvailable && $totpRequired ? '<p class="field-hint">Zvolte passkey nebo nový kód z ověřovací aplikace.</p>' : '')
@@ -280,7 +290,7 @@ final class McpOAuthAction
             return $this->consentError($response, $params, 'Ověřte passkey nebo zadejte nový kód ověřovací aplikace.', 401);
         }
         $code = $this->oauth->createCode(
-            $clientId, (int) $user['id'], null, $redirect, $challenge, $grantScope, $resource,
+            $clientId, (int) $user['id'], $target['supplier_id'], $redirect, $challenge, $grantScope, $resource,
         );
         return $this->finishConsent($response, self::redirectWith($redirect, [
             'code' => $code, 'state' => $state,
@@ -307,13 +317,18 @@ final class McpOAuthAction
             if (preg_match('/^[A-Za-z0-9._~-]{43,128}$/D', $verifier) !== 1) {
                 return $this->oauthError($response, 'invalid_grant', 400);
             }
-            $result = $this->oauth->exchange(
-                (string) ($params['code'] ?? ''), $clientId,
-                (string) ($params['redirect_uri'] ?? ''), $verifier,
-                (string) ($params['resource'] ?? $this->hosted->endpoint()),
-            );
+            try {
+                $result = $this->oauth->exchange(
+                    (string) ($params['code'] ?? ''), $clientId,
+                    (string) ($params['redirect_uri'] ?? ''), $verifier,
+                    (string) ($params['resource'] ?? $this->hosted->endpoint()),
+                );
+            } catch (LicenseSeatLimitExceeded) {
+                // Oprávnění se zápisem by podle parametru licence zabralo další místo.
+                return $this->oauthError($response, 'access_denied', 403);
+            }
         } elseif ($grant === 'refresh_token') {
-            $result = $this->oauth->refresh((string) ($params['refresh_token'] ?? ''), $clientId);
+            $result = $this->oauth->refresh((string) ($params['refresh_token'] ?? ''), $clientId, $params['resource'] ?? null);
         } else {
             return $this->oauthError($response, 'unsupported_grant_type', 400);
         }

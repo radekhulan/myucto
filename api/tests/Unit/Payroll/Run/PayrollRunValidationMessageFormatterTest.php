@@ -85,7 +85,7 @@ final class PayrollRunValidationMessageFormatterTest extends TestCase
 
         self::assertLessThanOrEqual(500, mb_strlen($message));
         self::assertStringEndsWith(
-            'Opravte uvedené podklady a otevřete novou revizi mzdového běhu.',
+            'Opravte uvedené podklady a v mzdovém běhu klikněte na Obnovit podklady.',
             $message,
         );
         self::assertStringNotContainsString('future:unknown', $message);

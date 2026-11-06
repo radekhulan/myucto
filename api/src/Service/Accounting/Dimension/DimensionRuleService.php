@@ -23,10 +23,9 @@ use PDO;
  *     `error` zápis odmítne (PostingException `dimension_required` se jménem účtu
  *     a chybějící dimenze), `warning` vrátí varování volajícímu.
  *
- * Platí jen pro doklady a ruční zápisy ({@see RULE_SOURCES}); systémové zápisy
- * (uzávěrka, otevření, odpisy, mzdy, přeúčtování DPH…) pravidla neblokují — jejich
- * řádky ukáže kontrola {@see DimensionRuleAudit}. Firma bez zapnutých dimenzí nebo
- * bez pravidel účtuje beze změny.
+ * Vlastní dimenze zachovávají rozsah dokladů a ručních zápisů ({@see RULE_SOURCES}).
+ * Systémové dimenze rámce 504 ověřuje navíc {@see SystemDimensionWritePolicy}
+ * pro všechny zdroje; u závěrky a otevření jen rozvahové účty.
  */
 final class DimensionRuleService
 {
@@ -113,6 +112,11 @@ final class DimensionRuleService
             if (!empty($line['dimensions'])) {
                 $lines[$i]['dimensions'] = $line['dimensions'];
             }
+            foreach (['dimension_origins', 'dimension_split_origins'] as $field) {
+                if (isset($line[$field])) {
+                    $lines[$i][$field] = $line[$field];
+                }
+            }
         }
         return $lines;
     }
@@ -124,8 +128,11 @@ final class DimensionRuleService
      * @return list<array{account_code:string, account_name:string, type_id:int, type_name:string, message:string}> varování
      * @throws PostingException `dimension_required`, když řádku chybí dimenze pravidla s vynucením `error`
      */
-    public function check(int $supplierId, string $sourceType, array $lines, string $entryDate): array
+    public function check(int $supplierId, string $sourceType, array $lines, string $entryDate, array $previousLines = []): array
     {
+        (new DimensionPeriodGuard($this->db))->transaction(fn () => (new SystemDimensionWritePolicy($this->db))->assertJournal(
+            ['supplier_id' => $supplierId, 'source_type' => $sourceType, 'entry_date' => $entryDate], $lines, $previousLines, $previousLines,
+        ));
         if (!in_array($sourceType, self::RULE_SOURCES, true)) {
             return [];
         }
@@ -153,10 +160,10 @@ final class DimensionRuleService
      * @param list<array<string,mixed>> $lines řádky s `account_id`, `side`, `amount`, `dimensions`, `dimension_splits`
      * @throws DimensionException `dimension_required`
      */
-    public function assertLines(int $supplierId, string $sourceType, array $lines, string $entryDate): void
+    public function assertLines(int $supplierId, string $sourceType, array $lines, string $entryDate, array $previousLines = []): void
     {
         try {
-            $this->check($supplierId, $sourceType, $lines, $entryDate);
+            $this->check($supplierId, $sourceType, $lines, $entryDate, $previousLines);
         } catch (PostingException $e) {
             throw new DimensionException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }

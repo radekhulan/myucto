@@ -2,7 +2,7 @@
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { assetsApi, type AccMethod, type AssetKind, type AssetPayload, type AssetStatus, type FirstYearIncrease, type TaxMethod } from '@/api/assets'
+import { assetsApi, type AccMethod, type AssetKind, type AssetPayload, type AssetStatus, type FirstYearIncrease, type ImportedDepreciationPlan, type TaxMethod } from '@/api/assets'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
@@ -58,6 +58,7 @@ const form = reactive({
   acc_residual_value: 0,
 })
 
+const importedPlan = ref<ImportedDepreciationPlan | null>(null)
 const status = ref<AssetStatus>('draft')
 const isHistorical = ref(false)
 const locks = reactive({ input_price: false, acquisition: false, tax_params: false })
@@ -84,6 +85,7 @@ const ACCUMULATED_MAP: Record<string, string | null> = {
 }
 
 function onAssetAccountChange(code: string | null) {
+  if (importedPlan.value) return
   form.asset_account_code = code || ''
   if (!code) return
   const synthetic = code.slice(0, 3)
@@ -118,6 +120,7 @@ const deNeedsMonths = computed(() => isTaxEvidence.value && isDepreciable.value
   && form.kind === 'intangible' && form.tax_method === 'by_accounting')
 
 watch(() => form.kind, (kind) => {
+  if (importedPlan.value) return
   if (kind === 'intangible') {
     if (!methodOptions.value.includes(form.tax_method)) form.tax_method = 'by_accounting'
     form.tax_group = null
@@ -132,6 +135,7 @@ watch(() => form.kind, (kind) => {
 })
 
 watch(() => form.tax_method, (m) => {
+  if (importedPlan.value) return
   if (m !== 'straight' && m !== 'accelerated') {
     form.tax_group = null
     form.tax_first_year_increase = 'none'
@@ -139,6 +143,7 @@ watch(() => form.tax_method, (m) => {
   if (m === 'none') form.acc_method = 'straight_line'
 })
 watch([() => form.tax_group, () => form.is_first_owner], () => {
+  if (importedPlan.value) return
   if (!showIncrease.value) form.tax_first_year_increase = 'none'
 })
 
@@ -151,6 +156,7 @@ onMounted(async () => {
     }
     if (isEdit.value) {
       const a = await assetsApi.get(assetId.value!)
+      importedPlan.value = a.imported_depreciation_plan ?? null
       form.inventory_number = a.inventory_number
       form.name = a.name
       form.description = a.description || ''
@@ -181,8 +187,8 @@ onMounted(async () => {
         || a.opening_acc_months > 0 || Number(a.opening_acc_amount) > 0
       // Zamčená pole (R13): flagy z API (locked.tax_params/acquisition), fallback dle stavu karty.
       const afterPutIntoUse = a.status !== 'draft'
-      locks.tax_params = a.locked?.tax_params ?? false
-      locks.acquisition = a.locked?.acquisition ?? a.locked?.in_use ?? afterPutIntoUse
+      locks.tax_params = !!importedPlan.value || (a.locked?.tax_params ?? false)
+      locks.acquisition = !!importedPlan.value || (a.locked?.acquisition ?? a.locked?.in_use ?? afterPutIntoUse)
       locks.input_price = locks.acquisition || locks.tax_params
       await docDims.load(assetId.value!)
     } else if (route.query.invoice_id) {
@@ -224,6 +230,7 @@ function validate(): boolean {
   errors.value = []
   if (!form.inventory_number.trim()) errors.value.push(t('accounting.assets.editor.err_inventory_number'))
   if (!form.name.trim()) errors.value.push(t('accounting.assets.editor.err_name'))
+  if (importedPlan.value) return errors.value.length === 0
   if (!form.input_price || form.input_price <= 0) errors.value.push(t('accounting.assets.editor.err_input_price'))
   if (!form.acquisition_date) errors.value.push(t('accounting.assets.editor.err_acquisition_date'))
   if (showTaxGroup.value && !form.tax_group) errors.value.push(t('accounting.assets.editor.err_tax_group'))
@@ -284,8 +291,11 @@ async function save() {
         payload.opening_acc_amount = 0
       }
     }
+    const updatePayload = importedPlan.value
+      ? { inventory_number: form.inventory_number.trim(), name: form.name.trim(), description: form.description.trim() || null }
+      : payload
     const result = isEdit.value
-      ? await assetsApi.update(assetId.value!, payload)
+      ? await assetsApi.update(assetId.value!, updatePayload)
       : await assetsApi.create(payload)
     await docDims.save(result.asset?.id ?? assetId.value ?? 0)
     for (const w of result.warnings || []) toast.warning(w.message)
@@ -301,7 +311,7 @@ async function save() {
 const inputCls = 'w-full h-9 px-2 border border-neutral-300 rounded-md text-sm disabled:bg-neutral-50 disabled:text-neutral-400'
 const selectCls = inputCls + ' bg-surface'
 const labelCls = 'block text-xs font-medium text-neutral-500 mb-1'
-const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
+const lockedTitle = computed(() => t(importedPlan.value ? 'accounting.assets.imported_plan.locked_hint' : 'accounting.assets.editor.locked_hint'))
 </script>
 
 <template>
@@ -321,6 +331,11 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <form v-else @submit.prevent="save" class="space-y-4">
+      <div v-if="importedPlan" data-testid="asset-imported-plan" class="rounded-lg border border-primary-500/30 bg-primary-50 p-4 text-sm text-primary-700">
+        <h2 class="font-semibold">{{ t('accounting.assets.imported_plan.title') }}</h2>
+        <p class="mt-1">{{ t('accounting.assets.imported_plan.source', { program: importedPlan.source_program, tax: importedPlan.source_tax_method, accounting: importedPlan.source_accounting_method }) }}</p>
+        <p class="mt-1">{{ t('accounting.assets.imported_plan.locked_hint') }}</p>
+      </div>
       <!-- Identifikace -->
       <section class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <h2 class="text-sm font-semibold mb-3">{{ t('accounting.assets.editor.section_identity') }}</h2>
@@ -353,20 +368,20 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label :class="labelCls">{{ isTaxEvidence ? t('accounting.assets.fields.asset_kind_de') : t('accounting.assets.fields.asset_account') }} *</label>
-            <SearchableSelect :modelValue="form.asset_account_code" :options="assetAccountOptions"
+            <SearchableSelect :modelValue="form.asset_account_code" :options="assetAccountOptions" :disabled="!!importedPlan"
               :clearable="false" @update:modelValue="onAssetAccountChange" />
             <p v-if="isTaxEvidence" class="text-xs text-neutral-400 mt-1">{{ t('accounting.assets.editor.kind_de_hint') }}</p>
           </div>
           <div v-if="!isTaxEvidence">
             <label :class="labelCls">{{ t('accounting.assets.fields.accumulated_account') }}</label>
-            <SearchableSelect :modelValue="form.accumulated_account_code" :options="accumulatedAccountOptions"
+            <SearchableSelect :modelValue="form.accumulated_account_code" :options="accumulatedAccountOptions" :disabled="!!importedPlan"
               :emptyLabel="t('accounting.assets.editor.no_depreciation')"
               @update:modelValue="v => form.accumulated_account_code = v" />
             <p class="text-xs text-neutral-400 mt-1">{{ t('accounting.assets.editor.accumulated_hint') }}</p>
           </div>
           <div v-if="!isTaxEvidence">
             <label :class="labelCls">{{ t('accounting.assets.fields.acquisition_account') }} *</label>
-            <SearchableSelect :modelValue="form.acquisition_account_code" :options="acquisitionAccountOptions"
+            <SearchableSelect :modelValue="form.acquisition_account_code" :options="acquisitionAccountOptions" :disabled="!!importedPlan"
               :clearable="false" @update:modelValue="v => form.acquisition_account_code = v || '042'" />
           </div>
         </div>
@@ -403,7 +418,7 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
       <!-- Daňové odpisy -->
       <section class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <h2 class="text-sm font-semibold mb-1">{{ t('accounting.assets.editor.section_tax') }}</h2>
-        <p v-if="locks.tax_params" class="text-xs text-warning-600 mb-2">{{ t('accounting.assets.editor.tax_locked') }}</p>
+        <p v-if="locks.tax_params && !importedPlan" class="text-xs text-warning-600 mb-2">{{ t('accounting.assets.editor.tax_locked') }}</p>
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label :class="labelCls">{{ t('accounting.assets.fields.tax_method') }}</label>
@@ -456,11 +471,11 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
       <section v-if="deNeedsMonths" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4">
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
-            <label :class="labelCls">{{ t('accounting.assets.fields.intangible_months_de') }} *</label>
-            <input v-model.number="form.acc_useful_life_months" type="number" min="1" step="1" :class="inputCls" />
+            <label :class="labelCls">{{ t(importedPlan ? 'accounting.assets.revision.original_life_label' : 'accounting.assets.fields.intangible_months_de') }}<template v-if="!importedPlan"> *</template></label>
+            <input v-model.number="form.acc_useful_life_months" :disabled="!!importedPlan" type="number" min="1" step="1" :class="inputCls" />
           </div>
         </div>
-        <p class="mt-2 text-xs text-neutral-400">{{ t('accounting.assets.editor.intangible_months_de_hint') }}</p>
+        <p v-if="!importedPlan" class="mt-2 text-xs text-neutral-400">{{ t('accounting.assets.editor.intangible_months_de_hint') }}</p>
       </section>
 
       <!-- Účetní odpisy -->
@@ -469,22 +484,22 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label :class="labelCls">{{ t('accounting.assets.fields.acc_method') }}</label>
-            <select v-model="form.acc_method" :class="selectCls">
+            <select v-model="form.acc_method" :disabled="!!importedPlan" :class="selectCls">
               <option v-for="m in accMethodOptions" :key="m" :value="m">{{ t(`accounting.assets.accMethod.${m}`) }}</option>
             </select>
           </div>
           <template v-if="!isAccByTax">
             <div>
-              <label :class="labelCls">{{ t('accounting.assets.fields.acc_useful_life_months') }} *</label>
-              <input v-model.number="form.acc_useful_life_months" type="number" min="1" step="1" :class="inputCls" />
+              <label :class="labelCls">{{ t(importedPlan ? 'accounting.assets.revision.original_life_label' : 'accounting.assets.fields.acc_useful_life_months') }}<template v-if="!importedPlan"> *</template></label>
+              <input v-model.number="form.acc_useful_life_months" :disabled="!!importedPlan" type="number" min="1" step="1" :class="inputCls" />
             </div>
             <div>
               <label :class="labelCls">{{ t('accounting.assets.fields.acc_residual_value') }}</label>
-              <input v-model.number="form.acc_residual_value" type="number" min="0" step="0.01" :class="inputCls" />
+              <input v-model.number="form.acc_residual_value" :disabled="!!importedPlan" type="number" min="0" step="0.01" :class="inputCls" />
             </div>
           </template>
         </div>
-        <p class="mt-2 text-xs text-neutral-400">
+        <p v-if="!importedPlan" class="mt-2 text-xs text-neutral-400">
           {{ isAccByTax ? t('accounting.assets.editor.acc_by_tax_hint') : t('accounting.assets.editor.acc_prospective_hint') }}
         </p>
       </section>
@@ -532,7 +547,7 @@ const lockedTitle = computed(() => t('accounting.assets.editor.locked_hint'))
         <div v-for="(err, i) in errors" :key="i">{{ err }}</div>
       </div>
 
-      <div class="flex justify-end gap-2">
+      <div class="flex flex-wrap justify-end gap-2">
         <RouterLink :to="isEdit ? { name: 'accounting-asset-detail', params: { id: assetId } } : { name: 'accounting-assets' }"
           :class="btnOutline('neutral')">
           {{ t('common.cancel') }}

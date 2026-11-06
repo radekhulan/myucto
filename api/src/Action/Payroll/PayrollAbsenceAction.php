@@ -418,9 +418,9 @@ final class PayrollAbsenceAction
      *
      * - Navazující část téže neschopnosti nedostane nové okno (DPN-01): vyčerpané dny
      *   určí řetěz schválených předchozích částí ({@see PayrollAbsenceRepository::sicknessChain()})
-     *   a zapíšou se k části, takže z nich čte krácení mzdy i hlášení. Průměr a pravidla
-     *   (redukční hranice, sazba) jsou z první části — jako u neschopnosti zapsané jedním
-     *   řádkem přes konec čtvrtletí.
+     *   a zapíšou se k části, takže z nich čte krácení mzdy i hlášení. Pravidla
+     *   (redukční hranice, sazba) jsou z první části; průměr z první části platí do konce
+     *   jejího čtvrtletí, dny okna v dalším čtvrtletí berou jeho průměr (§ 354 odst. 1 ZP).
      * - DPN bez nároku na nemocenské (§ 15a zák. č. 187/2006 Sb., DPN-02) se schválí
      *   s nulovou náhradou: mzda se krátí, mzdový vstup ani případ NEMPRI nevzniká.
      * - Snížení náhrady podle § 192 odst. 4 a 5 ZP (DPN-03) jde do výpočtu i do důkazu.
@@ -542,6 +542,7 @@ final class PayrollAbsenceAction
                 if ($averageSource['average_hourly_minor'] === null) {
                     throw self::missingAverage($averageSource);
                 }
+                $segments = $this->withQuarterAverages($supplierId, $absence, (string) $averageSource['date_from'], $segments);
                 $result = $this->sicknessCalculator->calculate(
                     $rulesDate,
                     (int) $averageSource['average_hourly_minor'],
@@ -590,6 +591,46 @@ final class PayrollAbsenceAction
             'Potvrďte účast na nemocenském pojištění, nebo zvolte, že zaměstnanec nárok na náhradu '
             . 'nemá (DPN bez nároku, § 15a zák. č. 187/2006 Sb.).',
         );
+    }
+
+    /**
+     * Směny okna § 192 ZP v dalším kalendářním čtvrtletí než začátek neschopnosti dostanou
+     * průměr toho čtvrtletí: průměrný výdělek se zjišťuje k prvnímu dni čtvrtletí a platí
+     * po celé čtvrtletí (§ 351 a § 354 odst. 1 ZP). Redukční hranice a sazba zůstávají
+     * z prvního dne neschopnosti.
+     *
+     * Průměr dalšího čtvrtletí vzniká až ze mzdy posledního měsíce toho předchozího,
+     * takže neschopnost schválená před jeho schválením by na něj čekala. Dokud schválený
+     * není, zůstává průměr čtvrtletí, kdy neschopnost začala.
+     *
+     * @param array<string,mixed> $absence
+     * @param list<array<string,mixed>> $segments
+     * @return list<array<string,mixed>>
+     */
+    private function withQuarterAverages(int $supplierId, array $absence, string $startDate, array $segments): array
+    {
+        $startKey = substr($startDate, 0, 4) . '-' . (intdiv((int) substr($startDate, 5, 2) - 1, 3) + 1);
+        $byQuarter = [];
+        foreach ($segments as $i => $segment) {
+            $date = (string) $segment['local_date'];
+            $year = (int) substr($date, 0, 4);
+            $quarter = intdiv((int) substr($date, 5, 2) - 1, 3) + 1;
+            if ("{$year}-{$quarter}" === $startKey) {
+                continue;
+            }
+            if (!array_key_exists("{$year}-{$quarter}", $byQuarter)) {
+                $average = $this->averages->findApproved($supplierId, (int) $absence['employment_id'], $year, $quarter);
+                $byQuarter["{$year}-{$quarter}"] = $average !== null && ($average['support_status'] ?? null) === 'supported'
+                    && is_int($average['average_hourly_minor'] ?? null) && $average['average_hourly_minor'] > 0
+                    ? $average['average_hourly_minor']
+                    : null;
+            }
+            if ($byQuarter["{$year}-{$quarter}"] !== null) {
+                $segments[$i]['average_hourly_minor'] = $byQuarter["{$year}-{$quarter}"];
+            }
+        }
+
+        return $segments;
     }
 
     /** @param array<string,mixed> $absence */
@@ -732,6 +773,15 @@ final class PayrollAbsenceAction
         }
         try {
             $data = $this->validator->average($this->body($request));
+            $mismatch = $this->averages->quarterMismatch(
+                $this->currentSupplierId($request),
+                $data['employment_id'],
+                $data['applicable_year'],
+                $data['applicable_quarter'],
+            );
+            if ($mismatch !== null) {
+                throw new \InvalidArgumentException($mismatch);
+            }
             $applicationDate = sprintf(
                 '%04d-%02d-01',
                 $data['applicable_year'],

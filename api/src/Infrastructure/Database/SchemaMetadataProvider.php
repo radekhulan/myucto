@@ -18,7 +18,10 @@ final class SchemaMetadataProvider
 
     public static function isSchemaStatement(string $sql): bool
     {
-        return preg_match('/\A(?:\s+|\/\*.*?\*\/|--[^\r\n]*(?:\r?\n|$)|\#[^\r\n]*(?:\r?\n|$))*(?:CREATE|ALTER|DROP|RENAME|TRUNCATE|USE)\b/is', $sql) === 1;
+        $prefix = '/\A(?:\s+|\/\*.*?\*\/|--[^\r\n]*(?:\r?\n|$)|\#[^\r\n]*(?:\r?\n|$))*';
+        // Dočasná tabulka patří jen aktuální session a strukturu databáze nemění.
+        if (preg_match($prefix . '(?:CREATE|DROP)\s+TEMPORARY\s+TABLE\b/is', $sql) === 1) return false;
+        return preg_match($prefix . '(?:CREATE|ALTER|DROP|RENAME|TRUNCATE|USE)\b/is', $sql) === 1;
     }
 
     public static function generation(): int

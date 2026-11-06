@@ -12,7 +12,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
-import { taxApi, type TaxProfile, type TaxActivity, type TaxChild, type SpouseClaim, type OsvcMonth } from '@/api/tax'
+import { taxApi, type TaxProfile, type TaxActivity, type TaxChild, type SpouseClaim, type OsvcMonth, type TaxFamilyIdentity, type TaxFamilyReveal } from '@/api/tax'
 import { taxEvidenceApi, type TaxEvidenceClosing, type TaxEvidenceAdjustment } from '@/api/taxEvidence'
 import { downloadApiFile } from '@/utils/downloadFile'
 import { btnOutline, btnFilled, ICONS } from '@/components/ui/buttonStyles'
@@ -60,7 +60,8 @@ const yearSelectOptions = computed<{ value: number; label: string }[]>(() => {
 })
 
 const supplierType: TaxpayerType = supplierStore.currentSupplier?.taxpayer_type === 'po' ? 'po' : 'fo'
-const type = ref<TaxpayerType>(supplierType)
+const type = ref<TaxpayerType>(route.query.type === 'po' ? 'po' : supplierType)
+watch(() => route.query.type, requested => { if (requested === 'po') type.value = 'po' })
 const variant = ref<TaxReturnVariant>('radne')
 // Pořadí dodatečného přiznání (E8): 0 = auto (poslední existující / založí č. 1).
 const dodatecneSeq = ref(0)
@@ -243,11 +244,60 @@ function hydrateInputs(loaded: Record<string, unknown>, suggestedTax: number | n
     merged.last_known_tax = suggestedTax
   }
   for (const k of Object.keys(inputs)) delete inputs[k]
+  if (state.value?.podklady.accounting_decree === '504') { merged.nonprofit = JSON.parse(JSON.stringify(loaded.nonprofit ?? {})); merged.puz_to_registry = false }
   Object.assign(inputs, merged)
   dirty.value = false
 }
 
+// Rodná čísla rodiny (H28): profil je nese jen maskovaná. Plná hodnota se načte až
+// na výslovné „Zobrazit" (auditované odhalení) a platí jen pro načtené řádky profilu;
+// uložením dostanou řádky nová id, proto se odhalení při každém načtení zahodí.
+const familyReveal = ref<TaxFamilyReveal | null>(null)
+const familyRevealShown = ref(false)
+const familyRevealing = ref(false)
+const canEditFamily = computed(() => auth.canWrite('reports') && !isFinal.value)
+const hasStoredFamilyBirthNumbers = computed(() =>
+  (profile.children ?? []).some(c => c.has_birth_number) || !!profile.spouse_claim?.has_birth_number)
+
+function familyPlaceholder(person: TaxFamilyIdentity): string {
+  if (person.has_birth_number && !person.birth_number_clear) {
+    return person.birth_number_masked ?? t('taxReturn.birth_number')
+  }
+  return t('taxReturn.birth_number')
+}
+function familyRevealed(kind: 'child' | 'spouse', person: TaxFamilyIdentity): string | null {
+  if (!familyRevealShown.value || !familyReveal.value || !person.id) return null
+  const hit = kind === 'spouse'
+    ? (familyReveal.value.spouse?.id === person.id ? familyReveal.value.spouse : null)
+    : familyReveal.value.children.find(c => c.id === person.id)
+  return hit?.birth_number ?? null
+}
+async function toggleFamilyReveal() {
+  if (familyRevealShown.value) {
+    familyRevealShown.value = false
+    familyReveal.value = null
+    return
+  }
+  if (familyRevealing.value) return
+  familyRevealing.value = true
+  error.value = ''
+  try {
+    familyReveal.value = await taxApi.revealFamily(year.value)
+    familyRevealShown.value = true
+  } catch (e) {
+    error.value = apiErrorMessage(e, t('taxReturn.birth_number_reveal_failed'))
+  } finally {
+    familyRevealing.value = false
+  }
+}
+function toggleFamilyClear(person: TaxFamilyIdentity) {
+  person.birth_number_clear = !person.birth_number_clear
+  if (person.birth_number_clear) person.birth_number = ''
+}
+
 function hydrateProfile(loaded: Record<string, any>) {
+  familyReveal.value = null
+  familyRevealShown.value = false
   for (const key of Object.keys(profile)) delete (profile as any)[key]
   Object.assign(profile, loaded)
   if (!Array.isArray(profile.activities)) profile.activities = []
@@ -331,7 +381,7 @@ async function finalize() {
   if (error.value) return
   saving.value = true
   try {
-    state.value = await taxReturnApi.finalize(type.value, year.value, state.value!.return.row_version, variant.value, seqParam())
+    state.value = await taxReturnApi.finalize(type.value, year.value, state.value!.return.row_version, variant.value, seqParam(), state.value!.nonprofit_filing_proof_hash)
     hydrateInputs(state.value.return.inputs, state.value.last_known_tax_suggested)
   } catch (e: any) {
     error.value = apiErrorMessage(e)
@@ -356,8 +406,8 @@ async function reopen() {
 }
 
 async function downloadXml() {
-  const url = !isFinal.value && type.value === 'fo'
-    ? taxReturnApi.previewXmlUrl(year.value, variant.value, seqParam())
+  const url = !isFinal.value && (type.value === 'fo' || (state.value?.podklady.accounting_decree === '504' && state.value.nonprofit_filing_proof_hash))
+    ? taxReturnApi.previewXmlUrl(year.value, variant.value, seqParam(), type.value)
     : taxReturnApi.xmlUrl(type.value, year.value, variant.value, seqParam())
   try {
     const headers = await downloadApiFile(url)
@@ -1060,7 +1110,7 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
                   </select>
                   <span class="block text-[11px] text-neutral-400 mt-0.5">{{ t('taxReturn.bank_account_hint') }}</span></label>
               </div>
-              <label class="flex items-start gap-2 text-sm mt-3 cursor-pointer">
+              <label v-if="state?.podklady.accounting_decree !== '504'" class="flex items-start gap-2 text-sm mt-3 cursor-pointer">
                 <input type="checkbox" v-model="inputs.puz_to_registry" class="mt-0.5" />
                 <span>{{ t('taxReturn.puz_to_registry') }}
                   <span class="block text-[11px] text-neutral-400">{{ t('taxReturn.puz_to_registry_hint') }}</span></span>
@@ -1226,15 +1276,17 @@ function tabLabel(k: TabKey): string { return t('taxReturn.tab_' + k) }
 
             <div class="bg-surface border border-neutral-200 rounded-lg p-4 space-y-3">
               <div class="flex flex-wrap items-center justify-between gap-2"><div class="text-sm font-semibold">{{ t('taxReturn.family_claims_title') }}</div>
-                <div class="flex flex-wrap gap-2"><button type="button" @click="addChild" class="h-9 px-3 rounded-md bg-primary-600 text-white text-sm whitespace-nowrap"><span aria-hidden="true">＋</span> {{ t('taxReturn.add_child') }}</button><button v-if="!profile.spouse_claim" type="button" @click="enableSpouse" class="h-9 px-3 rounded-md border border-primary-600 text-primary-700 text-sm whitespace-nowrap"><span aria-hidden="true">＋</span> {{ t('taxReturn.add_spouse') }}</button></div>
+                <div class="flex flex-wrap gap-2"><button type="button" @click="addChild" class="h-9 px-3 rounded-md bg-primary-600 text-white text-sm whitespace-nowrap"><span aria-hidden="true">＋</span> {{ t('taxReturn.add_child') }}</button><button v-if="auth.canWrite('reports') && hasStoredFamilyBirthNumbers" type="button" @click="toggleFamilyReveal" :disabled="familyRevealing" class="h-9 px-3 rounded-md border border-neutral-300 text-neutral-700 text-sm whitespace-nowrap" data-test="tax-family-reveal">{{ familyRevealShown ? t('taxReturn.birth_number_hide') : t('taxReturn.birth_number_reveal') }}</button><button v-if="!profile.spouse_claim" type="button" @click="enableSpouse" class="h-9 px-3 rounded-md border border-primary-600 text-primary-700 text-sm whitespace-nowrap"><span aria-hidden="true">＋</span> {{ t('taxReturn.add_spouse') }}</button></div>
               </div>
               <div v-for="(child, childIndex) in profile.children" :key="childIndex" class="border border-neutral-200 rounded-md p-3 space-y-2">
-                <div class="grid grid-cols-1 md:grid-cols-5 gap-2"><input v-model="child.first_name" :placeholder="t('taxReturn.first_name')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input v-model="child.last_name" :placeholder="t('taxReturn.last_name')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input v-model="child.birth_number" :placeholder="t('taxReturn.birth_number')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><DateInput v-model="child.birth_date" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><button type="button" @click="profile.children!.splice(childIndex, 1)" class="h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button></div>
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-2"><input v-model="child.first_name" :placeholder="t('taxReturn.first_name')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input v-model="child.last_name" :placeholder="t('taxReturn.last_name')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input v-model="child.birth_number" :placeholder="familyPlaceholder(child)" :disabled="child.birth_number_clear" autocomplete="off" data-test="tax-child-birth-number" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><DateInput v-model="child.birth_date" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><button type="button" @click="profile.children!.splice(childIndex, 1)" class="h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button></div>
+                <div v-if="child.has_birth_number" class="flex flex-wrap items-center gap-2 text-xs text-neutral-600" data-test="tax-child-birth-number-status"><span>{{ t('taxReturn.birth_number_saved') }}: <span class="font-mono">{{ familyRevealed('child', child) ?? child.birth_number_masked }}</span></span><span v-if="child.birth_number_clear" class="text-warning-700">{{ t('taxReturn.birth_number_will_remove') }}</span><span v-else class="text-neutral-500">{{ t('taxReturn.birth_number_replace_hint') }}</span><button v-if="canEditFamily" type="button" @click="toggleFamilyClear(child)" class="underline text-primary-700" data-test="tax-child-birth-number-clear">{{ child.birth_number_clear ? t('taxReturn.birth_number_keep') : t('taxReturn.birth_number_remove') }}</button></div>
                 <div class="flex flex-wrap gap-4 text-xs"><label><input type="checkbox" v-model="child.shared_household_proved" /> {{ t('taxReturn.shared_household_proved') }}</label><label><input type="checkbox" v-model="child.other_parent_not_claimed_proved" /> {{ t('taxReturn.other_parent_proved') }}</label></div>
                 <div class="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-1"><label v-for="month in child.months" :key="month.month" class="border border-neutral-200 rounded p-1 text-[11px]"><input type="checkbox" v-model="month.claimed" /> {{ month.month }}. <select v-model.number="month.order" class="ml-1 border rounded bg-surface"><option :value="1">1.</option><option :value="2">2.</option><option :value="3">3.+</option></select><label class="ml-1"><input type="checkbox" v-model="month.ztpp" /> ZTP/P</label></label></div>
               </div>
               <div v-if="profile.spouse_claim" class="border border-neutral-200 rounded-md p-3 space-y-2">
-                <div class="grid grid-cols-1 md:grid-cols-5 gap-2"><input v-model="profile.spouse_claim.first_name" :placeholder="t('taxReturn.first_name')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input v-model="profile.spouse_claim.last_name" :placeholder="t('taxReturn.last_name')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input v-model="profile.spouse_claim.birth_number" :placeholder="t('taxReturn.birth_number')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input type="number" min="0" max="12" v-model.number="profile.spouse_claim.eligible_months" :title="t('taxReturn.eligible_months')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><button type="button" @click="profile.spouse_claim = null" class="h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button></div>
+                <div class="grid grid-cols-1 md:grid-cols-5 gap-2"><input v-model="profile.spouse_claim.first_name" :placeholder="t('taxReturn.first_name')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input v-model="profile.spouse_claim.last_name" :placeholder="t('taxReturn.last_name')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input v-model="profile.spouse_claim.birth_number" :placeholder="familyPlaceholder(profile.spouse_claim)" :disabled="profile.spouse_claim.birth_number_clear" autocomplete="off" data-test="tax-spouse-birth-number" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><input type="number" min="0" max="12" v-model.number="profile.spouse_claim.eligible_months" :title="t('taxReturn.eligible_months')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" /><button type="button" @click="profile.spouse_claim = null" class="h-9 px-3 rounded-md border border-danger-500 text-danger-600 text-sm"><span aria-hidden="true">×</span> {{ t('common.delete') }}</button></div>
+                <div v-if="profile.spouse_claim.has_birth_number" class="flex flex-wrap items-center gap-2 text-xs text-neutral-600" data-test="tax-spouse-birth-number-status"><span>{{ t('taxReturn.birth_number_saved') }}: <span class="font-mono">{{ familyRevealed('spouse', profile.spouse_claim) ?? profile.spouse_claim.birth_number_masked }}</span></span><span v-if="profile.spouse_claim.birth_number_clear" class="text-warning-700">{{ t('taxReturn.birth_number_will_remove') }}</span><span v-else class="text-neutral-500">{{ t('taxReturn.birth_number_replace_hint') }}</span><button v-if="canEditFamily" type="button" @click="toggleFamilyClear(profile.spouse_claim)" class="underline text-primary-700" data-test="tax-spouse-birth-number-clear">{{ profile.spouse_claim.birth_number_clear ? t('taxReturn.birth_number_keep') : t('taxReturn.birth_number_remove') }}</button></div>
                 <label class="text-xs">{{ t('taxReturn.spouse_income') }}<input type="number" v-model.number="profile.spouse_claim.own_income" class="ml-2 h-8 px-2 border border-neutral-300 rounded-md" /></label>
                 <div class="flex flex-wrap gap-4 text-xs"><label><input type="checkbox" v-model="profile.spouse_claim.income_proved" /> {{ t('taxReturn.income_proved') }}</label><label><input type="checkbox" v-model="profile.spouse_claim.shared_household_proved" /> {{ t('taxReturn.shared_household_proved') }}</label><label><input type="checkbox" v-model="profile.spouse_claim.child_under_three_proved" /> {{ t('taxReturn.child_under_three_proved') }}</label><label><input type="checkbox" v-model="profile.spouse_claim.ztpp" /> ZTP/P</label></div>
               </div>

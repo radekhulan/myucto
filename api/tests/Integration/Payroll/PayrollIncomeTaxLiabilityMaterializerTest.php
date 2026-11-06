@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollInstitutionAccountRepository;
@@ -41,7 +40,7 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
         $batches = $container->get(PayrollPaymentBatchBuilder::class);
@@ -352,6 +351,38 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
         ));
     }
 
+    /**
+     * Od roku 2027 je daň ze samostatného základu podle § 6 odst. 4 ZDP
+     * ZÁLOHOU (zák. č. 360/2025 Sb.) splatnou s ostatními zálohami v poslední
+     * den lhůty pro hlášení k záloze (§ 38hb). Závazek na účet srážkové daně
+     * nevznikne; odvede se jedním převodem se zálohou a bonus ho snižuje stejně.
+     */
+    public function testSeparateBaseAdvance2027JoinsTheAdvanceLiability(): void
+    {
+        $revisionId = $this->createRevision(
+            1,
+            'regular',
+            null,
+            12_500,
+            3_000,
+            taxBonus: 2_000,
+            separateAdvance: true,
+        );
+
+        $result = $this->materializer->materialize(
+            $this->supplierId,
+            $revisionId,
+            $this->actorId,
+        );
+
+        $rows = array_map($this->liability(...), $result['liability_ids']);
+        self::assertSame(['advance_tax'], array_column($rows, 'liability_kind'));
+        self::assertSame([13_500], array_map(
+            fn (array $row): int => $this->integer($row, 'amount_minor'),
+            $rows,
+        ));
+    }
+
     public function testCorrectionCreatesIndependentSignedDeltas(): void
     {
         $regularRevision = $this->createRevision(
@@ -526,6 +557,7 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
         ?array $statutoryInput = null,
         int $taxBonus = 0,
         int $annualSettlement = 0,
+        bool $separateAdvance = false,
     ): int {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -589,6 +621,11 @@ final class PayrollIncomeTaxLiabilityMaterializerTest extends TestCase
             ],
             'withholding_tax_minor_units' => $withholding,
         ];
+        if ($separateAdvance) {
+            $personResult['calculation_date'] = '2027-01-31';
+            $personResult['separate_base_regime'] = 'separate-advance';
+            $personResult['separate_base_income_minor_units'] = $withholding * 100 / 15;
+        }
         $netResult = [
             'person_reference' => "employee:{$this->employeeId}",
             'annual_settlement_minor_units' => $annualSettlement,

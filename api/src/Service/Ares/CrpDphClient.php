@@ -37,6 +37,12 @@ final class CrpDphClient
         private readonly LoggerInterface $logger,
     ) {}
 
+    /** Skupinové české DIČ podle již normalizované číselné části bez prefixu CZ. */
+    public static function isGroupRegistration(string $number): bool
+    {
+        return preg_match('/^699\d{6}$/D', $number) === 1;
+    }
+
     /**
      * @return array{found:bool, unreliable:?bool, accounts:list<array{prefix:string, number:string, bank_code:string, iban:?string, display:string}>, fu_code:string, source:'cache'|'fresh'|'error'}
      */

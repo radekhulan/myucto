@@ -9,6 +9,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\TaxSubmissionRepository;
+use MyInvoice\Security\ClientTaxSubmissionPolicy;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Service\License\TaxSubmissionAccess;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -221,7 +223,7 @@ final class TaxSubmissionListFilterTest extends TestCase
     // ── Akce ───────────────────────────────────────────────────────────────────
 
     /** @return array{0:int,1:array<string,mixed>} */
-    private function callList(array $query): array
+    private function callList(array $query, bool $client = false): array
     {
         $action = $this->container->get(\MyInvoice\Action\Report\TaxSubmissionAction::class);
         $request = (new ServerRequestFactory())
@@ -229,6 +231,10 @@ final class TaxSubmissionListFilterTest extends TestCase
             ->withQueryParams($query)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin']);
+        if ($client) {
+            $request = $request->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
+                ->withAttribute('auth.effective_role', new EffectiveRole(0, 'Klient podání', 'client', true, ['reports.submissions' => 1]));
+        }
         $response = $action->list($request, (new ResponseFactory())->createResponse());
         return [
             $response->getStatusCode(),
@@ -242,6 +248,35 @@ final class TaxSubmissionListFilterTest extends TestCase
         self::assertSame(422, $status);
         self::assertSame('validation_failed', $body['error']['code'] ?? null);
         self::assertArrayNotHasKey('data', $body, 'Neplatný filtr nesmí vrátit plný seznam.');
+    }
+
+    public function testClientScopeAppliesToSqlPagesCountsStatsAndHostileFilters(): void
+    {
+        [$status, $before] = $this->callList([], true);
+        self::assertSame(200, $status);
+        foreach (ClientTaxSubmissionPolicy::FORM_CODES as $form) {
+            $this->seed($form, 1, 'downloaded');
+        }
+        $this->seed(self::PAID_FORM, 1, 'downloaded');
+        $this->seed('dpzvd6', 1, 'downloaded');
+
+        [$status, $body] = $this->callList(['limit' => '2'], true);
+        self::assertSame(200, $status);
+        self::assertCount(2, $body['data'], 'Nepovolené výkazy nesmějí zkrátit stránku filtrováním až v PHP.');
+        self::assertSame($before['meta']['total'] + 3, $body['meta']['total']);
+        self::assertSame($before['meta']['stats']['total'] + 3, $body['meta']['stats']['total']);
+        foreach ($body['data'] as $row) {
+            self::assertContains($row['form_code'], ClientTaxSubmissionPolicy::FORM_CODES);
+        }
+        self::assertSame([], array_diff($body['meta']['form_codes'], ClientTaxSubmissionPolicy::FORM_CODES));
+
+        foreach ([['scope' => 'payroll'], ['form_code' => self::PAID_FORM]] as $query) {
+            [$status, $filtered] = $this->callList($query, true);
+            self::assertSame(200, $status);
+            self::assertSame([], $filtered['data']);
+            self::assertSame(0, $filtered['meta']['total']);
+            self::assertSame([], array_diff($filtered['meta']['form_codes'], ClientTaxSubmissionPolicy::FORM_CODES));
+        }
     }
 
     public function testListReturnsPageWithTotalAndStats(): void

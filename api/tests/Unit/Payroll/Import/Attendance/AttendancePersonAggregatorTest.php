@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Payroll\Import\Attendance;
 
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceColumnMapper;
+use MyInvoice\Service\Payroll\Import\Attendance\AttendanceMyUctoSampleProfile;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendancePersonAggregator;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceRules;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceRuleSuggester;
@@ -77,6 +78,48 @@ final class AttendancePersonAggregatorTest extends TestCase
         self::assertSame('1992-02-29', $persons['datovy test']['_birth_date']);
         self::assertSame('205', $persons['datovy test']['_health_insurer_code']);
         self::assertNull($persons['chybny test']['_birth_date'], 'Neexistující datum se nepoužije.');
+    }
+
+    /**
+     * Hodinová sazba zůstává text (čte ji až založení osoby), konec dohody se
+     * čte z data v buňce i z textu a číslo účtu zůstává jen interní.
+     */
+    public function testHourlyRateAgreedEndAndBankAccountFromSourceData(): void
+    {
+        $serial = (new \DateTimeImmutable('1899-12-30'))->diff(new \DateTimeImmutable('2026-12-31'))->days;
+        $workbook = AttendanceFixture::xlsx([
+            'Podklady' => [
+                'rows' => [
+                    1 => ['A' => 'Příjmení a jméno', 'B' => 'Hodinová sazba (Kč/h)', 'C' => 'Konec dohody', 'D' => 'Číslo účtu'],
+                    2 => ['A' => 'Sazbová Alena', 'B' => 180.5, 'C' => $serial, 'D' => '1000000005/0100'],
+                    3 => ['A' => 'Textová Běla', 'B' => '165,50 Kč', 'C' => '30. 9. 2026', 'D' => null],
+                    4 => ['A' => 'Chybná Cecílie', 'B' => null, 'C' => 'do odvolání', 'D' => '123'],
+                ],
+                'formats' => ['C2' => 'd.m.yyyy'],
+            ],
+        ]);
+        $persons = $this->byKey($this->pipeline(
+            [AttendanceFixture::file('podklady.xlsx', $workbook)],
+            AttendanceMyUctoSampleProfile::rules(),
+        )['persons']);
+
+        $alena = $persons['alena sazbova'];
+        self::assertSame('180.5', $alena['hourly_rate']);
+        self::assertSame('2026-12-31', $alena['agreed_end_on']);
+        self::assertNull($alena['end_on'], 'Sjednaný konec není ukončení z poznámky.');
+        self::assertSame('1000000005/0100', $alena['_bank_account']);
+        self::assertNull($alena['bank_account_masked'], 'Maskuje až služba importu.');
+        self::assertArrayNotHasKey('bank_account', $alena);
+
+        self::assertSame('165,50 Kč', $persons['bela textova']['hourly_rate']);
+        self::assertSame('2026-09-30', $persons['bela textova']['agreed_end_on']);
+        self::assertNull($persons['bela textova']['_bank_account']);
+
+        $cecilie = $persons['cecilie chybna'];
+        self::assertNull($cecilie['hourly_rate']);
+        self::assertNull($cecilie['agreed_end_on']);
+        self::assertSame('do odvolání', $cecilie['end_date']);
+        self::assertStringContainsString('Konec dohody „do odvolání“', implode(' ', $cecilie['warnings']));
     }
 
     public function testHoursDurationsAndEmptyCells(): void

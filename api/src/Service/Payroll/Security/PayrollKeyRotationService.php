@@ -580,8 +580,9 @@ final class PayrollKeyRotationService
     }
 
     /**
-     * Mzdové sloupce šifrované master klíčem. Kontext každé hodnoty skládá
-     * funkce jejího vlastníka; výčet odpovídá inventáři citlivých sloupců
+     * Mzdové sloupce šifrované master klíčem (a další zapečetěné stejnou
+     * primitivou, např. rodná čísla daňového profilu). Kontext každé hodnoty
+     * skládá funkce jejího vlastníka; výčet odpovídá inventáři citlivých sloupců
      * v `AnonymizationPolicy` a hlídá ho `PayrollKeyRotationCatalogTest`.
      *
      * @return list<array{
@@ -603,6 +604,30 @@ final class PayrollKeyRotationService
             [
                 'table' => 'payroll_dependants',
                 'column' => 'birth_number_ciphertext',
+                'context' => $sealed(PayrollSensitiveField::PERSONAL_IDENTIFIER),
+                'guard' => null,
+                'updated_at' => true,
+            ],
+            // Rodná čísla rodiny z daňového profilu (H28) pečetí tatáž primitiva
+            // master klíčem, takže rotace musí jít i přes ně. Tabulky nemají
+            // `updated_at`.
+            [
+                'table' => 'tax_profile_children',
+                'column' => 'birth_number_ciphertext',
+                'context' => $sealed(PayrollSensitiveField::TAX_FAMILY_IDENTIFIER),
+                'guard' => null,
+                'updated_at' => false,
+            ],
+            [
+                'table' => 'tax_profile_spouse_claims',
+                'column' => 'birth_number_ciphertext',
+                'context' => $sealed(PayrollSensitiveField::TAX_FAMILY_IDENTIFIER),
+                'guard' => null,
+                'updated_at' => false,
+            ],
+            [
+                'table' => 'payroll_person_tax_child_claims',
+                'column' => 'other_caregiver_birth_number_ciphertext',
                 'context' => $sealed(PayrollSensitiveField::PERSONAL_IDENTIFIER),
                 'guard' => null,
                 'updated_at' => true,

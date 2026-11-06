@@ -1138,6 +1138,10 @@ final class PayrollPersonProfileRepository
                 $supplierId,
                 (int) $id,
             );
+            // Jedinečnost hlídá `uq_payroll_identifier_tenant_hash`; shoda se ale
+            // hlásí vlastním typem, aby ji akce mohly auditovat a omezit (viz
+            // PayrollPersonIdentifierCollisionException).
+            $this->assertIdentifierUnused($supplierId, $type, $sealed->lookupHash, (int) $id);
             $update = $this->db->pdo()->prepare(
                 'UPDATE payroll_person_identifiers
                     SET value_ciphertext = ?, value_hash = ?, value_masked = ?,
@@ -1154,6 +1158,24 @@ final class PayrollPersonProfileRepository
                 $id,
             ]);
             $this->assertOwnedRowUpdated($update, 'Identifikátor');
+        }
+    }
+
+    private function assertIdentifierUnused(
+        int $supplierId,
+        string $type,
+        string $valueHash,
+        int $identifierId,
+    ): void {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1
+               FROM payroll_person_identifiers
+              WHERE supplier_id = ? AND identifier_type = ? AND value_hash = ? AND id <> ?
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, $type, $valueHash, $identifierId]);
+        if ($stmt->fetchColumn() !== false) {
+            throw new PayrollPersonIdentifierCollisionException($type);
         }
     }
 

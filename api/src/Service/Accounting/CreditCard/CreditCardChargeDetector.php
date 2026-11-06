@@ -10,6 +10,7 @@ use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
 use MyInvoice\Service\Accounting\Bank\Detect\DetectionResult;
 use MyInvoice\Service\Accounting\OperationType;
+use MyInvoice\Service\Accounting\AccountRoleResolver;
 use MyInvoice\Service\Bank\CreditCard\CreditCardTransactionKind;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 
@@ -37,6 +38,7 @@ final class CreditCardChargeDetector
         private readonly SupplierBankAccountRepository $bankAccounts,
         private readonly CreditCardAccountRepository $creditCards,
         private readonly CreditCardSettingsRepository $settings,
+        private readonly AccountRoleResolver $roles,
     ) {}
 
     /** @param array<string,mixed> $tx řádek bank_transactions + recipient_account/recipient_bank výpisu */
@@ -57,6 +59,12 @@ final class CreditCardChargeDetector
         $codes = $this->settings->find($supplierId);
         $kind = CreditCardTransactionKind::classify((string) ($tx['description'] ?? ''), $amount);
         $in = $amount > 0;
+        if (in_array($kind, [CreditCardTransactionKind::INTEREST, CreditCardTransactionKind::FEE], true)) {
+            $profile = $this->roles->forDate($supplierId, (string) $tx['posted_at']);
+            $field = $kind === CreditCardTransactionKind::INTEREST ? 'interest' : 'fee';
+            $role = $kind === CreditCardTransactionKind::INTEREST ? 'interest.expense' : 'bank.fee';
+            $codes[$field . '_account_code'] = $profile->configuredAccount($role, $codes[$field . '_account_id'], $codes[$field . '_account_code']);
+        }
         return match ($kind) {
             CreditCardTransactionKind::INTEREST => $this->result(
                 OperationType::BANK_INTEREST,

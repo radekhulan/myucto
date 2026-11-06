@@ -4,7 +4,7 @@ import { ref } from 'vue'
 import GroupForecast, { type GroupAnnualForecast, type GroupForecastReport } from '../GroupForecast.vue'
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: object) => key + (params ? JSON.stringify(params) : ''), locale: ref('cs') }) }))
-vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: number, currency: string) => `${value} ${currency}` }))
+vi.mock('@/composables/useFormat', () => ({ formatMoneyWhole: (value: number, currency: string) => `${value} ${currency}` }))
 const annual = (currency = 'CZK'): GroupAnnualForecast => ({
   year: 2094, currency, revenue_model: 100, costs_model: 30, revenue_current_year: 80, costs_current_year: 20,
   other_revenue: 50, other_costs: 20, other_posted: 10, other_draft: 60,

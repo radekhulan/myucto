@@ -104,6 +104,7 @@ final class StockClosingValuation
     /**
      * Podklady k ručnímu doúčtování zásob způsobem B: příjemky bez PF
      * a PF se skladovými položkami bez příjemky k rozvahovému dni.
+     * Převzatá historie skladu se nehlásí: její doúčtování proběhlo v původním systému.
      *
      * @return list<array<string,mixed>>
      */
@@ -119,6 +120,7 @@ final class StockClosingValuation
               WHERE d.supplier_id = ? AND d.doc_type = 'receipt' AND d.status = 'posted'
                 AND d.doc_date <= ? AND d.purchase_invoice_id IS NULL
                 AND d.origin NOT IN ('inventory','credit_note')
+                AND d.history_import_job_id IS NULL
                 AND NOT EXISTS (
                     SELECT 1 FROM stock_documents original
                      WHERE original.supplier_id = d.supplier_id
@@ -146,7 +148,8 @@ final class StockClosingValuation
                 AND pi.status NOT IN ('draft','cancelled')
                 AND EXISTS (
                     SELECT 1 FROM purchase_invoice_items pii
-                     WHERE pii.purchase_invoice_id = pi.id AND pii.stock_item_id IS NOT NULL
+                     JOIN stock_items si ON si.id = pii.stock_item_id AND si.supplier_id = pi.supplier_id
+                     WHERE pii.purchase_invoice_id = pi.id AND si.item_type <> 'service'
                 )
                 AND NOT EXISTS (
                     SELECT 1 FROM stock_documents d

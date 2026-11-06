@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission;
 
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 use Psr\Clock\ClockInterface;
 
 final class PayrollObligationService
@@ -262,6 +263,15 @@ final class PayrollObligationService
         $this->assertActor($responsibleUserId);
         $this->assertActor($createdBy);
         $this->assertCode($agendaCode, 48, 'Agenda');
+        // `JMHZ27`/`REGZEC27` je ročník datové věty, ne agenda: povinnost za
+        // 01/2027 zůstává pod `JMHZ25`, jinak by ji minula jedinečnost řádného
+        // hlášení (migrace 1731) i odklady ({@see JmhzSpecVersion}).
+        if (JmhzSpecVersion::isEnvelopeOnlyCode($agendaCode)) {
+            throw new \InvalidArgumentException(
+                'Agenda ' . $agendaCode . ' je ročník datové věty; povinnost se eviduje pod '
+                    . JmhzSpecVersion::canonicalAgendaCode($agendaCode) . '.',
+            );
+        }
         $this->assertCode($sourceEventType, 64, 'Zdrojová událost');
         $this->assertReference($subjectReference);
         $this->assertReference($sourceEventReference);

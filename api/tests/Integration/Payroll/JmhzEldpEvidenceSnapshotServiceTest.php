@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEldpEvidenceSnapshotService;
@@ -12,6 +11,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PDOException;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -30,7 +30,7 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_jmhz_eldp_evidence_snapshots')) {
             $this->markTestSkipped('Migrace 1363 neproběhla.');
@@ -200,9 +200,10 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
 
     /**
      * Poživatel předčasného starobního důchodu před dosažením důchodového věku:
-     * kód D, ale odečtené doby nemá (předčasný důchod je důchod).
+     * kód D nemá (D jen po splnění podmínky nároku podle § 29 odst. 1 nebo 3,
+     * Zadání ELDP12 v1.04) a odečtené doby také ne.
      */
-    public function testEarlyPensionerFromStatutoryEvidenceGivesCodeDWithoutDeductedDays(): void
+    public function testEarlyPensionerFromStatutoryEvidenceHasNoCodeDBeforePensionAge(): void
     {
         $employeeId = $this->employeeId();
         $this->insertPensionAge($employeeId, '2027-05-01');
@@ -216,7 +217,7 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
         $snapshot = $this->preparedSnapshot('synthetic-preparation-early-pension');
 
         $section = $snapshot['payload']['eldp_sections'][0];
-        self::assertSame('1D+', $section['code']);
+        self::assertSame('1++', $section['code']);
         self::assertNull($section['deducted_days_total']);
         self::assertSame('2026-02-01', $snapshot['payload']['source_evidence']['pension_status']['early_pension_from']);
     }
@@ -236,6 +237,92 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
         self::assertIsArray($again);
         self::assertSame($first['id'], $again['id']);
         self::assertSame('1++', $again['payload']['eldp_sections'][0]['code']);
+    }
+
+    /**
+     * Poživatel starobního důchodu v plné výši: ELDP se vyplňuje „pouze do
+     * měsíce, od něhož náleží výplata starobního důchodu v plné výši" včetně
+     * něj (diskuse JMHZ #363, Metodická pomůcka ELDP, příklad 8a). Duben, od
+     * kterého důchod náleží, nese třídu ELDP i s ověřenou slevou pracujícího
+     * důchodce, ať důchod začíná 1. nebo 15. dubna; květen už jen 10354,
+     * 10355 a 10356 = 0. Dřív sleva sama vypustila ELDP už za duben.
+     */
+    #[DataProvider('fullPensionStarts')]
+    public function testFullPensionStartMonthStillCarriesEldpAndNextMonthDoesNot(string $year, string $day): void
+    {
+        $pdo = $this->db->pdo();
+        $employeeId = $this->employeeId();
+        $this->insertPensionAge($employeeId, "{$year}-03-20");
+        $pdo->prepare(
+            'INSERT INTO payroll_person_pensions
+                (supplier_id, employee_id, pension_type_code, early_retirement,
+                 reduced_retirement_age, effective_from)
+             VALUES (?, ?, "1", 0, 0, ?)',
+        )->execute([$this->supplierId, $employeeId, "{$year}-04-{$day}"]);
+        $existing = [$employeeId, $this->employmentId];
+        [, $aprilRevision] = $this->source($pdo, false, "{$year}-04-01", true, $existing);
+        [, $mayRevision] = $this->source($pdo, false, "{$year}-05-01", true, $existing);
+
+        $april = $this->preparedSnapshotFor($aprilRevision, "synthetic-full-pension-april-{$year}-{$day}");
+        $aprilSection = $april['payload']['eldp_sections'][0];
+        self::assertFalse($april['payload']['source_evidence']['working_pensioner']);
+        self::assertSame("{$year}-04", $april['payload']['source_evidence']['pension_status']['full_pension_paid_from']);
+        self::assertSame('1D+', $aprilSection['code']);
+        self::assertSame("{$year}-04-01", $aprilSection['valid_from']);
+        self::assertSame("{$year}-04-30", $aprilSection['valid_to']);
+        self::assertSame(30, $aprilSection['insurance_days']);
+        self::assertSame(10_000, $aprilSection['assessment_base_czk']);
+
+        $may = $this->preparedSnapshotFor($mayRevision, "synthetic-full-pension-may-{$year}-{$day}");
+        $maySection = $may['payload']['eldp_sections'][0];
+        self::assertTrue($may['payload']['source_evidence']['working_pensioner']);
+        self::assertSame("{$year}-05-01", $may['payload']['insurance_interval']['insurance_from']);
+        self::assertSame("{$year}-05-31", $may['payload']['insurance_interval']['insurance_to']);
+        self::assertNull($maySection['code']);
+        self::assertNull($maySection['valid_from']);
+        self::assertNull($maySection['valid_to']);
+        self::assertSame(0, $maySection['insurance_days']);
+        self::assertNull($maySection['assessment_base_czk']);
+    }
+
+    /** @return iterable<string,array{string,string}> */
+    public static function fullPensionStarts(): iterable
+    {
+        yield '2026, důchod od 1. 4.' => ['2026', '01'];
+        yield '2026, důchod od 15. 4.' => ['2026', '15'];
+        yield '2027, důchod od 1. 4.' => ['2027', '01'];
+        yield '2027, důchod od 15. 4.' => ['2027', '15'];
+    }
+
+    /**
+     * Ověřená sleva bez starobního důchodu v zákonné evidenci rozhoduje
+     * sama jako dřív: měsíc, od kterého výplata náleží, se nedá poznat.
+     */
+    public function testWorkingPensionerWithoutPensionEvidenceStaysWithoutEldp(): void
+    {
+        $pdo = $this->db->pdo();
+        [, $revision] = $this->source($pdo, false, '2026-04-01', true, [$this->employeeId(), $this->employmentId]);
+
+        $snapshot = $this->preparedSnapshotFor($revision, 'synthetic-pensioner-without-evidence');
+
+        self::assertTrue($snapshot['payload']['source_evidence']['working_pensioner']);
+        self::assertNull($snapshot['payload']['eldp_sections'][0]['code']);
+        self::assertSame(0, $snapshot['payload']['eldp_sections'][0]['insurance_days']);
+    }
+
+    /** @return array<string,mixed> */
+    private function preparedSnapshotFor(int $revisionId, string $key): array
+    {
+        $preparation = $this->preparations->freeze($this->supplierId, $revisionId, 'test', $key, $this->createdBy);
+        self::assertNotContains(
+            'jmhz_eldp_evidence_missing',
+            array_column($preparation['issues'], 'code'),
+            CanonicalJson::encode(array_column($preparation['issues'], 'code')),
+        );
+        $snapshot = $this->service->snapshotForPreparation($this->supplierId, 'test', $revisionId, $this->employmentId);
+        self::assertIsArray($snapshot);
+
+        return $snapshot;
     }
 
     /** @return array<string,mixed> */
@@ -455,30 +542,39 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
         ];
     }
 
-    /** @return array{int,int} */
+    /**
+     * @param array{int,int}|null $existing zaměstnanec a vztah dalšího měsíce téže osoby
+     * @return array{int,int}
+     */
     private function source(
         PDO $pdo,
         bool $withAbsence = false,
         string $periodStart = '2026-07-01',
+        bool $workingPensioner = false,
+        ?array $existing = null,
     ): array
     {
-        $pdo->prepare(
-            'INSERT INTO payroll_employees
-                (supplier_id, full_name, taxpayer_type, employment_type,
-                 tax_declaration_signed, tax_credit_taxpayer, child_count,
-                 monthly_gross, auto_post, is_active)
-             VALUES (?, "Syntetická osoba ELDP", "employee", "hpp",
-                     1, 1, 0, 10000, 0, 1)',
-        )->execute([$this->supplierId]);
-        $employeeId = (int) $pdo->lastInsertId();
-        $pdo->prepare(
-            'INSERT INTO payroll_employments
-                (supplier_id, employee_id, code, relation_type, status,
-                 start_date, monthly_gross_minor)
-             VALUES (?, ?, "eldp-synthetic", "employment", "active",
-                     "2026-01-01", 1000000)',
-        )->execute([$this->supplierId, $employeeId]);
-        $employmentId = (int) $pdo->lastInsertId();
+        if ($existing !== null) {
+            [$employeeId, $employmentId] = $existing;
+        } else {
+            $pdo->prepare(
+                'INSERT INTO payroll_employees
+                    (supplier_id, full_name, taxpayer_type, employment_type,
+                     tax_declaration_signed, tax_credit_taxpayer, child_count,
+                     monthly_gross, auto_post, is_active)
+                 VALUES (?, "Syntetická osoba ELDP", "employee", "hpp",
+                         1, 1, 0, 10000, 0, 1)',
+            )->execute([$this->supplierId]);
+            $employeeId = (int) $pdo->lastInsertId();
+            $pdo->prepare(
+                'INSERT INTO payroll_employments
+                    (supplier_id, employee_id, code, relation_type, status,
+                     start_date, monthly_gross_minor)
+                 VALUES (?, ?, "eldp-synthetic", "employment", "active",
+                         "2026-01-01", 1000000)',
+            )->execute([$this->supplierId, $employeeId]);
+            $employmentId = (int) $pdo->lastInsertId();
+        }
         $pdo->prepare(
             'INSERT INTO payroll_runs
                 (supplier_id, period_start, payment_date, status, current_revision_no)
@@ -491,6 +587,9 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
             'period_start' => $periodStart,
             'people' => [[
                 'employee' => ['id' => $employeeId],
+                ...($workingPensioner
+                    ? ['statutory_evidence' => ['social' => ['working_pensioner_discount' => ['status' => 'verified']]]]
+                    : []),
                 'employments' => [[
                     'employment' => [
                         'id' => $employmentId,
@@ -514,7 +613,7 @@ final class JmhzEldpEvidenceSnapshotServiceTest extends TestCase
                             'conditional_blocks_confirmed' => true,
                             'interactions' => ['IN07' => false, 'IN08' => false],
                             'values' => [
-                                'evidence_days' => 31,
+                                'evidence_days' => (int) (new \DateTimeImmutable($periodStart))->format('t'),
                                 'unworked_total_millihours' => null,
                                 'unworked_paid_millihours' => null,
                                 'dpn_without_employer_compensation_millihours' => null,

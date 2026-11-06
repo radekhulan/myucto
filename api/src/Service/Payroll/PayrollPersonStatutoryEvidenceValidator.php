@@ -8,6 +8,8 @@ use DateTimeImmutable;
 use InvalidArgumentException;
 use MyInvoice\Service\Codebook\HealthInsurers;
 use MyInvoice\Service\Payroll\HealthInsurance\HealthMinimumReductionReason;
+use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 
 final class PayrollPersonStatutoryEvidenceValidator
 {
@@ -22,6 +24,20 @@ final class PayrollPersonStatutoryEvidenceValidator
         return array_map(
             static fn (HealthMinimumReductionReason $reason): string => $reason->value,
             HealthMinimumReductionReason::cases(),
+        );
+    }
+
+    /**
+     * Druhy slev podle § 35ba. Jediný zdroj je enum, stejně jako u důvodů
+     * výjimky z minima ZP výše.
+     *
+     * @return list<string>
+     */
+    private static function taxCreditKinds(): array
+    {
+        return array_map(
+            static fn (TaxCreditKind $kind): string => $kind->value,
+            TaxCreditKind::cases(),
         );
     }
 
@@ -87,7 +103,7 @@ final class PayrollPersonStatutoryEvidenceValidator
             fn (array $row): string => $this->enum(
                 $row,
                 'credit_kind',
-                ['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p'],
+                self::taxCreditKinds(),
             ),
         );
         $childClaims = $this->intervalRows(
@@ -425,10 +441,23 @@ final class PayrollPersonStatutoryEvidenceValidator
         $status = $this->enum($row, 'status', ['signed', 'not-signed', 'unverified']);
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
         $this->assertEvidenceAllowed($status !== 'unverified', $evidence, 'daňové prohlášení');
+        // Den podpisu prohlášení (JMHZ 10575 od 01/2027, IN16). Má smysl jen
+        // u podepsaného prohlášení; řádek bez něj zůstává ve snímku bajtově
+        // stejný jako dřív.
+        if (($row['signed_on'] ?? null) === '') {
+            $row['signed_on'] = null;
+        }
+        $signedOn = $this->nullableDateValue($row, 'signed_on');
+        if ($signedOn !== null && $status !== 'signed') {
+            throw new InvalidArgumentException(
+                'Den podpisu lze uvést jen u podepsaného prohlášení poplatníka.',
+            );
+        }
 
         return $this->baseInterval($row) + [
             'status' => $status,
             'evidence_reference' => $evidence,
+            ...($signedOn === null ? [] : ['signed_on' => $signedOn]),
         ];
     }
 
@@ -478,12 +507,20 @@ final class PayrollPersonStatutoryEvidenceValidator
         $evidence = $this->nullableCanonical($row, 'evidence_reference');
         $this->assertEvidenceAllowed($status === 'verified', $evidence, 'daňová sleva');
 
-        return $this->baseInterval($row) + [
-            'credit_kind' => $this->enum(
-                $row,
-                'credit_kind',
-                ['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p'],
-            ),
+        $kind = $this->enum($row, 'credit_kind', self::taxCreditKinds());
+        $interval = $this->baseInterval($row);
+        // Sleva na studenta existuje až od 1. 1. 2027. Věkovou hranici (datum
+        // narození) kontroluje zápisová cesta, tady je jen to, co plyne z řádku.
+        if (StudentTaxCredit::isStudent(TaxCreditKind::from($kind))
+            && (string) $interval['effective_from'] < StudentTaxCredit::EFFECTIVE_FROM
+        ) {
+            throw new InvalidArgumentException(
+                'Slevu na studenta lze uplatnit až od 1. 1. 2027 (§ 35bc ZDP).',
+            );
+        }
+
+        return $interval + [
+            'credit_kind' => $kind,
             'evidence_status' => $status,
             'evidence_reference' => $evidence,
         ];

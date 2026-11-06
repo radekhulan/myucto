@@ -905,7 +905,8 @@
                     "status": "ignored"
                 },
                 "BezZdr": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PohodaPayrollConverter"
                 },
                 "DUvazek": {
                     "status": "mapped",
@@ -1219,7 +1220,8 @@
                     "status": "ignored"
                 },
                 "KcNahrNem": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PohodaPayrollConverter"
                 },
                 "KcNahrNemNad": {
                     "status": "ignored"
@@ -1288,7 +1290,8 @@
                     "status": "ignored"
                 },
                 "KcPripoj": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PohodaPayrollPeople"
                 },
                 "KcPrispKarantena": {
                     "status": "ignored"
@@ -2098,7 +2101,8 @@
                     "status": "ignored"
                 },
                 "Hodnota2": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PohodaPayrollPeople"
                 },
                 "Hodnota20": {
                     "status": "ignored"
@@ -4989,7 +4993,8 @@
                     "status": "ignored"
                 },
                 "RelDruhZ": {
-                    "status": "ignored"
+                    "status": "mapped",
+                    "target": "PohodaPayrollRelations"
                 },
                 "RelDruhZ2011": {
                     "status": "ignored"
@@ -5511,20 +5516,20 @@
                     }
                 },
                 "D01": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component task_wage PAM_D01"
                 },
                 "D02": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component hourly_wage PAM_D02"
                 },
                 "D03": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component task_wage PAM_D03"
                 },
                 "D04": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component hourly_wage PAM_D04"
                 },
                 "D05": {
                     "status": "warned",
@@ -6016,12 +6021,28 @@
                     "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
                 },
                 "Z23": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component other REKREACE_VOLNY_CAS",
+                    "probe": {
+                        "name": "Zaměstnanecké benefity",
+                        "catalog": {
+                            "RelTpDan": "4",
+                            "JeSoc": "0",
+                            "JeZdr": "0"
+                        }
+                    }
                 },
                 "Z24": {
-                    "status": "warned",
-                    "reason": "Převod složku nezná; měsíc s částkou ji hlásí v protokolu k ručnímu doplnění."
+                    "status": "mapped",
+                    "target": "component other ZDRAVOTNI_BENEFIT",
+                    "probe": {
+                        "name": "Zdravotní benefity",
+                        "catalog": {
+                            "RelTpDan": "4",
+                            "JeSoc": "0",
+                            "JeZdr": "0"
+                        }
+                    }
                 },
                 "Z25": {
                     "status": "warned",

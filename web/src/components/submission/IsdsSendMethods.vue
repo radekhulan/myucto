@@ -25,11 +25,15 @@ const props = defineProps<{
   transport?: { automatic: boolean; channel: string; reason?: string | null } | null
   /** Zahájení brány s oprávněním volajícího (obecné, mzdové, daňové). */
   gatewayStart?: (id: number) => Promise<GatewayStart>
+  /** Klient smí použít jen daňovou bránu, bez přístupu do obecné schránky. */
+  gatewayOnly?: boolean
 }>()
 const emit = defineEmits<{ sent: [dispatched: boolean] }>()
 const { t } = useI18n()
 
-const METHODS: Method[] = ['gateway', 'mobile_key', 'password', 'sms', 'certificate']
+const methods = computed<Method[]>(() => props.gatewayOnly
+  ? ['gateway']
+  : ['gateway', 'mobile_key', 'password', 'sms', 'certificate'])
 const ACCESS_LINK = '/admin/databox?tab=access'
 
 const gatewayRegistered = ref(false)
@@ -55,7 +59,7 @@ const gatewayAvailable = computed(() =>
   || props.transport?.channel === 'gateway',
 )
 
-const recommended = computed<Method>(() => (gatewayAvailable.value ? 'gateway' : 'mobile_key'))
+const recommended = computed<Method>(() => (props.gatewayOnly || gatewayAvailable.value ? 'gateway' : 'mobile_key'))
 
 function available(option: Method): boolean {
   if (option === 'gateway') return gatewayAvailable.value
@@ -225,6 +229,7 @@ async function sendWithCertificate() {
 }
 
 async function loadAvailability() {
+  if (props.gatewayOnly) return
   // Bez práva k nastavení schránky (403) o bráně ani certifikátu nic nevíme;
   // volba pak zůstane nedostupná s vysvětlením, ne skrytá.
   const [capabilities, credentials] = await Promise.all([
@@ -247,7 +252,7 @@ onBeforeUnmount(resetSecrets)
   <div class="space-y-3" data-test="isds-send-methods">
     <div class="grid min-w-0 gap-2 sm:grid-cols-2" role="radiogroup" :aria-label="t('databox.send.title')">
       <label
-        v-for="option in METHODS"
+        v-for="option in methods"
         :key="option"
         class="flex min-w-0 gap-3 rounded-lg border p-3"
         :class="!available(option)
@@ -447,7 +452,7 @@ onBeforeUnmount(resetSecrets)
         data-test="isds-send-error"
       >
         {{ error }}
-        <a v-if="forbidden" :href="outboxLink" class="mt-1 block font-medium underline" data-test="isds-send-open-outbox">
+        <a v-if="forbidden && !gatewayOnly" :href="outboxLink" class="mt-1 block font-medium underline" data-test="isds-send-open-outbox">
           {{ t('databox.send.openOutbox') }}
         </a>
       </div>

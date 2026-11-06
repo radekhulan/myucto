@@ -214,7 +214,7 @@ final class OffsetService
                 }
             }
 
-            $lines = $this->buildLines($supplierId, $total);
+            $lines = $this->buildLines($supplierId, $total, $items);
             $postMeta = array_merge($meta, [
                 'entry_date'  => $date,
                 'document_no' => (string) $agreement['document_no'],
@@ -391,17 +391,41 @@ final class OffsetService
     }
 
     /**
+     * Strana závazků se rozpadne podle účtu, na kterém závazek každé přijaté faktury
+     * vznikl ({@see PurchasePayableAccount::forPayment}) — účtenka na 325 se odúčtuje z 325.
+     * Leží-li všechny na účtu z kontace, zůstává jeden řádek jako dosud.
+     *
+     * @param list<array<string,mixed>> $items položky dohody (doc_type, doc_id, amount)
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
      */
-    private function buildLines(int $supplierId, float $total): array
+    private function buildLines(int $supplierId, float $total, array $items = []): array
     {
         $rule = $this->rules->resolve($supplierId, 'offset.mutual');
-        $debit  = $rule['debit_account_code'] ?? '321';
+        $debit  = (string) ($rule['debit_account_code'] ?? '321');
         $credit = $rule['credit_account_code'] ?? '311';
-        return [
-            ['account_code' => (string) $debit,  'side' => 'debit',  'amount' => round($total, 2)],
-            ['account_code' => (string) $credit, 'side' => 'credit', 'amount' => round($total, 2)],
-        ];
+
+        $payables = new PurchasePayableAccount($this->db);
+        $byAccount = [];
+        foreach ($items as $item) {
+            if (($item['doc_type'] ?? '') !== 'purchase_invoice') {
+                continue;
+            }
+            $account = $payables->forPayment($supplierId, (int) $item['doc_id'], $debit);
+            if ($account !== $debit) {
+                $byAccount[$account] = round(($byAccount[$account] ?? 0.0) + (float) $item['amount'], 2);
+            }
+        }
+        $lines = [];
+        $rest = round($total, 2);
+        foreach ($byAccount as $account => $amount) {
+            $lines[] = ['account_code' => (string) $account, 'side' => 'debit', 'amount' => $amount];
+            $rest = round($rest - $amount, 2);
+        }
+        if ($byAccount === [] || self::cents($rest) !== 0) {
+            array_unshift($lines, ['account_code' => $debit, 'side' => 'debit', 'amount' => $rest]);
+        }
+        $lines[] = ['account_code' => (string) $credit, 'side' => 'credit', 'amount' => round($total, 2)];
+        return $lines;
     }
 
     private function purchaseStatus(int $supplierId, int $docId): string

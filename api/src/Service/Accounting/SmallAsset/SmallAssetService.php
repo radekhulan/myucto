@@ -9,6 +9,7 @@ use MyInvoice\Repository\SmallAssetRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -41,6 +42,22 @@ final class SmallAssetService
         $this->assertSingleSource($data);
         $this->assertSourceBelongsToTenant($supplierId, $data);
         return $this->cards->insert($supplierId, $data, $createdBy);
+    }
+
+    /**
+     * Dodatečně naváže kartu BEZ zdroje na položku přijaté faktury (opakovaný převod z jiného
+     * programu dohledá doklad, který dřívější převod nenašel). Karta se zdrojem zůstává,
+     * jak je - vazbu nikdy nepřepisuje.
+     */
+    public function attachPurchaseSource(int $supplierId, int $id, int $purchaseInvoiceId, int $purchaseInvoiceItemId, ?string $documentRef): bool
+    {
+        $this->assertSourceBelongsToTenant($supplierId, ['purchase_invoice_id' => $purchaseInvoiceId, 'purchase_invoice_item_id' => $purchaseInvoiceItemId]);
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE small_assets SET purchase_invoice_id = ?, purchase_invoice_item_id = ?, document_ref = COALESCE(document_ref, ?)
+              WHERE id = ? AND supplier_id = ? AND purchase_invoice_id IS NULL AND purchase_invoice_item_id IS NULL AND cash_document_id IS NULL'
+        );
+        $stmt->execute([$purchaseInvoiceId, $purchaseInvoiceItemId, $documentRef, $id, $supplierId]);
+        return $stmt->rowCount() > 0;
     }
 
     /**
@@ -218,7 +235,7 @@ final class SmallAssetService
                 'quantity' => $qty,
                 // Jednotková cena PO slevě — jinak by karta tvrdila jinou cenu za kus,
                 // než kolik věc stála, a §26/2 se posuzuje právě podle ceny za kus.
-                'unit_price' => $qty != 0.0 ? round($price / $qty, 2) : $price,
+                'unit_price' => $qty != 0.0 ? UnitPricePrecision::normalize($price / $qty) : $price,
                 'price' => $price,
                 // DDHM vs DDNM — inventarizace hmotného je fyzická, u nehmotného se
                 // dokládá licenčním ujednáním; soupis, který obojí míchá, je nepoužitelný.

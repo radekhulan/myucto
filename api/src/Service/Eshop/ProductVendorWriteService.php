@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Eshop;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemVendorRepository;
 use MyInvoice\Service\Eshop\Pricing\PriceRecomputeDispatcher;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 final class ProductVendorWriteService
 {
@@ -80,7 +81,7 @@ final class ProductVendorWriteService
                 $prepared[] = [
                     'client_id'            => $clientId,
                     'vendor_sku'           => $this->stringOrNull($row['vendor_sku'] ?? null),
-                    'purchase_price'       => $this->numberOrNull($row['purchase_price'] ?? null),
+                    'purchase_price'       => $this->purchasePrice($row['purchase_price'] ?? null),
                     'currency_code'        => $this->currency($row['currency_code'] ?? 'CZK'),
                     'delivery_days'        => $this->intOrNull($row['delivery_days'] ?? null),
                     'stock_qty'            => $stockQty,
@@ -167,6 +168,14 @@ final class ProductVendorWriteService
             throw new EshopException('validation_failed', 'Neplatný stav nabídky dodavatele.', 422);
         }
         return $row + ['is_active' => true];
+    }
+
+    private function purchasePrice(mixed $value): ?string
+    {
+        if (!UnitPricePrecision::isWithinPrecision($value)) {
+            throw new EshopException('validation_failed', 'Nákupní cena smí mít nejvýše šest desetinných míst.', 400);
+        }
+        return $this->numberOrNull($value);
     }
 
     private function numberOrNull(mixed $value): ?string

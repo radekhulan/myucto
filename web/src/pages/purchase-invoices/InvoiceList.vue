@@ -17,8 +17,9 @@ import {
   type PurchaseDocumentKind,
   type ImportBatch,
 } from '@/api/purchaseInvoices'
-import { formatMoney, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
+import { formatMoney, formatMoneyWhole, formatUnitPrice, formatDate, formatMonth, formatNumber, taxDateClass } from '@/composables/useFormat'
 import { useRowLink } from '@/composables/useRowLink'
+import { useListNavigationSource } from '@/composables/useListNavigation'
 import { useToast } from '@/composables/useToast'
 import { ACCOUNTING_PERIOD_MISSING_CODES, accountingPeriodRoute, apiErrorMessage } from '@/api/errors'
 import { useYearOptions } from '@/composables/useYearOptions'
@@ -27,6 +28,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import BulkActionBar from '@/components/ui/BulkActionBar.vue'
+import InvoiceBookMenu from '@/components/invoices/InvoiceBookMenu.vue'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import { markRowsTouched, consumeFlashedRows } from '@/composables/useRowFlash'
 import { useListKeyboard } from '@/composables/useListKeyboard'
@@ -108,6 +110,8 @@ const approvalFilter = ref<'' | 'pending' | 'approved' | 'rejected'>('')
 const paymentOrderedFilter = ref<'' | '1' | '0'>('')
 // Zaúčtováno/nezaúčtováno (0.9) — jen podvojné účetnictví. '' = vše, '1' = zaúčtováno, '0' = nezaúčtováno.
 const bookedFilter = ref<'' | '1' | '0'>('')
+const structuredSourceFilter = ref<'' | '1' | '0'>('')
+const visualDocumentFilter = ref<'' | '1' | '0'>('')
 const currencyFilter = ref('')
 const vendorFilter = ref<number | ''>('')
 const vendors = ref<Client[]>([])
@@ -137,6 +141,8 @@ const activeFilterCount = computed(() => {
   if (approvalFilter.value) n++
   if (paymentOrderedFilter.value) n++
   if (bookedFilter.value) n++
+  if (structuredSourceFilter.value) n++
+  if (visualDocumentFilter.value) n++
   if (importBatchFilter.value) n++
   return n
 })
@@ -183,6 +189,8 @@ const filterChips = computed<FilterChip[]>(() => {
   if (bookedFilter.value) {
     chips.push({ key: 'booked', value: t(bookedFilter.value === '1' ? 'common.booked_badge' : 'common.unbooked_badge') })
   }
+  if (visualDocumentFilter.value) chips.push({ key: 'has_visual_document', value: `${t('purchase_invoice.filters.has_visual_document')}: ${t('purchase_invoice.filters.document_' + (visualDocumentFilter.value === '1' ? 'present' : 'missing'))}` })
+  if (structuredSourceFilter.value) chips.push({ key: 'has_structured_source', value: `${t('purchase_invoice.filters.has_structured_source')}: ${t('purchase_invoice.filters.document_' + (structuredSourceFilter.value === '1' ? 'present' : 'missing'))}` })
   if (importBatchFilter.value) chips.push({ key: 'importBatch', value: t('purchase_invoice.filters.import_batch') })
   return chips
 })
@@ -205,6 +213,8 @@ function clearFilter(key: string) {
     case 'approval': approvalFilter.value = ''; break
     case 'paymentOrdered': paymentOrderedFilter.value = ''; break
     case 'booked': bookedFilter.value = ''; break
+    case 'has_structured_source': structuredSourceFilter.value = ''; break
+    case 'has_visual_document': visualDocumentFilter.value = ''; break
     case 'importBatch': importBatchFilter.value = ''; break
   }
 }
@@ -497,6 +507,8 @@ function loadFiltersFromQuery(q: typeof route.query) {
     ? q.approval_status : ''
   paymentOrderedFilter.value = q.payment_ordered === '1' ? '1' : (q.payment_ordered === '0' ? '0' : '')
   bookedFilter.value = q.booked === '1' ? '1' : (q.booked === '0' ? '0' : '')
+  structuredSourceFilter.value = q.has_structured_source === '1' ? '1' : (q.has_structured_source === '0' ? '0' : '')
+  visualDocumentFilter.value = q.has_visual_document === '1' ? '1' : (q.has_visual_document === '0' ? '0' : '')
   statusFilter.value = typeof q.status === 'string' ? (q.status as PurchaseInvoiceStatus) : ''
   kindFilter.value   = typeof q.kind === 'string' ? (q.kind as PurchaseDocumentKind) : ''
   yearFilter.value   = typeof q.year === 'string' && q.year !== ''
@@ -538,6 +550,8 @@ function buildQuery(): Record<string, string> {
   if (approvalFilter.value) q.approval_status = approvalFilter.value
   if (paymentOrderedFilter.value) q.payment_ordered = paymentOrderedFilter.value
   if (bookedFilter.value) q.booked = bookedFilter.value
+  if (structuredSourceFilter.value) q.has_structured_source = structuredSourceFilter.value
+  if (visualDocumentFilter.value) q.has_visual_document = visualDocumentFilter.value
   if (importBatchFilter.value) q.import_batch = importBatchFilter.value
   if (search.value) q.q = search.value
   return q
@@ -558,7 +572,7 @@ function applyQueryToPage(q: Record<string, string>) {
 }
 
 watch([statusFilter, kindFilter, yearFilter, monthFilter, dateFrom, dateTo,
-       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, approvalFilter, paymentOrderedFilter, bookedFilter,
+       overdueOnly, unpaidOnly, unpaidAsOf, unmatchedOnly, paidShortfallOnly, needsReviewOnly, approvalFilter, paymentOrderedFilter, bookedFilter, structuredSourceFilter, visualDocumentFilter,
        currencyFilter, vendorFilter, projectFilter, importBatchFilter], () => {
   syncFiltersToUrl()
   load()
@@ -589,6 +603,8 @@ watch(() => route.query, (newQ) => {
     approvalFilter.value = ''
     paymentOrderedFilter.value = ''
     bookedFilter.value = ''
+    structuredSourceFilter.value = ''
+    visualDocumentFilter.value = ''
     currencyFilter.value = ''
     vendorFilter.value = ''
     projectFilter.value = ''
@@ -658,42 +674,9 @@ async function fetchPage(reset: boolean) {
   }
   error.value = ''
   try {
-    const res = await purchaseInvoicesApi.listGrouped({
-      status:        statusFilter.value || undefined,
-      document_kind: kindFilter.value   || undefined,
-      year:          yearFilter.value   || undefined,
-      month:         monthFilter.value  || undefined,
-      date_from:     dateFrom.value     || undefined,
-      date_to:       dateTo.value       || undefined,
-      currency:      currencyFilter.value || undefined,
-      vendor_id:     vendorFilter.value   || undefined,
-      project_id:    projectFilter.value  || undefined,
-      unpaid_only:   unpaidOnly.value   || undefined,
-      overdue:       overdueOnly.value  || undefined,
-      unpaid_as_of:  unpaidAsOf.value   || undefined,
-      unmatched:     unmatchedOnly.value || undefined,
-      paid_shortfall: paidShortfallOnly.value || undefined,
-      needs_review:  needsReviewOnly.value || undefined,
-      approval_status: approvalFilter.value || undefined,
-      payment_ordered: paymentOrderedFilter.value || undefined,
-      booked:        bookedFilter.value  || undefined,
-      import_batch_id: importBatchFilter.value || undefined,
-      q:             search.value       || undefined,
-      page: page.value,
-      per_page: 50,
-      sort_key: tbl.sort.value?.key,
-      sort_dir: tbl.sort.value?.dir,
-      group_by_month: groupByMonth.value,
-      include_kh: tbl.isVisible('kh'),
-      include_vat_classification: tbl.isVisible('vat_classification') || tbl.isVisible('vat_return_lines'),
-      include_journal_notes: auth.canRead('accounting') && tbl.isVisible('journal_notes'),
-      include_document_tags: auth.canRead('documents') && tbl.isVisible('document_tags'),
-      include_vat_breakdown: tbl.isVisible('vat_breakdown'),
-      include_posting_accounts: tbl.isVisible('debit_accounts') || tbl.isVisible('credit_accounts'),
-      include_dimensions: tbl.isVisible('dimensions'),
-      // Koncept bez povinné dimenze patří do kontroly vytěžení stejně jako doklad s hlášením.
-      include_review: dimensions.enabled.value,
-    })
+    const params = listParams()
+    loadedParams = params
+    const res = await purchaseInvoicesApi.listGrouped({ ...params, page: page.value })
     if (seq !== loadSeq) return
     if (reset) {
       groups.value = res.data
@@ -719,8 +702,76 @@ async function fetchPage(reset: boolean) {
   }
 }
 
+// Obnova po změně dat jinde: skeleton a návrat na první stránku by uživateli vzaly
+// pozici v seznamu, rozbalené řádky i dočtené stránky. Bez mazání se přepíše obsah.
+const REFRESH_PAGE_LIMIT = 5
+async function refreshLoadedPages() {
+  const seq = loadSeq
+  const count = Math.min(Math.max(page.value, 1), REFRESH_PAGE_LIMIT)
+  const params = listParams()
+  const results = await Promise.all(Array.from({ length: count }, (_, index) => purchaseInvoicesApi.listGrouped({ ...params, page: index + 1 })))
+  if (seq !== loadSeq) return
+  groups.value = results.slice(1).reduce((merged, result) => mergeGroups(merged, result.data), results[0]!.data)
+  page.value = count
+  total.value = results[0]!.meta.total
+  pages.value = results[0]!.meta.pages ?? 1
+  flashedIds.value = consumeFlashedRows('purchase_invoice')
+}
+
+// Parametry dotazu seznamu bez čísla stránky. Stejné parametry použije detail
+// při listování za hranici načtených řádků (useListNavigation).
+type PurchaseListParams = NonNullable<Parameters<typeof purchaseInvoicesApi.listGrouped>[0]>
+let loadedParams: PurchaseListParams = {}
+const purchaseBookUrl = (format: 'pdf' | 'xlsx') => purchaseInvoicesApi.bookUrl(listParams(), format)
+function listParams(): PurchaseListParams {
+  return {
+    status:        statusFilter.value || undefined,
+    document_kind: kindFilter.value   || undefined,
+    year:          yearFilter.value   || undefined,
+    month:         monthFilter.value  || undefined,
+    date_from:     dateFrom.value     || undefined,
+    date_to:       dateTo.value       || undefined,
+    currency:      currencyFilter.value || undefined,
+    vendor_id:     vendorFilter.value   || undefined,
+    project_id:    projectFilter.value  || undefined,
+    unpaid_only:   unpaidOnly.value   || undefined,
+    overdue:       overdueOnly.value  || undefined,
+    unpaid_as_of:  unpaidAsOf.value   || undefined,
+    unmatched:     unmatchedOnly.value || undefined,
+    paid_shortfall: paidShortfallOnly.value || undefined,
+    needs_review:  needsReviewOnly.value || undefined,
+    approval_status: approvalFilter.value || undefined,
+    payment_ordered: paymentOrderedFilter.value || undefined,
+    booked:        bookedFilter.value  || undefined,
+    has_structured_source: structuredSourceFilter.value || undefined,
+    has_visual_document: visualDocumentFilter.value || undefined,
+    import_batch_id: importBatchFilter.value || undefined,
+    q:             search.value       || undefined,
+    per_page: 50,
+    sort_key: tbl.sort.value?.key,
+    sort_dir: tbl.sort.value?.dir,
+    group_by_month: groupByMonth.value,
+    include_kh: tbl.isVisible('kh'),
+    include_vat_classification: tbl.isVisible('vat_classification') || tbl.isVisible('vat_return_lines'),
+    include_journal_notes: auth.canRead('accounting') && tbl.isVisible('journal_notes'),
+    include_document_tags: auth.canRead('documents') && tbl.isVisible('document_tags'),
+    include_vat_breakdown: tbl.isVisible('vat_breakdown'),
+    include_posting_accounts: tbl.isVisible('debit_accounts') || tbl.isVisible('credit_accounts'),
+    include_dimensions: tbl.isVisible('dimensions'),
+    // Koncept bez povinné dimenze patří do kontroly vytěžení stejně jako doklad s hlášením.
+    include_review: dimensions.enabled.value,
+  }
+}
+const listNav = useListNavigationSource('purchase-invoices', () => ({
+  ids: flatRows.value.map(inv => inv.id),
+  page: page.value,
+  pages: pages.value,
+  params: loadedParams as Record<string, unknown>,
+}), () => route.fullPath, () => supplierStore.currentSupplierId)
+
 const navigateRow = useRowLink()
 function openInvoice(inv: PurchaseInvoiceListItem, e?: MouseEvent) {
+  listNav.markOpen(inv.id)
   navigateRow(`/purchase-invoices/${inv.id}`, e)
 }
 
@@ -809,6 +860,14 @@ function rowLockedForMe(inv: PurchaseInvoiceListItem): boolean {
   return auth.isClientRole && !!inv.locked?.is_locked
 }
 
+function kindOf(id: number): string | null {
+  for (const g of groups.value) {
+    const f = g.invoices.find(i => i.id === id)
+    if (f) return f.document_kind
+  }
+  return null
+}
+
 function lockedById(id: number): boolean {
   for (const g of groups.value) {
     const f = g.invoices.find(i => i.id === id)
@@ -826,7 +885,8 @@ const draftsSelected     = computed(() => selectedIds.value.filter(id => statusO
 const markReceivedSelected = computed(() => selectedIds.value.filter(id => statusOf(id) === 'draft' && !lockedById(id)))
 const markPayableSelected = computed(() => selectedIds.value.filter(id => {
   const s = statusOf(id)
-  return (s === 'received' || s === 'booked') && !lockedById(id)
+  // DDKP se neplatí, úhrada patří na zálohu.
+  return (s === 'received' || s === 'booked') && !lockedById(id) && kindOf(id) !== 'tax_document'
 }))
 const cancellableSelected = computed(() => selectedIds.value.filter(id => {
   const s = statusOf(id); return s && s !== 'cancelled'
@@ -1012,8 +1072,8 @@ async function bulkSetKind() {
   markRowsTouched('purchase_invoice', done)
   await load()
 }
-useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'accounting'], () => load(),
-  () => !bulkBusy.value && selectedIds.value.length === 0)
+useWindowRefresh(refreshLoadedPages,
+  () => !loading.value && !loadingMore.value && !bulkBusy.value && selectedIds.value.length === 0)
 </script>
 
 <template>
@@ -1047,6 +1107,12 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m5 2a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
           {{ t('purchase_invoice.extraction_review.open_count', { count: reviewableIds.length }) }}
         </button>
+        <InvoiceBookMenu
+          v-if="auth.canRead('purchase_invoices')"
+          :label="t('invoice.book_received')"
+          :url-for="purchaseBookUrl"
+          fallback-filename="kniha-prijatych-faktur"
+        />
         <RouterLink
           v-if="auth.canWrite('purchase_invoices.create') || auth.isDemo"
           to="/purchase-invoices/new"
@@ -1276,6 +1342,20 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
           <option value="1">{{ t('purchase_invoice.filters.payment_ordered_yes') }}</option>
           <option value="0">{{ t('purchase_invoice.filters.payment_ordered_no') }}</option>
         </select>
+        <select v-model="visualDocumentFilter" data-test="has_visual_document-filter"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
+          :title="t('purchase_invoice.filters.has_visual_document_hint')">
+          <option value="">{{ t('purchase_invoice.filters.has_visual_document_all') }}</option>
+          <option value="1">{{ t('purchase_invoice.filters.has_visual_document_present') }}</option>
+          <option value="0">{{ t('purchase_invoice.filters.has_visual_document_missing') }}</option>
+        </select>
+        <select v-model="structuredSourceFilter" data-test="has_structured_source-filter"
+          class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
+          :title="t('purchase_invoice.filters.has_structured_source_hint')">
+          <option value="">{{ t('purchase_invoice.filters.has_structured_source_all') }}</option>
+          <option value="1">{{ t('purchase_invoice.filters.has_structured_source_present') }}</option>
+          <option value="0">{{ t('purchase_invoice.filters.has_structured_source_missing') }}</option>
+        </select>
         <select v-if="isDoubleEntry" v-model="bookedFilter"
           class="h-9 px-3 border border-neutral-300 rounded-md bg-surface text-sm"
           :title="t('common.booked_filter_all')">
@@ -1316,7 +1396,7 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
     </div>
 
     <div v-else-if="!groups.length" class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
-      <EmptyState v-if="search || statusFilter || kindFilter" variant="filtered"
+      <EmptyState v-if="search || activeFilterCount" variant="filtered"
         :title="t('purchase_invoice.empty_filtered')"
         :cta="t('common.empty_state.clear_filters')" @action="clearFiltersAndSearch" />
       <EmptyState v-else icon="inbox"
@@ -1341,7 +1421,7 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
           <div class="flex flex-wrap items-center justify-end gap-x-3 gap-y-0.5 min-w-0 text-xs">
             <span v-for="tc in g.totals_per_currency" :key="tc.currency" class="font-mono">
               <span class="text-neutral-500">{{ tc.currency }}:</span>
-              <span class="font-semibold text-neutral-900 ml-1">{{ formatMoney(tc.with_vat, tc.currency) }}</span>
+              <span class="font-semibold text-neutral-900 ml-1">{{ formatMoneyWhole(tc.with_vat, tc.currency) }}</span>
             </span>
           </div>
         </header>
@@ -1402,7 +1482,7 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
                   </td>
                   <template v-for="c in tbl.orderedColumns.value.filter(c => tbl.isVisible(c.key))" :key="c.key">
                 <td v-if="c.key === 'number'" :data-custom-color="!!colors.color('number')" :style="colors.cellStyle('number')" class="px-3 py-2.5 font-mono text-xs">
-                    <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>
+                    <RouterLink class="row-link" :to="`/purchase-invoices/${inv.id}`" @click.stop="listNav.markOpen(inv.id)" @auxclick.stop="listNav.markOpen(inv.id)">
                       <span v-if="inv.varsymbol">{{ inv.varsymbol }}</span>
                       <span v-else class="text-neutral-400">#{{ inv.id }}</span>
                     </RouterLink>
@@ -1572,7 +1652,7 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
                         <tr v-for="(item, ii) in expandedItems" :key="item.id ?? ii" class="border-t border-neutral-200/70">
                           <td class="py-1 pr-3 text-neutral-700">{{ item.description }}</td>
                           <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatNumber(item.quantity) }} {{ item.unit }}</td>
-                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatMoney(item.unit_price_without_vat, inv.currency) }}</td>
+                          <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap">{{ formatUnitPrice(item.unit_price_without_vat, inv.currency) }}</td>
                           <td class="py-1 text-right font-mono tabular-nums whitespace-nowrap font-semibold text-neutral-900">{{ formatMoney(item.total_with_vat ?? item.total_without_vat ?? 0, inv.currency) }}</td>
                         </tr>
                       </tbody>
@@ -1598,7 +1678,6 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
             :class="[rowClass(inv), flashedIds.has(inv.id) ? 'row-flash' : '']"
           >
             <div class="flex items-start gap-3">
-              <WorkspaceDragHandle />
               <input
                 type="checkbox"
                 :checked="selectedIds.includes(inv.id)"
@@ -1637,7 +1716,7 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
                 </div>
                 <div class="flex items-baseline justify-between gap-2 mt-1 text-xs text-neutral-500">
                   <div class="font-mono truncate">
-                    <RouterLink class="row-link" :data-custom-color="!!colors.color('number')" :style="colors.cellStyle('number')" :to="`/purchase-invoices/${inv.id}`" @click.stop @auxclick.stop>{{ inv.varsymbol || '#' + inv.id }}</RouterLink>
+                    <RouterLink class="row-link" :data-custom-color="!!colors.color('number')" :style="colors.cellStyle('number')" :to="`/purchase-invoices/${inv.id}`" @click.stop="listNav.markOpen(inv.id)" @auxclick.stop="listNav.markOpen(inv.id)">{{ inv.varsymbol || '#' + inv.id }}</RouterLink>
                     <span class="text-neutral-400"> · </span>
                     <span :data-custom-color="!!colors.color('vendor_number')" :style="colors.cellStyle('vendor_number')">{{ inv.vendor_invoice_number }}</span>
                   </div>

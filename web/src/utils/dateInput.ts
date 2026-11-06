@@ -92,17 +92,21 @@ export function formatIsoForInput(iso: string | null | undefined, appLocale: str
  * Přijímá:
  *  - složky v pořadí jazyka oddělené `.`, `/`, `-` nebo mezerou, s libovolnými
  *    mezerami okolo (`1.9.2026`, `01. 09. 2026`, `9/1/2026`),
- *  - dvouciferný rok jako 20xx (`1.9.26`) — jen s `allowShortYear` (default);
- *    během psaní ho volající vypne, protože „1.9.20" je jen mezistav cesty
- *    k „1.9.2026" a jako rok 2020 by spustil přepočty nad špatným datem,
- *  - souvislých 8 číslic v pořadí jazyka (`01092026`),
+ *  - zápis bez roku (`1.10.`, `1.10`) jako aktuální rok,
+ *  - dvouciferný rok jako 20xx (`1.9.26`),
+ *  - souvislé číslice, rok vždy na konci: 4 (`0110`, bez roku), 6 (`011026`)
+ *    nebo 8 (`01102026`), den a měsíc v pořadí jazyka,
  *  - ISO `YYYY-MM-DD` v každém jazyce (co přijde ze schránky nebo z API).
- * Odmítá neexistující dny (`31. 2.`) — vrátit posunuté datum by bylo horší než nic.
+ * Zkrácené zápisy (bez roku, dvouciferný rok) jen s `allowShortYear` (default);
+ * během psaní je volající vypne, protože „1.9.20" nebo „0110" jsou jen mezistavy
+ * cesty k „1.9.2026" a jako rok 2020 / aktuální rok by spustily přepočty nad
+ * špatným datem. Odmítá neexistující dny (`31. 2.`) — vrátit posunuté datum
+ * by bylo horší než nic.
  */
 export function parseInputDate(
   text: string,
   appLocale: string,
-  { allowShortYear = true }: { allowShortYear?: boolean } = {},
+  { allowShortYear = true, today = new Date() }: { allowShortYear?: boolean; today?: Date } = {},
 ): string | null {
   const raw = text.trim()
   if (raw === '') return null
@@ -111,29 +115,42 @@ export function parseInputDate(
   if (iso) return isoParts(raw) ? raw : null
 
   const { order } = dateInputLocale(appLocale)
+  const dayMonthOrder = order.filter(part => part !== 'year')
+  const yearLast = order[order.length - 1] === 'year'
   let tokens: string[]
-  if (/^\d{8}$/.test(raw)) {
-    tokens = []
-    let cursor = 0
-    for (const part of order) {
-      const width = part === 'year' ? 4 : 2
-      tokens.push(raw.slice(cursor, cursor + width))
-      cursor += width
-    }
+  let yearToken: string | null
+  if (/^\d+$/.test(raw)) {
+    if (![4, 6, 8].includes(raw.length) || !yearLast) return null
+    tokens = [raw.slice(0, 2), raw.slice(2, 4)]
+    yearToken = raw.length > 4 ? raw.slice(4) : null
   } else {
-    tokens = raw.split(/\s*[./\-\s]\s*/).filter(token => token !== '')
+    const all = raw.split(/\s*[./\-\s]\s*/).filter(token => token !== '')
+    if (all.some(token => !/^\d{1,4}$/.test(token))) return null
+    if (all.length === 3) {
+      const yearIndex = order.indexOf('year')
+      yearToken = all[yearIndex]
+      tokens = all.filter((_, index) => index !== yearIndex)
+    } else if (all.length === 2 && yearLast) {
+      tokens = all
+      yearToken = null
+    } else {
+      return null
+    }
   }
-  if (tokens.length !== 3 || tokens.some(token => !/^\d{1,4}$/.test(token))) return null
+  if (tokens.some(token => token.length > 2)) return null
 
-  const values: Record<DatePart, number> = { day: 0, month: 0, year: 0 }
-  order.forEach((part, index) => {
+  const values: Record<DatePart, number> = { day: 0, month: 0, year: today.getFullYear() }
+  dayMonthOrder.forEach((part, index) => {
     values[part] = Number(tokens[index])
   })
-  const yearToken = tokens[order.indexOf('year')]
-  if (yearToken.length === 2) {
+  if (yearToken === null) {
     if (!allowShortYear) return null
-    values.year += 2000
-  } else if (yearToken.length !== 4) {
+  } else if (yearToken.length === 2) {
+    if (!allowShortYear) return null
+    values.year = 2000 + Number(yearToken)
+  } else if (yearToken.length === 4) {
+    values.year = Number(yearToken)
+  } else {
     return null
   }
 

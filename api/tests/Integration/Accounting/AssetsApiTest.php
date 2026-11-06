@@ -15,6 +15,9 @@ use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\DepreciationEntryRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\Assets\AssetService;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Clock\ClockInterface;
@@ -40,6 +43,7 @@ final class AssetsApiTest extends TestCase
 
     private Connection $db;
     private AssetAction $assetAction;
+    private AssetService $assetService;
     private AssetLifecycleAction $lifecycleAction;
     private DepreciationAction $depreciationAction;
     private JournalAction $journalAction;
@@ -65,6 +69,7 @@ final class AssetsApiTest extends TestCase
             $container->set(ClockInterface::class, new MockClock(self::YEAR . '-12-31 12:00:00'));
             $this->db                 = $container->get(Connection::class);
             $this->assetAction        = $container->get(AssetAction::class);
+            $this->assetService       = $container->get(AssetService::class);
             $this->lifecycleAction    = $container->get(AssetLifecycleAction::class);
             $this->depreciationAction = $container->get(DepreciationAction::class);
             $this->journalAction      = $container->get(JournalAction::class);
@@ -503,6 +508,7 @@ final class AssetsApiTest extends TestCase
 
         $plan = $this->call($this->depreciationAction, 'plan', 'GET', 'accountant', ['id' => (string) $assetId]);
         $accountingByYear = array_column($plan['body']['accounting'], null, 'fiscal_year');
+        self::assertSame((int) $accounting['id'], (int) $accountingByYear[self::YEAR]['depreciation_entry_id']);
         self::assertSame($entryId, (int) $accountingByYear[self::YEAR]['journal_entry_id']);
 
         $deleted = $this->call($this->journalAction, 'delete', 'DELETE', 'accountant', ['id' => (string) $entryId]);
@@ -605,6 +611,69 @@ final class AssetsApiTest extends TestCase
         self::assertTrue((bool) $byId2[$purchaseId]['has_asset'], 'Po založení karty has_asset=true.');
     }
 
+    public function testRevisionEndpointsRequireDepreciationWriteAndEnforceTenantAndPlanKind(): void
+    {
+        $created = $this->call($this->assetAction, 'create', 'POST', 'accountant', [], $this->cardPayload('SYN-REVISION-API'));
+        self::assertSame(201, $created['status']);
+        $args = ['id' => (string) $created['body']['asset']['id']];
+        $input = ['effective_from' => '2099-01', 'remaining_months' => 12, 'reason' => 'Nový odhad', 'expected_revision' => 0];
+        foreach (['previewRevision', 'revise'] as $method) {
+            self::assertSame(403, $this->call($this->depreciationAction, $method, 'POST', 'readonly', $args, $input)['status']);
+            $response = $this->call($this->depreciationAction, $method, 'POST', 'accountant', $args, $input);
+            self::assertSame(422, $response['status']);
+            self::assertSame('imported_plan_revision_not_allowed', $response['body']['error']['code']);
+        }
+        $oldSupplier = $this->supplierId;
+        $this->supplierId = $this->cloneSupplier('double_entry');
+        try {
+            self::assertSame(404, $this->call($this->depreciationAction, 'previewRevision', 'POST', 'accountant', $args, $input)['status']);
+        } finally { $this->supplierId = $oldSupplier; }
+    }
+
+    public function testRevisionScopeIsDepreciationWriteRatherThanCardWrite(): void
+    {
+        $year = self::YEAR + 1;
+        $source = ['version' => 1, 'source_program' => 'Synthetic source',
+            'source_tax_method' => 'source-tax', 'source_accounting_method' => 'source-accounting',
+            'accounting' => [
+                ['month' => $year . '-01', 'amount_cents' => 899000],
+                ['month' => $year . '-02', 'amount_cents' => 899000],
+                ['month' => $year . '-03', 'amount_cents' => 899000],
+                ['month' => $year . '-04', 'amount_cents' => 903000],
+            ], 'tax' => [['fiscal_year' => $year, 'amount_cents' => 3600000]]];
+        $asset = $this->assetService->createImported($this->supplierId, [
+            'inventory_number' => 'SYN-REVISION-SCOPE', 'name' => 'Synthetic imported software',
+            'kind' => 'intangible', 'asset_account_code' => '013', 'accumulated_account_code' => '073',
+            'acquisition_account_code' => '041', 'input_price' => 96000.0,
+            'acquisition_date' => '2097-08-03', 'put_into_use_date' => '2097-08-05',
+            'status' => 'in_use', 'tax_method' => 'by_accounting', 'acc_method' => 'straight_line',
+            'acc_useful_life_months' => 20, 'opening_tax_years' => 2, 'opening_tax_amount' => 60000.0,
+            'opening_acc_months' => 16, 'opening_acc_amount' => 60000.0,
+        ], $source)['asset'];
+        $args = ['id' => (string) $asset['id']];
+        $input = ['effective_from' => $year . '-02', 'remaining_months' => 3,
+            'reason' => 'Synthetic reassessment', 'expected_revision' => 0];
+        foreach ([
+            ['assets.write' => AccessLevel::WRITE->value, 'assets.depreciation' => AccessLevel::NONE->value],
+            ['assets.write' => AccessLevel::WRITE->value, 'assets.depreciation' => AccessLevel::READ->value],
+            ['assets.write' => AccessLevel::NONE->value, 'assets.depreciation' => AccessLevel::READ->value],
+        ] as $permissions) {
+            foreach (['previewRevision', 'revise'] as $method) {
+                $response = $this->call($this->depreciationAction, $method, 'POST', 'accountant', $args, $input, $permissions);
+                self::assertSame(403, $response['status']);
+            }
+        }
+        $permissions = ['assets.write' => AccessLevel::NONE->value, 'assets.depreciation' => AccessLevel::WRITE->value];
+        $preview = $this->call($this->depreciationAction, 'previewRevision', 'POST', 'accountant', $args, $input, $permissions);
+        self::assertSame(200, $preview['status'], json_encode($preview['body'], JSON_THROW_ON_ERROR));
+        $saved = $this->call($this->depreciationAction, 'revise', 'POST', 'accountant', $args, $input + [
+            'expected_calendar_start_month' => $preview['body']['calendar_start_month'],
+            'expected_calendar_fingerprint' => $preview['body']['calendar_fingerprint'],
+        ], $permissions);
+        self::assertSame(200, $saved['status'], json_encode($saved['body'], JSON_THROW_ON_ERROR));
+        self::assertCount(1, $saved['body']['asset']['imported_depreciation_plan']['revisions']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /**
@@ -627,14 +696,18 @@ final class AssetsApiTest extends TestCase
     /**
      * @param array<string,string> $args
      * @param array<string,mixed>  $body
+     * @param array<string,int>|null $permissions
      * @return array{status:int, body:array<string,mixed>}
      */
-    private function call(object $action, string $method, string $httpMethod, string $role, array $args = [], array $body = []): array
+    private function call(object $action, string $method, string $httpMethod, string $role, array $args = [], array $body = [], ?array $permissions = null): array
     {
         $req = (new ServerRequestFactory())
             ->createServerRequest($httpMethod, '/api/accounting/assets')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role]);
+        if ($permissions !== null) {
+            $req = $req->withAttribute('auth.effective_role', new EffectiveRole(0, 'Synthetic scoped role', 'staff', true, $permissions));
+        }
         if ($body !== []) {
             $req = $req->withParsedBody($body);
         }

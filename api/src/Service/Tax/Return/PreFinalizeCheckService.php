@@ -10,6 +10,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Tax\TaxFamilyIdentifierService;
 
 /**
  * Předfinalizační kontrolní checklist přiznání k dani z příjmů („závěrková kontrola
@@ -56,6 +57,9 @@ final class PreFinalizeCheckService
         $period = $this->periods->findByYear($supplierId, $year);
         $startsOn = $period !== null ? (string) $period['starts_on'] : sprintf('%04d-01-01', $year);
         $endsOn = $period !== null ? (string) $period['ends_on'] : sprintf('%04d-12-31', $year);
+        if ($type === 'po') {
+            $podklady['accounting_decree'] = (new AccountingDecreeService($this->db))->forDate($supplierId, $startsOn);
+        }
 
         $checks = [];
         $checks[] = $this->checkPeriodStatus($period, $isDoubleEntry);
@@ -147,7 +151,7 @@ final class PreFinalizeCheckService
             if (!is_array($child)
                 || trim((string) ($child['first_name'] ?? '')) === ''
                 || trim((string) ($child['last_name'] ?? '')) === ''
-                || (empty($child['birth_number']) && empty($child['birth_date']))
+                || (!TaxFamilyIdentifierService::hasBirthNumber($child) && empty($child['birth_date']))
                 || empty($child['shared_household_proved'])
                 || empty($child['other_parent_not_claimed_proved'])
                 || (array) ($child['months'] ?? []) === []) {
@@ -177,7 +181,7 @@ final class PreFinalizeCheckService
         if ($spouse !== null) {
             $spouseOk = trim((string) ($spouse['first_name'] ?? '')) !== ''
                 && trim((string) ($spouse['last_name'] ?? '')) !== ''
-                && (!empty($spouse['birth_number']) || !empty($spouse['birth_date']))
+                && (TaxFamilyIdentifierService::hasBirthNumber($spouse) || !empty($spouse['birth_date']))
                 && !empty($spouse['income_proved'])
                 && !empty($spouse['shared_household_proved'])
                 && !empty($spouse['child_under_three_proved'])
@@ -328,7 +332,7 @@ final class PreFinalizeCheckService
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
-               JOIN chart_of_accounts a ON a.id = l.account_id
+               " . \MyInvoice\Repository\AccountDefinitionRepository::journalJoin($supplierId) . "
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
                 AND " . JournalTaxOrigin::includedSql() . "

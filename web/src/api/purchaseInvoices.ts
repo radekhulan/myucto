@@ -233,6 +233,38 @@ export interface VendorSnapshot {
 /** Nárok na odpočet DPH: plný / bez nároku / krácený (poměrný §75, viz vat_deduction_percent). */
 export type VatDeduction = 'full' | 'none' | 'proportional' | 'reduced'
 
+export type PurchaseVatTreatmentWarning =
+  | 'header_differs_from_allocations'
+  | 'items_claim_code_without_header_claim'
+  | 'header_no_claim_code_with_claim_items'
+
+export type PurchaseVatItemState = 'allocations' | 'no_claim_header' | 'no_claim_code' | 'claim' | 'unclassified'
+
+/**
+ * Režim vynucené úpravy zaúčtovaného dokladu v uzavřeném období: `reconcile` = storno
+ * a nový zápis v běžném období, `notes_only` = jen neúčetní pole (poznámky, jazyk).
+ */
+export type PurchaseForceMode = 'reconcile' | 'notes_only'
+
+/** Tělo opravy DPH zařazení — posílají se jen změněné klíče. */
+export interface PurchaseVatTreatmentPayload {
+  vat_deduction?: VatDeduction
+  vat_deduction_percent?: number
+  vat_classification_code?: string | null
+  items?: { id: number; vat_classification_code: string }[]
+  vat_allocations?: { id: number; vat_deduction: VatDeduction; vat_deduction_percent?: number; vat_classification_code?: string | null }[]
+  confirm_filed_period?: boolean
+}
+
+/** Skutečný nárok na odpočet dokladu (SSOT PurchaseVatTreatment na serveru). */
+export interface PurchaseVatTreatment {
+  source: 'header' | 'allocations'
+  effective: VatDeduction | 'mixed'
+  parts: { vat_deduction: VatDeduction; vat_deduction_percent: number; base_amount: number; vat_amount: number }[]
+  items: { id: number; effective_code: string | null; state: PurchaseVatItemState }[]
+  warnings: PurchaseVatTreatmentWarning[]
+}
+
 /** Stručné shrnutí navázané přijaté faktury (záloha ↔ vyúčtovací). */
 export interface PurchaseInvoiceBrief {
   id: number
@@ -534,6 +566,8 @@ export interface PurchaseInvoice {
   vat_overrides: PurchaseVatOverride[] | null
   /** Volitelné rozdělení rekapitulace DPH na účetní a odpočtové režimy. */
   vat_allocations: PurchaseVatAllocation[]
+  /** Nárok a členění, se kterými doklad do evidence DPH opravdu jde (rozpis má přednost před hlavičkou). */
+  vat_treatment?: PurchaseVatTreatment
   // Related
   items: PurchaseInvoiceItem[]
   vat_breakdown: PurchaseVatBreakdownRow[]
@@ -703,6 +737,8 @@ export interface PurchaseInvoicePayload {
 }
 
 export interface PurchaseListFilters {
+  has_visual_document?: '0' | '1'
+  has_structured_source?: '0' | '1'
   include_vat_classification?: boolean
   include_journal_notes?: boolean
   include_document_tags?: boolean
@@ -807,39 +843,47 @@ export interface PurchaseRenumberPlan {
   blocked: PurchaseRenumberRow[]
 }
 
+/** Query seznamu bez stránkování, řazení a doplňkových sloupců: stejný výběr, jaký čte kniha faktur. */
+function purchaseListFilterParams(filters: PurchaseListFilters): Record<string, string | number> {
+  const params: Record<string, string | number> = {}
+  if (filters.q) params.q = filters.q
+  if (filters.status) {
+    params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status
+  }
+  if (filters.document_kind) {
+    params['filter[document_kind]'] = Array.isArray(filters.document_kind)
+      ? filters.document_kind.join(',')
+      : filters.document_kind
+  }
+  if (filters.vendor_id)   params['filter[vendor_id]']   = filters.vendor_id
+  if (filters.project_id)  params['filter[project_id]']  = filters.project_id
+  if (filters.year)        params['filter[year]']        = filters.year
+  if (filters.month)       params['filter[month]']       = filters.month
+  if (filters.date_from)   params['filter[date_from]']   = filters.date_from
+  if (filters.date_to)     params['filter[date_to]']     = filters.date_to
+  if (filters.currency)    params['filter[currency]']    = filters.currency
+  if (filters.unpaid_only)  params['filter[unpaid_only]']  = 1
+  if (filters.overdue)      params['filter[overdue]']      = 1
+  if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
+  if (filters.unmatched)    params['filter[unmatched]']    = 1
+  if (filters.paid_shortfall) params['filter[paid_shortfall]'] = 1
+  if (filters.needs_review) params['filter[needs_review]'] = 1
+  if (filters.approval_status) {
+    // Smlouva říká jen „filtr approval_status"; ostatní filtry jedou přes filter[...], proto obě podoby.
+    params['filter[approval_status]'] = filters.approval_status
+    params.approval_status = filters.approval_status
+  }
+  if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
+  if (filters.booked)      params['filter[booked]']      = filters.booked
+  if (filters.has_visual_document !== undefined) params['filter[has_visual_document]'] = filters.has_visual_document
+  if (filters.has_structured_source !== undefined) params['filter[has_structured_source]'] = filters.has_structured_source
+  if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
+  return params
+}
+
 export const purchaseInvoicesApi = {
   listGrouped: (filters: PurchaseListFilters = {}) => {
-    const params: Record<string, string | number> = {}
-    if (filters.q) params.q = filters.q
-    if (filters.status) {
-      params['filter[status]'] = Array.isArray(filters.status) ? filters.status.join(',') : filters.status
-    }
-    if (filters.document_kind) {
-      params['filter[document_kind]'] = Array.isArray(filters.document_kind)
-        ? filters.document_kind.join(',')
-        : filters.document_kind
-    }
-    if (filters.vendor_id)   params['filter[vendor_id]']   = filters.vendor_id
-    if (filters.project_id)  params['filter[project_id]']  = filters.project_id
-    if (filters.year)        params['filter[year]']        = filters.year
-    if (filters.month)       params['filter[month]']       = filters.month
-    if (filters.date_from)   params['filter[date_from]']   = filters.date_from
-    if (filters.date_to)     params['filter[date_to]']     = filters.date_to
-    if (filters.currency)    params['filter[currency]']    = filters.currency
-    if (filters.unpaid_only)  params['filter[unpaid_only]']  = 1
-    if (filters.overdue)      params['filter[overdue]']      = 1
-    if (filters.unpaid_as_of) params['filter[unpaid_as_of]'] = filters.unpaid_as_of
-    if (filters.unmatched)    params['filter[unmatched]']    = 1
-    if (filters.paid_shortfall) params['filter[paid_shortfall]'] = 1
-    if (filters.needs_review) params['filter[needs_review]'] = 1
-    if (filters.approval_status) {
-      // Smlouva říká jen „filtr approval_status"; ostatní filtry jedou přes filter[...], proto obě podoby.
-      params['filter[approval_status]'] = filters.approval_status
-      params.approval_status = filters.approval_status
-    }
-    if (filters.payment_ordered) params['filter[payment_ordered]'] = filters.payment_ordered
-    if (filters.booked)      params['filter[booked]']      = filters.booked
-    if (filters.import_batch_id) params['filter[import_batch_id]'] = filters.import_batch_id
+    const params = purchaseListFilterParams(filters)
     if (filters.page)        params.page                   = filters.page
     if (filters.per_page)    params.per_page               = filters.per_page
     if (filters.sort_key)    params.sort_key               = filters.sort_key
@@ -897,10 +941,15 @@ export const purchaseInvoicesApi = {
     ).then(r => r.data)
   },
 
-  update: (id: number, payload: PurchaseInvoicePayload, force = false) =>
+  /**
+   * `forceMode` je povinný u vynucené úpravy zaúčtovaného dokladu v uzavřeném období
+   * (server jinak vrací 422 force_mode_required).
+   */
+  update: (id: number, payload: PurchaseInvoicePayload, force = false, forceMode?: PurchaseForceMode) =>
     api.put<PurchaseInvoice>(
-      `/purchase-invoices/${id}${force ? '?force=1' : ''}`,
+      `/purchase-invoices/${id}`,
       payload,
+      { params: { ...(force ? { force: 1 } : {}), ...(force && forceMode ? { force_mode: forceMode } : {}) } },
     ).then(r => r.data),
   delete: (id: number, force = false) =>
     api.delete<{ ok: boolean; pdf_deleted?: boolean }>(
@@ -925,6 +974,18 @@ export const purchaseInvoicesApi = {
   dismissExtractionWarning: (id: number, section?: string) =>
     api.post<PurchaseInvoice>(`/purchase-invoices/${id}/dismiss-extraction-warning`, section ? { section } : undefined)
       .then(r => r.data),
+
+  /**
+   * Oprava DPH zařazení (nárok na odpočet, klasifikace hlavičky, položek a rozpisu) bez
+   * storna, i u zaúčtovaného dokladu. `force` přebije uzavřené období (správce),
+   * `forceMode: 'reconcile'` stornuje a přeúčtuje zápis do běžného období.
+   */
+  changeVatTreatment: (id: number, payload: PurchaseVatTreatmentPayload, opts: { force?: boolean; forceMode?: 'reconcile' } = {}) =>
+    api.post<PurchaseInvoice & { _repost?: { entry_id: number }; _reconcile?: { new_entry_id: number } }>(
+      `/purchase-invoices/${id}/vat-treatment`,
+      payload,
+      { params: { ...(opts.force ? { force: 1 } : {}), ...(opts.forceMode ? { force_mode: opts.forceMode } : {}) } },
+    ).then(r => r.data),
 
   /** Druh nákladu po položkách — kontrolní okno po AI importu, i u zaplaceného dokladu. */
   setExpenseKinds: (id: number, items: { id: number; expense_kind: ExpenseKind | null; expense_account_code?: string | null; vat_classification_code?: string }[]) =>
@@ -1001,8 +1062,8 @@ export const purchaseInvoicesApi = {
 
   activity: (id: number) =>
     api.get<Array<{
-      id: number; user_id: number | null; user_email: string | null; user_name: string | null;
-      action: string; payload: Record<string, unknown> | null; ip: string | null; created_at: string;
+      id: number; user_id: number | null; user_name: string | null;
+      action: string; payload: Record<string, unknown> | null; created_at: string;
     }>>(`/purchase-invoices/${id}/activity`).then(r => r.data),
 
   pdfUrl: (id: number, inline = false) => {
@@ -1090,5 +1151,12 @@ export const purchaseInvoicesApi = {
     }
     if (sid && /^\d+$/.test(sid)) params.set('supplier_id', sid)
     return `/api/purchase-invoices/export?${params.toString()}`
+  },
+
+  /** Kniha přijatých faktur nad filtrem seznamu (bez stránkování). */
+  bookUrl: (filters: PurchaseListFilters, format: 'pdf' | 'xlsx') => {
+    const query = new URLSearchParams({ format })
+    for (const [key, value] of Object.entries(purchaseListFilterParams(filters))) query.set(key, String(value))
+    return `/api/purchase-invoices/book?${query.toString()}`
   },
 }

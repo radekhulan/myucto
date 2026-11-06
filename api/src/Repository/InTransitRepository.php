@@ -54,6 +54,18 @@ final class InTransitRepository
         'confirmed' => ['confirmed', 'partially_received'],
     ];
 
+    /**
+     * Převzatá výdejka z historie skladu (import z jiného programu) platí za výdej celé
+     * faktury, ale řádky na položky faktury nevážou: bez téhle podmínky by faktura
+     * držela fantomovou rezervaci. Stejné pravidlo jako StockIssueService::coversInvoice().
+     */
+    private const NOT_COVERED_BY_HISTORY = "
+                   AND NOT EXISTS (
+                       SELECT 1 FROM stock_documents hd
+                        WHERE hd.supplier_id = i.supplier_id AND hd.invoice_id = i.id AND hd.doc_type = 'issue'
+                          AND hd.status = 'posted' AND hd.history_import_job_id IS NOT NULL
+                   )";
+
     public function __construct(private readonly Connection $db) {}
 
     /**
@@ -253,7 +265,7 @@ final class InTransitRepository
                    AND NOT EXISTS (
                        SELECT 1 FROM sales_order_invoice_links soil
                         WHERE soil.supplier_id = i.supplier_id AND soil.invoice_id = i.id
-                   )" . $itemFilter;
+                   )" . self::NOT_COVERED_BY_HISTORY . $itemFilter;
 
         foreach ($itemIds as $id) {
             $params[] = (int) $id;
@@ -316,7 +328,7 @@ final class InTransitRepository
                    AND NOT EXISTS (
                        SELECT 1 FROM sales_order_invoice_links soil
                         WHERE soil.supplier_id = i.supplier_id AND soil.invoice_id = i.id
-                   )" . $itemFilter;
+                   )" . self::NOT_COVERED_BY_HISTORY . $itemFilter;
 
         foreach ($itemIds as $id) {
             $params[] = (int) $id;

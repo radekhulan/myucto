@@ -41,7 +41,7 @@ function internalFetch(input, url, options) {
     options.signal?.addEventListener('abort', () => child.kill(), { once: true });
     child.stdin.end(JSON.stringify({
       url: String(url), method: options.method, headers: options.headers,
-      ...encodeBody(options.body), serverParams: input.serverParams,
+      ...encodeBody(options.body), serverParams: input.serverParams, mcpResource: input.mcpResource,
     }));
   });
 }

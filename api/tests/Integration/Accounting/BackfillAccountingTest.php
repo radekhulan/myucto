@@ -12,6 +12,7 @@ use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Service\Accounting\Activation\DocumentBackfill;
 use MyInvoice\Service\Accounting\Activation\PendingBackfillCounter;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\PostingBackfillJobService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -230,7 +231,7 @@ final class BackfillAccountingTest extends TestCase
         $vendorId = $this->client('Dodavatel nepodporované kombinace s.r.o.');
         $purchaseId = $this->purchase('ERR-BF-2098-1', $vendorId, 1000.00, 210.00, 21.00);
         $this->db->pdo()->prepare(
-            "UPDATE purchase_invoices SET reverse_charge = 1, vat_deduction = 'proportional' WHERE id = ?"
+            "UPDATE purchase_invoices SET document_kind = 'tax_document', reverse_charge = 1 WHERE id = ?"
         )->execute([$purchaseId]);
 
         $report = $this->backfill->run($this->supplierId, null, self::YEAR, true);
@@ -243,7 +244,7 @@ final class BackfillAccountingTest extends TestCase
         self::assertGreaterThanOrEqual(1, $report['purchase_invoice']['failed']);
         self::assertCount(1, $issues);
         self::assertSame('failed', $issues[0]['severity']);
-        self::assertSame('rc_partial_deduction_unsupported', $issues[0]['error_code']);
+        self::assertSame('ddkp_reverse_charge_unsupported', $issues[0]['error_code']);
         self::assertSame('ERR-BF-2098-1', $issues[0]['document_no']);
     }
 
@@ -336,6 +337,34 @@ final class BackfillAccountingTest extends TestCase
         self::assertSame(1, (int) $this->jobs->findById($jobId)['created_count']);
     }
 
+    public function testUnpostedBackfillTakenOverCountExcludesRemainingOwnedPosting(): void
+    {
+        $client = $this->client('Syntetická skupina převzatého předpisu');
+        $docs = [
+            'invoice' => $this->sale('SYN-GROUP-FV', $client, 1000, 210, 21),
+            'purchase_invoice' => $this->purchase('SYN-GROUP-PF', $client, 1000, 210, 21),
+        ];
+        foreach ($docs as $type => $id) {
+            $lines = [['account_code' => '518', 'side' => 'debit', 'amount' => 1000],
+                ['account_code' => '321', 'side' => 'credit', 'amount' => 1000]];
+            $base = $this->posting->postDocument($this->supplierId, $type, $id, $lines, ['entry_date' => self::YEAR . '-06-15']);
+            $owned = $this->posting->postDocument($this->supplierId, 'manual', null, $lines, ['entry_date' => self::YEAR . '-06-15']);
+            (new DocumentPostingGroup($this->db))->attach($this->supplierId, $type, $id, [$base, $owned]);
+            $this->posting->reverse($this->supplierId, $base);
+        }
+        $preview = $this->backfill->run($this->supplierId, null, self::YEAR, true);
+        foreach ($docs as $type => $id) {
+            self::assertSame(1, $preview[$type]['updated'], 'Náhled rozpozná existující vlastněný předpis.');
+            self::assertSame(0, $preview[$type]['posted']);
+            $this->db->pdo()->prepare('INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id) VALUES (?, ?, ?, ?)')
+                ->execute([$this->supplierId, $type, 'synth|GROUP-' . $type, $id]);
+        }
+        $unposted = $this->backfill->run($this->supplierId, null, self::YEAR, true, onlyUnposted: true);
+        self::assertSame(['invoice' => 0, 'purchase_invoice' => 0], $unposted['taken_over']);
+        $all = $this->backfill->run($this->supplierId, null, self::YEAR, true);
+        self::assertSame(['invoice' => 1, 'purchase_invoice' => 1], $all['taken_over']);
+    }
+
     /**
      * N4: doklad převzatý z jiného programu bez vlastního zápisu má předpis v převzatém
      * deníku (jen na doklad není navázaný). Doúčtování ho nenabízí ani nezaúčtuje, jinak
@@ -391,6 +420,37 @@ final class BackfillAccountingTest extends TestCase
         self::assertSame($before, $this->entryHeader($entryId));
         self::assertSame(1000.0, $this->sourceAccountAmount('invoice', $invoiceId, '604', 'credit'), 'kontace zdroje zůstává');
         self::assertSame(0.0, $this->sourceAccountAmount('invoice', $invoiceId, '602', 'credit'));
+    }
+
+    /**
+     * Doúčtování jen zajišťuje zaúčtování. Doklad, jehož předpis tvoří vlastněná skupina
+     * (zbylý samostatný zápis DPH), ponechá beze změny a nehlásí jako chybu.
+     */
+    public function testUnpostedBackfillKeepsOwnedPostingGroup(): void
+    {
+        $clientId = $this->client('Dodavatel vlastněné skupiny s.r.o.');
+        $purchaseId = $this->purchase('PF-BF-2098-G', $clientId, 500.00, 105.00, 21.00);
+        $base = $this->posting->postDocument($this->supplierId, 'purchase_invoice', $purchaseId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 500.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 500.00],
+        ], ['entry_date' => self::YEAR . '-06-15']);
+        $vat = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '343', 'side' => 'debit', 'amount' => 105.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 105.00],
+        ], ['entry_date' => self::YEAR . '-06-15']);
+        (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(
+            fn () => (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))
+                ->attach($this->supplierId, 'purchase_invoice', $purchaseId, [$base, $vat]),
+        );
+        $this->posting->reverse($this->supplierId, $base);
+        $vatBefore = $this->entryHeader($vat);
+
+        $report = $this->backfill->run($this->supplierId, null, self::YEAR, false, onlyUnposted: true);
+
+        self::assertSame([], array_values(array_filter($report['document_issues'],
+            static fn (array $issue): bool => $issue['source_id'] === $purchaseId)));
+        self::assertSame(1, $this->sourceEntryCount('purchase_invoice', $purchaseId), 'Nevznikl druhý předpis vedle DPH.');
+        self::assertSame($vatBefore, $this->entryHeader($vat));
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

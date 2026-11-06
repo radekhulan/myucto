@@ -63,6 +63,7 @@
             <div class="header-meta">Fiskální rok {{ period.fiscal_year }}{% if prev_period %}, minulé období: fiskální rok {{ prev_period.fiscal_year }}{% endif %}</div>
             <div class="header-meta">Okamžik sestavení: {{ entity.prepared_at }} · verze výkazu: {{ version_code }}</div>
             {% if dimension is defined and dimension and dimension.label %}<div class="header-scope"><strong>Dimenze: {{ dimension.label }}</strong> (jen řádky s touto hodnotou, rozpad poměrem)</div>{% endif %}
+            {% include '_accrual_spread_note.twig' %}
         </td>
         <td style="width:45%;" class="entity-info">
             <strong>{{ entity.name }}</strong><br>

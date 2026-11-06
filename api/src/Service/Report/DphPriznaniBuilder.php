@@ -9,6 +9,7 @@ use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Repository\VatCoefficientRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Invoice\MultiPurposeVoucher;
 use MyInvoice\Service\Tax\BadDebt\Section46Service;
 use MyInvoice\Service\Tax\BadDebt\Section74bService;
 
@@ -618,6 +619,12 @@ final class DphPriznaniBuilder
         // ze kterých byla stanovena poslední známá daň." Základnou je POSLEDNÍ archivované
         // řádné/opravné (B/O) přiznání téhož období — parsujeme jeho SKUTEČNĚ podané XML,
         // ať se diff počítá proti tomu, co bylo odesláno, ne proti čerstvému přepočtu.
+        if (!$isAmendment) {
+            foreach (self::selfAssessmentDeductionRoundingNotes($veta4Raw, $year) as $note) {
+                $warnings[] = $note;
+            }
+        }
+
         $baseline = null;
         $referenceSubmissionId = null;
         if ($isAmendment) {
@@ -968,13 +975,17 @@ final class DphPriznaniBuilder
         $textFilter = $this->db->hasColumn('invoice_items', 'item_kind')
             ? "AND ii.item_kind <> 'text'"
             : '';
+        // Prodej víceúčelového poukazu není předmětem daně záměrně: daní se až plnění
+        // při uplatnění poukazu (MultiPurposeVoucher). Nejde o zapomenutou klasifikaci.
         $unclassifiedZero = $this->db->pdo()->prepare(
             "SELECT DISTINCT i.varsymbol
                FROM invoices i
                JOIN invoice_items ii ON ii.invoice_id = i.id
+          " . MultiPurposeVoucher::stockJoinSql('ii', 'si', 'i.supplier_id') . "
               WHERE i.supplier_id = ?
+                AND NOT " . MultiPurposeVoucher::untaxedLineSql('ii', 'si') . "
                 AND i.status NOT IN ('draft', 'cancelled')
-                AND i.invoice_type <> 'proforma'
+                AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
                 AND COALESCE(i.tax_date, i.issue_date) BETWEEN ? AND ?
                 AND COALESCE(i.reverse_charge, 0) = 0
                 AND ii.vat_rate_snapshot = 0
@@ -1127,7 +1138,9 @@ final class DphPriznaniBuilder
             'tax_date'      => $row['tax_date'] !== null ? (string) $row['tax_date'] : null,
             'updated_at'    => null,
             'total'         => (float) $row['document_total'],
+            'vat_lines'     => $refs[$key]['vat_lines'] ?? [],
         ];
+        VatPostFilingChangesService::addVatLine($refs[$key]['vat_lines'], $row);
     }
 
     /**
@@ -1390,6 +1403,60 @@ final class DphPriznaniBuilder
             }
         }
         return $out;
+    }
+
+    /**
+     * Upozornění na propustnou výtku EPO k ř. 43/44 (odpočet ze samovyměření).
+     *
+     * EPO ř. 43/44 kontroluje výpočtem ze ZÁKLADU řádku krát sazba, zaokrouhleným
+     * na celé Kč („Přesně vypočtená hodnota součtu daní na ř. 43 je …"). Aplikace
+     * tam ale záměrně vyplňuje součet daní přiznaných na ř. 3 až 13: nárok na
+     * odpočet je ve výši daně, kterou plátce na výstupu přiznal (§ 72 odst. 2,
+     * § 73 odst. 1 písm. b) ZDPH), a samovyměření se tak přesně vyruší. Součet
+     * zaokrouhlených daní a zaokrouhlený součet se mohou lišit o koruny, EPO pak
+     * vytkne propustnou chybu a podání přijme (ověřeno zkušebním podáním, #264).
+     * Hodnota se nemění, uživatel jen ví předem, co ho na portálu čeká.
+     *
+     * @param array<string,float> $veta4Raw
+     * @return list<string>
+     */
+    private static function selfAssessmentDeductionRoundingNotes(array $veta4Raw, int $year): array
+    {
+        $rows = ['43' => ['nar_zdp23', ['od_zdp23', 'odkr_zdp23'], 21]];
+        // Snížená sazba 12 % platí od 1. 1. 2024; dřív měl ř. 44 dvě sazby a jedním
+        // přepočtem ze základu ho ověřit nejde.
+        if ($year >= 2024) {
+            $rows['44'] = ['nar_zdp5', ['od_zdp5', 'odkr_zdp5'], 12];
+        }
+
+        $notes = [];
+        foreach ($rows as $line => [$baseAttr, $vatAttrs, $rate]) {
+            if (!isset($veta4Raw[$baseAttr])) {
+                continue;
+            }
+            $base = EpoAmount::wholeCzk((float) $veta4Raw[$baseAttr]);
+            $vat = 0;
+            foreach ($vatAttrs as $vatAttr) {
+                $vat += EpoAmount::wholeCzk((float) ($veta4Raw[$vatAttr] ?? 0.0));
+            }
+            $expected = EpoAmount::wholeCzk($base * $rate / 100);
+            if ($base === 0 || $vat === $expected) {
+                continue;
+            }
+            $notes[] = sprintf(
+                'Ř. %s: odpočet %s Kč je součet daně přiznané na ř. 3 až 13. EPO ho ověřuje '
+                    . 'výpočtem ze základu (%s Kč × %d %% = %s Kč) a kvůli zaokrouhlení jednotlivých '
+                    . 'řádků vytkne propustnou chybu. Podání přijme; odpočet ve výši přiznané daně je '
+                    . 'správně (§ 72 odst. 2 a § 73 odst. 1 písm. b) ZDPH), hodnotu neupravujte.',
+                $line,
+                number_format($vat, 0, ',', ' '),
+                number_format($base, 0, ',', ' '),
+                $rate,
+                number_format($expected, 0, ',', ' '),
+            );
+        }
+
+        return $notes;
     }
 
     /**

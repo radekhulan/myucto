@@ -56,7 +56,7 @@ final class SummaryAction
         try {
             $out = $this->exporter->export($supplierId, $format, $year, $data);
         } catch (\Throwable $e) {
-            return Json::error($response, 'export_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'export_failed', $e->getMessage(), 500);
         }
 
         $response->getBody()->write($out['bytes']);

@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Submission;
 use MyInvoice\Repository\Payroll\PayrollSubmissionRepository;
 use MyInvoice\Repository\Payroll\PayrollSubmissionTransportAttemptRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzRejectedSubmissionRefreezeService;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 
 /**
  * Zahození rozdělaného odeslání, aby šlo podat znovu.
@@ -65,7 +66,7 @@ final readonly class PayrollSubmissionAbandonService
     ];
 
     /** Agendy, jejichž podání nese GUID podání podle pravidel JMHZ. */
-    private const GUID_AGENDAS = ['JMHZ', 'JMHZ25'];
+    private const GUID_AGENDAS = ['JMHZ', ...JmhzSpecVersion::MONTHLY_AGENDA_CODES];
 
     public function __construct(
         private PayrollSubmissionService $submissions,

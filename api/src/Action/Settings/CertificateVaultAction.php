@@ -109,7 +109,27 @@ final class CertificateVaultAction
             $supplierId,
         );
 
-        if ($this->flag($body, 'share_with_other_suppliers')) {
+        $replaceId = (int) ($body['replace_credential_id'] ?? 0);
+        if ($replaceId > 0) {
+            // Certifikát už je uložený; nepovedená náhrada ho nesmí schovat
+            // za chybovou odpověď, jen se ohlásí vedle něj.
+            try {
+                $result['supplier_sharing'] = $this->sharing->replaceInSuppliers(
+                    $request,
+                    (int) ($result['id'] ?? 0),
+                    $replaceId,
+                    $userId,
+                    $supplierId,
+                    $this->clientIp($request),
+                );
+                if ($result['supplier_sharing'] === null) {
+                    unset($result['supplier_sharing']);
+                    $result['supplier_sharing_error'] = 'Nahrazovaný certifikát nebyl nalezen.';
+                }
+            } catch (\InvalidArgumentException | EpoSubmissionException $exception) {
+                $result['supplier_sharing_error'] = $exception->getMessage();
+            }
+        } elseif ($this->flag($body, 'share_with_other_suppliers')) {
             $result['supplier_sharing'] = $this->sharing->shareWithOtherSuppliers(
                 $request,
                 (int) ($result['id'] ?? 0),
@@ -127,7 +147,8 @@ final class CertificateVaultAction
      * Povolí už uložený certifikát i v dalších firmách uživatele, typicky
      * certifikát nahraný dřív jen v jedné firmě. Cílové firmy určuje server
      * ({@see CertificateVaultSupplierSharing}); klient posílá jen volbu
-     * „jen do firem bez platného certifikátu".
+     * „jen do firem bez platného certifikátu", případně `replace_credential_id`,
+     * když má certifikát všude nahradit starší.
      */
     public function shareWithOtherSuppliers(Request $request, Response $response, array $args): Response
     {
@@ -147,14 +168,38 @@ final class CertificateVaultAction
                 $exception->httpStatus,
             );
         }
-        $results = $this->sharing->shareWithOtherSuppliers(
-            $request,
-            (int) ($args['credentialId'] ?? 0),
-            $userId,
-            $supplierId,
-            $this->flag($body, 'share_only_without_valid'),
-            $this->clientIp($request),
-        );
+        $credentialId = (int) ($args['credentialId'] ?? 0);
+        $replaceId = (int) ($body['replace_credential_id'] ?? 0);
+        if ($replaceId > 0) {
+            try {
+                $results = $this->sharing->replaceInSuppliers(
+                    $request,
+                    $credentialId,
+                    $replaceId,
+                    $userId,
+                    $supplierId,
+                    $this->clientIp($request),
+                );
+            } catch (\InvalidArgumentException $exception) {
+                return Json::error($response, 'replace_invalid', $exception->getMessage(), 422);
+            } catch (EpoSubmissionException $exception) {
+                return Json::error(
+                    $response,
+                    $exception->errorCode,
+                    $exception->getMessage(),
+                    $exception->httpStatus,
+                );
+            }
+        } else {
+            $results = $this->sharing->shareWithOtherSuppliers(
+                $request,
+                $credentialId,
+                $userId,
+                $supplierId,
+                $this->flag($body, 'share_only_without_valid'),
+                $this->clientIp($request),
+            );
+        }
         if ($results === null) {
             return Json::error($response, 'credential_not_found', 'Certifikát nebyl nalezen.', 404);
         }

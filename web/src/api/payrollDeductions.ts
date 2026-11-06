@@ -48,6 +48,27 @@ export const deductionAgreementKinds: DeductionAgreementKind[] = [
   'advance', 'meal', 'contribution', 'damage', 'other', 'imported',
 ]
 
+/**
+ * Atributy JMHZ pro srážky ve prospěch zaměstnavatele (pokyny MPSV k MH,
+ * kap. 2.4.15): 10350 dohoda podle OZ, 10351 náhrada škody, 10352 závodní
+ * stravování (§ 236 ZP), 10353 jiný závazek podle § 146 písm. b) ZP.
+ */
+export type DeductionJmhzTarget = '10350' | '10351' | '10352' | '10353'
+
+export const deductionJmhzTargets: DeductionJmhzTarget[] = ['10350', '10351', '10352', '10353']
+
+/** Návrh zařazení podle titulu srážky (stejný jako na serveru); rozhoduje účetní. */
+export function defaultDeductionJmhzTarget(kind: DeductionAgreementKind): DeductionJmhzTarget | null {
+  switch (kind) {
+    case 'advance': return '10350'
+    case 'damage': return '10351'
+    case 'meal': return '10352'
+    case 'contribution':
+    case 'other': return '10353'
+    default: return null
+  }
+}
+
 /** Pásmo 1–9 patří zákonným a exekučním srážkám (backend to vynucuje). */
 export const deductionPriorityFloor = 10
 export const deductionPriorityCeiling = 9999
@@ -60,6 +81,13 @@ export interface DeductionAgreementSummary {
   title: string
   deduction_kind: DeductionAgreementKind
   legal_basis: DeductionLegalBasis
+  /**
+   * Věřitelem je zaměstnavatel (JMHZ 10349). `null` = nerozhodnuto; u zaměstnance
+   * s podporou zaměstnávání OZP taková srážka zastaví měsíční hlášení.
+   */
+  creditor_is_employer?: boolean | null
+  /** Atribut JMHZ srážky ve prospěch zaměstnavatele. */
+  jmhz_target?: DeductionJmhzTarget | null
   status: DeductionAgreementStatus
   priority_no: number
   requested_minor: number
@@ -134,6 +162,8 @@ export interface DeductionAgreementPayload {
   title: string
   deduction_kind: DeductionAgreementKind
   legal_basis?: DeductionLegalBasis
+  creditor_is_employer?: boolean | null
+  jmhz_target?: DeductionJmhzTarget | null
   priority_no: number
   requested_minor?: number
   basis_points?: number | null

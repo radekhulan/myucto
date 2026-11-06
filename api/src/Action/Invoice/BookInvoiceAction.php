@@ -7,6 +7,9 @@ namespace MyInvoice\Action\Invoice;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\JournalEntryRepository;
@@ -89,24 +92,24 @@ final class BookInvoiceAction
 
         $supplierId = (int) $invoice['supplier_id'];
 
-        // Aktivní posted zápis drží zámek — nejdřív reverse v deníku (§4.6).
-        $entry = $this->journal->findBySource($supplierId, 'invoice', $id);
-        if ($entry !== null && $entry['posted_at'] !== null && $entry['reversed_by'] === null) {
-            return Json::error(
-                $response,
-                'still_posted',
-                'Doklad má aktivní účetní zápis — nejdřív ho stornuj v deníku.',
-                409,
-            );
+        // Kontrola i odemknutí drží stejný zámek jako souběžné účtování/import.
+        $changed = TransactionFailure::retrying($this->db->pdo(), fn (): ?int =>
+            (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $id): ?int {
+                if ((new DocumentPostingGroup($this->db))->active($supplierId, 'invoice', $id, true) !== []) return null;
+                $stmt = $this->db->pdo()->prepare(
+                    'UPDATE invoices SET booked_at = NULL, booked_by = NULL
+                      WHERE id = ? AND supplier_id = ? AND booked_at IS NOT NULL'
+                );
+                $stmt->execute([$id, $supplierId]);
+                return $stmt->rowCount();
+            }),
+        );
+        if ($changed === null) {
+            return Json::error($response, 'still_posted',
+                'Doklad má aktivní účetní zápis — nejdřív ho stornuj v deníku.', 409);
         }
 
-        $stmt = $this->db->pdo()->prepare(
-            'UPDATE invoices SET booked_at = NULL, booked_by = NULL
-              WHERE id = ? AND supplier_id = ? AND booked_at IS NOT NULL'
-        );
-        $stmt->execute([$id, $supplierId]);
-
-        if ($stmt->rowCount() > 0) {
+        if ($changed > 0) {
             $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
             $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
             $this->logger->log('invoice.unbooked', isset($user['id']) ? (int) $user['id'] : null, 'invoice', $id, [

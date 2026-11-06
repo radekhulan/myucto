@@ -39,6 +39,7 @@ final class StereoNxPayrollWriter
             iterator_to_array($backup->rows('MPARUCT'), false),
             iterator_to_array($backup->rows('MPARZPR'), false),
             iterator_to_array($backup->rows('Cdenik'), false),
+            accountCodes: $this->map->accountCodes($supplierId, $backup->companyIdentity()['ico'], $backup->companyIndex()),
         );
         if ($source->postingRows() === []) return null;
         return $this->postingMapProposals->refresh($supplierId, $source, $source->year, 'Stereo NX', true);

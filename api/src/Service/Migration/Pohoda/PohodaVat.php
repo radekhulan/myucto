@@ -23,8 +23,9 @@ use MyInvoice\Service\Migration\Shared\VatReturnLineClassifier as Lines;
  *                        nese interní doklad s členěním `DD…`
  *   `---`                mimo přiznání
  *
- * Členění jiných řádků (dovoz ř. 42, insolvence, nedobytné pohledávky, vrácená daň…)
- * převod nezařazuje a doklad nechá jako koncept k ruční kontrole.
+ * Členění jiných řádků (dovoz ř. 42, insolvence, nedobytné pohledávky věřitele, vrácená
+ * daň…) převod nezařazuje a doklad nechá jako koncept k ruční kontrole. Opravu odpočtu
+ * dlužníka (ř. 34, 40, 41) převádí {@see InvoiceImporter} do evidence § 74b.
  *
  * Význam řádků drží {@see Lines}. Pohoda ale řádky vede jako celé dvojice (`1,2`,
  * `40,41`, `3,4`), takže se tu páruje přesná sada řádků, ne množina jako u PREMIER.
@@ -126,6 +127,15 @@ final class PohodaVat
     public function forcesA5(string $code): bool
     {
         return rtrim($this->classes[$code]['section'] ?? '', '. ') === 'A.5';
+    }
+
+    /**
+     * Oprava odpočtu dlužníka podle § 74b: členění `PNedpohl`/`PKnedpohl` s řádky 34, 40, 41.
+     * Zkratku si jednotka může upravit, proto rozhoduje sada řádků.
+     */
+    public function isDebtorDeductionCorrection(string $code): bool
+    {
+        return ($this->classes[$code]['lines'] ?? null) === [34, 40, 41];
     }
 
     /**

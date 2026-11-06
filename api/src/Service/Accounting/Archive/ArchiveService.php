@@ -65,11 +65,14 @@ final class ArchiveService
         'tax_loss_applications',
         'tax_advance_schedules',     // zálohy na daň (1044)
         'journal_entry_attachments', // §33a přílohy zápisů (metadata; binárky viz files)
+        'other_item_kinds',          // vlastní druhy ostatních položek (2228)
         'other_items',
         'other_item_schedules',
         'other_item_schedule_occurrences',
         'other_item_installments',
         'other_item_allocations',
+        'internal_documents',
+        'internal_document_lines',
     ];
 
     /**
@@ -405,8 +408,12 @@ final class ArchiveService
             $specs[$table] = [
                 'where' => 'supplier_id = ?',
                 'params' => [$supplierId],
-                'pk' => $table === 'accounting_supplier_settings' ? null : 'id',
-                'order' => $table === 'accounting_supplier_settings' ? 'supplier_id' : 'id',
+                'pk' => in_array($table, ['accounting_supplier_settings', 'internal_document_lines'], true) ? null : 'id',
+                'order' => match ($table) {
+                    'accounting_supplier_settings' => 'supplier_id',
+                    'internal_document_lines' => 'internal_document_id, position',
+                    default => 'id',
+                },
             ];
         }
         // Pokladní DPH řádky nemají supplier_id — filtr přes rodičovský cash_documents.

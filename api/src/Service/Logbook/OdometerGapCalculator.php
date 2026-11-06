@@ -19,6 +19,9 @@ use PDO;
  *
  * První odečet vozidla bez jízd a bez počátečního stavu mezeru netvoří: není od čeho
  * počítat, stává se výchozím bodem.
+ *
+ * Má-li den ruční i automatický stav (zdroj stavu tachometru), platí ruční: uživatel
+ * ho zapsal z palubní desky a automatický stav téhož dne se do výpočtu nebere.
  */
 final class OdometerGapCalculator
 {
@@ -69,13 +72,19 @@ final class OdometerGapCalculator
     }
 
     /**
-     * @param list<array{id:int, date:string, odometer:int}> $readings  odečty jednoho vozidla
+     * @param list<array{id:int, date:string, odometer:int, source?:string}> $readings  odečty jednoho vozidla
      * @param list<array{date:string, odometer_end:?int}>    $trips     jízdy téhož vozidla
      * @param array{odometer:int, date:?string}|null         $carStart  počáteční stav vozidla
      * @return list<array{reading_id:int, date_from:?string, date_to:string, odometer_from:int, odometer_to:int, km:int}>
      */
     public static function gaps(array $readings, array $trips, ?array $carStart): array
     {
+        $manualDays = [];
+        foreach ($readings as $r) {
+            if (($r['source'] ?? 'manual') === 'manual') $manualDays[$r['date']] = true;
+        }
+        $readings = array_values(array_filter($readings, static fn (array $r): bool =>
+            ($r['source'] ?? 'manual') === 'manual' || !isset($manualDays[$r['date']])));
         usort($readings, static fn (array $a, array $b): int => [$a['date'], $a['odometer']] <=> [$b['date'], $b['odometer']]);
         $trips = array_values(array_filter($trips, static fn (array $t): bool => $t['odometer_end'] !== null));
         usort($trips, static fn (array $a, array $b): int => $a['date'] <=> $b['date']);
@@ -107,11 +116,11 @@ final class OdometerGapCalculator
         return $gaps;
     }
 
-    /** @return list<array{id:int, date:string, odometer:int}> */
+    /** @return list<array{id:int, date:string, odometer:int, source:string}> */
     private function readings(int $supplierId, int $carId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, reading_date, odometer FROM odometer_readings
+            'SELECT id, reading_date, odometer, source FROM odometer_readings
               WHERE supplier_id = ? AND car_id = ? ORDER BY reading_date, odometer'
         );
         $stmt->execute([$supplierId, $carId]);
@@ -119,6 +128,7 @@ final class OdometerGapCalculator
             'id'       => (int) $r['id'],
             'date'     => (string) $r['reading_date'],
             'odometer' => (int) $r['odometer'],
+            'source'   => (string) $r['source'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 

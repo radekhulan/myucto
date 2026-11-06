@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollOpeningBalanceAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -45,7 +44,7 @@ final class PayrollOpeningBalanceExplicitMonthsTest extends TestCase
     protected function setUp(): void
     {
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->service = $container->get(PayrollOpeningBalanceService::class);
             $this->imports = $container->get(OpeningBalanceTabularImportService::class);
@@ -138,7 +137,7 @@ final class PayrollOpeningBalanceExplicitMonthsTest extends TestCase
 
     public function testGridEndpointRequiresExplicitMonths(): void
     {
-        $action = Bootstrap::buildContainer()->get(PayrollOpeningBalanceAction::class);
+        $action = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollOpeningBalanceAction::class);
         $request = (new ServerRequestFactory())
             ->createServerRequest('PUT', '/api/payroll/people/' . $this->employeeId . '/statutory-openings')
             ->withParsedBody([

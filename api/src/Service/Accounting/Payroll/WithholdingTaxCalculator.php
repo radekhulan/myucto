@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Payroll;
 
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
+
 /**
  * Srážková daň ze samostatného základu — § 6 odst. 4, § 7 odst. 6 a § 36 ZDP.
  *
@@ -105,6 +107,21 @@ final class WithholdingTaxCalculator
     ): bool {
         if ($amount <= 0) {
             return false;
+        }
+        // Od roku 2027 je DPP pod rozhodnou částkou samostatným základem ZÁLOHY
+        // (§ 6 odst. 4 a 18 ZDP ve znění zák. č. 360/2025 a 180/2026 Sb.):
+        // zaokrouhluje se nahoru, odvádí se se zálohami a vstupuje do ročního
+        // zúčtování. Tahle zjednodušená rekapitulace umí jen srážkovou daň,
+        // takže se rok 2027 nesmí tiše spočítat po staru ani běžnou zálohou.
+        if ($reason === self::REASON_DPP
+            && SeparateTaxBaseRegime::forTaxYear((int) ($c['year'] ?? 0))->isAdvance()
+            && !$taxDeclarationSigned
+            && self::withinLimit($reason, $amount, $c)
+        ) {
+            throw new \DomainException(
+                'Od roku 2027 se z DPP pod rozhodnou částkou nesráží srážková daň, ale záloha'
+                . ' ze samostatného základu (§ 6 odst. 4 ZDP). Spočítejte měsíc v modulu Mzdy.',
+            );
         }
 
         return match ($reason) {

@@ -58,6 +58,22 @@ final class AiProviderHttpClientAttachmentsTest extends TestCase
         self::assertSame(AiProviderHttpClient::LONG_REQUEST_TIMEOUT, $history[0]['options']['timeout']);
     }
 
+    /** Klíč bez přiřazeného workspace potřebuje hlavičku anthropic-workspace-id i u kontace bankovních pohybů. */
+    public function testAnthropicSendsWorkspaceHeaderOnlyWhenConfigured(): void
+    {
+        $history = [];
+        $client = FakeAiProviderHttpClientFactory::create($this, 'anthropic', [self::anthropicOk()], $history, anthropicWorkspaceId: 'wrkspc_01Test');
+        self::assertTrue($client->completeJson(1, 'SYS', 'DOTAZ', ['type' => 'object'])['ok']);
+        self::assertSame('wrkspc_01Test', $history[0]['request']->getHeaderLine('anthropic-workspace-id'));
+
+        $history = [];
+        $client = FakeAiProviderHttpClientFactory::create($this, 'anthropic', [self::anthropicOk()], $history);
+        self::assertTrue($client->completeJson(1, 'SYS', 'DOTAZ', ['type' => 'object'])['ok']);
+        self::assertFalse($history[0]['request']->hasHeader('anthropic-workspace-id'));
+        self::assertSame('test-api-key', $history[0]['request']->getHeaderLine('x-api-key'));
+        self::assertSame('2023-06-01', $history[0]['request']->getHeaderLine('anthropic-version'));
+    }
+
     /** Claude 5 vrací na `temperature` HTTP 400 (zjištěno ostrým voláním); starší modely ho dostávají dál. */
     public function testTemperatureIsSentOnlyToModelsThatAcceptIt(): void
     {

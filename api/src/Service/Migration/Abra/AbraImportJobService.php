@@ -34,6 +34,7 @@ final class AbraImportJobService extends AbstractImportJobService
         'faktura-prijata' => 'Přijaté faktury',
         'prodejka' => 'Prodejky',
         'zavazek' => 'Závazky',
+        'pohledavka' => 'Pohledávky',
         'bankovni-ucet' => 'Bankovní účty',
         'majetek' => 'Majetek',
         'banka' => 'Bankovní doklady',
@@ -53,7 +54,7 @@ final class AbraImportJobService extends AbstractImportJobService
     /** @var list<string> */
     private const STEPS = [
         'ucetni-obdobi', 'ucetni-osnova', 'ucet', 'adresar', 'faktura-vydana',
-        'faktura-prijata', 'prodejka', 'zavazek', 'bankovni-ucet', 'majetek', 'banka', 'pokladni-pohyb', 'vazba', 'ucetni-denik',
+        'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka', 'bankovni-ucet', 'majetek', 'banka', 'pokladni-pohyb', 'vazba', 'ucetni-denik',
         'pohyb-na-uctech', 'stav-uctu', 'periods', 'chart', 'documents', 'payments',
         'journal', 'links',
     ];

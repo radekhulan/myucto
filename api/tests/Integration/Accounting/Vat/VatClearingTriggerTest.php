@@ -314,6 +314,28 @@ final class VatClearingTriggerTest extends TestCase
     }
 
     /**
+     * Období převzaté z jiného programu se nehlásí: DPH v něm vypořádal zdroj po svém
+     * (POHODA dvěma doklady za rok) a zúčtovací doklad MyÚčta by převzatý deník rozbil.
+     * Období po konci převodu se hlásí dál.
+     */
+    public function testPeriodTakenOverFromAnotherProgramIsNotReported(): void
+    {
+        $this->bookOutputVat(4200.00, self::YEAR . '-07-10', 910073);
+        $this->bookOutputVat(1500.00, self::YEAR . '-08-10', 910074);
+        $entryId = (int) $this->db->pdo()->query(
+            "SELECT id FROM journal_entries WHERE supplier_id = {$this->supplierId} AND source_type = 'manual' AND source_id = 910073"
+        )->fetchColumn();
+        $this->db->pdo()->prepare(
+            "INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id) VALUES (?, 'journal_entry', 'test|910073', ?)"
+        )->execute([$this->supplierId, $entryId]);
+
+        self::assertSame([], $this->clearing->staleForRange($this->supplierId, self::YEAR . '-07-01', self::YEAR . '-07-31'));
+        $stale = $this->clearing->staleForRange($this->supplierId, self::YEAR . '-07-01', self::YEAR . '-08-31');
+        self::assertCount(1, $stale);
+        self::assertSame('08/' . self::YEAR, $stale[0]['doc_no']);
+    }
+
+    /**
      * Haléřový zbytek po RUČNÍM vyrovnání období není zastaralé zúčtování, ale
      * zaokrouhlení. Bez prahu materiality by v uzávěrce trvale svítil nález,
      * se kterým nejde nic udělat.

@@ -35,7 +35,7 @@ use MyInvoice\Service\Payroll\PayrollPersonCreateService;
  *     ({@see PayrollTakeoverPersonLookup}) → další vztah téže osoby,
  *  3. jinak nová osoba s tímto vztahem.
  *
- * Druh (DPP podle `JeDPP`, jinak pracovní poměr), nástup a úvazek jsou ze zdroje; skončení
+ * Druh ({@see self::relationType()}), nástup a úvazek jsou ze zdroje; skončení
  * zapíše krok osob ({@see PohodaPayrollPeopleWriter}). Vazba osobního čísla na vztah se uloží
  * do vazeb importu docházky, takže měsíc pak řádek přiřadí právě tomuto vztahu.
  *
@@ -103,7 +103,8 @@ final class PohodaPayrollRelations
             } elseif ($start === null || !self::withoutPayslip($start, $end, $year, $today)) {
                 continue;
             }
-            $dpp = in_array(strtolower(trim(PohodaXml::text($relation, 'JeDPP'))), ['1', '-1', 'true'], true);
+            $type = self::relationType($relation);
+            $dpp = $type === 'dpp';
             $weekly = PohodaXml::num($relation, 'TUvazek');
             $birthNumber = PohodaXml::text($person, 'RodCisl');
             $insurer = $insurers[PohodaXml::text($person, 'RefPoj')] ?? '';
@@ -117,10 +118,10 @@ final class PohodaPayrollRelations
                 'birth_date' => self::date(PohodaXml::text($person, 'DatNar')),
                 'oic' => $oic === '' ? null : $oic,
                 'insurer_code' => HealthInsurers::isValid($insurer) ? $insurer : null,
-                'relation_type' => $dpp ? 'dpp' : 'employment',
+                'relation_type' => $type,
                 'start' => $start,
                 'end' => $end,
-                'weekly_hours' => !$dpp && $weekly > 0 ? sprintf('%.2F', $weekly) : null,
+                'weekly_hours' => !$dpp && $type !== 'statutory_body' && $weekly > 0 ? sprintf('%.2F', $weekly) : null,
                 'order' => (int) (PohodaXml::text($relation, 'Poradi') ?: '1'),
             ];
         }
@@ -129,6 +130,27 @@ final class PohodaPayrollRelations
             <=> [$b['person_key'], $b['order'], $b['personal_number']]);
 
         return $out;
+    }
+
+    /**
+     * Druh vztahu podle druhu zaměstnání PAMICA (`RelDruhZ`): 3 dohoda o pracovní činnosti,
+     * 107 člen statutárního orgánu (jednatel, formulář JMHZ `cinnostKS`), 108 a `JeDPP`
+     * dohoda o provedení práce; ostatní (0 a další druhy poměru) pracovní poměr.
+     *
+     * @param array<string,mixed> $relation
+     */
+    public static function relationType(array $relation): string
+    {
+        if (in_array(strtolower(trim(PohodaXml::text($relation, 'JeDPP'))), ['1', '-1', 'true'], true)) {
+            return 'dpp';
+        }
+
+        return match (trim(PohodaXml::text($relation, 'RelDruhZ'))) {
+            '3' => 'dpc',
+            '107' => 'statutory_body',
+            '108' => 'dpp',
+            default => 'employment',
+        };
     }
 
     /**

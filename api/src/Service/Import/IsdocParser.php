@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Import;
 
 use MyInvoice\Service\Export\IsdocExporter;
 use MyInvoice\Service\Invoice\TimeBilling;
+use MyInvoice\Service\Xml\SafeXmlLoader;
+use MyInvoice\Service\Xml\UnsafeXmlException;
 
 /**
  * Parser ISDOC 5.x a 6.x — extrahuje fakturu do normalizovaného array.
@@ -38,6 +40,8 @@ final class IsdocParser
 {
     /** ISDOC 6.x namespace (náš exporter, iDoklad, Fakturoid…). */
     private const NS_2013 = 'http://isdoc.cz/namespace/2013';
+    /** Strop vstupu; nad limity uploadu (20 MiB), skutečnou cenu hlídá počet uzlů. */
+    private const MAX_XML_BYTES = 32 * 1024 * 1024;
     /** Starší ISDOC 5.x namespace — struktura čtených elementů je kompatibilní. */
     private const NS_LEGACY = 'http://isdoc.cz/namespace/invoice';
     /** Namespace, které parser umí — prefix `i:` se navazuje na ten z kořene dokladu. */
@@ -56,28 +60,17 @@ final class IsdocParser
      */
     public function parse(string $xml): array
     {
-        // XXE / billion-laughs hardening: odmítni DOCTYPE před libxml parsováním.
-        // V PHP 8 / libxml ≥ 2.9 jsou external entities default-off, ale interní
-        // entity expansion může pořád způsobit DoS — proto blokujeme DOCTYPE rovnou.
-        if (preg_match('/<!DOCTYPE/i', $xml)) {
-            throw new \RuntimeException('ISDOC XML obsahuje DOCTYPE, což není povoleno.');
-        }
-
-        $dom = new \DOMDocument();
-        $dom->preserveWhiteSpace = false;
-        $prev = libxml_use_internal_errors(true);
-        // LIBXML_NONET zakáže jakékoliv načítání ze sítě; nepoužíváme NOENT.
-        $loaded = $dom->loadXML($xml, LIBXML_NONET | LIBXML_NOERROR | LIBXML_NOWARNING);
-        libxml_clear_errors();
-        libxml_use_internal_errors($prev);
-        if (!$loaded || $dom->documentElement === null) {
-            throw new \RuntimeException('Nelze parsovat ISDOC XML.');
-        }
-        // Kontrola nad surovými bajty výše nevidí DOCTYPE v UTF-16 (mezi znaky jsou nulové
-        // bajty), libxml ho ale přečte. Rozhoduje proto i to, co libxml skutečně načetl,
-        // dřív než se z dokladu cokoli čte.
-        if ($dom->doctype !== null) {
-            throw new \RuntimeException('ISDOC XML obsahuje DOCTYPE, což není povoleno.');
+        // XXE / billion-laughs i paměťová amplifikace DOM: DOCTYPE (v jakémkoli
+        // kódování) a nadměrný počet uzlů odmítne sdílený loader dřív, než se
+        // postaví strom. Nepoužíváme NOENT, síť je zakázaná.
+        try {
+            $dom = SafeXmlLoader::load($xml, self::MAX_XML_BYTES);
+        } catch (UnsafeXmlException $e) {
+            throw new \RuntimeException(match ($e->reason) {
+                UnsafeXmlException::DOCTYPE        => 'ISDOC XML obsahuje DOCTYPE, což není povoleno.',
+                UnsafeXmlException::INVALID        => 'Nelze parsovat ISDOC XML.',
+                default                            => 'ISDOC XML je příliš rozsáhlé na zpracování.',
+            });
         }
 
         $root = $dom->documentElement;
@@ -521,8 +514,7 @@ final class IsdocParser
 
         $unitPriceLocalRaw = $this->text($xpath, 'i:UnitPrice', $line) ?: '0';
         $unitPriceLocal = (float) $unitPriceLocalRaw;
-        $preciseTimeRate = $durationMinutes !== null
-            || (TimeBilling::isHourUnit($unit) && self::hasSubcentPrecision($unitPriceLocalRaw));
+        $preciseUnitPrice = $durationMinutes !== null || self::hasSubcentPrecision($unitPriceLocalRaw);
 
         // <LineExtensionAmount> = celková částka řádku bez DPH PO slevě. ISDOC 6.0.x
         // nemá na řádce dedikovaný discount element — sleva se promítá jen tím, že
@@ -535,7 +527,7 @@ final class IsdocParser
         if ($hasForeignCurrency) {
             // <UnitPrice> je dle ISDOC vždy v lokální měně (CZK), ne v měně faktury.
             // Legacy cizoměnovou jednotkovou cenu po slevě odvodíme z
-            // <LineExtensionAmountCurr> / qty. Přesný časový řádek může mít Curr total
+            // <LineExtensionAmountCurr> / qty. Řádek s přesnou cenou může mít Curr total
             // zaokrouhlený na haléře, proto u něj obnovíme sazbu z lokální UnitPrice
             // a kurzu, ale jen pokud z ní vyjde stejný řádkový total bez slevy.
             // Fallback na <UnitPrice> drží pro nekonformní exporty cizích systémů,
@@ -544,7 +536,7 @@ final class IsdocParser
             $unitPrice = ($lineAmountCurr !== '' && $quantity > 0.0)
                 ? (float) $lineAmountCurr / $quantity
                 : $unitPriceLocal;
-            if ($preciseTimeRate && $lineAmountCurr !== '' && $quantity != 0.0
+            if ($preciseUnitPrice && $lineAmountCurr !== '' && $quantity != 0.0
                 && $exchangeRate !== null && $exchangeRate > 0.0
             ) {
                 $rateFromLocalUnitPrice = round($unitPriceLocal / $exchangeRate, 6);
@@ -563,10 +555,10 @@ final class IsdocParser
             if ($lineAmount !== '' && $quantity > 0.0) {
                 $effective = (float) $lineAmount / $quantity;
                 // Legacy toleranci porovnání jednotkových cen držíme beze změny.
-                // Jen přesný časový řádek smí místo ní porovnat zaokrouhlený total,
-                // protože dělení haléřové částky krátkým časem zničí hodinovou sazbu.
+                // Jen řádek s přesnou cenou (čas, cena pod haléř) smí místo ní porovnat
+                // zaokrouhlený total, protože dělení haléřové částky zničí přesnou cenu.
                 $isDiscounted = abs($effective - $unitPriceLocal) > 0.005;
-                if ($preciseTimeRate) {
+                if ($preciseUnitPrice) {
                     $expectedLineAmount = TimeBilling::invoiceAmount([
                         'quantity' => $quantity,
                         'duration_minutes' => $durationMinutes,
@@ -601,6 +593,8 @@ final class IsdocParser
 
         return [
             'description'            => $this->text($xpath, 'i:Item/i:Description', $line),
+            // Kód položky prodávajícího: podle něj páruje pravidla výnosů vydaných faktur.
+            'seller_item_code'       => $this->text($xpath, 'i:Item/i:SellersItemIdentification/i:ID', $line) ?: null,
             'quantity'               => $quantity,
             'duration_minutes'       => $durationMinutes,
             'unit'                   => $unit,

@@ -216,7 +216,7 @@ watch(page, () => {
   silentPageChange = false
   void load(silent)
 }, { flush: 'sync' })
-useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-suggestions', 'accounting', 'invoices', 'purchase-invoices', 'clients'], () => load(true))
+useWindowRefresh(() => load(true))
 </script>
 
 <template>

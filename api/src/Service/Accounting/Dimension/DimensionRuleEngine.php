@@ -58,12 +58,17 @@ final class DimensionRuleEngine
                     usort($matches, static fn (array $a, array $b): int
                         => [$b['specificity'], $a['rule']['id']] <=> [$a['specificity'], $b['rule']['id']]);
                     $valueId = null;
+                    $origin = null;
                     foreach ($matches as $m) {
                         if ($m['rule']['default_from_card'] && $cardValue !== null) {
                             $valueId = $cardCache[$typeId] ??= ($cardValue($typeId) ?? 0);
                             $valueId = $valueId > 0 ? $valueId : null;
+                            if ($valueId !== null) $origin = ['origin' => 'card_default', 'ref' => 'rule:' . $m['rule']['id']];
                         }
-                        $valueId ??= $m['rule']['default_value_id'];
+                        if ($valueId === null && $m['rule']['default_value_id'] !== null) {
+                            $valueId = $m['rule']['default_value_id'];
+                            $origin = ['origin' => 'rule_default', 'ref' => 'rule:' . $m['rule']['id']];
+                        }
                         if ($valueId !== null) {
                             break;
                         }
@@ -73,6 +78,7 @@ final class DimensionRuleEngine
                         $dims[$typeId] = $valueId;
                         ksort($dims);
                         $line['dimensions'] = $dims;
+                        $line['dimension_origins'][$typeId] = DimensionAssignmentOrigin::normalize($origin ?? []);
                         $defaults++;
                         continue;
                     }

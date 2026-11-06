@@ -32,6 +32,7 @@ final class LocateEntityAction
         'journal_entry'    => 'journal_entries',
         'cash_document'    => 'cash_documents',
         'other_item'       => 'other_items',
+        'internal_document' => 'internal_documents',
         'bank_statement'   => 'bank_statements',
         'document'         => 'documents',
         'stock_document'   => 'stock_documents',

@@ -186,6 +186,24 @@ export function workSummaryRemediation(code: string, employmentId: number, perio
   return { problemKey: `payroll.remediation.work.problems.${kind}`, stepKey: `payroll.remediation.work.steps.${kind}`, path, actionKey: `payroll.remediation.actions.${action}`, localTarget: kind === 'calendar' ? 'calendar' : 'entries' }
 }
 
+/**
+ * Nálezy pracovního souhrnu seskupené podle kódu.
+ *
+ * Server hlásí tentýž problém za každý dotčený den (chybějící kalendář vztahu
+ * dal v září 30 stejných odstavců i stejných tlačítek pod sebou). Návod
+ * k nápravě je jeden na kód; jednotlivé zprávy zůstávají v technických
+ * podrobnostech.
+ */
+export function groupWorkSummaryIssues(issues: ReadonlyArray<{ code: string, message: string }>): Array<{ code: string, messages: string[] }> {
+  const groups = new Map<string, string[]>()
+  for (const issue of issues) {
+    const messages = groups.get(issue.code) ?? []
+    if (!messages.includes(issue.message)) messages.push(issue.message)
+    groups.set(issue.code, messages)
+  }
+  return [...groups].map(([code, messages]) => ({ code, messages }))
+}
+
 export function averageEarningsTarget(employmentId: number, year?: number | null, quarter?: number | null): string {
   const base = `/payroll/absences?employment=${employmentId}&tab=averages`
   return Number.isInteger(year) && Number(year) >= 1900 && Number(year) <= 9999

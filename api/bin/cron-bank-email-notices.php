@@ -33,16 +33,13 @@ if (!CronPreflight::hasBankEmailNoticeAccounts($conn->pdo())) {
 $container = Bootstrap::buildContainer();
 $scanner = $container->get(BankEmailNoticeScanner::class);
 
-$scanAll = (bool) $config->get('app.scan_all_suppliers', false);
-if ($scanAll) {
-    $supplierIds = array_map('intval', $conn->pdo()->query('SELECT id FROM supplier')->fetchAll(\PDO::FETCH_COLUMN));
-} else {
-    $supplierIds = [(int) $config->get('app.default_supplier_id', 1)];
-}
+$supplierIds = CronPreflight::bankEmailNoticeSupplierIds($conn->pdo());
 
 $started = microtime(true);
 $summary = [
     'suppliers' => 0,
+    'accounts' => 0,
+    'fetched' => 0,
     'processed' => 0,
     'matched' => 0,
     'known_skipped' => 0,
@@ -57,11 +54,21 @@ foreach ($supplierIds as $sid) {
     try {
         $result = $scanner->scanSupplier($sid);
         $summary['suppliers']++;
-        foreach (['processed', 'matched', 'known_skipped', 'old_skipped', 'errors'] as $key) {
+        $summary['accounts'] += count($result['accounts'] ?? []);
+        foreach (['fetched', 'processed', 'matched', 'known_skipped', 'old_skipped', 'errors'] as $key) {
             $summary[$key] += (int) ($result[$key] ?? 0);
         }
         if (!empty($result['error'])) {
             $summary['details'][] = ['supplier_id' => $sid, 'error' => $result['error']];
+        }
+        foreach ($result['accounts'] ?? [] as $account) {
+            if (!empty($account['error'])) {
+                $summary['details'][] = [
+                    'supplier_id' => $sid,
+                    'imap_account_id' => $account['imap_account_id'],
+                    'error' => $account['error'],
+                ];
+            }
         }
     } catch (\Throwable $e) {
         $summary['errors']++;

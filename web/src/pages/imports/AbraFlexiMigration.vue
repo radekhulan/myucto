@@ -8,6 +8,7 @@ import { useActivationStatus } from '@/composables/useActivationStatus'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { btnFilled, ICONS } from '@/components/ui/buttonStyles'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
+import MigrationNonprofitNotice from '@/components/migration/MigrationNonprofitNotice.vue'
 
 const { t, te, locale } = useI18n()
 const supplier = useSupplierStore()
@@ -154,7 +155,7 @@ async function discover(): Promise<void> {
 }
 
 async function start(): Promise<void> {
-  if (running.value || !connection.value?.configured || (!connection.value.imported && !selectedYears.value.length)) return
+  if (running.value || !connection.value?.configured || connection.value.ico_mismatch || (!connection.value.imported && !selectedYears.value.length)) return
   const scope = generation
   await perform(async () => {
     const result = connection.value?.imported ? await abraFlexiApi.sync() : await abraFlexiApi.start([...selectedYears.value])
@@ -200,7 +201,7 @@ async function cancel(): Promise<void> {
 }
 
 const actions = computed<ActionItem[]>(() => [
-  { key: 'start', label: t(connection.value?.imported ? 'abra_flexi.sync' : 'abra_flexi.start'), icon: 'play', tier: 'primary', variant: 'primary', show: !!connection.value?.configured, disabled: busy.value || running.value || editing.value || (!connection.value?.imported && !selectedYears.value.length), run: () => { void start() } },
+  { key: 'start', label: t(connection.value?.imported ? 'abra_flexi.sync' : 'abra_flexi.start'), icon: 'play', tier: 'primary', variant: 'primary', show: !!connection.value?.configured, disabled: busy.value || running.value || editing.value || !!connection.value?.ico_mismatch || (!connection.value?.imported && !selectedYears.value.length), run: () => { void start() } },
   { key: 'catalog', label: t(connection.value?.catalog ? 'abra_flexi.catalog_sync' : 'abra_flexi.catalog_start'), icon: 'stock_items', tier: 'secondary', variant: 'neutral', show: !!connection.value?.imported, disabled: busy.value || running.value || editing.value, run: () => { void startCatalog() } },
   { key: 'discover', label: t('abra_flexi.discover'), icon: 'cycle', tier: 'secondary', variant: 'neutral', show: !!connection.value?.configured && !connection.value?.imported, disabled: busy.value || running.value, run: () => { void discover() } },
   { key: 'refresh', label: t('abra_flexi.refresh'), icon: 'cycle', tier: 'secondary', variant: 'neutral', disabled: busy.value, run: () => { void refresh() } },
@@ -249,6 +250,7 @@ onBeforeUnmount(() => { generation++; stopPolling(); clearCredentials() })
       <h1 class="text-2xl font-semibold">{{ t('abra_flexi.title') }}</h1>
       <p class="text-sm text-neutral-500 mt-1">{{ t('abra_flexi.intro') }}</p>
     </div>
+    <MigrationNonprofitNotice :notice="connection?.nonprofit_notice" />
     <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="abra-flexi-support-notice">
       <i18n-t keypath="abra_flexi.support_notice" tag="p">
         <template #recommend><strong><i18n-t keypath="abra_flexi.support_notice_recommend" tag="span"><template #contact><a href="https://myucto.cz/support#placena" target="_blank" rel="noopener" class="underline hover:no-underline">{{ t('abra_flexi.support_notice_contact') }}</a></template></i18n-t></strong></template>
@@ -308,6 +310,10 @@ onBeforeUnmount(() => { generation++; stopPolling(); clearCredentials() })
         </div>
       </fieldset>
       <p v-if="connection.source_company" class="text-sm">{{ connection.source_company.name }} ({{ connection.source_company.ico }})</p>
+      <div v-if="connection.ico_mismatch" role="alert" data-testid="abra-ico-mismatch" class="rounded-md border border-danger-200 bg-danger-50 p-4 space-y-1 text-sm text-danger-700">
+        <h3 class="font-medium">{{ t('abra_flexi.ico_mismatch_title') }}</h3>
+        <p>{{ t('abra_flexi.ico_mismatch', { source: connection.source_company?.name || '?', source_ico: connection.source_company?.ico || '?', target: connection.target_company?.name || '?', target_ico: connection.target_company?.ico || '?' }) }}</p>
+      </div>
       <form v-if="editing" autocomplete="off" class="space-y-4" @submit.prevent="save">
         <p class="text-sm text-neutral-500">{{ t('abra_flexi.credentials_hint') }}</p>
         <div class="grid gap-4 md:grid-cols-2">

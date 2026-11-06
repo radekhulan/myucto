@@ -49,6 +49,7 @@ final readonly class TaxSubmissionIsdsService
         private SubmissionOutboxService $outbox,
         private SubmissionOutboxRepository $outboxRows,
         private TaxSubmissionDocumentService $documents,
+        private \MyInvoice\Service\Tax\Return\AccountingDecreeService $accountingDecrees,
         private ?IsdsTransportAvailabilityResolver $transportAvailability = null,
     ) {}
 
@@ -66,6 +67,11 @@ final readonly class TaxSubmissionIsdsService
         $submission = $this->submissions->find($submissionId, $supplierId);
         if ($submission === null) {
             throw new SubmissionChannelException('not_found', 'Podání nebylo nalezeno.', 404);
+        }
+        try {
+            $this->accountingDecrees->assertDppoSubmissionSupported($supplierId, $submission, true);
+        } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
+            throw new SubmissionChannelException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
         $formCode = strtolower((string) $submission['form_code']);
         TaxIsdsRouting::groupFor($formCode);

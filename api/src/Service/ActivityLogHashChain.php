@@ -36,6 +36,11 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
  * krátká samostatná transakce po commitu ({@see sealPending()}); pořadí řetězu určuje
  * `seal_seq`, ne `id`. Mezi commitem a zapečetěním je záznam bez hashe — normálně
  * milisekundy, po pádu procesu do dalšího pečetění (kterýkoli další zápis, cron).
+ *
+ * ── Retence ve spravovaném provozu ──────────────────────────────────────────────────
+ * Na spravované instanci se stopa drží jen omezeně dlouho ({@see prune()}). Smazaný
+ * začátek řetězu tím přestává být prokazatelný: `verify()` od hranice promazání
+ * nekontroluje návaznost na předchozí článek, obsah ponechaných záznamů ano.
  */
 final class ActivityLogHashChain
 {
@@ -45,8 +50,40 @@ final class ActivityLogHashChain
         'payload', 'ip', 'user_agent', 'created_at',
     ];
 
+    /**
+     * Akce, které retence nemaže. Nejsou jen historií: aplikace z nich čte stav
+     * (ručně upravený popis zápisu, automatické zaúčtování, ruční změna úhrady,
+     * storno, přeúčtování, kurzový rozdíl převodu) a odeslané e-maily jsou doklad
+     * o doručení dokladu. Smazáním by se změnilo chování, ne jen délka historie.
+     */
+    public const RETAINED_ACTIONS = [
+        'accounting.auto_posted',
+        'bank_match.auto_posted',
+        'accounting.description_edited',
+        'accounting.reposted',
+        'accounting.reversed',
+        'purchase_invoice.transitioned',
+        'bank_transfer.fx_residual',
+        'invoice.sent',
+        'invoice.send_failed',
+        'invoice.reminder_sent',
+        'invoice.reminder_failed',
+        'invoice.approval_reminder_sent',
+        'invoice.approval_reminder_failed',
+        'invoice.payment_thanks_sent',
+        'invoice.payment_thanks_failed',
+        'recurring.reminder_sent',
+        'recurring.reminder_failed',
+    ];
+
+    /** Klíč `app_meta` s hranicí promazané části řetězu. */
+    private const PRUNE_META_KEY = 'activity_log_pruned';
+
     /** Kolik záznamů zapečetí jedna krátká transakce. */
     private const SEAL_BATCH = 500;
+
+    /** Kolik záznamů smaže jedna transakce retence. */
+    private const PRUNE_BATCH = 2000;
 
     /**
      * `created_at` je TIMESTAMP, takže ho MariaDB renderuje podle zóny SESSION —
@@ -308,11 +345,13 @@ final class ActivityLogHashChain
             }
         }
         $stmt = $pdo->query(
-            'SELECT ' . self::selectList() . ', prev_hash, hash
+            'SELECT ' . self::selectList() . ', prev_hash, hash' . ($deferred ? ', seal_seq' : '') . '
                FROM activity_log WHERE hash IS NOT NULL' . $chainWhere
             . ($deferred ? ' ORDER BY seal_seq, id' : ' ORDER BY id')
         );
 
+        $prunedBelow = $deferred ? ($this->pruneMark()['below_seq'] ?? null) : null;
+        $pastPruned = false;
         $checked = 0;
         $firstId = null;
         $broken = [];
@@ -323,8 +362,19 @@ final class ActivityLogHashChain
             $firstId ??= $id;
             $checked++;
 
+            // V promazané části a u prvního článku za ní předchůdce chybí záměrně.
+            $linkKnown = true;
+            if ($prunedBelow !== null && $row['seal_seq'] !== null) {
+                if ((int) $row['seal_seq'] < $prunedBelow) {
+                    $linkKnown = false;
+                } elseif (!$pastPruned) {
+                    $pastPruned = true;
+                    $linkKnown = false;
+                }
+            }
+
             // Prvnímu článku se předchozí hash neověřuje — žádný nemá.
-            if ($checked > 1 && (string) ($row['prev_hash'] ?? '') !== (string) $expectedPrev) {
+            if ($checked > 1 && $linkKnown && (string) ($row['prev_hash'] ?? '') !== (string) $expectedPrev) {
                 $broken[] = ['id' => $id, 'reason' => 'navazuje na jiný záznam, než na který má (řetěz přerušen)'];
             }
 
@@ -345,6 +395,141 @@ final class ActivityLogHashChain
             'broken' => $broken,
             'ok' => $broken === [],
         ];
+    }
+
+    /**
+     * Smaže záznamy starší než `$days` dní kromě {@see self::RETAINED_ACTIONS}.
+     *
+     * Jen pro spravovaný provoz (`cron-cleanup.php`). Nezapečetěné záznamy nad hranicí
+     * `deferred_from_id` nechává, na článek v řetězu teprve čekají. Hranici promazání
+     * zapisuje do `app_meta` v téže transakci jako mazání, takže `verify()` nikdy
+     * nevidí díru bez hranice.
+     *
+     * `$fromId` omezí úklid na záznamy od daného id (testy, stejně jako u `verify()`).
+     *
+     * @return int počet smazaných záznamů
+     */
+    public function prune(int $days, int $fromId = 0): int
+    {
+        if (!$this->isAvailable() || !$this->isDeferred() || !$this->db->hasTable('app_meta')) {
+            return 0;
+        }
+        $pdo = $this->db->pdo();
+        $before = (string) $pdo->query('SELECT NOW() - INTERVAL ' . max(1, $days) . ' DAY')->fetchColumn();
+        $lastOld = $this->lastIdCreatedBefore($pdo, $before, $fromId);
+        if ($lastOld === null) {
+            return 0;
+        }
+        $deferredFrom = $pdo->query('SELECT deferred_from_id FROM activity_log_chain_head WHERE id = 1')->fetchColumn();
+        $unsealedBelow = $deferredFrom === false || $deferredFrom === null ? PHP_INT_MAX : (int) $deferredFrom;
+
+        $keep = implode(',', array_fill(0, count(self::RETAINED_ACTIONS), '?'));
+        $select = $pdo->prepare(
+            "SELECT id, seal_seq FROM activity_log
+              WHERE id > ? AND id <= ? AND created_at < ? AND action NOT IN ($keep)
+                AND (hash IS NOT NULL OR id < ?)
+              ORDER BY id LIMIT " . self::PRUNE_BATCH
+        );
+
+        $deleted = 0;
+        $cursor = $fromId - 1;
+        do {
+            $select->execute([$cursor, $lastOld, $before, ...self::RETAINED_ACTIONS, $unsealedBelow]);
+            $rows = $select->fetchAll(\PDO::FETCH_ASSOC);
+            if ($rows === []) {
+                break;
+            }
+            $ids = array_map(static fn (array $r): int => (int) $r['id'], $rows);
+            $maxSeq = max(array_map(static fn (array $r): int => (int) ($r['seal_seq'] ?? 0), $rows));
+            $deleted += TransactionFailure::retrying($pdo, fn (): int => $this->pruneBatch($pdo, $ids, $maxSeq, $before));
+            $cursor = $ids[count($ids) - 1];
+        } while (count($rows) === self::PRUNE_BATCH);
+
+        return $deleted;
+    }
+
+    /** Čas, před kterým už stopa není úplná (`null` = nic se nepromazalo). */
+    public function prunedBefore(): ?string
+    {
+        $before = $this->pruneMark()['before'] ?? null;
+
+        return is_string($before) && $before !== '' ? $before : null;
+    }
+
+    /**
+     * @param list<int> $ids
+     */
+    private function pruneBatch(\PDO $pdo, array $ids, int $maxSeq, string $before): int
+    {
+        $pdo->beginTransaction();
+        try {
+            $mark = $this->pruneMark();
+            $pdo->prepare('INSERT INTO app_meta (k, v) VALUES (?, ?) ON DUPLICATE KEY UPDATE v = VALUES(v)')
+                ->execute([self::PRUNE_META_KEY, json_encode([
+                    'below_seq' => max((int) ($mark['below_seq'] ?? 0), $maxSeq + 1),
+                    'before' => max((string) ($mark['before'] ?? ''), $before),
+                ])]);
+            $delete = $pdo->prepare('DELETE FROM activity_log WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+            $delete->execute($ids);
+            $pdo->commit();
+
+            return $delete->rowCount();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Nejvyšší id záznamu staršího než `$before`, půlením po primárním klíči. Tabulka
+     * nemá index na samotném `created_at` a id roste s časem zápisu; drobné odchylky
+     * pořadí jistí podmínka na `created_at` přímo v mazání.
+     */
+    private function lastIdCreatedBefore(\PDO $pdo, string $before, int $fromId): ?int
+    {
+        $bounds = $pdo->prepare('SELECT MIN(id), MAX(id) FROM activity_log WHERE id >= ?');
+        $bounds->execute([$fromId]);
+        [$lo, $hi] = $bounds->fetch(\PDO::FETCH_NUM);
+        if ($lo === null) {
+            return null;
+        }
+        $probe = $pdo->prepare('SELECT id, created_at < ? FROM activity_log WHERE id >= ? ORDER BY id LIMIT 1');
+        $probe->execute([$before, (int) $lo]);
+        $first = $probe->fetch(\PDO::FETCH_NUM);
+        if ($first === false || !(int) $first[1]) {
+            return null;
+        }
+
+        $lo = (int) $lo;
+        $hi = (int) $hi;
+        while ($lo < $hi) {
+            $mid = intdiv($lo + $hi + 1, 2);
+            $probe->execute([$before, $mid]);
+            $row = $probe->fetch(\PDO::FETCH_NUM);
+            if ($row !== false && (int) $row[1]) {
+                $lo = (int) $row[0];
+            } else {
+                $hi = $mid - 1;
+            }
+        }
+
+        return $lo;
+    }
+
+    /** @return array{below_seq?:int, before?:string} */
+    private function pruneMark(): array
+    {
+        if (!$this->db->hasTable('app_meta')) {
+            return [];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT v FROM app_meta WHERE k = ?');
+        $stmt->execute([self::PRUNE_META_KEY]);
+        $value = $stmt->fetchColumn();
+        $mark = is_string($value) ? json_decode($value, true) : null;
+
+        return is_array($mark) ? $mark : [];
     }
 
     /**

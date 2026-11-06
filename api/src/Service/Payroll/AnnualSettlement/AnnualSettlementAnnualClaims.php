@@ -16,8 +16,10 @@ namespace MyInvoice\Service\Payroll\AnnualSettlement;
  *   - sleva na dani podle § 35 odst. 4 (za zastavenou exekuci),
  *   - sleva na manžela podle § 35ba odst. 1 písm. b) a § 35bb.
  *
- * Mzdový modul pro ně nemá evidenci nároku ani doložení podle § 38l.
- * `PresentUnsupported` proto zúčtování zastaví: kdyby se spočítalo bez nich,
+ * Od 10/2026 je eviduje `payroll_annual_settlement_deductions` a
+ * `payroll_annual_settlement_spouse_claims` a výpočet je uplatní (`Present`).
+ * `PresentUnsupported` zůstává pro případ, že poplatník uplatňuje něco, co
+ * evidence nepokrývá, a zúčtování zastaví: kdyby se spočítalo bez toho,
  * vyšel by přeplatek NIŽŠÍ, než na jaký má poplatník nárok, a zaměstnanec by
  * o rozdíl přišel, aniž by se to kdekoli projevilo.
  *
@@ -32,5 +34,8 @@ enum AnnualSettlementAnnualClaims: string
 {
     case Unknown = 'unknown';
     case None = 'none';
+    /** Položky jsou evidované v aplikaci a výpočet je uplatní. */
+    case Present = 'present';
+    /** Uplatňuje něco, co aplikace neeviduje — zúčtování se zastaví. */
     case PresentUnsupported = 'present_unsupported';
 }

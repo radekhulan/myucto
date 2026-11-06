@@ -17,11 +17,12 @@ final class HostedMcpSettingsAction
     public function __construct(
         private readonly HostedMcp $hosted,
         private readonly NodeBridge $bridge,
+        private readonly ?\MyInvoice\Service\Mcp\McpResourcePolicy $resources = null,
     ) {}
 
     public function show(Request $request, Response $response): Response
     {
-        return Json::ok($response, $this->state());
+        return Json::ok($response, $this->state($request));
     }
 
     public function update(Request $request, Response $response): Response
@@ -47,7 +48,7 @@ final class HostedMcpSettingsAction
             return Json::error($response, 'managed_by_environment', 'Nastavení MCP řídí proměnná prostředí.', 409);
         }
         $this->hosted->setEnabled($body['enabled']);
-        return Json::ok($response, $this->state());
+        return Json::ok($response, $this->state($request));
     }
 
     public function diagnostics(Request $request, Response $response): Response
@@ -84,12 +85,12 @@ final class HostedMcpSettingsAction
         }
     }
 
-    private function state(): array
+    private function state(Request $request): array
     {
         return [
             'enabled' => $this->hosted->enabled(),
             'node_available' => $this->hosted->nodeAvailable(),
-            'endpoint' => $this->hosted->endpoint(),
+            'endpoint' => $this->resources?->endpoint($request) ?? $this->hosted->endpoint(),
             'managed_by_environment' => $this->hosted->managedByEnvironment(),
             'managed_relay' => $this->hosted->managedRelay(),
         ];

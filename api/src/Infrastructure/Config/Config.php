@@ -149,6 +149,21 @@ final class Config
         return $this->data;
     }
 
+    /** Je některý klíč sekce skutečně přepsán prostředím, podle stejných pravidel jako load()? */
+    public static function hasEnvironmentOverride(string $section): bool
+    {
+        foreach (self::envOverrideMap() as $name => [$path]) {
+            if (($path === $section || str_starts_with($path, $section . '.')) && self::hasEnvValue($name)) return true;
+        }
+        return false;
+    }
+
+    private static function hasEnvValue(string $name): bool
+    {
+        $raw = getenv($name);
+        return $raw !== false && $raw !== '' && !self::isUnresolvedEnvReference($raw);
+    }
+
     /**
      * Vrací absolutní cestu z `MYINVOICE_DATA_DIR`, pokud je ENV nastavená.
      * Když je nastavená, všechny stateful adresáře žijí pod touto cestou.
@@ -354,6 +369,13 @@ final class Config
                 'lock_file'   => '',
                 'retry_after' => 300,
             ],
+            // Ohlášení plánované údržby ze serveru provozovatele
+            // (MaintenanceNoticeService). Ve spravovaném provozu se stahuje vždy,
+            // self-hosted instalace si úlohu zapíná sama. Prázdné `url` = licenční server.
+            'maintenance_notice' => [
+                'enabled' => false,
+                'url'     => '',
+            ],
             // Vlastní domény firem (#11) jsou opt-in a defaultně VYPNUTÉ.
             // Zapnutí mění hostname na tenantovou hranici: jiný host než ten
             // z `app.url` (a než registrovaná doména firmy) dostane 421.
@@ -420,6 +442,8 @@ final class Config
             'MYINVOICE_INSTANCE_PORTAL_URL'    => ['instance.portal_url', 'string'],
             'MYINVOICE_SETUP_PROVISION_TOKEN' => ['setup.provision_token', 'string'],
             'MYINVOICE_MAINTENANCE_LOCK_FILE' => ['maintenance.lock_file', 'string'],
+            'MYINVOICE_MAINTENANCE_NOTICE_ENABLED' => ['maintenance_notice.enabled', 'bool'],
+            'MYINVOICE_MAINTENANCE_NOTICE_URL' => ['maintenance_notice.url', 'string'],
             'MYINVOICE_PEPPER'      => ['app.pepper', 'string'],
             'MYINVOICE_SECRET_KEY'  => ['app.secret_encryption_key', 'string'],
             'MYINVOICE_PAYROLL_HASH_KEY' => ['app.payroll_hash_key', 'string'],
@@ -536,17 +560,14 @@ final class Config
 
         // 3) Per-key ENV overrides
         foreach (self::envOverrideMap() as $envName => [$path, $type]) {
-            $raw = getenv($envName);
             // Nepřítomná i prázdná ENV se ignoruje. Docker Compose při mapovém
             // zápisu `KEY: ${VAR}` dosadí prázdný řetězec i když VAR v .env chybí
             // — bez tohoto guardu by takový prázdný override přebil hodnotu
             // z cfg.php (např. SMTP z bind-mountnutého cfg.docker.php → smtp.port=0).
-            if ($raw === false || $raw === '') {
+            if (!self::hasEnvValue($envName)) {
                 continue;
             }
-            if (self::isUnresolvedEnvReference($raw)) {
-                continue;
-            }
+            $raw = (string) getenv($envName);
             $value = self::castEnv($raw, $type);
             $data  = self::setByPath($data, $path, $value);
         }

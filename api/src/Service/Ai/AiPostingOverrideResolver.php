@@ -56,6 +56,6 @@ final class AiPostingOverrideResolver
 
     private function forbidden(string $code): bool
     {
-        return preg_match('/^(?:311|321|314|324|325|33|34|221|211)/', $code) === 1;
+        return \MyInvoice\Service\Accounting\SettlementAccounts::isSettlement($code);
     }
 }

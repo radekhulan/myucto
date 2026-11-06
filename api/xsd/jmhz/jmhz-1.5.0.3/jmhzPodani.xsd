@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/podani/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:st="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           xmlns:so="http://schemas.cssz.cz/JMHZ/souhrn/2027"
+           xmlns:pvpoj="http://schemas.cssz.cz/JMHZ/PVPOJ/2027"
+           xmlns:form="http://schemas.cssz.cz/JMHZ/form/2027"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/podani/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" schemaLocation="simpleTypes.xsd"/>
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/souhrn/2027" schemaLocation="souhrn.xsd"/>
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/PVPOJ/2027" schemaLocation="PVPOJ.xsd"/>
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/form/2027" schemaLocation="form.xsd"/>
+
+  <xs:annotation>
+    <xs:documentation>
+XML schéma podání na DIS jednotného měsíčního hlášení zaměstnavatele
+<p/>
+Verze 0.5.0,    28.08.2026 - nové jmenné prostory
+                           - úpravy dle datového slovníku ve verzi 1.5.0
+                           - přejmenovány elementy ID: 10321, 10476, 10535
+                           - změna pozice elementu souhrn -> kolektivniSmlouvy
+                           - změna typu elementů: 10328, 10329
+                           - přejmenování elementů formulářů osob na formuláře zaměstnání
+                           a změna jmenného prostoru elementů formularZamestnani a hlavicka
+                           - přidány simpleTypes
+Verze 0.5.1,    08.09.2026 - úpravy dle datového slovníku ve verzi 1.5.0.2 a datových scénářů ve verzi 1.5.0.2
+                           - přejmenovány elementy ID: 10307, 10309
+                           - přidán nepovinný atribut VlastniIdPodani elementu SENDER, atribut pro využití HRIS při zasílání podání přes DS, atrubut není využit k dalšímu zpracování
+Verze 0.5.2,    16.09.2026 - změna typu elementů: 10330, 10331, 10337, 10338, 10340, 10341
+Verze 0.5.3,    25.09.2026 - úpravy dle datového slovníku ve verzi 1.5.0.2 a datových scénářů ve verzi 1.5.0.2
+Verze 1.5,      30.09.2026 - finální verze
+Verze 1.5.0.1,  02.10.2026 - změna povinnost na nepovinný elementu ulice ID 10551
+Verze 1.5.0.2,  05.10.2026 - oprava datových typů elementů: 10329, 10330, 10331, 10337, 10338, 10340, 10341
+Verze 1.5.0.3,  12.10.2026 - změna povinnosti na nepovinný elementů cisloPopisne (10552) a psc (10554)
+    </xs:documentation>
+  </xs:annotation>
+
+  <xs:element name="jmhz" type="jmhzType"/>
+  <xs:complexType name="jmhzType">
+    <xs:sequence>
+      <xs:element name="VENDOR" type="vendorType" minOccurs="0" />
+      <xs:element name="SENDER" type="senderType" minOccurs="0" />
+      <xs:element name="hlavicka" type="podaniHlavickaType"/>
+      <xs:element ref="so:souhrn" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Souhrnná část</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element ref="pvpoj:PVPOJ" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Pojistná část</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="formulareZamestnani" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element ref="form:formularZamestnani" maxOccurs="1500">
+              <xs:annotation>
+                <xs:documentation>Součást - formulář za zaměstnání</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="verze" type="xs:string">
+      <xs:annotation>
+        <xs:documentation>Verze datové věty
+Verze datové věty odpovídající XSD version ve formátu XX.YY.ZZ</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+
+  <xs:complexType name="podaniHlavickaType">
+    <xs:sequence>
+      <xs:element name="idPodani" type="st:guidType">
+        <xs:annotation>
+          <xs:documentation>GUID podání
+(ID podání ve tvaru GUID)
+DS: Meta atributy > Podání (ID 10001)
+Unikátní GUID pro Měsiční hlášení generovaný na straně ZEL.
+Generuje klient je stejné za celé mesícní hlášení</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="typPodani" type="st:typType">
+        <xs:annotation>
+          <xs:documentation>Typ podání
+DS:Meta atributy > Podání (ID 10007)
+R - Řádné
+O - Opravné
+S - Storno
+Předpoklad logické kontroly v L1 - záznamy k METAP_PODANI_ID + METAP_BALIK_PORADI by měly mít shodný Typ podání</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="variabilniSymbol" type="st:variabilniSymbolType">
+        <xs:annotation>
+          <xs:documentation>Variabilní symbol zaměstnavatele
+DS: Zaměstnavatel  / Škola / Vzdělávací zařízení  (ID 10221)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="mesic" type="st:mesicType">
+        <xs:annotation>
+          <xs:documentation>Měsíc
+DS:Meta atributy > Podání (ID 10010)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="rok" type="st:rokType">
+        <xs:annotation>
+          <xs:documentation>Rok
+DS:Meta atributy > Podání (ID 10011)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="datumVyplneni" type="xs:dateTime">
+        <xs:annotation>
+          <xs:documentation>Datum a čas vyplnění podání
+Datum a čas podání zákazníkem
+DS: Meta atributy > Podání (ID 10005)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="balikPoradi" type="st:nezaporneCislo3Type" minOccurs="0"> 
+        <xs:annotation>
+          <xs:documentation>Pořadí balíku dat
+DS: Meta atributy > Podání (ID 10002)
+Pořadí balíku dat pro Měsiční hlášení určuje ZEL.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="balikyPocet" type="st:nezaporneCislo3Type" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Počet balíků dat
+DS: Meta atributy > Podání (ID 10003)
+Počet balíků dat pro Měsiční hlášení určuje ZEL.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="formularePocetVBaliku" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Počet formulářů v balíku dat
+DS: Meta atributy > Podání (ID 10015)
+Počet formulářů (včetně souhrnu a PVPOJ) v balíku dat pro měsíční hlášení - určuje ZEL.</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:nonNegativeInteger">
+            <xs:minInclusive value="1" />
+            <xs:maxInclusive value="1502" />
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="formularePocetCelkem" type="xs:nonNegativeInteger" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Počet formulářů celkem
+DS: Meta atributy > Podání (ID 10488)
+Počet formulářů celkem (včetně souhrnu a PVPOJ) pro měsíční hlášení - určuje ZEL.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="vendorType">
+    <xs:attribute name="productName" type="xs:string"/>
+    <xs:attribute name="productVersion" type="xs:string"/>
+  </xs:complexType>
+  <xs:complexType name="senderType">
+    <xs:attribute name="EmailNotifikace" type="xs:string"/>
+    <xs:attribute name="ISDSreport" type="xs:string"/>
+    <xs:attribute name="VerzeProtokolu" type="xs:string"/>
+    <xs:attribute name="VlastniIdPodani">
+      <xs:simpleType>
+        <xs:annotation>
+          <xs:documentation>Atribut pro využití HRIS při zasílání podání přes DS, atrubut není využit k dalšímu zpracování.</xs:documentation>
+        </xs:annotation>
+        <xs:restriction base="xs:string">
+          <xs:maxLength value="36"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+</xs:schema>

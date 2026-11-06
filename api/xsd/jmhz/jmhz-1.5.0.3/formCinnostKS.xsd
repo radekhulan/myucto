@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/form/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:st="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/form/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" schemaLocation="simpleTypes.xsd"/>
+  <xs:include schemaLocation="formCommonTypes.xsd"/>
+
+  <xs:element name="cinnostKS" type="cinnostKSType"/>
+  <xs:complexType name="cinnostKSType">
+    <xs:annotation>
+      <xs:documentation>DATOVÝ SCÉNÁŘ V MĚSÍČNÍM HLÁŠENÍ PODLE DRUHU ČINNOSTI:
+K,N,O,P,Q,R,S nebo 1 až 9 s příznakem 10502 = pracovní vztah specifické skupiny</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="identifikace" type="identifikaceType"/>
+      <xs:element name="souhrnDataZec" type="souhrnDataZecCinnostKSType" minOccurs="0"/>
+      <xs:element name="pojisteni" type="pojisteniType"/>
+      <xs:element name="vykonavanaPozice" type="vykonavanaPoziceType"/>
+      <xs:element name="prubehZamestnani" type="prubehZamestnaniCinnostKSType"/>
+      <xs:element name="prijem" type="prijemType"/>
+      <xs:element name="mzda" type="mzdaCinnostKSType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="souhrnDataZecCinnostKSType">
+    <xs:sequence>
+      <xs:element name="prijmy" type="prijmyExtType"/>
+      <xs:element name="zalohaNaDan" type="zalohaNaDanType"/>
+      <xs:element name="rocniUhrny" type="rocniUhrnyType" minOccurs="0"/>          
+      <xs:element name="zdravPojZamestnanec" type="zdravPojZamestnanecType" />
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="prubehZamestnaniCinnostKSType">
+    <xs:sequence>
+      <xs:element name="statniZastupce" type="xs:boolean">
+        <xs:annotation>
+          <xs:documentation>Státní zástupce
+DS: Průběh zaměstnání v daném měsíci > Specifikace činnosti (ID 10587)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="odpracovaneDny" type="odpracovaneDnyCinnostKSType" minOccurs="0"/>
+      <xs:element name="odpracovaneHodiny" type="odpracovaneHodinyCinnostKSType" minOccurs="0"/>
+      <xs:element name="neodpracovaneHodiny" type="neodpracovaneHodinyCinnostKSType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="mzdaCinnostKSType">
+    <xs:sequence>
+      <xs:element name="mzdaRozpad">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="tarif" type="st:cislo14Type">
+              <xs:annotation>
+                <xs:documentation>Tarifní mzdy 
+DS: Mzda > Mzda zúčtovaná (ID 10329)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="vydelek" type="vydelekType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="odpracovaneDnyCinnostKSType">
+    <xs:annotation>
+      <xs:documentation>Odpracované dny</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="dnyEvidencniStav" type="st:nezaporneCislo3Type">
+        <xs:annotation>
+          <xs:documentation>Počet dní v evidenčním stavu
+DS: Průběh zaměstnání v daném měsíci > Odpracované dny (ID 10265)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="odpracovaneHodinyCinnostKSType">
+    <xs:sequence>
+      <xs:element name="pocet" type="st:nezaporneCislo8_3Type">
+        <xs:annotation>
+          <xs:documentation>Počet odpracovaných hodin
+DS: Průběh zaměstnání v daném měsíci > Odpracované hodiny (ID 10268)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType> 
+  <xs:complexType name="neodpracovaneHodinyCinnostKSType">
+    <xs:annotation>
+        <xs:documentation>Neodpracované hodiny</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="hodinyNeodpracNahrada" type="st:nezaporneCislo8_3Type" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Počet neodpracovaných hodin s náhradou či nekrácením mzdy
+DS: Průběh zaměstnání v daném měsíci > Neodpracované hodiny (ID 10276)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

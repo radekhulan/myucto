@@ -7,7 +7,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, c
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ hasSupplier: true, currentSupplier: { company_name: 'Testovací firma' } }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: vi.fn() }), RouterLink: { template: '<a><slot /></a>' } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
-vi.mock('@/composables/useFormat', () => ({ formatMoney: String, formatDate: String, formatNumber: String }))
+vi.mock('@/composables/useFormat', () => ({ formatMoney: String, formatMoneyWhole: String, formatDate: String, formatNumber: String }))
 
 import Dashboard from '../Dashboard.vue'
 

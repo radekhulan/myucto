@@ -49,8 +49,9 @@ jednorázové faktury (poradenství, licence).
 5. Zvolte **Měnu** a **Splatnost** (**7 dnů**, **14 dnů**, **Měsíc**
    nebo **Vlastní…**).
 6. Volitelně zadejte **Celkový**, **Roční** a **Měsíční rozpočet**.
-7. Přidejte **Fakturační e-maily** (viz [§ 19.9.3](#1993-fakturacni-e-maily)).
-8. Klikněte na **Vytvořit**.
+7. Volitelně vyberte **Výchozí šablonu účtování výkazů**; ta se předvyplní do nových výkazů této zakázky.
+8. Přidejte **Fakturační e-maily** (viz [§ 19.9.3](#1993-fakturacni-e-maily)).
+9. Klikněte na **Vytvořit**.
 
 ![Nová zakázka](img/07_zakazka_novy.webp)
 
@@ -102,6 +103,11 @@ a odešle. Zakázka se v detailu označí odznakem **Schválení výkazu zákazn
 > Faktura bez výkazu víceprací (například fixní paušál) schvalování přeskočí
 > a jde vystavit normálně.
 
+> [!WARNING]
+> Schválení hlídá ruční vystavení tlačítkem **Vystavit**. Pravidelná fakturace v režimu
+> **Na začátku období** ([§ 17.8.7](17_Pravidelne_fakturace.md#1787-otevreny-koncept-prubezny-vykaz-vicepraci))
+> koncept na konci období vystaví a odešle bez ohledu na schválení výkazu.
+
 Kam jde schvalovací e-mail, viz [§ 19.9.6](#1996-prijemci-schvalovaciho-e-mailu).
 Přehled všech žádostí je v `Prodej → Schvalování` (viz
 [§ 19.9.8](#1998-fronta-schvalovani)).
@@ -144,8 +150,10 @@ nový.
   z detailu zakázky se nabízí jen u aktivní zakázky.
 - **Uzavřené:** zakázka se schová z výchozího filtru. Faktury zůstávají, obrat
   se počítá. Lze obnovit zpět na **Aktivní**.
-- **Smazat** (v nabídce **Další akce** na detailu zakázky) lze jen zakázku bez
-  faktur. Jinak v téže nabídce zvolte **Archivovat** a potvrďte „Archivovat zakázku?“.
+- **Smazat** (v nabídce **Další akce** na detailu zakázky) zakázku odstraní, faktury
+  a výkazy práce zůstanou bez zakázky. Smazání odmítne jen faktura v uzavřeném nebo
+  uzavíraném období či za uzamčeným datem. Chcete-li vazbu zachovat, zvolte v téže
+  nabídce **Archivovat** a potvrďte „Archivovat zakázku?“.
 
 **Jak poznáte, že je hotovo:** v seznamu `Prodej → Zakázky` má zakázka nový stav
 ve sloupci stavu. Uzavřená zakázka z výchozího seznamu zmizí, archivovaná nebo
@@ -163,7 +171,7 @@ Stávající koncepty si zachovají původní sazbu, dokud je ručně neupravít
 | Hláška „Zakázka má N nezaúčtovaných dokladů“ | Nezaúčtovaný doklad se do ekonomiky nezapočítá | Doklady zaúčtujte, pak se součet doplní |
 | Fakturu s výkazem nejde vystavit | Zakázka vyžaduje schválení výkazu zákazníkem | Počkejte na schválení, nebo požadavek na zakázce vypněte |
 | Schvalovací e-mail nedostal klient | Zakázka má fakturační e-maily a ty mají přednost | Viz tabulka v [§ 19.9.6](#1996-prijemci-schvalovaciho-e-mailu) |
-| Smazání zakázky se nepodařilo | Na zakázce jsou faktury | Zakázku archivujte nebo uzavřete |
+| Smazání zakázky se nepodařilo | Zakázka má fakturu v uzavřeném období nebo za uzamčeným datem | Zakázku archivujte nebo uzavřete |
 | Zákazník na sledovacím odkazu nemůže dál | Kód nepřišel nebo e-mail není mezi povolenými | Zkontrolujte e-maily klienta a zakázky, odkaz můžete zneplatnit a poslat nový |
 | Faktura s „Pozastaveno“ v editoru | Zakázka má stav **Pozastavené** | Použijte jinou zakázku nebo stav změňte |
 
@@ -194,6 +202,7 @@ kalendářní měsíc. Zakázka přebíjí klienta i dodavatele.
 | Celkový rozpočet | Volitelný horní limit za celou zakázku (varování v editoru při překročení) |
 | Roční rozpočet | Volitelný roční limit |
 | Měsíční rozpočet | Volitelný měsíční limit |
+| Výchozí šablona účtování výkazů | Šablona předvyplněná do nového výkazu práce; výkaz si uloží vlastní kopii nastavení |
 | Výchozí kategorie tržby | Předvyplní se u nových vydaných faktur zakázky a má přednost před kategorií zákazníka. Po uložení se doplní do faktur zakázky, které kategorii nemají |
 | Stav | **Aktivní** (výchozí) / **Pozastavené** / **Uzavřené** |
 | Poznámka | Interní text |
@@ -271,11 +280,20 @@ Odkaz je veřejný, ale chráněný:
   pokaždé ukáže aktuální stav konceptů faktur s výkazem práce.
 - Při **prvním** otevření z prohlížeče zadá návštěvník svůj e-mail a MyÚčto na
   něj pošle **jednorázový ověřovací kód**. Po zadání se přístup uloží do
-  prohlížeče (cookie) a dalších **180 dní** se kód nevyžaduje.
+  prohlížeče (cookie) a dalších **180 dní** od ověření se kód nevyžaduje.
+  Po uplynutí lhůty si návštěvník vyžádá nový kód.
 - Povolené jsou jen **e-maily klienta** (hlavní e-mail a kontakty), u odkazu na
   zakázku navíc její **fakturační e-maily**. Na stránce se kvůli soukromí
   zobrazují jen **maskované** adresy (například `j****@fialka.cz`).
-- **Přihlášený uživatel** (vy nebo účetní) vidí náhled rovnou, bez kódu.
+- Když adresu odeberete z kontaktů klienta (nebo z fakturačních e-mailů
+  zakázky), uložený přístup z ní hned přestane platit. Ověřit se pak jde jen
+  adresou, která je stále povolená.
+- Stránka na žádost o kód odpovídá vždy stejně, ať zadaná adresa povolená je,
+  nebo není. Kód ale přijde jen na povolenou adresu.
+- **Přihlášený uživatel firmy** (vy nebo účetní) s oprávněním na veřejné
+  odkazy klientů a vydané faktury vidí náhled rovnou, bez kódu. Uživatelé
+  jiných firem, klientské role a role bez těchto oprávnění projdou ověřením
+  kódem jako ostatní návštěvníci.
 
 Obě e-mailové šablony („odkaz na sledování“ a „ověřovací kód“) upravíte
 v `Systém → E-maily a certifikáty`, záložka **E-mail šablony**.

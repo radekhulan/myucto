@@ -98,7 +98,11 @@ final class MyuctoExportReader
                         || !is_int($info['rows'] ?? null) || $info['rows'] < 0 || isset($tables[$table])) {
                         throw new RuntimeException('Neplatná definice tabulky v exportu.');
                     }
-                    $supported = in_array($table, [...MyuctoImportProfile::TABLES, ...MyuctoImportProfile::CONFIG_TABLES, 'supplier', ...array_keys(MyuctoImportProfile::GLOBAL_KEYS)], true);
+                    $supported = in_array($table, [...MyuctoImportProfile::TABLES, ...MyuctoImportProfile::CONFIG_TABLES, ...MyuctoImportProfile::CONTEXT_TABLES, 'supplier', ...array_keys(MyuctoImportProfile::GLOBAL_KEYS)], true);
+                    // Kontextová tabulka se jen čte ke kontrole a v protokolu zůstává mimo rozsah převodu.
+                    if (in_array($table, MyuctoImportProfile::CONTEXT_TABLES, true) && $info['rows'] > 0) {
+                        $skipped[$table] = $info['rows'];
+                    }
                     if (
                         $info['rows'] > 0
                         && (!is_string($info['entry'] ?? null)
@@ -167,6 +171,13 @@ final class MyuctoExportReader
                     }
                 }
             }
+            $context = [];
+            foreach (MyuctoImportProfile::CONTEXT_TABLES as $table) {
+                if (array_key_exists($table, $tables)) {
+                    $context[$table] = $tables[$table];
+                    unset($tables[$table]);
+                }
+            }
             $supplierId = self::id($manifest['supplier']['id'] ?? null);
             if (count($tables['supplier'] ?? []) !== 1 || !isset($tables['supplier'][$supplierId])) {
                 throw new RuntimeException('Export musí obsahovat právě jednu zdrojovou firmu.');
@@ -226,7 +237,7 @@ final class MyuctoExportReader
                 }
                 $tables['bank_statements'][$id][$asset['column']] = $this->content($zip, $asset['entry'], $bytes);
             }
-            return ['manifest' => $manifest, 'tables' => $tables, 'skipped' => $skipped, 'assets' => $assets];
+            return ['manifest' => $manifest, 'tables' => $tables, 'skipped' => $skipped, 'assets' => $assets, 'context' => $context];
         } finally {
             $zip->close();
         }

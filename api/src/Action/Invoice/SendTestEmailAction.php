@@ -68,7 +68,7 @@ final class SendTestEmailAction
         try {
             $pdfPath = $this->renderer->render($id, false, $userId);
         } catch (\Throwable $e) {
-            return Json::error($response, 'pdf_failed', 'Nepodařilo se vygenerovat PDF: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'pdf_failed', 'Nepodařilo se vygenerovat PDF: ' . $e->getMessage(), 500);
         }
 
         $locale = (string) ($invoice['language'] ?? 'cs');

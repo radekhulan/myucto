@@ -336,6 +336,14 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
             'script'  => 'backfill-card-last4.php',
         ],
         [
+            // Rodná čísla dětí a manžela/manželky v daňovém profilu uložená otevřeně
+            // před migrací 2160 (H28). Šifruje PHP, viz TaxFamilyBirthNumberBackfill.
+            'name'    => 'tax-family-birth-numbers',
+            'reason'  => 'otevřeně uložených rodných čísel v daňovém profilu',
+            'count'   => static fn (): int => \MyInvoice\Service\Tax\TaxFamilyBirthNumberBackfill::pendingIn($db),
+            'script'  => 'backfill-tax-family-birth-numbers.php',
+        ],
+        [
             // Originály příchozích dokladů uložené do kořene Dokumentů před zavedením
             // složky „Příchozí doklady / rok / měsíc", viz SubmissionFolderBackfill.
             'name'    => 'submission-folders',
@@ -372,6 +380,22 @@ function runAutoBackfills(\PDO $db, string $binDir, Connection $connection): voi
                 ->get(\MyInvoice\Service\Accounting\Bank\PurchaseRoundingSettlementBackfill::class)
                 ->pending(),
             'script'  => 'purchase-rounding-settlement-backfill.php',
+        ],
+        [
+            // Konečné přijaté faktury propojené se zálohou dřív, než se záloha spárovala
+            // s platbou: odečítají nulovou zálohu (issue #313), viz LinkedAdvanceAmount.
+            'name'    => 'linked-advance-amount',
+            'reason'  => 'konečných faktur s chybějící uhrazenou zálohou',
+            'count'   => static fn (): int => (new \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount($connection))->pending(),
+            'script'  => 'backfill-linked-advance-amount.php',
+        ],
+        [
+            // Úhrady ostatních položek se splátkami přiřazené před migrací 2237 bez vazby
+            // na splátku, viz OtherItemInstallmentBackfill.
+            'name'    => 'other-item-installments',
+            'reason'  => 'úhrad ostatních položek bez splátky',
+            'count'   => static fn (): int => (new \MyInvoice\Service\Accounting\OtherItemInstallmentBackfill($db))->pending(),
+            'script'  => 'backfill-other-item-installments.php',
         ],
     ];
 

@@ -39,11 +39,17 @@ final class BankMessageNormalizer
         return trim((string) preg_replace('/\s+/', ' ', $spaced));
     }
 
+    /** Sestavení transliterátoru je drahé (ICU), převod sám stav nemá: jedna instance na proces. */
+    private static Transliterator|false|null $transliterator = null;
+
     private static function stripDiacritics(string $s): string
     {
         if (class_exists(Transliterator::class)) {
-            $tr = Transliterator::create('Any-Latin; Latin-ASCII; Lower()');
-            if ($tr !== null) {
+            if (self::$transliterator === null) {
+                self::$transliterator = Transliterator::create('Any-Latin; Latin-ASCII; Lower()') ?? false;
+            }
+            $tr = self::$transliterator;
+            if ($tr !== false) {
                 $out = $tr->transliterate($s);
                 if ($out !== false) {
                     return $out;

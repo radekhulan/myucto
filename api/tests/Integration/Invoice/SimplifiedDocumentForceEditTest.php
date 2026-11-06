@@ -245,13 +245,27 @@ final class SimplifiedDocumentForceEditTest extends TestCase
     public function testForceEditUsesPersistedUnitPricePrecisionForSimplifiedLimit(): void
     {
         $id = $this->issued('P7FE-0009', simplified: false);
-        $body = $this->body(1652.893, ['is_simplified' => true]);
+        $body = $this->body(1652.89, ['is_simplified' => true]);
         $body['items'][0]['quantity'] = 5;
 
         $res = $this->forcePut($id, $body);
 
         self::assertSame(200, $res['status'], $res['code'] ?? '');
         self::assertSame(9999.98, (float) $this->row($id)['total_with_vat']);
+    }
+
+    public function testSubCentUnitPriceCountsTowardsSimplifiedLimit(): void
+    {
+        $id = $this->issued('P7FE-0010', simplified: false);
+        $before = (float) $this->row($id)['total_with_vat'];
+        $body = $this->body(1652.893, ['is_simplified' => true]);
+        $body['items'][0]['quantity'] = 5;
+
+        $res = $this->forcePut($id, $body);
+
+        self::assertSame(422, $res['status'], $res['body']);
+        self::assertSame('simplified_document_not_allowed', $res['code']);
+        self::assertSame($before, (float) $this->row($id)['total_with_vat']);
     }
 
     public function testForceEditCannotMakeSimplifiedDocumentReverseCharge(): void

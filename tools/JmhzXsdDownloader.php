@@ -27,7 +27,8 @@ final class JmhzXsdDownloader
      *     sha256:string,
      *     xsd_count:int,
      *     entry_points:list<string>,
-     *     xsd_root:?string
+     *     xsd_root:?string,
+     *     inner_archive:?string
      * }>
      */
     private array $packages;
@@ -113,11 +114,15 @@ final class JmhzXsdDownloader
                     throw new RuntimeException("Cannot create package target {$versionTarget}.");
                 }
 
-                $count = $this->extractXsd(
-                    $archives[$id],
-                    $versionTarget,
-                    $package['xsd_root'],
-                );
+                $count = $package['inner_archive'] === null
+                    ? $this->extractXsd($archives[$id], $versionTarget, $package['xsd_root'])
+                    : $this->extractFromInnerArchive(
+                        $archives[$id],
+                        $package['inner_archive'],
+                        $versionTarget,
+                        $package['xsd_root'],
+                        $stage,
+                    );
                 $this->validatePackageTree($id, $package, $versionTarget, $count);
                 $this->log("Prepared {$id} {$package['version']}: {$count} XSD file(s).");
             }
@@ -141,7 +146,8 @@ final class JmhzXsdDownloader
      *     sha256:string,
      *     xsd_count:int,
      *     entry_points:list<string>,
-     *     xsd_root:?string
+     *     xsd_root:?string,
+     *     inner_archive:?string
      * }>
      */
     private function validateManifest(array $packages): array
@@ -163,8 +169,10 @@ final class JmhzXsdDownloader
             $xsdCount = $package['xsd_count'] ?? null;
             $entryPoints = $package['entry_points'] ?? null;
             $xsdRoot = $package['xsd_root'] ?? null;
+            $innerArchive = $package['inner_archive'] ?? null;
             if (
                 preg_match('/\A[a-z0-9][a-z0-9-]*\z/D', $id) !== 1
+                || ($innerArchive !== null && !$this->isSafeInnerArchivePath($innerArchive))
                 || !is_string($target)
                 || preg_match('/\A[a-z0-9][a-z0-9.-]*\z/D', $target) !== 1
                 || !is_string($version)
@@ -206,6 +214,7 @@ final class JmhzXsdDownloader
                 'xsd_count' => $xsdCount,
                 'entry_points' => array_values($validatedEntryPoints),
                 'xsd_root' => $xsdRoot === null ? null : trim($xsdRoot, '/'),
+                'inner_archive' => $innerArchive,
             ];
         }
 
@@ -408,6 +417,60 @@ final class JmhzXsdDownloader
         }
     }
 
+    /**
+     * Oficiální balíček JMHZ 1.5.0.3 veze schémata ještě jednou zabalená
+     * v archivu uvnitř vnějšího ZIPu (vedle HTML dokumentace). Vnější archiv
+     * je ověřený SHA-256, vnitřní se rozbalí do přípravného adresáře a prochází
+     * stejnými kontrolami cest jako běžný archiv.
+     */
+    private function extractFromInnerArchive(
+        string $archive,
+        string $innerPath,
+        string $target,
+        ?string $xsdRoot,
+        string $stage,
+    ): int {
+        $outer = new ZipArchive();
+        if ($outer->open($archive) !== true) {
+            throw new RuntimeException("Cannot open ZIP archive {$archive}.");
+        }
+        $innerFile = $stage . DIRECTORY_SEPARATOR . '.inner-' . bin2hex(random_bytes(8)) . '.zip';
+
+        try {
+            $index = $outer->locateName($innerPath);
+            $stat = $index === false ? false : $outer->statIndex($index);
+            if ($stat === false || (int) $stat['size'] < 4 || (int) $stat['size'] > self::MAX_ARCHIVE_BYTES) {
+                throw new RuntimeException("Inner archive {$innerPath} is missing or has an unsafe size in {$archive}.");
+            }
+            $contents = $outer->getFromIndex($index);
+            if (!is_string($contents) || !str_starts_with($contents, "PK\x03\x04")) {
+                throw new RuntimeException("Inner archive {$innerPath} is not a ZIP archive.");
+            }
+            if (file_put_contents($innerFile, $contents, LOCK_EX) !== strlen($contents)) {
+                throw new RuntimeException("Cannot write temporary inner archive {$innerFile}.");
+            }
+        } finally {
+            $outer->close();
+        }
+
+        try {
+            return $this->extractXsd($innerFile, $target, $xsdRoot);
+        } finally {
+            if (is_file($innerFile)) {
+                unlink($innerFile);
+            }
+        }
+    }
+
+    private function isSafeInnerArchivePath(mixed $path): bool
+    {
+        if (!is_string($path) || strtolower(pathinfo($path, PATHINFO_EXTENSION)) !== 'zip') {
+            return false;
+        }
+
+        return $this->isSafeRelativeDirectory($path);
+    }
+
     private function extractXsd(string $archive, string $target, ?string $xsdRoot): int
     {
         $zip = new ZipArchive();
@@ -425,6 +488,10 @@ final class JmhzXsdDownloader
                 }
                 $name = str_replace('\\', '/', (string) $stat['name']);
                 if (str_ends_with($name, '/') || strtolower(pathinfo($name, PATHINFO_EXTENSION)) !== 'xsd') {
+                    continue;
+                }
+                // Metadata Finderu (`__MACOSX/` a `._soubor.xsd`) nejsou schémata.
+                if ($this->isMacMetadataEntry($name)) {
                     continue;
                 }
                 $this->assertSafeArchivePath($name);
@@ -496,7 +563,8 @@ final class JmhzXsdDownloader
      *     sha256:string,
      *     xsd_count:int,
      *     entry_points:list<string>,
-     *     xsd_root:?string
+     *     xsd_root:?string,
+     *     inner_archive:?string
      * } $package
      */
     private function validatePackageTree(string $id, array $package, string $target, int $extractedCount): void
@@ -638,6 +706,17 @@ final class JmhzXsdDownloader
         }
 
         return true;
+    }
+
+    private function isMacMetadataEntry(string $name): bool
+    {
+        foreach (explode('/', $name) as $segment) {
+            if ($segment === '__MACOSX' || str_starts_with($segment, '._')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function isXsdDocument(string $contents): bool

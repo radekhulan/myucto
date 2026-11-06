@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Import;
 
 use GuzzleHttp\Client;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Ai\AiRedirectPolicy;
 use MyInvoice\Service\Auth\SecretEncryption;
 use Psr\Log\LoggerInterface;
 
@@ -24,6 +25,7 @@ final class AnthropicClient implements LlmGatewayInterface
 {
     private const API_URL = 'https://api.anthropic.com/v1/messages';
     private const API_VERSION = '2023-06-01';
+    public const WORKSPACE_ID_MAX = 128;
     private const TIMEOUT = 300; // PDF extraction trvá 10-30s typicky, doklad s desítkami položek i přes 2 minuty
     // Stejný strop jako OpenAI/Gemini/Azure. S 4096 se faktura s ~40+ položkami usekla uprostřed JSON.
     private const INVOICE_MAX_TOKENS = 16384;
@@ -49,16 +51,51 @@ final class AnthropicClient implements LlmGatewayInterface
         $this->http = $http ?? new Client([
             'timeout' => self::TIMEOUT,
             'http_errors' => false,
+            'allow_redirects' => AiRedirectPolicy::options(),
         ]);
     }
 
     /**
-     * @return array{api_key:string, default_model:string}|null
+     * Hlavičky požadavku na Anthropic API — jediné místo pro všechny klienty, které
+     * volají api.anthropic.com. ID workspace jde jen u klíče bez přiřazeného
+     * workspace; bez něj zůstávají hlavičky beze změny.
+     *
+     * @return array<string,string>
+     */
+    public static function requestHeaders(string $apiKey, ?string $workspaceId = null): array
+    {
+        $headers = [
+            'x-api-key'         => $apiKey,
+            'anthropic-version' => self::API_VERSION,
+            'content-type'      => 'application/json',
+        ];
+        if ($workspaceId !== null && $workspaceId !== '') {
+            $headers['anthropic-workspace-id'] = $workspaceId;
+        }
+        return $headers;
+    }
+
+    /**
+     * Ověří ID workspace po oříznutí mezer. Prázdné je platné a znamená „bez workspace".
+     * Povolené jsou jen znaky, které bezpečně projdou hlavičkou HTTP.
+     *
+     * @return string|null chybová hláška, nebo null při platné hodnotě
+     */
+    public static function workspaceIdError(string $workspaceId): ?string
+    {
+        if ($workspaceId === '' || preg_match('/^[A-Za-z0-9_-]{1,' . self::WORKSPACE_ID_MAX . '}$/', $workspaceId) === 1) {
+            return null;
+        }
+        return 'ID workspace smí obsahovat jen písmena, číslice, podtržítko a pomlčku (nejvýš ' . self::WORKSPACE_ID_MAX . ' znaků).';
+    }
+
+    /**
+     * @return array{api_key:string, default_model:string, workspace_id:?string}|null
      */
     public function getCredentials(int $supplierId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT anthropic_api_key_enc, anthropic_default_model FROM supplier WHERE id = ?'
+            'SELECT anthropic_api_key_enc, anthropic_default_model, anthropic_workspace_id FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -72,17 +109,36 @@ final class AnthropicClient implements LlmGatewayInterface
         return [
             'api_key'       => $key,
             'default_model' => (string) ($row['anthropic_default_model'] ?? LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL),
+            'workspace_id'  => ($row['anthropic_workspace_id'] ?? '') !== '' ? (string) $row['anthropic_workspace_id'] : null,
         ];
     }
 
-    public function setCredentials(int $supplierId, string $apiKey, ?string $defaultModel = null): void
+    /**
+     * @param string|null $workspaceId null = ponechat uložené ID workspace, '' = smazat
+     */
+    public function setCredentials(int $supplierId, string $apiKey, ?string $defaultModel = null, ?string $workspaceId = null): void
     {
         $enc = $apiKey === '' ? null : $this->crypto->encrypt($apiKey);
         $model = $defaultModel ?: LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL;
+        if ($workspaceId === null) {
+            $this->db->pdo()->prepare(
+                'UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_default_model = ?
+                  WHERE id = ?'
+            )->execute([$enc, $model, $supplierId]);
+            return;
+        }
         $this->db->pdo()->prepare(
-            'UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_default_model = ?
+            'UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_default_model = ?, anthropic_workspace_id = ?
               WHERE id = ?'
-        )->execute([$enc, $model, $supplierId]);
+        )->execute([$enc, $model, $workspaceId !== '' ? $workspaceId : null, $supplierId]);
+    }
+
+    /** @param string $workspaceId '' = smazat */
+    public function updateWorkspaceId(int $supplierId, string $workspaceId): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE supplier SET anthropic_workspace_id = ? WHERE id = ?'
+        )->execute([$workspaceId !== '' ? $workspaceId : null, $supplierId]);
     }
 
     public function updateDefaultModel(int $supplierId, string $defaultModel): void
@@ -106,7 +162,7 @@ final class AnthropicClient implements LlmGatewayInterface
                 'model' => $creds['default_model'],
                 'max_tokens' => 10,
                 'messages' => [['role' => 'user', 'content' => 'Reply OK']],
-            ], $creds['api_key']);
+            ], $creds);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -641,7 +697,7 @@ EOT . "\n\n" . InvoiceExtractionPrompt::accrualFieldRules() . "\n\n" . InvoiceEx
                         ],
                     ],
                 ]],
-            ], $creds['api_key'], $supplierId);
+            ], $creds, $supplierId);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -744,7 +800,7 @@ EOT;
                         ['type' => 'text', 'text' => 'Vytáhni jednotlivé transakce tankování z detailního výpisu podle JSON schema. Odpověz JEN JSON.'],
                     ],
                 ]],
-            ], $creds['api_key'], $supplierId);
+            ], $creds, $supplierId);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -837,7 +893,7 @@ EOT;
                         ],
                     ],
                 ]],
-            ], $creds['api_key'], $supplierId);
+            ], $creds, $supplierId);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -931,7 +987,7 @@ EOT;
                         ],
                     ],
                 ]],
-            ], $creds['api_key'], $supplierId);
+            ], $creds, $supplierId);
             if ($code !== 200) {
                 $msg = is_array($body) ? ($body['error']['message'] ?? 'HTTP ' . $code) : 'HTTP ' . $code;
                 return ['ok' => false, 'error' => $msg];
@@ -1038,13 +1094,10 @@ EOT;
             : LlmProviderCapabilities::EFFORT_DEFAULT;
     }
 
-    private function authHeaders(string $apiKey): array
+    /** @param array{api_key:string, workspace_id?:?string} $creds */
+    private function authHeaders(array $creds): array
     {
-        return [
-            'x-api-key'         => $apiKey,
-            'anthropic-version' => self::API_VERSION,
-            'content-type'      => 'application/json',
-        ];
+        return self::requestHeaders($creds['api_key'], $creds['workspace_id'] ?? null);
     }
 
     /**
@@ -1055,9 +1108,10 @@ EOT;
      *      max `MAX_RETRIES`-krát s exponenciálním fallbackem.
      *
      * @param array<string,mixed> $payload
+     * @param array{api_key:string, workspace_id?:?string} $creds
      * @return array{code:int, body:array<string,mixed>|null}
      */
-    private function postWithRetry(array $payload, string $apiKey, ?int $supplierId = null): array
+    private function postWithRetry(array $payload, array $creds, ?int $supplierId = null): array
     {
         $model = (string) ($payload['model'] ?? '');
         if ($supplierId !== null) {
@@ -1073,7 +1127,7 @@ EOT;
         $attempt = 0;
         while (true) {
             $resp = $this->http->post(self::API_URL, [
-                'headers' => $this->authHeaders($apiKey),
+                'headers' => $this->authHeaders($creds),
                 'json'    => $payload,
             ]);
             $code = $resp->getStatusCode();

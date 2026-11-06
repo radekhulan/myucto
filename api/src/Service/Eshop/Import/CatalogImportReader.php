@@ -15,21 +15,21 @@ final class CatalogImportReader
     public const MAX_COLUMNS = 200;
     private const MAX_CELL_BYTES = 100_000;
 
-    public function rows(string $path, string $format, array $options = [], int $afterRow = 0): \Generator
+    public function rows(string $path, string $format, array $options = [], int $afterRow = 0, int $maxRows = self::MAX_ROWS): \Generator
     {
-        if ($afterRow < 0 || $afterRow > self::MAX_ROWS + 1 || !is_file($path) || !is_readable($path) || filesize($path) > self::MAX_BYTES) {
+        if ($afterRow < 0 || $afterRow > $maxRows + 1 || !is_file($path) || !is_readable($path) || filesize($path) > self::MAX_BYTES) {
             throw new \InvalidArgumentException('import_file_invalid');
         }
         if ($format === 'csv') {
-            yield from $this->csv($path, $options, $afterRow);
+            yield from $this->csv($path, $options, $afterRow, $maxRows);
         } elseif ($format === 'xlsx') {
-            yield from $this->xlsx($path, $options, $afterRow);
+            yield from $this->xlsx($path, $options, $afterRow, $maxRows);
         } else {
             throw new \InvalidArgumentException('import_format_invalid');
         }
     }
 
-    private function csv(string $path, array $options, int $afterRow): \Generator
+    private function csv(string $path, array $options, int $afterRow, int $maxRows): \Generator
     {
         $encoding = $options['encoding'] ?? 'UTF-8';
         $delimiter = $options['delimiter'] ?? ';';
@@ -50,7 +50,7 @@ final class CatalogImportReader
             }
             $line = 0;
             while (($values = fgetcsv($stream, null, $delimiter, '"', '')) !== false) {
-                if (++$line > self::MAX_ROWS + 1) {
+                if (++$line > $maxRows + 1) {
                     throw new \InvalidArgumentException('import_too_many_rows');
                 }
                 if ($line <= $afterRow) {
@@ -74,7 +74,7 @@ final class CatalogImportReader
         }
     }
 
-    private function xlsx(string $path, array $options, int $afterRow): \Generator
+    private function xlsx(string $path, array $options, int $afterRow, int $maxRows): \Generator
     {
         $sheetIndex = $options['sheet'] ?? 0;
         if (!is_int($sheetIndex) || $sheetIndex < 0) {
@@ -105,7 +105,7 @@ final class CatalogImportReader
             throw new \InvalidArgumentException('import_sheet_invalid');
         }
         $sheet = $info[$sheetIndex];
-        if ($sheet['totalRows'] > self::MAX_ROWS + 1 || $sheet['totalColumns'] > self::MAX_COLUMNS) {
+        if ($sheet['totalRows'] > $maxRows + 1 || $sheet['totalColumns'] > self::MAX_COLUMNS) {
             throw new \InvalidArgumentException('import_sheet_too_large');
         }
         $reader->setReadDataOnly(true);

@@ -13,6 +13,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
+use MyInvoice\Service\Supplier\SupplierBrandingSettings;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -22,20 +23,12 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class ClientBrandingSettingsAction
 {
-    /** @var list<string> */
-    private const FIELDS = [
-        'email_branding_enabled',
-        'email_accent_color',
-        'pdf_logo_show_name',
-        'invoice_pdf_monochrome',
-        'branding_profiles_enabled',
-    ];
-
     public function __construct(
         private readonly Connection $db,
         private readonly InvoicePdfRenderer $pdf,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly SupplierBrandingSettings $brandingSettings,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -58,7 +51,7 @@ final class ClientBrandingSettingsAction
         }
 
         $body = (array) ($request->getParsedBody() ?? []);
-        $unknown = array_values(array_diff(array_keys($body), self::FIELDS));
+        $unknown = array_values(array_diff(array_keys($body), SupplierBrandingSettings::FIELDS));
         if ($unknown !== []) {
             return Json::error(
                 $response,
@@ -72,36 +65,22 @@ final class ClientBrandingSettingsAction
             return $this->respond($response, $supplierId);
         }
 
-        if (array_key_exists('email_accent_color', $body)) {
-            $color = strtoupper(trim((string) $body['email_accent_color']));
-            if (preg_match('/^#[0-9A-F]{6}$/', $color) !== 1) {
-                return Json::error($response, 'validation_failed', 'Barva musí mít formát #RRGGBB.', 400);
-            }
-            $body['email_accent_color'] = $color;
-        }
-        foreach (array_diff(self::FIELDS, ['email_accent_color']) as $field) {
-            if (!array_key_exists($field, $body)) continue;
-            if (!is_bool($body[$field]) && !in_array($body[$field], [0, 1], true)) {
-                return Json::error(
-                    $response,
-                    'validation_failed',
-                    'Přepínače musí mít logickou hodnotu.',
-                    400,
-                    ['fields' => [$field]],
-                );
-            }
+        try {
+            $body = SupplierBrandingSettings::validate($body);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
 
         $sets = [];
         $params = [];
-        foreach (self::FIELDS as $field) {
+        foreach (SupplierBrandingSettings::FIELDS as $field) {
             if (!array_key_exists($field, $body)) continue;
             $sets[] = $field . ' = ?';
-            $params[] = $field === 'email_accent_color' ? $body[$field] : ((bool) $body[$field] ? 1 : 0);
+            $params[] = $body[$field];
         }
         $params[] = $supplierId;
         $stmt = $this->db->pdo()->prepare('UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?');
-        $stmt->execute($params);
+        $this->brandingSettings->persist($supplierId, $body, fn (): bool => $stmt->execute($params));
         if ($stmt->rowCount() === 0 && !$this->supplierExists($supplierId)) {
             return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         }
@@ -118,8 +97,7 @@ final class ClientBrandingSettingsAction
         }
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, company_name, display_name, email, phone, web, tagline,
-                    email_branding_enabled, email_accent_color, pdf_logo_show_name,
-                    invoice_pdf_monochrome, branding_profiles_enabled, default_branding_profile_id, logo_path
+                    ' . implode(', ', SupplierBrandingSettings::FIELDS) . ', default_branding_profile_id, logo_path
                FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
@@ -129,14 +107,10 @@ final class ClientBrandingSettingsAction
         }
 
         $row['id'] = (int) $row['id'];
-        $row['email_branding_enabled'] = (bool) $row['email_branding_enabled'];
-        $row['pdf_logo_show_name'] = (bool) $row['pdf_logo_show_name'];
-        $row['invoice_pdf_monochrome'] = (bool) $row['invoice_pdf_monochrome'];
-        $row['branding_profiles_enabled'] = (bool) $row['branding_profiles_enabled'];
+        $row = SupplierBrandingSettings::normalizeResponse($row);
         $row['default_branding_profile_id'] = $row['default_branding_profile_id'] !== null
             ? (int) $row['default_branding_profile_id']
             : null;
-        $row['email_accent_color'] = (string) ($row['email_accent_color'] ?: '#3B2D83');
         $row['has_email_logo'] = SafeLogoPath::resolve($row['logo_path'] ?? null, $supplierId) !== null;
 
         return Json::ok($response, $row);

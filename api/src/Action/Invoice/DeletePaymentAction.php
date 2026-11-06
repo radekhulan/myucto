@@ -11,6 +11,8 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Eet\EetHistoryExistsException;
+use MyInvoice\Service\Eet\EetHistoryGuard;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -57,6 +59,8 @@ final class DeletePaymentAction
 
         try {
             $result = $this->payments->deletePayment($paymentId);
+        } catch (EetHistoryExistsException $e) {
+            return Json::error($response, EetHistoryGuard::ERROR_CODE, $e->getMessage(), 409);
         } catch (\RuntimeException $e) {
             return Json::error($response, 'payment_locked', $e->getMessage(), 409);
         }

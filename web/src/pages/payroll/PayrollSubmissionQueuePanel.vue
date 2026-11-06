@@ -38,6 +38,7 @@ import {
   PAYROLL_QUEUE_BATCH_SIZE,
   payrollApi,
   type PayrollRegzelEnvironment,
+  type PayrollSubmissionDispatchMode,
   type PayrollSubmissionDetail,
   type PayrollSubmissionQueueBatchItemResult,
   type PayrollSubmissionQueueItem,
@@ -49,6 +50,10 @@ import { formatDate, formatDateTime, formatPeriod, formatUtcDateTime } from '@/c
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import PayrollPossiblyDeliveredNotice from '@/components/payroll/PayrollPossiblyDeliveredNotice.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import PayrollDispatchModeSelect from '@/components/payroll/PayrollDispatchModeSelect.vue'
+import IsdsBatchSendMethods from '@/components/submission/IsdsBatchSendMethods.vue'
+import { dataBoxApi, type MobileKeyBatchItemResult } from '@/api/dataBox'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 
 const props = defineProps<{ environment: PayrollRegzelEnvironment }>()
 const emit = defineEmits<{ 'update:environment': [PayrollRegzelEnvironment] }>()
@@ -105,6 +110,51 @@ const batchResult = ref<{
 const sweepResult = ref<string | null>(null)
 const sweeping = ref(false)
 
+/*
+ * Volba kanálu u řádku, kde jsou připravené oba (JMHZ: VREP i datovka).
+ * Bez volby platí `default_mode` ze serveru.
+ */
+const modeChoice = ref<Record<number, PayrollSubmissionDispatchMode>>({})
+
+function modeOf(item: PayrollSubmissionQueueItem): PayrollSubmissionDispatchMode {
+  return modeChoice.value[item.submission_id] ?? item.dispatch.default_mode
+}
+
+function setMode(item: PayrollSubmissionQueueItem, mode: PayrollSubmissionDispatchMode | null): void {
+  if (mode === null) return
+  modeChoice.value = { ...modeChoice.value, [item.submission_id]: mode }
+}
+
+/*
+ * Zprávy zařazené do odchozí fronty datové schránky, které ještě čekají na
+ * přihlášení. Zařazení samo nic neodešle — bez tohohle panelu by účetní
+ * musela hledat zprávu v Datové schránce.
+ */
+const isdsPending = ref<{
+  ids: number[]
+  transport: { automatic: boolean; channel: string; reason: string | null } | null
+} | null>(null)
+const isdsSentSummary = ref('')
+
+function continueIsds(item: PayrollSubmissionQueueItem): void {
+  if (!item.outbox) return
+  isdsSentSummary.value = ''
+  isdsPending.value = { ids: [item.outbox.id], transport: null }
+}
+
+function canContinueIsds(item: PayrollSubmissionQueueItem): boolean {
+  return item.outbox !== null && item.outbox.dispatch_state === 'ready'
+}
+
+async function onIsdsSent(results: MobileKeyBatchItemResult[]): Promise<void> {
+  isdsPending.value = null
+  isdsSentSummary.value = t('databox.send.batch.sentSummary', {
+    dispatched: results.filter(result => result.dispatched).length,
+    total: results.length,
+  })
+  await load()
+}
+
 const page = computed(() => Math.floor(offset.value / PAGE_SIZE) + 1)
 const dispatchable = computed(() => items.value.filter(item => item.dispatch.dispatchable))
 const selectedCount = computed(() => selected.value.size)
@@ -117,9 +167,15 @@ const environmentModel = computed({
   set: (value: PayrollRegzelEnvironment) => emit('update:environment', value),
 })
 
-async function load(): Promise<void> {
-  loading.value = true
-  error.value = ''
+/**
+ * `silent` = obnova na pozadí po změně v jiném okně: seznam zůstane vidět
+ * a chyba se jen předá dál, ať se obnova zkusí při dalším návratu.
+ */
+async function load(silent = false): Promise<void> {
+  if (!silent) {
+    loading.value = true
+    error.value = ''
+  }
   try {
     const response = await payrollApi.submissionQueue(props.environment, {
       limit: PAGE_SIZE,
@@ -141,11 +197,12 @@ async function load(): Promise<void> {
       [...selected.value].filter(id => stillSelectable.has(id)),
     )
   } catch (exception) {
+    if (silent) throw exception
     error.value = apiErrorMessage(exception, t('payroll.submissions.queue.load_failed'))
     items.value = []
     total.value = 0
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -310,27 +367,42 @@ async function sendMany(ids: number[]): Promise<void> {
   )
   if (!confirmed || batch.value !== null) return
   batchResult.value = null
+  isdsPending.value = null
+  isdsSentSummary.value = ''
   batch.value = { done: 0, totalCount: ids.length }
   let sent = 0
   let failed = 0
   const failures: PayrollSubmissionQueueBatchItemResult[] = []
+  const outboxIds: number[] = []
+  let transport: { automatic: boolean; channel: string; reason: string | null } | null = null
+  const byId = new Map(items.value.map(item => [item.submission_id, item]))
 
   try {
     for (const part of chunk(ids, PAYROLL_QUEUE_BATCH_SIZE)) {
       try {
         const response = await payrollApi.dispatchSubmissionBatch(
           props.environment,
-          part.map(id => ({
-            submission_id: id,
-            // Klíč je vázaný na JEDNU položku a jedno kliknutí. Kdyby ho
-            // sdílela celá dávka, druhá položka by se transportu jevila jako
-            // opakování první a tiše by se neodeslala.
-            idempotency_key: crypto.randomUUID(),
-          })),
+          part.map(id => {
+            const item = byId.get(id)
+            return {
+              submission_id: id,
+              // Klíč je vázaný na JEDNU položku a jedno kliknutí. Kdyby ho
+              // sdílela celá dávka, druhá položka by se transportu jevila jako
+              // opakování první a tiše by se neodeslala.
+              idempotency_key: crypto.randomUUID(),
+              ...(item ? { mode: modeOf(item) } : {}),
+            }
+          }),
         )
         sent += response.summary.sent
         failed += response.summary.failed
         failures.push(...response.results.filter(result => !result.ok))
+        for (const result of response.results) {
+          if (result.ok && result.outbox) {
+            outboxIds.push(result.outbox.id)
+            transport = result.outbox.transport
+          }
+        }
       } catch (exception) {
         // Spadlá PORCE nesmí zastavit zbytek dávky. Její položky se počítají
         // jako neúspěšné a zůstanou ve frontě k dalšímu pokusu.
@@ -352,6 +424,8 @@ async function sendMany(ids: number[]): Promise<void> {
     batch.value = null
     batchResult.value = { sent, failed, failures }
     selected.value = new Set()
+    modeChoice.value = {}
+    if (outboxIds.length > 0) isdsPending.value = { ids: outboxIds, transport }
     // Fronta se načte znovu vždy, i po chybě: neúspěšný pokus se zapíše do
     // evidence a mění to, co u řádku stojí.
     await load()
@@ -416,6 +490,10 @@ watch([agendaFilter, sort], () => {
 })
 
 void load()
+// Podání připravené nebo odeslané v jiném okně (měsíční přehled, datová
+// schránka) mění frontu; dávka a zahazování se nepřepisují pod rukama.
+useWindowRefresh(() => load(true), () => !loading.value && batch.value === null
+  && abandoning.value === null && !sweeping.value && isdsPending.value === null)
 </script>
 
 <template>
@@ -452,7 +530,7 @@ void load()
               : t('payroll.submissions.queue.sweep') }}
           </span>
         </button>
-        <button type="button" :class="btnOutlineSm('neutral')" :disabled="loading" @click="load">
+        <button type="button" :class="btnOutlineSm('neutral')" :disabled="loading" @click="load()">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
             <path :d="ICONS.cycle" />
           </svg>
@@ -525,6 +603,31 @@ void load()
           - {{ failure.message }}
         </li>
       </ul>
+    </div>
+
+    <div
+      v-if="isdsPending && !batch"
+      class="rounded-lg border border-primary-200 bg-primary-50/40 p-3"
+      data-test="queue-isds-pending"
+    >
+      <h3 class="mb-2 text-sm font-semibold text-neutral-900">
+        {{ t('payroll.submissions.queue.isds_pending_title') }}
+      </h3>
+      <IsdsBatchSendMethods
+        :key="isdsPending.ids.join(',')"
+        :outbox-ids="isdsPending.ids"
+        :environment="environment"
+        :transport="isdsPending.transport"
+        :gateway-start="dataBoxApi.gatewayStartPayroll"
+        @sent="onIsdsSent"
+      />
+    </div>
+    <div
+      v-if="isdsSentSummary"
+      class="rounded-lg border border-success-500/30 bg-success-50 p-3 text-sm text-success-800"
+      data-test="queue-isds-sent"
+    >
+      {{ isdsSentSummary }}
     </div>
 
     <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -728,7 +831,29 @@ void load()
               </td>
               <td class="px-3 py-2 align-top text-right">
                 <div class="flex flex-wrap items-center justify-end gap-2">
+                  <PayrollDispatchModeSelect
+                    v-if="item.dispatch.dispatchable"
+                    :model-value="modeOf(item)"
+                    :modes="item.dispatch.modes"
+                    :primary-mode="item.dispatch.mode"
+                    :disabled="batch !== null"
+                    @update:model-value="mode => setMode(item, mode)"
+                  />
                   <button
+                    v-if="canContinueIsds(item)"
+                    type="button"
+                    :class="btnFilledSm('primary')"
+                    :disabled="batch !== null"
+                    data-test="queue-isds-continue"
+                    @click="continueIsds(item)"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                      <path :d="ICONS.send" />
+                    </svg>
+                    <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.isds_continue') }}</span>
+                  </button>
+                  <button
+                    v-else
                     type="button"
                     :class="btnFilledSm('primary')"
                     :disabled="!item.dispatch.dispatchable || batch !== null"
@@ -886,7 +1011,29 @@ void load()
             import-mode="link"
             @confirmed="load()"
           />
+          <PayrollDispatchModeSelect
+            v-if="item.dispatch.dispatchable"
+            class="mt-2"
+            :model-value="modeOf(item)"
+            :modes="item.dispatch.modes"
+            :primary-mode="item.dispatch.mode"
+            :disabled="batch !== null"
+            @update:model-value="mode => setMode(item, mode)"
+          />
           <button
+            v-if="canContinueIsds(item)"
+            type="button"
+            :class="[btnFilledSm('primary'), 'mt-3 w-full justify-center']"
+            :disabled="batch !== null"
+            @click="continueIsds(item)"
+          >
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.send" />
+            </svg>
+            <span class="whitespace-nowrap">{{ t('payroll.submissions.queue.isds_continue') }}</span>
+          </button>
+          <button
+            v-else
             type="button"
             :class="[btnFilledSm('primary'), 'mt-3 w-full justify-center']"
             :disabled="!item.dispatch.dispatchable || batch !== null"

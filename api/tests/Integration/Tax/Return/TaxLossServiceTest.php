@@ -232,4 +232,28 @@ final class TaxLossServiceTest extends TestCase
         self::assertSame(100000.0, $byYear[2023]['applied'], 'Nejstarší ztráta se spotřebuje celá.');
         self::assertSame(150000.0, $byYear[2026]['applied'], 'Zbytek doplní zpětné uplatnění.');
     }
+
+    public function testPartialReconcileFailurePreservesExistingApplicationInsideCallerTransaction(): void
+    {
+        $this->service->reconcileFinalize($this->supplierId, 'fo', 2022, 100000, 0, null);
+        $this->service->reconcileFinalize($this->supplierId, 'fo', 2023, 100000, 30000, null);
+        $this->service->reconcileFinalize($this->supplierId, 'fo', 2024, 0, 160000, null);
+        $q = $this->db->pdo()->prepare('SELECT * FROM tax_loss_applications WHERE supplier_id=? ORDER BY id');
+        $q->execute([$this->supplierId]); $before = $q->fetchAll(\PDO::FETCH_ASSOC);
+        try { $this->service->reconcileFinalize($this->supplierId, 'fo', 2023, 50000, 0, null); self::fail('Used origin loss cannot be reduced.'); }
+        catch (\DomainException) {}
+        $q->execute([$this->supplierId]); self::assertSame($before, $q->fetchAll(\PDO::FETCH_ASSOC));
+        self::assertTrue($this->db->pdo()->inTransaction());
+    }
+
+    public function testExactFoCalendarAllocationNeedsNoDoubleEntryAccountingPeriods(): void
+    {
+        $this->service->registerOpeningLoss($this->supplierId, 'fo', 2024, 100000);
+        $return = (new \MyInvoice\Repository\TaxReturnRepository($this->db))->create($this->supplierId, 2025, 'fo', [], null);
+        $plan = $this->service->allocationPlan($this->supplierId, 'fo', 2025, 60000, null, (int) $return['id']);
+        $this->service->reconcileExact($plan, 0);
+        self::assertSame('6000000', $plan['allocated_cents']);
+        $this->service->assertPersistedPlan($plan);
+        self::assertSame(40000.0, $this->service->card($this->supplierId, 2026, 'fo')['available_total']);
+    }
 }

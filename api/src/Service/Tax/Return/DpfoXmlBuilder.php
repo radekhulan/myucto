@@ -157,6 +157,7 @@ final class DpfoXmlBuilder
         if ($spouse !== null) {
             $vetaD->setAttribute('manz_jmeno', (string) ($spouse['first_name'] ?? ''));
             $vetaD->setAttribute('manz_prijmeni', (string) ($spouse['last_name'] ?? ''));
+            self::assertIdentifierRevealed($spouse);
             if (!empty($spouse['birth_number'])) {
                 $vetaD->setAttribute('manz_r_cislo', preg_replace('/\D/', '', (string) $spouse['birth_number']) ?? '');
             } elseif (!empty($spouse['birth_date'])) {
@@ -240,6 +241,7 @@ final class DpfoXmlBuilder
             $vetaA = $dom->createElement('VetaA');
             $vetaA->setAttribute('vyzdite_jmeno', (string) ($child['first_name'] ?? ''));
             $vetaA->setAttribute('vyzdite_prijmeni', (string) ($child['last_name'] ?? ''));
+            self::assertIdentifierRevealed($child);
             if (!empty($child['birth_number'])) {
                 $vetaA->setAttribute('vyzdite_r_cislo', preg_replace('/\D/', '', (string) $child['birth_number']) ?? '');
             } elseif (!empty($child['birth_date'])) {
@@ -889,6 +891,21 @@ final class DpfoXmlBuilder
     private function int(mixed $v): string
     {
         return (string) (int) round((float) $v);
+    }
+
+    /**
+     * Profil nese rodné číslo zapečetěné (H28) a do výpočtu se dostane jen maska.
+     * Osoba s uloženým číslem, kterému volající před sestavením neodhalil otevřenou
+     * hodnotu ({@see \MyInvoice\Service\Tax\TaxFamilyIdentifierService::withFilingIdentifiers()}),
+     * by v XML tiše skončila s datem narození nebo úplně bez identity.
+     *
+     * @param array<string,mixed> $person
+     */
+    private static function assertIdentifierRevealed(array $person): void
+    {
+        if (!empty($person['has_birth_number']) && trim((string) ($person['birth_number'] ?? '')) === '') {
+            throw new \LogicException('Rodné číslo z daňového profilu nebylo pro sestavení XML odhaleno.');
+        }
     }
 
     /** ISO YYYY-MM-DD → D.M.YYYY (EPO dateInMultiFormat, shodně se zdobd_od/do); '' když neplatné. */

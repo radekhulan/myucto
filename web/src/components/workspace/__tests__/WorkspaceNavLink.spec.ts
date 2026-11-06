@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter, type Router } from 'vue-router'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
@@ -18,6 +18,7 @@ async function mountLink() {
     routes: [
       { path: '/', component: { template: '<div />' } },
       { path: '/invoices', component: { template: '<div />' } },
+      { path: '/instance-admin', meta: { instanceAdminOnly: true }, component: { template: '<div />' } },
     ],
   })
   await router.push('/')
@@ -40,7 +41,7 @@ async function mountLink() {
     slots: { default: 'Faktury' },
     global: { plugins: [pinia, router] },
   })
-  return { wrapper, navigate }
+  return { wrapper, navigate, router }
 }
 
 describe('WorkspaceNavLink', () => {
@@ -67,6 +68,16 @@ describe('WorkspaceNavLink', () => {
 
     expect(navigate).toHaveBeenCalledWith('/invoices')
     expect(wrapper.attributes('href')).toBe('/invoices')
+  })
+
+  it('Správu instance otevře hlavním routerem, router panelu ji nezná', async () => {
+    const { wrapper, navigate, router } = await mountLink()
+    await wrapper.setProps({ to: '/instance-admin' })
+    await wrapper.trigger('click', { button: 0 })
+    await flushPromises()
+
+    expect(navigate).not.toHaveBeenCalled()
+    expect(router.currentRoute.value.path).toBe('/instance-admin')
   })
 
   it('Ctrl+klik ponechá na obalujícím panelu, který může odkaz otevřít napravo', async () => {

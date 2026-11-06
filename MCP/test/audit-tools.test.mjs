@@ -22,6 +22,7 @@ const tool = (name) => {
 };
 
 const routes = [
+  ['accounting_fx_preview', { period_id: 5 }, '/accounting/periods/5/closing/fx-preview'],
   ['cash_flow_statement', { period_id: 5 }, '/accounting/reports/section18-statements'],
   ['balance_inventory', { period_id: 5 }, '/accounting/reports/balance-inventory'],
   ['document_completeness', {}, '/accounting/reports/document-completeness'],

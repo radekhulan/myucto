@@ -29,6 +29,9 @@ namespace MyInvoice\Service\Payroll\Ruleset;
  *        a ELDP podle starých pravidel, která tenhle modul neumí a nebude
  *        předstírat, že umí. Pokus o JMHZ za období roku 2025 skončí fail-closed
  *        na chybějícím rulesetu, což je správná odpověď.
+ * 2027 — pět domén mzdového výpočtu ({@see CzechPayrollRulesets2027}).
+ *        Cestovní náhrady, nezabavitelné částky a lhůty, číselníky a podání
+ *        JMHZ pro rok 2027 vyhlášené nebo doložené nejsou a sada je nemá.
  */
 final class CzechPayrollRulesets
 {
@@ -37,6 +40,7 @@ final class CzechPayrollRulesets
         return new PayrollRulesetProvider([
             ...CzechPayrollRulesets2025::provider()->versions(),
             ...CzechPayrollRulesets2026::provider()->versions(),
+            ...CzechPayrollRulesets2027::provider()->versions(),
         ]);
     }
 }

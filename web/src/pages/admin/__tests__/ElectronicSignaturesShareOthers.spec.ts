@@ -141,8 +141,74 @@ describe('ElectronicSignatures: uložit i do dalších firem', () => {
       41,
       false,
       expect.objectContaining({ password: 'heslo-do-aplikace' }),
+      null,
     )
     expect(wrapper.find('[data-testid="certificate-sharing-results"]').text())
       .toContain('settings.certificate_vault_share_status_already_enabled')
+  })
+})
+
+describe('ElectronicSignatures: nahradit certifikát ve všech firmách', () => {
+  const old = { ...certificate, id: 40, label: 'Starý podpis', valid_to: '2026-11-01 00:00:00' }
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    m.listCertificates.mockResolvedValue([certificate, old])
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+  })
+
+  it('nový certifikát nahradí vybraný starý a výsledek ukáže, co se přepojilo', async () => {
+    m.shareCertificateWithOtherSuppliers.mockResolvedValue([
+      { supplier_id: 2, name: 'Synthetic A', status: 'replaced', replaced: { data_box: 1, signing_profiles: 0, payroll: 1 } },
+    ])
+    const wrapper = await mountPage()
+
+    await wrapper.find('[data-testid="certificate-replace"]').setValue('40')
+    await wrapper.find('input[autocomplete="current-password"]').setValue('heslo-do-aplikace')
+    await wrapper.find('[data-testid="certificate-share-41"]').trigger('click')
+    await flushPromises()
+
+    expect(window.confirm).toHaveBeenCalledTimes(1)
+    expect(m.shareCertificateWithOtherSuppliers).toHaveBeenCalledWith(41, false, expect.anything(), 40)
+    const results = wrapper.find('[data-testid="certificate-sharing-results"]').text()
+    expect(results).toContain('settings.certificate_vault_share_status_replaced')
+    expect(results).toContain('settings.certificate_vault_replace_counts')
+    expect(m.toastSuccess).toHaveBeenCalledWith('settings.certificate_vault_replace_done')
+  })
+
+  it('bez potvrzení nic nepošle', async () => {
+    vi.mocked(window.confirm).mockReturnValue(false)
+    const wrapper = await mountPage()
+
+    await wrapper.find('[data-testid="certificate-replace"]').setValue('40')
+    await wrapper.find('input[autocomplete="current-password"]').setValue('heslo-do-aplikace')
+    await wrapper.find('[data-testid="certificate-share-41"]').trigger('click')
+    await flushPromises()
+
+    expect(m.shareCertificateWithOtherSuppliers).not.toHaveBeenCalled()
+  })
+
+  it('certifikát nenahradí sám sebe', async () => {
+    const wrapper = await mountPage()
+
+    await wrapper.find('[data-testid="certificate-replace"]').setValue('41')
+    await wrapper.find('input[autocomplete="current-password"]').setValue('heslo-do-aplikace')
+    await wrapper.find('[data-testid="certificate-share-41"]').trigger('click')
+    await flushPromises()
+
+    expect(m.shareCertificateWithOtherSuppliers).not.toHaveBeenCalled()
+    expect(m.toastError).toHaveBeenCalledWith('settings.certificate_vault_replace_same')
+  })
+
+  it('nahrání nového certifikátu pošle, který starý má nahradit', async () => {
+    m.uploadCertificate.mockResolvedValue({ ...certificate, id: 42, supplier_sharing: [] })
+    const wrapper = await mountPage()
+
+    await wrapper.find('[data-testid="certificate-replace"]').setValue('40')
+    await fillUpload(wrapper)
+    await wrapper.find('[data-testid="certificate-upload"]').trigger('click')
+    await flushPromises()
+
+    expect(m.uploadCertificate.mock.calls[0][0]).toMatchObject({ replaceCredentialId: 40 })
   })
 })

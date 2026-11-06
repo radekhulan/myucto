@@ -419,6 +419,85 @@ final class ForeignIncomeXmlBuilderTest extends TestCase
         )['xml']);
     }
 
+    /** @return array<string,mixed> */
+    private function representation(string $type, string $code): array
+    {
+        return [
+            'represented' => true,
+            'type' => $type,
+            'code' => $code,
+            'first_name' => $type === 'F' ? 'Petr' : null,
+            'last_name' => $type === 'F' ? 'Zmocněnec' : null,
+            'company_name' => $type === 'P' ? 'Poradna s.r.o.' : null,
+            'ico' => $type === 'P' ? '87654321' : null,
+            'ev_number' => null,
+            'birth_date' => $type === 'F' ? '1980-02-03' : null,
+            'signer_first_name' => $type === 'P' ? 'Karel' : null,
+            'signer_last_name' => $type === 'P' ? 'Jednatel' : null,
+            'signer_position' => $type === 'P' ? 'jednatel' : null,
+        ];
+    }
+
+    public function testGeneralAttorneyIsWrittenToBothFormsAndWarnsAboutDeadline(): void
+    {
+        $builder = new ForeignIncomeXmlBuilder();
+        $rep = $this->representation('F', '4a');
+        foreach ([
+            'dpshl1' => $builder->buildIncomeNotice($this->supplier(), $this->royaltyNotice(), ['representation' => $rep]),
+            'dpszd1' => $builder->buildSecurityNotice($this->supplier(), $this->securityNotice(), ['representation' => $rep]),
+        ] as $schema => $built) {
+            $dom = new \DOMDocument();
+            $dom->loadXML($built['xml']);
+            $payer = $dom->getElementsByTagName('VetaP')->item(0);
+            self::assertSame('F', $payer?->getAttribute('zast_typ'), $schema);
+            self::assertSame('4a', $payer?->getAttribute('zast_kod'), $schema);
+            self::assertSame('Petr', $payer?->getAttribute('zast_jmeno'), $schema);
+            self::assertSame('03.02.1980', $payer?->getAttribute('zast_dat_nar'), $schema);
+            self::assertFalse($payer?->hasAttribute('opr_jmeno'), $schema . ': FO zástupce opr_* nevyplňuje.');
+            self::assertNotEmpty(array_filter(
+                $built['warnings'],
+                static fn (string $w): bool => str_contains($w, '4b a 4c') && str_contains($w, '4a'),
+            ), $schema);
+            $this->assertXsdPasses($schema, $built['xml']);
+        }
+    }
+
+    public function testTaxAdvisorIsWrittenWithoutDeadlineWarning(): void
+    {
+        $builder = new ForeignIncomeXmlBuilder();
+        foreach ([['F', '4b'], ['P', '4c']] as [$type, $code]) {
+            $rep = $this->representation($type, $code);
+            $built = $builder->buildIncomeNotice($this->supplier(), $this->royaltyNotice(), ['representation' => $rep]);
+            $dom = new \DOMDocument();
+            $dom->loadXML($built['xml']);
+            $payer = $dom->getElementsByTagName('VetaP')->item(0);
+            self::assertSame($code, $payer?->getAttribute('zast_kod'));
+            self::assertEmpty(array_filter(
+                $built['warnings'],
+                static fn (string $w): bool => str_contains($w, 'lhůtu neprodlužuje'),
+            ));
+            if ($type === 'P') {
+                self::assertSame('Karel', $payer?->getAttribute('opr_jmeno'));
+                self::assertSame('Poradna s.r.o.', $payer?->getAttribute('zast_nazev'));
+            }
+            $this->assertXsdPasses('dpshl1', $built['xml']);
+        }
+    }
+
+    public function testUnrepresentedPayerHasNoRepresentativeAttributes(): void
+    {
+        $built = (new ForeignIncomeXmlBuilder())->buildIncomeNotice(
+            $this->supplier(),
+            $this->royaltyNotice(),
+            ['representation' => ['represented' => false]],
+        );
+        $dom = new \DOMDocument();
+        $dom->loadXML($built['xml']);
+        $payer = $dom->getElementsByTagName('VetaP')->item(0);
+        self::assertFalse($payer?->hasAttribute('zast_kod'));
+        self::assertSame('Jan', $payer?->getAttribute('opr_jmeno'));
+    }
+
     private function assertXsdPasses(string $formCode, string $xml): void
     {
         $validator = new XmlSchemaValidator();

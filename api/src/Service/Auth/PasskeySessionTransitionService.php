@@ -15,6 +15,7 @@ use PDO;
 final class PasskeySessionTransitionService
 {
     private const CEREMONY_SAVEPOINT = 'webauthn_ceremony_consumed';
+    public const CREDENTIAL_TEST_WINDOW_SECONDS = 900;
 
     public function __construct(
         private readonly Connection $db,
@@ -379,6 +380,107 @@ final class PasskeySessionTransitionService
         ];
     }
 
+    /**
+     * Zkušební ověření passkey hned po registraci. Správce klíčů může registraci
+     * projít a pak vracet ověření, které server odmítne — uživatel by se o tom
+     * dozvěděl až ve chvíli, kdy klíč potřebuje, a zůstal by zamčený (#225).
+     *
+     * Neprojde-li ověření, passkey se odvolá. Jen taková, kterou ještě nikdo
+     * nepoužil a vznikla před nejvýše {@see self::CREDENTIAL_TEST_WINDOW_SECONDS};
+     * fungující klíč tudy odvolat nejde. Poslední faktor se odvolá i při
+     * povinném MFA: klíč, kterým se nejde ověřit, faktorem není.
+     *
+     * @param array<string,mixed> $credentialPayload
+     * @return array{verified:true,credential:StoredPasskeyCredential}
+     *       | array{verified:false,revoked:bool,error:PasskeyVerificationException}
+     */
+    public function completeCredentialTest(
+        string $flowToken,
+        array $credentialPayload,
+        int $userId,
+        string $sessionToken,
+        int $credentialId,
+    ): array {
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        $ceremonyConsumed = false;
+        try {
+            $cutoff = $this->clock->capture($pdo);
+            $this->lockActiveUser($pdo, $userId);
+            $this->lockSession($pdo, $cutoff, $sessionToken, $userId, false);
+            $ceremony = $this->ceremonies->consumeInTransaction(
+                $pdo,
+                $cutoff,
+                $flowToken,
+                WebAuthnCeremonyStore::PURPOSE_CREDENTIAL_TEST,
+                $userId,
+                $sessionToken,
+                self::credentialTestOperation($credentialId),
+            );
+            $ceremonyConsumed = true;
+            $this->saveCeremonyConsumption($pdo);
+            $stored = $this->credentials->findActiveForUserByIdForUpdate($pdo, $userId, $credentialId);
+            if ($stored === null) {
+                throw new \DomainException('Passkey už není aktivní.');
+            }
+            try {
+                $verified = $this->passkeys->verifyAssertion(
+                    $credentialPayload,
+                    $ceremony->options,
+                    $stored->record,
+                );
+                if (!$this->credentials->updateAfterAssertionInTransaction(
+                    $pdo,
+                    $stored,
+                    $verified,
+                    $cutoff,
+                )) {
+                    throw new PasskeyCounterAnomalyException($stored->id);
+                }
+            } catch (PasskeyVerificationException $e) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . self::CEREMONY_SAVEPOINT);
+                $revoked = $this->credentials->revokeUnverifiedInTransaction(
+                    $pdo,
+                    $userId,
+                    $credentialId,
+                    $cutoff,
+                    self::CREDENTIAL_TEST_WINDOW_SECONDS,
+                );
+                if ($revoked) {
+                    $this->sessions->demoteToSetupInTransaction($pdo, $sessionToken, $userId, $credentialId);
+                }
+                $pdo->commit();
+                return ['verified' => false, 'revoked' => $revoked, 'error' => $e];
+            }
+            $pdo->commit();
+        } catch (OneTimeTokenException|\DomainException $e) {
+            if ($pdo->inTransaction()) {
+                $this->commitFailedAttempt(
+                    $pdo,
+                    $cutoff,
+                    $flowToken,
+                    $ceremonyConsumed,
+                );
+            }
+            throw $e;
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return ['verified' => true, 'credential' => $stored];
+    }
+
+    public static function credentialTestOperation(int $credentialId): string
+    {
+        if ($credentialId < 1) {
+            throw new \InvalidArgumentException('Neplatné ID passkey.');
+        }
+        return 'passkey.test:' . $credentialId;
+    }
+
     private function saveCeremonyConsumption(PDO $pdo): void
     {
         $pdo->exec('SAVEPOINT ' . self::CEREMONY_SAVEPOINT);
@@ -464,7 +566,7 @@ final class PasskeySessionTransitionService
         $rawCredentialId = $this->passkeys->credentialId($credentialPayload);
         $stored = $this->credentials->findActiveByCredentialIdForUpdate($pdo, $rawCredentialId);
         if ($stored === null || $stored->userId !== $userId) {
-            throw new PasskeyVerificationException('Ověření passkey selhalo.');
+            throw new PasskeyVerificationException(reason: PasskeyVerificationException::REASON_UNKNOWN_CREDENTIAL);
         }
         return $stored;
     }

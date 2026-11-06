@@ -16,3 +16,9 @@ export interface DocumentLock {
   date_locked: boolean
   accountant_managed: boolean
 }
+
+export function draftDeletionLockedForClient(lock: DocumentLock | undefined, hasFinancialLinks = false, linksLoaded = true): boolean {
+  return !!lock?.is_locked && (!linksLoaded || hasFinancialLinks || lock.reasons.some(reason =>
+    reason !== 'period_closed' && reason !== 'period_closing' && reason !== 'date_locked',
+  ))
+}

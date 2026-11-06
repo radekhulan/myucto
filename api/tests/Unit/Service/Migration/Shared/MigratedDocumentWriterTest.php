@@ -43,7 +43,8 @@ final class MigratedDocumentWriterTest extends TestCase
             vat_rate_id INT, vat_rate_snapshot NUMERIC, total_without_vat NUMERIC, total_vat NUMERIC,
             total_with_vat NUMERIC, order_index INT, vat_classification_code TEXT,
             oss_applicable INT, oss_consumer_country TEXT, oss_rate_type TEXT, oss_supply_type TEXT,
-            oss_needs_manual_review INT, oss_taxable_amount_return NUMERIC, oss_vat_amount_return NUMERIC)');
+            oss_needs_manual_review INT, oss_taxable_amount_return NUMERIC, oss_vat_amount_return NUMERIC,
+            revenue_account_code TEXT)');
         $this->pdo->exec('CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY AUTOINCREMENT,
             supplier_id INT, vendor_id INT, vendor_is_vat_payer INT, varsymbol TEXT, vendor_invoice_number TEXT,
             document_kind TEXT, issue_date TEXT, tax_date TEXT, due_date TEXT, received_at TEXT,
@@ -58,7 +59,7 @@ final class MigratedDocumentWriterTest extends TestCase
             purchase_invoice_id INT, description TEXT, quantity NUMERIC, unit TEXT, unit_price_without_vat NUMERIC,
             vat_rate_id INT, vat_rate_snapshot NUMERIC, total_without_vat NUMERIC, total_vat NUMERIC,
             total_with_vat NUMERIC, order_index INT, vat_classification_code TEXT, is_fixed_asset INT,
-            expense_kind TEXT)');
+            expense_kind TEXT, expense_account_code TEXT)');
         $db = new Connection(new Config([]));
         (new \ReflectionProperty($db, 'pdo'))->setValue($db, $this->pdo);
         $this->writer = new MigratedDocumentWriter($db);

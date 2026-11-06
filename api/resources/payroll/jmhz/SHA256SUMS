@@ -1,15 +1,23 @@
 84af3a344b421d462ea96233ae4267e524345750b84dbf1b95813f2bc47f6224  cssz-2025/DIS.CSSZ.2025.pem
-38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2  dictionary-1.4.1.6/Katalog kontrol MH(public)_1.4.2.10.xlsx
-2450d263029535a3fe2a20655b554f27cfd264d68c2ded6b126622b1328532fe  dictionary-1.4.1.6/control-manifest.json
+e5b664c135b63774b555e067c5ed83991bd919f023f3f577bcfafd030b441b62  dictionary-1.4.1.6/Katalog kontrol MH(public)_1.4.2.11.xlsx
+6e09cf5eb4aa61f1620d7d149e6967ad04f5a11beb2f695af017d560c8afc8b6  dictionary-1.4.1.6/control-manifest.json
 cc282115d58a3744348b500a2dcc6eec4a5899b12753ec756f01fe261fd7ff37  dictionary-1.4.1.6/datove_scenare_interakce_povinnosti_MH_1.4.0.2.xlsx
 e794a56d3baa48dd876ad45a0deb5b1bb77c17a0cb44a3511e8ef4028be69743  dictionary-1.4.1.6/datovy_slovnik_1.4.1.6.xlsx
-1deeb27c4cb68bd80d1f7be52b37200943a19f4f21bad4ad544f13ecae09e0db  dictionary-1.4.1.6/manifest.json
-37df3a44f1cce84518e773c1ba0eca5dc599d752d3e66b0ddf9339161c866889  dictionary-1.4.1.6/scenario-requirement-manifest.json
+d67adaf8799531876f0cdc0849ffd83438989f9144e60e502d3029f1cdd656c6  dictionary-1.4.1.6/manifest.json
+245142a981f8ba6f4d999a98df1dd5890a27b26e122753b2578fdd0722442001  dictionary-1.4.1.6/scenario-requirement-manifest.json
+748dd83a376540b85d5e0942af95ba6230671007c6e4269dda50db74faa88d35  dictionary-1.5.0.3/Katalog kontrol MH(public)_1.5.0.4.xlsx
+a16b3f3cdb487a04325fe59552a68a8b76678cb744e0d3f156c32461d70590d8  dictionary-1.5.0.3/control-manifest.json
+c4cb0704208f463417b564fd91a1884c71789b84d2966b074af33e5c41b5f45e  dictionary-1.5.0.3/datove_scenare_interakce_povinnosti_MH_1.5.0.3.xlsx
+861bc297adbadd475efa68214bdf194ce1b60a14337d5cf10307cf00b12e92ca  dictionary-1.5.0.3/datovy_slovnik_1.5.0.3.xlsx
+fc4710ab9298676f76cfba122133afae62cff979c202171b01a5d690c8f34799  dictionary-1.5.0.3/manifest.json
+8d6906f10241d4da8769d05de5b39498db85d4b46bdb4b9bed40e70fcb853796  dictionary-1.5.0.3/scenario-requirement-manifest.json
+1b1a4c1ec0d1e49663d0b793539a67c655555dfc208e2a4ba792f07226bc79c0  edv-1.5.0.3/Definice externí datové věty_1.5.0.3.xlsx
+ae08cde2f36c5c18873d7da976d583ab9a36131ef7ecd3a7704a4a3369ca7e02  edv-1.5.0.3/manifest.json
 11a35b83dd761d5d0a7cb466d74c74e5ee8c6de36970c58edde3e0d63f2c268f  examples-2026-04-13/classification-decisions.json
-8b24406f14a71268eca2cc4f1a72f6fdd0c15158e9fefe118c842e196b95af16  examples-2026-04-13/manifest.json
+c02f7f75b56c0a0b671645384eaddb53c0fa7dbffdcec6bf9b16374c40f8946a  examples-2026-04-13/manifest.json
 940d3ebef6d42294da79c7611654a59aef5beead3a48ffbdffdac9d0f1c58886  external-codebooks-2026-08-31/CIS1186_CS_2026-08-13.csv
-1584d4d009e0607207ce5ba9590401725652b2ebf5a6e450dfd7da0628b4f781  external-codebooks-2026-08-31/manifest.json
+3d2700b551733c1ca39e9f040d2b094ae3273efe7fae7af6e71a9369382076bf  external-codebooks-2026-08-31/manifest.json
 b4f130984c94904d083306b19e47f146e6e703847d315219daf97589a7526d44  external-codebooks-2026-08-31/sb-2025-511-priloha-2-fragment-1093782.ttl
 940d3ebef6d42294da79c7611654a59aef5beead3a48ffbdffdac9d0f1c58886  external-codebooks-2026-09-01/CIS1186_CS_2026-08-26.csv
-541e83d1c4dfbbf7878cfb24714e000a93277767b7361e602242014c9ad6aae0  external-codebooks-2026-09-01/manifest.json
+7f055a476df382c98538c3cdb915fc7ae1b5841bdae4d4d3da0d847eab6b13ec  external-codebooks-2026-09-01/manifest.json
 2263cd58c4dc589e42bc48f13f30db464ffce16e611762364c73f6a1c5bbc003  external-codebooks-2026-09-01/sb-2026-145-priloha-2-fragment-1836642.ttl

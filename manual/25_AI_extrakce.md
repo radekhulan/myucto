@@ -79,14 +79,30 @@ Volitelné kroky:
 - **Model pro dotaz účetnímu asistentovi.** V `Účetnictví → AI asistent` vyberete u vstupu dotazu **Model** aktivního
   poskytovatele, například `gpt-5.5` místo `gpt-5.4-mini`. Volba platí pro další odesílané dotazy na této stránce a nemění
   výchozí model firmy. U každé odpovědi je uveden použitý model, také při otevření uložené konverzace.
+  Navrhne-li asistent v odpovědi ostatní pohledávku nebo závazek, nabídne tlačítko **Založit v Ostatních pohledávkách
+  a závazcích**. Po potvrzení vznikne pouze koncept, který po kontrole zaúčtujete sami. K založení potřebujete právo
+  zapisovat do Ostatních pohledávek a závazků.
+- **Interní doklad od asistenta.** Na vnitřní účetní operace („přeúčtuj 5 000 z 518 na 501", „zaúčtuj odpisy",
+  „dohadná položka na energie", zápočet, kurzový rozdíl) asistent v podvojném účetnictví navrhne interní doklad: druh,
+  popis, datum účetního případu, datum dokladu a řádky MD a D s částkami, případně s dimenzemi firmy. Půjčky, nájem,
+  kauce a jiné pohledávky či závazky se sledováním úhrad navrhne jako ostatní pohledávku nebo závazek. Když z dotazu
+  nepozná, kam operace patří, nebo chybí částka či datum, zeptá se. Návrh zkontroluje server stejnými pravidly jako
+  zaúčtování ručního interního dokladu: účty musí být v účtové osnově firmy a aktivní k datu, strany MD a D vyrovnané,
+  účetní období otevřené a datum mimo zámek účtování, závěrkové účty ani podrozvaha proti rozvaze projít nemohou.
+  Nalezené chyby asistent vypíše u návrhu a tlačítka zůstanou neaktivní. Platný návrh uložíte tlačítkem **Uložit jako
+  koncept**, nebo ho tlačítkem **Založit a zaúčtovat** rovnou zaúčtujete s číslem z řady ID; po založení vede odkaz
+  **Otevřít doklad** na jeho detail. Dokumenty přiložené k dotazu se na doklad navážou. Návrh interního dokladu asistent
+  nabídne jen uživateli s právem zapisovat ruční zápisy, zaúčtovat ho lze jen s oprávněním zaúčtovat v deníku. Viz
+  [Interní doklady](52_Ucetni_denik.md#521415-interni-doklady).
 - **Smazání klíče.** Tlačítko **koš** u poskytovatele smaže jeho uložené přihlašovací údaje (po potvrzení). Pokud byl aktivní,
   extrakce přestane fungovat, dokud nenastavíte jiného poskytovatele nebo klíč nevložíte znovu.
 
 ## 25.4 Krok za krokem: importovat přijaté faktury z PDF
 
 1. Otevřete `Nákup → AI import`.
-2. Vyberte nebo přetáhněte jeden nebo více souborů (PDF, obrázek). Při více souborech vznikne dávka, která se zpracuje
+2. Vyberte nebo přetáhněte jeden nebo více souborů (PDF, obrázek), nebo na telefonu a tabletu klikněte na **Vyfotit**: doklad se vyfotí, zmenší a po potvrzení náhledu se použije jako vybraný soubor. Při více souborech vznikne dávka, která se zpracuje
    postupně po jednom.
+   Nahrané obrázky se pro vytěžení a archivaci převedou do PDF se zachovaným poměrem stran, bez deformace či ořezu.
 3. Počkejte na zpracování. U každého souboru uvidíte stav, dodavatele, částku a **typ dokladu**.
 4. Případně změňte **Typ dokladu** přímo v tabulce (například účtenku placenou kartou, kterou AI zařadila jako
    *Účtenka / paragon*, chcete vést jako *Faktura*).
@@ -114,6 +130,11 @@ Po AI importu se otevře okno **Kontrola vytěžených dokladů**. Prochází do
 potřebují: mají hlášení z vytěžení, nebo jim chybí dimenze povinná podle
 [pravidel dimenzí](114_Dimenze.md#1141110-pravidla-dimenzi-podle-uctu) (bez ní by doklad nešel zaúčtovat). Když takový doklad není,
 okno jen oznámí, že není co kontrolovat.
+
+Vedle formuláře (na užší obrazovce pod ním) okno ukazuje **Náhled originálu** právě kontrolovaného dokladu, takže vytěžené údaje
+porovnáte s PDF bez přepínání; tlačítkem **Skrýt PDF** / **Zobrazit PDF** v patičce ho schováte nebo znovu zobrazíte. V hlavičce
+náhledu přepnete umístění vpravo nebo pod formulář a šířku změníte tažením rozhraní nebo šipkami na klávesnici. Volbu si aplikace
+pamatuje.
 
 1. Nahoře zkontrolujte dodavatele, číslo dokladu, datum, stav a částku. Odkaz **Otevřít doklad** otevře editor.
 2. Projděte ostatní části hlášení (reverse charge, nesouhlasící součty apod.). U každé, kterou jste ověřili, klikněte na **Vyřešeno**.
@@ -193,11 +214,12 @@ jsou v [§ 25.9.18](#25918-lokalni-model-pres-ollamu-podrobnosti).
 | Chyba `residency_conflict` | Konfigurace by poslala data mimo EU, i když je EU vynucená | Opravte endpoint poskytovatele, žádná data se neodeslala |
 | Poskytovatel má štítek **bez klíče** | Je zvolený, ale nemá uložený klíč | Vložte klíč a uložte nastavení |
 | Test připojení selže hned | Špatný formát klíče (Anthropic `sk-ant-`, OpenAI `sk-`) | Zkontrolujte, že jste vložili celý klíč |
+| Anthropic hlásí, že klíč není přiřazený k workspace a požadavek musí obsahovat `anthropic-workspace-id` | Klíč nepatří do žádného workspace | Vyplňte **ID workspace** z Claude Console, nebo použijte klíč přiřazený k workspace |
 | Extrakce větších souborů vrátí chybu | Překročen limit PDF (Anthropic 32 MB, ostatní 20 MB) | Zmenšete soubor nebo ho rozdělte |
 | Faktura obsahuje řádek **KOREKCE** s nulovými množstvími | Model nerozparsoval složitou fakturu a součet se lišil o víc než 50 % | Doplňte množství a ceny k řádkům a korekční řádek smažte (viz [§ 25.9.4](#2594-katastrofalni-mismatch-placeholder)) |
 | Doklad z paliv nebo vyúčtování nemá položky | Doklad nemá spolehlivý rozpad řádkových částek odpovídající rekapitulaci | Zkontrolujte souhrnnou rekapitulaci a potřebné řádky doplňte ručně (viz [§ 25.9.7](#2597-doklad-bez-jednotkovych-cen-zalozeni-ze-souhrnne-rekapitulace)) |
 | U dokladu chybí splatnost | Doklad ji neuvádí a AI ji neodhaduje | Doplňte splatnost v editoru |
-| Doklad od člena skupinové registrace vyšel jako od neplátce | ARES vrací zaniklou registraci | Zkontrolujte, zda doklad nese dvě DIČ (viz [§ 25.9.9](#2599-dodavatel-se-skupinovou-registraci-k-dph-dve-dic-na-dokladu)) |
+| DIČ dodavatele ze skupinové registrace nesouhlasí s dokladem | ARES může vrátit vlastní DIČ člena nebo společné DIČ skupiny podle stavu registrace | Porovnejte údaje s dokladem a ověřte skupinové DIČ v registru (viz [§ 25.9.9](#2599-dodavatel-se-skupinovou-registraci-k-dph-dve-dic-na-dokladu)) |
 | Import Ollamou je extrémně pomalý, nebo skončí po zhruba 2 minutách | Model se nevejde do paměti grafické karty, nebo prohlížeč po 2 minutách přestane čekat | Zvolte menší model, nebo import nechte běžet přes scan inbox (viz [§ 25.9.18](#25918-lokalni-model-pres-ollamu-podrobnosti)) |
 | Test spojení hlásí `ollama_curl_missing` | Chybí PHP rozšíření `curl` | Doinstalujte rozšíření (v Docker image je) |
 
@@ -286,6 +308,8 @@ doplňte řádky ručně. Doklady s uvedenými jednotkovými cenami se přebíra
   Datum objednávky, expedice, tisku nebo přijetí objednávky za něj nezamění.
 - **Chybějící splatnost se neodhaduje.** Pokud na dokladu datum splatnosti není, výsledek ho nechá neurčené a doplníte ho při
   kontrole v editoru. Stejně tak se extraktor nesnaží „opravovat" DUZP jen proto, že předchází datu vystavení.
+- **Doklad s jediným datem dostane DUZP z data vystavení.** Typicky účtenka nebo doklad zaplacený kartou. Prázdné DUZP zůstane
+  u zálohy, dobropisu, dokladu s datem dodání a u pořízení zboží z EU, kde chybí datum dodání.
 - **Datum přijetí se bere z dokladu, ne ze dne vytěžení.** Do pole **Datum přijetí** se doplní **datum vystavení** dokladu,
   a když ho doklad nenese, DUZP. Datum v budoucnosti se nepoužije nikdy. Nemá-li doklad čitelné vůbec žádné datum, zůstane
   den importu a doklad na to upozorní žlutou hláškou. Chcete-li jako datum přijetí den importu, přepněte v
@@ -298,14 +322,13 @@ doplňte řádky ručně. Doklady s uvedenými jednotkovými cenami se přebíra
 
 ### 25.9.9 Dodavatel se skupinovou registrací k DPH (dvě DIČ na dokladu)
 
-Doklad odštěpného závodu nebo člena **skupinové registrace k DPH** má v hlavičce dvě různá čísla: **DIČ** samotného subjektu
-(typicky `CZ` + IČO) a **DIČ k DPH** skupiny (typicky ve tvaru `CZ699xxxxxx`). Extrakce je vytěží odděleně:
+Doklad odštěpného závodu nebo člena **skupinové registrace k DPH** může uvádět dvě různá čísla: **DIČ** samotného subjektu
+(typicky `CZ` + IČO) a **DIČ k DPH** skupiny. Extrakce je vytěží odděleně:
 
-- podle **DIČ subjektu** se dohledá karta dodavatele v adresáři (proto se karta napáruje pořád stejně a nevznikají duplicity),
-- podle **DIČ k DPH** se ověří **plátcovství** v registru plátců.
+- karta dodavatele se dohledá především podle **IČO**; jednotliví členové skupiny tak zůstávají oddělení,
+- pokud ARES nepotvrdí plátcovství a doklad uvádí odlišné **DIČ k DPH**, ověří se také v registru plátců.
 
-Bez toho by ARES podle IČO vrátil zaniklou registraci (vlastní registrace člena skupiny vstupem do skupiny zaniká) a doklad by
-se vytěžil jako od neplátce, tedy s nulovou daní a bez nároku na odpočet.
+Při novém načtení údajů dodavatele podle IČO ARES u aktivní skupinové registrace předvyplní skupinové DIČ a příznak plátce. Pokud ARES skupinové DIČ nevrátí, neaktivní vlastní DIČ se místo něj nedoplní. IČO přitom zůstává identifikátorem konkrétního člena, zatímco skupinové DIČ může sdílet více členů. Při vytěžení zkontrolujte čísla proti dokladu; skupinové DIČ lze samostatně ověřit v registru plátců. Automatické předvyplnění vychází z aktuálního stavu ARES a nepotvrzuje platnost registrace k historickému datu dokladu.
 
 ### 25.9.10 Reverse charge ze zahraničí: automatika
 
@@ -342,6 +365,12 @@ jen zařazení, částky ani DPH se nepřepočítávají. Záloha se tu měnit n
 
 Po dokončení dávky ukáže souhrn počet úspěšných a chybných dokladů a tlačítko **Zobrazit v přijatých fakturách**, které otevře
 seznam vyfiltrovaný na tuto dávku. Tam lze vybraným dokladům změnit typ hromadně akcí **Nastavit typ**.
+
+**Jeden doklad ve více souborech.** Když máte jednu fakturu nebo účtenku rozdělenou do více souborů (třeba každou stranu
+jako samostatné PDF nebo fotku), použijte sekci **Spojit více PDF do jednoho dokladu** pod nahráváním. Je na stránce
+`Nákup → AI import` i `Prodej → AI import`. Nahrajte všechny části, seřaďte je přetažením řádků nebo šipkami a klikněte na **Spojit a importovat
+jako jeden doklad**. Části se v prohlížeči spojí do jednoho PDF a vytěží se jako jediný doklad, takže vznikne jeden koncept.
+Spojit lze PDF a fotky JPG, PNG a WebP. PDF chráněné heslem spojit nejde a spojený soubor smí mít nejvýš 32 MB.
 
 ### 25.9.12 Kontrola vytěžených dokladů: podrobnosti
 
@@ -384,7 +413,9 @@ Podrobnosti k formuláři:
 - **Anthropic, OpenAI, Gemini**: jen pole **API klíč** (BYOK, jen pro zápis, po uložení se nikdy nezobrazí zpátky, jen
   placeholder „uloženo") a volitelně **Model** (výběr z povoleného whitelistu daného poskytovatele, prázdné znamená výchozí
   model poskytovatele). **Azure OpenAI** navíc **Azure endpoint**, **Deployment** (název nasazeného modelu v Azure resource)
-  a **API verze**.
+  a **API verze**. **Anthropic** má navíc nepovinné pole **ID workspace** (začíná `wrkspc_`), které vyplníte jen u klíče
+  nepřiřazeného k žádnému workspace; Anthropic takový klíč bez ID odmítne s hláškou, že požadavek musí obsahovat
+  `anthropic-workspace-id`.
 - **Test připojení** ověří klíč a endpoint reálným voláním a nahlásí, jaký model odpověděl (nebo chybu). Před uložením se
   kontroluje i základní formát klíče (Anthropic musí začínat `sk-ant-`, OpenAI `sk-`, Gemini přijímá podporované standardní
   i autorizační klíče z AI Studia), ušetří to zbytečný test s očividně špatně vloženým klíčem.

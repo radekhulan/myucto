@@ -17,6 +17,7 @@ const m = vi.hoisted(() => ({
   listCurrencies: vi.fn(),
   getBankEmailOverview: vi.fn(),
   updateBankEmailProvider: vi.fn(),
+  createBankEmailImapAccount: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -27,6 +28,7 @@ vi.mock('@/api/settings', () => ({
     listCurrencies: m.listCurrencies,
     getBankEmailOverview: m.getBankEmailOverview,
     updateBankEmailProvider: m.updateBankEmailProvider,
+    createBankEmailImapAccount: m.createBankEmailImapAccount,
   },
 }))
 
@@ -115,6 +117,33 @@ describe('BankAccounts — společný parser provider', () => {
     m.client = false
     m.accountBalances.mockResolvedValue(null)
     m.updateBankEmailProvider.mockResolvedValue(undefined)
+  })
+
+  it('nová schránka nabízí označení po načtení vypnuté a uloží jeho zapnutí nezávisle na akci po úspěchu', async () => {
+    let saved: unknown
+    m.createBankEmailImapAccount.mockImplementationOnce(async payload => { saved = { ...payload }; return {} })
+    const wrapper = await mountWith([])
+    await wrapper.findAll('button').find(button => button.text() === 'bank_accounts.new_imap')!.trigger('click')
+    const markSeen = wrapper.get('[data-testid="imap-mark-seen-after-import"] input')
+    expect((markSeen.element as HTMLInputElement).checked).toBe(false)
+    await markSeen.setValue(true)
+    const authLabel = wrapper.findAll('label').find(label => label.text().startsWith('bank_accounts.require_email_auth'))!
+    await authLabel.get('input').setValue(false)
+    await wrapper.findAll('button').find(button => button.text() === 'bank_accounts.save_imap')!.trigger('click')
+    await flushPromises()
+    expect(m.createBankEmailImapAccount).toHaveBeenCalledOnce()
+    expect(saved).toMatchObject({ mark_seen_after_import: true, success_action: 'none' })
+    expect(m.toastSuccess).toHaveBeenCalledWith('bank_accounts.imap_created')
+    wrapper.unmount()
+  })
+
+  it('označení po načtení je nedostupné při vypnutém načítání avíz', async () => {
+    const wrapper = await mountWith([])
+    await wrapper.findAll('button').find(button => button.text() === 'bank_accounts.new_imap')!.trigger('click')
+    const ingestLabel = wrapper.findAll('label').find(label => label.text().startsWith('bank_accounts.ingest_notices'))!
+    await ingestLabel.get('input').setValue(false)
+    expect((wrapper.get('[data-testid="imap-mark-seen-after-import"] input').element as HTMLInputElement).disabled).toBe(true)
+    wrapper.unmount()
   })
 
   it('loads staff account settings when entering on balances and retains them after switching to accounts', async () => {

@@ -879,10 +879,11 @@ onMounted(async () => {
                   <button
                     v-if="office.id > 0"
                     type="button"
-                    :class="btnOutline('neutral')"
+                    :class="[btnOutline('success'), 'whitespace-nowrap']"
                     :disabled="!canWrite"
                     @click="openRegistration(office)"
                   >
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                     {{ t('payroll.employer.manage_registration') }}
                   </button>
                   <span v-else class="text-xs text-neutral-500">{{ t('payroll.employer.registration_after_office_save') }}</span>
@@ -932,7 +933,8 @@ onMounted(async () => {
               </label>
               <label class="block">
                 <span class="mb-1 block text-xs text-neutral-500">{{ t('payroll.employer.office_social_security_variable_symbol') }}</span>
-                <button v-if="office.id > 0" type="button" :class="btnOutline('neutral')" :disabled="!canWrite" @click="openRegistration(office)">
+                <button v-if="office.id > 0" type="button" :class="[btnOutline('success'), 'whitespace-nowrap']" :disabled="!canWrite" @click="openRegistration(office)">
+                  <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                   {{ t('payroll.employer.manage_registration') }}
                 </button>
                 <span v-else class="text-xs text-neutral-500">{{ t('payroll.employer.registration_after_office_save') }}</span>

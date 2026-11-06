@@ -151,4 +151,24 @@ final class BankRuleMatcherTest extends TestCase
         self::assertTrue($this->matcher->matching($rule, $this->tx(['counterparty_account' => '705-77628031'])));
         self::assertFalse($this->matcher->matching($rule, $this->tx(['counterparty_account' => '721-77628031'])));
     }
+
+    public function testOwnBankAccountMustMatchWhenRuleHasIt(): void
+    {
+        $rule = $this->rule(['message_contains' => BankMessageNormalizer::normalize('úrok'), 'bank_account_id' => 7]);
+        $tx = $this->tx(['description' => 'Úrok']);
+        self::assertTrue($this->matcher->matching($rule, $tx + [BankRuleMatcher::OWN_ACCOUNT => 7]));
+        self::assertFalse($this->matcher->matching($rule, $tx + [BankRuleMatcher::OWN_ACCOUNT => 8]), 'Pohyb jiného účtu');
+        self::assertFalse($this->matcher->matching($rule, $tx + [BankRuleMatcher::OWN_ACCOUNT => null]), 'Výpis bez dohledaného účtu');
+        self::assertFalse($this->matcher->matching($rule, $tx), 'Volající, který účet nezná');
+        self::assertTrue($this->matcher->matching(['bank_account_id' => null] + $rule, $tx), 'Obecné pravidlo účet nepotřebuje');
+    }
+
+    public function testRankPrefersPriorityThenAccountRestriction(): void
+    {
+        $general = ['priority' => 100, 'bank_account_id' => null];
+        $account = ['priority' => 100, 'bank_account_id' => 3];
+        self::assertTrue(BankRuleMatcher::rank($account) < BankRuleMatcher::rank($general));
+        self::assertTrue(BankRuleMatcher::rank(['priority' => 40] + $general) < BankRuleMatcher::rank($account), 'Priorita rozhoduje první');
+        self::assertSame(BankRuleMatcher::rank($account), BankRuleMatcher::rank(['bank_account_id' => 9] + $account), 'Dva účty stejné priority jsou souběh');
+    }
 }

@@ -146,13 +146,21 @@ final class DimensionStamperTest extends TestCase
     public function testFilterLineSourceCountsCostCentreTextOnlyWithoutDimensionAndSplitsByShare(): void
     {
         $filter = new DimensionFilter(5, 11, [11, 12], ['REZ']);
-        [$sql, $params] = $filter->lineSource(7, 'l');
+        [$sql, $params] = $filter->lineSource(7, 'l', '2026-01-01', '2026-12-31');
         self::assertStringContainsString('fd.dimension_value_id IN (?,?)', $sql);
         self::assertStringContainsString('fl.cost_center IN (?)', $sql);
         self::assertStringContainsString('journal_entry_line_dimension_splits dim_cs', $sql, 'Řádek s rozpadem téhož typu nerozhoduje textem.');
         self::assertStringContainsString('ROUND(sl.amount * s.share', $sql, 'Řádek s rozpadem jen svým dílem.');
+        self::assertSame(2, substr_count($sql, 'fe.entry_date >= ? AND fe.entry_date <= ?'), 'Jediná hodnota i středisko jdou po datu zápisu.');
+        self::assertStringContainsString('se.entry_date >= ? AND se.entry_date <= ?', $sql, 'Rozpad jde po datu zápisu.');
         self::assertStringEndsWith(') l', $sql);
-        self::assertSame([5, 11, 12, 7, 7, 'REZ', 5, 5, 5, 7, 5, 11, 12, 11, 12, 7], $params);
+        $range = [7, '2026-01-01', '2026-12-31'];
+        self::assertSame([5, 11, 12, 7, ...$range, 7, ...$range, 'REZ', 5, 5, 5, 7, ...$range, 5, 11, 12, 11, 12, 7], $params);
+
+        [$sql, $params] = $filter->lineSource(7, 'l', null, '2026-12-31');
+        self::assertStringNotContainsString('entry_date >= ?', $sql, 'Bez spodní meze od počátku historie.');
+        self::assertSame(3, substr_count($sql, 'entry_date <= ?'));
+        self::assertCount(22, $params);
     }
 
     public function testPaymentOfSeveralDocumentsTagsCounterLinesAndSplitsTheRest(): void

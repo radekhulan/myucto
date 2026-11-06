@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeException;
@@ -36,7 +35,7 @@ final class PayrollSurchargeMaterializationTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }

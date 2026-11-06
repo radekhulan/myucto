@@ -22,6 +22,7 @@ final class AttendancePersonAggregator
 {
     private const TEXT_FIELDS = [
         'relation_label', 'department', 'cost_center', 'position', 'weekly_hours', 'start_end_note', 'monthly_wage',
+        'hourly_rate', 'end_date',
     ];
 
     /** Slova, která odlišují otce a syna — jméno lišící se jen jimi je jiná osoba. */
@@ -326,11 +327,33 @@ final class AttendancePersonAggregator
             'display_name' => (string) $group[0]['name'],
             'personal_number' => $identity['personal_number'] ?? null,
             'birth_number_masked' => null,
+            'bank_account_masked' => null,
         ];
         foreach (self::TEXT_FIELDS as $field) {
             $person[$field] = $identity[$field] ?? null;
         }
         $person += AttendanceText::noteDates((string) ($identity['start_end_note'] ?? ''));
+        // Samostatný sloupec s datem nástupu má přednost před datem z poznámky.
+        $startDate = trim((string) ($identity['start_date'] ?? ''));
+        if ($startDate !== '') {
+            $start = self::isoDate($startDate);
+            if ($start === null) {
+                $warnings[] = "Datum nástupu „{$startDate}“ nejde přečíst. Zapište ho jako den. měsíc. rok.";
+            } else {
+                $person['start_on'] = $start;
+            }
+        }
+        // Sjednaný konec dohody nebo doby určité není ukončení z poznámky
+        // (`end_on`): vztah k němu teprve skončí, varování o ukončení nepatří.
+        $person['agreed_end_on'] = null;
+        $endDate = trim((string) ($identity['end_date'] ?? ''));
+        if ($endDate !== '') {
+            $person['agreed_end_on'] = self::isoDate($endDate);
+            if ($person['agreed_end_on'] === null) {
+                $warnings[] = "Konec dohody „{$endDate}“ nejde přečíst. Zapište ho jako den. měsíc. rok.";
+            }
+        }
+        $bankAccount = trim((string) ($identity['bank_account'] ?? ''));
 
         return $person + [
             'sources' => $sources,
@@ -344,6 +367,7 @@ final class AttendancePersonAggregator
             '_birth_number' => $birthNumber,
             '_birth_date' => $birthDate,
             '_health_insurer_code' => $insurerCode === '' ? null : $insurerCode,
+            '_bank_account' => $bankAccount === '' ? null : $bankAccount,
             '_metrics' => $internalMetrics,
             '_components' => $internalComponents,
             '_deductions' => $internalDeductions,
@@ -471,7 +495,7 @@ final class AttendancePersonAggregator
                 }
             }
         }
-        if ($meaning === 'birth_date' && $cell->kind === AttendanceCell::NUMBER) {
+        if (in_array($meaning, ['birth_date', 'start_date', 'end_date'], true) && $cell->kind === AttendanceCell::NUMBER) {
             return self::excelDate((float) $cell->number) ?? '';
         }
         if ($cell->kind === AttendanceCell::ERROR) {

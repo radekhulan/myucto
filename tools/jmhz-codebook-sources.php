@@ -49,12 +49,12 @@ return [
         ],
         'control-catalog' => [
             'target' => 'dictionary-1.4.1.6',
-            'filename' => 'Katalog kontrol MH(public)_1.4.2.10.xlsx',
-            'version' => '1.4.2.10',
+            'filename' => 'Katalog kontrol MH(public)_1.4.2.11.xlsx',
+            'version' => '1.4.2.11',
             'url' => 'https://developers.mpsv.cz/assets/documents/'
-                . 'c5905c65-8fe0-4a60-826d-e8f0237bb6c8/Katalog kontrol MH(public)_1.4.2.10.xlsx',
-            'sha256' => '38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2',
-            'byte_length' => 201343,
+                . '8aea9a31-e27a-4635-934e-6d2a32289976/Katalog kontrol MH(public)_1.4.2.11.xlsx',
+            'sha256' => 'e5b664c135b63774b555e067c5ed83991bd919f023f3f577bcfafd030b441b62',
+            'byte_length' => 201904,
             'content_types' => [
                 'application/octet-stream',
                 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
@@ -120,8 +120,8 @@ return [
         'dictionary-1.4.1.6/manifest.json' => [
             'schema_version' => 'jmhz-spec-package.v1',
             'identity_key' => 'package_key',
-            'identity' => 'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1',
-            'manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
+            'identity' => 'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.11_manifest-v1',
+            'manifest_sha256' => '39bb516b4fff204c44f0b8a6b9e0ec40601ef73af79460bdf937777e046c00d8',
             'counts' => [
                 'attributes' => 442,
                 'monthly_attributes' => 234,
@@ -144,7 +144,7 @@ return [
             'schema_version' => 'jmhz-external-codebook-overlay.v1',
             'identity_key' => 'overlay_key',
             'identity' => 'jmhz-external-codebooks-cisob-511-2025-through-2026-08-31_czemalfa-2026-08-13-v1',
-            'manifest_sha256' => 'ccacac5e10f7059349c62ee680e70dfa3f96b4a1251661ba2fb6166cd537032c',
+            'manifest_sha256' => '8987287842a5ac9667e9fe1997f0cb8decc96c1967743e3de55e8e21567d64da',
             'counts' => [
                 'codebooks' => 2,
                 'municipalities' => 6254,
@@ -152,13 +152,13 @@ return [
                 'entries' => 6504,
             ],
             'external_reference_codebooks' => [],
-            'base_manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
+            'base_manifest_sha256' => '39bb516b4fff204c44f0b8a6b9e0ec40601ef73af79460bdf937777e046c00d8',
         ],
         'external-codebooks-2026-09-01/manifest.json' => [
             'schema_version' => 'jmhz-external-codebook-overlay.v1',
             'identity_key' => 'overlay_key',
             'identity' => 'jmhz-external-codebooks-cisob-145-2026_czemalfa-2026-08-26-v1',
-            'manifest_sha256' => '66b2481ef5724006e8f64541330d541cd9acec42e914077ed722154c10e220bf',
+            'manifest_sha256' => '933e3a31be700d9acc3f79ef449691cf8eef61c489c298249d40b7778c5cc976',
             'counts' => [
                 'codebooks' => 2,
                 'municipalities' => 6254,
@@ -166,7 +166,7 @@ return [
                 'entries' => 6504,
             ],
             'external_reference_codebooks' => [],
-            'base_manifest_sha256' => 'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d',
+            'base_manifest_sha256' => '39bb516b4fff204c44f0b8a6b9e0ec40601ef73af79460bdf937777e046c00d8',
         ],
     ],
 ];

@@ -34,6 +34,42 @@ final class CreditCardPostingTest extends BankPostingTestCase
     private int $ccId = 0;
     private string $ccCode = '';
 
+    #[\PHPUnit\Framework\Attributes\DataProvider('frameworkChargeCases')]
+    public function testFrameworkRolesForCreditCardCharges(bool $nonprofit, string $description, string $expected): void
+    {
+        $this->db->pdo()->prepare('DELETE FROM supplier_accounting_frameworks WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $this->db->pdo()->prepare('INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, ?, ?), (?, ?, ?)')
+            ->execute([$this->supplierId, '2098-01-01', 'cz_500', $this->supplierId, $nonprofit ? '2099-01-01' : '2099-07-01', 'cz_504']);
+        if ($this->accounts->findByCode($this->supplierId, $expected) === null) {
+            $this->accounts->insert($this->supplierId, ['account_code' => $expected, 'name' => 'Synthetic charge', 'account_type' => 'expense', 'normal_side' => 'debit']);
+        }
+        $tx = $this->ccTx(-125.5, $description);
+        $result = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $result['action'], json_encode($result));
+        $lines = $this->linesByAccountCode((int) $result['entry_id']);
+        self::assertSame(125.5, (float) ($lines[$expected]['debit'] ?? 0));
+        self::assertSame(125.5, (float) $lines[$this->ccCode]['credit']);
+    }
+
+    public static function frameworkChargeCases(): array
+    {
+        return [[false, 'Úrok', '562'], [true, 'Úrok', '544'], [false, 'Poplatek', '568'], [true, 'Poplatek', '549.100']];
+    }
+
+    public function testFrameworkExplicitCreditCardAccountRequiresBinding(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, ?, ?)')
+            ->execute([$this->supplierId, '2099-01-01', 'cz_504']);
+        $id = (int) $this->accounts->findByCode($this->supplierId, '562')['id'];
+        $this->container->get(\MyInvoice\Repository\CreditCardSettingsRepository::class)->save($this->supplierId, ['interest_account_id' => $id], $this->userId);
+        $this->expectException(\MyInvoice\Service\Accounting\AccountingFrameworkException::class);
+        $this->expectExceptionMessage('Vlastní účet nemá ověřenou vazbu');
+        $this->container->get(\MyInvoice\Service\Accounting\CreditCard\CreditCardChargeDetector::class)->detect($this->supplierId, [
+            'amount' => -125.5, 'description' => 'Úrok', 'recipient_account' => self::CC_ACCOUNT,
+            'recipient_bank' => self::CC_BANK, 'posted_at' => '2099-06-15',
+        ]);
+    }
+
     protected function setUp(): void
     {
         parent::setUp();

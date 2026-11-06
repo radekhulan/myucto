@@ -155,4 +155,18 @@ final class FiledDppoImporterTest extends TestCase
             self::assertSame('reconcile_year_mismatch', $e->errorCode);
         }
     }
+
+    public function testHandledPartialLossImportFailureDoesNotCommitDeletedApplications(): void
+    {
+        $this->losses->reconcileFinalize($this->supplierId, 'po', 2022, 100000, 0, null);
+        $this->losses->reconcileFinalize($this->supplierId, 'po', 2023, 100000, 30000, null);
+        $this->losses->reconcileFinalize($this->supplierId, 'po', 2024, 0, 160000, null);
+        $q = $this->db->pdo()->prepare('SELECT * FROM tax_loss_applications WHERE supplier_id=? ORDER BY id');
+        $q->execute([$this->supplierId]); $before = $q->fetchAll(\PDO::FETCH_ASSOC);
+        $notices = $this->importer->registerLosses($this->supplierId, 2023, 50000, 0);
+        self::assertNotEmpty($notices);
+        self::assertStringContainsString('nelze snížit', implode(' ', $notices));
+        $q->execute([$this->supplierId]); self::assertSame($before, $q->fetchAll(\PDO::FETCH_ASSOC));
+        self::assertTrue($this->db->pdo()->inTransaction());
+    }
 }

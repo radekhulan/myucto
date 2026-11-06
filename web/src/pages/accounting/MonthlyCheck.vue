@@ -8,12 +8,14 @@ import { closingApi, periodLockApi, type MonthlyCheckResult, type PrecheckItem }
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { formatMoney, formatDate } from '@/composables/useFormat'
+import { useAccountBalance } from '@/composables/useAccountBalance'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import CheckFindings from '@/components/accounting/CheckFindings.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const { t } = useI18n()
+const { formatBalance } = useAccountBalance()
 const auth = useAuthStore()
 const toast = useToast()
 
@@ -157,6 +159,8 @@ const BALANCE_CHECK_CODES: Record<string, string[]> = {
   procurement_111_131_open: ['111', '131'],
   estimates_balances: ['388', '389'],
   deferrals_balances: ['381', '382', '383', '384', '385'],
+  deposits_314_324_open: ['314', '324'],
+  voucher_balance_negative: [],
 }
 function balanceEntries(key: string, value: unknown): { code: string; amount: number }[] {
   const codes = BALANCE_CHECK_CODES[key]
@@ -165,7 +169,13 @@ function balanceEntries(key: string, value: unknown): { code: string; amount: nu
   if ('account' in v && 'balance' in v) {
     return [{ code: String(v.account), amount: Number(v.balance) }]
   }
-  return codes.filter(c => c in v).map(c => ({ code: c, amount: Number(v[c]) }))
+  const entries = codes.filter(c => c in v).map(c => ({ code: c, amount: Number(v[c]) }))
+  // Zůstatek prodaných poukazů a kreditu se u záloh jen ukazuje, za zálohu se nepočítá.
+  const vouchers = v.vouchers as { account?: unknown; balance?: unknown } | undefined
+  if (vouchers && typeof vouchers === 'object' && 'account' in vouchers) {
+    entries.push({ code: String(vouchers.account), amount: Number(vouchers.balance) })
+  }
+  return entries
 }
 
 function accountIdForCode(code: string): number | null {
@@ -367,9 +377,9 @@ async function saveLock() {
                       <template v-for="e in balanceEntries(c.key, c.value)" :key="e.code">
                         <RouterLink v-if="accountLink(e.code)" :to="accountLink(e.code)!"
                           class="font-mono text-primary-600 hover:underline" :class="{ 'text-neutral-400 hover:no-underline': Math.abs(e.amount) < 0.005 }">
-                          {{ e.code }}: {{ formatMoney(e.amount) }}
+                          {{ e.code }}: {{ formatBalance(e.amount) }}
                         </RouterLink>
-                        <span v-else class="font-mono">{{ e.code }}: {{ formatMoney(e.amount) }}</span>
+                        <span v-else class="font-mono">{{ e.code }}: {{ formatBalance(e.amount) }}</span>
                       </template>
                     </span>
                   </template>

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Report;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 
 /**
  * Křížová kontrola DPHDP3 ↔ KH ↔ SH ↔ obrat účtu 343 (audit 2026-07, C8').
@@ -910,8 +911,9 @@ final class VatCrossCheckService
      */
     private function booked343ByDoc(int $supplierId, int $accountId, string $start, string $end): array
     {
+        $docKey = TakenOverRecord::journalDocumentKeySql('e');
         $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(CONCAT(e.source_type, ':', e.source_id), CONCAT('manual:', e.id)) AS doc_key,
+            "SELECT {$docKey} AS doc_key,
                     MIN(e.entry_date) AS entry_date,
                     SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
                FROM journal_entry_lines l
@@ -996,9 +998,9 @@ final class VatCrossCheckService
 
     /**
      * Živý netto obrat 343 (credit − debit) MIMO období pro dané klíče (zrcadlový směr
-     * § 73: nárokováno teď, zaúčtováno dřív/později). Row-constructor IN nad
-     * (source_type, source_id). Stornovaný zápis není živý net: reversed_by IS NULL ho
-     * vyřadí (storno zrcadlo má source_id NULL, přes klíč by se nevynetovalo) a 343 řádky
+     * § 73: nárokováno teď, zaúčtováno dřív/později). Klíč dokladu je shodný
+     * s booked343ByDoc, včetně oddělených převzatých DPH zápisů.
+     * Stornovaný zápis ani jeho protizápis nejsou živý net: vyřadí se oba a 343 řádky
      * vynetované na 0 uvnitř zápisu odfiltruje HAVING (→ missing_entry, ne timing);
      * klasifikátor navíc porovnává net s přiznaným příspěvkem, takže odlišná částka
      * skončí jako value_mismatch.
@@ -1011,26 +1013,51 @@ final class VatCrossCheckService
         if ($keys === []) {
             return [];
         }
-        $pairs = [];
-        $params = [$supplierId, $accountId, $accountId, $start, $end];
+        // Klíč je týž jako TakenOverRecord::journalDocumentKeySql() pro živý zápis, který
+        // není protizápisem: vlastněný zápis patří dokladu skupiny, ostatní svému zdroji.
+        // Klíče pocházejí z existujících dokladů přiznání, takže kontrola existence
+        // dokladu z documentKeySql tu nic nemění. Klíče se zapisují po typech
+        // (`typ = ? AND id IN (…)`), aby obě větve šly rozsahem po indexu; výraz
+        // s korelovanými poddotazy v IN by prošel celý deník firmy. Pořadí spojení je
+        // pevné: z malé množiny zápisů dokladů přes PK k řádkům.
+        $idsByType = [];
         foreach ($keys as $k) {
             [$type, $id] = array_pad(explode(':', $k, 2), 2, '0');
-            $pairs[] = '(?, ?)';
-            $params[] = $type;
-            $params[] = (int) $id;
+            $idsByType[$type][(int) $id] = (int) $id;
         }
+        [$directWhere, $directParams] = self::typedIdFilter('e.source_type', 'e.source_id', $idsByType);
+        [$ownedWhere, $ownedParams] = self::typedIdFilter('jdp.doc_type', 'jdp.doc_id',
+            array_intersect_key($idsByType, array_flip(['invoice', 'purchase_invoice'])));
+        $owned = $ownedParams === [] ? '' : "
+                 UNION ALL
+                 SELECT jdp.entry_id, CONCAT(jdp.doc_type, ':', jdp.doc_id)
+                   FROM journal_document_postings jdp FORCE INDEX (uq_jdp_doc_entry)
+                  WHERE jdp.supplier_id = ? AND ({$ownedWhere})";
+        $params = array_merge(
+            [$supplierId],
+            $directParams,
+            $ownedParams === [] ? [] : [$supplierId, ...$ownedParams],
+            [$supplierId, $accountId, $accountId, $start, $end],
+        );
         $stmt = $this->db->pdo()->prepare(
-            "SELECT CONCAT(e.source_type, ':', e.source_id) AS doc_key,
+            "SELECT STRAIGHT_JOIN k.doc_key,
                     MIN(e.entry_date) AS entry_date,
                     SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE -l.signed_amount END) AS net
-               FROM journal_entry_lines l
-               JOIN journal_entries e    ON e.id = l.entry_id
+               FROM (SELECT e.id AS entry_id, CONCAT(e.source_type, ':', e.source_id) AS doc_key
+                       FROM journal_entries e FORCE INDEX (idx_je_supplier_source)
+                       LEFT JOIN journal_document_postings own FORCE INDEX (uq_jdp_entry)
+                              ON own.supplier_id = e.supplier_id AND own.entry_id = e.id
+                      WHERE e.supplier_id = ? AND ({$directWhere}) AND own.entry_id IS NULL{$owned}
+                    ) k
+               JOIN journal_entries e    ON e.supplier_id = ? AND e.id = k.entry_id
+               JOIN journal_entry_lines l ON l.entry_id = e.id AND l.supplier_id = e.supplier_id
                JOIN chart_of_accounts ca ON ca.id = l.account_id
-              WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL
+               LEFT JOIN journal_entries rev_src FORCE INDEX (idx_je_supplier_reversed_by)
+                      ON rev_src.supplier_id = e.supplier_id AND rev_src.reversed_by = e.id
+              WHERE e.posted_at IS NOT NULL AND e.reversed_by IS NULL AND rev_src.id IS NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
                 AND e.entry_date NOT BETWEEN ? AND ?
-                AND (e.source_type, e.source_id) IN (" . implode(',', $pairs) . ")
-              GROUP BY doc_key
+              GROUP BY k.doc_key
              HAVING ABS(net) > 0.004"
         );
         $stmt->execute($params);
@@ -1042,6 +1069,23 @@ final class VatCrossCheckService
             ];
         }
         return $out;
+    }
+
+    /**
+     * Podmínka `(typ = ? AND id IN (…)) OR …` pro klíče seskupené podle typu dokladu.
+     *
+     * @param array<string, array<int,int>> $idsByType
+     * @return array{0:string, 1:list<int|string>}
+     */
+    private static function typedIdFilter(string $typeColumn, string $idColumn, array $idsByType): array
+    {
+        $parts = [];
+        $params = [];
+        foreach ($idsByType as $type => $ids) {
+            $parts[] = "({$typeColumn} = ? AND {$idColumn} IN (" . implode(',', array_fill(0, count($ids), '?')) . '))';
+            array_push($params, (string) $type, ...array_values($ids));
+        }
+        return [implode(' OR ', $parts), $params];
     }
 
     /**
@@ -1226,12 +1270,19 @@ final class VatCrossCheckService
             }
             $idList = array_keys($ids);
             $placeholders = implode(',', array_fill(0, count($idList), '?'));
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT source_id FROM journal_entries
+            $sql = "SELECT source_id FROM journal_entries
                   WHERE supplier_id = ? AND source_type = ? AND source_id IN ({$placeholders})
-                    AND posted_at IS NOT NULL AND reversed_by IS NULL"
-            );
-            $stmt->execute(array_merge([$supplierId, $sourceType], $idList));
+                    AND posted_at IS NOT NULL AND reversed_by IS NULL";
+            $params = array_merge([$supplierId, $sourceType], $idList);
+            if ($sourceType !== 'cash') {
+                $sql .= " UNION SELECT jdp.doc_id AS source_id FROM journal_document_postings jdp
+                    JOIN journal_entries e ON e.supplier_id = jdp.supplier_id AND e.id = jdp.entry_id
+                    WHERE jdp.supplier_id = ? AND jdp.doc_type = ? AND jdp.doc_id IN ({$placeholders})
+                      AND e.posted_at IS NOT NULL AND e.reversed_by IS NULL";
+                array_push($params, $supplierId, $sourceType, ...$idList);
+            }
+            $stmt = $this->db->pdo()->prepare($sql);
+            $stmt->execute($params);
             $posted = [];
             foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $sid) {
                 $posted[(int) $sid] = true;

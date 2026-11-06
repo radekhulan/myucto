@@ -7,6 +7,10 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
+/**
+ * Účet a registrovaný klient KB+. Metody nad bank_oauth_sessions slouží jen k dokončení
+ * přihlášení zahájených před společnou vrstvou OAuth klienta (oauth_sessions).
+ */
 final class KbPlusOAuthRepository
 {
     public function __construct(private readonly Connection $db) {}
@@ -51,45 +55,22 @@ final class KbPlusOAuthRepository
         )->execute([$supplierId, $ciphertext, $userId]);
     }
 
-    public function replacePending(
-        string $stateHash,
-        int $supplierId,
-        int $currencyId,
-        int $userId,
-        string $stage,
-        string $ciphertext,
-        int $lifetimeSeconds,
-    ): void {
-        if (!in_array($stage, ['registration', 'oauth'], true) || $lifetimeSeconds < 1) {
-            throw new \InvalidArgumentException('Invalid OAuth session.');
-        }
-        $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
-        try {
-            $pdo->prepare(
-                "UPDATE bank_oauth_sessions
-                    SET status = 'failed', error_code = 'kb_plus_onboarding_restarted', consumed_at = CURRENT_TIMESTAMP(6)
-                  WHERE supplier_id = ? AND currency_id = ? AND provider = 'kb_plus' AND status = 'pending'"
-            )->execute([$supplierId, $currencyId]);
-            $pdo->prepare(
-                "INSERT INTO bank_oauth_sessions
-                    (state_hash, supplier_id, currency_id, user_id, provider, stage, secret_ciphertext, expires_at)
-                 VALUES (?, ?, ?, ?, 'kb_plus', ?, ?, TIMESTAMPADD(SECOND, ?, CURRENT_TIMESTAMP(6)))"
-            )->execute([$stateHash, $supplierId, $currencyId, $userId, $stage, $ciphertext, $lifetimeSeconds]);
-            $pdo->commit();
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
-        }
+    /** Ukončí rozpracované přihlášení účtu z doby před společnou vrstvou OAuth klienta. */
+    public function cancelPending(int $supplierId, int $currencyId): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE bank_oauth_sessions
+                SET status = 'failed', error_code = 'kb_plus_onboarding_restarted', consumed_at = CURRENT_TIMESTAMP(6)
+              WHERE supplier_id = ? AND currency_id = ? AND provider = 'kb_plus' AND status = 'pending'"
+        )->execute([$supplierId, $currencyId]);
     }
 
     /** @internal Contains encrypted flow data and must never be serialized. */
     public function claim(string $stateHash, int $supplierId, int $userId, string $stage): ?array
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $own = !$pdo->inTransaction();
+        if ($own) $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare(
                 "UPDATE bank_oauth_sessions SET status = 'processing', consumed_at = CURRENT_TIMESTAMP(6)
@@ -98,7 +79,7 @@ final class KbPlusOAuthRepository
             );
             $stmt->execute([$stateHash, $supplierId, $userId, $stage]);
             if ($stmt->rowCount() !== 1) {
-                $pdo->rollBack();
+                if ($own) $pdo->rollBack();
                 return null;
             }
             $read = $pdo->prepare(
@@ -107,7 +88,7 @@ final class KbPlusOAuthRepository
             );
             $read->execute([$stateHash]);
             $row = $read->fetch(PDO::FETCH_ASSOC);
-            $pdo->commit();
+            if ($own) $pdo->commit();
             if ($row === false) {
                 return null;
             }
@@ -116,7 +97,7 @@ final class KbPlusOAuthRepository
             $row['user_id'] = (int) $row['user_id'];
             return $row;
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) {
+            if ($own && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             throw $e;
@@ -172,6 +153,18 @@ final class KbPlusOAuthRepository
         $stmt->execute([$stateHash, $supplierId, $userId]);
         $value = $stmt->fetchColumn();
         return $value === false ? null : (int) $value;
+    }
+
+    /** Aktuálně uložený přístup napojení (ciphertext); null, když napojení přístup nemá. */
+    public function connectionCredential(int $supplierId, int $connectionId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT token_ciphertext FROM bank_connections
+              WHERE supplier_id = ? AND id = ? AND provider = 'kb_plus' AND token_ciphertext IS NOT NULL"
+        );
+        $stmt->execute([$supplierId, $connectionId]);
+        $value = $stmt->fetchColumn();
+        return $value === false ? null : (string) $value;
     }
 
     public function replaceConnectionCredential(

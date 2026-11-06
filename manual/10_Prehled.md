@@ -210,6 +210,7 @@ Widget úplně nahoře na Přehledu (nad KPI dlaždicemi) je průběžně sklád
 | Souhrnné hlášení za uplynulý měsíc | Termín SH | [Souhrnné hlášení](44_Souhrnne_hlaseni.md) |
 | Kontaktuj neaktivní klienty | Klienti bez aktivity delší dobu (riziko odchodu) | [Zisk](11_Zisk.md) |
 | **Odešli měsíční hlášení** | Připravené měsíční hlášení (JMHZ) čeká na odeslání na ČSSZ, viz [§ 10.10.6.3](#101063-odesli-mesicni-hlaseni) | [Podání a hlášení](85_Podani_a_hlaseni.md) |
+| Nainstalujte MyÚčto na plochu telefonu | Jen na mobilu a jen když aplikace neběží z plochy. V Chrome nebo Edge na Androidu stačí klepnout na **Nainstalovat**, na iPhonu a iPadu klepněte v prohlížeči na **Sdílet** a zvolte **Přidat na plochu** | - |
 
 Každá položka má menu se skrytím (na den, týden, natrvalo, nebo jen pro historická data). Po skrytí se dole objeví odkaz **Obnovit skrytá (N)**.
 
@@ -262,6 +263,8 @@ Na desktopu má aplikace dvě stálé lišty:
 
 Máte-li víc firem, hledání (**Alt+Q**) i paleta příkazů (**Ctrl+K**) nabízí ve skupině **Přepnout firmu** i firmy podle názvu nebo IČ. Aktuální firma se nenabízí.
 
+Hledání (**Alt+Q**) najde také zaměstnance podle jména, příjmení nebo osobního čísla, a to ve všech firmách, kde smíte číst mzdy. U zaměstnance z jiné firmy je uveden její název; jeho volbou se firma přepne a otevře se karta osoby.
+
 Otevřete-li odkaz na doklad jiné firmy (vydaná či přijatá faktura, zápis v deníku, pokladní doklad, ostatní položka, bankovní výpis, dokument, skladový doklad nebo objednávka) a máte do té firmy přístup, aplikace na ni přepne sama a doklad otevře. Do firmy, ke které přístup nemáte, se nepřepíná a doklad se nezobrazí.
 
 Pokud v sekci **Systém** zůstane pouze **Nápověda (manuál)**, horní menu tuto sekci nezobrazuje. Nápověda je dál dostupná přes kontextovou ikonu.
@@ -281,13 +284,13 @@ Na menší obrazovce lze tlačítkem **Menu vlevo** ve spodní liště nahradit 
 | **Prodej** | Vydané a pravidelné faktury, klienti, zakázky, AI import, export a import |
 | **Nákup** | Přijaté faktury, Příchozí doklady, AI import, dodavatelé, platební příkazy, drobný majetek, export a import |
 | **Peníze** | Bankovní účty a Pokladna |
-| **Dokumenty** | Dokumenty a Kniha jízd |
+| **Dokumenty** | Dokumenty, Chybějící doklady a Kniha jízd |
 | **Sklad** | Skladové karty, příjemky a výdejky, E-shop, inventury a sestavy |
 | **Daně** | Daňové výkazy, Daňový optimalizátor a samostatný **Hromadný export** |
-| **Účetnictví** | **Přehled firem**, Účetní deník, Automat, K doúčtování, účetní výkazy, kontroly, mzdy a majetek |
+| **Účetnictví** | Účetní deník, Automat, K doúčtování, účetní výkazy, kontroly, mzdy a majetek |
 | **Nástroje** | Šablony, Účtový rozvrh, Zápočty, Aktivace a doúčtování, Inventarizace účtů, výkazy kapitálu, Spojené osoby, Uzávěrka, Účetní nastavení a jako poslední **EPO podání a archív** |
-| **Firma** | Nastavení firmy, integrace, AI nastavení, branding, kategorie, API tokeny a Chybějící doklady |
-| **Systém** | Sazby a číselníky, samostatné **Daňové konstanty**, dodavatelé, uživatelé, role, e-maily, log, plánované úlohy, aktualizace a licenční položky |
+| **Firma** | Nastavení firmy, integrace, AI nastavení, branding, kategorie a API tokeny |
+| **Systém** | **Přehled firem** (jen s přístupem k více firmám), Sazby a číselníky, samostatné **Daňové konstanty**, dodavatelé, uživatelé, role, e-maily, log, plánované úlohy, aktualizace a licenční položky |
 
 ### 10.10.10 Více panelů pracovního prostoru
 
@@ -301,11 +304,17 @@ Zvýšení počtu panelů zachová jejich otevřený obsah, přidá nový prázd
 
 Všechna tlačítka **+** v menu a rychlé přidání v horní liště otevřou nové čisté okno v aktivním panelu, i když už máte stejný formulář rozepsaný. Stejně fungují klávesové zkratky pro vytvoření a rychlé akce v paletě příkazů. Původní rozepsané okno zůstane dostupné v přepínači **Okna**.
 
-Přepínač **Okna** najdete vlevo od volby rozložení, na mobilu ve spodní liště vedle přepínače světlého a tmavého režimu. Ukazuje nejvýše 20 oken podle posledního použití, jejich názvy, firmu a případné číslo panelu. U vydaných a přijatých faktur uvádí také číslo dokladu a zákazníka nebo dodavatele; u klientských karet jejich název. Domovská obrazovka má označení **Homepage**. Okno lze vyhledat podle těchto údajů, vybrat šipkami a potvrdit klávesou **Enter**; **Esc** přepínač zavře. Výchozí zkratky jsou **Alt+W** pro přepínač, **Alt+PageUp** pro předchozí okno v historii, **Alt+PageDown** pro další a **Alt+Shift+W** pro střídání posledních dvou oken. Fungují také při psaní do formuláře a lze je změnit v **Klávesových zkratkách**. Na macOS se místo Alt používá Option.
+Přepínač **Okna** najdete vlevo od volby rozložení, na mobilu ve spodní liště vedle přepínače světlého a tmavého režimu. Ukazuje nejvýše 20 oken podle posledního použití, jejich názvy, firmu a případné číslo panelu. U vydaných a přijatých faktur uvádí také číslo dokladu a zákazníka nebo dodavatele; u klientských karet jejich název. Domovská obrazovka má označení **Homepage**. Okno, které je právě vidět v aktivním panelu, má zelené číslo a štítek **Právě otevřené**. Okno lze vyhledat podle těchto údajů, vybrat šipkami a potvrdit klávesou **Enter**; **Esc** přepínač zavře. Křížek u okna nebo klávesa **Delete** okno zavře i s rozpracovaným obsahem. Ikona obnovy vlevo od přepínače znovu načte jen okno v aktivním panelu s výchozími daty, ostatní okna zůstanou beze změny. Výchozí zkratky jsou **Alt+W** pro přepínač, **Alt+PageUp** pro předchozí okno v historii, **Alt+PageDown** pro další, **Alt+Shift+W** pro střídání posledních dvou oken a **Alt+Shift+R** pro obnovu aktivního okna. Fungují také při psaní do formuláře a lze je změnit v **Klávesových zkratkách**. Na macOS se místo Alt používá Option.
 
-Při otevření šestnáctého okna aplikace požádá o potvrzení zavření nejstaršího skrytého okna. Odmítnutím zachováte všechna rozpracovaná data. Obsah oken se uchovává pouze v paměti této záložky. Obnovení stránky, zavření záložky nebo odhlášení jej vymaže; po obnovení se otevře jeden panel na adrese prvního panelu. Okna nenahrazují ukládání dokladů.
+Ikona hvězdičky **Oblíbené** vlevo od obnovy okna otevře seznam oblíbených stránek (výchozí zkratka **Alt+Shift+F**). Tlačítkem **Přidat aktuální stránku** si uložíte stránku, na které právě jste; vyplněná hvězdička znamená, že už v oblíbených je, a dalším kliknutím ji odeberete. Každá položka si pamatuje firmu, ve které jste ji uložili. Kliknutí ji otevře v této firmě, **Shift**+kliknutí ve firmě, kterou máte právě vybranou (u detailu konkrétního dokladu se pak otevře jeho seznam). Položku lze přejmenovat (**F2**) nebo odebrat (**Delete**). Oblíbené se ukládají k vašemu účtu, takže je uvidíte na každém zařízení; uložit jich jde nejvýše 50.
+
+Uložíte-li nebo odešlete-li něco v jednom okně, ostatní okna stejné firmy se při návratu do nich sama obnoví. Týká se to přehledů, ve kterých by jinak zůstal starý stav: Přehled, vydané a přijaté faktury, klienti, banka, Datová schránka a Mzdová podání (Měsíc, K odeslání, Odesláno a přehledy agend). Například JMHZ odeslané datovou schránkou ze Mzdových podání se po přepnutí do okna Datové schránky objeví v Odchozích podáních bez obnovení stránky. Obsah zůstává vidět a jen se přepíše novými údaji. Otevřený dialog, rozepsaný formulář nebo probíhající odesílání se nepřepisují; obnova proběhne, až je zavřete nebo dokončíte.
+
+Najednou může být otevřeno nejvýše 20 oken. Při otevření dvacátého prvního okna aplikace bez dotazu zavře nejstarší skryté okno i s jeho rozpracovaným obsahem. Jsou-li všechna okna zobrazená v panelech, nové okno se neotevře. Obsah oken se uchovává pouze v paměti této záložky. Obnovení stránky, zavření záložky nebo odhlášení jej vymaže; po obnovení se otevře jeden panel na adrese prvního panelu. Okna nenahrazují ukládání dokladů.
 
 Každé okno si pamatuje vlastní firmu. Výběr okna jiné firmy automaticky přepne aktivní firmu; rozpracovaná okna předchozí firmy zůstanou v přepínači. Zobrazované panely patří vždy aktivní firmě. Ruční přepnutí firmy obnoví její poslední otevřené okno, případně Homepage, pokud ještě žádné nemá. Prakticky lze například ponechat seznam přijatých faktur v prvním panelu, otevřít detail dokladu ve druhém a účetní deník ve třetím. **Ctrl+klik** na interní odkaz uvnitř panelu jej otevře v prvním prázdném panelu napravo a tento panel aktivuje. Po zaplnění všech panelů napravo se další odkaz otevře v bezprostředním panelu **+1**. Ctrl+klik v posledním panelu, Cmd+klik a prostřední tlačítko myši zachovávají běžné otevření nové záložky prohlížeče.
+
+Externí webové odkazy bez výslovně nastaveného cíle se běžným kliknutím otevírají v nové kartě prohlížeče. Objednávka doplňku, web podpory nebo externí dokumentace tak zůstávají mimo pracovní panel a rozpracovaná stránka MyÚčta se zachová.
 
 **Shift+klik** na interní odkaz nebo navigovatelný řádek otevře cíl v bezprostředním
 panelu napravo a aktivuje jej. Funguje také na odkazy v hlavním menu; jejich cílový

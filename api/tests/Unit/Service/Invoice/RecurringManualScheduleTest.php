@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Invoice;
 
+use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\RecurringTemplateRepository;
+use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RecurringInvoiceGenerator;
 use MyInvoice\Service\Invoice\RecurringPriceListService;
 use MyInvoice\Service\Oss\OssItemDeriver;
@@ -40,7 +42,12 @@ final class RecurringManualScheduleTest extends TestCase
     public function testManualGeneration(bool $advance, bool $draft, string $issueDate, string $next, ?string $end, string $status, bool $stockFailure = false): void
     {
         // Výhradně syntetická in-memory databáze; žádné připojení k aplikační DB.
-        $pdo = new PDO('sqlite::memory:');
+        $pdo = new class('sqlite::memory:') extends PDO {
+            public function prepare(string $query, array $options = []): \PDOStatement|false
+            {
+                return parent::prepare(str_replace(' FOR UPDATE', '', $query), $options);
+            }
+        };
         $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $columns = 'invoice_type, client_id, project_id, supplier_id, branding_profile_id, issue_date, tax_date, due_date, currency_id, reverse_charge, prices_include_vat, language, note_above_items, note_below_items, payment_method, discount_percent, recurring_template_id, revenue_category_id, payment_variable_symbol, rounding_mode, status, created_by';
         $pdo->exec('CREATE TABLE invoices (id INTEGER PRIMARY KEY, ' . $columns . ')');
@@ -52,8 +59,15 @@ final class RecurringManualScheduleTest extends TestCase
         $pdo->exec('CREATE TABLE vat_rates (id INTEGER PRIMARY KEY, code TEXT, label_cs TEXT, valid_from TEXT, valid_to TEXT)');
         $pdo->exec("INSERT INTO vat_rates VALUES (1, 'TEST', 'Test', '2000-01-01', NULL)");
         // Dimenze šablony se kopírují na vygenerovanou fakturu (F1).
-        $pdo->exec('CREATE TABLE document_dimensions (supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, item_no INTEGER, dimension_type_id INTEGER, dimension_value_id INTEGER)');
-        $pdo->exec('CREATE TABLE document_dimension_splits (supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, item_no INTEGER, dimension_type_id INTEGER, dimension_value_id INTEGER, share REAL)');
+        $pdo->exec("CREATE TABLE document_dimensions (supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, item_no INTEGER, dimension_type_id INTEGER, dimension_value_id INTEGER, assignment_origin TEXT DEFAULT 'unknown', assignment_origin_ref TEXT)");
+        $pdo->exec("CREATE TABLE document_dimension_splits (supplier_id INTEGER, doc_type TEXT, doc_id INTEGER, item_no INTEGER, dimension_type_id INTEGER, dimension_value_id INTEGER, share REAL, assignment_origin TEXT DEFAULT 'unknown', assignment_origin_ref TEXT)");
+        $pdo->exec('CREATE TABLE accounting_periods (id INTEGER PRIMARY KEY, supplier_id INTEGER, starts_on TEXT, status TEXT)');
+        $pdo->exec('CREATE TABLE journal_entries (id INTEGER PRIMARY KEY, supplier_id INTEGER, source_type TEXT, source_id INTEGER)');
+        $pdo->exec('CREATE TABLE supplier_accounting_frameworks (id INTEGER PRIMARY KEY, supplier_id INTEGER, effective_from TEXT, accounting_framework TEXT)');
+        $pdo->exec('CREATE TABLE dimension_types (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
+        $pdo->exec('CREATE TABLE dimension_values (id INTEGER PRIMARY KEY, supplier_id INTEGER, type_id INTEGER)');
+        $pdo->exec('CREATE TABLE property_objects (id INTEGER PRIMARY KEY, supplier_id INTEGER)');
+        $pdo->exec('CREATE TABLE unit_charges (id INTEGER PRIMARY KEY, supplier_id INTEGER, journal_entry_id INTEGER, reversal_entry_id INTEGER)');
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
         $items = [['description' => 'Test service', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => 121, 'vat_rate_id' => 1, 'order_index' => 0]];
@@ -89,6 +103,10 @@ final class RecurringManualScheduleTest extends TestCase
             $issueAndSend->method('run')->willThrowException(new StockException('insufficient_stock', 'Test stock shortage'));
             $repo->expects(self::once())->method('setLastError');
         }
+        // Finální platební službu sestaví DI; případný přístup k DB zůstává v lokálním SQLite.
+        $services = Bootstrap::buildContainer();
+        $services->set(Connection::class, $db);
+        $payments = $services->get(InvoicePaymentService::class);
         $reflection = new \ReflectionClass(RecurringInvoiceGenerator::class);
         $args = [];
         foreach ($reflection->getConstructor()->getParameters() as $parameter) {
@@ -97,6 +115,7 @@ final class RecurringManualScheduleTest extends TestCase
                 OssItemDeriver::class => $oss,
                 AutoIssueAndSendService::class => $issueAndSend,
                 Connection::class => $db,
+                InvoicePaymentService::class => $payments,
                 RecurringTemplateRepository::class => $repo,
                 InvoiceRepository::class => $invoices,
                 RecurringPriceListService::class => $priceList,

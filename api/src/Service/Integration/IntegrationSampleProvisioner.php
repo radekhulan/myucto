@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Integration;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Demo\DemoMode;
 
 /**
  * Každá firma má předem připravené ukázkové napojení (Koncept, bez secretu
@@ -21,11 +22,16 @@ final class IntegrationSampleProvisioner
     public function __construct(
         private readonly Connection $db,
         private readonly IntegrationConnectionService $connections,
+        private readonly DemoMode $demo,
     ) {}
 
     /** @return bool true, pokud ukázku právě založil */
     public function ensure(int $supplierId, ?int $createdBy = null): bool
     {
+        // Ukázka je jen ke čtení: otevřením seznamu se napojení ani značka nezakládá.
+        if ($this->demo->enabled()) {
+            return false;
+        }
         $pdo = $this->db->pdo();
         if ($pdo->inTransaction()) {
             throw new \LogicException('Ukázkové napojení se zakládá v samostatné transakci.');

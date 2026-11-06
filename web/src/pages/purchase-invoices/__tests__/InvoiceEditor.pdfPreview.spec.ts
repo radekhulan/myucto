@@ -18,6 +18,12 @@ vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
 }))
 
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }),
 }))
@@ -127,6 +133,7 @@ vi.mock('@/stores/supplier', () => ({
 }))
 
 import InvoiceEditor from '@/pages/purchase-invoices/InvoiceEditor.vue'
+import { stubSplitWidth } from '@/components/documents/__tests__/previewSplitTestUtils'
 
 function makeInvoice(overrides: Partial<PurchaseInvoice> = {}): PurchaseInvoice {
   return {
@@ -237,17 +244,11 @@ const stubs = {
   EmptyState: true,
 }
 
-function stubViewport(matches: boolean): void {
-  vi.stubGlobal('matchMedia', vi.fn().mockReturnValue({
-    matches,
-    media: '',
-    onchange: null,
-    addEventListener: vi.fn(),
-    removeEventListener: vi.fn(),
-    addListener: vi.fn(),
-    removeListener: vi.fn(),
-    dispatchEvent: vi.fn(),
-  }))
+const SPLITTER = '[data-test="document-preview-splitter"]'
+
+function stubViewport(fits: boolean): void {
+  vi.restoreAllMocks()
+  stubSplitWidth(fits ? 976 : 700)
 }
 
 describe('InvoiceEditor.vue — výchozí stav PDF náhledu (FR5)', () => {
@@ -255,9 +256,11 @@ describe('InvoiceEditor.vue — výchozí stav PDF náhledu (FR5)', () => {
     m.get.mockReset()
     m.expenseSuggestions.mockReset()
     m.expenseSuggestions.mockResolvedValue({ items: {} })
+    stubSplitWidth(976)
   })
 
   afterEach(() => {
+    vi.restoreAllMocks()
     vi.unstubAllGlobals()
   })
 
@@ -307,9 +310,9 @@ describe('InvoiceEditor.vue — výchozí stav PDF náhledu (FR5)', () => {
     const wrapper = mount(InvoiceEditor, { global: { stubs } })
     await flushPromises()
 
-    const side = wrapper.get('[data-test="document-side-preview"]')
+    expect(wrapper.find(SPLITTER).exists()).toBe(true)
     expect(wrapper.findAll('iframe')).toHaveLength(1)
-    expect(side.find('iframe').exists()).toBe(true)
+    expect(wrapper.find('[data-side-preview] iframe').exists()).toBe(true)
   })
 
   it('na užší obrazovce ponechá otevřený náhled pod formulářem', async () => {
@@ -318,7 +321,7 @@ describe('InvoiceEditor.vue — výchozí stav PDF náhledu (FR5)', () => {
     const wrapper = mount(InvoiceEditor, { global: { stubs } })
     await flushPromises()
 
-    expect(wrapper.find('[data-test="document-side-preview"]').exists()).toBe(false)
+    expect(wrapper.find(SPLITTER).exists()).toBe(false)
     expect(wrapper.findAll('iframe')).toHaveLength(1)
   })
 

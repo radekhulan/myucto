@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isCzechVatGroup } from '@/utils/vatGroup'
 import { ref, reactive, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter, type LocationQuery } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -9,8 +10,13 @@ import {
   type SupplierDirectoryItem,
   type SupplierDirectoryParams,
   type SupplierDirectorySort,
+  type SupplierCarryOverPreview,
+  type SupplierCarryOverResult,
 } from '@/api/suppliers'
 import { clientsApi } from '@/api/clients'
+import { authApi } from '@/api/auth'
+import { apiErrorMessage } from '@/api/errors'
+import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
 import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
@@ -143,6 +149,7 @@ const supplierBank = reactive({ currency: 'CZK', account_number: '', bank_code: 
 const supplierBankLoading = ref(false)
 const supplierBankMessage = ref<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null)
 const supplierBankAccounts = ref<import('@/api/clients').CrpDphAccount[]>([])
+const supplierBankAccountsRequireSelection = ref(false)
 
 function supplierApplyBank(acc: import('@/api/clients').CrpDphAccount) {
   if (acc.iban) {
@@ -164,21 +171,30 @@ async function supplierLookupBank() {
   supplierBankLoading.value = true
   supplierBankMessage.value = null
   supplierBankAccounts.value = []
+  supplierBankAccountsRequireSelection.value = false
   try {
     const r = await clientsApi.lookupBank(dic)
     supplierBankAccounts.value = r.accounts
+    supplierBankAccountsRequireSelection.value = isCzechVatGroup(dic)
     // O plátcovství rozhoduje registr plátců (stejně jako v prvotním setupu);
     // neúspěšné dohledání ho neshazuje.
     if (r.found === true) supplierDraft.is_vat_payer = true
     if (r.accounts.length === 0) {
       supplierBankMessage.value = { type: 'error', text: t('supplier.bank_lookup_none') }
+    } else if (supplierBankAccountsRequireSelection.value) {
+      supplierBankMessage.value = { type: 'warning', text: t('supplier.bank_lookup_group') }
     } else {
       supplierApplyBank(r.accounts[0])
       supplierBankMessage.value = r.accounts.length === 1
         ? { type: 'success', text: t('supplier.bank_lookup_one') }
         : { type: 'success', text: t('supplier.bank_lookup_many', { n: r.accounts.length }) }
     }
-    if (r.unreliable === true) supplierBankMessage.value = { type: 'warning', text: t('supplier.bank_lookup_unreliable') }
+    if (r.unreliable === true) {
+      supplierBankMessage.value = { type: 'warning', text: [
+        supplierBankAccountsRequireSelection.value && r.accounts.length > 0 ? t('supplier.bank_lookup_group') : '',
+        t('supplier.bank_lookup_unreliable'),
+      ].filter(Boolean).join(' ') }
+    }
   } catch (e: any) {
     supplierBankMessage.value = { type: 'error', text: e?.response?.data?.error?.message || t('supplier.bank_lookup_failed') }
   } finally {
@@ -196,8 +212,126 @@ function newSupplier() {
   Object.assign(supplierBank, { currency: 'CZK', account_number: '', bank_code: '', bank_name: '', iban: '', bic: '' })
   supplierBankMessage.value = null
   supplierBankAccounts.value = []
+  supplierBankAccountsRequireSelection.value = false
   supplierAresMessage.value = null
   supplierCreateOpen.value = true
+  void loadCarryOver()
+}
+
+// ─── Převzetí AI klíče a certifikátu ze stávajících firem ──────────────────
+// Server nabídne jen to, co je ve všech firmách uživatele stejné. Výchozí volba
+// je převzít vše nabídnuté; certifikát chce stejné ověření jako jeho sdílení
+// v Elektronických podpisech (passkey, nebo heslo + případně TOTP).
+const carryOver = ref<SupplierCarryOverPreview | null>(null)
+const carryOverAi = ref(false)
+const carryOverCertificateIds = ref<number[]>([])
+const carryOverStepPassword = ref('')
+const carryOverStepTotp = ref('')
+const carryOverStepPasskeyToken = ref('')
+const carryOverPasskeyBusy = ref(false)
+const passkeySupported = isWebAuthnAvailable()
+let carryOverRun = 0
+
+const hasPasskey = computed(() =>
+  auth.user?.mfa_methods?.includes('passkey') === true
+  || (auth.user?.passkey_count ?? 0) > 0,
+)
+const hasTotp = computed(() => auth.user?.totp_enabled === true)
+
+const carryOverOffered = computed(() =>
+  carryOver.value !== null
+  && (carryOver.value.ai.available || carryOver.value.ai.reason === 'different' || carryOver.value.certificates.length > 0),
+)
+const carryOverNeedsStepUp = computed(() => carryOverCertificateIds.value.length > 0)
+
+/** Prázdný řetězec = ověření je kompletní; jinak text, co ještě chybí. */
+const carryOverStepUpMissing = computed(() => {
+  if (!carryOverNeedsStepUp.value || carryOverStepPasskeyToken.value) return ''
+  if (!carryOverStepPassword.value) return t('settings.certificate_vault_step_up_password_missing')
+  if (hasTotp.value && !/^\d{6}$/.test(carryOverStepTotp.value.trim())) {
+    return t('settings.certificate_vault_step_up_totp_missing')
+  }
+  return ''
+})
+
+function resetCarryOver() {
+  carryOver.value = null
+  carryOverAi.value = false
+  carryOverCertificateIds.value = []
+  carryOverStepPassword.value = ''
+  carryOverStepTotp.value = ''
+  carryOverStepPasskeyToken.value = ''
+}
+
+async function loadCarryOver() {
+  const run = ++carryOverRun
+  resetCarryOver()
+  try {
+    const preview = await suppliersApi.carryOverPreview()
+    if (run !== carryOverRun) return
+    carryOver.value = preview
+    carryOverAi.value = preview.ai.available
+    carryOverCertificateIds.value = preview.certificates.map(c => c.id)
+  } catch {
+    // Náhled je jen nabídka navíc: bez něj se firma založí jako dřív.
+    if (run === carryOverRun) carryOver.value = null
+  }
+}
+
+function carryOverProviderLabel(provider: string | null): string {
+  return provider ? t(`aiGateway.provider.${provider}`) : ''
+}
+
+async function verifyCarryOverPasskey() {
+  if (!passkeySupported) return
+  carryOverPasskeyBusy.value = true
+  try {
+    const flow = await authApi.passkeyStepUpOptions('epo.certificate')
+    const credential = await getCredential(flow.public_key)
+    carryOverStepPasskeyToken.value = await authApi.passkeyStepUpVerify(flow.flow_token, 'epo.certificate', credential)
+  } catch (e: any) {
+    toast.error(apiErrorMessage(e, t('settings.certificate_vault_passkey_failed')))
+  } finally {
+    carryOverPasskeyBusy.value = false
+  }
+}
+
+function carryOverPayload(): SupplierCreatePayload['carry_over'] {
+  if (carryOver.value === null || (!carryOverAi.value && carryOverCertificateIds.value.length === 0)) return undefined
+  return {
+    ai: carryOverAi.value,
+    certificate_ids: [...carryOverCertificateIds.value],
+    step_up: carryOverNeedsStepUp.value
+      ? {
+          password: carryOverStepPassword.value || undefined,
+          totp_code: carryOverStepTotp.value.trim() || undefined,
+          step_up_token: carryOverStepPasskeyToken.value || undefined,
+        }
+      : undefined,
+  }
+}
+
+function reportCarryOver(result: SupplierCarryOverResult | undefined) {
+  if (!result) return
+  const failures: string[] = []
+  let carried = 0
+  if (result.ai) {
+    if (result.ai.ok) carried++
+    else failures.push(t('supplier.carry_over.failed_ai', { reason: t(`supplier.carry_over.error.${result.ai.error ?? 'failed'}`) }))
+  }
+  for (const row of result.certificates) {
+    if (row.ok) {
+      carried++
+      continue
+    }
+    const label = carryOver.value?.certificates.find(c => c.id === row.id)?.label ?? `#${row.id}`
+    failures.push(t('supplier.carry_over.failed_certificate', {
+      label,
+      reason: t(`supplier.carry_over.error.${row.error ?? 'failed'}`),
+    }))
+  }
+  if (carried > 0) toast.success(t('supplier.carry_over.done', { n: carried }))
+  for (const message of failures) toast.warning(message)
 }
 
 async function supplierLookupAres() {
@@ -242,8 +376,12 @@ async function saveSupplier() {
     toast.error(t('common.error'))
     return
   }
+  if (carryOverStepUpMissing.value !== '') {
+    toast.error(carryOverStepUpMissing.value)
+    return
+  }
   try {
-    const payload = { ...supplierDraft }
+    const payload: SupplierCreatePayload = { ...supplierDraft }
     if (!payload.is_vat_payer) delete payload.vat_period
     if (supplierBank.account_number || supplierBank.iban) {
       payload.bank_account = {
@@ -255,12 +393,18 @@ async function saveSupplier() {
         bic: supplierBank.bic || undefined,
       }
     }
-    await suppliersApi.create(payload)
+    const carry = carryOverPayload()
+    if (carry) payload.carry_over = carry
+    const created = await suppliersApi.create(payload)
     supplierCreateOpen.value = false
     toast.success(t('common.saved'))
+    reportCarryOver(created.carry_over_result)
+    resetCarryOver()
     await loadSuppliers()
     await auth.refresh()
   } catch (e: any) {
+    // Passkey proof je jednorázový; po odeslání se zahazuje i při chybě.
+    carryOverStepPasskeyToken.value = ''
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   }
 }
@@ -536,7 +680,7 @@ async function switchSupplier(id: number) {
                 }">
                 {{ supplierBankMessage.text }}
               </div>
-              <div v-if="supplierBankAccounts.length > 1" class="mb-2 flex flex-wrap gap-1.5">
+              <div v-if="supplierBankAccounts.length > 1 || (supplierBankAccountsRequireSelection && supplierBankAccounts.length > 0)" class="mb-2 flex flex-wrap gap-1.5">
                 <button v-for="(acc, i) in supplierBankAccounts" :key="i" type="button" @click="supplierApplyBank(acc)"
                   class="cursor-pointer px-2 py-1 text-xs font-mono border border-neutral-300 rounded hover:bg-primary-50 hover:border-primary-300">
                   {{ acc.display }}
@@ -568,12 +712,78 @@ async function switchSupplier(id: number) {
                 </template>
               </div>
             </div>
+
+            <div v-if="carryOver && carryOverOffered" class="border-t border-neutral-200 pt-3" data-testid="supplier-carry-over">
+              <h4 class="text-xs font-medium text-neutral-700">{{ t('supplier.carry_over.title') }}</h4>
+              <p class="text-xs text-neutral-500 mt-0.5 mb-2">{{ t('supplier.carry_over.hint') }}</p>
+              <div class="space-y-2">
+                <label v-if="carryOver.ai.available" class="flex items-start gap-2 text-sm cursor-pointer">
+                  <input v-model="carryOverAi" type="checkbox" data-testid="carry-over-ai"
+                    class="mt-0.5 h-4 w-4 accent-primary-600" />
+                  <span>
+                    <span class="block text-neutral-800">{{ t('supplier.carry_over.ai', {
+                      provider: carryOverProviderLabel(carryOver.ai.provider), n: carryOver.ai.companies_count,
+                    }, carryOver.ai.companies_count) }}</span>
+                    <span class="block text-xs text-neutral-500">{{ carryOver.ai.companies.join(', ') }}</span>
+                  </span>
+                </label>
+                <p v-else-if="carryOver.ai.reason === 'different'" class="text-xs text-neutral-500" data-testid="carry-over-ai-different">
+                  {{ t('supplier.carry_over.ai_different') }}
+                </p>
+                <label v-for="certificate in carryOver.certificates" :key="certificate.id"
+                  class="flex items-start gap-2 text-sm cursor-pointer">
+                  <input v-model="carryOverCertificateIds" type="checkbox" :value="certificate.id"
+                    :data-testid="`carry-over-certificate-${certificate.id}`"
+                    class="mt-0.5 h-4 w-4 accent-primary-600" />
+                  <span>
+                    <span class="block text-neutral-800">{{ t('supplier.carry_over.certificate', {
+                      label: certificate.label, date: formatDate(certificate.valid_to), n: certificate.companies_count,
+                    }, certificate.companies_count) }}</span>
+                    <span v-if="certificate.subject && certificate.subject !== certificate.label" class="block text-xs text-neutral-500">{{ certificate.subject }}</span>
+                  </span>
+                </label>
+              </div>
+
+              <div v-if="carryOverNeedsStepUp" class="mt-3 grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-3"
+                data-testid="carry-over-step-up">
+                <div v-if="hasPasskey" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+                  <div v-if="carryOverStepPasskeyToken" class="text-sm font-medium text-success-600">
+                    ✓ {{ t('settings.certificate_vault_passkey_verified') }}
+                  </div>
+                  <template v-else-if="passkeySupported">
+                    <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']"
+                      :disabled="carryOverPasskeyBusy" @click="verifyCarryOverPasskey">
+                      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+                      {{ carryOverPasskeyBusy ? t('common.loading') : t('settings.certificate_vault_verify_passkey') }}
+                    </button>
+                    <span class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
+                  </template>
+                  <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
+                </div>
+                <template v-if="!carryOverStepPasskeyToken">
+                  <label class="text-xs text-neutral-600">
+                    {{ t('settings.certificate_vault_step_up_password') }}
+                    <input v-model="carryOverStepPassword" type="password" autocomplete="current-password"
+                      data-testid="carry-over-step-password"
+                      class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
+                  </label>
+                  <label class="text-xs text-neutral-600">
+                    {{ t('settings.certificate_vault_step_up_totp') }}
+                    <input v-model="carryOverStepTotp" type="text" inputmode="numeric" maxlength="6"
+                      autocomplete="one-time-code"
+                      class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
+                  </label>
+                </template>
+                <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('supplier.carry_over.step_up_hint') }}</p>
+                <p v-if="carryOverStepUpMissing" class="sm:col-span-2 text-xs text-warning-700">{{ carryOverStepUpMissing }}</p>
+              </div>
+            </div>
           </div>
-          <div class="flex justify-end gap-2 pt-4 mt-3 border-t border-neutral-200">
-            <button type="button" @click="supplierCreateOpen = false" :class="btnOutline('neutral')">
+          <div class="flex flex-wrap justify-end gap-2 pt-4 mt-3 border-t border-neutral-200">
+            <button type="button" @click="supplierCreateOpen = false" :class="[btnOutline('neutral'), 'whitespace-nowrap']">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}</button>
-            <button type="submit" :class="btnFilled('primary')">
+            <button type="submit" :class="[btnFilled('primary'), 'whitespace-nowrap']" data-testid="supplier-create-submit">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ t('common.create') }}</button>
           </div>

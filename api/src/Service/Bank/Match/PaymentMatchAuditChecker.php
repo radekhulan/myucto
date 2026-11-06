@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Bank\Match;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
 /**
@@ -111,7 +112,7 @@ final class PaymentMatchAuditChecker
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.id AS tx_id, bt.posted_at AS tx_date, bt.amount AS tx_amount_raw,
                     bt.currency AS tx_currency, bs.currency AS stmt_currency,
-                    bt.counterparty_name AS counterparty_name,
+                    bt.counterparty_name AS counterparty_name, bt.card_last4 AS card_last4,
                     i.id AS doc_id, i.varsymbol AS doc_no, i.exchange_rate AS doc_rate,
                     i.amount_to_pay AS doc_amount_to_pay, i.status AS doc_status,
                     cur.code AS doc_currency, cl.company_name AS partner_name,
@@ -119,7 +120,8 @@ final class PaymentMatchAuditChecker
                     (SELECT SUM(ip2.amount) FROM invoice_payments ip2
                       WHERE ip2.invoice_id = i.id AND ip2.bank_transaction_id = bt.id) AS allocated_amount,
                     (SELECT COUNT(DISTINCT ip3.invoice_id) FROM invoice_payments ip3
-                      WHERE ip3.bank_transaction_id = bt.id) AS tx_invoice_count
+                      WHERE ip3.bank_transaction_id = bt.id) AS tx_invoice_count,
+                    " . TakenOverRecord::liveBankEntrySql('i.supplier_id', 'bt.id') . " AS taken_over
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
                JOIN invoices i ON i.id = bt.matched_invoice_id
@@ -153,12 +155,13 @@ final class PaymentMatchAuditChecker
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.id AS tx_id, bt.posted_at AS tx_date, pm.amount AS tx_amount_raw,
                     bt.currency AS tx_currency, bs.currency AS stmt_currency,
-                    bt.counterparty_name AS counterparty_name,
+                    bt.counterparty_name AS counterparty_name, bt.card_last4 AS card_last4,
                     pi.id AS doc_id,
                     COALESCE(NULLIF(pi.vendor_invoice_number, ''), pi.varsymbol) AS doc_no,
                     pi.exchange_rate AS doc_rate, pi.amount_to_pay AS doc_amount_to_pay,
                     pi.status AS doc_status, cur.code AS doc_currency, cl.company_name AS partner_name,
-                    (SELECT COUNT(*) FROM payment_matches pm2 WHERE pm2.purchase_invoice_id = pi.id) AS payment_count
+                    (SELECT COUNT(*) FROM payment_matches pm2 WHERE pm2.purchase_invoice_id = pi.id) AS payment_count,
+                    " . TakenOverRecord::liveBankEntrySql('pi.supplier_id', 'bt.id') . " AS taken_over
                FROM payment_matches pm
                JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id
                JOIN bank_statements bs ON bs.id = bt.statement_id
@@ -196,6 +199,13 @@ final class PaymentMatchAuditChecker
         $docRate = (float) ($row['doc_rate'] ?? 0);
         $docAmountToPay = (float) $row['doc_amount_to_pay'];
         $txId = (int) $row['tx_id'];
+        // Bankovní zápis převzatý z jiného programu: párování, částku i kurzový rozdíl
+        // zaúčtoval zdroj a převod je jen přenesl (rekonciliace převodu je hlídá proti
+        // deníku zdroje). Doklad převzatý v Kč z cizí měny tam nese kurzový rozdíl
+        // a úhrada často jde i jiným kanálem (zápočet, pokladna, před počátečním stavem),
+        // který se v počtu párování neobjeví. Částku ani kurzový rozdíl tu tedy nehlásíme,
+        // měnu a protistranu ano.
+        $takenOver = (bool) ($row['taken_over'] ?? false);
 
         $issues = [];
         $detail = [];
@@ -205,7 +215,11 @@ final class PaymentMatchAuditChecker
         // dokladu). Cizí měna tx na jinou cizí měnu dokladu, nebo cizí měna tx na CZK doklad,
         // konverzní základ nemají → podezřelé.
         $isLegitFxSettlement = $txCurrency === 'CZK' && $docCurrency !== 'CZK';
-        if ($txCurrency !== $docCurrency && !$isLegitFxSettlement) {
+        // Platba kartou: banka do pole protistrany dává sebe nebo popis terminálu, obchodník
+        // tam nikdy není, a měnu účtu převádí sama (EUR účet, faktura v USD). Ani jedna neshoda
+        // nic neznamená. Naměřeno na ostrých datech: 31 z 35 nálezů kontroly.
+        $isCardPayment = trim((string) ($row['card_last4'] ?? '')) !== '';
+        if ($txCurrency !== $docCurrency && !$isLegitFxSettlement && !$isCardPayment) {
             $issues[] = 'currency_mismatch';
             $detail['currency_mismatch'] = ['tx_currency' => $txCurrency, 'doc_currency' => $docCurrency];
             // Odhad dopadu v CZK: nejlepší dostupný přepočet (kurz dokladu, jinak 1:1).
@@ -216,7 +230,7 @@ final class PaymentMatchAuditChecker
         // 2) Částka mimo toleranci — jen pro doklad vypořádaný JEDNÍM párováním (žádné
         // částečné úhrady/přeplatky, ty tu NEflagujeme — legitimní, viz spec).
         $isSingleFullSettlement = (string) $row['doc_status'] === 'paid' && (int) $row['payment_count'] <= 1;
-        if ($isSingleFullSettlement && ($txCurrency === $docCurrency || $isLegitFxSettlement)) {
+        if (!$takenOver && $isSingleFullSettlement && ($txCurrency === $docCurrency || $isLegitFxSettlement)) {
             if ($txCurrency === $docCurrency) {
                 $expected = $docAmountToPay;
                 $tolerance = $docCurrency === 'CZK' ? self::CZK_TOLERANCE : max(self::CZK_TOLERANCE, $expected * self::FX_TOLERANCE_PCT);
@@ -258,7 +272,7 @@ final class PaymentMatchAuditChecker
 
         // 3) Kurzový rozdíl (563/663) zaúčtovaný na bankovním zápisu, kde JAK tx, TAK
         // doklad jsou CZK — konverze tam nemá co dělat, tedy vymyšlený rozdíl (dnešní nález).
-        if ($txCurrency === 'CZK' && $docCurrency === 'CZK') {
+        if (!$takenOver && $txCurrency === 'CZK' && $docCurrency === 'CZK') {
             if ($fxBooked !== null && abs($fxBooked) > 0.005) {
                 $issues[] = 'fx_on_czk_czk';
                 $detail['fx_on_czk_czk'] = ['amount' => round($fxBooked, 2)];
@@ -269,7 +283,8 @@ final class PaymentMatchAuditChecker
         // 4) Protistrana (volitelné, konzervativní) — jen když je counterparty_name k dispozici.
         $counterpartyName = trim((string) ($row['counterparty_name'] ?? ''));
         $partnerName = trim((string) ($row['partner_name'] ?? ''));
-        if ($counterpartyName !== ''
+        if (!$isCardPayment
+            && $counterpartyName !== ''
             && !self::isGenericCounterpartyLabel($counterpartyName)
             && self::namesLikelyDifferent($counterpartyName, $partnerName)
         ) {

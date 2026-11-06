@@ -267,6 +267,10 @@ final readonly class JmhzPreparationSnapshotService
                     $supplierId,
                     $this->employeeIds($input),
                 ),
+                $this->childIdentities->caregiverBirthNumbersFor(
+                    $supplierId,
+                    $this->employeeIds($input),
+                ),
             );
             $snapshotJson = $snapshot->canonicalJson();
             $snapshotFingerprint = $this->sensitiveData->keyedFingerprint(
@@ -599,6 +603,28 @@ final readonly class JmhzPreparationSnapshotService
                 $inputRows = $entry['inputs'] ?? [];
                 if (!is_array($inputRows) || !array_is_list($inputRows)) {
                     continue;
+                }
+                /*
+                 * Chybějící schválený průměr (10345) se dřív ukázal až u zmrazení
+                 * hlášení, tedy po schválení revize. Stejně jako zmrazení ho tu
+                 * nežádáme u měsíce bez příjmu (nulový formulář, viz
+                 * JmhzZeroReportProfile) ani u scénáře, jehož formulář pole nemá;
+                 * jinak průměr patří do snímku vstupů.
+                 */
+                if ($employmentId > 0
+                    && ($entry['average_earning'] ?? null) === null
+                    && !JmhzZeroReportProfile::isMonthWithoutIncome(array_map(
+                        static fn (mixed $row): mixed => is_array($row) ? ($row['amount_minor'] ?? null) : null,
+                        $inputRows,
+                    ))
+                    && $this->builder->averageEarningRequired($entry, substr($periodEnd, 0, 8) . '01')
+                ) {
+                    $issues[] = [
+                        'code' => 'jmhz_average_hourly_earning_missing',
+                        'entity_type' => 'employment',
+                        'entity_id' => $employmentId,
+                        'attribute_ids' => ['10345'],
+                    ];
                 }
                 foreach ($inputRows as $inputRow) {
                     $component = is_array($inputRow) ? ($inputRow['component'] ?? null) : null;

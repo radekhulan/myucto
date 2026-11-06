@@ -89,6 +89,44 @@ final class AbraAccountingImporterTest extends TestCase
         return (int) $stmt->fetchColumn();
     }
 
+    public function test504IntervalInsideImportedYearBlocksBeforeAnyMutation(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '2025-01-01', 'cz_500'), (?, '2025-06-01', 'cz_504'), (?, '2025-09-01', 'cz_500')")
+            ->execute([$this->supplier, $this->supplier, $this->supplier]);
+        $snapshot = $this->snapshot();
+        $snapshot['_meta']['source_oss'] = ['eu' => true, 'valid_from' => '2025-01-01'];
+        $before = $this->frameworkGateState();
+        $report = $this->transfer($snapshot);
+        self::assertSame($before, $this->frameworkGateState(), 'Unsupported framework must not write documents, settings or import maps.');
+        self::assertTrue($report['blocked']);
+        self::assertContains('accounting_framework_import_unsupported', $report['warnings']);
+    }
+
+    public function test500ImportedYearIsIndependentOfLater504Framework(): void
+    {
+        $this->db->pdo()->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '2026-01-01', 'cz_504')")->execute([$this->supplier]);
+        $report = $this->transfer($this->snapshot());
+        self::assertFalse($report['blocked'], json_encode($report));
+        self::assertSame(0, $report['failed']);
+        self::assertSame(3, $this->countRows('journal_entries'));
+        self::assertSame(1, $this->countRows('invoices'));
+    }
+
+    private function frameworkGateState(): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT * FROM supplier WHERE id = ?');
+        $stmt->execute([$this->supplier]);
+        $state = ['supplier' => $stmt->fetch(\PDO::FETCH_ASSOC)];
+        foreach (['accounting_periods', 'chart_of_accounts', 'journal_entries', 'invoices', 'purchase_invoices', 'clients',
+            'bank_statements', 'cash_documents', 'abra_flexi_import_map', 'activity_log'] as $table) {
+            $stmt = $this->db->pdo()->prepare('SELECT * FROM ' . $table . ' WHERE supplier_id = ?');
+            $stmt->execute([$this->supplier]);
+            $state[$table] = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        }
+        return $state;
+    }
+
     public function testPaymentLinkCursorOnlyUsesNumericMappedLinksForSelectedSupplier(): void
     {
         $runs = new AbraImportRepository($this->db);
@@ -1729,10 +1767,10 @@ final class AbraAccountingImporterTest extends TestCase
             FROM stock_item_prices WHERE supplier_id = ? ORDER BY currency_code');
         $price->execute([$this->supplier]);
         self::assertSame([
-            ['currency_code' => 'CZK', 'price_mode' => 'fixed', 'fixed_price' => '100.00', 'computed_price' => '100.00'],
-            ['currency_code' => 'EUR', 'price_mode' => 'fixed', 'fixed_price' => '100.00', 'computed_price' => '100.00'],
-            ['currency_code' => 'GBP', 'price_mode' => 'fixed', 'fixed_price' => '20.00', 'computed_price' => '20.00'],
-            ['currency_code' => 'USD', 'price_mode' => 'fixed', 'fixed_price' => '24.79', 'computed_price' => '24.79'],
+            ['currency_code' => 'CZK', 'price_mode' => 'fixed', 'fixed_price' => '100.000000', 'computed_price' => '100.000000'],
+            ['currency_code' => 'EUR', 'price_mode' => 'fixed', 'fixed_price' => '100.000000', 'computed_price' => '100.000000'],
+            ['currency_code' => 'GBP', 'price_mode' => 'fixed', 'fixed_price' => '20.000000', 'computed_price' => '20.000000'],
+            ['currency_code' => 'USD', 'price_mode' => 'fixed', 'fixed_price' => '24.793388', 'computed_price' => '24.793388'],
         ], $price->fetchAll(\PDO::FETCH_ASSOC));
         $this->db->pdo()->prepare('UPDATE stock_items SET name = "Manually edited" WHERE supplier_id = ?')->execute([$this->supplier]);
         $changed = $this->catalogImporter->importPage($this->supplier, $rows, $cancelled);
@@ -1891,5 +1929,152 @@ final class AbraAccountingImporterTest extends TestCase
         self::assertSame('paid', $target['status']);
         self::assertEquals(121.0, (float) $target['paid_amount_invoice_ccy']);
         self::assertSame('2025-06-03', $target['paid_at']);
+    }
+
+    /**
+     * Závazek bez DPH (zde 518/325) s platbou z banky. Synteticky: 1 000 Kč.
+     *
+     * @param list<array{0:string,1:string,2:string}> $documentEntries [MD, D, částka]
+     */
+    private function payableSnapshot(string $account, array $documentEntries, string $total, bool $paidByBank, array $extra = []): array
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['faktura-vydana'] = [];
+        $snapshot['zavazek'] = [array_replace([
+            'id' => '801', 'kod' => 'SYN-ZAV-1', 'datVyst' => '2025-06-01', 'datUcto' => '2025-06-01', 'datSplat' => '2025-06-15',
+            'mena' => 'code:CZK', 'sumZklCelkem' => $total, 'sumOsv' => $total, 'sumDphCelkem' => '0.00', 'sumCelkem' => $total,
+            'zuctovano' => true, 'nazFirmy' => 'Synthetic lender', 'firma' => ['id' => '8', 'evidencePath' => 'adresar/8'],
+            'stat' => 'code:CZ', 'popis' => 'Synthetic payable', 'primUcet' => 'code:' . $account, 'protiUcet' => 'code:' . $account,
+            'clenDph' => 'code:000P', 'typDokl' => 'code:OST', 'bezPolozek' => true,
+        ], $extra)];
+        $entries = [];
+        foreach ($documentEntries as $index => [$debit, $credit, $amount]) {
+            $entries[] = ['idUcetniDenik' => (string) (11 + $index), 'datUcto' => '2025-06-01', 'mdUcet' => 'code:' . $debit,
+                'dalUcet' => 'code:' . $credit, 'sumTuz' => $amount, 'idDokl@evidencePath' => 'zavazek/801'];
+        }
+        $snapshot['banka'] = $snapshot['vazba'] = [];
+        if ($paidByBank) {
+            $entries[] = ['idUcetniDenik' => '21', 'datUcto' => '2025-06-10', 'mdUcet' => 'code:' . $account,
+                'dalUcet' => 'code:221000', 'sumTuz' => $total, 'idDokl@evidencePath' => 'banka/302'];
+            $snapshot['banka'] = [['id' => '302', 'kod' => 'SYN-B-002', 'datUcto' => '2025-06-10', 'mena' => 'code:CZK',
+                'sumCelkem' => $total, 'typPohybuK' => 'typPohybu.vydej', 'banka' => ['id' => '1', 'evidencePath' => 'bankovni-ucet/1'],
+                'bankaUcet' => '1000000005', 'bankaKod' => '0100']];
+            $snapshot['vazba'] = [['id' => '402', 'a' => ['id' => '801', 'evidencePath' => 'zavazek/801'],
+                'b' => ['id' => '302', 'evidencePath' => 'banka/302'], 'castka' => $total, 'mena' => 'code:CZK']];
+        }
+        $snapshot['ucetni-denik'] = $entries;
+        $snapshot['pohyb-na-uctech'] = array_map(static fn (array $row): array => $row + [
+            'sumTuzMd' => $row['sumTuz'], 'sumTuzDal' => $row['sumTuz'],
+        ], $entries);
+        foreach (['518', '325', '331', '379', '562', '518000', '325000', '331000', '379000', '562000'] as $code) {
+            $snapshot['ucetni-osnova'][] = ['id' => $code, 'kod' => $code, 'nazev' => 'Synthetic account'];
+        }
+        return $snapshot;
+    }
+
+    private function otherItem(): array|false
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT oi.*, (SELECT COALESCE(SUM(a.amount), 0) FROM other_item_allocations a
+                WHERE a.other_item_id = oi.id AND a.reversed_on IS NULL) AS allocated
+            FROM other_items oi WHERE oi.supplier_id = ?');
+        $stmt->execute([$this->supplier]);
+        return $stmt->fetch(\PDO::FETCH_ASSOC);
+    }
+
+    public function testPayableWithoutVatBecomesPostedOtherItemPaidFromBank(): void
+    {
+        $snapshot = $this->payableSnapshot('325000', [['518000', '325000', '1000.00']], '1000.00', true);
+
+        $report = $this->transfer($snapshot);
+
+        self::assertFalse($report['blocked'], json_encode($report));
+        self::assertSame(0, $this->countRows('purchase_invoices'));
+        $item = $this->otherItem();
+        self::assertNotFalse($item);
+        self::assertSame(['payable', 'posted', '325000', '518000'], [$item['side'], $item['status'], $item['account_code'], $item['counter_account_code']]);
+        self::assertEquals(1000.0, (float) $item['allocated']);
+        self::assertEquals(0.0, (float) $item['settled_outside_amount']);
+        $owner = $this->db->pdo()->prepare('SELECT source_type, source_id FROM journal_entries WHERE id = ?');
+        $owner->execute([$item['journal_entry_id']]);
+        self::assertSame(['source_type' => 'other_item', 'source_id' => (int) $item['id']], array_map(
+            static fn ($v) => is_numeric($v) ? (int) $v : $v, $owner->fetch(\PDO::FETCH_ASSOC)));
+        $kinds = $this->db->pdo()->prepare('SELECT kind FROM abra_flexi_import_map WHERE supplier_id = ? AND target_type = "other_item"');
+        $kinds->execute([$this->supplier]);
+        self::assertSame(['ostatni-zavazek'], $kinds->fetchAll(\PDO::FETCH_COLUMN));
+        self::assertFalse((new TakenOverRecord($this->db))->isDocument($this->supplier, 'purchase_invoice', (int) $item['id']));
+
+        $repeat = $this->transfer($snapshot);
+        self::assertFalse($repeat['blocked'], json_encode($repeat));
+        self::assertSame(1, $this->countRows('other_items'));
+        self::assertSame(1, $this->countRows('other_item_allocations'));
+    }
+
+    public function testPayrollPayableStaysOnlyInJournal(): void
+    {
+        $snapshot = $this->payableSnapshot('331000', [['518000', '331000', '1000.00']], '1000.00', true);
+
+        $report = $this->transfer($snapshot);
+
+        self::assertFalse($report['blocked'], json_encode($report));
+        self::assertSame(0, $this->countRows('purchase_invoices'));
+        self::assertSame(0, $this->countRows('other_items'));
+        self::assertSame(1, $report['counts']['other_items_payroll_or_tax_skipped'] ?? 0);
+        self::assertSame(1, $report['counts']['payment_links_not_transferred_skipped'] ?? 0);
+    }
+
+    public function testLoanInstalmentWithUnchangedPrincipalIsUnpostedAndSettledFromSource(): void
+    {
+        // Splátka 1 000 Kč: jistina 379/379 nic nemění, úrok 562/379. Zdroj ji vede jako uhrazenou
+        // zápočtem (bez platby v bance).
+        $snapshot = $this->payableSnapshot('379000', [['379000', '379000', '900.00'], ['562000', '379000', '100.00']], '1000.00', false,
+            ['typDokl' => 'code:SPK', 'zbyvaUhradit' => '0.00', 'datUhr' => '2025-06-15']);
+
+        $report = $this->transfer($snapshot);
+
+        self::assertFalse($report['blocked'], json_encode($report));
+        $item = $this->otherItem();
+        self::assertNotFalse($item);
+        self::assertSame(['loan', 'confirmed', '379000'], [$item['kind'], $item['status'], $item['account_code']]);
+        self::assertNull($item['journal_entry_id']);
+        self::assertEquals(1000.0, (float) $item['settled_outside_amount']);
+        $manual = $this->db->pdo()->prepare('SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ? AND source_type = "manual"');
+        $manual->execute([$this->supplier]);
+        self::assertSame(2, (int) $manual->fetchColumn());
+        $found = (new \MyInvoice\Repository\OtherItemRepository($this->db))->find($this->supplier, (int) $item['id']);
+        self::assertEquals(0.0, (float) $found['remaining_amount']);
+        self::assertEquals(1000.0, (float) $found['paid_amount']);
+        self::assertSame([], (new \MyInvoice\Service\Accounting\Obligations\OtherItemForecastService($this->db))
+            ->dueBetween($this->supplier, '2025-01-01', '2025-12-31'));
+    }
+
+    public function testLoanBankAccountIsNotTransferredAsCompanyBankAccount(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['faktura-vydana'] = $snapshot['vazba'] = [];
+        $snapshot['bankovni-ucet'] = [
+            ['id' => '1', 'kod' => 'KB', 'buc' => '1000000005/0100', 'mena' => 'code:CZK', 'primUcet' => 'code:221000'],
+            ['id' => '2', 'kod' => 'UVER', 'buc' => '1000000013/0100', 'mena' => 'code:CZK', 'primUcet' => 'code:461000'],
+        ];
+        $snapshot['banka'] = [['id' => '303', 'kod' => 'SYN-B-003', 'datUcto' => '2025-06-02', 'mena' => 'code:CZK',
+            'sumCelkem' => '121.00', 'typPohybuK' => 'typPohybu.prijem', 'banka' => ['id' => '2', 'evidencePath' => 'bankovni-ucet/2']]];
+        $snapshot['ucetni-denik'] = [['idUcetniDenik' => '31', 'datUcto' => '2025-06-02', 'mdUcet' => 'code:461000',
+            'dalUcet' => 'code:311000', 'sumTuz' => '121.00', 'idDokl@evidencePath' => 'banka/303']];
+        $snapshot['pohyb-na-uctech'] = array_map(static fn (array $row): array => $row + [
+            'sumTuzMd' => $row['sumTuz'], 'sumTuzDal' => $row['sumTuz'],
+        ], $snapshot['ucetni-denik']);
+        foreach (['461', '461000'] as $code) {
+            $snapshot['ucetni-osnova'][] = ['id' => $code, 'kod' => $code, 'nazev' => 'Synthetic account'];
+        }
+
+        $report = $this->transfer($snapshot);
+
+        self::assertFalse($report['blocked'], json_encode($report));
+        self::assertSame(0, $this->countRows('bank_transactions'));
+        self::assertSame(1, $report['counts']['loan_account_movements_skipped'] ?? 0);
+        self::assertContains('bank_loan_account_not_transferred', $report['warnings']);
+        $accounts = $this->db->pdo()->prepare('SELECT account_number FROM supplier_bank_accounts WHERE supplier_id = ?');
+        $accounts->execute([$this->supplier]);
+        self::assertNotContains('1000000013', $accounts->fetchAll(\PDO::FETCH_COLUMN));
+        self::assertSame(1, $this->countRows('journal_entries'));
     }
 }

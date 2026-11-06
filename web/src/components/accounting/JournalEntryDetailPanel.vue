@@ -14,9 +14,11 @@ import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vu
 import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 import JournalLineDimensionsEditor from '@/components/dimensions/JournalLineDimensionsEditor.vue'
 import OtherItemSourceContext from './OtherItemSourceContext.vue'
+import InternalDocumentJournalContext from './InternalDocumentJournalContext.vue'
 import RepostModal from './RepostModal.vue'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import type { JournalPostingSource } from '@/api/accounting'
+import type { EntityType } from '@/api/documents'
 
 /**
  * Obsah rozbaleného zápisu deníku (rozpad na účty, Souvisí, přílohy, akce).
@@ -69,7 +71,18 @@ const repostOpen = ref(false)
 // hlásí potomci, jakmile si data dotáhnou — sekce se pak otevře sama.
 const extrasCount = ref(0)
 const documentCount = ref(0)
-const extrasTotal = computed(() => extrasCount.value + documentCount.value)
+const sourceDocumentCount = ref(0)
+const extrasTotal = computed(() => extrasCount.value + documentCount.value + sourceDocumentCount.value)
+
+// Dokument připojený k dokladu nebo pohybu (účtenka k platbě kartou) patří i k jeho
+// zápisu. Deník ho ukáže jen ke čtení, připojuje a odpojuje se u zdroje.
+const SOURCE_ENTITY_TYPES: Record<string, EntityType> = {
+  invoice: 'invoice',
+  purchase_invoice: 'purchase_invoice',
+  bank: 'bank_transaction',
+  cash: 'cash_document',
+}
+const sourceEntityType = computed(() => props.detail.source_id ? SOURCE_ENTITY_TYPES[props.detail.source_type] ?? null : null)
 
 // Uložené dimenze řádků se propíšou do načteného detailu, ať štítky v rozpadu sedí.
 function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, splits: Record<number, DimensionSplits> = {}) {
@@ -94,6 +107,7 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, s
       @preview="id => emit('preview', id)" @focus-entry="id => emit('focus-entry', id)" />
     <OtherItemSourceContext v-if="detail.source_type === 'other_item' && detail.source_id"
       :key="detail.id" :entry-id="detail.id" />
+    <InternalDocumentJournalContext :key="`internal-document-${detail.id}`" :detail="detail" />
     <WhyPanel v-if="detail.automation" class="mt-3" :provenance="detail.automation" />
     <!-- Epic F7: inline editace description (§35) + přílohy §33a -->
     <CollapsibleSection class="mt-4" :title="t('accounting.journal.extras_title')"
@@ -104,6 +118,9 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, s
         @count="n => extrasCount = n" />
       <LinkedDocumentsPanel entity-type="journal_entry" :entity-id="detail.id" collapsible
         @count="n => documentCount = n" />
+      <LinkedDocumentsPanel v-if="sourceEntityType" :key="`source-docs-${detail.id}`"
+        :entity-type="sourceEntityType" :entity-id="Number(detail.source_id)" collapsible readonly
+        :title="t('accounting.journal.source_documents')" @count="n => sourceDocumentCount = n" />
     </CollapsibleSection>
     <div class="flex flex-wrap items-center justify-between gap-3 mt-4 pt-3 border-t border-neutral-200">
       <div class="text-xs text-neutral-500">
@@ -118,8 +135,9 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, s
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
           <span class="whitespace-nowrap">{{ t('accounting.repost.action') }}</span>
         </button>
-        <!-- Zúčtování DPH se nestornuje, přepočítává se a maže na místě (VatClearingService). -->
-        <button v-if="canWrite && !detail.reversed_by && detail.source_type !== 'vat_clearing'" @click="emit('reverse', detail)" :class="btnOutline('danger')">
+        <!-- Zúčtování DPH se nestornuje, přepočítává se a maže na místě (VatClearingService).
+             Zápis interního dokladu se stornuje v detailu dokladu. -->
+        <button v-if="canWrite && !detail.reversed_by && detail.source_type !== 'vat_clearing' && !detail.internal_document" @click="emit('reverse', detail)" :class="btnOutline('danger')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.uturn" /></svg>
           {{ t('accounting.journal.reverse') }}
         </button>

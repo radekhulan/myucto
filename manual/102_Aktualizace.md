@@ -46,7 +46,7 @@ konkrétní postup závisí na typu instalace.
 
 > [!TIP]
 > Aktualizace aplikace se nedotýká licence. Je vázaná na instalaci a zůstává
-> aktivní přes upgrady. Viz [105. Licence a aktivace](105_Licence_a_aktivace.md).
+> aktivní přes upgrady. Viz [104. Licence a aktivace](104_Licence_a_aktivace.md).
 
 ## 102.3 Krok za krokem: aktualizace Dockeru
 
@@ -144,7 +144,7 @@ zálohujte databázi i datový adresář.
 > [!TIP]
 > Aktualizace aplikace se nedotýká licence. Je vázaná na instalaci a
 > zůstává aktivní přes upgrady. Správu licence a předplatného popisuje
-> [105. Licence a aktivace](105_Licence_a_aktivace.md).
+> [104. Licence a aktivace](104_Licence_a_aktivace.md).
 
 ### 102.8.2 Pravidelná kontrola - jak funguje
 
@@ -508,7 +508,7 @@ a odkaz `release_url`. Jde o veřejný endpoint bez autentizace; stejné základ
 
 ## 102.9 Související kapitoly
 
-- [Licence a aktivace](105_Licence_a_aktivace.md)
+- [Licence a aktivace](104_Licence_a_aktivace.md)
 - [Instalace Docker](03_Instalace_Docker.md)
 - [Nativní instalace](04_Instalace_Nativni.md)
 - [Řešení problémů](999_Reseni_problemu.md)

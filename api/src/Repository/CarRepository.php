@@ -28,6 +28,11 @@ final class CarRepository
                        (SELECT COUNT(*) FROM trips    t WHERE t.car_id = c.id) AS trips_count,
                        (SELECT COUNT(*) FROM fuelings f WHERE f.car_id = c.id) AS fuelings_count,
                        (SELECT MAX(t2.odometer_end) FROM trips t2 WHERE t2.car_id = c.id) AS last_trip_odometer,
+                       (SELECT CASE WHEN oa.status = \'error\' OR osc.last_sync_status = \'error\' THEN \'error\'
+                                    WHEN osc.last_sync_status = \'warning\' THEN \'warning\' ELSE \'active\' END
+                          FROM odometer_source_cars osc
+                          JOIN odometer_source_accounts oa ON oa.id = osc.account_id AND oa.supplier_id = osc.supplier_id
+                         WHERE osc.car_id = c.id AND osc.supplier_id = c.supplier_id) AS odometer_source_status,
                        pe.full_name AS driver_name
                   FROM cars c
              LEFT JOIN payroll_employees pe ON pe.id = c.driver_employee_id AND pe.supplier_id = c.supplier_id
@@ -260,6 +265,8 @@ final class CarRepository
             'created_at'          => (string) $r['created_at'],
             'trips_count'         => isset($r['trips_count']) ? (int) $r['trips_count'] : null,
             'fuelings_count'      => isset($r['fuelings_count']) ? (int) $r['fuelings_count'] : null,
+            // Stav automatického stavu tachometru (active/warning/error); jen v seznamu aut.
+            'odometer_source_status'    => isset($r['odometer_source_status']) ? (string) $r['odometer_source_status'] : null,
             // Poslední známý konečný tachometr (z jízd), jinak počáteční stav auta —
             // pro předvyplnění „tachometr zahájení" u nového záznamu.
             'last_odometer'       => isset($r['last_trip_odometer']) && $r['last_trip_odometer'] !== null

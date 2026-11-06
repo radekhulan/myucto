@@ -57,11 +57,11 @@ final class MonthlyReportAction
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
-        [$year, $month, $comment, $errResp] = $this->readPeriodParams($request, $response);
+        [$year, $month, $comment, $spread, $errResp] = $this->readPeriodParams($request, $response);
         if ($errResp !== null) return $errResp;
 
         try {
-            $data = $this->service->build($supplierId, $year, $month, $comment);
+            $data = $this->service->build($supplierId, $year, $month, $comment, $spread);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -77,11 +77,11 @@ final class MonthlyReportAction
         $supplierId = $this->currentSupplierId($request);
         if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
 
-        [$year, $month, $comment, $errResp] = $this->readPeriodParams($request, $response);
+        [$year, $month, $comment, $spread, $errResp] = $this->readPeriodParams($request, $response);
         if ($errResp !== null) return $errResp;
 
         try {
-            $data = $this->service->build($supplierId, $year, $month, $comment);
+            $data = $this->service->build($supplierId, $year, $month, $comment, $spread);
             $bytes = $this->pdf->render($data);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
@@ -109,6 +109,10 @@ final class MonthlyReportAction
         $to = array_values(array_filter(array_map('trim', (array) ($body['to'] ?? []))));
         $cc = array_values(array_filter(array_map('trim', (array) ($body['cc'] ?? []))));
         $subjectOverride = isset($body['subject_override']) ? trim((string) $body['subject_override']) : null;
+        $spread = self::accrualSpreadFlag($body['accrual_spread'] ?? '0');
+        if ($spread === null) {
+            return Json::error($response, 'validation_failed', 'accrual_spread musí být 0 nebo 1.', 422);
+        }
 
         if ($to === []) {
             return Json::error($response, 'no_recipients', 'Zadejte alespoň jednoho příjemce.', 400);
@@ -120,7 +124,7 @@ final class MonthlyReportAction
         }
 
         try {
-            $data = $this->service->build($supplierId, $year, $month, $comment !== '' ? $comment : null);
+            $data = $this->service->build($supplierId, $year, $month, $comment !== '' ? $comment : null, $spread);
             $pdfBytes = $this->pdf->render($data);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
@@ -189,7 +193,7 @@ final class MonthlyReportAction
         $this->logger->log('monthly_report.sent', $userId, 'monthly_report', $sendId, [
             'to' => $to, 'cc' => $cc, 'year' => $year, 'month' => $month,
             'document_id' => $documentId, 'smtp_response' => $smtpResponse,
-        ], $ip, $request->getHeaderLine('User-Agent'), $supplierId);
+        ] + ($spread ? ['accrual_spread' => true] : []), $ip, $request->getHeaderLine('User-Agent'), $supplierId);
 
         return Json::ok($response, [
             'sent_to' => $to, 'cc' => $cc, 'document_id' => $documentId, 'sent_at' => date('Y-m-d H:i:s'),
@@ -206,7 +210,7 @@ final class MonthlyReportAction
     }
 
     /**
-     * @return array{0:int,1:int,2:?string,3:?Response}
+     * @return array{0:int,1:int,2:?string,3:bool,4:?Response}
      */
     private function readPeriodParams(Request $request, Response $response): array
     {
@@ -215,8 +219,22 @@ final class MonthlyReportAction
         $month = (int) ($q['month'] ?? 0);
         $comment = isset($q['comment']) && trim((string) $q['comment']) !== '' ? trim((string) $q['comment']) : null;
         if ($year < 2000 || $year > 2100 || $month < 1 || $month > 12) {
-            return [0, 0, null, Json::error($response, 'validation_failed', 'Zadejte platný rok a měsíc (1–12).', 422)];
+            return [0, 0, null, false, Json::error($response, 'validation_failed', 'Zadejte platný rok a měsíc (1–12).', 422)];
         }
-        return [$year, $month, $comment, null];
+        $spread = self::accrualSpreadFlag($q['accrual_spread'] ?? '0');
+        if ($spread === null) {
+            return [0, 0, null, false, Json::error($response, 'validation_failed', 'accrual_spread musí být 0 nebo 1.', 422)];
+        }
+        return [$year, $month, $comment, $spread, null];
+    }
+
+    /** Volba `accrual_spread` z dotazu nebo těla; null = neplatná hodnota. */
+    private static function accrualSpreadFlag(mixed $raw): ?bool
+    {
+        if (!is_scalar($raw)) {
+            return null;
+        }
+        $value = trim((string) $raw);
+        return in_array($value, ['', '0', '1'], true) ? $value === '1' : null;
     }
 }

@@ -32,6 +32,24 @@ final class DocumentLock
             || $this->inClosingPeriod || $this->accountantManaged;
     }
 
+    public function forDeletion(string $status, bool $hasFinancialLinks): self
+    {
+        if ($status !== 'draft' || $this->booked || $this->posted || $hasFinancialLinks) {
+            return $this;
+        }
+        return new self(
+            booked: $this->booked,
+            bookedAt: $this->bookedAt,
+            posted: $this->posted,
+            journalEntryId: $this->journalEntryId,
+            inClosedPeriod: false,
+            inClosingPeriod: false,
+            periodStatus: null,
+            dateLocked: false,
+            accountantManaged: $this->accountantManaged,
+        );
+    }
+
     /** @return list<string> 'posted'|'booked'|'period_closed'|'period_closing'|'date_locked'|'accountant_managed' */
     public function reasons(): array
     {

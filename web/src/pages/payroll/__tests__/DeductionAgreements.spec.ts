@@ -25,6 +25,8 @@ vi.mock('vue-router', async (importOriginal) => ({
 vi.mock('@/api/payrollDeductions', () => ({
   deductionAgreementKinds: ['advance', 'meal', 'contribution', 'damage', 'other'],
   deductionLegalBases: ['agreement', 'zp_147_1_c', 'zp_147_1_d', 'zp_147_1_e'],
+  deductionJmhzTargets: ['10350', '10351', '10352', '10353'],
+  defaultDeductionJmhzTarget: (kind: string) => (kind === 'meal' ? '10352' : '10353'),
   deductionPriorityFloor: 10,
   deductionPriorityCeiling: 9999,
   payrollDeductionsApi: {
@@ -286,6 +288,35 @@ describe('DeductionAgreements', () => {
       delivered_on: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/),
       deduction_kind: 'advance',
     })
+    wrapper.unmount()
+  })
+
+  /*
+   * JMHZ 10349 až 10353 (IN24/IN28): věřitel srážky a zařazení se ukládají
+   * výslovně. Volba „zaměstnavatel" předvyplní zařazení podle titulu, třetí
+   * osoba zařazení nemá a srážka ze zákona sekci vůbec nenabízí.
+   */
+  it('uloží věřitele a zařazení srážky pro JMHZ', async () => {
+    m.routeQuery = { person: '3' }
+    m.create.mockResolvedValue(detailOf(summary({ id: 41, creditor_is_employer: true, jmhz_target: '10352' })))
+    const wrapper = mount(DeductionAgreements)
+    await flushPromises()
+
+    await wrapper.get('button').trigger('click')
+    await wrapper.get('[data-test="deduction-jmhz-creditor"]').setValue('employer')
+    await flushPromises()
+    expect((wrapper.get('[data-test="deduction-jmhz-target"]').element as HTMLSelectElement).value).toBe('10352')
+
+    await wrapper.get('input[maxlength="190"]').setValue('Obědy v kantýně')
+    await wrapper.get('input[inputmode="decimal"]').setValue('300')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.create.mock.calls[0][0]).toMatchObject({ creditor_is_employer: true, jmhz_target: '10352' })
+
+    await wrapper.get('[data-test="deduction-legal-basis"]').setValue('zp_147_1_c')
+    await flushPromises()
+    expect(wrapper.find('[data-test="deduction-jmhz-section"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

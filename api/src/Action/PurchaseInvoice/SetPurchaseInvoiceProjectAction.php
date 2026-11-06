@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\PurchaseInvoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Security\ProjectAssignmentAccess;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
@@ -33,9 +36,15 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Zakázka se promítá do dimenzovaných závěrkových a počátečních zůstatků.
  * V uzavřeném období se proto změna odmítne; zámek data otevřeného období ji dovoluje.
  * Stornovaný doklad se k akci nepřiřazuje.
+ *
+ * Přeřazení po zaúčtování je práce účetní a projektového vedoucího, ne klienta:
+ * bez `projects` se zakázka nepřiřadí vůbec a klientská role zamčený doklad
+ * nepřeřadí ({@see ProjectAssignmentAccess}).
  */
 final class SetPurchaseInvoiceProjectAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly PurchaseInvoiceRepository $repo,
         private readonly PostingService $posting,
@@ -43,6 +52,7 @@ final class SetPurchaseInvoiceProjectAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -52,6 +62,10 @@ final class SetPurchaseInvoiceProjectAction
             return Json::error($response, 'invalid_id', 'Neplatné ID', 400);
         }
 
+        if ($deny = ProjectAssignmentAccess::denyWithoutProjects($request, $response)) {
+            return $deny;
+        }
+
         $supplierId = SupplierGuard::currentId($request);
         $existing = $this->repo->find($id, $supplierId);
         if ($existing === null) {
@@ -59,6 +73,9 @@ final class SetPurchaseInvoiceProjectAction
         }
         if (($existing['status'] ?? '') === 'cancelled') {
             return Json::error($response, 'not_editable', 'Stornovaný doklad nelze zařadit k zakázce.', 409);
+        }
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forPurchaseInvoice($existing), 'purchase_invoice', $id, true)) {
+            return $deny;
         }
 
         $body = (array) ($request->getParsedBody() ?? []);

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Payroll\PayrollHistoricalPeriodService;
@@ -37,7 +36,7 @@ final class PayrollAwaitingRunDutyServiceTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());

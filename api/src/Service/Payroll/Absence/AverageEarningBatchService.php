@@ -156,6 +156,11 @@ final class AverageEarningBatchService
             $approved = [];
             foreach ($versions as $employmentId => $expectedVersion) {
                 $this->lockEmployment($supplierId, $employmentId);
+                if ($this->averages->quarterMismatch($supplierId, $employmentId, $year, $quarter) !== null) {
+                    // Vztah ve čtvrtletí netrval: přehled ho nenabízí, takže tu
+                    // může být jen z ručně sestavené dávky. Přeskočí se, dávka ne.
+                    continue;
+                }
                 $suggestion = $this->derivation->suggest($supplierId, $employmentId, $year, $quarter);
                 if (!hash_equals($expectedVersion, (string) $suggestion['input_version'])) {
                     throw new AverageEarningBatchConflictException($employmentId);

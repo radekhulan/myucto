@@ -69,19 +69,24 @@ final class JmhzOrdinaryEvidenceBuilder
              * odvozuje se ze zmrazené revize — srážka ze mzdy je fakt v datech,
              * ne rozhodnutí účetní. Hodnotu proto přepíše builder; tady se jen
              * nevyžaduje „Ne", aby existující volání s `false` prošla.
-             * Zbylé čtyři skutečnosti potvrzuje účetní a profil je má za „Ne".
+             *
+             * Podpora zaměstnávání OZP (IN28) smí být Ano: výdělek OZP a srážky
+             * ve prospěch zaměstnavatele (10347 až 10353) builder sestaví
+             * z podkladů, které k potvrzení patří ({@see self::ozpWage()}).
+             * Zbylé tři skutečnosti potvrzuje účetní a profil je má za „Ne".
              */
-            if ($key !== 'reportable_wage_deductions_recorded'
-                && $facts[$key] !== false
-            ) {
+            $passThrough = in_array(
+                $key,
+                ['reportable_wage_deductions_recorded', 'ozp_employment_support_claimed'],
+                true,
+            );
+            if (!$passThrough && $facts[$key] !== false) {
                 throw new JmhzOrdinaryEvidenceException(
                     'jmhz_ordinary_evidence_positive_unsupported',
                     'Ordinary profil podporuje jen výslovné Ne u potvrzovaných skutečností.',
                 );
             }
-            $normalized[$key] = $key === 'reportable_wage_deductions_recorded'
-                ? $facts[$key]
-                : false;
+            $normalized[$key] = $passThrough ? $facts[$key] : false;
         }
         return $normalized;
     }
@@ -98,6 +103,9 @@ final class JmhzOrdinaryEvidenceBuilder
      *
      * @param array<string,mixed> $source
      * @param array<string,bool> $facts
+     * @param array<string,mixed>|null $ozpWage podklady výdělku OZP, které zadává
+     *        účetní (10347 datum úhrady, 10348 hotovost); jen u vztahu
+     *        s podporou zaměstnávání OZP (IN28)
      */
     public function build(
         int $supplierId,
@@ -107,6 +115,8 @@ final class JmhzOrdinaryEvidenceBuilder
         int $confirmedBy,
         string $confirmedAt,
         string $sourceKind = 'explicit_confirmation',
+        ?array $ozpWage = null,
+        ?int $riskShiftCount = null,
     ): JmhzOrdinaryEvidenceSnapshot {
         if ($targetEmploymentId <= 0) {
             throw new \InvalidArgumentException('Pracovní vztah musí být kladné číslo.');
@@ -155,6 +165,11 @@ final class JmhzOrdinaryEvidenceBuilder
         $facts['reportable_wage_deductions_recorded'] =
             $this->resolveWageDeductionsRecorded($person, $result, $employeeId);
         $term = $this->object($employment['term'] ?? null, 'term');
+        $facts['ozp_employment_support_claimed'] = $this->ozpEmploymentSupport(
+            $employment,
+            $sourceKind,
+            $facts['ozp_employment_support_claimed'],
+        );
         $employmentSource = $this->object($employment['employment'] ?? null, 'employment');
         $selectorActivityCode = is_string($term['activity_code'] ?? null)
             ? $term['activity_code']
@@ -192,7 +207,8 @@ final class JmhzOrdinaryEvidenceBuilder
             $definition = $catalog->interaction($interactionId);
             $interactions[] = [
                 'interaction_id' => $interactionId,
-                'triggered' => false,
+                'triggered' => $interactionId === 'IN28'
+                    && $facts['ozp_employment_support_claimed'],
                 'row_sha256' => $definition->rowHash,
             ];
         }
@@ -210,6 +226,15 @@ final class JmhzOrdinaryEvidenceBuilder
         if (preg_match('/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{6})?Z$/D', $confirmedAt) !== 1) {
             $this->invalid('jmhz_ordinary_evidence_confirmation_invalid', 'Čas potvrzení není kanonický UTC timestamp.');
         }
+        if (!$facts['ozp_employment_support_claimed'] && $ozpWage !== null) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_ozp_wage_unexpected',
+                'Výdělek OZP (10347 až 10349) se uvádí jen u vztahu s podporou zaměstnávání OZP.',
+            );
+        }
+        $ozpWageBlock = $facts['ozp_employment_support_claimed']
+            ? $this->ozpWage($ozpWage, $term, $person, $result, $employeeId, $periodStart, $confirmedAt)
+            : null;
         $payload = [
             'schema_reference' => JmhzOrdinaryEvidenceSnapshot::SCHEMA_REFERENCE,
             'builder_version' => self::BUILDER_VERSION,
@@ -257,7 +282,69 @@ final class JmhzOrdinaryEvidenceBuilder
                 'confirmed_at' => $confirmedAt,
             ], static fn (mixed $value): bool => $value !== null),
         ];
+        // Klíč jen u vztahu s IN28: evidence ostatních vztahů zůstává
+        // bajtově stejná jako před podporou výdělku OZP.
+        if ($ozpWageBlock !== null) {
+            $payload['ozp_wage'] = $ozpWageBlock;
+        }
+        /*
+         * Počet směn při rizikové práci (10580, verze 2027, IN42: kategorizace
+         * rizika 1 a odpracované hodiny). Mzdy směny neevidují, proto ho
+         * zadává účetní za měsíc; jen u vztahu zařazeného do kategorie 4
+         * (§ 5a odst. 1 písm. c) ZPSZ). Bez něj zůstává evidence beze změny.
+         */
+        $is2027 = JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2027;
+        if ($riskShiftCount === null
+            && $is2027
+            && ($term['social_employer_rate_category'] ?? null) === 'risk_employment'
+            && self::riskShiftCountExpected($employment)
+        ) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_risk_shifts_required',
+                'Doplňte počet směn odpracovaných při rizikové práci v měsíci (10580); mzdy směny neevidují.',
+            );
+        }
+        if ($riskShiftCount !== null) {
+            if (($term['social_employer_rate_category'] ?? null) !== 'risk_employment') {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_risk_shifts_unexpected',
+                    'Počet směn při rizikové práci (10580) se uvádí jen u vztahu s prací zařazenou do kategorie 4.',
+                );
+            }
+            if ($riskShiftCount < 0 || $riskShiftCount > 999) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_risk_shifts_invalid',
+                    'Počet směn při rizikové práci (10580) musí být celé číslo 0 až 999.',
+                );
+            }
+            $payload['risk_shift_count'] = $riskShiftCount;
+        }
         return new JmhzOrdinaryEvidenceSnapshot($payload);
+    }
+
+    /**
+     * Čeká se v měsíci počet směn 10580? Jen při odpracovaných hodinách
+     * rizikové práce (IN42, kontrola 386: 10274 = 1 a 10273 > 0), tedy podle
+     * {@see Xml2027\Jmhz2027DocumentContract::riskShiftCountRequired()}
+     * s hodinami vztahu po odečtu náhradního volna, stejně jako resolver.
+     * Bez zmrazeného pracovního souhrnu se počet žádá (fail-closed).
+     *
+     * @param array<string,mixed> $employment
+     */
+    private static function riskShiftCountExpected(array $employment): bool
+    {
+        $timeMonth = $employment['time_month'] ?? null;
+        $summary = is_array($timeMonth) ? ($timeMonth['jmhz_work_summary'] ?? null) : null;
+        $values = is_array($summary) ? ($summary['values'] ?? null) : null;
+        if (!is_array($values)) {
+            return true;
+        }
+        $worked = JmhzReportedWorkHours::reported($values, true)['worked_millihours'];
+
+        return $worked === null || Xml2027\Jmhz2027DocumentContract::riskShiftCountRequired(
+            Xml2027\Jmhz2027DocumentContract::RISK_SHIFT_CODE,
+            $worked,
+        );
     }
 
     /**
@@ -309,7 +396,9 @@ final class JmhzOrdinaryEvidenceBuilder
                     ['field' => $key],
                 );
             }
-            if ($profile[$key] === true) {
+            // Podpora zaměstnávání OZP (IN28) výjimkou není: příznak je vstupem
+            // interakce, viz self::ozpEmploymentSupport().
+            if ($profile[$key] === true && $key !== 'ozp_employment_support_applies') {
                 $this->invalid(
                     'jmhz_ordinary_evidence_monthly_exception_required',
                     'Pracovní vztah má evidovanou neobvyklou situaci, kterou automatická příprava zatím nepodporuje. Ověřte nastavení vztahu; pravdivý údaj neměňte jen kvůli přípravě hlášení.',
@@ -566,6 +655,242 @@ final class JmhzOrdinaryEvidenceBuilder
         return $deductionsRecorded
             || $withheld !== 0
             || $enforcementResult['allocations'] !== [];
+    }
+
+    /**
+     * Uplatňuje se u vztahu podpora zaměstnávání OZP (interakce IN28)?
+     *
+     * Zdrojem je příznak podmínek vztahu `jmhz_ozp_employment_support_applies`
+     * zmrazený v revizi. Automatické doložení ho převezme; výslovné potvrzení
+     * mu nesmí odporovat, jinak by hlášení tvrdilo něco jiného než nastavení
+     * vztahu, ze kterého se mzda počítala. Revize bez zmrazeného profilu
+     * (starší) nese jen výslovné potvrzení.
+     *
+     * @param array<string,mixed> $employment
+     */
+    private function ozpEmploymentSupport(array $employment, string $sourceKind, bool $claimed): bool
+    {
+        $profile = $employment['ordinary_evidence_profile'] ?? null;
+        $flag = is_array($profile) && is_bool($profile['ozp_employment_support_applies'] ?? null)
+            ? $profile['ozp_employment_support_applies']
+            : null;
+        if ($sourceKind === 'derived_from_frozen_payroll_sources') {
+            return $flag === true;
+        }
+        if ($flag !== null && $flag !== $claimed) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_ozp_profile_mismatch',
+                $flag
+                    ? 'Pracovní vztah má v podmínkách zapnutou podporu zaměstnávání OZP, potvrzení ji ale neuvádí.'
+                    : 'Potvrzení uvádí podporu zaměstnávání OZP, podmínky pracovního vztahu ji ale nemají.',
+            );
+        }
+
+        return $claimed;
+    }
+
+    /**
+     * Výdělek osob OZP (10347 až 10349) a srážky ve prospěch zaměstnavatele
+     * (10350 až 10353) za osobu a měsíc.
+     *
+     * Pokyny MPSV k MH 1.4.14, kap. 2.4.14 a 2.4.15: 10347 až 10349 jsou
+     * „povinný údaj v rámci IN28", 10350 až 10353 se uvádějí v rámci IN24
+     * (10349 = ANO). XSD 1.4.3.6 (`vydelekOsobOZPType`) má datum úhrady 10347
+     * povinné, takže bez něj se blok sestavit nedá; datum se nikdy nedomýšlí.
+     * Dotaz 12 k webináři MPSV 11. 5. 2026 (FAQ v2) navíc říká, že hlášení se
+     * datem úhrady se posílá až po úhradě mzdy včetně pojistného (kontrola
+     * 20201: datum úhrady <= datum vyplnění) — proto datum nesmí být po dni
+     * potvrzení a podání vzniká až po něm.
+     *
+     * Částky srážek se berou ze zmrazené revize (`net_pay.deductions`, sražená
+     * částka za dohodu), ne z nového výpočtu; zařazení do 10350 až 10353 je
+     * uložené u dohody (`jmhz_target`). Nepatří sem výkon rozhodnutí (exekuce
+     * nejsou dohodami), srážky ze zákona podle § 147 odst. 1 ZP (datový slovník
+     * 1.4.1.6 vede 10353 jako srážky „podle § 146 písm. b) ZP", tedy z dohody)
+     * ani dohody ve prospěch třetí osoby. Dohoda bez rozhodnutí o věřiteli,
+     * ze které se v měsíci srazilo, hlášení zastaví.
+     *
+     * @param array<string,mixed>|null $input
+     * @param array<string,mixed> $term
+     * @param array<string,mixed> $person
+     * @param array<string,mixed> $result
+     * @return array<string,mixed>
+     */
+    private function ozpWage(
+        ?array $input,
+        array $term,
+        array $person,
+        array $result,
+        int $employeeId,
+        string $periodStart,
+        string $confirmedAt,
+    ): array {
+        // Pokyny k 10348 a 10349: jen u zaměstnavatele uznaného na chráněném
+        // trhu práce podle § 78 zákona o zaměstnanosti (REGZEL 10211).
+        if (($term['employer_protected_labor_market'] ?? null) !== true) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_ozp_employer_not_protected',
+                'Podpora zaměstnávání OZP se hlásí jen u zaměstnavatele uznaného na chráněném trhu práce;'
+                    . ' v registraci zaměstnavatele to uvedeno není.',
+            );
+        }
+        if ($input === null) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_ozp_wage_required',
+                'Doplňte datum úhrady mzdy včetně pojistného (10347) a zda byla mzda vyplacena v hotovosti (10348).',
+            );
+        }
+        $keys = array_keys($input);
+        sort($keys, SORT_STRING);
+        // Od verze 2027 se 10347 dělí na datum úhrady mzdy 10589 a dny
+        // provedení odvodů sociálního 10570 a zdravotního pojištění 10571.
+        // Obě data odvodů se zadávají spolu; evidence bez nich zůstává
+        // bajtově stejná jako dřív.
+        $withContributionDates = $keys === [
+            'cash_paid',
+            'health_insurance_paid_on',
+            'payment_date',
+            'social_insurance_paid_on',
+        ];
+        if (($keys !== ['cash_paid', 'payment_date'] && !$withContributionDates)
+            || !is_bool($input['cash_paid'])
+        ) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_ozp_wage_invalid',
+                'Výdělek OZP musí obsahovat datum úhrady, výslovné Ano nebo Ne u výplaty v hotovosti'
+                    . ' a případně obě data odvodů pojistného.',
+            );
+        }
+        if (!$withContributionDates
+            && JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2027
+        ) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_ozp_wage_required',
+                'Od ledna 2027 doplňte k datu úhrady mzdy (10589) i dny provedení odvodu sociálního'
+                    . ' (10570) a zdravotního pojištění (10571).',
+            );
+        }
+        $contributionDates = [];
+        if ($withContributionDates) {
+            $confirmedDay = (new \DateTimeImmutable($confirmedAt))
+                ->setTimezone(new \DateTimeZone('Europe/Prague'))
+                ->format('Y-m-d');
+            foreach (['social_insurance_paid_on', 'health_insurance_paid_on'] as $key) {
+                $value = $input[$key];
+                $parsed = is_string($value) ? \DateTimeImmutable::createFromFormat('!Y-m-d', $value) : false;
+                if ($parsed === false || $parsed->format('Y-m-d') !== $value
+                    || $value < $periodStart || $value > $confirmedDay
+                ) {
+                    $this->invalid(
+                        'jmhz_ordinary_evidence_ozp_payment_date_invalid',
+                        'Den provedení odvodu pojistného (10570, 10571) musí být platné datum mezi začátkem'
+                            . ' vykazovaného měsíce a dneškem; hlášení se podává až po odvodu.',
+                        ['payment_date' => is_string($value) ? $value : null, 'period_start' => $periodStart],
+                    );
+                }
+                $contributionDates[$key] = $value;
+            }
+        }
+        $paymentDate = $input['payment_date'];
+        $date = is_string($paymentDate)
+            ? \DateTimeImmutable::createFromFormat('!Y-m-d', $paymentDate)
+            : false;
+        if ($date === false || $date->format('Y-m-d') !== $paymentDate) {
+            $this->invalid('jmhz_ordinary_evidence_ozp_wage_invalid', 'Datum úhrady mzdy není platné datum.');
+        }
+        $confirmedOn = (new \DateTimeImmutable($confirmedAt))
+            ->setTimezone(new \DateTimeZone('Europe/Prague'))
+            ->format('Y-m-d');
+        if ($paymentDate < $periodStart || $paymentDate > $confirmedOn) {
+            $this->invalid(
+                'jmhz_ordinary_evidence_ozp_payment_date_invalid',
+                'Datum úhrady mzdy včetně pojistného (10347) musí ležet mezi začátkem vykazovaného měsíce'
+                    . ' a dneškem; hlášení se podává až po úhradě.',
+                ['payment_date' => $paymentDate, 'period_start' => $periodStart],
+            );
+        }
+
+        $agreements = [];
+        foreach ($person['deduction_agreements'] ?? [] as $agreement) {
+            if (is_array($agreement) && is_int($agreement['id'] ?? null)) {
+                $agreements[$agreement['id']] = $agreement;
+            }
+        }
+        $deductions = [];
+        foreach ($result['people'] ?? [] as $candidate) {
+            if (is_array($candidate) && ($candidate['employee_id'] ?? null) === $employeeId) {
+                $deductions = $candidate['statutory']['net_pay']['deductions'] ?? [];
+            }
+        }
+        $sums = [];
+        $sources = [];
+        $unclassified = [];
+        foreach (is_array($deductions) ? $deductions : [] as $deduction) {
+            $reference = is_array($deduction) ? ($deduction['deduction_reference'] ?? null) : null;
+            $applied = is_array($deduction) ? ($deduction['applied_minor_units'] ?? null) : null;
+            if (!is_string($reference)
+                || preg_match('/^agreement:([1-9][0-9]*)$/D', $reference, $match) !== 1
+                || !is_int($applied) || $applied < 0
+            ) {
+                $this->invalid('jmhz_ordinary_evidence_source_invalid', 'Zmrazený výsledek srážek není úplný.');
+            }
+            if ($applied === 0) {
+                continue;
+            }
+            $agreementId = (int) $match[1];
+            $agreement = $agreements[$agreementId] ?? null;
+            if ($agreement === null) {
+                $this->invalid(
+                    'jmhz_ordinary_evidence_deduction_conflict',
+                    'Výsledek obsahuje srážku bez evidovaného titulu.',
+                    ['reason' => 'missing_title'],
+                );
+            }
+            if (DeductionAgreementTerms::isStatutory((string) ($agreement['legal_basis'] ?? 'agreement'))) {
+                continue;
+            }
+            if (!array_key_exists('creditor_is_employer', $agreement)) {
+                $unclassified[] = $agreementId;
+                continue;
+            }
+            if ($agreement['creditor_is_employer'] !== true) {
+                continue;
+            }
+            $target = $agreement['jmhz_target'] ?? null;
+            if (!is_string($target) || !in_array($target, DeductionAgreementTerms::JMHZ_TARGETS, true)) {
+                $unclassified[] = $agreementId;
+                continue;
+            }
+            $sums[$target] = ($sums[$target] ?? 0) + $applied;
+            $sources[] = [
+                'agreement_id' => $agreementId,
+                'jmhz_target' => $target,
+                'applied_minor_units' => $applied,
+            ];
+        }
+        if ($unclassified !== []) {
+            sort($unclassified, SORT_NUMERIC);
+            $this->invalid(
+                'jmhz_ordinary_evidence_ozp_deduction_unclassified',
+                'U dohody o srážce, ze které se v měsíci srazilo, chybí rozhodnutí, zda je věřitelem'
+                    . ' zaměstnavatel a jak se srážka vykáže v JMHZ (10350 až 10353).',
+                ['agreement_ids' => array_values(array_unique($unclassified))],
+            );
+        }
+        ksort($sums, SORT_STRING);
+        usort(
+            $sources,
+            static fn (array $left, array $right): int => $left['agreement_id'] <=> $right['agreement_id'],
+        );
+
+        return [
+            'payment_date' => $paymentDate,
+            ...$contributionDates,
+            'cash_paid' => $input['cash_paid'],
+            'employer_deductions_made' => $sums !== [],
+            'employer_deductions_minor' => $sums,
+            'employer_deduction_sources' => $sources,
+        ];
     }
 
     private function scenarioSelector(): JmhzScenarioSelectorResolver

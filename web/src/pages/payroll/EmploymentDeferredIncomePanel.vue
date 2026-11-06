@@ -33,6 +33,8 @@ const saving = ref(false)
 const loadError = ref('')
 const saveError = ref('')
 const items = ref<PayrollDeferredIncome[]>([])
+/** Typy, které server zpracuje sama (`PayrollDeferredIncomeRepository::SUPPORTED_TYPES`). */
+const supportedTypes = ref<PayrollDeferredIncomeType[]>(['1'])
 const editorOpen = ref(false)
 const showValidation = ref(false)
 const period = ref('')
@@ -46,10 +48,22 @@ const firstPeriod = computed(() => {
   return `${next[0]}-${String(next[1]).padStart(2, '0')}`
 })
 
+/**
+ * Roční zúčtování po skončení (typ 4, i v typu 5) se hlásí jen za leden až
+ * březen (Pravidla podání JMHZ 1.4.5, kap. 6 bod 3 b); server to hlídá stejně.
+ */
+const ANNUAL_SETTLEMENT_MONTHS = ['01', '02', '03']
+const ANNUAL_SETTLEMENT_TYPES: PayrollDeferredIncomeType[] = ['4', '5']
+
 const periodValid = computed(() => /^\d{4}-\d{2}$/.test(period.value) && period.value >= firstPeriod.value)
-const invalidReason = computed(() => periodValid.value
-  ? ''
-  : t('payroll.people.deferred_income.period_invalid', { first: firstPeriod.value }))
+const periodFitsType = computed(() => !ANNUAL_SETTLEMENT_TYPES.includes(deferredType.value)
+  || ANNUAL_SETTLEMENT_MONTHS.includes(period.value.slice(5, 7)))
+const invalidReason = computed(() => {
+  if (!periodValid.value) return t('payroll.people.deferred_income.period_invalid', { first: firstPeriod.value })
+  if (!periodFitsType.value) return t('payroll.people.deferred_income.period_annual_invalid')
+
+  return ''
+})
 
 function openNew() {
   period.value = firstPeriod.value
@@ -64,7 +78,9 @@ async function load() {
   loading.value = true
   loadError.value = ''
   try {
-    items.value = (await payrollDeferredIncomeApi.list(props.employmentId)).items
+    const list = await payrollDeferredIncomeApi.list(props.employmentId)
+    items.value = list.items
+    if (list.supported_types.length > 0) supportedTypes.value = list.supported_types
   } catch (error: unknown) {
     loadError.value = apiMessage(error) || t('payroll.people.deferred_income.load_failed')
   } finally {
@@ -75,7 +91,7 @@ async function load() {
 async function save() {
   showValidation.value = true
   saveError.value = ''
-  if (!props.canWrite || !periodValid.value) return
+  if (!props.canWrite || invalidReason.value !== '') return
   saving.value = true
   try {
     const saved = await payrollDeferredIncomeApi.save(props.employmentId, period.value, {
@@ -106,9 +122,12 @@ async function remove(item: PayrollDeferredIncome) {
 }
 
 function typeLabel(type: PayrollDeferredIncomeType): string {
-  return type === '1'
-    ? t('payroll.people.deferred_income.type_1')
-    : t('payroll.people.deferred_income.type_other', { code: type })
+  switch (type) {
+    case '1': return t('payroll.people.deferred_income.type_1')
+    case '4': return t('payroll.people.deferred_income.type_4')
+    case '5': return t('payroll.people.deferred_income.type_5')
+    default: return t('payroll.people.deferred_income.type_other', { code: type })
+  }
 }
 
 function apiMessage(error: unknown): string {
@@ -198,9 +217,19 @@ onMounted(load)
             class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"
             data-test="deferred-income-type"
           >
-            <option value="1">{{ t('payroll.people.deferred_income.type_1') }}</option>
+            <option v-for="type in supportedTypes" :key="type" :value="type">{{ typeLabel(type) }}</option>
           </select>
           <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.deferred_income.type_hint') }}</span>
+          <span
+            v-if="deferredType === '4'"
+            class="mt-1 block text-xs text-neutral-500"
+            data-test="deferred-income-type-4-hint"
+          >{{ t('payroll.people.deferred_income.type_4_hint') }}</span>
+          <span
+            v-if="deferredType === '5'"
+            class="mt-1 block text-xs text-neutral-500"
+            data-test="deferred-income-type-5-hint"
+          >{{ t('payroll.people.deferred_income.type_5_hint') }}</span>
         </label>
         <label class="text-xs text-neutral-600 sm:col-span-2">
           {{ t('payroll.people.deferred_income.note') }}

@@ -50,7 +50,7 @@ final class ViesClient
         // tvar CZ699xxxxxx, kdežto 8místné „69900012" je běžné IČO, které do registru
         // skupin nepatří a musí dál chodit na ARES. Záměrně PŘED cache — dřív zacachované
         // false-negativy z VIES nesmí výsledek přebít; vlastní TTL má CrpDphClient.
-        if ($country === 'CZ' && strlen($number) === 9 && str_starts_with($number, '699')) {
+        if ($country === 'CZ' && CrpDphClient::isGroupRegistration($number)) {
             return $this->tryCrpDph($number, $vatId);
         }
 
@@ -130,8 +130,9 @@ final class ViesClient
     }
 
     /**
-     * CZ-only verifikace přes ARES. Subjekt je "platný plátce DPH" iff
-     * `seznamRegistraci.stavZdrojeDph === 'AKTIVNI'` (mapováno do `is_vat_payer`).
+     * CZ-only verifikace přes ARES: aktivní plátce musí mít právě ověřované DIČ.
+     * Normalizace ARES zahrnuje i skupinovou registraci; samotné plátcovství člena
+     * skupiny nedokládá platnost jeho původního vlastního DIČ.
      *
      * Vrací null = ARES nerozhodl (nedostupný NEBO subjekt nenalezen) → necháme
      * rozhodnout autoritativní VIES. ARES bereme jako směrodatný JEN když subjekt
@@ -147,7 +148,8 @@ final class ViesClient
             return null; // ARES nedostupný / subjekt nenalezen → fallback na VIES
         }
         $data   = $r['data'] ?? [];
-        $valid  = (bool) ($data['is_vat_payer'] ?? false);
+        $valid  = (bool) ($data['is_vat_payer'] ?? false)
+            && strtoupper(trim((string) ($data['dic'] ?? ''))) === $vatId;
         $street = (string) ($data['street'] ?? '');
         $zip    = (string) ($data['zip'] ?? '');
         $city   = (string) ($data['city'] ?? '');
@@ -358,6 +360,14 @@ final class ViesClient
         if ($row === false) return null;
         $data = json_decode((string) $row, true);
         if (!is_array($data)) return null;
+        // Jen výsledky odvozené z ARES závisí na výkladu jeho registrací DPH.
+        // Staré pozitivum ani negativum nesmí přebít nové přesné ověření DIČ.
+        if (($data['source'] ?? '') === 'ares'
+            && ($data['normalization_version'] ?? null) !== AresClient::NORMALIZATION_VERSION
+        ) {
+            return null;
+        }
+        unset($data['normalization_version']);
 
         // Repair: starší cache může mít parsed:null kvůli předchozí slabší heuristice.
         // Když je payload validní a máme address+country, zkusíme re-parse novou logikou.
@@ -378,6 +388,9 @@ final class ViesClient
 
     private function cache(string $vatId, array $payload): void
     {
+        if (($payload['source'] ?? '') === 'ares') {
+            $payload['normalization_version'] = AresClient::NORMALIZATION_VERSION;
+        }
         $stmt = $this->db->pdo()->prepare(
             'INSERT INTO vies_cache (vat_id, is_valid, payload) VALUES (?, ?, ?)
              ON DUPLICATE KEY UPDATE is_valid = VALUES(is_valid), payload = VALUES(payload), fetched_at = NOW()'

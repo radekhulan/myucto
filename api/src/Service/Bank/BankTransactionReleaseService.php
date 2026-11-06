@@ -7,11 +7,14 @@ namespace MyInvoice\Service\Bank;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\PurchaseInvoice\AdvanceCoveredPaidStatus;
+use MyInvoice\Service\PurchaseInvoice\PurchasePaidStatusRestore;
 use PDO;
 
 /**
@@ -48,6 +51,8 @@ final class BankTransactionReleaseService
         private readonly InvoicePaymentService $payments,
         private readonly BankPostingService $bankPosting,
         private readonly AutoPostingPolicyService $policy,
+        private readonly PurchasePaidStatusRestore $paidStatusRestore,
+        private readonly ActivityLogger $activity,
     ) {}
 
     /**
@@ -185,6 +190,19 @@ final class BankTransactionReleaseService
         $advances = $this->bankPosting->advancesOfTransaction($supplierId, $txId);
 
         $journal = $this->releaseJournal($supplierId, $txId, $mode, $userId);
+        // Úhrada ostatní položky: storno bankovního zápisu ji stornuje samo
+        // (PostingService::reverse), bez zápisu (daňová evidence, položka bez účtu) se storno
+        // zapíše tady. Stornované přiřazení automatika znovu nepřiřadí, ručně jde obnovit
+        // jen k původní položce.
+        $releasedItems = $pdo->prepare(
+            'UPDATE other_item_allocations SET reversed_on = CURDATE()
+              WHERE supplier_id = ? AND bank_transaction_id = ? AND reversed_on IS NULL'
+        );
+        $releasedItems->execute([$supplierId, $txId]);
+        if ($releasedItems->rowCount() > 0) {
+            \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::syncForItems($pdo, $supplierId,
+                \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::itemsOfPayment($pdo, $supplierId, 'bank_transaction_id', $txId));
+        }
 
         $purchaseStmt = $pdo->prepare(
             'SELECT purchase_invoice_id FROM payment_matches
@@ -210,6 +228,23 @@ final class BankTransactionReleaseService
               WHERE id = ?"
         )->execute([$txId]);
 
+        // Smazaný výpis se typicky nahraje znovu a táž platba se spáruje podruhé —
+        // automatické poděkování za ni už nemá odejít ({@see \MyInvoice\Service\Mail\PaymentThanksMailer}).
+        $paymentsStmt = $pdo->prepare('SELECT invoice_id, source FROM invoice_payments WHERE bank_transaction_id = ?');
+        $paymentsStmt->execute([$txId]);
+        $paidInvoices = [];
+        foreach ($paymentsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $p) {
+            $paidInvoices[(int) $p['invoice_id']] = ($paidInvoices[(int) $p['invoice_id']] ?? false) || $p['source'] === 'bank';
+        }
+        $bankPaidInvoiceIds = array_keys(array_filter($paidInvoices));
+        if ($mode === self::MODE_DELETE && $bankPaidInvoiceIds !== []) {
+            $placeholders = implode(',', array_fill(0, count($bankPaidInvoiceIds), '?'));
+            $pdo->prepare(
+                "UPDATE invoices SET payment_thanks_suppressed_at = NOW()
+                  WHERE payment_thanks_sent_at IS NULL AND id IN ($placeholders)"
+            )->execute($bankPaidInvoiceIds);
+        }
+
         // Platbu založenou párováním smaže, dřívější platbu jen odpojí; stav faktury
         // se přepočte z plateb (může se vrátit ze stavu 'paid').
         $deletedPayment = $this->payments->deleteForBankTransaction($txId);
@@ -217,14 +252,33 @@ final class BankTransactionReleaseService
         $pdo->prepare('DELETE FROM payment_matches WHERE bank_transaction_id = ? AND supplier_id = ?')
             ->execute([$txId, $supplierId]);
         $this->restorePurchaseInvoices($pdo, $supplierId, $purchaseInvoiceIds, $postedAt);
+        if ((float) ($tx['amount'] ?? 0) > 0) {
+            $this->paidStatusRestore->afterRefundRemoved($supplierId, $purchaseInvoiceIds);
+        }
         // Konečná faktura krytá zálohou přestává být uhrazená spolu se zálohou.
         (new AdvanceCoveredPaidStatus($this->db))->afterPaymentsChanged($supplierId, $purchaseInvoiceIds);
         $this->restoreRefundDocuments($pdo, $supplierId, $refundInvoiceIds, $postedAt);
         // Konečná faktura zálohy už nesmí čerpat 314/324 za úhradu, která tu není.
         $this->bankPosting->syncAdvanceSettlements($supplierId, $advances, $userId);
 
-        if (!$deletedPayment && $invoiceId > 0 && $postedAt !== '') {
-            $this->releaseLegacyInvoiceMatch($pdo, $txId, $invoiceId, $postedAt);
+        $legacyReleased = !$deletedPayment && $invoiceId > 0 && $postedAt !== ''
+            && $this->releaseLegacyInvoiceMatch($pdo, $txId, $invoiceId, $postedAt, $tx['matched_at'] ?? null);
+
+        // Faktura, které pohyb zrušil nebo odpojil úhradu, to musí mít v aktivitě —
+        // jinak není vidět, proč se tatáž platba později „zaplatila" znovu.
+        $affected = $paidInvoices;
+        if ($invoiceId > 0) {
+            $affected[$invoiceId] = $affected[$invoiceId] ?? false;
+        }
+        foreach ($affected as $affectedId => $bankPayment) {
+            $this->activity->log('invoice.bank_payment_released', $userId, 'invoice', $affectedId, [
+                'mode'                => $mode,
+                'bank_transaction_id' => $txId,
+                'statement_id'        => $statementId > 0 ? $statementId : null,
+                'posted_at'           => $postedAt !== '' ? $postedAt : null,
+                'payment_deleted'     => $bankPayment || ($legacyReleased && $affectedId === $invoiceId),
+                'thanks_suppressed'   => $mode === self::MODE_DELETE && $bankPayment,
+            ]);
         }
 
         if ($statementId > 0) {
@@ -278,13 +332,8 @@ final class BankTransactionReleaseService
     private function restorePurchaseInvoices(PDO $pdo, int $supplierId, array $purchaseInvoiceIds, string $postedAt): void
     {
         foreach ($purchaseInvoiceIds as $purchaseInvoiceId) {
-            $hasPosting = $pdo->prepare(
-                "SELECT 1 FROM journal_entries
-                  WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND source_id = ?
-                    AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1"
-            );
-            $hasPosting->execute([$supplierId, $purchaseInvoiceId]);
-            $restoredStatus = $hasPosting->fetchColumn() === false ? 'received' : 'booked';
+            $restoredStatus = (new DocumentPostingGroup($this->db))->hasActive($supplierId, 'purchase_invoice', $purchaseInvoiceId)
+                ? 'booked' : 'received';
             $pdo->prepare(
                 "UPDATE purchase_invoices pi
                     SET pi.status = ?, pi.paid_at = NULL
@@ -322,8 +371,10 @@ final class BankTransactionReleaseService
      * pohyb, vrátí do nezaplacených — ale jen když ji nekryjí jiné platby. O stavu
      * rozhoduje přepočet z plateb, ne ruční UPDATE: faktura zaplacená platbou, která
      * ztratila vazbu na pohyb (smazaný výpis), musí zůstat zaplacená.
+     *
+     * @return bool true = legacy platba smazána
      */
-    private function releaseLegacyInvoiceMatch(PDO $pdo, int $txId, int $invoiceId, string $postedAt): void
+    private function releaseLegacyInvoiceMatch(PDO $pdo, int $txId, int $invoiceId, string $postedAt, ?string $matchedAt): bool
     {
         $other = $pdo->prepare(
             "SELECT COUNT(*) FROM bank_transactions
@@ -333,20 +384,32 @@ final class BankTransactionReleaseService
         );
         $other->execute([$invoiceId, $txId]);
         if ((int) $other->fetchColumn() > 0) {
-            return;
+            return false;
         }
 
         $inv = $pdo->prepare("SELECT 1 FROM invoices WHERE id = ? AND status = 'paid' AND paid_at = ? FOR UPDATE");
         $inv->execute([$invoiceId, $postedAt]);
         if ($inv->fetchColumn() === false) {
-            return;
+            return false;
         }
 
         // Backfill 'legacy' platba (migrace 0108) odpovídá právě tomuto historickému
         // spárování — zmizí s ním. Ostatní platby zůstávají a rozhodnou o stavu.
+        // Párování mladší než backfill platbu nezaložilo: pohyb jen navázal fakturu
+        // zaplacenou už dřív (import, ruční úhrada) a její úhrada musí zůstat.
+        if ($matchedAt !== null) {
+            $older = $pdo->prepare(
+                "SELECT 1 FROM invoice_payments WHERE invoice_id = ? AND source = 'legacy' AND created_at < ? LIMIT 1"
+            );
+            $older->execute([$invoiceId, $matchedAt]);
+            if ($older->fetchColumn() !== false) {
+                return false;
+            }
+        }
         $pdo->prepare("DELETE FROM invoice_payments WHERE invoice_id = ? AND source = 'legacy'")
             ->execute([$invoiceId]);
         $this->payments->recompute($invoiceId);
+        return true;
     }
 
     /** @param list<int> $txIds */

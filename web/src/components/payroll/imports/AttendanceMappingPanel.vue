@@ -7,6 +7,7 @@ import {
   type AttendancePreview,
   type AttendanceProfile,
   type AttendanceRule,
+  type AttendanceSampleKey,
   type AttendanceUnrecognizedColumn,
 } from '@/api/payrollImports'
 import { apiErrorMessage } from '@/api/errors'
@@ -20,9 +21,12 @@ import AttendanceMappingStep from './AttendanceMappingStep.vue'
 import AttendanceRecognitionStrip from './AttendanceRecognitionStrip.vue'
 import AttendanceRuleEditor from './AttendanceRuleEditor.vue'
 import AttendanceProfileCopyDialog from './AttendanceProfileCopyDialog.vue'
+import AttendanceTemplateDownload from './AttendanceTemplateDownload.vue'
 import { useAttendanceWorkspace } from './attendanceWorkspace'
 import { upgradedProfile, upgradeMatchesProfile } from './attendanceWages'
 import {
+  ATTENDANCE_FILE_ACCEPT,
+  ATTENDANCE_FILE_EXTENSIONS,
   draftComponents,
   draftRules,
   draftSignature,
@@ -31,9 +35,11 @@ import {
   emptyRuleDraft,
   filesFingerprint,
   isValidPeriod,
+  missingSampleKeys,
   parseProfileExport,
   profileDraftIssues,
   profileExportFilename,
+  profileSampleKey,
   profileToDraft,
   ruleFromUnrecognized,
   ruleIssues,
@@ -66,6 +72,12 @@ const testPreview = ref<AttendancePreview | null>(null)
 const testSignature = ref('')
 const testError = ref('')
 const importInput = ref<HTMLInputElement | null>(null)
+const restoringKey = ref<AttendanceSampleKey | null>(null)
+const RESTORE_LABELS: Record<AttendanceSampleKey, { label: string; hint: string }> = {
+  giriton: { label: 'payroll_imports.mapping.restore_sample', hint: 'payroll_imports.mapping.restore_sample_hint' },
+  myucto: { label: 'payroll_imports.mapping.restore_sample_myucto', hint: 'payroll_imports.mapping.restore_sample_myucto_hint' },
+  pamica: { label: 'payroll_imports.mapping.restore_sample_pamica', hint: 'payroll_imports.mapping.restore_sample_pamica_hint' },
+}
 
 const isNew = computed(() => draft.value !== null && draft.value.id === null)
 const dirty = computed(() => draft.value !== null && draftSignature(draft.value) !== baseline.value)
@@ -77,7 +89,8 @@ const otherNames = computed(() => profiles.value.filter(profile => profile.id !=
 const issues = computed<ProfileDraftIssue[]>(() => draft.value ? profileDraftIssues(draft.value, otherNames.value) : [])
 const otherSuppliers = computed(() => supplierStore.availableSuppliers.filter(supplier => supplier.id !== supplierStore.currentSupplierId))
 // Vzor jde vrátit, když ho firma smazala; dokud ho má, tlačítko se nenabízí.
-const hasSample = computed(() => profiles.value.some(profile => profile.is_sample))
+const missingSamples = computed(() => missingSampleKeys(profiles.value))
+const draftSampleKey = computed(() => draft.value?.is_sample ? profileSampleKey(savedProfile.value) : null)
 
 const saveBlockedReason = computed(() => issues.value.length ? t('payroll_imports.mapping.reason.issues') : '')
 /*
@@ -282,11 +295,12 @@ async function remove() {
   }
 }
 
-async function restoreSample() {
+async function restoreSample(sampleKey: AttendanceSampleKey) {
   if (busy.value !== null || !confirmDiscard()) return
   busy.value = 'restore'
+  restoringKey.value = sampleKey
   try {
-    const { profile, restored } = await payrollImportsApi.restoreAttendanceSampleProfile()
+    const { profile, restored } = await payrollImportsApi.restoreAttendanceSampleProfile(sampleKey)
     workspace.upsertProfile(profile)
     openProfile(profile)
     toast.success(t(restored ? 'payroll_imports.mapping.sample_restored' : 'payroll_imports.mapping.sample_exists', { name: profile.name }))
@@ -294,6 +308,7 @@ async function restoreSample() {
     toast.error(apiErrorMessage(err, t('payroll_imports.mapping.sample_restore_failed')))
   } finally {
     busy.value = null
+    restoringKey.value = null
   }
 }
 
@@ -434,11 +449,14 @@ watch(workspace.mappingFocus, focus => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.upload" /></svg>
             {{ busy === 'import' ? t('payroll_imports.common.working') : t('payroll_imports.mapping.import') }}
           </button>
-          <button v-if="!hasSample && !profilesLoading" type="button" data-testid="attendance-profile-restore-sample" :class="btnOutline('neutral')"
-            :disabled="busy !== null" :title="t('payroll_imports.mapping.restore_sample_hint')" @click="restoreSample">
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
-            {{ busy === 'restore' ? t('payroll_imports.common.working') : t('payroll_imports.mapping.restore_sample') }}
-          </button>
+          <template v-if="!profilesLoading && !profilesError">
+            <button v-for="key in missingSamples" :key="key" type="button" :data-testid="`attendance-profile-restore-sample-${key}`"
+              class="whitespace-nowrap" :class="btnOutline('neutral')"
+              :disabled="busy !== null" :title="t(RESTORE_LABELS[key].hint)" @click="restoreSample(key)">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.cycle" /></svg>
+              {{ restoringKey === key ? t('payroll_imports.common.working') : t(RESTORE_LABELS[key].label) }}
+            </button>
+          </template>
         </div>
 
         <div v-if="profilesLoading && profiles.length === 0" class="space-y-2">
@@ -500,7 +518,17 @@ watch(workspace.mappingFocus, focus => {
               <span v-if="savedProfile" class="text-neutral-500">{{ t('payroll_imports.mapping.updated_at', { date: formatDate(savedProfile.updated_at) }) }}</span>
             </div>
           </div>
-          <p v-if="draft.is_sample" class="mt-3 rounded-lg bg-accent-50 px-3 py-2 text-sm text-accent-700">{{ t('payroll_imports.mapping.sample_hint') }}</p>
+          <div v-if="draftSampleKey === 'myucto'" class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-accent-50 px-3 py-2 text-sm text-accent-700"
+            data-testid="attendance-profile-myucto-hint">
+            <p class="min-w-0 max-w-2xl flex-1">{{ t('payroll_imports.mapping.sample_hint_myucto') }}</p>
+            <AttendanceTemplateDownload v-if="canPreview" />
+          </div>
+          <div v-else-if="draftSampleKey === 'pamica'" class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-accent-50 px-3 py-2 text-sm text-accent-700"
+            data-testid="attendance-profile-pamica-hint">
+            <p class="min-w-0 max-w-2xl flex-1">{{ t('payroll_imports.mapping.sample_hint_pamica') }}</p>
+            <AttendanceTemplateDownload v-if="canPreview" sample-key="pamica" :period="period" />
+          </div>
+          <p v-else-if="draft.is_sample" class="mt-3 rounded-lg bg-accent-50 px-3 py-2 text-sm text-accent-700">{{ t('payroll_imports.mapping.sample_hint') }}</p>
           <div v-if="upgradePending" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-800" data-testid="attendance-profile-upgrade">
             <p class="font-medium">{{ t('payroll_imports.mapping.upgrade_title') }}</p>
             <p class="mt-0.5 text-xs">{{ t('payroll_imports.mapping.upgrade_hint') }}</p>
@@ -540,8 +568,8 @@ watch(workspace.mappingFocus, focus => {
             <ImportFilesDropzone
               v-model:files="files"
               test-id="attendance-mapping-dropzone"
-              accept=".xlsx,.csv"
-              :allowed-extensions="['xlsx', 'csv']"
+              :accept="ATTENDANCE_FILE_ACCEPT"
+              :allowed-extensions="ATTENDANCE_FILE_EXTENSIONS"
               :drop-hint="t('payroll_imports.attendance.drop_hint')"
               :disabled="busy !== null"
             />

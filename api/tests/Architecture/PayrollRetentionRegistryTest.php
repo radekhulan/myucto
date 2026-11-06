@@ -107,7 +107,10 @@ final class PayrollRetentionRegistryTest extends TestCase
                 "Zbytková tabulka {$table} neexistuje — sonda by přestala hlásit, co po "
                 . 'anonymizaci zůstává, a mezera by se stala neviditelnou.',
             );
-            $this->assertColumns($table, ['supplier_id', 'employee_id'], 'zbytky');
+            // Odvozené zbytky (běhy, archivy) nesou osobu jen v obsahu a počítají
+            // se přes payroll_run_persons; i ty ale musí jít omezit na tenanta.
+            $derived = in_array($table, PayrollPersonAnonymizationRepository::derivedResidueTables(), true);
+            $this->assertColumns($table, $derived ? ['supplier_id'] : ['supplier_id', 'employee_id'], 'zbytky');
         }
     }
 

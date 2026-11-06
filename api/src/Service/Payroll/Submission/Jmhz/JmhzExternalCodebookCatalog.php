@@ -21,11 +21,11 @@ final class JmhzExternalCodebookCatalog
     public const AUGUST_2026_OVERLAY_KEY =
         'jmhz-external-codebooks-cisob-511-2025-through-2026-08-31_czemalfa-2026-08-13-v1';
     public const AUGUST_2026_MANIFEST_SHA256 =
-        'ccacac5e10f7059349c62ee680e70dfa3f96b4a1251661ba2fb6166cd537032c';
+        '8987287842a5ac9667e9fe1997f0cb8decc96c1967743e3de55e8e21567d64da';
     public const DEFAULT_OVERLAY_KEY =
         'jmhz-external-codebooks-cisob-145-2026_czemalfa-2026-08-26-v1';
     public const DEFAULT_MANIFEST_SHA256 =
-        '66b2481ef5724006e8f64541330d541cd9acec42e914077ed722154c10e220bf';
+        '933e3a31be700d9acc3f79ef449691cf8eef61c489c298249d40b7778c5cc976';
 
     /** @var array<string,array{manifest_sha256:string,directory:string,snapshot_date:string,effective_from:string,effective_to:?string,verified_through:string,selectable:bool}> */
     private const PACKAGES = [

@@ -60,6 +60,8 @@ use ZipArchive;
  *   Inventarizace-majetku/dlouhodoby-majetek-<rok>.pdf(.xlsx) + drobny-majetek-<rok>.pdf(.xlsx)
  *   Inventarizace-majetku/karty/karta-<N>.pdf (inventární karta na majetek, §29–30 ZoÚ)
  *   Saldokonta-nad-1-rok/saldo-nad-1-rok-<rok>.pdf(.xlsx)
+ *   Inventarizace-uctu/inventarizace-uctu-<rok>.pdf(.xlsx) (vyplněný protokol s podpisy)
+ *   Inventarizace-uctu/otevrene-polozky-<rok>.pdf(.xlsx) (261, 335, 395 a zúčtovací účty)
  *   Casova-rozliseni/casove-rozliseni-<rok>.pdf(.xlsx)
  *   Priloha-k-zaverce/priloha-<rok>.pdf + .txt (§ 18/1/c ZoÚ)
  *   README.txt
@@ -74,7 +76,7 @@ final class ClosingPackageService
         'balance_sheet', 'income_statement', 'general_ledger',
         'trial_balance', 'journal', 'balance_inventory', 'dph_book', 'income_tax', 'income_tax_report', 'income_tax_advances',
         'asset_inventory', 'saldo_over_1y', 'accruals', 'statement_notes',
-        'cash_flow', 'equity_changes',
+        'cash_flow', 'equity_changes', 'open_items',
     ];
 
     /**
@@ -98,7 +100,7 @@ final class ClosingPackageService
     private const XLSX_CAPABLE = [
         'balance_sheet', 'income_statement', 'general_ledger', 'trial_balance', 'journal',
         'balance_inventory', 'asset_inventory', 'saldo_over_1y', 'accruals',
-        'cash_flow', 'equity_changes',
+        'cash_flow', 'equity_changes', 'open_items',
     ];
 
     public function __construct(
@@ -107,6 +109,7 @@ final class ClosingPackageService
         private readonly ImportJobRepository $jobs,
         private readonly ActivityLogger $logger,
         private readonly AccountingPeriodRepository $periods,
+        private readonly \MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy $frameworks,
         private readonly FinancialStatementService $statements,
         private readonly BalanceSheetPdfRenderer $balanceSheetPdf,
         private readonly IncomeStatementPdfRenderer $incomeStatementPdf,
@@ -140,6 +143,8 @@ final class ClosingPackageService
         private readonly \MyInvoice\Service\Pdf\CashFlowPdfRenderer $cashFlowPdf,
         private readonly \MyInvoice\Service\Accounting\Reports\EquityChangesStatementService $equityService,
         private readonly \MyInvoice\Service\Pdf\EquityChangesPdfRenderer $equityPdf,
+        private readonly \MyInvoice\Service\Accounting\Reports\OpenItemsService $openItems,
+        private readonly \MyInvoice\Service\Pdf\OpenItemsListPdfRenderer $openItemsPdf,
     ) {}
 
     /** Verze generátoru balíčku (manifest.json, EP-6). */
@@ -167,6 +172,16 @@ final class ClosingPackageService
     {
         $valid = array_values(array_intersect($requested, self::ALL_PARTS));
         return $valid !== [] ? $valid : self::ALL_PARTS;
+    }
+
+    public function partsForPeriod(int $supplierId, int $periodId, array $requested): array
+    {
+        $framework = $this->frameworks->framework($supplierId, $periodId);
+        $parts = self::normalizeParts($requested);
+        if ($framework === 'cz_504' && array_intersect($requested, self::ALL_PARTS) === []) {
+            $parts = array_values(array_diff($parts, ['cash_flow', 'equity_changes']));
+        }
+        return $parts;
     }
 
     /**
@@ -208,6 +223,7 @@ final class ClosingPackageService
             return array_fill_keys(self::ALL_PARTS, 0);
         }
         $months = $this->monthsInPeriod((string) $period['starts_on'], (string) $period['ends_on']);
+        $is504 = $this->frameworks->framework($supplierId, $periodId) === 'cz_504';
         return [
             'balance_sheet'     => 1,
             'income_statement'  => 1,
@@ -223,9 +239,16 @@ final class ClosingPackageService
             'saldo_over_1y'     => 1,
             'accruals'          => 1,
             'statement_notes'   => 1,
-            'cash_flow'         => 1,
-            'equity_changes'    => 1,
+            'cash_flow'         => $is504 ? 0 : 1,
+            'equity_changes'    => $is504 ? 0 : 1,
+            'open_items'        => 1,
         ];
+    }
+
+    public function previewMetadata(int $supplierId, int $periodId): array
+    {
+        return $this->frameworks->framework($supplierId, $periodId) === 'cz_504'
+            ? ['accounting_framework' => 'cz_504'] : [];
     }
 
     /**
@@ -238,7 +261,8 @@ final class ClosingPackageService
     private static function renderNotes(array $notes): string
     {
         $out = ["PŘÍLOHA K ÚČETNÍ ZÁVĚRCE ZA ROK " . (int) $notes['fiscal_year'], ''];
-        $out[] = '§ 18 odst. 1 písm. c) zákona č. 563/1991 Sb., § 39/39a/39b vyhlášky č. 500/2002 Sb.';
+        $out[] = $notes['legal_basis'] ?? '§ 18 odst. 1 písm. c) zákona č. 563/1991 Sb., § 39/39a/39b vyhlášky č. 500/2002 Sb.';
+        if (isset($notes['period'])) $out[] = 'Účetní období: ' . $notes['period']['starts_on'] . ' - ' . $notes['period']['ends_on'];
         $out[] = 'Kategorie účetní jednotky: ' . (string) $notes['category'];
         $out[] = str_repeat('=', 78);
         $out[] = '';
@@ -275,7 +299,7 @@ final class ClosingPackageService
         $userId = (int) ($job['created_by'] ?? 0) ?: null;
         $params = is_array($job['params'] ?? null) ? $job['params'] : [];
         $periodId = (int) ($params['period_id'] ?? 0);
-        $parts = self::normalizeParts(array_map('strval', (array) ($params['parts'] ?? [])));
+        $requestedParts = array_map('strval', (array) ($params['parts'] ?? []));
         $includeXlsx = (bool) ($params['include_xlsx'] ?? false);
 
         $period = $this->periods->findById($supplierId, $periodId);
@@ -289,6 +313,8 @@ final class ClosingPackageService
         $endsOn = (string) $period['ends_on'];
 
         try {
+            $is504 = $this->frameworks->framework($supplierId, $periodId) === 'cz_504';
+            $parts = $this->partsForPeriod($supplierId, $periodId, $requestedParts);
             $companyName = $this->supplierCompanyName($supplierId);
 
             $relDir = 'sup-' . $supplierId;
@@ -347,7 +373,7 @@ final class ClosingPackageService
             if (in_array('balance_sheet', $parts, true)) {
                 $this->ensureNotCancelled($jobId, $zip, $absPath);
                 try {
-                    $data = $this->statements->balanceSheet($supplierId, $periodId, null, 'auto');
+                    $data = $this->statements->balanceSheet($supplierId, $periodId, $is504 ? $endsOn : null, 'auto');
                     $put(sprintf('Rozvaha/rozvaha-%d.pdf', $fiscalYear), $this->balanceSheetPdf->render($data));
                     $added++; $summary['balance_sheet'] = 1;
                     if ($includeXlsx) {
@@ -362,7 +388,7 @@ final class ClosingPackageService
             if (in_array('income_statement', $parts, true)) {
                 $this->ensureNotCancelled($jobId, $zip, $absPath);
                 try {
-                    $data = $this->statements->incomeStatement($supplierId, $periodId, null, 'auto');
+                    $data = $this->statements->incomeStatement($supplierId, $periodId, $is504 ? $endsOn : null, 'auto');
                     $put(sprintf('Vysledovka/vysledovka-%d.pdf', $fiscalYear), $this->incomeStatementPdf->render($data));
                     $added++; $summary['income_statement'] = 1;
                     if ($includeXlsx) {
@@ -451,8 +477,34 @@ final class ClosingPackageService
                         $out = $this->xlsx->balanceInventory($data);
                         $put(sprintf('Inventarizace-uctu/inventarizace-uctu-%d.xlsx', $fiscalYear), $out['bytes']);
                     }
+                    // Balíček s nedokončeným protokolem nesmí vypadat hotově.
+                    $inventory = $data['inventory'];
+                    if (!$inventory['can_close']) {
+                        $warnings[] = 'Inventarizace rozvahových účtů není dokončená: nevyřešených účtů ' . (int) $inventory['unresolved_count'] . '.';
+                    }
                 } catch (\Throwable $e) { $warnings[] = 'Inventarizace rozvahových účtů: ' . $e->getMessage(); }
                 $bump('Inventarizace rozvahových účtů');
+            }
+
+            // 5c) Soupis otevřených položek k rozvahovému dni jako podklad inventarizace
+            //     průběžných účtů. Doplňkový: firma takové účty mít nemusí.
+            if (in_array('open_items', $parts, true)) {
+                $this->ensureNotCancelled($jobId, $zip, $absPath);
+                try {
+                    $data = $this->openItems->listing($supplierId, $endsOn, [], 100000);
+                    if ($data['accounts'] !== []) {
+                        $put(sprintf('Inventarizace-uctu/otevrene-polozky-%d.pdf', $fiscalYear), $this->openItemsPdf->render($data));
+                        $added++; $summary['open_items'] = 1;
+                        if ($includeXlsx) {
+                            $out = $this->xlsx->openItemsList($data);
+                            $put(sprintf('Inventarizace-uctu/otevrene-polozky-%d.xlsx', $fiscalYear), $out['bytes']);
+                        }
+                        if ((int) $data['totals']['unmatched'] > 0) {
+                            $warnings[] = 'Soupis otevřených položek: součet nesedí na zůstatek u ' . (int) $data['totals']['unmatched'] . ' účtů.';
+                        }
+                    }
+                } catch (\Throwable $e) { $warnings[] = 'Soupis otevřených položek: ' . $e->getMessage(); }
+                $bump('Soupis otevřených položek');
             }
 
             // 6) Kniha DPH — per kalendářní měsíc období.
@@ -712,7 +764,7 @@ final class ClosingPackageService
             $withWarnings = $warnings !== [];
             $packageStatus = $classified['status'];
 
-            $put('README.txt', $this->buildReadme($companyName, $fiscalYear, $startsOn, $endsOn, $summary, $warnings));
+            $put('README.txt', ($is504 ? "Účetní rámec: vyhláška č. 504/2002 Sb.\r\n" : '') . $this->buildReadme($companyName, $fiscalYear, $startsOn, $endsOn, $summary, $warnings));
             // Manifest zaeviduje i README (přidané přes $put výše); sám sebe nezahrnuje.
             $zip->addFromString('manifest.json', $this->buildManifest($supplierId, $periodId, $period, $companyName, $summary, $warnings, $files, $packageStatus));
             $zip->close();
@@ -978,6 +1030,10 @@ final class ClosingPackageService
             'files' => array_values($files),
         ];
 
+        if ($this->frameworks->framework($supplierId, $periodId) === 'cz_504') {
+            $manifest['accounting_framework'] = 'cz_504';
+            $manifest['statement_as_of'] = $period['ends_on'];
+        }
         return (string) json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
 
@@ -993,7 +1049,8 @@ final class ClosingPackageService
             'general_ledger' => 'Hlavní kniha (PDF)',
             'trial_balance' => 'Obratová předvaha (PDF)',
             'journal' => 'Účetní deník (PDF)',
-            'balance_inventory' => 'Inventarizace rozvahových účtů (PDF, §29–30 ZoÚ)',
+            'balance_inventory' => 'Inventarizace rozvahových účtů, vyplněný protokol (PDF, §29–30 ZoÚ)',
+            'open_items' => 'Soupis otevřených položek k rozvahovému dni (PDF)',
             'dph_book' => 'Kniha DPH (PDF, počet měsíců)',
             'income_tax' => 'Přiznání k dani z příjmů (XML)',
             'income_tax_report' => 'Sestava přiznání k dani z příjmů (PDF, pracovní, není podáním; bez části XML i XML)',

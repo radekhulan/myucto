@@ -57,6 +57,23 @@ final class VariableSymbolNormalizer
     }
 
     /**
+     * Platební VS přijaté faktury: `payment_variable_symbol` → číslo dokladu dodavatele
+     * (`vendor_invoice_number`) → interní číslo (`varsymbol`), první neprázdný.
+     *
+     * @param array<string,mixed> $invoice řádek `purchase_invoices`
+     */
+    public static function forPurchasePayment(array $invoice): string
+    {
+        foreach (['payment_variable_symbol', 'vendor_invoice_number', 'varsymbol'] as $key) {
+            $vs = self::forPayment((string) ($invoice[$key] ?? ''));
+            if ($vs !== '') {
+                return $vs;
+            }
+        }
+        return '';
+    }
+
+    /**
      * `payment_variable_symbol` pro vydaný doklad převzatý z jiného systému (import,
      * AI vytěžení): VS ze zdroje se uloží jen tehdy, když se liší od VS, který by se
      * odvodil z čísla dokladu. Typicky daňový doklad k proformě, který nese VS proformy.

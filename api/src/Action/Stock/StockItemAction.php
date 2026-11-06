@@ -12,6 +12,7 @@ use MyInvoice\Repository\StockLevelRepository;
 use MyInvoice\Repository\StockItemCustomerPriceRepository;
 use MyInvoice\Repository\StockPackagingUnitRepository;
 use MyInvoice\Repository\StockTrackingRepository;
+use MyInvoice\Service\Eet\EetStoredValueCalculator;
 use MyInvoice\Service\Stock\StockItemPackagingService;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\ClientStockItemPolicy;
@@ -20,6 +21,7 @@ use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
 use MyInvoice\Service\Eshop\CatalogFilter;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\StockItemMovementsPdfRenderer;
 use MyInvoice\Service\Stock\StockReportXlsxExporter;
@@ -289,8 +291,13 @@ final class StockItemAction
         if ($accountErr !== null) {
             return $accountErr;
         }
+        [$eetKind, $eetKindErr] = self::eetItemKind($response, $body);
+        if ($eetKindErr !== null) {
+            return $eetKindErr;
+        }
         $id = $this->items->insert($supplierId, $data);
         if (!RequestAuthorization::isClientType($request)) $this->items->updatePostingAccounts($supplierId, $id, $accounts);
+        if ($eetKind !== null) $this->items->updateEetItemKind($supplierId, $id, $eetKind);
         $this->log($request, 'stock.item_created', $id, ['sku' => $data['sku']]);
         return Json::ok($response, $this->visibleItem($request, $this->items->find($supplierId, $id)), 201);
     }
@@ -350,12 +357,17 @@ final class StockItemAction
         if ($accountErr !== null) {
             return $accountErr;
         }
+        [$eetKind, $eetKindErr] = self::eetItemKind($response, $body);
+        if ($eetKindErr !== null) {
+            return $eetKindErr;
+        }
         $expectedVersion = RequestAuthorization::isClientType($request) ? (int) ($body['row_version'] ?? 0) : null;
         if (!$this->items->update($supplierId, $id, $data, $expectedVersion)) {
             return Json::error($response, 'version_conflict', 'Skladová karta se změnila; načtěte ji znovu.', 409);
         }
         if (!RequestAuthorization::isClientType($request)) $this->items->updatePostingAccounts($supplierId, $id, $accounts);
-        $this->log($request, 'stock.item_updated', $id, ['sku' => $data['sku']] + $accounts);
+        if ($eetKind !== null) $this->items->updateEetItemKind($supplierId, $id, $eetKind);
+        $this->log($request, 'stock.item_updated', $id, ['sku' => $data['sku']] + $accounts + ($eetKind !== null ? ['eet_item_kind' => $eetKind] : []));
         return Json::ok($response, $this->visibleItem($request, $this->items->find($supplierId, $id)));
     }
 
@@ -410,7 +422,38 @@ final class StockItemAction
                 ['suggestion' => 'deactivate'],
             );
         }
-        $this->items->delete($supplierId, $id);
+        // Řádky objednávek si nesou vlastní popis a kartu nepotřebují. Rezervace, expedice,
+        // inventury, sestavy a varianty bez karty smysl nemají a mazání zastaví cizí klíč.
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->items->delete($supplierId, $id);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\PDOException $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if (($e->errorInfo[0] ?? null) !== '23000') {
+                throw $e;
+            }
+            return Json::error(
+                $response,
+                'item_in_use',
+                'Skladovou kartu nelze smazat — používají ji rezervace, expedice, inventura, sestava nebo varianta. Deaktivujte ji místo mazání.',
+                409,
+                ['suggestion' => 'deactivate'],
+            );
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
         $this->log($request, 'stock.item_deleted', $id, []);
         return Json::ok($response, ['deleted' => true]);
     }
@@ -663,6 +706,26 @@ final class StockItemAction
      * @param array<string,mixed>|null $existing
      * @return array{0:array<string,mixed>, 1:?Response}
      */
+    /**
+     * Druh položky pro EET z těla (`eet_item_kind`), null = beze změny. Klientská role
+     * pole poslat nesmí (ClientStockItemPolicy ho mezi provozní údaje nepouští).
+     *
+     * @param array<string,mixed> $body
+     * @return array{0:?string, 1:?Response}
+     */
+    private static function eetItemKind(Response $response, array $body): array
+    {
+        if (!array_key_exists('eet_item_kind', $body) || $body['eet_item_kind'] === null) {
+            return [null, null];
+        }
+        $kind = $body['eet_item_kind'];
+        if (!is_string($kind) || !in_array($kind, EetStoredValueCalculator::ITEM_KINDS, true)) {
+            return [null, Json::error($response, 'validation_failed',
+                "eet_item_kind musí být 'standard', 'specific_voucher' nebo 'stored_value'.", 400)];
+        }
+        return [$kind, null];
+    }
+
     private function validate(Response $response, array $body, ?array $existing = null): array
     {
         $name = trim((string) ($body['name'] ?? $existing['name'] ?? ''));
@@ -679,8 +742,12 @@ final class StockItemAction
         }
 
         $itemType = (string) ($body['item_type'] ?? $existing['item_type'] ?? 'goods');
-        if (!in_array($itemType, ['material', 'goods', 'product'], true)) {
-            return [[], Json::error($response, 'validation_failed', "item_type musí být 'material', 'goods' nebo 'product'.", 400)];
+        if (!in_array($itemType, ['material', 'goods', 'product', 'service'], true)) {
+            return [[], Json::error($response, 'validation_failed', "item_type musí být 'material', 'goods', 'product' nebo 'service'.", 400)];
+        }
+        if ($itemType === 'service' && $existing !== null && ($existing['item_type'] ?? '') !== 'service'
+            && $this->items->hasMovements((int) $existing['supplier_id'], (int) $existing['id'])) {
+            return [[], Json::error($response, 'item_has_movements', 'Kartu se skladovými pohyby nelze změnit na službu.', 409)];
         }
 
         $unit = trim((string) ($body['unit'] ?? $existing['unit'] ?? 'ks'));
@@ -692,11 +759,21 @@ final class StockItemAction
         if (!in_array($trackingMode, ['none', 'lot', 'serial'], true)) {
             return [[], Json::error($response, 'validation_failed', "tracking_mode musí být 'none', 'lot' nebo 'serial'.", 400)];
         }
+        if ($itemType === 'service') {
+            $trackingMode = 'none';
+        }
 
         try {
             $intrastat = $this->intrastat->normalize($body, $existing);
         } catch (\InvalidArgumentException $e) {
             return [[], Json::error($response, 'validation_failed', $e->getMessage(), 400)];
+        }
+
+        $salePrice = $body['sale_price_without_vat'] ?? null;
+        if ($salePrice !== null && $salePrice !== ''
+            && (!is_numeric($salePrice) || preg_match('/^-?\d{1,10}(?:\.\d+)?$/D', trim((string) $salePrice)) !== 1
+                || !UnitPricePrecision::isWithinPrecision($salePrice))) {
+            return [[], Json::error($response, 'validation_failed', 'Prodejní cena musí být číslo s nejvýše šesti desetinnými místy.', 400)];
         }
 
         $data = [

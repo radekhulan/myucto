@@ -6,7 +6,9 @@ import { useRoute } from 'vue-router'
 import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
 import {
   deductionAgreementKinds,
+  deductionJmhzTargets,
   deductionLegalBases,
+  defaultDeductionJmhzTarget,
   deductionPriorityCeiling,
   deductionPriorityFloor,
   payrollDeductionsApi,
@@ -15,6 +17,7 @@ import {
   type DeductionAgreementKind,
   type DeductionAgreementStatus,
   type DeductionAgreementSummary,
+  type DeductionJmhzTarget,
   type DeductionLegalBasis,
 } from '@/api/payrollDeductions'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -106,6 +109,9 @@ interface AgreementForm {
   note: string
   effective_from: string
   activate_now: boolean
+  /** Věřitel srážky pro JMHZ 10349; prázdné = nerozhodnuto. */
+  jmhz_creditor: '' | 'employer' | 'third_party'
+  jmhz_target: DeductionJmhzTarget | ''
 }
 
 function emptyForm(): AgreementForm {
@@ -128,6 +134,8 @@ function emptyForm(): AgreementForm {
     note: '',
     effective_from: today,
     activate_now: true,
+    jmhz_creditor: '',
+    jmhz_target: '',
   }
 }
 const form = ref<AgreementForm>(emptyForm())
@@ -259,6 +267,9 @@ const saveBlockedReason = computed<string | null>(() => {
   }
   if (form.value.title.trim() === '') return t('payroll.deductions.validation.title')
   if (statutory.value && form.value.delivered_on === '') return t('payroll.deductions.validation.started_on')
+  if (!statutory.value && form.value.jmhz_creditor === 'employer' && form.value.jmhz_target === '') {
+    return t('payroll.deductions.validation.jmhz_target')
+  }
   return null
 })
 
@@ -301,6 +312,37 @@ function fillForm(item: DeductionAgreementDetail) {
     note: item.note ?? '',
     effective_from: today,
     activate_now: item.status === 'active',
+    jmhz_creditor: item.creditor_is_employer === true
+      ? 'employer'
+      : item.creditor_is_employer === false ? 'third_party' : '',
+    jmhz_target: item.jmhz_target ?? '',
+  }
+}
+
+/** Volba „věřitelem je zaměstnavatel" předvyplní zařazení podle titulu srážky. */
+function jmhzCreditorChanged() {
+  if (form.value.jmhz_creditor !== 'employer') {
+    form.value.jmhz_target = ''
+    return
+  }
+  if (form.value.jmhz_target === '') {
+    form.value.jmhz_target = defaultDeductionJmhzTarget(form.value.deduction_kind) ?? ''
+  }
+}
+
+/**
+ * Věřitel a zařazení pro JMHZ (10349 až 10353). Srážka ze zákona je nemá,
+ * server je u ní sám vynuluje; u dohody se posílají vždy, i nerozhodnuté.
+ */
+function jmhzClassificationPayload() {
+  if (statutory.value) return {}
+  return {
+    creditor_is_employer: form.value.jmhz_creditor === ''
+      ? null
+      : form.value.jmhz_creditor === 'employer',
+    jmhz_target: form.value.jmhz_creditor === 'employer' && form.value.jmhz_target !== ''
+      ? form.value.jmhz_target
+      : null,
   }
 }
 
@@ -352,6 +394,7 @@ function payloadFromForm() {
     delivered_on: form.value.delivered_on || null,
     recipient_reference: form.value.recipient_reference.trim() || null,
     note: form.value.note.trim() || null,
+    ...jmhzClassificationPayload(),
   }
   if (form.value.amount_mode === 'percentage') {
     return {
@@ -540,6 +583,7 @@ onMounted(load)
                   {{ item.title }}
                   <span class="ml-1 text-xs text-neutral-500">{{ t(`payroll.deductions.kinds.${item.deduction_kind}`) }}</span>
                   <span v-if="item.legal_basis && item.legal_basis !== 'agreement'" class="ml-1 rounded-full bg-warning-50 px-2 py-0.5 text-xs text-warning-700" :data-test="`deduction-statutory-${item.id}`">{{ t(`payroll.deductions.legal_basis_short.${item.legal_basis}`) }}</span>
+                  <span v-if="item.jmhz_target" class="ml-1 rounded-full bg-payroll-50 px-2 py-0.5 text-xs text-payroll-600" :data-test="`deduction-jmhz-target-${item.id}`">{{ t('payroll.deductions.jmhz_target_badge', { attribute: item.jmhz_target }) }}</span>
                 </td>
                 <td v-if="tbl.isVisible('status')" class="px-4 py-3">
                   <span class="rounded-full px-2 py-1 text-xs font-medium" :class="statusClass(item.status)">
@@ -741,6 +785,29 @@ onMounted(load)
             <label v-if="creating" class="flex items-center gap-2 pt-5 text-sm text-neutral-700">
               <input v-model="form.activate_now" type="checkbox" class="rounded border-neutral-300 text-payroll-600">
               {{ t('payroll.deductions.activate_now') }}
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset v-if="!statutory" class="rounded-lg border border-neutral-200 bg-surface p-4" data-test="deduction-jmhz-section">
+          <legend class="px-1 text-sm font-medium text-neutral-800">{{ t('payroll.deductions.section_jmhz') }}</legend>
+          <p class="mb-3 text-xs text-neutral-500">{{ t('payroll.deductions.jmhz_hint') }}</p>
+          <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <label class="text-xs font-medium text-neutral-600">
+              {{ t('payroll.deductions.jmhz_creditor') }}
+              <select v-model="form.jmhz_creditor" data-test="deduction-jmhz-creditor" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" @change="jmhzCreditorChanged">
+                <option value="">{{ t('payroll.deductions.jmhz_creditor_options.undecided') }}</option>
+                <option value="employer">{{ t('payroll.deductions.jmhz_creditor_options.employer') }}</option>
+                <option value="third_party">{{ t('payroll.deductions.jmhz_creditor_options.third_party') }}</option>
+              </select>
+            </label>
+            <label v-if="form.jmhz_creditor === 'employer'" class="text-xs font-medium text-neutral-600">
+              {{ t('payroll.deductions.jmhz_target') }}
+              <select v-model="form.jmhz_target" required data-test="deduction-jmhz-target" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+                <option value="" disabled>{{ t('payroll.deductions.jmhz_target_select') }}</option>
+                <option v-for="target in deductionJmhzTargets" :key="target" :value="target">{{ t(`payroll.deductions.jmhz_targets.${target}`) }}</option>
+              </select>
+              <span v-if="form.jmhz_target" class="mt-1 block text-xs font-normal text-neutral-500">{{ t(`payroll.deductions.jmhz_target_hints.${form.jmhz_target}`) }}</span>
             </label>
           </div>
         </fieldset>

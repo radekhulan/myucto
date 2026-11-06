@@ -8,7 +8,9 @@ import type { ActionItem } from '@/components/ui/ActionBar.vue'
 
 const m = vi.hoisted(() => ({
   isCompanyAdmin: false,
+  isClientRole: false,
   writable: new Set<string>(),
+  listPayments: vi.fn(),
   invoice: {
     id: 9, supplier_id: 1, status: 'sent', invoice_type: 'invoice',
     varsymbol: '2610001', currency: 'CZK', total: 1210, amount_to_pay: 1210,
@@ -25,7 +27,7 @@ function emptyApi(overrides: Record<string, unknown> = {}) {
   })
 }
 
-vi.mock('@/api/invoices', () => ({ invoicesApi: emptyApi({ get: vi.fn(async () => m.invoice) }) }))
+vi.mock('@/api/invoices', () => ({ invoicesApi: emptyApi({ get: vi.fn(async () => m.invoice), listPayments: m.listPayments }) }))
 vi.mock('@/api/settings', () => ({ settingsApi: emptyApi() }))
 vi.mock('@/api/admin', () => ({ adminApi: emptyApi() }))
 vi.mock('@/api/stock', () => ({ stockApi: emptyApi() }))
@@ -36,7 +38,7 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canRead: () => true,
     canWrite: (key: string) => m.writable.has(key),
-    isClientRole: false,
+    get isClientRole() { return m.isClientRole },
     isSuperadmin: false,
     get isCompanyAdminRole() { return m.isCompanyAdmin },
     hasCommercialFeatures: true,
@@ -59,7 +61,7 @@ vi.mock('vue-i18n', async importOriginal => ({
 
 import InvoiceDetail from '../InvoiceDetail.vue'
 
-async function editIssuedShown(): Promise<boolean> {
+async function editIssuedShown(key = 'edit-admin'): Promise<boolean> {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [{ path: '/invoices/:id', component: { render: () => null } }],
@@ -69,7 +71,7 @@ async function editIssuedShown(): Promise<boolean> {
   await flushPromises()
   const items = (wrapper.vm as unknown as { invoiceActions: ActionItem[] }).invoiceActions
   wrapper.unmount()
-  const item = items.find(a => a.key === 'edit-admin')
+  const item = items.find(a => a.key === key)
   expect(item).toBeDefined()
   return Boolean(item!.show)
 }
@@ -77,8 +79,12 @@ async function editIssuedShown(): Promise<boolean> {
 describe('akce Upravit vystavenou v detailu faktury', () => {
   beforeEach(() => {
     m.isCompanyAdmin = false
+    m.isClientRole = false
     m.writable = new Set(['invoices'])
     m.invoice.status = 'sent'
+    delete m.invoice.locked
+    delete m.invoice.cash_documents
+    m.listPayments.mockReset().mockResolvedValue({ payments: [], bank_transactions: [] })
   })
 
   it('správce ji vidí', async () => {
@@ -99,5 +105,29 @@ describe('akce Upravit vystavenou v detailu faktury', () => {
     m.writable.add('invoices.edit_issued')
     m.invoice.status = 'draft'
     expect(await editIssuedShown()).toBe(false)
+  })
+
+  it.each([
+    ['period_closed', true], ['period_closing', true], ['date_locked', true],
+    ['booked', false], ['posted', false], ['accountant_managed', false],
+  ])('klientské smazání konceptu při zámku %s: %s', async (reason, visible) => {
+    m.isClientRole = true
+    m.invoice.status = 'draft'
+    m.writable.add('invoices.delete')
+    m.invoice.locked = { is_locked: true, reasons: [reason] }
+    expect(await editIssuedShown('delete')).toBe(visible)
+  })
+
+  it.each(['bank', 'payment', 'cash', 'unavailable'])('klient nesmaže zamčený koncept při %s', async kind => {
+    m.isClientRole = true
+    m.invoice.status = 'draft'
+    m.invoice.paid_total = 0
+    m.writable.add('invoices.delete')
+    m.invoice.locked = { is_locked: true, reasons: ['period_closed'] }
+    if (kind === 'bank') m.listPayments.mockResolvedValue({ payments: [], bank_transactions: [{ id: 8 }] })
+    if (kind === 'payment') m.listPayments.mockResolvedValue({ payments: [{ id: 1, amount: 100 }, { id: 2, amount: -100 }], bank_transactions: [] })
+    if (kind === 'cash') m.invoice.cash_documents = [{ id: 7 }]
+    if (kind === 'unavailable') m.listPayments.mockRejectedValue(new Error('unavailable'))
+    expect(await editIssuedShown('delete')).toBe(false)
   })
 })

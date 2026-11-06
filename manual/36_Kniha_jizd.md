@@ -28,6 +28,7 @@ finanční úřad odpočet neuzná. Najdete ji v menu `Dokumenty → Kniha jízd
 | po každé cestě | Zapsat jízdu s konkrétním účelem | záložka **Kniha jízd**, **Nový záznam** |
 | jednou, při změně tras | Založit pravidelné cesty | záložka **Pravidelné cesty** |
 | průběžně (třeba týdně) | Zapsat stav tachometru a doplnit km z pravidelných cest | záložka **Kniha jízd**, **Stav tachometru** a panel **Km k doplnění** |
+| jednou, umí-li to auto | Připojit auto k automatickému stavu tachometru (BMW CarData), stav se pak načítá sám každý den | záložka **Automobily**, **Tachometr** |
 | po každém tankování nebo nabití | Zapsat tankování, nebo nechat vzniknout z dokladu | záložka **Tankování** |
 | měsíčně | Projít upozornění k tankování | záložka **Tankování**, panel **Upozornění k tankování** |
 | na konci roku | Zkontrolovat souhrn a vyexportovat ho k daňové evidenci | záložka **Souhrny** |
@@ -149,6 +150,30 @@ zmizel.
 **Jak poznáte, že je hotovo:** auto je v seznamu. Auto, které má navázané jízdy nebo
 tankování, nelze smazat. Při úpravě ho jen archivujte (**Zobrazit archivované** je ukáže).
 
+### 36.4.1 Připojit automatický stav tachometru
+
+Stav tachometru se může načítat sám každý den ze služby výrobce auta. Zatím to umí
+**BMW CarData**: potřebujete BMW s aktivním ConnectedDrive a musíte být jeho hlavní
+uživatel v aplikaci My BMW. Pak už jen doplňujete km z pravidelných
+cest (viz [§ 36.3.5](#3635-doplnit-km-podle-stavu-tachometru)).
+
+1. V portálu My BMW otevřete **CarData** a klikněte na **Create CarData Client**.
+2. U klienta zapněte službu **CarData API** a asi minutu počkejte. Zkopírujte
+   **Client ID**.
+3. V MyÚčtu na záložce **Automobily** klikněte u auta na **Tachometr** a vyberte **BMW CarData**.
+4. Vložte **Client ID** a klikněte na **Připojit**.
+5. Klikněte na **Otevřít přihlášení BMW CarData**, přihlaste se u BMW a potvrďte zobrazený kód.
+   Dialog nechte otevřený, sám pozná, že je přihlášení hotové.
+6. Patří-li k účtu BMW víc aut a žádné neodpovídá VIN zapsanému u auta v MyÚčtu,
+   vyberte auto a klikněte na **Použít**.
+
+Další auta ze stejného účtu BMW se připojí sama, mají-li v MyÚčtu zapsaný stejný VIN.
+U ostatních aut otevřete **Tachometr** a vyberte účet v části **Použít účet, který už je
+připojený**. Znovu se přihlašovat nemusíte.
+
+**Jak poznáte, že je hotovo:** u auta svítí štítek **Tachometr**, v dialogu je VIN a poslední
+stav tachometru a stav se objeví i v seznamu **Stav tachometru** se štítkem **BMW**.
+
 ## 36.5 Krok za krokem: zapsat tankování nebo nabíjení
 
 Tankování můžete zapsat ručně, nahrát ze souboru, nebo nechat vzniknout z dokladu,
@@ -241,6 +266,12 @@ souhrn je vyexportovaný.
 | **Km k doplnění** se ukazují i za období, kde jízdy jsou | Jízdy nemají vyplněný stav tachometru, takže kniha jízd neví, kde na tachometru leží | Doplňte u jízd tachometr, případně použijte **Přepočítat tachometr** (viz [§ 36.3.3](#3633-prepocitat-stav-tachometru)) |
 | **Zbytek zapsat jako soukromou jízdu** nejde zaškrtnout | Chybí kategorie cest označená jako soukromá jízda | Založte ji na záložce **Kategorie cest** |
 | **Jízdy mají víc km, než kolik je k doplnění.** | Součet km jízd přesahuje rozdíl stavů tachometru | Snižte km u některé jízdy nebo jízdu odeberte |
+| **Client ID nebylo přijato.** | Client ID je zkopírované špatně, nebo u klienta není zapnutá služba CarData API | Zkontrolujte klienta v portálu My BMW. Když to nepomůže, klienta smažte, po 30 sekundách založte nový a znovu zapněte CarData API |
+| Štítek **Tachometr: chyba** a **Přihlášení ke službě vypršelo** | Stav se nenačetl déle než dva týdny, nebo bylo u BMW přihlášení zrušeno | Otevřete **Tachometr** u kteréhokoli auta účtu a klikněte na **Připojit znovu**. Ostatní auta účtu se tím opraví také |
+| **K tomuto autu nemáte v BMW CarData přístup** | V aplikaci My BMW nejste hlavní uživatel auta | Požádejte hlavního uživatele, ať auto připojí on, nebo vás udělá hlavním uživatelem |
+| **Vyčerpán denní limit dotazů BMW (50).** | Příliš mnoho ručních načtení za den | Počkejte do dalšího dne. Denní načtení ve 3:30 proběhne samo |
+| Štítek **Tachometr: upozornění** a **Auto zatím stav tachometru neodeslalo.** | Auto po připojení ještě nepřeneslo data | Načtěte stav znovu po jízdě nebo po zamknutí auta |
+| Štítek **Tachometr: upozornění** a **Stav tachometru z auta nenavazuje na zapsané jízdy a stavy.** | Některá zapsaná jízda nebo stav má vyšší tachometr, než ukazuje auto. Stav se přeskočil | Opravte tachometr u dotčené jízdy nebo stavu. Další den se stav načte znovu |
 
 ## 36.8 Podrobnosti a pravidla
 
@@ -504,6 +535,33 @@ nearchivovanou kategorii označenou jako soukromá jízda a účel „Soukromá 
 
 Účel u pravidelné cesty pište stejně konkrétně jako u jednotlivé jízdy. Finanční úřad
 posuzuje každou jízdu zvlášť, i když vznikla z pravidelné cesty.
+
+### 36.8.10 Automatický stav tachometru
+
+Stav tachometru se načítá každý den ve 3:30 úlohou `cron-logbook-odometer-source`
+(nastavení plánovače je v [playbooku automatizačních skriptů](../cmd/README.md)).
+Tlačítko **Načíst teď** v dialogu **Tachometr** načte stav hned.
+
+- Ukládá se stav, který auto naposledy odeslalo, k datu a času odeslání. Auto data
+  posílá hlavně při jízdě a zamknutí.
+- Napojení patří k účtu u služby, ne k autu. Všechna auta jednoho účtu sdílí jedno
+  přihlášení i denní limit dotazů.
+- Na den připadá jeden automatický stav. Další načtení téhož dne ho přepíše. Ručně
+  zapsaný stav téhož dne zůstává vedle něj a pro **Km k doplnění** platí ten ruční.
+- Stav nižší než konec dřívější jízdy nebo dřívější stav, případně vyšší než pozdější
+  stav, se neuloží. U auta se ukáže varování **Tachometr: upozornění** a další den se
+  stav zkusí znovu. Stejně se označí auto, které stav tachometru zatím neodeslalo.
+  Varování denní načtení nepovažuje za chybu, štítek **Tachometr: chyba** znamená, že je
+  potřeba zásah (nové přihlášení, oprávnění k autu u služby).
+- Stav v mílích se převede na kilometry.
+- BMW CarData povoluje 50 dotazů denně za účet. Denní načtení spotřebuje jeden na auto,
+  připojení prvního auta tři, dalšího dva. Kolik je dnes použito, ukazuje dialog **Tachometr**.
+- Přihlášení k BMW CarData platí dva týdny a každé načtení ho prodlouží. Když se stav
+  dva týdny nenačte, je potřeba účet připojit znovu.
+- Ze služby se čte jen stav tachometru, ne poloha ani trasy. Přístup je uložený šifrovaně.
+  **Odpojit auto** auto od účtu odpojí. U posledního auta účtu smaže i přístup. Načtené
+  stavy tachometru zůstanou.
+- Napojení spravujete jen po přihlášení v aplikaci, ne přes API token.
 
 ## 36.9 Související kapitoly
 

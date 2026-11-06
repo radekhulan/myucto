@@ -52,6 +52,8 @@ vi.mock('@/security/domainLogin', () => ({
   advanceCanonicalDomainLoginSession: m.advanceSession,
   hasPendingCanonicalDomainLogin: () => m.domainPending,
   authorizePendingDomainLogin: m.authorizeDomain,
+  isDomainLoginConfirmationRequired: (e: any) => e?.response?.data?.error?.code === 'domain_login_confirmation_required',
+  pendingCanonicalDomainLoginQuery: () => ({ domain_login_request: 'r'.repeat(43), state: 's'.repeat(43) }),
 }))
 vi.mock('@/pages/Passkeys.vue', () => ({ default: { name: 'Passkeys', emits: ['registered'], template: '<button data-test="register-passkey" @click="$emit(\'registered\')" />' } }))
 vi.mock('@/pages/KeyboardShortcuts.vue', () => ({ default: { name: 'KeyboardShortcuts', template: '<div />' } }))

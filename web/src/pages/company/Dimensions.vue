@@ -26,6 +26,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 const DimensionRulesPanel = defineAsyncComponent(() => import('@/components/dimensions/DimensionRulesPanel.vue'))
 import Modal from '@/components/ui/Modal.vue'
 import ToggleSwitch from '@/components/ui/ToggleSwitch.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 /**
  * Firma → Dimenze: typy dimenzí a stromy jejich hodnot. Záložky dělí firemní
@@ -98,6 +99,7 @@ watch(level, () => {
 })
 
 function errorMessage(e: any): string {
+  if (e?.response?.data?.error?.code === 'system_dimension_immutable') return t('dimensions.system_history_conflict')
   return e?.response?.data?.error?.message || t('common.error')
 }
 
@@ -233,12 +235,14 @@ async function setApprover(value: DimensionValue, userId: number | null) {
 }
 
 async function toggleTypeActive(type: DimensionType) {
+  if (type.system_key) return
   const result = await run(() => dimensionsApi.updateType(type.id, { is_active: !type.is_active }),
     type.is_active ? t('dimensions.type_deactivated_toast') : t('dimensions.type_activated'))
   if (result) await load()
 }
 
 async function removeType(type: DimensionType) {
+  if (type.system_key) return
   if (!confirm(t('dimensions.type_delete_confirm', { name: type.name }))) return
   const result = await run(() => dimensionsApi.deleteType(type.id))
   if (!result) return
@@ -247,6 +251,10 @@ async function removeType(type: DimensionType) {
 }
 
 // ── hodnoty ──────────────────────────────────────────────────────────────
+
+const canCreateValue = computed(() => !selectedType.value?.system_key || selectedType.value.system_key === 'activity_kind')
+const editingValue = computed(() => dims.values.value.find(value => value.id === valueForm.id))
+const builtinValue = computed(() => Boolean(selectedType.value?.system_key && editingValue.value?.semantic_key))
 
 const valueFormOpen = ref(false)
 const valueForm = reactive({
@@ -339,6 +347,7 @@ const parentOptions = computed(() => {
 })
 
 function newValue(parentId: number | null = null) {
+  if (!canCreateValue.value) return
   closeForms()
   Object.assign(valueForm, {
     id: null, code: '', name: '', parent_id: parentId, is_active: true, responsible_user_id: null,
@@ -451,13 +460,15 @@ function closeForms() {
 async function saveValue() {
   if (!selectedType.value) return
   const payload = {
-    name: valueForm.name.trim(),
-    parent_id: valueForm.parent_id,
-    is_active: valueForm.is_active,
+    ...(!builtinValue.value ? {
+      name: valueForm.name.trim(),
+      parent_id: valueForm.parent_id,
+      is_active: valueForm.is_active,
+    } : {}),
     responsible_user_id: valueForm.responsible_user_id,
     responsible_note: valueForm.responsible_note.trim() || null,
     note: valueForm.note.trim() || null,
-    ...(selectedType.value.level === 'company' ? {
+    ...(selectedType.value.level === 'company' && !selectedType.value.system_key ? {
       car_id: valueForm.car_id,
       project_id: valueForm.project_id,
       ...(valueForm.id !== null || valueForm.cost_center_id !== null ? { cost_center_id: valueForm.cost_center_id } : {}),
@@ -487,12 +498,14 @@ async function saveValue() {
 }
 
 async function toggleActive(value: DimensionValue) {
+  if (selectedType.value?.system_key && value.semantic_key) return
   const result = await run(() => dimensionsApi.updateValue(value.id, { is_active: !value.is_active }),
     value.is_active ? t('dimensions.value_closed_toast') : t('dimensions.value_opened_toast'))
   if (result) await load()
 }
 
 async function removeValue(value: DimensionValue) {
+  if (selectedType.value?.system_key && value.semantic_key) return
   if (!confirm(t('dimensions.value_delete_confirm', { name: value.name }))) return
   const result = await run(() => dimensionsApi.deleteValue(value.id))
   if (!result) return
@@ -645,7 +658,7 @@ function valueCount(typeId: number) {
                   :class="{ 'bg-primary-50': type.id === selectedTypeId, 'opacity-60': !type.is_active }"
                   @click="selectedTypeId = type.id; closeForms()">
             <div class="flex items-center justify-between gap-2">
-              <span class="font-medium">{{ type.name }}</span>
+              <span class="font-medium">{{ type.name }}<span v-if="type.system_key" class="ml-2 rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700">{{ t('dimensions.system_badge') }}</span></span>
               <span class="text-xs text-neutral-400">{{ valueCount(type.id) }}</span>
             </div>
             <div class="text-xs text-neutral-500">
@@ -659,13 +672,14 @@ function valueCount(typeId: number) {
           <div class="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-neutral-200">
             <div>
               <h2 class="text-lg font-semibold">{{ selectedType.name }}</h2>
+              <p v-if="selectedType.system_key" class="text-xs text-primary-700 break-words" data-test="dimension-system-key">{{ t('dimensions.system_badge') }}</p>
               <p class="text-xs text-neutral-500">
                 {{ kindLabel(selectedType.kind) }} · {{ t(`dimensions.level_${selectedType.level}`) }}<span v-if="selectedType.drives_accounts"> · {{ t('dimensions.drives_accounts_badge') }} ({{ selectedType.drives_accounts_mask }})</span><span v-if="selectedType.requires_approval" data-test="dimension-type-approval-badge"> · {{ selectedType.approval_threshold ? t('dimensions.approval_badge_threshold', { amount: selectedType.approval_threshold }) : t('dimensions.approval_badge') }}</span>
               </p>
             </div>
             <div class="flex flex-wrap items-center gap-2">
               <label v-if="canWrite" class="inline-flex items-center gap-2 text-sm text-neutral-700 whitespace-nowrap mr-1" data-test="dimension-type-active">
-                <ToggleSwitch :model-value="selectedType.is_active" :disabled="busy" :label="t('dimensions.type_active')"
+                <ToggleSwitch :model-value="selectedType.is_active" :disabled="busy || !!selectedType.system_key" :label="selectedType.system_key ? t('dimensions.system_type_hint') : t('dimensions.type_active')"
                               @update:model-value="toggleTypeActive(selectedType)" />
                 {{ selectedType.is_active ? t('dimensions.type_state_active') : t('dimensions.type_state_inactive') }}
               </label>
@@ -683,30 +697,36 @@ function valueCount(typeId: number) {
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                 {{ t('dimensions.type_edit') }}
               </button>
-              <button v-if="canWrite" type="button" :class="btnOutlineSm('danger')" class="whitespace-nowrap" @click="removeType(selectedType)">
+              <button v-if="canWrite" type="button" :class="btnOutlineSm('danger')" class="whitespace-nowrap" :disabled="busy || !!selectedType.system_key" :title="selectedType.system_key ? t('dimensions.system_type_hint') : undefined" data-test="dimension-type-delete" @click="removeType(selectedType)">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                 {{ t('common.delete') }}
               </button>
-              <button v-if="canWrite" type="button" :class="btnFilledSm('primary')" class="whitespace-nowrap" data-test="dimension-value-new" @click="newValue(null)">
+              <button v-if="canWrite && canCreateValue" type="button" :class="btnFilledSm('primary')" class="whitespace-nowrap" data-test="dimension-value-new" @click="newValue(null)">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
                 {{ t('dimensions.value_new') }}
               </button>
             </div>
           </div>
 
+          <div v-if="selectedType.system_key" class="px-4 py-3 space-y-1 text-sm text-neutral-600 border-b border-neutral-200">
+            <p>{{ t('dimensions.system_type_hint') }}</p>
+            <p>{{ t('dimensions.system_assignment_hint') }}</p>
+            <p v-if="selectedType.system_key === 'activity_kind'">{{ t('dimensions.system_custom_hint') }}</p>
+          </div>
           <p v-if="tree.length === 0" class="px-4 py-6 text-sm text-neutral-500">{{ t('dimensions.values_empty') }}</p>
           <ul v-else class="divide-y divide-neutral-100">
             <li v-for="{ value, depth } in visibleTree" :key="value.id"
                 class="flex flex-wrap items-center gap-2 px-4 py-2"
                 :data-test="`dimension-value-${value.code}`">
-              <div class="flex items-center gap-2 min-w-0 flex-1" :class="{ 'opacity-60': !value.is_active }" :style="{ paddingLeft: `${depth * 1.25}rem` }">
+              <div class="flex flex-wrap items-center gap-2 min-w-0 flex-1" :class="{ 'opacity-60': !value.is_active }" :style="{ paddingLeft: `${depth * 1.25}rem` }">
                 <button v-if="childCount.get(value.id)" type="button" class="w-5 h-5 inline-flex items-center justify-center text-neutral-500"
                         :aria-expanded="expanded.has(value.id)" :aria-label="t('dimensions.toggle_children')" @click="toggle(value.id)">
                   <svg class="w-3.5 h-3.5 transition-transform" :class="{ 'rotate-90': expanded.has(value.id) }" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7" /></svg>
                 </button>
                 <span v-else class="w-5" />
-                <span class="font-mono text-xs text-neutral-500 whitespace-nowrap">{{ value.code }}</span>
-                <span class="truncate">{{ value.name }}</span>
+                <span v-if="!value.semantic_key" class="font-mono text-xs text-neutral-500 whitespace-nowrap">{{ value.code }}</span>
+                <span class="truncate">{{ dims.nameOf(value) }}</span>
+                <span v-if="selectedType.system_key && value.semantic_key" class="rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700 break-all" :title="t('dimensions.builtin_hint')">{{ t('dimensions.builtin_badge') }}</span>
                 <span v-if="!value.is_active" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-500">{{ t('dimensions.closed') }}</span>
                 <span v-if="value.car_registration" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">{{ value.car_registration }}</span>
                 <span v-if="value.cost_center_code" class="rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600">{{ t('dimensions.cost_center_short') }} {{ value.cost_center_code }}</span>
@@ -737,7 +757,7 @@ function valueCount(typeId: number) {
                     <option v-for="u in candidates" :key="u.id" :value="u.id">{{ u.name }}</option>
                   </select>
                 </label>
-                <button type="button" :class="btnOutlineSm('neutral')" :title="t('dimensions.value_add_child')" @click="newValue(value.id)">
+                <button v-if="canCreateValue" type="button" :class="btnOutlineSm('neutral')" :title="t('dimensions.value_add_child')" @click="newValue(value.id)">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
                   <span class="hidden sm:inline">{{ t('dimensions.value_add_child') }}</span>
                 </button>
@@ -745,11 +765,11 @@ function valueCount(typeId: number) {
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
                 </button>
                 <span class="inline-flex items-center px-1.5" data-test="dimension-value-active">
-                  <ToggleSwitch :model-value="value.is_active" :disabled="busy"
-                                :label="value.is_active ? t('dimensions.value_close') : t('dimensions.value_open')"
+                  <ToggleSwitch :model-value="value.is_active" :disabled="busy || !!(selectedType.system_key && value.semantic_key)"
+                                :label="selectedType.system_key && value.semantic_key ? t('dimensions.builtin_hint') : value.is_active ? t('dimensions.value_close') : t('dimensions.value_open')"
                                 @update:model-value="toggleActive(value)" />
                 </span>
-                <button type="button" :class="btnOutlineSm('danger')" :title="t('common.delete')" @click="removeValue(value)">
+                <button type="button" :class="btnOutlineSm('danger')" :title="selectedType.system_key && value.semantic_key ? t('dimensions.builtin_hint') : t('common.delete')" :disabled="busy || !!(selectedType.system_key && value.semantic_key)" data-test="dimension-value-delete" @click="removeValue(value)">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
                 </button>
               </div>
@@ -797,7 +817,7 @@ function valueCount(typeId: number) {
           {{ t('dimensions.show_on_documents') }}
         </label>
         <label v-if="typeForm.id !== null" class="flex items-center gap-2 text-sm text-neutral-700">
-          <input v-model="typeForm.is_active" type="checkbox" class="rounded border-neutral-300" />
+          <input v-model="typeForm.is_active" :disabled="!!dims.types.value.find(type => type.id === typeForm.id)?.system_key" type="checkbox" class="rounded border-neutral-300" />
           {{ t('dimensions.type_active') }}
         </label>
         <div class="border-t border-neutral-200 pt-4 space-y-2" data-test="dimension-type-approval">
@@ -843,12 +863,14 @@ function valueCount(typeId: number) {
       <Modal v-if="valueFormOpen && canWrite && selectedType" :title="valueForm.id === null ? t('dimensions.value_new') : t('dimensions.value_edit')"
              width-class="max-w-2xl" @close="valueFormOpen = false">
        <div class="space-y-4" data-test="dimension-value-form">
+        <p v-if="builtinValue" class="text-sm text-primary-700" data-test="dimension-builtin-hint">{{ t('dimensions.builtin_hint') }}</p>
         <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.name') }}</label>
-            <input v-model="valueForm.name" type="text" maxlength="190" @input="valueForm.id === null && valueSlug.fromName(valueForm.name)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-value-name" />
+            <input v-if="builtinValue && editingValue" :value="dims.nameOf(editingValue)" disabled type="text" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-value-name" />
+            <input v-else v-model="valueForm.name" :disabled="builtinValue" type="text" maxlength="190" @input="valueForm.id === null && valueSlug.fromName(valueForm.name)" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" data-test="dimension-value-name" />
           </div>
-          <div>
+          <div v-if="!builtinValue">
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.code') }}</label>
             <input v-model="valueForm.code" type="text" maxlength="50" @input="valueSlug.markManual(valueForm.code)" :disabled="valueForm.id !== null" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono disabled:bg-neutral-100" data-test="dimension-value-code" />
             <p v-if="valueForm.id !== null" class="text-xs text-neutral-400 mt-1">{{ t('dimensions.code_immutable') }}</p>
@@ -856,10 +878,10 @@ function valueCount(typeId: number) {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.parent') }}</label>
-            <select v-model="valueForm.parent_id" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
+            <select v-model="valueForm.parent_id" :disabled="builtinValue" data-test="dimension-value-parent" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
               <option :value="null">{{ t('dimensions.parent_none') }}</option>
               <option v-for="{ value, depth } in parentOptions" :key="value.id" :value="value.id">
-                {{ '  '.repeat(depth) }}{{ value.code }} – {{ value.name }}
+                {{ '  '.repeat(depth) }}{{ dims.labelOf(value) }}
               </option>
             </select>
           </div>
@@ -877,7 +899,7 @@ function valueCount(typeId: number) {
             <input v-model="valueForm.responsible_note" type="text" maxlength="190" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
             <p class="text-xs text-neutral-400 mt-1">{{ t('dimensions.responsible_hint') }}</p>
           </div>
-          <template v-if="selectedType.level === 'company'">
+          <template v-if="selectedType.level === 'company' && !selectedType.system_key">
             <div v-if="selectedType.kind === 'vehicle' || valueForm.car_id">
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('dimensions.link_car') }}</label>
               <select v-model="valueForm.car_id" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface">
@@ -906,7 +928,7 @@ function valueCount(typeId: number) {
           </div>
         </div>
         <label class="flex items-center gap-2 text-sm text-neutral-700">
-          <input v-model="valueForm.is_active" type="checkbox" class="rounded border-neutral-300" />
+          <input v-model="valueForm.is_active" :disabled="builtinValue" type="checkbox" class="rounded border-neutral-300" />
           {{ t('dimensions.value_active') }}
         </label>
         <section v-if="drivingSelected" class="border-t border-neutral-200 pt-4" data-test="dimension-account-map">
@@ -919,7 +941,7 @@ function valueCount(typeId: number) {
               <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-[1fr_1fr_9rem_9rem] gap-2">
                 <div>
                   <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_synthetic') }}</label>
-                  <select v-model="row.synthetic_account_id" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
+                  <select v-model="row.synthetic_account_id" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface"
                           @change="row.analytic_account_id = null; row.creating = false">
                     <option :value="null">{{ t('dimensions.account_map_select') }}</option>
                     <option v-for="c in accountCandidates" :key="c.id" :value="c.id">{{ c.code }} – {{ c.name }}</option>
@@ -928,28 +950,28 @@ function valueCount(typeId: number) {
                 <div>
                   <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_analytic') }}</label>
                   <select v-model="row.analytic_account_id" :disabled="row.synthetic_account_id === null"
-                          class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-100">
+                          class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface disabled:bg-neutral-100">
                     <option :value="null">{{ t('dimensions.account_map_select') }}</option>
                     <option v-for="a in analyticsOf(row.synthetic_account_id)" :key="a.id" :value="a.id">{{ a.code }} – {{ a.name }}</option>
                   </select>
                 </div>
                 <div>
                   <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_valid_from') }}</label>
-                  <input v-model="row.valid_from" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm" />
+                  <DateInput v-model="row.valid_from" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 </div>
                 <div>
                   <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_valid_to') }}</label>
-                  <input v-model="row.valid_to" type="date" class="w-full h-10 px-2 border border-neutral-300 rounded-md text-sm" />
+                  <DateInput v-model="row.valid_to" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 </div>
               </div>
               <div v-if="row.creating" class="flex flex-wrap items-end gap-2">
                 <div>
                   <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_new_code') }}</label>
-                  <input v-model="row.new_code" type="text" maxlength="10" class="w-32 h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
+                  <input v-model="row.new_code" type="text" maxlength="10" class="w-32 h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
                 </div>
                 <div class="flex-1 min-w-[12rem]">
                   <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('dimensions.account_map_new_name') }}</label>
-                  <input v-model="row.new_name" type="text" maxlength="190" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+                  <input v-model="row.new_name" type="text" maxlength="190" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" />
                 </div>
                 <button type="button" :disabled="busy || !row.new_code.trim() || !row.new_name.trim()" :class="btnFilledSm('success')" class="whitespace-nowrap" @click="createAnalytic(row)">
                   <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>

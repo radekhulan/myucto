@@ -148,6 +148,47 @@ final class SettingsBlankFieldsAndCurrencyTest extends TestCase
         self::assertSame('__TEST EUR účet', $this->currencyLabel());
     }
 
+    public static function foreignBankCodes(): iterable
+    {
+        yield 'sort code s pomlčkami' => ['60-84-64'];
+        yield 'sort code bez pomlček' => ['608464'];
+        yield 'routing number' => ['021000021'];
+    }
+
+    /**
+     * Issue #314: britský sort code v poli Kód banky končil chybou DB (CHAR(4)) a 500.
+     * Zahraniční národní kód se uloží tak, jak ho uživatel zadal, při úpravě i založení.
+     */
+    #[DataProvider('foreignBankCodes')]
+    public function testForeignBankCodeIsSavedOnUpdateAndCreate(string $bankCode): void
+    {
+        $update = $this->action->updateCurrency($this->request('PUT', '/api/settings/currencies/' . $this->currencyId, [
+            'label' => '__TEST GBP účet', 'account_number' => ' 12345678 ', 'bank_code' => $bankCode,
+            'iban' => 'GB33BUKB20201555555555', 'bic' => 'BUKBGB22',
+        ]), new Response(), ['id' => (string) $this->currencyId]);
+        self::assertSame(200, $update->getStatusCode(), (string) $update->getBody());
+        $saved = $this->json($update)['data'] ?? $this->json($update);
+        self::assertSame('12345678', $saved['account_number']);
+        self::assertSame($bankCode, $saved['bank_code']);
+
+        $create = $this->action->createCurrency($this->request('POST', '/api/settings/currencies', [
+            'code' => 'GBP', 'label' => '__TEST GBP nový', 'account_number' => '87654321', 'bank_code' => $bankCode,
+            'iban' => 'GB82WEST12345698765432', 'bic' => 'WESTGB2L',
+        ]), new Response());
+        self::assertSame(201, $create->getStatusCode(), (string) $create->getBody());
+    }
+
+    public function testInvalidOrOverlongBankFieldIsValidationErrorAndKeepsAccount(): void
+    {
+        foreach ([['bank_code' => '60/84/64'], ['bank_code' => '12345678901'], ['bic' => 'BUKBGB22XXXX']] as $body) {
+            $response = $this->action->updateCurrency($this->request('PUT', '/api/settings/currencies/' . $this->currencyId,
+                ['label' => '__TEST změna'] + $body), new Response(), ['id' => (string) $this->currencyId]);
+            self::assertSame(400, $response->getStatusCode(), (string) $response->getBody());
+            self::assertArrayHasKey(array_key_first($body), $this->json($response)['error']['fields'] ?? []);
+            self::assertSame('__TEST EUR účet', $this->currencyLabel(), 'Neplatný požadavek nesmí změnit účet.');
+        }
+    }
+
     public function testDeleteCurrencyUsedAsClientDefaultIsConflict(): void
     {
         $this->insertClient($this->currencyId);

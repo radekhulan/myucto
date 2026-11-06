@@ -12,6 +12,9 @@ const m = vi.hoisted(() => ({
   list: vi.fn(),
   credentials: vi.fn(),
   settings: vi.fn(),
+  isdsInbox: vi.fn(),
+  isClientRole: false,
+  canWrite: true,
 }))
 
 vi.mock('@/api/epoSubmissions', async (importOriginal) => {
@@ -22,7 +25,7 @@ vi.mock('@/api/epoSubmissions', async (importOriginal) => {
       list: m.list,
       credentials: m.credentials,
       settings: m.settings,
-      isdsInbox: vi.fn().mockResolvedValue([]),
+      isdsInbox: m.isdsInbox,
       xmlUrl: (id: number) => `/api/reports/submissions/${id}/xml`,
       artifactDownloadUrl: (id: number) => `/api/documents/${id}`,
     },
@@ -48,7 +51,8 @@ vi.mock('vue-i18n', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] },
-    canWrite: () => true,
+    isClientRole: m.isClientRole,
+    canWrite: () => m.canWrite,
     canRead: () => true,
   }),
 }))
@@ -137,6 +141,9 @@ describe('TaxSubmissions.vue — odeslání datovou schránkou', () => {
   beforeEach(() => {
     vi.useFakeTimers()
     vi.setSystemTime(NOW)
+    m.isClientRole = false
+    m.canWrite = true
+    m.isdsInbox.mockReset().mockResolvedValue([])
     m.list.mockReset()
     m.credentials.mockReset()
     m.settings.mockReset()
@@ -146,6 +153,28 @@ describe('TaxSubmissions.vue — odeslání datovou schránkou', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it.each([false, true])('klient s právem odesílání %s nenačítá interní zprávy FÚ', async canWrite => {
+    m.isClientRole = true
+    m.canWrite = canWrite
+    const item = submission({ isds_dispatch: dispatch('sent') })
+    const { wrapper } = await mountWith(item)
+    ;(wrapper.vm as any).toggleDetail(item)
+    await flushPromises()
+    expect(m.isdsInbox).not.toHaveBeenCalled()
+    expect(wrapper.text()).not.toContain('reports.submissions.isds.inbox_title')
+    expect(wrapper.text()).not.toContain('reports.submissions.isds.open_outbox')
+  })
+
+  it('interní čtenář nadále vidí zprávy FÚ', async () => {
+    m.canWrite = false
+    const item = submission({ isds_dispatch: dispatch('sent') })
+    const { wrapper } = await mountWith(item)
+    ;(wrapper.vm as any).toggleDetail(item)
+    await flushPromises()
+    expect(m.isdsInbox).toHaveBeenCalledWith(item.id)
+    expect(wrapper.text()).toContain('reports.submissions.isds.inbox_title')
   })
 
   it('nabídne datovku vedle EPO u podporovaného výkazu', async () => {

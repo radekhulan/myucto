@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Sample;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\BankPostingSuggestionRepository;
@@ -99,6 +100,10 @@ final class SampleDataGenerator
     public function generate(int $supplierId, int $adminUserId): array
     {
         $pdo = $this->db->pdo();
+        $today = new \DateTimeImmutable('today');
+        $frameworkGuard = new AccountingFrameworkImportGuard($this->db);
+        $frameworkPeriods = $frameworkGuard->periodsForDates($supplierId, $today->modify('-2 years')->format('Y-01-01'), $today->format('Y-12-31'));
+        $frameworkGuard->assertCz500Periods($supplierId, $frameworkPeriods);
 
         // Guard: sample data se generují JEN do prázdné DB. Bez této pojistky
         // šel `bin/sample.php` spustit i nad existujícími daty → duplicitní klienti/
@@ -141,8 +146,6 @@ final class SampleDataGenerator
         };
         $czkId = $resolveCurrency('CZK');
         $eurId = $resolveCurrency('EUR');
-        $today = new \DateTimeImmutable('today');
-
         $supplierStmt = $pdo->prepare(
             'SELECT company_name, taxpayer_type, is_vat_payer, accounting_mode, stock_enabled
                FROM supplier WHERE id = ?'
@@ -160,6 +163,7 @@ final class SampleDataGenerator
         // StatsRecomputer si otevírá vlastní transakci (vnořené PDO transakce nejdou).
         $pdo->beginTransaction();
         try {
+        $frameworkGuard->assertCz500Periods($supplierId, $frameworkPeriods, true);
 
         // RC flag (index 8) daňově smysluplně: tuzemští klienti BEZ reverse charge
         // (tuzemský RC §92a na IT služby neexistuje), EU klienti s DIČ (SK, DE)

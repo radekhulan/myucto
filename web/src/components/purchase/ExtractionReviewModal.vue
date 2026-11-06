@@ -7,7 +7,7 @@ import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.v
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import { purchaseExpenseAccountOptions } from '@/utils/chartAccountOptions'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
-import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE } from '@/components/ui/buttonStyles'
+import { btnFilled, btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import {
   purchaseInvoicesApi,
   type ExpenseKind,
@@ -36,6 +36,8 @@ import {
   type DimensionSplits,
 } from '@/api/dimensions'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
+import { useSidePreview } from '@/composables/useSidePreview'
 
 /**
  * Kontrola AI vytěžených přijatých faktur po importu — faktura po faktuře.
@@ -91,6 +93,17 @@ let expenseSeq = 0
 
 const invoice = computed<PurchaseInvoice | null>(() => queue.value[index.value] ?? null)
 const isLast = computed(() => index.value >= queue.value.length - 1)
+
+// ── Náhled originálu ────────────────────────────────────────────────────────
+// Volba je lepkavá a výchozí stav otevřený: kontrola vytěžení je porovnání s dokladem.
+const preview = useSidePreview('purchase_invoices', 'review_preview_open', { defaultOpen: true })
+/** Detail dokladu už originál ukazuje vedle sebe a Modal od něj odsadil backdrop. */
+const pageHasPreview = ref(false)
+const previewShown = computed(() => preview.open.value && !pageHasPreview.value)
+// Šířka okna se řídí volbou, ne změřeným výsledkem: v úzkém okně modál stejně nepřeroste
+// okno, a kdyby šířka modálu závisela na tom, co se do něj vejde, šlo by o kruh.
+const previewWantsSide = computed(() => previewShown.value && preview.placement.value === 'side')
+const previewSrc = computed(() => invoice.value?.pdf_path ? purchaseInvoicesApi.pdfUrl(invoice.value.id, true) : null)
 
 const proposals = computed(() => {
   const map = new Map<number, ExtractionExpenseKindProposal & { expense_account_code?: string | null }>()
@@ -422,6 +435,7 @@ function next(): void {
 }
 
 onMounted(async () => {
+  pageHasPreview.value = !!document.querySelector('[data-side-preview]')
   if (!auth.isClientRole) {
     void accountingApi.listAccounts().then(result => { accountingAccounts.value = result }).catch(() => {})
   }
@@ -443,8 +457,10 @@ onMounted(async () => {
 </script>
 
 <template>
-  <Modal v-if="!loading && invoice" :title="t('purchase_invoice.extraction_review.title')" width-class="max-w-5xl" @close="emit('close')">
-    <div class="space-y-4">
+  <Modal v-if="!loading && invoice" :title="t('purchase_invoice.extraction_review.title')"
+    :width-class="previewWantsSide ? 'max-w-[112rem]' : 'max-w-5xl'" @close="emit('close')">
+    <DocumentPreviewSplit :ctrl="preview" :show="previewShown" :src="previewSrc" :file-name="invoice.pdf_original_name"
+      embedded form-class="space-y-4" side-class="sticky top-0 h-[calc(100dvh-13rem)] min-h-[24rem]">
       <!-- Hlavička dokladu -->
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="min-w-0">
@@ -568,12 +584,19 @@ onMounted(async () => {
         </ul>
         <p v-if="readOnlyReason" :class="BTN_DISABLED_NOTE" class="mt-2">{{ readOnlyReason }}</p>
       </div>
-    </div>
+    </DocumentPreviewSplit>
 
     <template #footer>
       <div class="flex flex-wrap items-center justify-between gap-3">
         <div class="flex flex-wrap items-center gap-4 text-sm text-neutral-600">
           <span>{{ t('purchase_invoice.extraction_review.counter', { n: index + 1, total: queue.length }) }}</span>
+          <button v-if="!pageHasPreview" type="button" :class="btnOutlineSm('neutral')" class="whitespace-nowrap"
+            data-test="review-preview-toggle" :aria-pressed="preview.open.value" @click="preview.toggle()">
+            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" />
+            </svg>
+            {{ preview.open.value ? t('purchase_invoice.pdf.hide') : t('purchase_invoice.pdf.show') }}
+          </button>
         </div>
         <div class="flex flex-wrap gap-2">
           <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="index === 0 || saving" @click="goTo(index - 1)">

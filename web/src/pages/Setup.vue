@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { isCzechVatGroup } from '@/utils/vatGroup'
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -71,6 +72,7 @@ const aresMessage = ref<{ type: 'success' | 'error'; text: string } | null>(null
 const bankLoading = ref(false)
 const bankMessage = ref<{ type: 'success' | 'error' | 'warning'; text: string } | null>(null)
 const bankAccounts = ref<import('@/api/clients').CrpDphAccount[]>([])
+const bankAccountsRequireSelection = ref(false)
 
 // Auto-doplnění názvu banky podle kódu (číselník ČNB). Přepíše jen prázdný
 // nebo z číselníku pocházející název — ručně zadaný text nepřepisuje.
@@ -101,14 +103,16 @@ async function lookupBank() {
   bankLoading.value = true
   bankMessage.value = null
   bankAccounts.value = []
+  bankAccountsRequireSelection.value = false
   try {
     const r = await authApi.setupCrpdphLookup(dic)
     bankAccounts.value = r.accounts
+    bankAccountsRequireSelection.value = isCzechVatGroup(dic)
 
     // ⚠️ O plátcovství DPH rozhoduje registr plátců, ne ARES.
     //
-    // Z ARESu se plátcovství odvozuje z `stavZdrojeDph`, což je odvozený údaj
-    // a umí být prázdný i u firmy, která plátce je. Autoritativní je CRPDPH:
+    // ARES poskytuje stav vlastní i skupinové registrace; údaj může chybět
+    // i u firmy, která plátce je. Autoritativní je CRPDPH:
     // subjekt v něm dohledaný plátcem JE. Neúspěšné dohledání ale plátcovství
     // NESHAZUJE — výpadek registru nebo chybějící DIČ nesmí uživateli tiše
     // přepnout firmu na neplátce, což je nastavení, které pak mlčky pokazí
@@ -119,6 +123,8 @@ async function lookupBank() {
 
     if (r.accounts.length === 0) {
       bankMessage.value = { type: 'error', text: t('supplier.bank_lookup_none') }
+    } else if (bankAccountsRequireSelection.value) {
+      bankMessage.value = { type: 'warning', text: t('supplier.bank_lookup_group') }
     } else {
       applyBankAccount(r.accounts[0])
       bankMessage.value = r.accounts.length === 1
@@ -126,7 +132,10 @@ async function lookupBank() {
         : { type: 'success', text: t('supplier.bank_lookup_many', { n: r.accounts.length }) }
     }
     if (r.unreliable === true) {
-      bankMessage.value = { type: 'warning', text: t('supplier.bank_lookup_unreliable') }
+      bankMessage.value = { type: 'warning', text: [
+        bankAccountsRequireSelection.value && r.accounts.length > 0 ? t('supplier.bank_lookup_group') : '',
+        t('supplier.bank_lookup_unreliable'),
+      ].filter(Boolean).join(' ') }
     }
   } catch (e: any) {
     bankMessage.value = { type: 'error', text: e?.response?.data?.error?.message || t('supplier.bank_lookup_failed') }
@@ -637,7 +646,7 @@ async function submit() {
                 }">
                 {{ bankMessage.text }}
               </div>
-              <div v-if="bankAccounts.length > 1" class="mb-3 flex flex-wrap gap-1.5">
+              <div v-if="bankAccounts.length > 1 || (bankAccountsRequireSelection && bankAccounts.length > 0)" class="mb-3 flex flex-wrap gap-1.5">
                 <button v-for="(acc, i) in bankAccounts" :key="i" type="button" @click="applyBankAccount(acc)"
                   class="cursor-pointer px-2 py-1 text-xs font-mono border border-neutral-300 rounded hover:bg-primary-50 hover:border-primary-300">
                   {{ acc.display }}

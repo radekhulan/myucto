@@ -22,6 +22,11 @@ final class FxPaymentSettlement
      * jednotek procent; 4 % ponechá rezervu, ale stále odmítne zjevnou podplatbu.
      */
     public const MATCH_TOLERANCE_PCT = 0.04;
+    /**
+     * Platba kartou: karetní schéma přepočítá vlastním kurzem a banka k němu přidá
+     * přirážku, takže proti kurzu ČNB z data dokladu se běžně liší o 4 až 5 %.
+     */
+    public const CARD_MATCH_TOLERANCE_PCT = 0.06;
 
     public static function expectedLocalAmount(float $invoiceAmount, float $rate): float
     {
@@ -31,8 +36,14 @@ final class FxPaymentSettlement
     public static function matchTolerance(
         float $expectedAmount,
         float $absoluteTolerance = self::AMOUNT_TOLERANCE,
+        bool $card = false,
     ): float {
-        return max($absoluteTolerance, abs($expectedAmount) * self::MATCH_TOLERANCE_PCT);
+        return max($absoluteTolerance, abs($expectedAmount) * self::tolerancePct($card));
+    }
+
+    public static function tolerancePct(bool $card): float
+    {
+        return $card ? self::CARD_MATCH_TOLERANCE_PCT : self::MATCH_TOLERANCE_PCT;
     }
 
     public static function isCzkPaymentOfForeignInvoice(
@@ -50,6 +61,7 @@ final class FxPaymentSettlement
         string $invoiceCurrency,
         float $rate,
         ?string $transactionCurrency,
+        bool $card = false,
     ): bool {
         if ($transactionAmount <= 0.0 || $remaining <= 0.0 || $rate <= 0.0
             || !self::isCzkPaymentOfForeignInvoice($transactionCurrency, $invoiceCurrency)
@@ -57,7 +69,7 @@ final class FxPaymentSettlement
             return false;
         }
         $expected = self::expectedLocalAmount($remaining, $rate);
-        return abs($transactionAmount - $expected) <= self::matchTolerance($expected);
+        return abs($transactionAmount - $expected) <= self::matchTolerance($expected, card: $card);
     }
 
     /**
@@ -80,6 +92,7 @@ final class FxPaymentSettlement
         string $invoiceCurrency,
         float $rate,
         ?string $transactionCurrency,
+        bool $card = false,
     ): bool {
         if ($remaining <= 0.005) {
             return true;
@@ -90,7 +103,7 @@ final class FxPaymentSettlement
         }
         if (self::isCzkPaymentOfForeignInvoice($transactionCurrency, $invoiceCurrency) && $rate > 0.0) {
             $expected = self::expectedLocalAmount($remaining, $rate);
-            return $transactionAmount >= $expected - self::matchTolerance($expected);
+            return $transactionAmount >= $expected - self::matchTolerance($expected, card: $card);
         }
         return true;
     }

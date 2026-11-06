@@ -50,7 +50,7 @@ final class ClientVatStatusAction
             'is_vat_payer' => $isVatPayer,
             'source'       => $res['source'],   // 'ares' | 'vies' | 'unknown'
             'ic'           => $ic,
-            'dic'          => $dic,
+            'dic'          => $res['dic_updated'] ?? $dic,
         ]);
     }
 }

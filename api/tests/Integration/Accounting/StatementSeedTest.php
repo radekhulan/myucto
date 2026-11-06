@@ -99,7 +99,7 @@ final class StatementSeedTest extends TestCase
         $bs = $this->mapPrefixes($this->bsVersionId);
         $is = $this->mapPrefixes($this->isVersionId);
         $missing = [];
-        foreach (['094', '260', '350', '360', '374', '375', '376', '377'] as $code) {
+        foreach (['094', '260', '349', '350', '358', '360', '374', '375', '376', '377'] as $code) {
             if (!$this->covered($code, $bs)) {
                 $missing[] = $code;
             }

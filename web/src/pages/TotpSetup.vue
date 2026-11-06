@@ -7,6 +7,7 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { getCredential, webAuthnErrorKey } from '@/security/webauthn'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
+import TotpAppRecommendation from '@/components/security/TotpAppRecommendation.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -19,6 +20,9 @@ const code = ref('')
 const currentPassword = ref('')
 const busy = ref(false)
 const error = ref('')
+const recoveryRemaining = ref(0)
+const useRecovery = ref(false)
+const recoveryCode = ref('')
 
 // `/auth/totp/setup` teď vyžaduje čerstvé ověření — heslem, nebo (má-li
 // uživatel aspoň jednu passkey) step-up tokenem z passkey ceremonie. Bez toho
@@ -30,6 +34,13 @@ const hasPasskey = computed(() =>
 
 async function loadStatus() {
   status.value = await authApi.totpStatus()
+  // Záložní kód je cesta ven, když správce klíčů vrací neplatné ověření a nový
+  // klíč by skončil v témže správci. Nabízí se jen tomu, komu nějaký kód zbývá.
+  if (hasPasskey.value && !status.value.enabled) {
+    recoveryRemaining.value = await authApi.recoveryCodeStatus()
+      .then(s => s.remaining)
+      .catch(() => 0)
+  }
 }
 
 function applySetupError(e: any) {
@@ -56,9 +67,18 @@ async function startSetup() {
     error.value = t('mfa_setup.password_required')
     return
   }
+  if (hasPasskey.value && useRecovery.value && !recoveryCode.value.trim()) {
+    error.value = t('auth.recovery_hint')
+    return
+  }
   busy.value = true
   try {
-    if (hasPasskey.value) {
+    if (hasPasskey.value && useRecovery.value) {
+      const proof = await authApi.recoveryStepUp('totp.enable', recoveryCode.value.trim())
+      recoveryRemaining.value = proof.remaining
+      recoveryCode.value = ''
+      setup.value = await authApi.totpSetup({ step_up_token: proof.step_up_token })
+    } else if (hasPasskey.value) {
       const flow = await authApi.passkeyStepUpOptions('totp.enable')
       const credential = await getCredential(flow.public_key)
       const stepUpToken = await authApi.passkeyStepUpVerify(flow.flow_token, 'totp.enable', credential)
@@ -165,6 +185,19 @@ onMounted(loadStatus)
           />
         </div>
 
+        <div v-if="hasPasskey && useRecovery">
+          <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.recovery_code') }}</label>
+          <input
+            v-model="recoveryCode"
+            type="text"
+            autocomplete="one-time-code"
+            data-test="totp-recovery-code"
+            class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono"
+            @keydown.enter="startSetup"
+          />
+          <p class="text-xs text-neutral-500 mt-1">{{ t('auth.recovery_hint') }}</p>
+        </div>
+
         <div v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">
           {{ error }}
         </div>
@@ -175,12 +208,21 @@ onMounted(loadStatus)
           :disabled="busy"
           class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md"
         >
-          {{ busy ? '…' : (hasPasskey ? t('auth.totp_setup_verify_passkey_btn') : t('auth.totp_setup_btn')) }}
+          {{ busy ? '…' : (hasPasskey && !useRecovery ? t('auth.totp_setup_verify_passkey_btn') : t('auth.totp_setup_btn')) }}
+        </button>
+        <button
+          v-if="hasPasskey && recoveryRemaining > 0"
+          type="button"
+          data-test="totp-toggle-recovery"
+          class="block text-sm text-primary-600 hover:underline"
+          @click="useRecovery = !useRecovery; recoveryCode = ''; error = ''"
+        >
+          {{ useRecovery ? t('passkeys.use_passkey_instead') : t('passkeys.use_recovery_instead') }}
         </button>
       </div>
 
       <div v-if="setup" class="space-y-4 pt-2 border-t border-neutral-200">
-        <p class="text-sm text-neutral-700">{{ t('auth.totp_setup_step1') }}</p>
+        <TotpAppRecommendation />
         <div class="flex justify-center bg-neutral-50 rounded-md p-4">
           <img :src="setup.qr_data_uri" :alt="setup.uri" class="border border-neutral-200 rounded" />
         </div>

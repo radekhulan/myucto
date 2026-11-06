@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollTimeAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -32,7 +31,7 @@ final class PayrollTimeApiTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->action = $container->get(PayrollTimeAction::class);
         foreach ([
@@ -646,6 +645,29 @@ final class PayrollTimeApiTest extends TestCase
         ))['items'][0]['jmhz_work_summary']['preview'];
         self::assertSame('37.50', $preview['suggestions']['weekly_work_hours']);
         self::assertSame('157.5', $preview['suggestions']['standard_fund_hours']);
+    }
+
+    /**
+     * Stanovený fond 10259 jen za pracovní dny trvání vztahu v měsíci: datový slovník
+     * „pracovní dny trvání dohody včetně svátků", a stejně u pracovního poměru, který
+     * v měsíci začal nebo skončil (přijatá hlášení jiného systému: skončení 19. 4. 104 h,
+     * nástup 20. 4. 72 h). Květen 2026: do 15. 5. je 11 pracovních dnů včetně svátku
+     * 1. 5., od 20. 5. osm.
+     */
+    public function testStandardFundCoversOnlyDaysTheRelationLastedInTheMonth(): void
+    {
+        $preview = fn (): array => $this->json($this->action->month(
+            $this->request('GET', '/api/payroll/time/month')->withQueryParams(['period' => '2026-05']),
+            new Response(),
+        ))['items'][0]['jmhz_work_summary']['preview'];
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employments SET end_date = ? WHERE supplier_id = ? AND id = ?')
+            ->execute(['2026-05-15', $this->supplierId, $this->employmentId]);
+        self::assertSame('88', $preview()['suggestions']['standard_fund_hours']);
+
+        $pdo->prepare('UPDATE payroll_employments SET end_date = NULL, start_date = ?, actual_start_date = ? WHERE supplier_id = ? AND id = ?')
+            ->execute(['2026-05-20', '2026-05-20', $this->supplierId, $this->employmentId]);
+        self::assertSame('64', $preview()['suggestions']['standard_fund_hours']);
     }
 
     public function testJmhzConditionalWorkBlocksAreExplicitAndFailClosed(): void

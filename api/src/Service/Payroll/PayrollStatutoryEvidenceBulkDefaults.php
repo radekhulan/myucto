@@ -783,10 +783,9 @@ final class PayrollStatutoryEvidenceBulkDefaults
             $from = substr($earliest, 0, 8) . '01';
             $basis = 'employment_start';
         }
-        if ($frozenThrough !== null && $from <= $frozenThrough) {
-            $from = (new DateTimeImmutable($frozenThrough))
-                ->modify('first day of next month')
-                ->format('Y-m-d');
+        $open = PayrollApprovedPeriodFreeze::firstOpenMonth($from, $frozenThrough);
+        if ($open !== $from) {
+            $from = $open;
             $basis = 'after_frozen_period';
         }
 

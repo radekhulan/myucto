@@ -282,7 +282,7 @@ function resolveLink(it: PostingSuggestion) {
   }
   return null
 }
-useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-suggestions', 'accounting', 'invoices', 'purchase-invoices', 'clients'], () => Promise.all([load(), loadCounts()]), () => busyId.value === null && selected.size === 0)
+useWindowRefresh(() => Promise.all([load(), loadCounts()]), () => busyId.value === null && selected.size === 0)
 </script>
 
 <template>
@@ -345,14 +345,14 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
                   :title="(AI_SOURCES as readonly string[]).includes(it.source) ? t('automation.ai_no_bulk') : ''"
                   @change="toggleOne(it.id)" class="rounded border-neutral-300 disabled:opacity-50" />
               </td>
-              <td v-if="tbl.isVisible('date')" class="px-3 py-2 text-xs whitespace-nowrap">{{ formatDate(it.transaction.posted_at) }}</td>
-              <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono text-xs"
+              <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(it.transaction.posted_at) }}</td>
+              <td v-if="tbl.isVisible('amount')" class="px-3 py-2 text-right font-mono"
                 :class="it.transaction.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
                 {{ it.transaction.amount > 0 ? '+' : '' }}{{ formatMoney(it.transaction.amount, it.transaction.currency) }}
               </td>
-              <td v-if="tbl.isVisible('counterparty')" class="px-3 py-2 text-xs">
+              <td v-if="tbl.isVisible('counterparty')" class="px-3 py-2">
                 <div class="text-neutral-700 truncate max-w-xs">{{ it.transaction.counterparty_name || it.transaction.counterparty_account || '—' }}</div>
-                <div v-if="it.transaction.description" class="text-neutral-500 truncate max-w-xs">{{ it.transaction.description }}</div>
+                <div v-if="it.transaction.description" class="text-xs text-neutral-500 truncate max-w-xs">{{ it.transaction.description }}</div>
               </td>
               <td v-if="tbl.isVisible('counterparty_account')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ counterpartyAccount(it) }}</td>
               <td v-if="tbl.isVisible('vs')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">{{ it.transaction.variable_symbol || '—' }}</td>
@@ -426,7 +426,7 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
       <div class="md:hidden divide-y divide-neutral-100">
         <div v-for="it in items" :key="`m-${it.id}`" class="p-3 space-y-2">
           <div class="flex items-baseline justify-between gap-2">
-            <span class="font-mono text-base font-semibold" :class="it.transaction.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
+            <span class="font-mono text-sm font-semibold whitespace-nowrap" :class="it.transaction.amount > 0 ? 'text-success-700 dark:text-success-600' : 'text-danger-500'">
               {{ it.transaction.amount > 0 ? '+' : '' }}{{ formatMoney(it.transaction.amount, it.transaction.currency) }}
             </span>
             <span class="font-mono text-xs text-neutral-500">{{ it.debit_account_code }}/{{ it.credit_account_code }}</span>
@@ -436,7 +436,7 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
             <WhyChip :provenance="provenance(it)" />
           </div>
           <ConfidenceLabel v-if="it.confidence != null" :confidence="it.confidence" />
-          <div class="text-xs text-neutral-600 truncate">{{ it.transaction.counterparty_name || it.transaction.counterparty_account || '—' }}</div>
+          <div class="font-medium text-neutral-900 truncate">{{ it.transaction.counterparty_name || it.transaction.counterparty_account || '—' }}</div>
           <div v-if="it.note" class="text-xs text-neutral-500" :title="it.note">{{ noteText(it) }}</div>
           <span v-if="it.period_closed" class="inline-flex items-center text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-500">{{ t('bank.posting.period_closed_badge') }}</span>
           <RouterLink v-if="isNeedsInput && resolveLink(it)" :to="resolveLink(it)!"

@@ -8,7 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 
 /**
  * RFC 6238 TOTP (Time-based One-Time Password) implementace.
- * Kompatibilní s Google Authenticator, Authy, 1Password, Bitwarden, Microsoft Authenticator.
+ * Kompatibilní s Proton Authenticator, Ente Auth, Google Authenticator, 1Password, Bitwarden, Microsoft Authenticator.
  *
  * Algoritmus: HMAC-SHA1, 6 číslic, 30s perioda (defaults — to co aplikace používají).
  *
@@ -42,22 +42,40 @@ final class TotpService
         return $this->matchingStep($base32Secret, $code, $window) !== null;
     }
 
+    /**
+     * Ověří kód a jednorázově ho spotřebuje (RFC 6238 kap. 5.2). Přijme jen
+     * krok, který je novější než poslední přijatý krok téhož tajemství. Kód
+     * odpozorovaný po použití tak nejde zopakovat ani v rámci tolerančního okna,
+     * a to ani starší kód po použití novějšího.
+     *
+     * Kontrola i zápis jsou jeden příkaz: shodný krok zastaví primární klíč,
+     * souběžné různé kroky se v InnoDB serializují zámkem čteného rozsahu.
+     * Deadlock z takového souběhu znamená odmítnutí kódu, ne chybu serveru.
+     */
     public function verifyAndConsume(Connection $db, string $base32Secret, string $code): bool
     {
         $step = $this->matchingStep($base32Secret, $code, 1);
         if ($step === null) return false;
 
+        $fingerprint = hash('sha256', strtoupper(rtrim($base32Secret, '=')));
         $pdo = $db->pdo();
         $pdo->prepare('DELETE FROM totp_used_steps WHERE time_step < ?')
             ->execute([(int) floor(time() / self::PERIOD) - 2880]);
         try {
-            $pdo->prepare('INSERT INTO totp_used_steps (secret_fingerprint, time_step) VALUES (?, ?)')
-                ->execute([hash('sha256', strtoupper(rtrim($base32Secret, '='))), $step]);
+            $stmt = $pdo->prepare(
+                'INSERT INTO totp_used_steps (secret_fingerprint, time_step)
+                 SELECT ?, ?
+                  WHERE NOT EXISTS (
+                        SELECT 1 FROM totp_used_steps
+                         WHERE secret_fingerprint = ? AND time_step >= ?
+                  )'
+            );
+            $stmt->execute([$fingerprint, $step, $fingerprint, $step]);
         } catch (\PDOException $e) {
-            if ((string) $e->getCode() === '23000') return false;
+            if (in_array((string) $e->getCode(), ['23000', '40001'], true)) return false;
             throw $e;
         }
-        return true;
+        return $stmt->rowCount() === 1;
     }
 
     private function matchingStep(string $base32Secret, string $code, int $window): ?int

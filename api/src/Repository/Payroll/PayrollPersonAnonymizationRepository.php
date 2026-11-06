@@ -89,6 +89,33 @@ final class PayrollPersonAnonymizationRepository
         'payroll_jmhz_eldp_evidence_snapshots',
         'payroll_jmhz_ordinary_evidence_snapshots',
         'payroll_registration_identity_snapshots',
+        // Zmrazené mzdové běhy drží jméno i vstupy (včetně srážek) osoby.
+        'payroll_run_persons',
+        'payroll_run_revisions',
+        // Archiv mezd za období obsahuje výplatní pásky a data osoby v ZIPu.
+        'payroll_period_exports',
+    ];
+
+    /**
+     * Zbytkové tabulky bez sloupce `employee_id`: osoba je v nich vnořená
+     * v obsahu, takže se počítají přes vazbu na `payroll_run_persons`.
+     * Placeholdery jsou vždy `supplier_id`, `employee_id`.
+     *
+     * @var array<string,string>
+     */
+    private const DERIVED_RESIDUE_SQL = [
+        'payroll_run_revisions' =>
+            'SELECT COUNT(DISTINCT r.id)
+               FROM payroll_run_revisions r
+               JOIN payroll_run_persons p ON p.revision_id = r.id AND p.supplier_id = r.supplier_id
+              WHERE r.supplier_id = ? AND p.employee_id = ?',
+        'payroll_period_exports' =>
+            'SELECT COUNT(*)
+               FROM payroll_period_exports e
+              WHERE e.supplier_id = ?
+                AND EXISTS (SELECT 1 FROM payroll_run_persons p
+                             WHERE p.supplier_id = e.supplier_id AND p.employee_id = ?
+                               AND p.period_start BETWEEN e.period_start AND e.period_end)',
     ];
 
     public function __construct(
@@ -116,6 +143,16 @@ final class PayrollPersonAnonymizationRepository
     }
 
     /**
+     * Zbytkové tabulky, které osobu nesou jen v obsahu (bez `employee_id`).
+     *
+     * @return list<string>
+     */
+    public static function derivedResidueTables(): array
+    {
+        return array_keys(self::DERIVED_RESIDUE_SQL);
+    }
+
+    /**
      * Kolik osobních údajů po anonymizaci ZŮSTANE ve zmrazeném obsahu.
      *
      * @return array<string,int> tabulka => počet, jen nenulové
@@ -125,7 +162,8 @@ final class PayrollPersonAnonymizationRepository
         $out = [];
         foreach (self::RESIDUE_TABLES as $table) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND employee_id = ?"
+                self::DERIVED_RESIDUE_SQL[$table]
+                    ?? "SELECT COUNT(*) FROM {$table} WHERE supplier_id = ? AND employee_id = ?"
             );
             $stmt->execute([$supplierId, $employeeId]);
             $count = (int) $stmt->fetchColumn();

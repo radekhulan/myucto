@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollEmploymentAction;
 use MyInvoice\Action\Payroll\PayrollPeopleAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -49,7 +48,7 @@ final class PayrollDeletionApiTest extends TestCase
         if (!is_file($rootDir . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_employment_terms')) {
             $this->markTestSkipped('Migrace 1195 neproběhla.');

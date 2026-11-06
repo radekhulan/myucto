@@ -6,6 +6,10 @@ namespace MyInvoice\Service\Migration\Myucto;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\SchemaMetadataProvider;
+use MyInvoice\Repository\AccountingFrameworkRepository;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\UnusedAccountingPeriods;
+use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Export\Instance\TenantScopeResolver;
 use PDO;
 use RuntimeException;
@@ -13,12 +17,19 @@ use RuntimeException;
 /** Atomic graph import into an existing tenant; stored money is never recalculated. */
 final class MyuctoImporter
 {
+    private readonly UnusedAccountingPeriods $unusedPeriods;
+    private readonly ActivityLogger $activity;
+
     public function __construct(
         private readonly Connection $db,
         private readonly TenantScopeResolver $scopes,
-        private readonly MyuctoImportFiles $files
+        private readonly MyuctoImportFiles $files,
+        ?UnusedAccountingPeriods $unusedPeriods = null,
+        ?ActivityLogger $activity = null
     )
     {
+        $this->unusedPeriods = $unusedPeriods ?? new UnusedAccountingPeriods($db);
+        $this->activity = $activity ?? new ActivityLogger($db);
     }
 
     public function import(
@@ -81,6 +92,7 @@ final class MyuctoImporter
                 throw new RuntimeException('Země cílové firmy se liší od exportu.');
             }
             $this->assertVatHistory($pdo, $tables['supplier_vat_status_history'] ?? null, $sourceSupplier, $supplierId);
+            $this->assertAccountingFramework($tables, $package['context']['supplier_accounting_frameworks'] ?? null, $sourceSupplier, $supplierId);
             $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ? AND is_active = 1');
             $stmt->execute([$actorId]);
             if ($stmt->fetchColumn() === false) {
@@ -89,14 +101,20 @@ final class MyuctoImporter
             $stmt = $pdo->prepare("SELECT external_id FROM external_entity_map WHERE supplier_id = ? AND source_key = ? AND entity_type = 'myucto_import'");
             $stmt->execute([$supplierId, $sourceKey]);
             $previous = $stmt->fetchColumn();
+            if ($previous !== false && MyuctoImportProfile::isEarlierRestoreOfSameData((string) $previous, $digest)) {
+                // Shodná data obnovená starším profilem se ověří jako opakovaný import.
+                $previous = $digest;
+            }
             if ($previous !== false && !str_starts_with($previous, MyuctoImportProfile::VERSION . ':')) {
-                throw new RuntimeException('Firma již byla obnovena starším importním profilem. Doplnění předkontací a klasifikací vyžaduje novou obnovu do prázdné firmy.');
+                throw new RuntimeException('Firma již byla obnovena starším importním profilem. Doplnění převáděných účetních dat vyžaduje novou obnovu do prázdné firmy.');
             }
             if ($previous !== false && $previous !== $digest) {
                 throw new RuntimeException('Tento zdroj již byl importován s jinými daty. Opakovaný import nesmí přepsat existující doklady.');
             }
+            $replacedPeriods = [];
             if ($previous === false) {
-                $this->assertEmptyTarget($pdo, $supplierId);
+                $replacedPeriods = $this->replaceUnusedPeriods($pdo, $supplierId, ($tables['accounting_periods'] ?? []) !== []);
+                $this->assertEmptyTarget($pdo, $supplierId, $replacedPeriods !== null);
             }
             $writes = $this->files->prepare($tables, $package['assets'] ?? [], $supplierId, substr($sourceKey, 7, 16) . '-' . substr($digest, 0, 16));
             $reportFiles = count($writes);
@@ -104,7 +122,7 @@ final class MyuctoImporter
             $reused = [];
             $existing = [];
             $report = ['dry_run' => $dryRun, 'supplier_id' => $supplierId, 'source_supplier_id' => $sourceSupplier,
-                'created' => [], 'reused' => [], 'existing' => [], 'outside_scope' => $package['skipped'],
+                'created' => [], 'reused' => [], 'existing' => [], 'replaced_periods' => $replacedPeriods ?? [], 'outside_scope' => $package['skipped'],
                 'files' => $reportFiles, 'reconciliation' => []];
             foreach (MyuctoImportProfile::GLOBAL_KEYS as $table => $keys) {
                 foreach ($tables[$table] ?? [] as $id => $row) {
@@ -162,6 +180,7 @@ final class MyuctoImporter
             }
             $pending = [];
             $prepared = [];
+            $restoredEntries = [];
             $deferred = [];
             foreach (MyuctoImportProfile::TABLES as $table) {
                 foreach ($tables[$table] ?? [] as $id => $row) {
@@ -209,12 +228,20 @@ final class MyuctoImporter
                             unset($pending[$table]);
                         }
                         $report['created'][$table] = ($report['created'][$table] ?? 0) + 1;
+                        if ($table === 'journal_entries' && ($write['posted_at'] ?? null) !== null) {
+                            $restoredEntries[$map[$table][$id]] = $id;
+                        }
                         $progress = true;
                     }
                 }
                 if (!$progress) {
                     throw new RuntimeException('Importní graf má nepodporovaný cyklus povinných vazeb: ' . implode(', ', array_keys($pending)) . '.');
                 }
+            }
+            // § 33a: převzatý zaúčtovaný zápis potřebuje auditní stopu stejně jako zápis zaúčtovaný v MyÚčtu (invariant I28).
+            foreach ($restoredEntries as $entryId => $sourceEntryId) {
+                $this->activity->log('accounting.posted', $actorId, 'journal_entry', (int) $entryId,
+                    ['source' => 'myucto_import', 'source_entry_id' => (int) $sourceEntryId], null, null, $supplierId);
             }
             foreach ($deferred as [$table, $id, $values]) {
                 $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', array_keys($values)));
@@ -327,6 +354,58 @@ final class MyuctoImporter
         }
     }
 
+    /**
+     * Nese-li export účetnictví, musí cíl vést v každém okamžiku stejný účetní rámec
+     * (vyhláška 500, nebo 504 u neziskových organizací). Osnova i deník se přebírají
+     * beze změny, takže deník podle vyhlášky 504 ve firmě s rámcem 500 (a naopak) by
+     * dal chybné výkazy. Den bez záznamu má rámec 500 jako {@see AccountingFrameworkService::forDate()};
+     * export bez historie rámce je proto celý v rámci 500.
+     *
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     * @param array<int|string,array<string,mixed>>|null $source
+     */
+    private function assertAccountingFramework(
+        array $tables,
+        ?array $source,
+        int $sourceSupplier,
+        int $targetSupplier
+    ): void
+    {
+        $bound = false;
+        foreach (MyuctoImportProfile::FRAMEWORK_BOUND_TABLES as $table) {
+            $bound = $bound || ($tables[$table] ?? []) !== [];
+        }
+        if (!$bound) {
+            return;
+        }
+        $frameworks = [AccountingFrameworkService::CZ_500, AccountingFrameworkService::CZ_504];
+        $sourceByDate = [];
+        foreach ($source ?? [] as $row) {
+            $framework = $row['accounting_framework'] ?? null;
+            if (MyuctoExportReader::id($row['supplier_id'] ?? null) !== $sourceSupplier
+                || !is_string($row['effective_from'] ?? null) || isset($sourceByDate[$row['effective_from']])
+                || !in_array($framework, $frameworks, true)) {
+                throw new RuntimeException('Neplatná historie účetního rámce v exportu.');
+            }
+            $sourceByDate[$row['effective_from']] = $framework;
+        }
+        $targetByDate = array_column((new AccountingFrameworkRepository($this->db))->listForTenantForUpdate($targetSupplier), 'accounting_framework', 'effective_from');
+        $dates = array_unique([...array_keys($sourceByDate), ...array_keys($targetByDate)]);
+        sort($dates);
+        $left = AccountingFrameworkService::CZ_500;
+        $right = AccountingFrameworkService::CZ_500;
+        foreach ($dates as $date) {
+            $left = $sourceByDate[$date] ?? $left;
+            $right = $targetByDate[$date] ?? $right;
+            if ($left !== $right) {
+                throw new RuntimeException(sprintf(
+                    'Účetní rámec cílové firmy se liší od exportu k %s: export vede účetnictví podle vyhlášky %s, cílová firma podle vyhlášky %s.',
+                    $date, substr($left, 3), substr($right, 3),
+                ));
+            }
+        }
+    }
+
     private function assertVatHistory(
         PDO $pdo,
         ?array $source,
@@ -375,12 +454,19 @@ final class MyuctoImporter
         if ($table === 'de_movement_classification_history') {
             $refs['source_id'] = MyuctoAccountingGraph::movementTable($row['source_type'] ?? null);
         }
+        if ($table === 'journal_document_postings') {
+            $refs['doc_id'] = MyuctoImportProfile::DOCUMENT_TYPES[$row['doc_type'] ?? '']
+                ?? throw new RuntimeException('Nepodporovaný typ dokladu skupiny zaúčtování.');
+        }
         if (isset($schema['columns'][$table]['supplier_id'])) {
             $refs['supplier_id'] = 'supplier';
         }
         foreach ($schema['foreignKeyRows'] as $fk) {
             if ($fk['TABLE_NAME'] === $table) {
-                if ($fk['REFERENCED_COLUMN_NAME'] !== 'id' && $fk['COLUMN_NAME'] !== 'supplier_id') {
+                // U složeného FK (supplier_id, entry_id) je supplier_id stále
+                // vlastníkem firmy, nikoli ID rodičovského zápisu.
+                if ($fk['COLUMN_NAME'] === 'supplier_id') continue;
+                if ($fk['REFERENCED_COLUMN_NAME'] !== 'id') {
                     throw new RuntimeException('Nepodporovaná reference schématu.');
                 }
                 $refs[$fk['COLUMN_NAME']] = $fk['REFERENCED_TABLE_NAME'];
@@ -472,11 +558,35 @@ final class MyuctoImporter
         return $out;
     }
 
-    private function assertEmptyTarget(PDO $pdo, int $supplierId): void
+    /**
+     * Založení firmy hned otevře účetní období pro rok založení a uživatel ho v aplikaci
+     * smazat nemůže. Dokud je nepoužité ({@see UnusedAccountingPeriods}), firmu za prázdnou
+     * nepovažuje: nese-li export vlastní období, nahradí ho, jinak ho ponechá.
+     *
+     * @return list<array{fiscal_year:int, starts_on:string, ends_on:string}>|null smazaná období;
+     *         null = firma žádná období nemá, nebo je některé použité
+     */
+    private function replaceUnusedPeriods(PDO $pdo, int $supplierId, bool $packageHasPeriods): ?array
+    {
+        $stmt = $pdo->prepare('SELECT id, fiscal_year, starts_on, ends_on FROM accounting_periods WHERE supplier_id = ? ORDER BY starts_on FOR UPDATE');
+        $stmt->execute([$supplierId]);
+        $periods = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($periods === [] || $this->unusedPeriods->blocking($supplierId) !== []) {
+            return null;
+        }
+        if (!$packageHasPeriods) {
+            return [];
+        }
+        $pdo->prepare('DELETE FROM accounting_periods WHERE supplier_id = ?')->execute([$supplierId]);
+        return array_map(static fn (array $p): array => ['fiscal_year' => (int) $p['fiscal_year'],
+            'starts_on' => (string) $p['starts_on'], 'ends_on' => (string) $p['ends_on']], $periods);
+    }
+
+    private function assertEmptyTarget(PDO $pdo, int $supplierId, bool $unusedPeriods): void
     {
         $scopes = $this->scopes->resolveAll($supplierId);
         foreach (MyuctoImportProfile::TABLES as $table) {
-            if (isset(MyuctoImportProfile::REUSE_KEYS[$table])) {
+            if (isset(MyuctoImportProfile::REUSE_KEYS[$table]) || ($unusedPeriods && $table === 'accounting_periods')) {
                 continue;
             }
             $scope = $scopes[$table] ?? throw new RuntimeException('Nelze ověřit vlastnictví cílového grafu ' . $table . '.');

@@ -10,6 +10,8 @@ export interface ApiToken {
   scope: 'read' | 'read_write'
   /** Smí v Dokumentech vidět evidenci mzdových podání (doručenky, protokoly). */
   allow_payroll_submission_docs: boolean
+  /** Úhrady faktur z tokenu bez okolností platby eviduje EET externí systém (e-shop). */
+  eet_external_by_default?: boolean
   last_used_at: string | null
   last_used_ip: string | null
   expires_at: string | null
@@ -110,6 +112,10 @@ export const tokensApi = {
    * k tokenu. Nevratné.
    */
   purge: (id: number) => api.delete(`/auth/tokens/${id}/purge`),
+
+  /** Úhrady z tokenu bez kontextu EET eviduje externí systém (e-shop), MyÚčto je neodesílá. */
+  setEetExternal: (id: number, enabled: boolean) =>
+    api.put<{ id: number; eet_external_by_default: boolean }>(`/auth/tokens/${id}/eet-external`, { enabled }).then((r) => r.data),
 
   // ── IP allowlist tokenu — prázdný seznam znamená bez omezení ──────────────
   listIps: (tokenId: number) =>

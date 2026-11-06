@@ -24,6 +24,11 @@ final class ClientBankAccountRegistrySynchronizer
         if (!preg_match('/^\d{8,10}$/', $digits)) {
             return ['found' => false, 'source' => 'invalid', 'synced' => 0];
         }
+        // Registr zveřejňuje účty celé skupiny bez vazby na jednotlivého člena.
+        // Nelze je bezpečně připsat jeho kartě ani použít jako účet pro vratku.
+        if (CrpDphClient::isGroupRegistration($digits)) {
+            return ['found' => false, 'source' => 'group_registration', 'synced' => 0];
+        }
         $result = $this->crpdph->lookup($digits);
         $synced = $this->accounts->syncVatRegistry(
             $clientId,

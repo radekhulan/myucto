@@ -30,6 +30,11 @@ vi.mock('@/components/purchase/PdfDropzone.vue', () => ({ default: { template: '
 vi.mock('@/components/purchase/ExtractionReviewModal.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/dimensions/DimensionFields.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/dimensions/DimensionChips.vue', () => ({ default: { template: '<div />' } }))
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
+}))
 
 import IncomingDocuments from '../IncomingDocuments.vue'
 
@@ -43,7 +48,10 @@ function submission(id: number, status: PurchaseInvoiceSubmission['status'] = 's
 
 async function mountPage(items: PurchaseInvoiceSubmission[]) {
   m.list.mockResolvedValueOnce({ items })
-  const wrapper = shallowMount(IncomingDocuments)
+  // Stub bez slotu by schoval celý detail dokladu; tady jde o něj, ne o rozložení.
+  const wrapper = shallowMount(IncomingDocuments, {
+    global: { stubs: { DocumentPreviewSplit: { template: '<div><slot /></div>' } } },
+  })
   await flushPromises()
   return wrapper
 }
@@ -138,5 +146,16 @@ describe('Příchozí doklady: odmítnutí', () => {
   it.each(['processing', 'processed', 'rejected'] as const)('nenabídne odmítnutí ve stavu %s', async status => {
     const wrapper = await mountPage([submission(1, status)])
     expect(button(wrapper, 'reject')).toBeUndefined()
+  })
+
+  it('přerušené vytěžení nabídne znovu vytěžit i smazat, běžící ne', async () => {
+    const running = await mountPage([submission(1, 'processing', 'staff')])
+    expect(button(running, 'extract')).toBeUndefined()
+    expect(running.find('[data-testid="inbox-delete"]').exists()).toBe(false)
+
+    const stale = await mountPage([{ ...submission(2, 'processing', 'staff'), processing_stale: true }])
+    expect(stale.text()).toContain('purchase_submissions.processing_stale')
+    expect(button(stale, 'extract')).toBeDefined()
+    expect(stale.find('[data-testid="inbox-delete"]').exists()).toBe(true)
   })
 })

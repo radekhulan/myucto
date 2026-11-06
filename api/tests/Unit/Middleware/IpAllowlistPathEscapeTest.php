@@ -42,6 +42,15 @@ final class IpAllowlistPathEscapeTest extends TestCase
         self::assertSame(204, $this->statusFor('admin_only', self::FOREIGN_IP, 'GET', '/api/invoices'));
     }
 
+    public function testAdminOnlyModeAlsoProtectsTechnicalAdministration(): void
+    {
+        foreach (['/api/instance-admin/status', '/api/%69nstance-admin/smtp',
+            '/api/instance-admin/./suppliers', '/api//instance-admin//audit'] as $path) {
+            self::assertSame(403, $this->statusFor('admin_only', self::FOREIGN_IP, 'GET', $path), $path);
+            self::assertSame(204, $this->statusFor('admin_only', self::ALLOWED_IP, 'GET', $path), $path);
+        }
+    }
+
     /** Escapovaná /api/public/ výjimka platí přesně tam, kam router doručí. */
     public function testPublicPathExemptionMatchesRouterView(): void
     {

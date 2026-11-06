@@ -48,7 +48,7 @@ final class CashFuelingServiceTest extends TestCase
         self::assertSame(42.5, (float) $row['quantity']);
         self::assertSame(98765, (int) $row['odometer']);
         self::assertSame(286.36, (float) $row['amount_vat']);
-        self::assertSame(38.8235, (float) $row['unit_price']);
+        self::assertSame(38.823529, (float) $row['unit_price']);
     }
 
     public function testRepeatedScanDoesNotDuplicate(): void

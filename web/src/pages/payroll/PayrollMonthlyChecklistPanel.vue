@@ -9,6 +9,7 @@ import {
   type PayrollMonthlyChecklistItem,
   type PayrollMonthlyChecklistResponse,
   type PayrollRegzelEnvironment,
+  type PayrollSubmissionDispatchMode,
 } from '@/api/payroll'
 import {
   dataBoxApi,
@@ -19,7 +20,8 @@ import {
 import { payrollSicknessCasesApi } from '@/api/payrollSicknessCases'
 import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
-import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
+import IsdsBatchSendMethods from '@/components/submission/IsdsBatchSendMethods.vue'
+import PayrollDispatchModeSelect from '@/components/payroll/PayrollDispatchModeSelect.vue'
 import MobileKeyReceiptsButton from '@/components/submission/MobileKeyReceiptsButton.vue'
 import PayrollLateDiscountConfirm from '@/components/payroll/PayrollLateDiscountConfirm.vue'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
@@ -28,8 +30,8 @@ import { formatDate, formatPeriod } from '@/composables/useFormat'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
 import { useReceiptFollowUp } from '@/composables/useReceiptFollowUp'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
-import { navigateFullPage } from '@/workspace/fullPageNavigation'
 
 /*
  * Měsíční přehled říká, CO se za měsíc podává, a umí to rovnou připravit
@@ -37,10 +39,11 @@ import { navigateFullPage } from '@/workspace/fullPageNavigation'
  *
  * Neodesílá ale vlastní logikou: příprava volá `prepareMonthlyChecklistItem`
  * (zmrazí podání ze schválené revize), odeslání jde přes frontu podání
- * (`dispatchSubmissionBatch`), která zvolí kanál sama — JMHZ VREP hned,
- * přehledy pojišťovnám do odchozí fronty datové schránky. Zprávy datové
- * schránky se pak odešlou JEDNÍM potvrzením Mobilního klíče
- * (`MobileKeyBatchSendButton`) a doručenky se v téže relaci dotáhnou samy
+ * (`dispatchSubmissionBatch`) — JMHZ přes VREP, je-li zvolený podpisový
+ * certifikát, jinak datovou schránkou; přehledy pojišťovnám do odchozí fronty
+ * datové schránky. Zprávy datové schránky se pak odešlou jedním přihlášením
+ * zvoleným způsobem (`IsdsBatchSendMethods`, tentýž výběr jako fronta
+ * „K odeslání") a po Mobilním klíči se doručenky v téže relaci dotáhnou samy
  * (`useReceiptFollowUp`).
  *
  * Odeslání vždy potvrzuje uživatel: v ostrém prostředí dialog s přehledem
@@ -109,12 +112,20 @@ const flowBusy = ref(false)
 const sendError = ref<Record<string, string>>({})
 /** Shrnutí posledního odeslání pod hlavičkou. */
 const sendSummary = ref('')
-/** Zprávy datové schránky čekající na jedno potvrzení Mobilním klíčem. */
-const mobileKeyOutboxIds = ref<number[]>([])
-/** Koncepty pro odesílací bránu — každý se schvaluje v datovce zvlášť. */
-const gatewayOutboxIds = ref<number[]>([])
-/** Zprávy, které je nutné odeslat ze své datové schránky ručně. */
-const manualOutboxCount = ref(0)
+/** Zprávy zařazené do odchozí fronty datové schránky, čekající na přihlášení. */
+const databoxOutboxIds = ref<number[]>([])
+/** Doporučení transportu ze zařazení (u jedné zprávy rozhoduje o bráně). */
+const databoxTransport = ref<{ automatic: boolean; channel: string; reason: string | null } | null>(null)
+/** Volba kanálu u řádku, kde jsou připravené oba (JMHZ: VREP i datovka). */
+const modeChoice = ref<Record<string, PayrollSubmissionDispatchMode>>({})
+
+function modeOf(item: PayrollMonthlyChecklistItem): PayrollSubmissionDispatchMode | null {
+  return modeChoice.value[item.key] ?? item.dispatch_mode
+}
+
+function setMode(item: PayrollMonthlyChecklistItem, mode: PayrollSubmissionDispatchMode | null) {
+  if (mode !== null) modeChoice.value = { ...modeChoice.value, [item.key]: mode }
+}
 /** Kterému řádku patří odchozí zpráva — kvůli chybě u správného řádku. */
 const outboxItemKey = new Map<number, string>()
 const receiptsBusy = ref('')
@@ -277,14 +288,11 @@ function awaitsReceipt(item: PayrollMonthlyChecklistItem): boolean {
 }
 
 function channelLabel(item: PayrollMonthlyChecklistItem): string {
-  if (
-    item.dispatch_mode === 'vrep_jmhz'
-    || item.dispatch_mode === 'vrep_registration'
-    || item.dispatch_mode === 'vrep_cssz_form'
-  ) {
+  const mode = modeOf(item)
+  if (mode === 'vrep_jmhz' || mode === 'vrep_registration' || mode === 'vrep_cssz_form') {
     return t('payroll.submissions.monthly_checklist.send.channel_vrep')
   }
-  if (item.dispatch_mode === 'isds_health' || item.dispatch_mode === 'isds_payroll') {
+  if (mode === 'isds_health' || mode === 'isds_payroll') {
     return t('payroll.submissions.monthly_checklist.send.channel_isds')
   }
   return item.channel.label ?? t('payroll.submissions.monthly_checklist.unknown')
@@ -439,9 +447,8 @@ async function sendItems(rows: PayrollMonthlyChecklistItem[]) {
 
   const byKey = new Map(rows.map(item => [item.submission_id as number, item.key]))
   sendError.value = {}
-  mobileKeyOutboxIds.value = []
-  gatewayOutboxIds.value = []
-  manualOutboxCount.value = 0
+  databoxOutboxIds.value = []
+  databoxTransport.value = null
   outboxItemKey.clear()
   let delivered = 0
   let failed = 0
@@ -450,11 +457,15 @@ async function sendItems(rows: PayrollMonthlyChecklistItem[]) {
     try {
       const result = await payrollApi.dispatchSubmissionBatch(
         props.environment,
-        part.map(item => ({
-          submission_id: item.submission_id as number,
-          // Klíč je vázaný na JEDNU položku a jedno kliknutí.
-          idempotency_key: crypto.randomUUID(),
-        })),
+        part.map(item => {
+          const mode = modeOf(item)
+          return {
+            submission_id: item.submission_id as number,
+            // Klíč je vázaný na JEDNU položku a jedno kliknutí.
+            idempotency_key: crypto.randomUUID(),
+            ...(mode !== null ? { mode } : {}),
+          }
+        }),
       )
       for (const entry of result.results) {
         const key = byKey.get(entry.submission_id) ?? ''
@@ -469,13 +480,8 @@ async function sendItems(rows: PayrollMonthlyChecklistItem[]) {
           continue
         }
         outboxItemKey.set(outbox.id, key)
-        if (outbox.transport.channel === 'mobile_key') {
-          mobileKeyOutboxIds.value = [...mobileKeyOutboxIds.value, outbox.id]
-        } else if (outbox.transport.automatic) {
-          gatewayOutboxIds.value = [...gatewayOutboxIds.value, outbox.id]
-        } else {
-          manualOutboxCount.value += 1
-        }
+        databoxOutboxIds.value = [...databoxOutboxIds.value, outbox.id]
+        databoxTransport.value = outbox.transport
       }
     } catch (exception) {
       // Spadlá PORCE nesmí zastavit zbytek. Její řádky dostanou hlášku.
@@ -486,24 +492,25 @@ async function sendItems(rows: PayrollMonthlyChecklistItem[]) {
       }
     }
   }
+  modeChoice.value = {}
   sendSummary.value = t('payroll.submissions.monthly_checklist.send.summary', {
     sent: delivered,
-    databox: mobileKeyOutboxIds.value.length + gatewayOutboxIds.value.length + manualOutboxCount.value,
+    databox: databoxOutboxIds.value.length,
     failed,
   })
   await load(true)
 }
 
 /**
- * Jedno potvrzení Mobilního klíče odeslalo všechny zprávy dávky. Selhání
- * jedné zprávy se ukáže u jejího řádku, ostatní tím neutrpí. Relace
+ * Jedno přihlášení odeslalo všechny zprávy dávky. Selhání jedné zprávy se
+ * ukáže u jejího řádku, ostatní tím neutrpí. Po Mobilním klíči relace
  * zůstala otevřená a doručenky se v ní dotáhnou samy.
  */
-async function onMobileKeySent(
+async function onDataboxSent(
   results: MobileKeyBatchItemResult[],
   receiptSession: MobileKeyReceiptSession | null,
 ) {
-  mobileKeyOutboxIds.value = []
+  databoxOutboxIds.value = []
   let sent = 0
   for (const result of results) {
     if (result.dispatched) {
@@ -524,21 +531,6 @@ async function onMobileKeySent(
   })
   receiptFollowUp.start(receiptSession)
   await load(true)
-}
-
-/**
- * Odesílací brána schvaluje každý koncept v datové schránce zvlášť — jedna
- * autorizace na víc zpráv tam technicky nejde. Otevře se ten první.
- */
-async function approveGatewayConcept() {
-  const first = gatewayOutboxIds.value[0]
-  if (first === undefined) return
-  try {
-    const gateway = await dataBoxApi.gatewayStartPayroll(first)
-    navigateFullPage(gateway.redirect_url)
-  } catch (exception) {
-    sendSummary.value = apiErrorMessage(exception, t('payroll.submissions.queue.send_failed'))
-  }
 }
 
 /** Doručenky stažené jedním přihlášením Mobilním klíčem (bez otevřené relace). */
@@ -590,6 +582,9 @@ async function load(silent = false) {
 
 watch([environmentModel, period], () => { void load() })
 onMounted(() => { void load() })
+// Podání odeslané nebo doručenka stažená v jiném okně mění stav položek měsíce.
+useWindowRefresh(() => load(true), () => !loading.value && !flowBusy.value && preparing.value === '' && receiptsBusy.value === ''
+  && databoxOutboxIds.value.length === 0)
 </script>
 
 <template>
@@ -668,7 +663,7 @@ onMounted(() => { void load() })
 
     <template v-else-if="response">
       <div
-        v-if="bulkItems.length || prepareAllItems.length || prepareAllSummary || mobileKeyOutboxIds.length || gatewayOutboxIds.length || manualOutboxCount || sendSummary || followUpActive || receiptStats.pending"
+        v-if="bulkItems.length || prepareAllItems.length || prepareAllSummary || databoxOutboxIds.length || sendSummary || followUpActive || receiptStats.pending"
         class="rounded-xl border border-primary-500/30 bg-primary-50 p-4 text-sm shadow-sm"
         data-test="monthly-checklist-send-bar"
       >
@@ -713,35 +708,20 @@ onMounted(() => { void load() })
         <p v-if="sendSummary" class="mt-2 text-neutral-800" data-test="monthly-checklist-send-summary">
           {{ sendSummary }}
         </p>
-        <div v-if="mobileKeyOutboxIds.length" class="mt-3" data-test="monthly-checklist-mobile-key">
-          <p class="text-neutral-700">
-            {{ t('payroll.submissions.monthly_checklist.send.mobile_key_hint', { count: mobileKeyOutboxIds.length }) }}
-          </p>
-          <MobileKeyBatchSendButton
-            class="mt-2"
-            :outbox-ids="mobileKeyOutboxIds"
+        <div
+          v-if="databoxOutboxIds.length"
+          class="mt-3 rounded-lg border border-primary-200 bg-surface p-3"
+          data-test="monthly-checklist-databox"
+        >
+          <IsdsBatchSendMethods
+            :key="databoxOutboxIds.join(',')"
+            :outbox-ids="databoxOutboxIds"
             :environment="environment"
-            @sent="onMobileKeySent"
+            :transport="databoxTransport"
+            :gateway-start="dataBoxApi.gatewayStartPayroll"
+            @sent="onDataboxSent"
           />
         </div>
-        <div v-if="gatewayOutboxIds.length" class="mt-3" data-test="monthly-checklist-gateway">
-          <p class="text-neutral-700">
-            {{ t('payroll.submissions.monthly_checklist.send.gateway_hint', { count: gatewayOutboxIds.length }) }}
-          </p>
-          <button
-            type="button"
-            :class="[btnFilledSm('primary'), 'mt-2 whitespace-nowrap']"
-            @click="approveGatewayConcept"
-          >
-            {{ t('payroll.submissions.monthly_checklist.send.gateway_action', { current: 1, total: gatewayOutboxIds.length }) }}
-          </button>
-        </div>
-        <p v-if="manualOutboxCount" class="mt-3 text-neutral-700" data-test="monthly-checklist-manual-outbox">
-          {{ t('payroll.submissions.monthly_checklist.send.manual_hint', { count: manualOutboxCount }) }}
-          <RouterLink :to="{ name: 'admin-databox' }" class="font-medium text-primary-700 underline">
-            {{ t('payroll.submissions.monthly_checklist.send.open_databox') }}
-          </RouterLink>
-        </p>
         <p v-if="followUpActive" class="mt-3 text-neutral-600" data-test="monthly-checklist-receipts-following">
           {{ t('payroll.submissions.monthly_checklist.send.receipts_following') }}
         </p>
@@ -900,8 +880,16 @@ onMounted(() => { void load() })
                         </svg>
                         {{ t('payroll.submissions.monthly_checklist.send.prepare_only') }}
                       </button>
+                      <PayrollDispatchModeSelect
+                        v-if="!isPreparable(item) && isDispatchable(item)"
+                        :model-value="modeOf(item)"
+                        :modes="item.dispatch_modes ?? []"
+                        :primary-mode="null"
+                        :disabled="flowBusy"
+                        @update:model-value="mode => setMode(item, mode)"
+                      />
                       <button
-                        v-else-if="isDispatchable(item)"
+                        v-if="!isPreparable(item) && isDispatchable(item)"
                         type="button"
                         :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
                         :disabled="flowBusy"
@@ -1054,8 +1042,16 @@ onMounted(() => { void load() })
                   >
                     {{ t('payroll.submissions.monthly_checklist.send.prepare_only') }}
                   </button>
+                  <PayrollDispatchModeSelect
+                    v-if="!isPreparable(item) && isDispatchable(item)"
+                    :model-value="modeOf(item)"
+                    :modes="item.dispatch_modes ?? []"
+                    :primary-mode="null"
+                    :disabled="flowBusy"
+                    @update:model-value="mode => setMode(item, mode)"
+                  />
                   <button
-                    v-else-if="isDispatchable(item)"
+                    v-if="!isPreparable(item) && isDispatchable(item)"
                     type="button"
                     :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
                     :disabled="flowBusy"

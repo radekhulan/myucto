@@ -122,7 +122,8 @@ final class PayrollSensitiveData
         };
         $value = match ($field) {
             PayrollSensitiveField::PERSONAL_IDENTIFIER,
-            PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER =>
+            PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER,
+            PayrollSensitiveField::TAX_FAMILY_IDENTIFIER =>
                 preg_replace('/[\s\/.\-]+/u', '', $value),
             PayrollSensitiveField::PERSON_EXTERNAL_IDENTIFIER,
             PayrollSensitiveField::EMPLOYMENT_EXTERNAL_IDENTIFIER =>
@@ -240,7 +241,8 @@ final class PayrollSensitiveData
             // podmínkou dělitelnosti jedenácti, zůstává řádově deset kandidátů —
             // pořád dost na rozlišení karty, málo na rekonstrukci.
             PayrollSensitiveField::PERSONAL_IDENTIFIER,
-            PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER => min(2, $length),
+            PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER,
+            PayrollSensitiveField::TAX_FAMILY_IDENTIFIER => min(2, $length),
             default => min(4, $length),
         };
         $visible = min($maximumVisible, max(0, $length - 4));

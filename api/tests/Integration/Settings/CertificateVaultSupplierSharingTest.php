@@ -142,6 +142,133 @@ final class CertificateVaultSupplierSharingTest extends TestCase
         self::assertSame(0, $this->mappingCount($this->foreign));
     }
 
+    /**
+     * Superadmin bez jediného členství vidí v přepínači všechny firmy. Kdyby se
+     * cíle braly jen z `user_suppliers`, hromadné povolení by u něj nedělalo nic.
+     */
+    public function testSuperadminWithoutMembershipsReachesAllCompanies(): void
+    {
+        $credentialId = $this->uploadIntoSource();
+        $this->db->pdo()->prepare('DELETE FROM user_suppliers WHERE user_id = ?')->execute([$this->userId]);
+
+        $statuses = $this->statuses($this->sharing->shareWithOtherSuppliers(
+            $this->request(true),
+            $credentialId,
+            $this->userId,
+            $this->source,
+            false,
+        ));
+
+        self::assertArrayNotHasKey($this->source, $statuses);
+        self::assertSame(CertificateVaultSupplierSharing::STATUS_ENABLED, $statuses[$this->foreign]);
+        self::assertSame(CertificateVaultSupplierSharing::STATUS_ENABLED, $statuses[$this->permitted]);
+        self::assertTrue($this->vault->isEnabledForSupplier($credentialId, $this->foreign));
+    }
+
+    /** Běžný uživatel bez členství nedostane nic, ani přes hromadnou akci. */
+    public function testNonSuperadminWithoutMembershipsReachesNothing(): void
+    {
+        $credentialId = $this->uploadIntoSource();
+        $this->db->pdo()->prepare('DELETE FROM user_suppliers WHERE user_id = ?')->execute([$this->userId]);
+
+        $results = $this->sharing->shareWithOtherSuppliers(
+            $this->request(),
+            $credentialId,
+            $this->userId,
+            $this->source,
+            false,
+        );
+
+        self::assertSame([], $results);
+        self::assertSame(0, $this->mappingCount($this->foreign));
+    }
+
+    /**
+     * Nový certifikát nahradí starý všude, kde ho firma používala: v datové
+     * schránce, podpisovém profilu i volbě pro mzdy. Zapíše se i do firmy, kde už
+     * platný certifikát je, a i do firmy, ze které se akce spouští.
+     */
+    public function testReplaceRebindsEveryUsageAndEnablesEverywhere(): void
+    {
+        $old = $this->uploadIntoSource();
+        $this->vault->setSupplierEnabled($old, $this->userId, $this->permitted, true, $this->userId);
+        $this->vault->setSupplierEnabled($old, $this->userId, $this->alreadyCovered, true, $this->userId);
+        $new = $this->uploadIntoSource();
+        $pdo = $this->db->pdo();
+
+        $pdo->prepare(
+            "INSERT INTO submission_channel_credentials
+                (supplier_id, environment, channel, label, box_id, credential_id, last_verified_at)
+             VALUES (?, 'production', 'isds', 'Syntetická schránka', 'abc1234', ?, NOW())"
+        )->execute([$this->permitted, $old]);
+        $pdo->prepare(
+            "INSERT INTO payroll_submission_signing_profiles
+                (supplier_id, environment, credential_id, owner_user_id, cssz_registered_serial)
+             VALUES (?, 'production', ?, ?, '0A')"
+        )->execute([$this->source, $old, $this->userId]);
+        $pdo->prepare(
+            "INSERT INTO signing_profiles (supplier_id, owner_user_id, name, code, allowed_usages_json)
+             VALUES (?, ?, 'Syntetický profil', ?, '[]')"
+        )->execute([$this->permitted, $this->userId, 'synthetic-' . bin2hex(random_bytes(4))]);
+        $profileId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO signing_credentials (profile_id, vault_credential_id, certificate_fingerprint)
+             VALUES (?, ?, 'stary-otisk')"
+        )->execute([$profileId, $old]);
+
+        $statuses = $this->statuses($this->sharing->replaceInSuppliers(
+            $this->request(),
+            $new,
+            $old,
+            $this->userId,
+            $this->source,
+        ));
+
+        self::assertSame(CertificateVaultSupplierSharing::STATUS_REPLACED, $statuses[$this->source]);
+        self::assertSame(CertificateVaultSupplierSharing::STATUS_REPLACED, $statuses[$this->permitted]);
+        self::assertSame(CertificateVaultSupplierSharing::STATUS_ENABLED, $statuses[$this->alreadyCovered]);
+        self::assertSame(CertificateVaultSupplierSharing::STATUS_SKIPPED_NO_PERMISSION, $statuses[$this->readOnly]);
+        self::assertTrue($this->vault->isEnabledForSupplier($new, $this->alreadyCovered));
+        self::assertFalse($this->vault->isEnabledForSupplier($new, $this->foreign));
+
+        $box = $pdo->prepare('SELECT credential_id, last_verified_at FROM submission_channel_credentials WHERE supplier_id = ?');
+        $box->execute([$this->permitted]);
+        $boxRow = $box->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame($new, (int) $boxRow['credential_id']);
+        self::assertNull($boxRow['last_verified_at']);
+
+        $payroll = $pdo->prepare('SELECT credential_id, cssz_registered_serial FROM payroll_submission_signing_profiles WHERE supplier_id = ?');
+        $payroll->execute([$this->source]);
+        $payrollRow = $payroll->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame($new, (int) $payrollRow['credential_id']);
+        // Registrace u ČSSZ patří starému certifikátu, náhrada ji nepřepisuje.
+        self::assertSame('0A', $payrollRow['cssz_registered_serial']);
+
+        $profile = $pdo->prepare('SELECT vault_credential_id, certificate_fingerprint FROM signing_credentials WHERE profile_id = ?');
+        $profile->execute([$profileId]);
+        $profileRow = $profile->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame($new, (int) $profileRow['vault_credential_id']);
+        self::assertNotSame('stary-otisk', $profileRow['certificate_fingerprint']);
+
+        // Starý certifikát už nic nepoužívá, smazat ho jde ručně.
+        $usage = $this->vault->usage($old);
+        self::assertSame(0, $usage['signing_profiles'] + $usage['data_box_channels'] + $usage['payroll_selections']);
+    }
+
+    public function testReplaceRefusesSameOrExpiredCertificate(): void
+    {
+        $current = $this->uploadIntoSource();
+        $expired = $this->vaultRow('2000-01-01 00:00:00', '2001-01-01 00:00:00');
+
+        try {
+            $this->sharing->replaceInSuppliers($this->request(), $current, $current, $this->userId, $this->source);
+            self::fail('Náhrada sebou samým měla selhat.');
+        } catch (\InvalidArgumentException) {
+        }
+        $this->expectException(\InvalidArgumentException::class);
+        $this->sharing->replaceInSuppliers($this->request(), $expired, $current, $this->userId, $this->source);
+    }
+
     public function testOnlyWithoutValidCertificateSkipsCompaniesThatAlreadyHaveOne(): void
     {
         $valid = $this->vaultRow('2020-01-01 00:00:00', '2099-01-01 00:00:00');

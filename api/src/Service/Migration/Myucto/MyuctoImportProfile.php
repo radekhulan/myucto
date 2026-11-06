@@ -7,7 +7,9 @@ namespace MyInvoice\Service\Migration\Myucto;
 /** Explicit first import profile: business records, no instance credentials or runtime jobs. */
 final class MyuctoImportProfile
 {
-    public const VERSION = 'classifications-v1';
+    public const VERSION = 'posting-groups-v1';
+    /** Starší profily, jejichž obnova se shodnými daty je pro aktuální profil úplná. */
+    public const COMPATIBLE_VERSIONS = ['classifications-v1'];
     public const TABLES = [
         'currencies', 'revenue_categories', 'expense_categories', 'cost_centers',
         'chart_of_accounts', 'vat_classifications', 'accounting_periods', 'clients', 'client_bank_accounts',
@@ -18,11 +20,18 @@ final class MyuctoImportProfile
         'bank_statements', 'bank_transactions', 'invoice_payments', 'payment_matches',
         'cash_documents', 'cash_document_vat_lines', 'invoice_settlements', 'credit_note_offsets',
         'offset_agreements', 'offset_agreement_items', 'assets', 'asset_improvements',
-        'depreciation_entries', 'small_assets', 'journal_entries', 'journal_entry_lines',
+        'depreciation_entries', 'small_assets', 'journal_entries', 'journal_entry_lines', 'journal_document_postings',
         'posting_rules', 'de_movement_classification', 'de_movement_classification_history',
         'tax_evidence_bank_rules', 'supplier_email_templates',
     ];
     public const CONFIG_TABLES = ['supplier_vat_status_history'];
+    /**
+     * Tabulky, které se z exportu jen čtou ke kontrole shody s cílem. Nepřevádějí se,
+     * nejsou v otisku dat a protokol je dál vede mimo rozsah převodu.
+     */
+    public const CONTEXT_TABLES = ['supplier_accounting_frameworks'];
+    /** Tabulky účetnictví: když je export nese, musí cíl vést stejný účetní rámec (vyhláška 500/504). */
+    public const FRAMEWORK_BOUND_TABLES = ['chart_of_accounts', 'accounting_periods', 'journal_entries'];
     public const GLOBAL_KEYS = ['countries' => ['iso2'], 'vat_rates' => ['code', 'rate_percent', 'country']];
     public const REUSE_KEYS = [
         'currencies' => ['code', 'decimals'], 'chart_of_accounts' => ['account_code'],
@@ -68,4 +77,16 @@ final class MyuctoImportProfile
         'recurring_invoice_templates' => ['last_error', 'last_error_at'],
     ];
     public const DOCUMENT_TYPES = ['invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices'];
+
+    /**
+     * Firma obnovená starším profilem ze shodných dat. Otisk dat zahrnuje i seznam
+     * převáděných tabulek, takže shoda znamená, že export nové tabulky nenese
+     * (zdroj bez skupin zaúčtování) a opakovaný import nemá co doplnit.
+     */
+    public static function isEarlierRestoreOfSameData(string $previous, string $digest): bool
+    {
+        [$version, $hash] = array_pad(explode(':', $previous, 2), 2, '');
+        return in_array($version, self::COMPATIBLE_VERSIONS, true) && $hash !== ''
+            && $digest === self::VERSION . ':' . $hash;
+    }
 }

@@ -134,6 +134,7 @@ final class InvoiceImporter
         if (isset($existing[$key])) {
             if (!isset($doc['map_key'])) {
                 $ctx->issuedInvoices[$doc['inter']] = $existing[$key];
+                $ctx->issuedPaymentRows[$existing[$key]] = $doc['payment_rows'];
             }
             if ($doc['previous']) {
                 $ctx->previousPeriod['invoice|' . $existing[$key]] = true;
@@ -239,7 +240,7 @@ final class InvoiceImporter
         $codes = array_values(array_unique(array_filter(array_column($items, 'target_code'))));
         $vs = preg_replace('/\D/', '', $doc['variable_symbol']) ?? '';
         $reverse = VatReturnLineClassifier::isDomesticReverseSale($codes);
-        [$fx, $items, $amounts] = $this->takeOverCurrency($ctx, $doc, $items, ForeignCurrencyTakeover::paymentBlock(0.0, (float) $doc['paid'], (float) $doc['total']));
+        [$fx, $items, $amounts] = $this->takeOverCurrency($ctx, $doc, $items, ForeignCurrencyTakeover::paymentBlock((float) ($doc['advance_deducted'] ?? 0.0), (float) $doc['paid'], (float) $doc['total'] - (float) ($doc['advance_deducted'] ?? 0.0)));
         try {
             $id = $this->writer->insertIssued(new MigratedIssuedDocument(
                 supplierId: $ctx->supplierId,
@@ -264,7 +265,7 @@ final class InvoiceImporter
                 status: $status,
                 createdBy: $ctx->userOrNull(),
                 paymentVariableSymbol: $vs !== '' && strlen(ltrim($vs, '0')) <= VariableSymbolNormalizer::MAX_LENGTH && $vs !== VariableSymbolNormalizer::forPayment((string) $number['number']) ? $vs : null,
-                advancePaidAmount: 0.0,
+                advancePaidAmount: $fx->inForeignCurrency() ? 0.0 : (float) ($doc['advance_deducted'] ?? 0.0),
                 paidTotal: $amounts['paid'],
                 paidAt: $doc['settled'] ? ($doc['paid_at'] ?? $doc['issue']) : null,
                 bookedAt: $booked ? $doc['accounting'] . ' 00:00:00' : null,
@@ -293,6 +294,7 @@ final class InvoiceImporter
         $this->map->put($ctx->supplierId, isset($doc['map_key']) ? PremierImportRepository::KIND_VAT_DOCUMENT : PremierImportRepository::KIND_INVOICE, $key, $id, $ctx->runId);
         if (!isset($doc['map_key'])) {
             $ctx->issuedInvoices[$doc['inter']] = $id;
+            $ctx->issuedPaymentRows[$id] = $doc['payment_rows'];
         }
         $ctx->statsClients[] = $clientId;
         if ($doc['previous']) {
@@ -430,7 +432,7 @@ final class InvoiceImporter
         [$accountNo, $bankCode] = self::bankAccount($doc['account_no']);
         $vs = preg_replace('/\D/', '', $doc['variable_symbol']) ?? '';
         // Přijatý doklad úhradu v částce nevede (jen stav), částečná úhrada ho proto neblokuje.
-        [$fx, $items, $amounts] = $this->takeOverCurrency($ctx, $doc, $items, ForeignCurrencyTakeover::purchaseBlock($reverse, $deduction));
+        [$fx, $items, $amounts] = $this->takeOverCurrency($ctx, $doc, $items, abs((float) ($doc['advance_deducted'] ?? 0.0)) >= 0.005 ? ForeignCurrencyTakeover::paymentBlock((float) $doc['advance_deducted'], 0.0, 0.0) : ForeignCurrencyTakeover::purchaseBlock($reverse, $deduction));
         try {
             $id = $this->writer->insertPurchase(new MigratedPurchaseDocument(
                 supplierId: $ctx->supplierId,
@@ -459,7 +461,7 @@ final class InvoiceImporter
                 noteAboveItems: $doc['text'] !== '' ? mb_substr($doc['text'], 0, 1000) : null,
                 noteBelowItems: self::note($label, $reasons, $doc, $fx),
                 createdBy: $ctx->userId,
-                advancePaidAmount: 0.0,
+                advancePaidAmount: $fx->inForeignCurrency() ? 0.0 : (float) ($doc['advance_deducted'] ?? 0.0),
                 paymentVariableSymbol: $vs !== '' && strlen(ltrim($vs, '0')) <= VariableSymbolNormalizer::MAX_LENGTH && ltrim($vs, '0') !== '' ? $vs : null,
                 paymentConstantSymbol: preg_match('/^\d{1,4}$/', $doc['constant_symbol']) === 1 ? $doc['constant_symbol'] : null,
                 paymentAccountNumber: $accountNo,

@@ -8,8 +8,9 @@ import Branding from '@/pages/admin/Branding.vue'
 import ClientSigningProfiles from '@/components/settings/ClientSigningProfiles.vue'
 import CompanyEmailTemplates from '@/components/settings/CompanyEmailTemplates.vue'
 import ClientPaymentQrSettings from '@/components/settings/ClientPaymentQrSettings.vue'
+import ClientInvoiceDefaults from '@/components/settings/ClientInvoiceDefaults.vue'
 
-type SettingsTab = 'email-profiles' | 'branding' | 'payment-qr' | 'signing-profiles' | 'email-templates'
+type SettingsTab = 'email-profiles' | 'branding' | 'payment-qr' | 'signing-profiles' | 'email-templates' | 'invoice-defaults'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -19,6 +20,7 @@ const tabs = computed<SettingsTab[]>(() => {
   const allowed: SettingsTab[] = []
   if (auth.canWrite('settings.email_profiles')) allowed.push('email-profiles')
   if (auth.canWrite('settings.branding')) allowed.push('branding')
+  if (auth.canWrite('settings.invoice_defaults')) allowed.push('invoice-defaults')
   if (auth.canWrite('settings.payment_qr')) allowed.push('payment-qr')
   if (auth.isClientRole && auth.canWrite('settings.signing_profiles')) allowed.push('signing-profiles')
   if (auth.canWrite('settings.email_templates')) allowed.push('email-templates')
@@ -77,6 +79,9 @@ function switchTab(tab: SettingsTab) {
       >
         {{ t('settings.payment_qr_tab') }}
       </button>
+      <button type="button" class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
+        :class="activeTab === 'invoice-defaults' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
+        v-if="tabs.includes('invoice-defaults')" @click="switchTab('invoice-defaults')">{{ t('settings.invoice_defaults_title') }}</button>
       <button type="button"
         class="-mb-px cursor-pointer whitespace-nowrap border-b-2 px-4 py-2 text-sm font-medium transition-colors"
         :class="activeTab === 'signing-profiles' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
@@ -93,5 +98,6 @@ function switchTab(tab: SettingsTab) {
     <ClientSigningProfiles v-else-if="activeTab === 'signing-profiles'" />
     <CompanyEmailTemplates v-else-if="activeTab === 'email-templates'" client-scoped />
     <ClientPaymentQrSettings v-else-if="activeTab === 'payment-qr'" />
+    <ClientInvoiceDefaults v-else-if="activeTab === 'invoice-defaults'" />
   </div>
 </template>

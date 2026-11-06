@@ -21,6 +21,7 @@ interface ImapMailboxClientInterface
     /**
      * @param array<string,mixed> $settings Settings including decrypted password.
      * @param 'success'|'failure' $kind
+     * @param bool $noticeImported Bankovní pohyb z avíza je bezpečně uložený, i když není spárovaný.
      */
-    public function postProcess(array $settings, BankEmailNoticeMessage $message, string $kind): ?string;
+    public function postProcess(array $settings, BankEmailNoticeMessage $message, string $kind, bool $noticeImported = false): ?string;
 }

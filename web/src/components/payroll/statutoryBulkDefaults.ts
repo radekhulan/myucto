@@ -96,13 +96,24 @@ export function effectiveBasisCounts(
  * Tentýž kód nese i „chybí schválená mzdová složka" (proklik na rychlé zadání)
  * a další příčiny mimo zákonnou evidenci. Dialog doplnění rezidence,
  * příslušnosti a slevy s nimi nic neudělá, a když se nabízel u 182 lidí bez
- * mzdové složky, vedl do slepé uličky „0 osob k doplnění". Rozhoduje cíl
- * nápravy: zákonná evidence osoby, nebo nic konkrétního (starší záznam).
+ * mzdové složky, vedl do slepé uličky „0 osob k doplnění". Totéž platilo pro
+ * chybějící zdravotní pojištění nebo počáteční úhrny: vedou do zákonné
+ * evidence či na kartu vztahu, ale výchozí údaje je nedoplní. Rozhoduje proto
+ * sekce, na kterou proklik míří (`field=statutory.<sekce>`), nebo nic
+ * konkrétního (starší záznam bez prokliku).
  */
+const BULK_FIXABLE_FIELDS = [
+  'statutory.tax_declarations',
+  ...BULK_DEFAULT_SECTIONS.map(section => `statutory.${section}`),
+]
+
 function isStatutoryEvidenceReview(validation: PayrollRunValidation): boolean {
   if (validation.code !== STATUTORY_REVIEW_CODE) return false
   const path = validation.remediation_path
-  return path === null || path === undefined || path === '' || path.includes('panel=statutory_evidence')
+  if (path === null || path === undefined || path === '') return true
+  const query = path.includes('?') ? path.slice(path.indexOf('?') + 1) : ''
+  const field = new URLSearchParams(query).get('field')
+  return field !== null && BULK_FIXABLE_FIELDS.includes(field)
 }
 
 /** Osoby, u kterých běh hlásí nedokončený zákonný výpočet (jen záznamy vázané na osobu). */

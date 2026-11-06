@@ -121,6 +121,23 @@ Uložené finální snapshoty daňových výpočtů se změnou konstant zpětně
 nepřepisují. Nový náhled nebo nový výpočet však už použije aktuální efektivní
 sadu.
 
+### 100.7.4 Neziskovky a daňová ztráta
+
+Záložka **Neziskovky** obsahuje roční sazbu a dolní i horní mez snížení
+základu daně podle § 20 odst. 7. Sazba se zadává jako desetinné číslo:
+**0,30 znamená 30 %**. Oddělené meze platí pro standardní kategorii a pro
+oprávněné vysoké školy a výzkumné instituce. Částky zadávejte v celých Kč;
+dolní mez nesmí převyšovat horní mez.
+
+Přepis částek nezakládá právní nárok na snížení. Kategorii a způsobilost
+poplatníka určuje doložený právní profil příslušného období. Finální
+přiznání a evidence jeho daňové úspory používají zachycenou roční sadu,
+takže je pozdější přepis číselníku nepřepočítá.
+
+Záložka **Výkaznictví a termíny** obsahuje také počet období pro zpětné uplatnění
+daňové ztráty a jeho celkový limit. Tyto parametry samy nepotvrzují vznik
+ani dostupnost konkrétní daňové ztráty.
+
 ## 100.8 Související kapitoly
 
 - [Daňový optimalizátor](47_Danovy_optimalizator.md) - orientační porovnání

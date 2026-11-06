@@ -35,6 +35,58 @@ final class PayrollAverageEarningRepository
         return $this->deletion->decorate($supplierId, $rows);
     }
 
+    /**
+     * Důvod, proč vztah v daném čtvrtletí neexistuje (null = existuje).
+     *
+     * JEDINÉ místo té kontroly: volá ji ruční založení průměru i hromadné
+     * založení za čtvrtletí. Skutečný začátek bere stejně jako přehled
+     * hromadných průměrů: `COALESCE(actual_start_date, start_date)`. Průměr
+     * navázaný na čtvrtletí, kdy vztah netrval, JMHZ nikdy nepoužije
+     * (typicky omylem založený na jiném vztahu téže osoby) a chybí pak u
+     * vztahu, který ho potřebuje. Neexistující vztah vrací null, tu chybu
+     * hlásí {@see self::create()}.
+     */
+    public function quarterMismatch(int $supplierId, int $employmentId, int $year, int $quarter): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COALESCE(actual_start_date, start_date) AS started, end_date
+               FROM payroll_employments
+              WHERE supplier_id = ? AND id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        $from = new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, (($quarter - 1) * 3) + 1));
+        $to = $from->modify('+2 months')->modify('last day of this month');
+        $started = is_string($row['started'] ?? null) ? $row['started'] : null;
+        $ended = is_string($row['end_date'] ?? null) ? $row['end_date'] : null;
+        $label = sprintf(
+            'Průměr nejde založit na %d. čtvrtletí %d (%s až %s)',
+            $quarter,
+            $year,
+            $from->format('j. n. Y'),
+            $to->format('j. n. Y'),
+        );
+        if ($started !== null && $started > $to->format('Y-m-d')) {
+            return sprintf(
+                '%s: pracovní vztah začíná až %s. Vyberte vztah, který v tomto čtvrtletí trval.',
+                $label,
+                (new \DateTimeImmutable($started))->format('j. n. Y'),
+            );
+        }
+        if ($ended !== null && $ended < $from->format('Y-m-d')) {
+            return sprintf(
+                '%s: pracovní vztah skončil %s. Vyberte vztah, který v tomto čtvrtletí trval.',
+                $label,
+                (new \DateTimeImmutable($ended))->format('j. n. Y'),
+            );
+        }
+
+        return null;
+    }
+
     /** @return array<string,mixed> */
     public function create(
         int $supplierId,

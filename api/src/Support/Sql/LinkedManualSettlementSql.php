@@ -18,7 +18,20 @@ namespace MyInvoice\Support\Sql;
  * a přiznat ji celou každému dokladu by nesoulad schovalo. Doklad pak zůstane
  * v kontrole i v saldu k ručnímu posouzení.
  *
- * Volají ji `ClosingRepository` (K3) a `SaldoRepository` (otevřené položky).
+ * Zápis, který doklad vlastní ve skupině zaúčtování (`journal_document_postings`, doklad
+ * zaúčtovaný po řádcích víc zápisy), vyrovnáním není: je to další část předpisu.
+ * Agregace ho proto vynechává a předpis z něj skládají volající.
+ *
+ * Zápis s rozpadem na doklady téhož druhu (`journal_settlement_allocations`) se tu
+ * nepočítá: částky nese rozpad a {@see settledSql()} je přičítá zvlášť. Bez toho by se
+ * zápis navázaný na jediný doklad a zároveň rozepsaný započetl dvakrát.
+ *
+ * Totéž platí pro zápis, který k témuž dokladu eviduje zápočet (`invoice_settlements`
+ * s `journal_entry_id`): částku už nese kanál zápočtů v saldokontu i v K3. Vazba je pak
+ * jen odkaz a počítat ji znamená hlásit doklad jako přeplacený.
+ *
+ * Volají ji `ClosingRepository` (K3) a `SaldoRepository` (otevřené položky), obojí přes
+ * {@see settledSql()}.
  */
 final class LinkedManualSettlementSql
 {
@@ -40,6 +53,30 @@ final class LinkedManualSettlementSql
         bool $currentRead = false,
     ): string {
         return self::projection($docType, $settleSide, $accountPredicate, $supplierExpr, $asOfExpr, $currentRead, false);
+    }
+
+    /**
+     * Vyrovnání dokladů ručními zápisy celkem: vazba bez částky ({@see sql()}) a rozpad
+     * řádků na doklady ({@see JournalSettlementAllocationSql::settledSql()}). Agregace
+     * `doc_id`, `settled`; placeholdery dvakrát za sebou v pořadí `$supplierExpr`,
+     * `$asOfExpr`, `$asOfExpr`.
+     *
+     * @param 'invoice'|'purchase_invoice' $docType
+     * @param 'credit'|'debit' $settleSide
+     */
+    public static function settledSql(
+        string $docType,
+        string $settleSide,
+        string $accountPredicate,
+        string $supplierExpr = '?',
+        string $asOfExpr = '?',
+        bool $currentRead = false,
+    ): string {
+        $linked = self::sql($docType, $settleSide, $accountPredicate, $supplierExpr, $asOfExpr, $currentRead);
+        $allocated = JournalSettlementAllocationSql::settledSql($docType, $accountPredicate, $supplierExpr, $asOfExpr, $currentRead);
+        return "SELECT s.doc_id, SUM(s.settled) AS settled
+                  FROM (({$linked}) UNION ALL ({$allocated})) s
+                 GROUP BY s.doc_id";
     }
 
     public static function membersSql(
@@ -86,7 +123,29 @@ final class LinkedManualSettlementSql
                        ({$unique}) AS allocation_complete"
             : "dl.doc_id,
                        SUM(CASE WHEN l.side = '{$settleSide}' THEN l.signed_amount ELSE -l.signed_amount END) AS settled";
+        // Zápis ze skupiny zaúčtování téhož dokladu je jeho předpis, ne vyrovnání: volající
+        // ho berou do předpisu přes DocumentPostingGroup::entriesSql(). Členové pro
+        // kurzovou evidenci (members) zůstávají beze změny.
+        $ownPosting = "NOT EXISTS (
+                       SELECT 1 FROM journal_document_postings own
+                        WHERE own.supplier_id = dl.supplier_id AND own.entry_id = dl.entry_id
+                          AND own.doc_type = dl.doc_type AND own.doc_id = dl.doc_id{$lock}
+                   )";
+        $allocated = JournalSettlementAllocationSql::noAllocationSql('dl.supplier_id', 'dl.entry_id', 'dl.doc_type', $currentRead);
+        // Vydaná faktura má zápočet v saldu přes evidovanou platbu, bez ní ho žádný kanál nečte.
+        $settlementPayment = $docType === 'invoice'
+            ? " JOIN invoice_payments sip ON sip.id = stl.invoice_payment_id AND sip.supplier_id = stl.supplier_id
+                                                AND sip.source = 'settlement'"
+            : '';
+        $noSettlement = "NOT EXISTS (
+                       SELECT 1 FROM invoice_settlements stl{$settlementPayment}
+                        WHERE stl.journal_entry_id = dl.entry_id AND stl.supplier_id = dl.supplier_id
+                          AND stl.doc_type = dl.doc_type AND stl.doc_id = dl.doc_id{$lock}
+                   )";
         $tail = $members ? 'ORDER BY dl.doc_id, e.id, l.line_no, l.id' : "AND {$unique}
+                   AND {$ownPosting}
+                   AND {$allocated}
+                   AND {$noSettlement}
                  GROUP BY dl.doc_id";
         $effective = $lifecycle ? '' : " AND e.entry_date <= {$asOfExpr}
                    AND (e.reversed_by IS NULL OR rev.entry_date > {$asOfExpr})";

@@ -27,8 +27,10 @@ declare(strict_types=1);
  * skončí a vypíše je; s ním triggery na dobu mazání odstraní a pak obnoví (DDL
  * transakci ukončí, proto se obnovují i při chybě).
  *
- * `--files` smaže i soubory firmy v úložišti (složky a soubory `sup-<id>` v prvních dvou
- * úrovních `storage/`, například PDF faktur, přílohy, archivy a logo).
+ * `--files` smaže i soubory firmy v úložišti: složky a soubory `sup-<id>` a `supplier-<id>`
+ * v prvních třech úrovních `storage/` (`ResetStorageScope::supplierPaths`), například PDF
+ * vydaných i přijatých faktur, jejich zdrojové soubory, přílohy, archivy, podpisové
+ * profily a loga.
  *
  * Exit kódy: 0 ok · 1 chyba běhu · 2 chybné argumenty
  */
@@ -42,6 +44,7 @@ require __DIR__ . '/../vendor/autoload.php';
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\System\ResetStorageScope;
 
 $opts = [];
 foreach (array_slice($argv ?? [], 1) as $arg) {
@@ -239,12 +242,7 @@ try {
 
     $files = [];
     if (isset($opts['files'])) {
-        $root = rtrim(RuntimePaths::storage(''), '/\\');
-        foreach ([$root, ...(glob($root . '/*', GLOB_ONLYDIR) ?: [])] as $dir) {
-            foreach (glob($dir . '/sup-' . $supplierId . '{,.*}', GLOB_BRACE) ?: [] as $path) {
-                $files[] = $path;
-            }
-        }
+        $files = ResetStorageScope::supplierPaths(RuntimePaths::storage(''), $supplierId);
         foreach ($files as $path) {
             echo '  úložiště: ' . $path . "\n";
         }
@@ -341,19 +339,12 @@ try {
     }
     echo sprintf("Smazáno %d řádků v tabulkách firmy (bez podřízených řádků smazaných vazbou).\n", $deleted);
 
+    $removed = 0;
     foreach ($files as $path) {
-        if (is_dir($path)) {
-            $it = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($path, FilesystemIterator::SKIP_DOTS), RecursiveIteratorIterator::CHILD_FIRST);
-            foreach ($it as $f) {
-                $f->isDir() ? @rmdir($f->getPathname()) : @unlink($f->getPathname());
-            }
-            @rmdir($path);
-        } else {
-            @unlink($path);
-        }
+        $removed += ResetStorageScope::remove($path);
     }
     if ($files !== []) {
-        echo sprintf("Smazáno %d položek úložiště.\n", count($files));
+        echo sprintf("Smazáno %d položek úložiště (%d souborů).\n", count($files), $removed);
     }
     exit(0);
 } catch (Throwable $e) {

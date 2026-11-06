@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Payroll\Document;
 use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
 use MyInvoice\Service\Payroll\Calculation\Money;
 use MyInvoice\Service\Payroll\Component\PayrollExemptIncomeSplit;
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\Insurance\EmployerSocialInsuranceAllocation;
 
 final class PayslipDocumentSnapshotMapper
@@ -272,6 +273,7 @@ final class PayslipDocumentSnapshotMapper
             $personResult,
             $net,
             $nonCash,
+            SeparateTaxBaseRegime::fromResultSnapshot($tax),
         );
         $correction = $this->int($net, 'correction_minor_units');
         $annualSettlement = $this->nonNegativeInt(
@@ -549,6 +551,7 @@ final class PayslipDocumentSnapshotMapper
         array $personResult,
         array $net,
         int $nonCashMinorUnits,
+        SeparateTaxBaseRegime $separateBaseRegime,
     ): array {
         $lines = [];
         if ($nonCashMinorUnits > 0) {
@@ -556,7 +559,7 @@ final class PayslipDocumentSnapshotMapper
         }
         $withholding = $this->nonNegativeInt($net, 'withholding_tax_minor_units');
         if ($withholding > 0) {
-            $lines[] = new PayslipLine('Srážková daň', $withholding);
+            $lines[] = new PayslipLine($separateBaseRegime->payslipTaxLabel(), $withholding);
         }
 
         $agreements = [];

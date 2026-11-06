@@ -188,6 +188,18 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::ALL',
         'payrollImports.ts::AttendanceMatchStatus'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceMeaning::MATCH_STATUSES',
+        'payroll.ts::PayrollAgreementAnnualHoursStatus'
+            => 'const:MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours::STATUSES',
+        'payroll.ts::PayrollDeclarationSignState'
+            => 'const:MyInvoice\Service\Payroll\PayrollTaxDeclarationBulkSign::STATES',
+        'payroll.ts::PayrollDeclarationSignChange'
+            => 'const:MyInvoice\Service\Payroll\PayrollTaxDeclarationBulkSign::CHANGES',
+        'payroll.ts::PayrollBulkClosureGroup'
+            => 'const:MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure::GROUPS',
+        'payroll.ts::PayrollBulkClosureAction'
+            => 'const:MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure::ACTIONS',
+        'payrollImports.ts::AttendanceSampleKey'
+            => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceSampleProfiles::KEYS',
         'payrollImports.ts::AttendanceProfileComponentKind'
             => 'const:MyInvoice\Service\Payroll\Import\Attendance\AttendanceProfileComponents::KINDS',
         'payrollImports.ts::PohodaOicRowStatus'
@@ -217,6 +229,8 @@ final class PayrollEnumContractTest extends TestCase
             => 'const:MyInvoice\Service\Payroll\TaxStatement\TaxStatementService::FORMS',
         'payrollRulesets.ts::PayrollRulesetOutlookSeverity'
             => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRulesetYearOutlook::SEVERITIES',
+        'payrollRulesets.ts::PayrollRulesetReviewCategory'
+            => 'const:MyInvoice\Service\Payroll\Ruleset\PayrollRuleParameterCatalog::REVIEW_CATEGORIES',
         'payroll.ts::PayrollForeignPermitKind'
             => 'db:payroll_person_foreign_permits.permit_kind',
         'payroll.ts::PayrollForeignPermitStatus'
@@ -404,6 +418,21 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementAnnualClaims',
         'payroll.ts::PayrollAnnualSettlementCaregiverStatus'
             => 'db:payroll_annual_settlement_requests.other_household_caregiver_status',
+        // Ročně uplatňované položky (§ 15, § 35 odst. 4) a osoby pro slevu na
+        // manžela — formulář evidence i rozpis výsledku.
+        'payroll.ts::PayrollAnnualDeductionKind'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualNonTaxableKind',
+        'payroll.ts::PayrollAnnualDependantRelation'
+            => 'db:payroll_dependants.relation',
+        // Spropitné ze stravovacích služeb (§ 6 odst. 9 písm. g) — způsob rozdělení.
+        'payrollBenefitBaskets.ts::FoodServiceTipAllocationMode'
+            => 'db:payroll_food_service_tip_months.allocation_mode',
+        // Sleva za umístění dítěte (§ 35bd odst. 6) — druh předškolního zařízení.
+        'payroll.ts::PayrollAnnualPreschoolFacilityKind'
+            => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualPreschoolFacilityKind',
+        // Průvodce postupem po 20. dni (nulové opravné hlášení + REGZEC).
+        'payroll.ts::PayrollJmhzPost20Situation'
+            => 'keys:MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPost20GuideService::SITUATIONS',
         'payroll.ts::PayrollAnnualSettlementOutcome'
             => 'enum:MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementOutcome',
         'payroll.ts::PayrollAnnualSettlementBlocker'
@@ -540,6 +569,7 @@ final class PayrollEnumContractTest extends TestCase
             => 'enum:MyInvoice\Service\Payroll\Net\DeductionAgreementCommand',
         'payrollDeductions.ts::DeductionAgreementKind' => 'db:payroll_deduction_agreements.deduction_kind',
         'payrollDeductions.ts::DeductionLegalBasis' => 'db:payroll_deduction_agreements.legal_basis',
+        'payrollDeductions.ts::DeductionJmhzTarget' => 'db:payroll_deduction_agreements.jmhz_target',
         'payroll.ts::PayrollWorkInjuryCompensationPayer'
             => 'db:payroll_employment_terminations.work_injury_compensation_payer',
         'payroll.ts::PayrollEmploymentCertificateDeductionSourceKind'
@@ -880,6 +910,7 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\HealthInsurance\HealthParticipationStatus::class,
         \MyInvoice\Service\Payroll\IncomeTax\EmploymentRelationshipKind::class,
         \MyInvoice\Service\Payroll\IncomeTax\IncomeTaxComponentTreatment::class,
+        \MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime::class,
         \MyInvoice\Service\Payroll\IncomeTax\TaxCalculationStatus::class,
         \MyInvoice\Service\Payroll\IncomeTax\TaxCorrectionTreatment::class,
         \MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind::class,
@@ -925,6 +956,8 @@ final class PayrollEnumContractTest extends TestCase
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOfficialExampleClassification::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzOfficialExampleValidationResult::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenarioSelectionKind::class,
+        // Ročník specifikace volí server; klient dostává jen kód blokace.
+        \MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolErrorOrigin::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolKind::class,
         \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolPartKind::class,

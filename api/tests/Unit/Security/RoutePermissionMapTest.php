@@ -15,6 +15,10 @@ final class RoutePermissionMapTest extends TestCase
     {
         $map = new RoutePermissionMap();
         $cases = [
+            ['GET', '/api/settings/client/invoice-defaults', 'settings.invoice_defaults', AccessLevel::WRITE],
+            ['PUT', '/api/settings/client/invoice-defaults', 'settings.invoice_defaults', AccessLevel::WRITE],
+            ['POST', '/api/accounting/assets/7/depreciation/revision', 'assets.depreciation', AccessLevel::WRITE],
+            ['POST', '/api/accounting/assets/7/depreciation/revision/preview', 'assets.depreciation', AccessLevel::WRITE],
             ['POST', '/api/recurring/7/reschedule', 'recurring', AccessLevel::WRITE],
             ['POST', '/api/invoices/7/issue', 'invoices.issue', AccessLevel::WRITE],
             ['POST', '/api/invoices/7/send', 'invoices.send', AccessLevel::WRITE],
@@ -25,6 +29,7 @@ final class RoutePermissionMapTest extends TestCase
             ['GET', '/api/purchase-invoices/payment-orders/history', 'purchase_invoices.payment_orders', AccessLevel::READ],
             ['POST', '/api/purchase-invoices/scan-inbox', 'purchase_invoices.scan', AccessLevel::WRITE],
             ['POST', '/api/purchase-invoices/import-structured', 'purchase_invoices.create', AccessLevel::WRITE],
+            ['POST', '/api/purchase-invoices/import-ai', 'purchase_invoices.extract', AccessLevel::WRITE],
             ['GET', '/api/purchase-invoice-submissions', 'documents.inbox', AccessLevel::READ],
             ['POST', '/api/purchase-invoice-submissions', 'documents.inbox', AccessLevel::WRITE],
             ['DELETE', '/api/purchase-invoice-submissions/7', 'documents.inbox.delete', AccessLevel::WRITE],
@@ -56,11 +61,51 @@ final class RoutePermissionMapTest extends TestCase
             ['POST', '/api/reports/monthly-export/start', 'reports.export', AccessLevel::WRITE],
             ['POST', '/api/reports/monthly-export/jobs/7/cancel', 'reports.export', AccessLevel::WRITE],
             ['DELETE', '/api/reports/monthly-export/jobs/7', 'reports.export', AccessLevel::WRITE],
-            ['GET', '/api/reports/submissions/settings', 'reports.submit', AccessLevel::WRITE],
+            ['GET', '/api/reports/submissions/settings', 'reports.submit', AccessLevel::READ],
             ['GET', '/api/reports/submissions/7/artifacts/9/download', 'reports.export', AccessLevel::READ],
             ['POST', '/api/accounting/periods/4/close', 'accounting.periods.close', AccessLevel::WRITE],
             ['POST', '/api/accounting/assets/4/dispose', 'assets.dispose', AccessLevel::WRITE],
             ['POST', '/api/accounting/cash-documents', 'cash.document.write', AccessLevel::WRITE],
+            ['GET', '/api/property/service-lifecycles', 'property', AccessLevel::READ],
+            ['GET', '/api/property/service-lifecycles/choices', 'property', AccessLevel::READ],
+            ['GET', '/api/property/service-lifecycles/sources/estimates', 'property', AccessLevel::READ],
+            ['GET', '/api/property/service-lifecycles/7', 'property', AccessLevel::READ],
+            ['POST', '/api/property/service-lifecycles/preview/start', 'property.settlements.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/service-lifecycles/preview/start_opening', 'property.settlements.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/service-lifecycles/preview/unwind', 'property.settlements.unwind', AccessLevel::WRITE],
+            ['POST', '/api/property/service-lifecycles/preview/finalize', 'property.settlements.post', AccessLevel::WRITE],
+            ['POST', '/api/property/service-lifecycles/commands/start', 'property.settlements.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/service-lifecycles/commands/start_opening', 'property.settlements.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/service-lifecycles/commands/unwind', 'property.settlements.unwind', AccessLevel::WRITE],
+            ['POST', '/api/property/service-lifecycles/policies', 'property.settlements.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/service-settlements/12/objections', 'property.settlements.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/service-settlements/objections/3/resolve', 'property.settlements.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/service-lifecycles/commands/finalize', 'property.settlements.post', AccessLevel::WRITE],
+            ['GET', '/api/property/payments/debts', 'property', AccessLevel::READ],
+            ['GET', '/api/property/payments/debts/7', 'property', AccessLevel::READ],
+            ['GET', '/api/property/payments/source', 'property', AccessLevel::READ],
+            ['GET', '/api/property/payments/candidates', 'property', AccessLevel::READ],
+            ['GET', '/api/property/payments/context', 'property', AccessLevel::READ],
+            ['GET', '/api/property/payments/history', 'property', AccessLevel::READ],
+            ['GET', '/api/property/payments/card', 'property', AccessLevel::READ],
+            ['POST', '/api/property/payments/source-revisions/preview', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/source-revisions/confirm', 'property.payments.post', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/preview', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/confirm', 'property.payments.post', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/debts/register', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/debts/7/accessories', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/credits/7/reserve', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/reservations/7/cancel', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/reservations/7/cancel-submission', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/reservations/abo/preview', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/reservations/abo/confirm', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/reservations/abo/9/download', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/setoffs/preview', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/setoffs/confirm', 'property.payments.post', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/corrections/preview', 'property.payments.manage', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/corrections/confirm', 'property.payments.post', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/operations/7/reverse', 'property.payments.reverse', AccessLevel::WRITE],
+            ['POST', '/api/property/payments/corrections/7/reverse', 'property.payments.reverse', AccessLevel::WRITE],
             ['GET', '/api/accounting/bank-accounts', 'accounting', AccessLevel::READ],
             ['PATCH', '/api/accounting/bank-accounts/7', 'accounting', AccessLevel::WRITE],
             ['GET', '/api/accounting/bank-posting-unposted', 'bank.rules', AccessLevel::READ],
@@ -174,6 +219,9 @@ final class RoutePermissionMapTest extends TestCase
             ['GET', '/api/payroll/submissions/42/jmhz-content-correction', 'payroll.submissions', AccessLevel::WRITE],
             ['GET', '/api/payroll/submissions/42/jmhz-content-correction-preparations', 'payroll.submissions', AccessLevel::WRITE],
             ['POST', '/api/payroll/submissions/42/jmhz-content-correction', 'payroll.submissions', AccessLevel::WRITE],
+            ['GET', '/api/payroll/submissions/jmhz-post20/42', 'payroll.submissions', AccessLevel::READ],
+            ['GET', '/api/payroll/submissions/42/jmhz-zero-amendment', 'payroll.submissions', AccessLevel::WRITE],
+            ['POST', '/api/payroll/submissions/42/jmhz-zero-amendment', 'payroll.submissions', AccessLevel::WRITE],
             ['GET', '/api/payroll/submissions/42', 'payroll.submissions', AccessLevel::READ],
             ['GET', '/api/payroll/submissions/health-overviews/42', 'payroll.submissions', AccessLevel::READ],
             ['GET', '/api/payroll/submissions/health-overviews/42/111/download', 'payroll.submissions', AccessLevel::READ],
@@ -294,6 +342,20 @@ final class RoutePermissionMapTest extends TestCase
         }
     }
 
+    public function testStereoNxJsonAndPdfProtocolsUseReadImportPermission(): void
+    {
+        $map = new RoutePermissionMap();
+        $base = '/api/admin/imports/stereo-nx/uploads/' . str_repeat('a', 32) . '/runs/42';
+        foreach ([$base, $base . '/pdf'] as $path) {
+            $match = $map->match('GET', $path);
+            self::assertSame(RoutePermissionMap::PERMISSION, $match?->kind, $path);
+            self::assertSame('utilities.import', $match?->key, $path);
+            self::assertSame(AccessLevel::READ, $match?->minimum, $path);
+        }
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('POST', $base . '/pdf')?->kind);
+        self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('GET', $base . '/pdf/extra')?->kind);
+    }
+
     /** Klíče z admin výjimek musí existovat v katalogu — jinak by je nešlo v rolích nastavit. */
     public function testAdminImportPermissionKeysExistInCatalog(): void
     {
@@ -404,6 +466,7 @@ final class RoutePermissionMapTest extends TestCase
     {
         $map = new RoutePermissionMap();
         self::assertSame(RoutePermissionMap::ADMIN_PLUS, $map->match('POST', '/api/suppliers')?->kind);
+        self::assertSame(RoutePermissionMap::ADMIN_PLUS, $map->match('GET', '/api/suppliers/carry-over')?->kind);
         self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('PUT', '/api/suppliers/7')?->kind);
         self::assertSame(RoutePermissionMap::SUPERADMIN, $map->match('DELETE', '/api/suppliers/7')?->kind);
     }

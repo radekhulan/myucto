@@ -7,7 +7,8 @@ import { useSupplierStore } from '@/stores/supplier'
 
 const { t } = useI18n()
 import { dashboardApi, type DashboardSummary } from '@/api/dashboard'
-import { formatMoney, formatDate, formatNumber } from '@/composables/useFormat'
+import { formatMoney, formatMoneyWhole, formatDate, formatNumber } from '@/composables/useFormat'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import SparklineChart from '@/components/charts/SparklineChart.vue'
 import TopClientsPieChart from '@/components/charts/TopClientsPieChart.vue'
 import TaxNetWidget from '@/components/dashboard/TaxNetWidget.vue'
@@ -72,6 +73,14 @@ onMounted(loadSummary)
 
 // Výkaz práce modal — otevíráno z tlačítka „Výkaz" na kartě konceptu (stejný popup jako v /invoices).
 const wrModalOpen = ref(false)
+
+// Souhrn (tržby, neuhrazené, koncepty) se po zápisu v jiném okně přepíše
+// na místě, bez hlášky o načítání.
+useWindowRefresh(async () => {
+  error.value = ''
+  await loadSummary()
+  if (error.value) throw new Error(error.value)
+}, () => !wrModalOpen.value)
 const wrModalInvoiceId = ref(0)
 function openWorkReport(id: number) {
   wrModalInvoiceId.value = id
@@ -240,7 +249,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             </div>
             <div class="flex items-center justify-between gap-2 mt-auto pt-2 border-t border-neutral-100">
               <span class="text-xs font-mono text-neutral-600 truncate">
-                <span v-if="d.varsymbol">{{ d.varsymbol }} · </span>{{ formatMoney(d.total_with_vat, d.currency) }}
+                <span v-if="d.varsymbol">{{ d.varsymbol }} · </span>{{ formatMoneyWhole(d.total_with_vat, d.currency) }}
               </span>
               <div class="flex items-center gap-1.5 shrink-0">
                 <RouterLink :to="`/invoices/${d.id}/edit`"
@@ -284,11 +293,11 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             <!-- Velikost přes `clamp`, ne přes breakpointy: obrat je řetězec
                  proměnné délky s nedělitelnými mezerami, takže se nezalomí a na
                  320px displeji pevný `text-3xl` přetekl kartu. Na běžném mobilu
-                 (390px) vyjde 29px ≈ původní `text-3xl`, od 600px strop 2,25rem
-                 = původní `text-4xl`. -->
-            <div class="font-mono text-[length:clamp(1.5rem,7.5vw,2.25rem)] font-semibold tracking-tight leading-[1.1] text-neutral-900 tabular-nums">{{ formatMoney(c.this_year, c.currency) }}</div>
+                 (390px) vyjde 25px, od ~460px strop 1,875rem (zhruba 1,25× nadpisu
+                 stránky; řez 500, polotučné mono vedle nadpisu příliš ztěžklo). -->
+            <div class="font-mono text-[length:clamp(1.375rem,6.5vw,1.875rem)] font-medium tracking-[-0.01em] leading-[1.1] text-neutral-900 tabular-nums">{{ formatMoneyWhole(c.this_year, c.currency) }}</div>
             <div v-if="c.change_pct !== null" class="mt-2.5"
-              :title="t('dashboard.yoy_ytd_tooltip', { year: summary.prev_year, total: formatMoney(c.prev_year, c.currency), ytd: formatMoney(c.prev_year_ytd, c.currency) })">
+              :title="t('dashboard.yoy_ytd_tooltip', { year: summary.prev_year, total: formatMoneyWhole(c.prev_year, c.currency), ytd: formatMoneyWhole(c.prev_year_ytd, c.currency) })">
               <span class="inline-flex items-center gap-1 h-6 px-2 rounded-full text-xs font-semibold tabular-nums"
                 :class="c.change_pct >= 0 ? 'bg-success-50 text-success-600' : 'bg-danger-50 text-danger-600'">
                 {{ c.change_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(c.change_pct) }} %
@@ -305,7 +314,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
                 class="w-full"
                 :labels="sparklineFor(c.currency).labels"
                 :values="sparklineFor(c.currency).values"
-                :format="(v: number) => formatMoney(v, c.currency)"
+                :format="(v: number) => formatMoneyWhole(v, c.currency)"
                 :height="singleCurrency ? 150 : 40"
                 :show-average="c.change_pct !== null"
               />
@@ -327,7 +336,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
               {{ summary.kpi.overdue_count }}
             </div>
             <div class="text-xs mt-1 flex flex-wrap gap-x-3" :class="summary.kpi.overdue_count > 0 ? 'text-danger-500' : 'text-neutral-400'">
-              <span v-for="o in summary.kpi.overdue_per_currency" :key="o.currency">{{ formatMoney(o.total, o.currency) }}</span>
+              <span v-for="o in summary.kpi.overdue_per_currency" :key="o.currency">{{ formatMoneyWhole(o.total, o.currency) }}</span>
               <span v-if="summary.kpi.overdue_count === 0">{{ t('dashboard.all_ok') }}</span>
             </div>
           </div>
@@ -337,7 +346,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             <div class="text-[11px] uppercase tracking-[0.12em] font-semibold text-neutral-500 mb-1.5">{{ t('dashboard.upcoming') }}</div>
             <div class="text-xl font-semibold tabular-nums text-neutral-900">{{ summary.unpaid_upcoming.length }}</div>
             <div class="text-xs mt-1 text-neutral-400 flex flex-wrap gap-x-3">
-              <span v-for="u in upcomingPerCurrency" :key="u.currency">{{ formatMoney(u.total, u.currency) }}</span>
+              <span v-for="u in upcomingPerCurrency" :key="u.currency">{{ formatMoneyWhole(u.total, u.currency) }}</span>
               <span v-if="!upcomingPerCurrency.length">{{ t('dashboard.upcoming_none') }}</span>
             </div>
           </div>
@@ -363,7 +372,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
           <div @click="router.push({ path: '/purchase-invoices', query: { year: String(summary.year) } })"
             class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm cursor-pointer hover:border-primary-300 transition">
             <div class="text-[11px] uppercase tracking-[0.12em] font-semibold text-neutral-500 mb-1.5">{{ t('dashboard.purchase_costs_ytd', { year: summary.year }) }}</div>
-            <div class="text-xl font-semibold tabular-nums text-neutral-900 font-mono">{{ formatMoney(summary.kpi.purchase_costs_ytd, 'CZK') }}</div>
+            <div class="text-xl font-semibold tabular-nums text-neutral-900 font-mono">{{ formatMoneyWhole(summary.kpi.purchase_costs_ytd, 'CZK') }}</div>
             <div class="text-xs text-neutral-400 mt-1">{{ summary.kpi.purchase_count_ytd }} {{ t('dashboard.invoices_unit') }}</div>
           </div>
 
@@ -378,7 +387,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             </div>
             <div class="text-xs mt-1"
               :class="(summary.kpi.purchase_unpaid_count ?? 0) > 0 ? 'text-warning-600' : 'text-neutral-400'">
-              {{ formatMoney(summary.kpi.purchase_unpaid_total, 'CZK') }}
+              {{ formatMoneyWhole(summary.kpi.purchase_unpaid_total, 'CZK') }}
             </div>
           </div>
 
@@ -407,7 +416,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             <div v-if="hasCostsData" class="mt-1 flex-1 flex items-end">
               <SparklineChart class="w-full"
                 :labels="costsSparkline.labels" :values="costsSparkline.values"
-                :format="(v: number) => formatMoney(v, 'CZK')" color="#D9822B" :height="48" />
+                :format="(v: number) => formatMoneyWhole(v, 'CZK')" color="#D9822B" :height="48" />
             </div>
             <div v-else class="text-xl font-semibold tabular-nums text-primary-700">CRM →</div>
             <div class="text-xs text-neutral-400 mt-1">{{ t('dashboard.costs_trend_hint') }}</div>
@@ -507,7 +516,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
             {{ b.today_count }}
           </div>
           <div class="text-xs mt-1 font-mono" :class="b.today_count > 0 ? 'text-neutral-700' : 'text-neutral-400'">
-            {{ formatMoney(b.today_total, b.currency) }}
+            {{ formatMoneyWhole(b.today_total, b.currency) }}
           </div>
         </div>
         <div v-for="b in summary.due_buckets" :key="`db-week-${b.currency}`"
@@ -515,14 +524,14 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
           class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm cursor-pointer hover:border-primary-300 transition">
           <div class="text-[11px] uppercase tracking-[0.12em] font-semibold text-neutral-500 mb-1.5">{{ t('dashboard.due_this_week') }}</div>
           <div class="text-xl font-semibold tabular-nums text-neutral-900">{{ b.week_count }}</div>
-          <div class="text-xs mt-1 font-mono text-neutral-500">{{ formatMoney(b.week_total, b.currency) }}</div>
+          <div class="text-xs mt-1 font-mono text-neutral-500">{{ formatMoneyWhole(b.week_total, b.currency) }}</div>
         </div>
         <div v-for="b in summary.due_buckets" :key="`db-month-${b.currency}`"
           @click="router.push({ path: '/invoices', query: { year: 'all', unpaid: '1' } })"
           class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm cursor-pointer hover:border-primary-300 transition">
           <div class="text-[11px] uppercase tracking-[0.12em] font-semibold text-neutral-500 mb-1.5">{{ t('dashboard.due_this_month') }}</div>
           <div class="text-xl font-semibold tabular-nums text-neutral-900">{{ b.month_count }}</div>
-          <div class="text-xs mt-1 font-mono text-neutral-500">{{ formatMoney(b.month_total, b.currency) }}</div>
+          <div class="text-xs mt-1 font-mono text-neutral-500">{{ formatMoneyWhole(b.month_total, b.currency) }}</div>
         </div>
       </div>
       </section>
@@ -546,7 +555,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
               <div class="space-y-0.5">
                 <div v-for="cf in summary.cashflow_forecast" :key="`cf-${period}-${cf.currency}`"
                   class="font-mono text-base sm:text-lg font-semibold text-neutral-900">
-                  {{ formatMoney(period === '30' ? cf.in_30 : period === '60' ? cf.in_60 : cf.in_90, cf.currency) }}
+                  {{ formatMoneyWhole(period === '30' ? cf.in_30 : period === '60' ? cf.in_60 : cf.in_90, cf.currency) }}
                 </div>
               </div>
               <div class="text-xs text-neutral-500 mt-1 space-y-0.5">
@@ -708,7 +717,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
                 <span v-if="c.currencies && c.currencies !== 'CZK'" class="ml-1.5 text-xs text-neutral-400 font-normal">({{ c.currencies }})</span>
               </td>
               <td class="px-4 py-2.5 text-center text-xs text-neutral-600">{{ c.invoice_count }}</td>
-              <td class="px-4 py-2.5 text-right font-mono">{{ formatMoney(c.total_czk, 'CZK') }}</td>
+              <td class="px-4 py-2.5 text-right font-mono">{{ formatMoneyWhole(c.total_czk, 'CZK') }}</td>
               <td class="px-4 py-2.5">
                 <div class="h-2 bg-neutral-100 rounded-full overflow-hidden">
                   <div class="h-full bg-primary-500 rounded-full" :style="{ width: (c.total_czk / summary.top_clients_12m[0].total_czk * 100) + '%' }"></div>
@@ -730,7 +739,7 @@ const hasCostsData = computed(() => (summary.value?.purchase_costs_by_month ?? [
                 <RouterLink class="row-link font-medium text-neutral-900 truncate" :to="`/clients/${c.client_id}`" @click.stop @auxclick.stop>{{ c.company_name }}</RouterLink>
                 <span v-if="c.currencies && c.currencies !== 'CZK'" class="text-xs text-neutral-400 whitespace-nowrap">({{ c.currencies }})</span>
               </div>
-              <div class="font-mono text-sm whitespace-nowrap">{{ formatMoney(c.total_czk, 'CZK') }}</div>
+              <div class="font-mono text-sm whitespace-nowrap">{{ formatMoneyWhole(c.total_czk, 'CZK') }}</div>
             </div>
             <div class="flex items-center gap-2 mt-1.5">
               <div class="h-1.5 flex-1 bg-neutral-100 rounded-full overflow-hidden">

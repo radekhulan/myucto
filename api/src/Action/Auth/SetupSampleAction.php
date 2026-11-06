@@ -62,7 +62,7 @@ final class SetupSampleAction
         try {
             $result = $this->generator->generate($supplierId, $adminId);
         } catch (\Throwable $e) {
-            return Json::error($response, 'sample_failed', 'Generování sample dat selhalo: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'sample_failed', 'Generování sample dat selhalo: ' . $e->getMessage(), 500);
         }
 
         return Json::ok($response, $result, 201);

@@ -38,6 +38,7 @@ pod jinou neuvidíte.
    soubory se vždy nahrají do **aktuálně otevřené složky**.
 2. Zvolte způsob nahrání vpravo nahoře:
    - **Nahrát soubory** vybere jeden nebo více souborů,
+   - **Vyfotit** (jen na telefonu a tabletu) vyfotí doklad fotoaparátem, navrhne ořez podle okrajů dokladu (rohy jdou posunout), doklad narovná, zmenší na JPEG (zhruba 150 kB) a po potvrzení náhledu nahraje do aktuální složky,
    - **Nahrát složku** vybere celý adresář z disku, podsložky se v aplikaci vytvoří,
    - nebo soubory či celé složky přetáhněte kamkoli do okna sekce (**Přetáhni sem soubory nebo celé složky**).
 3. Nahráváte-li archiv ZIP, zvolte přepínačem **Soubory ZIP**, co se s ním stane:
@@ -142,7 +143,7 @@ hlásí aplikace **Koš je prázdný**.
 
 Postup je pro účetní nebo administrátora. Klient odpovídá v klientském portálu.
 
-1. Otevřete `Firma → Chybějící doklady` (stránka **Vyžádané doklady**).
+1. Otevřete `Dokumenty → Chybějící doklady` (stránka **Vyžádané doklady**).
 2. Klikněte na **Nový požadavek**.
 3. Vyplňte povinný **Popis** (co chybí, například doklad k platbě). Volitelně
    doplňte **Částku**, **Datum (kontext)** a **Termín**.

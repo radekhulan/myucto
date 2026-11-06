@@ -151,6 +151,38 @@ final class ForeignCurrencyTakeover
     }
 
     /**
+     * Položky bez částek v měně, u dokladu který má v hlavičce celkem v měně: základ a daň se
+     * dopočítají z Kč kurzem dokladu. Jen když dopočet přesně vrací koruny položky a součet
+     * sedí na celkem z hlavičky, jinak se položky vrátí beze změny a rozhodne {@see check()}.
+     *
+     * @param array<int,array<string,mixed>> $items
+     * @return array<int,array<string,mixed>>
+     */
+    public static function withDerivedAmounts(array $items, float $rate, float $units, float $foreignTotal): array
+    {
+        $perUnit = self::rate($rate, $units);
+        if ($perUnit === null || abs($foreignTotal) < 0.005) {
+            return $items;
+        }
+        $derived = [];
+        $sum = 0.0;
+        foreach ($items as $key => $item) {
+            $base = $item['foreign_base'] ?? null;
+            $vat = $item['foreign_vat'] ?? null;
+            if ($base === null || $vat === null) {
+                $base = round((float) $item['base'] / $perUnit, 2);
+                $vat = round((float) $item['vat'] / $perUnit, 2);
+                if (!self::convertsTo($base, $perUnit, (float) $item['base']) || !self::convertsTo($vat, $perUnit, (float) $item['vat'])) {
+                    return $items;
+                }
+            }
+            $derived[$key] = ['foreign_base' => (float) $base, 'foreign_vat' => (float) $vat] + $item;
+            $sum += (float) $base + (float) $vat;
+        }
+        return abs(round($sum, 2) - $foreignTotal) < 0.005 ? $derived : $items;
+    }
+
+    /**
      * Přijatý doklad, který převzít v měně nejde bez ohledu na částky: samovyměření vyměřil
      * zdroj kurzem ke dni plnění (POHODA, Money S3 interním dokladem), ne kurzem faktury,
      * a evidence DPH by daň dopočetla z přepočteného základu jinak; poměrný nárok krátí

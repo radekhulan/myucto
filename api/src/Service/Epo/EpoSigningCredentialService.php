@@ -21,10 +21,11 @@ final class EpoSigningCredentialService
     /**
      * @return list<array<string,mixed>>
      */
-    public function listOwnedForSupplier(int $ownerUserId, int $supplierId): array
+    public function listOwnedForSupplier(int $ownerUserId, int $supplierId, bool $supplierScoped = false): array
     {
-        $items = $this->credentials->listOwnedForSupplier($ownerUserId, $supplierId);
-        if ($this->crypto->validateKey() !== null || !function_exists('openssl_pkcs12_read')) {
+        $items = $this->credentials->listOwnedForSupplier($ownerUserId, $supplierId, $supplierScoped);
+        // Klientské GET nesmí kvůli starším metadatům dešifrovat klíč ani zapisovat.
+        if ($supplierScoped || $this->crypto->validateKey() !== null || !function_exists('openssl_pkcs12_read')) {
             return $items;
         }
         foreach ($items as &$item) {
@@ -52,6 +53,7 @@ final class EpoSigningCredentialService
         string $label,
         string $pfxBytes,
         string $pfxPassword,
+        bool $supplierScoped = false,
     ): array {
         $configurationError = $this->crypto->validateKey();
         if ($configurationError !== null) {
@@ -191,7 +193,7 @@ final class EpoSigningCredentialService
             }
             throw $e;
         }
-        foreach ($this->credentials->listOwnedForSupplier($ownerUserId, $supplierId) as $item) {
+        foreach ($this->credentials->listOwnedForSupplier($ownerUserId, $supplierId, $supplierScoped) as $item) {
             if ((int) $item['id'] === $credentialId) {
                 return $item;
             }

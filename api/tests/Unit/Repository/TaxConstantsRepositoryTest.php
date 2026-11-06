@@ -70,7 +70,7 @@ final class TaxConstantsRepositoryTest extends TestCase
 
     public function testFutureYearTemporarilyUsesLatestKnownConstants(): void
     {
-        self::assertSame(2026, $this->repo->forYear(2027)['year']);
+        self::assertSame(2027, $this->repo->forYear(2028)['year']);
     }
 
     public function testPartialNestedOverrideKeepsSiblingValuesAndListsReplaceWholly(): void
@@ -96,20 +96,20 @@ final class TaxConstantsRepositoryTest extends TestCase
 
     public function testUnknownYearOwnOverrideIsAccepted(): void
     {
-        $data27 = TaxConstants::forYear(2026);
-        $data27['year'] = 2027;
-        $data27['kh_item_threshold'] = 20000;
+        $data28 = TaxConstants::forYear(2027);
+        $data28['year'] = 2028;
+        $data28['kh_item_threshold'] = 20000;
         $this->pdo->prepare('INSERT INTO tax_constants (year, data) VALUES (?, ?)')
-            ->execute([2027, json_encode($data27)]);
-        $this->assertSame(20000.0, $this->repo->khItemThreshold(2027));
-        self::assertSame(2027, $this->repo->forExactYear(2027)['year']);
-        self::assertSame(20000.0, $this->repo->khItemThreshold(2028), 'další rok přebírá nejbližší DB sadu');
+            ->execute([2028, json_encode($data28)]);
+        $this->assertSame(20000.0, $this->repo->khItemThreshold(2028));
+        self::assertSame(2028, $this->repo->forExactYear(2028)['year']);
+        self::assertSame(20000.0, $this->repo->khItemThreshold(2029), 'další rok přebírá nejbližší DB sadu');
     }
 
     public function testExactYearRejectsFallback(): void
     {
         $this->expectException(\OutOfRangeException::class);
-        $this->repo->forExactYear(2027);
+        $this->repo->forExactYear(2028);
     }
 
     public function testHelpersRespectOverride(): void

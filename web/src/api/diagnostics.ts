@@ -31,6 +31,23 @@ export interface DiagnosticsReport {
   summary: DiagnosticsSummary
   checks: DiagnosticCheck[]
   facts: Record<string, any>
+  imported_posting_ambiguities: ImportedPostingAmbiguities
+}
+
+export interface ImportedPostingAmbiguities {
+  available: boolean
+  supplier_id: number
+  total: number | null
+  per_page: number
+  candidate_limit: number
+  next_after: number | null
+  entries: {
+    entry_id: number
+    entry_date: string
+    description: string
+    owner_count: number
+    candidates: { doc_type: 'invoice' | 'purchase_invoice'; doc_id: number; document_number: string | null }[]
+  }[]
 }
 
 /**
@@ -148,8 +165,8 @@ export const diagnosticsApi = {
     api.get<PreflightReport>('/auth/setup-preflight', { signal }).then((r) => r.data),
 
   /** Systém → Diagnostika: audit prostředí s verdiktem. */
-  report: (signal?: AbortSignal) =>
-    api.get<DiagnosticsReport>('/admin/diagnostics', { signal }).then((r) => r.data),
+  report: (signal?: AbortSignal, postingAfter = 0) =>
+    api.get<DiagnosticsReport>('/admin/diagnostics', { signal, params: { posting_after: postingAfter } }).then((r) => r.data),
 
   /** Co přesně bude v balíčku, položku po položce, včetně velikostí. */
   preview: (params: BundleOptions, signal?: AbortSignal) =>

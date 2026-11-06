@@ -12,9 +12,10 @@ final readonly class WithholdingTaxGroupResult implements JsonSerializable
     public function __construct(
         public string $group,
         /**
-         * § 36 odst. 3 věta třetí — základ pro zvláštní sazbu ZAOKROUHLENÝ na
-         * celé koruny dolů. Tohle je číslo, které se vykazuje a ze kterého se
-         * daň skutečně počítá.
+         * Samostatný základ podle § 6 odst. 4 ZDP po zaokrouhlení: do roku 2026
+         * na celé koruny dolů (§ 36 odst. 3 věta třetí, srážková daň), od roku
+         * 2027 na celé koruny nahoru (§ 6 odst. 18, záloha). Tohle je číslo,
+         * které se vykazuje a ze kterého se daň skutečně počítá.
          */
         public int $baseMinorUnits,
         public int $taxMinorUnits,

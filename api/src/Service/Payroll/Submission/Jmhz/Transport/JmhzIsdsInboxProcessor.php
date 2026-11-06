@@ -10,6 +10,7 @@ use MyInvoice\Service\Document\ZfoExtractor;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenPayloadReader;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzMonthCompletionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzFrozenSubmissionIdentity;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 use MyInvoice\Service\Payroll\Submission\PayrollReceiptVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionService;
@@ -41,7 +42,7 @@ use MyInvoice\Service\Submission\SubmissionInboxMessageProcessor;
 final readonly class JmhzIsdsInboxProcessor implements SubmissionInboxMessageProcessor
 {
     /** Agendy JMHZ tak, jak se zapisují do odchozí fronty. */
-    private const AGENDA_CODES = ['JMHZ', 'JMHZ25'];
+    private const AGENDA_CODES = ['JMHZ', ...JmhzSpecVersion::MONTHLY_AGENDA_CODES];
 
     public function __construct(
         private SubmissionOutboxRepository $outbox,

@@ -139,6 +139,8 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
     summaryKey: 'status',
     fields: [
       { key: 'status', kind: 'enum', options: ['signed', 'not-signed', 'unverified'] },
+      // Den podpisu prohlášení vykazuje měsíční hlášení od ledna 2027 (10575).
+      { key: 'signed_on', kind: 'date', visible: row => text(row, 'status') === 'signed' },
       {
         key: 'evidence_reference',
         kind: 'evidence',
@@ -181,7 +183,7 @@ export const STATUTORY_SECTIONS: readonly StatutorySectionSpec[] = [
       {
         key: 'credit_kind',
         kind: 'enum',
-        options: ['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p'],
+        options: ['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p', 'student', 'student-doctoral'],
       },
       { key: 'evidence_status', kind: 'enum', options: ['verified', 'unverified'] },
       {

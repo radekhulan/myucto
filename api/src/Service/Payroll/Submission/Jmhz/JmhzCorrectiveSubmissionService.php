@@ -254,6 +254,9 @@ final readonly class JmhzCorrectiveSubmissionService
             // Zadání se ověřuje uvnitř stejné zamčené transakce jako zmrazení.
             // Storno po lhůtě by ČSSZ odmítla; souběžné částečné storno zase nesmí
             // obejít kontrolu, že v řádném hlášení zůstane aspoň jedna platná část.
+            // Storno a oprava jdou ve verzi období původního hlášení: za 2026
+            // tedy verzí 2026 i v roce 2027.
+            JmhzSpecPackageCatalog::requireBuildable($identity->specVersion);
             $request = JmhzCancellationRequest::create(
                 $identity->submissionGuid,
                 $identity->variableSymbol,

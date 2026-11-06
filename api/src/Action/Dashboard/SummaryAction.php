@@ -18,6 +18,7 @@ use MyInvoice\Support\Sql\CzkAmountExpr;
 use MyInvoice\Support\Sql\PayablePredicate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use MyInvoice\Support\Sql\AdvanceSettledSql;
 
 /**
  * Agregace pro Dashboard:
@@ -670,8 +671,7 @@ final class SummaryAction
     {
         return " AND NOT (COALESCE(pi.document_kind, '') = 'advance'"
              . " AND (pi.status <> 'paid'"
-             . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             . " WHERE adv_s.advance_purchase_invoice_id = pi.id)))"
+             . ' OR ' . AdvanceSettledSql::purchase('pi') . '))'
              // DDKP (daňový doklad k platbě) není náklad — jen odpočet DPH ze zálohy (343/314);
              // náklad vzniká až u vyúčtovací faktury. Bezpodmínečně ven z nákladů.
              . " AND COALESCE(pi.document_kind, '') <> 'tax_document'";
@@ -689,8 +689,7 @@ final class SummaryAction
     {
         return "(i.invoice_type IN ('invoice','credit_note','tax_document')"
              . " OR (i.invoice_type = 'proforma'"
-             . " AND NOT EXISTS (SELECT 1 FROM invoices ch"
-             . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice')))";
+             . ' AND NOT ' . AdvanceSettledSql::proforma('i') . '))';
     }
 
     /**

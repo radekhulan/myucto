@@ -106,6 +106,26 @@ final readonly class EmploymentIncomeTaxPolicy2026
         return $value->value;
     }
 
+    /**
+     * Zná ruleset parametr, který mezi povinnými NENÍ, protože ho nemá každý
+     * ročník (sleva na studenta od roku 2027)? Neznámý nebo neúčinný parametr
+     * vrací `false` — volající z toho udělá překážku, ne nulu.
+     */
+    public function definesMoney(string $key): bool
+    {
+        $parameter = $this->ruleset->parameters[$key] ?? null;
+        if ($parameter === null || $parameter->type !== 'money_minor') {
+            return false;
+        }
+        try {
+            $parameter->assertCalculationReady($key);
+        } catch (PayrollRulesetException) {
+            return false;
+        }
+
+        return true;
+    }
+
     public function rate(string $key): string
     {
         $value = $this->ruleset->parameter($key);

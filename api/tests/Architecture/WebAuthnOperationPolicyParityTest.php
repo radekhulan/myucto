@@ -25,6 +25,8 @@ final class WebAuthnOperationPolicyParityTest extends TestCase
         'step_up.verify' => PasskeyAction::class . '::stepUpVerify',
         'credentials.rename' => PasskeyAction::class . '::rename',
         'credentials.revoke' => PasskeyAction::class . '::revoke',
+        'credentials.test_options' => PasskeyAction::class . '::testOptions',
+        'credentials.test_verify' => PasskeyAction::class . '::testVerify',
         'session_unlock.options' => SessionAction::class . '::unlockOptions',
         'session_unlock.verify' => SessionAction::class . '::unlockVerify',
     ];

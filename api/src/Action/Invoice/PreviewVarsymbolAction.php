@@ -48,7 +48,7 @@ final class PreviewVarsymbolAction
 
         // Kalendář (§ 31) se čísluje v řadě faktur — VarsymbolGenerator si typ normalizuje
         // sám, takže náhled ukáže číslo, které doklad při vystavení opravdu dostane.
-        if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'payment_calendar'], true)) {
+        if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'payment_calendar', 'rent_calendar', 'advance_calendar'], true)) {
             return Json::error($response, 'invalid_type', 'Neplatný typ.', 400);
         }
 

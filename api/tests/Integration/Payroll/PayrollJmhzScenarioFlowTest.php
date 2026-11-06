@@ -220,6 +220,34 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         );
     }
 
+    /**
+     * Nástup rodičovské v polovině měsíce u vztahu bez publikovaných směn.
+     * Hodiny rodičovské se měří pracovním kalendářem jako krácení mzdy
+     * (12 pracovních dnů od 16. 7. = 96 h), svátek 6. 7. v odpracované části
+     * je placený. 10268 + 10275 = 10260: 80 + 104 = 184.
+     */
+    public function testParentalLeaveFromMidMonthWithoutPublishedShifts(): void
+    {
+        $person = $this->hire('Renata Kalendářová', 'female', '1992-06-06', publishShifts: false);
+        $this->createApprovedAbsence($person['employment_id'], 'parental', '2026-07-16', '2026-12-31');
+        $worked = array_values(array_filter(
+            self::workdays(self::PERIOD),
+            static fn (string $date): bool => $date < '2026-07-16',
+        ));
+        $this->approveMonth($person['employment_id'], $worked);
+        $this->pay($person, 2_000_000);
+
+        $xml = $this->submission('parental-calendar');
+
+        self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
+        self::assertStringContainsString('<form:pocet>80.000</form:pocet>', $xml);
+        self::assertStringContainsString(
+            '<form:neodpracovaneHodiny><form:hodinyNeodpracCelkem>104.000</form:hodinyNeodpracCelkem>'
+                . '<form:hodinyNeodpracNahrada>8.000</form:hodinyNeodpracNahrada></form:neodpracovaneHodiny>',
+            $xml,
+        );
+    }
+
     public function testCompensatoryTimeOff(): void
     {
         $person = $this->hire('Hynek Náhradní', 'male', '1985-05-05');
@@ -331,10 +359,13 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertStringContainsString('<form:penezitaPomocMaterstvi>31</form:penezitaPomocMaterstvi>', $xml);
         self::assertStringContainsString('<form:vylouceneDobyCelkem>31</form:vylouceneDobyCelkem>', $xml);
         self::assertStringNotContainsString('<form:osvobozenoCelkem>', $xml);
-        // Na mateřské není zaměstnankyně v evidenčním stavu (10265 = 0),
-        // fondy 10259 a 10260 zůstávají plné.
+        // Na mateřské není zaměstnankyně v evidenčním stavu (10265 = 0) a bez
+        // práce i příjmu jde o řádný formulář s nulovými hodnotami: fond
+        // 10259 až 10261 je 0 (Pravidla podání 1.4.6, str. 16-17).
         self::assertStringContainsString('<form:dnyEvidencniStav>0</form:dnyEvidencniStav>', $xml);
-        self::assertStringContainsString('<form:sjednanyFond>184.000</form:sjednanyFond>', $xml);
+        self::assertStringContainsString('<form:stanovenyFond>0.000</form:stanovenyFond>', $xml);
+        self::assertStringContainsString('<form:sjednanyFond>0.000</form:sjednanyFond>', $xml);
+        self::assertStringContainsString('<form:stanovenaTydenniDoba>0.00</form:stanovenaTydenniDoba>', $xml);
         // Za příjemkyni PPM platí pojistné stát (§ 7 odst. 1 písm. d) zák.
         // 48/1997), minimum se po celý měsíc nepoužije: bez doplatku.
         self::assertStringContainsString(
@@ -637,6 +668,7 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         string $socialDiscountStatus = 'not_claimed',
         string $healthTopUpResponsibility = 'employer_obstacle_verified',
         bool $withAverage = true,
+        bool $publishShifts = true,
     ): array {
         $sequence = ++$this->sequence;
         $person = $this->createEmployment(
@@ -662,7 +694,9 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
             'birth_number' => self::syntheticBirthNumber($birthDate, $sex, $sequence),
         ]);
         $this->assignJmhzIdentity($person, self::syntheticOic($sequence), self::syntheticPpv($sequence));
-        $this->publishShifts($person['employment_id'], self::workdays(self::PERIOD));
+        if ($publishShifts) {
+            $this->publishShifts($person['employment_id'], self::workdays(self::PERIOD));
+        }
         $average = $withAverage ? $this->createApprovedAverage($person['employment_id'], 3) : null;
 
         return $person + [

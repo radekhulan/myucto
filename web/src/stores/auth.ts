@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { authApi, type User, type SetupStatus, type SessionState, type DomainContext } from '@/api/auth'
 import type { LicenseSummary } from '@/api/license'
 import { setCsrfToken, setDomainSupplierLock } from '@/api/client'
+import { domainLoginRequestContext, setDomainLoginCanonicalOrigin } from '@/security/domainLoginContext'
 import { markPortalLoggedOut } from '@/security/portalLogout'
 import { clearTargetDomainLogin, recordCanonicalDomainLoginSession } from '@/security/domainLogin'
 import { broadcastSessionEvent } from '@/security/sessionChannel'
@@ -35,6 +36,16 @@ export const useAuthStore = defineStore('auth', () => {
   let logoutRetryCsrfToken = ''
   let logoutPromise: Promise<void> | null = null
   let refreshGeneration = 0
+  let activeDomainLoginRequest: string | null = null
+
+  function prepareDomainLogin() {
+    const context = domainLoginRequestContext()
+    const request = context ? `${context.requestToken}:${context.state}` : null
+    if (request === activeDomainLoginRequest) return false
+    activeDomainLoginRequest = request
+    clearPrivateState()
+    return true
+  }
 
   const isAuthenticated = computed(() => user.value !== null)
   const needsSetup = computed(() => setupStatus.value?.needs_setup === true)
@@ -65,6 +76,8 @@ export const useAuthStore = defineStore('auth', () => {
   // backend stejně odmítne 404.
   const domainsFeatureEnabled = computed(() => domainContext.value?.feature_enabled === true)
 
+  const isInstanceAdmin = computed(() => user.value?.is_instance_admin === true
+    || user.value?.role?.type === 'instance_admin' || user.value?.role?.system_key === 'instance_admin')
   const isSuperadmin = computed(() => user.value?.is_superadmin === true)
   const isAdminPlusRole = computed(() => user.value?.is_superadmin !== true && (
     user.value?.can_create_supplier === true
@@ -110,6 +123,7 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function applyDomainContext(context: DomainContext) {
+    setDomainLoginCanonicalOrigin(context.mode === 'canonical')
     domainContext.value = context
     setDomainSupplierLock(context.locked ? context.supplier_id : null)
   }
@@ -217,7 +231,7 @@ export const useAuthStore = defineStore('auth', () => {
       setMfaPolicy(data.require_mfa, data.allowed_mfa_methods)
       lockedSession.value = null
       profileHydrated.value = false
-      if (isDemo.value && !getWindowSupplierScope()) localStorage.removeItem('myinvoice.current_supplier_id')
+      if (isDemo.value && !domainLoginRequestContext() && !getWindowSupplierScope()) localStorage.removeItem('myinvoice.current_supplier_id')
       // Po loginu načti suppliery (login response je nemá, /me je vrátí)
       await refresh()
       rememberTotpEnrollment(data.totp_enrollment_token, user.value?.id)
@@ -318,6 +332,7 @@ export const useAuthStore = defineStore('auth', () => {
     permissionCatalogVersion,
     permissionsLoading,
     isSuperadmin,
+    isInstanceAdmin,
     isAdminPlusRole,
     isCompanyAdminRole,
     isClientRole,
@@ -326,6 +341,7 @@ export const useAuthStore = defineStore('auth', () => {
     canRead,
     canWrite,
     clearPermissions,
+    prepareDomainLogin,
     fetchSetupStatus,
     fetchDomainContext,
     setSessionCsrfToken,

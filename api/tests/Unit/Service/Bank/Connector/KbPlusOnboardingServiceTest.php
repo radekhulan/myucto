@@ -15,6 +15,10 @@ use MyInvoice\Service\Bank\Connector\KbPlusCredentialVault;
 use MyInvoice\Service\Bank\Connector\KbPlusOnboardingService;
 use MyInvoice\Service\Bank\Connector\KbPlusRegistrationClient;
 use MyInvoice\Service\Bank\Connector\KbPlusRegistrationService;
+use MyInvoice\Service\OAuth\OAuthAuthorization;
+use MyInvoice\Service\OAuth\OAuthCallback;
+use MyInvoice\Service\OAuth\OAuthClientFlow;
+use MyInvoice\Service\OAuth\OAuthSession;
 use PHPUnit\Framework\MockObject\MockObject;
 use PHPUnit\Framework\TestCase;
 
@@ -30,6 +34,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
     private SecretEncryption&MockObject $secrets;
     private Config&MockObject $config;
     private KbPlusCredentialVault&MockObject $vault;
+    private OAuthClientFlow&MockObject $flow;
     private KbPlusOnboardingService $service;
 
     protected function setUp(): void
@@ -43,6 +48,9 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $this->secrets = $this->createMock(SecretEncryption::class);
         $this->config = $this->createMock(Config::class);
         $this->vault = $this->createMock(KbPlusCredentialVault::class);
+        $this->flow = $this->createMock(OAuthClientFlow::class);
+        $this->flow->method('authorize')->willReturnCallback(static fn (): OAuthAuthorization =>
+            new OAuthAuthorization(rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '='), null));
 
         $this->config->method('get')->willReturnCallback(static fn (string $key, mixed $default = null): mixed => match ($key) {
             'app.url' => 'https://example.invalid',
@@ -68,6 +76,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
             $this->calls,
             $this->secrets,
             $this->config,
+            $this->flow,
         );
     }
 
@@ -105,14 +114,13 @@ final class KbPlusOnboardingServiceTest extends TestCase
                 'state' => $state,
                 'encryption_key' => base64_encode(str_repeat('K', 32)),
             ]);
-        $this->secrets->expects(self::once())->method('encryptFor')
-            ->with(self::callback(static fn (string $plaintext): bool =>
-                str_contains($plaintext, 'synthetic-oauth-key')
-                && !str_contains($plaintext, 'synthetic-certificate')
-            ), self::stringContains('supplier:7:currency:11:user:5'))
-            ->willReturn('enc:v2:synthetic');
-        $this->oauth->expects(self::once())->method('replacePending')
-            ->with(self::matchesRegularExpression('/^[a-f0-9]{64}$/'), 7, 11, 5, 'registration', 'enc:v2:synthetic', 1800);
+        // Rozpracovanou registraci šifruje společná vrstva; certifikát do ní nepatří.
+        $this->oauth->expects(self::once())->method('cancelPending')->with(7, 11);
+        $this->flow->expects(self::once())->method('store')
+            ->with(self::callback(static fn (OAuthAuthorization $auth): bool => $auth->codeVerifier === null),
+                7, 5, 'bank', 'kb_plus', 11, OAuthClientFlow::FLOW_REDIRECT,
+                self::callback(static fn (array $secret): bool => $secret['oauth_api_key'] === 'synthetic-oauth-key'
+                    && !str_contains((string) json_encode($secret), 'synthetic-certificate')), 1800, 'registration');
 
         $result = $this->service->start(7, 11, 5, $this->registrationInput());
 
@@ -142,7 +150,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $this->oauth->expects(self::once())->method('finish')->with(hash('sha256', $state), true);
         $service = new KbPlusOnboardingService(
             $this->oauth, $this->connections, $this->registrationClient, new KbPlusRegistrationService(),
-            $this->api, $this->vault, $this->calls, $this->secrets, $this->config,
+            $this->api, $this->vault, $this->calls, $this->secrets, $this->config, $this->flow,
         );
         $payload = [
             'application_type' => 'web', 'redirect_uris' => ['https://example.invalid/callback'],
@@ -185,10 +193,10 @@ final class KbPlusOnboardingServiceTest extends TestCase
         );
         $service = new KbPlusOnboardingService(
             $this->oauth, $this->connections, $this->registrationClient, $this->registration,
-            $this->api, $this->vault, $this->calls, $this->secrets, $this->config,
+            $this->api, $this->vault, $this->calls, $this->secrets, $this->config, $this->flow,
         );
         $this->registrationClient->expects(self::never())->method('createSoftwareStatement');
-        $this->oauth->expects(self::never())->method('replacePending');
+        $this->flow->expects(self::never())->method('store');
 
         try {
             $service->start(7, 11, 5, $this->registrationInput());
@@ -265,7 +273,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $this->oauth->expects(self::never())->method('claim');
         $service = new KbPlusOnboardingService(
             $this->oauth, $this->connections, $this->registrationClient, $this->registration,
-            $this->api, $this->vault, $this->calls, $this->secrets, $this->config,
+            $this->api, $this->vault, $this->calls, $this->secrets, $this->config, $this->flow,
         );
 
         try {
@@ -306,6 +314,43 @@ final class KbPlusOnboardingServiceTest extends TestCase
         self::assertSame(11, $this->service->completeOAuth(7, 5, $state, 'synthetic_authorization_code_001'));
     }
 
+    public function testSharedFlowConsentIsCompletedWithoutTouchingLegacySessions(): void
+    {
+        $state = str_repeat('n', 43);
+        $session = new OAuthSession(hash('sha256', $state), 7, 5, 'bank', 'kb_plus', 11, OAuthClientFlow::FLOW_REDIRECT, 'oauth',
+            'processing', false, $this->oauthSecret(), null);
+        $this->flow->expects(self::once())->method('find')->with($state)->willReturn(['supplier_id' => 7, 'user_id' => 5, 'domain' => 'bank',
+            'provider' => 'kb_plus', 'subject_id' => 11]);
+        $this->flow->expects(self::once())->method('claim')->with($state, 7, 5, 'bank', 'kb_plus', 'oauth')->willReturn($session);
+        $this->oauth->expects(self::never())->method('currencyForState');
+        $this->oauth->expects(self::never())->method('claim');
+        $this->oauth->expects(self::never())->method('finish');
+        $this->api->expects(self::once())->method('exchangeAuthorizationCode')
+            ->with(self::callback(static fn (array $secret): bool => $secret['client_id'] === 'synthetic-client'), 'synthetic_authorization_code_001')
+            ->willReturn($this->tokens());
+        $this->api->method('accounts')->willReturn([['accountId' => 'synthetic-account-id', 'currency' => 'CZK', 'iban' => 'CZ0401000000191000000005']]);
+        $this->oauth->method('account')->willReturn($this->account());
+        $this->connections->method('ensure')->willReturn(19);
+        $this->vault->method('encode')->willReturn('{"synthetic":"credential"}');
+        $this->secrets->method('encryptFor')->willReturn('enc:v2:connection');
+        $this->flow->expects(self::once())->method('finish')->with($session, true, null);
+
+        self::assertSame(11, $this->service->completeCallback(new OAuthCallback(
+            ['supplier_id' => 7, 'user_id' => 5, 'domain' => 'bank', 'provider' => 'kb_plus', 'subject_id' => 11],
+            $state, 'synthetic_authorization_code_001', null, [],
+            (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('GET', '/api/oauth/callback'),
+        )));
+    }
+
+    public function testStateOfAnotherUserInSharedFlowHasNoAccount(): void
+    {
+        $state = str_repeat('o', 43);
+        $this->flow->method('find')->willReturn(['supplier_id' => 7, 'user_id' => 6, 'domain' => 'bank', 'provider' => 'kb_plus', 'subject_id' => 11]);
+        $this->oauth->expects(self::never())->method('currencyForState');
+
+        self::assertNull($this->service->currencyForState(7, 5, $state));
+    }
+
     /** @param list<string> $scopes */
     #[\PHPUnit\Framework\Attributes\DataProvider('batchScopes')]
     public function testRegistrationScopesFollowBatchChoiceOrKey(string $batchKey, ?bool $paymentBatches, array $scopes): void
@@ -322,10 +367,9 @@ final class KbPlusOnboardingServiceTest extends TestCase
                 'state' => $state,
                 'encryption_key' => base64_encode(str_repeat('K', 32)),
             ]);
-        $expectedFlag = $paymentBatches === true ? '"payment_batches":true' : '"payment_batches":false';
-        $this->secrets->expects(self::once())->method('encryptFor')
-            ->with(self::callback(static fn (string $plaintext): bool => str_contains($plaintext, $expectedFlag)), self::anything())
-            ->willReturn('enc:v2:synthetic');
+        $this->flow->expects(self::once())->method('store')
+            ->with(self::anything(), 7, 5, 'bank', 'kb_plus', 11, OAuthClientFlow::FLOW_REDIRECT,
+                self::callback(static fn (array $secret): bool => $secret['payment_batches'] === ($paymentBatches === true)), 1800, 'registration');
         $input = ['batchda_api_key' => $batchKey] + $this->registrationInput();
         if ($paymentBatches !== null) {
             $input['payment_batches'] = $paymentBatches;
@@ -358,9 +402,9 @@ final class KbPlusOnboardingServiceTest extends TestCase
                 'state' => $state,
                 'encryption_key' => base64_encode(str_repeat('K', 32)),
             ]);
-        $this->secrets->expects(self::once())->method('encryptFor')
-            ->with(self::callback(static fn (string $plaintext): bool => str_contains($plaintext, '"api_plan":"basic"')), self::anything())
-            ->willReturn('enc:v2:synthetic');
+        $this->flow->expects(self::once())->method('store')
+            ->with(self::anything(), 7, 5, 'bank', 'kb_plus', 11, OAuthClientFlow::FLOW_REDIRECT,
+                self::callback(static fn (array $secret): bool => $secret['api_plan'] === 'basic'), 1800, 'registration');
 
         $result = $this->service->start(7, 11, 5, ['api_plan' => 'basic', 'payment_batches' => true] + $this->registrationInput());
 
@@ -379,9 +423,9 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $this->api->expects(self::once())->method('authorizationUrl')
             ->with(self::callback(static fn (array $secret): bool => $secret['scope'] === 'statda' && $secret['api_plan'] === 'basic'), self::anything())
             ->willReturn('https://login.kb.cz/autfe/ssologin?state=synthetic');
-        $this->secrets->expects(self::once())->method('encryptFor')
-            ->with(self::callback(static fn (string $plaintext): bool => str_contains($plaintext, '"api_plan":"basic"')), self::anything())
-            ->willReturn('enc:v2:synthetic');
+        $this->flow->expects(self::once())->method('store')
+            ->with(self::anything(), 7, 5, 'bank', 'kb_plus', 11, OAuthClientFlow::FLOW_REDIRECT,
+                self::callback(static fn (array $secret): bool => $secret['api_plan'] === 'basic' && $secret['scope'] === 'statda'), 300, 'oauth');
 
         $result = $this->service->start(7, 11, 5, ['api_plan' => 'basic']);
 
@@ -398,7 +442,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
             JSON_THROW_ON_ERROR,
         ));
         $this->api->expects(self::never())->method('authorizationUrl');
-        $this->oauth->expects(self::never())->method('replacePending');
+        $this->flow->expects(self::never())->method('store');
 
         try {
             $this->service->start(7, 11, 5, ['api_plan' => 'basic']);
@@ -470,7 +514,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $this->oauth->method('account')->willReturn($this->account());
         $this->oauth->method('client')->willReturn(null);
         $this->registrationClient->expects(self::never())->method('createSoftwareStatement');
-        $this->oauth->expects(self::never())->method('replacePending');
+        $this->flow->expects(self::never())->method('store');
 
         try {
             $this->service->start(7, 11, 5, ['api_plan' => 'pro'] + $this->registrationInput());
@@ -529,7 +573,7 @@ final class KbPlusOnboardingServiceTest extends TestCase
         $this->oauth->method('account')->willReturn($this->account());
         $this->oauth->method('client')->willReturn(null);
         $this->registrationClient->expects(self::never())->method('createSoftwareStatement');
-        $this->oauth->expects(self::never())->method('replacePending');
+        $this->flow->expects(self::never())->method('store');
 
         try {
             $this->service->start(7, 11, 5, ['payment_batches' => 'yes'] + $this->registrationInput());

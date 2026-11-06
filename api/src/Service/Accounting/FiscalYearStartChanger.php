@@ -8,7 +8,6 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\ActivityLogger;
-use PDO;
 
 /**
  * Změna nastavení „Účetní rok začíná" u firmy, která už má účetní období.
@@ -19,9 +18,8 @@ use PDO;
  * nesouladu roku posílají uživatele právě do tohoto nastavení. Bez náhrady by firma
  * s hospodářským rokem uvízla na kalendářním období, které nikdy nepoužila.
  *
- * Nahradit se smí jen období, která jsou VŠECHNA nepoužitá: otevřená, bez zápisu
- * v deníku a bez čehokoli dalšího, co na ně odkazuje (uzávěrka, inventura, přílohy
- * k účetní závěrce, mapa převodu přes {@see TakenOverRecord}). Jakmile je některé použité, změna účetního roku
+ * Nahradit se smí jen období, která jsou VŠECHNA nepoužitá ({@see UnusedAccountingPeriods}).
+ * Jakmile je některé použité, změna účetního roku
  * je zákonný úkon s přechodným obdobím (§ 3 odst. 2 ZoÚ) a tady se neprovede.
  */
 final class FiscalYearStartChanger
@@ -30,7 +28,7 @@ final class FiscalYearStartChanger
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
         private readonly AccountingPeriodProvisioner $provisioner,
-        private readonly TakenOverRecord $takenOver,
+        private readonly UnusedAccountingPeriods $unused,
         private readonly ActivityLogger $activity,
     ) {}
 
@@ -41,19 +39,7 @@ final class FiscalYearStartChanger
      */
     public function blockingPeriods(int $supplierId): array
     {
-        $blocking = [];
-        foreach ($this->periods->listForTenant($supplierId) as $period) {
-            $reasons = $this->usage($supplierId, $period);
-            if ($reasons !== []) {
-                $blocking[] = [
-                    'fiscal_year' => (int) $period['fiscal_year'],
-                    'starts_on'   => (string) $period['starts_on'],
-                    'ends_on'     => (string) $period['ends_on'],
-                    'reasons'     => $reasons,
-                ];
-            }
-        }
-        return $blocking;
+        return $this->unused->blocking($supplierId);
     }
 
     /**
@@ -122,48 +108,5 @@ final class FiscalYearStartChanger
             throw $e;
         }
         return ['removed' => $removed, 'created' => $created];
-    }
-
-    /**
-     * @param array<string,mixed> $period
-     * @return list<string> čím je období použité (prázdné = nepoužité)
-     */
-    private function usage(int $supplierId, array $period): array
-    {
-        $pdo = $this->db->pdo();
-        $id = (int) $period['id'];
-        $reasons = [];
-        if ((string) $period['status'] !== 'open' || ($period['approved_at'] ?? null) !== null) {
-            $reasons[] = 'status:' . $period['status'];
-        }
-
-        // Co na období odkazuje cizím klíčem, se zjišťuje ze struktury databáze, aby
-        // nová tabulka navázaná na období nezůstala mimo kontrolu.
-        $refs = $pdo->query(
-            "SELECT TABLE_NAME, COLUMN_NAME FROM information_schema.KEY_COLUMN_USAGE
-              WHERE TABLE_SCHEMA = DATABASE()
-                AND REFERENCED_TABLE_NAME = 'accounting_periods' AND REFERENCED_COLUMN_NAME = 'id'"
-        )->fetchAll(PDO::FETCH_ASSOC);
-        foreach ($refs as $ref) {
-            $stmt = $pdo->prepare(sprintf('SELECT 1 FROM `%s` WHERE `%s` = ? LIMIT 1', $ref['TABLE_NAME'], $ref['COLUMN_NAME']));
-            $stmt->execute([$id]);
-            if ($stmt->fetchColumn() !== false) {
-                $reasons[] = (string) $ref['TABLE_NAME'];
-            }
-        }
-
-        if ($this->db->hasTable('statement_notes')) {
-            $stmt = $pdo->prepare('SELECT 1 FROM statement_notes WHERE supplier_id = ? AND fiscal_year = ? LIMIT 1');
-            $stmt->execute([$supplierId, (int) $period['fiscal_year']]);
-            if ($stmt->fetchColumn() !== false) {
-                $reasons[] = 'statement_notes';
-            }
-        }
-
-        // Období založené převodem patří převodu: smazání převodu ho uklízí podle mapy.
-        if ($this->takenOver->isAccountingPeriod($supplierId, $id)) {
-            $reasons[] = 'import';
-        }
-        return $reasons;
     }
 }

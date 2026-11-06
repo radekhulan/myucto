@@ -93,6 +93,7 @@ final class ClientResolverVatDicTest extends TestCase
         // ARES podle IČO: subjekt existuje, ale jako plátce NE (vlastní registrace zanikla
         // vstupem do skupiny) — přesně to, co ARES u člena skupiny vrací.
         $this->seedCache('ares_cache', 'ic', self::IC, [
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
             'found' => true,
             'data'  => [
                 'company_name' => 'Testovací odštěpný závod s.r.o.',
@@ -185,6 +186,91 @@ final class ClientResolverVatDicTest extends TestCase
 
         self::assertSame($existingId, $result['id']);
         self::assertFalse($result['is_vat_payer']);
+    }
+
+    public function testIcoOnlyGroupMemberUpgradesExistingNonPayer(): void
+    {
+        $ic = '00000000';
+        $this->seedActiveGroupMember($ic, 'Syntetický člen skupiny');
+        $existingId = $this->clients->create([
+            'company_name' => 'Syntetický člen skupiny',
+            'ic' => $ic,
+            'dic' => 'CZ00000000',
+            'street' => 'Testovací 1', 'city' => 'Vzorov', 'zip' => '00000',
+        ], $this->supplierId);
+        $this->clients->setVatPayer($existingId, false);
+
+        $result = $this->resolver->resolveVendor(['ic' => $ic], $this->supplierId);
+
+        self::assertFalse($result['created']);
+        self::assertSame($existingId, $result['id']);
+        self::assertTrue($result['is_vat_payer']);
+        self::assertSame(1, (int) $this->column('is_vat_payer', $existingId));
+        self::assertSame('CZ699000000', $this->column('dic', $existingId), 'Karta plátce nesmí do KH nést zaniklé vlastní DIČ člena skupiny.');
+    }
+
+    public function testGroupMemberKeepsManuallyEnteredForeignDic(): void
+    {
+        $ic = '00000000';
+        $this->seedActiveGroupMember($ic, 'Syntetický člen skupiny');
+        $existingId = $this->clients->create([
+            'company_name' => 'Syntetický člen skupiny',
+            'ic' => $ic,
+            'dic' => 'SK1234567890',
+            'street' => 'Testovací 1', 'city' => 'Vzorov', 'zip' => '00000',
+        ], $this->supplierId);
+
+        $result = $this->resolver->resolveVendor(['ic' => $ic], $this->supplierId);
+
+        self::assertSame($existingId, $result['id']);
+        self::assertTrue($result['is_vat_payer']);
+        self::assertSame('SK1234567890', $this->column('dic', $existingId), 'Jiné ručně zadané DIČ se nepřepisuje.');
+    }
+
+    public function testActiveGroupWithoutGroupDicTakesVatDicFromDocument(): void
+    {
+        $ic = '00000000';
+        $this->seedActiveGroupMember($ic, 'Syntetický člen skupiny', '');
+
+        $result = $this->resolver->resolveVendor(['ic' => $ic, 'dic' => 'CZ00000000', 'vat_dic' => 'CZ699000000'], $this->supplierId);
+
+        self::assertTrue($result['created']);
+        self::assertTrue($result['is_vat_payer']);
+        self::assertSame('CZ699000000', $this->column('dic', $result['id']), 'Karta plátce nesmí vzniknout bez DIČ, když ho doklad uvádí.');
+    }
+
+    public function testDifferentIcosSharingGroupDicRemainSeparateCards(): void
+    {
+        $ids = [];
+        foreach (['00000000', '00000001'] as $ic) {
+            $this->seedActiveGroupMember($ic, 'Syntetický člen ' . $ic);
+            $result = $this->resolver->resolveVendor(['ic' => $ic, 'dic' => 'CZ699000000'], $this->supplierId);
+            self::assertTrue($result['created']);
+            self::assertTrue($result['is_vat_payer']);
+            self::assertSame('CZ699000000', $this->column('dic', $result['id']));
+            $ids[$ic] = $result['id'];
+        }
+        self::assertNotSame($ids['00000000'], $ids['00000001']);
+
+        foreach ($ids as $ic => $id) {
+            $result = $this->resolver->resolveVendor(['ic' => $ic, 'dic' => 'CZ699000000'], $this->supplierId);
+            self::assertFalse($result['created']);
+            self::assertSame($id, $result['id']);
+        }
+    }
+
+    /** Cache vzniká stejnou normalizací jako čerstvá odpověď registru, bez HTTP. */
+    private function seedActiveGroupMember(string $ic, string $name, string $groupDic = 'CZ699000000'): void
+    {
+        $ares = new AresClient(new Config([]), $this->db, new NullLogger());
+        $data = (new \ReflectionMethod(AresClient::class, 'normalize'))->invoke($ares, [
+            'ico' => $ic, 'obchodniJmeno' => $name, 'dicSkDph' => $groupDic,
+            'seznamRegistraci' => ['stavZdrojeDph' => 'NEEXISTUJICI', 'stavZdrojeSkDph' => 'AKTIVNI'],
+        ]);
+        $this->seedCache('ares_cache', 'ic', $ic, [
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
+            'found' => true, 'data' => $data,
+        ]);
     }
 
     /** @param array<string,mixed> $payload */

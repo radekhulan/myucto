@@ -4,12 +4,15 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Invoice;
 
+use MyInvoice\Http\GuardsDocumentLock;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Security\ProjectAssignmentAccess;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
@@ -26,9 +29,14 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * cesty by se u akce dala doplnit jen nákladová strana a marže by lhala.
  *
  * Body: { project_id: number|null } — klíč je povinný, null zakázku odebere.
+ *
+ * Oprávnění a zámek řeší {@see ProjectAssignmentAccess}: zařazení je práce se
+ * zakázkami (`projects`), klientská role navíc zamčený doklad nepřeřadí.
  */
 final class SetInvoiceProjectAction
 {
+    use GuardsDocumentLock;
+
     public function __construct(
         private readonly InvoiceRepository $repo,
         private readonly PostingService $posting,
@@ -36,6 +44,7 @@ final class SetInvoiceProjectAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly Connection $db,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -45,6 +54,10 @@ final class SetInvoiceProjectAction
             return Json::error($response, 'invalid_id', 'Neplatné ID', 400);
         }
 
+        if ($deny = ProjectAssignmentAccess::denyWithoutProjects($request, $response)) {
+            return $deny;
+        }
+
         $supplierId = SupplierGuard::currentId($request);
         $existing = $this->repo->find($id);
         if ($existing === null || (int) ($existing['supplier_id'] ?? 0) !== $supplierId) {
@@ -52,6 +65,11 @@ final class SetInvoiceProjectAction
         }
         if (($existing['status'] ?? '') === 'cancelled') {
             return Json::error($response, 'not_editable', 'Stornovaný doklad nelze zařadit k zakázce.', 409);
+        }
+        // Klientská role zamčený doklad nepřeřadí: přeřazení přerazítkuje zaúčtované
+        // řádky deníku. Uzavřené období pro ostatní hlídá DimensionPeriodGuard níže.
+        if ($deny = $this->denyIfLocked($request, $response, $this->locks->forInvoice($existing), 'invoice', $id, true)) {
+            return $deny;
         }
 
         $body = (array) ($request->getParsedBody() ?? []);

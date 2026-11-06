@@ -621,22 +621,73 @@ final class AiProviderContractTest extends TestCase
         self::assertStringContainsString('nestihl vrátit celý doklad', $result['error']);
     }
 
+    /**
+     * Klíč bez přiřazeného workspace Anthropic odmítne bez hlavičky anthropic-workspace-id.
+     * S uloženým ID ji nese každý požadavek, bez něj se hlavičky nemění.
+     */
+    public function testAnthropicRequests_sendWorkspaceHeaderOnlyWhenConfigured(): void
+    {
+        $body = [
+            'content'     => [['type' => 'text', 'text' => (string) json_encode($this->goldenData())]],
+            'model'       => 'claude-haiku-4-5',
+            'stop_reason' => 'end_turn',
+        ];
+
+        [$client, $history] = $this->anthropicClient($body, 'wrkspc_01AbC-x_9');
+        self::assertTrue($client->extractInvoice(1, "%PDF-1.4\nfake")['ok']);
+        self::assertTrue($client->testConnection(1)['ok']);
+        self::assertCount(2, $history);
+        foreach ($history as $entry) {
+            self::assertSame('wrkspc_01AbC-x_9', $entry['request']->getHeaderLine('anthropic-workspace-id'));
+        }
+
+        [$client, $history] = $this->anthropicClient($body);
+        self::assertTrue($client->extractInvoice(1, "%PDF-1.4\nfake")['ok']);
+        self::assertTrue($client->testConnection(1)['ok']);
+        foreach ($history as $entry) {
+            self::assertFalse($entry['request']->hasHeader('anthropic-workspace-id'));
+            self::assertSame('2023-06-01', $entry['request']->getHeaderLine('anthropic-version'));
+        }
+        self::assertSame(
+            ['x-api-key' => 'k', 'anthropic-version' => '2023-06-01', 'content-type' => 'application/json'],
+            AnthropicClient::requestHeaders('k', null),
+        );
+        self::assertSame(AnthropicClient::requestHeaders('k', null), AnthropicClient::requestHeaders('k', ''));
+    }
+
+    public function testAnthropicWorkspaceId_validation(): void
+    {
+        self::assertNull(AnthropicClient::workspaceIdError(''));
+        self::assertNull(AnthropicClient::workspaceIdError('wrkspc_01ABCdef-ghi'));
+        self::assertNull(AnthropicClient::workspaceIdError(str_repeat('a', 128)));
+        self::assertNotNull(AnthropicClient::workspaceIdError(str_repeat('a', 129)));
+        self::assertNotNull(AnthropicClient::workspaceIdError('wrkspc 01'));
+        self::assertNotNull(AnthropicClient::workspaceIdError("wrkspc_01\r\nX-Injected: 1"));
+        self::assertNotNull(AnthropicClient::workspaceIdError('wrkspc_01;drop'));
+        self::assertNotNull(AnthropicClient::workspaceIdError('wrkspč'));
+    }
+
     // ── Harness ──────────────────────────────────────────────────────────────
 
     /** @return array{0: AnthropicClient, 1: \ArrayObject<int, array<string, mixed>>} */
-    private function anthropicClient(array $responseBody): array
+    private function anthropicClient(array $responseBody, ?string $workspaceId = null): array
     {
         $history = new \ArrayObject();
-        $stack = HandlerStack::create(new MockHandler([new Response(200, [], (string) json_encode($responseBody))]));
+        $stack = HandlerStack::create(new MockHandler([
+            new Response(200, [], (string) json_encode($responseBody)),
+            new Response(200, [], (string) json_encode($responseBody)),
+        ]));
         $stack->push(Middleware::history($history));
         $http = new Client(['handler' => $stack, 'http_errors' => false]);
 
         $pdo = $this->createMock(PDO::class);
-        $pdo->method('prepare')->willReturnCallback(function (string $sql) {
+        $pdo->method('prepare')->willReturnCallback(function (string $sql) use ($workspaceId) {
             $stmt = $this->createMock(PDOStatement::class);
             $stmt->method('execute')->willReturn(true);
             if (str_contains($sql, 'anthropic_api_key_enc')) {
-                $stmt->method('fetch')->willReturn(['anthropic_api_key_enc' => 'ENC', 'anthropic_default_model' => 'claude-haiku-4-5']);
+                $stmt->method('fetch')->willReturn([
+                    'anthropic_api_key_enc' => 'ENC', 'anthropic_default_model' => 'claude-haiku-4-5', 'anthropic_workspace_id' => $workspaceId,
+                ]);
             } else {
                 $stmt->method('fetch')->willReturn(false);
             }

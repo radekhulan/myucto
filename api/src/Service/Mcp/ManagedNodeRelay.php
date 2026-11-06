@@ -77,7 +77,7 @@ final class ManagedNodeRelay
         try {
             $this->write($pipes[0], array_intersect_key($input, array_flip([
                 'operation', 'scope', 'cursor', 'name', 'arguments',
-                'boundSupplierId', 'lockedSupplierId', 'apiUrl', 'version',
+                'boundSupplierId', 'lockedSupplierId', 'apiUrl', 'version', 'allowedTools',
             ])));
             $deadline = microtime(true) + self::DEADLINE_SECONDS;
             $buffer = '';
@@ -178,6 +178,7 @@ final class ManagedNodeRelay
             throw new \InvalidArgumentException('Nahrávaný soubor musí přijít v base64.', 400);
         }
 
+        $request['mcpResource'] = $input['mcpResource'] ?? null;
         return $request;
     }
 

@@ -34,6 +34,10 @@
 .PARAMETER BezZip
     Nevytvářet ZIP archiv. Výchozí chování je vytvořit ZIP vedle složky agendy.
 
+.PARAMETER Heslo
+    Heslo databáze, je-li datový soubor jím chráněný. Bez zadání se na něj skript
+    zeptá, když ho datový soubor vyžaduje.
+
 .EXAMPLE
     .\Export-PohodaMdbAccounting.ps1 -Mdb "C:\POHODA\Data\StwPh_12345678_2026.mdb" -Vystup .\export -Ico 12345678 -Rok 2026
 #>
@@ -44,32 +48,88 @@ param(
     [string]$Ico,
     [int]$Rok,
     [switch]$BezZip,
-    [switch]$PotvrditMetadata
+    [switch]$PotvrditMetadata,
+    [string]$Heslo
 )
 
 $ErrorActionPreference = 'Stop'
 $icoWasSpecified = $PSBoundParameters.ContainsKey('Ico') -and -not [string]::IsNullOrWhiteSpace($Ico)
 $yearWasSpecified = $PSBoundParameters.ContainsKey('Rok')
 
-function Open-PohodaMdb([string]$Path) {
+<#
+    Otevře datový soubor Accessu (.mdb) jen pro čtení, ovladače zkouší od nejnovějšího.
+    Vrací Connection, nebo při neúspěchu Failure s důvodem a Detail s hláškami ovladačů:
+      Driver    žádný ovladač Accessu v této bitovosti PowerShellu není registrovaný
+      Password  soubor je chráněný heslem databáze (heslo chybí, nebo nesouhlasí)
+      Locked    soubor drží výhradně jiný program, nebo chybí právo ke čtení
+      Format    soubor není databáze Accessu, nebo ji ovladač nezná
+      Other     jiná chyba
+    Shodné s Export-PohodaMdb.ps1 a Export-Pamica.ps1 - při změně upravte všechny tři.
+#>
+function Open-MdbConnection([string]$Path, [string]$Heslo) {
+    $details = New-Object System.Collections.Generic.List[string]
+    $failure = $null
     foreach ($provider in 'Microsoft.ACE.OLEDB.16.0', 'Microsoft.ACE.OLEDB.12.0', 'Microsoft.Jet.OLEDB.4.0') {
+        $connection = $null
         try {
             $builder = New-Object System.Data.OleDb.OleDbConnectionStringBuilder
             $builder.Provider = $provider
             $builder['Data Source'] = $Path
             $builder['Mode'] = 'Read'
             $builder['Persist Security Info'] = $false
+            if ($Heslo) { $builder['Jet OLEDB:Database Password'] = $Heslo }
             $connection = New-Object System.Data.OleDb.OleDbConnection ([string]$builder.ConnectionString)
             $connection.Open()
-            return $connection
+            return [pscustomobject]@{ Connection = $connection; Failure = $null; Detail = '' }
         } catch {
-            if ($connection) {
-                $connection.Dispose()
-            }
+            if ($connection) { $connection.Dispose() }
+            $e = $_.Exception
+            while ($e.InnerException) { $e = $e.InnerException }
+            $message = $e.Message.Trim()
+            $details.Add("${provider}: $message")
+            # Neregistrovaný ovladač o souboru nic neříká; důvod dá první ovladač, který soubor otevřít zkusil.
+            $kind = Get-MdbFailureKind $message.Replace($Path, '')
+            if ($kind -ne 'Driver' -and $null -eq $failure) { $failure = $kind }
         }
     }
-    return $null
+    if ($null -eq $failure) { $failure = 'Driver' }
+    return [pscustomobject]@{ Connection = $null; Failure = $failure; Detail = ($details -join [Environment]::NewLine) }
 }
+
+function Get-MdbFailureKind([string]$Message) {
+    if ($Message -match 'not registered|není registrov|nicht registriert') { return 'Driver' }
+    if ($Message -match 'password|heslo|Kennwort') { return 'Password' }
+    if ($Message -match 'exclusive|already in use|already opened|locked|could not use|výhradn|uzamčen|používá jiný') { return 'Locked' }
+    if ($Message -match 'Unrecognized database format|Neznámý formát|nerozpozn|formát databáze') { return 'Format' }
+    return 'Other'
+}
+
+<# Věta pro uživatele, proč se datový soubor neotevřel, včetně hlášek ovladačů. #>
+function Get-MdbFailureMessage($Result, [string]$Program, [bool]$HesloZadano) {
+    $text = switch ($Result.Failure) {
+        'Driver' { 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine.' }
+        'Password' {
+            if ($HesloZadano) { 'Datový soubor nejde otevřít: heslo databáze nesouhlasí.' }
+            else { 'Datový soubor je chráněný heslem databáze. Zadejte ho parametrem -Heslo.' }
+        }
+        'Locked' { "Datový soubor nejde otevřít, drží ho jiný program. Zavřete $Program na všech počítačích, které s datovým souborem pracují, a export spusťte znovu." }
+        'Format' { 'Soubor není datový soubor Accessu (.mdb), nebo ho nainstalovaný ovladač nezná.' }
+        default { 'Datový soubor nejde otevřít.' }
+    }
+    return $text + [Environment]::NewLine + 'Hlášení ovladačů:' + [Environment]::NewLine + $Result.Detail
+}
+
+<# Heslo databáze z konzole; v neinteraktivním běhu (bez konzole) vrátí $null. #>
+function Read-MdbPassword {
+    try {
+        $secure = Read-Host 'Datový soubor je chráněný heslem databáze. Zadejte heslo' -AsSecureString
+    } catch { return $null }
+    if ($null -eq $secure -or $secure.Length -eq 0) { return $null }
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
 
 function Select-PohodaMdb {
     Add-Type -AssemblyName System.Windows.Forms
@@ -117,13 +177,22 @@ if ([string]::IsNullOrWhiteSpace($Vystup)) {
     $Vystup = $PSScriptRoot
 }
 
-$connection = Open-PohodaMdb $mdbPath
-if ($null -eq $connection -and [Environment]::Is64BitProcess) {
+if (-not $Heslo -and $env:MYUCTO_MDB_HESLO) { $Heslo = $env:MYUCTO_MDB_HESLO }
+$opened = Open-MdbConnection $mdbPath $Heslo
+if ($null -eq $opened.Connection -and $opened.Failure -eq 'Password' -and -not $Heslo) {
+    $Heslo = Read-MdbPassword
+    if ($Heslo) { $opened = Open-MdbConnection $mdbPath $Heslo }
+}
+$connection = $opened.Connection
+# 32bitový PowerShell jen když ovladač opravdu chybí; heslo nebo zamčený soubor 32 bitů nevyřeší.
+if ($null -eq $connection -and $opened.Failure -eq 'Driver' -and [Environment]::Is64BitProcess) {
     $powershell32 = Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
     if (-not (Test-Path -LiteralPath $powershell32)) {
         throw 'Datový soubor nejde otevřít a 32bitový Windows PowerShell není dostupný.'
     }
     Write-Host 'Ovladač pro MDB v 64bitovém PowerShellu není dostupný, spouštím 32bitový PowerShell.'
+    # Heslo jde do 32bitového procesu proměnnou prostředí, ne na příkazové řádce.
+    if ($Heslo) { $env:MYUCTO_MDB_HESLO = $Heslo }
     $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $PSCommandPath, '-Mdb', $mdbPath, '-Vystup', $Vystup)
     if ($icoWasSpecified) {
         $arguments += @('-Ico', $Ico)
@@ -141,7 +210,11 @@ if ($null -eq $connection -and [Environment]::Is64BitProcess) {
     exit $LASTEXITCODE
 }
 if ($null -eq $connection) {
-    throw 'Datový soubor nejde otevřít. Nainstalujte Microsoft 365 Access Runtime s ACE OLE DB/ODBC ve stejné architektuře jako Microsoft Office: https://support.microsoft.com/en-us/access/download-and-install-microsoft-365-access-runtime'
+    $message = Get-MdbFailureMessage $opened 'POHODU' ([bool]$Heslo)
+    if ($opened.Failure -eq 'Driver') {
+        $message = 'Nainstalujte Microsoft 365 Access Runtime s ACE OLE DB/ODBC ve stejné architektuře jako Microsoft Office: https://support.microsoft.com/en-us/access/download-and-install-microsoft-365-access-runtime' + [Environment]::NewLine + $message
+    }
+    throw $message
 }
 
 try {
@@ -152,7 +225,7 @@ try {
         -Doplnky {
             param($agendaDir)
             $connection.Close()
-            & $companion -Mdb $mdbPath -Vystup $agendaDir -Skupiny @('majetek', 'mzdy', 'sklad')
+            & $companion -Mdb $mdbPath -Vystup $agendaDir -Skupiny @('majetek', 'mzdy', 'sklad') -Heslo $Heslo
         }
 } finally {
     $connection.Close()

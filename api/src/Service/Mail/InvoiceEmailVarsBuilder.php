@@ -261,7 +261,8 @@ final class InvoiceEmailVarsBuilder
     {
         return match ($type) {
             'tax_document'     => $locale === 'en' ? 'Tax document for payment received' : 'Daňový doklad k přijaté platbě',
-            'payment_calendar' => $locale === 'en' ? 'Payment calendar' : 'Platební kalendář',
+            'payment_calendar', 'advance_calendar' => $locale === 'en' ? 'Payment calendar' : 'Platební kalendář',
+            'rent_calendar' => $locale === 'en' ? 'Rent instalment calendar' : 'Splátkový kalendář',
             default            => $this->documentLabel($type, $locale),
         };
     }

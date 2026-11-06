@@ -9,8 +9,17 @@
 #
 # Pouziva docker-compose.production.yml (image pull, zadny build).
 # Idempotentni - bezpecne spoustet opakovane.
+#
+# Konfigurace (jen pri prvnim vygenerovani cfg.docker.php):
+#   -AppUrl https://ucto.firma.cz   verejna adresa (app.url); jinak $env:MYINVOICE_APP_URL,
+#                                   vychozi http://localhost:<APP_PORT>
+#   -Dev                            ciste lokalni vyvojova instalace (app.env=development);
+#                                   nikdy ji nevystavuj do site
+# Vychozi je produkcni rezim (app.env=production). Secure cookie se ridi schematem
+# app.url: https -> cookie_secure=true s prefixem __Host-, http -> false (jinak by se
+# pres http://localhost neslo prihlasit).
 [CmdletBinding()]
-param()
+param([switch]$Dev, [string]$AppUrl = '')
 
 # Skript vyzaduje PowerShell 7. Ve Windows PowerShellu 5.1 (povodni powershell.exe,
 # porad vychozi na Win 11) se lisi zapis souboru bez BOM a chybi cast syntaxe, takze
@@ -183,6 +192,14 @@ function New-RandomToken([int]$Bytes = 24) {
     return ([Convert]::ToBase64String($buf) -replace '[+/=]', '').Substring(0, [math]::Min($Bytes + 4, 32))
 }
 
+# Kryptograficky nahodny 32B klic v base64 (pepper, sifrovaci klic, klic
+# mzdovych otisku). Pseudonahodny generator PowerShellu na to nestaci.
+function New-Base64Key([int]$Bytes = 32) {
+    $buf = New-Object byte[] $Bytes
+    [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($buf)
+    return [Convert]::ToBase64String($buf)
+}
+
 # --- 1. .env --------------------------------------------------------------
 if (-not (Test-Path .env)) {
     Write-Host "==> Generating .env with random DB passwords..."
@@ -210,10 +227,25 @@ $envVars = Read-DotEnvFile -Path '.env'
 # --- 2. cfg.docker.php ----------------------------------------------------
 if (-not (Test-Path cfg.docker.php)) {
     Write-Host "==> Generating cfg.docker.php from cfg.sample.php with Docker defaults..."
-    $pepper = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
-    $encKey = [Convert]::ToBase64String((1..32 | ForEach-Object { Get-Random -Maximum 256 }))
+    $pepper = New-Base64Key
+    $encKey = New-Base64Key
+    # Nova instalace = nova data, takze samostatny klic mzdovych otisku je bezpecny.
+    # (Na existujici instalaci se nesmi menit, viz cfg.sample.php.)
+    $payrollHashKey = New-Base64Key
+
+    $appUrl = $AppUrl
+    if (-not $appUrl) { $appUrl = $env:MYINVOICE_APP_URL }
+    if (-not $appUrl) { $appUrl = "http://localhost:$($envVars.APP_PORT)" }
+    $appUrl = $appUrl.TrimEnd('/')
+    if ($appUrl -notmatch '^https?://[A-Za-z0-9.:\[\]-]+$') {
+        Write-Error "-AppUrl musi byt jen origin ve tvaru http(s)://host[:port], dostal jsem '$appUrl'."
+    }
+    $appIsHttp = $appUrl -match '^http://'
+    $appIsLocal = $appUrl -match '^https?://(localhost|127\.[0-9.]+|\[::1\])(:[0-9]+)?$'
+    $appEnv = 'production'
+    if ($Dev) { $appEnv = 'development' }
+
     $cfg = Get-Content cfg.sample.php -Raw
-    $appUrl = "http://localhost:$($envVars.APP_PORT)"
     $cfg = [regex]::Replace($cfg, "'host'    => '127\.0\.0\.1',", "'host'    => 'db',",    1)
     $cfg = [regex]::Replace($cfg, "'host'    => '127\.0\.0\.1',", "'host'    => 'redis',", 1)
     $cfg = $cfg -replace "'name'    => 'myucto',", "'name'    => '$($envVars.DB_NAME)',"
@@ -221,15 +253,28 @@ if (-not (Test-Path cfg.docker.php)) {
     $cfg = $cfg -replace "'pass'    => 'CHANGE-ME',", "'pass'    => '$($envVars.DB_PASSWORD)',"
     $cfg = $cfg -replace "'pepper' => 'CHANGE-ME',",  "'pepper' => '$pepper',"
     $cfg = $cfg -replace "'secret_encryption_key' => '',", "'secret_encryption_key' => '$encKey',"
-    $cfg = $cfg -replace "'env'    => 'production',",      "'env'    => 'development',"
+    $cfg = $cfg -replace "'payroll_hash_key' => '',", "'payroll_hash_key' => '$payrollHashKey',"
+    $cfg = $cfg -replace "'env'    => 'production',",      "'env'    => '$appEnv',"
     $cfg = $cfg -replace "'url'    => 'https://dev\.example\.com',", "'url'    => '$appUrl',"
-    $cfg = $cfg -replace "'cookie_name'   => '__Host-myinvoice_session',", "'cookie_name'   => 'myinvoice_session',"
-    $cfg = $cfg -replace "'cookie_secure' => true,", "'cookie_secure' => false,"
-    # Cookie duveryhodneho zarizeni ma stejny __Host- prefix, ktery prohlizec pres
-    # plain HTTP zahodi. Bez tehle nahrady prestane fungovat MFA "zapamatovat si".
-    $cfg = $cfg -replace "'trusted_cookie_name'     => '__Host-myinvoice_td',", "'trusted_cookie_name'     => 'myinvoice_td',"
+    # Secure cookie podle schematu app.url: pres plain HTTP by prohlizec Secure
+    # cookie (i prefix __Host-) zahodil a prihlaseni by nefungovalo. U https
+    # zustavaji produkcni hodnoty z cfg.sample.php.
+    if ($appIsHttp) {
+        $cfg = $cfg -replace "'cookie_name'   => '__Host-myinvoice_session',", "'cookie_name'   => 'myinvoice_session',"
+        $cfg = $cfg -replace "'cookie_secure' => true,", "'cookie_secure' => false,"
+        # Cookie duveryhodneho zarizeni ma stejny __Host- prefix, ktery prohlizec pres
+        # plain HTTP zahodi. Bez tehle nahrady prestane fungovat MFA "zapamatovat si".
+        $cfg = $cfg -replace "'trusted_cookie_name'     => '__Host-myinvoice_td',", "'trusted_cookie_name'     => 'myinvoice_td',"
+    }
     Write-Utf8NoBom 'cfg.docker.php' $cfg
-    Write-Host "    cfg.docker.php written"
+    Write-Host "    cfg.docker.php written (app.env=$appEnv, app.url=$appUrl)"
+    if ($appIsHttp -and -not $appIsLocal) {
+        Write-Host "    !!  app.url je HTTP mimo localhost: prihlasovaci cookie pujde po siti nesifrovane.  !!" -ForegroundColor Yellow
+        Write-Host "    !!  Pro provoz dej pred aplikaci HTTPS proxy a nastav https adresu + cookie_secure. !!" -ForegroundColor Yellow
+    }
+    if ($appEnv -eq 'development') {
+        Write-Host "    !!  Vyvojovy rezim (-Dev): instalaci nevystavuj do site.  !!" -ForegroundColor Yellow
+    }
     Write-Host ""
     Write-Host "    !!  Edit cfg.docker.php to fill in SMTP, Cloudflare Turnstile, IP allowlist  !!" -ForegroundColor Yellow
     Write-Host ""

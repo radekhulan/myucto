@@ -70,6 +70,13 @@ final class VatCoefficientRepository
         return null;
     }
 
+    public static function deductionPercent(?array $current, ?array $previous): ?int
+    {
+        $percent = $current['final_percent'] ?? $current['provisional_percent']
+            ?? (($previous['settled_at'] ?? null) !== null ? ($previous['final_percent'] ?? null) : null);
+        return $percent === null ? null : max(0, min(100, (int) $percent));
+    }
+
     /**
      * Ruční nastavení zálohového koeficientu pro rok (účetní/admin). Nedotýká se
      * vypořádacích sloupců (final/numerator/denominator/settled_*) — partial upsert.

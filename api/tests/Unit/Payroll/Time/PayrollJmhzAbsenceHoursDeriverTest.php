@@ -335,6 +335,33 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
     }
 
     /**
+     * Kalendářní cesta (měsíc ze souhrnu importu) bere u neomluvené absence na část
+     * směny jen zameškané minuty prvního a posledního dne, ne celé směny.
+     */
+    public function testCalendarPathCapsPartialFirstAndLastDay(): void
+    {
+        $absences = $this->repositoryStub();
+        $absences->method('absenceBounds')->willReturn([
+            'from' => new \DateTimeImmutable('2026-09-14'),
+            'to' => new \DateTimeImmutable('2026-09-16'),
+            'window_to' => new \DateTimeImmutable('2026-09-16'),
+        ]);
+        $absence = ['partial_first_minutes' => 30, 'partial_last_minutes' => 120]
+            + $this->absence(11, 'unexcused', '2026-09-14', '2026-09-16');
+
+        $derived = (new PayrollJmhzAbsenceHoursDeriver($this->createStub(Connection::class), $absences))->deriveFromCalendar(
+            1,
+            32,
+            self::PERIOD_START,
+            self::PERIOD_END,
+            [$absence],
+            static fn (string $date, bool $holidays): int => 480,
+        );
+
+        self::assertSame(30 + 480 + 120, $derived['minutes']['unexcused']);
+    }
+
+    /**
      * @param list<array<string,mixed>> $absences
      * @return array{supported:bool,minutes:array<string,int>,total:int,paid:int}
      */

@@ -30,6 +30,23 @@ final class CashDocumentRepository
      */
     public function insert(int $supplierId, array $data, ?int $userId): int
     {
+        $data['total_amount'] = (float) $data['total_amount'];
+        $data['fx_rate'] = (float) ($data['fx_rate'] ?? 1);
+        $data['amount_foreign'] = isset($data['amount_foreign']) ? (float) $data['amount_foreign'] : null;
+        return $this->persistHeader($supplierId, $data, $userId);
+    }
+
+    public function insertPropertyClearing(\MyInvoice\Service\Property\Payments\Workflow\PaymentClearingIntent $intent): \MyInvoice\Service\Property\Payments\Workflow\PaymentClearingIntent
+    {
+        $intent->assertConnection($this->db);
+        $proof = $intent->current('cash');
+        if ($proof['workflow']['cash_document_id'] !== null || !isset($proof['workflow']['request']['source']['draft'])) \MyInvoice\Service\Property\Payments\PaymentException::reject('workflow_version_conflict');
+        $id = $this->persistHeader($intent->supplier, $proof['snapshot']['source']['native_draft'], (int) $proof['workflow']['created_by']);
+        return $intent->bindCash($id);
+    }
+
+    private function persistHeader(int $supplierId, array $data, ?int $userId): int
+    {
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO cash_documents
@@ -260,8 +277,13 @@ final class CashDocumentRepository
     /** Smaže účetní zápis dokladu; řádky i přílohy padnou přes ON DELETE CASCADE. */
     public function deleteJournalEntry(int $supplierId, int $entryId): void
     {
-        $this->db->pdo()->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?')
-            ->execute([$entryId, $supplierId]);
+        (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $entryId): void {
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            $this->db->pdo()->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?')
+                ->execute([$entryId, $supplierId]);
+        });
     }
 
     /**

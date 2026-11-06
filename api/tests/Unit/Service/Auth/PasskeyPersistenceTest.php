@@ -9,7 +9,10 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PasskeyCredentialRepository;
 use MyInvoice\Service\Auth\MfaStepUpProofStore;
 use MyInvoice\Service\Auth\OneTimeTokenException;
+use MyInvoice\Service\Auth\DatabaseSecurityClock;
 use MyInvoice\Service\Auth\PsrSecurityClock;
+use MyInvoice\Service\Auth\SessionAuthContext;
+use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Auth\WebAuthnCeremonyStore;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -482,6 +485,100 @@ final class PasskeyPersistenceTest extends TestCase
 
         $this->expectException(OneTimeTokenException::class);
         $store->consume($token, $this->userId, 'session-a', 'api-token.create');
+    }
+
+    /**
+     * Zkušební ověření po registraci smí odvolat jen čerstvý a nikdy nepoužitý
+     * klíč. Podmínka je v SQL: kdyby ji hlídal jen volající, šlo by touto cestou
+     * odvolat klíč, který už jednou fungoval (#225).
+     */
+    public function testOnlyFreshUnusedPasskeyCanBeRevokedAfterFailedTest(): void
+    {
+        $handle = $this->credentials->userHandle($this->userId);
+        $fresh = $this->credentials->save($this->userId, $this->credentialRecord($handle), 'Fresh');
+        $used = $this->credentials->save($this->userId, $this->credentialRecord($handle), 'Used');
+        $old = $this->credentials->save($this->userId, $this->credentialRecord($handle), 'Old');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE webauthn_credentials SET last_used_at = UTC_TIMESTAMP(6) WHERE id = ?')->execute([$used]);
+        $pdo->prepare('UPDATE webauthn_credentials SET created_at = UTC_TIMESTAMP(6) - INTERVAL 1 HOUR WHERE id = ?')->execute([$old]);
+
+        self::assertSame($fresh, $this->credentials->findUnverifiedForUser($this->userId, $fresh, 900)?->id);
+        self::assertNull($this->credentials->findUnverifiedForUser($this->userId, $used, 900));
+        self::assertNull($this->credentials->findUnverifiedForUser($this->userId, $old, 900));
+        self::assertNull($this->credentials->findUnverifiedForUser($this->userId + 1, $fresh, 900));
+
+        // Skutečný čas, ne MutableClock: created_at zapisuje databáze přes UTC_TIMESTAMP.
+        $cutoff = \MyInvoice\Service\Auth\SecurityTime::fromDateTime(new \DateTimeImmutable('now', new \DateTimeZone('UTC')));
+        $pdo->beginTransaction();
+        try {
+            self::assertFalse($this->credentials->revokeUnverifiedInTransaction($pdo, $this->userId, $used, $cutoff, 900));
+            self::assertFalse($this->credentials->revokeUnverifiedInTransaction($pdo, $this->userId, $old, $cutoff, 900));
+            self::assertFalse($this->credentials->revokeUnverifiedInTransaction($pdo, $this->userId + 1, $fresh, $cutoff, 900));
+            self::assertTrue($this->credentials->revokeUnverifiedInTransaction($pdo, $this->userId, $fresh, $cutoff, 900));
+            $pdo->commit();
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+
+        self::assertSame(2, $this->credentials->countActiveForUser($this->userId));
+        self::assertNull($this->credentials->findActiveForUserById($this->userId, $fresh));
+    }
+
+    /**
+     * Setup session povýšená klíčem, který při zkušebním ověření neprošel, se
+     * vrací na `setup`. Session ověřená jiným klíčem zůstává silná (#225).
+     */
+    public function testSetupSessionUpgradedByRevokedPasskeyFallsBackToSetup(): void
+    {
+        $sessions = new SessionManager(
+            $this->db,
+            Config::load(dirname(__DIR__, 5)),
+            new DatabaseSecurityClock(),
+        );
+        $handle = $this->credentials->userHandle($this->userId);
+        $broken = $this->credentials->save($this->userId, $this->credentialRecord($handle), 'Broken');
+        $other = $this->credentials->save($this->userId, $this->credentialRecord($handle), 'Other');
+        $setup = $sessions->create($this->userId, '127.0.0.1', 'PHPUnit', SessionAuthContext::setup('password'));
+        $upgraded = $sessions->completeSetup(
+            $this->userId,
+            $setup['token'],
+            '127.0.0.1',
+            'PHPUnit',
+            SessionAuthContext::strong('passkey', new \DateTimeImmutable('now', new \DateTimeZone('UTC')), $broken),
+        );
+        $foreign = $sessions->create(
+            $this->userId,
+            '127.0.0.1',
+            'PHPUnit',
+            SessionAuthContext::strong('passkey', new \DateTimeImmutable('now', new \DateTimeZone('UTC')), $other),
+        );
+
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            self::assertFalse($sessions->demoteToSetupInTransaction($pdo, $foreign['token'], $this->userId, $broken));
+            self::assertTrue($sessions->demoteToSetupInTransaction($pdo, $upgraded['token'], $this->userId, $broken));
+            $pdo->commit();
+        } finally {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        }
+
+        $row = static function (string $token) use ($pdo): array {
+            $stmt = $pdo->prepare(
+                'SELECT auth_method, assurance_level, mfa_verified_at, auth_credential_id FROM sessions WHERE id = ?'
+            );
+            $stmt->execute([$token]);
+            return $stmt->fetch(\PDO::FETCH_ASSOC);
+        };
+        self::assertSame(
+            ['auth_method' => 'password', 'assurance_level' => 'setup', 'mfa_verified_at' => null, 'auth_credential_id' => null],
+            $row($upgraded['token']),
+        );
+        self::assertSame('strong', $row($foreign['token'])['assurance_level']);
     }
 
     private function credentialRecord(string $userHandle, int $counter = 0): CredentialRecord

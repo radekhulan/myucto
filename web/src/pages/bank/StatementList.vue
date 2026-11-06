@@ -635,6 +635,14 @@ async function onFileSelected(e: Event) {
         skipped: skippedWarning.skipped ?? lastNonDuplicate.skipped_duplicates ?? 0,
       }))
     }
+    const rebased = lastNonDuplicate.warnings?.find(w => w.code === 'imported_balances_rebased')
+    if (rebased) {
+      toast.warning(t('bank.warning.imported_balances_rebased', {
+        statements: rebased.statements ?? 0,
+        shift: formatMoney(rebased.shift ?? 0, 'CZK'),
+        opening: formatMoney(rebased.opening ?? 0, 'CZK'),
+      }))
+    }
     router.push(`/bank/${lastNonDuplicate.statement_id}`)
   } else {
     // Batch mode: souhrnný report — počet přeskočených duplicit se do jednořádkového
@@ -656,7 +664,7 @@ async function onFileSelected(e: Event) {
   uploading.value = false
   if (input) input.value = ''
 }
-useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-suggestions', 'accounting', 'invoices', 'purchase-invoices', 'clients'], () => load(),
+useWindowRefresh(() => load(),
   () => !uploading.value && !scanning.value && !ambiguityModal.value && !reconciliationModal.value)
 </script>
 
@@ -839,7 +847,7 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
             </td>
           </tr>
           <tr v-for="s in group.items" :key="s.id" @click="router.push(`/bank/${s.id}`)" class="cursor-pointer hover:bg-neutral-50">
-            <td class="px-3 py-2 text-xs">
+            <td class="px-3 py-2">
               <span class="inline-flex flex-wrap items-center gap-1.5">
                 <RouterLink class="row-link" :to="`/bank/${s.id}`" @click.stop @auxclick.stop>{{ statementDateLabel(s) }}</RouterLink>
                 <span v-if="s.source === 'email_notice'" :title="t('bank.email_notice_hint')"
@@ -862,16 +870,16 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
                 </span>
               </span>
             </td>
-            <td class="px-3 py-2 text-xs">
+            <td class="px-3 py-2">
               <div class="font-mono">{{ formatAccountNumber(s.account_number, s.bank_code) }}</div>
-              <div v-if="s.account_label" class="text-neutral-400 mt-0.5">{{ s.account_label }}</div>
+              <div v-if="s.account_label" class="text-xs text-neutral-400 mt-0.5">{{ s.account_label }}</div>
             </td>
             <td class="px-3 py-2">
               <span v-if="s.currency" class="text-xs px-2 py-0.5 rounded bg-neutral-100 text-neutral-700 font-medium">{{ s.currency }}</span>
               <span v-else class="text-xs text-neutral-400">—</span>
             </td>
             <td class="px-3 py-2 text-xs text-neutral-600 truncate max-w-xs">{{ s.file_name }}</td>
-            <td class="px-3 py-2 text-right font-mono text-xs">{{ statementClosingBalance(s) == null ? '-' : formatMoney(statementClosingBalance(s), s.currency ?? 'CZK') }}</td>
+            <td class="px-3 py-2 text-right font-mono">{{ statementClosingBalance(s) == null ? '-' : formatMoney(statementClosingBalance(s), s.currency ?? 'CZK') }}</td>
             <td class="px-3 py-2 text-center">{{ s.transaction_count }}</td>
             <td class="px-3 py-2 text-center">
               <span v-if="s.unposted_count > 0" class="text-xs px-2 py-0.5 rounded bg-warning-50 text-warning-600 font-medium">

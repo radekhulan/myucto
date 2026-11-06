@@ -61,6 +61,11 @@ final class OssItemInsertCoverageTest extends TestCase
         'Service/Sample/SampleDataGenerator.php' => [
             'generate' => 'ukázková data jsou tuzemská, OSS profil by byl vymyšlený',
         ],
+        // Postupné čerpání zálohy odmítne daňový doklad k platbě s řádky OSS (taxDocumentGroups),
+        // odpočet proto vždy ruší jen tuzemskou daň.
+        'Service/Invoice/AdvancePartialDrawdown.php' => [
+            'applyUnlocked' => 'čerpá jen zálohu s tuzemským daňovým dokladem, OSS odmítá',
+        ],
     ];
 
     public function testEveryInvoiceItemInsertDecidesThePlaceOfSupply(): void

@@ -332,6 +332,14 @@ final class GoPayPendingService
     public function releaseForPayment(int $paymentId): void
     {
         $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(fn () => $this->releaseForPayment($paymentId));
+            return;
+        }
+        $scope = $pdo->prepare('SELECT supplier_id FROM invoice_payments WHERE id = ?');
+        $scope->execute([$paymentId]);
+        $scopeId = $scope->fetchColumn();
+        if ($scopeId !== false) (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims((int) $scopeId);
         $stmt = $pdo->prepare(
             'SELECT gm.id,gm.supplier_id,gm.clearing_id,gc.clearing_id provider_clearing_id
                FROM gopay_movements gm
@@ -341,6 +349,9 @@ final class GoPayPendingService
         );
         $stmt->execute([$paymentId]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $movement) {
+            if ($scopeId === false || (int) $scopeId !== (int) $movement['supplier_id']) {
+                throw new GoPayException('allocation_source_changed', 'Zdroj úhrady se změnil. Načtěte aktuální stav.', 409);
+            }
             if ($movement['clearing_id'] !== null) {
                 throw new GoPayException(
                     'payment_in_clearing',
@@ -351,10 +362,12 @@ final class GoPayPendingService
             }
             $supplierId = (int) $movement['supplier_id'];
             $entries = $pdo->prepare(
-                'SELECT id FROM journal_entries WHERE supplier_id=? AND source_type="gopay" AND source_id=?'
+                'SELECT id FROM journal_entries WHERE supplier_id=? AND source_type="gopay" AND source_id=? FOR UPDATE'
             );
             $entries->execute([$supplierId, (int) $movement['id']]);
             $entryIds = array_map('intval', $entries->fetchAll(PDO::FETCH_COLUMN));
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, $entryIds);
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, $entryIds);
             $this->poster->assertEntriesRemovable($supplierId, $entryIds, 'Úhrada GoPay');
             foreach ($entryIds as $entryId) {
                 $pdo->prepare('DELETE FROM journal_entries WHERE id=? AND supplier_id=?')

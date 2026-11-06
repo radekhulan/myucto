@@ -40,7 +40,7 @@ final class OurPdfPurchaseInvoiceAction
         } catch (\RuntimeException $e) {
             return Json::error($response, 'not_found', $e->getMessage(), 404);
         } catch (\Throwable $e) {
-            return Json::error($response, 'render_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'render_failed', $e->getMessage(), 500);
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

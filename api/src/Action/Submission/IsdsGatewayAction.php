@@ -9,6 +9,7 @@ use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\Submission\IsdsGatewaySessionRepository;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
+use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
@@ -52,6 +53,7 @@ final class IsdsGatewayAction
         private readonly SubmissionOutboxRepository $outbox,
         private readonly ActivityLogger $logger,
         private readonly PayrollProductionGate $productionGate,
+        private readonly TaxSubmissionRepository $taxSubmissions,
         private readonly PayrollIsdsAgendaCatalog $payrollIsdsAgendas
             = new PayrollIsdsAgendaCatalog(),
     ) {}
@@ -123,7 +125,7 @@ final class IsdsGatewayAction
                 );
             }
             if ($permission === 'reports.submit') {
-                $this->assertTaxOutbox($supplierId, $id);
+                $this->assertTaxOutbox($request, $supplierId, $id);
             }
             $result = $this->dispatch->start($supplierId, $id, $userId);
         } catch (PayrollProductionGateException $e) {
@@ -212,7 +214,7 @@ final class IsdsGatewayAction
                 if ($session !== null && (int) $session['supplier_id'] === $supplierId) {
                     $permission === 'payroll.submissions'
                         ? $this->assertPayrollOutbox($supplierId, (int) $session['outbox_id'])
-                        : $this->assertTaxOutbox($supplierId, (int) $session['outbox_id']);
+                        : $this->assertTaxOutbox($request, $supplierId, (int) $session['outbox_id']);
                 }
             }
             $result = $this->dispatch->complete($supplierId, $userId, $appToken, $sessionId);
@@ -405,7 +407,7 @@ final class IsdsGatewayAction
      * Rozsah oprávnění „podávat výkazy" u brány: jen daňový snapshot zařazený
      * ze stránky Podání, nikdy cizí zpráva fronty (mzdy, dokumenty).
      */
-    private function assertTaxOutbox(int $supplierId, int $outboxId): void
+    private function assertTaxOutbox(Request $request, int $supplierId, int $outboxId): void
     {
         $row = $this->outbox->find($supplierId, $outboxId);
         if ($row === null) {
@@ -425,6 +427,23 @@ final class IsdsGatewayAction
                 403,
             );
         }
+        // Kód agendy fronty není důkaz rozsahu: rozhoduje skutečný snapshot firmy.
+        $submission = $this->taxSubmissions->find((int) $row['artifact_id'], $supplierId);
+        if ($submission === null) {
+            throw new SubmissionChannelException(
+                'submission_not_found',
+                'Daňové podání nebylo nalezeno.',
+                404,
+            );
+        }
+        if (!RequestAuthorization::canAccessTaxSubmission($request, $submission)) {
+            throw new SubmissionChannelException(
+                'tax_gateway_outbox_forbidden',
+                'Nemáte oprávnění k tomuto daňovému podání.',
+                403,
+            );
+        }
+
     }
 
     private function operatorGuard(

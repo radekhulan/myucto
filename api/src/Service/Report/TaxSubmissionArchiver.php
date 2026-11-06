@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Report;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\Accounting\Vat\VatClearingTrigger;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 
 /**
@@ -42,6 +43,7 @@ final class TaxSubmissionArchiver
         private readonly XmlSchemaValidator $validator,
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly VatClearingTrigger $vatClearing,
+        private readonly DemoMode $demo,
     ) {}
 
     /**
@@ -68,6 +70,18 @@ final class TaxSubmissionArchiver
     ): array {
         // XSD validation
         $validation = $this->validator->validate($xml, $formCode);
+
+        // Ukázka stahuje XML přes GET a návštěvník tím nesmí zakládat snímky do
+        // `tax_submissions` (ani přepočítat zúčtování DPH). `submission_id` null
+        // říká volajícím, že není k čemu cokoli dalšího navázat.
+        if ($this->demo->enabled()) {
+            return [
+                'submission_id'     => null,
+                'validation_status' => $validation['status'],
+                'validation_errors' => $validation['errors'],
+                'status'            => 'not_archived',
+            ];
+        }
 
         $id = $this->repo->archive(
             $supplierId,

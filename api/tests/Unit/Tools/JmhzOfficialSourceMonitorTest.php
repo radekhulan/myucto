@@ -552,6 +552,182 @@ final class JmhzOfficialSourceMonitorTest extends TestCase
         new JmhzOfficialSourceMonitor($sources, static fn (): string => throw new \LogicException('Bez sítě.'));
     }
 
+    /**
+     * Index `https://developers.mpsv.cz/jmhz/2027/` odkazuje relativně
+     * (`mh/…`, `pozadavky/…`). Základní cesta končí lomítkem, takže je to
+     * adresář; dřív se z ní ukrojil poslední segment (`/jmhz/…`) a žádný
+     * odkaz neprošel prefixem, hlídač hlásil "neobsahuje žádný dokument".
+     */
+    public function testRelativeLinksResolveAgainstDirectoryIndex(): void
+    {
+        $index = 'https://developers.mpsv.cz/jmhz/2027/';
+        $sources = [
+            'site' => [
+                'label' => 'Přehled 2027',
+                'index_url' => $index,
+                'index_format' => 'document_links',
+                'document_hosts' => ['developers.mpsv.cz'],
+                'document_path_prefixes' => ['/jmhz/2027/'],
+                'document_extensions' => ['html'],
+            ],
+        ];
+        $html = '<html><body>'
+            . '<a href="mh/mzda.html">Mzda</a>'
+            . '<a href="./kapitoly.html">Kapitoly</a>'
+            . '<a href="pozadavky/../souhrn.html#in-IN03">Souhrn</a>'
+            . '<a href="mh/mzda.html#in-IN16">Mzda znovu</a>'
+            . '<a href="#s1">Oddíl</a>'
+            . '<a href="../2026/stary.html">Rok 2026</a>'
+            . '<a href="%2e%2e/x.html">Zakódovaný únik</a>'
+            . '<a href="/jmhz/2027/regzec/edv.html">Absolutní</a>'
+            . '</body></html>';
+
+        $report = $this->monitorWith($sources, [$index => $html])->monitor($this->statePath());
+        $state = json_decode((string) file_get_contents($this->statePath()), true);
+        $urls = array_column($state['sources']['site']['documents'], 'url');
+        sort($urls);
+
+        self::assertSame(
+            [
+                'https://developers.mpsv.cz/jmhz/2027/kapitoly.html',
+                'https://developers.mpsv.cz/jmhz/2027/mh/mzda.html',
+                'https://developers.mpsv.cz/jmhz/2027/regzec/edv.html',
+                'https://developers.mpsv.cz/jmhz/2027/souhrn.html',
+            ],
+            $urls,
+        );
+        self::assertSame(4, $report['sources'][0]['document_count']);
+    }
+
+    /**
+     * Navigace stránky 2027 odkazuje na `index.html`, který portál
+     * přesměrovává na `…/`. Je to týž index, ne další stránka ke stažení.
+     */
+    public function testSitePagesSkipIndexHtmlOfTheSameDirectory(): void
+    {
+        $index = 'https://developers.mpsv.cz/jmhz/2027/';
+        $sources = [
+            'site' => [
+                'label' => 'Přehled 2027',
+                'index_url' => $index,
+                'index_format' => 'site_pages',
+                'document_hosts' => ['developers.mpsv.cz'],
+                'document_path_prefixes' => ['/jmhz/2027/'],
+                'document_extensions' => ['html'],
+            ],
+        ];
+        $responses = [
+            $index => '<a href="index.html">Úvod</a><a href="mh/mzda.html">Mzda</a>',
+            $index . 'mh/mzda.html' => 'mzda',
+        ];
+
+        $report = $this->monitorWith($sources, $responses)->monitor($this->statePath());
+
+        self::assertSame(2, $report['sources'][0]['document_count']);
+    }
+
+    public function testRelativeLinksResolveAgainstFileIndex(): void
+    {
+        $index = 'https://developers.mpsv.cz/jmhz/2027/index.html';
+        $sources = [
+            'site' => [
+                'label' => 'Přehled 2027',
+                'index_url' => $index,
+                'index_format' => 'document_links',
+                'document_hosts' => ['developers.mpsv.cz'],
+                'document_path_prefixes' => ['/jmhz/2027/'],
+                'document_extensions' => ['html'],
+            ],
+        ];
+
+        $this->monitorWith($sources, [$index => '<a href="mh/mzda.html">Mzda</a><a href="../2027/regzec/a.html">A</a>'])
+            ->monitor($this->statePath());
+        $state = json_decode((string) file_get_contents($this->statePath()), true);
+        $urls = array_column($state['sources']['site']['documents'], 'url');
+        sort($urls);
+
+        self::assertSame(
+            [
+                'https://developers.mpsv.cz/jmhz/2027/mh/mzda.html',
+                'https://developers.mpsv.cz/jmhz/2027/regzec/a.html',
+            ],
+            $urls,
+        );
+    }
+
+    /**
+     * Statický přehled 2027: klíčem je cesta stránky, otisk se bere z jejího
+     * obsahu. Tichá úprava karty změnového požadavku (stejný odkaz, stejný
+     * název) se musí ohlásit a nová karta také.
+     */
+    public function testSitePagesReportEditedAndAddedPagesButNotRepeatedLinks(): void
+    {
+        $index = 'https://developers.mpsv.cz/jmhz/2027/';
+        $sources = [
+            'site' => [
+                'label' => 'Přehled 2027',
+                'index_url' => $index,
+                'index_format' => 'site_pages',
+                'document_hosts' => ['developers.mpsv.cz'],
+                'document_path_prefixes' => ['/jmhz/2027/'],
+                'document_extensions' => ['html'],
+            ],
+        ];
+        $pages = static fn (string $extraLink = ''): string => '<html><body>'
+            . '<a href="mh/mzda.html">Mzda</a><a href="regzec/mzda.html">Mzda</a>'
+            . '<a href="mh/mzda.html#in-IN03">Mzda</a>'
+            . '<a href="pozadavky/zp_126_platnost_pobytu.html">ZP 126</a>' . $extraLink
+            . '</body></html>';
+        $base = 'https://developers.mpsv.cz/jmhz/2027/';
+        $responses = [
+            $index => $pages(),
+            $base . 'mh/mzda.html' => 'mzda v1',
+            $base . 'regzec/mzda.html' => 'regzec mzda',
+            $base . 'pozadavky/zp_126_platnost_pobytu.html' => 'ZP 126 v1',
+        ];
+
+        $baseline = $this->monitorWith($sources, $responses)->monitor($this->statePath());
+        self::assertTrue($baseline['baseline_created']);
+        self::assertSame(4, $baseline['sources'][0]['document_count']);
+
+        $same = $this->monitorWith($sources, $responses)->monitor($this->statePath());
+        self::assertFalse($same['changed']);
+
+        $responses['https://developers.mpsv.cz/jmhz/2027/pozadavky/zp_126_platnost_pobytu.html'] = 'ZP 126 v2';
+        $responses[$index] = $pages('<a href="pozadavky/zp_999_nova.html">Nová</a>');
+        $responses[$base . 'pozadavky/zp_999_nova.html'] = 'nová karta';
+        $report = $this->monitorWith($sources, $responses)->monitor($this->statePath());
+
+        self::assertSame(
+            [
+                'content_changed:index',
+                'content_changed:pozadavky/zp_126_platnost_pobytu.html',
+                'added:pozadavky/zp_999_nova.html',
+            ],
+            array_map(
+                static fn (array $change): string => $change['kind'] . ':' . $change['document_key'],
+                $report['changes'],
+            ),
+        );
+    }
+
+    public function testProductionConfigurationWatchesMpsvDocumentationAndSite2027(): void
+    {
+        $sources = require dirname(__DIR__, 4) . '/tools/jmhz-official-source-monitor-sources.php';
+
+        self::assertSame('mpsv_api', $sources['mpsv-jmhz-2027-documentation']['index_format']);
+        self::assertSame(
+            'Dokumentace projektu JMHZ - NV2027',
+            $sources['mpsv-jmhz-2027-documentation']['documentation_title'],
+        );
+        self::assertSame('site_pages', $sources['mpsv-jmhz-2027-site']['index_format']);
+        self::assertSame('https://developers.mpsv.cz/jmhz/2027/', $sources['mpsv-jmhz-2027-site']['index_url']);
+        self::assertSame(['/jmhz/2027/'], $sources['mpsv-jmhz-2027-site']['document_path_prefixes']);
+        // Stávající zdroj 2026 se nesmí změnit, jinak by se klíče jeho dokumentů ve stavu přeznačily.
+        self::assertSame('Dokumentace projektu JMHZ', $sources['mpsv-jmhz-documentation']['documentation_title']);
+        new JmhzOfficialSourceMonitor($sources, static fn (): string => throw new \LogicException('Bez sítě.'));
+    }
+
     public function testMpsvPagesRejectNewsOnUnwatchedPage(): void
     {
         $sources = $this->pagesSources();

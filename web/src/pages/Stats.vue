@@ -4,7 +4,7 @@ import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { dashboardApi, type DashboardSummary } from '@/api/dashboard'
 import { projectsApi, type ProjectStats } from '@/api/projects'
-import { formatMoney, formatNumber } from '@/composables/useFormat'
+import { formatMoneyWhole, formatNumber } from '@/composables/useFormat'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
 import CumulativeYtdChart from '@/components/charts/CumulativeYtdChart.vue'
@@ -232,8 +232,8 @@ const hasAnyData = computed(() =>
             {{ t('stats.rolling_12m', { currency: r.currency }) }}
           </div>
           <div class="text-2xl font-semibold text-neutral-900 font-mono"
-            :title="t('stats.rolling_12m_tooltip', { current: formatMoney(r.total, r.currency), prev: formatMoney(r.prev_period_total, r.currency) })">
-            {{ formatMoney(r.total, r.currency) }}
+            :title="t('stats.rolling_12m_tooltip', { current: formatMoneyWhole(r.total, r.currency), prev: formatMoneyWhole(r.prev_period_total, r.currency) })">
+            {{ formatMoneyWhole(r.total, r.currency) }}
           </div>
           <div v-if="r.prev_period_total > 0" class="text-xs mt-1"
             :class="r.total >= r.prev_period_total ? 'text-success-600' : 'text-danger-500'">
@@ -243,7 +243,7 @@ const hasAnyData = computed(() =>
             }) }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">
-            {{ t('stats.rolling_12m_vs_prev', { total: formatMoney(r.prev_period_total, r.currency) }) }}
+            {{ t('stats.rolling_12m_vs_prev', { total: formatMoneyWhole(r.prev_period_total, r.currency) }) }}
           </div>
           <div class="text-[11px] text-neutral-400 mt-2">{{ t('stats.rolling_12m_hint') }}</div>
         </div>
@@ -255,7 +255,7 @@ const hasAnyData = computed(() =>
                 : obratCzkThisYear >= VAT_REG_NEAR ? 'border-warning-500/50 bg-warning-50/30'
                 : 'border-neutral-200'">
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">{{ t('stats.vat_reg_title', { year: summary.year }) }}</div>
-          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoney(obratCzkThisYear, 'CZK') }}</div>
+          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoneyWhole(obratCzkThisYear, 'CZK') }}</div>
           <div class="mt-3">
             <div class="h-2 bg-neutral-100 rounded-full overflow-hidden">
               <div class="h-full rounded-full transition-all"
@@ -282,7 +282,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
             {{ t('stats.flat_tax_title', { year: summary.flat_tax_threshold.year }) }}
           </div>
-          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoney(summary.flat_tax_threshold.current_czk, 'CZK') }}</div>
+          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoneyWhole(summary.flat_tax_threshold.current_czk, 'CZK') }}</div>
           <div class="mt-3">
             <div class="h-2 bg-neutral-100 rounded-full overflow-hidden">
               <div class="h-full rounded-full transition-all"
@@ -297,7 +297,7 @@ const hasAnyData = computed(() =>
                     : summary.flat_tax_threshold.status === 'warning' ? 'text-warning-600' : 'text-neutral-500'">
               {{ t('stats.flat_tax_status', {
                 pct: summary.flat_tax_threshold.percent,
-                limit: formatMoney(summary.flat_tax_threshold.limit_czk, 'CZK'),
+                limit: formatMoneyWhole(summary.flat_tax_threshold.limit_czk, 'CZK'),
               }) }}
             </div>
             <div class="text-[10px] text-neutral-400 mt-0.5">{{ t('stats.flat_tax_hint') }}</div>
@@ -311,7 +311,7 @@ const hasAnyData = computed(() =>
             {{ t('stats.revenue_total_czk', { year: summary.year }) }}
           </div>
           <div class="text-2xl font-semibold text-primary-700 font-mono">
-            {{ formatMoney(revenueTotalCzk.this_year, 'CZK') }}
+            {{ formatMoneyWhole(revenueTotalCzk.this_year, 'CZK') }}
           </div>
           <div v-if="revenueTotalCzk.change_pct !== null" class="text-xs mt-1"
             :class="revenueTotalCzk.change_pct >= 0 ? 'text-success-600' : 'text-danger-500'">
@@ -330,7 +330,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
             {{ t('stats.revenue_this_year', { year: summary.year, currency: r.currency }) }}
           </div>
-          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoney(r.total, r.currency) }}</div>
+          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</div>
           <div v-if="r.change_pct !== null" class="text-xs mt-1"
             :class="r.change_pct >= 0 ? 'text-success-600' : 'text-danger-500'">
             {{ r.change_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(r.change_pct) }} % {{ t('dashboard.vs_prev_ytd', { year: summary.prev_year }) }}
@@ -351,15 +351,15 @@ const hasAnyData = computed(() =>
           </div>
           <div class="text-2xl font-semibold text-primary-700 font-mono"
             :title="t('stats.forecast_tooltip', {
-              ytd: formatMoney(f.ytd, f.currency),
-              remainder: formatMoney(f.prev_year_remainder, f.currency),
+              ytd: formatMoneyWhole(f.ytd, f.currency),
+              remainder: formatMoneyWhole(f.prev_year_remainder, f.currency),
               short: growthPct(f.growth_short),
               trend: growthPct(f.growth_trend),
-              low: formatMoney(f.forecast_low, f.currency),
-              high: formatMoney(f.forecast_high, f.currency)
-            })">{{ formatMoney(f.forecast, f.currency) }}</div>
+              low: formatMoneyWhole(f.forecast_low, f.currency),
+              high: formatMoneyWhole(f.forecast_high, f.currency)
+            })">{{ formatMoneyWhole(f.forecast, f.currency) }}</div>
           <div v-if="f.forecast_high > f.forecast_low" class="text-[11px] text-neutral-400 font-mono mt-0.5">
-            {{ t('stats.forecast_range', { low: formatMoney(f.forecast_low, f.currency), high: formatMoney(f.forecast_high, f.currency) }) }}
+            {{ t('stats.forecast_range', { low: formatMoneyWhole(f.forecast_low, f.currency), high: formatMoneyWhole(f.forecast_high, f.currency) }) }}
           </div>
           <div v-if="f.prev_year_full > 0" class="text-xs mt-1"
             :class="f.forecast >= f.prev_year_full ? 'text-success-600' : 'text-danger-500'">
@@ -380,7 +380,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
             {{ t('stats.revenue_prev_year', { year: summary.prev_year, currency: r.currency }) }}
           </div>
-          <div class="text-2xl font-semibold text-neutral-700 font-mono">{{ formatMoney(r.total, r.currency) }}</div>
+          <div class="text-2xl font-semibold text-neutral-700 font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</div>
           <div class="text-[11px] text-neutral-500 mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
             <span>{{ t('stats.year_invoices_n', { n: r.invoice_count }) }}</span>
             <span>{{ t('stats.year_clients_n', { n: r.client_count }) }}</span>
@@ -419,7 +419,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
             {{ t('stats.revenue_last_30d', { currency: r.currency }) }}
           </div>
-          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoney(r.total, r.currency) }}</div>
+          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</div>
           <div class="text-xs text-neutral-500 mt-1">{{ r.invoice_count }} {{ t('dashboard.invoices_unit') }}</div>
           <div class="text-[11px] text-neutral-400 mt-2">{{ t('stats.last_30d_hint') }}</div>
         </div>
@@ -561,14 +561,14 @@ const hasAnyData = computed(() =>
                     <span class="ml-1 text-[10px] font-normal text-primary-600 uppercase tracking-wide">{{ t('stats.forecast_label') }}</span>
                   </td>
                   <td class="px-4 py-2 text-right font-mono text-primary-700"
-                      :title="t('stats.forecast_range', { low: formatMoney(f.forecast_low, f.currency), high: formatMoney(f.forecast_high, f.currency) })">
-                    {{ formatMoney(f.forecast, f.currency) }}
+                      :title="t('stats.forecast_range', { low: formatMoneyWhole(f.forecast_low, f.currency), high: formatMoneyWhole(f.forecast_high, f.currency) })">
+                    {{ formatMoneyWhole(f.forecast, f.currency) }}
                   </td>
                   <td class="px-4 py-2 text-right text-xs text-primary-600">—</td>
                 </tr>
                 <tr v-for="r in summary.revenue_by_year" :key="`y-${r.year}-${r.currency}`">
                   <td class="px-4 py-2 font-medium">{{ r.year }}</td>
-                  <td class="px-4 py-2 text-right font-mono">{{ formatMoney(r.total, r.currency) }}</td>
+                  <td class="px-4 py-2 text-right font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</td>
                   <td class="px-4 py-2 text-right text-xs text-neutral-500">{{ r.invoice_count }}</td>
                 </tr>
               </tbody>
@@ -594,7 +594,7 @@ const hasAnyData = computed(() =>
                   <td class="px-4 py-2 font-mono text-neutral-700">{{ ymLabel(row.ym) }}</td>
                   <td class="px-4 py-2 text-right font-mono space-x-3">
                     <span v-for="c in row.perCurrency" :key="`${row.ym}-${c.currency}`">
-                      {{ formatMoney(c.total, c.currency) }}
+                      {{ formatMoneyWhole(c.total, c.currency) }}
                     </span>
                   </td>
                 </tr>
@@ -629,7 +629,7 @@ const hasAnyData = computed(() =>
                     <RouterLink class="row-link" :to="`/clients/${c.client_id}`" @click.stop @auxclick.stop>{{ c.company_name }}</RouterLink>
                     <span v-if="c.currencies && c.currencies !== 'CZK'" class="ml-1 text-xs text-neutral-400">({{ c.currencies }})</span>
                   </td>
-                  <td class="px-4 py-2 text-right font-mono">{{ formatMoney(c.total_czk, 'CZK') }}</td>
+                  <td class="px-4 py-2 text-right font-mono">{{ formatMoneyWhole(c.total_czk, 'CZK') }}</td>
                   <td class="px-4 py-2 text-right text-xs text-neutral-500">{{ c.invoice_count }}</td>
                 </tr>
               </tbody>
@@ -661,7 +661,7 @@ const hasAnyData = computed(() =>
                     <RouterLink class="row-link block" :to="`/projects/${p.id}`" @click.stop @auxclick.stop>{{ p.name }}</RouterLink>
                     <div class="text-xs text-neutral-500 truncate">{{ p.client_company_name }}</div>
                   </td>
-                  <td class="px-4 py-2 text-right font-mono">{{ formatMoney(p.revenue, 'CZK') }}</td>
+                  <td class="px-4 py-2 text-right font-mono">{{ formatMoneyWhole(p.revenue, 'CZK') }}</td>
                   <td class="px-4 py-2 text-right text-xs text-neutral-500">{{ p.invoice_count }}</td>
                 </tr>
               </tbody>
@@ -687,7 +687,7 @@ const hasAnyData = computed(() =>
                 :class="concentration.top3_pct >= 70 ? 'text-danger-500'
                        : concentration.top3_pct >= 50 ? 'text-warning-600'
                        : 'text-neutral-900'">{{ concentration.top3_pct }} %</span>
-              <span class="text-xs text-neutral-500">{{ formatMoney(concentration.top3_total, concentration.currency) }}</span>
+              <span class="text-xs text-neutral-500">{{ formatMoneyWhole(concentration.top3_total, concentration.currency) }}</span>
             </div>
             <div class="h-1.5 mt-2 bg-neutral-100 rounded-full overflow-hidden">
               <div class="h-full rounded-full"
@@ -704,7 +704,7 @@ const hasAnyData = computed(() =>
                 :class="concentration.top5_pct >= 90 ? 'text-danger-500'
                        : concentration.top5_pct >= 70 ? 'text-warning-600'
                        : 'text-neutral-900'">{{ concentration.top5_pct }} %</span>
-              <span class="text-xs text-neutral-500">{{ formatMoney(concentration.top5_total, concentration.currency) }}</span>
+              <span class="text-xs text-neutral-500">{{ formatMoneyWhole(concentration.top5_total, concentration.currency) }}</span>
             </div>
             <div class="h-1.5 mt-2 bg-neutral-100 rounded-full overflow-hidden">
               <div class="h-full rounded-full"
@@ -764,7 +764,7 @@ const hasAnyData = computed(() =>
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('stats.aging_title') }}</h3>
           <span class="text-xs text-neutral-400">{{ t('stats.aging_hint') }}</span>
         </div>
-        <AgingChart :rows="agingRows" :format="(v, c) => formatMoney(v, c)" />
+        <AgingChart :rows="agingRows" :format="(v, c) => formatMoneyWhole(v, c)" />
         <!-- Numerická tabulka pod grafem -->
         <div class="mt-4 overflow-x-auto">
           <table class="w-full text-xs">
@@ -782,24 +782,24 @@ const hasAnyData = computed(() =>
               <tr v-for="r in agingRows" :key="`ag-${r.currency}`">
                 <td class="px-3 py-1.5 font-mono">{{ r.currency }}</td>
                 <td class="px-3 py-1.5 text-right font-mono">
-                  <div>{{ formatMoney(r.current, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.current, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.current_n }}×</div>
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono">
-                  <div>{{ formatMoney(r.b1_30, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.b1_30, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.b1_30_n }}×</div>
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono">
-                  <div>{{ formatMoney(r.b31_60, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.b31_60, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.b31_60_n }}×</div>
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono">
-                  <div>{{ formatMoney(r.b61_90, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.b61_90, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.b61_90_n }}×</div>
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono"
                     :class="r.b90_plus > 0 ? 'text-danger-500 font-semibold' : ''">
-                  <div>{{ formatMoney(r.b90_plus, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.b90_plus, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.b90_plus_n }}×</div>
                 </td>
               </tr>

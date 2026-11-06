@@ -49,32 +49,33 @@ final class DimensionAccountRouter
      *
      * @return array{type_id:int, mask:DimensionAccountMask, map:array<int,array<int,int>>, accounts:array<int,array<string,mixed>>}|null
      */
-    public function context(int $supplierId, string $date): ?array
+    public function context(int $supplierId, string $date, bool $currentRead = false): ?array
     {
         $key = $supplierId . '|' . $date;
-        if (array_key_exists($key, $this->contextCache)) {
+        if (!$currentRead && array_key_exists($key, $this->contextCache)) {
             return $this->contextCache[$key];
         }
         $repo = new DimensionAccountMapRepository($this->db);
-        $type = $repo->drivingType($supplierId);
+        $type = $repo->drivingType($supplierId, $currentRead);
         if ($type === null) {
-            return $this->contextCache[$key] = null;
+            return $currentRead ? null : ($this->contextCache[$key] = null);
         }
-        $map = $repo->activeMap($supplierId, $type['id'], $date);
+        $map = $repo->activeMap($supplierId, $type['id'], $date, $currentRead);
         if ($map === []) {
-            return $this->contextCache[$key] = null;
+            return $currentRead ? null : ($this->contextCache[$key] = null);
         }
         try {
             $mask = DimensionAccountMask::parse($type['mask']);
         } catch (DimensionException) {
             $mask = DimensionAccountMask::parse(DimensionAccountMapService::DEFAULT_MASK);
         }
-        return $this->contextCache[$key] = [
+        $context = [
             'type_id' => $type['id'],
             'mask' => $mask,
             'map' => $map,
-            'accounts' => $repo->accounts($supplierId),
+            'accounts' => $repo->accounts($supplierId, $date, $currentRead),
         ];
+        return $currentRead ? $context : ($this->contextCache[$key] = $context);
     }
 
     public function forget(): void
@@ -89,9 +90,9 @@ final class DimensionAccountRouter
      * @param array<string,string> $singleAnalytics syntetika => jediná analytika (přesměr z resolveLines)
      * @return list<array<string,mixed>>
      */
-    public function apply(int $supplierId, array $lines, string $entryDate, array $singleAnalytics = []): array
+    public function apply(int $supplierId, array $lines, string $entryDate, array $singleAnalytics = [], bool $currentRead = false): array
     {
-        $context = $this->context($supplierId, $entryDate);
+        $context = $this->context($supplierId, $entryDate, $currentRead);
         if ($context === null) {
             return $lines;
         }
@@ -294,9 +295,9 @@ final class DimensionAccountRouter
      * @param array<int,array<string,mixed>> $old id řádku => dosavadní dimenze a rozpady
      * @return array{lines:list<array<string,mixed>>, conflicts:list<int>}
      */
-    public function projectForEntry(int $supplierId, string $entryDate, array $lines, array $singleAnalytics = [], array $old = []): array
+    public function projectForEntry(int $supplierId, string $entryDate, array $lines, array $singleAnalytics = [], array $old = [], bool $currentRead = false): array
     {
-        $context = $this->context($supplierId, $entryDate);
+        $context = $this->context($supplierId, $entryDate, $currentRead);
         if ($context === null) {
             return ['lines' => $lines, 'conflicts' => []];
         }
@@ -310,9 +311,9 @@ final class DimensionAccountRouter
      * @param array<string,string> $singleAnalytics
      * @return array<int,int>
      */
-    public function siblingAccounts(int $supplierId, string $date, array $singleAnalytics = []): array
+    public function siblingAccounts(int $supplierId, string $date, array $singleAnalytics = [], bool $currentRead = false): array
     {
-        $context = $this->context($supplierId, $date);
+        $context = $this->context($supplierId, $date, $currentRead);
         if ($context === null) {
             return [];
         }

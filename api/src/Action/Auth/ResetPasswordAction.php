@@ -99,6 +99,12 @@ final class ResetPasswordAction
         }
 
         // Invaliduj všechny aktivní sessions
+        //
+        // ⚠️ API tokeny se tu VĚDOMĚ neruší (rozhodnutí produktu, stejně jako při
+        // běžné změně hesla). Tokeny slouží integracím, které na hesle nezávisí;
+        // jejich hromadné zrušení při každé obnově hesla by integrace rozbilo.
+        // Tokeny se spravují a ruší samostatně v aplikaci; při ztrátě kontroly nad
+        // účtem je zruší nouzový `api/bin/reset-mfa.php`.
         $invalidated = $this->sessions->destroyAllForUser($userId);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

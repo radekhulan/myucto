@@ -60,12 +60,91 @@ final class JmhzSchemaCatalog
             '4d5be0d5fd0a0fa2e6f7c0ba66a19ff2e9bb122a1c2c03e8d2858a6958a747f7',
     ];
 
+    /**
+     * Balíček XSD 1.5.0.3 pro vykazovaná období od 01/2027 ({@see JmhzSpecVersion}),
+     * připnutý z `JMHZ_podani_1.5.0.3.zip` (MPSV, 14. 10. 2026). Verze datové věty
+     * má tvar `XX.YY.ZZ` podle `xs:schema/@version` vstupního schématu (1.5.0.3).
+     */
+    public const PACKAGE_KEY_2027 = 'jmhz-1.5.0.3';
+    public const DATA_VERSION_2027 = '1.5.0';
+    public const NS_PODANI_2027 = 'http://schemas.cssz.cz/JMHZ/podani/2027';
+    public const NS_FORM_2027 = 'http://schemas.cssz.cz/JMHZ/form/2027';
+
+    /** @var array<string,string> soubor balíčku 1.5 → SHA-256 */
+    private const BUNDLE_2027 = [
+        'PVPOJ.xsd' =>
+            '4f3938dbf1e0ffd179c8367def27915c0accfba1e3774b1cbeec512f2b866fed',
+        'baseTypes2.xsd' =>
+            '839973458fa82559dfb56114ef2e555523db64d5af9b4f203ece6e941f946660',
+        'form.xsd' =>
+            '434d1b2abafb08f1ed092a0a1d9ebe8754b906877906eee5b45ef145ef3bf2ab',
+        'formBezPriznaku.xsd' =>
+            'd798508fa8a906cc9aafa8abeb64dcd808f2c2f11847b592a5755be7b98bdd4c',
+        'formCinnostKS.xsd' =>
+            '912e809a289fb2240f59f3b4bf270cecf26b50dfaad9676b67cc651c079651a8',
+        'formCommonTypes.xsd' =>
+            'dda38db922ef83599e427fba675af61c9ceb51233c309a2f3bd518a43c2bb58e',
+        'formJinyPrijem.xsd' =>
+            '27a3840cb6e7b67829086204bc97a5271e68f53c5f10a3d798c7df0ea4640911',
+        'formMezinarodniPronajemSily.xsd' =>
+            'e1ab3928941f004b5a3e16faf66e048d406829745dd53807074b0fac4d6b06a6',
+        'formOdlozenyPrijem.xsd' =>
+            'cdbef23efea14d2d1bb66c57cac3997637f5a812f9d51c5663cb3b93199b56aa',
+        'formOzpTpp.xsd' =>
+            '715ac154823f65570576d126b8d094beb3d59534d23d8acc911a7e96906c3bb6',
+        'formPestoun.xsd' =>
+            'fa3b2e99fb296b4f3ea756e5ec6d4a0922351e495874c55245973d2081c44289',
+        'formVezen.xsd' =>
+            '540d02c2ecb352a42e964f5b822c3ae5751aa8424d4c1a2e05fa507658af54ef',
+        'jmhzPodani.xsd' =>
+            '7ff94b39bf9965b7e8b10ed9a90cf973f78510bcef00aad2d531a85d48fde186',
+        'simpleTypes.xsd' =>
+            '5f9505773262327907391eebe9fd37c924d7e214ee48d5b2a964f43eb9b4bf19',
+        'souhrn.xsd' =>
+            '9c19a0bc078d3af4a7d4e3253ef9a4c719fd90c8c3d1d01185891b1e1e23c6e2',
+    ];
+
     /** @return array{path:string,package_key:string,data_version:string,bundle_sha256:string} */
     public function entryPoint(): array
     {
-        $root = dirname(__DIR__, 5) . '/xsd/jmhz/' . self::PACKAGE_KEY;
+        return $this->entryPointFor(JmhzSpecVersion::V2026);
+    }
+
+    /** Jmenný prostor kořene `jmhz` datové věty dané verze. */
+    public static function podaniNamespaceFor(JmhzSpecVersion $version): string
+    {
+        return match ($version) {
+            JmhzSpecVersion::V2026 => self::NS_PODANI,
+            JmhzSpecVersion::V2027 => self::NS_PODANI_2027,
+        };
+    }
+
+    /** Je schéma verze v téhle instalaci připnuté? */
+    public static function isPinned(JmhzSpecVersion $version): bool
+    {
+        return match ($version) {
+            JmhzSpecVersion::V2026 => true,
+            JmhzSpecVersion::V2027 => count(self::BUNDLE_2027) > 0 && is_string(self::DATA_VERSION_2027),
+        };
+    }
+
+    /** @return array{path:string,package_key:string,data_version:string,bundle_sha256:string} */
+    public function entryPointFor(JmhzSpecVersion $version): array
+    {
+        if (!self::isPinned($version)) {
+            throw new JmhzXmlException(
+                JmhzSpecPackageCatalog::UNAVAILABLE_CODE,
+                'Schéma měsíčního hlášení ' . $version->label() . ' v téhle verzi aplikace'
+                    . ' zatím není, hlášení se proto nesestaví ani nezkontroluje.',
+            );
+        }
+        [$packageKey, $bundle, $dataVersion] = match ($version) {
+            JmhzSpecVersion::V2026 => [self::PACKAGE_KEY, self::BUNDLE, self::DATA_VERSION],
+            JmhzSpecVersion::V2027 => [self::PACKAGE_KEY_2027, self::BUNDLE_2027, (string) self::DATA_VERSION_2027],
+        };
+        $root = dirname(__DIR__, 5) . '/xsd/jmhz/' . $packageKey;
         $verified = [];
-        foreach (self::BUNDLE as $name => $expectedHash) {
+        foreach ($bundle as $name => $expectedHash) {
             $path = $root . '/' . $name;
             $actualHash = is_file($path) ? hash_file('sha256', $path) : false;
             if ($actualHash === false
@@ -81,8 +160,8 @@ final class JmhzSchemaCatalog
 
         return [
             'path' => $root . '/' . self::ENTRY_POINT,
-            'package_key' => self::PACKAGE_KEY,
-            'data_version' => self::DATA_VERSION,
+            'package_key' => $packageKey,
+            'data_version' => $dataVersion,
             'bundle_sha256' => hash('sha256', implode("\n", $verified)),
         ];
     }

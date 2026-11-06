@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Migration\Shared\ForeignCurrencyTakeover;
 use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 
@@ -22,8 +23,9 @@ use MyInvoice\Service\Migration\Shared\SmallAssetCard;
  * jinak podle částky, vždy jen jednoznačně. Číslo dokladu zůstane na kartě i tehdy, když
  * doklad v převodu není (minulý rok).
  *
- * Karta bez odkazu na doklad (v POHODĚ běžné) se naváže na jedinou dosud volnou položku
- * přijaté faktury se stejným datem a stejnou částkou bez DPH; jinak zůstane bez dokladu.
+ * Karta bez odkazu na doklad (v POHODĚ běžné) se naváže na volnou položku přijaté faktury
+ * se stejným datem a stejnou částkou bez DPH (u více kusů cenou za kus); nejednoznačnou
+ * vazbu rozhodne název, jinak karta zůstane bez dokladu.
  */
 final class SmallAssetImporter
 {
@@ -52,6 +54,10 @@ final class SmallAssetImporter
             $key = 'small_asset|' . ($number !== '' ? $number : '#' . PohodaXml::text($row, 'ID'));
             if (isset($existing[$key])) {
                 $p->count(self::STEP, 'existing');
+                $this->attachExisting($ctx, (int) $existing[$key], $row);
+                continue;
+            }
+            if ($ctx->skipsNew(self::STEP)) {
                 continue;
             }
             $date = PohodaXml::date($row, 'Datum');
@@ -62,7 +68,7 @@ final class SmallAssetImporter
             }
             $quantity = max(1, (int) PohodaXml::num($row, 'Pocet'));
             $price = round(PohodaXml::num($row, 'Kc'), 2);
-            $unitPrice = round(PohodaXml::num($row, 'KcJedn'), 2);
+            $unitPrice = UnitPricePrecision::normalize(PohodaXml::num($row, 'KcJedn'));
             $disposed = PohodaXml::date($row, 'DatLikv');
             $vendor = PohodaXml::text($row, 'Firma');
             $note = PohodaXml::text($row, 'Pozn');
@@ -74,7 +80,7 @@ final class SmallAssetImporter
                 $date,
                 $date,
                 $quantity,
-                $unitPrice > 0 ? $unitPrice : round($price / $quantity, 2),
+                $unitPrice > 0 ? $unitPrice : UnitPricePrecision::normalize($price / $quantity),
                 $price,
                 $places[PohodaXml::text($row, 'RefIMmist')] ?? '',
                 $disposed,
@@ -85,7 +91,7 @@ final class SmallAssetImporter
             if (!isset($data['purchase_invoice_id']) && !isset($data['cash_document_id']) && PohodaXml::text($row, 'SrcAgenda') === '') {
                 // POHODA vazbu karty na doklad často nedrží - náhradou jediná volná položka
                 // přijaté faktury se stejným datem a částkou bez DPH.
-                $match = $this->matchByDateAndAmount($ctx->supplierId, $date, $price);
+                $match = $this->matchByDateAndAmount($ctx->supplierId, $date, $price, $name);
                 if ($match !== null) {
                     $data += $match;
                     $p->count(self::STEP, 'matched_by_amount');
@@ -102,6 +108,49 @@ final class SmallAssetImporter
             $p->count(self::STEP, 'created');
             $p->count(self::STEP, isset($data['purchase_invoice_id']) || isset($data['cash_document_id']) ? 'linked' : 'no_document');
         }
+        $this->markSmallAssetItems($ctx->supplierId);
+    }
+
+    /**
+     * Karta z dřívějšího převodu bez dokladu: opakovaný převod zkusí položku dohledat stejně
+     * jako u nové karty (datum a částka, u více kusů cena za kus).
+     *
+     * @param array<string,mixed> $row
+     */
+    private function attachExisting(PohodaContext $ctx, int $cardId, array $row): void
+    {
+        if (PohodaXml::text($row, 'SrcAgenda') !== '') {
+            return;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT price, name, acquisition_date FROM small_assets
+              WHERE id = ? AND supplier_id = ? AND purchase_invoice_id IS NULL AND cash_document_id IS NULL'
+        );
+        $stmt->execute([$cardId, $ctx->supplierId]);
+        $card = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($card === false) {
+            return;
+        }
+        $match = $this->matchByDateAndAmount($ctx->supplierId, (string) $card['acquisition_date'], (float) $card['price'], (string) $card['name']);
+        if ($match !== null && $this->cards->attachPurchaseSource($ctx->supplierId, $cardId, $match['purchase_invoice_id'], $match['purchase_invoice_item_id'], $match['document_ref'] ?: null)) {
+            $ctx->protocol->count(self::STEP, 'matched_by_amount');
+        }
+    }
+
+    /**
+     * POHODA druh nákladu u položky nevede, převedená položka ho tedy nemá. Položka, ke které
+     * patří karta drobného majetku, je náklad na drobný majetek: bez druhu by ji obrat
+     * drobného majetku (inventarizace, odklad na 381) neviděl a kontrola úplnosti evidence
+     * by hlásila celý rozdíl. Deník se nemění, druh je jen třídění položky.
+     */
+    private function markSmallAssetItems(int $supplierId): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE purchase_invoice_items pii
+               JOIN small_assets s ON s.purchase_invoice_item_id = pii.id
+                SET pii.expense_kind = IF(s.asset_kind = 'intangible', 'small_intangible', 'small_asset')
+              WHERE s.supplier_id = ? AND pii.expense_kind IS NULL"
+        )->execute([$supplierId]);
     }
 
     /**
@@ -139,28 +188,52 @@ final class SmallAssetImporter
     }
 
     /**
-     * Jediná položka přijaté faktury s datem vystavení nebo DUZP rovným datu karty a částkou
-     * bez DPH rovnou ceně karty, kterou ještě žádná karta nedrží.
+     * Volná položka přijaté faktury s datem vystavení nebo DUZP rovným datu karty a částkou
+     * bez DPH rovnou ceně karty. Položka s více kusy (4 dokovací stanice na jednom řádku,
+     * v POHODĚ 4 karty) se páruje cenou za kus, dokud na ní není karta pro každý kus.
+     * Víc kandidátů se rozhodne názvem; stejné položky téže faktury jsou zaměnitelné
+     * (3 stejné monitory), karta dostane první volnou.
      *
      * @return array{purchase_invoice_id:int,purchase_invoice_item_id:int,document_ref:string}|null
      */
-    private function matchByDateAndAmount(int $supplierId, string $date, float $price): ?array
+    private function matchByDateAndAmount(int $supplierId, string $date, float $price, string $name): ?array
     {
         if ($price <= 0) {
             return null;
         }
+        $home = ForeignCurrencyTakeover::homeAmountSql('pii.total_without_vat', 'pi.exchange_rate');
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pii.id, pi.id AS invoice_id, pi.vendor_invoice_number
+            "SELECT pii.id, pi.id AS invoice_id, pi.vendor_invoice_number, pii.description
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
               WHERE pi.supplier_id = ? AND (pi.issue_date = ? OR pi.tax_date = ?)
-                AND ABS(' . ForeignCurrencyTakeover::homeAmountSql('pii.total_without_vat', 'pi.exchange_rate') . ' - ?) < 0.005
-                AND NOT EXISTS (SELECT 1 FROM small_assets s WHERE s.supplier_id = pi.supplier_id AND s.purchase_invoice_item_id = pii.id)
-              LIMIT 2'
+                AND (
+                     (ABS({$home} - ?) < 0.005
+                      AND NOT EXISTS (SELECT 1 FROM small_assets s WHERE s.supplier_id = pi.supplier_id AND s.purchase_invoice_item_id = pii.id))
+                  OR (pii.quantity > 1 AND ABS({$home} / pii.quantity - ?) < 0.02
+                      AND (SELECT COUNT(*) FROM small_assets s WHERE s.supplier_id = pi.supplier_id AND s.purchase_invoice_item_id = pii.id) < pii.quantity)
+                )
+              ORDER BY pi.id, pii.order_index, pii.id"
         );
-        $stmt->execute([$supplierId, $date, $date, $price]);
+        $stmt->execute([$supplierId, $date, $date, $price, $price]);
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-        if (count($rows) !== 1) {
+        if (count($rows) > 1) {
+            $normalize = static fn (string $s): string => mb_strtolower(trim((string) preg_replace('/\s+/u', ' ', $s)));
+            $card = $normalize($name);
+            $named = $card === '' ? [] : array_values(array_filter($rows, static function (array $r) use ($normalize, $card): bool {
+                $text = $normalize((string) $r['description']);
+                return $text !== '' && (str_starts_with($text, $card) || str_starts_with($card, $text));
+            }));
+            $rows = $named !== [] ? $named : $rows;
+            $same = count(array_unique(array_map(
+                static fn (array $r): string => $r['invoice_id'] . '|' . $normalize((string) $r['description']),
+                $rows,
+            ))) === 1;
+            if (!$same) {
+                return null;
+            }
+        }
+        if ($rows === []) {
             return null;
         }
         return [

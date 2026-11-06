@@ -35,7 +35,7 @@ final class ConnectedStatementImporterTest extends TestCase
             UNIQUE (supplier_id, file_hash)
         )');
         $this->pdo->exec("CREATE TABLE bank_transactions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT, statement_id INTEGER, posted_at TEXT, amount NUMERIC, currency TEXT,
+            id INTEGER PRIMARY KEY AUTOINCREMENT, statement_id INTEGER, posted_at TEXT, amount NUMERIC, currency TEXT, original_amount NUMERIC, original_currency TEXT,
             variable_symbol TEXT, constant_symbol TEXT, specific_symbol TEXT, counterparty_account TEXT,
             counterparty_bank TEXT, counterparty_name TEXT, card_last4 TEXT, description TEXT, bank_ref TEXT,
             import_fingerprint TEXT UNIQUE, portable_fingerprint TEXT, match_status TEXT DEFAULT 'unmatched',
@@ -429,22 +429,20 @@ final class ConnectedStatementImporterTest extends TestCase
         }
     }
 
-    public function testMonthlyGpcWithDifferentReferenceReusesConfirmedApiMovement(): void
+    /**
+     * Stejný den, částka a protiúčet, v GPC i ve feedu jediný takový pohyb: jde o tutéž platbu
+     * i s jinou referencí a popisem (převod mezi vlastními účty bez VS), potvrzení netřeba.
+     */
+    public function testMonthlyGpcWithDifferentReferenceReusesUniqueApiMovement(): void
     {
         $content = $this->transferGpc();
         $parsed = new GpcParser()->parse($content);
         $parsed['transactions'][0]['bank_ref'] = 'SYNTHETIC-API-REFERENCE';
+        $parsed['transactions'][0]['description'] = 'Odchozi uhrada';
         $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
         $this->importer->importConnectedParsed($parsed, 'synthetic-first-api', 'synthetic.json', null, 1, 10);
         $before = $this->pdo->query('SELECT * FROM bank_transactions')->fetchAll(PDO::FETCH_ASSOC);
-        try {
-            $this->importer->import($content, 'synthetic.gpc', null, 1);
-            self::fail('Confirmation required.');
-        } catch (\MyInvoice\Service\Bank\StatementReconciliationException $e) {
-            $keys = array_column($e->candidates, 'confirmation_key');
-            self::assertCount(1, $keys);
-        }
-        $result = $this->importer->import($content, 'synthetic.gpc', null, 1, $keys);
+        $result = $this->importer->import($content, 'synthetic.gpc', null, 1);
         self::assertSame(0, $result['transactions']);
         self::assertSame(1, $result['skipped_duplicates']);
         $retry = $this->importer->import($content . "\r\n", 'synthetic-overlap.gpc', null, 1);
@@ -523,14 +521,53 @@ final class ConnectedStatementImporterTest extends TestCase
         $this->importer->import($this->transferGpc(), 'synthetic.gpc', null, 1);
     }
 
-    public function testDifferentReferencesDoNotHideAnotherPaymentToSameAccount(): void
+    /**
+     * Feed je jen okno pohybů, ne úplný seznam účtu: proti uloženému GPC jediný pohyb téhož dne
+     * nic nedokazuje a shodu dál potvrzuje člověk. Automaticky ji bere jen GPC proti feedu.
+     */
+    public function testFeedWithDifferentReferenceAgainstGpcStillRequiresConfirmation(): void
     {
         $parsed = new GpcParser()->parse($this->transferGpc());
         $parsed['transactions'][0]['bank_ref'] = 'synthetic-distinct-payment';
         $this->matcher->expects(self::once())->method('matchBatch')->willReturn([]);
-        $this->importer->importConnectedParsed($parsed, '{"synthetic":8}', 'synthetic.json', null, 1, 10);
-        $this->expectException(\InvalidArgumentException::class);
         $this->importer->import($this->transferGpc(), 'synthetic.gpc', null, 1);
+        $this->expectException(\MyInvoice\Service\Bank\StatementReconciliationException::class);
+        $this->importer->importConnectedParsed($parsed, '{"synthetic":8}', 'synthetic.json', null, 1, 10);
+    }
+
+    public function testApiDownloadReusesMovementTakenOverFromAnotherProgram(): void
+    {
+        $parsed = new GpcParser()->parse($this->transferGpc());
+        $parsed['transactions'] = [array_replace($parsed['transactions'][0], ['bank_ref' => 'synthetic-api-ref', 'variable_symbol' => '2026001'])];
+        $tx = $parsed['transactions'][0];
+        $this->pdo->exec("INSERT INTO bank_statements (source, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_date, transaction_count)
+            VALUES ('import', 'money-s3-synthetic.import', 'synthetic-takeover', 10, '1000000005', '2010', 'EUR', '{$tx['posted_at']}', 1)");
+        $this->pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, variable_symbol, counterparty_account, counterparty_bank, bank_ref, import_fingerprint)
+            VALUES (?, ?, ?, 'EUR', ?, ?, ?, 'BV260001', 'synthetic-takeover-fingerprint')")
+            ->execute([(int) $this->pdo->lastInsertId(), $tx['posted_at'], $tx['amount'], $tx['variable_symbol'], $tx['counterparty_account'], $tx['counterparty_bank']]);
+        $this->matcher->expects(self::never())->method('matchBatch');
+
+        $result = $this->importer->importConnectedParsed($parsed, '{"synthetic":"takeover"}', 'synthetic.json', null, 1, 10);
+
+        self::assertSame(0, $result['transactions']);
+        self::assertSame(1, $result['skipped_duplicates']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM bank_transactions')->fetchColumn());
+    }
+
+    public function testTakenOverMovementWithoutCounterpartyRequiresReview(): void
+    {
+        $parsed = new GpcParser()->parse($this->transferGpc());
+        $parsed['transactions'] = [array_replace($parsed['transactions'][0], ['bank_ref' => 'synthetic-api-ref'])];
+        $tx = $parsed['transactions'][0];
+        $this->pdo->exec("INSERT INTO bank_statements (source, file_name, file_hash, supplier_id, account_number, bank_code, currency, statement_date, transaction_count)
+            VALUES ('import', 'money-s3-synthetic.import', 'synthetic-takeover', 10, '1000000005', '2010', 'EUR', '{$tx['posted_at']}', 1)");
+        $this->pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, bank_ref, import_fingerprint)
+            VALUES (?, ?, ?, 'EUR', 'BV260001', 'synthetic-takeover-fingerprint')")
+            ->execute([(int) $this->pdo->lastInsertId(), $tx['posted_at'], $tx['amount']]);
+        $this->matcher->expects(self::never())->method('matchBatch');
+
+        $this->expectException(\MyInvoice\Service\Bank\StatementReconciliationException::class);
+        $this->importer->importConnectedParsed($parsed, '{"synthetic":"takeover-weak"}', 'synthetic.json', null, 1, 10);
     }
 
     public function testIdenticalFileCannotBeReusedForAnotherCurrency(): void

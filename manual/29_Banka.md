@@ -89,7 +89,9 @@ Většina plateb se spáruje sama (podle variabilního symbolu, částky a čís
 6. Do pole **Vyhledat jiný doklad** zadejte číslo dokladu, platební VS, dodavatele či odběratele nebo přesnou částku (můžete psát `1 234,50`).
 7. Doklad vyberte a potvrďte.
 
-Párování můžete zahájit i z detailu vydané či přijaté faktury akcí **Spárovat s bankou**: vyberte volný pohyb správného směru a potvrďte přiřazení. U ostatních pohledávek a závazků použijte **Připojit úhradu**.
+Okno nabízí vedle vydaných a přijatých faktur i **ostatní pohledávky a závazky** (štítek **Ostatní pohledávka** nebo **Ostatní závazek**): příchozí platbu pohledávkám, odchozí závazkům. Nezaúčtovaný pohyb se při potvrzení zaúčtuje proti účtu položky (například 221 / 315 nebo 325 / 221), podrobnosti v [§ 29.13.8](#29138-rucni-parovani-pravidla-a-nesparovane-platby).
+
+Párování můžete zahájit i z detailu vydané či přijaté faktury akcí **Spárovat s bankou**: vyberte volný pohyb správného směru a potvrďte přiřazení. U ostatních pohledávek a závazků můžete platbu přiřadit i z jejich detailu akcí **Připojit úhradu**.
 
 **Jak poznáte, že je hotovo:** Transakce má stav **Ručně** (automaticky spárovaná **Auto OK**, částečná úhrada **Částečně**), ve sloupci **Faktura** je klikatelné číslo faktury a faktura je zaplacená, nebo částečně uhrazená (a zůstatek se sníží).
 
@@ -141,6 +143,8 @@ Stav a poznámka se aktualizují přímo v seznamu a nastavený filtr zůstane z
 2. Potvrďte.
 
 **Jak poznáte, že je hotovo:** Transakce je znovu ve stavu **Nespárováno**. Platba vzniklá párováním se z faktury odebrala a stav faktury se přepočítal ze zbývajících plateb. Faktura, kterou kryje jiná platba, zůstává zaplacená, jinak se vrátí na předchozí stav (vystaveno). Zaúčtovaný pohyb se stornoval.
+
+Pokud zrušíte spárování příchozí vratky k běžné přijaté faktuře, zbývající úhrada se zvýší. Kryjí-li zbývající platby nebo zápočty celou částku k úhradě, otevřená faktura se označí jako uhrazená s datem poslední zbývající odchozí úhrady nebo zápočtu. Koncepty, stornované faktury, faktury převzaté z jiného programu a ručně nastavený stav uhrazeno se tím nemění. Faktura, kterou jste ručně vrátili ze stavu uhrazeno, zůstane neuhrazená, dokud ji sami znovu neoznačíte.
 
 > [!WARNING]
 > V uzavřeném nebo zamčeném období storno nejde provést a párování zůstane beze změny. Nejdřív období otevřete, nebo počkejte na účetní.
@@ -234,6 +238,7 @@ Pro vybrané banky umí MyÚčto stahovat pohyby přes bankovní API, aniž byst
 | PDF výpis se nenaimportuje | Součet pohybů nesedí na rozdíl zůstatků, nebo banka není podporovaná | Použijte GPC/ABO, nebo PDF jiného formátu výpisu. |
 | Platba zůstala **Nespárováno**, důvod „Chybí variabilní symbol“ | Platba nemá VS | Spárujte ručně ([§ 29.4](#294-krok-za-krokem-parovani-plateb-s-fakturami)). |
 | Důvod „Žádná vydaná faktura s tímto VS“ | Platba přišla dřív, než faktura vznikla | Počkejte na fakturu a použijte **Přepárovat výpis**, nebo spárujte ručně. |
+| Odchozí platba zůstala nespárovaná, přijatá faktura přišla až po ní | Při importu výpisu doklad ještě nebyl přijatý | Přijetím dokladu se nespárované odchozí platby se shodným variabilním symbolem nebo částkou samy znovu spárují stejnými pravidly jako při importu. Nespárovanou platbu spárujte ručně tlačítkem **Spárovat s bankou** v detailu dokladu. |
 | Důvod „Částka nesedí s fakturou“ | Rozdílná částka, kurz nebo bankovní poplatek | Spárujte ručně, případně jako částečnou platbu ([§ 29.13.7](#29137-castecne-platby-a-cizi-mena)). |
 | Platba v EUR a faktura v CZK se nespárovaly | Jiná měna | Spárujte ručně. |
 | Platba kartou bez VS zůstala nespárovaná | Nejde o jediný volný doklad a jediný volný pohyb téže částky | Spárujte ručně nebo vytvořte doklad z výpisu ([§ 29.6](#296-krok-za-krokem-platba-ktera-neni-platbou-faktury)). |
@@ -309,7 +314,7 @@ Protistranu lze vyhledat psaním do filtru. Nabídka ukazuje nejvýše 50 shod; 
 - výpis slouží jako doklad o vyplacení mezd,
 - jde o měsíční výpis bankovního API (průběžně se doplňuje z banky).
 
-Měsíční výpis API skládá pohyby z jednotlivých stažení. Jejich **zdrojové výpisy** najdete v detailu měsíčního výpisu v nabídce **…**. Zdrojový výpis, který přinesl duplicitu (například po opětovném připojení banky), smažete tlačítkem **Smazat zdrojový výpis**. Výpis se odpojí od měsíce, jeho vlastní pohyby se uvolní a smažou a měsíční výpis se přepočítá. Ostatní zdrojové výpisy zůstanou beze změny. Smazání se odmítne, když pohyb dokládá ještě jiný import.
+Měsíční výpis API skládá pohyby z jednotlivých stažení. Stažení s pohyby najdete v detailu měsíčního výpisu v nabídce **…** pod **Stažení z banky**. Zdrojový výpis, který přinesl duplicitu (například po opětovném připojení banky), smažete tlačítkem **Smazat zdrojový výpis**. Výpis se odpojí od měsíce, jeho vlastní pohyby se uvolní a smažou a měsíční výpis se přepočítá. Ostatní zdrojové výpisy zůstanou beze změny. Smazání se odmítne, když pohyb dokládá ještě jiný import.
 
 ### 29.13.3 Všechny pohyby
 
@@ -327,7 +332,7 @@ U pohybů z API tlačítko **GPC** vytváří export ve standardním formátu GP
 
 Výpočet navazuje na poslední předchozí GPC nebo PDF se známým konečným zůstatkem. Přičte příjmy a odečte výdaje, včetně evidovaných pohybů mezi výchozím výpisem a začátkem měsíce. Pokud u API účtu není žádný známý počáteční ani konečný zůstatek, výpočet začíná od nuly a zahrne všechny evidované pohyby účtu v dané měně až do data výpisu. Pohyby před začátkem měsíce tvoří jeho počáteční zůstatek. Tento výchozí předpoklad odpovídá novému účtu s nulovým zůstatkem; u účtu se starší historií nahrajte předchozí bankovní výpis. Známý zůstatek se nulou nenahrazuje.
 
-Zůstatek je označený jako **vypočtený** a předpokládá úplnou evidenci pohybů. Po nahrání originálního bankovního výpisu ke stejnému koncovému dni se porovná s bankovním zůstatkem. Shoda se zobrazí jako potvrzená, rozdíl zablokuje nový export a ukáže částku ke kontrole. Výpočet probíhá při čtení, takže není potřeba ruční přepočet. Původní zůstatky, párování ani účetní zápisy se nepřepisují a nevytváří se dorovnávací platba.
+Zůstatek je označený jako **vypočtený** a předpokládá úplnou evidenci pohybů. Po nahrání originálního bankovního výpisu ke stejnému koncovému dni se porovná s bankovním zůstatkem. Shoda se zobrazí jako potvrzená, rozdíl zablokuje nový export a ukáže částku ke kontrole. Stejně se porovná zůstatek, který banka předá při stažení přes API (Fio). Stažení během dne nese stav v okamžiku stažení, proto se k němu přičtou pohyby téhož dne, které přinesla až pozdější stažení. Pohyby z nahraného GPC nebo PDF se nepřičítají, rozdíl proti nim zůstane vidět. Výpočet probíhá při čtení, takže není potřeba ruční přepočet. Původní zůstatky, párování ani účetní zápisy se nepřepisují a nevytváří se dorovnávací platba.
 
 Export má označení MYUCTO EXPORT a není originálním výpisem banky. Zpětný import tohoto exportu do MyÚčta je odmítnutý, aby se vypočtené údaje nevydávaly za bankou potvrzené. Pro ověření nahrajte originální GPC z banky. Dlouhé bankovní reference se přesouvají do doplňujícího textu a základní řádek dostává lokální identifikátor. Formát není totožný s KB KM ani s rozšířeným ABO České spořitelny; v cílovém programu zvolte profil GPC kompatibilní s ČSOB. Zahraniční protiúčet, který se nevejde do domácího pole, se uvádí v popisu. Delší popisy se zkracují na kapacitu formátu.
 
@@ -390,6 +395,26 @@ ruční párování přidělí nejvýše tento zbytek. Přijatý dobropis se pá
 platbou. Částečná vratka sama doklad neoznačí jako plně vypořádaný.
 
 Párování z detailu faktury (**Spárovat s bankou**): seznam lze hledat podle protistrany, VS, popisu nebo přesné částky. Pohyb přidělený jinému dokladu, mzdám, daním nebo vlastnímu převodu se nenabídne; dostupnost se znovu kontroluje při potvrzení. U ostatních pohledávek a závazků použijte **Připojit úhradu**.
+
+Ostatní pohledávky a závazky v okně **Spárovat**:
+
+- Bez hledání okno nabídne potvrzené nebo zaúčtované položky v CZK, u kterých sedí variabilní symbol, účet protistrany z detailu položky, neuhrazený zbytek splátky z kalendáře nebo celý zbývající dluh (částky s tolerancí ±0,01 Kč). Položky jsou seřazené podle síly shody: nejvýš VS s účtem a splátkou, pak VS, účet se splátkou, splátka do 15 dní od své splatnosti, celý zbývající dluh, splátka dál od splatnosti a nakonec jen účet. Štítky u položky ukazují, co sedí (VS, Účet protistrany, Splátka s číslem, U splatnosti, Celý zbytek). Pole **Vyhledat jiný doklad** hledá podle čísla dokladu, VS, partnera nebo názvu položky bez ohledu na částku.
+- Bez zapnutého automatického párování se pohyb k ostatní položce nepřiřadí sám, vždy ho potvrdíte v tomto okně nebo v detailu položky. Automatické párování popisuje následující odstavec.
+- Příchozí platba se nabízí jen pohledávkám, odchozí jen závazkům. Platba v cizí měně ani pohyb už přiřazený faktuře, mzdám nebo daním se nenabídne. Pohyb přiřazený jiné položce se nabídne jen s volnou částí a pohyb zaúčtovaný na jiný účet se položce nenabídne.
+- Přiřadí se volná část pohybu, nejvýše zbývající dluh. U položky se splátkovým kalendářem se úhrada váže ke splátce, jejíž zbytek odpovídá částce, jinak k první neuhrazené splátce; přebytek pokryje další splátky podle pořadí. Pohyb, který ještě není zaúčtovaný, MyÚčto zaúčtuje ručním zápisem proti účtu položky, u položky založené ze zůstatku zápisu proti účtu tohoto zápisu; k tomu potřebujete právo zaúčtovat bankovní pohyby a zapisovat do účetnictví. Bez něj se platba nepřiřadí a aplikace to oznámí.
+- Nezaúčtovaná platba vyšší než zbývající dluh se z okna nepřiřadí, protože by na saldokontu vznikl přeplatek. Zaúčtujte ji rozúčtováním a položce ji přiřaďte z jejího detailu akcí **Připojit úhradu**. V daňové evidenci se nic neúčtuje, přiřadí se jen část do výše dluhu.
+- Přiřazený pohyb má ve výpisu stav **Ostatní položka** a ve sloupci dokladu odkaz na položku. Pohyb s přiřazením nejde ignorovat.
+- Přiřazení zrušíte v detailu položky. Zaúčtování pohybu tím zůstává na účtu položky a pohyb lze přiřadit i jiné položce se stejným účtem. Po stornu zaúčtování lze pohyb znovu přiřadit jen původní položce.
+
+**Automatické párování ostatních položek.** V Nastavení firmy na záložce **Daně a účetnictví** zapnete volbu **Automaticky párovat ostatní pohledávky a závazky** (výchozí stav je vypnuto). Se zapnutou volbou MyÚčto při importu výpisu, při **Přepárovat výpis** i při přepárování po změně přijaté faktury zkusí ostatní položky až u pohybu, ke kterému nenašlo žádnou vydanou ani přijatou fakturu, vratku ani skórovaný návrh. Faktura tak má vždy přednost. Pohyb s nejednoznačným VS nebo s nesedící částkou faktury zůstane fakturám.
+
+- Pohyb se položce přiřadí sám jen při jisté shodě: variabilní symbol spolu s účtem protistrany, s částkou příští neuhrazené splátky nebo s celým zbývajícím dluhem, případně účet protistrany s částkou příští neuhrazené splátky, která je splatná nejvýše 15 dní před platbou nebo po ní. Jistou shodu musí mít právě jedna položka a platba nesmí převýšit zbývající dluh.
+- Přiřazení jde stejnou cestou jako ruční párování v okně **Spárovat**: nezaúčtovaný pohyb se zaúčtuje proti účtu položky, v daňové evidenci se nic neúčtuje. Uzavřené období, pohyb zaúčtovaný na jiný účet nebo přeplatek přiřazení zastaví a pohyb zůstane k ručnímu výběru.
+- Pohyb, u kterého položka sedí jen částečně nebo sedí víc položek, zůstane nespárovaný s důvodem *Možná ostatní pohledávka nebo závazek, vyberte ji ve Spárovat*. Kandidáty s důvody shody najdete v okně **Spárovat**.
+- Automaticky přiřazený pohyb má ve výpisu stav **Ostatní položka**, v detailu položky má úhrada štítek **automaticky** s důvodem shody a přiřazení je v aktivitě položky. Opakované párování výpisu přiřazení nezdvojí.
+- Přiřazení, které v detailu položky zrušíte, nebo které zrušení párování či smazání výpisu stornuje, automatika už neobnoví. Pohyb pak přiřadíte ručně.
+
+Účet protistrany jde u potvrzené i zaúčtované položky doplnit nebo opravit přímo v jejím detailu tlačítkem **Upravit** u pole **Účet protistrany**. Změna zaúčtování nemění, zapíše se do aktivity položky.
 
 U CZK platby cizoměnové faktury, která odpovídá celému zbytku v devizové toleranci, se faktura vyrovná celým zbytkem v její měně; přesný CZK pohyb zůstane na bankovní transakci. Výrazně nižší částka je částečná úhrada.
 
@@ -501,7 +526,7 @@ Nespárované transakce (odvody, poplatky, převody mezi vlastními účty) back
 
 ### 29.13.14 Pravidla účtování opakovaných plateb
 
-Z rozbalovacího menu pohybu lze otevřít **Vytvořit účtovací pravidlo**. Otevře se stejný formulář jako na záložce **Pravidla účtování** (v `Nástroje → Šablony účtování`), předvyplněný protistranou, zprávou, směrem, měnou a dostupnou kontací pohybu. Částka pohybu není výchozí účtovanou částkou; volitelný rozsah od/do zadáte sami nebo pomocí procentního rozpětí (předvyplněno ±10 %). Výchozí priorita je 40, pravidlo tak přebije systémová rozpoznání i obecná pravidla ze šablon. Po uložení se pravidlo hned použije na pohyb, ze kterého vzniklo (nezaúčtovaný pohyb se zaúčtuje, u jinak zaúčtovaného se nabídne přeúčtování), a volitelně i na další odpovídající nespárované nezaúčtované pohyby v otevřených obdobích (max. 200). Uzavřené období skončí jako blokovaný návrh v Automatice. Takové pravidlo je rovnou v režimu **Automaticky** a další odpovídající platby účtuje bez potvrzení. Založení z pohybu je vaše výslovná volba automatiky, proto pravidlo nečeká na historii použití ani nepotřebuje rozsah částky. Dál ho hlídá **Strop pro automatiku**, uzavřené období, neobvyklé částky a denní limit firmy.
+Z rozbalovacího menu pohybu lze otevřít **Vytvořit účtovací pravidlo**. Otevře se stejný formulář jako na záložce **Pravidla účtování** (v `Nástroje → Šablony účtování`), předvyplněný protistranou, zprávou, směrem, měnou a dostupnou kontací pohybu. Dimenze pravidla předvyplní jen dimenze zadané u pohybu ručně, ne hodnoty převzaté z hrazených dokladů nebo z jiného pravidla. Vlastní bankovní účet zůstane na **Všechny účty**, omezení vyberete sami. Částka pohybu není výchozí účtovanou částkou; volitelný rozsah od/do zadáte sami nebo pomocí procentního rozpětí (předvyplněno ±10 %). Výchozí priorita je 40, pravidlo tak přebije systémová rozpoznání i obecná pravidla ze šablon. Po uložení se pravidlo hned použije na pohyb, ze kterého vzniklo (nezaúčtovaný pohyb se zaúčtuje, u jinak zaúčtovaného se nabídne přeúčtování), a volitelně i na další odpovídající nespárované nezaúčtované pohyby v otevřených obdobích (max. 200). Uzavřené období skončí jako blokovaný návrh v Automatice. Takové pravidlo je rovnou v režimu **Automaticky** a další odpovídající platby účtuje bez potvrzení. Založení z pohybu je vaše výslovná volba automatiky, proto pravidlo nečeká na historii použití ani nepotřebuje rozsah částky. Dál ho hlídá **Strop pro automatiku**, uzavřené období, neobvyklé částky a denní limit firmy.
 
 Platby bez faktury (odvody na OSSZ/ZP, bankovní poplatky, úroky, leasing …) se neúčtují samy od prvního výskytu. Na záložce **Pravidla účtování** si pro ně založíte pravidlo:
 
@@ -511,6 +536,7 @@ Platby bez faktury (odvody na OSSZ/ZP, bankovní poplatky, úroky, leasing …) 
    |---|---|
    | Název | Popisek pravidla v seznamu |
    | Směr | **Příchozí** / **Odchozí** (platba na účet firmy, nebo z něj) |
+   | Vlastní bankovní účet | Volitelně jen pohyby na výpisu jednoho vlastního účtu. **Všechny účty** = bez omezení. Samo o sobě není kritériem shody |
    | Protiúčet + kód banky | Číslo protiúčtu, na které nebo z kterého platba chodí |
    | Variabilní symbol | Přesná shoda VS (číslice) |
    | Fragment zprávy | Podřetězec v popisu pohybu nebo ve jménu protistrany (bez ohledu na velikost písmen a diakritiku) |
@@ -520,9 +546,11 @@ Platby bez faktury (odvody na OSSZ/ZP, bankovní poplatky, úroky, leasing …) 
    | Režim | **Návrh**, nebo **Automaticky** |
    | Priorita | Pořadí vyhodnocení (nižší číslo má přednost; pod 50 přebije systémová rozpoznání) |
    | Strop pro automatiku | Nad zadanou částkou vynutí pouze návrh, i když je pravidlo povýšené na automatické |
+   | Dimenze pravidla | Hodnoty dimenzí, které se při schválení návrhu nebo automatickém zaúčtování zapíšou k pohybu (jen se zapnutými dimenzemi). Ruční dimenze pohybu a dimenze hrazených dokladů mají přednost, viz [§ 114.11.5](114_Dimenze.md#114115-vychozi-dimenze) |
+   | Přiřadit k ostatní položce | Volitelně potvrzená nebo zaúčtovaná ostatní pohledávka (u příchozího pravidla) či závazek (u odchozího) v CZK. Pravidlo pohyb zaúčtuje na účet položky a úhradu k ní rovnou přiřadí. Výběr položky předvyplní její účet na ne-bankovní straně kontace |
 
    Pravidlo musí mít **aspoň jedno kritérium** (protiúčet, VS nebo fragment zprávy), samotný rozsah částky nestačí.
-2. Bankovní strana kontace musí být účet **221** (dle směru: příchozí = MD 221, odchozí = D 221). Pravidlo vždy účtuje proti bankovnímu účtu. Zadává se syntetika **221**; při zaúčtování ji MyÚčto samo nahradí **analytikou účtu, ze kterého je výpis** ([Bankovní účty](30_Bankovni_ucty.md)), takže jedno pravidlo funguje pro všechny bankovní účty firmy. Druhá strana nesmí být saldokontní účet (**311/321/314/324/325**): na spárované platby faktur pravidla nesahají, ty řeší [§ 29.13.13.1](#2913131-sparovane-platby-faktur-primy-zapis).
+2. Bankovní strana kontace musí být účet **221** (dle směru: příchozí = MD 221, odchozí = D 221). Pravidlo vždy účtuje proti bankovnímu účtu. Zadává se syntetika **221**; při zaúčtování ji MyÚčto samo nahradí **analytikou účtu, ze kterého je výpis** ([Bankovní účty](30_Bankovni_ucty.md)), takže jedno pravidlo funguje pro všechny bankovní účty firmy. Druhá strana nesmí být saldokontní účet (**311/321/314/324/325**): na spárované platby faktur pravidla nesahají, ty řeší [§ 29.13.13.1](#2913131-sparovane-platby-faktur-primy-zapis). Výjimkou je pravidlo s vybranou ostatní položkou: to musí účtovat právě na účet položky (například 325) a pracuje jen v CZK.
 3. Tlačítko **Otestovat na historii** (dry-run) ukáže, kolika transakcím za posledních 12 měsíců by pravidlo sedělo a kolik z nich je už zaúčtovaných. Pomůže odladit kritéria dřív, než pravidlo uložíte.
 4. Při uložení nabídne zaškrtávátko **Navrhnout zaúčtování N historických plateb** (jen když dry-run něco našel) a vytvoří rovnou návrhy pro dosud nezaúčtované historické transakce v otevřených obdobích (max. 200 položek).
 
@@ -532,7 +560,9 @@ Pravidlo založené na záložce **Pravidla účtování** (ne z pohybu) vždy j
 
 Na automatiku ale můžete pravidlo přepnout **kdykoli ručně**, i bez historie potvrzení: v seznamu tlačítkem **Povýšit na automatiku** (u aktivního pravidla v režimu Návrh je vždy k dispozici), nebo v úpravě pravidla výběrem **Režim: Automaticky** a uložením. U pravidla, které ještě nemá pět čistých potvrzení, se potvrzovací dialog výslovně zeptá na **vynucené povýšení bez historie** a upozorní i na chybějící rozsah částky. Takové povýšení se v **Historii** pravidla zapíše jako ručně vynucené. Ručně povýšené pravidlo účtuje samo hned od dalšího výskytu, bez ohledu na počet použití a rozsah částky; strop automatiky, uzavřené období, neobvyklé částky a denní limit platí dál. Zpět na návrhy ho vrátíte tlačítkem **Jen návrhy** nebo v úpravě volbou **Režim: Návrh**. Režim se nikdy nepřepne na automatiku sám. Od dalšího výskytu se zápis vytvoří bez čekání ve frontě (transakce zůstane vidět v historii se štítkem, kdo nebo co ji zaúčtovalo).
 
-Když transakci odpovídá víc aktivních pravidel najednou, MyÚčto nikdy neúčtuje automaticky: vytvoří návrh podle pravidla s vyšší úspěšností a označí to jako konflikt, ať si kontaci zkontrolujete ručně. Opakované **odmítnutí** téhož pravidla (3× po sobě u různých transakcí) ho samo **deaktivuje**, na což vás upozorní hláška při odmítnutí; pravidlo pak najdete v seznamu vypnuté a můžete ho opravit nebo smazat.
+Pravidlo s vybranou ostatní položkou zaúčtuje pohyb a přiřadí úhradu položce jedním krokem, pohyb se nezaúčtuje dvakrát. Když položku uhradit nejde (je už uhrazená nebo stornovaná, platba převyšuje zbývající dluh), pravidlo nic nezaúčtuje a vytvoří návrh s důvodem, že položku nelze uhradit. Schválení návrhu takového pravidla úhradu položce také přiřadí, pokud to jde; jinak ji přiřadíte ručně v detailu položky. Pohyb, který už automaticky přiřadilo automatické párování ostatních položek, pravidlo podruhé neúčtuje.
+
+Když transakci odpovídá víc aktivních pravidel najednou, rozhoduje nižší priorita. Při stejné prioritě má přednost pravidlo omezené na vlastní bankovní účet výpisu před obecným. Zbývá-li i pak víc pravidel, MyÚčto nikdy neúčtuje automaticky: vytvoří návrh podle pravidla s vyšší úspěšností a označí to jako konflikt, ať si kontaci zkontrolujete ručně. Opakované **odmítnutí** téhož pravidla (3× po sobě u různých transakcí) ho samo **deaktivuje**, na což vás upozorní hláška při odmítnutí; pravidlo pak najdete v seznamu vypnuté a můžete ho opravit nebo smazat.
 
 Nesedí-li žádné aktivní pravidlo, ale MyÚčto najde v posledním roce **jedinou stejnou dvouřádkovou kontaci** už dřív zaúčtovanou pro stejný protiúčet (a sedí-li VS, je-li vyplněný), nabídne rovnou **naučený návrh** (označený „naučeno“), i bez založeného pravidla. Z libovolného ručního zaúčtování transakce navíc systém umí nabídnout **Podobná platba se opakuje…** → **Vytvořit pravidlo** s předvyplněnými kritérii (protiúčet, VS, fragment zprávy, rozsah částky ±10 % okolo částky) i kontací, kterou stačí zkontrolovat a uložit. Hláška se nabízí, když se v posledním roce objeví podobná platba víckrát a ještě pro ni neexistuje pravidlo. Ruční opravy mají přednost před starší historií; naučený návrh zobrazí datum a změnu kontace. Rozporné opravy nový návrh nevytvoří.
 
@@ -577,7 +607,7 @@ Odchozí korunové platby na účty vedené u ČNB (**kód banky 0710**) MyÚčt
 
 Rozpoznaný odvod se zobrazí ve frontě s kontací **336/341/342/343/345 proti 221**, údajem **Jistota** a lidským vysvětlením. Platba i vratka **DPH** míří na zúčtovací analytiku **343.900**, tedy přesně na účet, na kterém po měsíčním zúčtování DPH ([§ 84.3.3](66_Ucetni_osnova.md#6686-mesicni-zuctovani-dph)) leží skutečný závazek vůči finančnímu úřadu; firma bez analytik účtuje jako dřív na holou 343. Nejasný odvod zůstane pouze návrhem. Pokud na zúčtovacím účtu chybí zaúčtovaný předpis nebo jeho kreditní zůstatek nestačí na platbu, automatika zápis sama neprovede, aby nevytvořila debetní zůstatek závazku.
 
-Na stránce **Pravidla účtování** lze tlačítkem **Ze šablony** založit připravené pravidlo pro odvody, bankovní poplatky, úroky, nájem nebo předplatné. Šablona doplní identifikátory z nastavení firmy a vždy vznikne v režimu **Návrh**. Firemní katalog se spravuje v `Nástroje → Šablony bank. pravidel` podle oprávnění ke správě bankovních pravidel. Změna šablony ovlivní její budoucí použití v aktuální firmě; už dříve vytvořená pravidla se zpětně nemění. Použitou šablonu lze deaktivovat, ale ne smazat.
+Na stránce **Pravidla účtování** lze tlačítkem **Ze šablony** založit připravené pravidlo pro odvody, bankovní poplatky, úroky, nájem nebo předplatné. Šablona doplní identifikátory z nastavení firmy a vždy vznikne v režimu **Návrh**. Firemní katalog se spravuje v `Nástroje → Šablony účtování`, záložka **Šablony pravidel**, podle oprávnění ke správě bankovních pravidel. Změna šablony ovlivní její budoucí použití v aktuální firmě; už dříve vytvořená pravidla se zpětně nemění. Použitou šablonu lze deaktivovat, ale ne smazat.
 
 Fronta má vedle běžných návrhů také záložku **Potřebuje mě**. Sdružuje položky, které vyžadují rozhodnutí, i blokované položky z uzavřeného období. Jednotlivou položku lze po kontrole schválit; blokované a AI návrhy se nikdy neschvalují hromadně.
 
@@ -626,7 +656,7 @@ Kromě ručního nahrání GPC/ABO nebo PDF ([§ 29.3](#293-krok-za-krokem-nahra
 | **Fio banka** (ČR i SR) | 2010, 8330 | API token vázaný na konkrétní účet | ano | ano |
 | **ČSOB** | 0300 | CEB Business Connector: číslo smlouvy + komunikační certifikát | ano | ano |
 | **Raiffeisenbank** | 5500 | Premium API: Client ID + certifikát | ano | ano |
-| **Česká spořitelna** | 0800 | Premium Accounts API v3: OAuth2 Authorization Code | ano | ne (zatím neimplementováno) |
+| **Česká spořitelna** | 0800 | Premium Accounts API v3 + Premium Payments API v1: OAuth2 Authorization Code | ano | ano, tuzemské CZK se souhlasem `siblings.payments`, podpis v George ([§ 30.11.5.2](30_Bankovni_ucty.md#301152-ceska-sporitelna-0800)) |
 | **Banka CREDITAS** | 2250 | Bearer token, volitelně mTLS certifikát | ano | ano |
 | **MONETA Money Bank** | 0600 | MONETA API: token z Internet Banky | ano | ano |
 
@@ -634,12 +664,12 @@ Přehled bank se v sekci zobrazuje vždy; v seznamu účtů pod ním se nabízí
 
 #### 29.13.20.2 Co napojení dělá s pohyby
 
-Stažené pohyby se slučují do **jednoho měsíčního výpisu** pro danou firmu, účet, kód banky a měnu, ať banka posílá data jako API odpověď, nebo jako GPC (Fio, výpisy KB). Opakované načtení stejného období doplní tentýž výpis, překrývající se pohyby se nezapočítají podruhé a stažení bez nového pohybu nezaloží další řádek v přehledu. Každé stažení zůstává jako podklad měsíce v detailu výpisu. Dál se s nimi pracuje úplně stejně jako s nahraným GPC: párování na faktury ([§ 29.13.8](#29138-rucni-parovani-pravidla-a-nesparovane-platby)), automatické zaúčtování v podvojném účetnictví ([§ 29.13.13](#291313-automaticke-zauctovani-sparovanych-plateb-jen-podvojne-ucetnictvi)) i pravidla pro opakované platby. Pokud pro tentýž účet a měsíc později nahrajete úplný GPC, nahradí API přehled jako hlavní výpis a zachová párování i zaúčtování ([§ 30.11.4](30_Bankovni_ucty.md#30114-prime-napojeni-spolecna-pravidla)).
+Stažené pohyby se slučují do **jednoho měsíčního výpisu** pro danou firmu, účet, kód banky a měnu, ať banka posílá data jako API odpověď, nebo jako GPC (výpisy KB). Opakované načtení stejného období doplní tentýž výpis, překrývající se pohyby se nezapočítají podruhé a stažení bez nového pohybu nezaloží další řádek v přehledu. Každé stažení zůstává jako podklad měsíce v detailu výpisu. Dál se s nimi pracuje úplně stejně jako s nahraným GPC: párování na faktury ([§ 29.13.8](#29138-rucni-parovani-pravidla-a-nesparovane-platby)), automatické zaúčtování v podvojném účetnictví ([§ 29.13.13](#291313-automaticke-zauctovani-sparovanych-plateb-jen-podvojne-ucetnictvi)) i pravidla pro opakované platby. Pokud pro tentýž účet a měsíc později nahrajete úplný GPC, nahradí API přehled jako hlavní výpis a zachová párování i zaúčtování ([§ 30.11.4](30_Bankovni_ucty.md#30114-prime-napojeni-spolecna-pravidla)).
 
 Načítání má bezpečnostní meze:
 
 - **ruční načtení**: nejvýše **31 dní** včetně krajních dnů,
-- **automatické pokračování** (prázdné pole *Od data*): naváže 3 dny před posledním úspěšně načteným datem (překryv kvůli pozdě zaúčtovaným pohybům); u zcela nového napojení stáhne posledních 14 dní,
+- **automatické pokračování** (prázdné pole *Od data*): naváže 3 dny před posledním úspěšně načteným datem (překryv kvůli pozdě zaúčtovaným pohybům); u zcela nového napojení stáhne posledních 14 dní. Dny pokryté výpisem převzatým z jiného programu automatické načtení přeskakuje a začne dnem po něm. Ruční načtení od tohoto dne do dneška se počítá jako úplné první načtení,
 - pokud by mezi posledním načtením a dneškem vznikla mezera delší než **89 dní**, automatické pokračování to odmítne a je potřeba mezeru dohnat ručním načtením po částech,
 - konkrétní banka může mít vlastní dodatečné omezení (například Raiffeisenbank vrací pohyby jen za posledních 90 dní, KB+ tarif Plus/Pro omezuje frekvenci dotazů na jednou za 61, resp. 10 minut).
 
@@ -647,7 +677,7 @@ Načítání má bezpečnostní meze:
 
 U ČSOB tlačítko **Načíst výpisy a avíza** i automatická synchronizace načítají denní výpisy GPC a průběžná avíza BBF. V CEB musí být povolené vytváření a stahování obou formátů. Datum filtru se vztahuje k vytvoření souboru v bance. Avízo doplní pohyb a dostupný průběžný zůstatek; následný výpis pohyby potvrdí a doplní chybějící historii bez zdvojení již propojených plateb. Pokud se pohyb nedá jednoznačně ztotožnit, je potřeba zkontrolovat případnou duplicitu. Samotný známý zůstatek avíza nenahrazuje chybějící počáteční stav pro export GPC.
 
-Ruční tlačítko **Načíst pohyby** u účtu není jediná cesta: cron `cmd/cron-bank-connections.{sh,cmd}` (spouští `php api/bin/cron-bank-connections.php`) projde všechny aktivní napojení se zadanými přístupovými údaji a zavolá pro každé automatické pokračování posledního načtení. Pokud žádné napojení není aktivní, běh se přeskočí. Cron neřeší nic navíc oproti manuálnímu tlačítku, jen ho spouští za vás pravidelně, typicky **každých 15 minut** (`*/15 * * * *`). Nastavení plánovače je v [playbooku automatizačních skriptů](../cmd/README.md).
+Ruční tlačítko **Načíst pohyby** u účtu není jediná cesta: cron `cmd/cron-bank-connections.{sh,cmd}` (spouští `php api/bin/cron-bank-connections.php`) projde všechny aktivní napojení se zadanými přístupovými údaji a zavolá pro každé automatické pokračování posledního načtení. Pokud žádné napojení není aktivní, běh se přeskočí. Pohyby načítá stejně jako manuální tlačítko, jen ho spouští za vás pravidelně, typicky **každých 15 minut** (`*/15 * * * *`). Navíc zjišťuje u České spořitelny stav dávek, které čekají na podpis nebo provedení (viz [§ 30.11.6](30_Bankovni_ucty.md#30116-odeslani-prikazu-do-banky-pravidla)); dotaz na stav nic nezakládá ani neposílá znovu. Nastavení plánovače je v [playbooku automatizačních skriptů](../cmd/README.md).
 
 Některé banky omezují, jak často lze pohyby stahovat. **KB+** povoluje stažení nezměněných dat nejvýš jednou za 61 minut, jinak dotaz odmítne. Cron proto napojení KB+ zavolá až po uplynutí 61 minut od posledního pokusu a mezitím ho přeskočí. Nové pohyby z KB+ se tak v aplikaci objeví nejpozději zhruba za hodinu. Když banka dotaz kvůli četnosti odmítne, napojení se neoznačí jako chybné a další běh to zkusí znovu. Ruční tlačítko **Načíst pohyby** tímto odstupem omezené není.
 

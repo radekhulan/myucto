@@ -1,4 +1,6 @@
 import { api } from './client'
+import type { InternalDocumentKind, InternalDocumentPayload } from './internalDocuments'
+import type { DimensionMap } from './dimensions'
 
 export interface AiAssistantStatus {
   available: boolean
@@ -51,6 +53,38 @@ export interface AiOtherItem {
   unknown_accounts: string[]
 }
 
+export interface AiInternalDocumentLine {
+  account_code: string
+  account_name: string | null
+  side: 'debit' | 'credit'
+  amount: number
+  /** Dimenze ve tvaru agendy: typ => hodnota. */
+  dimensions: Record<string, number> | number[]
+  dimension_labels: string[]
+}
+
+/**
+ * Návrh interního dokladu. Zakládá se existující cestou (POST /accounting/internal-documents),
+ * `problems` jsou nálezy serverové kontroly stejnými pravidly jako zaúčtování ručního dokladu.
+ */
+export interface AiInternalDocument {
+  kind: InternalDocumentKind
+  title: string
+  document_date: string
+  entry_date: string
+  partner_id: number | null
+  partner_name: string | null
+  partner_ico: string | null
+  note: string | null
+  lines: AiInternalDocumentLine[]
+  total_debit: number
+  total_credit: number
+  balanced: boolean
+  unknown_accounts: string[]
+  problems: string[]
+  postable: boolean
+}
+
 export type AiAttachmentRef = { kind: 'file'; index: number } | { kind: 'document'; id: number }
 
 export interface AiDocumentSuggestion {
@@ -70,6 +104,7 @@ export interface AiAskResponse {
   answer: string
   journal_entries: AiJournalEntry[]
   other_items?: AiOtherItem[]
+  internal_documents?: AiInternalDocument[]
   document_suggestions: AiDocumentSuggestion[]
   warnings: string[]
   provider: string
@@ -80,7 +115,7 @@ export interface AiAskResponse {
   message_id?: number
 }
 
-export type AiAppliedKind = 'journal_entry' | 'other_item' | 'document'
+export type AiAppliedKind = 'journal_entry' | 'other_item' | 'internal_document' | 'document'
 /** Použité návrhy zprávy: {kind: {index: id}}. Ze serveru může dorazit i jako pole. */
 export type AiApplied = Partial<Record<AiAppliedKind, Record<string, number> | number[]>>
 
@@ -109,6 +144,7 @@ export interface AiStoredMessage {
   attachments: AiStoredAttachment[] | null
   response: {
     other_items?: AiOtherItem[]
+    internal_documents?: AiInternalDocument[]
     journal_entries?: AiJournalEntry[]
     document_suggestions?: AiDocumentSuggestion[]
     warnings?: string[]
@@ -163,6 +199,27 @@ export interface AiDocumentAnalysis {
   provider: string | null
   model: string | null
   created_at: string | null
+}
+
+/** Tělo POST /accounting/internal-documents z návrhu AI: stejný tvar jako ruční editor. */
+export function internalDocumentPayload(doc: AiInternalDocument): InternalDocumentPayload {
+  return {
+    kind: doc.kind,
+    title: doc.title,
+    document_date: doc.document_date,
+    entry_date: doc.entry_date,
+    partner_id: doc.partner_id,
+    partner_name: doc.partner_name,
+    note: doc.note,
+    lines: doc.lines.map(l => {
+      const dims: DimensionMap = {}
+      if (!Array.isArray(l.dimensions)) {
+        for (const [type, value] of Object.entries(l.dimensions ?? {})) dims[Number(type)] = Number(value)
+      }
+      return { account_code: l.account_code, side: l.side, amount: Number(l.amount), dimensions: dims }
+    }),
+    document_links: [],
+  }
 }
 
 export function buildAskForm(input: AiAskInput): FormData {

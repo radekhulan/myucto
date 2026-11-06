@@ -85,6 +85,18 @@ final class WebAuthnOperationPolicy
             'path_pattern' => '#^/api/auth/webauthn/credentials/[0-9]+$#D',
             'example_path' => '/api/auth/webauthn/credentials/7',
         ],
+        'credentials.test_options' => [
+            'method' => 'POST',
+            'route_pattern' => '/api/auth/webauthn/credentials/{id:[0-9]+}/test/options',
+            'path_pattern' => '#^/api/auth/webauthn/credentials/[0-9]+/test/options$#D',
+            'example_path' => '/api/auth/webauthn/credentials/7/test/options',
+        ],
+        'credentials.test_verify' => [
+            'method' => 'POST',
+            'route_pattern' => '/api/auth/webauthn/credentials/{id:[0-9]+}/test/verify',
+            'path_pattern' => '#^/api/auth/webauthn/credentials/[0-9]+/test/verify$#D',
+            'example_path' => '/api/auth/webauthn/credentials/7/test/verify',
+        ],
         'session_unlock.options' => [
             'method' => 'POST',
             'route_pattern' => '/api/auth/session/unlock/options',

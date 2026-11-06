@@ -4,11 +4,10 @@
  * reálně běžela v systémovém Segoe UI / Consolas. Typografie byla náhodná.
  *
  * Self-host (ne CDN): žádný third-party request, žádné GDPR téma, stabilní offline
- * i v PWA. Subsety latin + latin-ext (háčky a čárky!), variabilní řezy, ~116 kB celkem.
+ * i v PWA. Subsety latin + latin-ext (háčky a čárky!), variabilní řezy, ~84 kB celkem.
  *
- * Geist            — UI text (400–700)
- * Geist Mono       — čísla, var. symboly, částky (400–600)
- * Instrument Serif — display akcent: H1 stránek a hero KPI na dashboardu
+ * Geist      — UI text, nadpisy i čísla (čísla tabulárně, viz main.css)
+ * Geist Mono — jen kód (code, kbd, pre)
  */
 
 /* ─── Geist (UI) ─── */
@@ -33,7 +32,32 @@
     U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
-/* ─── Geist Mono (čísla) ─── */
+/* ─── Geist Mono bez mezer (čísla a částky) ───
+ * Tentýž soubor jako Geist Mono, jen bez desetinné čárky a tečky (U+002C, U+002E) a bez znaků mezer (U+0020, U+00A0, U+2000-200B,
+ * U+202F). Ty vykreslí proporcionální Geist, takže kolem nich nezůstane celá šířka číslice;
+ * každá částka má jednu čárku, desetinná místa ve sloupci tak zůstanou pod sebou. */
+@font-face {
+  font-family: "Geist Mono Num";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/geist-mono-latin.woff2") format("woff2");
+  unicode-range: U+0021-002B, U+002D, U+002F-007E, U+00A1-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6,
+    U+02DA, U+02DC, U+0304, U+0308, U+0329, U+200C-202E, U+2030-206F, U+20AC, U+2122,
+    U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+  font-family: "Geist Mono Num";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("/fonts/geist-mono-latin-ext.woff2") format("woff2");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
+    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
+    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* ─── Geist Mono (kód) ─── */
 @font-face {
   font-family: "Geist Mono";
   font-style: normal;
@@ -55,24 +79,3 @@
     U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
 }
 
-/* ─── Instrument Serif (display) ─── */
-@font-face {
-  font-family: "Instrument Serif";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/fonts/instrument-serif-latin.woff2") format("woff2");
-  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
-    U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193,
-    U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: "Instrument Serif";
-  font-style: normal;
-  font-weight: 400;
-  font-display: swap;
-  src: url("/fonts/instrument-serif-latin-ext.woff2") format("woff2");
-  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF,
-    U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020,
-    U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}

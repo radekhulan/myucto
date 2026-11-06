@@ -182,15 +182,22 @@ final class AdvanceSettlementSync
     private function syncFinal(int $supplierId, string $side, int $finalId, int $advanceId, ?int $userId): array
     {
         $sourceType = $side === 'sale' ? 'invoice' : 'purchase_invoice';
-        $entry = $this->journal->findBySource($supplierId, $sourceType, $finalId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null || ($entry['posted_at'] ?? null) === null) {
+        $active = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $finalId, $this->db->pdo()->inTransaction());
+        if ($active === []) {
             // Nezaúčtovaná konečná faktura si zúčtování spočítá sama při zaúčtování.
             return ['action' => 'none', 'reason' => 'final_not_posted'];
         }
+        $entry = $active[0];
         $entryId = (int) $entry['id'];
         if ((new TakenOverRecord($this->db))->isDocumentOrItsEntry($supplierId, $sourceType, $finalId)) {
             // Převzatý zápis musí souhlasit s deníkem zdroje — automatika ho nepřepisuje.
             return ['action' => 'skipped', 'reason' => 'taken_over', 'entry_id' => $entryId];
+        }
+        // Zúčtování mění řádky jediného předpisu. Rozdělenou skupinu ani jejího
+        // osamoceného ručního člena nesmíme vydávat za nezaúčtovanou fakturu nebo
+        // do prvního člena připsat pár, který už může nést jiný člen skupiny.
+        if (!DocumentPostingGroup::isSingleDirectEntry($active, $sourceType, $finalId)) {
+            return $this->stale($supplierId, $sourceType, $finalId, $entryId, 'posting_group_requires_repost', $userId);
         }
 
         ['debit' => $debitCode, 'credit' => $creditCode] = $this->posting->advanceSettlementAccounts($supplierId, $side);
@@ -211,20 +218,20 @@ final class AdvanceSettlementSync
 
         try {
             $rebuilt = $side === 'sale'
-                ? $this->posting->buildFromInvoice($supplierId, $finalId)
-                : $this->posting->buildFromPurchaseInvoice($supplierId, $finalId);
+                ? $this->posting->buildFromInvoice($supplierId, $finalId, ['entry_date' => (string) $entry['entry_date']])
+                : $this->posting->buildFromPurchaseInvoice($supplierId, $finalId, ['entry_date' => (string) $entry['entry_date']]);
         } catch (PostingException $e) {
             return $this->stale($supplierId, $sourceType, $finalId, $entryId, $e->errorCode, $userId);
         }
         $expected = [];
         foreach ($rebuilt as $line) {
-            $code = $this->posting->redirectedAccountCode($supplierId, (string) $line['account_code']);
+            $code = $this->posting->redirectedAccountCode($supplierId, (string) $line['account_code'], (string) $entry['entry_date']);
             if ($isPair($code, (string) $line['side'])) {
                 $expected[] = ['account_code' => $code] + $line;
             }
         }
 
-        $accountMap = $this->accounts->idToAccountMap($supplierId);
+        $accountMap = $this->accounts->idToAccountMap($supplierId, (string) $entry['entry_date']);
         $current = [];
         $currentIds = [];
         foreach ($this->journal->linesForEntry($entryId, $supplierId) as $line) {

@@ -96,7 +96,7 @@ final class ExportSelectedPdfAction
             return Json::error($response, 'signature_unavailable', $e->getMessage(), 422);
         } catch (\Throwable $e) {
             ob_end_clean();
-            return Json::error($response, 'export_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'export_failed', $e->getMessage(), 500);
         }
         ob_end_clean();
 

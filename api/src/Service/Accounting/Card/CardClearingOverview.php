@@ -172,11 +172,12 @@ final class CardClearingOverview
                 AND NOT EXISTS (SELECT 1 FROM journal_entries w
                                  WHERE w.supplier_id = ? AND w.source_type = 'card_writeoff'
                                    AND w.source_id = bt.id AND w.reversed_by IS NULL)
+                AND NOT " . \MyInvoice\Service\Bank\Card\CardPaymentOverview::attachedDocumentSql('bt') . "
                 AND " . BankStatementOwnershipResolver::sql('bs') . '
               ORDER BY bt.posted_at, bt.id'
         );
         $stmt->execute(array_merge(
-            [$supplierId, (string) $s['effective_from'], $cutoff, $supplierId],
+            [$supplierId, (string) $s['effective_from'], $cutoff, $supplierId, $supplierId, $supplierId],
             BankStatementOwnershipResolver::params($supplierId),
         ));
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];

@@ -40,7 +40,7 @@ abstract class ForeignKeyDeletionGuard
      * Vazby, které mazání BLOKUJÍ. Klíč = strojový kód do odpovědi, `message` =
      * věta pro uživatele s `%d` na počet vazeb.
      *
-     * @return array<string,array{message:string,references:list<array{table:string,column:string}>}>
+     * @return array<string,array{message:string,references:list<array{table:string,column:string,via?:array{table:string,column:string,parent_column:string,parent_table:string}}>}>
      */
     abstract protected static function blockers(): array;
 
@@ -75,7 +75,7 @@ abstract class ForeignKeyDeletionGuard
      * test proti nim ověřuje, že sloupec v cizím klíči SKUTEČNĚ existuje — přejmenování
      * sloupce by jinak kontrolu tiše vypnulo (dotaz by spadl až v produkci).
      *
-     * @return list<array{table:string,column:string}>
+     * @return list<array{table:string,column:string,via?:array{table:string,column:string,parent_column:string,parent_table:string}}>
      */
     final public static function blockingReferences(): array
     {
@@ -120,8 +120,9 @@ abstract class ForeignKeyDeletionGuard
         foreach (array_keys($blockers) as $index => $code) {
             $parts = [];
             foreach ($blockers[$code]['references'] as $reference) {
-                $parts[] = '(SELECT COUNT(*) FROM ' . $reference['table']
-                    . ' WHERE supplier_id = ? AND ' . $reference['column'] . ' = ?)';
+                $query = self::referenceQueryParts($reference);
+                $parts[] = '(SELECT COUNT(*) FROM ' . $query['from']
+                    . ' WHERE ' . $query['supplier'] . ' = ? AND ' . $query['parent'] . ' = ?)';
                 $params[] = $supplierId;
                 $params[] = $parentId;
             }
@@ -165,11 +166,12 @@ abstract class ForeignKeyDeletionGuard
             $placeholders = implode(',', array_fill(0, count($chunk), '?'));
             foreach (static::blockers() as $code => $blocker) {
                 foreach ($blocker['references'] as $reference) {
+                    $query = self::referenceQueryParts($reference);
                     $stmt = $this->db->pdo()->prepare(
-                        'SELECT ' . $reference['column'] . ' AS parent_id, COUNT(*) AS cnt'
-                        . ' FROM ' . $reference['table']
-                        . ' WHERE supplier_id = ? AND ' . $reference['column'] . " IN ({$placeholders})"
-                        . ' GROUP BY ' . $reference['column']
+                        'SELECT ' . $query['parent'] . ' AS parent_id, COUNT(*) AS cnt'
+                        . ' FROM ' . $query['from']
+                        . ' WHERE ' . $query['supplier'] . ' = ? AND ' . $query['parent'] . " IN ({$placeholders})"
+                        . ' GROUP BY ' . $query['parent']
                     );
                     $stmt->execute(array_merge([$supplierId], $chunk));
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
@@ -181,6 +183,25 @@ abstract class ForeignKeyDeletionGuard
         }
 
         return $result;
+    }
+
+    /**
+     * @param array{table:string,column:string,via?:array{table:string,column:string,parent_column:string,parent_table:string}} $reference
+     * @return array{from:string,supplier:string,parent:string}
+     */
+    final protected static function referenceQueryParts(array $reference): array
+    {
+        $from = $reference['table'] . ' blocker_ref';
+        $parent = 'blocker_ref.' . $reference['column'];
+        if (isset($reference['via'])) {
+            $via = $reference['via'];
+            $from .= ' JOIN ' . $via['table'] . ' blocker_via ON blocker_via.' . $via['column'] . ' = ' . $parent
+                . ' JOIN ' . $via['parent_table'] . ' blocker_parent ON blocker_parent.id = blocker_via.' . $via['parent_column']
+                . ' AND blocker_parent.supplier_id = blocker_ref.supplier_id';
+            $parent = 'blocker_via.' . $via['parent_column'];
+        }
+
+        return ['from' => $from, 'supplier' => 'blocker_ref.supplier_id', 'parent' => $parent];
     }
 
     /**

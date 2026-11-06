@@ -7,6 +7,8 @@ namespace MyInvoice\Tests\Integration\Automation;
 use MyInvoice\Action\Automation\AutomationFeedAction;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Automation\AutomationFeedService;
 use MyInvoice\Service\Automation\FeedQuery;
 use PHPUnit\Framework\Attributes\Group;
@@ -82,6 +84,60 @@ final class AutomationFeedMembershipTest extends TestCase
         self::assertSame([], $result['items']);
         self::assertSame(0, $result['total']);
         self::assertSame([], $this->feed->counts($userId, false, null, null, [$this->supplierB])['per_supplier']);
+    }
+
+    /**
+     * Token vázaný na firmu A nesmí přes kokpit automatizace číst firmy, ke kterým
+     * má vlastník přístup jinak (člen více firem, globální admin). Webová relace
+     * téhož uživatele vidí dál všechny své firmy.
+     */
+    public function testSupplierBoundTokenSeesOnlyItsCompany(): void
+    {
+        self::assertSame([$this->supplierA], $this->feed->allowedSupplierIds(0, true, $this->supplierA));
+        self::assertSame([], $this->feed->allowedSupplierIds(0, true, 999999999));
+
+        $action = new AutomationFeedAction($this->feed);
+        $bound = fn (string $uri) => (new ServerRequestFactory())->createServerRequest('GET', $uri)
+            ->withQueryParams($this->query($uri))
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')
+            ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read', 'supplier_id' => $this->supplierA])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA);
+
+        $counts = json_decode((string) $action->counts($bound('/api/automation/counts'), new Response())->getBody(), true);
+        self::assertSame([$this->supplierA], array_column($counts['per_supplier'], 'supplier_id'));
+
+        $foreign = '?supplier_id=' . $this->supplierB;
+        self::assertSame(404, $action->stats($bound('/api/automation/stats' . $foreign), new Response())->getStatusCode());
+        self::assertSame(404, $action->overview($bound('/api/automation/overview' . $foreign), new Response())->getStatusCode());
+        self::assertSame(404, $action->checklist($bound('/api/automation/checklist' . $foreign), new Response())->getStatusCode());
+        self::assertSame(200, $action->overview($bound('/api/automation/overview'), new Response())->getStatusCode());
+
+        $feed = json_decode((string) $action->feed(
+            $bound('/api/automation/feed?tab=needs_input&suppliers=' . $this->supplierB),
+            new Response(),
+        )->getBody(), true);
+        self::assertSame(0, $feed['total']);
+        $history = json_decode((string) $action->history(
+            $bound('/api/automation/history?suppliers=' . $this->supplierB),
+            new Response(),
+        )->getBody(), true);
+        self::assertSame(0, $history['total']);
+
+        $session = (new ServerRequestFactory())->createServerRequest('GET', '/api/automation/counts')
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+        $all = json_decode((string) $action->counts($session, new Response())->getBody(), true);
+        $ids = array_column($all['per_supplier'], 'supplier_id');
+        self::assertContains($this->supplierA, $ids);
+        self::assertContains($this->supplierB, $ids);
+    }
+
+    /** @return array<string,string> */
+    private function query(string $uri): array
+    {
+        parse_str((string) parse_url($uri, PHP_URL_QUERY), $query);
+        return $query;
     }
 
     public function testSuperadminScopeContainsAllDoubleEntrySuppliers(): void

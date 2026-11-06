@@ -83,7 +83,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         }
         $this->config = Config::load($this->rootDir);
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->sourceConnection = $container->get(Connection::class);
             $this->export = $container->get(InstanceExportService::class);
             $this->server = new PDO(
@@ -433,7 +433,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         ]);
         $revisionId = (int) $pdo->lastInsertId();
 
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $pdo->prepare('UPDATE supplier SET accounting_mode = "double_entry" WHERE id = ?')
             ->execute([$this->supplierId]);
         $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
@@ -673,7 +673,7 @@ final class PayrollInstanceRestoreRoundTripTest extends TestCase
         )->execute([$this->supplierId, $actorId]);
 
         $periodExportBytes = "synthetic MZ-31 monthly archive\n";
-        $periodStorage = Bootstrap::buildContainer()->get(PayrollPeriodExportStorage::class);
+        $periodStorage = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollPeriodExportStorage::class);
         self::assertInstanceOf(PayrollPeriodExportStorage::class, $periodStorage);
         $storedPeriodExport = $periodStorage->store(
             $this->supplierId,

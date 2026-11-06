@@ -136,7 +136,8 @@ final class DppoStatementNotesAttachmentTest extends TestCase
         self::assertNull($result['warning']);
         self::assertNotNull($result['file']);
         self::assertSame(sprintf('priloha-ucetni-zaverky-%d.pdf', self::YEAR), $result['file']['filename']);
-        self::assertStringContainsString((string) self::YEAR, $result['file']['label']);
+        // Firma na rámci 500: název přílohy v EPO XML zůstává shodný s komerčním podáním.
+        self::assertSame(sprintf('Příloha v účetní závěrce za rok %d (§ 39 vyhl. 500/2002 Sb.)', self::YEAR), $result['file']['label']);
         // %PDF hlavička — potvrzuje, že jde o skutečně vyrenderovaný PDF obsah, ne text/zástupný řetězec.
         self::assertStringStartsWith('%PDF', $result['file']['content']);
         self::assertLessThanOrEqual(10_240 * 1024, strlen($result['file']['content']));

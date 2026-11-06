@@ -53,9 +53,23 @@ COPY --from=mlocati/php-extension-installer:latest /usr/bin/install-php-extensio
 # (PdfPageRasterizer); Imagick tu Ghostscript delegate pro PDF zaručený nemá.
 RUN install-php-extensions \
         pdo_mysql gd mbstring intl zip opcache exif bcmath redis sodium soap imagick \
+ && php -r 'foreach (["redis","imagick","intl","gd","pdo_mysql","sodium","soap"] as $e) { if (!extension_loaded($e)) { fwrite(STDERR, "chybí rozšíření $e\n"); exit(1); } }' \
  && apk add --no-cache nginx cronie tini tzdata mariadb-client libstdc++ poppler-utils \
  && if [ "$INSTALL_RSVG" = "1" ]; then apk add --no-cache rsvg-convert; fi \
  && rm -rf /var/cache/apk/*
+
+# Restriktivní ImageMagick policy, stejná jako v Dockerfile (Debian) i se stejnou
+# kontrolou při buildu.
+COPY docker/imagemagick-policy.xml /tmp/imagemagick-policy.xml
+RUN set -e; \
+    major="$(php -r 'preg_match("/ImageMagick (\d+)/", Imagick::getVersion()["versionString"], $m); echo $m[1] ?? "";')"; \
+    [ -n "$major" ]; \
+    mkdir -p "/etc/ImageMagick-$major"; \
+    for d in /etc/ImageMagick-*; do install -m 0644 /tmp/imagemagick-policy.xml "$d/policy.xml"; done; \
+    rm -f /tmp/imagemagick-policy.xml; \
+    printf 'viewbox 0 0 1 1\n' > /tmp/policy-probe.mvg; \
+    php -r 'try { (new Imagick())->readImage("mvg:/tmp/policy-probe.mvg"); fwrite(STDERR, "ImageMagick policy se neuplatnila\n"); exit(1); } catch (ImagickException $e) { if (!preg_match("/security policy|not authorized/i", $e->getMessage())) { fwrite(STDERR, $e->getMessage() . "\n"); exit(1); } echo "ImageMagick policy OK\n"; }'; \
+    rm -f /tmp/policy-probe.mvg
 
 # www-data uid 82 → 33 (Debian-kompatibilní vlastnictví /data volume v OBOU směrech).
 RUN apk add --no-cache --virtual .uidgid shadow \
@@ -73,6 +87,7 @@ RUN { \
         echo 'max_execution_time = 60'; \
         echo 'date.timezone = Europe/Prague'; \
         echo 'expose_php = Off'; \
+        echo 'session.upload_progress.enabled = 0'; \
         echo 'opcache.enable = 1'; \
         echo 'opcache.memory_consumption = 128'; \
         echo 'opcache.interned_strings_buffer = 16'; \

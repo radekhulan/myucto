@@ -33,6 +33,12 @@ ke stažení, zálohu vytvoříte přímo v PREMIERu.
 
 ## 109.2 Než začnete
 
+Převod nebyl ověřen pro neziskové organizace a další účetní jednotky podle
+vyhlášky 504/2002 Sb. Průvodce je výrazně upozorní a převod účetnictví do
+období vedeného podle vyhlášky 504 odmítne (podrobnosti v kapitole
+[Přechod z Money S3](106_Prechod_z_Money_S3.md), oddíl 106.2). Neziskovka
+před převodem kontaktuje podporu.
+
 1. **Firma v MyÚčtu.** Musí existovat a mít vyplněné stejné IČO jako v PREMIERu.
    Převádí se do firmy, ve které právě pracujete; novou firmu nejdřív založte
    (kapitola [Multi supplier](95_Multi_supplier.md)). Firma, která zatím vede
@@ -96,7 +102,7 @@ ke stažení, zálohu vytvoříte přímo v PREMIERu.
 
 **Jak poznáte, že je hotovo:** Každý rok skončí stavem **V pořádku** nebo **S
 upozorněními**. Selže-li zkouška jen na **Rozdílech k přijetí**, postupujte podle
-[§ 103.10.5.1](103_Prechod_z_Money_S3.md#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
+[§ 106.10.5.1](106_Prechod_z_Money_S3.md#1061051-chyby-upozorneni-a-rozdily-k-prijeti).
 
 > [!WARNING]
 > Zkouška převádí každý rok samostatně a hned ho vrací zpět. Pozdější rok
@@ -442,7 +448,7 @@ Obratová předvaha MyÚčta se porovná s předvahou spočtenou přímo z dení
 PREMIER na haléř, včetně počátečních stavů. Protokol zkoušky nanečisto
 z přehledu pod průvodcem smažete, protokol ostrého převodu zůstává. Co je
 v protokolu chyba, upozornění a rozdíl k přijetí a jak rozdíly přijmout, popisuje
-[§ 103.10.5.1](103_Prechod_z_Money_S3.md#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
+[§ 106.10.5.1](106_Prechod_z_Money_S3.md#1061051-chyby-upozorneni-a-rozdily-k-prijeti).
 
 **Úpravy základu daně.** Výsledek hospodaření, odpisy a nedaňové účty spočte
 MyÚčto z převedených dat samo. Ruční úpravy, které účetní zadala do přiznání
@@ -530,7 +536,7 @@ ostrém převodu ho nahrajte zpět, viz [§ 96.13](96_Nastaveni.md#9613-krok-za-
 ## 109.9 Související kapitoly
 
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)
-- [Přechod z Money S3](103_Prechod_z_Money_S3.md)
+- [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 - [Souběh se starým systémem](111_Soubeh_se_starym_systemem.md)
 - [Mzdy: nastavení](90_Nastaveni_mezd.md)
 - [Řešení problémů](999_Reseni_problemu.md)

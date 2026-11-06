@@ -105,6 +105,12 @@ final class ClientBankAccess
     /** Jeden dotaz pro celou stránku; SSOT zohledňuje i platby obsazené mimo faktury. */
     public function redactTransactions(Request $request, array $rows): array
     {
+        // Výpis banky je bezplatný, ostatní položky ne: vazba na ně vyžaduje jejich právo i licenci.
+        if (!RequestAuthorization::allows($request, 'other_items', \MyInvoice\Security\AccessLevel::READ)
+            || \MyInvoice\Middleware\LicenseMiddleware::state($request)?->hasCommercialFeatures() === false) {
+            $rows = array_map(static fn (array $row): array => array_key_exists('matched_other_items', $row)
+                ? ['matched_other_items' => []] + $row : $row, $rows);
+        }
         if (!RequestAuthorization::isClientType($request) || $rows === []) return $rows;
         $ids = array_map(static fn (array $row): int => (int) $row['id'], $rows);
         $placeholders = implode(',', array_fill(0, count($ids), '?'));
@@ -135,7 +141,9 @@ final class ClientBankAccess
         }
         // Účetní kontace, mzdové vazby, držitelé karet a interní dimenze nejsou bankovní agenda klienta.
         foreach (['posting', 'card'] as $key) if (array_key_exists($key, $row)) $row[$key] = null;
-        unset($row['dimensions'], $row['match_reason'], $row['matched_by']);
+        // Ostatní pohledávky a závazky klientská role nevidí (agenda účetní).
+        if (array_key_exists('matched_other_items', $row)) $row['matched_other_items'] = [];
+        unset($row['dimensions'], $row['rule_dimension_types'], $row['match_reason'], $row['matched_by']);
         return $row;
     }
 }

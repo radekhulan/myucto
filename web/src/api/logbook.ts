@@ -18,6 +18,8 @@ export interface Car {
   created_at: string
   trips_count?: number | null
   fuelings_count?: number | null
+  /** Stav napojení na zdroj automatického stavu tachometru (jen v seznamu aut). */
+  odometer_source_status?: OdometerSourceCarState | null
   /** Poslední známý konečný tachometr (pro předvyplnění nového záznamu). */
   last_odometer?: number | null
   driver_employee_id?: number | null
@@ -117,10 +119,67 @@ export interface OdometerReading {
   reading_date: string
   reading_time: string | null
   odometer: number
-  source: 'manual'
+  /** 'manual' nebo kód zdroje automatického stavu tachometru (např. 'bmw_cardata'). */
+  source: string
   note: string | null
   created_at: string
 }
+
+/** Stav auta v seznamu: načítá se / poslední stav nenavazoval / chyba auta nebo účtu. */
+export type OdometerSourceCarState = 'active' | 'warning' | 'error'
+
+/** Zdroj automatického stavu tachometru (katalog). */
+export interface OdometerSourceDefinition {
+  code: string
+  label: string
+  fields: { key: string; placeholder?: string; pattern?: string }[]
+  daily_call_limit: number | null
+}
+
+/** Napojení = účet u zdroje; sdílí ho všechna k němu přiřazená auta. */
+export interface OdometerSourceAccount {
+  id: number
+  provider: string
+  status: 'active' | 'error'
+  last_sync_at: string | null
+  last_sync_error_code: string | null
+  calls_today: number
+  daily_call_limit: number | null
+  cars: { car_id: number; registration: string; name: string | null }[]
+}
+
+/** Auto přiřazené k účtu u zdroje a výsledek jeho posledního načtení. */
+export interface OdometerSourceCar {
+  account_id: number
+  car_id: number
+  vehicle_ref: string
+  last_sync_at: string | null
+  last_sync_status: 'success' | 'warning' | 'error' | null
+  last_sync_error_code: string | null
+  last_odometer: number | null
+  last_value_at: string | null
+}
+
+export interface OdometerSourceStatus {
+  car: OdometerSourceCar | null
+  account: OdometerSourceAccount | null
+  accounts: OdometerSourceAccount[]
+}
+
+export interface OdometerSourceVehicle {
+  ref: string
+  vin: string | null
+  label: string | null
+  primary: boolean
+}
+
+/** Výsledek kroku připojení — UI každý typ vykreslí stejně pro všechny zdroje. */
+export type OdometerSourceStep =
+  | { state: 'device_code'; user_code: string; url: string; interval: number; expires_in: number }
+  | { state: 'redirect'; url: string; expires_in: number }
+  | { state: 'waiting'; interval: number }
+  | { state: 'select_vehicle'; account_id: number; vehicles: OdometerSourceVehicle[] }
+  | ({ state: 'connected' } & OdometerSourceStatus)
 
 export interface OdometerReadingPayload {
   car_id: number
@@ -561,6 +620,23 @@ export const logbookApi = {
     api.get<OdometerReading[]>('/logbook/odometer-readings', { params: carId ? { car_id: carId } : undefined }).then(r => r.data),
   createReading: (data: OdometerReadingPayload) => api.post<OdometerReading>('/logbook/odometer-readings', data).then(r => r.data),
   deleteReading: (id: number) => api.delete<{ deleted: boolean }>(`/logbook/odometer-readings/${id}`).then(r => r.data),
+  odometerSources: () => api.get<OdometerSourceDefinition[]>('/logbook/odometer-sources').then(r => r.data),
+  odometerSourceStatus: (carId: number) =>
+    api.get<OdometerSourceStatus>(`/logbook/cars/${carId}/odometer-source`).then(r => r.data),
+  odometerSourceConnect: (carId: number, provider: string, input: Record<string, string>, accountId?: number) =>
+    api.post<OdometerSourceStep>(`/logbook/cars/${carId}/odometer-source/connect`,
+      { provider, input, ...(accountId ? { account_id: accountId } : {}) }).then(r => r.data),
+  odometerSourceContinue: (carId: number, input: Record<string, string> = {}) =>
+    api.post<OdometerSourceStep>(`/logbook/cars/${carId}/odometer-source/connect/continue`, { input }).then(r => r.data),
+  odometerSourceAttach: (carId: number, accountId: number) =>
+    api.post<OdometerSourceStep>(`/logbook/cars/${carId}/odometer-source/attach`, { account_id: accountId }).then(r => r.data),
+  odometerSourceSelectVehicle: (carId: number, accountId: number, vehicleRef: string) =>
+    api.post<OdometerSourceStep>(`/logbook/cars/${carId}/odometer-source/vehicle`, { account_id: accountId, vehicle_ref: vehicleRef }).then(r => r.data),
+  odometerSourceSync: (carId: number) =>
+    api.post<{ reading: { odometer: number; reading_date: string; reading_time: string } } & OdometerSourceStatus>(
+      `/logbook/cars/${carId}/odometer-source/sync`).then(r => r.data),
+  odometerSourceDisconnect: (carId: number) =>
+    api.delete<{ disconnected: boolean }>(`/logbook/cars/${carId}/odometer-source`).then(r => r.data),
   listGaps: (carId?: number | null) =>
     api.get<OdometerGap[]>('/logbook/odometer-gaps', { params: carId ? { car_id: carId } : undefined }).then(r => r.data),
   fillGap: (data: OdometerGapFillPayload) =>

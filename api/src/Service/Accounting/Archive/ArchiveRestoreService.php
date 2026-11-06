@@ -79,11 +79,14 @@ final class ArchiveRestoreService
         'cash_registers',
         'cash_documents',
         'cash_document_vat_lines',
+        'other_item_kinds',
         'other_items',
         'other_item_schedules',
         'other_item_schedule_occurrences',
         'other_item_installments',
         'other_item_allocations',
+        'internal_documents',
+        'internal_document_lines',
         'invoice_payments',
         'income_tax_returns',
         'tax_losses',
@@ -200,6 +203,7 @@ final class ArchiveRestoreService
         'product_variant_options',
         'product_variant_i18n_inheritance',
         'exchange_rates',
+        'internal_document_lines',
     ];
 
     /** @var array<string, array<string,string>> table → col → referenced_table (z info_schema) */
@@ -608,8 +612,31 @@ final class ArchiveRestoreService
                     $template['partner_id'] = $this->maps['clients'][$oldPartnerId]
                         ?? throw new RestoreException('snapshot_reference', 'Chybí mapování protistrany opakovaného dokladu.');
                 }
+                if (array_key_exists('kind_id', $template) && $template['kind_id'] !== null) {
+                    $template['kind_id'] = $this->maps['other_item_kinds'][(int) $template['kind_id']]
+                        ?? throw new RestoreException('snapshot_reference', 'Chybí mapování druhu opakovaného dokladu.');
+                }
                 $cols[] = $col;
                 $vals[] = json_encode($template, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
+                continue;
+            }
+            // Vazby konceptu interního dokladu na doklady firmy: id se přemapují na obnovené
+            // doklady, vazba na doklad mimo archiv (bez mapy) se zahodí, ať nemíří do cizí firmy.
+            if ($table === 'internal_documents' && $col === 'document_links_json') {
+                $links = $val !== null ? json_decode((string) $val, true, 512, JSON_THROW_ON_ERROR) : [];
+                $restored = [];
+                foreach (is_array($links) ? $links : [] as $link) {
+                    $reference = ['invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices',
+                        'bank' => 'bank_transactions', 'cash' => 'cash_documents'][(string) ($link['doc_type'] ?? '')] ?? null;
+                    $newId = $reference !== null ? ($this->maps[$reference][(int) ($link['doc_id'] ?? 0)] ?? null) : null;
+                    if ($newId === null) {
+                        $warnings[] = 'Vazba konceptu interního dokladu na doklad mimo archiv byla vynechána.';
+                        continue;
+                    }
+                    $restored[] = ['doc_type' => $link['doc_type'], 'doc_id' => $newId] + (isset($link['note']) ? ['note' => $link['note']] : []);
+                }
+                $cols[] = $col;
+                $vals[] = $restored === [] ? null : json_encode($restored, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE);
                 continue;
             }
             if ($table === 'accounting_closing_steps' && ($row['step_key'] ?? null) === 'provisions' && $col === 'payload' && $val !== null) {

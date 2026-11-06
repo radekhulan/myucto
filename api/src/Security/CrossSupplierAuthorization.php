@@ -94,29 +94,42 @@ final class CrossSupplierAuthorization
      */
     public function allowsIn(Request $request, int $supplierId, array $permissions, AccessLevel $level = AccessLevel::WRITE): bool
     {
-        if ($supplierId <= 0) {
+        $scoped = $this->scopedRequest($request, $supplierId);
+        if ($scoped === null || RequestAuthorization::isClientType($scoped)) {
             return false;
         }
-        $scoped = $request
-            ->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $supplierId)
-            ->withQueryParams([]);
-        $access = $this->supplierAccess->resolve($scoped);
-        if ($access->denied || $access->supplierId !== $supplierId) {
-            return false;
-        }
-        $role = $this->permissions->resolve($scoped);
-        if (!$role->isActive || $role->isClientType()) {
-            return false;
-        }
-        $scoped = $scoped
-            ->withAttribute('auth.effective_role', $role)
-            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId);
         foreach ($permissions as $permission) {
             if (!RequestAuthorization::allows($scoped, $permission, $level)) {
                 return false;
             }
         }
         return true;
+    }
+
+    /**
+     * Požadavek přepnutý do cílové firmy s její efektivní rolí; null, když do firmy uživatel
+     * nesmí nebo je jeho role neaktivní. O oprávnění se pak rozhoduje přes
+     * {@see RequestAuthorization} nad vráceným požadavkem, stejně jako v běžné akci.
+     */
+    public function scopedRequest(Request $request, int $supplierId): ?Request
+    {
+        if ($supplierId <= 0) {
+            return null;
+        }
+        $scoped = $request
+            ->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $supplierId)
+            ->withQueryParams([]);
+        $access = $this->supplierAccess->resolve($scoped);
+        if ($access->denied || $access->supplierId !== $supplierId) {
+            return null;
+        }
+        $role = $this->permissions->resolve($scoped);
+        if (!$role->isActive) {
+            return null;
+        }
+        return $scoped
+            ->withAttribute('auth.effective_role', $role)
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId);
     }
 
     /**
@@ -163,6 +176,19 @@ final class CrossSupplierAuthorization
         return (new ServerRequestFactory())
             ->createServerRequest('GET', '/')
             ->withAttribute(AuthMiddleware::ATTR_USER, $user);
+    }
+
+    /**
+     * Firmy, do kterých uživatel může patřit, ještě BEZ rozhodnutí o roli a zámku
+     * domény. Slouží jen k levnému předvýběru (např. hledání napříč firmami
+     * nejdřív zjistí, kde vůbec něco je); každá firma, ze které se pak něco
+     * vrací, musí projít {@see self::allowsIn()}.
+     *
+     * @return list<int>
+     */
+    public function candidateSupplierIds(Request $request): array
+    {
+        return $this->candidateIds($request);
     }
 
     /** @return list<int> */

@@ -21,6 +21,12 @@ vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
 }))
 
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }),
 }))
@@ -194,6 +200,24 @@ describe('InvoiceEditor.vue — stejné číslo dokladu u dodavatele', () => {
 
     expect(m.update).toHaveBeenCalledTimes(1)
     expect(wrapper.find('[data-error-banner]').exists()).toBe(true)
+    confirm.mockRestore()
+  })
+
+  it('shoda se stornovaným dokladem: vlastní text a po odmítnutí odkaz na vrácení ze storna', async () => {
+    m.update.mockRejectedValueOnce(Object.assign(new Error('storno'), {
+      response: { status: 409, data: { error: { code: 'vendor_invoice_duplicate', message: 'storno', can_confirm: true, cancelled_duplicate_id: 77 } } },
+    }))
+    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false)
+    const wrapper = mount(InvoiceEditor, { global: { stubs } })
+    await flushPromises()
+
+    await wrapper.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(confirm).toHaveBeenCalledWith('purchase_invoice.duplicate_number_confirm_cancelled')
+    expect(m.update).toHaveBeenCalledTimes(1)
+    const link = wrapper.findAllComponents({ name: 'RouterLink' }).find(l => l.props('to') === '/purchase-invoices/77')
+    expect(link?.text()).toContain('purchase_invoice.duplicate_cancelled_open')
     confirm.mockRestore()
   })
 })

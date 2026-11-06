@@ -19,6 +19,7 @@ final class EpoDirectSubmissionRepository
         ?int $userId,
         string $environment,
     ): int {
+        (new \MyInvoice\Service\Submission\AnonymizedCloneSubmissionProvenance($this->db))->assertDispatchable($supplierId, $submissionId);
         $environment = $this->normalizeEnvironment($environment);
         $stmt = $this->db->pdo()->prepare(
             "INSERT INTO tax_submission_attempts

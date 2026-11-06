@@ -32,11 +32,13 @@ final class McpOAuthGrantsAction
     {
         $userId = $this->sessionUserId($request);
         if ($userId <= 0) return Json::sessionRequired($response);
+        $domain = $request->getAttribute(\MyInvoice\Middleware\TenantDomainMiddleware::ATTR_CONTEXT);
+        $bound = $domain instanceof \MyInvoice\Service\Tenant\TenantDomainContext && $domain->locksSupplier();
         $all = filter_var($request->getQueryParams()['all'] ?? false, FILTER_VALIDATE_BOOLEAN);
-        if ($all && !$this->isSuperadmin($request)) {
+        if ($all && ($bound || !$this->isSuperadmin($request))) {
             return Json::error($response, 'forbidden', 'Připojení všech uživatelů vidí jen správce instance.', 403);
         }
-        return Json::ok($response, ['grants' => $all ? $this->oauth->listAll() : $this->oauth->listForUser($userId)])
+        return Json::ok($response, ['grants' => $all ? $this->oauth->listAll() : $this->oauth->listForUser($userId, $bound ? $domain->supplierId : null, $bound ? $domain->origin . '/mcp' : null)])
             ->withHeader('Cache-Control', 'no-store');
     }
 
@@ -45,10 +47,12 @@ final class McpOAuthGrantsAction
         $userId = $this->sessionUserId($request);
         if ($userId <= 0) return Json::sessionRequired($response);
         $id = (int) ($args['id'] ?? 0);
-        if ($id > 0 && $this->oauth->revokeForUser($id, $userId)) {
+        $domain = $request->getAttribute(\MyInvoice\Middleware\TenantDomainMiddleware::ATTR_CONTEXT);
+        $bound = $domain instanceof \MyInvoice\Service\Tenant\TenantDomainContext && $domain->locksSupplier();
+        if ($id > 0 && $this->oauth->revokeForUser($id, $userId, $bound ? $domain->supplierId : null, $bound ? $domain->origin . '/mcp' : null)) {
             return Json::ok($response, ['revoked' => true]);
         }
-        if ($id > 0 && $this->isSuperadmin($request)) {
+        if ($id > 0 && !$bound && $this->isSuperadmin($request)) {
             $ownerId = $this->oauth->revokeAny($id);
             if ($ownerId !== null) {
                 $this->activity->log(

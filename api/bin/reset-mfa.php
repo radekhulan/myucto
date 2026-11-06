@@ -6,7 +6,8 @@ declare(strict_types=1);
  * CLI: nouzově resetuje všechny MFA faktory uživatele podle e-mailu.
  *
  * Vypne TOTP, odvolá passkeys, zruší trusted devices, login OTP, rozpracované
- * WebAuthn ceremonies a step-up proofy. Invaliduje všechny session uživatele.
+ * WebAuthn ceremonies a step-up proofy. Zruší API tokeny a MCP připojení
+ * uživatele. Invaliduje všechny session uživatele.
  *
  * POZOR NA E-MAILOVÉ OTP: to není faktor uložený u uživatele, ale konfigurační
  * fallback (`auth.email_otp.enabled`) pro každého, kdo NEMÁ TOTP. Reset tedy
@@ -105,6 +106,17 @@ $proofs->execute([(int) $user['id']]);
 $recoveryCodes = $container->get(\MyInvoice\Service\Auth\MfaRecoveryCodeService::class)
     ->revokeAll((int) $user['id']);
 
+// API tokeny a MCP připojení: kdo účet ovládl, mohl si přes unesenou session
+// vyrazit dlouhodobý token, který by jinak reset faktorů přežil. Nouzový reset
+// je reakce na ztrátu kontroly nad účtem, proto se ruší všechny; integrace si
+// majitel po obnově vystaví znovu.
+$mcpGrants = $pdo->prepare(
+    'UPDATE mcp_oauth_grants SET revoked_at = NOW() WHERE user_id = ? AND revoked_at IS NULL'
+);
+$mcpGrants->execute([(int) $user['id']]);
+$apiTokensRevoked = $container->get(\MyInvoice\Service\Auth\ApiTokenService::class)
+    ->revokeAllForUser((int) $user['id']);
+
 $killed = $sessions->destroyAllForUser((int) $user['id']);
 $wasEnabled = ((int) ($user['totp_enabled'] ?? 0) === 1) ? 'ano' : 'ne';
 
@@ -124,6 +136,8 @@ $container->get(\MyInvoice\Service\ActivityLogger::class)->log(
         'passkeys_revoked' => $passkeys->rowCount(),
         'trusted_devices_removed' => $td->rowCount(),
         'recovery_codes_revoked' => $recoveryCodes,
+        'api_tokens_revoked' => $apiTokensRevoked,
+        'mcp_grants_revoked' => $mcpGrants->rowCount(),
         'sessions_invalidated' => $killed,
         'totp_was_enabled' => ((int) ($user['totp_enabled'] ?? 0) === 1),
         'via' => 'cli:reset-mfa',
@@ -136,6 +150,8 @@ echo "✓ MFA reset pro {$user['email']} (id={$user['id']}, TOTP původně aktiv
 echo "  Odvoláno {$passkeys->rowCount()} passkeys, {$td->rowCount()} důvěryhodných zařízení, "
     . "{$otp->rowCount()} e-mailových kódů, {$ceremonies->rowCount()} flow, "
     . "{$proofs->rowCount()} proofů, $recoveryCodes záložních kódů a $killed session(í).\n";
+echo "  Zrušeno $apiTokensRevoked API tokenů a {$mcpGrants->rowCount()} MCP připojení; "
+    . "integrace je potřeba po obnově účtu napojit novým tokenem.\n";
 
 // E-mailové OTP zůstává po resetu jediným druhým faktorem — a to je přesně ten
 // stav, ve kterém se dá zamknout ven. Buď ho na přání vypni, nebo aspoň řekni,

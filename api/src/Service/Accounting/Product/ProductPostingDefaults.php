@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Product;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountDefinitionRepository;
+use MyInvoice\Service\Accounting\SettlementAccounts;
 use PDO;
 
 /**
@@ -19,9 +21,9 @@ use PDO;
  * první podle pořadí). Nemá-li účet ona, dědí se od nejbližšího nadřízeného uzlu
  * (materialized path `/12/45/98/`).
  *
- * Validace účtu ({@see validateAccount()}) platí pro kartu, kategorii i položku faktury:
- * účet musí být v účtovém rozvrhu firmy, aktivní a výsledkový — výnos třídy 6,
- * náklad třídy 5.
+ * Validace účtu ({@see validateAccount()}) platí pro kartu a kategorii: účet musí být
+ * v účtovém rozvrhu firmy, aktivní a výsledkový (výnos třídy 6, náklad třídy 5). Účet
+ * zadaný přímo na položce vydané faktury ověřuje volnější {@see validateIssuedItemAccount()}.
  */
 final class ProductPostingDefaults
 {
@@ -126,17 +128,58 @@ final class ProductPostingDefaults
      * @param self::KIND_* $kind
      * @throws \InvalidArgumentException s česky formulovaným důvodem
      */
-    public function validateAccount(int $supplierId, mixed $code, string $kind): ?string
+    public function validateAccount(int $supplierId, mixed $code, string $kind, ?string $date = null, bool $currentRead = false): ?string
     {
         $code = self::code(is_scalar($code) ? (string) $code : null);
         if ($code === null) {
             return null;
         }
+        $row = $this->activeAccount($supplierId, $code, $date, $currentRead);
+        $expectedType = $kind === self::KIND_REVENUE ? 'revenue' : 'expense';
+        $expectedClass = $kind === self::KIND_REVENUE ? '6' : '5';
+        if ((string) $row['account_type'] !== $expectedType || !str_starts_with($code, $expectedClass)) {
+            throw new \InvalidArgumentException($kind === self::KIND_REVENUE
+                ? "Účet {$code} není výnosový (třída 6)."
+                : "Účet {$code} není nákladový (třída 5).");
+        }
+        return $code;
+    }
+
+    /**
+     * Ověří účet zadaný přímo na položce vydané faktury nebo šablony opakované faktury.
+     *
+     * Na rozdíl od karty a kategorie (jen výnos třídy 6) smí položka nést i rozvahový
+     * nebo nákladový účet: přefakturace (315, 378, snížení 518), prodej poukazů a podobné
+     * případy. Vyloučené jsou jen saldokontní, daňové a peněžní účty
+     * ({@see SettlementAccounts}), stejně jako u položky přijaté faktury. Evidence DPH
+     * a kontrolní hlášení na účtu položky nezávisí, řídí se sazbou a členěním řádku.
+     *
+     * @throws \InvalidArgumentException s česky formulovaným důvodem
+     */
+    public function validateIssuedItemAccount(int $supplierId, mixed $code, ?string $date = null, bool $currentRead = false): ?string
+    {
+        $code = self::code(is_scalar($code) ? (string) $code : null);
+        if ($code === null) {
+            return null;
+        }
+        if (SettlementAccounts::isSettlement($code)) {
+            throw new \InvalidArgumentException("Účet {$code} je saldokontní, daňový nebo peněžní a na položku vydané faktury nepatří.");
+        }
+        $this->activeAccount($supplierId, $code, $date, $currentRead);
+        return $code;
+    }
+
+    /**
+     * @return array{account_type:string, is_active:mixed}
+     * @throws \InvalidArgumentException
+     */
+    private function activeAccount(int $supplierId, string $code, ?string $date, bool $currentRead): array
+    {
         if (mb_strlen($code) > 10) {
             throw new \InvalidArgumentException("Účet {$code} je delší než 10 znaků.");
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT account_type, is_active FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?'
+            'SELECT account_type, is_active FROM ' . AccountDefinitionRepository::relation($date ?? date('Y-m-d'), $supplierId, $currentRead) . ' a WHERE supplier_id = ? AND account_code = ?'
         );
         $stmt->execute([$supplierId, $code]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -146,14 +189,7 @@ final class ProductPostingDefaults
         if (!(bool) $row['is_active']) {
             throw new \InvalidArgumentException("Účet {$code} není v účtovém rozvrhu aktivní.");
         }
-        $expectedType = $kind === self::KIND_REVENUE ? 'revenue' : 'expense';
-        $expectedClass = $kind === self::KIND_REVENUE ? '6' : '5';
-        if ((string) $row['account_type'] !== $expectedType || !str_starts_with($code, $expectedClass)) {
-            throw new \InvalidArgumentException($kind === self::KIND_REVENUE
-                ? "Účet {$code} není výnosový (třída 6)."
-                : "Účet {$code} není nákladový (třída 5).");
-        }
-        return $code;
+        return $row;
     }
 
     /**

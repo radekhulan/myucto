@@ -137,6 +137,17 @@ final class PayrollTakeoverAbsenceWriter
             if ($absence['type'] === 'ocr' && ($absence['lone_carer'] ?? false) === true) {
                 $body['lone_carer'] = true;
             }
+            // Neomluvená absence a neplacené volno na část směny: zameškané minuty prvního
+            // a posledního dne ze zdroje, jinak by se do hlášení (10275) a krácení mzdy
+            // počítala celá směna. Minuty nad délku směny výpočet sám ořízne.
+            if (in_array($absence['type'], ['unexcused', 'unpaid_leave'], true)) {
+                if (($absence['first_day_hours'] ?? 0) > 0) {
+                    $body['partial_first_minutes'] = (int) round($absence['first_day_hours'] * 60);
+                }
+                if ($absence['from'] !== $absence['to'] && ($absence['last_day_hours'] ?? 0) > 0) {
+                    $body['partial_last_minutes'] = (int) round($absence['last_day_hours'] * 60);
+                }
+            }
             try {
                 $created = $this->absences->create($supplierId, $this->absenceValidator->absence($body, takeover: true), $userId);
             } catch (PayrollAbsenceOverlapException) {
@@ -345,6 +356,7 @@ final class PayrollTakeoverAbsenceWriter
             return $absence;
         }
         $absence['from'] = (new \DateTimeImmutable($recordedTo))->modify('+1 day')->format('Y-m-d');
+        $absence['first_day_hours'] = null;
 
         return $absence;
     }
@@ -579,6 +591,12 @@ final class PayrollTakeoverAbsenceWriter
                 && ($out[$last]['lone_carer'] ?? false) === ($absence['lone_carer'] ?? false)
                 && (new \DateTimeImmutable($out[$last]['to']))->modify('+1 day')->format('Y-m-d') >= $absence['from']
             ) {
+                if ($absence['to'] > $out[$last]['to']) {
+                    $out[$last]['last_day_hours'] = $absence['last_day_hours'] ?? null;
+                    if ($absence['from'] === $absence['to']) {
+                        $out[$last]['last_day_hours'] = $absence['first_day_hours'] ?? null;
+                    }
+                }
                 $out[$last]['to'] = max($out[$last]['to'], $absence['to']);
                 if ($out[$last]['childbirth'] === null) {
                     $out[$last]['childbirth'] = $absence['childbirth'];
@@ -589,6 +607,7 @@ final class PayrollTakeoverAbsenceWriter
                 // Jiný druh ve stejných dnech: zapíše se jen část, která zbývá.
                 $trimmed++;
                 $absence['from'] = (new \DateTimeImmutable($out[$last]['to']))->modify('+1 day')->format('Y-m-d');
+                $absence['first_day_hours'] = null;
                 if ($absence['from'] > $absence['to']) {
                     continue;
                 }

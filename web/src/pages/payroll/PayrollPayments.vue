@@ -73,7 +73,13 @@ const runShortcutRequested = route.query.focus === 'bank-order'
 const runShortcutApplied = ref(false)
 const runShortcutState = ref<'ready' | 'empty' | null>(null)
 const period = ref(requestedPeriod ?? payrollWorkingPeriod())
-const activeTab = ref<'liabilities' | 'batches' | 'settlements'>('liabilities')
+// Návrat z podpisu v bance (?bank_batch=ID) otevře dávky s vybranou dávkou.
+const returnedBankBatchId = (() => {
+  const raw = route.query.bank_batch
+  const id = typeof raw === 'string' && /^[1-9][0-9]{0,18}$/.test(raw) ? Number(raw) : null
+  return id !== null && Number.isSafeInteger(id) ? id : null
+})()
+const activeTab = ref<'liabilities' | 'batches' | 'settlements'>(returnedBankBatchId !== null ? 'batches' : 'liabilities')
 const loading = ref(true)
 /*
  * Selhalo načtení? Pak o závazcích nevíme NIC — a to je něco jiného než „za
@@ -2275,7 +2281,7 @@ onMounted(load)
     </template>
 
     <template v-else-if="activeTab === 'batches'">
-      <PayrollBankPaymentSubmission :batches="batches" :can-write="auth.canWrite('payroll.payments')" />
+      <PayrollBankPaymentSubmission :batches="batches" :can-write="auth.canWrite('payroll.payments')" :initial-batch-id="returnedBankBatchId" />
       <div v-if="loading" class="space-y-3">
         <div v-for="index in 3" :key="index" class="h-24 animate-pulse rounded-xl bg-neutral-100" />
       </div>

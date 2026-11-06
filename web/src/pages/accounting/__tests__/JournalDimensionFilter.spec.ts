@@ -8,7 +8,9 @@ const m = vi.hoisted(() => ({
   listJournal: vi.fn(),
   exportReport: vi.fn(),
   replace: vi.fn(),
+  toastError: vi.fn(),
   routeQuery: {} as Record<string, string>,
+  supplier: { accounting_framework: 'cz_500', entity_profile: 'unknown' } as Record<string, string>,
 }))
 
 // Dimenze zapnuté: hodnota 5 typu Projekt (Firma → Dimenze).
@@ -42,7 +44,8 @@ vi.mock('vue-i18n', async importOriginal => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true, isDemo: false }) }))
-vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ get currentSupplier() { return m.supplier } }) }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: m.toastError, success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
 vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined), getPagePrefs: () => ref({}) }))
 vi.mock('@/composables/useTablePrefs', () => ({
@@ -60,7 +63,7 @@ vi.mock('@/composables/useSavedFilters', () => ({
 }))
 
 import Journal from '@/pages/accounting/Journal.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
 
 const FilterBarStub = {
   name: 'FilterBar',
@@ -76,7 +79,7 @@ function mountJournal() {
     global: {
       stubs: {
         FilterBar: FilterBarStub,
-        DimensionReportFilter: true,
+        DimensionReportFilters: true,
         ActivationBanner: true,
         SavedFiltersMenu: true,
         ColumnPicker: true,
@@ -98,11 +101,19 @@ function lastListCall(): Record<string, unknown> {
 
 describe('Journal – filtr dimenze', () => {
   beforeEach(() => {
-    for (const fn of [m.listPeriods, m.listAccounts, m.listJournal, m.exportReport, m.replace]) fn.mockReset()
+    for (const fn of [m.listPeriods, m.listAccounts, m.listJournal, m.exportReport, m.replace, m.toastError]) fn.mockReset()
     m.listPeriods.mockResolvedValue([])
     m.listAccounts.mockResolvedValue([])
     m.listJournal.mockResolvedValue({ items: [], total: 0, page: 1, per_page: 50 })
     m.routeQuery = {}
+  })
+
+  it('neplatný filtr ukáže hlášku serveru, ne obecnou chybu', async () => {
+    m.routeQuery = { account_from: '6', account_to: '5' }
+    m.listJournal.mockRejectedValue({ response: { status: 422, data: { error: { code: 'validation_failed', message: 'Počáteční účet nesmí být větší než koncový.' } } } })
+    mountJournal()
+    await flushPromises()
+    expect(m.toastError).toHaveBeenCalledWith('Počáteční účet nesmí být větší než koncový.')
   })
 
   it('převezme hodnotu dimenze z URL, pošle ji serveru a ukáže chip', async () => {
@@ -110,10 +121,10 @@ describe('Journal – filtr dimenze', () => {
     const wrapper = mountJournal()
     await flushPromises()
 
-    expect(lastListCall()).toMatchObject({ dimension_value_id: 5, dimension_descendants: false })
-    const filter = wrapper.findComponent(DimensionReportFilter)
+    expect(lastListCall()).toMatchObject({ dimension_value_id: '5', dimension_descendants: false })
+    const filter = wrapper.findComponent(DimensionReportFilters)
     expect(filter.exists()).toBe(true)
-    expect(filter.props()).toMatchObject({ valueId: 5, descendants: false })
+    expect(filter.props()).toMatchObject({ valueIds: [5], descendants: false })
     const chip = wrapper.find('.chip[data-key="dimension"]')
     expect(chip.text()).toContain('Projekt')
     expect(chip.text()).toContain('P5 – Projekt pět')
@@ -125,12 +136,12 @@ describe('Journal – filtr dimenze', () => {
     await flushPromises()
     expect(lastListCall().dimension_value_id).toBeUndefined()
 
-    wrapper.findComponent(DimensionReportFilter).vm.$emit('update:valueId', 5)
+    wrapper.findComponent(DimensionReportFilters).vm.$emit('update:valueIds', [5])
     await flushPromises()
-    expect(lastListCall()).toMatchObject({ dimension_value_id: 5, dimension_descendants: true })
+    expect(lastListCall()).toMatchObject({ dimension_value_id: '5', dimension_descendants: true })
     expect(m.replace).toHaveBeenLastCalledWith({ query: { dimension_value_id: '5' } })
 
-    wrapper.findComponent(DimensionReportFilter).vm.$emit('update:descendants', false)
+    wrapper.findComponent(DimensionReportFilters).vm.$emit('update:descendants', false)
     await flushPromises()
     expect(m.replace).toHaveBeenLastCalledWith({ query: { dimension_value_id: '5', dimension_descendants: '0' } })
 
@@ -138,6 +149,22 @@ describe('Journal – filtr dimenze', () => {
     await flushPromises()
     expect(lastListCall().dimension_value_id).toBeUndefined()
     expect(m.replace).toHaveBeenLastCalledWith({ query: {} })
+  })
+
+  it('víc hodnot různých dimenzí pošle serveru i do URL jako seznam a ukáže je v chipu', async () => {
+    m.routeQuery = { dimension_value_id: '5,5,abc,8' }
+    const wrapper = mountJournal()
+    await flushPromises()
+
+    expect(lastListCall()).toMatchObject({ dimension_value_id: '5,8' })
+    expect(wrapper.findComponent(DimensionReportFilters).props()).toMatchObject({ valueIds: [5, 8] })
+    const chip = wrapper.find('.chip[data-key="dimension"]')
+    expect(chip.text()).toContain('P5 – Projekt pět')
+
+    wrapper.findComponent(DimensionReportFilters).vm.$emit('update:valueIds', [5, 8, 9])
+    await flushPromises()
+    expect(lastListCall()).toMatchObject({ dimension_value_id: '5,8,9' })
+    expect(m.replace).toHaveBeenLastCalledWith({ query: { dimension_value_id: '5,8,9' } })
   })
 
   it('export posílá stejný filtr dimenze jako seznam', async () => {
@@ -153,6 +180,19 @@ describe('Journal – filtr dimenze', () => {
     await xlsx!.trigger('click')
     await flushPromises()
     expect(m.exportReport).toHaveBeenCalledWith('/accounting/reports/journal/export',
-      expect.objectContaining({ dimension_value_id: 5, dimension_descendants: 0, format: 'xlsx' }))
+      expect.objectContaining({ dimension_value_id: '5', dimension_descendants: 0, format: 'xlsx' }))
+  })
+
+  it('zdroj Předpis SVJ nabízí filtr jen firmě s profilem SVJ', async () => {
+    const options = async () => {
+      const wrapper = mountJournal()
+      await flushPromises()
+      return wrapper.findAll('option').map(option => option.attributes('value'))
+    }
+    m.supplier = { accounting_framework: 'cz_500', entity_profile: 'unknown' }
+    expect(await options()).toContain('invoice')
+    expect(await options()).not.toContain('unit_charge')
+    m.supplier = { accounting_framework: 'cz_504', entity_profile: 'svj' }
+    expect(await options()).toContain('unit_charge')
   })
 })

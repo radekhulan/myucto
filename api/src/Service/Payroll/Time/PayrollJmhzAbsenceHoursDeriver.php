@@ -258,12 +258,12 @@ final class PayrollJmhzAbsenceHoursDeriver
     ): array {
         $lastDay = (new \DateTimeImmutable($periodEnd))->modify('-1 day')->format('Y-m-d');
         $buckets = self::EMPTY_BUCKETS;
-        $sum = static function (\DateTimeImmutable $from, \DateTimeImmutable $to, bool $holidays) use ($periodStart, $lastDay, $dayMinutes): int {
+        $sum = static function (\DateTimeImmutable $from, \DateTimeImmutable $to, bool $holidays, array $caps = []) use ($periodStart, $lastDay, $dayMinutes): int {
             $minutes = 0;
             for ($day = $from; $day <= $to; $day = $day->modify('+1 day')) {
                 $iso = $day->format('Y-m-d');
                 if ($iso >= $periodStart && $iso <= $lastDay) {
-                    $minutes += $dayMinutes($iso, $holidays);
+                    $minutes += isset($caps[$iso]) ? min($dayMinutes($iso, $holidays), $caps[$iso]) : $dayMinutes($iso, $holidays);
                 }
             }
 
@@ -281,7 +281,17 @@ final class PayrollJmhzAbsenceHoursDeriver
             $row = $absence + ['supplier_id' => $supplierId, 'employment_id' => $employmentId];
             if ($bucket !== 'sickness') {
                 $bounds = $this->absences->absenceBounds($row, false);
-                $buckets[$bucket] += $sum($bounds['from'], $bounds['to'], false);
+                // Zameškaná část směny prvního a posledního dne, stejně jako
+                // {@see PayrollAbsenceRepository::publishedShiftSegments()}.
+                $caps = [];
+                if (($absence['partial_first_minutes'] ?? null) !== null) {
+                    $caps[(string) $absence['date_from']] = (int) $absence['partial_first_minutes'];
+                }
+                if (($absence['partial_last_minutes'] ?? null) !== null) {
+                    $last = (string) $absence['date_to'];
+                    $caps[$last] = min($caps[$last] ?? PHP_INT_MAX, (int) $absence['partial_last_minutes']);
+                }
+                $buckets[$bucket] += $sum($bounds['from'], $bounds['to'], false, $caps);
                 continue;
             }
             // Navazující část dlouhé nemoci (pokračování z předchozího měsíce) vlastní

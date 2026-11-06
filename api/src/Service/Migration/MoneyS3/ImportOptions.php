@@ -24,6 +24,13 @@ final class ImportOptions
      * @param int|null $fromYear první převáděný účetní rok; starší roky zálohy (a jejich doklady) se vynechají
      * @param string $disposalYearTax daňový odpis majetku v roce vyřazení (half|none)
      * @param bool $acceptDifferences ostrý převod přijme rozdíly k přijetí ({@see ImportProtocol::difference()})
+     * @param bool $relinkOnly opravný převod vazeb už převedené firmy: projde zálohu, ale nic
+     *                         nového nezaloží (zápis, doklad, pohyb, výpis, partnera, kartu, období) -
+     *                         jen u převzatých záznamů znovu dopočítá úhrady, zápočty a zálohy
+     *                         a doplní valuty valutových pokladen, jejich dokladů a řádků deníku
+     *                         otevřených let.
+     *                         Firma se po převodu účtuje v MyÚčtu a novější doklady z Money by se
+     *                         zdvojily s tím, co uživatel zadal.
      */
     public function __construct(
         public readonly string $mode = self::MODE_DRY_RUN,
@@ -35,6 +42,7 @@ final class ImportOptions
         public readonly ?int $fromYear = null,
         public readonly string $disposalYearTax = self::DISPOSAL_YEAR_TAX_HALF,
         public readonly bool $acceptDifferences = false,
+        public readonly bool $relinkOnly = false,
     ) {
         if (!in_array($mode, [self::MODE_DRY_RUN, self::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
@@ -67,6 +75,7 @@ final class ImportOptions
             'confirmed_ico' => $this->confirmedIco,
             'from_year' => $this->fromYear,
             'disposal_year_tax' => $this->disposalYearTax,
-        ] + ($this->acceptDifferences && !$this->isDryRun() ? ['accept_differences' => true] : []);
+        ] + ($this->acceptDifferences && !$this->isDryRun() ? ['accept_differences' => true] : [])
+          + ($this->relinkOnly ? ['relink_only' => true] : []);
     }
 }

@@ -87,6 +87,12 @@ final class KontrolniHlaseniVatIdTest extends TestCase
             'EU s prázdným VAT ID'      => ['DE', true,  '   ', $none],
             'EU s VAT ID jen prefix'    => ['DE', true,  'DE', $none],
             'neznámá země, EU VAT ID'   => [null, true,  'DE123456789', ['k_stat' => 'DE', 'vatid_dod' => '123456789']],
+            // Kontakt s chybnou zemí CZ (převod ji dřív dosadil americkému dodavateli
+            // s OSS číslem): A.2 je pro osoby neusazené v tuzemsku, k_stat CZ tam nepatří.
+            'chybná země CZ, OSS číslo' => ['CZ', true,  'EU372041333', $none],
+            'chybná země CZ, bez prefixu' => ['CZ', true, '372041333', $none],
+            'EU sídlo s OSS číslem'     => ['IE', true,  'EU372041333', $none],
+            'chybná země CZ, irské DIČ' => ['CZ', true,  'IE3668997OH', ['k_stat' => 'IE', 'vatid_dod' => '3668997OH']],
         ];
     }
 

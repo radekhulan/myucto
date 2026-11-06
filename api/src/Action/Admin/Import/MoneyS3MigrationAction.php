@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Admin\Import;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
@@ -22,6 +23,7 @@ use MyInvoice\Service\Migration\MoneyS3\MoneyS3Uploads;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
 use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
 use MyInvoice\Service\Migration\Shared\MigrationUploadLimits;
+use MyInvoice\Service\Migration\Shared\NonprofitMigrationNotice;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Message\UploadedFileInterface;
@@ -74,6 +76,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
         private readonly MoneyReportParser $reports,
         ActivityLogger $logger,
         IpMatcher $ipMatcher,
+        private readonly Connection $db,
     ) {
         parent::__construct($jobs, $runs, $logger, $ipMatcher);
     }
@@ -145,7 +148,7 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
             ['agenda_ico' => $agenda->ico, 'version' => $agenda->version, 'years' => $agenda->fiscalYears()],
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()), $request->getHeaderLine('User-Agent'));
 
-        return Json::ok($response, $meta + ['preflight' => $preflight, 'reports' => []], 201);
+        return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $meta + ['preflight' => $preflight, 'reports' => []]), 201);
     }
 
     /** @param array<string,string> $args */
@@ -173,11 +176,11 @@ final class MoneyS3MigrationAction extends AbstractMigrationAction
         } catch (MoneyS3Exception $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 404);
         }
-        return Json::ok($response, $meta + [
+        return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $meta + [
             'status' => MoneyS3Uploads::STATUS_READY,
             'preflight' => $preflight,
             'reports' => array_map('intval', array_keys(MoneyS3Uploads::reports($supplierId, $token))),
-        ]);
+        ]));
     }
 
     /** @param array<string,string> $args */

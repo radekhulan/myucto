@@ -155,6 +155,55 @@ final class PublicApprovalGetStateTest extends TestCase
         );
     }
 
+    /**
+     * Živý token je oprávnění schválit výkaz za zákazníka (a tím fakturu vystavit
+     * a odeslat). Detail faktury ani přehled schvalování ho nesmí vrátit, protože je
+     * čte i role jen pro čtení a token se scope `read`. Veřejný odkaz z e-mailu
+     * a připomínky (cron) musí s tokenem dál fungovat.
+     */
+    public function testInvoiceDetailAndInboxDoNotExposeLiveApprovalToken(): void
+    {
+        $token = bin2hex(random_bytes(24));
+        $this->db->pdo()->prepare(
+            "UPDATE invoices
+                SET approval_status = 'requested', approval_token = ?,
+                    approval_token_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY),
+                    approval_receipt_hash = NULL, approval_decided_at = NULL
+              WHERE id = ?"
+        )->execute([$token, $this->invoiceId]);
+        $supplierId = (int) $this->db->pdo()->query('SELECT supplier_id FROM invoices WHERE id = ' . $this->invoiceId)->fetchColumn();
+
+        $container = Bootstrap::buildContainer();
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices/' . $this->invoiceId)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'readonly'])
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId);
+        $response = $container->get(\MyInvoice\Action\Invoice\GetInvoiceAction::class)(
+            $request, new Psr7Response(), ['id' => (string) $this->invoiceId],
+        );
+        self::assertSame(200, $response->getStatusCode());
+        $body = (string) $response->getBody();
+        $detail = json_decode($body, true);
+        self::assertStringNotContainsString($token, $body);
+        self::assertArrayNotHasKey('approval_token', $detail);
+        self::assertArrayNotHasKey('approval_receipt_hash', $detail);
+        self::assertSame('requested', $detail['approval_status']);
+        self::assertNotEmpty($detail['approval_token_expires_at'], 'UI dál ukazuje platnost odkazu.');
+
+        $inbox = $container->get(\MyInvoice\Action\Admin\ApprovalListAction::class)(
+            (new ServerRequestFactory())->createServerRequest('GET', '/api/admin/approvals')
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin'])
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $supplierId),
+            new Psr7Response(),
+        );
+        self::assertSame(200, $inbox->getStatusCode());
+        self::assertStringNotContainsString($token, (string) $inbox->getBody());
+
+        // Legitimní tok: odkaz z e-mailu i připomínky token dál najdou.
+        self::assertSame($this->invoiceId, (int) ($this->repo->findByApprovalToken($token)['id'] ?? 0));
+        $cron = $this->repo->listForApprovalInbox(supplierId: $supplierId, statusFilter: 'requested', minDaysSince: null, maxReminders: null, page: 1, perPage: 0);
+        self::assertContains($token, array_column($cron, 'approval_token'));
+    }
+
     public function testUnknownTokenStillReturnsNotFound(): void
     {
         [$status] = $this->call(bin2hex(random_bytes(24)));

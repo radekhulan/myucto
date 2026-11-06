@@ -26,8 +26,23 @@ final class AutomationFeedService
         private readonly BankPostingPreview $previews,
     ) {}
 
+    /**
+     * Firmy, jejichž automatizaci smí uživatel vidět. Vázaný požadavek (token pro
+     * jednu firmu, vlastní doména) dostane nejvýš tuhle jednu firmu, a to i
+     * u globálního admina; jinak by token vydaný pro firmu A četl i ostatní firmy
+     * svého vlastníka.
+     *
+     * @return list<int>
+     */
+    public function allowedSupplierIds(int $userId, bool $isSuperadmin, ?int $boundSupplierId = null): array
+    {
+        $ids = $this->memberAllowedSupplierIds($userId, $isSuperadmin);
+        if ($boundSupplierId === null) return $ids;
+        return in_array($boundSupplierId, $ids, true) ? [$boundSupplierId] : [];
+    }
+
     /** @return list<int> */
-    public function allowedSupplierIds(int $userId, bool $isSuperadmin): array
+    private function memberAllowedSupplierIds(int $userId, bool $isSuperadmin): array
     {
         if ($isSuperadmin) {
             return array_map('intval', $this->db->pdo()->query(
@@ -54,9 +69,9 @@ final class AutomationFeedService
     }
 
     /** @return array{items:list<array<string,mixed>>,total:int,page:int,per_page:int} */
-    public function feed(int $userId, bool $isSuperadmin, FeedQuery $query): array
+    public function feed(int $userId, bool $isSuperadmin, FeedQuery $query, ?int $boundSupplierId = null): array
     {
-        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin);
+        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId);
         $suppliers = $query->suppliers === []
             ? $allowed
             : array_values(array_intersect($allowed, array_map('intval', $query->suppliers)));
@@ -140,9 +155,9 @@ final class AutomationFeedService
     }
 
     /** @param list<int> $supplierFilter */
-    public function counts(int $userId, bool $isSuperadmin, ?string $from, ?string $to, array $supplierFilter): array
+    public function counts(int $userId, bool $isSuperadmin, ?string $from, ?string $to, array $supplierFilter, ?int $boundSupplierId = null): array
     {
-        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin);
+        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId);
         $ids = $supplierFilter === [] ? $allowed : array_values(array_intersect($allowed, array_map('intval', $supplierFilter)));
         if ($ids === []) return ['auto_today' => 0, 'pending' => 0, 'needs_input' => 0, 'per_supplier' => []];
 
@@ -280,9 +295,9 @@ final class AutomationFeedService
     }
 
     /** @return array{scope:string,items:list<array<string,mixed>>} */
-    public function checklist(int $userId, bool $isSuperadmin, int $supplierId, string $scope, ?string $from, ?string $to): array
+    public function checklist(int $userId, bool $isSuperadmin, int $supplierId, string $scope, ?string $from, ?string $to, ?int $boundSupplierId = null): array
     {
-        $counts = $this->counts($userId, $isSuperadmin, $from, $to, [$supplierId]);
+        $counts = $this->counts($userId, $isSuperadmin, $from, $to, [$supplierId], $boundSupplierId);
         $items = [
             ['key' => 'auto_posted_since', 'ok' => true, 'count' => $counts['auto_today'], 'link' => ['route' => '/automation', 'query' => ['tab' => 'auto']]],
             ['key' => 'pending_count', 'ok' => $counts['pending'] === 0, 'count' => $counts['pending'], 'link' => ['route' => '/automation', 'query' => ['tab' => 'pending']]],
@@ -295,9 +310,9 @@ final class AutomationFeedService
     }
 
     /** @return array{items:list<array<string,mixed>>,total:int,page:int,per_page:int} */
-    public function history(int $userId, bool $isSuperadmin, FeedQuery $query): array
+    public function history(int $userId, bool $isSuperadmin, FeedQuery $query, ?int $boundSupplierId = null): array
     {
-        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin);
+        $allowed = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId);
         $ids = $query->suppliers === [] ? $allowed : array_values(array_intersect($allowed, $query->suppliers));
         if ($ids === []) return ['items' => [], 'total' => 0, 'page' => $query->page, 'per_page' => $query->perPage];
         [$in, $params] = $this->inClause($ids);
@@ -388,6 +403,7 @@ final class AutomationFeedService
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $duplicates = $this->duplicateEntries($rows, $supplierIds);
         $out = [];
+        $ownAccounts = new \MyInvoice\Service\Accounting\Bank\StatementOwnAccount($this->db);
         foreach ($rows as $r) {
             $sid = (int) $r['supplier_id'];
             $note = $r['note'] === null ? null : (string) $r['note'];
@@ -396,7 +412,7 @@ final class AutomationFeedService
                 $direction = (float) $r['signed_amount'] >= 0 ? 'incoming' : 'outgoing';
                 $conflicts = [];
                 foreach ($this->rules->findActive($sid, $direction) as $rule) {
-                    if ($this->ruleMatcher->matching($rule, $r)) {
+                    if ($this->ruleMatcher->matching($rule, $ownAccounts->withOwnAccount($sid, $r, $r))) {
                         $conflicts[] = [
                             'id' => $rule['id'], 'name' => $rule['name'],
                             'debit_account_code' => $rule['debit_account_code'],

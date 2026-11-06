@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
@@ -21,8 +20,8 @@ use PHPUnit\Framework\TestCase;
  * zařazení se nedoplnilo, protože složka nějaký záznam zařazení měla.
  *
  * Rozhodnutí účetní ze staršího balíku se převezme do aktuálního, pokud tam
- * cílový atribut existuje. Migrace 1840 (balík 1.4.2.9) a 1903 (balík 1.4.2.10)
- * dělají u existujících instalací totéž
+ * cílový atribut existuje. Migrace 1840 (balík 1.4.2.9), 1903 (balík 1.4.2.10)
+ * a 2210 (balík 1.4.2.11) dělají u existujících instalací totéž
  * co aplikace — shodu hlídá {@see self::testMigrationDoesExactlyWhatTheApplicationDoes()}.
  */
 #[Group('integration')]
@@ -30,7 +29,7 @@ final class PayrollComponentJmhzLegacyPackageAdoptionTest extends TestCase
 {
     use IsolatedSupplierTrait;
 
-    private const MIGRATION = '1903_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
+    private const MIGRATION = '2210_payroll_component_jmhz_catalog_1_4_2_11_package.sql';
 
     /** Cíle, které aplikace umí; synthetický starší balík je musí znát, jinak FK zařazení neprojde. */
     private const TARGETS = [
@@ -49,7 +48,7 @@ final class PayrollComponentJmhzLegacyPackageAdoptionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $components = $container->get(PayrollComponentRepository::class);
         $mappings = $container->get(PayrollComponentJmhzMappingRepository::class);

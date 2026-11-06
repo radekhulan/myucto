@@ -52,6 +52,11 @@ final class EpoSubmissionService
             if ($submission === null) {
                 throw new EpoSubmissionException('not_found', 'Podání nebylo nalezeno.', 404);
             }
+            try {
+                (new \MyInvoice\Service\Tax\Return\AccountingDecreeService($this->db))->assertDppoSubmissionSupported($supplierId, $submission, true);
+            } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
+                throw new EpoSubmissionException($e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
             if (in_array((string) $submission['form_code'], self::MOSS_OSS_FORMS, true)) {
                 throw new EpoSubmissionException(
                     'moss_oss_only',

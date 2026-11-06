@@ -11,6 +11,7 @@ use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\Migration\Shared\MigratedDepreciation;
+use MyInvoice\Service\Migration\Shared\ImportedAccountCode;
 use MyInvoice\Service\Migration\Shared\SmallAssetCard;
 
 /**
@@ -81,6 +82,8 @@ final class StereoNxAssets
 
         $tax = self::depreciationByCard($tables['JDanOdpisy'] ?? [], 'tax', $calendar, $warnings, $counts);
         $accounting = self::depreciationByCard($tables['JUcOdpisy'] ?? [], 'accounting', $calendar, $warnings, $counts);
+        $taxSource = self::sourceRowsByCard($tables['JDanOdpisy'] ?? []);
+        $accountingSource = self::sourceRowsByCard($tables['JUcOdpisy'] ?? []);
         $assets = [];
         $assetKeys = [];
         foreach ($tables['JMajetek'] ?? [] as $row) {
@@ -93,12 +96,30 @@ final class StereoNxAssets
                 throw new StereoNxException('asset_identity_duplicate', 'Evidence dlouhodobého majetku obsahuje duplicitní inventární číslo.');
             }
             $assetKeys[$number] = true;
-            $built = self::longTermCard($row, $tax[$number] ?? [], $accounting[$number] ?? [], $warnings);
+            $exact = null;
+            if (self::text($row['ZpusobDanOdepisovani'] ?? null) === 'M') {
+                $hasImprovements = array_any($tables['JTechZhod'] ?? [],
+                    static fn (array $change): bool => in_array(self::text($change['InvCislo'] ?? null), ['', $number], true));
+                try {
+                    $exact = StereoNxAssetDepreciationPlan::build($row,
+                        [...($taxSource[$number] ?? []), ...($taxSource[''] ?? [])],
+                        [...($accountingSource[$number] ?? []), ...($accountingSource[''] ?? [])], $calendar, $hasImprovements);
+                } catch (StereoNxException $e) {
+                    self::skip($counts, $warnings, 'assets_skipped', $e->errorCode,
+                        "Karta dlouhodobého majetku {$number} nebyla převedena: " . $e->getMessage());
+                    continue;
+                }
+            }
+            $built = self::longTermCard($row, $tax[$number] ?? [], $accounting[$number] ?? [], $warnings, $exact);
             if ($built === null) {
                 $counts['assets_skipped']++;
                 continue;
             }
             $record = ['source_key' => $number, 'card' => $built];
+            if ($exact !== null) {
+                $record['imported_depreciation_plan'] = $exact['future'];
+                $record['source_depreciation_plan'] = $exact['source'];
+            }
             $record['source_hash'] = StereoNxImportMap::fingerprint($record);
             $assets[] = $record;
             $counts['assets_ready']++;
@@ -154,6 +175,7 @@ final class StereoNxAssets
         }
         $written = ['assets_created' => 0, 'assets_existing' => 0,
             'small_assets_created' => 0, 'small_assets_existing' => 0];
+        $accountCodes = $this->map->accountCodes($supplierId, $ico, $companyIndex);
 
         foreach ((array) ($plan['records']['assets'] ?? []) as $record) {
             if ($this->alreadyImported($supplierId, $ico, $companyIndex, self::ASSET_KIND, $record)) {
@@ -161,7 +183,16 @@ final class StereoNxAssets
                 continue;
             }
             try {
-                $created = $this->assets->create($supplierId, (array) $record['card'], ['user_id' => $userId > 0 ? $userId : null]);
+                $meta = ['user_id' => $userId > 0 ? $userId : null];
+                $card = (array) $record['card'];
+                foreach (['asset_account_code', 'acquisition_account_code', 'accumulated_account_code'] as $field) {
+                    if (is_string($card[$field] ?? null)) {
+                        $card[$field] = ImportedAccountCode::target($card[$field], $accountCodes);
+                    }
+                }
+                $created = isset($record['imported_depreciation_plan'])
+                    ? $this->assets->createImported($supplierId, $card, (array) $record['imported_depreciation_plan'], $meta)
+                    : $this->assets->create($supplierId, $card, $meta);
             } catch (AssetException $e) {
                 throw new StereoNxException('asset_write_rejected', 'Kartu dlouhodobého majetku cílová evidence odmítla: ' . $e->getMessage());
             }
@@ -206,7 +237,7 @@ final class StereoNxAssets
     }
 
     /** @param array<string,mixed> $row @param array<string,mixed> $tax @param array<string,mixed> $accounting */
-    private static function longTermCard(array $row, array $tax, array $accounting, array &$warnings): ?array
+    private static function longTermCard(array $row, array $tax, array $accounting, array &$warnings, ?array $exact = null): ?array
     {
         $number = self::text($row['InvCislo'] ?? null);
         $name = self::text($row['Nazev'] ?? null);
@@ -235,6 +266,7 @@ final class StereoNxAssets
             'Z' => $kind === 'tangible' ? 'accelerated' : null,
             'R' => $kind === 'tangible' ? 'straight' : null,
             'N' => 'none',
+            'M' => $exact !== null ? 'by_accounting' : null,
             default => null,
         };
         $taxGroup = filter_var($row['OdpisovaSkupina'] ?? null, FILTER_VALIDATE_INT);
@@ -261,13 +293,13 @@ final class StereoNxAssets
         $accountingSchedule = $accounting['schedule'] ?? [];
         $samePlan = $taxSchedule !== [] && $taxSchedule === $accountingSchedule;
         $emptyPlan = $taxSchedule === [] && $accountingSchedule === [];
-        $accMethod = $samePlan || $emptyPlan ? 'by_tax' : 'straight_line';
-        $usefulLife = null;
-        if ($accumulatedAccount !== null && $emptyPlan) {
+        $accMethod = $exact !== null ? 'straight_line' : ($samePlan || $emptyPlan ? 'by_tax' : 'straight_line');
+        $usefulLife = $exact['life_months'] ?? null;
+        if ($exact === null && $accumulatedAccount !== null && $emptyPlan) {
             $review[] = 've Stereo chybí účetní i daňový odpisový plán';
             $warnings[] = self::warning('warning', 'asset_depreciation_plan_missing',
                 "Karta dlouhodobého majetku {$number} byla převedena jako koncept: ve Stereo chybí odpisový plán.");
-        } elseif ($accumulatedAccount !== null && !$samePlan) {
+        } elseif ($exact === null && $accumulatedAccount !== null && !$samePlan) {
             $last = $accounting['last_date'] ?? null;
             if ($inUse === null || $last === null || $last < $inUse) {
                 $warnings[] = self::warning('warning', 'asset_accounting_plan_unsupported',
@@ -319,10 +351,10 @@ final class StereoNxAssets
             'tax_group' => in_array($taxMethod, ['straight', 'accelerated'], true) ? $taxGroup : null,
             'tax_first_year_increase' => $firstIncrease,
             'is_first_owner' => $firstIncrease !== 'none',
-            'opening_tax_years' => (int) ($tax['applied_count'] ?? 0),
+            'opening_tax_years' => $exact['opening_years'] ?? (int) ($tax['applied_count'] ?? 0),
             'opening_tax_amount' => $taxOpening,
-            'opening_acc_months' => $inUse !== null && ($accounting['last_applied'] ?? null) !== null
-                ? max(0, MigratedDepreciation::monthsBetween($inUse, (string) $accounting['last_applied'])) : 0,
+            'opening_acc_months' => $exact['opening_months'] ?? ($inUse !== null && ($accounting['last_applied'] ?? null) !== null
+                ? max(0, MigratedDepreciation::monthsBetween($inUse, (string) $accounting['last_applied'])) : 0),
             'opening_acc_amount' => $accOpening,
             'acc_method' => $accMethod,
             'acc_useful_life_months' => $usefulLife,
@@ -425,6 +457,14 @@ final class StereoNxAssets
             $warnings[] = self::warning('warning', 'asset_' . $kind . '_depreciation_orphan',
                 'Odpisové řádky bez odpovídající karty nebyly převedeny; počet karet: ' . $count . '.');
         }
+    }
+
+    /** @param list<array<string,mixed>> $rows @return array<string,list<array<string,mixed>>> */
+    private static function sourceRowsByCard(array $rows): array
+    {
+        $out = [];
+        foreach ($rows as $row) $out[self::text($row['InvCislo'] ?? null)][] = $row;
+        return $out;
     }
 
     private static function assetKind(mixed $value): ?string

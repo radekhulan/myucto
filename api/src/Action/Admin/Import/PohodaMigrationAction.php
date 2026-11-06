@@ -25,6 +25,7 @@ use MyInvoice\Service\Migration\Pohoda\PohodaImportJobService;
 use MyInvoice\Service\Migration\Pohoda\PohodaUploads;
 use MyInvoice\Service\Migration\Shared\ChunkedUploadStore;
 use MyInvoice\Service\Migration\Shared\MigrationUploadLimits;
+use MyInvoice\Service\Migration\Shared\NonprofitMigrationNotice;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -181,13 +182,13 @@ final class PohodaMigrationAction extends AbstractMigrationAction
                 return $agenda;
             }, (array) $meta['agendas']);
         }
-        return Json::ok($response, $meta + [
+        return Json::ok($response, NonprofitMigrationNotice::attach($this->db, $supplierId, $meta + [
             'status' => PohodaUploads::STATUS_READY,
             'supplier_ico' => $supplierIco,
             'default_year' => $defaultYear,
             'preflight' => (object) $preflight,
             'payroll_preflight' => (object) $payrollPreflight,
-        ]);
+        ]));
     }
 
     /**

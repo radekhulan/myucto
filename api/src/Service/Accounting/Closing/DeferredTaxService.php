@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Closing;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\AccountRoleResolver;
+use MyInvoice\Service\Accounting\AccountingFrameworkException;
+use MyInvoice\Service\Accounting\FrameworkOperationPolicy;
 use MyInvoice\Repository\TaxConstantsRepository;
 
 /**
@@ -66,6 +69,11 @@ final class DeferredTaxService
      */
     public function compute(int $supplierId, int $fiscalYear, string $asOf, array $manual = []): array
     {
+        try {
+            FrameworkOperationPolicy::assertAllowed(AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $asOf), 'deferred_tax');
+        } catch (AccountingFrameworkException $e) {
+            throw new ClosingException($e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
         [$rate, $rateYear, $rateFallback] = $this->rateFor($fiscalYear);
         $warnings = [];
         if ($rateFallback) {

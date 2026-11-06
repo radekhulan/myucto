@@ -39,6 +39,21 @@ final class PohodaContext
     /** @var array<string,float> „typ|id“ dokladu => zbývá uhradit podle Pohody (Kč) */
     public array $remaining = [];
 
+    /** @var array<string,string> kód střediska z nově převedených řádků deníku => název */
+    public array $costCenters = [];
+
+    /**
+     * Dorovnání novější zálohou: datum prvního zápisu zadaného v MyÚčtu. Od něj se účtuje
+     * v MyÚčtu, záznamy POHODY s tímto nebo pozdějším datem převod nepřebírá (nevznikne dvojí zápis).
+     */
+    public ?string $ownJournalFrom = null;
+
+    /** Řádky deníku, kterým převod hlavní činnost nastavil už při zápisu (firma 504 z dřívějšího převodu). */
+    public int $nonprofitLines = 0;
+
+    /** @var array<int,float> other_items.id => uhrazeno podle Pohody (Kč) bez úhrad v nepřevedených rocích */
+    public array $otherItemPaid = [];
+
     /** @var array<string,int> id adresy v Pohodě => clients.id */
     public array $clientsByPohodaId = [];
 
@@ -107,6 +122,14 @@ final class PohodaContext
 
     public ?int $runId = null;
 
+    /**
+     * Opravný převod vazeb: firma už je převedená a v MyÚčtu se mezitím účtuje. Převod
+     * projde export, ale nic nového nezaloží (zápis, doklad, pohyb, partnera, kartu) - jen
+     * u převzatých záznamů znovu dopočítá úhrady, zápočty, zálohy a kurzové rozdíly.
+     * Novější doklady z POHODY by se jinak zdvojily s tím, co uživatel zadal v MyÚčtu.
+     */
+    public bool $relinkOnly = false;
+
     /** @var (callable(string,int,int):void)|null */
     public $progress = null;
 
@@ -156,7 +179,13 @@ final class PohodaContext
     /** Datum padá do období po období agendy, které se nepřevádí ({@see $skippedYears}). */
     public function skipsDate(?string $date): bool
     {
-        if ($this->skippedYears === [] || $date === null || preg_match('/^\d{4}-\d{2}-\d{2}/', $date) !== 1) {
+        if ($date === null || preg_match('/^\d{4}-\d{2}-\d{2}/', $date) !== 1) {
+            return false;
+        }
+        if ($this->ownJournalFrom !== null && substr($date, 0, 10) >= $this->ownJournalFrom) {
+            return true;
+        }
+        if ($this->skippedYears === []) {
             return false;
         }
         $year = $this->calendar->fiscalYearOfDate(substr($date, 0, 10));
@@ -203,6 +232,16 @@ final class PohodaContext
         if ($this->progress !== null) {
             ($this->progress)($step, $done, $total);
         }
+    }
+
+    /** Opravný převod nový záznam nezakládá; započítá ho v protokolu kroku jako vynechaný. */
+    public function skipsNew(string $step): bool
+    {
+        if (!$this->relinkOnly) {
+            return false;
+        }
+        $this->protocol->count($step, 'relink_skipped');
+        return true;
     }
 
     public function userOrNull(): ?int

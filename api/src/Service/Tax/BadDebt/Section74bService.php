@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Section74bCorrectionRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Report\VatLedgerService;
 
 /**
  * § 74b ZDPH — korekce odpočtu u neuhrazených závazků dlužníka (audit §2.5, PODVOJNE-AUDIT.md).
@@ -244,12 +245,13 @@ final class Section74bService
         // + hotovostní úhrady (cash_documents s POSTED 'cash' zápisem, shodná měna). Zrcadlí
         // {@see PurchaseInvoiceRepository::paidAdvanceAmount()}. NEspoléhá na generovaný
         // amount_to_pay (= total_with_vat − advance_paid_amount), který úhrady neodráží.
+        $vendorDic = VatLedgerService::purchaseCounterpartyDicExpr($this->db, 'pi', 'c');
         $sql =
             "SELECT pi.id, pi.vendor_id, pi.tax_date, pi.due_date,
                     pi.total_vat, pi.total_with_vat, pi.advance_paid_amount,
                     pi.paid_at, pi.status, pi.reverse_charge, pi.vendor_invoice_number,
                     pi.vat_classification_code, pi.vat_deduction, pi.vat_deduction_percent,
-                    c.company_name AS vendor_name, c.dic AS vendor_dic,
+                    c.company_name AS vendor_name, {$vendorDic} AS vendor_dic,
                     alloc.claimed_alloc, alloc.alloc_count,
                     (SELECT COALESCE(SUM(pm.amount), 0)
                        FROM payment_matches pm
@@ -463,16 +465,17 @@ final class Section74bService
             return [];
         }
         $ph = implode(',', array_fill(0, count($months), '?'));
+        $vendorDic = VatLedgerService::purchaseCounterpartyDicExpr($this->db, 'pi', 'cl');
         $sql =
             "SELECT c.purchase_invoice_id, c.movement,
                     SUM(c.vat_amount) AS vat_amount,
                     MAX(c.claimed_deduction_vat) AS claimed_deduction_vat,
-                    pi.vendor_invoice_number, pi.tax_date, cl.dic AS vendor_dic
+                    pi.vendor_invoice_number, pi.tax_date, {$vendorDic} AS vendor_dic
                FROM vat_s74b_corrections c
                JOIN purchase_invoices pi ON pi.id = c.purchase_invoice_id
                JOIN clients cl ON cl.id = pi.vendor_id
               WHERE c.supplier_id = ? AND c.period_year = ? AND c.period_month IN ({$ph})
-           GROUP BY c.purchase_invoice_id, c.movement, pi.vendor_invoice_number, pi.tax_date, cl.dic
+           GROUP BY c.purchase_invoice_id, c.movement, pi.vendor_invoice_number, pi.tax_date, {$vendorDic}
            ORDER BY c.purchase_invoice_id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute(array_merge([$supplierId, $year], $months));

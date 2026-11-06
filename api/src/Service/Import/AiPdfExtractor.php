@@ -13,6 +13,7 @@ use MyInvoice\Service\Accounting\Accrual\AccrualPeriodDetector;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKindSuggestion;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Support\AdvanceTaxDocumentText;
 use MyInvoice\Support\PaymentMethods;
@@ -38,6 +39,9 @@ use Psr\Log\NullLogger;
  */
 final class AiPdfExtractor
 {
+    /** Příznak v datech extrakce: datum vystavení na dokladu chybělo a bylo doplněno. */
+    public const ISSUE_DATE_FALLBACK = '_issue_date_fallback';
+
     private readonly LoggerInterface $logger;
 
     public function __construct(
@@ -153,7 +157,7 @@ final class AiPdfExtractor
 
         // Dedup check — pokud PDF se stejným SHA-256 už existuje u tenanta, vrať existing.
         $sha256 = hash('sha256', $pdfBytes);
-        $existingId = $this->repo->findIdByPdfHash($supplierId, $sha256);
+        $existingId = $this->repo->findIdByPdfHash($supplierId, $sha256, activeOnly: true);
         if ($existingId !== null) {
             return [
                 'ok'                  => true,
@@ -240,7 +244,7 @@ final class AiPdfExtractor
                 }
             }
         }
-        $data = $extracted['data'];
+        $data = self::withIssueDateFallback($extracted['data'], date('Y-m-d'));
 
         $validationError = $this->validateAiData($data);
         if ($validationError !== null) {
@@ -422,7 +426,7 @@ final class AiPdfExtractor
 
         // Dedup na vnitřním PDF (stejný klíč jako u běžného PDF importu).
         if ($innerPdf !== null) {
-            $existingId = $this->repo->findIdByPdfHash($supplierId, hash('sha256', $innerPdf));
+            $existingId = $this->repo->findIdByPdfHash($supplierId, hash('sha256', $innerPdf), activeOnly: true);
             if ($existingId !== null) {
                 return [
                     'ok'                  => true,
@@ -481,6 +485,27 @@ final class AiPdfExtractor
         } catch (\Throwable) {
             // ignore — dávkové označení není kritické
         }
+    }
+
+    /**
+     * Účtenka bez data (paragon z pokladny, která datum netiskne, nebo nečitelná
+     * fotka) by jinak celou extrakci shodila na validaci. Doplní se DUZP, a když
+     * chybí i to, den importu; koncept pak nese varování ({@see self::ISSUE_DATE_FALLBACK})
+     * a datum zkontroluje účetní. Datum rozhoduje o období DPH, proto nejde mlčky.
+     *
+     * @param array<string,mixed> $data
+     * @return array<string,mixed>
+     */
+    public static function withIssueDateFallback(array $data, string $today): array
+    {
+        $valid = static fn (mixed $v): bool => is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $v) === 1;
+        if ($valid($data['issue_date'] ?? null)) {
+            return $data;
+        }
+        $data['issue_date'] = $valid($data['tax_date'] ?? null) ? (string) $data['tax_date'] : $today;
+        $data[self::ISSUE_DATE_FALLBACK] = true;
+
+        return $data;
     }
 
     /**
@@ -939,6 +964,16 @@ final class AiPdfExtractor
             ]);
         }
 
+        // Náhradní datum vystavení (dnešek) není údaj z dokladu, DUZP se z něj neodvozuje.
+        if ($rcClassification !== '23' && ($data[self::ISSUE_DATE_FALLBACK] ?? false) !== true) {
+            $data['tax_date'] = ImportedTaxDatePolicy::resolve(
+                $data['tax_date'] ?? null,
+                $data['delivery_date'] ?? null,
+                $data['issue_date'] ?? null,
+                $documentKind,
+            );
+        }
+
         // Platební účet dodavatele pro „Zaplatit pomocí QR" — z AI pole `payment`.
         // Volný řetězec (účet i IBAN) rozparsujeme na strukturu. Repository nastaví
         // source/checked_at jen pokud je účet skutečně použitelný.
@@ -1021,21 +1056,21 @@ final class AiPdfExtractor
         ];
         // Dedup guard — jiné PDF stejné faktury (různý hash, stejné číslo+datum+vendor)
         // by hodilo SQL 23000 duplicate key. Skipnout a vrátit existující ID.
+        // Stornovaný doklad neblokuje: nový vznikne s dalším pořadím čísla dodavatele.
         $existingId = $this->repo->findIdByVendorInvoice(
             $supplierId, $vendorId,
             (string) $payload['vendor_invoice_number'],
             (string) $payload['issue_date'],
+            activeOnly: true,
         );
         if ($existingId !== null) {
             $existed = true;
             return $existingId;
         }
+        $payload['vendor_number_seq'] = $this->repo->importDuplicateSeq(
+            $supplierId, $vendorId, (string) $payload['vendor_invoice_number'], (string) $payload['issue_date'],
+        );
         $id = $this->repo->createDraft($payload, $userId, $supplierId);
-        // Doklad bez jediného čitelného data → datum přijetí je NÁHRADA, ne údaj z dokladu.
-        // Uživatel to musí vidět (žluté upozornění), ne se to dozvědět až v knize DPH.
-        if ($receivedAt['fell_back']) {
-            $this->repo->appendExtractionWarning($id, $supplierId, ImportedReceivedDatePolicy::fallbackWarning());
-        }
         // párování platby kartou. Čte se přes týž SSOT jako u skenů; ruční hodnotu nepřepíše.
         $cardLast4 = \MyInvoice\Service\Document\ScanAttach\ScanExtractionNormalizer::cardLast4($data['card_last4'] ?? null);
         if ($cardLast4 !== null) {
@@ -1116,6 +1151,20 @@ final class AiPdfExtractor
         // samotná záloha ('advance'), která se na nic nenavazuje.
         if ($documentKind !== 'advance') {
             $this->maybeSuggestAdvanceLink($id, $supplierId, $vendorId, $data);
+        }
+        // Doplněné datum (doklad žádné nenesl) je NÁHRADA, ne údaj z dokladu. Uživatel to
+        // musí vidět (žluté upozornění), ne se to dozvědět až v knize DPH. Append až po
+        // setExtractionWarning() zápisech výš, které by hlášku přepsaly.
+        if (($data[self::ISSUE_DATE_FALLBACK] ?? false) === true) {
+            $this->repo->appendExtractionWarning($id, $supplierId, sprintf(
+                'Na dokladu jsme nenašli datum vystavení, nastavili jsme %s (%s). '
+                . 'Zkontrolujte datum vystavení i DUZP podle originálu, rozhodují o období DPH.',
+                (new \DateTimeImmutable((string) $data['issue_date']))->format('j. n. Y'),
+                isset($data['tax_date']) && $data['tax_date'] === $data['issue_date'] ? 'DUZP z dokladu' : 'den importu',
+            ));
+        }
+        if ($receivedAt['fell_back']) {
+            $this->repo->appendExtractionWarning($id, $supplierId, ImportedReceivedDatePolicy::fallbackWarning());
         }
         // Varování z rekapitulace DPH (seed) přidáme až teď — po mismatch/neplátce
         // zápisech, které používají setExtractionWarning() (overwrite); append ho
@@ -1584,6 +1633,15 @@ final class AiPdfExtractor
             return [$qty, $unitPrice]; // 0 částka → nic spolehlivého k dosazení
         }
         if (round($qty * $unitPrice, 2) !== round($lineTotal, 2)) {
+            // Doklad vytiskl jednotkovou cenu zaokrouhlenou na haléře (víčka 0,01 EUR
+            // místo 0,0108 × 250 000 ks). Přesná cena z řádkové částky se od vytištěné
+            // liší méně než o půl haléře → množství zůstane a dosadí se přesná cena.
+            if ($qty != 0.0) {
+                $exact = UnitPricePrecision::normalize($lineTotal / $qty);
+                if (abs($exact - $unitPrice) < 0.005 && round($qty * $exact, 2) === round($lineTotal, 2)) {
+                    return [$qty, $exact];
+                }
+            }
             return [1.0, $lineTotal];
         }
         return [$qty, $unitPrice];
@@ -2300,7 +2358,7 @@ final class AiPdfExtractor
         if ($exactTotal === 0.0) return;
 
         $diff = round($pdfTotal - $exactTotal, 2);
-        if (abs($diff) > 0.0 && abs($diff) < 1.0) {
+        if (self::totalGapIsRounding($diff)) {
             try {
                 $this->repo->setRounding($id, $supplierId, $isCredit ? -1.0 * $diff : $diff);
             } catch (\Throwable $e) {
@@ -2309,7 +2367,71 @@ final class AiPdfExtractor
                     'error' => $e->getMessage(),
                 ]);
             }
+
+            return;
         }
+        if ($diff === 0.0) {
+            return;
+        }
+        // Rozdíl větší než haléřové zaokrouhlení: doklad uvádí k úhradě jinou částku,
+        // než dávají jeho řádky, a přes `setRounding` se sem nevejde. Dřív se v téhle
+        // větvi nestalo NIC, takže částka tiše zmizela.
+        //
+        // Typická příčina je řádek MIMO daňovou rekapitulaci — spropitné, vratná záloha,
+        // poplatek. Rekapitulace je pro nás autorita (a správně: viz prompt), takže se
+        // z ní sestaví totály a nedaněný řádek za ní propadne. Zachycený případ: doklad
+        // k úhradě 5 096,57 Kč, rekapitulace 4 532,64 + 543,93 = 5 076,57 a mimo ni
+        // „Spropitné kurýrovi 20,00" → doklad se naimportoval o 20 Kč kratší a nesedl
+        // na platbu.
+        //
+        // `maybeFlagTotalsMismatch()` to nechytí: hlídá odchylku nad 2 % a tohle je
+        // 0,4 %. Dohadovat chybějící řádek by znamenalo vymýšlet si položku, takže se
+        // jen zapíše varování s čísly a uživatel doklad doplní. Připojuje se (append), protože
+        // před touto metodou už může být zapsané varování o náhradním datu přijetí.
+        try {
+            $this->repo->appendExtractionWarning($id, $supplierId, self::totalGapWarning(
+                $pdfTotal,
+                $exactTotal,
+                $diff,
+                (string) ($current['currency'] ?? $data['currency'] ?? 'CZK'),
+            ));
+        } catch (\Throwable $e) {
+            // Varování je „nice to have" — doklad už je založený.
+            $this->logger->warning('AI extractor: applyRoundingFromPdfTotal — varování nešlo zapsat', [
+                'invoice_id' => $id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
+     * Vejde se rozdíl mezi částkou na dokladu a součtem řádků do zaokrouhlení?
+     *
+     * Hranice je korunová: haléře řeší § 36 ZDPH jako zaokrouhlení, cokoli většího je
+     * věcný rozdíl, který se má prošetřit, ne schovat do `rounding`.
+     */
+    public static function totalGapIsRounding(float $diff): bool
+    {
+        return abs($diff) > 0.0 && abs($diff) < 1.0;
+    }
+
+    /** Text varování o rozdílu mezi částkou k úhradě na dokladu a součtem řádků. */
+    public static function totalGapWarning(float $pdfTotal, float $exactTotal, float $diff, string $currency): string
+    {
+        $fmt = static fn (float $v): string => number_format($v, 2, ',', ' ');
+
+        return sprintf(
+            'Doklad uvádí k úhradě %s %s, ale jeho řádky dávají %s %s (rozdíl %s %s). '
+                . 'Zkontrolujte, jestli doklad nemá řádek mimo daňovou rekapitulaci '
+                . '(spropitné, vratná záloha, poplatek, doprava). Takový řádek se do položek '
+                . 'nedostane a doklad pak nesedne na platbu.',
+            $fmt($pdfTotal),
+            $currency,
+            $fmt($exactTotal),
+            $currency,
+            $fmt(abs($diff)),
+            $currency,
+        );
     }
 
     /**

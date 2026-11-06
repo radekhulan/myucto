@@ -1,5 +1,5 @@
 import { api } from './client'
-import { createMigrationApi } from './migrationApi'
+import { createMigrationApi, type MigrationNonprofitNotice } from './migrationApi'
 
 export { retryDelay } from './chunkedUpload'
 
@@ -57,6 +57,7 @@ export interface MoneyS3Message {
 }
 
 export interface MoneyS3Upload {
+  nonprofit_notice?: MigrationNonprofitNotice
   token: string
   file_name: string
   sha256: string

@@ -30,7 +30,9 @@ druhý záznam stejné firmy (viz [§ 18.7.7](#1877-role-odberatel-a-dodavatel))
 
 1. Otevřete `Prodej → Klienti` a klikněte na **Nový klient**.
 2. Do pole **IČO** zadejte 8 číslic a klikněte na **Najít v ARES (IČO)**.
-   Aplikace předvyplní název, DIČ, adresu a stát.
+   Aplikace předvyplní název, DIČ, adresu a stát. U aktivní skupinové registrace
+   označí subjekt jako plátce a předvyplní skupinové DIČ, pokud ho ARES vrátí.
+   IČO identifikuje konkrétního člena; stejné skupinové DIČ může mít více klientů.
 3. Doplňte **Hlavní e-mail**.
 4. Podle potřeby změňte **Výchozí měnu** a **Jazyk** (`cs` nebo `en`).
    Jazyk určuje jazyk PDF a e-mailových šablon.
@@ -271,6 +273,8 @@ Nabídka akcí obsahuje **Upravit**, **Detaily plátce DPH** a v rozbalovací
 Na detailu odběratele nebo dodavatele je sekce **Bankovní účty protistrany**.
 Účet můžete přidat ručně jako české číslo účtu nebo IBAN. U českého dodavatele
 s DIČ lze tlačítkem **Načíst z registru DPH** převzít všechny zveřejněné účty.
+U skupinového DIČ se účty hromadně nepřebírají, protože mohou patřit jiným členům
+skupiny. Účet konkrétního člena zadejte ručně podle jeho dokladu.
 
 MyÚčto účet doplní také z bankovního výpisu, ale až po potvrzeném spárování
 transakce s vydanou nebo přijatou fakturou. Samotná podobnost názvu či částky
@@ -322,7 +326,7 @@ Formát je text se zástupnými znaky ve složených závorkách:
 | Zástupný znak | Hodnota |
 |---|---|
 | `{VS}` | Variabilní symbol (číslo dokladu) |
-| `{TYP}` | Druh dokladu v jazyce klienta: Faktura, Zálohová faktura, Opravný daňový doklad, Daňový doklad k přijaté platbě, Platební kalendář |
+| `{TYP}` | Druh dokladu v jazyce klienta: Faktura, Zálohová faktura, Opravný daňový doklad, Daňový doklad k přijaté platbě, Splátkový kalendář, Platební kalendář |
 | `{KLIENT}` | Název klienta |
 | `{DODAVATEL}` | Název dodavatele |
 | `{MM}`, `{YYYY}`, `{YY}` | Měsíc a rok vystavení |

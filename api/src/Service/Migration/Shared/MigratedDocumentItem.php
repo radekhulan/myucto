@@ -33,6 +33,8 @@ final class MigratedDocumentItem
         public readonly array $oss,
         public readonly bool $isFixedAsset,
         public readonly ?string $expenseKind,
+        public readonly ?string $expenseAccountCode = null,
+        public readonly ?string $revenueAccountCode = null,
     ) {}
 
     /**
@@ -51,6 +53,7 @@ final class MigratedDocumentItem
         float $totalWithVat,
         ?string $vatClassificationCode,
         array $oss,
+        ?string $revenueAccountCode = null,
     ): self {
         $missing = array_diff(self::OSS_KEYS, array_keys($oss));
         if ($missing !== []) {
@@ -72,6 +75,8 @@ final class MigratedDocumentItem
             ],
             false,
             null,
+            null,
+            $revenueAccountCode,
         );
     }
 
@@ -110,6 +115,7 @@ final class MigratedDocumentItem
         ?string $vatClassificationCode,
         bool $isFixedAsset = false,
         ?string $expenseKind = null,
+        ?string $expenseAccountCode = null,
     ): self {
         return new self(
             $description, $quantity, $unit, $unitPrice, $vatRateId, $vatRateSnapshot,
@@ -120,6 +126,7 @@ final class MigratedDocumentItem
             // bez druhu by první uložení nebo auto-klasifikace příznak ř. 47 shodily. Druh daný
             // zdrojem (PREMIER podle účtu položky) má přednost.
             $expenseKind ?? ($isFixedAsset ? 'fixed_asset' : null),
+            $expenseAccountCode,
         );
     }
 }

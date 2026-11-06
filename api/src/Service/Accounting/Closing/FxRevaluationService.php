@@ -9,6 +9,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Service\Accounting\ForeignCurrencyAccountPolicy;
+use MyInvoice\Service\Accounting\AccountRoleResolver;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 
@@ -57,15 +58,56 @@ final class FxRevaluationService
         };
     }
 
-    private const FALLBACK_LOSS_ACCOUNT = '563';
-    private const FALLBACK_GAIN_ACCOUNT = '663';
 
     public function __construct(
         private readonly ClosingRepository $repo,
         private readonly CnbExchangeRateClient $cnb,
         private readonly PostingRuleRepository $rules,
         private readonly ChartOfAccountsRepository $accounts,
+        private readonly AccountRoleResolver $roles,
     ) {}
+
+    /**
+     * Doklad bez důkazu úhrady přecenění zastaví, protože jeho zůstatek v cizí měně nejde určit.
+     * Výjimkou je doklad, který je v deníku vyrovnaný a nenese dřívější přecenění: není co
+     * přeceňovat, ať už párování vypadá jakkoli. Hlásí se všechny doklady naráz i s číslem,
+     * jinak by se účetní k dalšímu dostala až po opravě předchozího.
+     *
+     * @param list<array<string,mixed>> $items projekce `item` + `evidence`
+     * @param array<string,int> $carrying
+     */
+    private function assertSettlementsProven(int $supplierId, array $items, array $carrying, string $endsOn): void
+    {
+        $unproven = [];
+        foreach ($items as $projection) {
+            $item = $projection['item'];
+            if ($projection['evidence']['complete'] || self::isNonMonetaryAdvanceAccount((string) $item['account_code'])) {
+                continue;
+            }
+            if (($carrying[FxCaseCarryingProjection::key($item)] ?? 0) === 0
+                && $this->repo->fxDocumentSettledInLedger($supplierId, (string) $item['doc_type'], (int) $item['doc_id'], (int) $item['account_id'], $endsOn)) {
+                continue;
+            }
+            $unproven[] = sprintf(
+                '%s %s: %s',
+                $item['doc_type'] === 'invoice' ? 'vydaná faktura' : 'přijatá faktura',
+                (string) ($item['varsymbol'] ?: '#' . $item['doc_id']),
+                self::settlementFindingText($projection['evidence']['findings'][0]),
+            );
+        }
+        if ($unproven === []) {
+            return;
+        }
+        $shown = array_slice($unproven, 0, 10);
+        $more = count($unproven) - count($shown);
+        throw new ClosingException(
+            'fx_settlement_unproven',
+            'Přecenění nelze dokončit, u těchto dokladů nejde určit zůstatek v cizí měně: ' . implode(' ', $shown)
+                . ($more > 0 ? ' A dalších ' . $more . '.' : '')
+                . ' Opravte párování úhrady na dokladu. Úplný seznam je v kroku Kontroly v řádku Cizoměnové otevřené doklady.',
+            422,
+        );
+    }
 
     /**
      * Výpočet přecenění bez zápisu — podklad pro FE náhled i pro buildEntries.
@@ -92,6 +134,7 @@ final class FxRevaluationService
         if (!$carrying['complete']) {
             throw new ClosingException('fx_case_history_unproven', FxCaseCarryingProjection::findingMessage($carrying['findings'][0]), 422);
         }
+        $this->assertSettlementsProven($supplierId, $snapshot['items'], $carrying['carrying'], $endsOn);
 
         foreach ($snapshot['items'] as $projection) {
             $item = $projection['item'];
@@ -112,9 +155,9 @@ final class FxRevaluationService
 
             $currency = (string) $item['currency_code'];
             $evidence = $projection['evidence'];
+            // Sem dojde jen doklad vyrovnaný v deníku, ostatní odmítl assertSettlementsProven().
             if (!$evidence['complete']) {
-                $label = $item['doc_type'] === 'invoice' ? 'Vydaná faktura' : 'Přijatá faktura';
-                throw new ClosingException('fx_settlement_unproven', self::settlementFindingText($evidence['findings'][0]) . ' ' . $label . ': #' . $item['doc_id'], 422);
+                continue;
             }
             foreach ($evidence['diagnostics'] ?? [] as $diagnostic) {
                 $warnings[] = ['code' => $diagnostic, 'doc_type' => $item['doc_type'], 'doc_id' => $item['doc_id']];
@@ -306,9 +349,9 @@ final class FxRevaluationService
      * @param array<string,mixed> $preview výstup preview()
      * @return array{saldo: list<array<string,mixed>>, bank: list<array<string,mixed>>}
      */
-    public function buildEntries(int $supplierId, array $preview): array
+    public function buildEntries(int $supplierId, array $preview, string $entryDate): array
     {
-        [$lossAccount, $gainAccount] = $this->resultAccounts($supplierId);
+        [$lossAccount, $gainAccount] = $this->resultAccounts($supplierId, $entryDate);
 
         $saldo = [];
         foreach ($preview['saldo']['lines'] as $g) {
@@ -372,16 +415,17 @@ final class FxRevaluationService
     }
 
     /**
-     * Účty 563/663 z kontací fx.loss/fx.gain (seedy 1006), fallback 563/663.
+     * Rámec k datu zápisu určuje FX role; dosavadní kontace zůstávají platné pro 500.
      *
      * @return array{0: string, 1: string} [loss, gain]
      */
-    private function resultAccounts(int $supplierId): array
+    private function resultAccounts(int $supplierId, string $entryDate): array
     {
         $lossRule = $this->rules->resolve($supplierId, 'fx.loss');
         $gainRule = $this->rules->resolve($supplierId, 'fx.gain');
-        $loss = (string) (($lossRule['debit_account_code'] ?? null) ?: self::FALLBACK_LOSS_ACCOUNT);
-        $gain = (string) (($gainRule['credit_account_code'] ?? null) ?: self::FALLBACK_GAIN_ACCOUNT);
+        $profile = $this->roles->forDate($supplierId, $entryDate);
+        $loss = $profile->account('fx.loss', $lossRule['debit_account_code'] ?? null);
+        $gain = $profile->account('fx.gain', $gainRule['credit_account_code'] ?? null);
         return [$loss, $gain];
     }
 

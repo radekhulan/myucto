@@ -22,6 +22,9 @@ final class BruteForceGuard
     public const STATE_LOCKED_15M      = 'locked_15m';
     public const STATE_LOCKED_24H      = 'locked_24h';
 
+    /** @var array<string,string> Kanonický e-mailový klíč per zadaná adresa v rámci requestu. */
+    private array $emailKeys = [];
+
     public function __construct(
         private readonly Config $config,
         private readonly RedisFactory $redis,
@@ -289,6 +292,73 @@ final class BruteForceGuard
         } else {
             $netKey = bin2hex(substr($packed, 0, 8)); // /64
         }
-        return sha1(strtolower($email)) . ':' . $netKey;
+        return sha1($this->emailKey($email)) . ':' . $netKey;
+    }
+
+    /**
+     * E-mailová část klíče musí mít STEJNOU rovnost jako dotaz na účet.
+     *
+     * `users.email` je v kolaci utf8mb4_unicode_ci, která kromě velikosti písmen
+     * nerozlišuje ani diakritiku a ignorované znaky (zero-width mezera apod.).
+     * Klíč ze `strtolower()` tak měl pro `ucetní@…` a `uce​tni@…` jiný bucket
+     * než pro `ucetni@…`, přestože se všechny přihlásí do stejného účtu, a každá
+     * varianta dostala vlastní příděl pokusů.
+     *
+     * Existující účet proto rozhoduje databáze: klíč se skládá z adresy, kterou
+     * vrátí stejné porovnání jako přihlášení. Pro neexistující adresu (a při
+     * nedostupné DB) zůstává Unicode složení, které varianty sjednotí také.
+     */
+    private function emailKey(string $email): string
+    {
+        $email = trim($email);
+        if (isset($this->emailKeys[$email])) {
+            return $this->emailKeys[$email];
+        }
+
+        $canonical = $email;
+        if ($email !== '') {
+            try {
+                $stmt = $this->db->pdo()->prepare('SELECT email FROM users WHERE email = ? LIMIT 1');
+                $stmt->execute([$email]);
+                $found = $stmt->fetchColumn();
+                if (is_string($found) && $found !== '') {
+                    $canonical = $found;
+                }
+            } catch (\Throwable) {
+                // Nevalidní UTF-8 nebo výpadek DB: klíč se složí jen ze zadané adresy.
+            }
+        }
+
+        if (count($this->emailKeys) >= 64) {
+            // Dlouho běžící proces (CLI, MCP) nesmí cache nafukovat donekonečna.
+            $this->emailKeys = [];
+        }
+        return $this->emailKeys[$email] = self::foldEmail($canonical);
+    }
+
+    /**
+     * Unicode složení e-mailu blízké kolaci utf8mb4_unicode_ci: kompatibilní
+     * rozklad (NFKD), bez diakritiky, formátovacích, řídicích a ignorovaných
+     * znaků, s plným case foldingem. Sjednotí víc variant než kolace, ne méně;
+     * přísnější bucket je tu v pořádku.
+     */
+    public static function foldEmail(string $email): string
+    {
+        if (class_exists(\Normalizer::class)) {
+            $normalized = \Normalizer::normalize($email, \Normalizer::FORM_KD);
+            if (is_string($normalized)) {
+                $email = $normalized;
+            }
+        }
+        $stripped = preg_replace(
+            '/[\p{M}\p{Cf}\p{Cc}\p{Z}\x{034F}\x{115F}\x{1160}\x{17B4}\x{17B5}\x{180B}-\x{180F}\x{3164}\x{FE00}-\x{FE0F}\x{FFA0}\x{E0000}-\x{E0FFF}]/u',
+            '',
+            $email,
+        );
+        if (!is_string($stripped)) {
+            // Nevalidní UTF-8 — bez Unicode operací, jen ASCII lowercase jako dřív.
+            return strtolower($email);
+        }
+        return mb_convert_case($stripped, MB_CASE_FOLD, 'UTF-8');
     }
 }

@@ -27,14 +27,20 @@ final class JmhzScenario1ControlValidator
         private readonly JmhzScenario1ControlEvaluator $evaluator,
     ) {}
 
+    /**
+     * Ročník kontrol se volí podle {@see JmhzSpecVersion}: katalog, slovník
+     * projekce, číselníky i vykonávací implementace musí být z téhož ročníku.
+     */
     public static function create(
         PayrollRulesetProvider $rulesets,
         ?string $resourceRoot = null,
+        JmhzSpecVersion $version = JmhzSpecVersion::V2026,
     ): self
     {
         $root = $resourceRoot ?? dirname(__DIR__, 5) . '/resources/payroll/jmhz';
-        $catalog = JmhzControlSourceCatalog::load($root);
+        $catalog = JmhzControlSourceCatalog::loadFor($version, $root);
         $specPackages = new JmhzSpecPackageCatalog($root);
+        $pin = $specPackages->requirePin($version);
 
         return new self(
             $catalog,
@@ -42,10 +48,8 @@ final class JmhzScenario1ControlValidator
                 $catalog->parameters(),
                 new JmhzDeadlinePolicy($rulesets),
                 new JmhzExternalCodebookCatalog($specPackages, $root),
-                new JmhzCodebookCatalog($specPackages->load(
-                    JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
-                    JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
-                )),
+                new JmhzCodebookCatalog($specPackages->load($pin['package_key'], $pin['manifest_sha256'])),
+                $version,
             ),
         );
     }
@@ -55,7 +59,11 @@ final class JmhzScenario1ControlValidator
         JmhzControlContext $context,
         ?string $resourceRoot = null,
     ): JmhzControlEvaluationReport {
-        $projection = JmhzAttributeProjection::fromXml($xml, $resourceRoot);
+        $version = $this->catalog->version();
+        if ($this->evaluator->version() !== $version) {
+            throw new \LogicException('Katalog kontrol a jejich implementace patří k různým ročníkům specifikace.');
+        }
+        $projection = JmhzAttributeProjection::fromXml($xml, $resourceRoot, $version);
         $present = array_flip($projection->presentAttributeIds());
         $findings = [];
         foreach ($this->catalog->definitions() as $definition) {
@@ -66,8 +74,8 @@ final class JmhzScenario1ControlValidator
 
         return new JmhzControlEvaluationReport(
             $findings,
-            JmhzControlSourceCatalog::CATALOG_KEY,
-            JmhzControlSourceCatalog::MANIFEST_SHA256,
+            $this->catalog->catalogKey(),
+            $this->catalog->manifestSha256(),
             $this->evaluator->documentedDeviations(),
         );
     }

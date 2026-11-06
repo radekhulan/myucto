@@ -31,14 +31,26 @@ export interface SearchPurchaseInvoice {
   company_name: string
 }
 
+/** Zaměstnanec z kterékoli firmy, kde má uživatel právo číst mzdy. */
+export interface SearchEmployee {
+  id: number
+  supplier_id: number
+  supplier_name: string
+  full_name: string
+  is_active: boolean
+  code: string | null
+}
+
 export interface SearchResults {
   q: string
   clients: SearchClient[]
   invoices: SearchInvoice[]
   purchase_invoices: SearchPurchaseInvoice[]
+  /** Starší server pole nevrací. */
+  employees?: SearchEmployee[]
 }
 
 export const searchApi = {
-  /** Globální vyhledávání — klienti/dodavatelé + vydané/přijaté faktury (dle čísla dokladu). */
+  /** Globální vyhledávání — klienti/dodavatelé + vydané/přijaté faktury (dle čísla dokladu) + zaměstnanci napříč firmami. */
   query: (q: string) => api.get<SearchResults>('/search', { params: { q } }).then(r => r.data),
 }

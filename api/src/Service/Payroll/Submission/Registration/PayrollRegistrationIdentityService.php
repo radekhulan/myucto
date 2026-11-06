@@ -2922,6 +2922,20 @@ final readonly class PayrollRegistrationIdentityService
             self::A1_DRAFT_ATTACHMENT,
             9,
         );
+        // Platnost pobytu (REGZEC27, ID 10568/10569) se do konceptu zapisuje
+        // jen vyplněná, aby koncepty bez ní zůstaly beze změny.
+        if (is_array($draft['foreign_worker'])) {
+            $stay = $this->a1DraftValue(
+                is_array($input['foreign_worker'] ?? null) ? $input['foreign_worker'] : null,
+                ['stay_valid_from' => 'text:10', 'stay_valid_to' => 'text:10'],
+            );
+            if (is_array($stay)) {
+                $draft['foreign_worker'] += array_filter(
+                    $stay,
+                    static fn (mixed $item): bool => $item !== null,
+                );
+            }
+        }
         $foreignInsurance = $this->a1DraftValue(
             $input['foreign_insurance'] ?? null,
             self::A1_DRAFT_FOREIGN_INSURANCE,

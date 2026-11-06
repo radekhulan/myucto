@@ -64,6 +64,12 @@ final class KhSubmittedXmlReader
         return $out;
     }
 
+    /** Rychlá odpověď na výzvu potvrzující poslední KH: nese jen hlavičku, ne oddíly. */
+    public static function isConfirmation(string $xml): bool
+    {
+        return preg_match('/<VetaD\b[^>]*\bvyzva_odp="P"/', $xml) === 1;
+    }
+
     private static function itemRow(string $section, \SimpleXMLElement $v, ?string $dicAttr, string $dateAttr): array
     {
         $dic = $dicAttr === null

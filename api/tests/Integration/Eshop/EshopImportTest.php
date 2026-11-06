@@ -61,11 +61,13 @@ final class EshopImportTest extends StockTestCase
         self::assertSame('fixed', $row['price_mode']);
     }
 
-    public function testImportedPriceRoundsHalfUp(): void
+    public function testImportedPriceKeepsSixDecimals(): void
     {
         $sid = $this->createSupplier();
-        $this->imp($sid, "sku;nazev;cena\nIMP-ROUND;Test;19.999\n", false);
-        self::assertSame('20.00', $this->itemsRepo->findBySku($sid, 'IMP-ROUND')['sale_price_without_vat']);
+        $this->imp($sid, "sku;nazev;cena\nIMP-ROUND;Test;19.999\nIMP-CAP;Víčko;0,004\nIMP-CENT;Krabice;12.5\n", false);
+        self::assertSame('19.999', $this->itemsRepo->findBySku($sid, 'IMP-ROUND')['sale_price_without_vat']);
+        self::assertSame('0.004', $this->itemsRepo->findBySku($sid, 'IMP-CAP')['sale_price_without_vat']);
+        self::assertSame('12.50', $this->itemsRepo->findBySku($sid, 'IMP-CENT')['sale_price_without_vat']);
     }
 
     public function testImportedPriceChangesEffectiveCzkWithoutRemovingEur(): void

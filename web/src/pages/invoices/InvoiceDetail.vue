@@ -4,11 +4,12 @@ import { useWindowTitle } from '@/composables/useWindowTitle'
 import { eshopApi } from '@/api/eshop'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
-import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type InvoicePayment, type PenaltyPreview, type RelatedBankTransaction } from '@/api/invoices'
+import { invoicesApi, type Invoice, type WorkReport, type ApprovalStatus, type InvoiceAttachment, type AdvanceCandidate, type AdvanceDrawdownCandidate, type InvoicePayment, type PenaltyPreview, type RelatedBankTransaction } from '@/api/invoices'
+import { hasPaymentSchedule, isCalendarType } from '@/utils/invoiceCalendar'
 import {
   settingsApi,
   type PdfSignatureDocumentEntityType,
@@ -17,10 +18,17 @@ import {
   type SigningProfile,
 } from '@/api/settings'
 import { adminApi, type InvoiceSmtpLog } from '@/api/admin'
-import { apiErrorMessage } from '@/api/errors'
+import { apiErrorCode, apiErrorMessage } from '@/api/errors'
+import { draftDeletionLockedForClient } from '@/api/locks'
+import AcceptPaymentDialog from '@/components/eet/AcceptPaymentDialog.vue'
+import QrInPersonPayment from '@/components/eet/QrInPersonPayment.vue'
+import EetInvoiceSummary from '@/components/eet/EetInvoiceSummary.vue'
+import EetCreditNoteRefundDialog from '@/components/eet/EetCreditNoteRefundDialog.vue'
+import { eetApi, type EetCreditNoteRefundInfo, type EetInvoiceSummaryItem } from '@/api/eet'
+import { useEetCapabilities } from '@/composables/useEetCapabilities'
 import { stockApi, type StockDocument } from '@/api/stock'
-import { formatMoney, formatHourlyRate, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
-import { durationTotal, formatDuration, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
+import { formatPeriod, formatMoney, formatHourlyRate, formatUnitPrice, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
+import { durationTotal, formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
 import { invoiceIssuedBy } from '@/pages/invoices/invoiceIssuedBy'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -31,8 +39,10 @@ import { insufficientStockItems, type InsufficientStockItem } from '@/components
 import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
+import BillingRecap from '@/components/work-reports/BillingRecap.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { offsetRoute } from '@/components/accounting/offsetLink'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
@@ -47,7 +57,10 @@ import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
+import InvoiceOtherItemLink from '@/components/invoices/InvoiceOtherItemLink.vue'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
+import ListNavArrows from '@/components/ui/ListNavArrows.vue'
+import { useListNavigation } from '@/composables/useListNavigation'
 
 const PaymentMethodModal = defineAsyncComponent(() => import('@/components/invoices/PaymentMethodModal.vue'))
 const RefundPaymentDialog = defineAsyncComponent(() => import('@/components/invoices/RefundPaymentDialog.vue'))
@@ -77,6 +90,16 @@ function formatRate(rate: number): string {
 
 const route = useRoute()
 const router = useRouter()
+const listNav = useListNavigation({
+  kind: 'invoices',
+  currentId: () => Number(route.params.id) || 0,
+  detailRoute: id => ({ name: 'invoice-detail', params: { id } }),
+  fetchPage: async (params, page) => {
+    const result = await invoicesApi.listGrouped({ ...(params as Parameters<typeof invoicesApi.listGrouped>[0]), page })
+    return { ids: result.data.flatMap(g => g.invoices.map(inv => inv.id)), pages: result.meta.pages ?? 1 }
+  },
+  scope: () => supplierStore.currentSupplierId,
+})
 
 const invoice = ref<Invoice | null>(null)
 
@@ -110,6 +133,24 @@ const wrModalOpen = ref(false)
 const loading = ref(true)
 const error = ref('')
 const busy = ref<string | null>(null)
+
+// ───── EET: přijetí platby s posouzením evidence ─────
+const eet = useEetCapabilities()
+const eetAcceptOpen = ref(false)
+const eetQrOpen = ref(false)
+const eetRefresh = ref(0)
+/** ID plateb faktury, ke kterým existuje EET tržba (úhradu s tržbou nelze smazat). */
+const eetPaymentIds = ref<Set<number>>(new Set())
+function onEetSummaryLoaded(items: EetInvoiceSummaryItem[]) {
+  const ids = new Set<number>()
+  for (const it of items) {
+    if (!it.eet_record && !it.eet) continue
+    for (const a of it.allocations ?? []) if (a.invoice_payment_id != null) ids.add(a.invoice_payment_id)
+  }
+  eetPaymentIds.value = ids
+}
+/** Volba z editoru (?eet=accept|qr): dialog se otevře, jakmile je faktura vystavená. */
+const pendingEet = ref<'accept' | 'qr' | null>(null)
 /** Výčet chybějících zásob z neúspěšného vystavení (okno místo toastu). */
 const insufficientStock = ref<InsufficientStockItem[] | null>(null)
 let loadGeneration = 0
@@ -120,7 +161,7 @@ let loadGeneration = 0
 // unit_price_without_vat už netto → vracíme ho beze změny.
 function displayUnitPriceNet(item: { quantity: number; unit_price_without_vat: number; total_without_vat?: number; unit?: string; duration_minutes?: number | null; stock_item_id?: number | null }): number {
   if (invoice.value?.prices_include_vat && Number(item.quantity)) {
-    if (isTimeItem(item) && (item.duration_minutes != null || item.unit_price_without_vat !== Math.round(item.unit_price_without_vat * 100) / 100)) {
+    if (isPreciseUnitPrice(item)) {
       return Math.round(((item.total_without_vat ?? 0) / itemQuantity(item)) * 1e6) / 1e6
     }
     return Math.round(((item.total_without_vat ?? 0) / Number(item.quantity)) * 100) / 100
@@ -157,7 +198,7 @@ const publicLinkUrl = ref('')
 const publicLinkViewedAt = ref<string | null>(null)
 const publicLinkBusy = ref(false)
 
-const activity = ref<Array<{ id: number; user_email: string | null; user_name: string | null; action: string; payload: any; ip: string | null; created_at: string }>>([])
+const activity = ref<Array<{ id: number; user_name: string | null; action: string; payload: any; created_at: string }>>([])
 const activityOpen = ref(false)
 const pdfHistory = ref<Array<{ id: number; filename: string; size_bytes: number; sha256: string; was_sent: boolean; sent_to: string[] | null; reason: string; archived_at: string }>>([])
 const pdfHistoryOpen = ref(false)
@@ -165,11 +206,6 @@ const pdfHistoryOpen = ref(false)
 // jen ve vlastním page_key, aby si prodej a nákup nešahaly do stavu.
 const importedPdfPreview = useSidePreview('invoices')
 const importedPdfPreviewOpen = importedPdfPreview.open
-// Nad prahem (viz useSidePreview) jde náhled do sloupce vpravo, pod prahem zůstává
-// pod dokladem. Bez zdrojového PDF se sloupec nevykreslí vůbec.
-const importedPdfSideBySide = computed(
-  () => !!invoice.value?.imported_pdf_path && importedPdfPreviewOpen.value && importedPdfPreview.wide.value,
-)
 const importedPdfInlineUrl = computed(
   () => (invoice.value ? `${invoicesApi.importedPdfUrl(invoice.value.id, true)}#view=FitH` : ''),
 )
@@ -211,6 +247,11 @@ const signingProfiles = ref<SigningProfile[]>([])
 const signatureSelectionLoading = ref(false)
 const signatureSelectionSaving = ref<PdfSignatureDocumentEntityType | null>(null)
 const wrHasDates = computed(() => !!workReport.value?.items.some(i => !!i.work_date))
+/** Viditelné sloupce výkazu; bez uložených voleb vše jako dřív. */
+const wrShow = computed(() => {
+  const options = workReport.value?.effective_display_options
+  return { hours: options?.hours !== false, rate: !workReport.value?.billing_snapshot && options?.rate !== false, amount: !workReport.value?.billing_snapshot && options?.amount !== false }
+})
 const hasPdfSigningProfiles = computed(() => signingProfiles.value.some(
   profile => profile.is_active && profile.allowed_usages.includes('pdf'),
 ))
@@ -375,7 +416,7 @@ function paymentsRelevant(): boolean {
 
 function loadPayments(invoiceId = invoice.value?.id ?? 0, generation = loadGeneration) {
   paymentsLoaded.value = false
-  if (!invoiceId || !invoice.value || !paymentsRelevant()) {
+  if (!invoiceId || !invoice.value || (!paymentsRelevant() && invoice.value.status !== 'draft')) {
     payments.value = []
     bankTransactions.value = []
     return
@@ -383,6 +424,7 @@ function loadPayments(invoiceId = invoice.value?.id ?? 0, generation = loadGener
   invoicesApi.listPayments(invoiceId)
     .then(r => {
       if (generation !== loadGeneration) return
+      if (!Array.isArray(r.payments) || !Array.isArray(r.bank_transactions)) return
       payments.value = r.payments
       bankTransactions.value = r.bank_transactions ?? []
       paymentsLoaded.value = true
@@ -485,6 +527,7 @@ async function submitPartialPayment() {
     }
     invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
   } catch (e: any) {
+    if (handleEetContextRequired(e)) return
     toast.error(e?.response?.data?.error?.message || t('invoice.operation_failed'))
   } finally {
     busy.value = null
@@ -525,7 +568,7 @@ async function deletePayment(p: InvoicePayment) {
     toast.success(t('invoice.payments.deleted'))
     invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('invoice.operation_failed'))
+    toast.error(eetHistoryMessage(e) || e?.response?.data?.error?.message || t('invoice.operation_failed'))
   } finally {
     busy.value = null
   }
@@ -536,6 +579,28 @@ async function deletePayment(p: InvoicePayment) {
 async function onReposted() {
   await load()
   toast.success(t('accounting.repost.done'))
+}
+
+// Faktura krytá ostatní pohledávkou: vazba mění zaúčtování i úhrady faktury.
+const otherItemLinkRef = ref<InstanceType<typeof InvoiceOtherItemLink> | null>(null)
+const canLinkOtherItem = computed(() =>
+  isDoubleEntry.value
+  && auth.canWrite('accounting.journal.post')
+  && auth.canWrite('invoices')
+  && auth.canRead('other_items')
+  && !lockedForMe.value)
+const canOfferOtherItemLink = computed(() =>
+  !!invoice.value
+  && canLinkOtherItem.value
+  && !invoice.value.other_item_id
+  && invoice.value.invoice_type === 'invoice'
+  && invoice.value.status !== 'cancelled'
+  && Math.abs(Number(invoice.value.total_vat ?? 0)) < 0.005)
+
+async function onOtherItemLinkChanged(updated: Invoice) {
+  invoice.value = updated
+  await postingPanelRef.value?.reload()
+  invoicesApi.activity(updated.id).then(a => { activity.value = a }).catch(() => {})
 }
 
 async function loadSignatureProfiles() {
@@ -749,12 +814,20 @@ function actionLabel(a: string): string {
     'invoice.public_isdoc_downloaded': 'invoice.actions.public_isdoc_downloaded',
     'invoice.public_attachment_downloaded': 'invoice.actions.public_attachment_downloaded',
     'proforma.final_issued':          'invoice.actions.proforma_final_issued',
+    'invoice.payment_matched':        'invoice.actions.payment_matched',
+    'invoice.bank_payment_released':  'invoice.actions.bank_payment_released',
+    'invoice.payment_thanks_sent':    'invoice.actions.payment_thanks_sent',
+    'invoice.payment_thanks_queued':  'invoice.actions.payment_thanks_queued',
+    'invoice.payment_thanks_failed':  'invoice.actions.payment_thanks_failed',
+    'invoice.payment_thanks_skipped': 'invoice.actions.payment_thanks_skipped',
   }
   return map[a] ? (t(map[a]) as string) : a
 }
 
 function actionColor(a: string): string {
   if (a.includes('reminder')) return 'bg-warning-50 text-warning-600'
+  if (a.includes('payment_thanks_failed')) return 'bg-danger-50 text-danger-500'
+  if (a.includes('bank_payment_released')) return 'bg-warning-50 text-warning-600'
   if (a.includes('approval_approved')) return 'bg-success-50 text-success-600'
   if (a.includes('approval_rejected')) return 'bg-danger-50 text-danger-500'
   if (a.includes('approval')) return 'bg-primary-100 text-primary-700'
@@ -777,6 +850,12 @@ function payloadText(payload: any): string {
           return label === key ? String(f) : label
         })
         return `${t('invoice.changed_label')}: ${names.join(', ')}`
+      }
+      // Důvod nevyřízeného poděkování za úhradu (PaymentThanksMailer skip reasons).
+      if (k === 'reason' && typeof v === 'string') {
+        const key = `invoice.payment_thanks_reasons.${v}`
+        const label = t(key) as string
+        if (label !== key) return `${k}=${label}`
       }
       return k + '=' + (typeof v === 'object' ? JSON.stringify(v) : String(v))
     })
@@ -870,6 +949,7 @@ async function issue() {
   try {
     invoice.value = await invoicesApi.issue(invoice.value.id)
     toast.success( t('invoice.issued_as', { varsymbol: invoice.value.varsymbol }))
+    if (pendingEet.value) await eet.reload()
     // Prodej majetku (1177): faktura je vystavená, ale karta zůstala v užívání (zavřené
     // období, nedoúčtovaný odpis minulého roku…). Bez téhle hlášky by jediná stopa byla
     // v auditním logu a účetní by na to přišla až u inventarizace.
@@ -958,6 +1038,7 @@ async function markPaid() {
     else if (pt?.status === 'failed') toast.warning(t('invoice.payment_thanks_failed'))
     else if (pt?.status === 'skipped' && pt.reason === 'no_recipient') toast.warning(t('invoice.payment_thanks_no_recipient'))
   } catch (e: any) {
+    if (handleEetContextRequired(e)) return
     toast.error( e?.response?.data?.error?.message || t('invoice.operation_failed'))
   } finally {
     busy.value = null
@@ -1002,7 +1083,7 @@ async function unmarkPaid() {
     loadPayments() // unmark-paid evidované platby smazal
     toast.success(t('invoice.unmark_paid_done'))
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('invoice.operation_failed'))
+    toast.error(eetHistoryMessage(e) || e?.response?.data?.error?.message || t('invoice.operation_failed'))
   } finally {
     busy.value = null
   }
@@ -1024,8 +1105,8 @@ async function uncancelInvoice() {
 }
 
 function openCancelModal() {
-  // Dobropisu nelze vystavit další dobropis — default mode = internal.
-  cancelMode.value = isCreditNoteSource.value ? 'internal' : 'credit_note'
+  // Dobropisu nelze vystavit další dobropis a kalendář se ruší jen interně — default mode = internal.
+  cancelMode.value = isCreditNoteSource.value || isCalendar.value ? 'internal' : 'credit_note'
   cancelOpen.value = true
 }
 
@@ -1104,6 +1185,9 @@ const canPairFinal = computed(() =>
 // Propojeno se zálohou (proforma) → lze odpojit. Rodič storna/dobropisu (non-proforma) ne.
 const linkedProforma = computed(() =>
   invoice.value?.parent_invoice?.invoice_type === 'proforma' ? invoice.value.parent_invoice : null)
+// Odpočtový řádek zálohy § 37a = záporný řádek mimo slevový (stejná definice jako na serveru).
+const hasAdvanceDeduction = computed(() =>
+  (invoice.value?.items ?? []).some(i => Number(i.total_with_vat) < 0 && (i.item_kind ?? 'standard') !== 'discount'))
 
 async function openPairModal(mode: 'advance' | 'final') {
   if (!invoice.value) return
@@ -1167,6 +1251,99 @@ async function unlinkAdvance(targetId?: number) {
     toast.error(apiErrorMessage(e))
   } finally {
     linkingAdvance.value = false
+  }
+}
+
+// ── Postupné čerpání zálohy (koncept faktury odečte část zaplacené zálohy) ──
+const drawdownOpen = ref(false)
+const drawdownCandidates = ref<AdvanceDrawdownCandidate[]>([])
+const drawdownLoading = ref(false)
+const drawdownSaving = ref(false)
+const drawdownProformaId = ref<number | null>(null)
+const drawdownAmount = ref<number | null>(null)
+const drawdownError = ref('')
+
+const selectedDrawdown = computed(() =>
+  drawdownCandidates.value.find(c => c.id === drawdownProformaId.value) ?? null)
+const drawdownAmountValid = computed(() => {
+  const c = selectedDrawdown.value
+  const a = Number(drawdownAmount.value)
+  return !!c && Number.isFinite(a) && a > 0 && a <= Number(c.available) + 0.005
+})
+
+function selectDrawdown(id: number) {
+  drawdownProformaId.value = id
+  const c = drawdownCandidates.value.find(x => x.id === id)
+  drawdownAmount.value = c ? Number(c.available) : null
+}
+
+async function openDrawdownModal() {
+  if (!invoice.value) return
+  drawdownError.value = ''
+  drawdownCandidates.value = []
+  drawdownProformaId.value = null
+  drawdownAmount.value = null
+  drawdownOpen.value = true
+  drawdownLoading.value = true
+  try {
+    drawdownCandidates.value = await invoicesApi.advanceDrawdownCandidates(invoice.value.id)
+    const current = invoice.value.parent_invoice?.id
+    const pre = drawdownCandidates.value.find(c => c.id === current) ?? drawdownCandidates.value[0]
+    if (pre) selectDrawdown(pre.id)
+  } catch (e) {
+    drawdownError.value = apiErrorMessage(e)
+  } finally {
+    drawdownLoading.value = false
+  }
+}
+
+async function confirmDrawdown() {
+  if (!invoice.value || drawdownSaving.value || !drawdownAmountValid.value || drawdownProformaId.value === null) return
+  drawdownSaving.value = true
+  drawdownError.value = ''
+  try {
+    const r = await invoicesApi.applyAdvanceDrawdown(invoice.value.id, {
+      proforma_id: drawdownProformaId.value,
+      amount: Number(drawdownAmount.value),
+    })
+    invoice.value = r.invoice
+    drawdownOpen.value = false
+    toast.success(t('invoice.advance_drawdown.applied'))
+    invoicesApi.activity(r.invoice.id).then(a => { activity.value = a }).catch(() => {})
+  } catch (e) {
+    drawdownError.value = apiErrorMessage(e)
+  } finally {
+    drawdownSaving.value = false
+  }
+}
+
+async function removeDrawdown() {
+  if (!invoice.value || busy.value !== null) return
+  if (!confirm(t('invoice.advance_drawdown.remove_confirm'))) return
+  busy.value = 'drawdown-remove'
+  try {
+    invoice.value = await invoicesApi.removeAdvanceDrawdown(invoice.value.id)
+    toast.success(t('invoice.advance_drawdown.removed'))
+    invoicesApi.activity(invoice.value.id).then(a => { activity.value = a }).catch(() => {})
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    busy.value = null
+  }
+}
+
+async function convertToTaxDocument() {
+  if (!invoice.value || busy.value !== null) return
+  if (!confirm(t('invoice.convert_to_tax_document.confirm'))) return
+  busy.value = 'convert-tax-doc'
+  try {
+    const r = await invoicesApi.convertToTaxDocument(invoice.value.id)
+    toast.success(t('invoice.convert_to_tax_document.done'))
+    router.push(`/invoices/${r.tax_document_ids[0] ?? r.proforma_id}`)
+  } catch (e) {
+    toast.error(apiErrorMessage(e))
+  } finally {
+    busy.value = null
   }
 }
 
@@ -1400,6 +1577,14 @@ async function send() {
 
 const isDraft = computed(() => invoice.value?.status === 'draft')
 const isProforma = computed(() => invoice.value?.invoice_type === 'proforma')
+// Vystavený kalendář nenese pohledávku, úhrady ani zápis v deníku, ty jsou na dokladech splátek.
+const isCalendar = computed(() => isCalendarType(invoice.value?.invoice_type))
+const isRentCalendar = computed(() => invoice.value?.invoice_type === 'rent_calendar')
+// Interní doklad splátky. Daňový doklad k její úhradě má calendar_id taky, ale dá se stornovat běžně.
+const isCalendarInstalment = computed(() =>
+  !!invoice.value?.calendar_id && ['invoice', 'proforma'].includes(invoice.value.invoice_type))
+const calendarScheduleRows = computed(() =>
+  hasPaymentSchedule(invoice.value?.invoice_type) ? invoice.value?.payment_schedule ?? [] : [])
 // Vyúčtovat lze i částečně uhrazenou proformu (#89) — odpočet pokryje přijaté platby.
 const canIssueFinal = computed(() => isProforma.value
   && (invoice.value?.status === 'paid' || Number(invoice.value?.paid_total ?? 0) > 0)
@@ -1444,8 +1629,26 @@ const hasCreditNoteOffsetContext = computed(() => {
   return inv.invoice_type === 'invoice' && payments.value.some(p => p.source === 'credit_note')
 })
 
+/** Vrácení k dobropisu s evidovanými tržbami opravované faktury: způsob vrácení rozhoduje o záporné tržbě EET. */
+const eetRefundInfo = ref<EetCreditNoteRefundInfo | null>(null)
+function onEetRefundDone(updated: Invoice) {
+  invoice.value = updated
+  eetRefresh.value++
+  toast.success(t('refundPayment.marked_refunded'))
+}
 async function markRefunded() {
   if (!invoice.value) return
+  if (invoice.value.invoice_type === 'credit_note' && invoice.value.parent_invoice_id && eet.enabled.value) {
+    try {
+      const summary = await eetApi.invoiceSummary(invoice.value.id)
+      if (summary.refund && Number(summary.refund.evidenced.remaining_czk) > 0) {
+        eetRefundInfo.value = summary.refund
+        return
+      }
+    } catch {
+      // Bez souhrnu EET pokračuje původní cesta; server sám odmítne vrácení bez okolností.
+    }
+  }
   if (!window.confirm(t('refundPayment.mark_refunded_confirm', { varsymbol: invoice.value.varsymbol || '' }))) return
   busy.value = 'mark-refunded'
   try {
@@ -1684,11 +1887,16 @@ async function updateApprovalStatus() {
 const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
-  && !invoice.value.booked_at
   && !invoice.value.locked?.journal_entry_id
+  && !invoice.value.other_item_id
   && invoice.value.status !== 'draft'
   && invoice.value.status !== 'cancelled'
   && auth.canWrite('invoices'))
+
+// Doklad označený jako zaúčtovaný (booked_at), ke kterému v deníku zápis není - typicky
+// po převodu z jiného programu, kde doklad zaúčtovaný nebyl. Zaúčtování zůstává dostupné.
+const bookedWithoutEntry = computed(() => canPostToJournal.value && !!invoice.value?.booked_at
+  && ['invoice', 'credit_note', 'tax_document', 'penalty'].includes(invoice.value.invoice_type))
 
 async function postToJournal() {
   if (!invoice.value || !canPostToJournal.value) return
@@ -1711,9 +1919,62 @@ async function postToJournal() {
 
 const postingRuleOpen = ref(false)
 
+watch(() => route.query.eet, (v) => {
+  if (v !== 'accept' && v !== 'qr') return
+  pendingEet.value = v
+  const { eet: _drop, ...rest } = route.query
+  void router.replace({ query: rest })
+}, { immediate: true })
+
+/** Platbu lze přijmout u vystavené faktury se zbývající částkou a při aktivní EET. */
+const eetPayAvailable = computed(() =>
+  eet.canAccept.value && paymentsRelevant() && !!isIssued.value
+  && remainingToPay.value > 0 && !lockedForMe.value)
+
+watch([pendingEet, eetPayAvailable, () => eet.loaded.value], () => {
+  if (!pendingEet.value || !eet.loaded.value || !invoice.value || isDraft.value) return
+  if (eetPayAvailable.value) {
+    if (pendingEet.value === 'qr') eetQrOpen.value = true
+    else eetAcceptOpen.value = true
+  }
+  pendingEet.value = null
+})
+
+function onEetPaymentDone() {
+  eetRefresh.value++
+  loadPayments()
+  invoicesApi.get(invoice.value!.id).then(inv => { invoice.value = inv }).catch(() => {})
+}
+function closeEetDialogs() {
+  const changed = eetAcceptOpen.value || eetQrOpen.value
+  eetAcceptOpen.value = false
+  eetQrOpen.value = false
+  if (changed) onEetPaymentDone()
+}
+/** Starý endpoint bez kontextu platby při aktivní EET vrací 422; nabídneme nový dialog. */
+function handleEetContextRequired(e: unknown): boolean {
+  if (apiErrorCode(e) !== 'eet_context_required') return false
+  toast.info(t('eet.invoice.context_required'))
+  markPaidOpen.value = false
+  partialOpen.value = false
+  if (eetPayAvailable.value) eetAcceptOpen.value = true
+  return true
+}
+function eetHistoryMessage(e: unknown): string | null {
+  return apiErrorCode(e) === 'eet_history_exists' ? t('eet.invoice.history_exists') : null
+}
+
 // ─── Lišta akcí (sdílená ActionBar) — primary se mění dle lifecyclu dokladu ───
 // Pravidlo „1 primární akce": je-li doklad po splatnosti, primární = Upomínka a Uhradit klesá
 // na sekundární; jinak je primární Uhradit.
+// Vystavený kalendář jde jen poslat, vytisknout a celý stornovat; zbytek se děje na splátkách.
+const ISSUED_CALENDAR_ACTIONS = new Set(['send', 'send-test', 'view-pdf', 'print', 'pdf', 'cancel', 'client'])
+// Doklady splátek odběratel nedostává (PDF je kalendář) a rozpisu na vytištěném kalendáři se
+// nesmí rozejít: žádná úprava, kopie ani odeslání. Úhrady, upomínky a dobropis zůstávají.
+const CALENDAR_DOCUMENT_HIDDEN_ACTIONS = new Set([
+  'send', 'send-test', 'edit', 'edit-admin', 'clone', 'public-link', 'approval', 'approval-test',
+  'recurring-from', 'rebuild-snapshots', 'uncancel', 'delete-cancelled',
+])
 const invoiceActions = computed<ActionItem[]>(() => {
   const inv = invoice.value
   if (!inv) return []
@@ -1729,7 +1990,7 @@ const invoiceActions = computed<ActionItem[]>(() => {
   const b = busy.value !== null
   const approvalPending = requiresApproval.value && approvalStatus.value !== 'approved'
   const markPaidPrimary = !canSendReminder.value
-  return [
+  const actions: ActionItem[] = [
     // ── primary (1 dle stavu) ──
     { key: 'issue', label: t('invoice.issue'), icon: 'check', tier: 'primary', variant: 'primary',
       show: isDraft.value && canIssueDraft.value && canIssue && !lockedForMe.value,
@@ -1740,7 +2001,12 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: canIssueFinal.value && canIssue, disabled: b, loading: busy.value === 'issue-final', run: issueFinalFromProforma },
     { key: 'mark-paid', label: t('invoice.mark_paid'), icon: 'checkCircle',
       tier: markPaidPrimary ? 'primary' : 'secondary', variant: 'success',
-      show: isIssued.value && canMarkPaid.value && canMarkPaidPermission && !lockedForMe.value && !isOpenRefund.value, disabled: b, run: openMarkPaid },
+      show: isIssued.value && canMarkPaid.value && canMarkPaidPermission && !lockedForMe.value && !isOpenRefund.value && !eetPayAvailable.value, disabled: b, run: openMarkPaid },
+    { key: 'eet-accept', label: t('eet.pay.action'), icon: 'checkCircle',
+      tier: markPaidPrimary ? 'primary' : 'secondary', variant: 'success',
+      show: eetPayAvailable.value && !isOpenRefund.value, disabled: b, run: () => { eetAcceptOpen.value = true } },
+    { key: 'eet-qr', label: t('eet.qr.action'), icon: 'qr', tier: 'secondary', variant: 'success',
+      show: eetPayAvailable.value && !isOpenRefund.value && (invoice.value?.currency ?? 'CZK') === 'CZK', disabled: b, run: () => { eetQrOpen.value = true } },
     { key: 'refund', label: t('refundPayment.action'), icon: 'upload', tier: 'primary', variant: 'primary',
       show: isOpenRefund.value && inv.payment_method !== 'cash' && auth.canRead('purchase_invoices.payment_orders'),
       disabled: b, run: () => { refundDialogOpen.value = true } },
@@ -1760,17 +2026,38 @@ const invoiceActions = computed<ActionItem[]>(() => {
     { key: 'approval', label: t('invoice.approval.send_request'), icon: 'send', tier: 'secondary', variant: 'primary',
       show: canRequestApproval.value && canApprovalPermission, disabled: b, loading: busy.value === 'approval-request', run: requestApproval },
     { key: 'partial', label: t('invoice.partial_payment'), icon: 'coin', tier: 'secondary', variant: 'warning',
-      show: canPartialPayment.value, disabled: b, run: openPartialPayment },
+      show: canPartialPayment.value && !eetPayAvailable.value, disabled: b, run: openPartialPayment },
+    // Vzájemný zápočet s partnerem: stránka Zápočty předvyplněná odběratelem a touto fakturou.
+    { key: 'mutual-offset', label: t('accounting.offsets.mutual_offset_action'), icon: 'swap', tier: 'secondary', variant: 'primary',
+      show: isDoubleEntry.value && auth.canWrite('accounting.offsets') && isIssued.value && inv.invoice_type === 'invoice'
+        && (inv.currency ?? 'CZK') === 'CZK' && Number(inv.amount_to_pay ?? 0) - Number(inv.paid_total ?? 0) > 0.005,
+      to: offsetRoute(Number(inv.client_id), [{ doc_type: 'invoice', doc_id: inv.id, amount: null }]) },
+    { key: 'advance-drawdown', label: t('invoice.advance_drawdown.action'), icon: 'coin', tier: 'secondary', variant: 'warning',
+      show: isDraft.value && inv.invoice_type === 'invoice' && w && !lockedForMe.value, disabled: b,
+      title: t('invoice.advance_drawdown.tooltip') as string, run: openDrawdownModal },
+    { key: 'advance-drawdown-remove', label: t('invoice.advance_drawdown.remove'), icon: 'uturn', tier: 'overflow', variant: 'neutral',
+      show: isDraft.value && inv.invoice_type === 'invoice' && inv.parent_invoice?.invoice_type === 'proforma' && w && !lockedForMe.value,
+      disabled: b, loading: busy.value === 'drawdown-remove', run: removeDrawdown },
     { key: 'wr', label: t('invoice.wr_btn'), icon: 'chart', tier: 'secondary', variant: 'primary',
       show: isDraft.value && inv.invoice_type !== 'tax_document' && w && !lockedForMe.value,
       title: t('invoice.wr_btn') as string, run: () => { wrModalOpen.value = true } },
     // ── zaúčtování (podvojné účetnictví) — sekundární, ať nekoliduje s primární
     // platební/upomínkovou akcí (pravidlo „1 primární akce dle stavu" výše) ──
+    { key: 'other-item-link', label: t('invoice.other_item_link.action'), icon: 'link', tier: 'secondary', variant: 'primary',
+      show: canOfferOtherItemLink.value, disabled: b,
+      title: t('invoice.other_item_link.action_tooltip') as string, run: () => { void otherItemLinkRef.value?.open() } },
     { key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
       show: canPostToJournal.value, disabled: b, loading: busy.value === 'post', run: postToJournal },
     { key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
-      show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
+      show: isDoubleEntry.value && !!inv.locked?.journal_entry_id,
       to: { name: 'accounting-journal', query: { source_type: 'invoice', source_id: String(inv.id) } } },
+    // Koncept vyúčtovací faktury po úhradě zálohy → daňový doklad k přijaté platbě
+    // (záloha na plnění, které ještě nenastalo). Route vyžaduje invoices.delete
+    // (koncept zmizí), akce navíc invoices.mark_paid.
+    { key: 'convert-tax-doc', label: t('invoice.convert_to_tax_document.action'), icon: 'swap', tier: 'overflow', variant: 'warning',
+      show: isDraft.value && inv.invoice_type === 'invoice' && inv.parent_invoice?.invoice_type === 'proforma'
+        && supplierIsVatPayer.value && !inv.reverse_charge && canDeletePermission && canMarkPaidPermission && !lockedForMe.value,
+      disabled: b, loading: busy.value === 'convert-tax-doc', run: convertToTaxDocument },
     { key: 'posting-rule', label: t('accounting.template.create_posting_rule'), icon: 'doc', tier: 'overflow', variant: 'neutral',
       show: isDoubleEntry.value && auth.canWrite('bank.rules'), run: () => { postingRuleOpen.value = true } },
     // ── overflow ──
@@ -1791,7 +2078,8 @@ const invoiceActions = computed<ActionItem[]>(() => {
       title: invoiceWillBeSigned.value ? (t('invoice.download_pdf_tooltip_signed') as string) : undefined,
       run: downloadPdf },
     { key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-      show: isDraft.value && canDeletePermission && !lockedForMe.value, disabled: b, run: deleteInvoice },
+      show: isDraft.value && canDeletePermission && !(auth.isClientRole && draftDeletionLockedForClient(inv.locked,
+        payments.value.length > 0 || bankTransactions.value.length > 0 || !!inv.cash_documents?.length, paymentsLoaded.value)), disabled: b, run: deleteInvoice },
     // ── spodní panel „Více akcí" → pod „Pokročilé" (test/odeslání, admin, storno/destrukce) ──
     { key: 'client', label: t('invoice.client_detail'), icon: 'user', tier: 'advanced', variant: 'neutral',
       to: `/clients/${inv.client_id}` },
@@ -1808,10 +2096,15 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: canAdminEdit.value, disabled: b, run: editIssued },
     { key: 'unmark-paid', label: t('invoice.unmark_paid'), icon: 'uturn', tier: 'advanced', variant: 'warning',
       show: isAdmin.value && inv.status === 'paid', disabled: b, loading: busy.value === 'unmark-paid', run: unmarkPaid },
+    { key: 'isdoc', label: t('invoice.download_isdoc'), icon: 'download', tier: 'advanced', variant: 'neutral',
+      show: !isDraft.value && inv.status !== 'cancelled',
+      href: invoicesApi.isdocUrl(inv.id), download: true },
     { key: 'rebuild-snapshots', label: t('invoice.rebuild_snapshots'), icon: 'cycle', tier: 'advanced', variant: 'warning',
       show: isAdmin.value && !isDraft.value && inv.status !== 'cancelled',
       disabled: b, loading: busy.value === 'rebuild-snapshots', run: rebuildSnapshots },
-    { key: 'cancel', label: isCreditNoteSource.value ? t('invoice.cancel_credit_note') : t('invoice.cancel_or_credit'),
+    { key: 'cancel', label: isCalendar.value ? t('invoice.calendar.cancel_action')
+        : isCalendarInstalment.value ? t('invoice.modals.cancel_credit_note')
+        : isCreditNoteSource.value ? t('invoice.cancel_credit_note') : t('invoice.cancel_or_credit'),
       icon: 'trash', tier: 'advanced', variant: 'danger',
       show: canCancel.value && canCancelPermission && !lockedForMe.value, disabled: b, run: openCancelModal },
     { key: 'uncancel', label: t('invoice.uncancel'), icon: 'uturn', tier: 'advanced', variant: 'warning',
@@ -1821,12 +2114,15 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: isAdmin.value && canDeletePermission && (inv.status === 'cancelled' || (inv.invoice_type === 'cancellation' && !!inv.parent_invoice_id)),
       disabled: b, loading: busy.value === 'delete', run: deleteInvoice },
   ]
+  if (isCalendar.value && !isDraft.value) return actions.filter(a => ISSUED_CALENDAR_ACTIONS.has(a.key))
+  if (inv.calendar_id) return actions.filter(a => !CALENDAR_DOCUMENT_HIDDEN_ACTIONS.has(a.key))
+  return actions
 })
 useWindowTitle(
   () => invoice.value ? [typeLabel(invoice.value.invoice_type), invoice.value.varsymbol].filter(Boolean).join(' ') : null,
   () => invoice.value?.client_company_name ?? null,
 )
-useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'accounting', 'stock'], async () => {
+useWindowRefresh(async () => {
   const generation = loadGeneration
   const invoiceId = Number(route.params.id)
   const [updated, events] = await Promise.all([invoicesApi.get(invoiceId), invoicesApi.activity(invoiceId)])
@@ -1837,7 +2133,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
   if (stockIntegrationVisible.value) void loadStockDocuments(invoiceId, generation)
 }, () => !loading.value && !busy.value && !accrualEditing.value && !accrualSaving.value
   && !sendOpen.value && !reminderOpen.value && !cancelOpen.value && !partialOpen.value
-  && !markPaidOpen.value && !advanceModalOpen.value && !penaltyOpen.value
+  && !markPaidOpen.value && !advanceModalOpen.value && !drawdownOpen.value && !penaltyOpen.value
   && !approvalStatusOpen.value && !wrModalOpen.value && !refundDialogOpen.value && !bankMatchTarget.value)
 </script>
 
@@ -1847,12 +2143,14 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
     {{ error }}
   </div>
 
-  <!-- Nad prahem (useSidePreview) jde náhled zdrojového PDF do sloupce vpravo, jinak
-       zůstává rozbalený pod dokladem. Bez PDF se sloupec nevykreslí a doklad má
-       celou šířku - proto je vnější div v ostatních případech jen průhledný obal. -->
-  <div v-else-if="invoice" :class="importedPdfSideBySide ? 'flex items-start gap-4' : ''">
-    <div class="max-w-5xl space-y-4 min-w-0" :class="importedPdfSideBySide ? 'flex-1' : ''">
-      <RouterLink to="/invoices" class="text-sm text-neutral-600 hover:text-neutral-900">{{ t('invoice.back_to_list') }}</RouterLink>
+  <div v-else-if="invoice">
+    <DocumentPreviewSplit :ctrl="importedPdfPreview" :show="!!invoice.imported_pdf_path && importedPdfPreviewOpen"
+      :src="importedPdfInlineUrl" :file-name="invoice.imported_pdf_original_name" form-class="space-y-4" narrow-class="max-w-5xl">
+      <div class="flex items-center gap-2">
+        <ListNavArrows v-if="listNav.active.value" :has-previous="listNav.hasPrevious.value" :has-next="listNav.hasNext.value"
+          :busy="listNav.busy.value" @previous="listNav.previous" @next="listNav.next" />
+        <RouterLink :to="listNav.listPath.value ?? '/invoices'" class="text-sm text-neutral-600 hover:text-neutral-900">{{ t('invoice.back_to_list') }}</RouterLink>
+      </div>
       <div class="flex flex-col md:flex-row md:items-start md:justify-between gap-3 md:gap-4">
         <h1 class="text-2xl font-semibold flex items-center gap-3 flex-wrap min-w-0">
           <span v-if="invoice.varsymbol" class="font-mono">{{ invoice.varsymbol }}</span>
@@ -1893,6 +2191,12 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         <ActionBar :actions="invoiceActions" />
       </div>
 
+      <!-- Příznak zaúčtování bez zápisu v deníku (např. převzato z jiného programu nezaúčtované). -->
+      <div v-if="bookedWithoutEntry" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700" data-test="booked-without-entry">
+        <div class="font-medium">{{ t('common.booked_without_entry_title') }}</div>
+        <div class="mt-1 text-warning-700/90">{{ t('common.booked_without_entry_hint') }}</div>
+      </div>
+
       <div class="flex items-start justify-between gap-4">
         <div class="flex-1 min-w-0 space-y-1">
           <div class="text-lg font-semibold text-neutral-900">
@@ -1928,6 +2232,21 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         :thanks="{ enabled: thanksEnabled, hasRecipient: thanksHasRecipient, defaultChecked: sendThanks }"
         :busy="busy === 'paid'"
         @close="markPaidOpen = false" @done="onAltPayDone" @mark-paid="onPlainMarkPaid" />
+
+      <!-- EET: přijetí platby a QR platba na místě -->
+      <AcceptPaymentDialog v-if="eetAcceptOpen && invoice" :invoice-id="invoice.id" :currency="invoice.currency"
+        :remaining="remainingToPay" :default-device-id="eet.capabilities.value?.default_device_id"
+        :environment="eet.capabilities.value?.environment"
+        @close="closeEetDialogs" @done="onEetPaymentDone" @qr="eetAcceptOpen = false; eetQrOpen = true" />
+      <QrInPersonPayment v-if="eetQrOpen && invoice" :invoice-id="invoice.id" :currency="invoice.currency"
+        :remaining="remainingToPay" :default-device-id="eet.capabilities.value?.default_device_id"
+        :environment="eet.capabilities.value?.environment"
+        @close="closeEetDialogs" @done="onEetPaymentDone" />
+
+      <!-- EET: vrácení peněz k dobropisu jako záporná tržba -->
+      <EetCreditNoteRefundDialog v-if="eetRefundInfo && invoice" :credit-note-id="invoice.id" :refund="eetRefundInfo"
+        :default-device-id="eet.capabilities.value?.default_device_id"
+        @close="eetRefundInfo = null" @done="onEetRefundDone" />
 
       <!-- Vrátit peníze odběrateli — platební příkaz s jednou vratkou -->
       <RefundPaymentDialog v-if="refundDialogOpen && invoice" :invoice-id="invoice.id"
@@ -2023,9 +2342,10 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
       <div v-if="cancelOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
         <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
           <h3 class="text-lg font-semibold mb-3">{{ isCreditNoteSource ? t('invoice.modals.cancel_title_cn') : t('invoice.modals.cancel_title') }}</h3>
-          <p class="text-sm text-neutral-600 mb-3">{{ t('invoice.modals.cancel_choose') }}</p>
+          <p v-if="isCalendar" class="text-sm text-neutral-600 mb-3">{{ t('invoice.calendar.cancel_hint') }}</p>
+          <p v-else class="text-sm text-neutral-600 mb-3">{{ t('invoice.modals.cancel_choose') }}</p>
           <div class="space-y-2 mb-4">
-            <label v-if="!isCreditNoteSource" class="flex items-start gap-2 p-3 border rounded-md cursor-pointer"
+            <label v-if="!isCreditNoteSource && !isCalendar" class="flex items-start gap-2 p-3 border rounded-md cursor-pointer"
               :class="cancelMode === 'credit_note' ? 'border-primary-500 bg-primary-50' : 'border-neutral-200'">
               <input type="radio" v-model="cancelMode" value="credit_note" class="mt-1" />
               <div>
@@ -2033,7 +2353,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
                 <div class="text-xs text-neutral-500">{{ t('invoice.modals.cancel_credit_desc') }}</div>
               </div>
             </label>
-            <label class="flex items-start gap-2 p-3 border rounded-md cursor-pointer"
+            <label v-if="!isCalendarInstalment" class="flex items-start gap-2 p-3 border rounded-md cursor-pointer"
               :class="cancelMode === 'internal' ? 'border-primary-500 bg-primary-50' : 'border-neutral-200'">
               <input type="radio" v-model="cancelMode" value="internal" class="mt-1" />
               <div>
@@ -2043,7 +2363,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
             </label>
             <!-- 3. možnost: force-delete účetního dokladu — admin only.
                  Po výběru a potvrzení modalky se otevře window.confirm s plným per-status warningem. -->
-            <label v-if="isAdmin" class="flex items-start gap-2 p-3 border rounded-md cursor-pointer"
+            <label v-if="isAdmin && !isCalendar && !invoice.calendar_id" class="flex items-start gap-2 p-3 border rounded-md cursor-pointer"
               :class="cancelMode === 'delete' ? 'border-danger-500 bg-danger-50' : 'border-neutral-200'">
               <input type="radio" v-model="cancelMode" value="delete" class="mt-1" />
               <div>
@@ -2252,6 +2572,46 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
           {{ t('invoice.advance_link.pair_final') }}
         </button>
       </div>
+      <!-- Interní doklad splátky a daňový doklad k její úhradě → odkaz na kalendář -->
+      <RouterLink v-if="invoice.calendar_id" :to="`/invoices/${invoice.calendar_id}`"
+        class="flex items-center justify-between gap-3 bg-primary-50 border border-primary-200 rounded-lg px-4 py-2.5 text-sm hover:bg-primary-100 transition mb-4">
+        <span class="text-primary-700 min-w-0">{{ isCalendarInstalment ? t('invoice.calendar.instalment_notice') : t('invoice.calendar.payment_document_notice') }}</span>
+        <span class="font-medium text-primary-700 whitespace-nowrap">{{ t('invoice.calendar.open_calendar') }} →</span>
+      </RouterLink>
+      <!-- Rozpis plateb kalendáře; po vystavení vede každý řádek na doklad splátky -->
+      <div v-if="calendarScheduleRows.length > 0" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden mb-4">
+        <header class="px-5 py-3 border-b border-neutral-200">
+          <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.calendar.instalments') }}</h3>
+        </header>
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead>
+              <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
+                <th class="px-5 py-2 font-medium">{{ t('invoice.calendar.instalment_document') }}</th>
+                <th v-if="isRentCalendar" class="px-3 py-2 font-medium">{{ t('invoice.tax_date') }}</th>
+                <th class="px-3 py-2 font-medium">{{ t('invoice.payment_schedule_due_on') }}</th>
+                <th class="px-5 py-2 font-medium text-right">{{ t('invoice.totals.total') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, i) in calendarScheduleRows" :key="row.id ?? i" class="border-t border-neutral-200">
+                <td class="px-5 py-2">
+                  <RouterLink v-if="row.instalment_invoice_id" :to="`/invoices/${row.instalment_invoice_id}`" class="text-primary-700 font-medium hover:underline whitespace-nowrap">
+                    {{ t('invoice.calendar.instalment_n', { n: i + 1 }) }}
+                  </RouterLink>
+                  <span v-else class="whitespace-nowrap">{{ t('invoice.calendar.instalment_n', { n: i + 1 }) }}</span>
+                </td>
+                <td v-if="isRentCalendar" class="px-3 py-2 whitespace-nowrap">{{ formatDate(row.tax_date ?? row.due_on) }}</td>
+                <td class="px-3 py-2 whitespace-nowrap">{{ formatDate(row.due_on) }}</td>
+                <td class="px-5 py-2 text-right font-mono whitespace-nowrap">{{ formatMoney(row.total_amount, invoice.currency) }}</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <!-- Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou) -->
+      <InvoiceOtherItemLink ref="otherItemLinkRef" :invoice="invoice" :can-link="canLinkOtherItem"
+        @updated="onOtherItemLinkChanged" />
       <!-- Zápočet dobropisu s opravovanou fakturou (issue #140) -->
       <CreditNoteOffsetNotice v-if="!isDraft && hasCreditNoteOffsetContext"
         doc-type="invoice" :doc-id="invoice.id" :is-credit-note="invoice.invoice_type === 'credit_note'"
@@ -2273,8 +2633,15 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
           </RouterLink>
         </span>
         <!-- Daňový doklad k přijaté platbě (#89) má vazbu strukturální (drží § 37a
-             odpočty finálu i vazbu na platbu) — rozpojit nelze, backend to odmítá. -->
-        <button v-if="auth.canWrite('invoices') && invoice.invoice_type !== 'tax_document' && !lockedForMe" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
+             odpočty finálu i vazbu na platbu) — rozpojit nelze, backend to odmítá.
+             Koncept s odpočtem zálohy § 37a rozpojí jen odebrání čerpání (smaže i odpočet);
+             vystavený doklad s odpočtem backend rozpojit nedovolí. -->
+        <button v-if="auth.canWrite('invoices') && invoice.invoice_type !== 'tax_document' && !lockedForMe && hasAdvanceDeduction && isDraft"
+          type="button" @click="removeDrawdown()" :disabled="busy !== null"
+          class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
+          {{ t('invoice.advance_drawdown.remove') }}
+        </button>
+        <button v-else-if="auth.canWrite('invoices') && invoice.invoice_type !== 'tax_document' && !lockedForMe && !hasAdvanceDeduction" type="button" @click="unlinkAdvance()" :disabled="linkingAdvance"
           class="cursor-pointer text-xs px-2 py-1 border border-neutral-300 rounded text-neutral-600 hover:bg-neutral-50 disabled:opacity-50 shrink-0 bg-surface">
           {{ t('invoice.advance_link.unlink') }}
         </button>
@@ -2312,17 +2679,65 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         </div>
       </div>
 
+      <!-- Modal postupného čerpání zálohy -->
+      <div v-if="drawdownOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" @click.self="drawdownOpen = false">
+        <div class="bg-surface rounded-lg shadow-xl max-w-lg w-full max-h-[80vh] overflow-hidden flex flex-col">
+          <div class="px-5 py-3 border-b border-neutral-100 flex items-center justify-between">
+            <h3 class="font-medium">{{ t('invoice.advance_drawdown.modal_title') }}</h3>
+            <button type="button" @click="drawdownOpen = false" class="cursor-pointer text-neutral-400 hover:text-neutral-600">✕</button>
+          </div>
+          <div class="p-4 overflow-y-auto space-y-3">
+            <div v-if="drawdownLoading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
+            <div v-else-if="drawdownCandidates.length === 0 && !drawdownError" class="text-sm text-neutral-500">{{ t('invoice.advance_drawdown.no_candidates') }}</div>
+            <template v-else-if="drawdownCandidates.length > 0">
+              <ul class="space-y-2">
+                <li v-for="cand in drawdownCandidates" :key="cand.id">
+                  <label class="cursor-pointer flex items-center gap-3 px-3 py-2 border rounded-md"
+                    :class="drawdownProformaId === cand.id ? 'border-primary-500 bg-primary-50' : 'border-neutral-200 hover:border-primary-400'">
+                    <input type="radio" name="drawdown-proforma" :value="cand.id" :checked="drawdownProformaId === cand.id" @change="selectDrawdown(cand.id)" />
+                    <span class="font-mono text-sm">{{ cand.varsymbol || ('#' + cand.id) }}</span>
+                    <span class="text-xs text-neutral-500 ml-auto text-right">
+                      {{ cand.issue_date ? formatDate(cand.issue_date) : '' }} · {{ t('invoice.advance_drawdown.total') }} {{ formatMoney(cand.total_with_vat, invoice.currency) }}
+                      <br />{{ t('invoice.advance_drawdown.available') }} {{ formatMoney(cand.available, invoice.currency) }}
+                    </span>
+                  </label>
+                </li>
+              </ul>
+              <div>
+                <label class="block text-sm text-neutral-600 mb-1" for="drawdown-amount">{{ t('invoice.advance_drawdown.amount') }}</label>
+                <input id="drawdown-amount" v-model.number="drawdownAmount" type="number" step="0.01" min="0.01"
+                  :max="selectedDrawdown?.available" class="w-full border border-neutral-300 rounded-md px-3 py-2 text-sm bg-surface" />
+                <p class="text-xs text-neutral-500 mt-1">{{ t('invoice.advance_drawdown.amount_hint') }}</p>
+              </div>
+            </template>
+            <p v-if="drawdownError" class="text-sm text-danger-600">{{ drawdownError }}</p>
+          </div>
+          <div class="px-5 py-3 border-t border-neutral-100 flex justify-end gap-2">
+            <button type="button" @click="drawdownOpen = false"
+              class="cursor-pointer text-sm px-3 py-1.5 border border-neutral-300 rounded-md hover:bg-neutral-50">{{ t('common.cancel') }}</button>
+            <button type="button" @click="confirmDrawdown" :disabled="!drawdownAmountValid || drawdownSaving"
+              class="cursor-pointer text-sm px-3 py-1.5 rounded-md bg-primary-600 text-white hover:bg-primary-700 disabled:opacity-50">
+              {{ t('invoice.advance_drawdown.confirm') }}
+            </button>
+          </div>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">
             {{ t('invoice.issue_date') }}
-            <template v-if="!isProforma"> / {{ t('invoice.tax_date') }}</template>
+            <template v-if="!isProforma && !isCalendar"> / {{ t('invoice.tax_date') }}</template>
             / {{ t('invoice.due_date') }}
           </h3>
           <dl class="space-y-1.5 text-sm">
             <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.issue_date') }}</dt><dd>{{ formatDate(invoice.issue_date) }}</dd></div>
             <div v-if="invoice.tax_date && !isProforma" class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.tax_date') }}</dt><dd>{{ formatDate(invoice.tax_date) }}</dd></div>
             <div class="flex justify-between"><dt class="text-neutral-500">{{ t('invoice.due_date') }}</dt><dd>{{ formatDate(invoice.due_date) }}</dd></div>
+            <div v-if="invoice.calendar_contract_ref" class="flex justify-between gap-3">
+              <dt class="text-neutral-500">{{ t('invoice.calendar_contract_ref') }}</dt>
+              <dd class="text-right">{{ invoice.calendar_contract_ref }}</dd>
+            </div>
             <div v-if="invoice.payment_variable_symbol" class="flex justify-between gap-3">
               <dt class="text-neutral-500">{{ t('invoice.payment_variable_symbol') }}</dt>
               <dd class="font-mono text-right">{{ invoice.payment_variable_symbol }}</dd>
@@ -2389,7 +2804,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         @reposted="onReposted" />
       <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
            se přerazítkují. -->
-      <DocumentDimensionsPanel doc-type="invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
+      <DocumentDimensionsPanel doc-type="invoices" :doc-id="invoice.id" collapsible @saved="postingPanelRef?.reload()" />
 
       <!-- Položky -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
@@ -2434,7 +2849,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
             </tr>
             <tr v-else :class="item.item_kind === 'discount' ? 'text-warning-700' : ''">
               <td class="px-4 py-2.5 whitespace-pre-wrap">
-                {{ item.description }}
+                <a v-if="item.linked_work_report_id" href="#invoice-work-report" class="text-primary-700 hover:underline" :title="t('work_report_billing.linked_report')">{{ item.description }}</a><template v-else>{{ item.description }}</template>
                 <!-- OSS je vlastnost ŘÁDKU, ne dokladu — dole v doložce je jen souhrn zemí,
                      takže bez tohohle štítku není vidět, který řádek do OSS jde a který čeká na posouzení. -->
                 <span v-if="item.oss_applicable"
@@ -2456,7 +2871,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
               </td>
               <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : (isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity) }}</td>
               <td class="px-4 py-2.5 text-neutral-600">{{ item.item_kind === 'discount' ? '' : item.unit }}</td>
-              <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : (isTimeItem(item) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(item), invoice.currency) }}</td>
+              <td class="px-4 py-2.5 text-right font-mono">{{ item.item_kind === 'discount' ? '' : formatUnitPrice(displayUnitPriceNet(item), invoice.currency) }}</td>
               <td v-if="supplierIsVatPayer" class="px-4 py-2.5 text-center text-xs">{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</td>
               <td v-if="supplierIsVatPayer" class="px-4 py-2.5 text-right font-mono">{{ formatMoney(item.total_without_vat ?? 0, invoice.currency) }}</td>
               <td class="px-4 py-2.5 text-right font-mono font-medium">{{ formatMoney(supplierIsVatPayer ? (item.total_with_vat ?? 0) : (item.total_without_vat ?? 0), invoice.currency) }}</td>
@@ -2472,7 +2887,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
             <div v-if="item.item_kind === 'text'" class="text-sm whitespace-pre-wrap font-medium text-neutral-800" data-test="invoice-text-row-mobile">{{ item.description }}</div>
             <template v-else>
             <div class="text-sm whitespace-pre-wrap" :class="item.item_kind === 'discount' ? 'text-warning-700' : 'text-neutral-900'">
-              {{ item.description }}
+              <a v-if="item.linked_work_report_id" href="#invoice-work-report" class="text-primary-700 hover:underline" :title="t('work_report_billing.linked_report')">{{ item.description }}</a><template v-else>{{ item.description }}</template>
               <span v-if="item.oss_applicable"
                 class="ml-1.5 px-1 py-0.5 rounded bg-primary-50 text-primary-700 text-[10px] font-semibold whitespace-nowrap">
                 {{ t('invoice.oss.enabled') }}&nbsp;{{ item.oss_consumer_country || '—' }}
@@ -2494,7 +2909,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
                 <span class="font-mono text-neutral-700">{{ isTimeItem(item) && item.duration_minutes != null ? formatDuration(item.duration_minutes) : item.quantity }}</span>
                 <span class="ml-1">{{ item.unit }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ (isTimeItem(item) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(item), invoice.currency) }}</span>
+                <span class="font-mono">{{ formatUnitPrice(displayUnitPriceNet(item), invoice.currency) }}</span>
                 <template v-if="supplierIsVatPayer">
                   <span class="text-neutral-400 mx-1.5">·</span>
                   <span>{{ formatPercent(item.vat_rate_snapshot ?? 0) }}</span>
@@ -2586,7 +3001,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between gap-3">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.payments.title') }}</h3>
-          <button v-if="canPartialPayment" @click="openPartialPayment" :disabled="busy !== null"
+          <button v-if="canPartialPayment" @click="eetPayAvailable ? (eetAcceptOpen = true) : openPartialPayment()" :disabled="busy !== null"
             class="cursor-pointer text-xs px-2.5 py-1 border border-amber-500/50 text-amber-700 hover:bg-amber-50 rounded-md">
             + {{ t('invoice.payments.add') }}
           </button>
@@ -2634,11 +3049,12 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
                   <span v-else class="text-xs text-neutral-400">—</span>
                 </td>
                 <td class="px-4 py-2.5 text-right">
-                  <button v-if="auth.canWrite('invoices') && !lockedForMe && !p.bank_transaction_id && !(p.tax_document_invoice_id && p.tax_document_status !== 'cancelled')"
+                  <button v-if="auth.canWrite('invoices') && !lockedForMe && !p.bank_transaction_id && !eetPaymentIds.has(p.id) && !(p.tax_document_invoice_id && p.tax_document_status !== 'cancelled')"
                     @click="deletePayment(p)" :disabled="busy !== null"
                     class="cursor-pointer text-xs text-danger-500 hover:text-danger-700"
                     :title="t('common.delete')">✕</button>
                   <span v-else-if="p.bank_transaction_id" class="text-xs text-neutral-300" :title="t('invoice.payments.locked_bank')">🔒</span>
+                  <span v-else-if="eetPaymentIds.has(p.id)" class="text-xs text-neutral-300" :title="t('eet.invoice.locked_eet')">🔒</span>
                 </td>
               </tr>
             </tbody>
@@ -2740,6 +3156,13 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         class="bg-neutral-50 border border-neutral-200 rounded-lg px-5 py-4 text-sm text-neutral-600">
         {{ t('invoice.payments.imported_without_details', { date: invoice.paid_at ? formatDate(invoice.paid_at) : '—' }) }}
       </div>
+
+      <div v-if="pendingEet && isDraft && eet.enabled.value" class="rounded-lg border border-primary-600/30 bg-primary-50 px-5 py-3 text-sm text-primary-700" data-test="eet-pending-hint">
+        {{ t(pendingEet === 'qr' ? 'eet.invoice.pending_qr' : 'eet.invoice.pending_accept') }}
+      </div>
+
+      <EetInvoiceSummary v-if="eet.capabilities.value && (paymentsRelevant() || (invoice.invoice_type === 'credit_note' && !!invoice.parent_invoice_id))"
+        :invoice-id="invoice.id" :refresh-key="eetRefresh" @loaded="onEetSummaryLoaded" />
 
       <div v-if="invoice.cash_documents?.length"
         class="bg-surface border border-neutral-200 rounded-lg px-5 py-4 shadow-sm text-sm space-y-1.5" data-invoice-cash-documents>
@@ -2936,60 +3359,66 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
 
 
       <!-- Výkaz víceprací -->
-      <div v-if="workReport" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div v-if="workReport" id="invoice-work-report" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden scroll-mt-4">
         <header class="px-5 py-3 border-b border-neutral-200 flex items-baseline justify-between gap-3">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report') }}</h3>
           <span class="text-sm text-neutral-700">{{ workReport.title }}</span>
         </header>
+        <div v-if="workReport.billing_snapshot" class="px-5 py-3 space-y-3">
+          <p v-if="workReport.billing_period" class="text-sm text-neutral-500">{{ t('work_report_billing.period') }}: {{ formatPeriod(workReport.billing_period) }}</p>
+          <p v-if="workReport.billing_error" class="text-sm text-warning-600" data-test="billing-error">{{ t('work_report_billing.invalid', { message: workReport.billing_error }) }}</p>
+          <p v-else-if="workReport.billing_stale" class="text-sm text-warning-600">{{ t('work_report_billing.stale') }}</p>
+          <BillingRecap v-if="workReport.billing_preview" :preview="workReport.billing_preview" :currency="invoice.currency" :prices-include-vat="!!invoice.prices_include_vat" />
+        </div>
         <!-- Desktop: tabulka -->
         <div class="hidden md:block overflow-x-auto">
-        <table class="w-full text-sm table-sticky-first">
+        <table class="w-full text-sm table-sticky-first" :class="{ 'wr-compact': workReport.effective_display_options?.compact }">
           <thead class="bg-neutral-50 text-neutral-500 text-xs uppercase tracking-wide">
             <tr>
               <th class="text-left px-5 py-2 font-medium">{{ t('invoice.wr_description') }}</th>
-              <th v-if="wrHasDates" class="text-left px-4 py-2 font-medium w-32">{{ t('invoice.wr_date') }}</th>
-              <th class="text-right px-4 py-2 font-medium w-28">{{ t('invoice.wr_hours') }}</th>
-              <th class="text-right px-4 py-2 font-medium w-32">{{ t('invoice.wr_rate') }}</th>
-              <th class="text-right px-5 py-2 font-medium w-36">{{ t('invoice.wr_total') }}</th>
+              <th v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="text-left px-4 py-2 font-medium w-32">{{ t('invoice.wr_date') }}</th>
+              <th v-if="workReport.effective_display_options?.hours !== false" class="text-right px-4 py-2 font-medium w-28">{{ t('invoice.wr_hours') }}</th>
+              <th v-if="wrShow.rate" class="text-right px-4 py-2 font-medium w-32">{{ t('invoice.wr_rate') }}</th>
+              <th v-if="wrShow.amount" class="text-right px-5 py-2 font-medium w-36">{{ t('invoice.wr_total') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
             <tr v-for="(it, i) in workReport.items" :key="i">
               <td class="px-5 py-2 text-neutral-800 whitespace-pre-wrap">{{ it.description }}</td>
-              <td v-if="wrHasDates" class="px-4 py-2 text-neutral-600 whitespace-nowrap">{{ formatDate(it.work_date) }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</td>
-              <td class="px-5 py-2 text-right font-mono">{{ formatMoney(workRowTotal(it), invoice.currency) }}</td>
+              <td v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="px-4 py-2 text-neutral-600 whitespace-nowrap">{{ formatDate(it.work_date) }}</td>
+              <td v-if="workReport.effective_display_options?.hours !== false" class="px-4 py-2 text-right font-mono">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }}</td>
+              <td v-if="wrShow.rate" class="px-4 py-2 text-right font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</td>
+              <td v-if="wrShow.amount" class="px-5 py-2 text-right font-mono">{{ formatMoney(workRowTotal(it), invoice.currency) }}</td>
             </tr>
-            <tr class="bg-neutral-50 font-semibold">
-              <td class="px-5 py-2 text-right" :colspan="wrHasDates ? 2 : 1">{{ t('invoice.totals.total') }}</td>
-              <td class="px-4 py-2 text-right font-mono">{{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</td>
-              <td></td>
-              <td class="px-5 py-2 text-right font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</td>
+            <tr v-if="workReport.effective_display_options?.hours !== false || workReport.effective_display_options?.amount !== false" class="bg-neutral-50 font-semibold">
+              <td class="px-5 py-2 text-right" :colspan="workReport.effective_display_options?.date !== false && wrHasDates ? 2 : 1">{{ t('invoice.totals.total') }}</td>
+              <td v-if="workReport.effective_display_options?.hours !== false" class="px-4 py-2 text-right font-mono">{{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</td>
+              <td v-if="wrShow.rate"></td>
+              <td v-if="wrShow.amount" class="px-5 py-2 text-right font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</td>
             </tr>
           </tbody>
         </table>
         </div>
 
         <!-- Mobile: stack karet -->
-        <div class="md:hidden divide-y divide-neutral-100">
+        <div class="md:hidden divide-y divide-neutral-100" :class="{ 'wr-compact': workReport.effective_display_options?.compact }">
           <div v-for="(it, i) in workReport.items" :key="`m-${i}`" class="p-3 space-y-1">
             <div class="text-sm whitespace-pre-wrap text-neutral-800">{{ it.description }}</div>
             <div class="flex items-baseline justify-between text-xs text-neutral-500">
-              <span v-if="wrHasDates" class="font-mono">{{ formatDate(it.work_date) }}</span>
+              <span v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="font-mono">{{ formatDate(it.work_date) }}</span>
               <span v-else></span>
               <span>
-                <span class="font-mono text-neutral-700">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }} h</span>
-                <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</span>
-                <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono font-semibold text-neutral-900">{{ formatMoney(workRowTotal(it), invoice.currency) }}</span>
+                <span v-if="wrShow.hours" class="font-mono text-neutral-700">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }} h</span>
+                <span v-if="wrShow.hours && wrShow.rate" class="text-neutral-400 mx-1.5">·</span>
+                <span v-if="wrShow.rate" class="font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</span>
+                <span v-if="wrShow.amount && (wrShow.hours || wrShow.rate)" class="text-neutral-400 mx-1.5">·</span>
+                <span v-if="wrShow.amount" class="font-mono font-semibold text-neutral-900">{{ formatMoney(workRowTotal(it), invoice.currency) }}</span>
               </span>
             </div>
           </div>
-          <div class="bg-neutral-50 p-3 flex items-center justify-between font-semibold">
-            <span class="font-mono">Σ {{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
-            <span class="font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</span>
+          <div v-if="workReport.effective_display_options?.hours !== false || workReport.effective_display_options?.amount !== false" class="bg-neutral-50 p-3 flex items-center justify-between font-semibold">
+            <span v-if="workReport.effective_display_options?.hours !== false" class="font-mono">Σ {{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
+            <span v-if="wrShow.amount" class="font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</span>
           </div>
         </div>
       </div>
@@ -3017,7 +3446,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
                 <td class="px-5 py-2 text-neutral-800 whitespace-pre-wrap">{{ m.description }}</td>
                 <td class="px-4 py-2 text-right font-mono">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }}</td>
                 <td class="px-4 py-2 text-neutral-600">{{ m.unit }}</td>
-                <td class="px-4 py-2 text-right font-mono">{{ formatMoney(m.unit_price, invoice.currency) }}</td>
+                <td class="px-4 py-2 text-right font-mono">{{ formatUnitPrice(m.unit_price, invoice.currency) }}</td>
                 <td class="px-5 py-2 text-right font-mono">{{ formatMoney(Number(m.total_amount ?? Number(m.quantity) * Number(m.unit_price)), invoice.currency) }}</td>
               </tr>
               <tr class="bg-neutral-50 font-semibold">
@@ -3035,7 +3464,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
             <div class="flex items-baseline justify-between text-xs text-neutral-500">
               <span class="font-mono">{{ Number(m.quantity).toLocaleString('cs', { maximumFractionDigits: 3 }) }} {{ m.unit }}</span>
               <span>
-                <span class="font-mono">{{ formatMoney(m.unit_price, invoice.currency) }}</span>
+                <span class="font-mono">{{ formatUnitPrice(m.unit_price, invoice.currency) }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
                 <span class="font-mono font-semibold text-neutral-900">{{ formatMoney(Number(m.total_amount ?? Number(m.quantity) * Number(m.unit_price)), invoice.currency) }}</span>
               </span>
@@ -3256,16 +3685,6 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
             </a>
           </div>
         </div>
-        <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
-             Content-Disposition: attachment a některé prohlížeče blokují embed). Nad prahem
-             se tenhle blok nevykresluje — náhled je vedle dokladu (DocumentSidePreview). -->
-        <div v-if="importedPdfPreviewOpen && !importedPdfSideBySide" class="bg-neutral-100 border-t border-neutral-200">
-          <iframe
-            :src="importedPdfInlineUrl"
-            class="w-full h-[80vh] border-0"
-            :title="invoice.imported_pdf_original_name || 'PDF'"
-          ></iframe>
-        </div>
       </div>
 
       <!-- Historie PDF -->
@@ -3338,7 +3757,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
                   <td class="px-5 py-2 whitespace-nowrap">
                     <span class="text-xs px-2 py-0.5 rounded font-medium" :class="actionColor(a.action)">{{ actionLabel(a.action) }}</span>
                   </td>
-                  <td class="px-3 py-2 text-xs text-neutral-500 whitespace-nowrap">{{ a.user_name || a.user_email || '—' }}</td>
+                  <td class="px-3 py-2 text-xs text-neutral-500 whitespace-nowrap">{{ a.user_name || '—' }}</td>
                   <td class="px-3 py-2 font-mono text-xs text-neutral-400 whitespace-nowrap">{{ a.created_at.replace('T', ' ').slice(0, 19) }}</td>
                   <td class="px-3 py-2 text-xs text-neutral-600 break-all whitespace-pre-wrap leading-snug">{{ payloadText(a.payload) }}</td>
                 </tr>
@@ -3352,7 +3771,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
                 <span class="text-xs px-2 py-0.5 rounded font-medium" :class="actionColor(a.action)">{{ actionLabel(a.action) }}</span>
                 <span class="font-mono text-xs text-neutral-400 whitespace-nowrap">{{ a.created_at.replace('T', ' ').slice(0, 19) }}</span>
               </div>
-              <div class="text-xs text-neutral-500">{{ a.user_name || a.user_email || '—' }}</div>
+              <div class="text-xs text-neutral-500">{{ a.user_name || '—' }}</div>
               <div v-if="a.payload" class="text-xs text-neutral-600 break-all whitespace-pre-wrap leading-snug">{{ payloadText(a.payload) }}</div>
             </li>
           </ul>
@@ -3456,13 +3875,7 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         @saved="load" />
 
       <LinkedDocumentsPanel v-if="invoice" class="mt-4 block" entity-type="invoice" :entity-id="invoice.id" />
-    </div>
-    <DocumentSidePreview
-      v-if="importedPdfSideBySide"
-      :src="importedPdfInlineUrl"
-      :file-name="invoice.imported_pdf_original_name"
-      @close="importedPdfPreview.close()"
-    />
+    </DocumentPreviewSplit>
     <WorkspaceTeleport>
       <RuleFormModal v-if="postingRuleOpen && invoice"
         :prefill="{ name: invoice.client_company_name || invoice.varsymbol || '', direction: invoice.total_with_vat < 0 ? 'outgoing' : 'incoming', applies_currency: invoice.currency, variable_symbol: invoice.payment_varsymbol || invoice.varsymbol || null }"
@@ -3476,3 +3889,8 @@ useWindowRefresh(['invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'a
         @close="bankMatchTarget = null" @done="load" />
     </WorkspaceTeleport>
 </template>
+
+<style scoped>
+.wr-compact :is(th, td) { padding-top: 0.2rem; padding-bottom: 0.2rem; font-size: 0.75rem; }
+.wr-compact > div { padding-top: 0.4rem; padding-bottom: 0.4rem; }
+</style>

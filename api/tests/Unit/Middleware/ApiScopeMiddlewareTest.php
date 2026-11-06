@@ -15,6 +15,65 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class ApiScopeMiddlewareTest extends TestCase
 {
+    public function testDelegatedInvoiceDefaultsRemainSessionOnly(): void
+    {
+        foreach (['GET', 'PUT'] as $method) {
+            $path = '/api/settings/client/invoice-defaults';
+            foreach (['read', 'read_write'] as $scope) {
+                $response = $this->middleware()->process($this->bearer($method, $path, $scope), $this->okHandler());
+                self::assertSame(403, $response->getStatusCode());
+                self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+            }
+            $session = (new ServerRequestFactory())->createServerRequest($method, $path)
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+            self::assertSame(204, $this->middleware()->process($session, $this->okHandler())->getStatusCode());
+        }
+    }
+
+    public function testMembershipCatalogTokenReadsRegisteredAccountingRoutesOnly(): void
+    {
+        $app = \Slim\Factory\AppFactory::create();
+        \MyInvoice\Routes::register($app);
+        foreach (['roles', 'roles/7', 'receivables', 'receivables/7'] as $resource) {
+            $path = '/api/accounting/catalog/nonprofit-membership/' . $resource;
+            $routing = $app->getRouteResolver()->computeRoutingResults($path, 'GET');
+            self::assertSame(\Slim\Routing\RoutingResults::FOUND, $routing->getRouteStatus());
+            $permission = (new \MyInvoice\Security\RoutePermissionMap())->match('GET', $path);
+            self::assertSame('accounting', $permission->key);
+            self::assertSame(\MyInvoice\Security\AccessLevel::READ, $permission->minimum);
+            foreach (['read', 'read_write'] as $scope) {
+                self::assertSame(204, $this->middleware()->process($this->bearer('GET', $path, $scope), $this->okHandler())->getStatusCode());
+                foreach (['POST', 'PUT', 'PATCH', 'DELETE'] as $method) {
+                    self::assertSame(403, $this->middleware()->process($this->bearer($method, $path, $scope), $this->okHandler())->getStatusCode());
+                }
+            }
+        }
+    }
+
+    public function testPropertyTokenReadsOnlyCuratedCatalogAndNeverChangesRegistry(): void
+    {
+        foreach (['profile', 'summary', 'houses', 'units', 'services', 'unit-legal-roles', 'unit-legal-roles/7'] as $resource) {
+            $path = '/api/property/catalog/' . $resource;
+            self::assertSame(204, $this->middleware()->process($this->bearer('GET', $path, 'read'), $this->okHandler())->getStatusCode());
+            self::assertSame(403, $this->middleware()->process($this->bearer('POST', $path, 'read_write'), $this->okHandler())->getStatusCode());
+        }
+        foreach (['profile', 'export', 'objects/7', 'import/preview', 'units', 'catalog/units/7'] as $resource) {
+            self::assertSame(403, $this->middleware()->process($this->bearer('GET', '/api/property/' . $resource, 'read_write'), $this->okHandler())->getStatusCode());
+        }
+    }
+
+    public function testPropertyChargeTokenReadsOnlyCuratedHistory(): void
+    {
+        foreach (['components', 'versions', 'versions/7'] as $resource) {
+            $path = '/api/property/catalog/charges/' . $resource;
+            self::assertSame(204, $this->middleware()->process($this->bearer('GET', $path, 'read'), $this->okHandler())->getStatusCode());
+            self::assertSame(403, $this->middleware()->process($this->bearer('POST', $path, 'read_write'), $this->okHandler())->getStatusCode());
+        }
+        foreach (['components', 'context', 'versions', 'versions/7', 'preview'] as $resource) {
+            self::assertSame(403, $this->middleware()->process($this->bearer('GET', '/api/property/charges/' . $resource, 'read_write'), $this->okHandler())->getStatusCode());
+        }
+    }
+
     public function testCatalogReadPostHasExactReadScopeException(): void
     {
         foreach ([
@@ -106,6 +165,17 @@ final class ApiScopeMiddlewareTest extends TestCase
         self::assertSame('token_endpoint_forbidden', $this->errorCode($r));
     }
 
+    public function testPurchaseInvoiceAiImportRequiresWriteScopeOnTokenRoute(): void
+    {
+        $path = '/api/purchase-invoices/import-ai';
+        $read = $this->middleware()->process($this->bearer('POST', $path, 'read'), $this->okHandler());
+        self::assertSame(403, $read->getStatusCode());
+        self::assertSame('insufficient_scope', $this->errorCode($read));
+
+        $write = $this->middleware()->process($this->bearer('POST', $path, 'read_write'), $this->okHandler());
+        self::assertSame(204, $write->getStatusCode());
+    }
+
     /**
      * Účetní a daňová vrstva je pro token jednosměrná. Bez tohohle testu by stačilo
      * přidat `/api/accounting` do allowlistu (kvůli čtení sestav) a token s právem
@@ -122,6 +192,8 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/invoices/12/rebuild-snapshots'],
             ['POST', '/api/bank-transactions/34/post'],
             ['POST', '/api/bank-transactions/34/unpost'],
+            // Zrušení párování zaúčtovaného pohybu stornuje zápis stejně jako unpost.
+            ['POST', '/api/bank-transactions/34/unmatch'],
             ['POST', '/api/reports/s74b/record'],
             ['POST', '/api/reports/s46/correction'],
             ['PUT',  '/api/tax/profile'],
@@ -152,6 +224,7 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['PUT', '/api/accounting/other-items/12/installments'],
             ['POST', '/api/accounting/other-items/12/schedule'],
             ['PUT', '/api/accounting/other-items/schedules/3/status'],
+            ['POST', '/api/accounting/other-items/12/allocations'],
         ] as [$method, $path]) {
             $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
             self::assertSame(204, $r->getStatusCode(), "bearer $method $path musí projít");
@@ -223,7 +296,6 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['POST', '/api/accounting/other-items/12/post'],
             ['POST', '/api/accounting/other-items/12/reverse'],
             ['POST', '/api/accounting/other-items/12/repost'],
-            ['POST', '/api/accounting/other-items/12/allocations'],
             ['DELETE', '/api/accounting/other-items/12/allocations/5'],
             ['POST', '/api/accounting/other-items/schedules/3/generate'],
             ['PUT', '/api/accounting/other-items'],
@@ -519,6 +591,33 @@ final class ApiScopeMiddlewareTest extends TestCase
     }
 
     /**
+     * Bankovní spojení firmy (měnové účty) token nezmění ani se scope read_write:
+     * přepsaný IBAN by se tiskl na každou další fakturu a do QR platby.
+     */
+    public function testBearerReadWriteCannotChangeCompanyBankAccounts(): void
+    {
+        foreach ([
+            ['POST', '/api/settings/currencies'],
+            ['PUT', '/api/settings/currencies/5'],
+            ['DELETE', '/api/settings/currencies/5'],
+        ] as [$method, $path]) {
+            $r = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(403, $r->getStatusCode(), "bearer $method $path");
+            self::assertSame('token_write_forbidden', $this->errorCode($r));
+        }
+        self::assertSame(204, $this->middleware()->process(
+            $this->bearer('GET', '/api/settings/currencies', 'read_write'),
+            $this->okHandler(),
+        )->getStatusCode());
+        // Session (webové rozhraní) zůstává beze změny.
+        self::assertSame(204, $this->middleware()->process(
+            (new ServerRequestFactory())->createServerRequest('PUT', '/api/settings/currencies/5')
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session'),
+            $this->okHandler(),
+        )->getStatusCode());
+    }
+
+    /**
      * Daňová přiznání byla přes token nedostupná omylem: `#^/api/tax(/|$)#`
      * vyžaduje po „tax" lomítko, takže `/api/tax-return/...` nikdy nechytil.
      * Čtení přiznání je přitom to, kvůli čemu se integrace staví.
@@ -598,6 +697,8 @@ final class ApiScopeMiddlewareTest extends TestCase
             ['GET', '/api/portal/document-requests'],
             ['POST', '/api/portal/document-requests/7/upload'],
             ['GET', '/api/user/filters'],
+            ['GET', '/api/user/favorites'],
+            ['DELETE', '/api/user/favorites/7'],
             ['GET', '/api/user/preferences'],
             ['DELETE', '/api/user/preferences/theme'],
             ['POST', '/api/ai/suggestions/7/accept'],
@@ -613,6 +714,81 @@ final class ApiScopeMiddlewareTest extends TestCase
         }
     }
 
+    public function testClosingDecisionWorkspacesRequireSessionBeforeHandler(): void
+    {
+        $handler = new class implements RequestHandlerInterface {
+            public int $calls = 0;
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                ++$this->calls;
+                return (new ResponseFactory())->createResponse(204);
+            }
+        };
+        foreach (['asset-reserve', 'legal-provisions'] as $workspace) {
+            $path = '/api/accounting/periods/7/closing/' . $workspace . '/workspace';
+            foreach (['GET', 'HEAD'] as $method) {
+                foreach (['read', 'read_write'] as $scope) {
+                    $response = $this->middleware()->process($this->bearer($method, $path, $scope), $handler);
+                    self::assertSame(403, $response->getStatusCode(), "$scope $method $path");
+                    self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+                    self::assertSame(0, $handler->calls);
+                }
+            }
+            $session = (new ServerRequestFactory())->createServerRequest('GET', $path)
+                ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
+            self::assertSame(204, $this->middleware()->process($session, $this->okHandler())->getStatusCode());
+        }
+    }
+
+    public function testClosingPublicPreviewsRemainAvailableToReadTokens(): void
+    {
+        foreach (['fx-preview', 'deferred-tax-preview', 'provisions-preview'] as $preview) {
+            foreach (['read', 'read_write'] as $scope) {
+                $response = $this->middleware()->process(
+                    $this->bearer('GET', '/api/accounting/periods/7/closing/' . $preview, $scope),
+                    $this->okHandler(),
+                );
+                self::assertSame(204, $response->getStatusCode(), "$scope $preview");
+            }
+        }
+    }
+
+    /**
+     * Mobilní aplikace a integrace čtou evidenci tržeb tokenem (Domů, Tržby, detail),
+     * zápisové EET a rychlou účtenku jen se scope `read_write`. Nastavení, jednotky,
+     * zařízení, certifikáty, diagnostika a export zůstávají jen pro webovou relaci.
+     */
+    public function testEetAndMobileReceiptBearerBoundary(): void
+    {
+        $uuid = '0f8fad5b-d9cb-469f-a165-70867728950e';
+        foreach (['/api/eet/summary', '/api/eet/records', '/api/eet/records/7', '/api/eet/queue', '/api/eet/capabilities', '/api/eet/payments/' . $uuid] as $path) {
+            self::assertSame(204, $this->middleware()->process($this->bearer('GET', $path, 'read'), $this->okHandler())->getStatusCode(), $path);
+        }
+        foreach ([
+            '/api/eet/payments', '/api/eet/payments/preview', '/api/eet/payment-intents',
+            '/api/eet/payment-intents/' . $uuid . '/confirm', '/api/eet/payment-intents/' . $uuid . '/cancel',
+            '/api/eet/records/7/retry', '/api/eet/records/7/corrections', '/api/eet/records/7/corrections/preview',
+            '/api/mobile/receipts',
+        ] as $path) {
+            $denied = $this->middleware()->process($this->bearer('POST', $path, 'read'), $this->okHandler());
+            self::assertSame(403, $denied->getStatusCode(), $path);
+            self::assertSame('insufficient_scope', $this->errorCode($denied), $path);
+            self::assertSame(204, $this->middleware()->process($this->bearer('POST', $path, 'read_write'), $this->okHandler())->getStatusCode(), $path);
+        }
+        foreach ([
+            ['GET', '/api/eet/certificates'], ['POST', '/api/eet/certificates'], ['POST', '/api/eet/certificates/3/deactivate'],
+            ['GET', '/api/eet/settings'], ['PUT', '/api/eet/settings'], ['GET', '/api/eet/units'], ['POST', '/api/eet/devices'],
+            ['POST', '/api/eet/diagnostics'], ['GET', '/api/eet/export'],
+        ] as [$method, $path]) {
+            $denied = $this->middleware()->process($this->bearer($method, $path, 'read_write'), $this->okHandler());
+            self::assertSame(403, $denied->getStatusCode(), $method . ' ' . $path);
+            self::assertSame('token_endpoint_forbidden', $this->errorCode($denied), $method . ' ' . $path);
+        }
+        // Veřejná účtenka zákazníka: odkaz spravuje token jako ostatní zápisy faktur.
+        self::assertSame(204, $this->middleware()->process($this->bearer('POST', '/api/invoices/7/receipt-link', 'read_write'), $this->okHandler())->getStatusCode());
+        self::assertSame(403, $this->middleware()->process($this->bearer('DELETE', '/api/invoices/7/receipt-link', 'read'), $this->okHandler())->getStatusCode());
+    }
     private function middleware(): ApiScopeMiddleware
     {
         return new ApiScopeMiddleware(new ResponseFactory());

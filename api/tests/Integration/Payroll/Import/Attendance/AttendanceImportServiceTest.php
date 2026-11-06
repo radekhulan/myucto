@@ -5,12 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 
 use MyInvoice\Action\Payroll\PayrollAttendanceImportAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceSourceConfirmationRequired;
+use MyInvoice\Service\Payroll\PayrollEmploymentBulkClosure;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -52,7 +52,7 @@ final class AttendanceImportServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $service = $this->container->get(AttendanceImportService::class);
         if (!$db instanceof Connection || !$service instanceof AttendanceImportService) {
@@ -548,6 +548,122 @@ final class AttendanceImportServiceTest extends TestCase
         );
         $stmt->execute([$this->supplierId, (int) $result['results'][0]['employment_id']]);
         self::assertEquals(18.75, (float) $stmt->fetchColumn());
+    }
+
+    /**
+     * Hodinová sazba, sjednaný konec a číslo účtu jdou při založení stejnými
+     * službami jako při ručním zadání: sazba do podmínek jako pravděpodobný
+     * výdělek, konec do podmínek i vztahu (pozná ho hromadné ukončení dohod),
+     * účet na kartu přes validaci karty. Neplatná hodnota osobu neshodí.
+     */
+    public function testPersonsTakeHourlyRateAgreedEndAndBankAccount(): void
+    {
+        $base = ['relation_type' => 'dpp', 'planned_start_on' => '2026-06-01', 'activate' => true, 'birth_number' => null];
+        $result = $this->service->persons($this->supplierId, self::PERIOD, [
+            $base + [
+                'person_key' => 'alena sazbova',
+                'full_name' => 'Alena Sazbová',
+                'first_name' => 'Alena',
+                'last_name' => 'Sazbová',
+                'hourly_rate' => '180,50',
+                'fixed_term_end_on' => '31. 8. 2026',
+                'bank_account' => '1000000005/0100',
+            ],
+            $base + [
+                'person_key' => 'bela chybna',
+                'full_name' => 'Běla Chybná',
+                'first_name' => 'Běla',
+                'last_name' => 'Chybná',
+                'hourly_rate' => 'dle dohody',
+                'fixed_term_end_on' => '2026-05-31',
+                'bank_account' => '123',
+            ],
+        ], $this->userId, null, null);
+
+        self::assertSame(
+            ['created', 'created'],
+            array_column($result['results'], 'status'),
+            (string) json_encode($result['results'], JSON_UNESCAPED_UNICODE),
+        );
+        self::assertNull($result['results'][0]['message']);
+        $alena = (int) $result['results'][0]['employment_id'];
+        self::assertSame(
+            ['probable_hourly_earning_minor' => 18050, 'fixed_term_end_on' => '2026-08-31', 'end_date' => '2026-08-31'],
+            $this->agreedTerms($alena),
+        );
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT probable_earning_rationale FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?',
+        );
+        $stmt->execute([$this->supplierId, $alena]);
+        self::assertStringContainsString('180,50 Kč', (string) $stmt->fetchColumn());
+        $sensitive = $this->container->get(PayrollSensitiveData::class);
+        self::assertInstanceOf(PayrollSensitiveData::class, $sensitive);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT bank_account_masked, allocation_basis_points, effective_from, is_active,
+                    verification_source, verified_by
+               FROM payroll_person_accounts WHERE supplier_id = ? AND employee_id = ?',
+        );
+        $stmt->execute([$this->supplierId, (int) $result['results'][0]['employee_id']]);
+        // Účet z podkladů rovnou ověří uživatel, který import spustil.
+        self::assertSame([[
+            'bank_account_masked' => $sensitive->mask('1000000005/0100', PayrollSensitiveField::BANK_ACCOUNT),
+            'allocation_basis_points' => 10000,
+            'effective_from' => '2026-06-01',
+            'is_active' => 1,
+            'verification_source' => 'user_verified',
+            'verified_by' => $this->userId,
+        ]], array_map(static fn (array $row): array => [
+            'bank_account_masked' => (string) $row['bank_account_masked'],
+            'allocation_basis_points' => (int) $row['allocation_basis_points'],
+            'effective_from' => (string) $row['effective_from'],
+            'is_active' => (int) $row['is_active'],
+            'verification_source' => $row['verification_source'],
+            'verified_by' => $row['verified_by'] === null ? null : (int) $row['verified_by'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC)));
+
+        $closure = $this->container->get(PayrollEmploymentBulkClosure::class);
+        self::assertInstanceOf(PayrollEmploymentBulkClosure::class, $closure);
+        $expired = array_values(array_filter(
+            $closure->preview($this->supplierId, 3, 12, '2026-09-15')['items'],
+            static fn (array $item): bool => $item['employment_id'] === $alena,
+        ));
+        self::assertSame('expired', $expired[0]['group'] ?? null);
+        self::assertSame('2026-08-31', $expired[0]['proposed_on']);
+
+        $bela = (int) $result['results'][1]['employment_id'];
+        $message = (string) $result['results'][1]['message'];
+        self::assertStringContainsString('Hodinovou sazbu „dle dohody“', $message);
+        self::assertStringContainsString('je před nástupem', $message);
+        self::assertStringContainsString('Číslo účtu z podkladů neplatí', $message);
+        self::assertSame(
+            ['probable_hourly_earning_minor' => null, 'fixed_term_end_on' => null, 'end_date' => null],
+            $this->agreedTerms($bela),
+        );
+        self::assertSame(0, $this->countRows(
+            'SELECT COUNT(*) FROM payroll_person_accounts WHERE supplier_id = ? AND employee_id = ?',
+            [$this->supplierId, (int) $result['results'][1]['employee_id']],
+        ));
+    }
+
+    /** @return array{probable_hourly_earning_minor:?int,fixed_term_end_on:?string,end_date:?string} */
+    private function agreedTerms(int $employmentId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT terms.probable_hourly_earning_minor, terms.fixed_term_end_on, employment.end_date
+               FROM payroll_employments employment
+               JOIN payroll_employment_terms terms
+                 ON terms.supplier_id = employment.supplier_id AND terms.employment_id = employment.id
+              WHERE employment.supplier_id = ? AND employment.id = ?',
+        );
+        $stmt->execute([$this->supplierId, $employmentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($row);
+
+        return [
+            'probable_hourly_earning_minor' => $row['probable_hourly_earning_minor'] === null ? null : (int) $row['probable_hourly_earning_minor'],
+            'fixed_term_end_on' => $row['fixed_term_end_on'] === null ? null : (string) $row['fixed_term_end_on'],
+            'end_date' => $row['end_date'] === null ? null : (string) $row['end_date'],
+        ];
     }
 
     public function testProfilesCrudAndPreviewWithProfile(): void

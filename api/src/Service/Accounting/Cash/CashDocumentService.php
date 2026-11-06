@@ -15,6 +15,7 @@ use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\PurchasePayableAccount;
 use MyInvoice\Service\Invoice\InvoiceMath;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RefundDocument;
@@ -22,6 +23,9 @@ use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
 use MyInvoice\Service\Currency\CnbRateDeviationChecker;
+use MyInvoice\Service\Eet\EetCashDocumentRecorder;
+use MyInvoice\Service\Eet\EetCommandException;
+use MyInvoice\Service\Eet\EetHistoryGuard;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use DateTimeImmutable;
@@ -76,6 +80,8 @@ final class CashDocumentService
         private readonly VatStatusService $vatStatus,
         private readonly InvoicePdfRenderer $invoicePdf,
         private readonly \MyInvoice\Service\Accounting\AdvanceSettlementSync $advanceSettlement,
+        private readonly \MyInvoice\Service\PurchaseInvoice\PurchasePaidStatusRestore $paidStatusRestore,
+        private readonly EetCashDocumentRecorder $eet,
     ) {}
 
     /**
@@ -114,7 +120,7 @@ final class CashDocumentService
             $this->documents->replaceVatLines($docId, $doc['vat_mode'] === 'vat' ? $doc['vat_lines'] : []);
 
             if ($post) {
-                $result = $this->doPost($supplierId, $docId, $userId);
+                $result = $this->doPost($supplierId, $docId, $userId, self::eetDeviceId($data));
             } else {
                 $result = ['doc_number' => null, 'journal_entry_id' => null, 'status' => 'draft', 'warnings' => []];
             }
@@ -283,12 +289,23 @@ final class CashDocumentService
             $pdo->beginTransaction();
         }
         try {
+            (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims($supplierId);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertSourceMutable($supplierId, 'cash', $id);
             $doc = $this->documents->lockForPost($supplierId, $id);
             if ($doc === null) {
                 throw new CashException('validation', 'Pokladní doklad nenalezen.', 404);
             }
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId,
+                array_values(array_filter([(int) ($doc['journal_entry_id'] ?? 0), (int) ($doc['reversal_entry_id'] ?? 0)])));
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId,
+                array_values(array_filter([(int) ($doc['journal_entry_id'] ?? 0), (int) ($doc['reversal_entry_id'] ?? 0)])));
             $this->assertTaxDateUnlocked($supplierId, (string) ($doc['tax_date'] ?? $doc['issue_date']));
             $this->assertNoFollowUpDocuments($supplierId, $doc);
+            $eetConflict = (new EetHistoryGuard($this->db))->cashDocumentConflict($supplierId, $id);
+            if ($eetConflict !== null) {
+                throw new CashException(EetHistoryGuard::ERROR_CODE, $eetConflict, 409);
+            }
 
             // Vazba na fakturu: úhradu zrušit dřív, než zmizí sám doklad.
             if ($doc['invoice_payment_id'] !== null) {
@@ -296,7 +313,7 @@ final class CashDocumentService
                 $this->documents->setInvoicePaymentId($supplierId, $id, null);
             }
             $this->reopenRefund($supplierId, $doc);
-            if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
+            if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null && $doc['doc_type'] !== 'in') {
                 // Stejné pravidlo jako u storna: PF zpět do stavu před úhradou dle
                 // tvaru dokladu (zaúčtovaný → 'booked', journal-free DE → 'received').
                 $this->purchaseInvoices->setStatus(
@@ -321,6 +338,7 @@ final class CashDocumentService
 
             $docNumber = self::nullableString($doc['doc_number'] ?? null);
             $this->documents->deleteDocument($supplierId, $id);
+            $this->restorePaidAfterRefundRemoved($supplierId, $doc);
             $this->syncAdvanceCoveredStatus($supplierId, $doc);
 
             if ($ownTx) {
@@ -330,6 +348,9 @@ final class CashDocumentService
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
+            }
+            if ($e instanceof \MyInvoice\Service\Property\PropertyException && $e->errorCode === 'property_not_found') {
+                throw new CashException('validation', 'Pokladní doklad nenalezen.', 404);
             }
             throw $e;
         }
@@ -395,17 +416,48 @@ final class CashDocumentService
      *
      * @return array{doc_number:string, journal_entry_id:?int, warnings:list<string>}
      */
-    public function post(int $supplierId, int $id, ?int $userId): array
+    public function postPropertyClearing(\MyInvoice\Service\Property\Payments\Workflow\PaymentClearingIntent $intent): array
+    {
+        $intent->assertConnection($this->db);
+        $proof = $intent->current('cash');
+        $supplier = $intent->supplier;
+        $doc = $proof['snapshot']['source']['native_draft'];
+        $register = $proof['snapshot']['source']['register'];
+        $this->assertTaxDateUnlocked($supplier, (string) ($doc['tax_date'] ?? $doc['issue_date']));
+        $this->validateDoc($supplier, $doc, [], $register);
+        if ($this->supplierAccountingMode($supplier) === 'tax_evidence') throw new CashException('validation', 'Tento předpis vyžaduje účetní deník.');
+        if ($proof['workflow']['cash_document_id'] === null) {
+            $intent = $this->documents->insertPropertyClearing($intent);
+            $proof = $intent->current('cash');
+        }
+        $id = (int) $proof['workflow']['cash_document_id'];
+        $vat = $this->db->pdo()->prepare('SELECT id FROM cash_document_vat_lines WHERE cash_document_id=? FOR UPDATE');
+        $vat->execute([$id]);
+        if ($vat->fetchColumn() !== false) throw new CashException('validation', 'Clearingový doklad nesmí obsahovat řádky DPH.');
+        $number = $doc['doc_number'] ?? null;
+        if ($number === null) {
+            $year = (int) substr($doc['issue_date'], 0, 4);
+            $scope = !empty($register['own_series']) ? (int) $register['id'] : 0;
+            if ($scope > 0 && !$this->cashRegisters->ensureOwnSeries($supplier, $scope, $year)) $scope = 0;
+            $number = $this->series->next($supplier, $doc['doc_type'] === 'in' ? 'cash_in' : 'cash_out', $year, $scope);
+        }
+        $entry = (new \MyInvoice\Repository\JournalEntryRepository($this->db, new \MyInvoice\Service\ActivityLogger($this->db)))->insertPropertyClearing($intent, $number);
+        $this->documents->markPosted($supplier, $id, $number, $entry);
+        return ['id' => $id, 'journal_entry_id' => $entry, 'doc_number' => $number];
+    }
+
+    /** @param ?int $eetDeviceId zařízení EET, když pokladna žádné namapované nemá */
+    public function post(int $supplierId, int $id, ?int $userId, ?int $eetDeviceId = null): array
     {
         // Viz create(): výdej čísla řady je horký řádek, odvolanou vlastní transakci zopakuje.
         return TransactionFailure::retrying(
             $this->db->pdo(),
-            fn (): array => $this->postOnce($supplierId, $id, $userId),
+            fn (): array => $this->postOnce($supplierId, $id, $userId, $eetDeviceId),
         );
     }
 
     /** @return array{doc_number:string, journal_entry_id:?int, warnings:list<string>} */
-    private function postOnce(int $supplierId, int $id, ?int $userId): array
+    private function postOnce(int $supplierId, int $id, ?int $userId, ?int $eetDeviceId = null): array
     {
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -413,7 +465,7 @@ final class CashDocumentService
             $pdo->beginTransaction();
         }
         try {
-            $result = $this->doPost($supplierId, $id, $userId);
+            $result = $this->doPost($supplierId, $id, $userId, $eetDeviceId);
             if ($ownTx) {
                 $pdo->commit();
             }
@@ -421,7 +473,7 @@ final class CashDocumentService
                 'doc_number'       => (string) $result['doc_number'],
                 'journal_entry_id' => $result['journal_entry_id'] !== null ? (int) $result['journal_entry_id'] : null,
                 'warnings'         => $result['warnings'],
-            ];
+            ] + (isset($result['eet_refund']) ? ['eet_refund' => $result['eet_refund']] : []);
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
@@ -458,6 +510,7 @@ final class CashDocumentService
             $pdo->beginTransaction();
         }
         try {
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertSourceMutable($supplierId, 'cash', $id);
             $doc = $this->documents->lockForPost($supplierId, $id);
             if ($doc === null) {
                 throw new CashException('validation', 'Pokladní doklad nenalezen.', 404);
@@ -506,12 +559,22 @@ final class CashDocumentService
                 ])
                 : null;
 
+            // EET-05: storno PPD s evidovanou tržbou = vrácení peněz z pokladny → záporná
+            // oprava celé neopravené části, idempotentně vázaná na doklad. Musí předejít
+            // zrušení úhrady faktury: tržbu s neopravenou částkou úhrada drží.
+            try {
+                $this->eet->afterReverse($supplierId, $id, isset($meta['eet_correction_reason']) ? (string) $meta['eet_correction_reason'] : null,
+                    $userId, 'Storno ' . $doc['doc_number'] . ': ' . $reason, self::eetDeviceId($meta));
+            } catch (EetCommandException $e) {
+                throw new CashException($e->errorCode, $e->getMessage(), $e->httpStatus, $e->extra);
+            }
+
             if ($doc['invoice_payment_id'] !== null) {
                 $this->invoicePayments->deletePayment((int) $doc['invoice_payment_id']);
                 $this->documents->setInvoicePaymentId($supplierId, $id, null);
             }
             $this->reopenRefund($supplierId, $doc);
-            if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
+            if ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null && $doc['doc_type'] !== 'in') {
                 // PF vrátit do stavu PŘED úhradou dle tvaru dokladu: zaúčtovaný (journal) byl
                 // 'booked', journal-free (daňová evidence, PF se neúčtuje) byl 'received'.
                 $this->purchaseInvoices->setStatus(
@@ -527,6 +590,7 @@ final class CashDocumentService
                 $this->documents->markReversed($supplierId, $id, $reversalId);
                 $this->advanceSettlement->afterCashDocument($supplierId, $doc, $userId);
             }
+            $this->restorePaidAfterRefundRemoved($supplierId, $doc);
             $this->syncAdvanceCoveredStatus($supplierId, $doc);
 
             $warnings = $this->collectReversalWarnings($supplierId, $doc, $reversalId, $entryDate);
@@ -666,9 +730,10 @@ final class CashDocumentService
                     -- `invoice_type` a musí uživatele upozornit, že úhrada spustí kaskádu
                     -- finálního dokladu / DDKP. Platební kalendář platebním cílem není
                     -- (zrcadlo CashSettlementService::NON_SETTLEABLE_INVOICE_TYPES).
-                    AND i.invoice_type <> 'payment_calendar'
+                    AND i.invoice_type NOT IN ('payment_calendar','rent_calendar','advance_calendar')
                     AND cur.code = 'CZK'
                     AND (i.amount_to_pay - i.paid_total) > 0.005
+                    AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i') . "
                     AND (i.varsymbol LIKE ? OR c.company_name LIKE ?)
                   ORDER BY i.issue_date DESC, i.id DESC
                   LIMIT " . $limit
@@ -762,7 +827,7 @@ final class CashDocumentService
     /**
      * @return array{doc_number:string, journal_entry_id:?int, status:string, warnings:list<string>}
      */
-    private function doPost(int $supplierId, int $id, ?int $userId): array
+    private function doPost(int $supplierId, int $id, ?int $userId, ?int $eetDeviceId = null): array
     {
         $doc = $this->documents->lockForPost($supplierId, $id);
         if ($doc === null) {
@@ -815,16 +880,17 @@ final class CashDocumentService
         // kontroly účetního období (v DE období neexistují; zámek je booked_at, R14).
         // Side-effecty úhrad FV/PF (anotace pro peněžní deník, noha A) zůstávají shodné.
         if ($taxEvidence) {
-            $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
+            $invoicePaymentId = $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
+            $eetRefund = $this->recordEetSale($supplierId, $doc, $docNumber, $invoicePaymentId, $eetDeviceId, $userId);
             $this->documents->markPostedNoJournal($supplierId, $id, $docNumber);
             $this->syncAdvanceCoveredStatus($supplierId, $doc);
 
-            return [
+            return self::withEetRefund([
                 'doc_number'       => $docNumber,
                 'journal_entry_id' => null,
                 'status'           => 'posted',
                 'warnings'         => $this->collectWarnings($supplierId, $doc, (string) $register['account_code']),
-            ];
+            ], $eetRefund);
         }
 
         $lines = $this->buildLines($supplierId, $doc, (string) $register['account_code']);
@@ -846,18 +912,38 @@ final class CashDocumentService
             'posted_by'     => $userId,
         ]);
 
-        $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
+        $invoicePaymentId = $this->applySideEffects($supplierId, $id, $doc, $docNumber, $userId);
+        $eetRefund = $this->recordEetSale($supplierId, $doc, $docNumber, $invoicePaymentId, $eetDeviceId, $userId);
         $this->documents->markPosted($supplierId, $id, $docNumber, $entryId);
         $this->syncAdvanceCoveredStatus($supplierId, $doc);
         // Hotovostní úhrada zálohy po zaúčtování konečné faktury → doplnit její zúčtování.
         $this->advanceSettlement->afterCashDocument($supplierId, $doc, $userId);
 
-        return [
+        return self::withEetRefund([
             'doc_number'       => $docNumber,
             'journal_entry_id' => $entryId,
             'status'           => 'posted',
             'warnings'         => $this->collectWarnings($supplierId, $doc, (string) $register['account_code']),
-        ];
+        ], $eetRefund);
+    }
+
+    /**
+     * Výsledek zaúčtování doplněný o vrácení peněz k dobropisu zaevidované do EET.
+     *
+     * @param array<string,mixed> $result
+     * @param array<string,mixed>|null $eetRefund
+     * @return array<string,mixed>
+     */
+    private static function withEetRefund(array $result, ?array $eetRefund): array
+    {
+        if ($eetRefund === null) {
+            return $result;
+        }
+        if (($eetRefund['warning'] ?? null) !== null) {
+            $result['warnings'][] = 'cash.warning.eet_refund_partial';
+        }
+        $result['eet_refund'] = $eetRefund;
+        return $result;
     }
 
     /**
@@ -913,8 +999,56 @@ final class CashDocumentService
         }
     }
 
-    /** Side-effecty úhrad faktur (v téže transakci). */
-    private function applySideEffects(int $supplierId, int $id, array $doc, string $docNumber, ?int $userId): void
+    /**
+     * Zrušená pokladní vratka k přijaté faktuře úhradu zvyšuje: plně krytá faktura se
+     * vrací do „uhrazeno" stejně jako po odpárování bankovní vratky. Stav před vratkou
+     * nastavením „booked"/„received" vrátit nejde, faktura mohla být uhrazená i předtím.
+     * Koncept vratky úhradu nesnižoval, jeho smazání stav nemění.
+     *
+     * @param array<string,mixed> $doc stav dokladu PŘED stornem/smazáním
+     */
+    private function restorePaidAfterRefundRemoved(int $supplierId, array $doc): void
+    {
+        if (($doc['status'] ?? null) === 'posted'
+            && ($doc['purpose'] ?? null) === 'purchase_payment' && ($doc['doc_type'] ?? null) === 'in'
+            && ($doc['purchase_invoice_id'] ?? null) !== null) {
+            $this->paidStatusRestore->afterRefundRemoved($supplierId, [(int) $doc['purchase_invoice_id']]);
+        }
+    }
+
+    /**
+     * Tržba EET z PPD (EET-05) v transakci zaúčtování. Úhrada faktury, kterou právě
+     * založil {@see applySideEffects()}, dostane stejnou platební událost. Výdajový
+     * doklad k dobropisu je vrácení peněz: záporné opravy tržeb opravované faktury
+     * (EET-08); vrací jejich souhrn.
+     *
+     * @param array<string,mixed> $doc
+     * @return array<string,mixed>|null
+     */
+    private function recordEetSale(int $supplierId, array $doc, string $docNumber, ?int $invoicePaymentId, ?int $eetDeviceId, ?int $userId): ?array
+    {
+        try {
+            if (($doc['doc_type'] ?? null) === 'out') {
+                return $this->eet->afterRefundPost($supplierId, ['doc_number' => $docNumber] + $doc, $eetDeviceId, $userId);
+            }
+            $this->eet->afterPost($supplierId, ['doc_number' => $docNumber] + $doc, $invoicePaymentId, $eetDeviceId, $userId);
+            return null;
+        } catch (EetCommandException $e) {
+            throw new CashException($e->errorCode, $e->getMessage(), $e->httpStatus, $e->extra);
+        }
+    }
+
+    /** @param array<string,mixed> $data */
+    private static function eetDeviceId(array $data): ?int
+    {
+        $id = $data['eet_device_id'] ?? null;
+        return is_numeric($id) && (int) $id > 0 ? (int) $id : null;
+    }
+
+    /**
+     * Side-effecty úhrad faktur (v téže transakci). Vrací id založené úhrady faktury.
+     */
+    private function applySideEffects(int $supplierId, int $id, array $doc, string $docNumber, ?int $userId): ?int
     {
         if ($doc['purpose'] === 'invoice_payment' && $doc['invoice_id'] !== null && $doc['doc_type'] === 'out') {
             // Výplata dokladu k vyplacení: `invoice_payments` nese jen kladné úhrady,
@@ -932,6 +1066,7 @@ final class CashDocumentService
                 ['source' => 'cash', 'note' => $docNumber, 'created_by' => $userId],
             );
             $this->documents->setInvoicePaymentId($supplierId, $id, (int) $res['payment_id']);
+            return (int) $res['payment_id'];
         } elseif ($doc['purpose'] === 'purchase_payment' && $doc['purchase_invoice_id'] !== null) {
             $pfId = (int) $doc['purchase_invoice_id'];
             if ($doc['doc_type'] === 'in') {
@@ -952,6 +1087,7 @@ final class CashDocumentService
                 $this->purchaseInvoices->setStatus($pfId, 'paid', $supplierId, (string) $doc['issue_date']);
             }
         }
+        return null;
     }
 
     /** @return list<string> */
@@ -1160,7 +1296,8 @@ final class CashDocumentService
 
     /**
      * Úhrada přijaté faktury hotově: běžná PF → 321/211, zálohová PF (document_kind=advance)
-     * → poskytnutá záloha 314/211 (B5).
+     * → poskytnutá záloha 314/211 (B5). Závazek se bere z účtu, na kterém doklad vznikl
+     * ({@see PurchasePayableAccount::forPayment}), např. 325 u účtenky.
      *
      * @return list<array{account_code:string, side:string, amount:float}>
      */
@@ -1200,6 +1337,9 @@ final class CashDocumentService
                 ];
         }
         $payable = $this->ruleAccount($supplierId, 'payment.payable.cash', 'debit', '321');
+        if ($doc['purchase_invoice_id'] !== null) {
+            $payable = (new PurchasePayableAccount($this->db))->forPayment($supplierId, (int) $doc['purchase_invoice_id'], $payable);
+        }
         return $refund
             ? [
                 $this->line($cashAccount, 'debit', $total),
@@ -1432,7 +1572,7 @@ final class CashDocumentService
         // (create/post), zámek se drží do jejího konce.
         $this->lockRow('invoices', $invoiceId, $supplierId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, cur.code AS currency
+            'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, i.other_item_id, cur.code AS currency
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id = ? AND i.supplier_id = ?'
         );
@@ -1440,6 +1580,11 @@ final class CashDocumentService
         $inv = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($inv === false) {
             throw new CashException('invoice_not_found', 'Vydaná faktura nenalezena.', 404);
+        }
+        // Úhrada faktury kryté ostatní pohledávkou patří pohledávce (migrace 2246).
+        if ($inv['other_item_id'] !== null) {
+            throw new CashException('invoice_covered_by_other_item',
+                'Faktura je navázaná na ostatní pohledávku. Pokladní doklad přiřaďte pohledávce, faktura úhradu převezme.', 409);
         }
         // Proforma (zálohová) se hotově hradit SMÍ (B5 — inkaso zálohy 211/324); jen
         // draft/cancelled zůstávají zakázané.

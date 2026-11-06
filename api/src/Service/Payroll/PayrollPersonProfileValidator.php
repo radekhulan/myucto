@@ -964,7 +964,11 @@ final class PayrollPersonProfileValidator
         return $value;
     }
 
-    private function normalizeBankAccount(string $raw): string
+    /**
+     * Výplatní účet osoby: IBAN, nebo český účet předčíslí-číslo/kód banky.
+     * Veřejné, aby import podkladů kontroloval účet stejným pravidlem jako karta.
+     */
+    public function normalizeBankAccount(string $raw): string
     {
         $this->rejectMaskPlaceholder($raw, 'bank_account');
         $value = strtoupper(trim($raw));

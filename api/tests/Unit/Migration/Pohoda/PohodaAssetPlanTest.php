@@ -59,6 +59,21 @@ final class PohodaAssetPlanTest extends TestCase
         self::assertSame(35, $card['acc_useful_life_months']);
     }
 
+    /** Dvoumístný kód skupiny (42 u osobního auta) je skupina 2 ve zvláštním režimu: převezme se jako koncept ke kontrole. */
+    public function testTwoDigitGroupCodeIsDerivedForReview(): void
+    {
+        $plan = PohodaAssetPlan::build(self::card(['RelSkOdp' => '42', 'Datum' => '2023-08-01', 'DatZar' => '2023-08-01', 'Kc' => '1082889.01', 'KcDanova' => '1082889.01']), [
+            ['Rok' => '2023', 'KcOdpis' => '216580', 'RelUzavreno' => '1'],
+            ['Rok' => '2024', 'KcOdpis' => '577541.41', 'RelUzavreno' => '1'],
+            ['Rok' => '2025', 'KcOdpis' => '288767.6', 'RelUzavreno' => '1'],
+        ], self::months('2023-08', 60, 18048), 2026, '2025-12');
+
+        self::assertSame(2, $plan['card']['tax_group']);
+        self::assertSame('draft', $plan['card']['status']);
+        self::assertSame(1082889.01, $plan['card']['opening_tax_amount']);
+        self::assertContains('odpisová skupina 2 je odvozená z kódu POHODY 42, zkontrolujte ji', $plan['review']);
+    }
+
     /** Karta bez daňových odpisů jen s účetním plánem; neznámý typ majetku jde ke kontrole jako koncept. */
     public function testWithoutTaxDepreciationAndUnknownKindGoesToReview(): void
     {

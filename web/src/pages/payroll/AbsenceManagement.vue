@@ -3,6 +3,7 @@ import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { useRoute } from 'vue-router'
+import PayrollJmhzReturnBar from './PayrollJmhzReturnBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
@@ -1471,6 +1472,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-6">
+    <PayrollJmhzReturnBar />
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 class="text-2xl font-semibold text-neutral-900">{{ t('payroll_absence.title') }}</h1>

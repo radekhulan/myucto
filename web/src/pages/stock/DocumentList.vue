@@ -27,6 +27,8 @@ const navigate = useRowLink()
 const documents = ref<StockDocument[]>([])
 const warehouses = ref<Warehouse[]>([])
 const loading = ref(false)
+const showImport = ref(false)
+const canImport = computed(() => auth.canWrite('stock') && auth.canWrite('stock.documents.write'))
 
 const page = ref(1)
 const total = ref(0)
@@ -101,6 +103,7 @@ async function load() {
 }
 
 function selectTab(k: '' | StockDocType) {
+  showImport.value = false
   filters.doc_type = k
   page.value = 1
   router.replace({ query: { ...route.query, type: k || undefined } })
@@ -189,6 +192,7 @@ onMounted(async () => {
 })
 
 watch(() => route.query.type, (v) => {
+  showImport.value = false
   const val = (typeof v === 'string' && ['receipt', 'issue', 'transfer'].includes(v)) ? v as StockDocType : ''
   if (val !== filters.doc_type) { filters.doc_type = val; page.value = 1; load() }
 })
@@ -202,10 +206,6 @@ watch(() => route.query.type, (v) => {
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('stock.documents.subtitle') }}</p>
       </div>
       <div v-if="auth.canWrite('stock')" class="flex flex-wrap items-center gap-2">
-        <RouterLink v-if="auth.canWrite('stock.documents.write')" to="/stock/opening-import" :class="btnOutline('neutral')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" /></svg>
-          {{ t('stock.opening_import.action') }}
-        </RouterLink>
         <RouterLink :to="{ path: '/stock/documents/new', query: { doc_type: 'receipt' } }" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
           {{ t('stock.documents.new_receipt') }}
@@ -220,12 +220,29 @@ watch(() => route.query.type, (v) => {
     <!-- Taby -->
     <div class="flex flex-wrap gap-1 mb-4 border-b border-neutral-200">
       <button v-for="tab in TABS" :key="tab.key" type="button" @click="selectTab(tab.key)"
-        class="cursor-pointer px-3 py-2 text-sm font-medium border-b-2 -mb-px"
-        :class="filters.doc_type === tab.key ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-800'">
+        class="cursor-pointer whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 -mb-px"
+        :class="!showImport && filters.doc_type === tab.key ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-800'">
         {{ t(tab.labelKey) }}
+      </button>
+      <button v-if="canImport" type="button" @click="showImport = true"
+        class="cursor-pointer whitespace-nowrap px-3 py-2 text-sm font-medium border-b-2 -mb-px"
+        :class="showImport ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-800'">
+        {{ t('stock.documents.tab_import') }}
       </button>
     </div>
 
+    <section v-if="showImport && canImport" class="flex flex-wrap items-center gap-2 rounded-lg border border-neutral-200 bg-surface p-5 shadow-sm">
+      <RouterLink to="/stock/opening-import" :class="btnOutline('neutral')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" /></svg>
+        {{ t('stock.opening_import.action') }}
+      </RouterLink>
+      <RouterLink to="/stock/history-import" :class="btnOutline('neutral')">
+        <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4-4m-4 4-4-4M5 19h14" /></svg>
+        {{ t('stock.history_import.action') }}
+      </RouterLink>
+    </section>
+
+    <div v-show="!showImport || !canImport">
     <!-- Řádek pohledů. Bez jediného uloženého pohledu se nevykresluje vůbec —
          osamocené „Vše" nad seznamem nic neříká a jen ubírá výšku. -->
     <div
@@ -334,6 +351,7 @@ watch(() => route.query.type, (v) => {
               @click="openDetail(d, $event)" @auxclick.prevent="openDetail(d, $event)">
               <td v-if="tbl.isVisible('number')" class="px-3 py-2 font-mono text-xs whitespace-nowrap">
                 <RouterLink class="row-link" :to="`/stock/documents/${d.id}`" @click.stop @auxclick.stop>{{ d.doc_number || t('stock.doc_status.draft') }}</RouterLink>
+                <span v-if="d.history_import_job_id" data-test="imported-badge" class="ml-1 rounded bg-neutral-100 px-1.5 py-0.5 font-sans text-[10px] text-neutral-600" :title="t('stock.history_import.imported_hint')">{{ t('stock.history_import.imported_badge') }}</span>
               </td>
               <td v-if="tbl.isVisible('date')" class="px-3 py-2 whitespace-nowrap">{{ formatDate(d.doc_date) }}</td>
               <td v-if="tbl.isVisible('type')" class="px-3 py-2">
@@ -364,5 +382,6 @@ watch(() => route.query.type, (v) => {
           class="cursor-pointer h-8 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-40 disabled:cursor-not-allowed">›</button>
       </div>
     </nav>
+    </div>
   </div>
 </template>

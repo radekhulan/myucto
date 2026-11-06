@@ -12,7 +12,10 @@ final class PaymentThanksOutbox
 {
     public const TEMPLATE = '__payment_thanks_intent_v1';
 
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly ?\MyInvoice\Service\ActivityLogger $activity = null,
+    ) {}
 
     public function enqueue(int $invoiceId, string $trigger, ?int $userId, ?string $ip, ?string $userAgent, bool $requireUnsent): array
     {
@@ -76,6 +79,7 @@ final class PaymentThanksOutbox
                 || !in_array($payload['trigger'] ?? null, ['manual', 'bulk', 'bank_match'], true)
                 || !is_bool($payload['require_unsent'] ?? null)) {
                 $this->finish((int) $candidate['id'], 'failed', 'invalid_intent');
+                $this->logFailure(is_array($payload) ? $payload : [], 'invalid_intent');
                 $report['failed']++;
                 continue;
             }
@@ -95,6 +99,8 @@ final class PaymentThanksOutbox
                 } catch (\Throwable $e) {
                     if (TransactionFailure::aborted($e)) throw $e;
                     $result = ['status' => 'failed', 'reason' => 'delivery_failed'];
+                    // Selhání mimo SMTP mailer sám nezaloguje (to dělá jen u odeslání).
+                    $this->logFailure($payload, 'delivery_failed: ' . $e->getMessage());
                 }
                 if ($result['status'] === 'failed') {
                     if ((int) $attempts + 1 >= MailOutbox::MAX_ATTEMPTS) {
@@ -111,6 +117,21 @@ final class PaymentThanksOutbox
             $report[$result['status'] ?? 'queued']++;
         }
         return $report;
+    }
+
+    /** @param array<string,mixed> $payload */
+    private function logFailure(array $payload, string $reason): void
+    {
+        $invoiceId = is_int($payload['invoice_id'] ?? null) ? $payload['invoice_id'] : 0;
+        if ($this->activity === null || $invoiceId <= 0) {
+            return;
+        }
+        $this->activity->log('invoice.payment_thanks_failed', is_int($payload['user_id'] ?? null) ? $payload['user_id'] : null,
+            'invoice', $invoiceId, [
+                'reason'  => mb_substr($reason, 0, 500),
+                'trigger' => $payload['trigger'] ?? null,
+                'queued'  => true,
+            ]);
     }
 
     private function finish(int $id, string $status, string $reason): void

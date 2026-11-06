@@ -66,10 +66,8 @@ final class CardPaymentAutomation
         $out = ['matched_transaction_id' => null, 'settlements' => 0];
         try {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT pi.status,
-                        EXISTS (SELECT 1 FROM journal_entries je
-                                 WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice'
-                                   AND je.source_id = pi.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL) AS posted
+                "SELECT pi.status, "
+                . \MyInvoice\Service\Accounting\DocumentPostingGroup::activePostingExistsSql("'purchase_invoice'", 'pi.id', 'pi.supplier_id') . " AS posted
                    FROM purchase_invoices pi WHERE pi.id = ? AND pi.supplier_id = ?"
             );
             $stmt->execute([$purchaseInvoiceId, $supplierId]);

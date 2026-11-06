@@ -19,6 +19,7 @@
  * přesně ten krok, který token dělat nemá.
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import { CONFIRM, changed, merged, requireConfirm, seg } from './tool-shared.mjs';
 
 const str = (description, extra = {}) => ({ type: 'string', description, ...extra });
@@ -244,6 +245,11 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'create_purchase_invoice',
+    api: [
+      ['POST', '/api/purchase-invoices'],
+      ['GET', '/api/codebooks/currencies'],
+      ['GET', '/api/codebooks/cnb-rate'],
+    ],
     title: 'Založit přijatou fakturu (koncept)',
     description:
       'Zapíše došlý doklad od dodavatele jako KONCEPT. Do evidence DPH, závazků a účetnictví '
@@ -338,6 +344,12 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'update_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['GET', '/api/codebooks/currencies'],
+      ['GET', '/api/clients/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}'],
+    ],
     title: 'Upravit hlavičku konceptu přijaté faktury',
     description:
       'Změní hlavičku KONCEPTU přijaté faktury: dodavatele, číslo dokladu, data, měnu, druh dokladu, '
@@ -425,6 +437,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'add_purchase_invoice_item',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Přidat položku na koncept přijaté faktury',
     description:
       'Přidá položku na KONCEPT přijaté faktury. Existující položky zůstanou beze změny včetně '
@@ -463,6 +479,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'update_purchase_invoice_item',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Upravit položku konceptu přijaté faktury',
     description:
       'Změní jednu položku KONCEPTU přijaté faktury, určenou `item_id` nebo pořadím `row` '
@@ -530,6 +550,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'remove_purchase_invoice_item',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['PUT', '/api/purchase-invoices/{id}/items'],
+    ],
     title: 'Odebrat položku z konceptu přijaté faktury',
     description:
       'Odebere jednu položku KONCEPTU přijaté faktury, určenou `item_id` nebo pořadím `row`. '
@@ -552,6 +576,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'delete_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['DELETE', '/api/purchase-invoices/{id}'],
+    ],
     title: 'Smazat koncept přijaté faktury',
     description:
       'Smaže KONCEPT přijaté faktury i s položkami. Přijatý, uhrazený nebo zaúčtovaný doklad '
@@ -572,6 +600,10 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'receive_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/transition'],
+    ],
     title: 'Přijmout přijatou fakturu',
     description:
       'Převede doklad do stavu PŘIJATO. Z konceptu: přidělí interní číslo, doklad vstoupí do evidence '
@@ -601,6 +633,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'mark_purchase_invoice_paid',
+    api: [
+      ['POST', '/api/purchase-invoices/{id}/transition'],
+    ],
     title: 'Označit přijatou fakturu jako uhrazenou',
     description:
       'Zaeviduje úhradu přijaté faktury. Jen tam, kde úhrada nepřijde z bankovního výpisu nebo '
@@ -617,6 +652,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'cancel_purchase_invoice',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/transition'],
+    ],
     title: 'Stornovat přijatou fakturu',
     description:
       'Stornuje přijatou fakturu: vypadne z evidence DPH a závazků, aktivní účetní zápis i automaticky '
@@ -639,6 +678,8 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'set_purchase_invoice_document_kind',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit druh přijatého dokladu',
     description:
       'Rychlá oprava druhu dokladu po importu (faktura, účtenka, dobropis). Částky se nemění. '
@@ -657,6 +698,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'set_purchase_invoice_project',
+    api: [
+      ['POST', '/api/purchase-invoices/{id}/project'],
+    ],
     title: 'Zařadit přijatou fakturu k zakázce',
     description:
       'Přiřadí náklad k zakázce, nebo ho z ní vyřadí (`project_id: 0`). Jde i u zaúčtovaného dokladu: '
@@ -673,6 +717,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'set_purchase_invoice_expense_kinds',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nastavit druh nákladu po položkách',
     description:
       'Nastaví druh nákladu (služba, materiál, drobný majetek, dlouhodobý majetek…) jednotlivým '
@@ -706,6 +752,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'set_purchase_invoice_exchange_rate',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nastavit kurz konceptu přijaté faktury',
     description:
       'Nastaví ruční kurz KONCEPTU přijaté faktury v cizí měně (pevný kurz z dokladu), '
@@ -735,6 +783,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'list_purchase_advance_candidates',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/advance-candidates'],
+    ],
     title: 'Zálohy k vyúčtování přijaté faktury',
     description:
       'Nespárované zálohové faktury a samostatné daňové doklady k záloze od stejného dodavatele, '
@@ -745,6 +796,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_purchase_settlement_candidates',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/settlement-candidates'],
+    ],
     title: 'Faktury k vyúčtování zálohy',
     description: 'Opačný směr: z detailu zálohy nepropojené konečné faktury stejného dodavatele.',
     inputSchema: schema({ id: id('ID zálohové faktury.') }, ['id']),
@@ -753,6 +807,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'link_purchase_advance',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/link-advance'],
+    ],
     title: 'Spárovat přijatou fakturu se zálohou',
     description:
       'Spáruje konečnou fakturu se zálohou (nebo samostatným daňovým dokladem k záloze), ať se '
@@ -772,6 +830,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'unlink_purchase_advance',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['DELETE', '/api/purchase-invoices/{id}/link-advance'],
+    ],
     title: 'Zrušit spárování se zálohou',
     description:
       'Zruší vazbu konečné faktury na zálohu. Odečtená záloha na faktuře zůstane, upravuje se ručně. '
@@ -781,6 +843,7 @@ export const PURCHASE_TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
+      refuseIfPosted(pi, a.id, 'Zrušení vazby na zálohu');
       const advance = pi?.linked_advance;
       if (!advance) throw new Error(`Přijatá faktura ${purchaseLabel(pi, a.id)} se zálohou spárovaná není.`);
       requireConfirm(a, `Od faktury ${purchaseLabel(pi, a.id)} se má odpojit záloha`,
@@ -794,6 +857,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_purchase_invoice_payment',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/payment-qr'],
+    ],
     title: 'Platební údaje přijaté faktury',
     description:
       'Účet dodavatele, částka k úhradě, měna a variabilní symbol pro zaplacení přijaté faktury. '
@@ -804,6 +870,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'set_purchase_invoice_payment_account',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Změnit účet dodavatele na přijaté faktuře',
     description:
       'Uloží účet, na který se má přijatá faktura zaplatit (použije ho QR platba i příkaz k úhradě). '
@@ -838,6 +906,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'verify_purchase_payment_account',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Ověřit účet dodavatele v registru plátců',
     description:
       'Zkontroluje účet na přijaté faktuře proti účtům, které dodavatel jako plátce DPH zveřejnil '
@@ -848,6 +918,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_purchase_payment_candidates',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Faktury k zaplacení příkazem',
     description:
       'Neuhrazené přijaté faktury, které jde zařadit do příkazu k úhradě, a účty firmy, ze kterých '
@@ -865,6 +937,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_purchase_payment_orders',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Příkazy k úhradě',
     description: 'Historie vytvořených příkazů k úhradě (dávek) s částkou, měnou a stavem odeslání.',
     inputSchema: schema({ ...PAGING }),
@@ -873,6 +947,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'get_purchase_payment_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Detail příkazu k úhradě',
     description: 'Dávka příkazu k úhradě s jednotlivými platbami (příjemce, účet, částka, VS).',
     inputSchema: schema({ id: id('ID příkazu k úhradě.') }, ['id']),
@@ -881,6 +957,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'create_purchase_payment_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Vytvořit příkaz k úhradě',
     description:
       'Připraví dávku příkazu k úhradě z vybraných přijatých faktur a označí je „Zařazeno k úhradě". '
@@ -907,6 +985,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'mark_purchase_invoices_payment_ordered',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Označit faktury jako zařazené k úhradě',
     description:
       'Jen označí vybrané přijaté faktury „Zařazeno k úhradě" bez vytvoření dávky, třeba když je '
@@ -922,6 +1002,8 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'delete_purchase_payment_order',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat příkaz k úhradě',
     description:
       'Smaže připravenou dávku příkazu k úhradě. Příkaz, u kterého je evidovaný pokus o odeslání '
@@ -942,6 +1024,9 @@ export const PURCHASE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'get_purchase_invoice_activity',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}/activity'],
+    ],
     title: 'Historie přijaté faktury',
     description: 'Kdo a kdy doklad založil, upravil, přijal, uhradil nebo stornoval.',
     inputSchema: schema({ id: id('ID přijaté faktury.') }, ['id']),
@@ -950,6 +1035,9 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'list_expense_categories',
+    api: [
+      ['GET', '/api/expense-categories'],
+    ],
     title: 'Kategorie nákladů',
     description: 'Číselník kategorií nákladů s jejich ID pro `expense_category_id` přijaté faktury.',
     inputSchema: schema({ include_archived: bool('Vrátit i archivované kategorie.') }),

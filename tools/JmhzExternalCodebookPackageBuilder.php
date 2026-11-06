@@ -9,9 +9,9 @@ require dirname(__DIR__) . '/api/vendor/autoload.php';
 final class JmhzExternalCodebookPackageBuilder
 {
     private const SPEC_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1';
+        'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.11_manifest-v1';
     private const SPEC_MANIFEST_SHA256 =
-        'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d';
+        '39bb516b4fff204c44f0b8a6b9e0ec40601ef73af79460bdf937777e046c00d8';
     private const MUNICIPALITY_COUNT = 6254;
     private const COUNTRY_SHA256 =
         '940d3ebef6d42294da79c7611654a59aef5beead3a48ffbdffdac9d0f1c58886';

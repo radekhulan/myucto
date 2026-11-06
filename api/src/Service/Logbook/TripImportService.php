@@ -9,7 +9,9 @@ use MyInvoice\Repository\TripCategoryRepository;
 use MyInvoice\Repository\TripRepository;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
 use MyInvoice\Support\LocaleNumber;
-use PhpOffice\PhpSpreadsheet\IOFactory;
+use MyInvoice\Support\Spreadsheet\SafeSpreadsheetReader;
+use MyInvoice\Support\Spreadsheet\SpreadsheetLimitException;
+use PhpOffice\PhpSpreadsheet\Cell\Cell;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
 /**
@@ -37,6 +39,11 @@ final class TripImportService
         'kategorie' => 'category', 'kategorie cesty' => 'category', 'category' => 'category', 'typ' => 'category',
     ];
 
+    /** Strop datových řádků a sloupců sešitu (XLSX/XLS/ODS); větší soubor je třeba rozdělit. */
+    public const MAX_ROWS = 10000;
+    public const MAX_COLUMNS = 40;
+    private const MAX_UNCOMPRESSED_BYTES = 10_000_000;
+
     public function __construct(
         private readonly CarRepository $cars,
         private readonly TripCategoryRepository $categories,
@@ -50,9 +57,14 @@ final class TripImportService
     public function import(int $supplierId, ?int $userId, string $content, string $filename, bool $dryRun = false): array
     {
         $ext = strtolower((string) pathinfo($filename, PATHINFO_EXTENSION));
-        $matrix = in_array($ext, ['xlsx', 'xls', 'ods'], true)
-            ? $this->readSpreadsheet($content, $ext)
-            : $this->readCsv($content);
+        try {
+            $matrix = in_array($ext, ['xlsx', 'xls', 'ods'], true)
+                ? $this->readSpreadsheet($content)
+                : $this->readCsv($content);
+        } catch (SpreadsheetLimitException $e) {
+            return ['ok' => false, 'dry_run' => $dryRun, 'created' => 0, 'failed' => 0, 'rows' => [],
+                    'error' => self::limitMessage($e)];
+        }
 
         if ($matrix === []) {
             return ['ok' => false, 'dry_run' => $dryRun, 'created' => 0, 'failed' => 0, 'rows' => [], 'error' => 'Soubor je prázdný nebo nečitelný.'];
@@ -214,44 +226,50 @@ final class TripImportService
         return $rows;
     }
 
-    /** @return list<list<string>> */
-    private function readSpreadsheet(string $content, string $ext): array
+    /**
+     * Sešit čte sdílený {@see SafeSpreadsheetReader}: formát z obsahu, strop rozbalené
+     * velikosti a počtu řádků/sloupců, jen existující buňky, dočasný soubor se maže vždy.
+     *
+     * @return list<list<string>>
+     */
+    private function readSpreadsheet(string $content): array
     {
-        $tmp = tempnam(sys_get_temp_dir(), 'logimp_') . '.' . $ext;
-        file_put_contents($tmp, $content);
+        $reader = new SafeSpreadsheetReader(self::MAX_ROWS + 1, self::MAX_COLUMNS, self::MAX_UNCOMPRESSED_BYTES);
+        // Formát buněk je potřeba (rozpoznání datumu), proto ne readDataOnly.
+        $spreadsheet = $reader->load($content, [
+            SafeSpreadsheetReader::TYPE_XLSX, SafeSpreadsheetReader::TYPE_XLS, SafeSpreadsheetReader::TYPE_ODS,
+        ], false);
         try {
-            $reader = IOFactory::createReaderForFile($tmp);
-            $reader->setReadDataOnly(false);
-            $spreadsheet = $reader->load($tmp);
-            $sheet = $spreadsheet->getActiveSheet();
             // Datumové/časové buňky čteme z Excel SERIÁLU (locale-proof) → ISO, ne ze
             // zobrazeného řetězce: ten je dle formátu sešitu (často US M/D/Y) a parser
             // by ho odmítl. Ostatní buňky bereme jako formátovanou hodnotu (čísla/text).
-            $out = [];
-            foreach ($sheet->getRowIterator() as $row) {
-                $cellIter = $row->getCellIterator();
-                $cellIter->setIterateOnlyExistingCells(false);
-                $cells = [];
-                foreach ($cellIter as $cell) {
-                    $value = $cell->getValue();
-                    if (is_numeric($value) && ExcelDate::isDateTime($cell)) {
-                        $dt = ExcelDate::excelToDateTimeObject((float) $value);
-                        $cells[] = $dt->format('H:i:s') !== '00:00:00'
-                            ? $dt->format('Y-m-d H:i')   // datum+čas (nebo jen čas → datum 1899)
-                            : $dt->format('Y-m-d');
-                    } elseif (is_int($value) || is_float($value)) {
-                        // Čísla surově — formát sešitu („1 234,5") by závisel na locale.
-                        $cells[] = (string) $value;
-                    } else {
-                        $cells[] = (string) ($cell->getFormattedValue() ?? '');
-                    }
+            return $reader->matrix($spreadsheet->getActiveSheet(), static function (Cell $cell): string {
+                $value = $cell->getValue();
+                if (is_numeric($value) && ExcelDate::isDateTime($cell)) {
+                    $dt = ExcelDate::excelToDateTimeObject((float) $value);
+                    return $dt->format('H:i:s') !== '00:00:00'
+                        ? $dt->format('Y-m-d H:i')   // datum+čas (nebo jen čas → datum 1899)
+                        : $dt->format('Y-m-d');
                 }
-                $out[] = $cells;
-            }
-            return $out;
+                if (is_int($value) || is_float($value)) {
+                    // Čísla surově — formát sešitu („1 234,5") by závisel na locale.
+                    return (string) $value;
+                }
+                return (string) ($cell->getFormattedValue() ?? '');
+            });
         } finally {
-            @unlink($tmp);
+            $spreadsheet->disconnectWorksheets();
         }
+    }
+
+    private static function limitMessage(SpreadsheetLimitException $e): string
+    {
+        return match ($e->reason) {
+            'too_many_rows'    => 'Soubor má více než ' . self::MAX_ROWS . ' řádků. Rozdělte ho prosím na menší části.',
+            'too_many_columns' => 'Soubor má více než ' . self::MAX_COLUMNS . ' sloupců.',
+            'too_large'        => 'Soubor je po rozbalení příliš velký.',
+            default            => 'Soubor nelze přečíst. Podporované formáty jsou CSV, XLSX, XLS a ODS.',
+        };
     }
 
     /** @param list<string> $cols */

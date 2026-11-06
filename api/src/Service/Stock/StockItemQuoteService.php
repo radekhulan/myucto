@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Stock;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockItemCustomerPriceRepository;
 use MyInvoice\Service\Eshop\Pricing\EffectivePriceResolver;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -143,13 +144,13 @@ final class StockItemQuoteService
                 // `effective_price` našeptávače (bez klienta a balení beze změny).
                 'unit_price'          => $basePrice === null ? null : ($isBase
                     ? (string) $basePrice
-                    : StockUnitConverter::applyRatio((string) $basePrice, $ratio['numerator'], $ratio['denominator'], 2)),
+                    : self::unitPrice(StockUnitConverter::applyRatio((string) $basePrice, $ratio['numerator'], $ratio['denominator'], UnitPricePrecision::DECIMALS))),
                 'base_unit_price'     => $basePrice !== null ? (string) $basePrice : null,
                 // Cena za zvolenou jednotku před slevou (migrace 2035), přepočtená stejně
                 // jako unit_price. Editor ji uloží k řádku jako `list_unit_price`.
                 'list_unit_price'     => $listBase === null ? null : ($isBase
                     ? (string) $listBase
-                    : StockUnitConverter::applyRatio((string) $listBase, $ratio['numerator'], $ratio['denominator'], 2)),
+                    : self::unitPrice(StockUnitConverter::applyRatio((string) $listBase, $ratio['numerator'], $ratio['denominator'], UnitPricePrecision::DECIMALS))),
                 'price_source'        => $p['price_source'] ?? (($p['promo_applied'] ?? false) ? 'promo' : 'standard'),
                 // Cenová hladina odběratele (1833), jen když cenu určila.
                 'price_level'         => $p['price_level'] ?? null,
@@ -167,6 +168,11 @@ final class StockItemQuoteService
             ];
         }
         return ['lines' => $out];
+    }
+
+    private static function unitPrice(string $price): string
+    {
+        return (string) UnitPricePrecision::toDecimalString($price);
     }
 
     /**

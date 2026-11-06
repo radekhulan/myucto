@@ -1,4 +1,4 @@
-import { flushPromises, shallowMount } from '@vue/test-utils'
+import { config, flushPromises, shallowMount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
@@ -16,6 +16,12 @@ const m = vi.hoisted(() => ({
 
 // `locale` musí být v mocku taky: editor ho čte v computed formátování data,
 // takže bez něj render spadne na `locale.value` a wrapper zůstane prázdný.
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
+}))
+
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key, locale: ref('cs-CZ') }),
 }))
@@ -81,6 +87,9 @@ vi.mock('@/stores/supplier', () => ({
 }))
 
 import InvoiceEditor from '@/pages/purchase-invoices/InvoiceEditor.vue'
+
+// Stub bez slotu by schoval celý formulář; tady jde o něj, ne o rozložení s náhledem.
+config.global.stubs = { ...config.global.stubs, DocumentPreviewSplit: { template: '<div><slot /></div>' } }
 
 function importedInvoice() {
   return {

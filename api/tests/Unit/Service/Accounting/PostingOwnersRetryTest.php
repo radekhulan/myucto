@@ -96,7 +96,16 @@ final class PostingOwnersRetryTest extends TestCase
     /** @return array{0:DepreciationPostingService,1:\PDO,2:AssetRepository&\PHPUnit\Framework\MockObject\MockObject} */
     private function depreciation(): array
     {
-        [$db, $pdo] = $this->transactionalConnection();
+        $pdo = new class('sqlite::memory:', null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]) extends \Pdo\Sqlite {
+            public function prepare(string $query, array $options = []): \PDOStatement|false
+            {
+                return parent::prepare(preg_replace('/\s+FOR UPDATE\s*$/i', '', $query), $options);
+            }
+        };
+        $db = $this->createStub(Connection::class);
+        $db->method('pdo')->willReturn($pdo);
+        $pdo->exec('CREATE TABLE accounting_periods (id INTEGER PRIMARY KEY, supplier_id INTEGER, status TEXT, starts_on TEXT)');
+        $pdo->exec("INSERT INTO accounting_periods VALUES (1, 3, 'open', '2099-01-01')");
         $pdo->exec('CREATE TABLE supplier (id INTEGER PRIMARY KEY, accounting_mode TEXT)');
         $pdo->exec("INSERT INTO supplier VALUES (3, 'double_entry')");
         $periods = $this->createStub(AccountingPeriodRepository::class);

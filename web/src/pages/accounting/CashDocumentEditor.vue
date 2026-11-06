@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch, nextTick, useId } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, nextTick, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import {
@@ -21,11 +21,19 @@ import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
+import { useEetCapabilities } from '@/composables/useEetCapabilities'
+import { eetApi, type EetCreditNoteRefundInfo } from '@/api/eet'
+import { documentsApi, type DocItem } from '@/api/documents'
+import { useAuthStore } from '@/stores/auth'
+import { useSidePreview } from '@/composables/useSidePreview'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
+import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const auth = useAuthStore()
 // Firma → Dimenze — dimenze hlavičky pokladního dokladu.
 const docDims = useDocumentDimensions('cash-documents')
 const pageId = useId()
@@ -36,6 +44,13 @@ const supplierStore = useSupplierStore()
 const isTaxEvidence = computed(() => supplierStore.currentSupplier?.accounting_mode === 'tax_evidence')
 
 const today = appIsoDate()
+// „Vystavit a další" předává datum posledního zápisu v query; obyčejné otevření
+// nového dokladu query nemá, a tak začíná dnešním datem.
+const queryIssueDate = typeof route.query.issue_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(route.query.issue_date)
+  ? route.query.issue_date
+  : null
+const initialDate = queryIssueDate ?? today
+const formEl = ref<HTMLElement | null>(null)
 
 const registers = ref<CashRegister[]>([])
 const accounts = ref<ChartAccount[]>([])
@@ -53,12 +68,80 @@ const isDraft = computed(() => !isEdit.value || loadedStatus.value === 'draft')
 // Plnění formuláře z API nesmí spustit reset-watchery určené pro ruční přepnutí.
 const hydrating = ref(false)
 
+// Originál dokladu: první příloha, kterou prohlížeč umí zobrazit. Nový doklad vazbu
+// mít nemůže, proto drží vybraný sken jen v paměti prohlížeče (blob: URL) a do modulu
+// Dokumenty ho nahraje a připojí až po uložení dokladu, stejně jako přílohy ručního
+// zápisu nebo PDF nové přijaté faktury. Zrušení formuláře na serveru nic nenechá.
+const preview = useSidePreview('cash_documents')
+const linkedDocs = ref<DocItem[]>([])
+const original = computed(() => linkedDocs.value.find(d => d.doc_type === 'pdf' || d.doc_type === 'image') ?? null)
+const canAttachOriginal = computed(() =>
+  auth.canRead('documents') && auth.canWrite('documents.upload') && auth.canWrite('documents.move'))
+const pendingOriginal = ref<File | null>(null)
+const pendingOriginalUrl = ref<string | null>(null)
+const originalInput = ref<HTMLInputElement | null>(null)
+
+function setPendingOriginal(file: File | null) {
+  if (pendingOriginalUrl.value) URL.revokeObjectURL(pendingOriginalUrl.value)
+  pendingOriginalUrl.value = file ? URL.createObjectURL(file) : null
+  pendingOriginal.value = file
+}
+function onPickOriginal(e: Event) {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  input.value = ''
+  if (!file) return
+  if (file.type !== 'application/pdf' && !file.type.startsWith('image/')) {
+    toast.error(t('cash.original.unsupported'))
+    return
+  }
+  setPendingOriginal(file)
+  preview.openTemporarily()
+}
+onBeforeUnmount(() => setPendingOriginal(null))
+
+const previewSource = computed<{ src: string; name: string; docType: string } | null>(() => {
+  if (original.value) {
+    return { src: documentsApi.previewUrl(original.value.id), name: original.value.title, docType: original.value.doc_type }
+  }
+  if (pendingOriginal.value && pendingOriginalUrl.value) {
+    return {
+      src: pendingOriginalUrl.value,
+      name: pendingOriginal.value.name,
+      docType: pendingOriginal.value.type.startsWith('image/') ? 'image' : 'pdf',
+    }
+  }
+  return null
+})
+
+/**
+ * Nahraje originál vybraný před prvním uložením a připojí ho k vytvořenému dokladu.
+ * Doklad už je uložený, takže chyba ho nevrací, jen upozorní. Když se soubor nahraje,
+ * ale vazba selže, nahraný dokument se smaže, ať v Dokumentech nezůstane sirotek.
+ * Upload i vazba běží v kontextu aktivní firmy a server vazbu na doklad cizí firmy odmítne.
+ */
+async function attachPendingOriginal(cashDocumentId: number): Promise<void> {
+  const file = pendingOriginal.value
+  if (!file) return
+  setPendingOriginal(null)
+  let uploadedIds: number[] = []
+  try {
+    const r = await documentsApi.upload([file], { zipMode: 'keep' })
+    uploadedIds = r.root_ids ?? []
+    if (uploadedIds.length === 0) throw new Error('upload_failed')
+    for (const id of uploadedIds) await documentsApi.addLink(id, 'cash_document', cashDocumentId)
+  } catch {
+    await Promise.allSettled(uploadedIds.map(id => documentsApi.remove(id)))
+    toast.warning(t('cash.original.attach_failed'))
+  }
+}
+
 const form = reactive({
   register_id: '' as number | '',
   doc_type: (route.query.doc_type === 'out' ? 'out' : 'in') as CashDocType,
   purpose: 'sale' as CashPurpose,
-  issue_date: today,
-  tax_date: today,
+  issue_date: initialDate,
+  tax_date: initialDate,
   partner_name: '',
   partner_ic: '',
   partner_dic: '',
@@ -101,6 +184,27 @@ const purposeOptions = computed<CashPurpose[]>(() => {
       ? ['purchase', 'invoice_payment', 'purchase_payment', 'transfer', 'other']
       : ['purchase', 'purchase_payment', 'transfer', 'other']
 })
+
+// ── EET: tržba z příjmového dokladu se eviduje při zaúčtování ────────────────
+// Zařízení namapované na pokladnu, jinak zvolené tady (předvybrané výchozí zařízení firmy).
+// Hotovostní tržbu evidovat musí; bez zařízení ji server odmítne zaúčtovat.
+const eetCaps = useEetCapabilities()
+const eetSale = computed(() =>
+  eetCaps.enabled.value && form.doc_type === 'in' && (form.purpose === 'sale' || form.purpose === 'invoice_payment'))
+const eetDevices = computed(() => eetCaps.capabilities.value?.devices ?? [])
+const eetDefaultDeviceId = computed<number | null>(() => {
+  const id = eetCaps.capabilities.value?.default_device_id ?? null
+  return id !== null && eetDevices.value.some(d => d.id === id) ? id : null
+})
+const eetMappedDevice = computed(() =>
+  form.register_id === '' ? null : eetDevices.value.find(d => d.cash_register_id === form.register_id) ?? null)
+const eetChosenDeviceId = ref<number | null>(null)
+const eetSelectedDeviceId = computed<number | null>({
+  get: () => eetChosenDeviceId.value ?? eetDefaultDeviceId.value,
+  set: (id) => { eetChosenDeviceId.value = id },
+})
+const eetDeviceToSend = computed<number | null>(() =>
+  eetSale.value && eetMappedDevice.value === null ? eetSelectedDeviceId.value : null)
 
 const isTaxDoc = computed(() => form.purpose === 'sale' || form.purpose === 'purchase')
 const isPayment = computed(() => form.purpose === 'invoice_payment' || form.purpose === 'purchase_payment')
@@ -366,6 +470,26 @@ const isPurchaseRefund = computed(() => form.purpose === 'purchase_payment' && f
 /** Výplata dokladu k vyplacení — výdajový doklad s účelem `invoice_payment`, jen v plné výši. */
 const isInvoiceRefund = computed(() => form.purpose === 'invoice_payment' && form.doc_type === 'out')
 
+// EET: hotovostní vrácení k dobropisu se při zaúčtování zaeviduje jako záporná tržba,
+// nejvýš do neopravené evidované části tržeb opravované faktury.
+const eetRefund = ref<EetCreditNoteRefundInfo | null>(null)
+watch(() => [isInvoiceRefund.value, form.invoice_id, eetCaps.enabled.value] as const, async ([refund, id, enabled]) => {
+  eetRefund.value = null
+  if (!refund || !id || !enabled) return
+  try {
+    const r = await eetApi.invoiceSummary(id)
+    if (form.invoice_id === id) eetRefund.value = r.refund ?? null
+  } catch {
+    // Jen informace; o evidenci rozhoduje server při zaúčtování.
+  }
+})
+const eetRefundAmount = computed<number | null>(() => {
+  const r = eetRefund.value
+  const remaining = Number(r?.evidenced.remaining_czk ?? 0)
+  if (!r || remaining <= 0) return null
+  return Math.min(Number(form.total_amount) || Number(r.refund_amount), remaining)
+})
+
 // PF: úhrada jen v plné výši (R4) → částka readonly. U vratky se naopak vrací
 // libovolná část, takže částka zůstává editovatelná.
 const amountReadonly = computed(() =>
@@ -552,7 +676,7 @@ const blockedReason = computed<string | null>(() => {
  * „uložit a dodělat později" i editace existujícího draftu byly z UI nedosažitelné,
  * přestože je backend umí (POST … {post:false}, PUT {id}, POST {id}/post).
  */
-async function save(post = true) {
+async function save(post = true, next = false) {
   error.value = ''
   if (isEdit.value && !isDraft.value) { error.value = t('cash.error.doc_not_draft'); return }
   if (form.register_id === '') { error.value = t('cash.validation.register'); return }
@@ -597,6 +721,7 @@ async function save(post = true) {
     counter_account_code: (isOther.value || (form.purpose === 'purchase' && !isTaxEvidence.value)) && form.counter_account_code ? form.counter_account_code : null,
     rule_key: isOther.value && !form.counter_account_code && form.rule_key ? form.rule_key : null,
     post,
+    eet_device_id: eetDeviceToSend.value,
   }
 
   saving.value = true
@@ -606,7 +731,9 @@ async function save(post = true) {
       // Dimenze před zaúčtováním, ať je zápis dostane rovnou.
       await docDims.save(editId.value)
       if (post) {
-        const res = await cashApi.postDocument(editId.value)
+        const res = eetDeviceToSend.value !== null
+          ? await cashApi.postDocument(editId.value, eetDeviceToSend.value)
+          : await cashApi.postDocument(editId.value)
         toast.success(t('cash.new_document') + ' ' + res.doc_number)
         for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
       } else {
@@ -616,8 +743,13 @@ async function save(post = true) {
       const res = await cashApi.createDocument(payload)
       // Zaúčtovaný doklad dostane dimenze přerazítkováním (mění se jen analytika).
       await docDims.save(res.id)
+      await attachPendingOriginal(res.id)
       toast.success(post ? t('cash.new_document') + ' ' + (res.doc_number ?? '') : t('common.saved'))
       for (const w of res.warnings) toast.warning(cashWarningMessage(w, t))
+      if (next) {
+        await startNextDocument()
+        return
+      }
     }
     router.push('/accounting/cash')
   } catch (e: any) {
@@ -626,16 +758,72 @@ async function save(post = true) {
     saving.value = false
   }
 }
+
+/**
+ * „Vystavit a další": nový prázdný doklad ve stejné pokladně, se stejným typem
+ * a datem posledního zápisu. Routa zůstává stejná (jen jiné query), takže Vue
+ * komponentu znovu nepřipojí a formulář se vyprázdní tady.
+ */
+async function startNextDocument(): Promise<void> {
+  const issueDate = form.issue_date
+  void router.replace({
+    path: '/accounting/cash/new',
+    query: { register_id: String(form.register_id), doc_type: form.doc_type, issue_date: issueDate },
+  })
+  form.tax_date = issueDate
+  form.purpose = purposeOptions.value[0]
+  form.description = ''
+  form.vat_mode = 'none'
+  form.total_amount = null
+  form.fx_rate = null
+  form.invoice_id = null
+  form.purchase_invoice_id = null
+  form.counter_account_code = ''
+  form.rule_key = ''
+  clearPartner()
+  vatLines.value = []
+  vatMatches.value = true
+  selectedUnpaid.value = null
+  unpaidQuery.value = ''
+  unpaidOptions.value = []
+  unpaidTruncated.value = false
+  unpaidError.value = ''
+  docDims.header.value = {}
+  docDims.autoFilled.value = {}
+  error.value = ''
+  await nextTick()
+  formEl.value?.querySelector<HTMLElement>('input:not([type="hidden"]):not([readonly]):not([disabled]), select:not([disabled]), textarea:not([disabled])')?.focus()
+}
 </script>
 
 <template>
-  <div>
-    <div class="flex items-center justify-between mb-4">
+  <DocumentPreviewSplit :ctrl="preview" :show="!!previewSource && preview.open.value"
+    :src="previewSource?.src ?? null" :file-name="previewSource?.name" :doc-type="previewSource?.docType">
+    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ isEdit ? t('cash.edit_document') : t('cash.new_document') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ form.doc_type === 'in' ? t('cash.type.in') : t('cash.type.out') }}</p>
       </div>
-      <RouterLink to="/accounting/cash" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.back') }}</RouterLink>
+      <div class="flex flex-wrap items-center gap-3">
+        <template v-if="!isEdit && canAttachOriginal">
+          <input ref="originalInput" type="file" accept="application/pdf,image/*" class="hidden" data-test="cash-original-file" @change="onPickOriginal" />
+          <span v-if="pendingOriginal" class="text-sm text-neutral-600 truncate max-w-[16rem]" :title="t('cash.original.pending_hint')" data-test="cash-original-name">{{ pendingOriginal.name }}</span>
+          <button v-if="pendingOriginal" type="button" :class="[btnOutline('danger'), 'whitespace-nowrap']" data-test="cash-original-remove" @click="setPendingOriginal(null)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.trash" /></svg>
+            {{ t('cash.original.remove') }}
+          </button>
+          <button v-else type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" data-test="cash-original-pick" @click="originalInput?.click()">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.upload" /></svg>
+            {{ t('cash.original.pick') }}
+          </button>
+        </template>
+        <button v-if="previewSource" type="button" :class="btnOutline('neutral')" data-test="cash-preview-toggle"
+          :aria-pressed="preview.open.value" @click="preview.toggle()">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" /></svg>
+          {{ preview.open.value ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+        </button>
+        <RouterLink to="/accounting/cash" class="text-sm text-neutral-500 hover:text-neutral-700">{{ t('common.back') }}</RouterLink>
+      </div>
     </div>
 
     <datalist :id="`${pageId}-cash-partners`">
@@ -644,7 +832,7 @@ async function save(post = true) {
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
       <!-- Formulář -->
-      <div :class="isTaxEvidence ? 'lg:col-span-3' : 'lg:col-span-2'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4">
+      <div ref="formEl" :class="isTaxEvidence ? 'lg:col-span-3' : 'lg:col-span-2'" class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 space-y-4">
         <!-- Hlavička -->
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
@@ -863,6 +1051,35 @@ async function save(post = true) {
           <p class="text-xs text-neutral-400">{{ t('cash.form.simplified_limit_hint') }}</p>
         </template>
 
+        <!-- EET: zařízení pro tržbu z tohoto dokladu -->
+        <div v-if="eetSale && isDraft" class="rounded-md border px-3 py-2 text-sm"
+          :class="eetMappedDevice ? 'border-primary-200 bg-primary-50 text-primary-800'
+            : eetSelectedDeviceId === null ? 'border-warning-200 bg-warning-50 text-warning-800'
+            : 'border-neutral-200 bg-neutral-50 text-neutral-700'"
+          data-test="cash-eet-info">
+          <p v-if="eetMappedDevice">
+            {{ t('cash.eet.mapped', { device: `${eetMappedDevice.code}${eetMappedDevice.name ? ' - ' + eetMappedDevice.name : ''}` }) }}
+          </p>
+          <template v-else-if="eetDevices.length > 0">
+            <label :for="`${pageId}-cash-eet-device`" class="block font-medium mb-1">{{ t('cash.eet.device') }}</label>
+            <select :id="`${pageId}-cash-eet-device`" v-model="eetSelectedDeviceId"
+              class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm bg-surface" data-test="cash-eet-device">
+              <option v-if="eetSelectedDeviceId === null" :value="null" disabled>{{ t('cash.eet.device') }}</option>
+              <option v-for="d in eetDevices" :key="d.id" :value="d.id">
+                {{ d.code }}{{ d.name ? ' - ' + d.name : '' }} ({{ d.unit_number }}){{ d.id === eetDefaultDeviceId ? ' · ' + t('cash.eet.default') : '' }}
+              </option>
+            </select>
+            <p class="mt-1 text-xs" :class="eetSelectedDeviceId === null ? 'text-warning-700' : 'text-neutral-500'">
+              {{ eetSelectedDeviceId === null ? t('cash.eet.device_required') : t('cash.eet.chosen') }}
+            </p>
+          </template>
+          <p v-else data-test="cash-eet-device-required">{{ t('cash.eet.device_required') }}</p>
+        </div>
+        <div v-if="eetRefundAmount !== null && isDraft" class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800"
+          data-test="cash-eet-refund">
+          {{ t('cash.eet.refund_info', { amount: formatMoney(eetRefundAmount) }) }}
+        </div>
+
         <div v-if="error" class="text-sm text-danger-500">{{ error }}</div>
 
         <div class="border-t border-neutral-200 pt-3 flex flex-col items-end gap-1.5">
@@ -872,6 +1089,11 @@ async function save(post = true) {
               :title="disabledTitle(!canSubmit, blockedReason)">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
               {{ t('cash.save_draft') }}
+            </button>
+            <button v-if="!isEdit" @click="save(true, true)" :disabled="!canSubmit" :class="btnOutline('primary')"
+              :title="disabledTitle(!canSubmit, blockedReason)" data-test="cash-post-and-next">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
+              {{ t('cash.post_and_next') }}
             </button>
             <button @click="save(true)" :disabled="!canSubmit" :class="btnFilled('primary')"
               :title="disabledTitle(!canSubmit, blockedReason)">
@@ -920,5 +1142,8 @@ async function save(post = true) {
         </div>
       </div>
     </div>
-  </div>
+
+    <LinkedDocumentsPanel v-if="isEdit && auth.canRead('documents')" class="mt-4 block" entity-type="cash_document"
+      :entity-id="editId" uploadable :title="t('linked_documents.title')" @docs="linkedDocs = $event" />
+  </DocumentPreviewSplit>
 </template>

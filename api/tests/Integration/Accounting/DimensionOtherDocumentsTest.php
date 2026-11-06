@@ -24,6 +24,8 @@ use Psr\Container\ContainerInterface;
 #[Group('integration')]
 final class DimensionOtherDocumentsTest extends TestCase
 {
+    use \MyInvoice\Tests\Support\SharedClassFixture;
+
     private ContainerInterface $container;
     private Connection $db;
     private DimensionService $dimensions;
@@ -99,7 +101,7 @@ final class DimensionOtherDocumentsTest extends TestCase
 
     public function testCardDimensionChangeRestampsPostedAssetEntries(): void
     {
-        $this->scenarios->run();
+        $this->scenario('plain', null);
         $this->loadTypes();
         $assetId = $this->scenarios->ids['asset'];
         $result = $this->dimensions->saveDocument($this->scenarios->supplierId, 'asset', $assetId, [], null, false,
@@ -114,7 +116,7 @@ final class DimensionOtherDocumentsTest extends TestCase
 
     public function testRestampKeepsManualLineDimensionsOfOtherTypes(): void
     {
-        $this->scenarios->run();
+        $this->scenario('plain', null);
         $this->loadTypes();
         $supplierId = $this->scenarios->supplierId;
         $assetId = $this->scenarios->ids['asset'];
@@ -150,7 +152,7 @@ final class DimensionOtherDocumentsTest extends TestCase
 
     public function testPurchaseInvoiceChangeRestampsCardsWithoutOwnDimensions(): void
     {
-        $this->scenarios->run();
+        $this->scenario('plain', null);
         $this->loadTypes();
         $supplierId = $this->scenarios->supplierId;
         $cc = $this->types['cost_center'];
@@ -171,7 +173,7 @@ final class DimensionOtherDocumentsTest extends TestCase
 
     public function testCashPayingSeveralOtherItemsSplitsByAllocation(): void
     {
-        $this->scenarios->run();
+        $this->scenario('plain', null);
         $this->loadTypes();
         $supplierId = $this->scenarios->supplierId;
         $cc = $this->types['cost_center'];
@@ -229,7 +231,7 @@ final class DimensionOtherDocumentsTest extends TestCase
 
     public function testScheduleDraftsFollowSourceDimensions(): void
     {
-        $this->scenarios->run();
+        $this->scenario('plain', null);
         $this->loadTypes();
         $supplierId = $this->scenarios->supplierId;
         $cc = $this->types['cost_center'];
@@ -249,7 +251,7 @@ final class DimensionOtherDocumentsTest extends TestCase
      */
     public function testDepreciationOfCardWithDrivingDimensionGoesToAnalytic(): void
     {
-        $out = $this->runWithDrivingDimension(fn (int $cc): array => [[$cc => $this->value('C1')], null]);
+        $out = $this->runWithDrivingDimension('driving-header', fn (int $cc): array => [[$cc => $this->value('C1')], null]);
 
         $depreciation = array_values(array_filter($out['depreciation'], static fn (array $l): bool => str_starts_with($l['account'], '551')));
         self::assertNotEmpty($depreciation);
@@ -262,7 +264,7 @@ final class DimensionOtherDocumentsTest extends TestCase
     /** Změna karty: jiná dimenze se přerazítkuje (ruční typy zůstanou), změna střediska chce přeúčtování. */
     public function testCardChangeWithDrivingDimensionNeedsRepostOnlyForDrivingValue(): void
     {
-        $this->runWithDrivingDimension(fn (int $cc): array => [[$cc => $this->value('C1')], null]);
+        $this->runWithDrivingDimension('driving-header', fn (int $cc): array => [[$cc => $this->value('C1')], null]);
         $supplierId = $this->scenarios->supplierId;
         $assetId = $this->scenarios->ids['asset'];
         $cc = $this->types['cost_center'];
@@ -285,7 +287,7 @@ final class DimensionOtherDocumentsTest extends TestCase
 
     public function testDepreciationOfCardWithDrivingSplitIsDividedToAnalytics(): void
     {
-        $out = $this->runWithDrivingDimension(fn (int $cc): array => [[], [0 => [$cc => [
+        $out = $this->runWithDrivingDimension('driving-split', fn (int $cc): array => [[], [0 => [$cc => [
             ['value_id' => $this->value('C1'), 'share' => 0.6],
             ['value_id' => $this->value('C2'), 'share' => 0.4],
         ]]]]);
@@ -307,10 +309,10 @@ final class DimensionOtherDocumentsTest extends TestCase
      * @param callable(int):array{0:array<int,int>,1:?array<int,mixed>} $cardDims hlavička a rozpad karty
      * @return array<string,mixed>
      */
-    private function runWithDrivingDimension(callable $cardDims): array
+    private function runWithDrivingDimension(string $key, callable $cardDims): array
     {
         $pdo = $this->db->pdo();
-        return $this->scenarios->run(function (string $scenario, int $docId, OtherDocumentsPostingScenarios $ctx) use ($pdo, $cardDims): void {
+        return $this->scenario($key, function (string $scenario, int $docId, OtherDocumentsPostingScenarios $ctx) use ($pdo, $cardDims): void {
             if ($scenario !== 'asset') {
                 return;
             }
@@ -337,7 +339,7 @@ final class DimensionOtherDocumentsTest extends TestCase
     private function runWithDimensions(): array
     {
         $pdo = $this->db->pdo();
-        return $this->scenarios->run(function (string $scenario, int $docId, OtherDocumentsPostingScenarios $ctx) use ($pdo): void {
+        return $this->scenario('dims', function (string $scenario, int $docId, OtherDocumentsPostingScenarios $ctx) use ($pdo): void {
             $this->loadTypes();
             $cc = $this->types['cost_center'];
             $project = $this->types['project'];
@@ -357,6 +359,23 @@ final class DimensionOtherDocumentsTest extends TestCase
                 default => null,
             };
         });
+    }
+
+    /**
+     * Sada scénářů s danou přípravou se zaúčtuje jednou za třídu a commitne
+     * ({@see SharedClassFixture}); testy nad ní pracují ve vlastní transakci.
+     *
+     * @return array<string,mixed>
+     */
+    private function scenario(string $key, ?callable $prepare): array
+    {
+        $data = $this->sharedFixture($this->db->pdo(), $key, function () use ($prepare): array {
+            $out = $this->scenarios->run($prepare);
+            return [$this->scenarios->supplierId, ['out' => $out, 'state' => $this->scenarios->state()]];
+        });
+        $this->scenarios->restore($data['state']);
+        $this->loadTypes();
+        return $data['out'];
     }
 
     private function loadTypes(): void

@@ -14,6 +14,7 @@ final class WebAuthnCeremonyStore
     public const PURPOSE_DISCOVERABLE_LOGIN = 'passkey.login.discoverable';
     public const PURPOSE_STEP_UP = 'passkey.step_up';
     public const PURPOSE_UNLOCK = 'session.unlock';
+    public const PURPOSE_CREDENTIAL_TEST = 'passkey.test';
     public const REGISTRATION_CONSTRAINT_NO_ACTIVE_PASSKEY = 'first_passkey_only';
 
     private const PURPOSES = [
@@ -22,7 +23,11 @@ final class WebAuthnCeremonyStore
         self::PURPOSE_DISCOVERABLE_LOGIN,
         self::PURPOSE_STEP_UP,
         self::PURPOSE_UNLOCK,
+        self::PURPOSE_CREDENTIAL_TEST,
     ];
+
+    /** Účely, které nesou vázanou operaci (step-up účel, ID testované passkey). */
+    private const OPERATION_PURPOSES = [self::PURPOSE_STEP_UP, self::PURPOSE_CREDENTIAL_TEST];
 
     public function __construct(
         private readonly Connection $db,
@@ -219,7 +224,7 @@ final class WebAuthnCeremonyStore
             'UPDATE webauthn_ceremonies
                 SET used_at = ?
               WHERE session_id_hash = ?
-                AND purpose IN (?, ?)
+                AND purpose IN (?, ?, ?)
                 AND used_at IS NULL'
         );
         $stmt->execute([
@@ -227,6 +232,7 @@ final class WebAuthnCeremonyStore
             hash('sha256', $sessionToken, true),
             self::PURPOSE_REGISTER,
             self::PURPOSE_STEP_UP,
+            self::PURPOSE_CREDENTIAL_TEST,
         ]);
         return $stmt->rowCount();
     }
@@ -412,7 +418,7 @@ final class WebAuthnCeremonyStore
         if (!$loginPurpose && ($sessionToken === null || $sessionToken === '')) {
             throw new \InvalidArgumentException('WebAuthn flow musí být vázané na session.');
         }
-        if ($purpose === self::PURPOSE_STEP_UP && ($operation === null || trim($operation) === '')) {
+        if (in_array($purpose, self::OPERATION_PURPOSES, true) && ($operation === null || trim($operation) === '')) {
             throw new \InvalidArgumentException('Step-up flow vyžaduje účelovou operaci.');
         }
         if ($purpose === self::PURPOSE_REGISTER
@@ -421,7 +427,7 @@ final class WebAuthnCeremonyStore
         ) {
             throw new \InvalidArgumentException('Neplatný constraint registračního flow.');
         }
-        if (!in_array($purpose, [self::PURPOSE_STEP_UP, self::PURPOSE_REGISTER], true)
+        if (!in_array($purpose, [...self::OPERATION_PURPOSES, self::PURPOSE_REGISTER], true)
             && $operation !== null
         ) {
             throw new \InvalidArgumentException(

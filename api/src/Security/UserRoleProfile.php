@@ -97,6 +97,7 @@ final class UserRoleProfile
         $user['role_id']       = $profile['id'];
         $user['role_summary']  = $profile;
         $user['is_superadmin'] = $profile['system_key'] === 'superadmin';
+        $user['is_instance_admin'] = $profile['type'] === 'instance_admin' && $profile['system_key'] === 'instance_admin';
         return $user;
     }
 

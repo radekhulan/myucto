@@ -50,19 +50,23 @@ param(
     [Parameter(Mandatory)][string]$Mdb,
     [Parameter(Mandatory)][string]$Vystup,
     [switch]$Xml,
-    [string]$Php = 'php'
+    [string]$Php = 'php',
+    [string]$Heslo
 )
 
 $ErrorActionPreference = 'Stop'
 
-# Dot-source přepíše parametry Mdb a Vystup svými výchozími hodnotami, proto je předem uložíme.
+# Dot-source přepíše parametry Mdb, Vystup a Heslo svými výchozími hodnotami, proto je předem uložíme.
 $mdbPath = $Mdb
 $outPath = $Vystup
 $buildXml = $Xml.IsPresent
 $phpPath = $Php
+$mdbPassword = $Heslo
 . (Join-Path $PSScriptRoot 'Export-Pamica.ps1')
 $Mdb = $mdbPath
 $Vystup = $outPath
+$Heslo = $mdbPassword
+if (-not $Heslo -and $env:MYUCTO_MDB_HESLO) { $Heslo = $env:MYUCTO_MDB_HESLO }
 
 # Tabulky podání a jejich vazby; sloupec typu byte[] se rozepíše jako atributový blob.
 $PodaniTables = @(
@@ -115,8 +119,12 @@ $Mdb = (Resolve-Path -LiteralPath $Mdb).Path
 New-Item -ItemType Directory -Force (Join-Path $Vystup 'raw\dorucenky') | Out-Null
 $raw = Join-Path (Resolve-Path -LiteralPath $Vystup).Path 'raw'
 
-$conn = Open-PamicaSource $Mdb
-if ($null -eq $conn -and [Environment]::Is64BitProcess) {
+$conn = Open-PamicaSource $Mdb $Heslo
+if ($null -eq $conn -and $PamicaOpenFailure.Failure -eq 'Password' -and -not $Heslo) {
+    $Heslo = Read-MdbPassword
+    if ($Heslo) { $conn = Open-PamicaSource $Mdb $Heslo }
+}
+if ($null -eq $conn -and $PamicaOpenFailure.Failure -eq 'Driver' -and [Environment]::Is64BitProcess) {
     # Ovladač Accessu bývá jen 32bitový (instaluje ho 32bitová PAMICA) - zkusíme 32bitový PowerShell.
     $ps32 = Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
     if (Test-Path -LiteralPath $ps32) {
@@ -124,11 +132,12 @@ if ($null -eq $conn -and [Environment]::Is64BitProcess) {
         $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
         $args32 = "-Mdb {0} -Vystup {1} -Php {2}" -f (& $q $Mdb), (& $q $Vystup), (& $q $phpPath)
         if ($buildXml) { $args32 += ' -Xml' }
+        if ($Heslo) { $env:MYUCTO_MDB_HESLO = $Heslo }
         & $ps32 -NoProfile -ExecutionPolicy Bypass -Command ("& {0} {1}" -f (& $q $PSCommandPath), $args32)
         exit $LASTEXITCODE
     }
 }
-if ($null -eq $conn) { throw 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine (ACE OLEDB).' }
+if ($null -eq $conn) { throw (Get-MdbFailureMessage $PamicaOpenFailure 'PAMICU' ([bool]$Heslo)) }
 
 $meta = [ordered]@{
     zdroj = Split-Path -Leaf $Mdb

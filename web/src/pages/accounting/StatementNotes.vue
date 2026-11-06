@@ -40,7 +40,7 @@ function isDirty(key: string): boolean {
   return (drafts.value[key] ?? '') !== stored
 }
 
-const dirtyKeys = computed(() => notes.value?.sections.filter(s => isDirty(s.key)).map(s => s.key) ?? [])
+const dirtyKeys = computed(() => notes.value?.sections.filter(s => !s.readonly && isDirty(s.key)).map(s => s.key) ?? [])
 const filledCount = computed(() => notes.value?.sections.filter(s => s.filled).length ?? 0)
 
 async function load() {
@@ -102,6 +102,7 @@ async function saveAll() {
 }
 
 function scopeBadge(scope: string): string | null {
+  if (scope === 'full504') return t('accounting.statement504.full')
   if (scope === 'audited') return t('accounting.statement_notes.scope_audited')
   if (scope === 'large') return t('accounting.statement_notes.scope_large')
   return null
@@ -115,7 +116,7 @@ onMounted(load)
     <div class="flex items-center justify-between mb-1 gap-3 flex-wrap">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('accounting.statement_notes.title') }}</h1>
-        <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.statement_notes.subtitle') }}</p>
+        <p class="text-sm text-neutral-500 mt-0.5">{{ notes?.accounting_framework === 'cz_504' ? t('accounting.statement504.notes_subtitle') : t('accounting.statement_notes.subtitle') }}</p>
         <p v-if="state" class="text-sm text-neutral-600 mt-1">
           {{ state.period.fiscal_year }} · {{ formatDate(state.period.starts_on) }} – {{ formatDate(state.period.ends_on) }}
         </p>
@@ -193,7 +194,8 @@ onMounted(load)
           </span>
         </div>
 
-        <textarea
+        <p v-if="s.readonly" class="whitespace-pre-wrap text-sm text-neutral-700">{{ s.content }}</p>
+        <textarea v-else
           v-model="drafts[s.key]"
           rows="4"
           :disabled="!canWrite"
@@ -201,7 +203,7 @@ onMounted(load)
           class="w-full text-sm border border-neutral-300 rounded-md p-2.5 focus:ring-primary-500 focus:border-primary-500 disabled:bg-neutral-50 disabled:text-neutral-500"
         ></textarea>
 
-        <p v-if="s.auto" class="text-[11px] text-neutral-400">{{ t('accounting.statement_notes.auto_hint') }}</p>
+        <p v-if="s.auto && !s.readonly" class="text-[11px] text-neutral-400">{{ t('accounting.statement_notes.auto_hint') }}</p>
         <p v-if="s.carried_over_from_year" class="text-[11px] text-warning-700">
           {{ t('accounting.statement_notes.carried_over_hint', { year: s.carried_over_from_year }) }}
         </p>

@@ -10,6 +10,7 @@ use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 /**
  * Pure match logika pravidel účtování (§3.5, §4.1). Bez DB — jednotkově
  * testovatelné. Kritéria = AND přes VYPLNĚNÁ pole pravidla:
+ *   - bank_account_id — vlastní bankovní účet výpisu (id ze supplier_bank_accounts),
  *   - counterparty_account (+ counterparty_bank, je-li) — normalizované číslo účtu,
  *   - variable_symbol — číslice (VariableSymbolNormalizer::digits),
  *   - message_contains — substring v normalizované zprávě nebo jméně protistrany (BankMessageNormalizer),
@@ -23,6 +24,9 @@ final class BankRuleMatcher
     /** Pravidlo s prioritou pod touto hranicí má přednost před detektory (vlastní převod, odvody, karta). */
     public const DETECTOR_OVERRIDE_PRIORITY = 50;
 
+    /** Klíč pohybu s id vlastního bankovního účtu výpisu ({@see StatementOwnAccount::idFor()}). */
+    public const OWN_ACCOUNT = 'own_bank_account_id';
+
     /** @param array<string,mixed> $rule řádek bank_posting_rules */
     public static function overridesDetectors(array $rule): bool
     {
@@ -30,13 +34,33 @@ final class BankRuleMatcher
     }
 
     /**
+     * Pořadí pravidel při souběhu: nižší priorita, pak pravidlo omezené na vlastní účet
+     * před obecným. Pravidla se stejným pořadím jsou v souběhu, mezi nimi rozhoduje
+     * počet použití ({@see \MyInvoice\Repository\BankPostingRuleRepository::findActive()}).
+     *
+     * @param array<string,mixed> $rule
+     * @return array{int,int}
+     */
+    public static function rank(array $rule): array
+    {
+        return [(int) ($rule['priority'] ?? 100), (int) ($rule['bank_account_id'] ?? 0) > 0 ? 0 : 1];
+    }
+
+    /**
      * @param array<string,mixed> $rule řádek bank_posting_rules
      * @param array{amount:float|int|string, variable_symbol?:?string,
      *              counterparty_account?:?string, counterparty_bank?:?string,
-     *              description?:?string, counterparty_name?:?string} $tx
+     *              description?:?string, counterparty_name?:?string, own_bank_account_id?:?int} $tx
      */
     public function matching(array $rule, array $tx): bool
     {
+        // Vlastní bankovní účet výpisu ({@see StatementOwnAccount}). Volající, který účet
+        // výpisu nezná, klíč nepředá a pravidlo omezené na účet se nepoužije.
+        $ruleOwnAccount = (int) ($rule['bank_account_id'] ?? 0);
+        if ($ruleOwnAccount > 0 && (int) ($tx[self::OWN_ACCOUNT] ?? 0) !== $ruleOwnAccount) {
+            return false;
+        }
+
         // counterparty_account
         $ruleAccount = self::str($rule['counterparty_account'] ?? null);
         if ($ruleAccount !== null) {

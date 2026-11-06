@@ -1,6 +1,90 @@
 import { api } from './client'
 import type { AccountingPeriod, ReportingSettings } from './accounting'
 
+export interface DeferredTax504Method {
+  enabled: true
+  version: '504-deferred-own-v1'
+  first_adoption: boolean
+  reference: string
+  faithful_image_reason: string
+  standard_departure_reason: string
+  presentation_reason: string
+  first_adoption_reason?: string
+}
+export interface DeferredTax504Title {
+  reference: string
+  evidence: string
+  kind: 'taxable' | 'deductible'
+  difference: string | number
+  rate_percent: string | number
+  rate_basis: string
+  temporary_confirmed: boolean
+  recognized_difference?: string | number
+  recoverability_evidence?: string
+  dimensions: Record<number, number>
+  cost_center?: string | null
+  project_id?: number | null
+}
+export interface DeferredTax504Decision {
+  method: DeferredTax504Method
+  titles: DeferredTax504Title[]
+  opening_titles?: DeferredTax504Title[]
+  prepare_accounts?: boolean
+}
+export interface DeferredTax504ReviewedDecision extends DeferredTax504Decision {
+  source_hash: string
+}
+export interface DeferredTax504Cell {
+  dimensions: Record<number, number>
+  cost_center: string | null
+  project_id: number | null
+}
+export interface DeferredTax504Balance extends DeferredTax504Cell {
+  kind: 'asset' | 'liability'
+  balance_cents: number
+}
+export interface DeferredTax504AssessedTitle extends DeferredTax504Cell {
+  reference: string
+  evidence: string
+  kind: 'taxable' | 'deductible'
+  temporary_confirmed: true
+  difference_cents: number
+  recognized_difference_cents: number
+  rate_basis_points: number
+  rate_basis: string
+  recognized_tax_cents: number
+  unrecognized_tax_cents: number
+  recoverability_evidence: string | null
+}
+export interface DeferredTax504Phase {
+  titles: DeferredTax504AssessedTitle[]
+  cells: Record<string, DeferredTax504Balance> | []
+  liability_cents: number
+  asset_cents: number
+  unrecognized_asset_cents: number
+}
+export interface DeferredTax504Preview {
+  source_hash: string
+  accounting_framework: 'cz_504'
+  as_of: string
+  row_version: number
+  enabled: boolean
+  decision: DeferredTax504Decision | null
+  method: DeferredTax504Method | null
+  balances: DeferredTax504Balance[]
+  assessment_current: boolean
+  assessment: { enabled: false; method: null } | { enabled: true; method: DeferredTax504Method; opening: DeferredTax504Phase; closing: DeferredTax504Phase }
+  movements: { opening: DeferredTax504Movement[]; closing: DeferredTax504Movement[] }
+}
+export interface DeferredTax504Movement extends DeferredTax504Cell {
+  account_code: string
+  side: 'debit' | 'credit'
+  amount: number
+  dimensions: Record<number, number>
+}
+
+
+
 /**
  * Uzávěrka období, archiv, číselné řady a převody přes 261 (Epic F4) —
  * typovaný klient pro /api/accounting. Tenant-scoped přes X-Supplier-Id
@@ -43,6 +127,7 @@ export type ClosingStepKey =
   | 'deferrals'
   | 'provisions'
   | 'income_tax'
+  | 'deferred_tax'
   | 'stock'
   | 'close_books'
   | 'open_next'
@@ -164,6 +249,7 @@ export interface ClosingStep {
 
 /** GET /periods/{id}/closing — období + kroky + odvozené flagy (§3.4). */
 export interface ClosingState {
+  accounting_framework?: 'cz_504'
   period: ClosingPeriod
   steps: ClosingStep[]
   can_start?: boolean
@@ -393,10 +479,12 @@ export interface PrepaidExpenseAccrualPreview {
   existing: { entry_id: number; amount: number | null } | null
 }
 
-/** Časové rozlišení výnosů příštích období (384) z řádků vydaných faktur. */
+/** Časové rozlišení výnosů příštích období (384) z řádků vydaných faktur a členských předpisů NNO. */
 export interface DeferredRevenueAccrualItem {
+  source: 'invoice' | 'nonprofit_membership'
   item_id: number
-  invoice_id: number
+  invoice_id: number | null
+  membership_case_id: number | null
   invoice_number: string
   description: string
   currency_code: string
@@ -417,7 +505,7 @@ export interface DeferredRevenueAccrualPreview {
   period: { id: number; fiscal_year: number; starts_on: string; ends_on: string }
   next_period_start: string
   items: DeferredRevenueAccrualItem[]
-  documents: { invoice_id: number; invoice_number: string; deferred_amount: number }[]
+  documents: { source: 'invoice' | 'nonprofit_membership'; invoice_id: number | null; membership_case_id: number | null; invoice_number: string; deferred_amount: number }[]
   by_account: Record<string, number>
   total: number
   existing: { entry_id: number; amount: number | null } | null
@@ -512,7 +600,8 @@ export interface IncomeTaxPreview {
 }
 
 // ── D10: rozdělení výsledku hospodaření ────────────────────────────────────
-export interface ProfitDistributionPreview {
+export interface ProfitDistribution500Preview {
+  accounting_framework?: 'cz_500'
   approved_period: { id: number; fiscal_year: number; status: string }
   target_period: { id: number; fiscal_year: number; row_version: number; starts_on: string; ends_on: string }
   balance_431: number
@@ -524,6 +613,43 @@ export interface ProfitDistributionPreview {
   withholding_rate: number
   existing_entry_id: number | null
 }
+
+export interface ResultDecision504Cell {
+  key: string
+  account_code: string
+  dimensions: Record<number, number>
+  cost_center: string | null
+  project_id: number | null
+  available: number
+  available_cents: number
+  source_line_ids: number[]
+}
+export type ResultDecision504Role = 'result.retained_profit' | 'result.funds' | 'result.own_equity'
+export interface ResultDecision504Allocation { cell_key: string; role: ResultDecision504Role; amount: number; account_code?: string }
+export interface ResultDecision504Payload {
+  decision_date: string
+  decision_reference: string
+  decision_authority: string
+  target_row_version: number
+  snapshot_hash: string
+  allocations: ResultDecision504Allocation[]
+}
+export interface ProfitDistribution504Preview {
+  accounting_framework: 'cz_504'
+  as_of: string
+  approved_period: ProfitDistribution500Preview['approved_period']
+  target_period: ProfitDistribution500Preview['target_period']
+  available_profit: number
+  pending_account: string
+  cells: ResultDecision504Cell[]
+  resources: ResultDecision504Cell[]
+  dimension_labels: Record<number, string>
+  snapshot_hash: string
+  target_roles: { role: ResultDecision504Role; account_code: string }[]
+  existing_entry_id: number | null
+  decision: (Omit<ResultDecision504Payload, 'target_row_version'> & { entry_id: number; target_period_id: number; cells: ResultDecision504Cell[] }) | null
+}
+export type ProfitDistributionPreview = ProfitDistribution500Preview | ProfitDistribution504Preview
 
 export interface ProfitDistributionAllocation {
   account_code: string
@@ -553,6 +679,7 @@ export type SeriesCode =
   | 'cash_in' | 'cash_out'
   | 'stock_in' | 'stock_out' | 'stock_transfer'
   | 'offset' | 'purchase_order'
+  | 'other_receivable' | 'other_payable'
 
 /**
  * Výchozí prefixy řad = zrcadlo DocumentSeriesService::DEFAULT_PREFIXES. Řádek řady
@@ -572,6 +699,8 @@ export const SERIES_DEFAULT_PREFIXES: Record<SeriesCode, string> = {
   stock_transfer: 'PRE',
   offset: 'ZAP',
   purchase_order: 'OBJ',
+  other_receivable: 'OP',
+  other_payable: 'OZ',
 }
 
 /**
@@ -584,10 +713,14 @@ export const SERIES_DOUBLE_ENTRY_ONLY: SeriesCode[] = ['closing', 'opening', 'fx
 export interface DocumentSeries {
   id?: number
   series_code: SeriesCode
-  /** L-3: 0 = společná řada firmy, >0 = vlastní řada té pokladny. */
+  /** 0 = společná řada firmy, >0 = vlastní řada pokladny (cash_*) nebo druhu ostatní položky (other_*). */
   register_id?: number
   /** Název pokladny u vlastní řady — jen pro zobrazení (BE dopočítává). */
   register_name?: string | null
+  /** Název vlastního druhu ostatní položky u jeho vlastní řady (other_receivable / other_payable). */
+  kind_name?: string | null
+  /** Kód vestavěného druhu ostatní položky u jeho vlastní řady (název je v překladech). */
+  kind_builtin_code?: string | null
   fiscal_year: number
   prefix: string
   /** Šablona čísla ({PREFIX}/{YYYY}/{YY}/{C+}); null = vestavěné {PREFIX}-{YYYY}-{CCCC}. */
@@ -731,6 +864,11 @@ export const closingApi = {
     return api.get<FxPreview>(`/accounting/periods/${periodId}/closing/fx-preview`, { params }).then(r => r.data)
   },
   // D9 — náhled OP k pohledávkám (aging 311 + návrh §8a/§8c).
+  deferredTax504Preview: (periodId: number, decision?: DeferredTax504Decision) =>
+    (decision ? api.post<DeferredTax504Preview>(`/accounting/periods/${periodId}/closing/deferred-tax-504-preview`, decision)
+      : api.get<DeferredTax504Preview>(`/accounting/periods/${periodId}/closing/deferred-tax-preview`)).then(r => r.data),
+  deferredTax504Run: (periodId: number, rowVersion: number, decision: DeferredTax504ReviewedDecision) =>
+    api.post(`/accounting/periods/${periodId}/closing/steps/deferred_tax/run`, { row_version: rowVersion, decision_504: decision }).then(r => r.data),
   provisionsPreview: (periodId: number, page = 1) =>
     api.get<ProvisionsPreview>(`/accounting/periods/${periodId}/closing/provisions-preview`, { params: { page } }).then(r => r.data),
   // K10 — návrh dohadných položek pasivních (opakující se náklad bez faktury k rozvahovému dni).
@@ -755,9 +893,11 @@ export const closingApi = {
   deferredRevenueAccrualPreview: (periodId: number) =>
     api.get<DeferredRevenueAccrualPreview>(`/accounting/periods/${periodId}/closing/deferred-revenue-accrual-preview`).then(r => r.data),
   // D10 — rozdělení výsledku hospodaření (431 → 428/429/364…).
-  profitDistributionPreview: (periodId: number) =>
-    api.get<ProfitDistributionPreview>(`/accounting/periods/${periodId}/profit-distribution/preview`).then(r => r.data),
-  profitDistribution: (periodId: number, payload: ProfitDistributionPayload) =>
+  profitDistributionPreview: (periodId: number, decisionDate?: string) =>
+    (decisionDate
+      ? api.get<ProfitDistributionPreview>(`/accounting/periods/${periodId}/profit-distribution/preview`, { params: { decision_date: decisionDate } })
+      : api.get<ProfitDistributionPreview>(`/accounting/periods/${periodId}/profit-distribution/preview`)).then(r => r.data),
+  profitDistribution: (periodId: number, payload: ProfitDistributionPayload | ResultDecision504Payload) =>
     api.post(`/accounting/periods/${periodId}/profit-distribution`, payload).then(r => r.data),
   profitDistributionRevert: (periodId: number, targetRowVersion: number) =>
     api.post(`/accounting/periods/${periodId}/profit-distribution/revert`, { target_row_version: targetRowVersion }).then(r => r.data),
@@ -820,12 +960,13 @@ export const closingApi = {
 
 // ── Příloha k účetní závěrce (§ 18/1/c) ─────────────────────────────────────
 export interface StatementNotesSection {
+  readonly?: boolean
   key: string
   label: string
   legal: string
   /** Upozornění k sekci: co aplikace nedopočítává a co proto musí doplnit účetní. */
   hint: string | null
-  scope: 'all' | 'audited' | 'large'
+  scope: 'all' | 'audited' | 'large' | 'full504'
   auto: boolean
   content: string | null
   filled: boolean
@@ -834,6 +975,10 @@ export interface StatementNotesSection {
 }
 
 export interface StatementNotes {
+  accounting_framework?: 'cz_504'
+  legal_basis?: string
+  scope?: 'full' | 'small'
+  period?: { id: number; starts_on: string; ends_on: string }
   fiscal_year: number
   category: string
   scopes: string[]

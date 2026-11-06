@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\GoPay;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use PDO;
@@ -425,13 +426,7 @@ final class GoPayMovementPoster
         if (!$this->isDoubleEntry($supplierId)) {
             return;
         }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT 1 FROM journal_entries
-              WHERE supplier_id=? AND source_type="invoice" AND source_id=?
-                AND posted_at IS NOT NULL AND reversed_by IS NULL LIMIT 1'
-        );
-        $stmt->execute([$supplierId, $invoiceId]);
-        if ($stmt->fetchColumn() === false) {
+        if (!(new DocumentPostingGroup($this->db))->hasActive($supplierId, 'invoice', $invoiceId)) {
             throw new GoPayException('invoice_not_posted', 'Faktura nebo dobropis ještě není zaúčtovaný v deníku.');
         }
     }

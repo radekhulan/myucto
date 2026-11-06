@@ -189,9 +189,16 @@ final class WarehouseRepository
         return $stmt->rowCount() > 0;
     }
 
-    /** Hard delete — volající MUSÍ nejdřív ověřit hasStockOrMovements() === false. */
+    /**
+     * Hard delete — volající MUSÍ nejdřív ověřit hasStockOrMovements() === false a volat
+     * v transakci. Volitelný odkaz na řádcích a vratkách se uvolní, ostatní vazby zastaví cizí klíč.
+     */
     public function delete(int $supplierId, int $id): bool
     {
+        foreach (['purchase_order_lines', 'sales_order_lines', 'fulfillment_returns'] as $table) {
+            $this->db->pdo()->prepare("UPDATE {$table} SET warehouse_id = NULL WHERE supplier_id = ? AND warehouse_id = ?")
+                ->execute([$supplierId, $id]);
+        }
         $stmt = $this->db->pdo()->prepare(
             'DELETE FROM warehouses WHERE id = ? AND supplier_id = ?'
         );

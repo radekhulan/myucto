@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Submission;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Submission\AnonymizedCloneSubmissionProvenance;
 use PDO;
 use PDOException;
 use MyInvoice\Support\PeriodFilter;
@@ -71,6 +72,9 @@ final class SubmissionOutboxRepository
     public function enqueue(array $data, string $idempotencyKey): array
     {
         $this->assertAvailable();
+        if ($data['artifact_kind'] === 'tax_submission') {
+            (new AnonymizedCloneSubmissionProvenance($this->db))->assertDispatchable($data['supplier_id'], $data['artifact_id']);
+        }
         $hash = hash('sha256', $idempotencyKey, true);
 
         try {

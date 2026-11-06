@@ -9,6 +9,7 @@ use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxCalculator;
 use MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxInput;
 use MyInvoice\Service\Payroll\Calculation\MonthlyAdvanceTaxResult;
+use MyInvoice\Service\Payroll\Calculation\PayrollRounding;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
@@ -140,10 +141,12 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 $ruleset->id,
                 $ruleset->canonicalHash,
                 $input->residence->residence,
+                SeparateTaxBaseRegime::forCalculationDate($input->calculationDate),
             );
         }
 
         $withheldGroups = $this->withheldGroups($groups, $bases, $policy);
+        $regime = SeparateTaxBaseRegime::forCalculationDate($input->calculationDate);
 
         $relationships = [];
         $advanceBase = 0;
@@ -164,6 +167,7 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 $bases[$index],
                 $group === null ? TaxRegime::Advance : TaxRegime::Withholding,
                 $group,
+                $regime->isAdvance() ? ($group === null ? 0 : $bases[$index]) : null,
             );
         }
 
@@ -179,8 +183,19 @@ final class MonthlyEmploymentIncomeTaxCalculator
         );
         $withholdingGroups = [];
         $roundedWithholdingBases = [];
+        $separateBaseIncome = 0;
         foreach ($withholdingBases as $group => $base) {
             if ($base === 0) {
+                continue;
+            }
+            $separateBaseIncome = TaxIntegerMath::add($separateBaseIncome, $base);
+            if ($regime->isAdvance()) {
+                $withholdingGroups[] = $this->separateAdvanceGroup(
+                    $group,
+                    $base,
+                    $policy,
+                );
+                $roundedWithholdingBases[$group] = end($withholdingGroups)->baseMinorUnits;
                 continue;
             }
             // § 36 odst. 3 věta třetí: „Základ daně se nesnižuje o nezdanitelnou
@@ -267,6 +282,49 @@ final class MonthlyEmploymentIncomeTaxCalculator
             $ruleset->id,
             $ruleset->canonicalHash,
             $input->residence->residence,
+            $regime,
+            $separateBaseIncome,
+        );
+    }
+
+    /**
+     * Záloha ze samostatného základu podle § 6 odst. 4 ZDP (od 1. 1. 2027).
+     *
+     * § 6 odst. 4: „… samostatným základem pro výpočet zálohy … sazbou zálohy
+     * podle § 38h"; § 6 odst. 18: základ i záloha „se zaokrouhluje na celé
+     * koruny nahoru". Sazba je tedy sazba ZÁLOHY (`advance.low_rate`), ne sazba
+     * srážkové daně, a obě zaokrouhlení jdou nahoru — opak § 36 odst. 3.
+     *
+     * Druhé pásmo sazby (23 % nad trojnásobkem průměrné mzdy, § 38h odst. 2)
+     * samostatný základ nikdy nedosáhne: obě rozhodné částky jsou hluboko pod
+     * ním. Kdyby ho po zásahu do rulesetu dosáhl, výpočet se zastaví, místo aby
+     * počítal jen dolním pásmem.
+     */
+    private function separateAdvanceGroup(
+        string $group,
+        int $base,
+        EmploymentIncomeTaxPolicy2026 $policy,
+    ): WithholdingTaxGroupResult {
+        $roundedBase = PayrollRounding::ceilToCzk($base);
+        if ($roundedBase > $policy->money('advance.high_threshold.monthly')) {
+            throw new \DomainException(
+                'Samostatný základ zálohy podle § 6 odst. 4 ZDP přesahuje'
+                . ' trojnásobek průměrné mzdy; zkontrolujte rozhodné částky v rulesetu.',
+            );
+        }
+        $step = CalculationStep::calculate(
+            "monthly-separate-advance-tax-{$group}",
+            $roundedBase,
+            DecimalRate::fromString($policy->rate('advance.low_rate')),
+            RoundingMode::Ceil,
+        );
+
+        return new WithholdingTaxGroupResult(
+            $group,
+            $roundedBase,
+            PayrollRounding::ceilToCzk($step->outputMinorUnits),
+            $step,
+            $base,
         );
     }
 
@@ -341,8 +399,10 @@ final class MonthlyEmploymentIncomeTaxCalculator
          * odst. 1 bez ohledu na výši i prohlášení. Tenhle výpočet je vázaný na
          * sadu pro rok 2026 a časovou větev nemá; přepočet měsíce roku 2025
          * u nerezidentního člena orgánu proto musí posoudit mzdová účetní.
-         * A od 1. 1. 2027 padá i § 36 odst. 2 písm. m) (čl. VI bod 36 téhož
-         * zákona), takže srážka podle § 6 odst. 4 skončí úplně.
+         * Od 1. 1. 2027 padá § 36 odst. 2 písm. m) (čl. VI bod 36 téhož
+         * zákona): samostatný základ podle § 6 odst. 4 zůstává se stejnými
+         * podmínkami zařazení, ale daní se zálohou, ne srážkou — viz
+         * {@see SeparateTaxBaseRegime}. Zařazení tady proto platí pro oba roky.
          */
         if ($signed) {
             return null;
@@ -369,9 +429,13 @@ final class MonthlyEmploymentIncomeTaxCalculator
      * plátce v měsíci nedosáhne rozhodné částky ({@see self::withheldGroups()}),
      * a to se z evidence předem poznat nedá. Slouží náhledu hromadného
      * doplnění evidence, aby účetní věděla, u koho má „nepodepsal" daňový
-     * dopad navíc. Podle § 6 odst. 4 písm. b) je to každý vztah; `null`
-     * zůstává pro případ, že srážka skončí (§ 36 odst. 2 písm. m) od
-     * 1. 1. 2027 ruší zákon č. 360/2025 Sb.).
+     * dopad navíc. Podle § 6 odst. 4 písm. b) je to každý vztah.
+     *
+     * Je to jediný predikát „příjem, který patří do samostatného základu podle
+     * § 6 odst. 4" pro obě znění zákona: do 2026 se z takového základu sráží
+     * daň, od 2027 záloha ({@see SeparateTaxBaseRegime}). Podmínky zařazení
+     * (rozhodné částky, téhož plátce, bez prohlášení) zákon č. 360/2025 Sb.
+     * nezměnil.
      */
     public function withholdingGroupWithoutSignedDeclaration(
         EmploymentRelationshipTaxInput $relationship,
@@ -396,6 +460,14 @@ final class MonthlyEmploymentIncomeTaxCalculator
      * pokynu do jednoho základu pro zálohu „všechny příjmy plynoucí
      * poplatníkovi od téhož plátce daně“ — proto se DPP mimo písm. a) přičítá
      * do úhrnu písm. b) a ten pak rozhodnou částku dosáhne taky.
+     *
+     * Učinil-li zaměstnanec u plátce prohlášení, samostatný základ nevzniká
+     * vůbec: podle prvního odstavce téhož pokynu jdou při souběhu HPP nebo
+     * DPČ s DPP „veškeré příjmy … do jednoho základu pro výpočet zálohy na
+     * daň bez ohledu na výši příjmů … z dohody o provedení práce“. Podmínka
+     * „u tohoto plátce daně neučinil prohlášení“ je v § 6 odst. 4 ve znění
+     * 2026 i 2027 stejná; prohlášení se proto eviduje pro zaměstnance
+     * plátce (supplier_id), ne pro osobu napříč firmami.
      *
      * Test je ostrý („nedosáhne“, „nedosahující“): příjem PŘESNĚ na rozhodné
      * částce zakládá účast na nemocenském pojištění (§ 7a z. č. 187/2006 Sb.
@@ -478,6 +550,28 @@ final class MonthlyEmploymentIncomeTaxCalculator
         ) {
             $issues[] = 'disability-credit-conflict';
         }
+        // Sleva na studenta (§ 35bc ZDP) existuje až od roku 2027 a jen pro
+        // rezidenta; podmínky drží {@see StudentTaxCredit}. Ruleset bez její
+        // částky ji nezná — nárok pak výpočet zastaví, nepočítá ho jako nulu.
+        $studentKinds = 0;
+        foreach ($active as $claim) {
+            if (!StudentTaxCredit::isStudent($claim->kind)) {
+                continue;
+            }
+            $studentKinds++;
+            if ($claim->effectiveTo === null) {
+                $issues[] = 'student-credit-interval-open';
+            }
+            if ($input->residence->residence === TaxResidence::NonResident) {
+                $issues[] = 'nonresident-student-credit-not-allowed';
+            }
+            if (!$policy->definesMoney(StudentTaxCredit::RULESET_KEY)) {
+                $issues[] = 'student-credit-not-in-ruleset';
+            }
+        }
+        if ($studentKinds > 1) {
+            $issues[] = 'student-credit-conflict';
+        }
         if ($active !== [] && $declaration?->status !== TaxDeclarationStatus::Signed) {
             $issues[] = 'tax-credit-requires-signed-declaration';
         }
@@ -506,6 +600,10 @@ final class MonthlyEmploymentIncomeTaxCalculator
                 TaxCreditKind::DisabilityExtended
                     => $policy->money('credit.disability.extended.monthly'),
                 TaxCreditKind::ZtpP => $policy->money('credit.ztp_p.monthly'),
+                TaxCreditKind::Student, TaxCreditKind::StudentDoctoral
+                    => $policy->definesMoney(StudentTaxCredit::RULESET_KEY)
+                        ? $policy->money(StudentTaxCredit::RULESET_KEY)
+                        : 0,
             };
             $breakdown[$claim->kind->value] = TaxIntegerMath::add(
                 $breakdown[$claim->kind->value] ?? 0,

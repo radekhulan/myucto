@@ -67,6 +67,7 @@ final class PaymentOrderService
         private readonly ClientBankAccountRepository $clientAccounts,
         private readonly CzechBankAccountValidator $czechAccounts,
         private readonly TaxPaymentCandidates $taxes,
+        private readonly OtherPayablePaymentCandidates $otherPayables,
     ) {}
 
     /**
@@ -139,6 +140,9 @@ final class PaymentOrderService
         $result = ['payer_accounts' => $payerAccounts, 'candidates' => $candidates, 'total' => $total];
         $result['tax_candidates'] = $currency === null || strtoupper($currency) === 'CZK'
             ? $this->taxes->list($supplierId)
+            : [];
+        $result['other_candidates'] = $currency === null || strtoupper($currency) === 'CZK'
+            ? $this->otherPayables->list($supplierId)
             : [];
         if (RefundDocument::enabledForSupplier($this->db->pdo(), $supplierId)) {
             $result['refund_candidates'] = $currency === null || strtoupper($currency) === 'CZK'
@@ -307,7 +311,8 @@ final class PaymentOrderService
     /**
      * Vytvoří (uloží) platební příkaz ze zvolených faktur.
      *
-     * @param array{invoice_ids?:list<int>, payer_currency_id?:int, payment_date?:string,
+     * @param array{invoice_ids?:list<int>, other_items?:list<int|array{id:int, installment_id?:?int}>,
+     *              payer_currency_id?:int, payment_date?:string,
      *              constant_symbol?:?string, note?:?string, mark_paid?:bool} $input
      * @return array{order_id:int, view:array<string,mixed>, skipped:list<array{id:int,reason:string}>,
      *               clamped_date:bool}
@@ -320,10 +325,16 @@ final class PaymentOrderService
         $refundIds = array_values(array_unique(array_map('intval', (array) ($input['refund_invoice_ids'] ?? []))));
         $taxVatIds = array_values(array_unique(array_map('intval', (array) ($input['tax_submission_ids'] ?? []))));
         $taxAdvanceIds = array_values(array_unique(array_map('intval', (array) ($input['tax_advance_ids'] ?? []))));
-        if ($ids === [] && $refundIds === [] && $taxVatIds === [] && $taxAdvanceIds === []) {
+        // Ostatní závazky: ID závazku, nebo {id, installment_id} se splátkou, kterou
+        // uživatel v seznamu viděl (OtherPayablePaymentCandidates::items).
+        $otherItems = array_values(array_filter(
+            (array) ($input['other_items'] ?? []),
+            static fn (mixed $entry): bool => is_int($entry) || is_string($entry) || is_array($entry),
+        ));
+        if ($ids === [] && $refundIds === [] && $taxVatIds === [] && $taxAdvanceIds === [] && $otherItems === []) {
             throw new \InvalidArgumentException('Není vybrána žádná faktura.');
         }
-        if (count($ids) + count($refundIds) + count($taxVatIds) + count($taxAdvanceIds) > 500) {
+        if (count($ids) + count($refundIds) + count($taxVatIds) + count($taxAdvanceIds) + count($otherItems) > 500) {
             throw new \InvalidArgumentException('Najednou lze zařadit maximálně 500 faktur.');
         }
 
@@ -426,6 +437,14 @@ final class PaymentOrderService
             [$taxItems, $taxSkipped] = $this->taxes->items($supplierId, $taxVatIds, $taxAdvanceIds, $orderCurrency, $batchKs);
             array_push($items, ...$taxItems);
             array_push($skipped, ...$taxSkipped);
+        }
+
+        // Ostatní závazek dostane stav „v platebním příkazu" samotnou položkou příkazu;
+        // mark_paid se na něj neuplatní, uhrazení zapisuje až párování bankovního pohybu.
+        if ($otherItems !== []) {
+            [$otherOrderItems, $otherSkipped] = $this->otherPayables->items($supplierId, $otherItems, $orderCurrency, $batchKs);
+            array_push($items, ...$otherOrderItems);
+            array_push($skipped, ...$otherSkipped);
         }
 
         if ($items === []) {
@@ -585,7 +604,7 @@ final class PaymentOrderService
                 'message'             => $it['message'],
                 'account_verified'    => $it['account_verified'],
             ];
-            foreach (['invoice_id', 'tax_submission_id', 'tax_advance_schedule_id'] as $target) {
+            foreach (['invoice_id', 'tax_submission_id', 'tax_advance_schedule_id', 'other_item_id', 'other_item_installment_id'] as $target) {
                 if (($it[$target] ?? null) !== null) {
                     $item[$target] = $it[$target];
                 }
@@ -948,17 +967,7 @@ final class PaymentOrderService
     /** VS pro platbu: payment_variable_symbol → vendor_invoice_number → varsymbol. */
     private function variableSymbol(array $inv): string
     {
-        foreach ([
-            (string) ($inv['payment_variable_symbol'] ?? ''),
-            (string) ($inv['vendor_invoice_number'] ?? ''),
-            (string) ($inv['varsymbol'] ?? ''),
-        ] as $c) {
-            $vs = VariableSymbolNormalizer::forPayment($c);
-            if ($vs !== '') {
-                return $vs;
-            }
-        }
-        return '';
+        return VariableSymbolNormalizer::forPurchasePayment($inv);
     }
 
     /** @return array{company_name:?string, abo_client_number:?string} */

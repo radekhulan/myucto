@@ -110,6 +110,18 @@ if (preg_match_all(
     }
 }
 
+if (str_contains($src, '\\MyInvoice\\Routes\\PropertyAccountingCatalogRoutes::register($app)')) {
+    $registrarApp = \Slim\Factory\AppFactory::create();
+    \MyInvoice\Routes\PropertyAccountingCatalogRoutes::register($registrarApp);
+    foreach ($registrarApp->getRouteCollector()->getRoutes() as $route) {
+        $callable = $route->getCallable();
+        $action = is_array($callable) ? $callable[0] . '::' . $callable[1] : null;
+        foreach ($route->getMethods() as $method) {
+            $routes[] = ['method' => $method, 'path' => $route->getPattern(), 'action' => $action];
+        }
+    }
+}
+
 // Normalize placeholdery: `{id:[0-9]+}` → `{id}`, `{entity_type:invoice|work_report}` → `{entity_type}`
 // Musí umět i jednu úroveň vnořených složených závorek (regex kvantifikátory typu
 // `{date:\d{4}-\d{2}-\d{2}}` nebo `{batchId:[a-fA-F0-9]{32}}`) — jinak se placeholder
@@ -224,12 +236,64 @@ $sessionActions = [
     'MyInvoice\\Action\\Eshop\\ShoptetAction::rotateFeed',
     'MyInvoice\\Action\\Eshop\\ShoptetAction::disableFeed',
     'MyInvoice\\Action\\PurchaseInvoice\\PaymentOrderAction::archive',
+    // Podpis dávky v bance je přesměrování prohlížeče; API token ho dokončit nemůže.
+    'MyInvoice\\Action\\PurchaseInvoice\\BankPaymentOrderSubmissionAction::sign',
+    'MyInvoice\\Action\\PurchaseInvoice\\BankPaymentOrderSubmissionAction::refresh',
+    'MyInvoice\\Action\\PurchaseInvoice\\BankPaymentOrderSubmissionAction::items',
     // Schvalování manažerem střediska (F6) — interní, session-only v akci.
     'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::forInvoice',
     'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::request',
     'MyInvoice\\Action\\PurchaseInvoice\\Approval\\PurchaseInvoiceApprovalAction::cancel',
     // Přehled firem ve správě firem - interní, akce odmítá bearer token.
     'MyInvoice\\Action\\Settings\\SettingsAction::supplierDirectory',
+    // Náhled převzetí AI a certifikátu do nové firmy - interní, akce odmítá bearer token.
+    'MyInvoice\\Action\\Settings\\SupplierCarryOverAction::__invoke',
+    // Automatický stav tachometru — přihlášení u služby je osobní krok, akce odmítá bearer token.
+    'MyInvoice\\Action\\Logbook\\OdometerSourceAction::catalog',
+    'MyInvoice\\Action\\Logbook\\OdometerSourceAction::status',
+    'MyInvoice\\Action\\Logbook\\OdometerSourceAction::connect',
+    'MyInvoice\\Action\\Logbook\\OdometerSourceAction::continue',
+    'MyInvoice\\Action\\Logbook\\OdometerSourceAction::attach',
+    'MyInvoice\\Action\\Logbook\\OdometerSourceAction::selectVehicle',
+    'MyInvoice\\Action\\Logbook\\OdometerSourceAction::sync',
+    'MyInvoice\\Action\\Logbook\\OdometerSourceAction::disconnect',
+    // EET 2.0 — aplikační API webu a budoucího mobilu, mimo veřejný read-only subset;
+    // kontrakt je v api/openapi-app-eet.yaml.
+    'MyInvoice\\Action\\Eet\\EetCapabilitiesAction::__invoke',
+    'MyInvoice\\Action\\Eet\\EetSettingsAction::show',
+    'MyInvoice\\Action\\Eet\\EetSettingsAction::update',
+    'MyInvoice\\Action\\Eet\\EetUnitsAction::list',
+    'MyInvoice\\Action\\Eet\\EetUnitsAction::create',
+    'MyInvoice\\Action\\Eet\\EetUnitsAction::update',
+    'MyInvoice\\Action\\Eet\\EetUnitsAction::endValidity',
+    'MyInvoice\\Action\\Eet\\EetDevicesAction::list',
+    'MyInvoice\\Action\\Eet\\EetDevicesAction::create',
+    'MyInvoice\\Action\\Eet\\EetDevicesAction::update',
+    'MyInvoice\\Action\\Eet\\EetDevicesAction::deactivate',
+    'MyInvoice\\Action\\Eet\\EetCertificatesAction::list',
+    'MyInvoice\\Action\\Eet\\EetCertificatesAction::upload',
+    'MyInvoice\\Action\\Eet\\EetCertificatesAction::deactivate',
+    'MyInvoice\\Action\\Eet\\EetDiagnosticsAction::__invoke',
+    'MyInvoice\\Action\\Eet\\EetPaymentAction::preview',
+    'MyInvoice\\Action\\Eet\\EetPaymentAction::accept',
+    'MyInvoice\\Action\\Eet\\EetPaymentAction::detail',
+    'MyInvoice\\Action\\Eet\\EetPaymentAction::createIntent',
+    'MyInvoice\\Action\\Eet\\EetPaymentAction::confirmIntent',
+    'MyInvoice\\Action\\Eet\\EetPaymentAction::cancelIntent',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::list',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::detail',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::retry',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::correctionPreview',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::correction',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::queue',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::summary',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::export',
+    'MyInvoice\\Action\\Eet\\EetRecordAction::invoice',
+    // Oblíbené stránky uživatele - stav UI, akce je jen z webového rozhraní.
+    'MyInvoice\\Action\\UserSettings\\FavoriteAction::list',
+    'MyInvoice\\Action\\UserSettings\\FavoriteAction::create',
+    'MyInvoice\\Action\\UserSettings\\FavoriteAction::update',
+    'MyInvoice\\Action\\UserSettings\\FavoriteAction::delete',
 ];
 $isSessionAction = static fn (array $route): bool => in_array($route['action'], $sessionActions, true);
 

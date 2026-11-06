@@ -34,6 +34,8 @@ final class EntityCategoryService
         private readonly EntityCategoryHistoryRepository $history,
         private readonly TaxConstantsRepository $taxConstants,
         private readonly StatementMapResolver $maps,
+        private readonly StatementFrameworkResolver $frameworkResolver,
+        private readonly Statement504Service $statements504,
         private readonly NetTurnoverReadService $turnover,
     ) {}
 
@@ -226,6 +228,11 @@ final class EntityCategoryService
      */
     private function criteriaFor(int $supplierId, array $period): array
     {
+        $context = $this->frameworkResolver->accountingContext($supplierId, (int) $period['id'], max($period['starts_on'], min($period['ends_on'], date('Y-m-d'))));
+        if ($context['framework'] === 'cz_504') {
+            // Kritéria 504 již obsahují roční obrat, stejně jako dosud uložená historie.
+            return $this->statements504->criteria($supplierId, $period, $context['as_of']) + ['turnover_months' => 12];
+        }
         $asOf = min((string) $period['ends_on'], date('Y-m-d'));
         $version = $this->definitions->findVersion('balance_sheet', $asOf);
         if ($version === null) {
@@ -269,7 +276,7 @@ final class EntityCategoryService
      */
     private function classify(array $criteria, array $thresholds, array $period): string
     {
-        return self::classifyCriteria($criteria, $thresholds, EntityCategoryPeriodPolicy::commencedMonths(
+        return self::classifyCriteria($criteria, $thresholds, $criteria['turnover_months'] ?? EntityCategoryPeriodPolicy::commencedMonths(
             (string) $period['starts_on'],
             (string) $period['ends_on'],
         ));

@@ -141,6 +141,32 @@ final class PayrollRegistrationA2UnemploymentConditionsTest extends TestCase
         }
     }
 
+    /**
+     * EDV 1.5 (JMHZ-3394): skončení od 1. 1. 2027 zná druh zaměstnání 3 a 4
+     * a důvody 7 až 23 podle druhu. Skončení do 31. 12. 2026 (REGZEC25) je
+     * nezná.
+     */
+    public function testServiceTypesThreeAndFourExistOnlyFrom2027(): void
+    {
+        $three = $this->base() + ['employment_type' => '3', 'service_termination_reason' => '9'];
+        $result = $this->invoke($three, false, '2027-01-31');
+        self::assertIsArray($result);
+        self::assertSame(['3', '9'], [$result['employment_type'], $result['service_termination_reason']]);
+
+        $four = $this->base() + ['employment_type' => '4', 'service_termination_reason' => '23'];
+        self::assertSame('23', $this->invoke($four, false, '2027-01-31')['service_termination_reason'] ?? null);
+
+        $this->expectRefusal(fn () => $this->invoke($three, false, '2026-12-31'), 'druh 3 v roce 2026');
+        $this->expectRefusal(
+            fn () => $this->invoke(['service_termination_reason' => '2'] + $three, false, '2027-01-31'),
+            'důvod 2 u druhu 3',
+        );
+        $this->expectRefusal(
+            fn () => $this->invoke(['service_termination_reason' => '7'] + $this->service([]), false, '2027-01-31'),
+            'důvod 7 u druhu 2',
+        );
+    }
+
     /** @param array<string,mixed> $extra @return array<string,mixed> */
     private function service(array $extra): array
     {
@@ -200,7 +226,7 @@ final class PayrollRegistrationA2UnemploymentConditionsTest extends TestCase
     }
 
     /** @param array<string,mixed>|null $input @return array<string,mixed>|null */
-    private function invoke(?array $input, bool $earlyTerminationApplies): ?array
+    private function invoke(?array $input, bool $earlyTerminationApplies, string $endOn = '2026-06-30'): ?array
     {
         $reflection = new \ReflectionClass(PayrollRegistrationEventService::class);
         $service = $reflection->newInstanceWithoutConstructor();
@@ -215,6 +241,7 @@ final class PayrollRegistrationA2UnemploymentConditionsTest extends TestCase
             false,
             ['start_date' => '2026-01-01', 'end_date' => '2026-06-30'],
             $earlyTerminationApplies,
+            $endOn,
         );
     }
 

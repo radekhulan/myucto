@@ -154,6 +154,15 @@ final class MoneyS3ImportAccountingTest extends MoneyS3ImportTestCase
         );
         $stmt->execute([$supplierId]);
         self::assertSame(['518' => 'deductible', '568' => 'non_deductible'], $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
+
+        // Účetní v MyÚčtu nedaňový typ z Money opravila; opakovaný převod do firmy ho nevrátí.
+        $this->db->pdo()->prepare(
+            "UPDATE chart_of_accounts SET tax_deductibility = 'deductible' WHERE supplier_id = ? AND LEFT(account_code, 3) = '568'"
+        )->execute([$supplierId]);
+        $again = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        $stmt->execute([$supplierId]);
+        self::assertSame(['518' => 'deductible', '568' => 'deductible'], $stmt->fetchAll(PDO::FETCH_KEY_PAIR));
     }
 
     /**

@@ -46,6 +46,39 @@ return [
         'document_extensions' => ['csv', 'docx', 'eml', 'html', 'pdf', 'png', 'pptx', 'txt', 'xlsx', 'xml', 'xsd', 'zip'],
     ],
     /*
+     * Dokumentace JMHZ pro rok 2027 (API verze 1.5.0, stránka "Dokumentace
+     * projektu JMHZ - NV2027"): XSD 1.5, datový slovník, katalog kontrol,
+     * scénáře a EDV REGZEC. Jde o finální návrh, MPSV soubory v připomínkovém
+     * řízení vydává znovu (14. 10. 2026 přišly slovník 1.5.0.3 a katalog
+     * 1.5.0.4), takže se u příloh hlídá obsah, ne jen název a odkaz.
+     *
+     * Samostatný zdroj vedle `mpsv-jmhz-documentation`, aby se klíče dokumentů
+     * rokem 2026 ve stavu monitoru nezměnily.
+     */
+    'mpsv-jmhz-2027-documentation' => [
+        'label' => 'Vývojářský portál MPSV - dokumentace JMHZ pro rok 2027 (verze 1.5.0)',
+        'index_url' => 'https://developers.mpsv.cz/api/apidata',
+        'index_format' => 'mpsv_api',
+        'api_slug' => 'jednotne-mesicni-hlaseni-zamestnavatelu',
+        'documentation_title' => 'Dokumentace projektu JMHZ - NV2027',
+        'document_hosts' => ['developers.mpsv.cz'],
+        'document_path_prefixes' => ['/assets/documents/'],
+        'document_extensions' => ['csv', 'docx', 'eml', 'html', 'pdf', 'xlsx', 'xml', 'xsd', 'zip'],
+    ],
+    /*
+     * Statický přehled změn od 1. 1. 2027 (kapitoly, karty 51 změnových
+     * požadavků, souhrn). Stránky odkazují relativně (`mh/…`, `pozadavky/…`),
+     * klíčem je cesta stránky a hlídá se otisk jejího obsahu.
+     */
+    'mpsv-jmhz-2027-site' => [
+        'label' => 'Vývojářský portál MPSV - přehled změn JMHZ od 1. 1. 2027',
+        'index_url' => 'https://developers.mpsv.cz/jmhz/2027/',
+        'index_format' => 'site_pages',
+        'document_hosts' => ['developers.mpsv.cz'],
+        'document_path_prefixes' => ['/jmhz/2027/'],
+        'document_extensions' => ['html'],
+    ],
+    /*
      * Provozní oznámení ČSSZ. Sem chodí vady katalogu kontrol, výpadky, posuny
      * lhůt i nové povinnosti — 28. 8. 2026 tu ČSSZ oznámila nedostatek ve
      * vyhodnocování kontrol 164, 270, 290, 291 a 333 a hromadný přepočet stavů

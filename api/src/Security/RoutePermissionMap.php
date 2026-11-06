@@ -11,6 +11,7 @@ final class RoutePermissionMap
     public const SUPERADMIN = 'superadmin';
     public const ADMIN_PLUS = 'admin_plus';
     public const PERMISSION = 'permission';
+    public const INSTANCE_ADMIN = 'instance_admin';
 
     /** @var list<string> */
     private const PUBLIC_PATHS = [
@@ -48,6 +49,9 @@ final class RoutePermissionMap
         '/api/auth/session/lock-preference',
         // Výchozí firma je volba vlastního účtu; přístup k firmě ověřuje akce.
         '/api/auth/default-supplier',
+        // Návrat z OAuth přihlášení ke službě: firma i oprávnění v ní plynou z rozpracovaného
+        // přihlášení, ne z aktuálně zvolené firmy. Ověřuje je handler domény (OAuthCallbackDispatcher).
+        '/api/oauth/callback',
         '/api/auth/domain-login/authorize',
         '/api/mcp/settings', '/api/mcp/grants',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
@@ -64,6 +68,7 @@ final class RoutePermissionMap
         ['*', '#^/api/settings/client/branding(/|$)#', 'settings.branding', AccessLevel::WRITE],
         ['*', '#^/api/settings/branding-profiles(/|$)#', 'settings.branding', AccessLevel::WRITE],
         ['*', '#^/api/settings/client/payment-qr(/|$)#', 'settings.payment_qr', AccessLevel::WRITE],
+        ['*', '#^/api/settings/client/invoice-defaults$#', 'settings.invoice_defaults', AccessLevel::WRITE],
         ['*', '#^/api/settings/client/(signing|pdf-signing)(/|$)#', 'settings.signing_profiles', AccessLevel::WRITE],
         ['GET', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::READ],
         ['*', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::WRITE],
@@ -72,9 +77,39 @@ final class RoutePermissionMap
         // Log volání API vlastními tokeny — čtení sdílí oprávnění se správou tokenů.
         ['GET', '#^/api/auth/api-log$#', 'profile.tokens', AccessLevel::READ],
 
+        // EET 2.0 — evidence tržeb. Bez obecného fallbacku: každá routa modulu má
+        // vlastní pravidlo, nová routa bez něj spadne v RoutePermissionCoverageTest.
+        ['GET', '#^/api/invoices/[0-9]+/eet$#', 'eet', AccessLevel::READ],
+        ['GET', '#^/api/eet/capabilities$#', 'eet', AccessLevel::READ],
+        ['GET', '#^/api/eet/settings$#', 'eet.settings', AccessLevel::READ],
+        ['PUT', '#^/api/eet/settings$#', 'eet.settings', AccessLevel::WRITE],
+        ['GET', '#^/api/eet/(units|devices)(/[0-9]+)?$#', 'eet.settings', AccessLevel::READ],
+        ['*', '#^/api/eet/(units|devices)(/[0-9]+)?$#', 'eet.settings', AccessLevel::WRITE],
+        ['GET', '#^/api/eet/certificates$#', 'eet.certificates', AccessLevel::READ],
+        ['POST', '#^/api/eet/certificates(/[0-9]+/deactivate)?$#', 'eet.certificates', AccessLevel::WRITE],
+        ['POST', '#^/api/eet/diagnostics$#', 'eet.settings', AccessLevel::WRITE],
+        ['POST', '#^/api/eet/payments/preview$#', 'eet.accept_payment', AccessLevel::READ],
+        ['POST', '#^/api/eet/payments$#', 'eet.accept_payment', AccessLevel::WRITE],
+        ['GET', '#^/api/eet/payments/[^/]+$#', 'eet', AccessLevel::READ],
+        ['POST', '#^/api/eet/payment-intents(/[^/]+/(confirm|cancel))?$#', 'eet.accept_payment', AccessLevel::WRITE],
+        ['POST', '#^/api/eet/records/[^/]+/retry$#', 'eet.correct', AccessLevel::WRITE],
+        ['POST', '#^/api/eet/records/[^/]+/corrections/preview$#', 'eet.correct', AccessLevel::READ],
+        ['POST', '#^/api/eet/records/[^/]+/corrections$#', 'eet.correct', AccessLevel::WRITE],
+        ['GET', '#^/api/eet/records(/[^/]+)?$#', 'eet', AccessLevel::READ],
+        ['GET', '#^/api/eet/queue$#', 'eet', AccessLevel::READ],
+        ['GET', '#^/api/eet/summary$#', 'eet', AccessLevel::READ],
+        ['GET', '#^/api/eet/export$#', 'eet.export', AccessLevel::READ],
+
+        // Rychlá účtenka: route hlídá založení faktury; vystavení, úhradu a evidenci tržby
+        // ověřuje akce (RequestAuthorization::canIssueQuickReceipt, eet.accept_payment).
+        ['POST', '#^/api/mobile/receipts$#', 'invoices.create', AccessLevel::WRITE],
+
         ['GET', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::WRITE],
         ['*', '#^/api/invoices/[0-9]+/book$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Faktura krytá ostatní pohledávkou: výběr čte ostatní položky, vazba mění zaúčtování.
+        ['GET', '#^/api/invoices/[0-9]+/other-item-candidates$#', 'other_items', AccessLevel::READ],
+        ['*', '#^/api/invoices/[0-9]+/other-item-link$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/issue(-final)?$#', 'invoices.issue', AccessLevel::WRITE],
         // Import už vystaveného dokladu zakládá rovnou vystavenou fakturu: vystavení
         // hlídá mapa, založení (`invoices.create`) dohlíží akce.
@@ -94,6 +129,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/invoices/bulk-reminder$#', 'invoices.reminder', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/bulk-reissue$#', 'invoices.clone', AccessLevel::WRITE],
         ['DELETE', '#^/api/invoices/[0-9]+$#', 'invoices.delete', AccessLevel::WRITE],
+        ['POST', '#^/api/invoices/[0-9]+/convert-to-tax-document$#', 'invoices.delete', AccessLevel::WRITE],
         ['*', '#^/api/invoices/[0-9]+/(request-approval|request-approval-test|approval-status)$#', 'invoices.approval', AccessLevel::WRITE],
         ['POST', '#^/api/invoices$#', 'invoices.create', AccessLevel::WRITE],
         ['GET', '#^/api/invoices(/|$)#', 'invoices', AccessLevel::READ],
@@ -103,11 +139,13 @@ final class RoutePermissionMap
         ['*', '#^/api/purchase-invoices/payment-orders(/|$)#', 'purchase_invoices.payment_orders', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/scan-inbox$#', 'purchase_invoices.scan', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/import-structured$#', 'purchase_invoices.create', AccessLevel::WRITE],
+        ['POST', '#^/api/purchase-invoices/import-ai$#', 'purchase_invoices.extract', AccessLevel::WRITE],
         ['GET', '#^/api/purchase-invoices/[0-9]+/documents(/|$)#', 'documents', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices/[0-9]+/documents(/|$)#', 'documents', AccessLevel::WRITE],
         ['GET', '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/purchase-invoices/[0-9]+/stock-receipts?(/|$)#', 'stock', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/[0-9]+/transition$#', 'purchase_invoices.transition', AccessLevel::WRITE],
+        ['POST', '#^/api/purchase-invoices/[0-9]+/vat-treatment$#', 'purchase_invoices.vat_treatment', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/[0-9]+/credit-note-offset$#', 'purchase_invoices.transition', AccessLevel::WRITE],
         ['POST', '#^/api/purchase-invoices/[0-9]+/payment-calendar$#', 'purchase_invoices.create', AccessLevel::WRITE],
         ['DELETE', '#^/api/purchase-invoices/[0-9]+/credit-note-offset$#', 'purchase_invoices.transition', AccessLevel::WRITE],
@@ -224,9 +262,12 @@ final class RoutePermissionMap
         // údaje celé firmy, proto stejné právo jako zápis.
         ['POST', '#^/api/payroll/statutory-evidence/bulk-defaults/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/statutory-evidence/health-insurer-bulk/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/statutory-evidence/declaration-signed-bulk/(preview|apply)$#', 'payroll.person.write', AccessLevel::WRITE],
         // Hromadné doplnění pracoviště — tentýž zápis jako oprava podmínek na
         // kartě vztahu, jen pro víc vztahů. Náhled je POST se seznamem vztahů.
         ['POST', '#^/api/payroll/employments/workplace-bulk/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Hromadné ukončení a archivace — tentýž přechod stavu jako na kartě vztahu.
+        ['POST', '#^/api/payroll/employments/bulk-closure/(preview|apply)$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Počáteční stavy kumulací: zápis je táž operace jako PUT
         // /people/{id}/statutory-openings, jen za víc osob naráz (soubor za celou
         // firmu). Vzorový soubor je prázdná šablona bez dat, tedy jen čtení.
@@ -292,6 +333,7 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/people/[0-9]+$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/check$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/manual/[0-9]+$#', 'payroll.reports', AccessLevel::READ],
+        ['GET', '#^/api/payroll/takeover-wages/[0-9]{4}/manual/[0-9]+/filed-forms$#', 'payroll.reports', AccessLevel::READ],
         ['PUT', '#^/api/payroll/takeover-wages/[0-9]{4}/manual/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Žádosti o daňový bonus (§ 35d odst. 5 a 9). Náhled je mzdová sestava;
         // stažení XML navíc prochází `reports.export` kontrolou v Action, protože
@@ -364,8 +406,8 @@ final class RoutePermissionMap
         // samostatné právo by zamklo hledání a nechalo otevřený celý seznam.
         ['GET', '#^/api/payroll/payments/reconciliation/options$#', 'payroll.payments', AccessLevel::READ],
         ['POST', '#^/api/payroll/payments/batches$#', 'payroll.payments', AccessLevel::WRITE],
-        ['GET', '#^/api/payroll/payments/batches/[0-9]+/bank-submission$#', 'payroll.payments', AccessLevel::READ],
-        ['POST', '#^/api/payroll/payments/batches/[0-9]+/bank-submission$#', 'payroll.payments', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/payments/batches/[0-9]+/bank-submission(/items)?$#', 'payroll.payments', AccessLevel::READ],
+        ['POST', '#^/api/payroll/payments/batches/[0-9]+/bank-submission(/sign|/refresh)?$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/reconciliation/(matches|reversals|incoming-refunds|incoming-refund-reversals|recognize)$#', 'payroll.payments', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/payments/liabilities/[0-9]+/settlement-signal$#', 'payroll.payments', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/payments/liabilities/[0-9]+/settlement-signal$#', 'payroll.payments', AccessLevel::WRITE],
@@ -478,6 +520,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/submissions/[0-9]+/jmhz-content-correction-preparations$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/[0-9]+/jmhz-content-correction$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-content-correction$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/submissions/jmhz-post20/[0-9]+$#', 'payroll.submissions', AccessLevel::READ],
+        ['GET', '#^/api/payroll/submissions/[0-9]+/jmhz-zero-amendment$#', 'payroll.submissions', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-zero-amendment$#', 'payroll.submissions', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/submissions/[0-9]+/jmhz-cancel(?:-components)?$#', 'payroll.submissions', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/submissions/jmhz-protocol-import$#', 'payroll.submissions', AccessLevel::READ],
         ['POST', '#^/api/payroll/submissions/jmhz-protocol-import$#', 'payroll.submissions', AccessLevel::WRITE],
@@ -513,10 +558,14 @@ final class RoutePermissionMap
         ['GET', '#^/api/payroll/annual-settlements/[0-9]{4}$#', 'payroll.documents', AccessLevel::READ],
         ['GET', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+$#', 'payroll.documents', AccessLevel::READ],
         ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/request$#', 'payroll.documents', AccessLevel::WRITE],
+        ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/requests/bulk$#', 'payroll.documents', AccessLevel::WRITE],
         // Zadání potvrzení od jiného plátce je taky `payroll.approve`: ta čísla
         // jdou přímo do úhrnu, ze kterého vychází přeplatek, takže kdo je smí
         // zadat, ten rozhoduje o penězích stejně jako ten, kdo zúčtování provede.
         ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/certificates$#', 'payroll.approve', AccessLevel::WRITE],
+        // Roční nároky (§ 15, § 35 odst. 4, sleva na manžela) jdou rovnou do
+        // základu a daně, ze kterých vychází přeplatek — stejně citlivé jako potvrzení.
+        ['PUT', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/annual-claims$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/annual-settlements/[0-9]{4}/people/[0-9]+/settle$#', 'payroll.approve', AccessLevel::WRITE],
         // Hromadné zúčtování žadatelů přes frontu ročních dokumentů — týž úkon.
         ['POST', '#^/api/payroll/documents/annual-batches/annual-settlement/[0-9]{4}$#', 'payroll.approve', AccessLevel::WRITE],
@@ -548,6 +597,11 @@ final class RoutePermissionMap
         // v catch-all pravidle níž: kdo cestu založil, musí umět svůj překlep uklidit.
         ['POST', '#^/api/payroll/travel/trips/[0-9]+/(approve|materialize|cancel)$#', 'payroll.approve', AccessLevel::WRITE],
         ['*', '#^/api/payroll/travel(?:/.*)?$#', 'payroll.inputs.write', AccessLevel::WRITE],
+        // Evidence tržeb pro osvobozené spropitné (§ 6 odst. 9 písm. g) ZDP).
+        // Strop se zmrazuje do schválených vstupů a mění daň i pojistné, proto
+        // zápis pod `payroll.approve` jako ostatní daňové podklady.
+        ['GET', '#^/api/payroll/food-service-tips/[0-9]{4}-[0-9]{2}$#', 'payroll', AccessLevel::READ],
+        ['PUT', '#^/api/payroll/food-service-tips/[0-9]{4}-[0-9]{2}$#', 'payroll.approve', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/deduction-agreements(?:/|$)#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/deduction-agreements(?:/|$)#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/revisions/[0-9]+/net-results/[0-9]+$#', 'payroll', AccessLevel::READ],
@@ -572,9 +626,10 @@ final class RoutePermissionMap
         // Založení chybějících osob z podkladů je personální zápis, ne mzdový vstup.
         ['POST', '#^/api/payroll/imports/attendance/persons$#', 'payroll.person.write', AccessLevel::WRITE],
         // Profily mapování sloupců jsou nastavení firmy; číst je smí každý, kdo importuje.
-        ['POST', '#^/api/payroll/imports/attendance/profiles(?:/import|/[0-9]+/copy)?$#', 'payroll.settings', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/imports/attendance/profiles(?:/import|/sample|/[0-9]+/copy)?$#', 'payroll.settings', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/imports/attendance/profiles/[0-9]+$#', 'payroll.settings', AccessLevel::WRITE],
-        ['GET', '#^/api/payroll/imports/attendance/(batches(?:/[0-9]+)?|profiles(?:/[0-9]+/export)?)$#', 'payroll.inputs.write', AccessLevel::READ],
+        // Šablona XLSX Vzoru MyÚčto je bez dat firmy; stáhne si ji každý, kdo importuje.
+        ['GET', '#^/api/payroll/imports/attendance/(batches(?:/[0-9]+)?|profiles(?:/[0-9]+/export)?|template)$#', 'payroll.inputs.write', AccessLevel::READ],
         ['POST', '#^/api/payroll/imports/attendance/(preview|apply)$#', 'payroll.inputs.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::READ],
         ['*', '#^/api/payroll/settings/activation$#', 'payroll.settings', AccessLevel::WRITE],
@@ -651,6 +706,15 @@ final class RoutePermissionMap
         ['*', '#^/api/documents/[0-9]+/(move|links)(/|$)#', 'documents.move', AccessLevel::WRITE],
         ['DELETE', '#^/api/(documents|document-folders)(/|$)#', 'documents.delete', AccessLevel::WRITE],
         ['POST', '#^/api/documents/[0-9]+/restore$#', 'documents.restore', AccessLevel::WRITE],
+        // Destruktivní POST akce musí stát PŘED obecným pravidlem pro nahrání,
+        // jinak by je `documents.upload` pokrylo celé. Vysypání koše je
+        // nevratné smazání, přesun a obnova složky totéž co u dokumentu.
+        ['POST', '#^/api/documents/trash/empty$#', 'documents.delete', AccessLevel::WRITE],
+        ['POST', '#^/api/document-folders/[0-9]+/move$#', 'documents.move', AccessLevel::WRITE],
+        ['POST', '#^/api/document-folders/[0-9]+/restore$#', 'documents.restore', AccessLevel::WRITE],
+        // Hromadná akce nese víc operací jednou cestou: trasa pustí každého, kdo
+        // Dokumenty vidí, a jemné právo podle `action` ověří až DocumentsAction::bulk().
+        ['POST', '#^/api/documents/bulk$#', 'documents', AccessLevel::READ],
         ['POST', '#^/api/(documents|document-folders)(/|$)#', 'documents.upload', AccessLevel::WRITE],
         ['GET', '#^/api/(documents|document-folders)(/|$)#', 'documents', AccessLevel::READ],
         ['*', '#^/api/(documents|document-folders)(/|$)#', 'documents', AccessLevel::WRITE],
@@ -662,7 +726,70 @@ final class RoutePermissionMap
         ['GET', '#^/api/accounting/ai-assistant/conversations(/[0-9]+)?$#', 'accounting', AccessLevel::READ],
         ['DELETE', '#^/api/accounting/ai-assistant/conversations/[0-9]+$#', 'accounting', AccessLevel::READ],
         ['POST', '#^/api/accounting/ai-assistant/messages/[0-9]+/applied$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/joint-allocations/preview$#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/property/funds(/|$)#', 'property', AccessLevel::READ],
+        ['POST', '#^/api/property/funds/(preview|commands)$#', 'property', AccessLevel::READ],
+        ['GET', '#^/api/property/export$#', 'property.export', AccessLevel::WRITE],
+        ['POST', '#^/api/property/(profile|objects/[0-9]+/revisions/[0-9]+/confirm)$#', 'property.registry.confirm', AccessLevel::WRITE],
+        ['POST', '#^/api/property/charges/issues/batches/[0-9]+/post$#', 'property.charges.post', AccessLevel::WRITE],
+        ['POST', '#^/api/property/charges/issues/[0-9]+/reverse$#', 'property.charges.reverse', AccessLevel::WRITE],
+        ['POST', '#^/api/property/charges/issues(?:/preview|/[0-9]+/evidence)?$#', 'property.charges.issue', AccessLevel::WRITE],
+        ['POST', '#^/api/property/charges/versions$#', 'property.charges.confirm', AccessLevel::WRITE],
+        ['POST', '#^/api/property/charges/(components|preview)$#', 'property.charges.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/receivables/transfers/preview$#', 'property.receivables.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/receivables/transfers/confirm$#', 'property.receivables.confirm', AccessLevel::WRITE],
+        ['POST', '#^/api/property/receivables/certificates/(preview|issue)$#', 'property.receivables.certificates', AccessLevel::WRITE],
+        ['GET', '#^/api/property/service-lifecycles(/|$)#', 'property', AccessLevel::READ],
+        ['POST', '#^/api/property/service-lifecycles/(preview|commands)/(start|start_opening)$#', 'property.settlements.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/service-lifecycles/policies$#', 'property.settlements.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/service-lifecycles/(preview|commands)/unwind$#', 'property.settlements.unwind', AccessLevel::WRITE],
+        ['POST', '#^/api/property/service-lifecycles/(preview|commands)/finalize$#', 'property.settlements.post', AccessLevel::WRITE],
+        ['GET', '#^/api/property/(service-settlements|catalog/service-settlements)(/|$)#', 'property', AccessLevel::READ],
+        ['POST', '#^/api/property/service-settlements(/prepare|/[0-9]+/preview)?$#', 'property.settlements.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/service-settlements/[0-9]+/dossier-events$#', 'property.settlements.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/service-settlements/([0-9]+/objections|objections/[0-9]+/resolve)$#', 'property.settlements.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/service-settlements/[0-9]+/apply$#', 'property.settlements.post', AccessLevel::WRITE],
+        ['POST', '#^/api/property/service-settlements/applications/[0-9]+/reverse$#', 'property.settlements.reverse', AccessLevel::WRITE],
+        ['GET', '#^/api/property/(openings|catalog/openings)$#', 'property', AccessLevel::READ],
+        ['POST', '#^/api/property/openings/preview$#', 'property.opening.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/openings/confirm$#', 'property.opening.post', AccessLevel::WRITE],
+        ['POST', '#^/api/property/openings/revise$#', 'property.opening.revise', AccessLevel::WRITE],
+        ['GET', '#^/api/property/payments(/|$)#', 'property', AccessLevel::READ],
+        ['POST', '#^/api/property/payments/(source-revisions/preview|preview|debts/register|debts/[0-9]+/accessories|credits/[0-9]+/reserve|reservations/[0-9]+/(cancel|cancel-submission|release-unexecuted)|reservations/abo/(preview|confirm|[0-9]+/download)|setoffs/preview|corrections/preview|bank-proposals/[0-9]+/plan)$#', 'property.payments.manage', AccessLevel::WRITE],
+        ['POST', '#^/api/property/payments/(source-revisions/confirm|confirm|setoffs/confirm|corrections/confirm)$#', 'property.payments.post', AccessLevel::WRITE],
+        ['POST', '#^/api/property/payments/(operations/[0-9]+/reverse|corrections/[0-9]+/reverse)$#', 'property.payments.reverse', AccessLevel::WRITE],
+        ['GET', '#^/api/property(/|$)#', 'property', AccessLevel::READ],
+        ['*', '#^/api/property(/|$)#', 'property.registry.manage', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/catalog/nonprofit-membership/(roles|receivables)(/[0-9]+)?$#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/accounting/nonprofit-capital$#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/accounting/periods/[0-9]+/nonprofit-capital/choices$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-capital/(preview|confirm)$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/nonprofit-funding$#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/accounting/periods/[0-9]+/nonprofit-funding/choices$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-funding/(preview|confirm)$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/periods/[0-9]+/nonprofit-legal-profile$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-legal-profile/confirm$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-legal-profile/readiness$#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/accounting/nonprofit-dppo/acceptance$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-dppo/acceptance/(accept|revoke)$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/(?:nonprofit-membership/(?:members(?:/[0-9]+)?|claims/[0-9]+)|periods/[0-9]+/nonprofit-membership/reconciliation)$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-membership/(?:members(?:/[0-9]+/revisions)?|charges/(?:preview|confirm))$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/nonprofit-tax-savings$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-tax-savings/sources/[0-9]+/(preview|events/[0-9]+/reverse-preview)$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/nonprofit-tax-savings/sources/[0-9]+/(confirm|events/[0-9]+/reverse-confirm)$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-tax/preview$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-tax/(confirm|withdraw)$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-tax/(draft|drafts/[0-9]+/(reset|preview|confirm))$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/periods/[0-9]+/nonprofit-tax/assessments/[0-9]+/(withdraw|convert)$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['PATCH', '#^/api/accounting/periods/[0-9]+/nonprofit-tax/drafts/[0-9]+/(decisions|activities|funding-pools|funding-links|funding-pools/(revenue|expense)/[^/]+/members)$#', 'accounting.periods.close', AccessLevel::WRITE],
+        ['GET', '#^/api/accounting/periods/[0-9]+/nonprofit-tax(/|$)#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/accounting/nonprofit-tax-assessments/[0-9]+(?:/(?:source|decision|result|coverage|usage|export(?:\.(pdf|xlsx))?|summary\.(?:pdf|xlsx)))?$#', 'accounting', AccessLevel::READ],
+        ['GET', '#^/api/accounting/joint-allocations(/|$)#', 'accounting', AccessLevel::READ],
+        ['*', '#^/api/accounting/joint-allocations(/|$)#', 'accounting', AccessLevel::WRITE],
+        ['POST', '#^/api/accounting/periods/[0-9]+/closing/deferred-tax-504-preview$#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/periods/[0-9]+/closing/asset-reserve/(preview|correction-preview)$#', 'accounting', AccessLevel::READ],
         ['GET', '#^/api/accounting/periods(/|$)#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/periods/[0-9]+/closing/fx-preview$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/periods/[0-9]+/(closing|close|open-next|revert)(/|$)#', 'accounting.periods.close', AccessLevel::WRITE],
         ['*', '#^/api/accounting/periods(/|$)#', 'accounting.periods.manage', AccessLevel::WRITE],
         ['*', '#^/api/accounting/journal/(post|transfer)|^/api/accounting/journal/post-(invoice|purchase)/#', 'accounting.journal.post', AccessLevel::WRITE],
@@ -708,10 +835,20 @@ final class RoutePermissionMap
         // Odhad daně do konce roku k výsledovce po účtech — čísla náhledu DPPO, proto
         // stejné právo jako přiznání (`reports`), ne obecné `accounting`.
         ['GET', '#^/api/accounting/reports/statement-accounts/tax-estimate$#', 'reports', AccessLevel::READ],
+        // Vyrovnání položky saldokonta je rozpis zápisu v deníku na doklady → stejné právo
+        // jako vazba zápisu na doklad. Založení ostatní položky ze zůstatku ověřuje Action
+        // navíc proti `other_items`.
+        ['GET', '#^/api/accounting/saldo-settlements(/|$)#', 'accounting', AccessLevel::READ],
+        ['*', '#^/api/accounting/saldo-settlements(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/journal(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::READ],
         ['*', '#^/api/accounting/other-items(/|$)#', 'other_items', AccessLevel::WRITE],
+        // Interní doklady: práva ručního zápisu deníku. Zaúčtování, storno a hlavička nad
+        // existujícím zápisem jsou zápis do deníku, koncept jen jeho příprava.
+        ['GET', '#^/api/accounting/internal-documents(/|$)#', 'accounting', AccessLevel::READ],
+        ['POST', '#^/api/accounting/internal-documents/(?:[0-9]+/(?:post|reverse)|from-entry/[0-9]+)$#', 'accounting.journal.post', AccessLevel::WRITE],
+        ['*', '#^/api/accounting/internal-documents(/|$)#', 'accounting.journal.write', AccessLevel::WRITE],
         ['GET', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting(?:$|/(?!cash-|assets|bank-posting-))#', 'accounting', AccessLevel::WRITE],
 
@@ -758,6 +895,7 @@ final class RoutePermissionMap
         ['*', '#^/api/accounting/cash-registers/[0-9]+/(close|lock)$#', 'cash.close', AccessLevel::WRITE],
         ['*', '#^/api/accounting/cash-(documents|registers)(/|$)#', 'cash', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/assets(/|$)#', 'assets', AccessLevel::READ],
+        ['POST', '#^/api/accounting/assets/[0-9]+/depreciation/revision(?:/preview)?$#', 'assets.depreciation', AccessLevel::WRITE],
         ['*', '#^/api/accounting/assets/[0-9]+/(depreciation|improvements)(/|$)#', 'assets.depreciation', AccessLevel::WRITE],
         ['*', '#^/api/accounting/assets/[0-9]+/(dispose|sale)$#', 'assets.dispose', AccessLevel::WRITE],
         ['*', '#^/api/accounting/assets(/|$)#', 'assets.write', AccessLevel::WRITE],
@@ -783,6 +921,7 @@ final class RoutePermissionMap
         ['*', '#^/api/stock/items(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/sets(/|$)#', 'stock.items.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/opening-import(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
+        ['*', '#^/api/stock/history-import(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/documents(/|$)#', 'stock.documents.write', AccessLevel::WRITE],
         ['*', '#^/api/stock/.*/close$#', 'stock.close', AccessLevel::WRITE],
         ['*', '#^/api/stock/takes(/|$)#', 'stock.take', AccessLevel::WRITE],
@@ -868,15 +1007,20 @@ final class RoutePermissionMap
         ['*', '#^/api/(portfolio|crm)(/|$)#', 'dashboard.portfolio', AccessLevel::WRITE],
         ['GET', '#^/api/(codebooks|expense-categories|revenue-categories|vat-classifications)(/|$)#', 'settings.company', AccessLevel::READ],
         ['*', '#^/api/(codebooks|expense-categories|revenue-categories|vat-classifications)(/|$)#', 'settings.company.write', AccessLevel::WRITE],
+        // `GET /api/suppliers/{id}` s `profile` vrací jen bezpečný výřez firmy; plný detail
+        // akce podmiňuje `settings.company` READ k aktuální firmě (SettingsAction::getSupplierById).
         ['GET', '#^/api/(suppliers|search|slug|locate)(/|$)#', 'profile', AccessLevel::READ],
         ['GET', '#^/api/branding-profiles$#', 'profile', AccessLevel::READ],
-        ['*', '#^/api/user/(filters|preferences)(/|$)#', 'profile', AccessLevel::WRITE],
+        ['*', '#^/api/user/(filters|preferences|favorites)(/|$)#', 'profile', AccessLevel::WRITE],
         ['GET', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::READ],
         ['POST', '#^/api/portal/purchase-invoice-submissions(/|$)#', 'documents.submit', AccessLevel::WRITE],
         ['DELETE', '#^/api/portal/purchase-invoice-submissions/[0-9]+$#', 'documents.submit', AccessLevel::WRITE],
         ['GET', '#^/api/portal/document-requests$#', 'documents.submit', AccessLevel::READ],
         ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'documents.submit', AccessLevel::WRITE],
         ['GET', '#^/api/portal(/|$)#', 'profile', AccessLevel::READ],
+        ['GET', '#^/api/work-report-billing-templates(/|$)#', 'price_list', AccessLevel::READ],
+        ['*', '#^/api/work-report-billing-templates(/|$)#', 'price_list', AccessLevel::WRITE],
+        ['POST', '#^/api/work-report-billing-preview$#', 'invoices', AccessLevel::READ],
         ['GET', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::READ],
         ['*', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::WRITE],
     ];
@@ -939,7 +1083,7 @@ final class RoutePermissionMap
         // Smazání protokolu zkoušky nanečisto (AbstractMigrationAction::deleteRun) - stejné právo jako spuštění.
         ['DELETE', '#^/api/admin/imports/(money-s3|pohoda|premier)/runs/[0-9]+$#', 'utilities.import', AccessLevel::WRITE],
         ['POST',   '#^/api/admin/imports/stereo-nx/uploads(/chunked|/[a-f0-9]{32}/(chunks|complete|preview|run))$#', 'utilities.import', AccessLevel::WRITE],
-        ['GET',    '#^/api/admin/imports/stereo-nx/uploads(/[a-f0-9]{32}(/runs/[0-9]+)?)?$#', 'utilities.import', AccessLevel::READ],
+        ['GET',    '#^/api/admin/imports/stereo-nx/uploads(/[a-f0-9]{32}(/runs/[0-9]+(/pdf)?)?)?$#', 'utilities.import', AccessLevel::READ],
         ['DELETE', '#^/api/admin/imports/stereo-nx/uploads/[a-f0-9]{32}$#', 'utilities.import', AccessLevel::WRITE],
         // Credentials importních integrací — {Idoklad,Fakturoid}CredentialsAction hlídají
         // WRITE i u `status` (odpověď prozrazuje, že je integrace nastavená).
@@ -958,6 +1102,9 @@ final class RoutePermissionMap
     public function match(string $method, string $path): ?RoutePermission
     {
         $method = strtoupper($method);
+        if (InstanceAdminRoutePolicy::isTechnicalEndpoint($method, $path)) {
+            return new RoutePermission(self::INSTANCE_ADMIN);
+        }
         if ($path === '/api/mcp/settings' && $method !== 'GET') {
             return new RoutePermission(self::SUPERADMIN);
         }
@@ -978,9 +1125,10 @@ final class RoutePermissionMap
         if (in_array($path, self::SELF_PATHS, true)) {
             return new RoutePermission(self::SELF_SERVICE);
         }
-        // Správa vlastních přístupových klíčů (přejmenování, smazání) je self-service —
-        // vazba na přihlášeného uživatele se kontroluje až v akci podle ID klíče.
-        if (preg_match('#^/api/auth/webauthn/credentials/[0-9]+$#', $path) === 1) {
+        // Správa vlastních přístupových klíčů (přejmenování, smazání, zkušební ověření)
+        // je self-service — vazba na přihlášeného uživatele se kontroluje až v akci
+        // podle ID klíče.
+        if (preg_match('#^/api/auth/webauthn/credentials/[0-9]+(/test/(options|verify))?$#', $path) === 1) {
             return new RoutePermission(self::SELF_SERVICE);
         }
         if ($path === '/api/auth/setup-sample') {
@@ -1014,15 +1162,42 @@ final class RoutePermissionMap
             return new RoutePermission(self::PERMISSION, 'price_list', $read ? AccessLevel::READ : AccessLevel::WRITE,
                 $picker ? ['invoices', 'recurring'] : []);
         }
+        if (in_array($method, ['GET', 'HEAD'], true) && $path === '/api/work-report-billing-templates') {
+            return new RoutePermission(self::PERMISSION, 'price_list', AccessLevel::READ, ['invoices', 'projects']);
+        }
         if ($method === 'GET' && preg_match('#^/api/codebooks/(currencies|units|vat-rates)$#D', $path) === 1) {
             return new RoutePermission(self::PERMISSION, 'settings.company', AccessLevel::READ,
                 $path === '/api/codebooks/currencies' ? ['price_list', 'stock', 'projects'] : ['price_list', 'stock']);
         }
-        if ($method === 'POST' && $path === '/api/suppliers') {
+        // Náhled převzetí do nové firmy patří k zakládání firmy, proto stejná brána.
+        if (($method === 'POST' && $path === '/api/suppliers')
+            || ($method === 'GET' && $path === '/api/suppliers/carry-over')) {
             return new RoutePermission(self::ADMIN_PLUS);
         }
         if ($method !== 'GET' && preg_match('#^/api/suppliers(/[0-9]+)?$#', $path) === 1) {
             return new RoutePermission(self::SUPERADMIN);
+        }
+        // Klientský archiv je úzká alternativa k internímu čtení výkazů.
+        // Whitelist současně zabrání tomu, aby nová routa automaticky zdědila
+        // klientská práva z obecného fallbacku podání.
+        if (preg_match('#^/api/reports/submissions(?:/|$)#D', $path) === 1) {
+            if ($method === 'GET' && ClientTaxSubmissionPolicy::allowsRoute($method, $path)) {
+                if ($path === '/api/reports/submissions/epo-credentials') {
+                    return new RoutePermission(self::PERMISSION, 'reports.submit', AccessLevel::WRITE);
+                }
+                $key = $path === '/api/reports/submissions/settings'
+                    ? 'reports.submit'
+                    : (preg_match('#/(?:xml|download)$#D', $path) === 1 ? 'reports.export' : 'reports');
+                return new RoutePermission(self::PERMISSION, $key, AccessLevel::READ,
+                    $path === '/api/reports/submissions/settings'
+                        ? ['reports.submissions', 'reports.submissions.manage']
+                        : ['reports.submissions']);
+            }
+            if ($method === 'PUT' && in_array($path, [
+                '/api/reports/submissions/settings', '/api/reports/submissions/isds-routes',
+            ], true)) {
+                return new RoutePermission(self::PERMISSION, 'reports.submissions.manage', AccessLevel::WRITE, ['reports.submit']);
+            }
         }
         foreach (self::RULES as [$ruleMethod, $pattern, $key, $level]) {
             if (($ruleMethod === '*' || $ruleMethod === $method) && preg_match($pattern, $path) === 1) {

@@ -193,7 +193,7 @@ php api/bin/reset-mfa.php vas@email.cz
 ```
 
 Reset vypne TOTP, odvolá passkeys, smaže důvěryhodná zařízení, čekající ověřovací procesy
-i záložní kódy a zneplatní všechny session. Detail včetně příkazů pro Docker je v
+i záložní kódy, zruší API tokeny a MCP připojení a zneplatní všechny session. Detail včetně příkazů pro Docker je v
 [§ 101.11.2.4](101_Bezpecnost.md#1011124-obnova-pristupu). Neupravujte jen sloupce TOTP
 ručně v databázi: ponechali byste aktivní další faktory a session.
 
@@ -501,6 +501,7 @@ instalaci mají co dělat. Úloha je **neaktivní** a jako zaseklá se nehlásí
 | `cron-bank-scan`, `cron-scan-purchase-inbox` | není nastavený adresář, který skenují |
 | `cron-bank-connections` | neexistuje zapnuté bankovní napojení |
 | `cron-bank-email-notices` | není zapnutá IMAP schránka bankovních avíz |
+| `cron-logbook-odometer-source` | není žádné auto napojené na zdroj automatického stavu tachometru |
 | `cron-catalog-worker` | nečeká katalogová úloha (sklad, ceník, import) a není napojený e-shop |
 | `cron-epo-status` | nečeká žádné přímé podání EPO na stav |
 | `cron-jmhz-poll` | nejsou zapnuté mzdy, nebo žádné mzdové podání nečeká na protokol ČSSZ |
@@ -610,13 +611,24 @@ kapitoly manuálu.
 
 Kontroluje se verze PHP a povinná rozšíření, klíčové hodnoty `php.ini` (`memory_limit`,
 limity nahrávání, časové pásmo, OPcache), verze a nastavení MariaDB, dostupnost Redisu,
-volné místo a práva zápisu, shoda časových pásem, stav databázových migrací, struktura
+volné a celkové místo na disku (na spravované instalaci ho hlídá provozovatel a kontrola se nezobrazuje) a práva zápisu, shoda časových pásem, stav databázových migrací, struktura
 databáze proti migracím ([§ 999.6.1.3](#999613-struktura-databaze)), poslední běhy
 plánovaných úloh, stav licence, dostupnost novější verze aplikace a šifrování mzdového
 archivu ([§ 999.6.1.4](#999614-sifrovani-mzdoveho-archivu-a-rotace-klice)).
 
 Nálezy jsou seřazené od problémů k varováním, takže shora dolů odpovídají pořadí, v
 jakém má smysl je řešit.
+
+V části **Nejednoznačné vlastnictví převzatých zápisů** uvidíte pro právě vybranou
+firmu zápisy, které automatické doplnění vlastnictví vynechalo: převod doložil vazbu
+jednoho způsobilého zápisu na více různých existujících vydaných či přijatých dokladů.
+Kontrola zahrnuje Stereo NX, PREMIER, Money S3, Pohodu a ABRA Flexi. Ručně přidané
+souvislosti, úhrady a otevírací zápisy se za kandidátní předpisy nepovažují.
+Přehled ukazuje celkový počet, po 20 zápisech a nejvýše 20 kandidátů na zápis;
+na další zápisy přejdete tlačítkem **Další zápisy**. Odkazy otevřou konkrétní zápis
+a kandidátní doklady. Porovnejte je s původní evidencí a ověřené přiřazení předejte
+správci nebo podpoře; samotná diagnostika částky ani vazby nemění. Zápis s již
+určeným vlastníkem se mezi nevyřešenými případy nezobrazuje.
 
 #### 999.6.1.1 Diagnostický balíček
 

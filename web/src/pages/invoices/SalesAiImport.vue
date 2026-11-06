@@ -7,6 +7,7 @@ import { useToast } from '@/composables/useToast'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
 import AiNotConfiguredNotice from '@/components/purchase/AiNotConfiguredNotice.vue'
 import { ICONS } from '@/components/ui/buttonStyles'
+import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -143,6 +144,15 @@ async function runAiExtract() {
   }
 }
 
+// Doklad spojený z více částí jde do stejného vytěžení jako jeden nahraný soubor.
+function importMerged(file: File) {
+  if (aiExtracting.value || aiBatchRunning.value) return
+  aiBatchQueue.value = []
+  aiPdfFile.value = file
+  aiResult.value = null
+  void runAiExtract()
+}
+
 function gotoInvoice(id: number) {
   router.push(`/invoices/${id}/edit`)
 }
@@ -269,5 +279,6 @@ onMounted(() => {
         </details>
       </div>
     </div>
+    <MergeDocumentsPanel v-if="aiConfigured" :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
   </div>
 </template>

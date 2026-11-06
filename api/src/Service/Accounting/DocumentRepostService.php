@@ -84,7 +84,11 @@ final class DocumentRepostService
      */
     public function plan(int $supplierId, string $sourceType, int $docId, ?array $lines = null): array
     {
-        $entry = $this->journal->findBySource($supplierId, $sourceType, $docId);
+        $groups = new DocumentPostingGroup($this->db);
+        $members = $groups->active($supplierId, $sourceType, $docId, $this->db->pdo()->inTransaction());
+        $entry = $members[0] ?? ($this->db->pdo()->inTransaction()
+            ? $this->journal->findBySourceForUpdate($supplierId, $sourceType, $docId)
+            : $this->journal->findBySource($supplierId, $sourceType, $docId));
         if ($entry === null) {
             throw new PostingException(
                 'entry_not_found',
@@ -97,7 +101,7 @@ final class DocumentRepostService
         $entryDate = (string) $entry['entry_date'];
         $alreadyReversed = $entry['reversed_by'] !== null;
         $period = $this->periods->findById($supplierId, (int) $entry['period_id']);
-        $periodStatus = $period === null ? null : (string) $period['status'];
+        $periodStatus = $entry['period_status'] ?? ($period === null ? null : (string) $period['status']);
         $lockedUntil = $this->lockedUntil($supplierId);
         $violation = $lines === null ? null : $this->taxNeutralViolation($supplierId, $entryId, $entryDate, $lines);
 
@@ -111,10 +115,52 @@ final class DocumentRepostService
             'already_reversed'      => $alreadyReversed,
             'tax_neutral_violation' => $violation,
             'lines'                 => $this->describeLines($supplierId, $entryId),
+            'posting_entries'       => array_map(static fn (array $member): array => [
+                'id' => (int) $member['id'], 'entry_date' => (string) $member['entry_date'],
+                'row_version' => (int) $member['row_version'],
+            ], $members),
         ];
 
         $today = date('Y-m-d');
-        $todayPeriod = $this->periods->findForDate($supplierId, $today);
+        $todayPeriod = $this->db->pdo()->inTransaction()
+            ? $this->periods->findForDateForUpdate($supplierId, $today)
+            : $this->periods->findForDate($supplierId, $today);
+
+        if (DocumentPostingGroup::hasOwnedEntries($members)) {
+            $plan['lines'] = array_map(static fn (array $line): array => [
+                'account_code' => $line['account_code'], 'account_name' => $line['account_name'],
+                'side' => $line['side'], 'amount' => (float) $line['amount'],
+                'is_red_storno' => (bool) $line['is_red_storno'],
+            ], $groups->lines($supplierId, array_column($members, 'id'), $this->db->pdo()->inTransaction()));
+            $shift = false;
+            foreach ($members as $member) {
+                $shift = $shift || $member['period_status'] !== 'open'
+                    || self::locked((string) $member['entry_date'], $lockedUntil);
+            }
+            $blocked = $shift && (self::locked($today, $lockedUntil)
+                || ($todayPeriod !== null && $todayPeriod['status'] !== 'open'));
+            $plan['tax_neutral_violation'] = null;
+            try {
+                $proposed = $sourceType === 'invoice'
+                    ? $this->posting->buildFromInvoice($supplierId, $docId)
+                    : $this->posting->buildFromPurchaseInvoice($supplierId, $docId);
+                $plan['suggested_lines'] = array_map(static fn (array $line): array => [
+                    'account_code' => $line['account_code'], 'account_name' => null,
+                    'side' => $line['side'], 'amount' => (float) $line['amount'],
+                    'is_red_storno' => (bool) ($line['is_red_storno'] ?? false),
+                ], $proposed);
+            } catch (PostingException) {
+                // Návrh z dokladu nejde sestavit (cizí měna bez kurzu, DDKP s RC…).
+                // Náhled i přeúčtování ručními řádky musí projít s řádky skupiny.
+            }
+            return $plan + [
+                'strategy' => $blocked ? self::STRATEGY_BLOCKED : self::STRATEGY_REVERSE,
+                'needs_reversal' => true, 'target_date' => $blocked ? null : ($shift ? $today : $entryDate),
+                'date_shifted' => $shift,
+                'reason_code' => $blocked ? (self::locked($today, $lockedUntil) ? 'date_locked' : 'period_not_open') : 'posting_group',
+                'tax_neutral_available' => false,
+            ];
+        }
 
         return $plan + self::decide(
             $alreadyReversed,
@@ -274,119 +320,135 @@ final class DocumentRepostService
         array $meta,
         bool $confirmDateShift = false,
     ): array {
-        $pdo = $this->db->pdo();
-        $ownTx = !$pdo->inTransaction();
-        if ($ownTx) {
-            $pdo->beginTransaction();
+        return TransactionFailure::retrying($this->db->pdo(),
+            fn (): array => (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(
+                fn (): array => $this->repostOnce($supplierId, $sourceType, $docId, $lines, $meta, $confirmDateShift),
+            ),
+        );
+    }
+
+    private function repostOnce(int $supplierId, string $sourceType, int $docId, array $lines, array $meta, bool $confirmDateShift): array
+    {
+        (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+        // Bankovní invarianty se ověřují UVNITŘ transakce a PŘED stornem: jinak by
+        // vadné řádky shodily operaci až po zrušení původního zápisu.
+        if ($sourceType === 'bank') {
+            $lines = $this->bankPosting->prepareRepostLines($supplierId, $docId, $lines, true);
         }
-        try {
-            // Bankovní invarianty se ověřují UVNITŘ transakce a PŘED stornem: jinak by
-            // vadné řádky shodily operaci až po zrušení původního zápisu.
-            if ($sourceType === 'bank') {
-                $lines = $this->bankPosting->prepareRepostLines($supplierId, $docId, $lines, true);
+
+        // Plán se počítá ZNOVU uvnitř transakce: mezi náhledem a potvrzením mohla
+        // proběhnout uzávěrka nebo cizí storno a rozhodnutí by se rozešlo se stavem.
+        $plan = $this->plan($supplierId, $sourceType, $docId, $lines);
+        if (isset($meta['expected_posting_entries'])) {
+            $key = static function (array $entries): array {
+                $result = [];
+                foreach ($entries as $member) $result[(int) $member['id']] = (int) $member['row_version'];
+                ksort($result);
+                return $result;
+            };
+            if ($key($meta['expected_posting_entries']) !== $key($plan['posting_entries'])) {
+                throw new PostingException('version_conflict', 'Zaúčtování dokladu se mezitím změnilo. Obnovte náhled přeúčtování.', 409);
             }
+        }
 
-            // Plán se počítá ZNOVU uvnitř transakce: mezi náhledem a potvrzením mohla
-            // proběhnout uzávěrka nebo cizí storno a rozhodnutí by se rozešlo se stavem.
-            $plan = $this->plan($supplierId, $sourceType, $docId, $lines);
-
-            if ($plan['strategy'] === self::STRATEGY_BLOCKED) {
-                throw new PostingException(
-                    $plan['reason_code'] === 'date_locked' ? 'date_locked' : 'period_not_open',
-                    $plan['reason_code'] === 'date_locked'
-                        ? 'Účetnictví je zamčené k ' . (string) $plan['locked_until']
-                            . ' včetně dneška — opravu není kam zapsat. Posuň zámek v nastavení účetnictví (jen admin).'
-                        : 'Zápis je v období „' . (string) $plan['period_status']
-                            . '" a pro dnešek není otevřené účetní období — opravu není kam zapsat.',
-                    409,
-                );
-            }
-            if ($plan['date_shifted'] && !$confirmDateShift) {
-                $why = $plan['tax_neutral_available'] && $plan['tax_neutral_violation'] !== null
-                    ? ' Přepsat zápis na místě nejde, protože '
-                        . TaxNeutralReclassification::describe((string) $plan['tax_neutral_violation']) . '.'
-                    : '';
-                throw new PostingException(
-                    'repost_date_shift_confirmation_required',
-                    'Původní datum ' . $plan['entry_date'] . ' je uzavřené nebo zamčené, takže storno i oprava '
-                        . 'padnou na ' . (string) $plan['target_date'] . '.' . $why . ' Potvrď posun data.',
-                    409,
-                    ['entry_date' => $plan['entry_date'], 'target_date' => $plan['target_date']],
-                );
-            }
-
-            $targetDate = (string) $plan['target_date'];
-            $reversalId = null;
-            if ($plan['strategy'] === self::STRATEGY_REVERSE && $plan['needs_reversal']) {
-                $reversalId = $this->posting->reverse($supplierId, (int) $plan['entry_id'], $meta + [
-                    'entry_date'  => $targetDate,
-                    'description' => 'Storno před přeúčtováním dokladu (zápis #' . $plan['entry_id'] . ')',
-                ]);
-            }
-
-            // Řádky z dialogu nenesou cizoměnovou stopu (321 v EUR apod.). Převezme se
-            // z opravovaného zápisu, ať je oprava přepisem nebo stornem a novým zápisem.
-            $postMeta = array_merge($meta, [
-                'entry_date'              => $targetDate,
-                'inherit_line_trace_from' => (int) $plan['entry_id'],
-            ]);
-            if ($plan['reason_code'] === 'tax_neutral_rewrite') {
-                // PostingService podmínky ověří znovu sám, pod zámkem zápisu.
-                $postMeta['tax_neutral_rewrite'] = true;
-            }
-            $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, $postMeta);
-            // Přeúčtování stornem vytvoří nový zápis — poznámky případu jdou s ním.
-            (new \MyInvoice\Repository\JournalEntryNoteRepository($this->db))
-                ->copyToEntry((int) $plan['entry_id'], $entryId, $supplierId);
-
-            $itemsSynced = $sourceType === 'purchase_invoice'
-                ? $this->syncPurchaseItemAccounts($supplierId, $docId, $plan['lines'], $lines)
-                : 0;
-
-            $this->activity->log(
-                'accounting.reposted',
-                $meta['user_id'] ?? null,
-                'journal_entry',
-                $entryId,
-                [
-                    'source_type'        => $sourceType,
-                    'source_id'          => $docId,
-                    'strategy'           => $plan['strategy'],
-                    'reason_code'        => $plan['reason_code'],
-                    'original_entry_id'  => $plan['entry_id'],
-                    'reversal_entry_id'  => $reversalId,
-                    'original_entry_date' => $plan['entry_date'],
-                    'entry_date'         => $targetDate,
-                    'before'             => $plan['lines'],
-                    'after'              => $lines,
-                    'items_synced'       => $itemsSynced,
-                ],
-                $meta['ip'] ?? null,
-                $meta['user_agent'] ?? null,
-                $supplierId,
+        if ($plan['strategy'] === self::STRATEGY_BLOCKED) {
+            throw new PostingException(
+                $plan['reason_code'] === 'date_locked' ? 'date_locked' : 'period_not_open',
+                $plan['reason_code'] === 'date_locked'
+                    ? 'Účetnictví je zamčené k ' . (string) $plan['locked_until']
+                        . ' včetně dneška — opravu není kam zapsat. Posuň zámek v nastavení účetnictví (jen admin).'
+                    : 'Zápis je v období „' . (string) $plan['period_status']
+                        . '" a pro dnešek není otevřené účetní období — opravu není kam zapsat.',
+                409,
             );
-
-            if ($ownTx) {
-                $pdo->commit();
-            }
-
-            return [
-                'strategy'          => (string) $plan['strategy'],
-                'entry_id'          => $entryId,
-                'reversal_entry_id' => $reversalId,
-                'entry_date'        => $targetDate,
-                'date_shifted'      => (bool) $plan['date_shifted'],
-                'items_synced'      => $itemsSynced,
-            ];
-        } catch (\Throwable $e) {
-            if (TransactionFailure::rollbackIfAborted($pdo, $e)) {
-                throw $e;
-            }
-            if ($ownTx && $pdo->inTransaction()) {
-                $pdo->rollBack();
-            }
-            throw $e;
         }
+        if ($plan['date_shifted'] && !$confirmDateShift) {
+            $why = $plan['tax_neutral_available'] && $plan['tax_neutral_violation'] !== null
+                ? ' Přepsat zápis na místě nejde, protože '
+                    . TaxNeutralReclassification::describe((string) $plan['tax_neutral_violation']) . '.'
+                : '';
+            throw new PostingException(
+                'repost_date_shift_confirmation_required',
+                'Původní datum ' . $plan['entry_date'] . ' je uzavřené nebo zamčené, takže storno i oprava '
+                    . 'padnou na ' . (string) $plan['target_date'] . '.' . $why . ' Potvrď posun data.',
+                409,
+                ['entry_date' => $plan['entry_date'], 'target_date' => $plan['target_date']],
+            );
+        }
+
+        $targetDate = (string) $plan['target_date'];
+        $reversalId = null;
+        $reversalIds = [];
+        if ($plan['reason_code'] === 'posting_group') {
+            $reverseMeta = $meta;
+            unset($reverseMeta['entry_date']);
+            if ($plan['date_shifted']) $reverseMeta['entry_date'] = $targetDate;
+            $reverseMeta['description'] = 'Storno skupiny před přeúčtováním dokladu';
+            $reversals = $this->posting->reverseDocument($supplierId, $sourceType, $docId, $reverseMeta);
+            $reversalIds = array_values($reversals);
+            $reversalId = $reversals[(int) $plan['entry_id']] ?? null;
+        } elseif ($plan['strategy'] === self::STRATEGY_REVERSE && $plan['needs_reversal']) {
+            $reversalId = $this->posting->reverse($supplierId, (int) $plan['entry_id'], $meta + [
+                'entry_date'  => $targetDate,
+                'description' => 'Storno před přeúčtováním dokladu (zápis #' . $plan['entry_id'] . ')',
+            ]);
+            $reversalIds[] = $reversalId;
+        }
+
+        // Řádky z dialogu nenesou cizoměnovou stopu (321 v EUR apod.). Převezme se
+        // z opravovaného zápisu, ať je oprava přepisem nebo stornem a novým zápisem.
+        $postMeta = array_merge($meta, [
+            'entry_date'              => $targetDate,
+            'inherit_line_trace_from' => array_column($plan['posting_entries'], 'id') ?: [(int) $plan['entry_id']],
+            'explicit_repost'        => true,
+        ]);
+        if ($plan['reason_code'] === 'tax_neutral_rewrite') {
+            // PostingService podmínky ověří znovu sám, pod zámkem zápisu.
+            $postMeta['tax_neutral_rewrite'] = true;
+        }
+        $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, $postMeta);
+        // Přeúčtování stornem vytvoří nový zápis — poznámky případu jdou s ním.
+        (new \MyInvoice\Repository\JournalEntryNoteRepository($this->db))
+            ->copyToEntry((int) $plan['entry_id'], $entryId, $supplierId);
+
+        $itemsSynced = $sourceType === 'purchase_invoice'
+            ? $this->syncPurchaseItemAccounts($supplierId, $docId, $plan['lines'], $lines)
+            : 0;
+
+        $this->activity->log(
+            'accounting.reposted',
+            $meta['user_id'] ?? null,
+            'journal_entry',
+            $entryId,
+            [
+                'source_type'        => $sourceType,
+                'source_id'          => $docId,
+                'strategy'           => $plan['strategy'],
+                'reason_code'        => $plan['reason_code'],
+                'original_entry_id'  => $plan['entry_id'],
+                'reversal_entry_id'  => $reversalId,
+                'original_entry_ids' => array_column($plan['posting_entries'], 'id'),
+                'reversal_entry_ids' => $reversalIds,
+                'original_entry_date' => $plan['entry_date'],
+                'entry_date'         => $targetDate,
+                'before'             => $plan['lines'],
+                'after'              => $lines,
+                'items_synced'       => $itemsSynced,
+            ],
+            $meta['ip'] ?? null,
+            $meta['user_agent'] ?? null,
+            $supplierId,
+        );
+
+        return [
+            'strategy'          => (string) $plan['strategy'],
+            'entry_id'          => $entryId,
+            'reversal_entry_id' => $reversalId,
+            'reversal_entry_ids' => $reversalIds,
+            'entry_date'        => $targetDate,
+            'date_shifted'      => (bool) $plan['date_shifted'],
+            'items_synced'      => $itemsSynced,
+        ];
     }
 
     /**
@@ -415,7 +477,7 @@ final class DocumentRepostService
         }
 
         return TaxNeutralReclassification::violation(
-            $this->journal->linesForEntry($entryId, $supplierId),
+            $this->journal->linesForEntry($entryId, $supplierId, $this->db->pdo()->inTransaction()),
             $after,
             $this->accounts->idToAccountMap($supplierId),
             $this->posting->incomeTaxFiledForYear($supplierId, (int) substr($entryDate, 0, 4)),
@@ -494,6 +556,7 @@ final class DocumentRepostService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ?'
+            . ($this->db->pdo()->inTransaction() ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId]);
         $value = $stmt->fetchColumn();
@@ -507,7 +570,7 @@ final class DocumentRepostService
     {
         $map = $this->accounts->idToAccountMap($supplierId);
         $out = [];
-        foreach ($this->journal->linesForEntry($entryId, $supplierId) as $line) {
+        foreach ($this->journal->linesForEntry($entryId, $supplierId, $this->db->pdo()->inTransaction()) as $line) {
             $acc = $map[(int) $line['account_id']] ?? null;
             $out[] = [
                 'account_code' => isset($acc['code']) ? (string) $acc['code'] : null,

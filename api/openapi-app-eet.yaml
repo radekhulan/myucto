@@ -1,0 +1,2668 @@
+openapi: 3.1.0
+info:
+  title: MyÚčto – aplikační API EET 2.0
+  version: 2026-10.4
+  description: 'Aplikační API evidence tržeb EET 2.0 pro webové rozhraní a budoucí mobilní
+
+    aplikaci. Není součástí veřejného read-only subsetu `/api/v1` (viz `openapi.yaml`).
+
+
+    Firma se odvozuje z ověřeného scope požadavku (hlavička `X-Supplier-Id`
+
+    u relace). Peníze se přenášejí jako desetinné řetězce s měnou, časy jako
+
+    ISO 8601 s offsetem. Soukromý klíč ani heslo certifikátu se nikdy nevrací.
+
+    Upload certifikátu je možný jen z webové relace s opětovným ověřením uživatele.
+
+    API token (mobilní aplikace, integrace) smí číst evidenci, souhrn, frontu a schopnosti;
+    se scope `read_write` i přijmout platbu, QR záměr, opakování a opravu. Nastavení,
+    jednotky, zařízení, certifikáty, diagnostika a export jsou jen pro webovou relaci
+    (`security` u každé operace).
+
+
+    Změny kontraktu 2026-10.4: evidence v pověření (scénář `delegation` přešel
+    z `unsupported_scenarios` do `supported_scenarios`). Pověření se nastavuje
+    u zařízení (`delegation`, `delegating_eic`), záznam ho vrací v `delegating_eic`
+    a `multiple_delegators`. Pole `delegating_eic` v těle platby dřív vedlo na
+    `unsupported` s důvodem `delegation`; teď vrací 422 `eet_validation`
+    (`field = delegating_eic`, `reason_code = delegation_requires_device`).
+    Zařízení v pověření nesmí být výchozí ani přiřazené pokladně.
+
+    '
+servers:
+- url: /
+security:
+- session: []
+- bearer: []
+tags:
+- name: EET – nastavení
+- name: EET – certifikáty
+paths:
+  /api/eet/capabilities:
+    get:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET – nastavení
+      operationId: eetCapabilities
+      summary: Schopnosti modulu EET, režim, prostředí a práva uživatele
+      description: Vyžaduje oprávnění `eet` (čtení).
+      responses:
+        '200':
+          description: Schopnosti
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetCapabilities'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+  /api/eet/settings:
+    get:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetSettingsShow
+      summary: Profil EET, překážky aktivace a historie změn
+      description: Vyžaduje `eet.settings` (čtení).
+      responses:
+        '200':
+          description: Profil
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - settings
+                - activation_obstacles
+                - history
+                properties:
+                  settings:
+                    $ref: '#/components/schemas/EetSettings'
+                  activation_obstacles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EetActivationObstacle'
+                  history:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EetSettingsHistoryEntry'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    put:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetSettingsUpdate
+      summary: Změna profilu EET (částečná) s kontrolou souběžné úpravy
+      description: 'Vyžaduje `eet.settings` (zápis). Zapnutí (`enabled=true`) vyžaduje aktivní
+
+        komerční licenci a splněné podmínky: EIČ, účinnost, účinná jednotka, aktivní
+
+        zařízení a platný certifikát pro prostředí se shodným EIČ.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetSettingsPatch'
+      responses:
+        '200':
+          description: Uložený profil
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - settings
+                - activation_obstacles
+                properties:
+                  settings:
+                    $ref: '#/components/schemas/EetSettings'
+                  activation_obstacles:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EetActivationObstacle'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /api/eet/units:
+    get:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetUnitsList
+      summary: Evidenční jednotky
+      description: Vyžaduje `eet.settings` (čtení).
+      responses:
+        '200':
+          description: Seznam jednotek
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EetUnit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetUnitsCreate
+      summary: Založení místního mapování jednotky z DIS+
+      description: Vyžaduje `eet.settings` (zápis).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetUnitInput'
+      responses:
+        '201':
+          description: Jednotka
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetUnit'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /api/eet/units/{id}:
+    parameters:
+    - $ref: '#/components/parameters/Id'
+    put:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetUnitsUpdate
+      summary: Úprava jednotky
+      description: Vyžaduje `eet.settings` (zápis).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetUnitInput'
+      responses:
+        '200':
+          description: Jednotka
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetUnit'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+    delete:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetUnitsEndValidity
+      summary: Ukončení účinnosti jednotky (jednotka se nemaže)
+      description: Vyžaduje `eet.settings` (zápis).
+      parameters:
+      - name: valid_to
+        in: query
+        required: false
+        description: Poslední den účinnosti; výchozí dnes.
+        schema:
+          type: string
+          format: date
+      responses:
+        '200':
+          description: Jednotka s ukončenou účinností
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetUnit'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /api/eet/devices:
+    get:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetDevicesList
+      summary: Logická zařízení (pokladny)
+      description: Vyžaduje `eet.settings` (čtení).
+      responses:
+        '200':
+          description: Seznam zařízení
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EetDevice'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetDevicesCreate
+      summary: Založení zařízení
+      description: Vyžaduje `eet.settings` (zápis).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetDeviceInput'
+      responses:
+        '201':
+          description: Zařízení
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetDevice'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /api/eet/devices/{id}:
+    parameters:
+    - $ref: '#/components/parameters/Id'
+    put:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetDevicesUpdate
+      summary: Úprava zařízení (kód nelze změnit po vydání první účtenky)
+      description: Vyžaduje `eet.settings` (zápis).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetDeviceInput'
+      responses:
+        '200':
+          description: Zařízení
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetDevice'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+    delete:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetDevicesDeactivate
+      summary: Deaktivace zařízení (zařízení se nemaže)
+      description: Vyžaduje `eet.settings` (zápis).
+      responses:
+        '200':
+          description: Deaktivované zařízení
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetDevice'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/eet/certificates:
+    get:
+      security:
+      - session: []
+      tags:
+      - EET – certifikáty
+      operationId: eetCertificatesList
+      summary: Metadata pokladních certifikátů
+      description: Vyžaduje `eet.certificates` (čtení). Nikdy nevrací klíč ani heslo.
+      responses:
+        '200':
+          description: Seznam certifikátů
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EetCertificate'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+    post:
+      security:
+      - session: []
+      tags:
+      - EET – certifikáty
+      operationId: eetCertificatesUpload
+      summary: Chráněný upload pokladního certifikátu (.p12)
+      description: 'Vyžaduje `eet.certificates` (zápis), webovou relaci a opětovné ověření
+
+        uživatele (`password`, `totp_code` nebo `step_up_token`). Server ověří soukromý klíč, shodu
+
+        s certifikátem, CN = EIČ, účel podpisu, platnost a řetězec k autoritě EET
+
+        zvoleného prostředí.
+
+        '
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/EetCertificateUploadFields'
+              - type: object
+                required:
+                - file
+                properties:
+                  file:
+                    type: string
+                    contentMediaType: application/x-pkcs12
+          application/json:
+            schema:
+              allOf:
+              - $ref: '#/components/schemas/EetCertificateUploadFields'
+              - type: object
+                required:
+                - pkcs12_base64
+                properties:
+                  pkcs12_base64:
+                    type: string
+                    contentEncoding: base64
+      responses:
+        '201':
+          description: Uložený certifikát (metadata)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetCertificate'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Validation'
+  /api/eet/certificates/{id}/deactivate:
+    parameters:
+    - $ref: '#/components/parameters/Id'
+    post:
+      security:
+      - session: []
+      tags:
+      - EET – certifikáty
+      operationId: eetCertificatesDeactivate
+      summary: Místní vyřazení certifikátu z podepisování (není revokace u CA)
+      description: 'Vyžaduje `eet.certificates` (zápis), webovou relaci a opětovné ověření
+
+        uživatele (`password`, `totp_code` nebo `step_up_token`), stejně jako upload.
+
+        '
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetStepUpProof'
+      responses:
+        '200':
+          description: Certifikát
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetCertificate'
+        '401':
+          $ref: '#/components/responses/Forbidden'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /api/eet/diagnostics:
+    post:
+      security:
+      - session: []
+      tags:
+      - EET – nastavení
+      operationId: eetDiagnosticsRun
+      summary: Ověřovací test spojení (overeni=true)
+      description: 'Vyžaduje `eet.settings` (zápis). Úspěch (`ok=true`) znamená odpověď FS
+
+        `Chyba kod=0` v ověřovacím módu s UUID odeslané zprávy (`outcome=verification_ok`),
+        nikoli evidovanou tržbu. Nic se neukládá
+
+        do evidence.
+
+        '
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                device_id:
+                  type:
+                  - integer
+                  - 'null'
+                  description: Zařízení; výchozí je výchozí zařízení firmy.
+      responses:
+        '200':
+          description: Výsledek ověření
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetDiagnosticsResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '422':
+          $ref: '#/components/responses/Validation'
+        '502':
+          $ref: '#/components/responses/Validation'
+  /api/eet/payments/preview:
+    post:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Náhled rozhodnutí politiky evidence bez zápisu
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetPaymentInput'
+      responses:
+        '200':
+          description: Výsledek politiky
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetPaymentPreview'
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/eet/payments:
+    post:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Přijetí platby s posouzením a případnou evidencí tržby
+      description: V jedné transakci vznikne platební událost, případná úhrada faktury a EET záznam. První odeslání proběhne
+        po uložení; timeout FS platbu neruší (EET zůstane ve frontě). Klientské `eet_required` se ignoruje.
+        S `eet_context = external` se tržba jen zaznamená (stav `external`), neodesílá se; 409 `eet_external_duplicate`
+        = stejná externí tržba (EIČ + id_pokl + porad_cis) s jiným obsahem.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetPaymentInput'
+      responses:
+        '200':
+          description: Uložená platební událost (i opakovaný požadavek se stejným klíčem nebo stejnou externí tržbou)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetPaymentEvent'
+        '400':
+          $ref: '#/components/responses/EetError'
+        '409':
+          $ref: '#/components/responses/EetError'
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/eet/payments/{publicId}:
+    get:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Detail platební události s oddělenými stavy
+      parameters:
+      - $ref: '#/components/parameters/EetPublicId'
+      responses:
+        '200':
+          description: Platební událost
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetPaymentEvent'
+        '404':
+          $ref: '#/components/responses/EetError'
+  /api/eet/payment-intents:
+    post:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: QR platba na místě — příprava záměru a QR dat (není inkaso ani tržba)
+      description: >-
+        Založí platební záměr k faktuře a vrátí QR data. Nový záměr ve stejné transakci pod zámkem
+        faktury zruší (payment_order_status = cancelled) dřívější nepotvrzené záměry téže faktury ve
+        stavu initiated, které nemají účetní ani EET účinek; zbývající částka se počítá až poté.
+        Potvrzené záměry (operator_confirmed) se nemění a dál blokují svou část dluhu. Bez částky se
+        použije celá zbývající částka. Stejný Idempotency-Key se stejným tělem vrátí původní výsledek;
+        opakování nic dalšího neruší. Odmítnutý záměr dřívější záměry nezruší.
+      parameters:
+      - name: Idempotency-Key
+        in: header
+        required: false
+        schema:
+          type: string
+          minLength: 8
+          maxLength: 80
+          pattern: ^[A-Za-z0-9._:\-]+$
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetPaymentIntentInput'
+      responses:
+        '201':
+          description: Založený záměr s QR daty
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetPaymentIntent'
+        '409':
+          $ref: '#/components/responses/EetError'
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/eet/payment-intents/{publicId}/confirm:
+    post:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: „Zákazník zadal platbu" — okamžik příkazu a evidence tržby
+      description: EET záznam vznikne hned. Účetní úhrada faktury vzniká až bankovním párováním (accounting_settlement_status
+        = pending, bank_verification_status = pending).
+      parameters:
+      - $ref: '#/components/parameters/EetPublicId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                ordered_at:
+                  type: string
+                  format: date-time
+                  description: Čas zadání příkazu (−48 h … +5 min); výchozí čas serveru
+                note:
+                  type: string
+                  maxLength: 255
+      responses:
+        '200':
+          description: Potvrzená platební událost
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetPaymentEvent'
+        '404':
+          $ref: '#/components/responses/EetError'
+        '409':
+          $ref: '#/components/responses/EetError'
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/eet/payment-intents/{publicId}/cancel:
+    post:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Zrušení neprovedeného záměru (jen ve stavu initiated)
+      parameters:
+      - $ref: '#/components/parameters/EetPublicId'
+      responses:
+        '200':
+          description: Zrušený záměr
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetPaymentEvent'
+        '404':
+          $ref: '#/components/responses/EetError'
+        '409':
+          $ref: '#/components/responses/EetError'
+  /api/eet/records:
+    get:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Evidence tržeb (keyset stránkování od nejnovější)
+      parameters:
+      - name: cursor
+        in: query
+        schema:
+          type: string
+      - name: limit
+        in: query
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+        description: Včetně
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/EetRecordStatus'
+      - name: unit_id
+        in: query
+        schema:
+          type: integer
+      - name: device_id
+        in: query
+        schema:
+          type: integer
+      - name: cash_document_id
+        in: query
+        description: Jen záznamy tržby a opravy navázané na daný pokladní doklad (vždy v rámci aktivní firmy).
+        schema:
+          type: integer
+          minimum: 1
+      - name: kind
+        in: query
+        schema:
+          type: string
+          enum:
+          - sale
+          - correction
+      responses:
+        '200':
+          description: Stránka záznamů
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                - next_cursor
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/EetRecord'
+                  next_cursor:
+                    type: string
+                    nullable: true
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/eet/records/{id}:
+    get:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Detail záznamu s pokusy a opravami
+      description: XML pokusů jen pro přihlášenou relaci s právem eet.correct; bearer token ho nedostane nikdy.
+      parameters:
+      - $ref: '#/components/parameters/EetRecordId'
+      responses:
+        '200':
+          description: Detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetRecordDetail'
+        '404':
+          $ref: '#/components/responses/EetError'
+  /api/eet/records/{id}/retry:
+    post:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Okamžité opakování odeslání (retry_wait / action_required)
+      parameters:
+      - $ref: '#/components/parameters/EetRecordId'
+      responses:
+        '200':
+          description: Stav po pokusu
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetRecordState'
+        '404':
+          $ref: '#/components/responses/EetError'
+        '409':
+          $ref: '#/components/responses/EetError'
+  /api/eet/records/{id}/corrections/preview:
+    post:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Náhled záporné opravy
+      parameters:
+      - $ref: '#/components/parameters/EetRecordId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetCorrectionInput'
+      responses:
+        '200':
+          description: Náhled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetCorrectionPreview'
+        '404':
+          $ref: '#/components/responses/EetError'
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/eet/records/{id}/corrections:
+    post:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Záporná oprava tržby (vlastní číslo, aktuální čas, max do neopravené části)
+      parameters:
+      - $ref: '#/components/parameters/EetRecordId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EetCorrectionInput'
+      responses:
+        '201':
+          description: Oprava (i opakovaný požadavek se stejným klíčem)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetCorrection'
+        '400':
+          $ref: '#/components/responses/EetError'
+        '404':
+          $ref: '#/components/responses/EetError'
+        '409':
+          $ref: '#/components/responses/EetError'
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/eet/queue:
+    get:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: Souhrn fronty, nejstarší lhůta, poslední potvrzení, certifikáty
+      responses:
+        '200':
+          description: Souhrn
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetQueueSummary'
+  /api/eet/summary:
+    get:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      operationId: eetSalesSummary
+      summary: Souhrn tržeb dne a měsíce pro obrazovku Domů
+      description: 'Vyžaduje `eet` (čtení). Den a měsíc zvoleného data (výchozí dnes): počet
+        tržeb, součet potvrzených, čekající, vyžadující zásah a po lhůtě 48 h. K tomu poslední
+        potvrzení, platnost certifikátu aktuálního prostředí, stav fronty a prostředí. Počítá
+        se jen aktuální prostředí. Bez XML a tajemství. Dostupné i přes API token (čtení).'
+      parameters:
+      - name: date
+        in: query
+        description: Den souhrnu (RRRR-MM-DD nebo `today`), výchozí dnes.
+        schema:
+          type: string
+      responses:
+        '200':
+          description: Souhrn
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EetSalesSummary'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/eet/export:
+    get:
+      security:
+      - session: []
+      tags:
+      - EET
+      summary: CSV export evidence (bez XML a tajemství)
+      parameters:
+      - name: from
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: to
+        in: query
+        schema:
+          type: string
+          format: date
+      - name: status
+        in: query
+        schema:
+          $ref: '#/components/schemas/EetRecordStatus'
+      - name: unit_id
+        in: query
+        schema:
+          type: integer
+      - name: device_id
+        in: query
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: CSV (UTF-8 s BOM, středník)
+          content:
+            text/csv:
+              schema:
+                type: string
+        '422':
+          $ref: '#/components/responses/EetError'
+  /api/invoices/{id}/eet:
+    get:
+      security:
+      - session: []
+      - bearer: []
+      tags:
+      - EET
+      summary: EET souhrn faktury po platebních událostech
+      parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+      responses:
+        '200':
+          description: Platební události faktury s EET záznamy
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      allOf:
+                      - $ref: '#/components/schemas/EetPaymentEvent'
+                      - type: object
+                        properties:
+                          eet_record:
+                            allOf:
+                            - $ref: '#/components/schemas/EetRecord'
+                            nullable: true
+                  refund:
+                    type: object
+                    description: Jen u dobropisu s opravovanou fakturou. Kolik z evidovaných tržeb faktury zbývá opravit; vrácení peněz (výdajový pokladní doklad, označení vráceno hotově nebo kartou na místě) se zaeviduje jako záporná tržba nejvýš do této částky.
+                    properties:
+                      invoice_id:
+                        type: integer
+                      invoice_number:
+                        type: string
+                      currency:
+                        type: string
+                      refund_amount:
+                        $ref: '#/components/schemas/EetMoney'
+                      evidenced:
+                        type: object
+                        properties:
+                          records:
+                            type: integer
+                          remaining_czk:
+                            $ref: '#/components/schemas/EetMoney'
+                          remaining:
+                            type:
+                            - string
+                            - 'null'
+                            description: Zbývá v cizí měně tržeb (null u Kč)
+                          currency:
+                            type:
+                            - string
+                            - 'null'
+components:
+  securitySchemes:
+    session:
+      type: apiKey
+      in: cookie
+      name: __Host-myinvoice_session
+    bearer:
+      type: http
+      scheme: bearer
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        minimum: 1
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: Stejný klíč se stejným tělem vrátí původní výsledek, s jiným tělem 409 idempotency_conflict.
+      schema:
+        type: string
+        minLength: 8
+        maxLength: 80
+        pattern: ^[A-Za-z0-9._:\-]+$
+    EetPublicId:
+      name: publicId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    EetRecordId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+  responses:
+    Forbidden:
+      description: Chybí oprávnění, relace nebo licence
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Záznam ve firmě neexistuje
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Conflict:
+      description: Konflikt stavu (souběžná změna, duplicita)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    Validation:
+      description: Neplatný vstup nebo nesplněná podmínka
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    EetError:
+      description: Chyba (kódy eet_validation, eet_not_configured, eet_unsupported_scenario, eet_fx_rate_unavailable, idempotency_conflict, idempotency_key_required,
+        idempotency_key_invalid, eet_state_conflict, not_found)
+      content:
+        application/json:
+          schema:
+            type: object
+            required:
+            - error
+            properties:
+              error:
+                type: object
+                required:
+                - code
+                - message
+                properties:
+                  code:
+                    type: string
+                  message:
+                    type: string
+                  field:
+                    type: string
+                  reason_code:
+                    type: string
+                  remaining:
+                    $ref: '#/components/schemas/EetMoney'
+                additionalProperties: true
+  schemas:
+    Error:
+      type: object
+      required:
+      - error
+      properties:
+        error:
+          type: object
+          required:
+          - code
+          - message
+          properties:
+            code:
+              type: string
+              examples:
+              - eet_validation
+              - eet_not_configured
+              - eet_conflict
+              - eet_not_found
+              - license_commercial_feature_unavailable
+            message:
+              type: string
+            field:
+              type: string
+            obstacles:
+              type: array
+              items:
+                $ref: '#/components/schemas/EetActivationObstacle'
+          additionalProperties: true
+    EetEnvironment:
+      type: string
+      enum:
+      - playground
+      - production
+    EetPermissionLevel:
+      type: string
+      enum:
+      - none
+      - read
+      - write
+    EetCapabilities:
+      type: object
+      required:
+      - contract_version
+      - enabled
+      - environment
+      - regime
+      - eic
+      - active_from
+      - supported_scenarios
+      - unsupported_scenarios
+      - permissions
+      - default_device_id
+      - devices
+      - has_active_certificate
+      - certificate_expires_at
+      - commercial_license
+      properties:
+        contract_version:
+          type: string
+          examples:
+          - 2026-10.4
+        enabled:
+          type: boolean
+        environment:
+          $ref: '#/components/schemas/EetEnvironment'
+        regime:
+          type: string
+          enum:
+          - standard
+          - exempt
+          - eet_off
+        eic:
+          type:
+          - string
+          - 'null'
+        active_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        supported_scenarios:
+          type: array
+          items:
+            type: string
+            enum:
+            - cash
+            - card_terminal_confirmed
+            - qr_in_person
+            - refund
+            - correction
+            - foreign_currency
+            - credit_note_refund
+            - credit
+            - external_recording
+            - delegation
+        unsupported_scenarios:
+          type: array
+          items:
+            type: string
+            enum:
+            - security_deposit
+        permissions:
+          type: object
+          required:
+          - eet
+          - eet.accept_payment
+          - eet.correct
+          - eet.settings
+          - eet.certificates
+          - eet.export
+          properties:
+            eet:
+              $ref: '#/components/schemas/EetPermissionLevel'
+            eet.accept_payment:
+              $ref: '#/components/schemas/EetPermissionLevel'
+            eet.correct:
+              $ref: '#/components/schemas/EetPermissionLevel'
+            eet.settings:
+              $ref: '#/components/schemas/EetPermissionLevel'
+            eet.certificates:
+              $ref: '#/components/schemas/EetPermissionLevel'
+            eet.export:
+              $ref: '#/components/schemas/EetPermissionLevel'
+        default_device_id:
+          type:
+          - integer
+          - 'null'
+        devices:
+          type: array
+          description: Aktivní pokladní zařízení pro výběr při přijetí platby (bez čítače řady).
+          items:
+            type: object
+            required: [id, code, name, unit_id, unit_number, unit_name, cash_register_id, delegation, delegating_eic]
+            properties:
+              id:
+                type: integer
+              code:
+                type: string
+              name:
+                type: string
+              unit_id:
+                type: integer
+              unit_number:
+                type: integer
+              unit_name:
+                type: string
+              cash_register_id:
+                type:
+                - integer
+                - 'null'
+                description: Účetní pokladna namapovaná na zařízení (tržba z jejích příjmových dokladů se eviduje na toto zařízení).
+              delegation:
+                $ref: '#/components/schemas/EetDelegationMode'
+              delegating_eic:
+                type:
+                - string
+                - 'null'
+        has_active_certificate:
+          type: boolean
+        certificate_expires_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        commercial_license:
+          type: boolean
+    EetSettings:
+      type: object
+      required:
+      - enabled
+      - environment
+      - eic
+      - active_from
+      - active_to
+      - regime
+      - exemption_reason
+      - default_device_id
+      - response_timeout_ms
+      - dispatch_blocked
+      - row_version
+      - updated_by
+      - updated_at
+      properties:
+        enabled:
+          type: boolean
+        environment:
+          $ref: '#/components/schemas/EetEnvironment'
+        eic:
+          type:
+          - string
+          - 'null'
+          pattern: ^CZ[0-9]{8,10}$
+        active_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        active_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        regime:
+          type: string
+          enum:
+          - standard
+          - exempt
+          - eet_off
+        exemption_reason:
+          type:
+          - string
+          - 'null'
+          maxLength: 255
+        default_device_id:
+          type:
+          - integer
+          - 'null'
+        response_timeout_ms:
+          type: integer
+          minimum: 2000
+          maximum: 10000
+        dispatch_blocked:
+          type: boolean
+          description: Nastavuje jen server (např. anonymizovaná kopie); odesílání je zastavené.
+        row_version:
+          type: integer
+          description: Verze pro kontrolu souběžné změny; 0 = profil ještě není uložený.
+        updated_by:
+          type:
+          - integer
+          - 'null'
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    EetSettingsPatch:
+      type: object
+      additionalProperties: false
+      properties:
+        enabled:
+          type: boolean
+        environment:
+          $ref: '#/components/schemas/EetEnvironment'
+        eic:
+          type:
+          - string
+          - 'null'
+          pattern: ^CZ[0-9]{8,10}$
+        active_from:
+          type:
+          - string
+          - 'null'
+          format: date
+        active_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        regime:
+          type: string
+          enum:
+          - standard
+          - exempt
+          - eet_off
+        exemption_reason:
+          type:
+          - string
+          - 'null'
+          maxLength: 255
+        default_device_id:
+          type:
+          - integer
+          - 'null'
+        response_timeout_ms:
+          type: integer
+          minimum: 2000
+          maximum: 10000
+        row_version:
+          type: integer
+          description: Očekávaná verze; při nesouladu 409 eet_conflict.
+    EetActivationObstacle:
+      type: object
+      required:
+      - code
+      - message
+      properties:
+        code:
+          type: string
+          enum:
+          - regime_not_standard
+          - eic_missing
+          - active_from_missing
+          - unit_missing
+          - device_missing
+          - certificate_missing
+        message:
+          type: string
+    EetSettingsHistoryEntry:
+      type: object
+      required:
+      - id
+      - changed_at
+      - changed_by
+      - snapshot
+      properties:
+        id:
+          type: integer
+        changed_at:
+          type: string
+          format: date-time
+        changed_by:
+          type:
+          - integer
+          - 'null'
+        snapshot:
+          type: object
+          additionalProperties: true
+    EetUnitKind:
+      type: string
+      enum:
+      - premises
+      - online
+      - vehicle
+      - mobile
+      - other
+    EetUnit:
+      type: object
+      required:
+      - id
+      - unit_number
+      - name
+      - kind
+      - valid_from
+      - valid_to
+      - notified_to_fs
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: integer
+        unit_number:
+          type: integer
+          minimum: 1
+          maximum: 999999
+          description: Číslo jednotky (id_provoz) z DIS+.
+        name:
+          type: string
+          maxLength: 120
+        kind:
+          $ref: '#/components/schemas/EetUnitKind'
+        valid_from:
+          type: string
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        notified_to_fs:
+          type: boolean
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    EetUnitInput:
+      type: object
+      required:
+      - unit_number
+      - name
+      - kind
+      - valid_from
+      properties:
+        unit_number:
+          type: integer
+          minimum: 1
+          maximum: 999999
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        kind:
+          $ref: '#/components/schemas/EetUnitKind'
+        valid_from:
+          type: string
+          format: date
+        valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        notified_to_fs:
+          type: boolean
+          default: true
+    EetDelegationMode:
+      type: string
+      enum:
+      - none
+      - single
+      - multiple
+      description: |
+        Evidence tržeb v pověření (§ 10 odst. 1 ZoET) podle dokumentu FS „Popis položek datové zprávy
+        s příklady jejich vyplnění“ v1.0, kap. 3: `none` = poplatník eviduje sám nebo v zastoupení
+        (situace 1 až 3), `single` = pověření jedním poplatníkem (situace 4, povinné `eic_poverujiciho`),
+        `multiple` = pověření více poplatníky (situace 5, `povereni_vice_popl="true"`, `eic_poverujiciho`
+        nepovinně). Tržby v pověření se zadávají přes zařízení s tímto nastavením.
+    EetDevice:
+      type: object
+      required:
+      - id
+      - unit_id
+      - unit_number
+      - unit_name
+      - unit_valid_from
+      - unit_valid_to
+      - code
+      - name
+      - cash_register_id
+      - delegation
+      - delegating_eic
+      - active
+      - sequence_year
+      - next_sequence
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: integer
+        unit_id:
+          type: integer
+        unit_number:
+          type: integer
+        unit_name:
+          type: string
+        unit_valid_from:
+          type: string
+          format: date
+        unit_valid_to:
+          type:
+          - string
+          - 'null'
+          format: date
+        code:
+          type: string
+          pattern: ^[0-9a-zA-Z.,:;/#\-_ ]{1,20}$
+          description: Označení pokladního zařízení (id_pokl).
+        name:
+          type: string
+          maxLength: 120
+        cash_register_id:
+          type:
+          - integer
+          - 'null'
+        delegation:
+          $ref: '#/components/schemas/EetDelegationMode'
+        delegating_eic:
+          type:
+          - string
+          - 'null'
+          pattern: ^CZ[0-9]{8,10}$
+          description: EIČ pověřujícího poplatníka (`eic_poverujiciho`). Povinné u `single`, nepovinné u `multiple`, u `none` se neuvádí.
+        active:
+          type: boolean
+        sequence_year:
+          type:
+          - integer
+          - 'null'
+        next_sequence:
+          type: integer
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        updated_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+    EetDeviceInput:
+      type: object
+      required:
+      - unit_id
+      - code
+      - name
+      properties:
+        unit_id:
+          type: integer
+          minimum: 1
+        code:
+          type: string
+          pattern: ^[0-9a-zA-Z.,:;/#\-_ ]{1,20}$
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        cash_register_id:
+          type:
+          - integer
+          - 'null'
+        delegation:
+          allOf:
+          - $ref: '#/components/schemas/EetDelegationMode'
+          default: none
+        delegating_eic:
+          type:
+          - string
+          - 'null'
+          pattern: ^CZ[0-9]{8,10}$
+          description: EIČ pověřujícího poplatníka (`eic_poverujiciho`). Povinné u `single`, nepovinné u `multiple`, u `none` se neuvádí.
+        active:
+          type: boolean
+          default: true
+    EetCertificate:
+      type: object
+      required:
+      - id
+      - environment
+      - eic
+      - subject_cn
+      - serial_number
+      - fingerprint_sha256
+      - issuer
+      - not_before
+      - not_after
+      - label
+      - status
+      - uploaded_by
+      - created_at
+      - retired_at
+      - valid_now
+      - expires_in_days
+      - expiry_warning
+      properties:
+        id:
+          type: integer
+        environment:
+          $ref: '#/components/schemas/EetEnvironment'
+        eic:
+          type: string
+        subject_cn:
+          type:
+          - string
+          - 'null'
+        serial_number:
+          type:
+          - string
+          - 'null'
+        fingerprint_sha256:
+          type: string
+          pattern: ^[0-9a-f]{64}$
+        issuer:
+          type:
+          - string
+          - 'null'
+        not_before:
+          type: string
+          format: date-time
+        not_after:
+          type: string
+          format: date-time
+        label:
+          type:
+          - string
+          - 'null'
+        status:
+          type: string
+          enum:
+          - active
+          - retired
+          - revoked
+        uploaded_by:
+          type:
+          - integer
+          - 'null'
+        created_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        retired_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        valid_now:
+          type: boolean
+        expires_in_days:
+          type: integer
+          description: Celé dny do konce platnosti (záporné = prošlý).
+        expiry_warning:
+          type:
+          - string
+          - 'null'
+          enum:
+          - warning
+          - critical
+          - expired
+          - null
+          description: Upozornění u aktivního certifikátu (méně než 30, resp. 7 dní).
+    EetCertificateUploadFields:
+      type: object
+      properties:
+        environment:
+          $ref: '#/components/schemas/EetEnvironment'
+        pfx_password:
+          type: string
+          writeOnly: true
+          description: Heslo k souboru P12; nikdy se nevrací ani neloguje.
+        label:
+          type: string
+          maxLength: 120
+        password:
+          type: string
+          writeOnly: true
+          description: Opětovné ověření uživatele (heslo účtu).
+        totp_code:
+          type: string
+          writeOnly: true
+        step_up_token:
+          type: string
+          writeOnly: true
+          description: Doklad o ověření druhým faktorem (WebAuthn) místo hesla.
+    EetStepUpProof:
+      type: object
+      properties:
+        password:
+          type: string
+          writeOnly: true
+          description: Opětovné ověření uživatele (heslo účtu).
+        totp_code:
+          type: string
+          writeOnly: true
+        step_up_token:
+          type: string
+          writeOnly: true
+          description: Doklad o ověření druhým faktorem (WebAuthn) místo hesla.
+    EetDiagnosticsResult:
+      type: object
+      required:
+      - ok
+      - outcome
+      - error_code
+      - message
+      - duration_ms
+      - environment
+      - device_id
+      - certificate_id
+      properties:
+        ok:
+          type: boolean
+        outcome:
+          type: string
+        error_code:
+          type:
+          - integer
+          - 'null'
+        message:
+          type:
+          - string
+          - 'null'
+        duration_ms:
+          type: integer
+        environment:
+          $ref: '#/components/schemas/EetEnvironment'
+        device_id:
+          type: integer
+        certificate_id:
+          type:
+          - integer
+          - 'null'
+    EetMoney:
+      type: string
+      pattern: ^-?\d+\.\d{2}$
+      example: '1210.00'
+    EetRecordStatus:
+      type: string
+      enum:
+      - pending
+      - sending
+      - retry_wait
+      - confirmed
+      - confirmed_warning
+      - action_required
+      - verification_ok
+      - external
+      description: '`external` = tržbu evidoval jiný systém (e-shop); MyÚčto ji jen zaznamenalo a nikdy ji neodesílá, nepatří do fronty.'
+    EetPaymentInput:
+      type: object
+      required:
+      - amount
+      description: |
+        Kredit: podíl položek faktury se skladovou kartou druhu `stored_value` jde do `urceno_cerp_zuct`
+        (u prodeje bez faktury s účelem `credit_topup` celá částka), úhrada kanálem `stored_value`
+        (poukaz / kredit, účel `credit_draw`, způsob `offset`) celou částkou do `cerp_zuct`.
+
+        `eet_context = external`: tržbu evidoval jiný systém; platba se zapíše a záznam vznikne se
+        stavem `external` (neodesílá se), viz `external_eet`. Stejná trojice EIČ + id_pokl + porad_cis
+        s jiným obsahem vrací 409 `eet_external_duplicate`.
+      properties:
+        eet_context:
+          type: string
+          enum:
+          - external
+        external_eet:
+          type: object
+          additionalProperties: false
+          description: Volitelné údaje externí evidence (formáty XSD EET); id_pokl a porad_cis obě, nebo žádné.
+          properties:
+            pok:
+              type: string
+              description: Potvrzovací kód, 39 znaků
+            eic:
+              type: string
+              pattern: ^CZ[0-9]{8,10}$
+            id_jednotky:
+              type: integer
+              minimum: 1
+              maximum: 999999999
+            id_pokl:
+              type: string
+              pattern: ^[0-9a-zA-Z.,:;/#\-_ ]{1,20}$
+            porad_cis:
+              type: string
+              pattern: ^[0-9a-zA-Z.,:;/#\-_ ]{1,25}$
+            dat_trzby:
+              type: string
+              format: date-time
+            celk_trzba:
+              $ref: '#/components/schemas/EetMoney'
+            eic_poverujiciho:
+              type: string
+              pattern: ^CZ[0-9]{8,10}$
+              description: EIČ pověřujícího poplatníka, pokud externí systém evidoval v pověření (nesmí se shodovat s EIČ firmy)
+            povereni_vice_popl:
+              type: boolean
+              description: Pověření více poplatníky; uvádí se jen hodnota true
+        paid_on:
+          type: string
+          format: date
+          description: Jen u `eet_context = external` (výchozí den tržby)
+        amount:
+          $ref: '#/components/schemas/EetMoney'
+        currency:
+          type: string
+          default: CZK
+          example: CZK
+          description: Měna platby (ISO 4217). U faktury musí odpovídat měně faktury. Platba v cizí měně se do EET uvádí v Kč přepočtená kurzem, jakým účetnictví ocení úhradu ke dni přijetí (režim kurzu firmy, jinak kurz ČNB); chybí-li kurz, 422 `eet_fx_rate_unavailable`. QR platba na místě je jen v Kč.
+        channel:
+          type: string
+          enum:
+          - cash
+          - card_terminal
+          - qr_in_person
+          - bank_transfer
+          - card_online
+          - cash_on_delivery
+          - other
+          - stored_value
+        payment_method:
+          type: string
+          enum:
+          - bank_transfer
+          - direct_debit
+          - card
+          - cash
+          - cash_on_delivery
+          - offset
+          - other
+        contact_context:
+          type: string
+          enum:
+          - in_person
+          - on_premises
+          - in_vehicle
+          - remote
+          - unknown
+          default: unknown
+        business_purpose:
+          type: string
+          enum:
+          - sale
+          - order_deposit
+          - credit_topup
+          - credit_draw
+          - security_deposit
+          - other
+          default: sale
+        invoice_id:
+          type: integer
+        device_id:
+          type: integer
+          description: Pokladní zařízení; bez něj výchozí zařízení firmy
+        received_at:
+          type: string
+          format: date-time
+          description: Čas přijetí (−48 h … +5 min); výchozí čas serveru
+        note:
+          type: string
+          maxLength: 255
+    EetPolicyResult:
+      type: object
+      required:
+      - decision
+      - reason_code
+      - message
+      - policy_version
+      properties:
+        decision:
+          type: string
+          enum:
+          - required
+          - voluntary
+          - not_subject
+          - unknown
+          - unsupported
+          - inactive
+          - external
+        reason_code:
+          type: string
+        message:
+          type: string
+        policy_version:
+          type: string
+    EetPaymentPreview:
+      type: object
+      required:
+      - eet
+      - creates_record
+      - blocks_acceptance
+      - requires
+      - amount
+      - currency
+      properties:
+        eet:
+          $ref: '#/components/schemas/EetPolicyResult'
+        creates_record:
+          type: boolean
+        blocks_acceptance:
+          type: boolean
+        requires:
+          type: array
+          items:
+            type: string
+            enum:
+            - channel
+            - contact_context
+        amount:
+          $ref: '#/components/schemas/EetMoney'
+        currency:
+          type: string
+        amount_czk:
+          description: Částka, která se zaeviduje (Kč); null, když kurz chybí
+          oneOf:
+          - $ref: '#/components/schemas/EetMoney'
+          - type: 'null'
+        exchange_rate:
+          type:
+          - string
+          - 'null'
+          description: Kurz CZK za 1 jednotku měny platby (u CZK null)
+        exchange_rate_source:
+          type:
+          - string
+          - 'null'
+          example: cnb:2026-11-02
+        exchange_rate_error:
+          type:
+          - object
+          - 'null'
+          description: Kurz pro den platby chybí (`eet_fx_rate_unavailable`); přijetí by bylo odmítnuto
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+        credit_topup_amount:
+          description: Část tržby v Kč pro `urceno_cerp_zuct` (null = pole se neuvádí)
+          oneOf:
+          - $ref: '#/components/schemas/EetMoney'
+          - type: 'null'
+        credit_draw_amount:
+          description: Část tržby v Kč pro `cerp_zuct` (null = pole se neuvádí)
+          oneOf:
+          - $ref: '#/components/schemas/EetMoney'
+          - type: 'null'
+        invoice:
+          type: object
+          nullable: true
+          properties:
+            id:
+              type: integer
+            currency:
+              type: string
+            remaining:
+              $ref: '#/components/schemas/EetMoney'
+    EetRecordState:
+      type: object
+      required:
+      - record_id
+      - public_id
+      - status
+      - environment
+      - warnings
+      - overdue
+      properties:
+        record_id:
+          type: integer
+        public_id:
+          type: string
+          format: uuid
+        status:
+          $ref: '#/components/schemas/EetRecordStatus'
+        action_code:
+          type: string
+          nullable: true
+          description: certificate_missing, rejected, …
+        pok:
+          type: string
+          nullable: true
+        environment:
+          type: string
+          enum:
+          - playground
+          - production
+        warnings:
+          type: array
+          items:
+            type: object
+            properties:
+              code:
+                oneOf:
+                - type: integer
+                - type: string
+              message:
+                type: string
+        overdue:
+          type: boolean
+        attempt_count:
+          type: integer
+        next_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_error:
+          type: object
+          nullable: true
+          properties:
+            code:
+              type: integer
+              nullable: true
+            message:
+              type: string
+              nullable: true
+        attempted:
+          type: boolean
+    EetAllocation:
+      type: object
+      properties:
+        invoice_id:
+          type: integer
+          nullable: true
+        invoice_payment_id:
+          type: integer
+          nullable: true
+        cash_document_id:
+          type: integer
+          nullable: true
+        bank_transaction_id:
+          type: integer
+          nullable: true
+        amount:
+          $ref: '#/components/schemas/EetMoney'
+    EetPaymentEvent:
+      type: object
+      required:
+      - payment_event_id
+      - kind
+      - origin
+      - amount
+      - currency
+      - payment_order_status
+      - bank_verification_status
+      - accounting_settlement_status
+      - eet_decision
+      - eet
+      properties:
+        payment_event_id:
+          type: string
+          format: uuid
+        kind:
+          type: string
+          enum:
+          - payment
+          - refund
+          - intent
+        origin:
+          type: string
+          enum:
+          - invoice_payment
+          - cash_document
+          - quick_sale
+          - payment_intent
+          - correction
+          - bank_reconciliation
+          - api
+        amount:
+          $ref: '#/components/schemas/EetMoney'
+          description: Částka v měně platby (u opravy záporná)
+        currency:
+          type: string
+          description: Měna platby
+        amount_czk:
+          $ref: '#/components/schemas/EetMoney'
+          description: Částka evidovaná v EET, vždy v Kč (u CZK platby totéž co amount)
+        exchange_rate:
+          type:
+          - string
+          - 'null'
+          description: Kurz přepočtu cizoměnové platby (CZK za 1 jednotku); oprava nese kurz původní tržby
+        exchange_rate_source:
+          type:
+          - string
+          - 'null'
+          description: 'Zdroj kurzu: `cnb:{den kurzu}`, `fixed_monthly:{období}`, `fixed_annual:{období}`, `cash_document:{datum dokladu}`'
+        payment_method:
+          type: string
+          nullable: true
+        channel:
+          type: string
+          nullable: true
+        contact_context:
+          type: string
+        business_purpose:
+          type: string
+        invoice_id:
+          type: integer
+          nullable: true
+        ordered_at:
+          type: string
+          format: date-time
+          nullable: true
+        received_at:
+          type: string
+          format: date-time
+          nullable: true
+        recorded_at:
+          type: string
+          format: date-time
+        paid_on:
+          type: string
+          format: date
+          nullable: true
+        payment_order_status:
+          type: string
+          enum:
+          - initiated
+          - operator_confirmed
+          - settled
+          - failed
+          - cancelled
+        bank_verification_status:
+          type: string
+          enum:
+          - not_applicable
+          - pending
+          - verified
+        accounting_settlement_status:
+          type: string
+          enum:
+          - not_applicable
+          - pending
+          - settled
+        eet_decision:
+          type: object
+          properties:
+            decision:
+              type: string
+            reason_code:
+              type: string
+              nullable: true
+            policy_version:
+              type: string
+              nullable: true
+        allocations:
+          type: array
+          items:
+            $ref: '#/components/schemas/EetAllocation'
+        eet:
+          allOf:
+          - $ref: '#/components/schemas/EetRecordState'
+          nullable: true
+        idempotent_replay:
+          type: boolean
+        poll_after_seconds:
+          type: integer
+          description: Doporučený interval dalšího čtení, dokud EET čeká
+    EetPaymentIntentInput:
+      type: object
+      required:
+      - invoice_id
+      properties:
+        invoice_id:
+          type: integer
+        amount:
+          $ref: '#/components/schemas/EetMoney'
+        device_id:
+          type: integer
+        contact_context:
+          type: string
+          enum:
+          - in_person
+          - on_premises
+          - in_vehicle
+          default: in_person
+        note:
+          type: string
+          maxLength: 255
+    EetPaymentIntent:
+      allOf:
+      - $ref: '#/components/schemas/EetPaymentEvent'
+      - type: object
+        properties:
+          qr:
+            type: object
+            nullable: true
+            properties:
+              spd:
+                type: string
+                description: Řetězec SPAYD (SPD*1.0*…)
+              image_data_uri:
+                type: string
+                nullable: true
+                description: PNG jako data URI
+              account_number:
+                type: string
+                nullable: true
+                description: Tuzemské číslo účtu (s předčíslím) z QR; null, pokud QR nese jen IBAN
+              bank_code:
+                type: string
+                nullable: true
+                description: Kód banky k account_number
+              iban:
+                type: string
+                nullable: true
+                description: IBAN účtu bez mezer, pokud je znám
+              variable_symbol:
+                type: string
+                nullable: true
+                description: Variabilní symbol z QR (jen číslice)
+              amount:
+                type: string
+                description: Částka k úhradě v Kč (desetinná tečka, dvě místa)
+    EetRecord:
+      allOf:
+      - $ref: '#/components/schemas/EetRecordState'
+      - type: object
+        properties:
+          kind:
+            type: string
+            enum:
+            - sale
+            - correction
+            - diagnostic
+          payment_event_id:
+            type: integer
+            nullable: true
+          corrects_record_id:
+            type: integer
+            nullable: true
+          correction_reason:
+            type: string
+            nullable: true
+            enum:
+            - refund
+            - failed_payment
+            - wrong_data
+            - duplicate
+            - other
+          eic:
+            type: string
+          delegating_eic:
+            type:
+            - string
+            - 'null'
+            description: EIČ pověřujícího poplatníka (`eic_poverujiciho`), jak odešlo ve zprávě
+          multiple_delegators:
+            type: boolean
+            description: Pověření více poplatníky (`povereni_vice_popl="true"`)
+          unit_id:
+            type: integer
+            nullable: true
+            description: Null u tržby evidované externím systémem
+          unit_number:
+            type: integer
+            nullable: true
+          device_id:
+            type: integer
+            nullable: true
+            description: Null u tržby evidované externím systémem
+          device_code:
+            type: string
+            nullable: true
+          sequence_number:
+            type: string
+            nullable: true
+            example: 2026/000001
+          external:
+            type: boolean
+            description: Tržbu evidoval jiný systém (stav `external`), MyÚčto ji neodesílalo
+          sale_at:
+            type: string
+            format: date-time
+          total_amount:
+            $ref: '#/components/schemas/EetMoney'
+          credit_topup_amount:
+            description: Platby určené k čerpání (`urceno_cerp_zuct`)
+            oneOf:
+            - $ref: '#/components/schemas/EetMoney'
+            - type: 'null'
+          credit_draw_amount:
+            description: Čerpání kreditu (`cerp_zuct`)
+            oneOf:
+            - $ref: '#/components/schemas/EetMoney'
+            - type: 'null'
+          currency:
+            type: string
+            example: CZK
+          policy:
+            type: object
+            properties:
+              decision:
+                type: string
+                nullable: true
+              reason_code:
+                type: string
+                nullable: true
+              version:
+                type: string
+                nullable: true
+          deadline_at:
+            type: string
+            format: date-time
+          confirmed_at:
+            type: string
+            format: date-time
+            nullable: true
+          created_at:
+            type: string
+            format: date-time
+            nullable: true
+    EetAttempt:
+      type: object
+      properties:
+        attempt_no:
+          type: integer
+        uuid_zpravy:
+          type: string
+          format: uuid
+        sent_at:
+          type: string
+          format: date-time
+        first_attempt:
+          type: boolean
+        verification:
+          type: boolean
+        certificate_id:
+          type: integer
+          nullable: true
+        outcome:
+          type: string
+        http_status:
+          type: integer
+          nullable: true
+        error_code:
+          type: integer
+          nullable: true
+        error_message:
+          type: string
+          nullable: true
+        pok:
+          type: string
+          nullable: true
+        test_flag:
+          type: boolean
+          nullable: true
+        signature_verified:
+          type: boolean
+        duration_ms:
+          type: integer
+          nullable: true
+        request_sha256:
+          type: string
+          nullable: true
+        received_at:
+          type: string
+          nullable: true
+        request_xml:
+          type: string
+          nullable: true
+          description: Jen relace s eet.correct
+        response_xml:
+          type: string
+          nullable: true
+          description: Jen relace s eet.correct
+    EetRecordDetail:
+      allOf:
+      - $ref: '#/components/schemas/EetRecord'
+      - type: object
+        properties:
+          source_invoices:
+            type: array
+            description: Zdrojové faktury platební události s číslem dokladu.
+            items:
+              type: object
+              properties:
+                id:
+                  type: integer
+                number:
+                  type: string
+          payment_event:
+            allOf:
+            - $ref: '#/components/schemas/EetPaymentEvent'
+            nullable: true
+          corrections:
+            type: array
+            items:
+              $ref: '#/components/schemas/EetRecord'
+          attempts:
+            type: array
+            items:
+              $ref: '#/components/schemas/EetAttempt'
+    EetCorrectionInput:
+      type: object
+      description: Částka opravy buď v Kč (`amount`), nebo v původní měně cizoměnové tržby (`original_amount`), ne obojí.
+      properties:
+        amount:
+          $ref: '#/components/schemas/EetMoney'
+        original_amount:
+          $ref: '#/components/schemas/EetMoney'
+          description: O kolik se tržba snižuje v původní měně. Přepočet kurzem původní tržby kumulativně (vratka celé zbývající cizí částky dá celou zbývající částku v Kč).
+        reason:
+          type: string
+          enum:
+          - refund
+          - failed_payment
+          - wrong_data
+          - duplicate
+          - other
+        note:
+          type: string
+          maxLength: 255
+        device_id:
+          type: integer
+        refund_to_stored_value:
+          type: boolean
+          default: false
+          description: Vratka tržby uhrazené poukazem / kreditem zpět na kartu / kredit (záporné `cerp_zuct`); jen s důvodem `refund`.
+    EetCorrectionPreview:
+      type: object
+      properties:
+        original:
+          $ref: '#/components/schemas/EetRecord'
+        corrected_total:
+          $ref: '#/components/schemas/EetMoney'
+        remaining:
+          $ref: '#/components/schemas/EetMoney'
+        stored_value_payment:
+          type: boolean
+          description: Tržba byla uhrazena poukazem / kreditem (nabídnout vrácení na kartu)
+        foreign:
+          type:
+          - object
+          - 'null'
+          description: Cizoměnová stopa tržby (null u tržby v Kč)
+          properties:
+            currency:
+              type: string
+            original_amount:
+              $ref: '#/components/schemas/EetMoney'
+            remaining:
+              type:
+              - string
+              - 'null'
+              description: Zbývá opravit v původní měně; null, když tržbu snížila oprava zadaná v Kč
+            exchange_rate:
+              type: string
+            exchange_rate_source:
+              type:
+              - string
+              - 'null'
+        proposed:
+          type: object
+          properties:
+            total_amount:
+              $ref: '#/components/schemas/EetMoney'
+            original_amount:
+              type:
+              - string
+              - 'null'
+            credit_topup_amount:
+              type:
+              - string
+              - 'null'
+            credit_draw_amount:
+              type:
+              - string
+              - 'null'
+            refund_to_stored_value:
+              type: boolean
+            reason:
+              type: string
+              nullable: true
+            device_id:
+              type: integer
+            environment:
+              type: string
+            sale_at:
+              type: string
+              format: date-time
+        allowed:
+          type: boolean
+        error:
+          type:
+          - string
+          - 'null'
+        accounting:
+          type: string
+    EetCorrection:
+      allOf:
+      - $ref: '#/components/schemas/EetPaymentEvent'
+      - type: object
+        properties:
+          correction:
+            allOf:
+            - $ref: '#/components/schemas/EetRecord'
+            nullable: true
+          original_remaining:
+            $ref: '#/components/schemas/EetMoney'
+          original_remaining_foreign:
+            $ref: '#/components/schemas/EetMoney'
+            description: Zbývá opravit v původní měně cizoměnové tržby
+    EetSalesPeriod:
+      type: object
+      properties:
+        from:
+          type: string
+          format: date
+        to:
+          type: string
+          format: date
+        count:
+          type: integer
+          description: Počet tržeb (prodeje i opravy) s časem tržby v období
+        confirmed_count:
+          type: integer
+        confirmed_total:
+          $ref: '#/components/schemas/EetMoney'
+        waiting:
+          type: integer
+          description: Čeká na odeslání nebo opakování
+        action_required:
+          type: integer
+        overdue:
+          type: integer
+          description: Evidováno po lhůtě 48 h
+        currency:
+          type: string
+    EetSalesSummary:
+      type: object
+      properties:
+        date:
+          type: string
+          format: date
+        active:
+          type: boolean
+          description: Firma k dnešku eviduje tržby
+        environment:
+          type: string
+          enum:
+          - playground
+          - production
+        dispatch_blocked:
+          type: boolean
+        today:
+          $ref: '#/components/schemas/EetSalesPeriod'
+        month:
+          $ref: '#/components/schemas/EetSalesPeriod'
+        last_confirmed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        certificate:
+          type:
+          - object
+          - 'null'
+          properties:
+            valid_until:
+              type: string
+              format: date-time
+            days_left:
+              type: integer
+            expired:
+              type: boolean
+        queue:
+          type: object
+          properties:
+            open_total:
+              type: integer
+            counts:
+              type: object
+              additionalProperties:
+                type: integer
+            overdue:
+              type: integer
+            oldest_deadline_at:
+              type:
+              - string
+              - 'null'
+              format: date-time
+    EetQueueSummary:
+      type: object
+      properties:
+        counts:
+          type: object
+          properties:
+            pending:
+              type: integer
+            sending:
+              type: integer
+            retry_wait:
+              type: integer
+            action_required:
+              type: integer
+        open_total:
+          type: integer
+        action_required_by_code:
+          type: object
+          additionalProperties:
+            type: integer
+        overdue:
+          type: integer
+        oldest_deadline_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_confirmed_at:
+          type: string
+          format: date-time
+          nullable: true
+        environment:
+          type: string
+          enum:
+          - playground
+          - production
+        dispatch_blocked:
+          type: boolean
+        certificates:
+          type: object
+          additionalProperties:
+            type: object
+            properties:
+              valid_until:
+                type: string
+                format: date-time
+                nullable: true
+              expired:
+                type: boolean

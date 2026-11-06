@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\AccountRoleResolver;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\BankPostingRuleRepository;
@@ -14,7 +15,9 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\TaxAdvanceScheduleRepository;
 use MyInvoice\Service\Accounting\AdvanceSettlementSync;
+use MyInvoice\Service\Accounting\Dimension\BankRuleDimensions;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\ForeignCurrencyAccountPolicy;
 use MyInvoice\Service\Accounting\JournalLineAmount;
@@ -22,6 +25,7 @@ use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\PolicyInput;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\PurchasePayableAccount;
 use MyInvoice\Service\Accounting\TakenOverRecord;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Accounting\Card\CardClearingRegime;
@@ -37,7 +41,9 @@ use MyInvoice\Service\Bank\BankTransactionContext;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Currency\CnbExchangeRateClient;
+use MyInvoice\Service\Currency\ExchangeRateUnavailableException;
 use MyInvoice\Service\Currency\FixedExchangeRateService;
+use MyInvoice\Service\Currency\PaymentExchangeRate;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\RefundDocument;
 use MyInvoice\Service\Ai\AiKillSwitchService;
@@ -119,6 +125,12 @@ final class BankPostingService
          * dorovnat, jinak 314/324 zůstane rozjeté proti saldokontu.
          */
         private readonly ?AdvanceSettlementSync $advanceSettlement = null,
+        /**
+         * Pravidlo s cílovou ostatní položkou (`bank_posting_rules.other_item_id`) pohyb
+         * po zaúčtování rovnou přiřadí položce. Nullable kvůli ručním konstrukcím v testech;
+         * bez služby pravidlo pohyb jen zaúčtuje.
+         */
+        private readonly ?\MyInvoice\Service\Accounting\OtherItemService $otherItems = null,
     ) {}
 
     /**
@@ -364,7 +376,8 @@ final class BankPostingService
             // Jediný hook detektorů před obecným FX guardem. Matched platby mají
             // přednost; stejnoměnný cizoměnový vlastní převod smí projít tierem 20.
             if (!$isMatched) {
-                $detected = $this->detectors?->run($supplierId, $tx, $userId, $suggestOnly);
+                // Pravidla s přednostní prioritou porovnává řetězec i podle vlastního účtu výpisu.
+                $detected = $this->detectors?->run($supplierId, (new StatementOwnAccount($this->db))->withOwnAccount($supplierId, $tx, $tx), $userId, $suggestOnly);
                 if ($detected !== null) {
                     return $detected instanceof DetectionResult
                         ? $this->applyDetection($supplierId, $tx, $detected, $userId, $suggestOnly)
@@ -573,14 +586,19 @@ final class BankPostingService
         }
 
         try {
-            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $postedLines, [
-                'entry_date'    => $postedAt,
-                'document_date' => $postedAt,
-                'description'   => $this->entryDescription($tx),
-                'posted'        => true,
-                'user_id'       => $userId,
-                'posted_by'     => $userId,
-            ]);
+            // Úhrada dokladu není použití pravidla: přepisuje-li zápis pohybu zaúčtovaného
+            // pravidlem, dimenze pravidla z pohybu zmizí. Savepoint je vrátí, když zápis selže.
+            $entryId = (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $txId, $postedLines, $postedAt, $tx, $userId): int {
+                (new BankRuleDimensions($this->db))->clearFromTransaction($supplierId, $txId);
+                return $this->posting->postDocument($supplierId, 'bank', $txId, $postedLines, [
+                    'entry_date'    => $postedAt,
+                    'document_date' => $postedAt,
+                    'description'   => $this->entryDescription($tx),
+                    'posted'        => true,
+                    'user_id'       => $userId,
+                    'posted_by'     => $userId,
+                ]);
+            });
         } catch (PostingException $e) {
             if (in_array($e->errorCode, ['period_not_open', 'no_accounting_period', 'entry_reversed'], true)) {
                 return $this->paymentMatchSuggestion($supplierId, $tx, 'period_closed');
@@ -723,7 +741,7 @@ final class BankPostingService
             $lines[] = $this->line($counter, 'credit', $alloc);
         }
 
-        $this->appendRounding($lines, $absAmount - round($allocSum, 2));
+        $this->appendRounding($lines, $absAmount - round($allocSum, 2), $supplierId, (string) $tx['posted_at']);
         return ['lines' => $lines];
     }
 
@@ -817,11 +835,11 @@ final class BankPostingService
             throw new PostingException('fx_not_supported', 'Křížovou měnu této vydané faktury nelze automaticky zaúčtovat.');
         }
 
-        $entry = $this->journal->findBySource($supplierId, 'invoice', $invoiceId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.');
-        }
-        $rate = $this->predpisFxRate($supplierId, (int) $entry['id'], $invoice);
+        $saldo = $this->predpisSaldo($supplierId, $this->predpis(
+            $supplierId, 'invoice', $invoiceId, false,
+            'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.',
+        ), $receivable);
+        $rate = $this->predpisFxRate($supplierId, $saldo, $invoice);
         $foreign = round($foreignAmount, 2);
         $predpisCzk = FxPaymentSettlement::expectedLocalAmount($foreign, $rate);
         $bankCzk = round(abs((float) $tx['amount']), 2);
@@ -829,13 +847,13 @@ final class BankPostingService
         $lines = [
             $this->line($bankAcc, 'debit', $bankCzk),
             $this->withFxTrace(
-                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $receivable), 'credit', $predpisCzk),
+                $this->line($saldo['code'], 'credit', $predpisCzk),
                 (string) $invoice['currency'],
                 $rate,
                 $foreign,
             ),
         ];
-        $this->appendFxDifference($lines, $supplierId, 0.0, true);
+        $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], 0.0, true);
         return ['lines' => $lines];
     }
 
@@ -869,7 +887,7 @@ final class BankPostingService
         $receivable = $rule['credit_account_code'] ?? '311';
         $lines = [
             $this->line($bankAcc, 'debit', $net),
-            $this->line('568', 'debit', $fee),
+            $this->line(AccountRoleResolver::fromConnection($this->db)->resolve($supplierId, 'bank.fee', (string) $tx['posted_at']), 'debit', $fee),
         ];
         foreach ($allocations as $allocation) {
             $counter = $this->incomingCounterAccount($supplierId, (int) $allocation['invoice_id'], $receivable);
@@ -958,7 +976,7 @@ final class BankPostingService
         $lines[] = $this->line($bankAcc, 'credit', $absAmount);
 
         // diff = ΣMD − ΣD = allocSum − absAmount; záporné → 548 (odchozí náklad).
-        $this->appendRounding($lines, round($allocSum, 2) - $absAmount);
+        $this->appendRounding($lines, round($allocSum, 2) - $absAmount, $supplierId, (string) $tx['posted_at']);
         return ['lines' => $lines];
     }
 
@@ -1001,22 +1019,22 @@ final class BankPostingService
                 throw new PostingException('fx_not_supported', 'Křížovou měnu přijaté faktury #' . $purchaseId . ' nelze automaticky zaúčtovat.');
             }
 
-            $entry = $this->journal->findBySource($supplierId, 'purchase_invoice', $purchaseId);
-            if ($entry === null || ($entry['posted_at'] ?? null) === null || ($entry['reversed_by'] ?? null) !== null) {
-                throw new PostingException('document_not_posted', 'Přijatá faktura #' . $purchaseId . ' nemá zaúčtovaný předpis.');
-            }
-            $rate = $this->predpisFxRate($supplierId, (int) $entry['id'], [
+            $saldo = $this->predpisSaldo($supplierId, $this->predpis(
+                $supplierId, 'purchase_invoice', $purchaseId, true,
+                'Přijatá faktura #' . $purchaseId . ' nemá zaúčtovaný předpis.',
+            ), $this->purchasePayable($supplierId, $purchaseId, $payable));
+            $rate = $this->predpisFxRate($supplierId, $saldo, [
                 'exchange_rate' => $allocation['purchase_exchange_rate'] ?? null,
             ]);
             $lines[] = $this->withFxTrace(
-                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $payable), 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
+                $this->line($saldo['code'], 'debit', FxPaymentSettlement::expectedLocalAmount($foreign, $rate)),
                 $currency,
                 $rate,
                 $foreign,
             );
         }
         $lines[] = $this->line($bankAcc, 'credit', $bankCzk);
-        $this->appendFxDifference($lines, $supplierId, 0.0, false);
+        $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], 0.0, false);
         return ['lines' => $lines];
     }
 
@@ -1044,11 +1062,11 @@ final class BankPostingService
             throw new PostingException('fx_not_supported', 'Křížovou měnu této přijaté faktury nelze automaticky zaúčtovat.');
         }
 
-        $entry = $this->journal->findBySource($supplierId, 'purchase_invoice', $purchaseId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Přijatá faktura #' . $purchaseId . ' nemá zaúčtovaný předpis.');
-        }
-        $rate = $this->predpisFxRate($supplierId, (int) $entry['id'], $purchase);
+        $saldo = $this->predpisSaldo($supplierId, $this->predpis(
+            $supplierId, 'purchase_invoice', $purchaseId, false,
+            'Přijatá faktura #' . $purchaseId . ' nemá zaúčtovaný předpis.',
+        ), $this->purchasePayable($supplierId, $purchaseId, $payable));
+        $rate = $this->predpisFxRate($supplierId, $saldo, $purchase);
         $bankCzk = round(abs((float) $tx['amount']), 2);
         // Odúčtovat se smí jen ZBYTEK dokladu (bez tohoto pohybu) a jen když ho korunová
         // platba v kurzové toleranci pokryje. Menší platba je částečná úhrada: ruční
@@ -1065,7 +1083,14 @@ final class BankPostingService
         $foreign = round((float) $remainingStmt->fetchColumn(), 2);
         $docRate = (float) ($purchase['exchange_rate'] ?? 0) > 0.0 ? (float) $purchase['exchange_rate'] : $rate;
         if ($foreign <= 0.005
-            || !FxPaymentSettlement::isFullCzkSettlement($bankCzk, $foreign, (string) $purchase['currency'], $docRate, FxPaymentSettlement::LOCAL_CURRENCY)
+            || !FxPaymentSettlement::isFullCzkSettlement(
+                $bankCzk,
+                $foreign,
+                (string) $purchase['currency'],
+                $docRate,
+                FxPaymentSettlement::LOCAL_CURRENCY,
+                ($tx['card_last4'] ?? null) !== null,
+            )
         ) {
             throw new PostingException(
                 'cross_currency',
@@ -1076,14 +1101,14 @@ final class BankPostingService
 
         $lines = [
             $this->withFxTrace(
-                $this->line($this->predpisSaldoCode($supplierId, (int) $entry['id'], $payable), 'debit', $predpisCzk),
+                $this->line($saldo['code'], 'debit', $predpisCzk),
                 (string) $purchase['currency'],
                 $rate,
                 $foreign,
             ),
             $this->line($bankAcc, 'credit', $bankCzk),
         ];
-        $this->appendFxDifference($lines, $supplierId, 0.0, false);
+        $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], 0.0, false);
         return ['lines' => $lines];
     }
 
@@ -1105,11 +1130,10 @@ final class BankPostingService
             $rule = $this->postingRules->resolve($supplierId, 'advance.received.collection');
             return ($rule['credit_account_code'] ?? null) ?: '324';
         }
-        $entry = $this->journal->findBySource($supplierId, 'invoice', $invoiceId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.');
-        }
-        return $this->predpisSaldoCode($supplierId, (int) $entry['id'], $receivable);
+        return $this->predpisSaldo($supplierId, $this->predpis(
+            $supplierId, 'invoice', $invoiceId, false,
+            'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.',
+        ), $receivable)['code'];
     }
 
     /**
@@ -1153,11 +1177,19 @@ final class BankPostingService
             $rule = $this->postingRules->resolve($supplierId, 'advance.paid.payment');
             return ($rule['debit_account_code'] ?? null) ?: '314';
         }
-        $entry = $this->journal->findBySource($supplierId, 'purchase_invoice', $pfId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Přijatá faktura #' . $pfId . ' nemá zaúčtovaný předpis.');
-        }
-        return $this->predpisSaldoCode($supplierId, (int) $entry['id'], $payable);
+        return $this->predpisSaldo($supplierId, $this->predpis(
+            $supplierId, 'purchase_invoice', $pfId, false,
+            'Přijatá faktura #' . $pfId . ' nemá zaúčtovaný předpis.',
+        ), $this->purchasePayable($supplierId, $pfId, $payable))['code'];
+    }
+
+    /**
+     * Závazek přijatého dokladu, který úhrada odúčtuje: účet z jeho zápisu (např. 325
+     * u účtenky), jinak účet z kontace úhrady ({@see PurchasePayableAccount::forPayment}).
+     */
+    private function purchasePayable(int $supplierId, int $pfId, string $payable): string
+    {
+        return (new PurchasePayableAccount($this->db))->forPayment($supplierId, $pfId, $payable);
     }
 
     /**
@@ -1188,6 +1220,100 @@ final class BankPostingService
         return count($codes) === 1 ? (string) $codes[0] : $code;
     }
 
+    /**
+     * Aktivní předpis dokladu, proti kterému se úhrada odúčtuje. Nativní doklad (jen přímý
+     * zápis, případně skupina s jediným přímým členem) se čte beze změny přes findBySource.
+     * Doklad se skupinou zaúčtování ({@see DocumentPostingGroup}) má předpis, dokud skupina
+     * drží aktivní člen: ruční storno přímého člena převzatého dokladu předpis neruší.
+     *
+     * @return array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int}
+     */
+    private function predpis(int $supplierId, string $docType, int $docId, bool $requirePosted, string $notPostedMessage): array
+    {
+        $group = (new DocumentPostingGroup($this->db))->active($supplierId, $docType, $docId);
+        if (DocumentPostingGroup::hasOwnedEntries($group) && !DocumentPostingGroup::isSingleDirectEntry($group, $docType, $docId)) {
+            return [
+                'grouped' => true,
+                'entry_ids' => array_map(static fn (array $entry): int => (int) $entry['id'], $group),
+                'doc_type' => $docType,
+                'doc_id' => $docId,
+            ];
+        }
+        $entry = $this->journal->findBySource($supplierId, $docType, $docId);
+        if ($entry === null
+            || ($requirePosted && ($entry['posted_at'] ?? null) === null)
+            || ($entry['reversed_by'] ?? null) !== null
+        ) {
+            throw new PostingException('document_not_posted', $notPostedMessage);
+        }
+        return ['grouped' => false, 'entry_ids' => [(int) $entry['id']], 'doc_type' => $docType, 'doc_id' => $docId];
+    }
+
+    /**
+     * Saldokontní účet předpisu a zápisy, které ho nesou. U nativního předpisu beze změny
+     * {@see predpisSaldoCode}. Ve skupině se účet bere jen z aktivních členů, které saldokontní
+     * řádek (účet z pravidla nebo jeho analytika) skutečně nesou; každý člen se vyhodnotí
+     * stejně jako nativní zápis. Nenese-li ho žádný člen, nebo ho dva nesou na různých účtech,
+     * úhrada se automaticky nezaúčtuje: odhad by nechal otevřené saldo na jiném účtu.
+     * Kurz předpisu se u skupiny bere z cizoměnové stopy saldokontních řádků nosičů.
+     *
+     * @param array{grouped:bool, entry_ids:list<int>, doc_type:string, doc_id:int} $predpis
+     * @return array{code:string, entry_ids:list<int>, fx_rate:?float}
+     */
+    private function predpisSaldo(int $supplierId, array $predpis, string $code): array
+    {
+        if (!$predpis['grouped']) {
+            return [
+                'code' => $this->predpisSaldoCode($supplierId, $predpis['entry_ids'][0], $code),
+                'entry_ids' => $predpis['entry_ids'],
+                'fx_rate' => null,
+            ];
+        }
+        $byEntry = [];
+        foreach ((new DocumentPostingGroup($this->db))->lines($supplierId, $predpis['entry_ids']) as $line) {
+            $account = (string) $line['account_code'];
+            if ($account === $code || str_starts_with($account, $code . '.')) {
+                $byEntry[(int) $line['entry_id']][] = $line;
+            }
+        }
+        $label = ($predpis['doc_type'] === 'invoice' ? 'vydané faktury #' : 'přijaté faktury #') . $predpis['doc_id'];
+        if ($byEntry === []) {
+            throw new PostingException(
+                'posting_group_saldo_ambiguous',
+                'Žádný aktivní zápis skupiny zaúčtování ' . $label . ' nenese saldokontní řádek na účtu ' . $code
+                    . '. Úhradu zaúčtujte ručně.',
+            );
+        }
+        $codes = [];
+        $rates = [];
+        foreach ($byEntry as $lines) {
+            $analytics = array_values(array_unique(array_filter(
+                array_map(static fn (array $line): string => (string) $line['account_code'], $lines),
+                static fn (string $account): bool => str_starts_with($account, $code . '.'),
+            )));
+            $codes[] = preg_match('/^\d{3}$/', $code) === 1 && count($analytics) === 1 ? $analytics[0] : $code;
+            foreach ($lines as $line) {
+                if ($line['currency_code'] !== null && $line['fx_rate'] !== null && (float) $line['fx_rate'] > 0) {
+                    $rates[] = (string) (float) $line['fx_rate'];
+                }
+            }
+        }
+        $codes = array_values(array_unique($codes));
+        $rates = array_values(array_unique($rates));
+        if (count($codes) > 1 || count($rates) > 1) {
+            throw new PostingException(
+                'posting_group_saldo_ambiguous',
+                'Saldokonto ' . $label . ' nesou ve skupině zaúčtování různé účty nebo kurzy ('
+                    . implode(', ', count($codes) > 1 ? $codes : $rates) . '). Úhradu zaúčtujte ručně.',
+            );
+        }
+        return [
+            'code' => $codes[0],
+            'entry_ids' => array_keys($byEntry),
+            'fx_rate' => $rates === [] ? null : (float) $rates[0],
+        ];
+    }
+
     private function incomingPurchaseRefundCounter(int $supplierId, int $pfId): string
     {
         $pf = $this->loadPurchase($supplierId, $pfId);
@@ -1205,12 +1331,9 @@ final class BankPostingService
         if ((string) $pf['currency'] !== 'CZK') {
             throw new PostingException('fx_not_supported', 'Cizoměnová refundace dobropisu se zatím neúčtuje automaticky.');
         }
-        $entry = $this->journal->findBySource($supplierId, 'purchase_invoice', $pfId);
-        if ($entry === null || ($entry['posted_at'] ?? null) === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Přijatý dobropis #' . $pfId . ' nemá zaúčtovaný předpis.');
-        }
+        $this->predpis($supplierId, 'purchase_invoice', $pfId, true, 'Přijatý dobropis #' . $pfId . ' nemá zaúčtovaný předpis.');
         $rule = $this->postingRules->resolve($supplierId, 'payment.payable.bank');
-        return ($rule['debit_account_code'] ?? null) ?: '321';
+        return $this->purchasePayable($supplierId, $pfId, ($rule['debit_account_code'] ?? null) ?: '321');
     }
 
     private function outgoingIssuedRefundCounter(int $supplierId, int $invoiceId): string
@@ -1231,10 +1354,7 @@ final class BankPostingService
         if ((string) $inv['currency'] !== 'CZK') {
             throw new PostingException('fx_not_supported', 'Cizoměnová refundace dobropisu se zatím neúčtuje automaticky.');
         }
-        $entry = $this->journal->findBySource($supplierId, 'invoice', $invoiceId);
-        if ($entry === null || ($entry['posted_at'] ?? null) === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Vydaný dobropis #' . $invoiceId . ' nemá zaúčtovaný předpis.');
-        }
+        $this->predpis($supplierId, 'invoice', $invoiceId, true, 'Vydaný dobropis #' . $invoiceId . ' nemá zaúčtovaný předpis.');
         $rule = $this->postingRules->resolve($supplierId, 'payment.receivable.bank');
         return ($rule['credit_account_code'] ?? null) ?: '311';
     }
@@ -1322,7 +1442,7 @@ final class BankPostingService
 
         $this->assertFxAllocation($absForeign, round($allocForeignSum, 2));
         $remainderCzk = round(($absForeign - round($allocForeignSum, 2)) * $paymentRate, 2);
-        $this->appendFxDifference($lines, $supplierId, $remainderCzk, true);
+        $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], $remainderCzk, true);
         return ['lines' => $lines];
     }
 
@@ -1410,7 +1530,7 @@ final class BankPostingService
         // skutečně inkasované částky — jinak jde spíš o špatně spárovaný doklad/přeplatek než
         // o kurzový rozdíl → ruční ověření (blokovaný návrh).
         $this->assertCrossCurrencySane($bankCzk, round($settledCzk, 2));
-        $this->appendFxDifference($lines, $supplierId, 0.0, true);
+        $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], 0.0, true);
         return ['lines' => $lines];
     }
 
@@ -1434,10 +1554,7 @@ final class BankPostingService
         if ((string) $inv['invoice_type'] === 'proforma') {
             throw new PostingException('cross_currency', 'Cizoměnová úhrada korunové proformy vyžaduje ruční ověření.');
         }
-        $entry = $this->journal->findBySource($supplierId, 'invoice', $invoiceId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.');
-        }
+        $this->predpis($supplierId, 'invoice', $invoiceId, false, 'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.');
         $allocCzk = $allocAmount !== null
             ? round((float) $allocAmount, 2)
             : round((float) ($inv['amount_to_pay'] ?? 0) - (float) ($inv['paid_total'] ?? 0), 2);
@@ -1496,6 +1613,17 @@ final class BankPostingService
         $payable = $rule['debit_account_code'] ?? '321';
         $bankAcc = $cashAccount ?? ($rule['credit_account_code'] ?? '221');
 
+        if (count($allocations) === 1) {
+            $purchase = $this->loadPurchase($supplierId, (int) $allocations[0]['purchase_invoice_id']);
+            $purchaseCurrency = strtoupper((string) ($purchase['currency'] ?? ''));
+            if ($purchase !== null && $purchaseCurrency !== 'CZK' && $purchaseCurrency !== $currency) {
+                return $this->buildOutgoingCrossCurrencyFx(
+                    $supplierId, $tx, $purchase, round((float) $allocations[0]['amount'], 2),
+                    (string) $payable, (string) $bankAcc,
+                );
+            }
+        }
+
         $paymentRate = $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
         $bankCzk = round($absForeign * $paymentRate, 2);
 
@@ -1515,7 +1643,80 @@ final class BankPostingService
 
         $this->assertFxAllocation($absForeign, round($allocForeignSum, 2));
         $remainderCzk = round(($absForeign - round($allocForeignSum, 2)) * $paymentRate, 2);
-        $this->appendFxDifference($lines, $supplierId, $remainderCzk, false);
+        $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], $remainderCzk, false);
+        return ['lines' => $lines];
+    }
+
+    /**
+     * Úhrada přijaté faktury v jedné cizí měně z účtu v jiné cizí měně (dolarová služba
+     * zaplacená kartou z eurového účtu). Závazek 321 se odúčtuje v nominálu zbytku dokladu
+     * kurzem předpisu, banka v CZK hodnotě skutečně odepsané cizí částky kurzem dne úhrady,
+     * obě nohy s cizoměnovou stopou své měny. Rozdíl je kurzový zisk/ztráta 563/663.
+     *
+     * Celý zbytek smí platba vypořádat jen doloženě: banka uvádí původní částku nákupu
+     * v měně dokladu a ta zbytek pokrývá, nebo CZK hodnota platby leží v kurzové toleranci
+     * od CZK hodnoty závazku (u karty širší). Jinak jde o částečnou nebo cizí úhradu
+     * a návrh zůstane k ručnímu ověření (`cross_currency`).
+     *
+     * @param array<string,mixed> $tx
+     * @param array<string,mixed> $purchase
+     * @return array{lines:list<array<string,mixed>>}
+     */
+    private function buildOutgoingCrossCurrencyFx(
+        int $supplierId,
+        array $tx,
+        array $purchase,
+        float $allocated,
+        string $payable,
+        string $bankAcc,
+    ): array {
+        $purchaseId = (int) $purchase['id'];
+        $currency = $this->effectiveCurrency($tx);
+        $absForeign = round(abs((float) $tx['amount']), 2);
+        if ((string) $purchase['document_kind'] === 'advance' || (float) ($purchase['amount_to_pay'] ?? 0) <= 0.0) {
+            throw new PostingException('fx_not_supported', 'Křížovou měnu této přijaté faktury nelze automaticky zaúčtovat.');
+        }
+        $this->assertFxAllocation($absForeign, $allocated);
+
+        $saldo = $this->predpisSaldo($supplierId, $this->predpis(
+            $supplierId, 'purchase_invoice', $purchaseId, false,
+            'Přijatá faktura #' . $purchaseId . ' nemá zaúčtovaný předpis.',
+        ), $this->purchasePayable($supplierId, $purchaseId, $payable));
+        $rate = $this->predpisFxRate($supplierId, $saldo, $purchase);
+
+        $settled = PurchaseSettledExpr::settled('pi', excludeBankTransactionId: (int) $tx['id']);
+        $remainingStmt = $this->db->pdo()->prepare(
+            "SELECT pi.amount_to_pay - ({$settled}) FROM purchase_invoices pi WHERE pi.id = ? AND pi.supplier_id = ?"
+        );
+        $remainingStmt->execute([$purchaseId, $supplierId]);
+        $foreign = round((float) $remainingStmt->fetchColumn(), 2);
+
+        $paymentRate = $this->paymentRateForDay($supplierId, $currency, (string) $tx['posted_at']);
+        $bankCzk = round($absForeign * $paymentRate, 2);
+        $predpisCzk = FxPaymentSettlement::expectedLocalAmount($foreign, $rate);
+
+        $documentCurrency = strtoupper((string) $purchase['currency']);
+        $original = strtoupper((string) ($tx['original_currency'] ?? '')) === $documentCurrency
+            ? round(abs((float) ($tx['original_amount'] ?? 0)), 2)
+            : null;
+        $covers = $original !== null
+            ? abs($original - $foreign) < 0.005
+            : abs($bankCzk - $predpisCzk) <= FxPaymentSettlement::matchTolerance(
+                $predpisCzk,
+                card: ($tx['card_last4'] ?? null) !== null,
+            );
+        if ($foreign <= 0.005 || !$covers) {
+            throw new PostingException(
+                'cross_currency',
+                'Platba v ' . $currency . ' nepokrývá zbytek přijaté faktury #' . $purchaseId . ' v ' . $documentCurrency . ' - vyžaduje ruční ověření.',
+            );
+        }
+
+        $lines = [
+            $this->withFxTrace($this->line($saldo['code'], 'debit', $predpisCzk), $documentCurrency, $rate, $foreign),
+            $this->withFxTrace($this->line($bankAcc, 'credit', $bankCzk), $currency, $paymentRate, $absForeign),
+        ];
+        $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], 0.0, false);
         return ['lines' => $lines];
     }
 
@@ -1539,11 +1740,11 @@ final class BankPostingService
         if ((string) $inv['invoice_type'] === 'proforma') {
             throw new PostingException('fx_not_supported', 'Cizoměnová záloha (proforma) se zatím neúčtuje automaticky.');
         }
-        $entry = $this->journal->findBySource($supplierId, 'invoice', $invoiceId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.');
-        }
-        return [$receivable, $this->predpisFxRate($supplierId, (int) $entry['id'], $inv)];
+        $saldo = $this->predpisSaldo($supplierId, $this->predpis(
+            $supplierId, 'invoice', $invoiceId, false,
+            'Vydaná faktura #' . $invoiceId . ' nemá zaúčtovaný předpis.',
+        ), $receivable);
+        return [$receivable, $this->predpisFxRate($supplierId, $saldo, $inv)];
     }
 
     /**
@@ -1567,11 +1768,12 @@ final class BankPostingService
         if ((string) $pf['document_kind'] === 'advance') {
             throw new PostingException('fx_not_supported', 'Cizoměnová poskytnutá záloha se zatím neúčtuje automaticky.');
         }
-        $entry = $this->journal->findBySource($supplierId, 'purchase_invoice', $pfId);
-        if ($entry === null || ($entry['reversed_by'] ?? null) !== null) {
-            throw new PostingException('document_not_posted', 'Přijatá faktura #' . $pfId . ' nemá zaúčtovaný předpis.');
-        }
-        return [$payable, $this->predpisFxRate($supplierId, (int) $entry['id'], $pf)];
+        $payable = $this->purchasePayable($supplierId, $pfId, $payable);
+        $saldo = $this->predpisSaldo($supplierId, $this->predpis(
+            $supplierId, 'purchase_invoice', $pfId, false,
+            'Přijatá faktura #' . $pfId . ' nemá zaúčtovaný předpis.',
+        ), $payable);
+        return [$payable, $this->predpisFxRate($supplierId, $saldo, $pf)];
     }
 
     /**
@@ -1579,13 +1781,22 @@ final class BankPostingService
      * při zaúčtování, i kdyby se exchange_rate hlavičky dokladu později změnil). Fallback
      * na exchange_rate dokladu, když stopa chybí (předpis bez FX stopy).
      *
+     * Skupina zaúčtování bere kurz ze saldokontních řádků svých nosičů ({@see predpisSaldo}),
+     * bez stopy z ostatních řádků těchže nosičů.
+     *
+     * @param array{code:string, entry_ids:list<int>, fx_rate:?float} $saldo
      * @param array<string,mixed> $doc
      */
-    private function predpisFxRate(int $supplierId, int $entryId, array $doc): float
+    private function predpisFxRate(int $supplierId, array $saldo, array $doc): float
     {
-        foreach ($this->journal->linesForEntry($entryId, $supplierId) as $l) {
-            if ($l['currency_code'] !== null && $l['fx_rate'] !== null && (float) $l['fx_rate'] > 0) {
-                return (float) $l['fx_rate'];
+        if ($saldo['fx_rate'] !== null) {
+            return $saldo['fx_rate'];
+        }
+        foreach ($saldo['entry_ids'] as $entryId) {
+            foreach ($this->journal->linesForEntry($entryId, $supplierId) as $l) {
+                if ($l['currency_code'] !== null && $l['fx_rate'] !== null && (float) $l['fx_rate'] > 0) {
+                    return (float) $l['fx_rate'];
+                }
             }
         }
         $rate = isset($doc['exchange_rate']) ? (float) $doc['exchange_rate'] : 0.0;
@@ -1603,21 +1814,22 @@ final class BankPostingService
      *
      * @param list<array{account_code:string, side:string, amount:float}> $lines
      */
-    private function appendFxDifference(array &$lines, int $supplierId, float $remainderCzk = 0.0, bool $incoming = true): void
+    private function appendFxDifference(array &$lines, int $supplierId, string $entryDate, float $remainderCzk = 0.0, bool $incoming = true): void
     {
         $balance = PostingService::balanceCents($lines);
         $diff = $balance['debit'] - $balance['credit'];
+        $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $entryDate);
         $remainderCents = (int) round(abs($remainderCzk) * 100.0);
         if ($remainderCents > 0) {
             $lines[] = $incoming
-                ? $this->line('648', 'credit', $remainderCents / 100.0)
-                : $this->line('548', 'debit', $remainderCents / 100.0);
+                ? $this->line($profile->account('rounding.gain'), 'credit', $remainderCents / 100.0)
+                : $this->line($profile->account('rounding.loss'), 'debit', $remainderCents / 100.0);
             $diff += $incoming ? -$remainderCents : $remainderCents;
         }
         if ($diff === 0) {
             return;
         }
-        [$loss, $gain] = $this->fxResultAccounts($supplierId);
+        [$loss, $gain] = $this->fxResultAccounts($supplierId, $entryDate);
         if ($diff > 0) {
             $lines[] = $this->line($gain, 'credit', $diff / 100.0);
         } else {
@@ -1626,17 +1838,18 @@ final class BankPostingService
     }
 
     /**
-     * Účty kurzového rozdílu z kontací fx.loss (MD 563) / fx.gain (D 663). Protiúčet je
-     * dynamický (saldokonto/banka daného případu), proto seed nese jen jednu stranu.
+     * FX role k datu platby zachovávají kontace 500. Protiúčet je dynamický
+     * (saldokonto/banka daného případu), proto seed nese jen jednu stranu.
      *
      * @return array{0:string, 1:string} [loss, gain]
      */
-    private function fxResultAccounts(int $supplierId): array
+    private function fxResultAccounts(int $supplierId, string $entryDate): array
     {
         $lossRule = $this->postingRules->resolve($supplierId, 'fx.loss');
         $gainRule = $this->postingRules->resolve($supplierId, 'fx.gain');
-        $loss = ($lossRule['debit_account_code'] ?? null) ?: '563';
-        $gain = ($gainRule['credit_account_code'] ?? null) ?: '663';
+        $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $entryDate);
+        $loss = $profile->account('fx.loss', $lossRule['debit_account_code'] ?? null);
+        $gain = $profile->account('fx.gain', $gainRule['credit_account_code'] ?? null);
         return [(string) $loss, (string) $gain];
     }
 
@@ -1677,23 +1890,21 @@ final class BankPostingService
      */
     private array $paymentRateMemo = [];
 
-    /** Kurz úhrady podle kurzového režimu firmy; v daily režimu ČNB. */
+    private ?PaymentExchangeRate $paymentRates = null;
+
+    /** Kurz úhrady podle kurzového režimu firmy; v daily režimu ČNB. Pravidlo drží {@see PaymentExchangeRate}. */
     private function paymentRateForDay(int $supplierId, string $currency, string $date): float
     {
         $key = $supplierId . '|' . $currency . '|' . $date;
         if (isset($this->paymentRateMemo[$key])) {
             return $this->paymentRateMemo[$key];
         }
-        $day = new \DateTimeImmutable($date);
-        $fixed = $this->fixedRates->resolve($supplierId, $currency, $day);
-        if ($fixed !== null && (float) $fixed['rate'] > 0) {
-            return $this->paymentRateMemo[$key] = (float) $fixed['rate'];
-        }
-        $info = $this->cnb->getRate($currency, $day);
-        if ($info === null || (float) $info['rate'] <= 0) {
+        $this->paymentRates ??= new PaymentExchangeRate($this->fixedRates, $this->cnb);
+        try {
+            return $this->paymentRateMemo[$key] = $this->paymentRates->forDay($supplierId, $currency, $date)['rate'];
+        } catch (ExchangeRateUnavailableException) {
             throw new PostingException('fx_rate_unavailable', 'Kurz ČNB pro měnu ' . $currency . ' k ' . $date . ' není k dispozici.');
         }
-        return $this->paymentRateMemo[$key] = (float) $info['rate'];
     }
 
     /**
@@ -1902,7 +2113,7 @@ final class BankPostingService
             } catch (PostingException $e) {
                 return ['action' => 'skipped', 'reason' => $e->errorCode];
             }
-            $lines = $this->alignCardSettlement($supplierId, $lines, $clearing);
+            $lines = $this->alignCardSettlement($supplierId, $lines, $clearing, (string) $tx['posted_at']);
         }
         if ($lines !== null) {
             // Doklad dorazil k platbě, kterou účetní mezitím uzavřela bez dokladu — uzavření
@@ -2006,10 +2217,10 @@ final class BankPostingService
      * @param array{code:string, side:string, amount:float, currency_code:?string, fx_rate:?float, amount_foreign:?float} $clearing
      * @return list<array<string,mixed>>
      */
-    private function alignCardSettlement(int $supplierId, array $lines, array $clearing): array
+    private function alignCardSettlement(int $supplierId, array $lines, array $clearing, string $entryDate): array
     {
         $side = $clearing['side'] === 'debit' ? 'credit' : 'debit';
-        [$loss, $gain] = $this->fxResultAccounts($supplierId);
+        [$loss, $gain] = $this->fxResultAccounts($supplierId, $entryDate);
         $findLeg = static function (array $lines) use ($clearing, $side): ?int {
             foreach ($lines as $i => $l) {
                 if ((string) $l['account_code'] === $clearing['code'] && (string) $l['side'] === $side) {
@@ -2025,7 +2236,7 @@ final class BankPostingService
                 $lines,
                 static fn (array $l): bool => !in_array((string) $l['account_code'], [$loss, $gain], true),
             ));
-            $this->appendFxDifference($lines, $supplierId, 0.0, $side === 'debit');
+            $this->appendFxDifference($lines, $supplierId, $entryDate, 0.0, $side === 'debit');
             $idx = $findLeg($lines);
         }
         if ($idx !== null && $clearing['currency_code'] !== null) {
@@ -2035,12 +2246,22 @@ final class BankPostingService
         }
 
         $settings = $this->cardRegime?->settings($supplierId) ?? [];
-        $map = array_filter([
-            $loss => $settings['fx_loss_account_code'] ?? null,
-            $gain => $settings['fx_gain_account_code'] ?? null,
-            '548' => $settings['rounding_loss_account_code'] ?? null,
-            '648' => $settings['rounding_gain_account_code'] ?? null,
-        ], static fn (mixed $v): bool => is_string($v) && $v !== '');
+        $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $entryDate);
+        $roleSettings = [
+            $loss => ['fx.loss', 'fx_loss'],
+            $gain => ['fx.gain', 'fx_gain'],
+            $profile->account('rounding.loss') => ['rounding.loss', 'rounding_loss'],
+            $profile->account('rounding.gain') => ['rounding.gain', 'rounding_gain'],
+        ];
+        $map = [];
+        foreach ($lines as $line) {
+            $code = (string) $line['account_code'];
+            if ($code === $clearing['code'] || !isset($roleSettings[$code])) {
+                continue;
+            }
+            [$role, $field] = $roleSettings[$code];
+            $map[$code] = $profile->configuredAccount($role, $settings[$field . '_account_id'] ?? null, $settings[$field . '_account_code'] ?? $code);
+        }
         foreach ($lines as $i => $l) {
             $code = (string) $l['account_code'];
             if ($code !== $clearing['code'] && isset($map[$code])) {
@@ -2063,7 +2284,7 @@ final class BankPostingService
         }
         $direction = (float) $tx['amount'] > 0 ? 'incoming' : 'outgoing';
         $currency = strtoupper($this->effectiveCurrency($tx));
-        $match = $this->matchTxArray($tx);
+        $match = $this->matchTxArray($supplierId, $tx);
         foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
             if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== $currency
                 || !$this->ruleMatcher->matching($rule, $match)) {
@@ -2132,7 +2353,7 @@ final class BankPostingService
         }
         $direction = $amount > 0 ? 'incoming' : 'outgoing';
 
-        $matchTx = $this->matchTxArray($tx);
+        $matchTx = $this->matchTxArray($supplierId, $tx);
         $matches = [];
         foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
             if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== strtoupper($this->effectiveCurrency($tx))) {
@@ -2147,11 +2368,11 @@ final class BankPostingService
         }
 
         if (count($matches) === 1
-            || (count($matches) >= 2 && (int) $matches[0]['priority'] < (int) $matches[1]['priority'])) {
+            || (count($matches) >= 2 && BankRuleMatcher::rank($matches[0]) < BankRuleMatcher::rank($matches[1]))) {
             return $this->applySingleRule($supplierId, $tx, $matches[0], $userId, $suggestOnly);
         }
         if (count($matches) >= 2) {
-            // Stejná nejvyšší priorita → vítěz dle hit_count, ale nikdy auto.
+            // Stejná nejvyšší priorita i omezení na účet → vítěz dle hit_count, ale nikdy auto.
             return $this->ruleSuggestion($supplierId, $tx, $matches[0], 'rule_conflict');
         }
 
@@ -2212,32 +2433,9 @@ final class BankPostingService
         }
 
         $tx = $this->lockTransaction($supplierId, $txId);
-        if ($tx === null || (int) ($tx['statement_supplier_id'] ?? 0) !== $supplierId) {
-            return ['action' => 'skipped', 'reason' => 'transaction_not_found'];
-        }
-        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
-            return ['action' => 'skipped', 'reason' => BankTransactionPostingScope::MIGRATION_REVIEW_REASON];
-        }
-        if ($this->skipPayrollPayment($supplierId, $txId)) {
-            return ['action' => 'skipped', 'reason' => 'payroll_payment'];
-        }
-        $amount = (float) $tx['amount'];
-        $direction = $amount > 0 ? 'incoming' : 'outgoing';
-        if ($amount === 0.0 || $direction !== (string) $rule['direction']) {
-            return ['action' => 'skipped', 'reason' => 'rule_not_matched'];
-        }
-        if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== strtoupper($this->effectiveCurrency($tx))) {
-            return ['action' => 'skipped', 'reason' => 'rule_not_matched'];
-        }
-        $entry = $this->journal->findBySource($supplierId, 'bank', $txId);
-        if ($entry !== null && ($entry['reversed_by'] ?? null) === null) {
-            return ['action' => 'skipped', 'reason' => 'already_posted'];
-        }
-        if ($this->suggestions->hasRejected($supplierId, $txId, $ruleId)) {
-            return ['action' => 'skipped', 'reason' => 'rule_rejected'];
-        }
-        if (!$this->ruleMatcher->matching($rule, $this->matchTxArray($tx))) {
-            return ['action' => 'skipped', 'reason' => 'rule_not_matched'];
+        $skip = $this->ruleBackfillSkipReason($supplierId, $txId, $tx, $rule);
+        if ($skip !== null) {
+            return ['action' => 'skipped', 'reason' => $skip];
         }
         if ($this->transfers !== null && $this->transfers->detectUnlessOverridden($supplierId, $txId, $rule) !== null) {
             return $this->transfers->handle($supplierId, $tx, $userId, true)
@@ -2254,6 +2452,75 @@ final class BankPostingService
         }
 
         return $this->applySingleRule($supplierId, $tx, $rule, $userId, true);
+    }
+
+    /**
+     * Proč se zadané pravidlo na pohyb nesmí uplatnit. Společné pro backfill i převod.
+     *
+     * @param array<string,mixed>|null $tx
+     * @param array<string,mixed> $rule
+     */
+    private function ruleBackfillSkipReason(int $supplierId, int $txId, ?array $tx, array $rule): ?string
+    {
+        if ($tx === null || (int) ($tx['statement_supplier_id'] ?? 0) !== $supplierId) {
+            return 'transaction_not_found';
+        }
+        if (BankTransactionPostingScope::requiresMigrationReview($tx)) {
+            return BankTransactionPostingScope::MIGRATION_REVIEW_REASON;
+        }
+        if ($this->skipPayrollPayment($supplierId, $txId)) {
+            return 'payroll_payment';
+        }
+        $amount = (float) $tx['amount'];
+        if ($amount === 0.0 || ($amount > 0 ? 'incoming' : 'outgoing') !== (string) $rule['direction']) {
+            return 'rule_not_matched';
+        }
+        if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) !== strtoupper($this->effectiveCurrency($tx))) {
+            return 'rule_not_matched';
+        }
+        $entry = $this->journal->findBySource($supplierId, 'bank', $txId);
+        if ($entry !== null && ($entry['reversed_by'] ?? null) === null) {
+            return 'already_posted';
+        }
+        if ($this->suggestions->hasRejected($supplierId, $txId, (int) $rule['id'])) {
+            return 'rule_rejected';
+        }
+        return $this->ruleMatcher->matching($rule, $this->matchTxArray($supplierId, $tx)) ? null : 'rule_not_matched';
+    }
+
+    /**
+     * Návrh zaúčtování podle návrhového pravidla během převodu z jiného programu.
+     *
+     * Automatika je během převodu vypnutá ({@see \MyInvoice\Service\Migration\MoneyS3\AccountingUnitSwitch}),
+     * takže politika v {@see applySingleRule()} by návrh zahodila jako `policy_off`. Tady se
+     * proto politika nevolá: výsledkem je vždy jen čekající návrh, nikdy zápis, a jen u pravidla
+     * v režimu `suggest`. Čekající návrh jiného původu zůstává, spárovaná úhrada, platba přes
+     * mezičlen karty ani vlastní převod návrh nedostanou.
+     *
+     * @return array{action:string, reason?:?string, suggestion_id?:int, created?:bool}
+     */
+    public function proposeRuleForMigration(int $supplierId, int $txId, int $ruleId): array
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $txId, $ruleId): array {
+            $rule = $this->rules->find($supplierId, $ruleId);
+            if ($rule === null || !(bool) $rule['is_active'] || (string) $rule['mode'] !== 'suggest') {
+                return ['action' => 'skipped', 'reason' => 'rule_not_suggest'];
+            }
+            $tx = $this->lockTransaction($supplierId, $txId);
+            $skip = $this->ruleBackfillSkipReason($supplierId, $txId, $tx, $rule);
+            if ($skip !== null) {
+                return ['action' => 'skipped', 'reason' => $skip];
+            }
+            if ((string) $tx['match_status'] !== 'unmatched'
+                || !empty($tx['has_explicit_allocation'])
+                || $this->cardClearingFor($supplierId, $tx, false) !== null) {
+                return ['action' => 'skipped', 'reason' => 'payment_matched'];
+            }
+            if ($this->transfers !== null && $this->transfers->detectUnlessOverridden($supplierId, $txId, $rule) !== null) {
+                return ['action' => 'skipped', 'reason' => 'own_transfer'];
+            }
+            return $this->ruleSuggestion($supplierId, $tx, $rule, null, 'pending', round(abs((float) $tx['amount']), 2));
+        });
     }
 
     /**
@@ -2496,24 +2763,21 @@ final class BankPostingService
                 return $this->ruleSuggestion($supplierId, $tx, $rule, 'period_closed', 'blocked', $absAmount);
             }
             try {
-                $entryId = $this->posting->postDocument($supplierId, 'bank', (int) $tx['id'], $this->withBankAnalytic($supplierId, $tx, [
-                    $fxRate === null
-                        ? $this->line((string) $rule['debit_account_code'], 'debit', $absAmount)
-                        : $this->withFxTrace($this->line((string) $rule['debit_account_code'], 'debit', $absAmount), $currency, $fxRate, $foreignAmount),
-                    $fxRate === null
-                        ? $this->line((string) $rule['credit_account_code'], 'credit', $absAmount)
-                        : $this->withFxTrace($this->line((string) $rule['credit_account_code'], 'credit', $absAmount), $currency, $fxRate, $foreignAmount),
-                ]), [
-                    'entry_date'    => $postedAt,
-                    'document_date' => $postedAt,
-                    // Popis pravidla je věcný obsah, ne identifikace pohybu — viz
-                    // stejné místo u detektoru výš.
-                    'description'   => $this->entryDescription($tx, (string) ($rule['description'] ?? '')),
-                    'posted'        => true,
-                    'user_id'       => $userId,
-                    'posted_by'     => $userId,
-                ]);
+                // Dimenze pravidla a zápis buď spolu, nebo vůbec: chybějící povinná dimenze
+                // vrátí obojí a pohyb skončí jako návrh k doplnění. Totéž přiřazení cílové
+                // položce: zápis bez přiřazení by na jejím účtu založil přeplatek.
+                $entryId = (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $tx, $rule, $absAmount, $fxRate, $currency, $foreignAmount, $userId): int {
+                    $entryId = $this->postByRule($supplierId, $tx, $rule, $absAmount, $fxRate, $currency, $foreignAmount, $userId);
+                    $this->allocateRuleTarget($supplierId, $tx, $rule, $userId);
+                    return $entryId;
+                });
+            } catch (\MyInvoice\Service\Accounting\OtherItemException) {
+                // Položka už je uhrazená, stornovaná nebo platba převyšuje dluh: rozhodne člověk.
+                return $this->ruleSuggestion($supplierId, $tx, $rule, 'other_item_unavailable', 'pending', $absAmount);
             } catch (PostingException $e) {
+                if ($e->errorCode === 'dimension_required') {
+                    return $this->ruleSuggestion($supplierId, $tx, $rule, 'dimension_required', 'needs_input', $absAmount);
+                }
                 if (in_array($e->errorCode, ['period_not_open', 'no_accounting_period', 'entry_reversed'], true)) {
                     return $this->ruleSuggestion($supplierId, $tx, $rule, 'period_closed', 'blocked', $absAmount);
                 }
@@ -2556,6 +2820,63 @@ final class BankPostingService
             $this->anomalies?->recordDegraded($supplierId);
         }
         return $result;
+    }
+
+    /**
+     * Přiřadí zaúčtovaný pohyb cílové ostatní položce pravidla stejnou cestou jako ruční
+     * přiřazení ({@see \MyInvoice\Service\Accounting\OtherItemService::allocate}: stav,
+     * směr, měna, přeplatek a zaúčtování na účet položky). Pravidlo účtuje na účet položky
+     * ({@see BankPostingRuleValidator::otherItemTarget}), takže druhý zápis nevzniká.
+     *
+     * @param array<string,mixed> $tx
+     * @param array<string,mixed> $rule
+     * @throws \MyInvoice\Service\Accounting\OtherItemException
+     */
+    private function allocateRuleTarget(int $supplierId, array $tx, array $rule, ?int $userId): void
+    {
+        if ($this->otherItems === null || ($rule['other_item_id'] ?? null) === null) {
+            return;
+        }
+        $itemId = (int) $rule['other_item_id'];
+        $txId = (int) $tx['id'];
+        $amount = round(abs((float) $tx['amount']), 2);
+        $this->otherItems->allocate($supplierId, $itemId, ['bank_transaction_id' => $txId, 'amount' => $amount], $userId);
+        $this->db->pdo()->prepare(
+            "UPDATE other_item_allocations SET auto_match_reason = 'bank_rule'
+              WHERE supplier_id = ? AND other_item_id = ? AND bank_transaction_id = ? AND reversed_on IS NULL"
+        )->execute([$supplierId, $itemId, $txId]);
+        $this->activity->log('other_item.payment_auto_matched', $userId, 'other_item', $itemId,
+            ['bank_transaction_id' => $txId, 'match' => 'bank_rule', 'rule_id' => (int) $rule['id']],
+            null, null, $supplierId);
+    }
+
+    /**
+     * Automatické zaúčtování pohybu podle pravidla včetně zápisu jeho dimenzí k pohybu.
+     *
+     * @param array<string,mixed> $tx
+     * @param array<string,mixed> $rule
+     */
+    private function postByRule(int $supplierId, array $tx, array $rule, float $absAmount, ?float $fxRate, string $currency, float $foreignAmount, ?int $userId): int
+    {
+        $postedAt = (string) $tx['posted_at'];
+        (new BankRuleDimensions($this->db))->applyToTransaction($supplierId, (int) $tx['id'], (int) $rule['id']);
+        return $this->posting->postDocument($supplierId, 'bank', (int) $tx['id'], $this->withBankAnalytic($supplierId, $tx, [
+            $fxRate === null
+                ? $this->line((string) $rule['debit_account_code'], 'debit', $absAmount)
+                : $this->withFxTrace($this->line((string) $rule['debit_account_code'], 'debit', $absAmount), $currency, $fxRate, $foreignAmount),
+            $fxRate === null
+                ? $this->line((string) $rule['credit_account_code'], 'credit', $absAmount)
+                : $this->withFxTrace($this->line((string) $rule['credit_account_code'], 'credit', $absAmount), $currency, $fxRate, $foreignAmount),
+        ]), [
+            'entry_date'    => $postedAt,
+            'document_date' => $postedAt,
+            // Popis pravidla je věcný obsah, ne identifikace pohybu — viz
+            // stejné místo u detektoru výš.
+            'description'   => $this->entryDescription($tx, (string) ($rule['description'] ?? '')),
+            'posted'        => true,
+            'user_id'       => $userId,
+            'posted_by'     => $userId,
+        ]);
     }
 
     /**
@@ -2754,7 +3075,7 @@ final class BankPostingService
             $this->assertPostableTx($tx, $isForeignRule, false);
             $debit = (string) $sug['debit_account_code'];
             $credit = (string) $sug['credit_account_code'];
-            $this->assertSaldoBlacklist((float) $tx['amount'], $debit, $credit);
+            $this->assertRuleAccounts($tx, $rule, $debit, $credit, false);
             $foreignAmount = round(abs((float) $tx['amount']), 2);
             if ($isForeignRule) {
                 $this->assertFxResultAccounts((float) $tx['amount'], $debit, $credit);
@@ -2884,7 +3205,7 @@ final class BankPostingService
                     || $selectedRule === null
                     || !(bool) $selectedRule['is_active']
                     || (string) $selectedRule['direction'] !== $direction
-                    || !$this->ruleMatcher->matching($selectedRule, $this->matchTxArray($tx))) {
+                    || !$this->ruleMatcher->matching($selectedRule, $this->matchTxArray($supplierId, $tx))) {
                     throw new PostingException('invalid_rule_selection', 'Vybrané pravidlo už této transakci neodpovídá.', 422);
                 }
                 $pdo->prepare(
@@ -2929,7 +3250,7 @@ final class BankPostingService
             } else {
                 $debit = $overrides['debit_account_code'] ?? (string) $sug['debit_account_code'];
                 $credit = $overrides['credit_account_code'] ?? (string) $sug['credit_account_code'];
-                $this->assertSaldoBlacklist((float) $tx['amount'], $debit, $credit);
+                $this->assertRuleAccounts($tx, $rule, $debit, $credit, $overrides !== []);
                 $foreignAmount = round(abs((float) $tx['amount']), 2);
                 if ($isForeignRule) {
                     $this->assertFxResultAccounts((float) $tx['amount'], $debit, $credit);
@@ -2947,14 +3268,32 @@ final class BankPostingService
                 }
             }
 
-            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
-                'entry_date'    => (string) $tx['posted_at'],
-                'document_date' => (string) $tx['posted_at'],
-                'description'   => $this->entryDescription($tx),
-                'posted'        => true,
-                'user_id'       => $meta['user_id'] ?? null,
-                'posted_by'     => $meta['posted_by'] ?? ($meta['user_id'] ?? null),
-            ]);
+            // Dimenze pravidla a zápis buď spolu, nebo vůbec: schválení volané uvnitř cizí
+            // transakce (použití pravidla na pohyby) při chybě zápisu nesmí nechat dimenze na pohybu.
+            $entryId = (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $txId, $tx, $lines, $rule, $meta): int {
+                if ($rule !== null) {
+                    (new BankRuleDimensions($this->db))->applyToTransaction($supplierId, $txId, (int) $rule['id']);
+                }
+                return $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
+                    'entry_date'    => (string) $tx['posted_at'],
+                    'document_date' => (string) $tx['posted_at'],
+                    'description'   => $this->entryDescription($tx),
+                    'posted'        => true,
+                    'user_id'       => $meta['user_id'] ?? null,
+                    'posted_by'     => $meta['posted_by'] ?? ($meta['user_id'] ?? null),
+                ]);
+            });
+            // Schválený návrh pravidla s cílovou položkou ji uhradí jako automatika. Přepsaná
+            // kontace míří jinam; nedostupnou položku (uhrazenou, stornovanou) přiřadí člověk
+            // z jejího detailu, zápis schválení zůstává.
+            if ($rule !== null && $overrides === [] && ($rule['other_item_id'] ?? null) !== null) {
+                try {
+                    (new DimensionPeriodGuard($this->db))->transaction(
+                        fn () => $this->allocateRuleTarget($supplierId, $tx, $rule, $meta['user_id'] ?? null),
+                    );
+                } catch (\MyInvoice\Service\Accounting\OtherItemException) {
+                }
+            }
 
             $this->suggestions->markApproved($supplierId, $suggestionId, $entryId, $meta['user_id'] ?? null);
             $this->markSchedulePaid($supplierId, $sug['tax_advance_schedule_id'] ?? null, $tx);
@@ -3070,6 +3409,13 @@ final class BankPostingService
      * @param array{user_id?:?int, posted_by?:?int} $meta
      * @return array{entry_id:int, rule_id:?int, rule_hint:?array<string,mixed>}
      */
+    public function postPropertyClearing(\MyInvoice\Service\Property\Payments\Workflow\PaymentClearingIntent $intent): int
+    {
+        $intent->assertConnection($this->db);
+        $intent->current('bank');
+        return $this->journal->insertPropertyClearing($intent);
+    }
+
     public function postManual(int $supplierId, int $txId, array $input, array $meta): array
     {
         $pdo = $this->db->pdo();
@@ -3356,6 +3702,12 @@ final class BankPostingService
      */
     public function onIgnore(int $supplierId, int $txId): void
     {
+        (new DimensionPeriodGuard($this->db))->transaction(fn () => $this->onIgnoreLocked($supplierId, $txId));
+    }
+
+    private function onIgnoreLocked(int $supplierId, int $txId): void
+    {
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertSourceMutable($supplierId, 'bank', $txId);
         if ($this->supplierMode($supplierId) !== 'double_entry') {
             return;
         }
@@ -3394,7 +3746,7 @@ final class BankPostingService
         }
         // Aktivní pravidlo tx nechytá (jinak by hint duplikoval pravidlo).
         $direction = (float) $tx['amount'] > 0 ? 'incoming' : 'outgoing';
-        $matchTx = $this->matchTxArray($tx);
+        $matchTx = $this->matchTxArray($supplierId, $tx);
         foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
             if ($this->ruleMatcher->matching($rule, $matchTx)) {
                 return null;
@@ -3572,6 +3924,8 @@ final class BankPostingService
         array $meta,
         string $requeueNote,
     ): void {
+        // Dimenze z pravidla patří jen zápisu, který pravidlo vytvořilo.
+        (new BankRuleDimensions($this->db))->clearFromTransaction($supplierId, $txId);
         if ($sourceSuggestion !== null) {
             $this->corrections?->fromSuggestion(
                 $supplierId,
@@ -3777,7 +4131,7 @@ final class BankPostingService
      *
      * @return array{0:string, 1:string}
      */
-    private static function genericBankLeg(string $debit, string $credit): array
+    public static function genericBankLeg(string $debit, string $credit): array
     {
         $debitBank  = str_starts_with($debit, '221');
         $creditBank = str_starts_with($credit, '221');
@@ -3785,6 +4139,21 @@ final class BankPostingService
             return [$debit, $credit];
         }
         return $debitBank ? ['221', $credit] : [$debit, '221'];
+    }
+
+    /**
+     * Smí se kontace z historie nabídnout jako návrh k pohybu daného směru? Táž pravidla, která
+     * {@see assertSaldoBlacklist()} vynutí při schválení: saldokonto se páruje, ne účtuje
+     * pravidlem, a bankovní strana musí sedět na směr pohybu.
+     */
+    public static function isProposableKontace(bool $incoming, string $debit, string $credit): bool
+    {
+        foreach (self::SALDO_BLACKLIST as $prefix) {
+            if (str_starts_with($debit, $prefix) || str_starts_with($credit, $prefix)) {
+                return false;
+            }
+        }
+        return str_starts_with($incoming ? $debit : $credit, '221');
     }
 
     /**
@@ -3829,6 +4198,24 @@ final class BankPostingService
      * v ruce. Jednorázové ruční zaúčtování člověka, který doklad má, si volá jen
      * {@see assertBankSide()} (stejně jako ruční rozúčtování na víc řádků).
      */
+    /**
+     * Kontace návrhu: zákaz saldokonta (H2) neplatí pro účet cílové ostatní položky pravidla
+     * ({@see BankPostingRuleValidator::otherItemTarget}), dokud ho uživatel nepřepsal;
+     * úhradu tam páruje přiřazení k položce. Bankovní strana se hlídá vždy.
+     *
+     * @param array<string,mixed> $tx
+     * @param array<string,mixed>|null $rule
+     */
+    private function assertRuleAccounts(array $tx, ?array $rule, string $debit, string $credit, bool $overridden): void
+    {
+        if (!$overridden && $rule !== null && ($rule['other_item_id'] ?? null) !== null
+            && $debit === (string) $rule['debit_account_code'] && $credit === (string) $rule['credit_account_code']) {
+            $this->assertBankSide((float) $tx['amount'], $debit, $credit);
+            return;
+        }
+        $this->assertSaldoBlacklist((float) $tx['amount'], $debit, $credit);
+    }
+
     private function assertSaldoBlacklist(float $amount, string $debit, string $credit): void
     {
         foreach (self::SALDO_BLACKLIST as $prefix) {
@@ -4177,7 +4564,7 @@ final class BankPostingService
      */
     private static function centsToCzk(float $cents): float
     {
-        return round(round($cents, 4)) / 100;
+        return PaymentExchangeRate::roundCents($cents) / 100;
     }
 
     /**
@@ -4379,7 +4766,7 @@ final class BankPostingService
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             "SELECT bt.id, bt.source, bt.amount, bt.currency AS tx_currency, bt.match_status, bt.posted_at,
-                    bs.currency AS statement_currency,
+                    bt.card_last4, bs.currency AS statement_currency,
                     pm.id AS match_id, pm.invoice_id, pm.purchase_invoice_id, pm.amount AS allocated,
                     pm.match_type, pm.match_confidence,
                     pi.status, pi.amount_to_pay, pi.rounding, pi.exchange_rate, cur.code AS invoice_currency
@@ -4431,7 +4818,7 @@ final class BankPostingService
             && FxPaymentSettlement::isCzkPaymentOfForeignInvoice($txCurrency, $invoiceCurrency)
             && ($manualMatch || $confidence >= 60)
             && $expectedCzk > 0.0
-            && abs($txAmount - $expectedCzk) <= FxPaymentSettlement::matchTolerance($expectedCzk);
+            && abs($txAmount - $expectedCzk) <= FxPaymentSettlement::matchTolerance($expectedCzk, card: $row['card_last4'] !== null);
         if ((string) $row['source'] !== 'statement'
             || ($refund ? (float) $row['amount'] <= 0.0 : (float) $row['amount'] >= 0.0)
             // auto_exact patří do seznamu taky: rozdíl do EXACT_MATCH_TOLERANCE (0,05) sice
@@ -4451,14 +4838,7 @@ final class BankPostingService
             return false;
         }
 
-        $predpisStmt = $pdo->prepare(
-            "SELECT 1 FROM journal_entries
-              WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND source_id = ?
-                AND posted_at IS NOT NULL AND reversed_by IS NULL
-              LIMIT 1"
-        );
-        $predpisStmt->execute([$supplierId, (int) $row['purchase_invoice_id']]);
-        if ($predpisStmt->fetchColumn() === false) {
+        if (!(new DocumentPostingGroup($this->db))->hasActive($supplierId, 'purchase_invoice', (int) $row['purchase_invoice_id'])) {
             return false;
         }
 
@@ -4490,7 +4870,7 @@ final class BankPostingService
      *
      * @param list<array{account_code:string, side:string, amount:float}> $lines
      */
-    private function appendRounding(array &$lines, float $diff): void
+    private function appendRounding(array &$lines, float $diff, int $supplierId, string $entryDate): void
     {
         $cents = (int) round($diff * 100.0);
         if ($cents === 0) {
@@ -4499,10 +4879,11 @@ final class BankPostingService
         if (abs($cents) > self::ROUNDING_TOLERANCE_CENTS) {
             throw new PostingException('allocation_mismatch', 'Alokace plateb se liší od částky o víc než 1 Kč.');
         }
+        $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $entryDate);
         if ($cents > 0) {
-            $lines[] = $this->line('648', 'credit', $cents / 100.0);
+            $lines[] = $this->line($profile->account('rounding.gain'), 'credit', $cents / 100.0);
         } else {
-            $lines[] = $this->line('548', 'debit', -$cents / 100.0);
+            $lines[] = $this->line($profile->account('rounding.loss'), 'debit', -$cents / 100.0);
         }
     }
 
@@ -4529,7 +4910,7 @@ final class BankPostingService
     {
         $direction = (float) $tx['amount'] > 0 ? 'incoming' : 'outgoing';
         $currency = strtoupper($this->effectiveCurrency($tx));
-        $match = $this->matchTxArray($tx);
+        $match = $this->matchTxArray($supplierId, $tx);
         foreach ($this->rules->findActive($supplierId, $direction) as $rule) {
             if (strtoupper((string) ($rule['applies_currency'] ?? 'CZK')) === $currency
                 && $this->ruleMatcher->matching($rule, $match)) {
@@ -4567,16 +4948,16 @@ final class BankPostingService
      * @return array{amount:float, variable_symbol:?string, counterparty_account:?string,
      *   counterparty_bank:?string, description:?string}
      */
-    private function matchTxArray(array $tx): array
+    private function matchTxArray(int $supplierId, array $tx): array
     {
-        return [
+        return (new StatementOwnAccount($this->db))->withOwnAccount($supplierId, [
             'amount'               => (float) $tx['amount'],
             'variable_symbol'      => $tx['variable_symbol'] !== null ? (string) $tx['variable_symbol'] : null,
             'counterparty_account' => $tx['counterparty_account'] !== null ? (string) $tx['counterparty_account'] : null,
             'counterparty_bank'    => $tx['counterparty_bank'] !== null ? (string) $tx['counterparty_bank'] : null,
             'description'          => $tx['description'] !== null ? (string) $tx['description'] : null,
             'counterparty_name'    => ($tx['counterparty_name'] ?? null) !== null ? (string) $tx['counterparty_name'] : null,
-        ];
+        ], $tx);
     }
 
     // ── data access ─────────────────────────────────────────────────────────────
@@ -4584,13 +4965,13 @@ final class BankPostingService
     /** @return array<string,mixed>|null */
     public function lockStatement(int $supplierId, int $statementId): ?array
     {
-        return (new BankTransactionContext($this->db))->statement($supplierId, $statementId);
+        return (new BankTransactionContext($this->db))->mutableStatement($supplierId, $statementId);
     }
 
     /** @return array<string,mixed>|null */
     public function lockTransaction(int $supplierId, int $txId): ?array
     {
-        return (new BankTransactionContext($this->db))->lock($supplierId, $txId);
+        return (new BankTransactionContext($this->db))->mutableTransaction($supplierId, $txId);
     }
 
     /** @return array<string,mixed>|null */

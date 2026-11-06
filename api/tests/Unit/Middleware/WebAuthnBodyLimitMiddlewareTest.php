@@ -33,6 +33,20 @@ final class WebAuthnBodyLimitMiddlewareTest extends TestCase
         );
     }
 
+    public function testOversizedCredentialTestPayloadIsRejectedBeforeHandler(): void
+    {
+        $handler = $this->createMock(RequestHandlerInterface::class);
+        $handler->expects(self::never())->method('handle');
+        $request = (new ServerRequestFactory())
+            ->createServerRequest('POST', '/api/auth/webauthn/credentials/7/test/verify')
+            ->withBody((new StreamFactory())->createStream(str_repeat('x', 65_537)));
+
+        $response = (new WebAuthnBodyLimitMiddleware(new ResponseFactory()))
+            ->process($request, $handler);
+
+        self::assertSame(413, $response->getStatusCode());
+    }
+
     public function testLimitDoesNotAffectOtherEndpoints(): void
     {
         $request = (new ServerRequestFactory())

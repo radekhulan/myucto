@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Invoice;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AdvanceDeductionRepository;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Service\Oss\OssItemCarryOver;
 use MyInvoice\Service\Stats\StatsRecomputer;
@@ -129,9 +130,11 @@ final class FinalFromProformaCreator
         // stejnou sazbou, ale různým místem plnění (OSS do PL × tuzemský), se nesmí
         // slít do jednoho odpočtového řádku — u zákazníkovy konfigurace mají i totéž
         // `vat_rate_id`, protože polská 23% sazba je ve `vat_rates` vedená se zemí CZ.
+        // Totéž platí pro klasifikaci: odpočet ruší přesně to, co doklad k platbě vykázal,
+        // takže 1c a 26c musí zůstat na svých řádcích přiznání i v režimu KH.
         $ossSelect = $this->ossCarry->selectList('ii');
         $tdStmt = $pdo->prepare(
-            "SELECT td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot{$ossSelect},
+            "SELECT td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot, ii.vat_classification_code{$ossSelect},
                     SUM(ii.total_without_vat) AS base, SUM(ii.total_vat) AS vat,
                     SUM(ii.total_with_vat) AS gross
                FROM invoices td
@@ -141,7 +144,7 @@ final class FinalFromProformaCreator
                 AND (td.parent_invoice_id = ?
                      OR td.id IN (SELECT p.tax_document_invoice_id FROM invoice_payments p
                                    WHERE p.invoice_id = ? AND p.tax_document_invoice_id IS NOT NULL))
-           GROUP BY td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot{$ossSelect}
+           GROUP BY td.id, td.varsymbol, ii.vat_rate_id, ii.vat_rate_snapshot, ii.vat_classification_code{$ossSelect}
            ORDER BY td.id, ii.vat_rate_snapshot DESC"
         );
         $tdStmt->execute([$proformaId, $proformaId]);
@@ -181,6 +184,9 @@ final class FinalFromProformaCreator
             $pdo->beginTransaction();
         }
         try {
+            // Konečná faktura z proformy čerpá celou zálohu vazbou parent_invoice_id; proformu
+            // už čerpanou po dvojicích v saldokontu by vyúčtovala podruhé.
+            AdvanceDeductionRepository::assertLinkAllowed($pdo, (int) $proforma['supplier_id'], 'invoice', 0, $proformaId);
             $stmt = $pdo->prepare(
                 'INSERT INTO invoices
                    (invoice_type, parent_invoice_id, client_id, project_id, supplier_id, branding_profile_id,
@@ -246,9 +252,10 @@ final class FinalFromProformaCreator
                    (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind,
-                    stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to, revenue_account_code'
+                    stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to, revenue_account_code,
+                    vat_classification_code'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'
                 . $this->ossCarry->placeholders()
                 . ')'
             );
@@ -278,6 +285,9 @@ final class FinalFromProformaCreator
                     ...\MyInvoice\Repository\InvoiceRepository::accrualPeriod($item),
                     // Výnosový účet položky (F1): účtuje se až finál, proto přechází z proformy.
                     $item['revenue_account_code'] ?? null,
+                    // Klasifikace je vlastností plnění: bez ní by se zvláštní režim, majetek
+                    // nebo osvobození na vyúčtování odhadly jen podle sazby.
+                    $item['vat_classification_code'] ?? null,
                     // Místo plnění se vyúčtováním nemění — přenáší se z proformy, protože
                     // ta už derivací i případnou ruční opravou prošla (viz OssItemCarryOver).
                     ...$this->ossCarry->values($item),
@@ -349,6 +359,7 @@ final class FinalFromProformaCreator
                     null,
                     null,
                     null,
+                    $r['vat_classification_code'] ?? null,
                     // Zato OSS profil nese: odpočet ruší přesně tu daň, kterou přiznal
                     // daňový doklad k platbě, takže musí jít do TÉŽE evidence. Jinak by
                     // kladná polovina zůstala v OSS podání a záporná spadla na ř. 1
@@ -459,6 +470,8 @@ final class FinalFromProformaCreator
             ...\MyInvoice\Repository\InvoiceRepository::accrualPeriod($dominant),
             // Výnosový účet (F1) dědí po dominantním řádku — zbytek téže zakázky je týž výnos.
             $dominant['revenue_account_code'] ?? null,
+            // Klasifikace taky: zbytek téže zakázky je totéž plnění.
+            $dominant['vat_classification_code'] ?? null,
             // OSS profil dědí po dominantním řádku: zbytek téže zakázky patří do téže
             // evidence jako to, co už bylo fakturováno zálohou.
             ...$this->ossCarry->values($dominant),

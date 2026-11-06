@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, ref, watch } from 'vue'
-import { workSummaryRemediation } from './payrollRemediation'
+import { groupWorkSummaryIssues, workSummaryRemediation } from './payrollRemediation'
 import { revealField } from '@/utils/revealField'
 import { formatPeriod } from '@/composables/useFormat'
 import { useI18n } from 'vue-i18n'
@@ -54,11 +54,12 @@ import PayrollFileDropzone, {
 } from '@/components/payroll/PayrollFileDropzone.vue'
 import Modal from '@/components/ui/Modal.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
-import { btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import {
   formatPayrollMinutes,
   payrollIsoToWallTime,
+  payrollMonthCoversFund,
   payrollWallTimeToIso,
 } from '@/pages/payroll/payrollTime'
 import { localPayrollPeriod, payrollQueryPeriod } from '@/pages/payroll/payrollComponentsUi'
@@ -562,6 +563,13 @@ async function load() {
     )
     total.value = overview.value.total
     selectedEmploymentIds.value = []
+    // Proklik z mzdového běhu („Otevřít docházku a schválit měsíc") rovnou
+    // nabídne hromadné schválení všech otevřených měsíců.
+    if (payrollQueryValue(route.query, 'approve') === 'all') {
+      const { approve: _approve, ...query } = route.query
+      void router.replace({ query })
+      if (canApprove.value && selectableItems.value.length > 0) approveAllOpen()
+    }
     // Předvybraný vztah má přednost před prvním v seznamu — jinak by odkaz
     // z karty zúžil tabulku, ale editor otevřel někoho jiného.
     const focused = focusEmploymentId.value !== null
@@ -1604,6 +1612,59 @@ function closeBulkApproval() {
   bulkApprovalOpen.value = false
 }
 
+/**
+ * „Schválit měsíc všem" — výběr všech otevřených měsíců na stránce a rovnou
+ * dávkový dialog. Dřív se hromadné schválení objevilo až po zaškrtnutí
+ * řádků, takže účetní měsíc schvalovala člověka po člověku.
+ */
+function approveAllOpen() {
+  selectedEmploymentIds.value = selectableItems.value.map(item => item.employment.id)
+  openBulkApproval()
+}
+
+/*
+ * Pracovní poměr, kde zapsaná práce spolu s nepřítomnostmi a svátky
+ * nepokrývá fond (payrollMonthCoversFund). Hromadné schválení by do hlášení
+ * ČSSZ poslalo méně odpracovaných hodin bez vysvětlení. Neblokuje se: dialog
+ * to ukáže a nabídne doplnit chybějící dny podle kalendáře jedním klikem.
+ * Dohody (DPP, DPČ) sem nepatří - jejich „fond" je jen sjednaný rozsah.
+ */
+const bulkUnderFund = computed(() => bulkCandidates.value.filter(item =>
+  item.employment.relation_type === 'employment'
+  && !payrollMonthCoversFund(item)))
+
+async function fillUnderFundAndReturn() {
+  const ids = new Set(bulkUnderFund.value.map(item => item.employment.id))
+  if (ids.size === 0) return
+  const selection = [...selectedEmploymentIds.value]
+  bulkApprovalOpen.value = false
+  await fillWorkdays(ids)
+  if (gridDirtyCount.value > 0) await saveGrid()
+  if (gridCellErrorCount.value > 0 || gridSaveError.value) return
+  selectedEmploymentIds.value = selection.filter(id =>
+    selectableItems.value.some(item => item.employment.id === id))
+  openBulkApproval()
+}
+
+/** Řádek, který dávka nevezme, se odbaví jednotlivě — rovnou z dialogu. */
+function approveExcludedSingly(employmentId: number) {
+  const item = visibleItems.value.find(candidate => candidate.employment.id === employmentId)
+  if (!item) return
+  bulkApprovalOpen.value = false
+  openApproval(item)
+}
+
+function absenceRoute(item?: PayrollTimeOverviewItem) {
+  return {
+    name: 'payroll-absences',
+    query: {
+      tab: 'absences',
+      period: period.value,
+      ...(item ? { employment: String(item.employment.id) } : {}),
+    },
+  }
+}
+
 async function approveSelected() {
   const items = bulkCandidates.value
   if (items.length === 0 || bulkBlockedReason.value !== null) return
@@ -2025,7 +2086,7 @@ function focusGridCell(row: number, column: number) {
  * hromadnou akci nepřijde — a svátky ani víkendy se neplní vůbec, protože je
  * kalendář (a v něm `CzechHolidayCalendar`) označuje jako nepracovní.
  */
-async function fillWorkdays() {
+async function fillWorkdays(onlyEmploymentIds?: Set<number>) {
   if (gridFillBlockedReason.value) return
   // Dny schválené nepřítomnosti (DPN, ošetřovné, dovolená…) se neplní — jinak
   // by v tentýž den vznikla práce i nemoc. Nepřítomnosti se čtou až tady, ať
@@ -2043,6 +2104,7 @@ async function fillWorkdays() {
   const drafts = { ...gridDrafts.value }
   for (const row of gridRows.value) {
     if (row.item.month.status !== 'open') continue
+    if (onlyEmploymentIds && !onlyEmploymentIds.has(row.item.employment.id)) continue
     if (!row.item.calendar) withoutCalendar += 1
     const absent = absenceDays.get(row.item.employment.id)
     for (const day of gridDays.value) {
@@ -2407,7 +2469,7 @@ function approveFailureTarget(failure: ApproveFailure): RouteLocationRaw | null 
     case 'overtime_conflict':
       return { name: 'payroll-quick-inputs', query: { employment } }
     case 'inputs_locked':
-      return { name: 'payroll-runs' }
+      return { name: 'payroll-runs', query: { period: period.value } }
   }
 }
 
@@ -2490,6 +2552,61 @@ onMounted(async () => {
       <p class="mt-1">
         {{ t('payroll.historical.attendance', { period: formatPeriod(payrollStartPeriod ?? '') }) }}
       </p>
+    </section>
+
+    <!--
+      Průvodce měsícem. Obrazovka má hodně nástrojů (mřížka, směny, kalendáře,
+      přesčasy), ale běžný měsíc jsou tři kroky - a ty musí být vidět dřív
+      než nástroje. Nepřítomnost se zadává v agendě Nepřítomnosti, mřížka ji
+      pak sama vynechá; dřív na ni odtud nevedla žádná cesta.
+    -->
+    <section
+      v-if="!historicalMonth && !historyVisible"
+      class="rounded-xl border border-payroll-200 bg-payroll-50 p-4 text-sm text-neutral-800"
+      data-test="payroll-time-guide"
+    >
+      <p class="font-semibold text-neutral-900">{{ t('payroll.time.guide.title') }}</p>
+      <ol class="mt-2 grid gap-3 lg:grid-cols-3">
+        <li class="flex gap-2">
+          <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-payroll-600 text-xs font-semibold text-white">1</span>
+          <span>{{ t('payroll.time.guide.work') }}</span>
+        </li>
+        <li class="flex flex-col gap-2">
+          <span class="flex gap-2">
+            <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-payroll-600 text-xs font-semibold text-white">2</span>
+            <span>{{ t('payroll.time.guide.absence') }}</span>
+          </span>
+          <RouterLink :to="absenceRoute()" :class="[btnOutline('neutral'), 'ml-8 self-start whitespace-nowrap']" data-test="payroll-time-guide-absence">
+            <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.guide.absence_action') }}
+          </RouterLink>
+        </li>
+        <li class="flex flex-col gap-2">
+          <span class="flex gap-2">
+            <span class="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-payroll-600 text-xs font-semibold text-white">3</span>
+            <span>{{ t('payroll.time.guide.approve') }}</span>
+          </span>
+          <button
+            v-if="canApprove && selectableItems.length > 0"
+            type="button"
+            :class="[btnFilled('success'), 'ml-8 self-start whitespace-nowrap']"
+            :disabled="saving"
+            data-test="payroll-time-approve-all"
+            @click="approveAllOpen"
+          >
+            <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.guide.approve_action', { count: selectableItems.length }) }}
+          </button>
+          <template v-else-if="visibleItems.length > 0">
+            <span class="ml-8 text-xs text-success-700">{{ t('payroll.time.guide.all_approved') }}</span>
+            <RouterLink
+              :to="{ name: 'payroll-runs', query: { period } }"
+              :class="[btnFilled('primary'), 'ml-8 self-start whitespace-nowrap']"
+              data-test="payroll-time-guide-runs"
+            >
+              <svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.chevronRight" /></svg>{{ t('payroll.time.guide.to_runs') }}
+            </RouterLink>
+          </template>
+        </li>
+      </ol>
     </section>
 
     <section class="rounded-xl border border-neutral-200 bg-surface p-4 shadow-sm">
@@ -3170,11 +3287,17 @@ onMounted(async () => {
               <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="monthStatusClass(item)">{{ t(`payroll.time.status.${monthStatusKey(item)}`) }}</span></td>
               <td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2">
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
-                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
-                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('primary')" :disabled="saving" :title="t('payroll.time.plan_shifts.hint')" :data-test="`plan-shifts-${item.employment.id}`" @click="planShifts(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.plan_shifts.action') }}</button>
+                <RouterLink v-if="canWrite && item.month.status === 'open'" :to="absenceRoute(item)" :class="[btnOutline('neutral'), 'whitespace-nowrap']" :data-test="`time-absence-${item.employment.id}`"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.absence_action') }}</RouterLink>
                 <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" :disabled="saving" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
-                <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
                 <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" :disabled="saving" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
+                <details v-if="canWrite" class="relative" :data-test="`time-more-${item.employment.id}`">
+                  <summary :class="[btnOutline('neutral'), 'list-none cursor-pointer whitespace-nowrap']"><svg class="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.chevron" /></svg>{{ t('payroll.time.more_actions') }}</summary>
+                  <div class="absolute right-0 z-20 mt-1 flex w-72 flex-col gap-1 rounded-lg border border-neutral-200 bg-surface p-2 text-left shadow-lg">
+                    <button v-if="item.month.status === 'open'" type="button" class="flex items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-neutral-100" :disabled="saving" :title="t('payroll.time.plan_shifts.hint')" :data-test="`plan-shifts-${item.employment.id}`" @click="planShifts(item)"><svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg><span><span class="block font-medium">{{ t('payroll.time.plan_shifts.action') }}</span><span class="block text-xs text-neutral-500">{{ t('payroll.time.plan_shifts.short_hint') }}</span></span></button>
+                    <button v-if="item.month.status === 'open'" type="button" class="flex items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-neutral-100" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg><span><span class="block font-medium">{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</span><span class="block text-xs" :class="item.calendar ? 'text-warning-700' : 'text-neutral-500'">{{ t(item.calendar ? 'payroll.time.calendar.new_version_hint' : 'payroll.time.calendar.short_hint') }}</span></span></button>
+                    <button type="button" class="flex items-start gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-neutral-100" :disabled="saving" @click="openConsent(item)"><svg class="mt-0.5 h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg><span class="font-medium">{{ t('payroll.time.overtime.consent_action') }}</span></button>
+                  </div>
+                </details>
               </div></td>
             </tr>
             <tr v-if="overtimeVisible(item)" :data-test="`overtime-limits-${item.employment.id}`">
@@ -3254,8 +3377,9 @@ onMounted(async () => {
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openProtection(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.lock" /></svg>{{ t('payroll.time.overtime.protection_action') }}</button>
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openCompensation(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('payroll.time.overtime.compensation_action') }}</button>
             <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
-            <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t(item.calendar ? 'payroll.time.calendar.new_version' : 'payroll.time.calendar.create') }}</button>
-                <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('primary')" :disabled="saving" :title="t('payroll.time.plan_shifts.hint')" :data-test="`plan-shifts-${item.employment.id}`" @click="planShifts(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.plan_shifts.action') }}</button>
+            <RouterLink v-if="canWrite && item.month.status === 'open'" :to="absenceRoute(item)" :class="[btnOutline('neutral'), 'whitespace-nowrap']"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.absence_action') }}</RouterLink>
+            <button v-if="canWrite && item.month.status === 'open' && !item.calendar" :class="btnOutline('neutral')" :disabled="saving" :data-work-calendar="item.employment.id" @click="createCalendar(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('payroll.time.calendar.create') }}</button>
+            <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :disabled="saving" :title="t('payroll.time.plan_shifts.hint')" @click="planShifts(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>{{ t('payroll.time.plan_shifts.action') }}</button>
             <button v-if="canApprove && item.month.status === 'open'" :class="btnOutline('success')" @click="openApproval(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('payroll.time.approve') }}</button>
             <button v-if="canReopen && item.month.status === 'approved'" :class="btnOutline('warning')" @click="openReopen(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.uturn" /></svg>{{ t('payroll.time.reopen') }}</button>
           </div>
@@ -3287,7 +3411,7 @@ onMounted(async () => {
           v-if="approvalItem.jmhz_work_summary.preview?.issues.length"
           class="space-y-1 rounded-lg border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700"
         >
-          <li v-for="issue in approvalItem.jmhz_work_summary.preview.issues" :key="issue.code">
+          <li v-for="issue in groupWorkSummaryIssues(approvalItem.jmhz_work_summary.preview.issues)" :key="issue.code">
             <div data-test="work-summary-guidance">
               <p class="font-medium">{{ t(workSummaryRemediation(issue.code, approvalItem.employment.id, period).problemKey) }}</p>
               <p class="mt-1">{{ t(workSummaryRemediation(issue.code, approvalItem.employment.id, period).stepKey) }}</p>
@@ -3300,7 +3424,7 @@ onMounted(async () => {
                 {{ t(workSummaryRemediation(issue.code, approvalItem.employment.id, period).actionKey) }}
               </button>
             </div>
-            <details class="mt-2 text-xs"><summary>{{ t('payroll.remediation.technical') }}</summary><p>{{ issue.code }}</p><p>{{ issue.message }}</p></details>
+            <details class="mt-2 text-xs"><summary>{{ t('payroll.remediation.technical') }}</summary><p>{{ issue.code }}</p><p v-for="message in issue.messages" :key="message">{{ message }}</p></details>
           </li>
         </ul>
         <p
@@ -3503,11 +3627,50 @@ onMounted(async () => {
           class="rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-700"
         >
           <p class="font-medium">{{ t('payroll.time.bulk.excluded.title', { count: bulkExclusions.length }) }}</p>
-          <ul class="mt-2 space-y-1">
-            <li v-for="row in bulkExclusions" :key="row.employmentId">
-              <span class="font-medium">{{ row.name }}</span> - {{ row.reason }}
+          <ul class="mt-2 space-y-2">
+            <li v-for="row in bulkExclusions" :key="row.employmentId" class="flex flex-wrap items-center justify-between gap-2">
+              <span><span class="font-medium">{{ row.name }}</span> - {{ row.reason }}</span>
+              <button type="button" :class="[btnOutlineSm('success'), 'whitespace-nowrap']" :disabled="saving" @click="approveExcludedSingly(row.employmentId)">
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>
+                {{ t('payroll.time.bulk.excluded.approve_single') }}
+              </button>
             </li>
           </ul>
+        </section>
+
+        <section
+          v-if="bulkUnderFund.length"
+          data-test="bulk-approve-under-fund"
+          class="rounded-lg border border-warning-500/40 bg-warning-50 p-3 text-sm text-warning-800"
+        >
+          <p class="font-medium">{{ t('payroll.time.bulk.under_fund.title', { count: bulkUnderFund.length }) }}</p>
+          <ul class="mt-1 space-y-0.5">
+            <li v-for="item in bulkUnderFund" :key="item.employment.id">
+              <span class="font-medium">{{ item.employment.full_name }}</span>
+              - {{ t('payroll.time.bulk.under_fund.row', {
+                worked: formatPayrollMinutes(item.summary.actual_minutes),
+                fund: formatPayrollMinutes(item.summary.fund_minutes),
+              }) }}
+            </li>
+          </ul>
+          <p class="mt-2 max-w-prose text-xs">{{ t('payroll.time.bulk.under_fund.hint') }}</p>
+          <div class="mt-2 flex flex-wrap gap-2">
+            <button
+              v-if="canWrite"
+              type="button"
+              :class="[btnOutlineSm('primary'), 'whitespace-nowrap']"
+              :disabled="saving || gridSaving"
+              data-test="bulk-fill-under-fund"
+              @click="fillUnderFundAndReturn"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>
+              {{ t('payroll.time.bulk.under_fund.fill') }}
+            </button>
+            <RouterLink :to="absenceRoute()" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']">
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.calendar" /></svg>
+              {{ t('payroll.time.guide.absence_action') }}
+            </RouterLink>
+          </div>
         </section>
 
         <div class="flex flex-wrap justify-end gap-2">

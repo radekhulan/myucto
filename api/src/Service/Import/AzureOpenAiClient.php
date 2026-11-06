@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Import;
 
 use GuzzleHttp\Client;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Ai\AiRedirectPolicy;
 use MyInvoice\Service\Auth\SecretEncryption;
 use Psr\Log\LoggerInterface;
 
@@ -38,7 +39,35 @@ final class AzureOpenAiClient implements LlmGatewayInterface
         private readonly LoggerInterface $logger,
         ?Client $http = null,
     ) {
-        $this->http = $http ?? new Client(['timeout' => self::TIMEOUT, 'http_errors' => false]);
+        // Endpoint je hostname zadaný adminem (i `*.azure-api.net`, kam si kdokoli
+        // postaví vlastní APIM s redirect politikou). Následuje se nejvýš jedno
+        // přesměrování v rámci hostu, viz AiRedirectPolicy.
+        $this->http = $http ?? new Client(['timeout' => self::TIMEOUT, 'http_errors' => false, 'allow_redirects' => AiRedirectPolicy::options()]);
+    }
+
+    /**
+     * Pravidlo pro Azure endpoint: https a host z Azure domén. Sdílené s uložením
+     * nastavení a kontrolované znovu před každým voláním, takže neprojde ani
+     * hodnota uložená dřív, než pravidlo existovalo.
+     */
+    public static function endpointError(string $endpoint): ?string
+    {
+        $endpoint = trim($endpoint);
+        if ($endpoint === '') {
+            return 'endpoint je povinný.';
+        }
+        $scheme = strtolower((string) parse_url($endpoint, PHP_URL_SCHEME));
+        $host   = strtolower((string) parse_url($endpoint, PHP_URL_HOST));
+        if ($scheme !== 'https') {
+            return 'azure endpoint musí používat https.';
+        }
+        $allowed = ['.openai.azure.com', '.cognitiveservices.azure.com', '.azure-api.net'];
+        foreach ($allowed as $suffix) {
+            if ($host !== '' && str_ends_with($host, $suffix)) {
+                return null;
+            }
+        }
+        return 'azure endpoint musí směřovat na *.openai.azure.com / *.cognitiveservices.azure.com / *.azure-api.net.';
     }
 
     /**
@@ -255,11 +284,17 @@ final class AzureOpenAiClient implements LlmGatewayInterface
      */
     private function post(array $creds, array $payload): array
     {
+        $endpointError = self::endpointError($creds['endpoint']);
+        if ($endpointError !== null) {
+            throw new \RuntimeException($endpointError);
+        }
         $url = rtrim($creds['endpoint'], '/') . '/openai/deployments/' . rawurlencode($creds['deployment'])
             . '/chat/completions?api-version=' . rawurlencode($creds['api_version']);
         $resp = $this->http->post($url, [
             'headers' => ['api-key' => $creds['api_key'], 'content-type' => 'application/json'],
             'json'    => $payload,
+            // Per-request, aby platilo i pro injektovaného klienta.
+            'allow_redirects' => AiRedirectPolicy::options(),
         ]);
         $body = json_decode((string) $resp->getBody(), true);
         return ['code' => $resp->getStatusCode(), 'body' => is_array($body) ? $body : null];

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use DOMDocument;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Xml2027\JmhzScenario1Xml2027Serializer;
 
 /**
  * Striktní lokální dry-run. Neposílá nic ven a nezapisuje do platformy podání
@@ -13,13 +14,31 @@ use DOMDocument;
  * Vstupem je celé rozhodnutí resolveru, ne jen kandidát: XML smí vzniknout
  * výhradně z dokumentu bez blockerů. Kdyby validátor bral rovnou dokument,
  * dala by se fail-closed vrstva obejít tím, že se resolver prostě nezavolá.
+ *
+ * Serializér a schéma volí vykazované období dokumentu ({@see JmhzSpecVersion}):
+ * do 12/2026 verze 2026 beze změny, od 01/2027 serializér XSD 1.5.0.3. Verze,
+ * kterou instalace ještě neumí sestavit, se zastaví branou
+ * {@see JmhzSpecPackageCatalog::requireBuildable()}; testy ji nahrazují
+ * vlastní bránou v konstruktoru.
  */
 final readonly class JmhzScenario1XmlValidator
 {
+    /** @var \Closure(JmhzSpecVersion):void */
+    private \Closure $buildableGate;
+
+    /**
+     * @param (\Closure(JmhzSpecVersion):void)|null $buildableGate brána sestavitelnosti
+     *        verze 2027; `null` = {@see JmhzSpecPackageCatalog::requireBuildable()}
+     */
     public function __construct(
         private JmhzSchemaCatalog $schemas = new JmhzSchemaCatalog(),
         private JmhzScenario1XmlSerializer $serializer = new JmhzScenario1XmlSerializer(),
-    ) {}
+        private JmhzScenario1Xml2027Serializer $serializer2027 = new JmhzScenario1Xml2027Serializer(),
+        ?\Closure $buildableGate = null,
+    ) {
+        $this->buildableGate = $buildableGate
+            ?? static fn (JmhzSpecVersion $version) => JmhzSpecPackageCatalog::requireBuildable($version);
+    }
 
     public function packageFormLimit(): int
     {
@@ -38,9 +57,12 @@ final readonly class JmhzScenario1XmlValidator
             );
         }
         $document = $resolution->requireResolvedDocument();
-        $xml = $this->serializer->serialize($document, $envelope);
-        $this->assertByteStable($document, $envelope, $xml);
-        $schema = $this->schemas->entryPoint();
+        $version = $this->versionOf($document);
+        $xml = $version === JmhzSpecVersion::V2027
+            ? $this->serializer2027->serialize($document, $envelope)
+            : $this->serializer->serialize($document, $envelope);
+        $this->assertByteStable($document, $envelope, $xml, $version);
+        $schema = $this->schemaFor($version);
         $this->assertSchemaValid($xml, $schema['path']);
 
         return [
@@ -72,9 +94,11 @@ final readonly class JmhzScenario1XmlValidator
             );
         }
         $document = $resolution->requireResolvedDocument();
-        $packages = $this->serializer->serializePackages($document, $envelope);
-        $repeated = $this->serializer->serializePackages($document, $envelope);
-        $schema = $this->schemas->entryPoint();
+        $version = $this->versionOf($document);
+        $serializer = $version === JmhzSpecVersion::V2027 ? $this->serializer2027 : $this->serializer;
+        $packages = $serializer->serializePackages($document, $envelope);
+        $repeated = $serializer->serializePackages($document, $envelope);
+        $schema = $this->schemaFor($version);
         $result = [];
         foreach ($packages as $index => $xml) {
             if (!hash_equals(hash('sha256', $repeated[$index] ?? ''), hash('sha256', $xml))) {
@@ -111,15 +135,17 @@ final readonly class JmhzScenario1XmlValidator
             );
         }
         $document = $resolution->requireResolvedDocument();
-        $xml = $this->serializer->serializeCorrection($document, $envelope, $plan);
-        $repeated = $this->serializer->serializeCorrection($document, $envelope, $plan);
+        $version = $this->versionOf($document);
+        $serializer = $version === JmhzSpecVersion::V2027 ? $this->serializer2027 : $this->serializer;
+        $xml = $serializer->serializeCorrection($document, $envelope, $plan);
+        $repeated = $serializer->serializeCorrection($document, $envelope, $plan);
         if (!hash_equals(hash('sha256', $repeated), hash('sha256', $xml))) {
             throw new JmhzXmlException(
                 'jmhz_xml_not_byte_stable',
                 'Serializace téže obsahové opravy nevrátila shodné bajty.',
             );
         }
-        $schema = $this->schemas->entryPoint();
+        $schema = $this->schemaFor($version);
         $this->assertSchemaValid($xml, $schema['path']);
 
         return [
@@ -153,9 +179,11 @@ final readonly class JmhzScenario1XmlValidator
             );
         }
         $document = $resolution->requireResolvedDocument();
-        $packages = $this->serializer->serializeCorrectionPackages($document, $envelope, $plan);
-        $repeated = $this->serializer->serializeCorrectionPackages($document, $envelope, $plan);
-        $schema = $this->schemas->entryPoint();
+        $version = $this->versionOf($document);
+        $serializer = $version === JmhzSpecVersion::V2027 ? $this->serializer2027 : $this->serializer;
+        $packages = $serializer->serializeCorrectionPackages($document, $envelope, $plan);
+        $repeated = $serializer->serializeCorrectionPackages($document, $envelope, $plan);
+        $schema = $this->schemaFor($version);
         $result = [];
         foreach ($packages as $index => $xml) {
             if (!hash_equals(hash('sha256', $repeated[$index] ?? ''), hash('sha256', $xml))) {
@@ -187,7 +215,7 @@ final readonly class JmhzScenario1XmlValidator
      */
     public function validateFrozen(string $xml): array
     {
-        $schema = $this->schemas->entryPoint();
+        $schema = $this->schemaFor($this->frozenVersion($xml));
         $this->assertSchemaValid($xml, $schema['path']);
 
         return [
@@ -197,12 +225,62 @@ final readonly class JmhzScenario1XmlValidator
         ];
     }
 
+    /**
+     * Verze dokumentu podle vykazovaného období v hlavičce. Dokument bez
+     * platného období jde cestou 2026, kde ho serializér odmítne stejně jako dřív.
+     */
+    private function versionOf(JmhzScenario1NormalizedDocument $document): JmhzSpecVersion
+    {
+        $header = $document->payload['header'] ?? null;
+        $year = is_array($header) ? ($header['year'] ?? null) : null;
+        $month = is_array($header) ? ($header['month'] ?? null) : null;
+        if (!is_int($year) || !is_int($month) || $month < 1 || $month > 12 || $year < 2000 || $year > 2999) {
+            return JmhzSpecVersion::V2026;
+        }
+        $version = JmhzSpecVersion::forPeriod($year, $month);
+        if ($version !== JmhzSpecVersion::V2026) {
+            ($this->buildableGate)($version);
+        }
+
+        return $version;
+    }
+
+    /** Verze hotové datové věty podle jmenného prostoru kořene. */
+    private function frozenVersion(string $xml): JmhzSpecVersion
+    {
+        $dom = new DOMDocument();
+        $previous = libxml_use_internal_errors(true);
+        $loaded = $dom->loadXML($xml, LIBXML_NONET);
+        libxml_clear_errors();
+        libxml_use_internal_errors($previous);
+        $version = $loaded
+            ? JmhzSpecVersion::fromDocumentNamespace((string) $dom->documentElement?->namespaceURI)
+            : null;
+        if ($version === null || $version === JmhzSpecVersion::V2026) {
+            return JmhzSpecVersion::V2026;
+        }
+        ($this->buildableGate)($version);
+
+        return $version;
+    }
+
+    /** @return array{path:string,package_key:string,data_version:string,bundle_sha256:string} */
+    private function schemaFor(JmhzSpecVersion $version): array
+    {
+        return $version === JmhzSpecVersion::V2026
+            ? $this->schemas->entryPoint()
+            : $this->schemas->entryPointFor($version);
+    }
+
     private function assertByteStable(
         JmhzScenario1NormalizedDocument $document,
         JmhzSubmissionEnvelope $envelope,
         string $xml,
+        JmhzSpecVersion $version,
     ): void {
-        $repeated = $this->serializer->serialize($document, $envelope);
+        $repeated = $version === JmhzSpecVersion::V2027
+            ? $this->serializer2027->serialize($document, $envelope)
+            : $this->serializer->serialize($document, $envelope);
         if (!hash_equals(hash('sha256', $repeated), hash('sha256', $xml))) {
             throw new JmhzXmlException(
                 'jmhz_xml_not_byte_stable',

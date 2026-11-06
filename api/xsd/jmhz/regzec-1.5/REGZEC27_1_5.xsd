@@ -1,0 +1,1268 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/REGZEC/2027" targetNamespace="http://schemas.cssz.cz/REGZEC/2027"
+  xmlns:t="http://schemas.cssz.cz/baseTypes/v2" xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  elementFormDefault="qualified" attributeFormDefault="unqualified" version="1.5.0.0">
+  <xs:import namespace="http://schemas.cssz.cz/baseTypes/v2" schemaLocation="baseTypes2.xsd"/>
+  <xs:annotation>
+	<xs:documentation>
+	
+XML schéma podání na DIS Registrace zaměstnavatele
+<p/>
+Verze 0.5.0.1    08.09.2026 - nový jmenný prostor
+							- nový atribut /REGZEC/employees/employee/nocitizen/@stayvalidfro ID 10568
+							- nový atribut /REGZEC/employees/employee/nocitizen/@stayvalidto ID 10569
+							- nový atribut /REGZEC/SENDER/VlastniIdPodani, atribut pro využití HRIS při zasílání podání přes DS, atribut není využit k dalšímu zpracování  
+							- nová délka atributu onum ve všech adresách ID 10079, 10508, 10515, 10521, 10096
+							- odstranění atributu /REGZEC/employees/employee/insh/cnr
+							- odstranění atributu /REGZEC/employees/employee/unemplcomp/severancepay
+							- odstranění atributu /REGZEC/employees/employee/unemplcomp/disposal
+							
+Verze 0.5.0.2    25.09.2026 - vrácení atributu /REGZEC/employees/employee/insh/cnr ID 10102
+							- odstranění atributu /REGZEC/employees/employee/unemplcomp/goldenhandshake
+							- nový atribut /REGZEC/employees/employee/unemplcomp/severencebenefit ID 10588
+
+	</xs:documentation>
+  </xs:annotation>
+  <xs:element name="REGZEC" type="regzecType" />
+  <xs:element name="employee" type="employeeType" />
+  <xs:complexType name="regzecType">
+    <xs:sequence>
+      <xs:element name="VENDOR" minOccurs="0" >
+        <xs:complexType>
+          <xs:attribute name="productName" type="xs:string" />
+          <xs:attribute name="productVersion" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="SENDER" minOccurs="0">
+        <xs:complexType>
+          <xs:attribute name="EmailNotifikace" type="xs:string" />
+          <xs:attribute name="ISDSreport" type="xs:string" />
+          <xs:attribute name="VerzeProtokolu" type="xs:string" />
+		  <xs:attribute name="VlastniIdPodani" use="optional">
+			<xs:simpleType>
+				<xs:restriction base="xs:string">
+					<xs:maxLength value="36"/>
+				</xs:restriction>
+			</xs:simpleType>
+		</xs:attribute>		  
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="employees" maxOccurs="1">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="employee" type="employeeType" maxOccurs="1500"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="version" type="xs:string" />
+    <xs:attribute name="partialAccept" type="xs:string" />
+  </xs:complexType>
+  <xs:complexType name="employeeType">
+    <xs:sequence>
+      <xs:element name="client" type="clientType" />
+      <xs:element name="comp" type="compType" />
+      <xs:element name="job" type="jobType" />
+      <xs:element name="forin" type="forinType" minOccurs="0"/>
+      <xs:element name="pens" type="pensType" minOccurs="0"/>
+      <xs:element name="insh" type="inshType" minOccurs="0"/>
+      <xs:element name="inso" type="insoType" minOccurs="0"/>
+      <xs:element name="insp" type="inspType" minOccurs="0"/>
+      <xs:element name="unemplcomp" type="unemplcompType" minOccurs="0" />
+      <xs:element name="fact" type="factType" minOccurs="0"/>
+      <xs:element name="nocitizen" type="nocitizenType" minOccurs="0" />
+      <xs:element name="forinreg" type="forinregType" minOccurs="0" />
+      <xs:element name="attachs" type="attachsType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="sqnr" use="required">
+      <xs:annotation>
+        <xs:documentation>pořadové číslo věty v podání (ID 10014)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="1500" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="dep" use="required">
+      <xs:annotation>
+        <xs:documentation>kód okresu (org. jednotky ČSSZ) z C_COKR (ID 10004) </xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="100" />
+          <xs:maxInclusive value="999" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="act" use="required">
+      <xs:annotation>
+        <xs:documentation>číslo akce z C_AKCE. Určuje charakter požadované operace (ID 10008).</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="99" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="dat" type="xs:date" use="required">
+      <xs:annotation>
+        <xs:documentation>datum vyplnění (vyhotovení) dat.věty (ID 10005)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="fro" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>platnost zaslaných údajů od / datum vyhotovení opravované přihlášky (ID 10009)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="clientType">
+    <xs:sequence>
+      <xs:element name="name" type="nameType" minOccurs="0"/>
+      <xs:element name="birth" type="birthType" minOccurs="0" />
+      <xs:element name="stat" type="statType" minOccurs="0"/>
+      <xs:element name="adr" type="intlAdrType" minOccurs="0"/>
+      <xs:element name="fdr" type="czAdrType" minOccurs="0"/>
+      <xs:element name="cdr" type="intlAdrType" minOccurs="0"/>
+      <xs:element name="rdr" type="rdrType" minOccurs="0"/>
+      <xs:element name="taxidrezid" type="taxidrezidType" minOccurs="0"/>
+      <xs:element name="proofid" type="proofidType" minOccurs="0"/>
+    </xs:sequence>
+    <xs:attribute name="bno" use="optional">
+      <xs:annotation>
+        <xs:documentation>Rodné číslo / EČP (ID 10057/10058)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNNType">
+          <xs:minLength value="9" />
+          <xs:maxLength value="10" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="ikmpsv" use="optional">
+      <xs:annotation>
+        <xs:documentation>IK MPSV (ID 10051)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNNType">
+          <xs:length value="10" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="vcp" use="optional">
+      <xs:annotation>
+        <xs:documentation>VČP (ID 10060)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="100000000" />
+          <xs:maxInclusive value="999999999" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="nameType">
+    <xs:sequence />
+    <xs:attribute name="sur" use="optional">
+      <xs:annotation>
+        <xs:documentation>příjmení (ID 10053)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_ZX_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="ona" use="optional">
+      <xs:annotation>
+        <xs:documentation>dřívější příjmení (ID 10064)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_ZX_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="100" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="fir" use="optional">
+      <xs:annotation>
+        <xs:documentation>jméno (ID 10054)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_ZX_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="tit" use="optional">
+      <xs:annotation>
+        <xs:documentation>titul (ID 10055)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_ZX_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="30" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="birthType">
+    <xs:sequence />
+    <xs:attribute name="dat" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>datum narození (ID 10056)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="nam" use="optional">
+      <xs:annotation>
+        <xs:documentation>rodné příjmení (ID 10063)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_ZX_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cit" use="optional">
+      <xs:annotation>
+        <xs:documentation>místo narození (ID 10066)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZ_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="stat" use="optional">
+      <xs:annotation>
+        <xs:documentation>stát narození (ID 10065)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="statType">
+    <xs:sequence />
+    <xs:attribute name="mal" use="optional">
+      <xs:annotation>
+        <xs:documentation>pohlaví (ID 10059)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:length value="1" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cnt" use="optional">
+      <xs:annotation>
+        <xs:documentation>státní občanství (ID 10067)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="intlAdrType">
+    <xs:sequence />
+    <xs:attribute name="str" use="optional">
+      <xs:annotation>
+        <xs:documentation>ulice (ID 10077,10506)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZ_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="num" use="required">
+      <xs:annotation>
+        <xs:documentation>číslo domu (pro stát CZ č.popisné) (ID 10078,10507)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="12" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="onum" use="optional">
+      <xs:annotation>
+        <xs:documentation>trvalý pobyt - č.o. (ID 10079,10508)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="4" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="pnu" use="required">
+      <xs:annotation>
+        <xs:documentation>psč (ID 10082,10510)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="11" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cit" use="required">
+      <xs:annotation>
+        <xs:documentation>obec (ID 10080,10509)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZL_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cnt" use="required">
+      <xs:annotation>
+        <xs:documentation>stát (ID 10083,10511)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="ruianpoint" use="optional">
+      <xs:annotation>
+        <xs:documentation>trvalý pobyt - kód adresního místa (ID 10076,10505)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="999999999" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="czAdrType">
+    <xs:sequence />
+    <xs:attribute name="str" use="optional">
+      <xs:annotation>
+        <xs:documentation>ulice - (ID 10513)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZ_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="num" use="required">
+      <xs:annotation>
+        <xs:documentation>č.popisné - (ID 10514)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="9999" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="onum" use="optional">
+      <xs:annotation>
+        <xs:documentation>číslo orientrační - (ID 10515)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="4" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="pnu" use="required">
+      <xs:annotation>
+        <xs:documentation>psč (ID 10517)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="xs:string">
+          <xs:pattern value="\d{5}" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cit" use="required">
+      <xs:annotation>
+        <xs:documentation>obec - (ID 10516)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZL_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="ruianpoint" use="optional">
+      <xs:annotation>
+        <xs:documentation>pobyt v ČR - (ID 10512)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="999999999" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="rdrType">
+    <xs:attribute name="str" use="optional">
+      <xs:annotation>
+        <xs:documentation>Adresa bydliště ve státě, jehož je zaměstnanec rezidentem - ulice (ID 10519)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZ_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="num" use="required">
+      <xs:annotation>
+        <xs:documentation>Adresa bydliště ve státě, jehož je zaměstnanec rezidentem - číslo popisné (ID 10520)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="12" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="onum" use="optional">
+      <xs:annotation>
+        <xs:documentation>Adresa bydliště ve státě, jehož je zaměstnanec rezidentem - číslo orientační (ID 10521)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="4" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="pnu" use="required">
+      <xs:annotation>
+        <xs:documentation>Adresa bydliště ve státě, jehož je zaměstnanec rezidentem - psč (postcode) (ID 10522)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="11" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cit" use="required">
+      <xs:annotation>
+        <xs:documentation>Adresa bydliště ve státě, jehož je zaměstnanec rezidentem - obec (ID 10523)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZL_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cnt" use="required">
+      <xs:annotation>
+        <xs:documentation>Adresa bydliště ve státě, jehož je zaměstnanec rezidentem - stát (ID 10524)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="compType">
+    <xs:sequence />
+    <xs:attribute name="vs" use="required">
+      <xs:annotation>
+        <xs:documentation>variabilní symbol zaměstnavatele - (ID 10221)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNNType">
+          <xs:minLength value="8" />
+          <xs:maxLength value="10" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="nvs" use="optional">
+      <xs:annotation>
+        <xs:documentation>nový variabilní symbol zaměstnavatele (ID 10222)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNNType">
+          <xs:minLength value="8" />
+          <xs:maxLength value="10" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="nam" use="required">
+      <xs:annotation>
+        <xs:documentation>název zaměstnavatele (ID 10120)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleL2Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="150" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="jobType">
+    <xs:sequence>
+      <xs:element name="prof" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Profese</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:attribute name="clas" use="optional">
+            <xs:annotation>
+              <xs:documentation>Profese (ID 10234)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="t:simpleNNType">
+                <xs:minLength value="3" />
+                <xs:maxLength value="5" />
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+          <xs:attribute name="edu" use="optional">
+            <xs:annotation>
+              <xs:documentation>Vzdělání požadované pro výkon profese. (ID 10248)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="t:simpleAType">
+                <xs:length value="1" />
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="position" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Pozice</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:attribute name="name" use="optional">
+            <xs:annotation>
+              <xs:documentation>název pozice (ID 10235)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="t:simpleL2Type">
+                <xs:minLength value="1" />
+                <xs:maxLength value="100" />
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+          <xs:attribute name="lead" type="t:simpleLType" use="optional">
+            <xs:annotation>
+              <xs:documentation>vedoucí zaměstnanec (ID 10238)</xs:documentation>
+            </xs:annotation>
+          </xs:attribute>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="oid" use="optional">
+      <xs:annotation>
+        <xs:documentation>identifikátor pojistného vztahu - Datový slovník atribut (ID 10228), element v MH idPpv</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNNType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="22" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="fro" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>datum vstupu do zaměstnání (zaměstnán od)(ID 10223)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="to" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>datum ukončení zaměstnání (zaměstnán do)(ID 10224)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="rel" use="optional">
+      <xs:annotation>
+        <xs:documentation>druh výdělečné činnosti (ID 10239)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="relDetail" use="optional">
+      <xs:annotation>
+        <xs:documentation>Bližší určení pracovně právního vztahu (ID 10502)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="9" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="sme" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>zaměstnání malého rozsahu (ID 10243)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="endbydeath" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>zaměstnání ukončeno smrtí (ID 10225)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="notstart" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>zaměstnanec nenastoupil (ID 10226)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="contractfro" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>vznik zaměstnání (ID 10227)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="relat" use="optional">
+      <xs:annotation>
+        <xs:documentation>postavení v zaměstnání (ID 10249)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="99999" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="workmode" use="optional">
+      <xs:annotation>
+        <xs:documentation>pracovní režim (ID 10255)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="9" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cont" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>nepřetržitý provoz (ID 10407)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="place" use="optional">
+      <xs:annotation>
+        <xs:documentation>práce probíhá převážně (ID 10258)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="9" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="preplace" use="optional">
+      <xs:annotation>
+        <xs:documentation>Předpokládané/á místo/a výkonu práce (ID 10526)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleL2Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="500" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="contractplace" use="optional">
+      <xs:annotation>
+        <xs:documentation>Místo výkonu práce uvedené v pracovní smlouvě zaměstnance (ID 10527)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleL2Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="200" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cit" use="optional">
+      <xs:annotation>
+        <xs:documentation>Název obce (ID 10528)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZ_SP_Type">
+          <xs:minLength value="1"/>
+          <xs:maxLength value="50"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="municode" use="optional">
+      <xs:annotation>
+        <xs:documentation>Kód obce (ID 10529)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNNType">
+          <xs:length value="6" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="forinType">
+    <xs:sequence />
+    <xs:attribute name="cur" use="optional">
+      <xs:annotation>
+        <xs:documentation>informace o cizozemském nositeli  pojištění - specifikace (ID 10092)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="1" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="nam" use="optional">
+      <xs:annotation>
+        <xs:documentation>nositel cizozemského pojištění - název (ID 10093)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleL2Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="100" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="str" use="optional">
+      <xs:annotation>
+        <xs:documentation>nositel cizozemského pojištění - ulice (ID 10094)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZ_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="num" use="optional">
+      <xs:annotation>
+        <xs:documentation>nositel cizozemského pojištění - č.p. (ID 10095)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="12" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="onum" use="optional">
+      <xs:annotation>
+        <xs:documentation>nositel cizozemského pojištění - č.o.(ID 10096)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="4" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="pnu" use="optional">
+      <xs:annotation>
+        <xs:documentation>nositel cizozemského pojištění - PSČ (postcode)(ID 10098)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZ_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="11" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cit" use="optional">
+      <xs:annotation>
+        <xs:documentation>nositel cizozemského pojištění - obec (ID 10097)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZL_SP_Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="50" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="cnt" use="optional">
+      <xs:annotation>
+        <xs:documentation>nositel cizozemského pojištění - stát (ID 10099)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="id" use="optional">
+      <xs:annotation>
+        <xs:documentation>číslo cizozemského pojištění (ID 10100)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="25" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="sec" use="optional">
+      <xs:annotation>
+        <xs:documentation>sektor (účel pojištění)(ID 10101)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNNType">
+          <xs:length value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="pensType">
+    <xs:sequence />
+    <xs:attribute name="typ" use="optional">
+      <xs:annotation>
+        <xs:documentation>druh pobíraného důchodu (ID 10113)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NType">
+          <xs:length value="1" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="tak" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>důchod pobírán od (ID 10114)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="early" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>poživatel předčasného starobního důchodu (ID 10115)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="reducedAge" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>Poživatel starobního důchodu se sníženým důchodovým věkem (ID 10504)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="inshType">
+    <xs:sequence/>
+    <xs:attribute name="cnr" use="required">
+      <xs:annotation>
+        <xs:documentation>kód zdravotní pojištovny (ID 10102)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="100"/>
+          <xs:maxInclusive value="999"/>
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>  
+  <xs:complexType name="insoType">
+    <xs:sequence />
+    <xs:attribute name="nam" use="required">
+      <xs:annotation>
+        <xs:documentation>název současného orgánu nem. pojištění (mimo ČSSZ)(ID 10103)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleL2Type">
+          <xs:minLength value="0" />
+          <xs:maxLength value="100" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="inspType">
+    <xs:sequence />
+    <xs:attribute name="nam" use="required">
+      <xs:annotation>
+        <xs:documentation>název předchozího orgánu nem. pojištění (mimo ČSSZ)(ID 10104)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleL2Type">
+          <xs:minLength value="0" />
+          <xs:maxLength value="100" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="unemplcompType">
+    <xs:sequence>
+      <xs:element name="pensionperiod" minOccurs="0" maxOccurs="unbounded">
+        <xs:annotation>
+          <xs:documentation>
+            intervaly důchodového pojištění
+          </xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:attribute name="fro" type="xs:date" use="optional">
+            <xs:annotation>
+              <xs:documentation>důchod pobírán od (ID 10386)</xs:documentation>
+            </xs:annotation>
+          </xs:attribute>
+          <xs:attribute name="to" type="xs:date" use="optional">
+            <xs:annotation>
+              <xs:documentation>důchod pobírán do (ID 10387)</xs:documentation>
+            </xs:annotation>
+          </xs:attribute>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="rsn" type="number3Type" use="optional">
+      <xs:annotation>
+        <xs:documentation>kód důvodu neposkytnutí podkladů (ID 10376)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="typeempl" type="number3Type" use="optional">
+      <xs:annotation>
+        <xs:documentation>kód druhu zaměstnání (ID 10525)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="belong" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>odchodné/odbytné/odstupné náleží (ID 10378)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="fullpay" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>odchodné/odbytné/odstupné vyplaceno v plné výši (ID 10379)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="avgmonear" use="optional">
+      <xs:annotation>
+        <xs:documentation>průměrný čistý měsíční výdělek (ID 10377)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType_string">
+          <xs:minLength value="1" />
+          <xs:maxLength value="10" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="rsnterrel" type="number3Type" use="optional">
+      <xs:annotation>
+        <xs:documentation>kód důvodu ukončení služebního poměru (ID 10381)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="rsnterempl" type="number3Type" use="optional">
+      <xs:annotation>
+        <xs:documentation>kód důvodu ukončení pracovněprávního vztahu (ID 10380)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="replacement" use="optional">
+      <xs:annotation>
+        <xs:documentation>Jednorázová náhrada při skončení pracovního poměru (§271ca ZP) (ID 10530)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType_string">
+          <xs:minLength value="1" />
+          <xs:maxLength value="10" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="severencebenefit" use="optional">
+      <xs:annotation>
+        <xs:documentation>Odstupné, odchodné, odbytné  (ID 10588)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType_string">
+          <xs:minLength value="1" />
+          <xs:maxLength value="10" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="earlyterm" use="optional">
+      <xs:annotation>
+        <xs:documentation>Důvod předčasného ukončení  (ID 10534)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="9" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="attachsType">
+    <xs:sequence>
+      <xs:element name="attach" minOccurs="0" maxOccurs="9">
+        <xs:annotation>
+          <xs:documentation>příloha, je možné vložit max 9 příloh</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:attribute name="name" use="required">
+            <xs:annotation>
+              <xs:documentation>název přílohy/souboru včetně přípony (ID 10396)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="t:simpleL2Type">
+                <xs:minLength value="1" />
+                <xs:maxLength value="100" />
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+          <xs:attribute name="desc" use="optional">
+            <xs:annotation>
+              <xs:documentation>popis přílohy (ID 10397)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="t:simpleL2Type">
+                <xs:minLength value="0" />
+                <xs:maxLength value="100" />
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+          <xs:attribute name="data" use="required">
+            <xs:annotation>
+              <xs:documentation>data přílohy (ID 10400)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="xs:base64Binary">
+                <xs:minLength value="1" />
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:simpleType name="number3Type">
+    <xs:restriction base="t:simpleNType">
+      <xs:minInclusive value="1" />
+      <xs:maxInclusive value="999" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:complexType name="taxidrezidType">
+    <xs:attribute name="type" use="optional">
+      <xs:annotation>
+        <xs:documentation>typ daňové identifikace (ID 10061)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="1" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="num" use="optional">
+      <xs:annotation>
+        <xs:documentation>daňový identifikátor ve státě rezidence (ID 10062)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="20" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="stat" use="optional">
+      <xs:annotation>
+        <xs:documentation>kód státu rezidenství (ID 10068)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:minLength value="2" />
+          <xs:maxLength value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="statchang" use="optional" type="xs:date" >
+      <xs:annotation>
+        <xs:documentation>platnost změny kódu státu rezidentství od (ID 10459)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="proofidType">
+    <xs:attribute name="type" use="optional">
+      <xs:annotation>
+        <xs:documentation>typ dokladu (ID 10069)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="num" use="optional">
+      <xs:annotation>
+        <xs:documentation>číslo dokladu (ID 10070)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleL2Type">
+          <xs:maxLength value="20" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="foreigninst" use="optional">
+      <xs:annotation>
+        <xs:documentation>orgán, který vydal doklad v zahraničí (ID 10071)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleL2Type">
+          <xs:minLength value="1" />
+          <xs:maxLength value="100" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="stat" use="optional">
+      <xs:annotation>
+        <xs:documentation>kód státu, který doklady vydal (ID 10072)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="factType">
+    <xs:sequence>
+      <xs:element name="healtrest" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Zdravotní omezení</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:attribute name="type" use="optional">
+            <xs:annotation>
+              <xs:documentation>typ zdravotního omezení (ID 10085)</xs:documentation>
+            </xs:annotation>
+            <xs:simpleType>
+              <xs:restriction base="t:simpleNType">
+                <xs:minInclusive value="1" />
+                <xs:maxInclusive value="9" />
+              </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+          <xs:attribute name="fro" type="xs:date" use="optional">
+            <xs:annotation>
+              <xs:documentation>zdravotní omezení přiznané od (ID 10086)</xs:documentation>
+            </xs:annotation>
+          </xs:attribute>
+          <xs:attribute name="to" type="xs:date" use="optional">
+            <xs:annotation>
+              <xs:documentation>zdravotní omezení přiznané do (ID 10087)</xs:documentation>
+            </xs:annotation>
+          </xs:attribute>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="ztp" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>držitel karty ZTP/P (ID 10090)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="highedu" use="optional">
+      <xs:annotation>
+        <xs:documentation>nejvyšší dosažené vzdělání podle KKOV (ID 10091)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="1" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="nocitizenType">
+    <xs:attribute name="freeacc" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>volný přístup na trh práce (ID 10414)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="perm" use="optional">
+      <xs:annotation>
+        <xs:documentation>Důvod pro volný přístup na trh práce (ID 10105)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="99" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="permtype" use="optional">
+      <xs:annotation>
+        <xs:documentation>druh pracovního oprávnění (ID 10106)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleNType">
+          <xs:minInclusive value="1" />
+          <xs:maxInclusive value="9" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="issue" use="optional">
+      <xs:annotation>
+        <xs:documentation>vydala Krajská pobočka ÚP ČR (ID 10107)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="3" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="permid" use="optional">
+      <xs:annotation>
+        <xs:documentation>identifikátor pracovního oprávnění (ID 10108)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleA_NN_ZZType">
+          <xs:minLength value="1" />
+          <xs:maxLength value="20" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+    <xs:attribute name="permfro" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>trvání oprávnění od (ID 10109)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="permto" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>trvání oprávnění do (ID 10110)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="stayvalidfro" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>Platnost pobytu od (ID 10568)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="stayvalidto" type="xs:date" use="optional">
+      <xs:annotation>
+        <xs:documentation>Platnost pobytu do (ID 10569)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+  </xs:complexType>
+  <xs:complexType name="forinregType">
+    <xs:attribute name="juris" type="t:simpleLType" use="optional">
+      <xs:annotation>
+        <xs:documentation>příslušnost k cizím právním předpisům (ID 10427)</xs:documentation>
+      </xs:annotation>
+    </xs:attribute>
+    <xs:attribute name="state" use="optional">
+      <xs:annotation>
+        <xs:documentation>kód státu (ID 10428)</xs:documentation>
+      </xs:annotation>
+      <xs:simpleType>
+        <xs:restriction base="t:simpleAType">
+          <xs:length value="2" />
+        </xs:restriction>
+      </xs:simpleType>
+    </xs:attribute>
+  </xs:complexType>
+</xs:schema>

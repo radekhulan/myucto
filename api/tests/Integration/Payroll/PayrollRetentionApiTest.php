@@ -256,6 +256,22 @@ final class PayrollRetentionApiTest extends TestCase
     }
 
     /**
+     * Návrh výmazu k datu v budoucnosti by retenční lhůty vyhodnotil jako
+     * uplynulé už dnes. Odmítne se dřív, než se cokoli posoudí nebo zapíše.
+     */
+    public function testProposalWithFutureAsOfIsRejected(): void
+    {
+        foreach ([(new \DateTimeImmutable('tomorrow'))->format('Y-m-d'), '2099-12-31', '2026-02-30'] as $asOf) {
+            $request = $this->roleRequest('POST', '/api/payroll/retention/erasure', $this->erasureRole(AccessLevel::WRITE))
+                ->withQueryParams(['as_of' => $asOf]);
+            $response = $this->action->createProposal($request, new Response());
+
+            self::assertSame(422, $response->getStatusCode(), $asOf);
+            self::assertSame('validation_failed', $this->errorOf($response)['code'], $asOf);
+        }
+    }
+
+    /**
      * Detail návrhu musí jmenovat osobu a rozepsat dopad ROZEBRANÝ, ne jako
      * řetězec JSON — jinak by ho musel rozebírat prohlížeč.
      */

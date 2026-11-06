@@ -84,6 +84,13 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
         self::assertStringContainsString('<form:odpracovaneHodiny><form:pocet>12.000</form:pocet>', $xml);
         self::assertStringContainsString('<form:eldp><form:pocetDnu>0</form:pocetDnu></form:eldp>', $xml);
         self::assertStringNotContainsString('<form:castkaOdvodPojistneho>', $xml);
+        // 10370 a 10481 jsou povinné i bez účasti (matice DS 1.4.0.2, ukázka
+        // MPSV „Jedna DPP do 11499"), hodnotou je nula.
+        self::assertStringContainsString(
+            '<form:pojisteniZamestnanec><form:socialniPojisteni>0</form:socialniPojisteni></form:pojisteniZamestnanec>'
+                . '<form:pojisteniZamestnavatel><form:socialniPojisteni>0</form:socialniPojisteni></form:pojisteniZamestnavatel>',
+            $xml,
+        );
     }
 
     /**
@@ -119,6 +126,10 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
         self::assertStringNotContainsString('<form:prohlaseniPoplatnikaDane>', $xml);
         // 35 000 - 4 500 - 750 - 2 130 (7,1 % z 30 000) - 1 350 (4,5 % z 30 000).
         self::assertStringContainsString('<form:mzdaCista>26270</form:mzdaCista>', $xml);
+        // Pojistné HPP beze změny (7,1 % a 24,8 % z 30 000), formulář dohody
+        // bez účasti nese povinné 10370 a 10481 jako nulu.
+        self::assertSame(['2130', '0'], $this->socialContributions($xml, 'pojisteniZamestnanec'));
+        self::assertSame(['7440', '0'], $this->socialContributions($xml, 'pojisteniZamestnavatel'));
     }
 
     /**
@@ -314,7 +325,7 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
 
         self::assertStringContainsString(
             '<form:zalohaNaDan><form:zakladDane>8000</form:zakladDane><form:vypoctenaZaloha>1200</form:vypoctenaZaloha>'
-                . '<form:danZalohaPoSleve>0</form:danZalohaPoSleve><form:danBonus>0</form:danBonus></form:zalohaNaDan>',
+                . '<form:danZalohaPoSleve>0</form:danZalohaPoSleve></form:zalohaNaDan>',
             $xml,
         );
         self::assertSame(['8000'], $this->relationshipTaxBases($xml));
@@ -569,6 +580,22 @@ final class PayrollJmhzScenarioValueFlowTest extends TestCase
     private function relationshipTaxBases(string $xml): array
     {
         preg_match_all('#<form:prijem><form:dan><form:zakladDane>(\d+)</form:zakladDane>#', $xml, $matches);
+
+        return $matches[1];
+    }
+
+    /**
+     * Pojistné SP (10370 nebo 10481) všech formulářů v pořadí podání.
+     *
+     * @return list<string>
+     */
+    private function socialContributions(string $xml, string $element): array
+    {
+        preg_match_all(
+            '#<form:' . $element . '><form:socialniPojisteni>(\d+)</form:socialniPojisteni>#',
+            $xml,
+            $matches,
+        );
 
         return $matches[1];
     }

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { searchApi, type SearchResults } from '@/api/search'
+import { searchApi, type SearchEmployee, type SearchResults } from '@/api/search'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useSupplierStore } from '@/stores/supplier'
 import { matchSwitchableSuppliers, useSupplierSwitch } from '@/composables/useSupplierSwitch'
@@ -27,20 +27,43 @@ const q = ref('')
 const open = ref(false)
 const loading = ref(false)
 const activeIndex = ref(0)
-const results = ref<SearchResults>({ q: '', clients: [], invoices: [], purchase_invoices: [] })
+const results = ref<SearchResults>(emptyResults(''))
 const inputEl = ref<HTMLInputElement | null>(null)
 
 let debounceTimer: ReturnType<typeof setTimeout> | undefined
 let seq = 0
 
-interface Option { kind: 'menu' | 'company' | 'client' | 'invoice' | 'purchase'; label: string; sub: string; run: () => void }
+interface Option { kind: 'menu' | 'company' | 'client' | 'employee' | 'invoice' | 'purchase'; label: string; sub: string; run: () => void }
 
 const GROUP_LABEL: Record<Option['kind'], string> = {
   menu:     'search.group_menu',
   company:  'search.group_companies',
   client:   'search.group_clients',
+  employee: 'search.group_employees',
   invoice:  'search.group_invoices',
   purchase: 'search.group_purchase',
+}
+
+function emptyResults(q: string): SearchResults {
+  return { q, clients: [], invoices: [], purchase_invoices: [], employees: [] }
+}
+
+/*
+ * Zaměstnanec může být v jiné firmě, než je otevřená — hledání jde napříč
+ * firmami uživatele. Pak se firma nejdřív přepne a karta osoby otevře až v ní.
+ */
+function openEmployee(employee: SearchEmployee) {
+  const to = `/payroll/people?person=${employee.id}`
+  if (employee.supplier_id === supplierStore.currentSupplierId) void workspaceNavigation.navigate(to)
+  else void supplierSwitch.switchTo(employee.supplier_id, to)
+}
+
+function employeeSub(employee: SearchEmployee): string {
+  const parts: string[] = []
+  if (employee.code) parts.push(t('search.employee_code', { code: employee.code }))
+  if (!employee.is_active) parts.push(t('search.employee_inactive'))
+  if (employee.supplier_id !== supplierStore.currentSupplierId) parts.push(employee.supplier_name)
+  return parts.join(' · ')
 }
 
 const menuMatches = computed<MenuItem[]>(() => {
@@ -64,6 +87,9 @@ const options = computed<Option[]>(() => {
     out.push({ kind: 'client', label: c.company_name, sub: c.main_email || '',
       run: () => void workspaceNavigation.navigate(`/clients/${c.id}`) })
   }
+  for (const e of results.value.employees ?? []) {
+    out.push({ kind: 'employee', label: e.full_name, sub: employeeSub(e), run: () => openEmployee(e) })
+  }
   for (const i of results.value.invoices) {
     out.push({ kind: 'invoice', label: i.varsymbol || `#${i.id}`, sub: i.company_name,
       run: () => void workspaceNavigation.navigate(`/invoices/${i.id}`) })
@@ -81,7 +107,7 @@ watch(q, (val) => {
   clearTimeout(debounceTimer)
   const needle = val.trim()
   if (needle.length < 2) {
-    results.value = { q: needle, clients: [], invoices: [], purchase_invoices: [] }
+    results.value = emptyResults(needle)
     loading.value = false
     return
   }
@@ -92,7 +118,7 @@ watch(q, (val) => {
       const r = await searchApi.query(needle)
       if (mySeq === seq) results.value = r
     } catch {
-      if (mySeq === seq) results.value = { q: needle, clients: [], invoices: [], purchase_invoices: [] }
+      if (mySeq === seq) results.value = emptyResults(needle)
     } finally {
       if (mySeq === seq) loading.value = false
     }
@@ -111,7 +137,7 @@ function reset() {
   q.value = ''
   open.value = false
   activeIndex.value = 0
-  results.value = { q: '', clients: [], invoices: [], purchase_invoices: [] }
+  results.value = emptyResults('')
   inputEl.value?.blur()
 }
 

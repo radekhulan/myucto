@@ -9,6 +9,8 @@ const m = vi.hoisted(() => ({
   cancelJmhzSubmission: vi.fn(),
   jmhzCorrectableComponents: vi.fn(),
   cancelJmhzSubmissionComponents: vi.fn(),
+  jmhzZeroAmendmentCandidates: vi.fn(),
+  freezeJmhzZeroAmendment: vi.fn(),
   jmhzContentCorrectionCandidates: vi.fn(),
   jmhzContentCorrectionPreparations: vi.fn(),
   freezeJmhzContentCorrection: vi.fn(),
@@ -33,6 +35,8 @@ vi.mock('@/api/payroll', () => ({
     cancelJmhzSubmission: m.cancelJmhzSubmission,
     jmhzCorrectableComponents: m.jmhzCorrectableComponents,
     cancelJmhzSubmissionComponents: m.cancelJmhzSubmissionComponents,
+    jmhzZeroAmendmentCandidates: m.jmhzZeroAmendmentCandidates,
+    freezeJmhzZeroAmendment: m.freezeJmhzZeroAmendment,
     jmhzContentCorrectionCandidates: m.jmhzContentCorrectionCandidates,
     jmhzContentCorrectionPreparations: m.jmhzContentCorrectionPreparations,
     freezeJmhzContentCorrection: m.freezeJmhzContentCorrection,
@@ -1491,6 +1495,61 @@ describe('PayrollTransportHistoryPanel', () => {
     expect(m.cancelJmhzSubmission).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="transport-success"]').text())
       .toContain('payroll.jmhz_gate.cancel_components.frozen 93')
+  })
+
+  /**
+   * Anulace měsíce nulovým opravným hlášením: jen vztahy, které server
+   * pustí, a teprve po výslovném potvrzení situace i dopadu.
+   */
+  it('anulace měsíce vyžaduje potvrzení situace i dopadu a nabídne jen způsobilé vztahy', async () => {
+    m.jmhzZeroAmendmentCandidates.mockResolvedValue({
+      environment: 'production',
+      submission_id: 70,
+      submission_status: 'accepted',
+      situation: 'amendment_unreportable_month',
+      month: 7,
+      year: 2026,
+      cancellation_allowed: false,
+      forms: [
+        {
+          form_guid: 'AAAA0001', person_external_identifier: '1000000001', employment_external_identifier: '2000000000000000000001',
+          employment_id: 11, employee_id: 21, employee_name: 'Jana Syntetická', employment_start: '2026-01-01', employment_end: '2026-06-30',
+          annullable: true, blocker: null, amendments: [],
+        },
+        {
+          form_guid: 'AAAA0002', person_external_identifier: '1000000019', employment_external_identifier: '2000000000000000000002',
+          employment_id: 12, employee_id: 22, employee_name: 'Petr Syntetický', employment_start: '2026-01-01', employment_end: null,
+          annullable: false, blocker: { code: 'jmhz_zero_amendment_employment_active_in_month', message: 'trvá' }, amendments: [],
+        },
+      ],
+    })
+    m.freezeJmhzZeroAmendment.mockResolvedValue({
+      submission_id: 94, part_id: 1, artifact_id: 2, status: 'ready', row_version: 3, environment: 'production',
+      artifact_sha256: 'e'.repeat(64), created: true, submission_kind: 'correction', corrects_submission_id: 70,
+      submission_guid: '0195AAAA-1111-7222-8333-BBBBCCCCDDDD', variable_symbol: '1234567890', month: 7, year: 2026,
+    })
+
+    const wrapper = mount(PayrollTransportHistoryPanel)
+    await flushPromises()
+    await wrapper.get('[data-test="transport-cancel-70"]').trigger('click')
+    await wrapper.get('[data-test="transport-cancel-mode-annul-70"]').trigger('change')
+    await flushPromises()
+
+    expect(m.jmhzZeroAmendmentCandidates).toHaveBeenCalledWith(70, 'production')
+    expect(wrapper.get('[data-test="transport-annul-form-2000000000000000000002"] input').attributes('disabled')).toBeDefined()
+    const submit = () => wrapper.get('[data-test="transport-annul-submit-70"]')
+    await wrapper.get('[data-test="transport-annul-form-2000000000000000000001"] input').setValue(true)
+    expect(submit().attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="transport-annul-situation-70"]').setValue(true)
+    expect(submit().attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="transport-annul-impact-70"]').setValue(true)
+    await submit().trigger('click')
+    await flushPromises()
+
+    expect(m.freezeJmhzZeroAmendment).toHaveBeenCalledWith(70, 'production', ['AAAA0001'])
+    expect(m.cancelJmhzSubmissionComponents).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="transport-success"]').text())
+      .toContain('payroll.jmhz_gate.zero_amendment.frozen 94')
   })
 
   it('obsahová oprava ukáže vztahy, které teď opravit nejde', async () => {

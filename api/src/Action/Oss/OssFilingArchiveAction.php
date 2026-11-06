@@ -77,7 +77,7 @@ final class OssFilingArchiveAction
         try {
             return Json::ok($response, $this->reconciliation->reconcile($guard, $period[0], $period[1]));
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
     }
 

@@ -19,6 +19,10 @@ final class IncomeStatementPdfRenderer extends ReportPdfRendererBase
 {
     public function render(array $data): string
     {
+        if (\MyInvoice\Service\Accounting\Reports\Statement504Presentation::accepts($data)) {
+            return (new Statement504PdfRenderer())->render($data);
+        }
+        \MyInvoice\Service\Accounting\Reports\StatementExportPolicy::assertSupported($data);
         $body = $this->renderTemplate('income_statement.twig', $this->toThousands($data));
         $mpdf = $this->mpdf(['format' => 'A4', 'orientation' => 'P']);
         $mpdf->SetTitle('Výkaz zisku a ztráty k ' . (string) ($data['as_of'] ?? ''));

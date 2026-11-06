@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import AppShell from '@/components/layout/AppShell.vue'
 import RecoveryCodesOnce from '@/components/security/RecoveryCodesOnce.vue'
 import { BTN_BASE, ICONS, OUTLINE } from '@/components/ui/buttonStyles'
+import TotpAppRecommendation from '@/components/security/TotpAppRecommendation.vue'
 import { authApi, type TotpSetup } from '@/api/auth'
 import { createCredential, getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { useAuthStore } from '@/stores/auth'
@@ -14,8 +15,11 @@ import {
   authorizePendingDomainLogin,
   canonicalDomainLoginSessionCsrf,
   hasPendingCanonicalDomainLogin,
+  isDomainLoginConfirmationRequired,
+  pendingCanonicalDomainLoginQuery,
 } from '@/security/domainLogin'
 import { takeTotpEnrollment } from '@/security/totpEnrollment'
+import { testRegisteredPasskey } from '@/security/passkeyTest'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -34,14 +38,23 @@ const totpSetup = ref<TotpSetup | null>(null)
 // ⚠️ Sada přijde ze zapnutí TOTP a jde ukázat PRÁVĚ JEDNOU — server plaintext
 // neukládá. Dokud ji uživatel nepotvrdí, setup se nedokončí.
 const recoveryCodes = ref<string[] | null>(null)
+// Klíč neprošel zkušebním ověřením a server ho odvolal. Po potvrzení kódů se
+// pak nepokračuje do aplikace, uživatel zůstane tady a zvolí faktor znovu.
+const passkeyRevoked = ref(false)
 const totpCode = ref('')
 
 async function continueAfterSetup(): Promise<void> {
   if (hasPendingCanonicalDomainLogin()) {
-    await authorizePendingDomainLogin()
+    try {
+      await authorizePendingDomainLogin()
+    } catch (e) {
+      if (!isDomainLoginConfirmationRequired(e)) throw e
+      // Potvrzení předání na vlastní doménu zobrazuje přihlašovací stránka.
+      await router.replace({ name: 'login', query: pendingCanonicalDomainLoginQuery() ?? {} })
+    }
     return
   }
-  await router.replace('/')
+  await router.replace(auth.isInstanceAdmin ? '/instance-admin' : '/')
 }
 
 // Vynucená varianta odsud nepustí jinam než odhlášením; nabídka ano. Rozhoduje
@@ -107,14 +120,21 @@ async function completePasskey() {
       if (previousCsrf) advanceCanonicalDomainLoginSession(previousCsrf, result.csrf_token)
       auth.setSessionCsrfToken(result.csrf_token)
     }
+    // Klíč, který správce uložil, ale neumí jím ověřit, by uživatele zamkl hned
+    // při dalším přihlášení. Ověří se teď; když neprojde, server ho odvolá.
+    const revoked = await testRegisteredPasskey(result.credential?.id) === 'revoked'
     await auth.refresh()
     await sessionSecurity.refresh({ force: true })
+    passkeyRevoked.value = revoked
+    if (revoked) error.value = t('passkeys.test_revoked')
     // ⚠️ Stejně jako u TOTP: kódy PŘED dokončením setupu, jinak je odnaviguje
-    // pryč a uživatel skončí s klíčem, ale bez jediné cesty zpět.
+    // pryč a uživatel skončí s klíčem, ale bez jediné cesty zpět. Patří uživateli,
+    // ne klíči, takže se ukazují i po odvolání nefunkčního klíče.
     if (result.recovery_codes?.length) {
       recoveryCodes.value = result.recovery_codes
       return
     }
+    if (revoked) return
     await continueAfterSetup()
   } catch (e: any) {
     const ceremonyError = webAuthnErrorKey(e)
@@ -237,6 +257,11 @@ async function completeTotp() {
 
 async function confirmRecoveryCodes() {
   if (busy.value) return
+  if (passkeyRevoked.value) {
+    recoveryCodes.value = null
+    passkeyRevoked.value = false
+    return
+  }
   busy.value = true
   error.value = ''
   try {
@@ -366,7 +391,7 @@ onMounted(async () => {
 
         <div v-else-if="method === 'totp' && totpAllowed" class="space-y-4">
           <template v-if="totpSetup">
-            <p class="text-sm text-neutral-700">{{ t('auth.totp_setup_step1') }}</p>
+            <TotpAppRecommendation />
             <div class="flex justify-center bg-neutral-50 rounded-md p-4">
               <img :src="totpSetup.qr_data_uri" :alt="totpSetup.uri" class="border border-neutral-200 rounded" />
             </div>

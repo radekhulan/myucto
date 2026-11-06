@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -37,7 +36,7 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
     use IsolatedSupplierTrait;
 
     private const PERIOD = '2026-06-01';
-    private const MIGRATION = '1903_payroll_component_jmhz_catalog_1_4_2_10_package.sql';
+    private const MIGRATION = '2210_payroll_component_jmhz_catalog_1_4_2_11_package.sql';
 
     private ContainerInterface $container;
     private Connection $db;
@@ -48,7 +47,7 @@ final class PayrollComponentJmhzCreationDefaultsTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $components = $this->container->get(PayrollComponentRepository::class);
         $mappings = $this->container->get(PayrollComponentJmhzMappingRepository::class);

@@ -11,6 +11,7 @@ use MyInvoice\Service\Bank\EmailNoticeReconciler;
 use MyInvoice\Service\Bank\GpcParser;
 use MyInvoice\Service\Bank\StatementImporter;
 use MyInvoice\Service\Bank\StatementMatcher;
+use MyInvoice\Service\Bank\StatementTransactionScope;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -257,6 +258,41 @@ final class StatementImporterDuplicateTest extends TestCase
 
         self::assertSame(1, $second['transactions'], 'Nesouvisející platba téhož dne a částky se nesmí spolknout.');
         self::assertSame(2, $this->rawTransactionCount($account));
+    }
+
+    /**
+     * Automatická synchronizace stahuje okno s překryvem, takže už evidované pohyby dostane
+     * znovu. Nové stažení je skrytý podklad měsíčního výpisu a k už evidovanému pohybu se
+     * stejným otiskem vazbu nezakládá: dřív se každý pohyb navázal ke každému stažení
+     * a tabulka vazeb rostla o statisíce řádků denně. Měsíční výpis musí mít oba pohyby.
+     */
+    public function testRepeatedDownloadOfConnectedFeedDoesNotRelinkKnownMovements(): void
+    {
+        $account = '9990562357';
+        $currencyId = $this->activeCurrency($account, '0100');
+        $known = $this->apiStatement($account, 'ref-W1', '5555555555', '0800', description: 'Platba W1');
+        $new = $this->apiStatement($account, 'ref-W2', '6666666666', '0300', vs: '2099009993', description: 'Platba W2');
+
+        $first = $this->importer->importConnectedParsed($known, '{"window":1}', 'kb_plus-30-1.json', null, $currencyId, $this->supplierId);
+        $this->statementIds[] = (int) $first['evidence_statement_id'];
+        $this->statementIds[] = (int) $first['statement_id'];
+        $second = $this->importer->importConnectedParsed(
+            ['header' => $known['header'], 'transactions' => [...$known['transactions'], ...$new['transactions']]],
+            '{"window":2}', 'kb_plus-30-2.json', null, $currencyId, $this->supplierId,
+        );
+        $evidence = (int) $second['evidence_statement_id'];
+        $this->statementIds[] = $evidence;
+        $this->statementIds[] = (int) $second['statement_id'];
+
+        self::assertSame(1, $second['transactions']);
+        self::assertSame(1, $second['skipped_duplicates']);
+        $links = $this->db->pdo()->prepare('SELECT COUNT(*) FROM bank_transaction_imports WHERE statement_id = ?');
+        $links->execute([$evidence]);
+        self::assertSame(0, (int) $links->fetchColumn(), 'Opakované stažení nesmí znovu navázat už evidovaný pohyb.');
+        self::assertSame((int) $first['statement_id'], (int) $second['statement_id'], 'Obě stažení patří do téhož měsíce.');
+        $month = $this->db->pdo()->query('SELECT COUNT(*) FROM bank_transactions bt WHERE '
+            . StatementTransactionScope::sql((int) $second['statement_id']))->fetchColumn();
+        self::assertSame(2, (int) $month, 'Měsíční výpis obsahuje oba pohyby.');
     }
 
     /**

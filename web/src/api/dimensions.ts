@@ -11,6 +11,7 @@ export interface DimensionType {
   code: string
   name: string
   kind: DimensionKind
+  system_key?: string | null
   is_active: boolean
   show_on_documents: boolean
   sort_order: number
@@ -57,6 +58,7 @@ export interface DimensionAccountCandidate {
 export interface DimensionValue {
   id: number
   type_id: number
+  semantic_key?: string | null
   supplier_id: number | null
   supplier_group_id: number | null
   level: DimensionLevel
@@ -251,7 +253,7 @@ export function documentDimensionsBody(payload: DocumentDimensionsPayload) {
 export type DimensionDocType = 'purchase-invoices' | 'invoices' | 'cash-documents' | 'bank-transactions' | 'journal-templates' | 'recurring-templates' | 'other-items' | 'assets'
 
 /** Karta s výchozími dimenzemi (klient slouží jako odběratel i dodavatel). */
-export type DimensionDefaultsEntity = 'clients' | 'projects' | 'stock/items' | 'eshop/categories'
+export type DimensionDefaultsEntity = 'clients' | 'projects' | 'stock/items' | 'eshop/categories' | 'accounting/bank-accounts'
 
 /** history = návrh z posledního přijatého dokladu téhož dodavatele (nejnižší přednost). */
 export type DimensionPrefillSource = 'project' | 'client' | 'document' | 'history'
@@ -317,13 +319,14 @@ export interface DimensionProfitRow {
   has_children: boolean
   own: DimensionProfitAmounts
   total: DimensionProfitAmounts
+  semantic_key?: string | null
   responsible_user_id?: number | null
   responsible_user_name?: string | null
 }
 
 /** Rozpad po syntetických účtech: řádky = účty, sloupce = kořeny sestavy (+ bez hodnoty). */
 export interface DimensionProfitMatrix {
-  columns: { key: string; value_id: number | null; code: string; name: string | null }[]
+  columns: { key: string; value_id: number | null; code: string; name: string | null; semantic_key?: string | null }[]
   rows: { code: string; name: string; account_type: 'revenue' | 'expense'; cells: number[]; total: number }[]
   results: number[]
   total_result: number

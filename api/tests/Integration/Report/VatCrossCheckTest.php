@@ -16,6 +16,7 @@ use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Report\VatCrossCheckService;
 use MyInvoice\Service\Report\VatLedgerService;
 use PDO;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ServerRequestFactory;
@@ -110,6 +111,214 @@ final class VatCrossCheckTest extends TestCase
     }
 
     // (a) vše sedí + zaúčtováno → cross_check prázdné, download projde ────────────
+
+    public function testImportedSplitVatEntryReconcilesWithItsPurchase(): void
+    {
+        $vendor = $this->client('Test převzaté DPH', 'CZ22222220');
+        $purchase = $this->purchase('TEST-SPLIT-VAT', $vendor, '40', 1000.0, 210.0, 21.0);
+        $this->splitImportedVatEntry($purchase, sprintf('%04d-%02d-15', self::YEAR, self::MONTH));
+        // Vedlejší skutečný rozdíl vynutí i kontrolu per-dokladového rozpisu.
+        $extra = $this->manualEntry343(sprintf('%04d-%02d-16', self::YEAR, self::MONTH), 50.0);
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+
+        self::assertNotNull($finding);
+        self::assertSame(50.0, $finding['difference']);
+        self::assertCount(1, $finding['documents'], 'Převzatá DPH nesmí vytvořit falešný přebývající ani chybějící zápis.');
+        self::assertSame($extra, $finding['documents'][0]['invoice_id']);
+    }
+
+    public function testImportedSplitVatEntryOutsidePeriodExplainsClaimTiming(): void
+    {
+        $vendor = $this->client('Test převzaté DPH mimo období', 'CZ22222220');
+        $purchase = $this->purchase('TEST-SPLIT-TIMING', $vendor, '40', 1000.0, 210.0, 21.0);
+        $this->splitImportedVatEntry($purchase, sprintf('%04d-05-15', self::YEAR));
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+
+        self::assertNotNull($finding);
+        self::assertFalse($finding['blocking']);
+        self::assertSame(210.0, $finding['explained']);
+        self::assertCount(1, $finding['documents']);
+        self::assertSame('timing_73', $finding['documents'][0]['reason']);
+        self::assertSame($purchase, $finding['documents'][0]['invoice_id']);
+    }
+
+    public function testPostingGroupIsRecognizedAfterReversingItsFirstEntry(): void
+    {
+        $vendor = $this->client('Test zbývajícího člena zaúčtování', 'CZ22222220');
+        $purchase = $this->purchase('TEST-REMAINING-VAT', $vendor, '40', 1000.0, 210.0, 21.0);
+        $date = sprintf('%04d-%02d-15', self::YEAR, self::MONTH);
+        $this->splitImportedVatEntry($purchase, $date);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM journal_entries WHERE supplier_id=? AND source_type="purchase_invoice" AND source_id=? AND reversed_by IS NULL');
+        $stmt->execute([$this->supplierId, $purchase]);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\PostingService::class)
+            ->reverse($this->supplierId, (int) $stmt->fetchColumn(), ['entry_date' => $date]);
+        $extra = $this->manualEntry343($date, 50.0);
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+
+        self::assertNotNull($finding);
+        self::assertSame('mismatch', $finding['severity'], 'Živá vlastněná DPH se nesmí tvářit jako nezaúčtovaný doklad.');
+        self::assertSame(50.0, $finding['difference']);
+        self::assertCount(1, $finding['documents']);
+        self::assertSame($extra, $finding['documents'][0]['invoice_id']);
+    }
+
+    public function testOrdinarySoftLinkDoesNotReassignManualVatEntry(): void
+    {
+        $vendor = $this->client('Test ruční vazby DPH', 'CZ22222220');
+        $purchase = $this->purchase('TEST-SOFT-VAT', $vendor, '40', 1000.0, 210.0, 21.0);
+        $entry = $this->splitImportedVatEntry($purchase, sprintf('%04d-%02d-15', self::YEAR, self::MONTH));
+        $this->db->pdo()->prepare('DELETE FROM stereo_nx_import_map WHERE supplier_id = ? AND target_id = ?')
+            ->execute([$this->supplierId, $entry]);
+        $this->db->pdo()->prepare('DELETE FROM journal_document_postings WHERE supplier_id = ? AND entry_id = ?')
+            ->execute([$this->supplierId, $entry]);
+        $this->manualEntry343(sprintf('%04d-%02d-16', self::YEAR, self::MONTH), 50.0);
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+
+        self::assertNotNull($finding);
+        self::assertTrue($finding['blocking']);
+        self::assertCount(3, $finding['documents'], 'Obyčejná měkká vazba nedokazuje původ DPH.');
+    }
+
+    public function testAdditionalSoftLinkDoesNotChangePostingOwnership(): void
+    {
+        $vendor = $this->client('Test nejednoznačné vazby DPH', 'CZ22222220');
+        $purchase = $this->purchase('TEST-AMBIGUOUS-VAT', $vendor, '40', 1000.0, 210.0, 21.0);
+        $entry = $this->splitImportedVatEntry($purchase, sprintf('%04d-%02d-15', self::YEAR, self::MONTH));
+        $this->db->pdo()->prepare('INSERT INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id)
+            VALUES (?, ?, "bank", 999999)')->execute([$this->supplierId, $entry]);
+        $this->manualEntry343(sprintf('%04d-%02d-16', self::YEAR, self::MONTH), 50.0);
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+
+        self::assertNotNull($finding);
+        self::assertSame(50.0, $finding['difference'], 'Vazby nesmějí znásobit obrat.');
+        self::assertCount(1, $finding['documents'], 'Informativní vazba nesmí změnit jednoznačné vlastnictví zaúčtování.');
+    }
+
+    public function testImportedSplitSaleVatEntryReconcilesWithItsSale(): void
+    {
+        $client = $this->client('Test převzaté DPH na výstupu', 'CZ11111118');
+        $sale = $this->sale('TEST-SPLIT-SALE', $client, '1', false, 1000.0, 210.0, 21.0);
+        $entry = $this->autoPoster->post($this->supplierId, 'invoice', $sale);
+        $this->db->pdo()->prepare('UPDATE journal_entries SET source_type="manual", source_id=NULL WHERE supplier_id=? AND id=?')
+            ->execute([$this->supplierId, $entry]);
+        $this->mapImportedEntry($entry, 'invoice', $sale);
+        // První převzatý zápis bez DPH zůstává vlastníkem zdroje dokladu.
+        $owner = $this->entry343(sprintf('%04d-%02d-15', self::YEAR, self::MONTH), 1000.0, 'credit', 'invoice', $sale);
+        $this->db->pdo()->prepare('UPDATE journal_entry_lines SET account_id=? WHERE entry_id=? AND account_id=?')
+            ->execute([$this->accountId('602'), $owner, $this->accountId('343')]);
+        $extra = $this->manualEntry343(sprintf('%04d-%02d-16', self::YEAR, self::MONTH), 50.0);
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+
+        self::assertNotNull($finding);
+        self::assertCount(1, $finding['documents']);
+        self::assertSame($extra, $finding['documents'][0]['invoice_id']);
+    }
+
+    public function testReversedImportedVatEntryDoesNotLeaveFalseDocumentDifferences(): void
+    {
+        $vendor = $this->client('Test storna převzaté DPH', 'CZ22222220');
+        $purchase = $this->purchase('TEST-SPLIT-REVERSED', $vendor, '40', 1000.0, 210.0, 21.0);
+        $date = sprintf('%04d-%02d-15', self::YEAR, self::MONTH);
+        $entry = $this->splitImportedVatEntry($purchase, $date);
+        $this->db->pdo()->prepare('UPDATE purchase_invoices SET status="draft" WHERE id=? AND supplier_id=?')
+            ->execute([$purchase, $this->supplierId]);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\PostingService::class)
+            ->reverse($this->supplierId, $entry, ['entry_date' => $date]);
+        $extra = $this->manualEntry343($date, 50.0);
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+
+        self::assertNotNull($finding);
+        self::assertSame(50.0, $finding['difference']);
+        self::assertCount(1, $finding['documents']);
+        self::assertSame($extra, $finding['documents'][0]['invoice_id']);
+    }
+
+    public function testReversedImportedVatOutsidePeriodIsNotLiveClaimTiming(): void
+    {
+        $vendor = $this->client('Test storna DPH mimo období', 'CZ22222220');
+        $purchase = $this->purchase('TEST-REVERSED-OUTSIDE', $vendor, '40', 1000.0, 210.0, 21.0);
+        $date = sprintf('%04d-05-15', self::YEAR);
+        $entry = $this->splitImportedVatEntry($purchase, $date);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\PostingService::class)
+            ->reverse($this->supplierId, $entry, ['entry_date' => $date]);
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+
+        self::assertNotNull($finding);
+        self::assertTrue($finding['blocking']);
+        self::assertSame(0.0, $finding['explained']);
+        self::assertCount(1, $finding['documents']);
+        self::assertSame('missing_entry', $finding['documents'][0]['reason']);
+    }
+
+    public static function deletedPostingCases(): iterable
+    {
+        foreach (['invoice', 'purchase_invoice'] as $type) {
+            yield $type . ' storno mimo období' => [$type, false];
+            yield $type . ' storno ve stejném období' => [$type, true];
+        }
+    }
+
+    #[DataProvider('deletedPostingCases')]
+    public function testDeletedDocumentKeepsHistoricalVatAccessibleInJournal(string $type, bool $samePeriod): void
+    {
+        $partner = $this->client('Test smazaného převzatého dokladu', 'CZ22222220');
+        $docId = $type === 'invoice'
+            ? $this->sale('TEST-DELETED-POSTING', $partner, '1', false, 1000.0, 210.0, 21.0)
+            : $this->purchase('TEST-DELETED-POSTING', $partner, '40', 1000.0, 210.0, 21.0);
+        $date = sprintf('%04d-%02d-15', self::YEAR, self::MONTH);
+        $entryId = $this->entry343($date, 210.0, $type === 'invoice' ? 'credit' : 'debit', 'manual', null);
+        $this->mapImportedEntry($entryId, $type, $docId);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\PostingService::class)
+            ->reverse($this->supplierId, $entryId, ['entry_date' => $samePeriod ? $date : sprintf('%04d-05-15', self::YEAR)]);
+        Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\DocumentJournalSync::class)
+            ->onDelete($this->supplierId, $type, $docId);
+        $table = $type === 'invoice' ? 'invoices' : 'purchase_invoices';
+        $this->db->pdo()->prepare("DELETE FROM {$table} WHERE supplier_id=? AND id=?")->execute([$this->supplierId, $docId]);
+        $owner = $this->db->pdo()->prepare('SELECT doc_id FROM journal_document_postings WHERE supplier_id=? AND entry_id=?');
+        $owner->execute([$this->supplierId, $entryId]);
+        self::assertSame($docId, (int) $owner->fetchColumn(), 'Historické vlastnictví se při smazání dokladu neztrácí.');
+
+        $finding = $this->findingByCheck($this->crossCheck->check($this->supplierId, self::YEAR, self::MONTH, 'monthly'), 'account_343_vs_return');
+        if ($samePeriod) {
+            self::assertNull($finding, 'Originál i protizápis ve stejném období se musejí dál vyrušit.');
+            return;
+        }
+        self::assertNotNull($finding);
+        self::assertCount(1, $finding['documents']);
+        self::assertSame('extra_entry', $finding['documents'][0]['reason']);
+        self::assertSame('journal_entry', $finding['documents'][0]['doc_type']);
+        self::assertSame($entryId, $finding['documents'][0]['invoice_id']);
+        self::assertSame($type === 'invoice' ? 210.0 : -210.0, $finding['documents'][0]['counter']);
+    }
+
+    /** Zdrojový program vede základ a DPH dokladu jako dva samostatné zápisy. */
+    private function splitImportedVatEntry(int $purchaseId, string $date): int
+    {
+        $this->entry343NettedPair($date, 1.0, $purchaseId);
+        $entry = $this->entry343($date, 210.0, 'debit', 'manual', null);
+        $this->mapImportedEntry($entry, 'purchase_invoice', $purchaseId);
+        return $entry;
+    }
+
+    private function mapImportedEntry(int $entry, string $docType, int $docId): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO journal_entry_document_links (supplier_id, entry_id, doc_type, doc_id)
+            VALUES (?, ?, ?, ?)')->execute([$this->supplierId, $entry, $docType, $docId]);
+        $this->db->pdo()->prepare('INSERT INTO stereo_nx_import_map
+            (supplier_id, source_ico, source_company_index, kind, source_key, source_hash, target_id)
+            VALUES (?, "00000000", 1, "accounting_journal", ?, ?, ?)')
+            ->execute([$this->supplierId, 'test-split-' . $entry, str_repeat('a', 64), $entry]);
+        (new \MyInvoice\Service\Accounting\DocumentPostingGroup($this->db))
+            ->attach($this->supplierId, $docType, $docId, [$entry]);
+    }
 
     public function testConsistentAndPostedYieldsEmptyCrossCheckAndDownloadPasses(): void
     {

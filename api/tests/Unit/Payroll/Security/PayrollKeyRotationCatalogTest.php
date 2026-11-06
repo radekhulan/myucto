@@ -22,11 +22,13 @@ final class PayrollKeyRotationCatalogTest extends TestCase
     {
         $expected = [];
         foreach (AnonymizationPolicy::COLUMNS as $table => $columns) {
-            if (!str_starts_with($table, 'payroll_')) {
-                continue;
-            }
-            foreach (array_keys($columns) as $column) {
-                if (str_ends_with($column, '_ciphertext')) {
+            foreach ($columns as $column => $strategy) {
+                // Mzdové tabulky celé; mimo mzdy každá hodnota zapečetěná mzdovou
+                // primitivou (`sealed:`), třeba rodná čísla daňového profilu (H28).
+                $payroll = str_starts_with($table, 'payroll_');
+                if (str_ends_with($column, '_ciphertext')
+                    && ($payroll || AnonymizationPolicy::isSealed($strategy))
+                ) {
                     $expected[] = $table . '.' . $column;
                 }
             }

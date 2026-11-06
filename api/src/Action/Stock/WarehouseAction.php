@@ -150,7 +150,36 @@ final class WarehouseAction
                 ['suggestion' => 'deactivate'],
             );
         }
-        $this->warehouses->delete($supplierId, $id);
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->warehouses->delete($supplierId, $id);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\PDOException $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if (($e->errorInfo[0] ?? null) !== '23000') {
+                throw $e;
+            }
+            return Json::error(
+                $response,
+                'warehouse_in_use',
+                'Sklad nelze smazat — používají ho objednávky, rezervace, expedice, inventury nebo sestavy. Deaktivujte jej místo mazání.',
+                409,
+                ['suggestion' => 'deactivate'],
+            );
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
         $this->log($request, 'stock.warehouse_deleted', $id, []);
         return Json::ok($response, ['deleted' => true]);
     }

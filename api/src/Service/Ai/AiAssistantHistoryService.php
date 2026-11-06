@@ -17,7 +17,7 @@ final class AiAssistantHistoryService
 {
     public const MAX_LIST = 100;
     public const CONTEXT_MESSAGES = 10;
-    private const APPLIED_KINDS = ['journal_entry', 'other_item', 'document'];
+    private const APPLIED_KINDS = ['journal_entry', 'other_item', 'internal_document', 'document'];
 
     public function __construct(private readonly Connection $db) {}
 

@@ -13,8 +13,10 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
  *
  * - **`amendment_unreportable_month`** anuluje měsíc, který už neměl být hlášen,
  *   protože pracovněprávní vztah v něm neměl pokračovat. Trvání pojištění se
- *   smrskne na jediný kalendářní den a ELDP blok ani místo výkonu práce se
- *   neuvádí — opravovat je nemá smysl, když vztah neexistoval.
+ *   smrskne na jediný kalendářní den a kód ELDP se neuvádí. Místo výkonu
+ *   práce, stanovený fond, prohlášení poplatníka a příznaky ročního
+ *   zúčtování se „neopravují": jsou povinné, takže opravný formulář nese
+ *   hodnotu z opravovaného formuláře.
  * - **`regular_without_work`** vykazuje registrovaný vztah, ve kterém se jen
  *   nepracovalo a nic se nezúčtovalo. Trvání pojištění pokrývá celý měsíc,
  *   místo výkonu práce se uvádí a ELDP blok se uvede, pokud kód existuje.
@@ -31,13 +33,19 @@ final class JmhzZeroReportProfile
     public const SITUATION_REGULAR_WITHOUT_WORK = 'regular_without_work';
 
     public const TABLES_SHA256 =
-        'c624e8137032af49782f68a93d44f91cfc18781712fd0f746f0495fefd8dc3c9';
+        '5a3be07539e606ee00efe73ed2c8a687e5e0a3906e24fba527c54e642dd459b1';
 
     /** Hodnota se uvede jako nula. */
     public const RULE_ZERO = 'zero';
 
     /** Atribut se neuvede vůbec. */
     public const RULE_OMIT = 'omit';
+
+    /**
+     * „Neopravuje se": povinný atribut opravný formulář nemění, uvede se
+     * tedy hodnota z formuláře, který se opravuje.
+     */
+    public const RULE_UNCHANGED = 'unchanged';
 
     /** Příznak se uvede jako „ne". */
     public const RULE_FALSE = 'false';
@@ -67,20 +75,20 @@ final class JmhzZeroReportProfile
     private const TABLES = [
         self::SITUATION_AMENDMENT_UNREPORTABLE_MONTH => [
             '10286' => self::RULE_ZERO,
-            '10419' => self::RULE_OMIT,
-            '10319' => self::RULE_OMIT,
-            '10320' => self::RULE_OMIT,
+            '10419' => self::RULE_UNCHANGED,
+            '10319' => self::RULE_UNCHANGED,
+            '10320' => self::RULE_UNCHANGED,
             '10344' => self::RULE_ZERO_OR_ACTUAL_WHEN_CONCURRENT,
             '10116' => self::RULE_FALSE,
             '10482' => self::RULE_ZERO_OR_ACTUAL_WHEN_CONCURRENT,
             '10371' => self::RULE_ZERO_OR_ACTUAL_WHEN_CONCURRENT,
-            '10229' => self::RULE_OMIT,
-            '10230' => self::RULE_OMIT,
-            '10231' => self::RULE_OMIT,
+            '10229' => self::RULE_UNCHANGED,
+            '10230' => self::RULE_UNCHANGED,
+            '10231' => self::RULE_UNCHANGED,
             '10232' => self::RULE_FALSE,
             '10247' => self::RULE_FALSE,
             '10251' => self::RULE_FALSE,
-            '10259' => self::RULE_OMIT,
+            '10259' => self::RULE_UNCHANGED,
             '10260' => self::RULE_ZERO,
             '10261' => self::RULE_ZERO,
             '10265' => self::RULE_ZERO,

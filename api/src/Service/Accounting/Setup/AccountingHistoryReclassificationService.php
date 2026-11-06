@@ -10,6 +10,8 @@ use MyInvoice\Repository\AccountingSetupRepository;
 use MyInvoice\Repository\ImportJobRepository;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Accounting\SmallAsset\SmallAssetService;
 use MyInvoice\Service\Accounting\TakenOverRecord;
@@ -126,6 +128,7 @@ final class AccountingHistoryReclassificationService
                         continue;
                     }
                     $calculatedLines = $this->posting->buildFromPurchaseInvoice($supplierId, $invoiceId, [
+                        'entry_date' => $before['entry_date'],
                         'item_classification_overrides' => $itemOverrides,
                     ]);
                     $desiredLines = self::mergeReclassifiedLines((array) $before['lines'], $calculatedLines);
@@ -179,8 +182,16 @@ final class AccountingHistoryReclassificationService
                     );
                     $changed++;
                 } catch (\Throwable $e) {
-                    $this->setup->addReclassificationItem($jobId, (int) $bundle['id'], $supplierId, $invoiceId, 'failed', null, null, null, 'reclassification_failed', $e->getMessage());
-                    $failed++;
+                    if ($e instanceof PostingException && $e->errorCode === 'posting_group_requires_repost') {
+                        $taken = $this->takenOver->isDocumentOrItsEntry($supplierId, 'purchase_invoice', $invoiceId);
+                        $this->setup->addReclassificationItem($jobId, (int) $bundle['id'], $supplierId, $invoiceId,
+                            'skipped', null, null, null, $taken ? 'taken_over' : $e->errorCode,
+                            $taken ? 'Doklad je převzatý z jiného účetního programu, jeho kontace se nepřepisuje.' : $e->getMessage());
+                        $skipped++;
+                    } else {
+                        $this->setup->addReclassificationItem($jobId, (int) $bundle['id'], $supplierId, $invoiceId, 'failed', null, null, null, 'reclassification_failed', $e->getMessage());
+                        $failed++;
+                    }
                 } finally {
                     $processed++;
                     if ($processed % 25 === 0 || $processed === count($overrides)) {
@@ -236,7 +247,8 @@ final class AccountingHistoryReclassificationService
                 throw new \RuntimeException('result_changed_after_dry_run');
             }
             $calculatedLines = $this->posting->buildFromPurchaseInvoice($supplierId, $invoiceId, [
-                'item_classification_overrides' => $itemOverrides,
+                'entry_date' => $before['entry_date'],
+                        'item_classification_overrides' => $itemOverrides,
             ]);
             $lines = self::mergeReclassifiedLines((array) $before['lines'], $calculatedLines);
             if (self::linesHash($lines) !== self::linesHash($expectedAfterLines)) {
@@ -505,6 +517,14 @@ final class AccountingHistoryReclassificationService
 
     private function snapshot(int $supplierId, int $invoiceId, bool $forUpdate = false): ?array
     {
+        $entries = (new DocumentPostingGroup($this->db))->active($supplierId, 'purchase_invoice', $invoiceId, $forUpdate);
+        if ($entries === []) return null;
+        if (DocumentPostingGroup::hasOwnedEntries($entries)
+            && !DocumentPostingGroup::isSingleDirectEntry($entries, 'purchase_invoice', $invoiceId)) {
+            throw new PostingException('posting_group_requires_repost', 'Přeúčtujte celou skupinu z detailu dokladu.', 409);
+        }
+        // Nativní předpis zachovává dosavadní výběr nejnovějšího přímého zápisu.
+        $entryId = max(array_column($entries, 'id'));
         $lock = $forUpdate ? ' FOR UPDATE' : '';
         $stmt = $this->db->pdo()->prepare(
             'SELECT je.id entry_id, je.entry_date, je.document_date, je.document_no, je.description,
@@ -514,11 +534,10 @@ final class AccountingHistoryReclassificationService
                FROM journal_entries je
                JOIN accounting_periods ap ON ap.id = je.period_id AND ap.supplier_id = je.supplier_id
                LEFT JOIN accounting_supplier_settings aset ON aset.supplier_id = je.supplier_id
-              WHERE je.supplier_id = ? AND je.source_type = "purchase_invoice" AND je.source_id = ?
-                AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL
-              ORDER BY je.id DESC LIMIT 1' . $lock
+              WHERE je.supplier_id = ? AND je.id = ?
+                AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL' . $lock
         );
-        $stmt->execute([$supplierId, $invoiceId]);
+        $stmt->execute([$supplierId, $entryId]);
         $header = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($header === false) {
             return null;

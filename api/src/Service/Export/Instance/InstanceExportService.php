@@ -1786,7 +1786,8 @@ final class InstanceExportService
         $lines[] = 'Mzdové osobní údaje a platební exporty zůstávají uvnitř kontextově zašifrované;';
         $lines[] = 'pro jejich čtení po obnově musí cílová instalace bezpečně převzít původní';
         $lines[] = 'app.secret_encryption_key (nebo jej ponechat mezi previous keys). Klíč v archivu není.';
-        $lines[] = 'Zachovej také původní app.payroll_hash_key; pokud nebyl nastavený, původní app.pepper.';
+        $lines[] = 'Zachovej také původní app.payroll_hash_key; pokud nebyl nastavený, musí mít cílová';
+        $lines[] = 'instalace app.payroll_hash_key PRÁZDNÝ (i když ho instalátor vygeneroval) a původní app.pepper.';
         $lines[] = 'Bez tohoto hashovacího klíče nelze ověřovat a dohledávat původní mzdové osobní údaje.';
         $lines[] = 'Tyto klíče přenes odděleně a bezpečně, nejsou součástí ZIPu.';
         $lines[] = 'Chybějící zdrojové soubory nelze exportem opravit. Náhradní PDF jsou označena';

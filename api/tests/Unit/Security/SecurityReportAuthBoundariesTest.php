@@ -96,6 +96,27 @@ final class SecurityReportAuthBoundariesTest extends TestCase
         self::assertFalse($totp->verifyAndConsume($db, $secret, 'not-a-code'));
     }
 
+    public function testTotpRejectsStepNotNewerThanLastAcceptedStep(): void
+    {
+        $pdo = \PDO::connect('sqlite::memory:');
+        $pdo->exec('CREATE TABLE totp_used_steps (secret_fingerprint TEXT, time_step INTEGER, PRIMARY KEY (secret_fingerprint, time_step))');
+        $db = $this->createStub(Connection::class);
+        $db->method('pdo')->willReturn($pdo);
+        $secret = TotpService::generateSecret();
+        $other = TotpService::generateSecret();
+        $totp = new TotpService();
+        $generate = new \ReflectionMethod(TotpService::class, 'generateAt');
+        $step = (int) floor(time() / 30);
+
+        // Novější krok projde, starší kód z tolerančního okna po něm už ne.
+        self::assertTrue($totp->verifyAndConsume($db, $secret, $generate->invoke($totp, $secret, $step)));
+        self::assertFalse($totp->verifyAndConsume($db, $secret, $generate->invoke($totp, $secret, $step - 1)));
+        self::assertTrue($totp->verifyAndConsume($db, $secret, $generate->invoke($totp, $secret, $step + 1)));
+        self::assertFalse($totp->verifyAndConsume($db, $secret, $generate->invoke($totp, $secret, $step)));
+        // Evidence je per tajemství, jiný uživatel tím ovlivněn není.
+        self::assertTrue($totp->verifyAndConsume($db, $other, $generate->invoke($totp, $other, $step - 1)));
+    }
+
     #[DataProvider('publicIdentities')]
     public function testPublicReportRequiresAuthorizedStaffOrLinkSession(string $method, bool $denied, string $type, array $permissions, bool $expected): void
     {
@@ -121,11 +142,14 @@ final class SecurityReportAuthBoundariesTest extends TestCase
     public static function publicIdentities(): array
     {
         return [
-            'foreign staff' => ['session', true, 'staff', ['invoices' => 1], true],
-            'client' => ['session', false, 'client', ['invoices' => 1], true],
-            'staff without invoices' => ['session', false, 'staff', [], true],
-            'bearer' => ['bearer', false, 'staff', ['invoices' => 1], true],
-            'authorized staff' => ['session', false, 'staff', ['invoices' => 1], false],
+            'foreign staff' => ['session', true, 'staff', ['invoices' => 1, 'clients.public_links' => 1], true],
+            'client' => ['session', false, 'client', ['invoices' => 1, 'clients.public_links' => 1], true],
+            'staff without invoices' => ['session', false, 'staff', ['clients.public_links' => 1], true],
+            'staff without public links' => ['session', false, 'staff', ['invoices' => 2], true],
+            'staff without permissions' => ['session', false, 'staff', [], true],
+            'bearer' => ['bearer', false, 'staff', ['invoices' => 1, 'clients.public_links' => 1], true],
+            'authorized staff' => ['session', false, 'staff', ['invoices' => 1, 'clients.public_links' => 1], false],
+            'accountant with write' => ['session', false, 'staff', ['invoices' => 2, 'clients.public_links' => 2], false],
         ];
     }
 
@@ -157,7 +181,7 @@ final class SecurityReportAuthBoundariesTest extends TestCase
         $pdo->exec('CREATE TABLE clients (id INTEGER, main_email TEXT)');
         $pdo->exec("INSERT INTO clients VALUES (1, 'synthetic@example.test')");
         $pdo->exec('CREATE TABLE client_email_contacts (client_id INTEGER, email TEXT, is_active INTEGER)');
-        $pdo->exec('CREATE TABLE work_report_link_sessions (link_id INTEGER, email TEXT, session_hash TEXT, last_seen_at TEXT, ip TEXT)');
+        $pdo->exec('CREATE TABLE work_report_link_sessions (link_id INTEGER, email TEXT, session_hash TEXT, last_seen_at TEXT, expires_at TEXT, ip TEXT)');
         $pdo->prepare('INSERT INTO work_report_link_codes VALUES (1, 1, ?, ?, 0, ?, ?, NULL)')
             ->execute(['synthetic@example.test', hash('sha256', '123456'), '2026-09-09 11:59:00', '2026-09-09 12:10:00']);
         $pdo->createFunction('UNIX_TIMESTAMP', static function () use ($pdo, $interleaved): int {
@@ -182,7 +206,10 @@ final class SecurityReportAuthBoundariesTest extends TestCase
             'consumed concurrently' => ["used_at = '2026-09-09 12:00:00'", '123456', 0, false],
             'attempt cap reached concurrently' => ['attempts = 5', '123456', 5, false],
             'failed attempts accumulate' => ['attempts = 2', '000000', 3, false],
-            'valid unused code' => ['attempts = 0', '123456', 0, true],
+            // Pokus se započte před porovnáním, i ten úspěšný.
+            'valid unused code' => ['attempts = 0', '123456', 1, true],
+            'last attempt taken concurrently' => ['attempts = 5', '000000', 5, false],
+            'valid code on the last free attempt' => ['attempts = 4', '123456', 5, true],
         ];
     }
 

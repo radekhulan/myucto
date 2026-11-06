@@ -24,6 +24,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { useAuthStore } from '@/stores/auth'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import BankConnectionsPanel from '@/components/bank/BankConnectionsPanel.vue'
 
@@ -192,11 +193,12 @@ watch(() => currencyDraft.bank_code, (code) => {
 })
 const imapDraft = reactive<Partial<BankEmailImapSettings> & { password?: string }>(defaultImapDraft())
 const regexFieldDefinitions = [
-  { key: 'variable_symbol', required: true },
   { key: 'amount', required: true },
   { key: 'currency', required: true },
   { key: 'posted_at', required: true },
   { key: 'recipient_account', required: true },
+  { key: 'direction', required: false },
+  { key: 'variable_symbol', required: false },
   { key: 'counterparty_account', required: false },
   { key: 'counterparty_name', required: false },
   { key: 'constant_symbol', required: false },
@@ -232,6 +234,7 @@ function defaultImapDraft(): Partial<BankEmailImapSettings> & { password?: strin
     // Aviza jsou puvodni ucel schranky, takze novy ucet je ma zapnuta;
     // PDF prilohy nize jsou naopak opt-in.
     ingest_notices: true,
+    mark_seen_after_import: false,
     ingest_pdf_invoices: false,
     ingest_pdf_statements: false,
     distribute_to_suppliers: false,
@@ -879,7 +882,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <tr v-for="c in currencies" :key="c.id">
                 <td class="px-3 py-2 font-mono">{{ c.code }} <span class="text-xs text-neutral-500">{{ c.symbol }}</span></td>
                 <td class="px-3 py-2">{{ c.label }}</td>
-                <td class="px-3 py-2 font-mono text-xs">
+                <td class="px-3 py-2 font-mono">
                   {{ c.account_number || '—' }}<span v-if="c.bank_code"> / {{ c.bank_code }}</span>
                 </td>
                 <td class="px-3 py-2 font-mono text-xs">{{ c.iban || '—' }}</td>
@@ -993,22 +996,22 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                       <td class="px-3 py-2 text-right font-mono whitespace-nowrap text-neutral-600">
                         {{ a.current_balance_czk !== null ? formatMoney(a.current_balance_czk, 'CZK') : '—' }}
                       </td>
-                      <td class="px-3 py-2 text-xs whitespace-nowrap">
+                      <td class="px-3 py-2 whitespace-nowrap">
                         {{ formatDate(a.statement_date) }}
                         <span v-if="a.current_source === 'bank_api'" :title="t('bank_accounts.balances_source_api_hint')"
-                          class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
+                          class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 text-xs font-medium">
                           {{ t('bank_accounts.balances_source_api') }}
                         </span>
                         <span v-if="a.current_source === 'import'" :title="t('bank_accounts.balances_source_import_hint')"
-                          class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
+                          class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 text-xs font-medium">
                           {{ t('bank_accounts.balances_source_import') }}
                         </span>
                         <span v-if="a.current_source === 'email_notice'" :title="t('bank_accounts.balances_source_email_hint')"
-                          class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-medium">
+                          class="ml-1 inline-flex items-center px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 text-xs font-medium">
                           {{ t('bank_accounts.balances_source_email') }}
                         </span>
                       </td>
-                      <td class="px-3 py-2 text-right text-xs">{{ a.statement_count }}</td>
+                      <td class="px-3 py-2 text-right">{{ a.statement_count }}</td>
                     </tr>
                   </tbody>
                   <tfoot class="bg-neutral-50 border-t border-neutral-200">
@@ -1216,9 +1219,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 <td class="px-3 py-2 font-mono text-xs">{{ account.host || '—' }}<span v-if="account.port">:{{ account.port }}</span></td>
                 <td class="px-3 py-2">{{ account.folder || 'INBOX' }}</td>
                 <td class="px-3 py-2">{{ account.max_messages_per_run }}</td>
-                <td class="px-3 py-2 text-xs">
-                  <div>{{ account.last_scan_at || '—' }}</div>
-                  <div v-if="account.last_scan_status" :class="account.last_scan_status === 'ok' ? 'text-success-600' : 'text-danger-600'">
+                <td class="px-3 py-2">
+                  <div class="whitespace-nowrap">{{ account.last_scan_at || '—' }}</div>
+                  <div v-if="account.last_scan_status" class="text-xs" :class="account.last_scan_status === 'ok' ? 'text-success-600' : 'text-danger-600'">
                     {{ account.last_scan_status }}<span v-if="account.last_scan_message"> · {{ account.last_scan_message }}</span>
                   </div>
                 </td>
@@ -1320,6 +1323,14 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 <span>
                   {{ t('bank_accounts.ingest_notices') }}
                   <span class="block text-xs text-neutral-500">{{ t('bank_accounts.ingest_notices_hint') }}</span>
+                </span>
+              </label>
+              <label class="flex items-start gap-2 text-sm md:col-span-2" data-testid="imap-mark-seen-after-import">
+                <input v-model="imapDraft.mark_seen_after_import" type="checkbox" :disabled="!imapDraft.ingest_notices"
+                  class="mt-0.5 rounded border-neutral-300 text-primary-600" />
+                <span>
+                  {{ t('bank_accounts.mark_seen_after_import') }}
+                  <span class="block text-xs text-neutral-500">{{ t('bank_accounts.mark_seen_after_import_hint') }}</span>
                 </span>
               </label>
               <label class="flex items-start gap-2 text-sm">
@@ -1535,8 +1546,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="m in messages" :key="m.id">
                 <td class="px-3 py-2 font-mono text-xs">#{{ m.id }}<div v-if="m.imap_uid" class="text-neutral-500">UID {{ m.imap_uid }}</div></td>
-                <td class="px-3 py-2 text-xs">{{ m.imap_account_name || (m.imap_account_id ? `#${m.imap_account_id}` : '—') }}</td>
-                <td class="px-3 py-2 text-xs whitespace-nowrap">
+                <td class="px-3 py-2">{{ m.imap_account_name || (m.imap_account_id ? `#${m.imap_account_id}` : '—') }}</td>
+                <td class="px-3 py-2 whitespace-nowrap">
                   <time :datetime="m.processed_at">{{ formatDateTime(m.processed_at) }}</time>
                 </td>
                 <td class="px-3 py-2 max-w-sm">
@@ -1554,9 +1565,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                   </div>
                 </td>
                 <td class="px-3 py-2">{{ m.provider_code || '—' }}</td>
-                <td class="px-3 py-2 font-mono text-xs">
-                  {{ m.parsed_payload?.variable_symbol || '—' }}
-                  <div v-if="m.parsed_payload?.amount">{{ m.parsed_payload.amount }} {{ m.parsed_payload.currency }}</div>
+                <td class="px-3 py-2 font-mono">
+                  <div class="text-xs">{{ m.parsed_payload?.variable_symbol || '—' }}</div>
+                  <div v-if="m.parsed_payload?.amount" class="whitespace-nowrap">{{ m.parsed_payload.amount }} {{ m.parsed_payload.currency }}</div>
                 </td>
                 <td class="px-3 py-2">
                   <span v-if="m.bank_transaction_id">#{{ m.bank_transaction_id }}</span>
@@ -1611,7 +1622,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                   <div class="truncate">{{ a.filename }}</div>
                   <div class="text-xs text-neutral-500 truncate">{{ a.sender }}<template v-if="a.subject"> · {{ a.subject }}</template></div>
                 </td>
-                <td class="px-3 py-2 text-xs whitespace-nowrap">
+                <td class="px-3 py-2 whitespace-nowrap">
                   <time :datetime="a.created_at">{{ formatDateTime(a.created_at) }}</time>
                 </td>
                 <td class="px-3 py-2 whitespace-nowrap">
@@ -1631,9 +1642,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
       </div>
     </div>
 
-    <div v-if="canManageAccounts && currencyFormOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
-        <h3 class="text-lg font-semibold mb-3">{{ editingCurrency === null ? t('bank_accounts.new_account') : t('bank_accounts.edit_account_title', { label: editingCurrencyLabel }) }}</h3>
+    <Modal v-if="canManageAccounts && currencyFormOpen" width-class="max-w-md"
+      :title="editingCurrency === null ? t('bank_accounts.new_account') : t('bank_accounts.edit_account_title', { label: editingCurrencyLabel })"
+      @close="closeCurrencyForm">
         <div class="space-y-3">
           <div class="grid grid-cols-3 gap-3">
             <div>
@@ -1692,8 +1703,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.bank_code') }}</label>
-            <input v-model="currencyDraft.bank_code" type="text"
+            <input v-model="currencyDraft.bank_code" type="text" maxlength="10"
               class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm font-mono" />
+            <p class="mt-1 text-xs text-neutral-500">{{ t('bank_accounts.bank_code_hint') }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.bank_name') }}</label>
@@ -1718,7 +1730,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             <input v-model="currencyDraft.is_default" type="checkbox" class="rounded border-neutral-300 text-primary-600" />
             {{ t('bank_accounts.default_for_currency') }}
           </label>
-          <div class="flex justify-end gap-2 pt-2">
+        </div>
+        <template #footer>
+          <div class="flex flex-wrap justify-end gap-2">
             <button type="button" @click="closeCurrencyForm"
               :class="btnOutline('neutral')">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
@@ -1728,9 +1742,8 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
               {{ t('common.save') }}</button>
           </div>
-        </div>
-      </div>
-    </div>
+        </template>
+    </Modal>
 
     <div v-if="providerFormOpen" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-5xl w-full max-h-[90vh] overflow-y-auto p-5">
@@ -1807,12 +1820,6 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
                 </tbody>
               </table>
             </div>
-          </section>
-
-          <section>
-            <h4 class="text-sm font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t('bank_accounts.normalizer_config') }}</h4>
-            <textarea v-model="providerDraft.normalizer_config_json" rows="4"
-              class="w-full p-3 bg-surface border border-neutral-300 rounded-md text-sm font-mono"></textarea>
           </section>
 
           <div class="flex justify-end gap-2 pt-1">

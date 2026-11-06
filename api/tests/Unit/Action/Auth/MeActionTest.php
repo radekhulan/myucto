@@ -28,6 +28,48 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[AllowMockObjectsWithoutExpectations]
 final class MeActionTest extends TestCase
 {
+    public function testTechnicalProfileDoesNotReadMembershipOrExposeCommercialOrTenantData(): void
+    {
+        $db = $this->createMock(Connection::class);
+        $db->expects(self::never())->method('pdo');
+        $db->expects(self::never())->method('hasColumn');
+        $memberships = $this->createMock(UserSupplierRepository::class);
+        $memberships->expects(self::never())->method('allowedSupplierIds');
+        $license = $this->createMock(LicenseService::class);
+        $license->expects(self::never())->method('current');
+        $role = new EffectiveRole(19, 'Správce instance', 'instance_admin', true, [], 'instance_admin');
+        $permissions = $this->createStub(PermissionResolver::class);
+        $permissions->method('resolve')->willReturn($role);
+        $permissions->method('resolveDefault')->willReturn($role);
+        $credentials = $this->createStub(PasskeyCredentialRepository::class);
+        $credentials->method('countActiveForUser')->willReturn(1);
+        $offers = $this->createStub(MfaOfferService::class);
+        $offers->method('shouldOffer')->willReturn(false);
+        $clock = $this->createStub(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-10-23 12:00:00 UTC'));
+        $config = new Config([]);
+        $action = new MeAction($db, $config, $memberships, $permissions, $license, $credentials,
+            new MfaPolicyService($config), $offers, new SessionLockPolicy($config), $clock);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/auth/me')
+            ->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => 19, 'name' => 'Synthetic technician', 'email' => 'tech@example.invalid',
+                'role' => 'readonly', 'role_summary' => ['type' => 'instance_admin', 'system_key' => 'instance_admin'],
+                'is_instance_admin' => true, 'is_superadmin' => false,
+            ])->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 77)
+            ->withAttribute(\MyInvoice\Middleware\TenantDomainMiddleware::ATTR_CONTEXT,
+                new \MyInvoice\Service\Tenant\TenantDomainContext('custom', 'synthetic.invalid', 'https://synthetic.invalid', 1, 77, 'all'));
+        $response = $action($request, (new ResponseFactory())->createResponse());
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertTrue($body['user']['is_instance_admin']);
+        self::assertFalse($body['user']['is_superadmin']);
+        self::assertFalse($body['user']['can_create_supplier']);
+        self::assertSame([], $body['suppliers']);
+        self::assertSame(0, $body['current_supplier_id']);
+        self::assertNull($body['domain_context']);
+        self::assertNull($body['license']);
+        self::assertSame([], $body['permissions']);
+    }
+
     public function testResponseContainsMfaAndAuthoritativeSessionState(): void
     {
         $supplierStatement = $this->createMock(\PDOStatement::class);
@@ -36,12 +78,19 @@ final class MeActionTest extends TestCase
             ->with(\PDO::FETCH_ASSOC)
             ->willReturn([]);
         $pdo = $this->createMock(\PDO::class);
+        // Instalace bez sloupce rozpisu slevy (2035) dostane volbu vypnutou, dotaz nespadne.
         $pdo->expects(self::once())
             ->method('prepare')
+            ->with(self::logicalAnd(
+                self::stringContains('0 AS invoice_pdf_show_line_discount'),
+                self::stringContains('NULL AS work_report_display_options'),
+                self::stringContains('0 AS default_hourly_rate'),
+            ))
             ->willReturn($supplierStatement);
         $db = $this->createMock(Connection::class);
-        // Sloupce kontrolované kvůli instalacím pozadu s migrací: OSS a zjednodušený doklad (2037).
-        $db->expects(self::exactly(2))->method('hasColumn')
+        // Sloupce kontrolované kvůli instalacím pozadu s migrací: OSS, zjednodušený doklad (2037)
+        // rozpis slevy na PDF (2035) a zobrazení výkazu (2229, oba tady záměrně chybí).
+        $db->expects(self::exactly(5))->method('hasColumn')
             ->willReturnCallback(static fn (string $table, string $column): bool =>
                 $table === 'supplier' && in_array($column, ['oss_enabled', 'simplified_hide_customer_default'], true));
         $db->expects(self::once())->method('pdo')->willReturn($pdo);

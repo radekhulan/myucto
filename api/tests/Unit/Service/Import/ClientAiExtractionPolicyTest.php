@@ -30,6 +30,17 @@ final class ClientAiExtractionPolicyTest extends TestCase
         ], (new ClientAiExtractionPolicy($db, $gateway))->supplierState(42));
     }
 
+    /** Integrace s API tokenem volí firmu sama; doklad se nesmí přesměrovat jinam (#233). */
+    public function testApiTokenNeverRoutesAcrossSuppliers(): void
+    {
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/purchase-invoices/import-ai')
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => 17, 'role_type' => 'staff']);
+        self::assertTrue(ClientAiExtractionPolicy::canRouteAcrossSuppliers(
+            $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')));
+        self::assertFalse(ClientAiExtractionPolicy::canRouteAcrossSuppliers(
+            $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'bearer')));
+    }
+
     public static function states(): iterable
     {
         yield 'disabled' => [false, null, false];

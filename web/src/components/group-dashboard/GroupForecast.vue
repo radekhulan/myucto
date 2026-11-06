@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { formatMoney } from '@/composables/useFormat'
+import { formatMoneyWhole } from '@/composables/useFormat'
 import GroupDashboardChart, { type GroupChartSeries } from '@/components/group-dashboard/GroupDashboardChart.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 
@@ -51,7 +51,7 @@ const chartSeries = computed<GroupChartSeries[]>(() => metrics.map((metric, inde
   label: t(`group_stats.${metric}`), values: chartRows.value.map(row => row.value![metric]),
   tone: (['primary', 'warning', 'success'] as const)[index]!,
 })))
-const money = (amount: number | null | undefined, currency: string) => amount == null ? t('group_stats.forecast_unknown') : formatMoney(amount, currency)
+const money = (amount: number | null | undefined, currency: string) => amount == null ? t('group_stats.forecast_unknown') : formatMoneyWhole(amount, currency)
 const resultClass = (amount: number | null | undefined) => amount == null ? 'text-neutral-400' : amount < 0 ? 'text-danger-600' : amount > 0 ? 'text-success-600' : 'text-neutral-700'
 const stateText = (company: GroupForecastCompany) => company.forecast === undefined ? t('group_stats.restricted')
   : company.forecast === null ? t('group_stats.failed_part') : t('group_stats.no_currency_data')

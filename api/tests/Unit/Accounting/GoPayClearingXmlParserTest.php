@@ -38,6 +38,21 @@ final class GoPayClearingXmlParserTest extends TestCase
             '<?xml version="1.0"?><!DOCTYPE clearing [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>', $this->xml()));
     }
 
+    public function testAcceptsClearingLargerThanFormerTwoMegabyteLimit(): void
+    {
+        $xml = str_replace('<storno>', str_repeat('<!-- ' . str_repeat('x', 1000) . ' -->', 5000) . '<storno>', $this->xml());
+        self::assertGreaterThan(2_097_152, strlen($xml));
+
+        self::assertSame('875.00', (new GoPayClearingXmlParser())->parse($xml)['amount_transfer']);
+    }
+
+    public function testRejectsClearingOverLimit(): void
+    {
+        $this->expectException(GoPayException::class);
+        $this->expectExceptionMessage('limit 32 MB');
+        (new GoPayClearingXmlParser())->parse(str_pad($this->xml(), GoPayClearingXmlParser::MAX_BYTES + 1));
+    }
+
     public function testRejectsWrongNamespace(): void
     {
         $this->expectException(GoPayException::class);

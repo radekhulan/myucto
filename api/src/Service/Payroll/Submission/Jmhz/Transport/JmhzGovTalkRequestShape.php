@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz\Transport;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
+
 /**
  * Vědomé, explicitní prohlášení tvaru ODESÍLANÉ GovTalk obálky.
  *
@@ -31,6 +33,11 @@ final readonly class JmhzGovTalkRequestShape
     private const FORM_CLASSES = [
         'JMHZ25' => 'CSSZ_JMHZ',
         'REGZEC25' => 'CSSZ_REGZEC',
+        // Verze 2027 (příručka testování změn 2027, kap. 3.1 a 13.2): Class
+        // beze změny, jiný eType. PREZEC27 a DZMH27 tu schválně nejsou, jejich
+        // eType doložený není (O-4) a obálka se pro ně proto nepostaví.
+        'JMHZ27' => 'CSSZ_JMHZ',
+        'REGZEC27' => 'CSSZ_REGZEC',
         'PREZEC26' => 'CSSZ_PREZEC',
         'NEMPRI25' => 'CSSZ_NEM_PRI',
         'HZUPN20' => 'CSSZ_NEM_PRI',
@@ -128,9 +135,11 @@ final readonly class JmhzGovTalkRequestShape
      * takové podání nemá jak zpracovat — přitom lokální XSD i katalog kontrol
      * projdou, protože ani jedno na obálku nedosáhne.
      */
-    public static function forSubmissionClass(string $submissionClass): self
-    {
-        $envelopeType = self::envelopeTypeFor($submissionClass);
+    public static function forSubmissionClass(
+        string $submissionClass,
+        JmhzSpecVersion $version = JmhzSpecVersion::V2026,
+    ): self {
+        $envelopeType = self::envelopeTypeFor($submissionClass, $version);
         if ($envelopeType === null) {
             // Neznámá třída, nebo třída sdílená víc formuláři (CSSZ_NEM_PRI):
             // tam se `eType` z třídy odvodit nedá a musí přijít formulář.
@@ -171,11 +180,50 @@ final readonly class JmhzGovTalkRequestShape
     }
 
     /**
-     * Doložený `eType` ČSSZ obálky pro `Class`, viz {@see forSubmissionClass()}.
-     * U třídy sdílené víc formuláři vrací `null` — jednoznačná odpověď není.
+     * Tvar obálky pro zmrazenou datovou větu: `eType` se bere z ročníku, který
+     * nese jmenný prostor kořene těla ({@see JmhzSpecVersion::fromDocumentNamespace()}).
+     * Hlavička obálky tak nemůže tvrdit jiný ročník, než jaký je uvnitř.
+     * U formulářů, jejichž jmenný prostor ročník nerozlišuje (PREZEC, NEMPRI,
+     * OZUSPOJ), platí totéž co {@see forSubmissionClass()}; verzi 2027 u nich
+     * hlídá už sestavení podle data události.
      */
-    public static function envelopeTypeFor(string $submissionClass): ?string
+    public static function forPayload(string $submissionClass, string $payloadXml): self
     {
+        $version = null;
+        if (JmhzSpecVersion::isVersionedClass($submissionClass)) {
+            $previous = libxml_use_internal_errors(true);
+            $reader = new \XMLReader();
+            $namespace = null;
+            if ($reader->XML($payloadXml, null, LIBXML_NONET)) {
+                while ($reader->read()) {
+                    if ($reader->nodeType === \XMLReader::ELEMENT) {
+                        $namespace = $reader->namespaceURI;
+                        break;
+                    }
+                }
+                $reader->close();
+            }
+            libxml_clear_errors();
+            libxml_use_internal_errors($previous);
+            $version = is_string($namespace) ? JmhzSpecVersion::fromDocumentNamespace($namespace) : null;
+        }
+
+        return self::forSubmissionClass($submissionClass, $version ?? JmhzSpecVersion::V2026);
+    }
+
+    /**
+     * Doložený `eType` ČSSZ obálky pro `Class` ve verzi specifikace, viz
+     * {@see forSubmissionClass()} a {@see JmhzSpecVersion::envelopeTypeFor()}.
+     * U třídy sdílené víc formuláři vrací `null` — jednoznačná odpověď není;
+     * stejně tak u verze, pro kterou `eType` formuláře doložený není.
+     */
+    public static function envelopeTypeFor(
+        string $submissionClass,
+        JmhzSpecVersion $version = JmhzSpecVersion::V2026,
+    ): ?string {
+        if (JmhzSpecVersion::isVersionedClass($submissionClass)) {
+            return $version->envelopeTypeFor($submissionClass);
+        }
         $forms = array_keys(self::FORM_CLASSES, $submissionClass, true);
 
         return count($forms) === 1 ? $forms[0] : null;

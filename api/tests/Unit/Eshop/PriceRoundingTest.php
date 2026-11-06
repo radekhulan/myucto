@@ -11,10 +11,21 @@ use PHPUnit\Framework\TestCase;
 #[Group('unit')]
 final class PriceRoundingTest extends TestCase
 {
-    public function testNoneNormalizesToTwoDecimals(): void
+    public function testNoneKeepsUnitPricePrecision(): void
     {
         self::assertSame('196.50', R::apply('196.5', 'none'));
+        self::assertSame('196.50', R::apply('196.500000', 'none'));
+        self::assertSame('0.004', R::apply('0.004', 'none'));
+        self::assertSame('0.0108', R::apply('0.010800', 'none'));
+        self::assertSame('196.554', R::apply('196.554', 'none'));
+        self::assertSame('0.000001', R::apply('0.0000005', 'none')); // half-up na šesté místo
+        self::assertSame('0.00', R::apply('0.0000004', 'none'));
+    }
+
+    public function testRoundToHeller(): void
+    {
         self::assertSame('196.50', R::apply('196.50', '0.01'));
+        self::assertSame('0.00', R::apply('0.004', '0.01'));
         self::assertSame('196.55', R::apply('196.554', '0.01')); // half-up na halíř
         self::assertSame('196.55', R::apply('196.545', '0.01'));
     }

@@ -16,10 +16,13 @@ final class AuthoritativeTransactionReconciler
         $accountKey = self::account($account, $bank);
         if ($accountKey === null || $currency === '') return [];
         $dates = array_column($transactions, 'posted_at');
+        // Výpisy převzaté z jiného programu (source 'import') nesou tytéž pohyby banky,
+        // jen s referencí podle dokladu původního programu. Bez nich by stažení z banky
+        // za převzaté období založilo každý pohyb podruhé.
         $query = $this->pdo->prepare(
             "SELECT bt.*, bs.source AS statement_source, bs.account_number AS own_account, bs.bank_code AS own_bank
              FROM bank_transactions bt JOIN bank_statements bs ON bs.id = bt.statement_id
-             WHERE bs.supplier_id = ? AND bs.source IN ('gpc', 'bank_api')
+             WHERE bs.supplier_id = ? AND bs.source IN ('gpc', 'bank_api', 'import')
                AND bs.currency = ? AND COALESCE(NULLIF(bt.currency, ''), bs.currency) = ? AND bt.posted_at BETWEEN ? AND ?"
         );
         $query->execute([$supplierId, $currency, $currency, min($dates), max($dates)]);
@@ -52,6 +55,11 @@ final class AuthoritativeTransactionReconciler
                 if ($ids !== []) $known[$index] = (int) array_key_first($ids);
             }
         }
+        // GPC je úplný seznam pohybů účtu od banky. Má-li v něm den a částka jediný pohyb, feed
+        // má také jediný a protiúčet je stejný, nemůže jít o jinou platbu, i když každý zdroj
+        // nese vlastní referenci a popis (převod mezi vlastními účty bez VS). Uvnitř jednoho
+        // zdroje a u pohybů bez protiúčtu (poplatek, karta) tenhle důkaz neplatí.
+        $incomingByDateAmount = array_count_values(array_map(self::dateAmount(...), $transactions));
         $matches = [];
         $strong = [];
         foreach ($transactions as $index => $tx) {
@@ -78,7 +86,11 @@ final class AuthoritativeTransactionReconciler
             foreach ($exact !== [] ? $exact : $possible as $row) {
                 $id = (int) $row['id'];
                 $matches[$index][] = $id;
-                $strong[$index][$id] = self::strong($tx, $row);
+                $strong[$index][$id] = self::strong($tx, $row)
+                    || ($source === 'gpc' && $row['statement_source'] === 'bank_api'
+                        && ($incomingByDateAmount[self::dateAmount($tx)] ?? 0) === 1
+                        && count($byDateAmount[self::dateAmount($tx)]) === 1
+                        && self::sameCounterparty($tx, $row));
             }
         }
         // Dvě legitimní platby téhož dne, částky a VS (typicky dva samostatné převody
@@ -193,6 +205,13 @@ final class AuthoritativeTransactionReconciler
     private static function dateAmount(array $tx): string
     {
         return $tx['posted_at'] . ':' . number_format((float) $tx['amount'], 2, '.', '');
+    }
+
+    private static function sameCounterparty(array $a, array $b): bool
+    {
+        $account = self::account((string) ($a['counterparty_account'] ?? ''), (string) ($a['counterparty_bank'] ?? ''));
+        return $account !== null
+            && $account === self::account((string) ($b['counterparty_account'] ?? ''), (string) ($b['counterparty_bank'] ?? ''));
     }
 
     private static function strong(array $a, array $b): bool

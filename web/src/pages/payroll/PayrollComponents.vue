@@ -561,7 +561,7 @@ const taxTreatments: PayrollComponentTaxTreatment[] = ['included', 'exempt', 'wi
 const inclusionTreatments: PayrollComponentInclusion[] = ['included', 'excluded', 'manual_review']
 const exemptionBaskets: PayrollBenefitExemptionBasket[] = [
   'non_cash_health', 'non_cash_leisure', 'old_age_savings',
-  'meal_per_shift', 'temporary_accommodation',
+  'meal_per_shift', 'temporary_accommodation', 'recreation', 'food_service_tips',
 ]
 const exemptionBases: PayrollExemptionBasis[] = [
   'not_subject_to_tax', 'statutory_exempt', 'benefit_basket', 'periodic_benefit_limit',
@@ -2173,7 +2173,8 @@ onMounted(load)
             <p v-if="inputPreview.blocker" class="mt-1">{{ inputPreview.blocker }}</p>
             <p v-if="inputPreview.annual_limit_minor !== null" class="mt-1">{{ t('payroll.components.inputs.annual_limit', { used: formatMoney(inputPreview.annual_used_minor), after: formatMoney(inputPreview.annual_after_minor), limit: formatMoney(inputPreview.annual_limit_minor) }) }}</p>
             <template v-if="inputPreview.exemption_basket">
-              <p data-testid="payroll-input-basket" class="mt-2 font-medium">{{ t('payroll.components.inputs.basket_usage', { basket: t(`payroll.components.exemption_basket.${inputPreview.exemption_basket.basket}`), statute: inputPreview.exemption_basket.statute, used: formatMoney(inputPreview.exemption_basket.used_after_minor), limit: formatMoney(inputPreview.exemption_basket.limit_minor), remaining: formatMoney(inputPreview.exemption_basket.remaining_minor) }) }}</p>
+              <p v-if="inputPreview.exemption_basket.limit_minor === null" data-testid="payroll-input-basket" class="mt-2 font-medium">{{ t('payroll.components.inputs.basket_usage_unlimited', { basket: t(`payroll.components.exemption_basket.${inputPreview.exemption_basket.basket}`), statute: inputPreview.exemption_basket.statute, used: formatMoney(inputPreview.exemption_basket.used_after_minor) }) }}</p>
+              <p v-else data-testid="payroll-input-basket" class="mt-2 font-medium">{{ t('payroll.components.inputs.basket_usage', { basket: t(`payroll.components.exemption_basket.${inputPreview.exemption_basket.basket}`), statute: inputPreview.exemption_basket.statute, used: formatMoney(inputPreview.exemption_basket.used_after_minor), limit: formatMoney(inputPreview.exemption_basket.limit_minor), remaining: formatMoney(inputPreview.exemption_basket.remaining_minor) }) }}</p>
               <p v-if="inputPreview.exemption_basket.limit_exceeded" data-testid="payroll-input-basket-over" class="mt-1">{{ t('payroll.components.inputs.basket_over_limit', { exempt: formatMoney(inputPreview.exemption_basket.exempt_minor), taxable: formatMoney(inputPreview.exemption_basket.taxable_minor) }) }}</p>
               <p
                 v-if="inputPreview.exemption_basket.allocation?.mode === 'uniform_per_entitlement'"

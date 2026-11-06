@@ -482,4 +482,81 @@ final class AiLayerSecurityTest extends TestCase
         self::assertFalse($result['ok']);
         self::assertSame('rule_matched', $result['error']);
     }
+
+    /** Pravidlo omezené na jiný vlastní účet pohyb nepokrývá, AI ho smí navrhnout. */
+    public function testRuleOfAnotherOwnAccountDoesNotBlockSuggestion(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET ai_assist_enabled=1,ai_assist_scope='bank_tx' WHERE id=?")
+            ->execute([$this->supplierId]);
+        $account = $pdo->prepare(
+            "INSERT INTO supplier_bank_accounts (supplier_id, label, account_number, bank_code, bank_code_norm, currency, account_canonical, kind, source, is_active)
+             VALUES (?, ?, ?, '0100', '0100', 'CZK', ?, 'current', 'manual', 1)
+             ON DUPLICATE KEY UPDATE id = LAST_INSERT_ID(id)"
+        );
+        $account->execute([$this->supplierId, '__test vlastní', '1000000005', '1000000005']);
+        $ownId = (int) $pdo->lastInsertId();
+        $account->execute([$this->supplierId, '__test jiný', '3000000004', '3000000004']);
+        $otherId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date)
+             VALUES (?,?,?,?,?,?,?)'
+        )->execute([
+            $this->supplierId, '__test_ai_rule_account.gpc', hash('sha256', random_bytes(16)),
+            '1000000005', '0100', 'CZK', '2026-07-14',
+        ]);
+        $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id,posted_at,amount,currency,counterparty_account,counterparty_bank)
+             VALUES (?,'2026-07-14',-1436,'CZK','21012-7928311','0710')"
+        )->execute([(int) $pdo->lastInsertId()]);
+        $txId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO bank_posting_rules
+                (supplier_id,name,direction,bank_account_id,counterparty_account,counterparty_bank,
+                 debit_account_code,credit_account_code,mode,is_active,applies_currency)
+             VALUES (?, '__test Odvod OSSZ jiného účtu','outgoing',?,'21012-7928311','0710','336','221','suggest',1,'CZK')"
+        )->execute([$this->supplierId, $otherId]);
+        $ruleId = (int) $pdo->lastInsertId();
+
+        $other = $this->suggestionService->suggestBankNow($this->supplierId, $txId);
+        self::assertNotSame('rule_matched', $other['error'] ?? null, 'Pravidlo jiného vlastního účtu pohyb nepokrývá.');
+
+        $pdo->prepare('UPDATE bank_posting_rules SET bank_account_id = ? WHERE id = ?')->execute([$ownId, $ruleId]);
+        $own = $this->suggestionService->suggestBankNow($this->supplierId, $txId);
+        self::assertSame('rule_matched', $own['error'] ?? null, 'Pravidlo účtu výpisu pohyb pokrývá.');
+    }
+
+    /**
+     * Pohyb kartou, ke kterému párování našlo doklad ke kontrole, se účtuje přes doklad.
+     * Kontace z popisu (typicky náklad místo 321) by účetní jen mátla.
+     */
+    public function testTransactionAwaitingDocumentMatchIsNotClassified(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE supplier SET ai_assist_enabled=1,ai_assist_scope='bank_tx' WHERE id=?")
+            ->execute([$this->supplierId]);
+        $pdo->prepare(
+            'INSERT INTO bank_statements
+                (supplier_id,file_name,file_hash,account_number,bank_code,currency,statement_date)
+             VALUES (?,?,?,?,?,?,?)'
+        )->execute([
+            $this->supplierId, '__test_ai_document_match.gpc', hash('sha256', random_bytes(16)),
+            '1000000005', '0100', 'CZK', '2026-07-14',
+        ]);
+        $statementId = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id,posted_at,amount,currency,card_last4,description,match_reason)
+             VALUES (?,'2026-07-14',-250.37,'CZK','6801','SYNTHETIC SHOP','card_match_requires_review')"
+        )->execute([$statementId]);
+        $txId = (int) $pdo->lastInsertId();
+
+        $result = $this->suggestionService->suggestBankNow($this->supplierId, $txId);
+
+        self::assertFalse($result['ok']);
+        self::assertSame('document_match', $result['error']);
+        self::assertSame(0, (int) $pdo->query(
+            'SELECT COUNT(*) FROM bank_posting_suggestions WHERE bank_transaction_id=' . $txId
+        )->fetchColumn());
+    }
 }

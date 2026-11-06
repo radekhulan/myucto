@@ -14,12 +14,25 @@ use PDOException;
  *
  * @phpstan-type ImportProfile array{
  *   id:int,name:string,rules:list<array<string,mixed>>,components:list<array<string,mixed>>,
- *   is_sample:bool,sample_version:?int,updated_at:string
+ *   is_sample:bool,sample_key:?string,sample_version:?int,updated_at:string
  * }
  */
 final class PayrollImportProfileRepository
 {
-    private const COLUMNS = 'id, name, rules_json, components_json, is_sample, sample_version, updated_at';
+    private const COLUMNS = 'id, name, rules_json, components_json, is_sample, sample_key, sample_version, updated_at';
+
+    /**
+     * Klíč vzoru => značka na firmě, že vzor už dostala. Každý vzor má vlastní,
+     * takže nový vzor dostanou i firmy, které starší vzor mají nebo smazaly.
+     */
+    public const SAMPLE_MARKERS = [
+        'giriton' => 'payroll_attendance_sample_seeded_at',
+        'myucto' => 'payroll_attendance_myucto_sample_seeded_at',
+        'pamica' => 'payroll_attendance_pamica_sample_seeded_at',
+    ];
+
+    /** Vzory založené před zavedením klíčů jsou GIRITON (migrace 2206). */
+    private const LEGACY_SAMPLE_KEY = 'giriton';
 
     public function __construct(private readonly Connection $db)
     {
@@ -71,6 +84,7 @@ final class PayrollImportProfileRepository
         array $components = [],
         bool $isSample = false,
         ?int $sampleVersion = null,
+        ?string $sampleKey = null,
     ): ?array {
         $rulesJson = self::json($rules);
         $componentsJson = self::json($components);
@@ -78,9 +92,9 @@ final class PayrollImportProfileRepository
             if ($id === null) {
                 $this->db->pdo()->prepare(
                     'INSERT INTO payroll_import_profiles
-                        (supplier_id, source_system, name, rules_json, components_json, is_sample,
+                        (supplier_id, source_system, name, rules_json, components_json, is_sample, sample_key,
                          sample_version, sample_rules_sha256, updated_by)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
                 )->execute([
                     $supplierId,
                     $sourceSystem,
@@ -88,6 +102,7 @@ final class PayrollImportProfileRepository
                     $rulesJson,
                     $componentsJson,
                     $isSample ? 1 : 0,
+                    $isSample ? ($sampleKey ?? self::LEGACY_SAMPLE_KEY) : null,
                     $isSample ? $sampleVersion : null,
                     $isSample ? self::contentHash($rulesJson, $componentsJson) : null,
                     $userId,
@@ -136,8 +151,8 @@ final class PayrollImportProfileRepository
     }
 
     /**
-     * Ukázkový profil se firmě založí jednou; značka na firmě zajistí, že se
-     * smazaný vzor znovu nevrátí. Uvnitř cizí transakce se nic nezakládá —
+     * Ukázkový profil se firmě založí jednou; značka vzoru na firmě zajistí,
+     * že se smazaný vzor znovu nevrátí. Uvnitř cizí transakce se nic nezakládá —
      * zámek řádku firmy by se tam držel až do jejího konce.
      *
      * @param list<array<string,mixed>> $rules
@@ -147,16 +162,19 @@ final class PayrollImportProfileRepository
     public function seedSampleOnce(
         int $supplierId,
         string $sourceSystem,
+        string $sampleKey,
         string $name,
         array $rules,
         array $components,
         ?int $sampleVersion = null,
     ): bool {
+        $marker = self::SAMPLE_MARKERS[$sampleKey]
+            ?? throw new \InvalidArgumentException("Vzor profilu „{$sampleKey}“ nemá značku na firmě.");
         $pdo = $this->db->pdo();
         if ($pdo->inTransaction()) {
             return false;
         }
-        $check = $pdo->prepare('SELECT payroll_attendance_sample_seeded_at FROM supplier WHERE id = ?');
+        $check = $pdo->prepare("SELECT {$marker} FROM supplier WHERE id = ?");
         $check->execute([$supplierId]);
         $seeded = $check->fetchColumn();
         if ($seeded === false || $seeded !== null) {
@@ -164,7 +182,7 @@ final class PayrollImportProfileRepository
         }
         $pdo->beginTransaction();
         try {
-            $lock = $pdo->prepare('SELECT payroll_attendance_sample_seeded_at FROM supplier WHERE id = ? FOR UPDATE');
+            $lock = $pdo->prepare("SELECT {$marker} FROM supplier WHERE id = ? FOR UPDATE");
             $lock->execute([$supplierId]);
             $current = $lock->fetchColumn();
             if ($current === false || $current !== null) {
@@ -178,9 +196,9 @@ final class PayrollImportProfileRepository
             $exists->execute([$supplierId, $sourceSystem, $name]);
             $created = $exists->fetchColumn() === false;
             if ($created) {
-                $this->save($supplierId, $sourceSystem, null, $name, $rules, null, $components, true, $sampleVersion);
+                $this->save($supplierId, $sourceSystem, null, $name, $rules, null, $components, true, $sampleVersion, $sampleKey);
             }
-            $pdo->prepare('UPDATE supplier SET payroll_attendance_sample_seeded_at = NOW() WHERE id = ?')
+            $pdo->prepare("UPDATE supplier SET {$marker} = NOW() WHERE id = ?")
                 ->execute([$supplierId]);
             $pdo->commit();
 
@@ -194,7 +212,8 @@ final class PayrollImportProfileRepository
     }
 
     /**
-     * Převede ukázkové profily firmy na aktuální verzi vzoru.
+     * Převede ukázkové profily firmy založené z vzoru `$sampleKey` na jeho
+     * aktuální verzi; vzory s jiným klíčem se nedotknou.
      *
      * Nedotčený vzor (uložený obsah má týž otisk, jaký aplikace zapsala) se
      * nahradí; obsah, který už aktuálnímu vzoru odpovídá, jen dostane novou
@@ -208,11 +227,12 @@ final class PayrollImportProfileRepository
      *
      * @param list<array<string,mixed>> $rules
      * @param list<array<string,mixed>> $components
-     * @return list<array{id:int,name:string,sample_version:?int}> upravené vzory starší verze
+     * @return list<array{id:int,name:string,sample_key:string,sample_version:?int}> upravené vzory starší verze
      */
     public function upgradeSample(
         int $supplierId,
         string $sourceSystem,
+        string $sampleKey,
         int $version,
         array $rules,
         array $components,
@@ -220,11 +240,11 @@ final class PayrollImportProfileRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, name, rules_json, components_json, sample_version, sample_rules_sha256, row_version
                FROM payroll_import_profiles
-              WHERE supplier_id = ? AND source_system = ? AND is_sample = 1
+              WHERE supplier_id = ? AND source_system = ? AND is_sample = 1 AND sample_key = ?
                 AND (sample_version IS NULL OR sample_version < ?)
               ORDER BY id'
         );
-        $stmt->execute([$supplierId, $sourceSystem, $version]);
+        $stmt->execute([$supplierId, $sourceSystem, $sampleKey, $version]);
         $rulesJson = self::json($rules);
         $componentsJson = self::json($components);
         $latestHash = self::contentHash($rulesJson, $componentsJson);
@@ -264,7 +284,7 @@ final class PayrollImportProfileRepository
                     continue;
                 }
             }
-            $modified[] = ['id' => $id, 'name' => (string) $row['name'], 'sample_version' => $sampleVersion];
+            $modified[] = ['id' => $id, 'name' => (string) $row['name'], 'sample_key' => $sampleKey, 'sample_version' => $sampleVersion];
         }
 
         return $modified;
@@ -297,6 +317,7 @@ final class PayrollImportProfileRepository
             'rules' => is_array($rules) ? array_values(array_filter($rules, 'is_array')) : [],
             'components' => is_array($components) ? array_values(array_filter($components, 'is_array')) : [],
             'is_sample' => (int) ($row['is_sample'] ?? 0) === 1,
+            'sample_key' => is_string($row['sample_key'] ?? null) ? $row['sample_key'] : null,
             'sample_version' => ($row['sample_version'] ?? null) === null
                 ? null
                 : PayrollTimeValue::int($row['sample_version'], 'sample_version'),

@@ -1,5 +1,5 @@
 MYÚČTO.CZ — LICENČNÍ UJEDNÁNÍ A OZNÁMENÍ O PRÁVECH
-Verze 1.4, účinná od 22. srpna 2026
+Verze 1.6, účinná od 6. listopadu 2026
 
 Aktuální znění tohoto dokumentu je trvale dostupné na adrese:
 https://myucto.cz/licence
@@ -76,6 +76,12 @@ kontakty, banku a pokladnu, základní daňovou evidenci, běžné výkazy DPH a
 související provozní funkce. Bezplatné funkce lze v Produktu používat bez
 časového omezení a bez Komerční smlouvy. Toto funkční oprávnění samo o sobě
 nemění licenční režim zdrojového kódu, který se určuje podle článků 2 a 3.
+
+1.13 „Parametry licence“ znamenají technické podmínky užívání, které Držitel
+práv stanoví k licenci a Licenční mechanismus je předává Instalaci
+v licenčním tokenu, zejména nejvyšší počet současně přihlášených relací
+jednoho uživatelského účtu a způsob započítávání přístupových tokenů do počtu
+Aktivních uživatelů.
 
 2. PŮVOD PRODUKTU A LICENCE MIT
 
@@ -192,6 +198,20 @@ obnova licence pozastaví (čl. 7.2).
 5.6 Nasazení nad rámec standardních variant, například podnikové řešení,
 použití pod vlastní značkou, individuální podmínky nebo SLA, se sjednává
 samostatnou Komerční smlouvou podle článku 4.
+
+5.7 Uživatelský účet je určen vždy jedné fyzické osobě. Sdílet přihlašovací
+údaje jednoho uživatelského účtu mezi více osob je zakázáno; každá osoba,
+která s Produktem pracuje, musí mít vlastní uživatelský účet. Licenční
+mechanismus může podle Parametrů licence omezit počet současně přihlášených
+relací jednoho uživatelského účtu. U Předplatného je standardně povolena jedna
+relace ve webovém prohlížeči počítače a jedna relace na mobilním zařízení;
+přihlášení nad tento počet ukončí dříve otevřenou relaci téhož druhu.
+
+5.8 Parametry licence mohou stanovit, že se do počtu Aktivních uživatelů
+započítává také každý platný přístupový token s právem zápisu do obchodních
+dat (osobní API token nebo oprávnění udělené MCP klientovi), a to jako jeden
+Aktivní uživatel za každý takový token. Přístupové tokeny pouze pro čtení se
+do počtu Aktivních uživatelů nezapočítávají.
 
 6. ZKUŠEBNÍ OBDOBÍ, AKTIVACE A LICENČNÍ MECHANISMUS
 

@@ -45,6 +45,7 @@ final class FakeAiProviderHttpClientFactory
         array &$history = [],
         string $model = 'claude-haiku-4-5',
         bool $dpaConfirmed = true,
+        ?string $anthropicWorkspaceId = null,
     ): AiProviderHttpClient {
         $stack = HandlerStack::create(new MockHandler($queue));
         $stack->push(Middleware::history($history));
@@ -52,13 +53,15 @@ final class FakeAiProviderHttpClientFactory
 
         $mock = (new \ReflectionClass($test))->getMethod('createStub');
         $pdo = $mock->invoke($test, PDO::class);
-        $pdo->method('prepare')->willReturnCallback(static function (string $sql) use ($mock, $test, $provider, $model, $dpaConfirmed) {
+        $pdo->method('prepare')->willReturnCallback(static function (string $sql) use ($mock, $test, $provider, $model, $dpaConfirmed, $anthropicWorkspaceId) {
             $s = $mock->invoke($test, PDOStatement::class);
             $s->method('execute')->willReturn(true);
             if (str_contains($sql, 'ai_eu_residency_required')) {
                 $s->method('fetch')->willReturn(['ai_provider' => $provider, 'ai_eu_residency_required' => 0]);
             } elseif (str_contains($sql, 'anthropic_api_key_enc')) {
-                $s->method('fetch')->willReturn(['anthropic_api_key_enc' => 'enc', 'anthropic_default_model' => $model]);
+                $s->method('fetch')->willReturn([
+                    'anthropic_api_key_enc' => 'enc', 'anthropic_default_model' => $model, 'anthropic_workspace_id' => $anthropicWorkspaceId,
+                ]);
             } elseif (str_contains($sql, 'openai_api_key_enc')) {
                 $s->method('fetch')->willReturn(['openai_api_key_enc' => 'enc', 'openai_default_model' => $model, 'openai_base_url' => 'https://api.openai.test']);
             } elseif (str_contains($sql, 'gemini_api_key_enc')) {

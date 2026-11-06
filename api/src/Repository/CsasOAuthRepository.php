@@ -7,6 +7,10 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
+/**
+ * Účet ČSAS a uložený přístup. Metody nad bank_oauth_sessions slouží jen k dokončení
+ * přihlášení zahájených před společnou vrstvou OAuth klienta (oauth_sessions).
+ */
 final class CsasOAuthRepository
 {
     public function __construct(private readonly Connection $db) {}
@@ -20,23 +24,12 @@ final class CsasOAuthRepository
         return $row === false ? null : $row;
     }
 
-    public function start(string $hash, int $supplierId, int $currencyId, int $userId, string $ciphertext): void
+    /** Ukončí rozpracované přihlášení účtu z doby před společnou vrstvou OAuth klienta. */
+    public function cancelPending(int $supplierId, int $currencyId): void
     {
-        $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
-        try {
-            $pdo->prepare("UPDATE bank_oauth_sessions SET status = 'failed', secret_ciphertext = '', consumed_at = CURRENT_TIMESTAMP(6)
-                WHERE supplier_id = ? AND currency_id = ? AND provider = 'csas' AND status = 'pending'")
-                ->execute([$supplierId, $currencyId]);
-            $pdo->prepare("INSERT INTO bank_oauth_sessions
-                (state_hash, supplier_id, currency_id, user_id, provider, stage, secret_ciphertext, expires_at)
-                VALUES (?, ?, ?, ?, 'csas', 'oauth', ?, TIMESTAMPADD(SECOND, 600, CURRENT_TIMESTAMP(6)))")
-                ->execute([$hash, $supplierId, $currencyId, $userId, $ciphertext]);
-            $pdo->commit();
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            throw $e;
-        }
+        $this->db->pdo()->prepare("UPDATE bank_oauth_sessions SET status = 'failed', secret_ciphertext = '', consumed_at = CURRENT_TIMESTAMP(6)
+            WHERE supplier_id = ? AND currency_id = ? AND provider = 'csas' AND status = 'pending'")
+            ->execute([$supplierId, $currencyId]);
     }
 
     public function currency(string $hash, int $supplierId, int $userId): ?int
@@ -51,23 +44,24 @@ final class CsasOAuthRepository
     public function claim(string $hash, int $supplierId, int $userId): ?array
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        $own = !$pdo->inTransaction();
+        if ($own) $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare("UPDATE bank_oauth_sessions SET status = 'processing', consumed_at = CURRENT_TIMESTAMP(6)
                 WHERE state_hash = ? AND supplier_id = ? AND user_id = ? AND provider = 'csas'
                   AND stage = 'oauth' AND status = 'pending' AND expires_at > CURRENT_TIMESTAMP(6)");
             $stmt->execute([$hash, $supplierId, $userId]);
             if ($stmt->rowCount() !== 1) {
-                $pdo->rollBack();
+                if ($own) $pdo->rollBack();
                 return null;
             }
             $stmt = $pdo->prepare('SELECT currency_id, secret_ciphertext FROM bank_oauth_sessions WHERE state_hash = ? FOR UPDATE');
             $stmt->execute([$hash]);
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            $pdo->commit();
+            if ($own) $pdo->commit();
             return $row === false ? null : $row;
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($own && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
     }
@@ -77,6 +71,26 @@ final class CsasOAuthRepository
         $this->db->pdo()->prepare("UPDATE bank_oauth_sessions SET status = ?, secret_ciphertext = ''
             WHERE state_hash = ? AND provider = 'csas' AND status = 'processing'")
             ->execute([$success ? 'completed' : 'failed', $hash]);
+    }
+
+    /** Aktuálně uložený přístup napojení (ciphertext); null, když napojení přístup nemá. */
+    public function credential(int $supplierId, int $connectionId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT token_ciphertext FROM bank_connections
+            WHERE supplier_id = ? AND id = ? AND provider = 'csas' AND token_ciphertext IS NOT NULL");
+        $stmt->execute([$supplierId, $connectionId]);
+        $value = $stmt->fetchColumn();
+        return $value === false ? null : (string) $value;
+    }
+
+    /** @return array{id:int,token_ciphertext:string}|null připojený přístup ČS k účtu (měně) */
+    public function connectedCredential(int $supplierId, int $currencyId): ?array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT id, token_ciphertext FROM bank_connections
+            WHERE supplier_id = ? AND currency_id = ? AND provider = 'csas' AND token_ciphertext IS NOT NULL");
+        $stmt->execute([$supplierId, $currencyId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : ['id' => (int) $row['id'], 'token_ciphertext' => (string) $row['token_ciphertext']];
     }
 
     public function rotate(int $supplierId, int $connectionId, string $ciphertext): bool

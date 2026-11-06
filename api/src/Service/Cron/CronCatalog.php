@@ -223,6 +223,18 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Denně ve 3:30 — po půlnočním (UTC) obnovení denních limitů volání služeb.
+                // Denní běh zároveň udržuje přihlášení, které by u služeb s rotujícím tokenem propadlo.
+                'script' => 'cron-logbook-odometer-source',
+                'requires_usage' => CronJobGate::USAGE_ODOMETER_SOURCE,
+                'recommended' => 'daily_0330',
+                'linux_cron' => '30 3 * * *',
+                'windows_schtasks' => '/sc daily /st 03:30',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
                 'script' => 'cron-scan-purchase-inbox',
                 'recommended' => 'every_10_min',
                 'linux_cron' => '*/10 * * * *',
@@ -278,6 +290,20 @@ final class CronCatalog
                 'max_age_hours' => 96,
                 'weekdays_only' => true,
                 'critical' => false,
+            ],
+            [
+                // Záložní odesílání EET: první pokus dělá příkaz hned po commitu,
+                // worker doručí tržby po výpadku FS, pádu procesu nebo doplnění
+                // certifikátu. Zákonná lhůta je 48 h, proto kritická a každou minutu.
+                // Bez EET záznamů skončí preflightem bez stavby kontejneru.
+                'script' => 'cron-eet-dispatch',
+                'requires_usage' => CronJobGate::USAGE_EET_PENDING,
+                'recommended' => 'every_1_min',
+                'linux_cron' => '* * * * *',
+                'windows_schtasks' => '/sc minute /mo 1',
+                'max_age_hours' => 1,
+                'weekdays_only' => false,
+                'critical' => true,
             ],
             [
                 'script' => 'cron-epo-status',
@@ -513,6 +539,21 @@ final class CronCatalog
                 'linux_cron' => '0 15 * * *',
                 'windows_schtasks' => '/sc daily /st 15:00',
                 'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => false,
+            ],
+            [
+                // Ohlášení plánované údržby od provozovatele. Ve spravovaném
+                // provozu povinné, self-hosted instalace si úlohu zapíná sama.
+                // 15 minut: hláška má dorazit dřív, než si ji uživatel přečte
+                // až na stránce 503.
+                'script' => 'cron-maintenance-notice',
+                'requires_config_flag' => 'maintenance_notice.enabled',
+                'managed_implies_flag' => true,
+                'recommended' => 'every_15_min',
+                'linux_cron' => '*/15 * * * *',
+                'windows_schtasks' => '/sc minute /mo 15',
+                'max_age_hours' => 4,
                 'weekdays_only' => false,
                 'critical' => false,
             ],

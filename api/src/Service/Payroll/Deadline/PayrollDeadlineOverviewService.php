@@ -1020,6 +1020,7 @@ final readonly class PayrollDeadlineOverviewService
         );
         $lastYear = min(
             PayrollTaxStatementDeadlinePolicy::SUPPORTED_TO_YEAR,
+            PayrollTaxStatementDeadlinePolicy::LAST_STATEMENT_TAX_YEAR,
             (int) substr($to, 0, 4),
         );
         for ($year = $firstYear; $year <= $lastYear; ++$year) {

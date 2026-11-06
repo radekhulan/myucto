@@ -12,6 +12,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementClaimMonths;
 use MyInvoice\Service\Payroll\IncomeTax\EuropeanEconomicAreaCountries;
 use MyInvoice\Service\Payroll\IncomeTax\EvidenceInterval;
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxDeclarationStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
@@ -1024,6 +1025,22 @@ class AnnualTaxCertificateSnapshotBuilder
             === PayrollDocumentKind::TaxableIncomeAdvanceCertificate
                 ? $this->nonNegativeInt($net, 'tax_bonus_minor_units')
                 : 0;
+        // Od roku 2027 jsou příjmy podle § 6 odst. 4 základem ZÁLOHY, takže
+        // patří do dokladu o zálohách (§ 38j odst. 2 písm. f) a odst. 3) —
+        // příjem i sražená záloha. Srážkové potvrzení za takový rok neexistuje
+        // ({@see AnnualTaxCertificateFormCatalog::resolve()}).
+        if ($kind === PayrollDocumentKind::TaxableIncomeAdvanceCertificate
+            && SeparateTaxBaseRegime::fromResultSnapshot($tax)->isAdvance()
+        ) {
+            $income = $this->add(
+                $income,
+                $this->nonNegativeInt($tax, 'separate_base_income_minor_units'),
+            );
+            $taxAmount = $this->add(
+                $taxAmount,
+                $this->nonNegativeInt($tax, 'withholding_tax_minor_units'),
+            );
+        }
         if ($income > 0) {
             if ($this->nonNegativeInt(
                 $net,

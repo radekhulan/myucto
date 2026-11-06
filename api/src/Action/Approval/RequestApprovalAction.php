@@ -50,6 +50,7 @@ final class RequestApprovalAction
         private readonly AutoIssueAndSendService $autoIssue,
         private readonly PdfArchiveService $pdfArchive,
         private readonly RecipientResolver $recipients,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -77,6 +78,12 @@ final class RequestApprovalAction
             return Json::error($response, 'invalid_amount', InvoiceAmountPolicy::NON_POSITIVE_DRAFT_MESSAGE, 409);
         }
 
+        try {
+            $this->billing->assertCurrent($id, (int) $invoice['supplier_id']);
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
+        }
+
         // Příjemci — jednotný resolver (#86), účel `approvals`: kontakty klienta
         // s tímto účelem; bez nich legacy chování (project_billing_emails NEBO
         // client_main_email, nikdy nesměšovat). Včetně kopie dodavateli pro audit
@@ -95,7 +102,7 @@ final class RequestApprovalAction
         try {
             $invoice = $this->autoIssue->allocateVarsymbolAndSnapshots($id);
         } catch (\Throwable $e) {
-            return Json::error($response, 'allocation_failed', 'Nepodařilo se alokovat číslo faktury: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'allocation_failed', 'Nepodařilo se alokovat číslo faktury: ' . $e->getMessage(), 500);
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
@@ -105,7 +112,7 @@ final class RequestApprovalAction
         try {
             $pdfPath = $this->renderer->render($id, $userId);
         } catch (\Throwable $e) {
-            return Json::error($response, 'pdf_failed', 'Nepodařilo se vygenerovat PDF výkazu: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'pdf_failed', 'Nepodařilo se vygenerovat PDF výkazu: ' . $e->getMessage(), 500);
         }
 
         // Vygeneruj nový token (přepíše dřívější requested/rejected). TTL z config.

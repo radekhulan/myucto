@@ -159,11 +159,12 @@ final class ChartOfAccountsAction
                 'account_code je po doplnění tečky delší než 10 znaků (' . $code . ') — zkraťte analytiku.', 422);
         }
 
-        if ($this->accounts->findByCode($supplierId, $code) !== null) {
+        if ($this->accounts->codeExists($supplierId, $code)) {
             return Json::error($response, 'duplicate_account', 'Účet s tímto kódem už v osnově existuje.', 409);
         }
 
         // Analytika dědí typ i normální stranu po syntetickém rodiči.
+        try {
         $id = $this->accounts->insert($supplierId, [
             'account_code' => $code,
             'name'         => $name,
@@ -172,7 +173,8 @@ final class ChartOfAccountsAction
             'is_synthetic' => false,
             'parent_id'    => $parentId,
             'is_active'    => true,
-        ]);
+        ],date('Y-m-d'),$this->userId($request));
+        } catch (\MyInvoice\Service\Accounting\AccountDefinitionException $e) { return Json::error($response,$e->errorCode,$e->getMessage(),$e->httpStatus); }
 
         $this->log($request, 'accounting.account_created', $id, ['account_code' => $code, 'parent_id' => $parentId]);
         return Json::ok($response, $this->accounts->findById($supplierId, $id), 201);
@@ -215,7 +217,8 @@ final class ChartOfAccountsAction
             return Json::ok($response, $existing);
         }
 
-        $this->accounts->update($supplierId, $id, $data);
+        try { $this->accounts->update($supplierId, $id, $data, date('Y-m-d'), null, $this->userId($request)); }
+        catch (\MyInvoice\Service\Accounting\AccountDefinitionException $e) { return Json::error($response,$e->errorCode,$e->getMessage(),$e->httpStatus); }
         $this->log($request, 'accounting.account_updated', $id, ['fields' => array_keys($data)]);
         return Json::ok($response, $this->accounts->findById($supplierId, $id));
     }
@@ -250,7 +253,8 @@ final class ChartOfAccountsAction
                 'Účet už se používá (' . implode(', ', $usages) . ') — smazat lze jen analytiku bez pohybů. Místo mazání ji deaktivujte.', 409);
         }
 
-        $this->accounts->delete($supplierId, $id);
+        try { $this->accounts->delete($supplierId, $id); }
+        catch (\MyInvoice\Service\Accounting\AccountDefinitionException $e) { return Json::error($response,$e->errorCode,$e->getMessage(),$e->httpStatus); }
         $this->log($request, 'accounting.account_deleted', $id, ['account_code' => $account['account_code']]);
         return Json::ok($response, ['deleted' => true]);
     }

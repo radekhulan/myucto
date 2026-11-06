@@ -50,7 +50,7 @@ final class InvoiceValidation
         $domestic = self::normalizedCountry($domesticCountry) ?? self::FALLBACK_DOMESTIC_COUNTRY;
 
         $type = (string) ($data['invoice_type'] ?? 'invoice');
-        if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'cancellation', 'tax_document', 'penalty', 'payment_calendar'], true)) {
+        if (!in_array($type, ['invoice', 'proforma', 'credit_note', 'cancellation', 'tax_document', 'penalty', 'payment_calendar', 'rent_calendar', 'advance_calendar'], true)) {
             $err['invoice_type'][] = 'Neplatný typ dokladu';
         }
 
@@ -83,6 +83,20 @@ final class InvoiceValidation
         }
         if ($type !== 'proforma' && !empty($data['tax_date']) && !self::isValidDate((string) $data['tax_date'])) {
             $err['tax_date'][] = 'Neplatné DUZP';
+        }
+        if (isset($data['payment_schedule']) && is_array($data['payment_schedule'])) {
+            foreach (array_values($data['payment_schedule']) as $i => $row) {
+                if (!is_array($row)) {
+                    $err["payment_schedule.{$i}"][] = 'Neplatná splátka';
+                    continue;
+                }
+                if (!empty($row['due_on']) && !self::isValidDate((string) $row['due_on'])) {
+                    $err["payment_schedule.{$i}.due_on"][] = 'Neplatné datum splatnosti';
+                }
+                if (!empty($row['tax_date']) && !self::isValidDate((string) $row['tax_date'])) {
+                    $err["payment_schedule.{$i}.tax_date"][] = 'Neplatné DUZP';
+                }
+            }
         }
 
         $items = $data['items'] ?? [];

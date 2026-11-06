@@ -184,6 +184,9 @@ function warningTitle(warning: HealthWarning): string {
   if (warning.code === 'secret_encryption_key') return t('updates.warning_secret_key_title')
   if (warning.code === 'webauthn_configuration') return t('updates.warning_webauthn_title')
   if (warning.code === 'app_url_configuration') return t('updates.warning_app_url_title')
+  if (warning.code === 'session_cookie_insecure') return t('updates.warning_cookie_insecure_title')
+  if (warning.code === 'app_env_development') return t('updates.warning_env_development_title')
+  if (warning.code === 'payroll_hash_key_fallback') return t('updates.warning_payroll_hash_key_title')
   return t('updates.warning_generic_title')
 }
 
@@ -194,6 +197,9 @@ function warningText(warning: HealthWarning): string {
     const key = `updates.warning_${warning.reason_code}`
     return te(key) ? t(key) : t('updates.warning_app_url_invalid_origin')
   }
+  if (warning.code === 'session_cookie_insecure') return t('updates.warning_cookie_insecure_text')
+  if (warning.code === 'app_env_development') return t('updates.warning_env_development_text')
+  if (warning.code === 'payroll_hash_key_fallback') return t('updates.warning_payroll_hash_key_text')
   return t('updates.warning_generic_text')
 }
 

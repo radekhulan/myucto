@@ -168,8 +168,16 @@ final class AdvancePaymentRelink
             return ['status' => 'card_clearing', 'message' => 'platba kartou přes mezičlen 378, přepáruj ručně (vypořádání 321/378)'];
         }
         $dates = ['bankovní zápis' => (string) $bank['entry_date']];
-        $final = $this->journal->findBySource($sid, 'purchase_invoice', (int) $c['final_id']);
-        if ($final !== null && ($final['reversed_by'] ?? null) === null && ($final['posted_at'] ?? null) !== null) {
+        $finalId = (int) $c['final_id'];
+        $active = (new DocumentPostingGroup($this->db))->active($sid, 'purchase_invoice', $finalId);
+        if ((new TakenOverRecord($this->db))->isDocumentOrItsEntry($sid, 'purchase_invoice', $finalId)) {
+            return ['status' => 'taken_over', 'message' => 'konečná faktura nebo její předpis je převzatý z jiného programu'];
+        }
+        if ($active !== [] && !DocumentPostingGroup::isSingleDirectEntry($active, 'purchase_invoice', $finalId)) {
+            return ['status' => 'posting_group_requires_repost', 'message' => 'konečná faktura má skupinu zápisů, přeúčtujte celý doklad'];
+        }
+        $final = $active[0] ?? null;
+        if ($final !== null) {
             $dates['zápis konečné faktury'] = (string) $final['entry_date'];
             // Úhrada v POZDĚJŠÍM účetním období (hospodářském roce) než zápis faktury se do
             // něj zpětně nedopisuje ({@see AdvanceSettlementSync}); dřívější úhrada je běžná.
@@ -277,13 +285,17 @@ final class AdvancePaymentRelink
     /** Úhrada na 314 v bance a zúčtování 314 v konečné faktuře musí sedět na haléř. */
     private function assertAdvanceBalanced(int $supplierId, int $bankEntryId, int $finalId): void
     {
-        $final = $this->journal->findBySource($supplierId, 'purchase_invoice', $finalId);
+        $active = (new DocumentPostingGroup($this->db))->active($supplierId, 'purchase_invoice', $finalId, $this->db->pdo()->inTransaction());
         $entryIds = [$bankEntryId];
-        if ($final !== null && ($final['reversed_by'] ?? null) === null && ($final['posted_at'] ?? null) !== null) {
-            $entryIds[] = (int) $final['id'];
-        } else {
+        if ($active === []) {
             return; // nezaúčtovaná konečná faktura si zúčtování spočítá sama při zaúčtování
         }
+        // Druhá pojistka uvnitř transakce: skupina mohla vzniknout od náhledu
+        // blocker(). Jednočlenný součet by její zúčtování neověřil a změny se vrátí.
+        if (!DocumentPostingGroup::isSingleDirectEntry($active, 'purchase_invoice', $finalId)) {
+            throw new \RuntimeException('Konečná faktura má skupinu zápisů, přeúčtujte celý doklad.');
+        }
+        $entryIds[] = (int) $active[0]['id'];
         $in = implode(',', array_fill(0, count($entryIds), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 0)

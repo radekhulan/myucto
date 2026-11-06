@@ -804,10 +804,9 @@ final class RecurringTemplateRepository
                 continue;
             }
             try {
-                $revenueAccounts[$i] = $productDefaults->validateAccount(
+                $revenueAccounts[$i] = $productDefaults->validateIssuedItemAccount(
                     $ownerId,
                     $item['revenue_account_code'] ?? null,
-                    \MyInvoice\Service\Accounting\Product\ProductPostingDefaults::KIND_REVENUE,
                 );
             } catch (\InvalidArgumentException $e) {
                 throw new \MyInvoice\Service\Invoice\PriceListResolutionException('validation_failed', 'Položka ' . ($i + 1) . ': ' . $e->getMessage());

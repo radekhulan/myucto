@@ -9,6 +9,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Repository\StatementDefinitionRepository;
 use MyInvoice\Service\Tax\Return\DppoXmlBuilder;
+use MyInvoice\Service\Tax\Return\AccountingDecreeService;
 use PDO;
 
 /**
@@ -195,6 +196,9 @@ final class StatementOverrideSuggester
     public function appAppendix(int $supplierId, int $periodId, string $scope = 'full'): array
     {
         $period = $this->period($supplierId, $periodId);
+        $decree = (new AccountingDecreeService($this->db))->assertDppoPeriodSupported(
+            $supplierId, (string) $period['starts_on'], (string) $period['ends_on'],
+        );
         // Rozvahový den = konec období. Podané přiznání je vždy za uplynulý rok, kde je to
         // totéž, co výkaz bez `as_of` v TaxReturnService.
         $endsOn = (string) $period['ends_on'];
@@ -208,6 +212,7 @@ final class StatementOverrideSuggester
             'settings'         => [],
         ];
         $meta = [
+            'accounting_decree' => $decree,
             'zdobd_od' => date('d.m.Y', (int) strtotime((string) $period['starts_on'])),
             'zdobd_do' => date('d.m.Y', (int) strtotime((string) $period['ends_on'])),
         ];

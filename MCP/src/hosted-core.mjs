@@ -29,9 +29,10 @@ export async function runHosted(input, fetcher) {
     const lockedSupplierId = Number.isSafeInteger(input.lockedSupplierId) && input.lockedSupplierId > 0
       ? input.lockedSupplierId : null;
     const withoutCompany = new Set(['whoami', 'list_suppliers']);
+    const allowed = Array.isArray(input.allowedTools) ? new Set(input.allowedTools) : null;
 
     if (input.operation === 'list') {
-      const exposed = readOnly ? TOOLS.filter((tool) => !tool.write) : TOOLS;
+      const exposed = TOOLS.filter((tool) => (!readOnly || !tool.write) && (allowed === null || allowed.has(tool.name)));
       const cursor = input.cursor === undefined ? 0 : Number(input.cursor);
       if (cursor !== 0) {
         throw new Error('Neplatný kurzor seznamu nástrojů.');
@@ -67,6 +68,7 @@ export async function runHosted(input, fetcher) {
     }
     if (input.operation === 'call') {
       const tool = TOOLS_BY_NAME.get(input.name);
+      if (allowed !== null && !allowed.has(input.name)) throw new Error('Pro tento nástroj nemáte oprávnění.');
       if (!tool) throw new Error(`Neznámý nástroj "${input.name}".`);
       if (tool.write && readOnly) throw new ReadOnlyError(input.name);
 

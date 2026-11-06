@@ -26,7 +26,7 @@ use Slim\Psr7\Response as Psr7Response;
 /**
  * Licenční limity (E4) na úrovni Action tříd:
  *  - seat limit: UserAdminAction::create blokuje nového provozního uživatele nad
- *    počet míst; bez business WRITE se role nepočítá; trial je bez limitu.
+ *    počet míst; výjimkou je jen vestavěná čtecí role; trial je bez limitu.
  *  - max_companies: SettingsAction::createSupplier blokuje nad limit; null (unlimited)
  *    i trial projdou.
  *  - LicenseService::countActiveUsers() — počítací dotaz vč. JOIN na roles.
@@ -93,7 +93,7 @@ final class LicenseLimitsTest extends TestCase
 
     // ── countActiveUsers: JOIN na roles ──────────────────────────────────────
 
-    public function testCountActiveUsersUsesWritePermissionRegardlessOfRoleType(): void
+    public function testCountActiveUsersExemptsOnlyBuiltInReadOnlyRole(): void
     {
         $roles = $this->roleIds();
         $baseline = $this->service->countActiveUsers();
@@ -180,6 +180,28 @@ final class LicenseLimitsTest extends TestCase
         self::assertSame('license_user_limit', $this->error($resp));
     }
 
+    public function testCustomReadOnlyRoleCannotBypassFullSeatLimit(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->exec("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, 'Pouze pro čtení', 'staff', 1)");
+        $roleId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, 'invoices', 1)")->execute([$roleId]);
+        $before = $this->service->countActiveUsers();
+        $this->licenseWithToken($this->token(['users' => $before]));
+        $created = $this->createUser($roleId);
+        self::assertSame(403, $created->getStatusCode(), (string) $created->getBody());
+        self::assertSame('license_user_limit', $this->error($created));
+
+        $userId = $this->insertUser('readonly', $this->roleIds()['readonly']);
+        $supplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        self::assertGreaterThan(0, $supplierId);
+        $assigned = $this->replaceAssignments($userId, $supplierId, $roleId);
+        self::assertSame(403, $assigned->getStatusCode(), (string) $assigned->getBody());
+        self::assertSame('license_user_limit', $this->error($assigned));
+        self::assertSame($before, $this->service->countActiveUsers());
+        self::assertSame(0, (int) $pdo->query('SELECT COUNT(*) FROM user_suppliers WHERE user_id = ' . $userId)->fetchColumn());
+    }
+
     public function testTrialHasNoSeatLimit(): void
     {
         $this->trialLicense();
@@ -239,7 +261,7 @@ final class LicenseLimitsTest extends TestCase
         self::assertSame($before, $this->service->countActiveUsers());
     }
 
-    public function testAddingWriteToUsedRoleIsBlockedAndRolledBack(): void
+    public function testAddingWriteToCustomRoleDoesNotAddAlreadyCountedSeats(): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, ?, 'staff', 1)")
@@ -249,7 +271,8 @@ final class LicenseLimitsTest extends TestCase
             ->execute([$roleId]);
         $this->insertUser('readonly', $roleId);
         $this->insertUser('readonly', $roleId);
-        $this->licenseWithToken($this->token(['users' => $this->service->countActiveUsers() + 1]));
+        $before = $this->service->countActiveUsers();
+        $this->licenseWithToken($this->token(['users' => $before]));
         $role = $this->roles->find($roleId);
         self::assertIsArray($role);
 
@@ -264,15 +287,15 @@ final class LicenseLimitsTest extends TestCase
             ]);
         $resp = $this->roleAdmin->update($request, new Psr7Response(), ['id' => (string) $roleId]);
 
-        self::assertSame(403, $resp->getStatusCode(), (string) $resp->getBody());
-        self::assertSame('license_user_limit', $this->error($resp));
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
         $level = $pdo->query(
             "SELECT access_level FROM role_permissions WHERE role_id = {$roleId} AND permission_key = 'invoices'"
         )->fetchColumn();
-        self::assertSame(1, (int) $level, 'Oprávnění používané role se musí rollbacknout.');
+        self::assertSame(2, (int) $level);
+        self::assertSame($before, $this->service->countActiveUsers());
     }
 
-    public function testActivatingUsedWritingRoleIsBlockedAndRolledBack(): void
+    public function testActivatingUsedCustomRoleDoesNotAddAlreadyCountedSeats(): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, ?, 'staff', 0)")
@@ -281,7 +304,8 @@ final class LicenseLimitsTest extends TestCase
         $pdo->prepare("INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, 'invoices', 2)")
             ->execute([$roleId]);
         $this->insertUser('readonly', $roleId);
-        $this->licenseWithToken($this->token(['users' => $this->service->countActiveUsers()]));
+        $before = $this->service->countActiveUsers();
+        $this->licenseWithToken($this->token(['users' => $before]));
         $role = $this->roles->find($roleId);
         self::assertIsArray($role);
 
@@ -296,9 +320,9 @@ final class LicenseLimitsTest extends TestCase
             ]);
         $resp = $this->roleAdmin->update($request, new Psr7Response(), ['id' => (string) $roleId]);
 
-        self::assertSame(403, $resp->getStatusCode(), (string) $resp->getBody());
-        self::assertSame('license_user_limit', $this->error($resp));
-        self::assertSame(0, (int) $pdo->query('SELECT is_active FROM roles WHERE id = ' . $roleId)->fetchColumn());
+        self::assertSame(200, $resp->getStatusCode(), (string) $resp->getBody());
+        self::assertSame(1, (int) $pdo->query('SELECT is_active FROM roles WHERE id = ' . $roleId)->fetchColumn());
+        self::assertSame($before, $this->service->countActiveUsers());
     }
 
     // ── max_companies přes SettingsAction::createSupplier ────────────────────

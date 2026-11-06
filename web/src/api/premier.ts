@@ -1,4 +1,4 @@
-import { createMigrationApi } from './migrationApi'
+import { createMigrationApi, type MigrationNonprofitNotice } from './migrationApi'
 import type { AcceptedDifference, MoneyS3RunStatus, MoneyS3Step } from './moneyS3'
 
 /**
@@ -35,6 +35,7 @@ export interface PremierMessage {
 }
 
 export interface PremierUpload {
+  nonprofit_notice?: MigrationNonprofitNotice
   token: string
   status: 'ready'
   file_name: string

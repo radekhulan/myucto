@@ -55,6 +55,7 @@ final class CronDispatcher
         'cron-jmhz-poll' => [CronPreflight::class, 'hasJmhzTransportWork'],
         'cron-bank-email-notices' => [CronPreflight::class, 'hasBankEmailNoticeAccounts'],
         'cron-bank-connections' => [CronPreflight::class, 'hasBankConnections'],
+        'cron-logbook-odometer-source' => [CronPreflight::class, 'hasOdometerSourceConnections'],
     ];
 
     /** Minuta nárokována — úloha se spustí. */

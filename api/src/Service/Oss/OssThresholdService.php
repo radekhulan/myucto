@@ -209,7 +209,7 @@ final class OssThresholdService
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.supplier_id = ?
                 AND i.status NOT IN ('draft', 'cancelled')
-                AND i.invoice_type NOT IN ('proforma', 'penalty')
+                AND i.invoice_type NOT IN ('proforma', 'penalty','rent_calendar','advance_calendar')
                 AND YEAR(i.effective_tax_date) = ?
                 AND co.is_eu = 1
                 AND UPPER(TRIM(co.iso2)) <> 'CZ'

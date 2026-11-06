@@ -21,6 +21,7 @@ vi.mock('@/api/paymentCards', () => ({
   paymentCardsApi: { unmatchedPayments: m.unmatchedPayments, uploadReceipt: m.uploadReceipt, rematch: m.rematch, writeOff: m.writeOff },
 }))
 vi.mock('@/api/accounting', () => ({ accountingApi: { listAccounts: m.listAccounts } }))
+vi.mock('@/api/otherItems', () => ({ otherItemsApi: { bankCandidates: vi.fn().mockResolvedValue([]) } }))
 vi.mock('@/api/bank', () => ({ bankApi: { matchCandidates: m.matchCandidates, splitSuggestions: m.splitSuggestions, matchManual: m.matchManual } }))
 vi.mock('@/components/ui/Modal.vue', () => ({ default: { props: ['title', 'widthClass'], template: '<div><slot /><slot name="footer" /></div>' } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({
@@ -33,7 +34,7 @@ vi.mock('@/composables/useFormat', () => ({
   formatDate: (s: string) => s,
   formatMoney: (amount: number, currency: string) => `${amount.toFixed(2)} ${currency}`,
 }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: { value: 'cs' } }) }))
 vi.mock('vue-router', () => ({ useRouter: () => ({ push: m.push }), RouterLink: { template: '<a><slot /></a>' } }))
 
 /** Syntetická data: dvě karty, jedna v evidenci, druhá neznámá. */

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tax\Return;
 
+use MyInvoice\Service\Tax\TaxFamilyIdentifierService;
+
 final class DpfoEpoBusinessValidator
 {
     /** @return list<string> */
@@ -77,7 +79,7 @@ final class DpfoEpoBusinessValidator
             if (!is_array($child)
                 || trim((string) ($child['first_name'] ?? '')) === ''
                 || trim((string) ($child['last_name'] ?? '')) === ''
-                || (empty($child['birth_number']) && empty($child['birth_date']))
+                || (!TaxFamilyIdentifierService::hasBirthNumber($child) && empty($child['birth_date']))
                 || (array) ($child['months'] ?? []) === []) {
                 $errors[] = 'DPFO: neúplné identifikační nebo měsíční údaje dítěte.';
                 break;
@@ -87,7 +89,7 @@ final class DpfoEpoBusinessValidator
         if (is_array($spouse) && (
             trim((string) ($spouse['first_name'] ?? '')) === ''
             || trim((string) ($spouse['last_name'] ?? '')) === ''
-            || (empty($spouse['birth_number']) && empty($spouse['birth_date']))
+            || (!TaxFamilyIdentifierService::hasBirthNumber($spouse) && empty($spouse['birth_date']))
             || empty($spouse['income_proved'])
             || empty($spouse['shared_household_proved'])
             || empty($spouse['child_under_three_proved'])

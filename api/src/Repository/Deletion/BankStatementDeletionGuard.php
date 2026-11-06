@@ -68,6 +68,25 @@ final class BankStatementDeletionGuard extends ForeignKeyDeletionGuard
                     ['table' => 'bank_transaction_imports', 'column' => 'original_statement_id'],
                 ],
             ],
+            'unit_payment_evidence' => [
+                'message' => 'Výpis nelze smazat, protože %d vazeb jeho pohybů patří do plateb jednotek. Zkontrolujte evidenci plateb jednotek.',
+                'references' => [
+                    [
+                        'table' => 'unit_payment_sources', 'column' => 'bank_transaction_id',
+                        'via' => [
+                            'table' => 'bank_transactions', 'column' => 'id',
+                            'parent_column' => 'statement_id', 'parent_table' => 'bank_statements',
+                        ],
+                    ],
+                    [
+                        'table' => 'unit_payment_workflows', 'column' => 'bank_transaction_id',
+                        'via' => [
+                            'table' => 'bank_transactions', 'column' => 'id',
+                            'parent_column' => 'statement_id', 'parent_table' => 'bank_statements',
+                        ],
+                    ],
+                ],
+            ],
             'payroll_payment_evidence' => [
                 'message' => 'Výpis nelze smazat — %d jeho položek je použito jako doklad o vyplacení '
                     . 'mezd. Nejdřív to spárování zrušte v Mzdy → Platby, teprve pak půjde výpis smazat.',

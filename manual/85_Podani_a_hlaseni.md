@@ -221,6 +221,12 @@ Lhůta: 20. den následujícího měsíce (na pracovní den se posouvá).
 9. Aplikace se ČSSZ na výsledek doptává sama. Stav sledujte na záložce
    **Odesláno**.
 
+Nejde-li hlášení při odeslání nebo zmrazení připravit, aplikace pod chybou
+vypíše nálezy seskupené podle důvodu a u každého jméno zaměstnance. Tlačítko
+**Opravit** otevře přímo pole, které chybí (karta zaměstnance, roční zúčtování,
+průměry). Na stránce otevřené tímto odkazem je nahoře tlačítko **Zpět na
+přípravu JMHZ**, které vás vrátí tam, kde jste skončili.
+
 **Jak poznáte, že je hotovo:** Na záložce **Odesláno** má podání za období
 štítek **Přijato** a v panelu **Zákonné termíny** je JMHZ za měsíc **Splněno**.
 Stav **Odesláno** ani **Čeká na výsledek** ještě nestačí, rozhoduje ověřený
@@ -247,18 +253,23 @@ pojištěný aspoň jeden zaměstnanec.
 2. Nahoře vidíte akční kartu s řádkem za každou pojišťovnu. Klikněte na
    **Připravit a odeslat** (nebo vše najednou na záložce **Měsíc**
    tlačítkem **Připravit a odeslat vše**).
-3. Zprávy se zařadí do odchozí fronty datové schránky. Odešlete je podle
-   způsobu přihlášení:
-   - s Mobilním klíčem odejdou všechny jedním potvrzením v mobilu,
-   - přes odesílací bránu schvalujete každý koncept zvlášť tlačítkem
-     **Schválit koncept v datovce** (s pořadím, například 1/3),
-   - bez brány i Mobilního klíče zůstanou zprávy ve frontě datové schránky
-     k ručnímu odeslání (`Mzdy → Datová schránka`, záložka
-     **Odchozí podání**).
+3. Zprávy se zařadí do odchozí fronty datové schránky a pod tlačítkem se
+   ukáže výběr, jak se k datové schránce přihlásíte. Všechny zprávy odejdou
+   jedním přihlášením, každá do schránky své pojišťovny:
+   - **Mobilní klíč eGovernmentu**: jedno potvrzení v mobilu,
+   - **Jméno a heslo**: údaje zadáte jednou pro všechny zprávy, heslo se
+     neukládá,
+   - **Jméno, heslo a SMS kód**: jeden SMS kód pro všechny zprávy,
+   - **Systémový certifikát** firmy: po vědomém potvrzení,
+   - **Odesílací brána** schvaluje v datové schránce každý koncept zvlášť,
+     proto se nabízí jen u jedné zprávy; u více zpráv zvolte jiný způsob.
 4. Klikněte na **Načíst doručenky**, pokud se doručenky nedotáhly samy.
 
 Jednotlivou pojišťovnu můžete podat i z její karty pod akční kartou
 tlačítkem **Podat datovkou**, soubor stáhnete tlačítkem **Stáhnout PDF/XML**.
+Více pojišťoven najednou odešlete tak, že na kartách zaškrtnete
+**Vybrat k hromadnému odeslání** a kliknete na **Odeslat vybraná podání
+datovou schránkou**; nabídne se tentýž výběr způsobu přihlášení.
 
 **Jak poznáte, že je hotovo:** Řádek pojišťovny na záložce **Měsíc** ukazuje
 **Doručeno** a karta pojišťovny **Podáno** s datem. Přehled je podaný
@@ -328,6 +339,17 @@ HOZ je doručené do schránky pojišťovny.
 > nebo ukončení předregistrace P2 (viz
 > [§ 85.14.16](#851416-registrace-zamestnance-prezec-a-regzec)).
 
+**Členové volebních komisí.** Člena okrskové volební komise, který dostává
+jen osvobozenou odměnu a nemá u zaměstnavatele jiný příjem ze závislé činnosti
+ani jiné zaměstnání, nepřihlašujete ani nevykazujete (ani sociální, ani
+daňovou část). Je-li zároveň vaším zaměstnancem, odměna se přičte do
+zúčtovaného příjmu za měsíc a znovu se nepřihlašuje. Člena komise se
+zdanitelným příjmem (nadlimitní stravné) založte s druhem činnosti 13;
+vyplňují se jen daňové atributy a přihlašuje se do 8 dnů od složení slibu.
+U komise pro místní referendum odměna osvobozená není, takový člen se zakládá
+jako zaměstnanec s druhem činnosti 1 (malý rozsah). Formulář ukáže u druhu
+činnosti 13 stručnou nápovědu.
+
 ## 85.6 Krok za krokem: nemoc, ošetřování, mateřská a otcovská
 
 NEMPRI je oznámení o dávce, HZUPN hlášení o skončení pracovní neschopnosti.
@@ -384,6 +406,18 @@ dál.
 **Jak poznáte, že je hotovo:** Odhláška A2 má stav přijato podle protokolu
 ČSSZ a HOZ s kódem `O` je doručené do schránky pojišťovny. Položky výstupního
 checklistu na kartě vztahu jsou splněné.
+
+**Druh zaměstnání v podkladech pro podporu v nezaměstnanosti.** Pole **Druh
+zaměstnání v podkladech** nabízí pracovní vztah a služební poměr a od
+1. 1. 2027 i služební poměr podle zákonů č. 361/2003 Sb. a č. 221/1999 Sb.;
+u služebních poměrů pak nabídne jen důvody skončení, které k danému druhu
+patří. Státní zaměstnanci vykonávají od 1. 11. 2026 práci v pracovním poměru
+(zákon č. 195/2026 Sb.), proto u jejich skončení od tohoto dne zvolte pracovní
+vztah a jeho důvod ukončení, jinak 15 (Ostatní). Služební poměr zvolte u
+skončení do 31. 10. 2026 a u služebního poměru končícího 1. 11. 2026 podle
+§ 95 odst. 19 s důvodem 5 (Ostatní). Zvolíte-li služební poměr se skončením
+po 1. 11. 2026, formulář jen upozorní; nic nezakazuje, protože jiné služební
+vztahy než státních zaměstnanců pokračují.
 
 > [!WARNING]
 > Příprava A2 prověří všechna období od ledna 2026 do měsíce
@@ -443,6 +477,20 @@ podání A3 má stav přijato podle protokolu ČSSZ.
    **Jen vybrané pracovní vztahy** a vyberte zaměstnance.
 3. Potvrďte dopad. Storno se připraví jako nové podání a odešlete ho stejně
    jako řádné hlášení.
+
+**Anulace měsíce** (vztah v měsíci už netrval, ale byl nahlášen, typicky
+zapomenutá odhláška; po 20. dni a za leden až březen 2026 storno nejde):
+
+1. Na kartě zaměstnance opravte datum skončení nebo nástupu vztahu.
+2. Na záložce **Odesláno** u platné karty období klikněte na **Stornovat
+   podání** a v **Rozsah storna** zvolte **Anulovat měsíc nulovým opravným
+   hlášením**.
+3. Vyberte zaměstnance (nabídnou se jen ti, jejichž vztah v měsíci podle
+   evidence netrval), potvrďte situaci i dopad a klikněte na **Anulovat
+   měsíc u vybraných vztahů**.
+4. Opravné hlášení odešlete stejně jako řádné hlášení a k tomu pošlete
+   odhlášku nebo změnu registrace REGZEC (viz průvodce **Náprava po 20. dni**
+   na kartě vztahu).
 
 **Odmítnuté nebo nepřevzaté podání** (ČSSZ ho zpracovala a zamítla, nebo
 odmítla zpracovat): na záložce **K odeslání** klikněte u podání na **Zahodit
@@ -696,20 +744,22 @@ měsíce, které jde připravit nebo odeslat. Nepřipravené se nejdřív připr
 pak se v ostrém prostředí ukáže jedno potvrzení se seznamem *co → komu →
 jakou cestou*. Po potvrzení:
 
-- **JMHZ** odejde přes VREP ČSSZ (podepsané certifikátem) hned. Hlášení, které
+- **JMHZ** odejde přes VREP ČSSZ (podepsané certifikátem) hned, pokud je pro
+  firmu a prostředí zvolený podpisový certifikát. Bez něj odejde datovou
+  schránkou a odpověď ČSSZ se k podání spáruje sama. Když jsou připravené obě
+  cesty, vyberete u řádku v poli **Odeslat přes**, výchozí je VREP. Hlášení, které
   obsahuje pracovní vztah s právě přijatou změnou údajů zaměstnance (A3), se
   ale nepřipraví dřív než 48 hodin po jejím přijetí; data se do systémů ČSSZ
   propisují později a dřív odeslané hlášení by ČSSZ mohla zamítnout (chyba
   243). Hláška uvede, od kdy to jde.
-- **Přehledy o platbě** všem pojišťovnám a **hromadná oznámení** se zařadí do
-  odchozí fronty datové schránky. S Mobilním klíčem je odešle **jedno
-  potvrzení v mobilu**; každá zpráva jde do schránky své pojišťovny. Když jedna
-  zpráva selže, ostatní odejdou a chyba se ukáže u jejího řádku.
-- U **odesílací brány** se každý koncept schvaluje v datové schránce zvlášť
-  (tlačítko **Schválit koncept v datovce** s pořadím, například 1/3); jednou
-  autorizací pro všechny zprávy odesílá jen Mobilní klíč.
-- Bez brány i Mobilního klíče zůstanou zprávy ve frontě datové schránky
-  k ručnímu odeslání.
+- **Přehledy o platbě** všem pojišťovnám, **hromadná oznámení** a JMHZ
+  posílané datovkou se zařadí do odchozí fronty datové schránky. Nad seznamem
+  se pak ukáže výběr způsobu přihlášení (Mobilní klíč, jméno a heslo, jméno,
+  heslo a SMS kód, systémový certifikát) a **jedním přihlášením** odejdou
+  všechny zprávy; každá jde do schránky svého úřadu nebo pojišťovny. Když
+  jedna zpráva selže, ostatní odejdou a chyba se ukáže u jejího řádku.
+- **Odesílací brána** schvaluje v datové schránce každý koncept zvlášť, proto
+  se nabízí, jen když odchází jediná zpráva.
 
 Kontrola slevy po lhůtě (kontrola 290) se při přípravě ptá u konkrétního
 řádku a čeká na vědomé potvrzení. Druhé řádné JMHZ za týž měsíc aplikace
@@ -841,6 +891,16 @@ selhalo 3.“) a jmenovitý seznam toho, co neprošlo, i s důvodem. Jednotlivé
 podání jde poslat i samostatně tlačítkem **Odeslat** na řádku. Potvrzení
 o převzetí není potvrzení o přijetí; výsledek zpracování se dotahuje
 samostatně a najdete ho na záložce **Odesláno**.
+
+**Kudy podání odejde.** JMHZ jde přes VREP ČSSZ i datovou schránkou. VREP
+potřebuje zvolený podpisový certifikát; když chybí, odejde hlášení datovou
+schránkou a u řádku to stojí. Když jsou připravené obě cesty, vyberete ji
+v poli **Odeslat přes** (výchozí je VREP). Podání odeslaná datovou schránkou
+se zařadí do její odchozí fronty a fronta hned nabídne výběr způsobu
+přihlášení (Mobilní klíč, jméno a heslo, jméno, heslo a SMS kód, systémový
+certifikát, u jediné zprávy i odesílací bránu); vybraná podání odejdou jedním
+přihlášením. Zpráva, která v odchozí frontě datové schránky čeká na
+přihlášení, má u řádku tlačítko **Odeslat datovkou**.
 
 **Proč podání nejde odeslat.** Fronta ukazuje i podání, která odeslat nejde,
 a u každého uvádí důvod: typicky že podání ještě není zmrazené, že už bylo
@@ -1215,7 +1275,7 @@ tyto formuláře:
 | 4 | výkon trestu nebo zabezpečovací detence: druh činnosti 1 až 9 s bližším určením 2 u pracovního poměru nebo zaměstnání malého rozsahu | vezen |
 | 5 | druh činnosti 11, 13 nebo 14 u pracovního poměru | jinyPrijem |
 | 6 | druh činnosti 12 (mezinárodní pronájem pracovní síly) u pracovního poměru | mezinarodniPronajemSily |
-| 8 | odložený příjem typu 1, volí se ručně potvrzením odloženého příjmu | odlozenyPrijem |
+| 8 | odložený příjem typu 1, roční zúčtování po skončení (typ 4) a jejich spojení (typ 5), volí se ručně potvrzením odloženého příjmu | odlozenyPrijem |
 
 Formuláře jiného příjmu (5) a mezinárodního pronájmu pracovní síly (6)
 nenesou pojištění. I u podporovaných scénářů zůstávají dvě výjimky, které test
@@ -1290,7 +1350,44 @@ skutečně sraženou částku. Potvrzení se uloží jako neměnný šifrovaný 
 svázaný s přesnou revizí a přesným pracovním vztahem. Vztah bez potvrzení
 zůstává adresným nálezem přípravy; je z něj vidět, komu evidence chybí.
 Pokud některá skutečnost nastala, tento první běžný profil ji nepodporuje
-a přípravu uzavře bez falešného výchozího **Ne**.
+a přípravu uzavře bez falešného výchozího **Ne**. Výjimkou je podpora
+zaměstnávání osob se zdravotním postižením, viz níže.
+
+**Zaměstnanci OZP u zaměstnavatele na chráněném trhu práce (IN28, IN24).**
+Má-li pracovní vztah v profilu JMHZ zaškrtnutou podporu zaměstnávání osob se
+zdravotním postižením a je-li zaměstnavatel v profilu registrace označen jako
+uznaný na chráněném trhu práce, nese hlášení výdělek OZP: datum úhrady mzdy
+včetně pojistného (10347), výplatu v hotovosti (10348) a srážky ve prospěch
+zaměstnavatele (10349 až 10353). Datum úhrady je nejpozdější z: den výplaty
+mzdy, den odvodu sociálního a den odvodu zdravotního pojištění. Zadává se až
+po úhradě v panelu právních skutečností přímo u vztahu (**Potvrdit výdělek
+OZP**); nesmí být v budoucnu ani před začátkem vykazovaného měsíce a bez něj
+se hlášení nepřipraví. Srážky se odvodí ze schválené revize: počítají se jen
+dohody o srážkách, u kterých je v `Mzdy → Dohody o srážkách` (sekce
+**Měsíční hlášení JMHZ**) uvedeno, že
+věřitelem je zaměstnavatel, a podle zvoleného zařazení (10350 plnění podle
+občanského zákoníku, 10351 náhrada škody, 10352 závodní stravování, 10353 jiný
+závazek podle § 146 písm. b) zákoníku práce). Exekuce, srážky ze zákona podle
+§ 147 odst. 1 zákoníku práce ani srážky ve prospěch třetí osoby se do nich
+nepočítají. Dohoda, ze které se v měsíci srazilo a u které věřitel není
+rozhodnutý, hlášení zastaví. Výdělek OZP nese jen souhrn hlavního pracovního
+vztahu; podpora nastavená jen u vedlejšího vztahu hlášení zastaví.
+
+Za období od ledna 2027 se místo jednoho data uvádí datum úhrady mzdy
+a zvlášť **Den odvodu sociálního pojištění** a **Den odvodu zdravotního
+pojištění**. V panelu u vztahu vyplňte všechna tři data; bez dnů odvodů se
+výdělek OZP za rok 2027 nepotvrdí.
+
+**Počet směn při rizikové práci (od ledna 2027).** U vztahu s prací zařazenou
+do kategorie 4 uvádí hlášení počet směn odpracovaných v měsíci. Mzdy směny
+neevidují, proto se vztah v panelu právních skutečností zastaví a počet směn
+zadáte přímo u něj (**Potvrdit počet směn**).
+
+**Úhrn měsíčních bonusů za minulý rok (leden od roku 2027).** Lednové hlášení
+uvádí úhrn měsíčních daňových bonusů vyplacených za předchozí rok. Bere se
+z roční kumulace daně (počáteční stav a schválené měsíce), stejně jako
+v ročním zúčtování; ručně se nezadává. Chybí-li počáteční stav roku, hlášení
+se zastaví.
 
 **Sleva po splatnosti (kontrola 290).** Hlášení, které se podává **po
 splatnosti pojistného** a uplatňuje **slevu na pojistném zaměstnavatele**,
@@ -1428,27 +1525,44 @@ zablokuje; revizi přepočtěte opravným během po schválení nemoci.
 **Pracující důchodce** nemá v hlášení údaje pro evidenční list (třída, dny
 a vyměřovací základ ELDP), vyloučené dny podle § 18 ale nese dál. Za
 pracujícího důchodce aplikace považuje zaměstnance s ověřenou slevou
-pracujícího důchodce v zákonné evidenci osoby.
+pracujícího důchodce v zákonné evidenci osoby. Měsíc, od kterého mu náleží
+výplata starobního důchodu v plné výši, ale hlášení ještě vykazuje s údaji
+pro evidenční list, i když v něm sleva už náleží (důchod od 1. dne měsíce):
+údaje se vyplňují do tohoto měsíce včetně, stejně jako roční evidenční list.
+Jen interval pojištění s nulou dnů se hlásí až od následujícího měsíce. Měsíc
+výplaty aplikace bere ze sekce **Pobíraný důchod** zákonné evidence osoby.
 
 **Zaměstnanec po dosažení důchodového věku** bez ověřené slevy pracujícího
-důchodce a **poživatel předčasného starobního důchodu**: kód ELDP v hlášení
-nese druhý znak `D` (například `1D+`) od dne dosažení důchodového věku nebo
-od přiznání předčasného důchodu, podle toho, co nastalo dřív. Údaje se berou
+důchodce: kód ELDP v hlášení nese druhý znak `D` (například `1D+`) od dne
+dosažení důchodového věku. Předčasný starobní důchod kód `D` nezakládá, jeho
+poživatel má před dosažením věku běžný kód (například `1++`). Údaje se berou
 ze zákonné evidence osoby (sekce **Důchodový věk** a **Pobíraný důchod**)
 k vykazovanému měsíci, stejně jako u evidenčního listu. Bez zapsaného dne
 dosažení věku kód `D` nevznikne. Měsíc, ve kterém zaměstnanec věk dovrší, se
-rozdělí na dvě sekce: do dne před dovršením bez `D` se základem 0, od
-dovršení s `D` a celým základem měsíce. Předčasný důchod přiznaný uprostřed
-měsíce hlášení zastaví, protože pravidla podání rozdělení základu
-nestanoví. Hlášení už připravené za dřívější měsíc se změnou evidence nemění;
-projeví se až v hlášení, které se teprve sestaví (i v opravném).
+rozdělí na dvě sekce (i u poživatele předčasného důchodu): do dne před
+dovršením bez `D` se základem 0, od dovršení s `D` a celým základem měsíce.
+Hlášení už připravené za dřívější měsíc se změnou evidence nemění; projeví se
+až v hlášení, které se teprve sestaví (i v opravném).
 
-Kdo dosáhl důchodového věku a starobní důchod nepobírá, má za nemoc,
+Kdo dosáhl důchodového věku a starobní důchod v plné výši nepobírá (i poživatel
+předčasného důchodu po dosažení věku), má za nemoc,
 ošetřování, mateřskou, otcovskou, neplacené volno, neomluvenou absenci
-a měsíc bez účasti **odečítané doby** (10375). Ty aplikace do měsíčního
-hlášení nesestaví: takový měsíc přípravu zastaví a hlášení za vztah podejte
-ručně přes ePortál ČSSZ, nebo vztah odložte. Předčasný důchod je důchod,
-takže u jeho poživatele se odečítané doby nevedou a hlášení se sestaví.
+a měsíc bez účasti **odečítané doby** (10375, interakce IN04). Aplikace je
+odvodí ze schválených nepřítomností stejně jako u evidenčního listu a zapíše
+do hlášení úhrn 10375 s rozpadem: pracovní neschopnost (10462), mateřská
+(10463), ošetřovné v podpůrčí době (10464) a po ní (10465), otcovská (10466),
+neplacené volno (10468) a neomluvená absence (10469). Počet dnů pojištění
+(10356) je pak interval měsíce minus odečítané doby. Měsíc bez odečítaných
+dob element nenese. Odečítané doby nese i měsíc, od kterého náleží výplata
+plného důchodu.
+
+Příprava hlášení zastaví tři případy, které pravidla podání vykázat
+nedovolují nebo pro ně nestanoví postup: dobu po neplatném skončení vztahu
+(§ 16 odst. 4 písm. j)), dny bez účasti na pojištění, které nevysvětluje
+žádná nepřítomnost se složkou odečítaných dob (součet složek se musí rovnat
+10375), a odečítané doby v měsíci, ve kterém zaměstnanec důchodový věk
+teprve dovršil (měsíc rozdělený na dvě sekce). Hlášení za takový vztah
+podejte ručně přes ePortál ČSSZ.
 
 Měsíc porodu, ve kterém zaměstnankyně pobírá peněžitou pomoc v mateřství
 a nemá žádný započitatelný příjem, se vykazuje jako měsíc účasti na
@@ -1483,6 +1597,28 @@ u zaměstnanců, které vyberete podle jména (ostatní formuláře zůstanou u 
 platné; storno vybraných vztahů jde jen u úplně přijatého hlášení). Obojí se
 nejdřív potvrzuje. Celé hlášení lze stornovat jen do 20. dne následujícího
 měsíce, potom už jen opravným hlášením.
+
+**Nulové hlášení.** Vztah, který v měsíci trvá, ale nic se v něm
+neodpracovalo ani nezúčtovalo (rodičovská dovolená, dohoda bez práce), se
+hlásí **řádným formulářem s nulovými hodnotami**: aplikace ho sestaví
+z mzdového běhu sama, jen u vztahu bez jediného vstupu je potřeba zadat
+u základní složky 0 Kč. Měsíc, ve kterém vztah **netrval** a přesto byl
+nahlášen, se **anuluje** nulovým opravným hlášením (volba **Anulovat měsíc
+nulovým opravným hlášením** ve **Stornovat podání**). Formulář se staví ze
+zmrazeného původního formuláře podle tabulky Pravidel podání JMHZ: trvání
+pojištění tvoří jediný den, kód ELDP se neuvádí a místo výkonu práce,
+stanovený fond a prohlášení poplatníka zůstávají z původního formuláře.
+Anulovat jde jen měsíc, který podle evidence leží celý mimo období vztahu,
+a jen formulář bez příjmu a pojistného, bez souběžného vztahu osoby
+a bez ročních úhrnů; jinak aplikace anulaci nesestaví a řekne proč.
+
+**Náprava po 20. dni.** Na kartě pracovního vztahu je průvodce **Náprava
+po 20. dni (REGZEC a opravná hlášení)**. Po výběru situace (zapomenutá
+odhláška, změna data nástupu či skončení, neplatný vztah) ukáže potřebnou
+akci REGZEC (2, 3 nebo 4, 8), zda už je připravená nebo podaná, a měsíce
+s podaným hlášením, které je třeba anulovat nebo zkontrolovat. ČSSZ
+doporučuje poslat obě podání najednou. U neplatného vztahu měsíce v jeho
+období aplikace sama nenuluje; postupujte ručně.
 
 **Obsahová oprava.** **Opravit hodnoty hlášení** pracuje s aktuální přípravou
 JMHZ po opravě mzdových údajů a vytvoří skutečné obsahové opravné hlášení.
@@ -1717,6 +1853,36 @@ nepřipraví a vede k podání P2 a nového přihlášení s novým předpoklád
 dnem. Cizinec se přihlašuje vždy plnou registrací před zahájením práce, volba
 se u něj neukazuje. Dřív než osm dnů před nástupem aplikace přihlášku
 nepřipraví a napíše, od kterého dne to jde.
+
+**Události od 1. 1. 2027 (REGZEC27).** Ročník formuláře REGZEC určuje
+rozhodné datum události: nástup (A1), skončení (A2) a den platnosti (A5 až A7)
+od 1. 1. 2027 se hlásí formulářem REGZEC27, dřívější události dál formulářem
+REGZEC25, i když je podáváte v roce 2027. U změny a opravy (A3, A4) rozhoduje
+jen datum skončení pracovního vztahu: u vztahu skončeného do 31. 12. 2026 jde
+REGZEC25, u trvajícího vztahu nebo skončeného později REGZEC27, a to i tehdy,
+když změna platí už od roku 2026. Ostrá ČSSZ přijímá REGZEC27 od 23. 12. 2026;
+změnu trvajícího vztahu připravenou dřív proto aplikace pošle ještě jako
+REGZEC25, od 23. 12. 2026 jako REGZEC27. Takovou změnu nebo opravu připravenou
+ve formátu REGZEC25, která do 22. 12. 2026 neodešla, aplikace od 23. 12. 2026
+neodešle: v kartě podání místo tlačítka odeslání nabídne **Připravit znovu**,
+které ze stejné schválené události připraví REGZEC27 a původní podání zruší.
+
+Změna i oprava u vztahu, který už skončil, nese datum skončení, jinak by ji
+ČSSZ předala k ručnímu zpracování. Datum musí být stejné jako to, které vede
+ČSSZ: aplikace ho bere z odeslané odhlášky (A2), a jen když žádná odhláška
+z aplikace neodešla, z karty pracovního vztahu. Liší-li se datum na kartě od
+odeslané odhlášky, změnu ani opravu neschválí; datum na kartě opravte. Opravu
+samotného data skončení (s písemným vysvětlením) aplikace nepodává, vyřiďte ji
+s ČSSZ. Oprava (A4) běžného pracovního vztahu s datem skončení nese navíc údaj
+o skončení úmrtím a podklady pro podporu v nezaměstnanosti; aplikace je převezme
+ze schválené odhlášky. Bez schválené odhlášky aplikace opravu skončeného
+vztahu odmítne a napíše proč.
+
+Plnou registraci
+s nástupem v lednu 2027 aplikace připraví nejdřív 23. 12. 2026 a vždy nejvýš
+osm dnů před nástupem. Částečné přihlášení PREZEC se ročníkem nemění.
+U cizince ze státu mimo EHP chce REGZEC27 navíc platnost pobytu (od a do)
+a číslo orientační má u všech adres nejvýš čtyři znaky.
 
 **Nástup v jiný den (oprava A4).** Byla-li přihláška podaná s předpokládaným
 dnem nástupu a zaměstnanec nastoupil jindy, podejte opravu A4. Opravu
@@ -2767,8 +2933,9 @@ se potvrzuje jen ve formuláři.
 
 - **Den dosažení důchodového věku** a den, od kterého zaměstnanec pobírá
   předčasný starobní důchod (pole **Poživatel předčasného starobního důchodu
-  od**). Od dřívějšího z nich má činnost druhý znak kódu `D` (například
-  `1D+`, `AD+`); řádek se k tomuto dni rozdělí na dvě sekce. Připadne-li den
+  od**). Od dosažení důchodového věku má činnost druhý znak kódu `D`
+  (například `1D+`, `AD+`); předčasný důchod kód `D` nezakládá. Řádek se
+  k tomuto dni rozdělí na dvě sekce. Připadne-li den
   doprostřed měsíce, aplikace list nesestaví, protože vyměřovací základ za
   část měsíce nevede; takový list podejte mimo aplikaci. Řádek s kódem `D`
   nese **odečtené doby**, které aplikace odvodí z nepřítomností: neplacené
@@ -2781,12 +2948,12 @@ se potvrzuje jen ve formuláři.
   přípravu zastaví.
 - **První měsíc výplaty starobního důchodu v plné výši.** Od roku 2025 se za
   poživatele plného starobního důchodu evidenční list nevede (§ 38 odst. 1
-  věta druhá zákona č. 582/1991 Sb.). Měsíce od tohoto měsíce se z listu
-  vypustí; nezbude-li žádný, list se nesestaví a hláška to řekne. Za roky do
-  2024 se list za pracujícího důchodce vede dál. Z evidence se bere první
-  celý měsíc starobního důchodu (druh 1 bez příznaku předčasnosti): důchod
-  přiznaný uprostřed měsíce se počítá od následujícího měsíce, takže měsíc
-  přiznání v listu zůstane.
+  věta druhá zákona č. 582/1991 Sb.). List se vede do měsíce, od něhož
+  náleží výplata, včetně; následující měsíce se z listu vypustí a nezbude-li
+  žádný, list se nesestaví a hláška to řekne. Za roky do 2024 se list za
+  pracujícího důchodce vede dál. Z evidence se bere měsíc začátku
+  starobního důchodu (druh 1 bez příznaku předčasnosti): důchod přiznaný od
+  15. dubna ukončí list dubnem.
 - **Účast na důchodovém pojištění v cizině.** Je-li zaměstnanec účasten
   pojištění v cizině, vede se list i za poživatele plného starobního důchodu.
 
@@ -2921,9 +3088,10 @@ Ani jednu lhůtu nelze prodloužit. Aplikace je vypisuje jako text; do daňovéh
 kalendáře ani do přehledu mzdových termínů se nepromítají.
 
 > [!TIP]
-> Za rok 2026 se obojí podává běžným způsobem. Teprve od období 2027
-> nahradí vyúčtování zálohové daně hlášení k záloze v měsíčním hlášení, takže
-> tuhle cestu je potřeba ještě jednu sezónu.
+> Za rok 2026 se obojí podává běžným způsobem. Za období 2027 a dál aplikace
+> vyúčtování nesestaví ani nepřipomene: vyúčtování zálohové daně nahradilo
+> hlášení k záloze v měsíčním hlášení a srážková daň ze mzdy zanikla (příjmy
+> podle § 6 odst. 4 se daní zálohou).
 
 **Kde to je.** Na `Mzdy → Přehled mezd`, panel **Roční vyúčtování daně**,
 pod ročním zúčtováním a roční uzávěrkou. Vybíráte rok (výchozí je loňský)
@@ -2990,6 +3158,12 @@ i tehdy, když je příloha č. 1 prázdná, když firma nemá vyplněný finan�
 (dosadí se FÚ pro Prahu 1 a je potřeba ho ověřit), a když zaokrouhlení na
 celé koruny zbylo přes.
 
+**Zástupce.** Je-li ke dni vytvoření XML v evidenci zastoupení platný zástupce
+(`Nastavení → Daně a účetnictví`, část **Zastoupení a podepisující osoba**), vyplní se
+do obou vyúčtování jako podepisující osoba, stejně jako u přiznání DPH a daně
+z příjmů. Lhůtu vyúčtování ale neprodlužuje žádný zástupce, ani daňový poradce
+s kódem 4b nebo 4c, a aplikace proto u vyúčtování na kód zástupce neupozorňuje.
+
 ### 85.14.24 Žádost o poukázání chybějící částky na daňovém bonusu
 
 Vyplatí-li zaměstnavatel na daňových bonusech víc, než kolik ten měsíc
@@ -3038,6 +3212,8 @@ musíte vrátit sami.
 
 Výstupem je XML pro EPO. Archivuje se se stejným otiskem jako ostatní daňová
 podání a v přehledu podání je najdete ve složce „Daňové bonusy“.
+Zástupce platný ke dni vytvoření XML se do žádosti vyplní jako podepisující
+osoba stejně jako u vyúčtování.
 S [Vyúčtováním daně](#851423-vyuctovani-zalohove-a-srazkove-dane) nemá
 žádost společný formulář ani přílohu; jsou to samostatná podání, byť se
 stejnými částkami vyplacených bonusů v pozadí.

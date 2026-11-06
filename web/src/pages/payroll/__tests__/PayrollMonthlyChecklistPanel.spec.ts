@@ -635,9 +635,11 @@ describe('PayrollMonthlyChecklistPanel', () => {
     await flushPromises()
 
     expect(m.dispatchBatch).toHaveBeenCalledWith('production', [
-      { submission_id: 42, idempotency_key: expect.any(String) },
+      { submission_id: 42, idempotency_key: expect.any(String), mode: 'isds_health' },
     ])
-    expect(wrapper.find('[data-test="monthly-checklist-mobile-key"]').exists()).toBe(true)
+    // Zpráva v odchozí frontě datovky dostane výběr všech způsobů přihlášení.
+    expect(wrapper.find('[data-test="monthly-checklist-databox"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="isds-send-methods"]').exists()).toBe(true)
     expect(m.push).not.toHaveBeenCalled()
   })
 
@@ -670,6 +672,44 @@ describe('PayrollMonthlyChecklistPanel', () => {
     expect(m.prepareItem).not.toHaveBeenCalled()
     expect(m.dispatchBatch).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-test="monthly-checklist-send-summary"]').text()).toContain('1')
+  })
+
+  /**
+   * Řádek JMHZ i „Připravit a odeslat vše" posílaly vždy přes VREP. Se zvoleným
+   * certifikátem jsou připravené oba kanály a účetní si vybere.
+   */
+  it('u JMHZ s oběma kanály pošle frontou zvolenou datovou schránku', async () => {
+    const ready = {
+      ...agendaDutyItem(),
+      key: 'submission:4',
+      source: 'submission',
+      status: 'ready',
+      submission_id: 31,
+      dispatchable: true,
+      dispatch_mode: 'vrep_jmhz',
+      dispatch_modes: ['vrep_jmhz', 'isds_payroll'],
+      agenda_code: 'JMHZ25',
+      action: { kind: 'send', label: 'Odeslat', path: '/payroll/submissions/jmhz', reason: null, prepare: null },
+    }
+    m.monthlyChecklist.mockResolvedValue(baseResponse({ items: [ready] }))
+    m.dispatchBatch.mockResolvedValue({
+      environment: 'production',
+      summary: { requested: 1, sent: 1, failed: 0 },
+      results: [{ ok: true, submission_id: 31, dispatched: true, message: '', mode: 'isds_payroll', outbox: null }],
+    })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('tbody [data-test="dispatch-mode-select"]').setValue('isds_payroll')
+    await wrapper.get('tbody [data-test="monthly-checklist-send"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="production-send-confirm-items"]').text()).toContain('channel_isds')
+    await wrapper.get('[data-test="production-send-confirm-yes"]').trigger('click')
+    await flushPromises()
+
+    expect(m.dispatchBatch).toHaveBeenCalledWith('production', [
+      { submission_id: 31, idempotency_key: expect.any(String), mode: 'isds_payroll' },
+    ])
   })
 
   it('zrušené potvrzení nic neodešle', async () => {

@@ -13,6 +13,17 @@ final class AbraJournalMapper
         $code = AbraSource::account($row['kod'] ?? $row['ucet'] ?? $row['id'] ?? null);
         $sourceType = mb_strtolower(AbraSource::reference($row['typUctuK'] ?? $row['typUctu'] ?? $row['typ'] ?? null));
         [$type, $side] = $this->accountType($sourceType, $code);
+        // Rozvahový účet nese stranu v druhu účtu (`druhUctu.aktivni` / `pasivni`). Bez něj
+        // by se strana odvodila jen z třídy a pohledávky třídy 3 (311, 314, 378) by vyšly
+        // jako závazky. Smíšené druhy (aktivně-pasivní) zůstávají podle třídy.
+        $kind = (string) preg_replace('/^.*\./', '', mb_strtolower(AbraSource::reference($row['druhUctuK'] ?? null)));
+        if ($type !== null && in_array($type, ['asset', 'liability', 'equity'], true)) {
+            if ($kind === 'aktivni') {
+                [$type, $side] = ['asset', 'debit'];
+            } elseif ($kind === 'pasivni') {
+                [$type, $side] = str_starts_with($code, '4') ? ['equity', 'credit'] : ['liability', 'credit'];
+            }
+        }
         return [
             'source_key' => AbraSource::sourceKey($row, $code),
             'source_hash' => AbraSource::hash($row),

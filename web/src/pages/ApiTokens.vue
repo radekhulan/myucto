@@ -234,6 +234,23 @@ async function purge(tk: ApiToken) {
   }
 }
 
+/**
+ * Volba „úhrady z tohoto klíče eviduje EET externí systém (e-shop)". Úhrada faktury
+ * z tokenu bez okolností platby se pak jen zaznamená, MyÚčto ji do EET neodešle.
+ */
+async function toggleEetExternal(tk: ApiToken) {
+  if (!canManageTokens.value) return
+  const enabled = !tk.eet_external_by_default
+  if (enabled && !confirm(t('api_tokens.eet_external_confirm', { name: tk.name }))) return
+  try {
+    await tokensApi.setEetExternal(tk.id, enabled)
+    toast.success(t(enabled ? 'api_tokens.eet_external_enabled' : 'api_tokens.eet_external_disabled'))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  }
+}
+
 async function openIps(tk: ApiToken) {
   ipToken.value = tk
   ipRules.value = []
@@ -322,7 +339,7 @@ onMounted(load)
 </script>
 
 <template>
-  <div class="max-w-5xl">
+  <div class="w-full">
     <div class="flex items-start justify-between mb-4">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('api_tokens.title') }}</h1>
@@ -348,7 +365,7 @@ onMounted(load)
       {{ error }}
     </div>
 
-    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+    <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-x-auto">
       <table class="w-full text-sm">
         <thead class="bg-neutral-50 text-neutral-600 text-xs uppercase">
           <tr>
@@ -384,6 +401,18 @@ onMounted(load)
                   :title="t('api_tokens.payroll_docs_desc')">
                   {{ t('api_tokens.payroll_docs_badge') }}
                 </span>
+                <button v-if="canManageTokens && !tk.is_revoked && tk.scope === 'read_write'" type="button"
+                  @click="toggleEetExternal(tk)" data-token-eet-external
+                  class="cursor-pointer inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium border whitespace-nowrap"
+                  :class="tk.eet_external_by_default
+                    ? 'border-primary-500/40 bg-primary-50 text-primary-700'
+                    : 'border-neutral-300 text-neutral-500 hover:bg-neutral-50'"
+                  :title="t('api_tokens.eet_external_desc')">
+                  <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M9 14l2 2 4-4M7 3h10a2 2 0 0 1 2 2v16l-3-2-2 2-2-2-2 2-2-2-3 2V5a2 2 0 0 1 2-2z" />
+                  </svg>
+                  {{ tk.eet_external_by_default ? t('api_tokens.eet_external_on') : t('api_tokens.eet_external_off') }}
+                </button>
               </div>
             </td>
             <td class="px-3 py-2">

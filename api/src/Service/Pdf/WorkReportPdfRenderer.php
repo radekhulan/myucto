@@ -46,7 +46,7 @@ final class WorkReportPdfRenderer
         if ($invoice === null) {
             throw new \RuntimeException("Faktura #{$invoiceId} nenalezena");
         }
-        $workReport = $this->workReports->findByInvoice($invoiceId);
+        $workReport = $this->workReports->findByInvoice($invoiceId, (int) $invoice['supplier_id']);
         if ($workReport === null) {
             throw new \RuntimeException("Výkaz pro fakturu #{$invoiceId} neexistuje");
         }

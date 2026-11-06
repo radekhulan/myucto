@@ -77,6 +77,41 @@ enum AnnualSettlementBlocker: string
     case AnnualOnlyClaimsUnknown = 'annual_only_claims_unknown';
 
     /**
+     * Žádost tvrdí, že poplatník ročně uplatňuje položky, ale v evidenci žádné
+     * nejsou — nebo naopak v evidenci jsou, ale žádost říká „žádné" či „nevíme".
+     * Rozpor se nerozhoduje za účetní ani jedním směrem: vynechat evidované
+     * položky by poplatníka připravilo o odpočet, uplatnit je proti žádosti by
+     * znamenalo uznat něco, co poplatník nežádal.
+     */
+    case AnnualClaimsInconsistent = 'annual_claims_inconsistent';
+
+    /**
+     * Ročně uplatňovaná položka (§ 15, § 35 odst. 4, sleva na manžela) nemá
+     * doložení. § 38l odst. 1 a 2 vyjmenovává doklady (potvrzení o daru,
+     * o zaplacených úrocích, o příspěvcích, o příjmu manžela …), bez nichž ji
+     * plátce uznat nesmí.
+     */
+    case AnnualClaimEvidenceUnverified = 'annual_claim_evidence_unverified';
+
+    /**
+     * Sleva na manžela je uplatněná, ale podle evidence nejsou splněné podmínky
+     * § 35bb: příjem manžela nad limit nebo neznámý, v některém označeném měsíci
+     * není na jeho počátku vyživované dítě do 3 let nebo manžel, ZTP/P mimo
+     * měsíce nároku. Které podmínky to jsou, nese stopa výsledku.
+     */
+    case SpouseCreditConditionsNotMet = 'spouse_credit_conditions_not_met';
+
+    /**
+     * Sleva za umístění dítěte (§ 35bd) je uplatněná, ale podle evidence nejsou
+     * splněné podmínky: rok před účinností (2027), vnuk bez péče nahrazující péči
+     * rodičů, dítě v roce nežilo s poplatníkem, slevu v téže domácnosti uplatňuje
+     * jiný poplatník, výdaje jsou uplatněné jako výdaj na dosažení příjmů, dohoda
+     * o stropu nad minimální mzdou nebo ruleset bez minimální mzdy. Které
+     * podmínky to jsou, nese stopa výsledku (`preschool_credit_failures`).
+     */
+    case PreschoolCreditConditionsNotMet = 'preschool_credit_conditions_not_met';
+
+    /**
      * § 38ch odst. 4 mluví o ÚHRNU mezd od všech plátců. Potvrzení od
      * předchozího plátce, které je v evidenci vedené jako nedoložené, do úhrnu
      * vzít nejde.

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/form/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/form/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:include schemaLocation="formCommonTypes.xsd"/>
+
+  <xs:element name="jinyPrijem" type="jinyPrijemType"/>
+  <xs:complexType name="jinyPrijemType">
+    <xs:annotation>
+      <xs:documentation>DATOVÝ SCÉNÁŘ V MĚSÍČNÍM HLÁŠENÍ PODLE DRUHU ČINNOSTI:
+11, 13, 14</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="identifikace" type="identifikaceType"/>
+      <xs:element name="souhrnDataZec" type="souhrnDataZecCoreType" minOccurs="0"/>
+      <xs:element name="prijem" type="prijemType"/>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

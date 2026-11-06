@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEventSe
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use ReflectionClass;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Hlášky registračních událostí A2–A8 jdou beze změny přes akci až do
@@ -244,14 +245,52 @@ final class PayrollRegistrationEventMessageWordingTest extends TestCase
         $service = (new ReflectionClass(PayrollRegistrationEventService::class))->newInstanceWithoutConstructor();
         $method = new \ReflectionMethod(PayrollRegistrationEventService::class, 'employmentChange');
 
-        self::assertSame(['profession_code' => '24111'], $method->invoke($service, ['profession_code' => '24111']));
+        self::assertSame(
+            ['profession_code' => '24111'],
+            $method->invoke($service, ['profession_code' => '24111'], '2026-08-05'),
+        );
         try {
-            $method->invoke($service, ['profession_code' => '2411']);
+            $method->invoke($service, ['profession_code' => '2411'], '2026-08-05');
             self::fail('Čtyřmístný kód CZ-ISCO nesmí do A3 projít.');
         } catch (\InvalidArgumentException $exception) {
             self::assertStringContainsString('pětimístný kód CZ-ISCO', $exception->getMessage());
             self::assertStringEndsWith('(employment.profession_code)', $exception->getMessage());
         }
+    }
+
+    /**
+     * Postavení v zaměstnání v A3/A4 se kontroluje proti číselníku ročníku
+     * věty: REGZEC 2025 slovník 1.4.1.6 (2119), REGZEC 2027 ČSÚ (2219).
+     * U aktivního vztahu rozhoduje podle odpovědi ČSSZ 13 den vyhotovení
+     * (od 23. 12. 2026 REGZEC27), ne den platnosti změny. U vztahu skončeného
+     * u ČSSZ rozhoduje datum skončení 10224, které doplní withRegisteredEnd(),
+     * takže se kód ověřuje až nad finálními daty.
+     */
+    public function testEmploymentChangeChecksStatusAgainstVintageCodebook(): void
+    {
+        $method = new \ReflectionMethod(PayrollRegistrationEventService::class, 'assertEmploymentStatusCodeKnown');
+        $rejected = static function (array $employment, string $effectiveOn, string $now) use ($method): bool {
+            $service = (new ReflectionClass(PayrollRegistrationEventService::class))->newInstanceWithoutConstructor();
+            (new \ReflectionProperty(PayrollRegistrationEventService::class, 'clock'))
+                ->setValue($service, new MockClock($now . ' 10:00:00'));
+            try {
+                $method->invoke($service, 3, $effectiveOn, ['delta' => ['employment' => $employment]]);
+                return false;
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringEndsWith('(employment.employment_status_code)', $exception->getMessage());
+                return true;
+            }
+        };
+
+        self::assertFalse($rejected(['employment_status_code' => '2119'], '2026-12-10', '2026-12-10'));
+        self::assertTrue($rejected(['employment_status_code' => '2219'], '2026-12-10', '2026-12-10'));
+        // Změna s platností v roce 2026 vyhotovená v lednu 2027 jde jako REGZEC27.
+        self::assertFalse($rejected(['employment_status_code' => '2219'], '2026-12-15', '2027-01-05'));
+        self::assertTrue($rejected(['employment_status_code' => '2119'], '2026-12-15', '2027-01-05'));
+        // Vztah skončený 30. 11. 2026: REGZEC25 i při vyhotovení 28. 12. 2026.
+        $ended = ['employment_status_code' => '2119', 'end_on' => '2026-11-30'];
+        self::assertFalse($rejected($ended, '2026-11-20', '2026-12-28'));
+        self::assertTrue($rejected(['employment_status_code' => '2219'] + $ended, '2026-11-20', '2026-12-28'));
     }
 
     private function messageFrom(string $method, array $arguments): string

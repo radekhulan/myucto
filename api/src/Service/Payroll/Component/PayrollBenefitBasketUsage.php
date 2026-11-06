@@ -27,7 +27,7 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
      * a `limit_unavailable` jsou PŘIZNÁNÍ, že podklad chybí, a musí mít na
      * obrazovce vlastní větu — jinak by se tvářily jako „v pořádku".
      */
-    public const STATUSES = ['ok', 'approaching', 'exceeded', 'incomplete', 'limit_unavailable'];
+    public const STATUSES = ['ok', 'approaching', 'exceeded', 'incomplete', 'limit_unavailable', 'unlimited'];
 
     /**
      * Čeho se `limitMinor` týká. Je to ODPOVĚĎ NA JINOU OTÁZKU než období součtu:
@@ -73,6 +73,12 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
          */
         public int $takenOverMinor = 0,
         public int $takenOverMonths = 0,
+        /**
+         * Koš je v daném roce osvobozený bez číselného limitu (§ 6 odst. 9
+         * písm. d) bod 2 od 2027). `limitMinor` je pak `null`, ale nejde
+         * o chybějící podklad, takže stav není `limit_unavailable`.
+         */
+        public bool $unlimited = false,
     ) {}
 
     public function remainingMinor(): ?int
@@ -103,6 +109,9 @@ final readonly class PayrollBenefitBasketUsage implements \JsonSerializable
         // části proběhlo v předchozím programu.
         if ($this->takenOverMinor > 0 && $this->limitMinor !== null && $this->usedMinor > $this->limitMinor) {
             return 'exceeded';
+        }
+        if ($this->unlimited) {
+            return 'unlimited';
         }
         if ($this->limitMinor === null) {
             return 'limit_unavailable';

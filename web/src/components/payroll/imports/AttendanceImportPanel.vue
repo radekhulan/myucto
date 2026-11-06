@@ -24,8 +24,11 @@ import AttendanceSummaryStep from './AttendanceSummaryStep.vue'
 import AttendanceBatchHistory from './AttendanceBatchHistory.vue'
 import AttendanceRecognitionStrip from './AttendanceRecognitionStrip.vue'
 import AttendanceTimeApprovalResult from './AttendanceTimeApprovalResult.vue'
+import AttendanceTemplateDownload from './AttendanceTemplateDownload.vue'
 import { useAttendanceWorkspace } from './attendanceWorkspace'
 import {
+  ATTENDANCE_FILE_ACCEPT,
+  ATTENDANCE_FILE_EXTENSIONS,
   autoCreatablePersons,
   autoPersonCreateDefaults,
   buildAttendanceLinks,
@@ -428,11 +431,16 @@ async function approveTimeMonths() {
         </label>
       </div>
 
+      <div v-if="canWrite" class="mb-4 flex flex-wrap items-center gap-3" data-testid="attendance-template">
+        <AttendanceTemplateDownload :disabled="busy !== null" />
+        <p class="min-w-0 max-w-2xl flex-1 text-xs text-neutral-500">{{ t('payroll_imports.template.hint') }}</p>
+      </div>
+
       <ImportFilesDropzone
         v-model:files="files"
         test-id="attendance-dropzone"
-        accept=".xlsx,.csv"
-        :allowed-extensions="['xlsx', 'csv']"
+        :accept="ATTENDANCE_FILE_ACCEPT"
+        :allowed-extensions="ATTENDANCE_FILE_EXTENSIONS"
         :drop-hint="t('payroll_imports.attendance.drop_hint')"
         :disabled="!canWrite || busy !== null"
       />

@@ -62,7 +62,7 @@ final class McpOAuthGrantTest extends TestCase
         ]);
         $this->userId = (int) $pdo->lastInsertId();
         $this->tokens = new ApiTokenService($this->db, new RedisFactory($config));
-        $this->oauth = new McpOAuth($this->db, $this->tokens);
+        $this->oauth = new McpOAuth($this->db, $this->tokens, Bootstrap::buildContainer()->get(\MyInvoice\Service\Mcp\McpResourcePolicy::class));
     }
 
     protected function tearDown(): void

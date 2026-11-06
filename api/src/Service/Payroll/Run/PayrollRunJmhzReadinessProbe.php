@@ -9,6 +9,7 @@ use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzPreparationSnapshotService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerRemediationPath;
 use PDO;
 
 /**
@@ -56,6 +57,7 @@ final class PayrollRunJmhzReadinessProbe
         private readonly Connection $db,
         private readonly JmhzPreparationSnapshotService $preparation,
         private readonly PayrollComponentJmhzMappingDefaults $mappingDefaults,
+        private readonly PayrollPeopleRepository $people,
     ) {}
 
     /**
@@ -123,7 +125,7 @@ final class PayrollRunJmhzReadinessProbe
                     'impact' => $classification['impact'],
                     'scope' => $classification['scope'],
                     'message' => '',
-                    'remediation_path' => self::remediationPath($code),
+                    'remediation_path' => self::remediationPath($code, null, $periodStart),
                     'count' => 0,
                     'entity_total' => 0,
                     'entities' => [],
@@ -138,7 +140,7 @@ final class PayrollRunJmhzReadinessProbe
                     'entity_id' => $issue['entity_id'],
                     'label' => $label,
                     'message' => self::message($issue['code'], $label === null ? [] : [$label], 1),
-                    'remediation_path' => self::remediationPath($issue['code'], $issue['entity_id']),
+                    'remediation_path' => self::remediationPath($issue['code'], $issue['entity_id'], $periodStart),
                 ];
                 if ($label !== null && !in_array($label, $groups[$code]['labels'], true)) {
                     $groups[$code]['labels'][] = $label;
@@ -322,63 +324,27 @@ final class PayrollRunJmhzReadinessProbe
                 . 'mzdový běh ale běží dál.',
                 $named !== '' ? $named : $count . '× pracovní vztah',
             ),
+            'jmhz_average_hourly_earning_missing' => sprintf(
+                'Chybí průměr pro JMHZ: %s. Měsíční hlášení v poli 10345 požaduje '
+                . 'schválený průměrný hodinový výdělek za čtvrtletí období. Otevřete '
+                . 'Mzdy → Absence a průměry → Průměrný výdělek a v části „Hromadné '
+                . 'vypočtení průměrů za čtvrtletí" průměry vypočtěte a schvalte, '
+                . 'a to PŘED zamknutím vstupů a výpočtem. Schválený později se do '
+                . 'zmrazených vstupů revize nedostane a oprava stojí opravnou revizi. '
+                . 'Mzdový běh tím omezený není.',
+                $named !== '' ? $named : $count . '× pracovní vztah',
+            ),
             default => JmhzBlockerExplainer::guidance($code)
                 . ($named === '' ? '' : ' Týká se: ' . $named . '.')
                 . ' Otevřete Mzdová podání → JMHZ a spusťte test hlášení. Mzdový běh tím není omezený.',
         };
     }
 
-    private static function remediationPath(string $code, ?int $entityId = null): ?string
+    private static function remediationPath(string $code, ?int $entityId = null, ?string $periodStart = null): ?string
     {
-        if (in_array($code, [
-            'jmhz_identity_missing',
-            'jmhz_identity_oic_missing',
-            'jmhz_identity_id_ppv_missing',
-            'jmhz_identity_incomplete',
-            'jmhz_identity_unresolved',
-        ], true)) {
-            $query = $entityId === null ? [] : ['employment' => $entityId];
-            $query['panel'] = 'jmhz_identity';
-            $query['field'] = $code === 'jmhz_identity_id_ppv_missing'
-                ? 'jmhz.employment_external_identifier'
-                : 'jmhz.person_external_identifier';
-            return '/payroll/people?' . http_build_query($query);
-        }
-        return match ($code) {
-            'component_jmhz_mapping_missing',
-            'component_jmhz_manual_review',
-            'component_jmhz_treatment_invalid',
-            'component_jmhz_bonus_regularity_unverified' => self::componentPath($code, $entityId),
-            default => '/payroll/submissions/jmhz',
-        };
-    }
-
-    /**
-     * Odkaz, který vede ROVNOU na opravu.
-     *
-     * Dřív mířil nález na holé `/payroll/components` — stránka se otevřela na
-     * záložce mzdových vstupů a účetní musela hledat číselník i složku sama.
-     * Jednotlivá složka teď vede na svoje zařazení (`component` + `panel=jmhz`),
-     * souhrnný nález na číselník vyfiltrovaný na složky s tímtéž problémem,
-     * odkud se dají zařadit hromadně.
-     */
-    private static function componentPath(string $code, ?int $componentId): string
-    {
-        $query = ['tab' => 'catalog'];
-        if ($componentId !== null) {
-            $query['component'] = $componentId;
-            $query['panel'] = 'jmhz';
-        } elseif ($code !== 'component_jmhz_bonus_regularity_unverified') {
-            // Neověřené zařazení odměny je zařazení, ne chybějící stav — filtr
-            // stavů ho nemá, souhrnný nález proto vede na celý číselník.
-            $query['jmhz'] = match ($code) {
-                'component_jmhz_manual_review' => 'manual_review',
-                'component_jmhz_treatment_invalid' => 'invalid',
-                default => 'missing',
-            };
-        }
-
-        return '/payroll/components?' . http_build_query($query);
+        // Cestu skládá jediné místo, stejné jako u blokace zmrazení hlášení.
+        return JmhzBlockerRemediationPath::forReadinessCode($code, $entityId, $periodStart)
+            ?? '/payroll/submissions/jmhz';
     }
 
     /**
@@ -421,30 +387,6 @@ final class PayrollRunJmhzReadinessProbe
      */
     public function employmentLabels(int $supplierId, array $ids): array
     {
-        if ($ids === []) {
-            return [];
-        }
-        $placeholders = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT employment.id, employment.code,
-                    ' . PayrollPeopleRepository::fullNameExpression() . ' AS full_name
-               FROM payroll_employments employment
-               JOIN payroll_employees employee
-                 ON employee.id = employment.employee_id
-                AND employee.supplier_id = employment.supplier_id
-              WHERE employment.supplier_id = ?
-                AND employment.id IN (' . $placeholders . ')',
-        );
-        $stmt->execute([$supplierId, ...$ids]);
-
-        $labels = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $code = (string) ($row['code'] ?? '');
-            $labels[(int) $row['id']] = $code === ''
-                ? (string) $row['full_name']
-                : sprintf('%s (%s)', (string) $row['full_name'], $code);
-        }
-
-        return $labels;
+        return $this->people->employmentLabels($supplierId, $ids);
     }
 }

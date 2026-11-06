@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Accounting\Dimension;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Repository\AccountingFrameworkRepository;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Service\TaxEvidence\CashJournalDimensionService;
 use PDO;
@@ -20,8 +22,9 @@ use PDO;
  *   • {@see coverage()} — kolik řádků na syntetickém účtu nese hodnotu typu. Podklad
  *     pro návrh pravidel po převodu z jiného systému.
  *
- * Nebere se uzávěrka a otevření účtů (převody zůstatků) a storna ani jimi stornované
- * zápisy — pár storna se v sestavách vynuluje, doplňovat mu dimenzi nemá smysl.
+ * U vlastních dimenzí se převody závěrky a otevření vynechávají. Systémová pravidla
+ * rámce 504 kontrolují také jejich rozvahové řádky. Storna a stornované zápisy
+ * se vynechávají, protože pár se v sestavách vynuluje.
  */
 final class DimensionRuleAudit
 {
@@ -55,14 +58,22 @@ final class DimensionRuleAudit
             static fn (array $r): bool => $r['enforcement'] !== 'none',
         ));
         $types = [];
+        $systemTypes = [];
         foreach ((new DimensionRepository($this->db))->listTypes($supplierId) as $t) {
             $types[$t['id']] = (string) $t['name'];
+            if (!empty($t['system_key'])) {
+                $systemTypes[$t['id']] = $t['system_key'];
+                if ($t['system_key'] === 'activity') {
+                    $rules[] = SystemDimensionSourcePolicy::activityRule((int) $t['id']);
+                }
+            }
         }
         $byType = [];
         foreach ($rules as $rule) {
             $byType[$rule['dimension_type_id']][] = $rule;
         }
 
+        [$frameworkSql, $frameworkParams] = $systemTypes === [] ? ['0 = 1', []] : $this->framework504Sql($supplierId);
         $rows = [];
         $summary = [];
         $total = 0;
@@ -85,13 +96,27 @@ final class DimensionRuleAudit
                     $cond .= ' AND je.entry_date <= ?';
                     $condParams[] = $rule['valid_to'];
                 }
+                if (isset($systemTypes[$typeId])) {
+                    if (!empty($rule['system_required'])) {
+                        $cond .= ' AND (' . $frameworkSql . ')';
+                        array_push($condParams, ...$frameworkParams);
+                    }
+                    $balanceTypes = implode(',', array_map(static fn (string $type): string => "'" . $type . "'", SystemDimensionSourcePolicy::BALANCE_TYPES));
+                    $closing = $rule['enforcement'] === 'error'
+                        ? "a.account_type IN ({$balanceTypes}) AND ({$frameworkSql})"
+                        : '0 = 1';
+                    $cond .= " AND (je.source_type NOT IN ('closing','opening') OR ({$closing}))";
+                    if ($rule['enforcement'] === 'error') {
+                        array_push($condParams, ...$frameworkParams);
+                    }
+                }
                 $conds[] = '(' . $cond . ')';
                 array_push($params, ...$condParams);
                 $severity[] = 'CASE WHEN ' . $cond . ' THEN ' . ($rule['enforcement'] === 'error' ? 2 : 1) . ' ELSE 0 END';
                 array_push($sevParams, ...$condParams);
             }
             $sevSql = count($severity) === 1 ? $severity[0] : 'GREATEST(' . implode(', ', $severity) . ')';
-            [$baseSql, $baseParams] = $this->baseSql($supplierId, $dateFrom, $dateTo);
+            [$baseSql, $baseParams] = $this->baseSql($supplierId, $dateFrom, $dateTo, isset($systemTypes[$typeId]));
             $where = $baseSql . ' AND (' . implode(' OR ', $conds) . ')
                   AND NOT EXISTS (SELECT 1 FROM journal_entry_line_dimensions d
                                    WHERE d.line_id = l.id AND d.dimension_type_id = ?)
@@ -205,10 +230,31 @@ final class DimensionRuleAudit
         return $out;
     }
 
+    private function framework504Sql(int $supplierId): array
+    {
+        $history = (new AccountingFrameworkService($this->db, new AccountingFrameworkRepository($this->db)))->history($supplierId);
+        $conditions = [];
+        $params = [];
+        foreach ($history as $i => $row) {
+            if ($row['accounting_framework'] !== AccountingFrameworkService::CZ_504) {
+                continue;
+            }
+            $condition = 'je.entry_date >= ?';
+            $params[] = $row['effective_from'];
+            if (isset($history[$i + 1])) {
+                $condition .= ' AND je.entry_date < ?';
+                $params[] = $history[$i + 1]['effective_from'];
+            }
+            $conditions[] = '(' . $condition . ')';
+        }
+        return [$conditions === [] ? '0 = 1' : implode(' OR ', $conditions), $params];
+    }
+
     /** @return array{0:string,1:list<int|string>} FROM … WHERE nad zaúčtovanými řádky období */
-    private function baseSql(int $supplierId, string $dateFrom, string $dateTo): array
+    private function baseSql(int $supplierId, string $dateFrom, string $dateTo, bool $includeClosing = false): array
     {
         $exempt = implode(',', array_fill(0, count(self::EXEMPT_SOURCES), '?'));
+        $sourceFilter = $includeClosing ? '' : "AND je.source_type NOT IN ({$exempt})";
         return [
             "FROM journal_entries je
              JOIN journal_entry_lines l ON l.entry_id = je.id AND l.supplier_id = je.supplier_id
@@ -216,10 +262,10 @@ final class DimensionRuleAudit
             WHERE je.supplier_id = ? AND je.entry_date BETWEEN ? AND ?
               AND je.posted_at IS NOT NULL
               AND je.reversed_by IS NULL
-              AND je.source_type NOT IN ({$exempt})
+              {$sourceFilter}
               AND NOT EXISTS (SELECT 1 FROM journal_entries orig
                                WHERE orig.supplier_id = je.supplier_id AND orig.reversed_by = je.id)",
-            [$supplierId, $dateFrom, $dateTo, ...self::EXEMPT_SOURCES],
+            [$supplierId, $dateFrom, $dateTo, ...($includeClosing ? [] : self::EXEMPT_SOURCES)],
         ];
     }
 }

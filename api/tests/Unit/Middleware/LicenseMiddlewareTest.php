@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Unit\Middleware;
 
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
+use MyInvoice\Service\License\LicenseConsistency;
 use MyInvoice\Service\License\LicenseService;
 use MyInvoice\Service\License\LicenseState;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -197,12 +198,39 @@ final class LicenseMiddlewareTest extends TestCase
 
     // ── helpers ────────────────────────────────────────────────────────────────
 
-    private function middleware(LicenseService $service): LicenseMiddleware
+    public function testCommercialStateWithoutIndependentConfirmationIsForbidden(): void
     {
+        $denied = $this->middleware($this->stateReturning(LicenseState::ACTIVE), confirmed: false);
+
+        $restricted = $denied->process($this->request('GET', '/api/accounting/journal'), $this->handler());
+        self::assertSame(403, $restricted->getStatusCode());
+        self::assertStringContainsString('license_commercial_feature_unavailable', (string) $restricted->getBody());
+
+        $licensed = $this->createStub(LicenseService::class);
+        $licensed->method('current')->willReturn($this->state(LicenseState::ACTIVE, payrollEnabled: true));
+        $payroll = $this->middleware($licensed, confirmed: false)
+            ->process($this->request('GET', '/api/payroll/runs'), $this->handler());
+        self::assertSame(403, $payroll->getStatusCode());
+
+        // Bezplatný základ ani zbytek EET (fronta, opakování, opravy) na nezávislé
+        // kontrole nestojí.
+        foreach (['/api/invoices', '/api/eet/queue', '/api/eet/records/5/retry', '/api/eet/records/5/corrections'] as $path) {
+            $free = $denied->process($this->request('POST', $path), $this->handler());
+            self::assertSame(204, $free->getStatusCode(), $path);
+        }
+    }
+
+    private function middleware(LicenseService $service, bool $confirmed = true): LicenseMiddleware
+    {
+        $consistency = $this->createStub(LicenseConsistency::class);
+        $consistency->method('allowsCommercial')->willReturn($confirmed);
+        $consistency->method('allowsPayroll')->willReturn($confirmed);
+
         return new LicenseMiddleware(
             $service,
             new ResponseFactory(),
             new NullLogger(),
+            $consistency,
         );
     }
 

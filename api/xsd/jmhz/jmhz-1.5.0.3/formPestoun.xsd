@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/form/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/form/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:include schemaLocation="formCommonTypes.xsd"/>
+
+  <xs:element name="pestoun" type="pestounType"/>
+  <xs:complexType name="pestounType">
+    <xs:annotation>
+      <xs:documentation>DATOVÝ SCÉNÁŘ V MĚSÍČNÍM HLÁŠENÍ PODLE DRUHU ČINNOSTI:
+M</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="identifikace" type="identifikaceType"/>
+      <xs:element name="souhrnDataZec" type="souhrnDataZecPestounType" minOccurs="0"/>
+      <xs:element name="pojisteni" type="pojisteniType"/>
+      <xs:element name="vykonavanaPozice" type="vykonavanaPoziceCoreType"/>
+      <xs:element name="prijem" type="prijemType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="souhrnDataZecPestounType">
+    <xs:complexContent>
+      <xs:extension base="souhrnDataZecCoreType">
+        <xs:sequence>
+          <xs:element name="zdravPojZamestnavatel" type="zdravPojZamestnavatelType" />
+          <xs:element name="zdravPojZamestnanec" type="zdravPojZamestnanecType"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+</xs:schema>

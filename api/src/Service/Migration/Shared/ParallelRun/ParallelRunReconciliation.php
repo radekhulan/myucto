@@ -10,6 +10,7 @@ use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
 use MyInvoice\Service\Accounting\Reports\AssetInventoryReportService;
 use MyInvoice\Service\Accounting\Reports\DimensionProfitService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Accounting\Reports\StatementFrameworkResolver;
 use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Accounting\Reports\TrialBalanceService;
 use MyInvoice\Service\Migration\Shared\TrialBalanceReconciliation;
@@ -49,6 +50,7 @@ final class ParallelRunReconciliation
         private readonly AssetInventoryReportService $assets,
         private readonly DimensionProfitService $dimensionProfit,
         private readonly FinancialStatementService $statements,
+        private readonly StatementFrameworkResolver $frameworks,
         private readonly LoggerInterface $log,
         private readonly EpoVatFilingReader $epo = new EpoVatFilingReader(),
     ) {}
@@ -367,6 +369,8 @@ final class ParallelRunReconciliation
     /** K13 — rozvaha a výsledovka k poslednímu dni měsíce v plném rozsahu. */
     private function statementsCriterion(int $supplierId, int $periodId, string $asOf, SourceSnapshot $source): array
     {
+        $context = $this->frameworks->context($supplierId, $periodId, $asOf);
+        TrialBalanceReconciliation::assertStatementFrameworkSupported($context['framework']);
         $diffs = [];
         $summary = [];
         if ($source->balanceSheet !== null) {

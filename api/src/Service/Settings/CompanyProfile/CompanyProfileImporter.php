@@ -8,10 +8,12 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\BankPostingRuleRepository;
+use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
 use MyInvoice\Repository\StatementOverrideRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingRuleValidator;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateValidator;
 use MyInvoice\Service\Accounting\Dimension\DimensionAccountMask;
@@ -658,16 +660,13 @@ final class CompanyProfileImporter
             return;
         }
         if (!$this->dimensionRepo->enabled($supplierId)) {
-            $this->warn($section, 'Firma nemá zapnuté dimenze, výchozí dimenze klientů, zakázek a produktů se nenahrály.');
+            $this->warn($section, 'Firma nemá zapnuté dimenze, výchozí dimenze klientů, zakázek, produktů a bankovních účtů se nenahrály.');
             return;
         }
-        $types = [];
-        foreach ($this->dimensionRepo->listTypes($supplierId) as $t) {
-            // Firemní typ má přednost před globálním se stejným kódem.
-            if (!isset($types[$t['code']]) || $t['level'] === 'company') {
-                $types[$t['code']] = (int) $t['id'];
-            }
-        }
+        $types = $this->dimensionTypesByCode($supplierId);
+        $mode = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
+        $mode->execute([$supplierId]);
+        $doubleEntry = $mode->fetchColumn() === 'double_entry';
         $wanted = [];
         foreach (array_values($data) as $d) {
             if (!is_array($d)) {
@@ -676,17 +675,25 @@ final class CompanyProfileImporter
             $entity = (string) ($d['entity'] ?? '');
             $typeCode = (string) ($d['type_code'] ?? '');
             $valueCode = (string) ($d['value_code'] ?? '');
+            if ($entity === 'bank_account' && !$doubleEntry) {
+                // Výchozí dimenze účtu platí jen v podvojném účetnictví (Kontace účtů).
+                $this->warn($section, sprintf('Firma nevede podvojné účetnictví, výchozí dimenze bankovního účtu %s přeskočena.', (string) ($d['bank_account']['account'] ?? '?')));
+                continue;
+            }
             $entityId = match ($entity) {
                 'client' => $this->clientId($supplierId, (array) ($d['client'] ?? [])),
                 'project' => $this->projectId($supplierId, (array) ($d['project'] ?? [])),
                 'product' => $this->codeId('SELECT id FROM stock_items WHERE supplier_id = ? AND sku = ?', $supplierId, (string) ($d['product']['sku'] ?? '')),
                 'product_category' => $this->codeId('SELECT id FROM stock_categories WHERE supplier_id = ? AND code = ?', $supplierId, (string) ($d['product_category']['code'] ?? '')),
+                'bank_account' => $this->bankAccountId($supplierId, (array) ($d['bank_account'] ?? [])),
                 default => null,
             };
             $who = match ($entity) {
                 'client' => 'klient ' . (string) ($d['client']['name'] ?? '?'),
                 'product' => 'produkt ' . (string) ($d['product']['sku'] ?? '?'),
                 'product_category' => 'kategorie ' . (string) ($d['product_category']['code'] ?? '?'),
+                'bank_account' => 'bankovní účet ' . (string) ($d['bank_account']['account'] ?? '?')
+                    . ((string) ($d['bank_account']['bank_code'] ?? '') !== '' ? '/' . (string) $d['bank_account']['bank_code'] : ''),
                 default => 'zakázka ' . (string) ($d['project']['name'] ?? '?'),
             };
             if ($entityId === null) {
@@ -872,6 +879,22 @@ final class CompanyProfileImporter
         return count($ids) === 1 ? (int) $ids[0] : null;
     }
 
+    /**
+     * Vlastní bankovní účet firmy podle čísla účtu a kódu banky, stejně jako ho najde
+     * zaúčtování pohybu ({@see SupplierBankAccountRepository::matchCounterparty()}): číslo
+     * i kód banky se kanonizují a účet registru bez kódu banky se spáruje taky. Neaktivní
+     * účet se najde, jeho nastavení se přenáší jako ostatní vlastnosti účtu.
+     *
+     * @param array<string,mixed> $key
+     */
+    private function bankAccountId(int $supplierId, array $key): ?int
+    {
+        $bank = trim((string) ($key['bank_code'] ?? ''));
+        $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
+            ->matchCounterparty($supplierId, (string) ($key['account'] ?? ''), $bank === '' ? null : $bank, true);
+        return $account === null ? null : (int) $account['id'];
+    }
+
     /** @param array<string,mixed> $project */
     /** Id záznamu firmy podle unikátního kódu (SKU produktu, kód kategorie), jinak null. */
     private function codeId(string $sql, int $supplierId, string $code): ?int
@@ -1011,8 +1034,28 @@ final class CompanyProfileImporter
             if (!is_array($raw)) {
                 continue;
             }
+            // Vlastní účet pravidla podle čísla, id z cizí instance se nepoužije. Pravidlo
+            // omezené na účet, který ve firmě není, se přeskočí: bez omezení by platilo
+            // pro pohyby všech účtů.
+            $ownAccount = $raw['bank_account'] ?? null;
+            $profileHasAccount = array_key_exists('bank_account', $raw);
+            $raw['bank_account_id'] = null;
+            if (is_array($ownAccount)) {
+                $raw['bank_account_id'] = $this->bankAccountId($supplierId, $ownAccount);
+                if ($raw['bank_account_id'] === null) {
+                    $this->warn($section, sprintf(
+                        'Pravidlo %s: bankovní účet %s%s ve firmě není, pravidlo přeskočeno.',
+                        (string) ($raw['name'] ?? '?'),
+                        (string) ($ownAccount['account'] ?? '?'),
+                        (string) ($ownAccount['bank_code'] ?? '') !== '' ? '/' . (string) $ownAccount['bank_code'] : '',
+                    ));
+                    continue;
+                }
+            }
             $rule = $this->bankRules->normalizeRule($supplierId, $raw);
             $rule['is_active'] = self::flag($raw['is_active'] ?? true, 'is_active');
+            // Starší profil sekci dimenzí pravidla nemá: dimenze existujícího pravidla zůstanou.
+            $dims = array_key_exists('dimensions', $raw) ? $this->bankRuleDimensions($supplierId, $raw['dimensions'], $rule['name']) : null;
             $templateKey = BankPostingRuleValidator::nn($raw['system_template_key'] ?? null);
             if ($templateKey !== null && preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/', $templateKey) !== 1) {
                 throw new CompanyProfileException('validation_failed', sprintf('Pravidlo %s: neplatný klíč šablony.', $rule['name']));
@@ -1023,6 +1066,9 @@ final class CompanyProfileImporter
             $current = $this->findBankRule($supplierId, $rule, $templateKey);
             if ($current === null) {
                 $id = $this->bankRuleRepo->insert($supplierId, $rule + ['system_template_key' => $templateKey], $userId);
+                if ($dims !== null && $dims !== []) {
+                    $this->bankRuleRepo->replaceDimensions($supplierId, $id, $dims);
+                }
                 if ($wantAuto && $rule['is_active']) {
                     $this->promotion->promote($supplierId, $id, $userId);
                 }
@@ -1036,8 +1082,19 @@ final class CompanyProfileImporter
                     $fields[$field] = $rule[$field];
                 }
             }
+            // Instance šablony se hledá jen podle klíče, omezení na účet z profilu se jí proto
+            // promítne tady (u ostatních pravidel je účet součástí hledání). Starší profil
+            // bez klíče `bank_account` omezení nezná a nesmí ho zrušit.
+            if ($templateKey !== null && $profileHasAccount
+                && (int) ($current['bank_account_id'] ?? 0) !== (int) ($rule['bank_account_id'] ?? 0)) {
+                $fields['bank_account_id'] = $rule['bank_account_id'] ?? null;
+            }
             if ($fields !== []) {
                 $this->bankRuleRepo->update($supplierId, $id, $fields);
+            }
+            if ($dims !== null && $dims !== $this->bankRuleRepo->dimensions($supplierId, $id)) {
+                $this->bankRuleRepo->replaceDimensions($supplierId, $id, $dims);
+                $fields['dimensions'] = $dims;
             }
             $mode = (string) $current['mode'];
             $modeChanged = false;
@@ -1057,6 +1114,59 @@ final class CompanyProfileImporter
     }
 
     /**
+     * Dimenze pravidla z profilu (typ a hodnota kódem) jako typ => hodnota. Hodnotu,
+     * která ve firmě není, ohlásí a vynechá. Bez zapnutých dimenzí nenahraje žádnou
+     * a vrátí null, aby import dosavadní dimenze pravidla nesmazal.
+     *
+     * @return array<int,int>|null
+     */
+    private function bankRuleDimensions(int $supplierId, mixed $raw, string $label): ?array
+    {
+        $entries = array_values(array_filter(is_array($raw) ? $raw : [], 'is_array'));
+        if (!$this->dimensionRepo->enabled($supplierId)) {
+            // Ani prázdný seznam z profilu nesmí smazat dimenze, které firma má jen vypnuté.
+            if ($entries !== []) {
+                $this->warn('bank_posting_rules', sprintf('Pravidlo %s: firma nemá zapnuté dimenze, dimenze pravidla se nenahrály.', $label));
+            }
+            return null;
+        }
+        if ($entries === []) {
+            return [];
+        }
+        $types = $this->dimensionTypesByCode($supplierId);
+        $out = [];
+        foreach ($entries as $d) {
+            $typeCode = (string) ($d['type_code'] ?? '');
+            $valueCode = (string) ($d['value_code'] ?? '');
+            $typeId = $types[$typeCode] ?? null;
+            $value = $typeId === null ? null : $this->dimensionRepo->findValueByCode($typeId, $valueCode);
+            if ($value === null) {
+                $this->warn('bank_posting_rules', sprintf('Pravidlo %s: hodnota %s/%s ve firmě není, přeskočena.', $label, $typeCode, $valueCode));
+                continue;
+            }
+            $out[$typeId] = (int) $value['id'];
+        }
+        ksort($out);
+        return $out;
+    }
+
+    /**
+     * Typy dimenzí firmy podle kódu; firemní typ má přednost před globálním se stejným kódem.
+     *
+     * @return array<string,int>
+     */
+    private function dimensionTypesByCode(int $supplierId): array
+    {
+        $types = [];
+        foreach ($this->dimensionRepo->listTypes($supplierId) as $t) {
+            if (!isset($types[$t['code']]) || $t['level'] === 'company') {
+                $types[$t['code']] = (int) $t['id'];
+            }
+        }
+        return $types;
+    }
+
+    /**
      * Existující pravidlo, které profilové pravidlo popisuje: instance šablony podle klíče
      * šablony, jinak stejný směr, měna a stejná kritéria shody.
      *
@@ -1073,13 +1183,14 @@ final class CompanyProfileImporter
             $stmt = $pdo->prepare(
                 'SELECT * FROM bank_posting_rules
                   WHERE supplier_id = ? AND system_template_key IS NULL AND direction = ? AND applies_currency = ?
+                    AND bank_account_id <=> ?
                     AND counterparty_account <=> ? AND counterparty_bank <=> ? AND counterparty_prefix <=> ?
                     AND variable_symbol <=> ? AND message_contains <=> ?
                     AND amount_min <=> ? AND amount_max <=> ?
                   ORDER BY id LIMIT 1'
             );
             $stmt->execute([
-                $supplierId, $rule['direction'], $rule['applies_currency'],
+                $supplierId, $rule['direction'], $rule['applies_currency'], $rule['bank_account_id'],
                 $rule['counterparty_account'], $rule['counterparty_bank'], $rule['counterparty_prefix'],
                 $rule['variable_symbol'], $rule['message_contains'], $rule['amount_min'], $rule['amount_max'],
             ]);

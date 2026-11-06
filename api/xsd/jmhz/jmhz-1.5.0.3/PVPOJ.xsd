@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="http://schemas.cssz.cz/JMHZ/PVPOJ/2027"
+           xmlns:st="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/PVPOJ/2027" elementFormDefault="qualified" attributeFormDefault="unqualified"
+           version="1.5.0.3">
+
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" schemaLocation="simpleTypes.xsd"/>
+
+  <xs:element name="PVPOJ" type="prehledType"/>
+  <xs:complexType name="prehledType">
+    <xs:sequence>
+      <xs:element name="pojistne" type="pojistneType"/>
+      <xs:element minOccurs="0" name="slevaZamestnavatele" type="slevaType">
+        <xs:annotation>
+          <xs:documentation>Sleva na pojistném zaměstnavatele</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="slevyZamestnancu" type="slevaType">
+        <xs:annotation>
+          <xs:documentation>Slevy na pojistném zaměstnanců</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="slevyZamestnancuOvoZel" type="slevaType">
+        <xs:annotation>
+          <xs:documentation>Slevy na pojistném zaměstnanců v ovocnářství a při pěstování zeleniny</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="pojistneUhrada" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Vypočítané pojistné (rozdíl mezi pojistným celkem a slevou na pojistném)
+DS:Pojistná část > Pojistné k úhradě
+Rozdíl mezi celkovým pojistným (10029) a slevou na pojistném zaměstnavatele (10032) a úhrnem slev na pojistném zaměstnanců (10487). (ID 10033)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="pojistneType">
+    <xs:sequence>
+      <xs:element minOccurs="0" name="zakladZamestnavateleA" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Vyměřovací základ zaměstnavatele podle § 5a odst. 1 písm. a)
+DS:Pojistná část > Odváděné pojistné
+Úhrn vyměřovacích základů zaměstnanců, kteří nevykonávají činnost v rizikovém zaměstnání nebo nejsou zdravotnickými záchranáři nebo členy HZS podniku (ID 10023)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="pojistneZamestnavateleA" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Pojistné za zaměstnavatele vypočteno automaticky
+DS:Pojistná část > Odváděné pojistné
+Pojistné za zaměstnavatele u zaměstnanců, kteří nevykonávají činnost v rizikovém zaměstnání nebo nejsou zdravotnickými záchranáři nebo členy HZS podniku (ID 10024)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="zakladZamestnavateleB" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Vyměřovací základ zaměstnavatele podle § 5a odst. 1 písm. b)
+DS:Pojistná část > Odváděné pojistné
+Úhrn vyměřovacích základů zaměstnanců, kteří jsou zdravotnickými záchranáři nebo členy HZS podniku (ID 10025)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="pojistneZamestnavateleB" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Pojistné za zaměstnavatele vypočteno automaticky
+DS:Pojistná část > Odváděné pojistné
+Pojistné za zaměstnavatele u zaměstnanců, kteří jsou zdravotnickými záchranáři nebo členy HZS podniku (ID 10026)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="zakladZamestnavateleC" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Vyměřovací základ zaměstnavatele podle § 5a odst. 1 písm. c)
+DS:Pojistná část > Odváděné pojistné
+Úhrn vyměřovacích základů zaměstnanců, kteří vykonávají rizikové zaměstnání (ID 10483)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element minOccurs="0" name="pojistneZamestnavateleC" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Pojistné za zaměstnavatele vypočteno automaticky
+DS:Pojistná část > Odváděné pojistné
+Pojistné za zaměstnavatele u zaměstnanců, kteří vykonávají rizikové zaměstnání (ID 10484)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="pojistneZamestnavateleCelkem" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Pojistné za zaměstnavatele celkem
+DS:Pojistná část > Odváděné pojistné
+Pojistné za zaměstnavatele celkem, tj. součet dílčích částek pojistného uvedených v atributech 10024, 10026 a 10484 (ID 10027)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="pojistneZamestnance" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation> Pojistné za zaměstnance
+DS:Pojistná část > Odváděné pojistné (ID 10028)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="pojistneCelkem" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Pojistné celkem
+DS:Pojistná část > Odváděné pojistné
+Součet pojistného za zaměstnavatele (10027) a pojistného za zaměstnance (10028). (ID 10029)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="slevaType">
+    <xs:sequence>
+      <xs:element name="pocetZamestnancu" type="st:nezaporneCislo6Type">
+        <xs:annotation>
+          <xs:documentation>Počet zaměstnanců
+DS:Pojistná část > Slevy na pojistném zaměstnavatele
+Počet zaměstnanců, za které zaměstnavatel uplatňuje slevu na pojistném v souladu s § 7a a násl. zákona č. 589/1992 Sb. (ID 10030)
+DS:Pojistná část > Slevy na pojistném zaměstnanců > Pracující důchodci
+Počet zaměstnanců, kteří mají v kalendářním měsíci nárok na slevu na pojistném podle § 7d a násl. zákona č. 589/1992 Sb. (ID 10485)
+DS:Pojistná část > Slevy na pojistném zaměstnanců > Ovocnářství a pěstování zeleniny
+Počet zaměstnanců, kteří mají v kalendářním měsíci nárok na slevu na pojistném zaměstnance v ovocnářství a při pěstování zeleniny. (ID 10543)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="uhrnVymerovacichZakladu" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Úhrn vyměřovacích základů zaměstnanců
+DS:Pojistná část > Slevy na pojistném zaměstnavatele
+Úhrn vyměřovacích základů těchto zaměstnanců (zahrnutých do počtu 10030) (ID 10031)
+DS:Pojistná část > Slevy na pojistném zaměstnanců > Pracující důchodci
+Úhrn vyměřovacích základů těchto zaměstnanců (zahrnutých do počtu 10485) (ID 10486)
+DS:Pojistná část > Slevy na pojistném zaměstnanců > Ovocnářství a pěstování zeleniny
+Úhrn vyměřovacích základů zaměstnanců, kteří mají v kalendářním měsíci nárok na slevu na pojistném zaměstnance v ovocnářství a při pěstování zeleniny. (ID 10544)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="pojistneSleva" type="st:nezaporneCislo12Type">
+        <xs:annotation>
+          <xs:documentation>Sleva na pojistném zaměstnavatele / Úhrn slev na pojistném zaměstnanců
+DS:Pojistná část > Slevy na pojistném zaměstnavatele
+Sleva na pojistném zaměstnavatele (ID 10032)
+DS:Pojistná část > Slevy na pojistném zaměstnanců > Pracující důchodci
+Úhrn slev na pojistném těchto zaměstnanců (ID 10487)
+DS:Pojistná část > Slevy na pojistném zaměstnanců > Ovocnářství a pěstování zeleniny
+Úhrn slev na pojistném zaměstnanců, kteří mají v kalendářním měsíci nárok na slevu na pojistném zaměstnance v ovocnářství a při pěstování zeleniny. (ID 10545)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

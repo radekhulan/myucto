@@ -17,6 +17,7 @@ use MyInvoice\Service\Migration\StereoNx\StereoNxImporter;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImportJobService;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImportMap;
 use MyInvoice\Service\Migration\StereoNx\StereoNxSourcePlan;
+use MyInvoice\Service\Migration\StereoNx\StereoNxRunReportStore;
 use MyInvoice\Service\Migration\StereoNx\StereoNxUploads;
 use MyInvoice\Service\Migration\Shared\MigrationCompanyLock;
 use MyInvoice\Service\Report\VatLedgerService;
@@ -46,6 +47,7 @@ final class StereoNxImportTest extends TestCase
     private int $userId;
     private string $tmp;
     private array $tokens = [];
+    private array $runReportPaths = [];
     private const PASSWORD = 'Synthetic-NX-test-password';
 
     protected function setUp(): void
@@ -80,6 +82,10 @@ final class StereoNxImportTest extends TestCase
 
     protected function tearDown(): void
     {
+        foreach ($this->runReportPaths as $path) {
+            $absolute = \MyInvoice\Infrastructure\Config\RuntimePaths::storage($path);
+            if (is_file($absolute) && !is_link($absolute)) unlink($absolute);
+        }
         foreach ($this->tokens as $token) {
             $dir = StereoNxUploads::dir($this->supplierId, $token);
             foreach (glob($dir . '/*') ?: [] as $path) if (is_file($path)) unlink($path);
@@ -609,6 +615,96 @@ final class StereoNxImportTest extends TestCase
         self::assertFileDoesNotExist(StereoNxUploads::archive($this->supplierId, $token));
     }
 
+    public function testBankSeriesSuggestionRequiresConfirmationAndBindsBothJobChecksToDryRun(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['LFirmaUc'][0]['DoklRada'] = '';
+        $this->backup($tables);
+        $bytes = file_get_contents($this->tmp . '/backup.zip');
+        $init = $this->call('init', ['file_name' => 'synthetic.zip', 'size' => strlen($bytes)]);
+        $token = $this->json($init)['token'];
+        $this->tokens[] = $token;
+        self::assertSame(200, $this->chunk($token, 0, $bytes)->getStatusCode());
+        self::assertSame(200, $this->call('complete', [], $token)->getStatusCode());
+        $body = ['company' => 0, 'password' => self::PASSWORD, 'mode' => 'dry_run'];
+        $plan = $this->json($this->call('preview', $body, $token))['companies'][0]['bank_account_series'] ?? null;
+        self::assertIsArray($plan);
+        self::assertTrue($plan['requires_confirmation']);
+        self::assertFalse($plan['ambiguous']);
+        self::assertSame('B', $plan['assignments'][0]['series']);
+        $before = $this->snapshot();
+        foreach ([null, 'true', 1] as $invalidConfirmation) {
+            self::assertSame(422, $this->call('run', ['match_bank_account_series' => $invalidConfirmation] + $body, $token)->getStatusCode());
+        }
+        $denied = $this->call('run', $body, $token);
+        self::assertSame(422, $denied->getStatusCode());
+        self::assertSame('bank_account_series_confirmation_required', $this->json($denied)['error']['code']);
+        $body['match_bank_account_series'] = true;
+        $dry = $this->runJob($body, $token);
+        self::assertTrue($dry['report']['ok'], json_encode($dry));
+        self::assertContains('bank_account_series_confirmed', array_column($dry['report']['warnings'], 'code'));
+        self::assertSame($before, $this->snapshot());
+        self::assertTrue(StereoNxUploads::state($this->supplierId, $token)['dry_run_match_bank_account_series']);
+        $body['mode'] = 'import';
+        // HTTP preflight must reject a different interpretation of the same ZIP.
+        $state = StereoNxUploads::state($this->supplierId, $token);
+        $state['dry_run_match_bank_account_series'] = false;
+        StereoNxUploads::save($this->supplierId, $token, $state);
+        self::assertSame(409, $this->call('run', $body, $token)->getStatusCode());
+        $state['dry_run_match_bank_account_series'] = true;
+        StereoNxUploads::save($this->supplierId, $token, $state);
+        $started = $this->call('run', $body, $token);
+        self::assertSame(202, $started->getStatusCode());
+        $jobId = $this->json($started)['job_id'];
+        // The worker repeats the same check after the request has returned.
+        $state['dry_run_match_bank_account_series'] = false;
+        StereoNxUploads::save($this->supplierId, $token, $state);
+        Bootstrap::buildContainer()->get(StereoNxImportJobService::class)->run($jobId);
+        $job = Bootstrap::buildContainer()->get(ImportJobRepository::class)->find($jobId, $this->supplierId);
+        self::assertSame('failed', $job['status']);
+        self::assertSame($before, $this->snapshot());
+        $this->runJob(['mode' => 'dry_run'] + $body, $token);
+        $import = $this->runJob($body, $token);
+        self::assertTrue($import['report']['ok'], json_encode($import));
+        self::assertSame(1, $import['report']['written']['bank_statements']);
+        self::assertSame('', iterator_to_array(StereoNxBackup::open(StereoNxUploads::archive($this->supplierId, $token), 0, self::PASSWORD)->rows('LFirmaUc'), false)[0]['DoklRada']);
+    }
+
+    public function testUnavailableReportStorageDoesNotFailFinishedJob(): void
+    {
+        $this->backup();
+        $bytes = file_get_contents($this->tmp . '/backup.zip');
+        $token = $this->json($this->call('init', ['file_name' => 'synthetic.zip', 'size' => strlen($bytes)]))['token'];
+        $this->tokens[] = $token;
+        self::assertSame(200, $this->chunk($token, 0, $bytes)->getStatusCode());
+        self::assertSame(200, $this->call('complete', [], $token)->getStatusCode());
+        // Soubor místo adresáře reportů: trvalou kopii protokolu nejde uložit.
+        $blocked = \MyInvoice\Infrastructure\Config\RuntimePaths::storage('import-jobs/' . $this->supplierId . '/reports');
+        if (!is_dir(dirname($blocked))) mkdir(dirname($blocked), 0700, true);
+        file_put_contents($blocked, 'synthetic');
+        try {
+            $started = $this->call('run', ['company' => 0, 'password' => self::PASSWORD, 'mode' => 'dry_run'], $token);
+            self::assertSame(202, $started->getStatusCode(), (string) $started->getBody());
+            $jobId = (int) $this->json($started)['job_id'];
+            $container = Bootstrap::buildContainer();
+            $container->get(StereoNxImportJobService::class)->run($jobId);
+            $jobs = $container->get(ImportJobRepository::class);
+            $job = $jobs->find($jobId, $this->supplierId);
+            self::assertSame('completed', $job['status'], (string) ($job['last_error'] ?? ''));
+            self::assertNull($job['result_path']);
+            $result = $this->action->result($this->request([]), (new ResponseFactory())->createResponse(), ['token' => $token, 'id' => (string) $jobId]);
+            self::assertSame(200, $result->getStatusCode(), (string) $result->getBody());
+            self::assertTrue($this->json($result)['report']['ok']);
+        } finally {
+            unlink($blocked);
+            @rmdir(dirname($blocked));
+        }
+        $this->action->result($this->request([]), (new ResponseFactory())->createResponse(), ['token' => $token, 'id' => (string) $jobId]);
+        $job = Bootstrap::buildContainer()->get(ImportJobRepository::class)->find($jobId, $this->supplierId);
+        self::assertSame('import-jobs/' . $this->supplierId . '/reports/stereo-nx-' . $jobId . '.json', $job['result_path']);
+        $this->runReportPaths[] = $job['result_path'];
+    }
+
     public function testCompanyProfileAppliesSelectedFieldsAndKeepsSettingsAuthorization(): void
     {
         $this->backup();
@@ -705,9 +801,15 @@ final class StereoNxImportTest extends TestCase
         $jobs = $container->get(ImportJobRepository::class);
         self::assertStringNotContainsString(self::PASSWORD, json_encode($jobs->find($jobId, $this->supplierId)['params']));
         $container->get(StereoNxImportJobService::class)->run($jobId);
-        self::assertArrayNotHasKey('password_enc', $jobs->find($jobId, $this->supplierId)['params']);
+        $job = $jobs->find($jobId, $this->supplierId);
+        self::assertArrayNotHasKey('password_enc', $job['params']);
+        self::assertSame('application/json', $job['result_mime']);
+        self::assertSame('import-jobs/' . $this->supplierId . '/reports/stereo-nx-' . $jobId . '.json', $job['result_path']);
+        $this->runReportPaths[] = $job['result_path'];
         $result = $this->action->result($this->request([]), (new ResponseFactory())->createResponse(), ['token' => $token, 'id' => (string) $jobId]);
         self::assertSame(200, $result->getStatusCode(), (string) $result->getBody());
+        self::assertSame($this->json($result)['report'],
+            $container->get(StereoNxRunReportStore::class)->read($this->supplierId, $jobId, $job['result_path']));
         return $this->json($result);
     }
 

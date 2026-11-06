@@ -105,6 +105,17 @@ final class TaxConstantsAction
                 return "Chybí nebo není číslo: {$k}";
             }
         }
+        try {
+            \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoReduction::configuration($d);
+        } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
+            return $e->getMessage();
+        }
+        foreach (['tax_loss_carryback_years','tax_loss_carryback_limit'] as $key) {
+            $value = $d[$key] ?? null;
+            if ((!is_int($value) && !is_float($value)) || !is_finite((float) $value) || $value < 0 || $value > ($key === 'tax_loss_carryback_years' ? 100 : 99999999999999) || floor($value) !== (float) $value) {
+                return "{$key} musí být nezáporné celé číslo v povoleném rozsahu.";
+            }
+        }
         // Měsíční hranice §38h odst. 2 — přibyla později než ostatní skaláry, proto stejně
         // jako payroll.advance_tax_high jen volitelně (chybějící doplní merge).
         if (isset($d['advance_tax_high_threshold'])

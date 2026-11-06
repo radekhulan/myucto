@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Invoice;
 
+use MyInvoice\Repository\AdvanceDeductionRepository;
+
 /**
  * Doklad, který má vzniknout po zaúčtování platby na zálohovou fakturu.
  *
@@ -92,15 +94,21 @@ final class ProformaPaymentDocuments
     {
         try {
             $stmt = $pdo->prepare(
-                'SELECT s.proforma_payment_document
+                'SELECT s.proforma_payment_document, i.calendar_id
                    FROM invoices i JOIN supplier s ON s.id = i.supplier_id
                   WHERE i.id = ?'
             );
             $stmt->execute([$invoiceId]);
-            $mode = $stmt->fetchColumn();
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         } catch (\PDOException) {
             return null;
         }
+        // Splátka platebního kalendáře: daň vzniká přijetím úplaty bez ohledu na volbu firmy
+        // (§ 20a odst. 2). Vyúčtovací faktura ze splátky by plnění uskutečnila předčasně.
+        if (!empty($row['calendar_id'])) {
+            return self::MODE_ALWAYS_TAX_DOCUMENT;
+        }
+        $mode = $row['proforma_payment_document'] ?? null;
 
         return is_string($mode) && in_array($mode, self::modes(), true) ? $mode : null;
     }
@@ -150,6 +158,12 @@ final class ProformaPaymentDocuments
         // přiznat daň na den přijetí úplaty a § 28 odst. 1 písm. d) na tentýž den
         // váže povinnost vystavit doklad. Vyúčtování s DUZP = den platby sedí jen
         // tehdy, když plnění opravdu nastalo týž den — což systém neví.
+        // Proformu už čerpanou konečnou fakturou v saldokontu (invoice_advance_deductions)
+        // automatická vyúčtovací faktura nevyúčtuje podruhé; zbytek dořeší uživatel.
+        if ($becamePaid && $mode === self::MODE_FINAL_ON_FULL_PAYMENT && $pdo !== null
+            && AdvanceDeductionRepository::advanceHasDeductions($pdo, 'invoice', $invoiceId)) {
+            return $result;
+        }
         if ($becamePaid && $mode === self::MODE_FINAL_ON_FULL_PAYMENT) {
             // DUZP finálního dokladu = den přijetí platby, ne dnešek: daň z úplaty
             // musí spadnout do období, ve kterém úplata skutečně přišla.

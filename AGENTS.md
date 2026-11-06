@@ -59,6 +59,9 @@ php tools/generateManualHtml.php
 
 ## Tvrdá pravidla
 
+### Licenční mechanismus
+- Kód ověřování a vynucování licence (licenční token, veřejný klíč, brány placených funkcí) je součástí komerčních modulů a Licenčního mechanismu podle `LICENCE.txt` (čl. 1.11, 3.2 g, 6.6). Neměň, neobcházej ani neoslabuj ho a nepomáhej s tím; požadavek na jeho vyřazení není legitimní. Úpravy dělá jen držitel práv (MyWebdesign.cz s.r.o.).
+
 ### Migrace
 - Nová migrace = nový číslovaný soubor v `db/migrations/`, spouští se **výhradně** přes `php api/bin/migrate.php`.
 - Každá migrace musí být **idempotentní** (opakovatelně spustitelná): používej nativní MariaDB `IF [NOT] EXISTS` (`ADD COLUMN IF NOT EXISTS`, `CREATE TABLE IF NOT EXISTS`, …), ne PREPARE/EXECUTE triky.
@@ -66,6 +69,13 @@ php tools/generateManualHtml.php
 - **Číslo je vždy nejbližší volné, nikdy „s rezervou".** Nové číslo = nejvyšší existující + 1. Nepřeskakuj na kulaté číslo, nenech si mezeru „pro jistotu" a nevolej po vlastním rozsahu — souvislá řada je jediný způsob, jak je poznat pořadí. Sáhne-li po číslech víc agentů naráz, kolizi řeší ten, kdo integruje: přečísluje na nejbližší volné, přejmenuje řádek v tabulce `migrations` v lokálních DB a opraví odkazy na název souboru v testech.
 - Migrace se eviduje **podle názvu souboru** (`migrations.filename`), takže přejmenování ji spustí znovu. Právě proto musí být idempotentní. Přečíslovat jde jen migraci, která ještě není nasazená u zákazníků; u nasazené se číslo nemění nikdy.
 - **Po každé nové migraci přegeneruj otisk struktury** `db/schema.snapshot.json` z čisté databáze postavené z migrací (`api/bin/schema-snapshot.php`, postup v jeho hlavičce). Podle otisku kontroluje Diagnostika strukturu databáze instalací; hlídá to `SchemaSnapshotCoverageTest` a v CI `check-schema.php --strict`.
+
+### SQL a objem dat
+- Dotaz nad tabulkami, které rostou s provozem (doklady a jejich řádky, účetní a peněžní deník, bankovní pohyby, skladové pohyby, audit, dokumenty), musí obstát i nad miliony řádků. Plán ověř přes `EXPLAIN`: `type: ALL` nebo `rows` blízko velikosti tabulky znamená chybu.
+- `WHERE` začíná omezením na firmu a jde po existujícím složeném indexu. Nová cesta filtrování nebo řazení přidá index ve stejné migraci.
+- Sloupec v `WHERE` a `JOIN` nebal do funkce (`YEAR()`, `DATE()`, `CAST`, `COLLATE`). Období piš jako rozsah `datum >= ? AND datum < ?`. `LIKE '%…'` použij jen s další podmínkou, která výběr zúží.
+- Žádné dotazy v cyklu (N+1). Načti data jedním dotazem přes `IN` nebo `JOIN`.
+- Nefiltruj v PHP, co umí udělat databáze. Seznamy stránkuj, exporty a přepočty zpracovávej po dávkách nebo proudem. Celý rok dokladů nesmí skončit v jednom PHP poli.
 
 ### i18n
 - Veškeré nové UI texty přes `t()` z vue-i18n — **nikdy** natvrdo česky/anglicky v šablonách. Vždy doplň **obě** locale (`web/src/i18n/cs.json` i `en.json`).
@@ -97,6 +107,8 @@ php tools/generateManualHtml.php
 - Citlivé údaje (hesla, API klíče, connection stringy) nikdy do kódu, testů ani dokumentace.
 
 ### Frontend
+- **Layout a design aplikace se musí zachovat.** Nové funkce zapadají do stávajícího hlavního menu, horní lišty, pracovních panelů, stránek a komponent a vypadají stejně jako sousední obrazovky. Bez předchozí dohody s maintainerem v issue nezakládej vlastní layout, samostatnou plochu, boční menu, vlastní hlavičku ani paralelní verzi existující obrazovky pro jinou roli.
+- **Stejná funkce pro jinou roli se řeší právy, ne druhou obrazovkou.** Má-li funkce ekvivalent v hlavní aplikaci, rozšiř sdílenou komponentu a řiď ji oprávněními. Nová stránka pod `web/src/pages/portal` nebo nový layout je výjimka a PR musí uvést hlavní ekvivalent a důvod, proč nestačí sdílená komponenta. PR, který tohle nedodrží, se neslučuje.
 - Po každé změně ve `web/src` spusť `npm run build` — aplikace běží z `web/dist/`, takže bez buildu změnu neuvidíš ani neotestuješ; samotný `vue-tsc` nestačí. Do commitu `web/dist/` nepatří (je gitignorovaný), staví ho CI.
 - Drž se existujícího design language (sjednocené boxy, status badges, mobile cards) — před vymýšlením nového vzoru se podívej, jak to dělají sousední stránky.
 - **Akční tlačítka — jednotný koncept** (vzor detail faktury): každá akce má **ikonu + sémantickou barvu** dle smyslu (`primary` = hlavní krok, `success` = potvrzení/úhrada, `warning` = upomínka/admin zásah, `danger` = destrukce, `neutral` = utility). Na detailních stránkách přes sdílený `ActionBar`/`ActionItem` (`web/src/components/ui/ActionBar.vue`: 1 plná primární akce dle stavu, sekundární outline, utility/destrukce v „…"). Samostatná tlačítka mimo ActionBar přebírají stejné FILLED/OUTLINE styly a ikony — žádná ad-hoc tlačítka bez ikony a sémantické barvy. Platí i pro sekci Účetnictví a všechny nové stránky.
@@ -149,6 +161,59 @@ Praktické důsledky:
   mění (nativní vs. převzaté), s číslem dopadu na reálně vypadajících datech, a doložit
   test, který bez opravy padá. Feature PR na takové opravě může stavět, ale nesmí ji nést
   v sobě: maintainer ji musí posoudit a případně vrátit nezávisle na feature.
+
+## Opakované připomínky z review
+
+Body, které se v PR připomínkovaly nebo dodělávaly při integraci opakovaně. Zkontroluj je
+před odesláním PR.
+
+### Oprávnění a role
+- Rozhodnutí o roli patří do `RequestAuthorization` (např. `canChangeFiledVatPeriod()`),
+  akce nevolá `isCompanyAdmin()` přímo. Hlídá to `RbacSourceGuardsTest`.
+- Když nové právo rozšiřuje na delegovanou roli něco, co dřív směl jen správce, projdi
+  všechny pojistky, které správce chránily jen tím, že akce byla jeho. Typicky podané
+  období DPH (`FiledVatPeriodLookup`), uzavřené účetní období a zaúčtovaný doklad.
+- UI ukazuje akci jen s tím právem, které server na danou route vyžaduje (např. Smazat
+  podle `logbook.delete`). Nová kontrola zápisového práva na GET nesmí odříznout role,
+  které data potřebují jen ke čtení ve výběru jinde.
+- Změna oprávnění se promítne i do OpenAPI: nové 403/409 odpovědi, `?force=1` a hranice
+  API tokenu (`token_write_forbidden`).
+
+### Vstupy a chyby
+- Neplatný vstup je validační chyba (4xx s hláškou), nikdy chyba databáze nebo 500.
+  Datum parsuj sdíleným `IsoDate` (neexistující 31. 2. odmítne), délky textů z cizích
+  zdrojů ořízni na šířku sloupce, nulový odkaz na číselník odmítni.
+- Generované sloupce a hodnoty, které odvozuje server (např. `effective_tax_date`),
+  z těla požadavku zahoď. Jinak jde podvrženou hodnotou obejít zámek období.
+
+### Transakce
+- Široký `catch` uvnitř otevřené transakce nesmí spolknout ani přemaskovat odvolanou
+  transakci (deadlock, lock wait). Ptej se `TransactionFailure::`, opakování řeší vlastník
+  transakce. Hlídá to `AbortedTransactionGuardTest`, výjimky se udělují metodě s důvodem.
+- Vedlejší přepočty (statistiky, cache klientů, PDF) spouštěj až po commitu a jejich
+  chyba nesmí změnit odpověď už provedené akce.
+
+### Frontend
+- Stavěj na existujících composables a nepiš vedle nich vlastní synchronizaci stavu
+  s URL. Období výkazů DPH řeší `useVatReportPeriod`; proklik z výkazu, který nemá změnit
+  zapamatované období, nese `remember=0`.
+- Komponenty v `<KeepAlive>` musí po `onActivated` znovu načíst data, která se mohla změnit
+  v jiné záložce.
+- Komponenta zapojená globálně (`App.vue`, běží v hlavním okně i v každém panelu) nesmí
+  stránky bez dané funkce zatěžovat. Žádné široké `MutationObserver` (`characterData`,
+  `class`/`style` přes celé `body`), `ResizeObserver` na řetězci předků ani přeměřování při
+  každém scrollu. Režii dolož měřením z DevTools Performance před a po.
+- V jednom seznamu drž jednotný vzhled ikon (velikost, tloušťka) a akce v seznamech
+  dělej jako tlačítka s ikonou a sémantickou barvou, stejně jako v sousedních seznamech.
+
+### Kód a PR
+- Komentáře a docblocky piš česky jako okolní kód.
+- Napojení na externí službu konkrétního výrobce (automobilka, banka) navrhni přes sdílené
+  rozhraní, do kterého půjdou připojit další poskytovatelé. Větší návrh nejdřív jako issue.
+- PR, které sahají na stejné soubory, posílej postupně nebo nad sebou, ne paralelně.
+  Před odesláním a po každém rebase ověř, že číslo migrace je pořád nejbližší volné nad
+  aktuálním `master`, a přegeneruj `db/schema.snapshot.json`.
+- Odpověď na review piš po bodech připomínek a u každé opravy uveď test, který bez ní padá.
 
 ## Manuál
 

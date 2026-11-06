@@ -1,0 +1,54 @@
+import { mount, flushPromises } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import { reactive } from 'vue'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import PropertyFundsView from '@/views/PropertyFundsView.vue'
+const calls = vi.hoisted(() => ({ choices: vi.fn(), balances: vi.fn(), list: vi.fn(), costs: vi.fn(), banks: vi.fn(), coverages: vi.fn(), preview: vi.fn(), execute: vi.fn() }))
+vi.mock('@/api/propertyFunds', () => ({ propertyFundsApi: calls }))
+const supplier = reactive({ currentSupplierId: 1 })
+const grants = reactive({ post: true, reverse: false })
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplier }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: (key: string) => key.endsWith('.reverse') ? grants.reverse : grants.post }) }))
+const bar = { props: ['actions'], template: '<div><button v-for="a in actions" :key="a.key" :data-action="a.key" :disabled="a.disabled" @click="a.run">{{ a.label }}</button></div>' }
+const date = { props: ['modelValue'], emits: ['update:modelValue'], template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />' }
+const instant = { props: ['modelValue', 'label'], emits: ['update:modelValue'], template: '<label>{{label}}<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" /></label>' }
+const catalog = { houses: [{ id: 10, code: 'HOUSE' }], units: [{ id: 21, parent_id: 10, code: 'U01' }], accounts: [] }
+const state = () => ({ revision: 0, totals: { '955.100': '30000000' }, ledger_totals: { '955.100': '30000000' }, unit_balances: { 21: { '955.100': '30000000' } }, differences: {}, matches: true, unregistered_line_ids: [], sources: [{ source: { kind: 'opening', id: 71 }, unit_id: 21, account_code: '955.100', amount_cents: '30000000', purpose_ref: 'Synthetic roof evidence' }], income_lots: [{ id: 81, unit_id: 21, account_code: '379.920', amount_cents: '6000000', remaining_cents: '6000000', operation_id: 1, accounting_date: '2026-01-01', parties: { group_key: 'SJM', kind: 'marital_community', members: [101, 102], share: { num: '1', den: '1' }, title_ref: 'Synthetic original owners' } }] })
+const view = () => mount(PropertyFundsView, { global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs: {} }, missingWarn: false, fallbackWarn: false })], stubs: { ActionBar: bar, DateInput: date, PropertyInstantInput: instant, PropertyPartyPicker: true } } })
+async function enterIncome(wrapper: ReturnType<typeof view>) {
+ await flushPromises(); await wrapper.get('[data-field=kind]').setValue('income'); await flushPromises()
+ for (const [field, value] of Object.entries({ amount: '60000', evidence: 'Synthetic lease and bank reference', reason: 'Synthetic owner income', 'key-evidence': 'Synthetic approved unit shares' })) await wrapper.get(`[data-field=${field}]`).setValue(value)
+ await wrapper.get('[data-action=sources]').trigger('click'); await flushPromises(); await wrapper.get('[data-field=bank]').setValue('41')
+}
+beforeEach(() => {
+ vi.resetAllMocks(); supplier.currentSupplierId = 1; grants.post = true; grants.reverse = false
+ calls.choices.mockResolvedValue(catalog); calls.balances.mockImplementation(async () => state()); calls.list.mockResolvedValue({ revision: 0, items: [] })
+ calls.banks.mockResolvedValue({ items: [{ id: 41, direction: 'in', date: '2026-01-01', amount_cents: '6000000', money_account: '221', raw: { counterparty_name: 'Synthetic lessee' } }], next_after_id: null, incomplete: [] }); calls.costs.mockResolvedValue({ items: [{ id: 51, amount_cents: '9000000', line: { account_code: '549.900' }, ledger: { entry: { entry_date: '2026-01-01' } } }], next_after_id: null, incomplete: [] }); calls.coverages.mockResolvedValue({ items: [], next_after_id: null, incomplete: [] })
+ calls.preview.mockImplementation(async (_supplier, command) => ({ preview_hash: 'synthetic-preview', plan: { request: command, effects: [{ unit_id: 21, account_code: '379.920', amount_cents: '6000000' }], journal: { header: { entry_date: command.accounting_date }, lines: [{ account_code: '221', side: 'debit', amount: '60000.00' }, { account_code: '379.920', side: 'credit', amount: '60000.00' }] }, proofs: {} } })); calls.execute.mockResolvedValue({ id: 1 })
+})
+describe('funding workspace', () => {
+ it('reviews a typed bank source, requires acknowledgement and confirms the exact preview once', async () => {
+  const wrapper = view(); await enterIncome(wrapper); expect(wrapper.get<HTMLButtonElement>('[data-action=preview]').element.disabled).toBe(false); await wrapper.get('[data-action=preview]').trigger('click'); await flushPromises()
+  expect(calls.preview).toHaveBeenCalledWith(1, expect.objectContaining({ kind: 'income', amount_cents: '6000000', bank_id: 41, expected_revision: 0 })); expect(wrapper.get<HTMLButtonElement>('[data-action=confirm]').element.disabled).toBe(true); await wrapper.get('[data-field=ack]').setValue(true); await wrapper.get('[data-action=confirm]').trigger('click'); await flushPromises()
+  expect(calls.execute).toHaveBeenCalledWith(1, calls.preview.mock.calls[0]?.[1], expect.objectContaining({ preview_hash: 'synthetic-preview' }), expect.any(String)); expect(wrapper.find('[data-section=preview]').exists()).toBe(false); wrapper.unmount()
+ })
+ it('selects native cost, per-unit advance and separately evidenced other coverage without JSON entry', async () => {
+  calls.coverages.mockResolvedValue({ items: [{ id: 62, amount_cents: '1000000', line: { account_code: '691' }, ledger: { entry: { entry_date: '2026-01-01' } } }], next_after_id: null, incomplete: [] })
+  const wrapper = view(); await flushPromises(); for (const [field, value] of Object.entries({ amount: '90000', evidence: 'Synthetic approved common property repair', reason: 'Synthetic draw', 'key-evidence': 'Synthetic approved unit key', 'purpose-evidence': 'Synthetic source purpose compatibility', 'advance-amount-0': '90000' })) await wrapper.get(`[data-field=${field}]`).setValue(value)
+  await wrapper.get('[data-action=sources]').trigger('click'); await flushPromises(); await wrapper.get('[data-field=cost]').setValue('51'); await wrapper.get('[data-action=coverage-sources]').trigger('click'); await flushPromises(); await wrapper.get('[data-action=add-coverage]').trigger('click'); await wrapper.get('[data-field=coverage-source-0]').setValue('62'); await wrapper.get('[data-field=coverage-amount-0]').setValue('10000'); await wrapper.get('[data-field=coverage-evidence-0]').setValue('Synthetic separately reimbursed part'); await wrapper.get('[data-action=preview]').trigger('click'); await flushPromises()
+  expect(calls.preview).toHaveBeenCalledWith(1, expect.objectContaining({ kind: 'draw', cost_line_id: 51, amount_cents: '9000000', classification: 'repair', ownership: 'owners_common_parts', sources: [{ source: { kind: 'opening', id: 71 }, amount_cents: '9000000', purpose_evidence: 'Synthetic source purpose compatibility' }], other_coverage: [{ line_id: 62, amount_cents: '1000000', evidence_ref: 'Synthetic separately reimbursed part' }] })); expect(wrapper.find('textarea[data-field=json]').exists()).toBe(false); wrapper.unmount()
+ })
+ it('preserves the exact command and token when the result is uncertain', async () => {
+  calls.execute.mockRejectedValueOnce(new Error('network outcome unknown')); const wrapper = view(); await enterIncome(wrapper); await wrapper.get('[data-action=preview]').trigger('click'); await flushPromises(); await wrapper.get('[data-field=ack]').setValue(true); await wrapper.get('[data-action=confirm]').trigger('click'); await flushPromises(); expect(wrapper.get<HTMLButtonElement>('[data-action=cancel]').element.disabled).toBe(true); await wrapper.get('[data-action=confirm]').trigger('click'); await flushPromises(); expect(calls.execute.mock.calls[1]).toEqual(calls.execute.mock.calls[0]); wrapper.unmount()
+ })
+ it('drops a late preview from a previous supplier and respects revoked permission', async () => {
+  let resolve!: (value: unknown) => void; calls.preview.mockImplementationOnce(() => new Promise(done => { resolve = done })); const wrapper = view(); await enterIncome(wrapper); await wrapper.get('[data-action=preview]').trigger('click'); supplier.currentSupplierId = 2; await flushPromises(); resolve({ preview_hash: 'old-supplier', plan: { journal: { lines: [] }, effects: [] } }); await flushPromises(); expect(wrapper.find('[data-action=confirm]').exists()).toBe(false); await enterIncome(wrapper); await wrapper.get('[data-action=preview]').trigger('click'); await flushPromises(); await wrapper.get('[data-field=ack]').setValue(true); grants.post = false; await flushPromises(); expect(wrapper.get<HTMLButtonElement>('[data-action=confirm]').element.disabled).toBe(true); expect(calls.execute).not.toHaveBeenCalled(); wrapper.unmount()
+ })
+ it('keeps original joint-owner groups in a separate contribution', async () => {
+  const wrapper = view(); await flushPromises(); await wrapper.get('[data-field=kind]').setValue('transfer'); await flushPromises(); for (const [field, value] of Object.entries({ amount: '45000', evidence: 'Synthetic original owners contribution approval', reason: 'Synthetic separate contribution', 'disposition-evidence': 'Synthetic signed SJM instruction', purpose: 'Synthetic repairs', due: '2029-12-31' })) await wrapper.get(`[data-field=${field}]`).setValue(value)
+  await wrapper.get('[data-action=add-source]').trigger('click'); await wrapper.get('[data-field=disposition-source-0]').setValue('81'); await wrapper.get('[data-field=disposition-amount-0]').setValue('45000'); await wrapper.get('[data-action=preview]').trigger('click'); await flushPromises(); expect(calls.preview).toHaveBeenCalledWith(1, expect.objectContaining({ kind: 'transfer', dispositions: [expect.objectContaining({ source_id: 81, amount_cents: '4500000', party_ids: [101, 102] })] })); wrapper.unmount()
+ })
+ it('requires a new review after editing and permits leaving an unavailable reversal', async () => {
+  const wrapper = view(); await enterIncome(wrapper); await wrapper.get('[data-action=preview]').trigger('click'); await flushPromises(); await wrapper.get('[data-action=cancel]').trigger('click'); await wrapper.get('[data-field=amount]').setValue('50000'); expect(wrapper.find('[data-action=confirm]').exists()).toBe(false); await wrapper.get('[data-field=kind]').setValue('reverse'); await flushPromises(); expect(wrapper.get<HTMLButtonElement>('[data-action=preview]').element.disabled).toBe(true); expect(wrapper.get<HTMLSelectElement>('[data-field=kind]').element.disabled).toBe(false); await wrapper.get('[data-field=kind]').setValue('income'); await flushPromises(); expect(wrapper.get<HTMLSelectElement>('[data-field=kind]').element.disabled).toBe(false); wrapper.unmount()
+ })
+})

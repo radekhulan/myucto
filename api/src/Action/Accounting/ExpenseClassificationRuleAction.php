@@ -256,7 +256,7 @@ final class ExpenseClassificationRuleAction
      *
      * Ověřuje se TADY, ne až při účtování: neplatný účet v pravidle by se projevil až
      * `unknown_account` u nic netušícího uživatele nad cizím dokladem. Zakázané prefixy
-     * jsou shodné s `PostingService::validatePurchaseDebitOverride` — saldokonta, DPH,
+     * určuje {@see \MyInvoice\Service\Accounting\SettlementAccounts}: saldokonta, DPH,
      * banka ani pokladna nákladem přijaté faktury nejsou.
      */
     private function assertTargetAccount(int $supplierId, mixed $value): ?string
@@ -265,7 +265,7 @@ final class ExpenseClassificationRuleAction
         if ($code === null) {
             return null;
         }
-        if (preg_match('/^(?:311|321|314|324|325|33|34|221|211)/', $code) === 1) {
+        if (\MyInvoice\Service\Accounting\SettlementAccounts::isSettlement($code)) {
             throw $this->err('invalid_target_account', 'Tento účet nelze použít jako náklad přijaté faktury.');
         }
         $stmt = $this->db->pdo()->prepare(

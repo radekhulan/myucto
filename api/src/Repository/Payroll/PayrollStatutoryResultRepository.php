@@ -55,17 +55,16 @@ final class PayrollStatutoryResultRepository
         $this->validateStatusHierarchy($resultStatus, $normalizedPeople);
         $inputJson = CanonicalJson::encode($inputSnapshot);
         $resultJson = CanonicalJson::encode($resultSnapshot);
-        $resultSetJson = CanonicalJson::encode([
-            'calculation_kind' => $calculationKind,
-            'input_snapshot' => $inputSnapshot,
-            'people' => $normalizedPeople,
-            'result_snapshot' => $resultSnapshot,
-            'result_status' => $resultStatus,
-            'ruleset_hash' => $rulesetHash,
-            'ruleset_id' => $rulesetId,
-            'schema_version' => $schemaVersion,
-        ]);
-        $resultSetHash = hash('sha256', $resultSetJson);
+        $resultSetHash = $this->resultSetHash(
+            $calculationKind,
+            $schemaVersion,
+            $resultStatus,
+            $rulesetId,
+            $rulesetHash,
+            $inputSnapshot,
+            $resultSnapshot,
+            $normalizedPeople,
+        );
 
         return $this->transactional(function () use (
             $supplierId,
@@ -202,6 +201,33 @@ final class PayrollStatutoryResultRepository
         }
 
         return $result;
+    }
+
+    /**
+     * @param list<array<string,mixed>> $people
+     */
+    public function resultSetHash(
+        string $calculationKind,
+        string $schemaVersion,
+        string $resultStatus,
+        string $rulesetId,
+        string $rulesetHash,
+        array $inputSnapshot,
+        array $resultSnapshot,
+        array $people,
+    ): string {
+        $normalizedPeople = $this->normalizePeople($people);
+        $this->validateStatusHierarchy($resultStatus, $normalizedPeople);
+        return hash('sha256', CanonicalJson::encode([
+            'calculation_kind' => $calculationKind,
+            'input_snapshot' => $inputSnapshot,
+            'people' => $normalizedPeople,
+            'result_snapshot' => $resultSnapshot,
+            'result_status' => $resultStatus,
+            'ruleset_hash' => $rulesetHash,
+            'ruleset_id' => $rulesetId,
+            'schema_version' => $schemaVersion,
+        ]));
     }
 
     /**

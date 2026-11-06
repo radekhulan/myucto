@@ -210,6 +210,30 @@ final class VarsymbolSetCounterTest extends TestCase
         self::assertSame($this->gen->render($this->template, $this->date, 8), $next);
     }
 
+    public function testPeekShowsStoredNextNumberWithoutWriting(): void
+    {
+        $this->gen->setCounter($this->supplierId, 'invoice', 42, $this->date);
+
+        $peek = $this->gen->peek($this->supplierId, 'invoice', $this->date);
+        self::assertNotNull($peek);
+        self::assertSame(42, $peek['next_number']);
+        self::assertSame(41, $peek['counter']);
+
+        // Peek nic nezapisuje: opakované volání i vystavení dají totéž číslo.
+        self::assertSame($peek, $this->gen->peek($this->supplierId, 'invoice', $this->date));
+        self::assertSame($peek['preview'], $this->gen->next($this->supplierId, 'invoice', $this->date));
+    }
+
+    public function testPeekSkipsOccupiedNumberLikeNext(): void
+    {
+        $this->insertIssued(7);
+        $this->gen->setCounter($this->supplierId, 'invoice', 7, $this->date);
+
+        $peek = $this->gen->peek($this->supplierId, 'invoice', $this->date);
+        self::assertSame(8, $peek['next_number'], 'UI má ukázat číslo, které vystavení opravdu použije.');
+        self::assertSame($peek['preview'], $this->gen->next($this->supplierId, 'invoice', $this->date));
+    }
+
     /**
      * Přechod z jiného software se netýká jen řady dodavatele — přebít šablonu jde na
      * třech osách (klient > kategorie tržby > dodavatel) a na každé z nich může běžet

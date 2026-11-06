@@ -35,12 +35,13 @@ final class TaxReturnRepository
                           last_submission_id, row_version, created_by, created_at, updated_at';
 
     /** @return array<string,mixed>|null */
-    public function find(int $supplierId, int $year, string $type, string $variant = 'radne', int $variantSeq = 1): ?array
+    public function find(int $supplierId, int $year, string $type, string $variant = 'radne', int $variantSeq = 1, bool $currentRead = false): ?array
     {
+        if ($currentRead && !$this->db->pdo()->inTransaction()) throw new \LogicException('Current tax return reads require a caller transaction.');
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::COLS . '
                FROM income_tax_returns
-              WHERE supplier_id = ? AND year = ? AND taxpayer_type = ? AND variant = ? AND variant_seq = ?'
+              WHERE supplier_id = ? AND year = ? AND taxpayer_type = ? AND variant = ? AND variant_seq = ?' . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $year, $this->normType($type), $this->normVariant($variant), $this->normSeq($variant, $variantSeq)]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -329,8 +330,9 @@ final class TaxReturnRepository
     }
 
     /** @return array<string,mixed>|null Poslední finalizovaná varianta přiznání za období. */
-    public function findLastFinalized(int $supplierId, int $year, string $type, ?int $excludeId = null): ?array
+    public function findLastFinalized(int $supplierId, int $year, string $type, ?int $excludeId = null, bool $currentRead = false): ?array
     {
+        if ($currentRead && !$this->db->pdo()->inTransaction()) throw new \LogicException('Current tax return reads require a caller transaction.');
         $exclude = $excludeId !== null ? ' AND id <> ?' : '';
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::COLS . '
@@ -339,7 +341,7 @@ final class TaxReturnRepository
                 AND status = \'final\' AND computed IS NOT NULL' . $exclude . '
               ORDER BY FIELD(variant,\'radne\',\'opravne\',\'dodatecne\') DESC,
                        variant_seq DESC, updated_at DESC, id DESC
-              LIMIT 1'
+              LIMIT 1' . ($currentRead ? ' FOR UPDATE' : '')
         );
         $params = [$supplierId, $year, $this->normType($type)];
         if ($excludeId !== null) {

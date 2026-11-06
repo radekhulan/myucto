@@ -513,7 +513,7 @@ final class DpfoReturnDataProvider
               GROUP BY ip.invoice_id
           ) p ON p.invoice_id = i.id
               WHERE i.supplier_id = ? AND i.issue_date <= ?
-                AND i.invoice_type NOT IN ('proforma','tax_document') AND i.status <> 'cancelled'"
+                AND i.invoice_type NOT IN ('proforma','tax_document','rent_calendar','advance_calendar') AND i.status <> 'cancelled'"
         );
         $receivables->execute([$asOf, $supplierId, $asOf]);
         $receivableTotal = round((float) $receivables->fetchColumn(), 2);

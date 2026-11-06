@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import OpeningStockImport from '../OpeningStockImport.vue'
+import DateInput from '@/components/ui/DateInput.vue'
 
 const mocks = vi.hoisted(() => ({
   upload: vi.fn(), sample: vi.fn(), preview: vi.fn(), job: vi.fn(), items: vi.fn(),
@@ -19,7 +20,10 @@ vi.mock('@/stores/supplier', async () => {
   mocks.supplierStore = reactive({ currentSupplierId: 1 })
   return { useSupplierStore: () => mocks.supplierStore }
 })
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', async () => {
+  const { ref } = await import('vue')
+  return { useI18n: () => ({ t: (key: string) => key, locale: ref('cs') }) }
+})
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route, useRouter: () => ({ replace: mocks.replace }) }))
 
 const base = { id: 31, supplier_id: 1, kind: 'stock_opening_import_stage', input_version: 1,
@@ -36,8 +40,9 @@ function deferred<T>() {
   return { promise, resolve }
 }
 
-function mountPage() {
+function mountPage(realDateInput = false) {
   return shallowMount(OpeningStockImport, { global: { stubs: {
+    DateInput: !realDateInput,
     RouterLink: true,
     CatalogJobProgress: { name: 'CatalogJobProgress', props: ['job'], emits: ['cancel'], template: '<button data-test="cancel-job" @click="$emit(\'cancel\')">{{ job.checkpoint }}</button>' },
   } } })
@@ -63,6 +68,31 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks())
 
 describe('OpeningStockImport', () => {
+  it('blocks stale valid dates behind invalid date text and permits a corrected preview', async () => {
+    mocks.preview.mockResolvedValue({ ...base, status: 'completed' })
+    mocks.job.mockResolvedValue({ ...base, status: 'completed' })
+    const wrapper = mountPage(true)
+    await flushPromises()
+    await uploadFile(wrapper)
+    await wrapper.get('input[placeholder="erp-2026"]').setValue('opening-1')
+    const date = wrapper.getComponent(DateInput)
+    const previous = date.props('modelValue')
+    const text = date.get<HTMLInputElement>('input[type="text"]')
+    await text.trigger('focus')
+    await text.setValue('31. 2. 2026')
+    expect(date.props('modelValue')).toBe(previous)
+    expect(text.element.checkValidity()).toBe(false)
+    const preview = wrapper.findAll('button').find(button => button.text().includes('stock.opening_import.preview'))!
+    await preview.trigger('click')
+    await flushPromises()
+    expect(mocks.preview).not.toHaveBeenCalled()
+    await text.setValue('1. 1. 2020')
+    await preview.trigger('click')
+    await flushPromises()
+    expect(mocks.preview).toHaveBeenCalledWith(7, expect.objectContaining({ doc_date: '2020-01-01' }))
+    wrapper.unmount()
+  })
+
   it('resumes a durable job and refreshes its progress and row report', async () => {
     mocks.route.query = { opening_job: '31' }
     mocks.job.mockResolvedValueOnce({ ...base, status: 'running' })

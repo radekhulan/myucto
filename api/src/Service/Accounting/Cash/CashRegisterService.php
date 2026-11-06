@@ -183,6 +183,9 @@ final class CashRegisterService
             $this->assertSeriesSwitchable($supplierId, $id);
             $patch['own_series'] = $wantsOwnSeries;
         }
+        if (array_key_exists('opening_foreign_amount', $data) || array_key_exists('opening_foreign_date', $data)) {
+            $patch += $this->foreignOpening($register, $data);
+        }
 
         $wantsDefault = array_key_exists('is_default', $data) ? (bool) $data['is_default'] : null;
 
@@ -297,14 +300,49 @@ final class CashRegisterService
      */
     public function documentsSignedForeignTotal(int $supplierId, int $registerId, string $asOf): float
     {
+        // Počáteční stav ve valutě (stav na začátku dne `opening_foreign_date`) už obsahuje
+        // všechny starší doklady; přičítají se jen doklady od toho dne.
+        $register = $this->registers->find($supplierId, $registerId);
+        $openingDate = $register['opening_foreign_date'] ?? null;
+        $opening = $openingDate !== null && $openingDate <= $asOf ? (float) ($register['opening_foreign_amount'] ?? 0) : 0.0;
         $stmt = $this->db->pdo()->prepare(
             "SELECT COALESCE(SUM(CASE WHEN doc_type = 'in' THEN amount_foreign ELSE -amount_foreign END), 0)
                FROM cash_documents
               WHERE supplier_id = ? AND register_id = ? AND status = 'posted'
-                AND amount_foreign IS NOT NULL AND issue_date <= ?"
+                AND amount_foreign IS NOT NULL AND issue_date <= ? AND issue_date >= ?"
         );
-        $stmt->execute([$supplierId, $registerId, $asOf]);
-        return round((float) $stmt->fetchColumn(), 2);
+        $stmt->execute([$supplierId, $registerId, $asOf, $openingDate ?? '0001-01-01']);
+        return round($opening + (float) $stmt->fetchColumn(), 2);
+    }
+
+    /**
+     * Počáteční stav valutové pokladny ve valutě a jeho den. Obě hodnoty spolu: prázdná
+     * částka i datum počáteční stav ruší. Korunová pokladna valutový stav nevede.
+     *
+     * @param array<string,mixed> $register
+     * @param array<string,mixed> $data
+     * @return array{opening_foreign_amount:?float,opening_foreign_date:?string}
+     */
+    private function foreignOpening(array $register, array $data): array
+    {
+        $amountRaw = $data['opening_foreign_amount'] ?? $register['opening_foreign_amount'] ?? null;
+        $dateRaw = $data['opening_foreign_date'] ?? $register['opening_foreign_date'] ?? null;
+        $amount = $amountRaw === null || trim((string) $amountRaw) === '' ? null : $amountRaw;
+        $date = $dateRaw === null || trim((string) $dateRaw) === '' ? null : trim((string) $dateRaw);
+        if ($amount === null && $date === null) {
+            return ['opening_foreign_amount' => null, 'opening_foreign_date' => null];
+        }
+        if (strtoupper((string) $register['currency_code']) === 'CZK') {
+            throw new CashException('validation', 'Počáteční stav ve valutě má jen pokladna v cizí měně.');
+        }
+        if ($amount === null || !is_numeric(str_replace(',', '.', (string) $amount))) {
+            throw new CashException('validation', 'Počáteční stav ve valutě musí být číslo.');
+        }
+        $parsed = $date !== null ? \DateTimeImmutable::createFromFormat('!Y-m-d', $date) : false;
+        if ($parsed === false || $parsed->format('Y-m-d') !== $date) {
+            throw new CashException('validation', 'K počátečnímu stavu ve valutě patří datum (RRRR-MM-DD).');
+        }
+        return ['opening_foreign_amount' => round((float) str_replace(',', '.', (string) $amount), 2), 'opening_foreign_date' => $date];
     }
 
     /**
@@ -346,38 +384,18 @@ final class CashRegisterService
             return false;
         }
 
-        $existing = [];
-        $prefixByCode = [];
-        $formatByCode = [];
-        foreach ($this->series->list($supplierId) as $row) {
-            if ((int) $row['register_id'] !== $registerId) {
-                continue;
-            }
-            $code = (string) $row['series_code'];
-            if ((int) $row['fiscal_year'] === $fiscalYear) {
-                $existing[$code] = true;
-            }
-            // Prefix pokladny se přes roky nemění — účetní ho zná a řada by jinak
-            // každý leden vypadala jako řada jiné pokladny. Totéž platí o šabloně
-            // čísla: řada převzatá z jiného systému (`{YY}{PREFIX}{CCCCC}`) by
-            // v lednu tiše přešla na vestavěné `{PREFIX}-{YYYY}-{CCCC}`.
-            $prefixByCode[$code] ??= (string) $row['prefix'];
-            $formatByCode[$code] ??= $row['number_format'] !== null ? (string) $row['number_format'] : null;
-        }
+        // Prefix a šablona pokladny se přes roky nemění (ensureOwnSeriesYear); úplně první
+        // rok řady dostane volný prefix, aby nekolidoval s firemní PPD/VPD.
         foreach (['cash_in', 'cash_out'] as $seriesCode) {
-            if (isset($existing[$seriesCode])) {
+            if ($this->series->ensureOwnSeriesYear($supplierId, $seriesCode, $registerId, $fiscalYear)) {
                 continue;
             }
-            $prefix = $prefixByCode[$seriesCode]
-                ?? $this->freeSeriesPrefix($supplierId, DocumentSeriesService::DEFAULT_PREFIXES[$seriesCode]);
-            // `ensure` semantika, ne `updateSeries`: čítač se smí nastavit jen při
-            // skutečném zakládání řádku, jinak ho souběžné vystavení vrátí na 1.
             $this->series->ensureSeriesRow(
                 $supplierId,
                 $seriesCode,
                 $fiscalYear,
-                $prefix,
-                $formatByCode[$seriesCode] ?? null,
+                $this->freeSeriesPrefix($supplierId, DocumentSeriesService::DEFAULT_PREFIXES[$seriesCode]),
+                null,
                 $registerId,
             );
         }

@@ -127,7 +127,7 @@ nehlásí chybu. Parametry a konfigurace jsou v
 **Jak poznáte, že je hotovo:** Zkouška skončí stavem **V pořádku** nebo **S
 upozorněními** a protokol ukazuje počty zaměstnanců a měsíců, které odpovídají
 exportu. Selže-li jen na **Rozdílech k přijetí**, postupujte podle
-[§ 103.10.5.1](103_Prechod_z_Money_S3.md#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
+[§ 106.10.5.1](106_Prechod_z_Money_S3.md#1061051-chyby-upozorneni-a-rozdily-k-prijeti).
 
 > [!WARNING]
 > Se zapnutým schválením spuštěný mzdový běh měsíc spočítá znovu podle vlastní
@@ -188,6 +188,8 @@ který už prošel, přeskočí; změněný měsíc počítaný MyÚčtem převe
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
 | **Export neobsahuje mzdy s IČO firmy v MyÚčtu** | Jiné IČO v PAMICA nebo ve firmě | Zkontrolujte IČO v nastavení firmy a v PAMICA |
+| Nástroj hlásí, že datový soubor je chráněný heslem databáze | Datový soubor PAMICA má heslo databáze | Spusťte nástroj znovu a heslo zadejte, když se zeptá, nebo parametrem `-Heslo` |
+| Nástroj hlásí, že datový soubor drží jiný program | PAMICA je otevřená na jiném počítači, nebo chybí právo ke čtení | Zavřete PAMICU u všech uživatelů, případně pracujte s kopií souboru |
 | Náhled exportu se nenačetl | Výpadek spojení, chyba serveru | **Zkusit znovu**; nahraný export zůstává na serveru |
 | Kontrola před převodem hlásí začátek vedení mezd před zpracovanými měsíci | Firma už v MyÚčtu je a začátek je dřív než poslední měsíc exportu | Zvolte **Posunout začátek...** nebo **Převést bez posunu začátku**; má-li MyÚčto už vlastní mzdový běh, posun se nenabízí a běh zrušte |
 | Osoba se nezaložila | Rodné číslo bez platného data narození, neznámý kód pojišťovny | Doplňte osobu v evidenci a převod zopakujte |
@@ -242,8 +244,15 @@ jen čte, PAMICA během exportu musí být zavřená.
 | `-Mdb` | cesta k datovému souboru PAMICA (`Mzdy*.mdb`), když ho nástroj sám nenajde |
 | `-Rok` | omezí export na zadané roky; bez něj se vyexportují všechny roky v datech |
 | `-Ico` | IČO firmy, když se ho nepodaří určit z dat |
+| `-Heslo` | heslo databáze, je-li jím datový soubor chráněný; bez parametru se na něj nástroj zeptá |
 
 Export jen čte. Do datového souboru nic nezapisuje.
+
+Když se datový soubor neotevře, nástroj vypíše důvod i s hlášením ovladače:
+chybějící ovladač Access (pak se sám zkusí spustit v 32bitovém PowerShellu),
+heslo databáze, soubor držený jiným programem, nebo soubor, který není
+databází Accessu. Datový soubor chráněný heslem databáze nástroj otevře
+s heslem z parametru `-Heslo` nebo z dotazu při spuštění.
 
 #### 108.9.1.3 Co je v exportu
 
@@ -346,7 +355,9 @@ jen údaje, které v MyÚčtu chybí; vyplněný údaj nepřepíše:
 | příznak *Nedoplácet ZP do minima* u zpracovaných mezd | výjimka z minimálního vyměřovacího základu zdravotního pojištění za dotčené měsíce (důvod doplní účetní) |
 | týdenní úvazek u zpracovaných mezd | týdenní pracovní doba a úvazek vztahu po měsících |
 | sleva pracujícího důchodce u zpracovaných mezd (doplňkové údaje mzdy) | sleva pracujícího důchodce po měsících (uplatněná, nebo neuplatňuje se); podané hlášení má přednost |
+| druh zaměstnání (pracovní poměr, DPČ, DPP, člen statutárního orgánu) | druh pracovního vztahu; jednatel bez týdenního úvazku |
 | příspěvek zaměstnavatele na penzijní připojištění, doplňkové penzijní spoření a DIP u zpracovaných mezd | čerpání ročního limitu osvobození (§ 6 odst. 9 písm. m) zákona o daních z příjmů) v převzatém měsíci; další měsíce téhož roku osvobodí jen zbytek limitu |
+| zaměstnanecké a zdravotní benefity bez daně a pojistného (Z23, Z24, například Multisport) | mzdové vstupy na složkách *Rekreace a volnočasový benefit* a *Zdravotní benefit*, osvobozené v ročním limitu; složce, o které jste ještě nerozhodli, převod zapíše toto zacházení |
 | děti s daňovým zvýhodněním (1., 2. a 3. dítě) | vyživované osoby s nárokem daného pořadí, od měsíce podepsaného prohlášení |
 | prohlášení poplatníka u zpracovaných mezd | prohlášení poplatníka po měsících |
 | pracoviště s kódem obce, CZ-ISCO | podmínky vztahu (pracoviště JMHZ) |
@@ -413,7 +424,9 @@ Za měsíc, ve kterém takový souhrn je, převod tutéž nepřítomnost nezakl�
 podruhé: jeden údaj má mít jediný zdroj, jinak by se doba vedla dvakrát
 a poměrná část měsíční mzdy by se nezkrátila vůbec. Druhy, které souhrn
 nenese (peněžitá pomoc v mateřství, rodičovská, dlouhodobé ošetřovné), převod
-zapíše a schválí. Protokol vypíše počty podle druhu.
+zapíše a schválí. Protokol vypíše počty podle druhu. Placené volno a sick
+days, za které PAMICA nic nezaplatila (sazba 0, vyčerpaný nárok), převod
+převede jako neplacené volno, aby za ně MyÚčto nedopočítalo náhradu.
 
 **Zapnutí mezd a začátek vedení mezd.** Firmě, která mzdy v MyÚčtu ještě
 nemá, převod zapne modul Mzdy a začátek vedení mezd v MyÚčtu nastaví na měsíc
@@ -616,9 +629,11 @@ co doplnit.
 
 Kód územního pracoviště finančního úřadu export nenese vůbec, pro podání
 REGZEL ho zadejte ručně. Penzijní a životní pojištění, DIP a dlouhodobá péče
-mají v exportu jen názvy, ne účty. Smlouvy se nepřevádějí: příspěvek
-zaměstnavatele pro měsíce, které počítá MyÚčto, zadejte na složku
-*Příspěvek na penzijní a životní produkty*.
+mají v exportu jen názvy, ne účty. Smlouvy se nepřevádějí. Příspěvek
+zaměstnavatele převod pro měsíce, které počítá MyÚčto, založí jako opakovanou
+složku *Příspěvek na penzijní a životní produkty* s částkou z posledních
+zpracovaných mezd. Druh smlouvy PAMICA ve mzdě nevede, proto zařazení složky
+(osvobození a JMHZ 10292 až 10296) potvrďte v `Mzdy → Mzdové složky a vstupy`.
 
 ### 108.9.5 Dovolená
 
@@ -718,7 +733,7 @@ převod spusťte znovu.
 
 Měsíc, který se nepodařilo převést, je v protokolu rozdíl k přijetí: ostatní
 měsíce se převedou a ostrý převod jde po zkoušce nanečisto spustit i s ním,
-viz [§ 103.10.5.1](103_Prechod_z_Money_S3.md#1031051-chyby-upozorneni-a-rozdily-k-prijeti).
+viz [§ 106.10.5.1](106_Prechod_z_Money_S3.md#1061051-chyby-upozorneni-a-rozdily-k-prijeti).
 
 ### 108.9.10 Kontrola převzatých mezd
 
@@ -737,6 +752,12 @@ MyÚčto / rozdíl**:
 - pojistné zaměstnance na sociální a na zdravotní,
 - pojistné zaměstnavatele na zdravotní,
 - záloha na daň, srážková daň a daňový bonus.
+
+Strana PAMICA nese čísla tak, jak šla do měsíčního hlášení: čistá mzda
+zahrnuje i náhradu mzdy za pracovní neschopnost a vyměřovací základ sociálního
+pojištění je jen v měsíci s účastí na pojištění. Příjem dohody pod rozhodným
+příjmem nebo jednatele bez účasti se převezme jako příjem z nepojištěné
+činnosti.
 
 Rozhodovací vrstvou je **přehled měsíců**: za každý měsíc roku počet osob,
 počet odchylek, největší rozdíl a stav. Rozkliknutý měsíc ukáže své odchylky
@@ -822,6 +843,7 @@ chybí, a to stejnými zápisy jako údaje z karet:
 | OIČ a ID PPV | identifikátory ČSSZ, jen s potvrzením v průvodci a jen chybějící |
 | průměrný hodinový výdělek | schválený průměr čtvrtletí, které průměr ze zpracovaných mezd nemá |
 | vyživované děti z prohlášení poplatníka | vyživované osoby, jen osobě, která žádnou nemá |
+| zda tytéž děti vyživuje jiná osoba v domácnosti a kdo to je | odpověď u nároků na zvýhodnění (jen dosud nezodpovězených), u kladné odpovědi i jméno a datum narození té osoby (z rodného čísla, když ho hlášení neuvádí) |
 
 Podmínky vztahu doplní převod po každém převedeném měsíci z hlášení za ten
 měsíc, stejně jako pracoviště z karet. Dny důchodového pojištění a vyloučené

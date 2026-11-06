@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
@@ -19,7 +18,7 @@ final class PayrollPaymentLedgerSchemaTest extends TestCase
 
     public function testPaymentLedgerSchemaAndTenantRelationsAreInstalled(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $pdo = $connection->pdo();
 
@@ -141,7 +140,7 @@ final class PayrollPaymentLedgerSchemaTest extends TestCase
 
     public function testActualPaymentDateComesFromPartialBankAndCashEvidence(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $pdo = $connection->pdo();
         $sourceSupplierId = (int) $this->query(

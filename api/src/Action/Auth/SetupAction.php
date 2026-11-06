@@ -21,6 +21,7 @@ use MyInvoice\Service\License\PayrollUsagePolicy;
 use MyInvoice\Service\License\SeatPolicy;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Config\CfgLocalWriter;
+use MyInvoice\Service\Config\FreshInstallSecrets;
 use MyInvoice\Service\System\ManagedModeGuard;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Setup\PasswordSetupLinkIssuer;
@@ -102,6 +103,10 @@ final class SetupAction
             $bankOwnership,
             $coaSeeder,
             $accountingModes,
+            new \MyInvoice\Service\Accounting\AccountingFrameworkService(
+                $db,
+                new \MyInvoice\Repository\AccountingFrameworkRepository($db),
+            ),
             $periodProvisioner,
             $autoPosting,
             $log,
@@ -393,7 +398,7 @@ final class SetupAction
             $pdo->commit();
         } catch (\PDOException $e) {
             $pdo->rollBack();
-            return Json::error($response, 'setup_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'setup_failed', $e->getMessage(), 500);
         }
 
         // Po commitu (mimo DB transakci — dělá síťové volání): doplň z veřejných
@@ -457,6 +462,13 @@ final class SetupAction
         // je v tomhle režimu chyba zřízení a má se řešit tam, ne přepsat naslepo.
         if ($willWriteDetectedUrl && !$this->managed->isLocked(ManagedModeGuard::KEY_APP_URL)) {
             $keysToWrite['app.url'] = $detectedUrl;
+        }
+        // Samostatný klíč mzdových otisků jen pro čerstvou self-hosted instalaci:
+        // výše jsme pod zámkem ověřili, že neexistuje žádný uživatel, takže nejsou
+        // ani mzdová data, jejichž otisky by nový klíč zneplatnil. Spravovanou
+        // instalaci konfiguruje provisioning, tam nic nepřidáváme.
+        if (!$this->managed->isManaged()) {
+            $keysToWrite += FreshInstallSecrets::forFreshInstall($this->config);
         }
         $cfgLocalWritten = false;
         try {

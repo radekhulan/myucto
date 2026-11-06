@@ -8,6 +8,7 @@ use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\GoPay\GoPayClearingXmlParser;
 use MyInvoice\Service\Accounting\GoPay\GoPayException;
 use MyInvoice\Service\Accounting\GoPay\GoPayPendingService;
 use MyInvoice\Service\Accounting\GoPay\GoPayService;
@@ -157,13 +158,13 @@ final class GoPayAction
         if ($file === null || $file->getError() !== UPLOAD_ERR_OK) {
             return Json::error($response, 'gopay.no_file', 'Vyber GoPay XML vyúčtování nebo výpis XLS/XLSX.', 400);
         }
-        if (($file->getSize() ?? 0) > 2_097_152) {
-            return Json::error($response, 'gopay.invalid_file_size', 'Soubor GoPay překračuje limit 2 MB.', 413);
+        if (($file->getSize() ?? 0) > GoPayClearingXmlParser::MAX_BYTES) {
+            return Json::error($response, 'gopay.invalid_file_size', 'Soubor GoPay překračuje limit 32 MB.', 413);
         }
         try {
             $content = $file->getStream()->getContents();
-            if (strlen($content) > 2_097_152) {
-                return Json::error($response, 'gopay.invalid_file_size', 'Soubor GoPay překračuje limit 2 MB.', 413);
+            if (strlen($content) > GoPayClearingXmlParser::MAX_BYTES) {
+                return Json::error($response, 'gopay.invalid_file_size', 'Soubor GoPay překračuje limit 32 MB.', 413);
             }
             $uploadedPdf = $request->getUploadedFiles()['pdf'] ?? null;
             $pdf = $uploadedPdf instanceof UploadedFileInterface

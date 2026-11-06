@@ -5,17 +5,22 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Logbook\OdometerSource\OdometerSourceRegistry;
 use PDO;
 
 /**
  * Repository pro odometer_readings — zjištěné stavy tachometru vozidla k datu.
  *
  * Jeden stav na auto, den a zdroj (UNIQUE car_id, reading_date, source): opakovaný
- * zápis téhož dne stav přepíše.
+ * zápis téhož dne stav přepíše. `source` je 'manual' nebo kód registrovaného zdroje
+ * automatického stavu tachometru — sloupec je VARCHAR, platné kódy hlídá registr.
  */
 final class OdometerReadingRepository
 {
-    public function __construct(private readonly Connection $db) {}
+    public function __construct(
+        private readonly Connection $db,
+        private readonly OdometerSourceRegistry $sources,
+    ) {}
 
     /**
      * @return list<array<string,mixed>> od nejnovějšího
@@ -50,12 +55,13 @@ final class OdometerReadingRepository
     }
 
     /**
-     * Nejbližší stavy kolem data (bez odečtu téhož dne a zdroje, který se přepisuje):
-     * nejvyšší odečet i konec jízdy před datem, nejnižší odečet po datu.
+     * Nejbližší stavy kolem data: nejvyšší odečet i konec jízdy před datem, nejnižší
+     * odečet po datu. Stavy téhož dne se neporovnávají — ruční a automatický stav
+     * jednoho dne mohou být z různé denní doby.
      *
      * @return array{before:?int, after:?int}
      */
-    public function bounds(int $supplierId, int $carId, string $date, string $source): array
+    public function bounds(int $supplierId, int $carId, string $date): array
     {
         $pdo = $this->db->pdo();
         $before = $pdo->prepare(
@@ -68,9 +74,9 @@ final class OdometerReadingRepository
         $before->execute([$supplierId, $carId, $date, $supplierId, $carId, $date]);
         $after = $pdo->prepare(
             'SELECT MIN(odometer) FROM odometer_readings
-              WHERE supplier_id = ? AND car_id = ? AND (reading_date > ? OR (reading_date = ? AND source <> ?))'
+              WHERE supplier_id = ? AND car_id = ? AND reading_date > ?'
         );
-        $after->execute([$supplierId, $carId, $date, $date, $source]);
+        $after->execute([$supplierId, $carId, $date]);
         $b = (int) $before->fetchColumn();
         $a = $after->fetchColumn();
         return ['before' => $b > 0 ? $b : null, 'after' => $a !== null && $a !== false ? (int) $a : null];
@@ -78,6 +84,10 @@ final class OdometerReadingRepository
 
     public function upsert(int $supplierId, array $data, ?int $userId): int
     {
+        $source = (string) ($data['source'] ?? 'manual');
+        if (!$this->sources->isReadingSource($source)) {
+            throw new \InvalidArgumentException('Neznámý zdroj stavu tachometru: ' . $source);
+        }
         $pdo = $this->db->pdo();
         $pdo->prepare(
             'INSERT INTO odometer_readings (supplier_id, car_id, reading_date, reading_time, odometer, source, note, created_by)
@@ -90,7 +100,7 @@ final class OdometerReadingRepository
             (string) $data['reading_date'],
             $this->nullableStr($data['reading_time'] ?? null),
             (int) $data['odometer'],
-            (string) ($data['source'] ?? 'manual'),
+            $source,
             $this->nullableStr($data['note'] ?? null),
             $userId,
         ]);

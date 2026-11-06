@@ -99,6 +99,9 @@ final class InvoiceImporter
                 $this->reportChangedInMoney($ctx, self::STEP_PURCHASE, 'purchase_invoices', $existing[$key], $docNo, $year, $r);
                 continue;
             }
+            if ($ctx->skipsNew(self::STEP_PURCHASE)) {
+                continue;
+            }
             if ($ctx->isLocked($year)) {
                 $p->warn(self::STEP_PURCHASE, 'year_locked', "Faktura {$docNo}: rok {$year} je uzavřený, doklad nepřevzat.");
                 continue;
@@ -299,6 +302,9 @@ final class InvoiceImporter
                 $this->reportChangedInMoney($ctx, self::STEP_ISSUED, 'invoices', $existing[$key], $docNo, $year, $r);
                 continue;
             }
+            if ($ctx->skipsNew(self::STEP_ISSUED)) {
+                continue;
+            }
             if ($ctx->isLocked($year)) {
                 $p->warn(self::STEP_ISSUED, 'year_locked', "Faktura {$docNo}: rok {$year} je uzavřený, doklad nepřevzat.");
                 continue;
@@ -423,6 +429,9 @@ final class InvoiceImporter
             if (isset($existing[$key])) {
                 $ctx->otherReceivables[$year . '|' . $docNo] = $existing[$key];
                 $p->count(self::STEP_ISSUED, 'existing');
+                continue;
+            }
+            if ($ctx->skipsNew(self::STEP_ISSUED)) {
                 continue;
             }
             $issue = self::date($r, ['DatVyst', 'DatUcPr']);

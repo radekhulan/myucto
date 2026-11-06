@@ -11,6 +11,7 @@
 | Kdy | Co udělat | Kde v aplikaci |
 |---|---|---|
 | Zakládáte nový účetní rok nebo hospodářský rok | Založit účetní období | `Nástroje → Uzávěrka`, **Nové období** ([§ 72.3](#723-krok-za-krokem-zalozit-ucetni-obdobi)) |
+| Firma vznikla v průběhu roku a první období začíná 1. ledna | Posunout začátek prvního období na den vzniku | `Nástroje → Uzávěrka`, **Změnit začátek** ([§ 72.3](#723-krok-za-krokem-zalozit-ucetni-obdobi)) |
 | Rok skončil a chcete uzavřít účetnictví | Projít kroky uzávěrkového průvodce | `Nástroje → Uzávěrka`, odkaz **Uzávěrka** u období ([§ 72.4](#724-krok-za-krokem-uzaverka-roku-pruvodce)) |
 | Kroky jsou hotové | Uzavřít knihy a otevřít nový rok | Průvodce, kroky **Uzavření knih** a **Otevření nového roku** ([§ 72.5](#725-krok-za-krokem-uzavreni-knih-a-otevreni-noveho-roku)) |
 | Závěrku schvaluje statutár nebo valná hromada | Schválit závěrku | `Nástroje → Uzávěrka`, **Schválit závěrku** ([§ 72.6](#726-krok-za-krokem-schvaleni-zaverky-a-znovuotevreni-obdobi)) |
@@ -43,6 +44,14 @@
 **Jak poznáte, že je hotovo:** Období je v tabulce se stavem **Otevřené**.
 
 Aplikace kontroluje, že začátek je dřív než konec, že pro daný rok ještě jiné období není a že se období nepřekrývá s žádným existujícím obdobím firmy.
+
+**Začátek prvního období.** První účetní období začíná dnem vzniku firmy (§ 3 zákona o účetnictví).
+Když aplikace založila období od 1. ledna a firma vznikla později, klikněte u prvního období na
+**Změnit začátek**, zadejte den vzniku a uložte. Konec období a účetní rok zůstávají. Tlačítko je jen
+u nejstaršího období ve stavu **Otevřené** a nový začátek musí patřit do téhož účetního roku.
+Aplikace změnu odmítne, když je v období zápis v deníku s datem před novým začátkem. Takový zápis
+nejprve stornujte nebo přeúčtujte. Firma s hospodářským rokem musí mít v nastavení firmy vyplněné
+**Účetní rok začíná**, jinak by zkrácené první období změnilo, jak aplikace zakládá další roky.
 
 > [!TIP]
 > Chybějící období si aplikace většinou doplní sama (viz [§ 72.12.2](#72122-automaticky-doplnena-obdobi)).
@@ -86,6 +95,8 @@ kroku se zobrazí datum potvrzení. Administrátor může dokončený krok vrát
 
 Kontrolují se mimo jiné:
 
+- **služby SVJ** v rámci 504: shoda záloh, dohadů, skutečných nákladů a vyúčtování s hlavní knihou; nedokončená návaznost nebo nedoložený zdroj blokují uzavření knih i při nulovém rozdílu (viz [Registr domů a jednotek](116_Registr_domu_a_jednotek.md#kontrola-shody-salda)),
+
 - zda je **předchozí období uzavřené**,
 - **nezaúčtované koncepty** v deníku období a nevyrovnaný deník (Σ MD ≠ Σ Dal),
 - **vydané a přijaté faktury** období bez účetního zápisu,
@@ -115,14 +126,43 @@ Nebyl-li v období žádný odpisovaný majetek, krok se přeskočí sám.
 
 ### 72.4.3 Krok 3: Kurzové rozdíly
 
+**Účetní rámec 504:** Náhled vychází z doložených účetních případů a jejich aktuálních zůstatků.
+U nejednoznačných zápisů vyberte skutečný původ, doložte podklady a rozepište přesné částky v Kč i cizí měně.
+Potom obnovte náhled. Potvrzená historická přiřazení jsou uzamčená a nelze je v dalším roce přepsat.
+Chybějící výsledkové dimenze doplňte společnými buňkami s odůvodněním; částky musí přesně pokrýt kurzový rozdíl.
+Systém automaticky nedoplňuje hlavní činnost ani daňový režim. Neúplný náhled sčítá pouze vyřešené položky.
+Zaúčtování vyžaduje aktuální podklady, aktivní účet a úplné rozhodnutí. Přenesené historické dimenze mohou
+zůstat uzavřené, nově doplněné hodnoty musí být aktivní. Kurzové zisky a ztráty se zachovávají po jednotlivých
+případech i při uzavření a otevření knih. Cenné papíry vyžadují samostatné doložené ocenění.
+
+V části **Cenné papíry** doložte profil a kategorii účetní jednotky, identitu a zařazení nástroje a přesný rozpis inventurních řádků v Kč i cizí měně. Editor nabízí pořizovací ocenění majetkových cenných papírů, tržní reálnou hodnotu a ekvivalenci u účastí; přípustnost ověřuje podle profilu, období a doloženého vlivu. Podle metody přiložte pořizovací cenu a posouzení návratnosti, aktuální tržní podklady nebo podíl a vlastní kapitál emitenta. Nenulová změna vyžaduje odpovídající existující účetní zápis se správnými účty a úplnými dimenzemi. Peněžní část na společném účtu doložte odděleně. Chybějící či změněné podklady brání dokončení.
+
+Kupónové a diskontní dluhové cenné papíry spravujte v **Účetnictví > Dluhové cenné papíry**. Zvolte skutečný účetní řádek pořízení a doložte smluvní nominál, čistou pořizovací cenu, nakoupený naběhlý úrok, splatnost a účetní zařazení. U kupónů vyplňte navazující smluvní období, roční sazbu a způsob výpočtu dnů. Pro dluhopisy s pevným kupónem zvolte ACT/ACT (ICMA) a počet výplat za rok: kupón za období je vždy roční sazba krát nominál dělená počtem výplat, i když období obsahuje přestupný den, a naběhlý úrok se počítá poměrem uplynulých dní období. Konvence ACT/365F a ACT/360 zůstávají pro instrumenty, jejichž podmínky je výslovně uvádějí. U držby do splatnosti potvrďte metodu rovnoměrného časového rozlišení podle skutečných dnů (ČÚS 406 bod 3.4.2): rozdíl mezi pořizovací cenou bez kupónu a nominálem se rozpouští na 644 Úroky (diskont) nebo 544 Úroky (prémie) tak, aby účetní hodnota jistiny ke dni splatnosti přesně odpovídala nominálu. Rozpis v měně instrumentu i v Kč musí odpovídat celému vybranému řádku.
+
+Příklad: dluhopis s nominálem 1 000 000 Kč koupený 1. 7. 2025 za 980 000 Kč, kupón 4 % ročně vyplácený vždy 1. 7., splatnost 1. 7. 2028. K 31. 12. 2025 se zaúčtuje naběhlý úrok 20 164,38 Kč (184 dní ze 365) a u držby do splatnosti rozpuštění diskontu 3 357,66 Kč (184 dní z 1 096), obojí na vrub analytického účtu cenného papíru a ve prospěch 644. Za celou dobu držby vynese úrok 120 000 Kč a rozpuštění diskontu 20 000 Kč.
+
+Ke zvolenému účetnímu dni vytvořte náhled naběhlého úroku, diskontu nebo prémie HTM a po kontrole jej potvrďte. Při tržním přecenění obchodního instrumentu doložte přípustný profil účetní jednotky a čistou tržní kotaci bez naběhlého úroku. Potvrďte také doloženou kotaci, která účetní hodnotu nemění; uloží se její podklady bez nového účetního pohybu. Nakoupený a nově naběhlý úrok se vedou odděleně od jistiny a čisté tržní ceny.
+
+Inkaso kupónu a splacení jistiny přiřazujte k již zaúčtovanému příjmu na bankovním výpisu nebo pokladním dokladu. Nový peněžní zápis tím nevzniká. Vyberte celý odpovídající účetní řádek ve stejném dni a při splacení zadejte vrácený smluvní nominál. Smluvní nominál se může lišit od účetní hodnoty řádku například po přecenění nebo při původní prémii. Konečné splacení vyžaduje vypořádané časové rozlišení a přesnou zbývající účetní hodnotu jistiny.
+
+Prodej před splatností zaúčtujte nejprve jako příjem na bankovním výpisu nebo pokladním dokladu ve prospěch účtu 653 Tržby z prodeje cenných papírů a podílů, a to v plné přijaté částce včetně úroku, který zaplatil kupující. U cenného papíru v cizí měně veďte řádek tržby ve stejné měně. V evidenci pak ke dni prodeje doúčtujte naběhlý úrok a u držby do splatnosti i rozpuštění rozdílu, zvolte operaci prodeje, zadejte prodávaný smluvní nominál a vyberte řádek tržby. Prodej celého zbývajícího nominálu vyřadí celou účetní hodnotu cenného papíru včetně naběhlého úroku na vrub 553 Prodané cenné papíry a podíly. Při částečném prodeji se vyřadí poměrná část jistiny podle prodaného nominálu a alikvotní úrok běžného kupónového období připadající na prodaný nominál; splatné a dosud neuhrazené kupóny zůstávají u zbytku držby. Zbytek dál nabíhá úrok jen ze zbývajícího nominálu a u držby do splatnosti se zbývající rozdíl rozpouští rovnoměrně do splatnosti, takže prodaná část se znovu nerozpouští. Příklad: z dluhopisu s nominálem 1 000 000 Kč (viz výše) se k 31. 3. 2026 prodá nominál 400 000 Kč. Jistina 985 000 Kč se vyřadí ve výši 394 000 Kč, prodaný alikvotní úrok činí 12 010,96 Kč, na vrub 553 jde 406 010,96 Kč. Zbytek 600 000 Kč nese jistinu 591 000 Kč a úrok 18 016,44 Kč. U cizí měny se účetní hodnota (včetně kurzového rozdílu z poslední uzávěrky) ke dni prodeje nejprve přepočte kurzem ČNB, a to úrok vždy a jistina u držby do splatnosti; jistina obchodní pozice zůstává v reálné hodnotě z rozvahového dne. Kurzový rozdíl se zaúčtuje ve stejném zápisu na 645 nebo 545 a na 553 jde prodaná část v přepočtené hodnotě. Zbytek pokračuje s přepočtenou hodnotou a přecení ho další uzávěrka. Rozdíl mezi 653 a 553 je zisk nebo ztráta z prodeje. Po prodeji celé držby už pozice další úrok ani rozpuštění nenabíhá a uzávěrka ho po dni prodeje nevyžaduje.
+
+Evidence navazuje přes uzavření a otevření období. U cizí měny přebírá ověřený kurzový rozdíl z uzávěrky včetně případného obrácení při otevření. Historické přecenění použité pozdější operací nelze znovu přepsat. Zdrojové účetní zápisy a přiřazené peněžní doklady jsou chráněny před změnou. Poslední operaci lze opravit řízeným stornem: vygenerovaný zápis (úrok, rozpuštění, přecenění, prodej) se stornuje protizápisem a prodej tím zároveň uvolní řádek tržby. Přiřazené inkaso kupónu nebo splacení jistiny se stornem jen odváže, a to ve stejném dni, kdy bylo přiřazeno; bankovní nebo pokladní doklad pak lze opravit a přiřadit znovu. Změna podkladů ruší platnost náhledu a vyžaduje nové ověření.
+
+Evidence dluhových cenných papírů je určena účetním jednotkám, které účtují podle vyhlášky č. 504/2002 Sb. U firmy v rámci vyhlášky č. 500/2002 Sb. stránka zobrazí vysvětlení a zápis nenabídne.
+
+U doložené korunové hotovostní úhrady cizoměnového dokladu systém načítá nominál z propojené evidence platby. Chybějící nebo nejednoznačná vazba se zobrazí jako nevyřešený podklad a zabrání zaúčtování. Ověřte zdrojový doklad, platbu a její účetní zápis a obnovte náhled.
+
+Následující přehled polí Saldokonto a Devizové účty popisuje průvodce pro účetní rámec 500.
+
 Krok se zpřístupní až po zahájení uzávěrky. Zobrazí přecenění cizoměnových položek kurzem ČNB k rozvahovému
-dni (§ 24 odst. 6 a 7 zákona o účetnictví, ČÚS 006).
+dni (§ 24 odst. 6 a 7 zákona o účetnictví, ČÚS 006 pro rámec 500 a ČÚS 404 pro rámec 504).
 
 1. V části **Saldokonto** zkontrolujte tabulku cizoměnových vydaných (FV) a přijatých (FP) faktur: zbývá v cizí měně, kurz dokladu a kurz ČNB. Změna ocenění od dokladu, přecenění přenesené z minulých let a skutečný zisk nebo ztráta tohoto roku mají samostatné sloupce. Zelená označuje zisk běžného roku, červená ztrátu; změna korunové hodnoty závazku sama o sobě není zisk. Nad tabulkou je pro každou měnu použitý kurz ČNB a datum; pokud se ke dni nenašel platný kurz a použil se náhradní, zobrazí se u měny varovná ikona.
 2. V části **Devizové účty a valutové pokladny** doplňte řádky: účet z osnovy, měna, **Zůstatek v cizí měně**. Tlačítkem **Přidat řádek pokladny** přidáte řádek, křížkem ho odeberete. Aplikace nabízí i návrhy zůstatků z posledních bankovních výpisů, účet osnovy ale doplňte ručně (výpis nese jen číslo účtu banky).
 3. Cizoměnové zůstatky účtů **378** a **379** (například eurová záloha od faktora) aplikace přecení sama z účetního deníku. Zobrazí je v samostatné tabulce jen pro čtení. Bere jen řádky v dané měně, korunové pohyby na týchž účtech se nepřeceňují. Tyto účty do devizových účtů nezadávejte, aplikace je tam odmítne.
 4. Klikněte na **Přepočítat návrh** (náhled bez zaúčtování).
-5. Klikněte na **Zaúčtovat kurzové rozdíly** (jen ve stavu Uzavírá se). Zápis jde na účty **563** (kurzová ztráta) a **663** (kurzový zisk), jejich součty jsou pod tabulkami.
+5. Klikněte na **Zaúčtovat kurzové rozdíly** (jen ve stavu Uzavírá se). Účty se řídí rámcem platným na konci daného období: pro vyhlášku 500 jde o **563** (kurzová ztráta) a **663** (kurzový zisk), pro vyhlášku 504 o **545** a **645**. V rámci 500 se zachovávají vlastní nastavené kontace. Součty jsou pod tabulkami.
 6. Potvrďte krok.
 
 Administrátor může přecenění vzít zpět tlačítkem **Zrušit přecenění** (smaže zaúčtovaný zápis).
@@ -151,9 +191,11 @@ Oba kroky fungují stejně. Jde o asistenta pro ruční zaúčtování rozvahov�
 **Automatické návrhy** jsou oddělené od zaúčtování, zápis vždy vytváří účetní po kontrole:
 
 - u **dohadných položek** tlačítko **Navrhnout dohady** načte opakující se měsíční náklady (energie, nájem, telco, cloud), pro které do rozvahového dne nedorazila obvyklá faktura. Aplikace předvyplní dodavatele, poslední doklad, odhad částky a případný protiúčet. Tlačítko **Předvyplnit** je převezme do formuláře,
-- u **nákladů příštích období** se nabídnou řádky přijatých faktur s vyplněným obdobím plnění přesahujícím rozvahový den. Aplikace vypočte část připadající na další období a po potvrzení ji zaúčtuje na 381 proti původnímu nákladovému účtu,
+- u **nákladů příštích období** se nabídnou řádky přijatých faktur s vyplněným obdobím plnění přesahujícím rozvahový den. Aplikace vypočte část připadající na další období a po potvrzení ji zaúčtuje na 381 proti původnímu nákladovému účtu. Vychází z účetního nákladu položky: základ a daň, na kterou nemá firma nárok na odpočet. Neplátce tak odkládá i budoucí část DPH, při poměrném odpočtu se počítá jen neodpočitatelná část. Otevření dalšího roku odklad rozpustí ze stejné částky, ze které ho uzávěrka zaúčtovala,
 - u **výnosů příštích období** se nabídnou řádky vydaných faktur s vyplněným obdobím výnosu přesahujícím rozvahový den, jejichž zápis leží v uzavíraném roce. Aplikace vypočte poměrně podle dnů část připadající na další období a po potvrzení ji zaúčtuje na vrub výnosového účtu, na který se faktura zaúčtovala, a ve prospěch 384. Dobropis se stejným obdobím odklad sníží. Otevření dalšího roku odloženou část rozpustí zpět do výnosů (víceleté plnění po ročních tranších),
 - pro **drobný majetek** zvolíte politiku **Bez rozlišení**, **Poměrně dle data pořízení** (poměr podle budoucí, nespotřebované doby užitku), nebo **Paušální %** (pevné procento). Náhled porovná cenu karet s rozpisem nákladů 501 a po potvrzení vytvoří časové rozlišení na 381. Politika se ukládá per období (ne per firma).
+
+Během roku, ještě před uzávěrkou, ukáže stejný odklad nákladů a výnosů příštích období výsledovka a rozvaha s volbou **Průběžné časové rozlišení** ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni)). Počítá se stejným pravidlem jako tento krok, ale jen ve výkazu, do deníku nic nezapisuje. Po zaúčtování kroku výkaz k rozvahovému dni doklady s už zaúčtovaným odkladem neupravuje.
 
 **Jak poznáte, že je hotovo:** U kroku je datum potvrzení a zápisy jsou v seznamu vytvořených zápisů.
 
@@ -363,6 +405,10 @@ stránku uzávěrky pojmenován **Uzávěrka / rozdělení**.
 
 ## 72.7 Krok za krokem: rozdělení výsledku hospodaření
 
+V období vedeném podle vyhlášky 504 otevřete **Rozhodnutí o výsledku hospodaření**. Zvolte datum uvnitř cílového období, načtěte podklady a vyplňte označení rozhodnutí a oprávněný orgán. Každou zobrazenou kombinaci dimenzí vypořádejte do nevypořádaného výsledku 932, fondů 911 nebo vlastního jmění 901. Zisky a ztráty se posuzují odděleně; krytí ztráty fondem nebo vlastním jměním vyžaduje dostatečný zůstatek stejné kombinace. Pro krytí ztráty použijte skutečný účet fondu nebo vlastního jmění. Je-li ve stejné kombinaci více analytických účtů, vyberte konkrétní zdroj; zůstatky jiných účtů se na jeho krytí nepoužijí. Příděly musí souhlasit na haléř. Při změně podkladů načtěte nový náhled. Zrušení je dostupné v otevřeném nebo uzavíraném cílovém období bez navazujících pohybů.
+
+Následující kroky popisují rozdělení podle rámce 500.
+
 Po schválení závěrky (a po převodu výsledku hospodaření na účet 431 otevíracím zápisem) je na stránce uzávěrky
 dostupná karta **Rozdělení výsledku hospodaření**. Zápis se účtuje do otevřeného období (nikdy do uzavřeného,
 431 se řeší až v novém roce), proto je karta dostupná nad schváleným obdobím. Při otevření z následujícího období
@@ -404,6 +450,16 @@ Tabulka drží řady dokladů per účetní rok:
 | Skladové příjemky / výdejky / převodky | `stock_in` / `stock_out` / `stock_transfer` | PRI / VYD / PRE |
 | Zápočty | `offset` | ZAP |
 | Objednávky dodavatelům | `purchase_order` | OBJ |
+| Ostatní pohledávky / závazky | `other_receivable` / `other_payable` | OP / OZ |
+
+Příjmové a výdajové pokladní doklady vydávají čísla do jedné evidence, stejně jako ostatní pohledávky
+a závazky (řady `other_receivable` / `other_payable`, prefixy OP / OZ). Řady téže skupiny proto nesmí mít
+stejný prefix (v kterémkoli roce) ani výchozí prefix druhé řady, dokud ta pro daný rok nevydala číslo
+a nebyla upravena, jinak by vydaly totéž číslo.
+
+Pokladna a druh ostatní položky mohou mít vlastní řadu vedle společné řady firmy; v tabulce je označená
+názvem pokladny nebo druhu ([§ 32.11.1](32_Pokladna.md#32111-ciselnik-pokladen),
+[§ 52.14.14.11](52_Ucetni_denik.md#52141411-druhy-a-ciselne-rady)).
 
 Řádek řady pro daný rok vzniká automaticky při prvním vydání čísla (dokud rok nemá žádný doklad dané řady,
 v tabulce se nezobrazuje; zobrazí se **zatím nevydáno**). Čísla se vydávají vzestupně a mezery po smazaných nebo
@@ -420,6 +476,8 @@ tvar čísla `PREFIX` a `CCCCC` ve složených závorkách a další číslo `11
 s už existujícím dokladem skončí chybou uložení, ne tichým duplikátem.
 
 **Nastavení uzávěrky a výkazů:**
+
+Příloha k závěrce a uzávěrkový balíček respektují účetní rámec zvoleného období. Příloha podle vyhlášky 504/2002 Sb. obsahuje sekce podle § 29 a § 30, včetně dotací, fondů, darů, veřejných sbírek a použití daňových úlev. Zkrácený rozsah vynechává pouze údaje uvedené v § 30 odst. 7. Údaje, které se jednotky netýkají, označte výslovně v textu. Vyplnění sekce potvrzuje přítomnost textu, nikoli jeho věcnou správnost. Převzaté loňské texty před uložením zkontrolujte; vlastní text se nepřepisuje. Balíček 504 sestavuje výkazy k poslednímu dni účetního období, PDF v celých tisících Kč a pracovní XLSX v Kč. Nedostupné přehledy podle vyhlášky 500 nejsou v nabídce aktivní.
 
 1. Na stránce Účetní období klikněte na **Nastavení uzávěrky** (okno **Nastavení uzávěrky a výkazů**).
 2. Upravte firemní výchozí hodnoty a uložte.
@@ -443,7 +501,7 @@ s už existujícím dokladem skončí chybou uložení, ne tichým duplikátem.
 Uzávěrkový balíček je výběrový ZIP sestav za jedno období.
 
 1. Otevřete `Nástroje → Uzávěrka` a u období klikněte na **Uzávěrkový balíček** (vyžaduje oprávnění k exportu sestav).
-2. V části **Co zahrnout do balíčku** vyberte sestavy (**Vybrat vše**, **Zrušit výběr**). K dispozici jsou rozvaha, výsledovka, hlavní kniha, obratová předvaha, deník, kniha DPH, přiznání k dani z příjmů (XML), PDF sestava přiznání, přehled záloh na daň z příjmů právnických osob, inventura dlouhodobého majetku, saldo starší než jeden rok a soupis dohadných položek a časového rozlišení. Náhled nejprve ukáže, které části mají data.
+2. V části **Co zahrnout do balíčku** vyberte sestavy (**Vybrat vše**, **Zrušit výběr**). K dispozici jsou rozvaha, výsledovka, hlavní kniha, obratová předvaha, deník, vyplněný protokol inventarizace rozvahových účtů, soupis otevřených položek, kniha DPH, přiznání k dani z příjmů (XML), PDF sestava přiznání, přehled záloh na daň z příjmů právnických osob, inventura dlouhodobého majetku, saldo starší než jeden rok a soupis dohadných položek a časového rozlišení. Náhled nejprve ukáže, které části mají data.
 3. Volitelně zaškrtněte **Přiložit i XLSX** (kromě Knihy DPH, přiznání k dani a záloh, ty jsou jen PDF/XML). Výstup je standardně PDF.
 4. Případně doplňte přílohu k závěrce tlačítkem **Vyplnit přílohu** (vyplněné sekce se do balíčku promítnou při dalším vygenerování).
 5. Klikněte na **Připravit balíček**.
@@ -590,7 +648,7 @@ přeúčtování i stornu dokladů starších než zamčené datum, i když je o
 
 ### 72.12.4 Pořadí kroků uzávěrky
 
-Uzávěrkový průvodce má deset kroků v pevném, závazném pořadí (viz tabulka v [§ 72.4](#724-krok-za-krokem-uzaverka-roku-pruvodce)).
+Uzávěrkový průvodce má v rámci 500 deset kroků v pevném, závazném pořadí. V rámci 504 navíc obsahuje krok Odložená daň podle výslovně zvolené vlastní metody (viz tabulka v [§ 72.4](#724-krok-za-krokem-uzaverka-roku-pruvodce)).
 Každý krok musí být před uzavřením knih buď dokončený, nebo vědomě přeskočený. Krok Zásoby je podmíněný: jen firma
 se skladem účtovaným způsobem B, jinak se automaticky přeskočí. Kroky Opravné položky a Daň z příjmů musí být před
 uzavřením knih dokončené nebo vědomě přeskočené, protože ovlivňují výsledek hospodaření.
@@ -605,7 +663,7 @@ samy o sobě nemusí znamenat nesprávné účetnictví.
 <!-- cols: 24 34 42 -->
 | Kontrola | Co aplikace porovnává | Jak nález interpretovat a řešit |
 |---|---|---|
-| **K1 - technické a clearingové účty** | Nenulové zůstatky 041/042, 111/131, 261, 314/324, 395 a souvisejících účtů. | Otevřete opis účtu a na záložce [Otevřené položky - párování](55_Hlavni_kniha.md#55851-otevrene-polozky-a-parovani) přiřaďte zůstatek ke konkrétnímu případu. Nenulový zůstatek může být oprávněný; účetní jej musí doložit nebo doúčtovat, ne mechanicky vynulovat. |
+| **K1 - technické a clearingové účty** | Nenulové zůstatky 041/042, 111/131, 261, 314/324, 395 a souvisejících účtů. | Otevřete opis účtu a na záložce [Otevřené položky - párování](55_Hlavni_kniha.md#55851-otevrene-polozky-a-parovani) přiřaďte zůstatek ke konkrétnímu případu. Nenulový zůstatek může být oprávněný; účetní jej musí doložit nebo doúčtovat, ne mechanicky vynulovat. Analytika prodaných poukazů a kreditu (výchozí 324.900, viz [Účtování a DPH poukazů](121_EET.md)) se do zůstatku 324 nepočítá, kontrola ji jen ukáže; záporný zůstatek analytiky je chyba kontroly **Záporný zůstatek prodaných poukazů a kreditu**. |
 | **K2 - neobvyklá strana** | Zůstatek účtu proti jeho běžné straně, včetně záporné pokladny. | Může jít o přeplatek, dobropis či jiné legitimní saldo, ale také o obrácenou kontaci. Rozhoduje věcný podklad a opis účtu. |
 | **K3 - úhrady a saldokonto** | Stav „uhrazeno" proti otevřenému saldu, spárované zálohy a finální doklady s nulou k úhradě. | Ověřte vazbu plateb, zálohových a finálních dokladů. Neměňte stav jen proto, aby kontrola zezelenala; opravte zdroj párování nebo chybějící účetní zápis. |
 | **K4 - kurz ČNB** | Kurz dokladu proti referenčnímu kurzu ČNB a povolené odchylce. | Pevný kurz či smluvně doložený postup může odchylku vysvětlit. Bez podkladu opravte kurz na zdrojovém dokladu a poté řízeně přeúčtujte. |
@@ -630,7 +688,71 @@ potvrzení správnosti; k významným varováním uchovejte podklad a zdůvodně
 - Znovuotevření uzavřeného období je zablokované, dokud existují zaúčtované uzávěrkové nebo otevírací zápisy. Nejprve je nutné vzít zpět kroky Otevření nového roku a Uzavření knih v průvodci.
 - Číselné řady se nikdy nedorovnávají po smazaných dokladech. Jedinečnost a souvislost číslování je vyžadována zákonem, ne estetika bez mezer.
 
-## 72.13 Související kapitoly
+### 72.12.7 Přechod mezi účetními rámci
+
+Při přechodu z vyhlášky 500 na 504 použijte samostatný řízený převod v Účetnictví. Běžné otevření
+účetních knih nemění účetní rámec. Řízený převod vychází z ověřené nativní uzávěrky 500 a uchovává
+původní výkazy.
+
+Výsledek převzatý na 931 se vypořádává akcí Rozhodnutí o výsledku v detailu převodu. Zdrojové výkazy
+musí být schválené. Vyberte datum, uveďte příslušný orgán a referenci rozhodnutí a výslovně potvrďte
+částky jednotlivých buněk. Nabízený postup převádí výsledek na nerozdělený výsledek minulých let
+932. Účelové převody vyžadují příslušný samostatný podklad evidence. Nevypořádané buňky 931 brání
+zahájení další uzávěrky, i pokud se jejich zisky a ztráty v součtu rovnají nule. Cizoměnové bankovní
+zůstatky si zachovávají doložený původ pro následné kurzové přecenění.
+
+## 72.13 Daňové posouzení činností v rámci 504
+
+V průvodci uzávěrkou otevřete **Daňové posouzení činností**. Podklady vycházejí ze zaúčtovaných výsledkových řádků, jejich doloženého členění a společných alokací. Chybějící členění nebo neprůkaznou alokaci nejprve opravte v účetnictví.
+
+Vyberte a doložte postavení poplatníka. U jednotlivých příjmů určete právní titul a rozhodné skutečnosti, u nákladů uznatelnou část a právní podklad. Samostatně vymezte druhy činností a případné cenové kohorty. U darů a dotací doložte financované náklady; dřívější čerpání se zohledňuje podle potvrzených historických podkladů. U částečně uznatelných nákladů doložte souhrnný překryv financování s uznatelnou částí. Stejnou neuznatelnou část nelze přidělit více zdrojům; kontrola zohledňuje také opravy nákladu.
+
+Roční test zohledňuje také financování z daru, který se podle výsledku činnosti stane příjmem mimo předmět daně. Navazující činnosti se vyhodnocují podle vazeb financování. Kruhová závislost je přípustná jen při prokázání jediného konzistentního výsledku; více možných výsledků, chybějící podklady nebo více než deset podmíněných zdrojových kohort vyžaduje samostatné posouzení.
+
+Automatická metodika pokrývá účetní období zcela uvnitř let 2024 až 2026. Pro jiné období použijte **Doložené ruční posouzení**. Uveďte právní podklad a jeho účinnost pro celé období, doložte postavení poplatníka a konečný režim každého řádku. U příjmů určete také způsob zdanění. U nákladů zadejte uznatelnou část před zvláštním vyloučením financovaných nákladů; aplikace průkazný překryv odečte právě jednou. Roční test činností se v této variantě neprovádí. Jde o uživatelem doložený podklad bez automatického ověření daňového režimu, což výslovně uvádějí i exporty. Kontroly účetních zdrojů, financování, volby osvobození darů a aktuálnosti potvrzení zůstávají povinné.
+
+Spusťte náhled, zkontrolujte návaznost na účetní výsledek a potvrďte posouzení s důvodem. Potvrzení ukládá neměnnou revizi s uživatelem a otiskem podkladů. Změna podkladů vyžaduje nové posouzení. Uzavření knih vyžaduje aktuální potvrzenou revizi; staré nebo odvolané potvrzení nestačí.
+
+Historii a podklady konkrétní revize lze stáhnout jako PDF, XLSX nebo strukturovaná data. Export označuje, zda revize stále odpovídá aktuálním podkladům. Přehled tvoří klasifikační most před obecnými úpravami základu daně. Nepočítá konečné DPPO, odpočty ani daň k podání; doložené úpravy mimo tento most zůstávají samostatným podkladem pro daňové přiznání.
+
+Potvrzenou volbu osvobození daru nelze zpětně změnit ani jeho rozdělením do nových alokačních řádků. Části stejného původního daru musejí mít jednotný právní titul a volbu osvobození. Pokud z dřívějšího zdroje čerpá další potvrzené období, nejprve doloženě přehodnoťte navazující posouzení. Ochranu zachovává i nahrazení starého posouzení, při němž zdroj dostane jiný právní titul.
+
+### 72.13.1 Zákonné opravné položky a rezervy
+
+V kroku **Opravné položky** uzávěrky rámce 504 jsou samostatné formuláře pro zákonnou opravnou položku, tvorbu rezervy na opravu majetku a její čerpání. Rozhodnutí potvrzuje uživatel s právem provádět uzávěrku. Uživatel s právem číst účetnictví může prohlížet podklady a ověřovat náhledy. Zápis vyžaduje probíhající uzávěrku. Práce s konkrétním zdrojem majetku navíc vyžaduje oprávnění číst majetek; běžné podklady zákonných opravných položek toto právo nepotřebují.
+
+U pohledávky zadejte **konečný stav zákonné opravné položky** po společných buňkách. Každá buňka zachovává současně činnost, druh činnosti, daňový režim i další členění zdroje. Můžete potvrdit doložené řádky pohledávky s poměrným vypořádáním úhrad nebo výslovně zdůvodnit nové rozdělení. Doplňte označení rozhodnutí, právní základ a doklad splnění podmínek včetně vazby na zdanitelnou činnost. Účtuje se pouze změna proti dosavadnímu stavu na 559/391. Nulový konečný stav opravnou položku rozpouští. Účetní opravná položka se v tomto rámci nenabízí.
+
+Pro **tvorbu rezervy na opravu** vyhledejte kartu majetku, doložte jeho trvající užívání a vyberte podklad pořízení. U zařazení z karty se dohledá původní zápis. U doloženého přiřazení vyberte konkrétní účetní řádky a částku přiřazenou z každého z nich; jejich součet musí odpovídat pořizovací hodnotě včetně doložených technických zhodnocení. Rozpočet opravy je samostatná částka a může být vyšší než pořizovací hodnota. Režim zařazení z karty pokrývá původní pořizovací zápis bez technických zhodnocení. Při evidovaném a zaúčtovaném technickém zhodnocení použijte doložené přiřazení obou druhů řádků. Například zařazení 100 000 Kč a technické zhodnocení 90 000 Kč vyžadují přiřazení 190 000 Kč; rozpočet rezervy může být samostatně 150 000 Kč. Neúplné přiřazení aplikace odmítne.
+
+Doplňte rozhodnutí, právní titul, popis a důkazy splnění zákonných podmínek. Po volbě **Ověřit a zobrazit náhled** zkontrolujte celé společné rozdělení. **Potvrdit zápis** vytvoří 556/941. Změna údajů zruší předchozí náhled; podklady se při potvrzení znovu ověřují.
+
+Pro čerpání nebo rozpuštění vyberte původní doloženou rezervu a částky v jejích společných buňkách. Zápis 941/556 nesmí překročit dostupný zůstatek žádné buňky. Seznam zápisů aktuálního období umožňuje doložené storno; při navazujícím čerpání je nutné nejprve stornovat čerpání a až poté tvorbu.
+
+### 72.13.2 Oprava zdroje rezervy majetku
+
+Opravu zahajte u stejné karty majetku v uzávěrce a uveďte důvod i správné pořizovací podklady. Formulář rozlišuje dvě situace:
+
+- **Oprava zdroje ve stejném období:** nejprve stornujte navazující čerpání a tvorbu úplnými protizápisy ve stejném období. Samotný opačný součet na účtu nestačí. Náhled musí potvrdit celý původní společný zápis a průkaznost nového zdroje. Po potvrzení opravy lze rezervu znovu vytvořit ze správného zdroje.
+- **Oprava zdroje při uzavřené historii:** původní tvorba ani čerpání se nestornují. Doložte původní dokument s datem, označením a důkazem, že šlo od začátku o stejný majetek i účel opravy. V aktuálním období se převede pouze zbývající rezerva mezi společnými buňkami zápisem 941/941. Historie a její původní zdroje zůstávají chráněné.
+
+Například při tvorbě **150 000 Kč** a čerpání **30 000 Kč** se při opravě uzavřené historie převádí **120 000 Kč**. Náhled ukáže převáděný zůstatek a obě strany společného rozdělení. Změněný zdroj, nesouhlasný účel, překročený zůstatek nebo zastaralý stav období potvrzení zablokují.
+
+Majetek navázaný na doloženou rezervu nelze zpětně vyřadit způsobem, který by popřel jeho užívání v doloženém období. Obdobně nelze zrušením již neplatného zpětného vyřazení obcházet ochranu zdroje. Pozdější vyřazení a jeho zrušení jsou možné, pokud zachovají průkazný historický stav.
+
+## 72.14 Odložená daň podle vlastní metody v rámci 504
+
+Krok **Odložená daň** je ve výchozím stavu vypnutý. Jeho výslovná volba vyžaduje odkaz na schválené rozhodnutí, důvod věrného a poctivého obrazu, rozsah odchylky a důvod odděleného vykázání. Jde o vlastní účetní metodu podle § 7 odst. 2 a § 36 zákona o účetnictví, nikoli automatické posouzení splatné daně. Daňové posouzení činností zůstává samostatným podkladem.
+
+Zadejte doložené tituly a celý požadovaný konečný přechodný rozdíl, sazbu a její právní podklad. U pohledávky určete prokazatelně využitelnou část a doložte pravděpodobnost uplatnění. Každý titul zachovává společné přiřazení dimenzí. Odebrání titulu rozpouští jeho dosavadní zůstatek; nový přírůstek potřebuje aktivní přiřazení. Samostatná volba prvního zavedení minulých rozdílů vyžaduje další důvod a používá účet 932.
+
+Spusťte **Ověřit rozhodnutí a zobrazit zápisy**, zkontrolujte hrubý závazek, uznanou pohledávku, neuznanou část a navržené zápisy. Potvrzení účtuje přesně ověřené rozhodnutí nad stejnými podklady. Úprava rozhodnutí, změna verze období nebo podkladů vyžaduje nový náhled. Každé další období vyžaduje nové posouzení i při nulové změně částky. Příprava chybějících účtů 349, 592 a 959.100 vyžaduje zvláštní souhlas; existující nekompatibilní účty se nepřepisují.
+
+Vrácením kroku nelze vymazat historii již potvrzeného posouzení ani zaúčtované zápisy. Změnu konečných rozdílů proveďte novým doloženým posouzením; historie předchozích rozhodnutí zůstává zachovaná i při nulovém zůstatku.
+
+Závazek a pohledávka se vzájemně nezapočítávají. Rozvaha, výsledovka, PDF i XLSX zachovávají zákonné řádky a uvnitř nich oddělují běžnou a odloženou část. Příloha automaticky uvádí doloženou metodu, hrubé počáteční a konečné zůstatky, výsledkový dopad, neuznanou část a důkazy využitelnosti. Tato automatická sekce je pouze ke čtení. Při zobrazení v tisících se podpoložky dorovnají na zaokrouhlený rodičovský řádek.
+
+## 72.15 Související kapitoly
 
 - [Účetní kontroly a inventarizace](46_Ucetni_kontroly_a_inventarizace.md)
 - [Inventarizace účtů](69_Inventarizace_rozvahovych_uctu.md)

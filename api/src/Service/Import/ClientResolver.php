@@ -100,7 +100,7 @@ final class ClientResolver
         // založené před opravou BUG 2/FR 2 mohly mít IČO uložené bez úvodní nuly.
         if ($ic !== null) {
             $stmt = $this->db->pdo()->prepare(
-                "SELECT id FROM clients WHERE supplier_id = ? AND LPAD(REGEXP_REPLACE(ic, '[^0-9]', ''), 8, '0') = ?" . $preferName
+                'SELECT id FROM clients WHERE supplier_id = ? AND ' . \MyInvoice\Support\CompanyIdNormalizer::icSql('ic') . ' = ?' . $preferName
             );
             $stmt->execute([$supplierId, $ic, $companyName]);
             $existing = $stmt->fetchColumn();
@@ -174,6 +174,12 @@ final class ClientResolver
         // main_email je od #221 nullable — neznámý e-mail necháváme prázdný,
         // dřívější placeholder 'unknown@import.local' vypadal jako reálná adresa.
         $email = trim((string) ($parsedClient['email'] ?? '')) ?: null;
+
+        // Aktivní skupina DPH bez DIČ skupiny v ARES: plátce je doložený, DIČ vezmeme
+        // z dokladu (DIČ k DPH má přednost). Bez toho by vznikla karta plátce bez DIČ.
+        if ($aresData !== null && ($aresData['dic'] ?? '') === '' && !empty($aresData['is_vat_payer'])) {
+            $aresData['dic'] = trim((string) ($parsedClient['vat_dic'] ?? '')) ?: (trim((string) ($parsedClient['dic'] ?? '')) ?: null);
+        }
 
         $data = [
             'company_name' => $aresData['company_name']

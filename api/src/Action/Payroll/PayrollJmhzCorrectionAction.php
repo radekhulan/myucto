@@ -16,6 +16,7 @@ use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzContentCorrectionSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCorrectiveSubmissionService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzZeroAmendmentSubmissionService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -43,7 +44,80 @@ final class PayrollJmhzCorrectionAction
         private readonly PayrollSensitiveData $sensitiveData,
         private readonly PayrollRegistrationIdentityRepository $identities,
         private readonly PayrollPeopleRepository $people,
+        private readonly JmhzZeroAmendmentSubmissionService $zeroAmendments,
     ) {
+    }
+
+    /**
+     * Součásti přijatého řádného hlášení a zda jde jejich měsíc anulovat
+     * nulovým opravným hlášením.
+     *
+     * @param array{submissionId:string} $args
+     */
+    public function zeroAmendmentCandidates(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        if ($environment === null || preg_match('/^[1-9][0-9]*$/D', $args['submissionId']) !== 1) {
+            return $this->invalid($response, 'Podání nebo prostředí nulového opravného hlášení nejsou platné.');
+        }
+        try {
+            $result = $this->zeroAmendments->candidates(
+                $this->currentSupplierId($request),
+                $environment,
+                (int) $args['submissionId'],
+            );
+        } catch (JmhzXmlException|\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+
+        return Json::ok($response, $result)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
+    }
+
+    /**
+     * Zmrazí nulové opravné hlášení, které anuluje měsíc vybraných vztahů.
+     * Situaci musí klient poslat výslovně; z dat se neodvozuje.
+     *
+     * @param array{submissionId:string} $args
+     */
+    public function freezeZeroAmendment(Request $request, Response $response, array $args): Response
+    {
+        if (($denied = $this->authorize($request, $response)) !== null) {
+            return $denied;
+        }
+        $environment = $this->environment($request);
+        $body = $request->getParsedBody();
+        $selected = is_array($body) ? ($body['form_guids'] ?? null) : null;
+        $situation = is_array($body) ? ($body['situation'] ?? null) : null;
+        if ($environment === null || !is_array($selected) || $selected === [] || !is_string($situation)
+            || preg_match('/^[1-9][0-9]*$/D', $args['submissionId']) !== 1
+        ) {
+            return $this->invalid($response, 'Podání, výběr vztahů nebo situace nulového opravného hlášení nejsou platné.');
+        }
+        try {
+            $result = $this->zeroAmendments->freeze(
+                $this->currentSupplierId($request),
+                $environment,
+                (int) $args['submissionId'],
+                array_values($selected),
+                $situation,
+                $this->userId($request),
+            );
+        } catch (JmhzXmlException|\InvalidArgumentException $exception) {
+            return $this->invalid($response, $exception->getMessage());
+        } catch (\DomainException $exception) {
+            return Json::error($response, 'conflict', $exception->getMessage(), 409);
+        }
+
+        return Json::ok($response, $result, $result['created'] ? 201 : 200)
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
     }
 
     /** @param array{submissionId:string} $args */

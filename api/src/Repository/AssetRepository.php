@@ -28,7 +28,7 @@ final class AssetRepository
         'depreciator_ground', 'co_ownership_share', 'depreciator_note',
         'opening_tax_years', 'opening_tax_amount', 'opening_acc_months', 'opening_acc_amount',
         'acc_useful_life_months', 'acc_method', 'acc_residual_value', 'created_by',
-        'summary_account_code',
+        'summary_account_code', 'imported_depreciation_plan',
     ];
 
     /**
@@ -60,7 +60,17 @@ final class AssetRepository
         $perPage = $perPage > 0 ? min($perPage, 200) : 50;
         $offset = ($page - 1) * $perPage;
 
-        $sql = "SELECT a.*,
+        $sql = "SELECT a.id, a.supplier_id, a.inventory_number, a.name, a.description, a.kind,
+                       a.asset_account_code, a.accumulated_account_code, a.acquisition_account_code,
+                       a.purchase_invoice_id, a.purchase_invoice_item_id, a.input_price,
+                       a.acquisition_date, a.put_into_use_date, a.disposal_date, a.disposal_type,
+                       a.disposal_price, a.sale_invoice_id, a.disposal_entry_id, a.status,
+                       a.tax_method, a.tax_group, a.tax_first_year_increase,
+                       a.is_first_owner, a.is_m1_vehicle, a.m1_limit_exception, a.is_zero_emission,
+                       a.depreciator_ground, a.co_ownership_share, a.depreciator_note,
+                       a.opening_tax_years, a.opening_tax_amount, a.opening_acc_months, a.opening_acc_amount,
+                       a.acc_useful_life_months, a.acc_method, a.acc_residual_value,
+                       a.created_by, a.created_at, a.updated_at, a.summary_account_code,
                        COALESCE(de.tax_amount_sum, 0)  AS tax_amount_sum,
                        COALESCE(de.tax_full_sum, 0)    AS tax_full_sum,
                        COALESCE(de.acc_amount_sum, 0)  AS acc_amount_sum,
@@ -112,6 +122,30 @@ final class AssetRepository
         return ['items' => $items, 'total' => $total, 'page' => $page, 'per_page' => $perPage];
     }
 
+    /**
+     * Hromadné odpisové sestavy potřebují úplný plán pro výpočet; běžný seznam
+     * jej kvůli objemu JSON vůbec nevybírá. Načítáme jen konkrétní karty po dávkách.
+     *
+     * @param list<int> $assetIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function importedPlansForAssets(int $supplierId, array $assetIds): array
+    {
+        $plans = [];
+        foreach (array_chunk(array_values(array_unique(array_map('intval', $assetIds))), 200) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT id, imported_depreciation_plan FROM assets
+                  WHERE supplier_id = ? AND id IN ($placeholders) AND imported_depreciation_plan IS NOT NULL"
+            );
+            $stmt->execute([$supplierId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $plans[(int) $row['id']] = json_decode($row['imported_depreciation_plan'], true, 512, JSON_THROW_ON_ERROR);
+            }
+        }
+        return $plans;
+    }
+
     public function find(int $supplierId, int $id): ?array
     {
         $stmt = $this->db->pdo()->prepare('SELECT * FROM assets WHERE supplier_id = ? AND id = ?');
@@ -141,7 +175,8 @@ final class AssetRepository
         foreach (self::COLUMNS as $col) {
             if (array_key_exists($col, $data)) {
                 $cols[] = $col;
-                $params[] = $data[$col];
+                $params[] = $col === 'imported_depreciation_plan' && $data[$col] !== null
+                    ? json_encode($data[$col], JSON_THROW_ON_ERROR) : $data[$col];
             }
         }
         $place = implode(', ', array_fill(0, count($cols), '?'));
@@ -162,7 +197,8 @@ final class AssetRepository
         foreach (self::COLUMNS as $col) {
             if (array_key_exists($col, $data)) {
                 $set[] = $col . ' = ?';
-                $params[] = $data[$col];
+                $params[] = $col === 'imported_depreciation_plan' && $data[$col] !== null
+                    ? json_encode($data[$col], JSON_THROW_ON_ERROR) : $data[$col];
             }
         }
         if ($set === []) {
@@ -323,6 +359,10 @@ final class AssetRepository
 
     private function cast(array $r): array
     {
+        if (array_key_exists('imported_depreciation_plan', $r)) {
+            $r['imported_depreciation_plan'] = $r['imported_depreciation_plan'] === null
+                ? null : json_decode($r['imported_depreciation_plan'], true, 512, JSON_THROW_ON_ERROR);
+        }
         $r['id'] = (int) $r['id'];
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['purchase_invoice_id'] = $r['purchase_invoice_id'] === null ? null : (int) $r['purchase_invoice_id'];

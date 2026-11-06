@@ -20,14 +20,19 @@ final class LoggingPdoStatement extends PDOStatement
         private readonly ?\Closure $schemaChanged = null,
         private readonly ?SlowQueryLog $slowLog = null,
         private readonly string $database = '',
+        private readonly ?\Closure $transactionState = null,
+        private readonly ?\Closure $statementSucceeded = null,
+        private readonly ?\Closure $statementFailed = null,
     ) {}
 
     public function execute(?array $params = null): bool
     {
+        $before = ($this->transactionState)?->__invoke() ?? false;
         $started = $this->slowLog !== null ? hrtime(true) : 0;
         try {
-            $ok = parent::execute($params);
+            $ok = $this->executeRetryingReprepare($params);
         } catch (PDOException $e) {
+            ($this->statementFailed)?->__invoke((string) $this->queryString, $before, $e->errorInfo);
             DbErrorLogger::log($this->logger, $e, (string) $this->queryString, $params ?? []);
             throw $e;
         }
@@ -37,10 +42,32 @@ final class LoggingPdoStatement extends PDOStatement
         // příkazu je uvnitř, čtení odfiltruje hned první regex, takže SELECTy
         // (drtivá většina volání) platí jen jedno porovnání.
         if ($ok) {
+            ($this->statementSucceeded)?->__invoke((string) $this->queryString, $before);
             WriteWatcher::noteStatement((string) $this->queryString);
             ($this->schemaChanged)?->__invoke((string) $this->queryString);
+        } else {
+            ($this->statementFailed)?->__invoke((string) $this->queryString, $before, $this->errorInfo());
         }
 
         return $ok;
+    }
+
+    /**
+     * MariaDB 1615 (Prepared statement needs to be re-prepared): definice tabulky se mezi
+     * přípravou a provedením změnila nebo vypadla z cache definic (paralelní zátěž,
+     * sekvenční engine). Chyba vzniká PŘED provedením, takže opakování nic nezdvojí
+     * a server při něm příkaz připraví znovu; jiné chyby jdou dál beze změny.
+     */
+    private function executeRetryingReprepare(?array $params): bool
+    {
+        for ($attempt = 0; ; $attempt++) {
+            try {
+                return parent::execute($params);
+            } catch (PDOException $retry) {
+                if ($attempt >= 2 || (int) ($retry->errorInfo[1] ?? 0) !== 1615) {
+                    throw $retry;
+                }
+            }
+        }
     }
 }

@@ -31,6 +31,7 @@ final class PayrollWarningSuppressionService
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $activity,
+        private readonly PayrollPeopleRepository $people,
     ) {}
 
     /**
@@ -88,8 +89,8 @@ final class PayrollWarningSuppressionService
                 $employmentIds[] = (int) $row['subject_id'];
             }
         }
-        $employeeLabels = $this->employeeLabels($supplierId, $employeeIds);
-        $employmentLabels = $this->employmentLabels($supplierId, $employmentIds);
+        $employeeLabels = $this->people->personLabels($supplierId, $employeeIds);
+        $employmentLabels = $this->people->employmentLabels($supplierId, $employmentIds);
 
         return array_map(static function (array $row) use ($employeeLabels, $employmentLabels): array {
             $type = (string) $row['subject_type'];
@@ -277,62 +278,5 @@ final class PayrollWarningSuppressionService
         if ($found !== count($ids)) {
             throw new \InvalidArgumentException('Některá z vybraných osob do firmy nepatří.');
         }
-    }
-
-    /**
-     * @param list<int> $ids
-     * @return array<int,string>
-     */
-    private function employeeLabels(int $supplierId, array $ids): array
-    {
-        if ($ids === []) {
-            return [];
-        }
-        $labels = [];
-        foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
-            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT employee.id, ' . PayrollPeopleRepository::fullNameExpression() . ' AS full_name
-                   FROM payroll_employees employee
-                  WHERE employee.supplier_id = ? AND employee.id IN (' . $placeholders . ')'
-            );
-            $stmt->execute([$supplierId, ...$chunk]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $labels[(int) $row['id']] = (string) $row['full_name'];
-            }
-        }
-        return $labels;
-    }
-
-    /**
-     * @param list<int> $ids
-     * @return array<int,string>
-     */
-    private function employmentLabels(int $supplierId, array $ids): array
-    {
-        if ($ids === []) {
-            return [];
-        }
-        $labels = [];
-        foreach (array_chunk(array_values(array_unique($ids)), 500) as $chunk) {
-            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT employment.id, employment.code,
-                        ' . PayrollPeopleRepository::fullNameExpression() . ' AS full_name
-                   FROM payroll_employments employment
-                   JOIN payroll_employees employee
-                     ON employee.id = employment.employee_id
-                    AND employee.supplier_id = employment.supplier_id
-                  WHERE employment.supplier_id = ? AND employment.id IN (' . $placeholders . ')'
-            );
-            $stmt->execute([$supplierId, ...$chunk]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-                $code = (string) ($row['code'] ?? '');
-                $labels[(int) $row['id']] = $code === ''
-                    ? (string) $row['full_name']
-                    : sprintf('%s (%s)', (string) $row['full_name'], $code);
-            }
-        }
-        return $labels;
     }
 }

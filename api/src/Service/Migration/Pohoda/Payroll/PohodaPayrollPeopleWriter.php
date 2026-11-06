@@ -169,6 +169,9 @@ final class PohodaPayrollPeopleWriter
             }
             $this->part($protocol, $step, $number, 'Sjednaná měsíční mzda', fn (): array => $this->employments->monthlyWage($supplierId, $employmentId, $relation, $userId, $policy));
             $this->part($protocol, $step, $number, 'Předpis měsíční mzdy', fn (): array => $this->employments->recurringWage($supplierId, $employmentId, $relation, $userId, $policy, $state));
+            if ($relation->recurringComponents !== []) {
+                $this->part($protocol, $step, $number, 'Opakované složky', fn (): array => $this->employments->recurringComponents($supplierId, $employmentId, $relation, $userId, $policy));
+            }
             $this->part($protocol, $step, $number, 'Průměrný výdělek', fn (): array => $this->employments->averageEarnings($supplierId, $employmentId, $relation, $userId, $policy));
             $this->part($protocol, $step, $number, 'Nepřítomnosti', fn (): array => $this->absences->absences($supplierId, $employmentId, $relation, $userId, $policy, $state));
             $this->part($protocol, $step, $number, 'Zůstatek dovolené', fn (): array => $this->absences->leaveCarryover($supplierId, $employmentId, $relation, $userId, $policy, $state));

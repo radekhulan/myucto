@@ -5,6 +5,7 @@ import { vi } from 'vitest'
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 
 import CatalogJobProgress from '../CatalogJobProgress.vue'
+import type { CatalogJob } from '@/api/catalogJobs'
 
 describe('CatalogJobProgress', () => {
   it('maps catalog checkpoints to the shared progress component and preserves cancellation state', async () => {
@@ -47,5 +48,15 @@ describe('CatalogJobProgress', () => {
     expect(wrapper.text()).toContain('eshop.jobs.cancel_boundary')
     await wrapper.setProps({ job: { ...wrapper.props('job')!, report: { counts: { ready: 2, applied: 3, unchanged: 1, skipped: 2, failed: 1, conflict: 2 } } } })
     expect(progress.props('job')).toMatchObject({ created_count: 5, skipped_count: 3, failed_count: 3 })
+  })
+
+  it('shows the pending-cancel note only while the job runs and the cancel hint only to whoever may cancel', () => {
+    const job: CatalogJob = { id: 21, supplier_id: 1, kind: 'stock_history_import_apply', input_version: 1, status: 'cancelled', checkpoint: 3, total: 12,
+      report: {}, error_code: null, cancel_requested: true, created_at: '', updated_at: '', finished_at: null, attempts: 1 }
+    const stubs = { ImportJobProgress: { name: 'ImportJobProgress', props: ['job', 'percent', 'showCancel'], template: '<div />' } }
+    let wrapper = shallowMount(CatalogJobProgress, { props: { job, canCancel: true }, global: { stubs } })
+    expect(wrapper.text()).not.toContain('eshop.jobs.cancel_requested')
+    wrapper = shallowMount(CatalogJobProgress, { props: { job: { ...job, status: 'running', cancel_requested: false }, canCancel: false }, global: { stubs } })
+    expect(wrapper.text()).not.toContain('eshop.jobs.cancel_boundary')
   })
 })

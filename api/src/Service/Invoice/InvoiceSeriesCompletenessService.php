@@ -650,6 +650,7 @@ final class InvoiceSeriesCompletenessService
                  FROM invoices
                 WHERE supplier_id = ? AND invoice_type IN ($in)
                   AND varsymbol IS NOT NULL AND varsymbol <> ''
+                  AND calendar_id IS NULL
                   AND issue_date >= ? AND issue_date <= ?"
         );
         $stmt->execute([$supplierId, ...$types, $from, $to]);

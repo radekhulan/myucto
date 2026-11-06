@@ -10,9 +10,10 @@ import { useAuthStore } from '@/stores/auth'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import OpeningBalanceEditor from '@/components/settings/activation/OpeningBalanceEditor.vue'
 import BackfillReportView from '@/components/settings/activation/BackfillReportView.vue'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import Modal from '@/components/ui/Modal.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -71,6 +72,71 @@ const progress = computed(() => {
 })
 const jobRunning = computed(() => job.value?.status === 'queued' || job.value?.status === 'running')
 const activated = computed(() => status.value?.activation_status === 'completed')
+
+/**
+ * Vynucení nabízí jen správci firmy (server rozhoduje stejně) a jen nad během, který prošel
+ * všechny zdroje s vyrovnaným deníkem - zbývají chyby jednotlivých položek. Z kontroly
+ * nanečisto vede k vynucenému doúčtování, z neúspěšného doúčtování rovnou k dokončení.
+ */
+const forceMode = computed<'execute' | 'complete' | null>(() => {
+  const report = job.value?.report_json
+  if (!auth.isCompanyAdminRole || !job.value || !report || jobRunning.value) return null
+  if (report.fatal_error || !report.balance?.balanced || report.failed_total === 0) return null
+  if (job.value.kind === 'dry_run' && job.value.status === 'failed' && currentStep.value === 3) return 'execute'
+  if (job.value.kind === 'execute' && job.value.status === 'failed' && currentStep.value === 5
+    && status.value?.activation_status === 'failed' && status.value?.last_job?.id === job.value.id) return 'complete'
+  return null
+})
+const forceOpen = ref(false)
+const forceReason = ref('')
+const forceConfirmed = ref(false)
+const FORCE_LIST_LIMIT = 20
+const forceItems = computed(() => {
+  const report = job.value?.report_json
+  if (!report) return [] as string[]
+  const items = (report.document_issues || [])
+    .filter(issue => issue.severity === 'failed')
+    .map(issue => `${t(`activation.document_type.${issue.source_type}`)} ${issue.document_no || `#${issue.source_id}`}: ${issue.message}`)
+  const settlementErrors = report.phases?.account_settlements?.errors
+  if (Array.isArray(settlementErrors)) items.push(...settlementErrors.map(String))
+  for (const [key, row] of Object.entries(report.document_coverage || {})) {
+    if (row.missing > 0) items.push(t('activation.force_missing', { source: t(`activation.source.${key === 'invoice' ? 'invoices' : 'purchase_invoices'}`), n: row.missing }))
+  }
+  return items
+})
+const forceReady = computed(() => forceConfirmed.value && forceReason.value.trim().length >= 5)
+
+function openForce() {
+  forceReason.value = ''
+  forceConfirmed.value = false
+  forceOpen.value = true
+}
+
+async function submitForce() {
+  if (!forceReady.value || !job.value || !forceMode.value) return
+  busy.value = true
+  const payload = { reason: forceReason.value.trim() }
+  try {
+    if (forceMode.value === 'complete') {
+      const jobId = job.value.id
+      status.value = await activationApi.forceComplete(jobId, payload)
+      await sharedStatus.refresh(true)
+      job.value = await activationApi.job(jobId)
+      await loadJobs()
+      await auth.refresh()
+      forceOpen.value = false
+      toast.success(t('activation.force_done'))
+    } else {
+      const created = await activationApi.execute(payload)
+      forceOpen.value = false
+      executeConfirmed.value = true
+      currentStep.value = 4
+      await pollJob(created.job_id)
+    }
+  } catch (error: any) {
+    toast.error(errorMessage(error))
+  } finally { busy.value = false }
+}
 // Dokud jde otevírací zápis založit, musí zůstat cesta zpět do kroku 2. Rozhoduje
 // server (postBlocker): otevřenost cílového období a to, že otevření nepatří
 // uzávěrce předchozího roku.
@@ -309,7 +375,10 @@ const actions = computed<ActionItem[]>(() => {
         { key: 'next', label: t('activation.continue'), icon: 'check', tier: 'primary', variant: 'primary', run: () => { currentStep.value = 4 } },
         { key: 'rerun', label: t('activation.dry_run_again'), icon: 'cycle', tier: 'secondary', variant: 'neutral', run: runDry },
       ]
-    : [{ key: 'dry', label: t('activation.dry_run_start'), icon: 'play', tier: 'primary', variant: 'primary', disabled: job.value?.status === 'queued' || job.value?.status === 'running', loading: busy.value, run: runDry }]
+    : [
+        { key: 'dry', label: t('activation.dry_run_start'), icon: 'play', tier: 'primary', variant: 'primary', disabled: job.value?.status === 'queued' || job.value?.status === 'running', loading: busy.value, run: runDry },
+        { key: 'force', label: t('activation.force_execute'), icon: 'bell', tier: 'secondary', variant: 'warning', show: forceMode.value === 'execute', disabled: busy.value, run: openForce },
+      ]
   if (currentStep.value === 4) return [
     { key: 'execute', label: t('activation.execute_start'), icon: 'play', tier: 'primary', variant: 'warning', disabled: !executeConfirmed.value || job.value?.status === 'queued' || job.value?.status === 'running', loading: busy.value, run: runExecute },
     { key: 'cancel', label: t('common.cancel'), icon: 'x', tier: 'overflow', variant: 'danger', show: job.value?.status === 'queued' || job.value?.status === 'running', run: cancelJob },
@@ -321,6 +390,7 @@ const actions = computed<ActionItem[]>(() => {
     { key: 'trial', label: t('activation.open_trial_balance'), icon: 'chart', tier: 'secondary', variant: 'neutral', to: { name: 'accounting-trial-balance' }, show: status.value?.activation_status === 'completed' },
     { key: 'hide', label: t('activation.hide_from_menu'), icon: 'x', tier: 'secondary', variant: 'neutral', run: hideFromMenu, show: status.value?.activation_status === 'completed' && !nav.isHidden('/admin/accounting-activation') },
     { key: 'retry', label: t('activation.retry'), icon: 'cycle', tier: 'primary', variant: 'warning', run: () => { job.value = null; currentStep.value = 3 }, show: status.value?.activation_status === 'failed' },
+    { key: 'force', label: t('activation.force_complete'), icon: 'bell', tier: 'secondary', variant: 'warning', show: forceMode.value === 'complete', disabled: busy.value, run: openForce },
   ]
 })
 
@@ -375,12 +445,34 @@ onBeforeUnmount(() => { if (pollTimer) clearTimeout(pollTimer) })
 
     <div class="flex justify-end"><ActionBar :actions="actions" /></div>
 
+    <Modal v-if="forceOpen" :title="forceMode === 'complete' ? t('activation.force_complete') : t('activation.force_execute')" width-class="max-w-2xl" @close="forceOpen = false">
+      <div class="space-y-4 text-sm" data-test="force-dialog">
+        <p class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-warning-700">{{ t('activation.force_intro', { n: job?.report_json?.failed_total ?? 0 }) }}</p>
+        <div v-if="forceItems.length">
+          <h3 class="mb-2 font-semibold">{{ t('activation.force_list_title') }}</h3>
+          <ul class="max-h-60 list-disc space-y-1 overflow-y-auto pl-5 text-neutral-700">
+            <li v-for="(item, index) in forceItems.slice(0, FORCE_LIST_LIMIT)" :key="index">{{ item }}</li>
+          </ul>
+          <p v-if="forceItems.length > FORCE_LIST_LIMIT" class="mt-1 text-neutral-500">{{ t('activation.force_list_more', { n: forceItems.length - FORCE_LIST_LIMIT }) }}</p>
+        </div>
+        <p class="text-neutral-500">{{ t('activation.force_hard_blocks') }}</p>
+        <label class="block font-medium">{{ t('activation.force_reason') }}<textarea v-model="forceReason" rows="3" maxlength="500" class="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2" :placeholder="t('activation.force_reason_placeholder')"></textarea></label>
+        <label class="flex cursor-pointer items-start gap-3"><input v-model="forceConfirmed" type="checkbox" class="mt-1 rounded border-neutral-300 text-primary-600" /><span>{{ t('activation.force_confirm', { n: job?.report_json?.failed_total ?? 0 }) }}</span></label>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="forceOpen = false"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
+          <button type="button" data-test="force-submit" :class="btnFilled('warning')" class="whitespace-nowrap" :disabled="!forceReady || busy" @click="submitForce"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.bell" /></svg>{{ forceMode === 'complete' ? t('activation.force_complete') : t('activation.force_execute') }}</button>
+        </div>
+      </template>
+    </Modal>
+
     <section v-if="jobHistory.length || jobTotal" class="overflow-hidden rounded-lg border border-neutral-200 bg-surface shadow-sm">
       <h2 class="border-b border-neutral-200 px-4 py-3 text-lg font-semibold">{{ t('activation.history_title') }}</h2>
       <div class="divide-y divide-neutral-100">
         <button v-for="item in jobHistory" :key="item.id" type="button" class="flex w-full cursor-pointer flex-wrap items-center justify-between gap-3 px-4 py-3 text-left hover:bg-neutral-50" @click="showJob(item)">
           <span><strong>#{{ item.id }} · {{ t(`activation.kind.${item.kind}`) }}</strong><span class="ml-2 text-xs text-neutral-500">{{ item.created_at }}</span></span>
-          <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : 'bg-neutral-100 text-neutral-600'">{{ t(`activation.status.${item.status}`) }}</span>
+          <span class="rounded-full px-2.5 py-1 text-xs font-medium" :class="item.status === 'completed' ? 'bg-success-50 text-success-600' : item.status === 'failed' ? 'bg-danger-50 text-danger-600' : 'bg-neutral-100 text-neutral-600'">{{ t(`activation.status.${item.status}`) }}<template v-if="item.report_json?.forced"> · {{ t('activation.status_forced') }}</template></span>
         </button>
       </div>
       <PaginationBar embedded :page="jobPage" :per-page="jobPerPage" :total="jobTotal" @update:page="jobPage = $event" />

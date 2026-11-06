@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
+
 /**
  * Mzdový list po měsících 1–12 a „Celkem", jak ho znají účetní z PAMICA.
  *
@@ -109,6 +111,9 @@ final class PayrollSheetMatrix
             ['Zdravotní pojištění zaměstnavatel', 'money', static fn (PayrollSheetMonth $m) => $m->employerHealthMinorUnits, $takenField('employer_health_minor')],
         ], $own, $taken, false);
 
+        // Od roku 2027 je samostatný základ podle § 6 odst. 4 základem zálohy,
+        // ne srážkové daně — popisek se řídí zdaňovacím obdobím listu.
+        $separateBase = SeparateTaxBaseRegime::forTaxYear($data->taxYear);
         $sections[] = self::section('Údaje o dani z příjmů', [
             ['Základ daně (zálohový)', 'money', static fn (PayrollSheetMonth $m) => $m->advanceTaxBaseMinorUnits, null],
             ['Daň před slevami', 'money', static fn (PayrollSheetMonth $m) => $m->advanceTaxBeforeCreditsMinorUnits, null],
@@ -119,8 +124,8 @@ final class PayrollSheetMatrix
             ['Sleva na dani § 35c (uplatněná)', 'money', static fn (PayrollSheetMonth $m) => $m->childCreditMinorUnits, null],
             ['Záloha na daň (sražená)', 'money', static fn (PayrollSheetMonth $m) => $m->advanceTaxMinorUnits, $takenField('advance_tax_minor'), true],
             ['Daňový bonus', 'money', static fn (PayrollSheetMonth $m) => $m->taxBonusMinorUnits, $takenField('tax_bonus_minor')],
-            ['Základ daně zvláštní sazbou', 'money', static fn (PayrollSheetMonth $m) => $m->taxDetailRecorded() ? $m->withholdingTaxBaseMinorUnits : false, null],
-            ['Daň zvláštní sazbou (srážková)', 'money', static fn (PayrollSheetMonth $m) => $m->withholdingTaxMinorUnits, $takenField('withholding_tax_minor')],
+            [$separateBase->sheetBaseLabel(), 'money', static fn (PayrollSheetMonth $m) => $m->taxDetailRecorded() ? $m->withholdingTaxBaseMinorUnits : false, null],
+            [$separateBase->sheetTaxLabel(), 'money', static fn (PayrollSheetMonth $m) => $m->withholdingTaxMinorUnits, $takenField('withholding_tax_minor')],
             ['Doplatek z ročního zúčtování', 'money', static fn (PayrollSheetMonth $m) => $m->annualSettlementMinorUnits, null],
         ], $own, $taken, false);
 

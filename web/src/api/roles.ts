@@ -1,7 +1,7 @@
 import { api } from './client'
 import type { PermissionValue } from '@/security/permissions'
 
-export type RoleType = 'superadmin' | 'staff' | 'client'
+export type RoleType = 'superadmin' | 'staff' | 'client' | 'instance_admin'
 
 export interface RoleListItem {
   id: number

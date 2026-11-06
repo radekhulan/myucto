@@ -25,6 +25,7 @@ final class AbraSnapshotBuilder
         'faktura-prijata',
         'prodejka',
         'zavazek',
+        'pohledavka',
         'bankovni-ucet',
         'majetek',
         'banka',
@@ -35,7 +36,7 @@ final class AbraSnapshotBuilder
         'stav-uctu',
     ];
 
-    /** @var array<string,string> evidence Changes API => evidence snímku */
+    /** @var array<string,string|list<string>> evidence Changes API => evidence snímku */
     private const CHANGE_EVIDENCES = [
         'ucetni-obdobi' => 'ucetni-obdobi',
         'ucetni-osnova' => 'ucetni-osnova',
@@ -59,8 +60,8 @@ final class AbraSnapshotBuilder
         'stav-uctu' => 'stav-uctu',
         'interni-doklad' => 'ucetni-denik',
         'interni-doklad-polozka' => 'ucetni-denik',
-        'pohledavka' => 'ucetni-denik',
-        'pohledavka-polozka' => 'ucetni-denik',
+        'pohledavka' => ['pohledavka', 'ucetni-denik'],
+        'pohledavka-polozka' => ['pohledavka', 'ucetni-denik'],
         'zavazek' => 'zavazek',
         'zavazek-polozka' => 'zavazek',
         'vzajemny-zapocet' => 'ucetni-denik',
@@ -72,24 +73,24 @@ final class AbraSnapshotBuilder
 
     /** @var list<string> evidence, jejichž řádky se omezují na vybrané roky */
     private const PERIOD_EVIDENCES = [
-        'ucetni-obdobi', 'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'banka',
+        'ucetni-obdobi', 'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka', 'banka',
         'pokladni-pohyb', 'ucetni-denik', 'pohyb-na-uctech', 'stav-uctu',
     ];
 
     /** @var list<string> */
     private const ACCOUNTING_CONTROL_TRIGGERS = [
-        'ucetni-obdobi', 'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'banka',
+        'ucetni-obdobi', 'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka', 'banka',
         'pokladni-pohyb', 'ucetni-denik', 'pohyb-na-uctech', 'stav-uctu',
     ];
 
     /** @var list<string> */
     private const RELATION_EVIDENCES = [
-        'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'banka', 'pokladni-pohyb',
+        'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka', 'banka', 'pokladni-pohyb',
     ];
 
     /** @var list<string> */
     private const FISCAL_DATE_EVIDENCES = [
-        'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'banka', 'pokladni-pohyb',
+        'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka', 'banka', 'pokladni-pohyb',
         'ucetni-denik', 'pohyb-na-uctech',
     ];
 
@@ -396,15 +397,17 @@ final class AbraSnapshotBuilder
                     throw new AbraException('invalid_changes', 'ABRA Flexi nevrátila platný záznam změny.');
                 }
                 $sourceEvidence = (string) ($change['@evidence'] ?? '');
-                $evidence = self::CHANGE_EVIDENCES[$sourceEvidence] ?? null;
-                if ($evidence === null) {
+                $evidences = (array) (self::CHANGE_EVIDENCES[$sourceEvidence] ?? []);
+                if ($evidences === []) {
                     $label = self::safeEvidence($sourceEvidence);
                     $unknown[$label] = ($unknown[$label] ?? 0) + 1;
                     continue;
                 }
-                $affected[$evidence] = true;
-                if (($change['@operation'] ?? null) === 'delete') {
-                    $deletions[$evidence] = ($deletions[$evidence] ?? 0) + 1;
+                foreach ($evidences as $evidence) {
+                    $affected[$evidence] = true;
+                    if (($change['@operation'] ?? null) === 'delete') {
+                        $deletions[$evidence] = ($deletions[$evidence] ?? 0) + 1;
+                    }
                 }
             }
             $next = $root['next'] ?? 'none';
@@ -517,7 +520,7 @@ final class AbraSnapshotBuilder
     {
         $selected = [];
         $documentDates = [];
-        foreach (['faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek'] as $evidence) {
+        foreach (AbraSource::DOCUMENT_EVIDENCES as $evidence) {
             foreach (AbraSource::rows($snapshot, $evidence) as $row) {
                 $key = AbraSource::sourceKey($row);
                 if ($key === '') continue;
@@ -587,7 +590,7 @@ final class AbraSnapshotBuilder
     public static function linkedInvoiceKeys(array $snapshot, array $importedEndpointKeys = []): array
     {
         $movementKeys = ['banka' => [], 'pokladni-pohyb' => []];
-        $wanted = ['faktura-vydana' => [], 'faktura-prijata' => [], 'prodejka' => [], 'zavazek' => []];
+        $wanted = array_fill_keys(AbraSource::DOCUMENT_EVIDENCES, []);
         foreach ($importedEndpointKeys as $endpoint => $_) {
             [$evidence, $key] = array_pad(explode('|', $endpoint, 2), 2, '');
             if (isset($movementKeys[$evidence]) && $key !== '') {
@@ -670,6 +673,7 @@ final class AbraSnapshotBuilder
             str_contains($normalized, 'fakturaprijata') => 'faktura-prijata',
             str_contains($normalized, 'prodejka') => 'prodejka',
             str_contains($normalized, 'zavazek') => 'zavazek',
+            str_contains($normalized, 'pohledavka') => 'pohledavka',
             str_contains($normalized, 'pokladnipohyb') => 'pokladni-pohyb',
             $normalized === 'banka' => 'banka',
             default => '',
@@ -764,7 +768,7 @@ final class AbraSnapshotBuilder
                     $kept[] = $row;
                 } elseif ($inside) {
                     $kept[] = $row;
-                } elseif (in_array($evidence, ['faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek'], true)) {
+                } elseif (in_array($evidence, AbraSource::DOCUMENT_EVIDENCES, true)) {
                     $outsideInvoices[$evidence][] = $row;
                 }
             }
@@ -788,7 +792,7 @@ final class AbraSnapshotBuilder
                         foreach (['a', 'b'] as $side) {
                             $relation = AbraSource::relation($row[$side . '@ref'] ?? $row[$side] ?? null);
                             if ($relation !== null && in_array(self::relationEvidence($relation['evidence']),
-                                ['faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek'], true)) {
+                                AbraSource::DOCUMENT_EVIDENCES, true)) {
                                 $references[mb_strtolower($relation['key'])] = true;
                             }
                         }
@@ -816,7 +820,7 @@ final class AbraSnapshotBuilder
     {
         $selected = $this->importedEndpointKeys;
         $untyped = [];
-        foreach (['faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'banka', 'pokladni-pohyb'] as $evidence) {
+        foreach (['faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka', 'banka', 'pokladni-pohyb'] as $evidence) {
             foreach ($snapshot[$evidence] as $row) {
                 if (!is_array($row)) {
                     continue;

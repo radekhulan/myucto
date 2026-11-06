@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/form/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:st="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/form/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" schemaLocation="simpleTypes.xsd"/>
+  <xs:include schemaLocation="formCommonTypes.xsd"/>
+
+  <xs:element name="mezinarodniPronajemSily" type="mezinarodniPronajemSilyType"/>
+  <xs:complexType name="mezinarodniPronajemSilyType">
+    <xs:annotation>
+      <xs:documentation>DATOVÝ SCÉNÁŘ V MĚSÍČNÍM HLÁŠENÍ PODLE DRUHU ČINNOSTI:
+12</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="identifikace" type="identifikaceType"/>
+      <xs:element name="souhrnDataZec" type="souhrnDataZecMpsType" minOccurs="0"/>
+      <xs:element name="vykonavanaPozice" type="vykonavanaPoziceCoreType"/>
+      <xs:element name="prijem" type="prijemType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="souhrnDataZecMpsType">
+    <xs:sequence>
+      <xs:element name="prijmy" type="prijmyMpsType"/>
+      <xs:element name="zalohaNaDan" type="zalohaNaDanType"/>
+      <xs:element name="rocniUhrny" type="rocniUhrnyType" minOccurs="0"/>       
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="prijmyMpsType">
+    <xs:complexContent>
+      <xs:extension base="prijmyCoreType">
+        <xs:sequence>
+          <xs:element name="prispevekZelSporeniOsvob" type="st:cislo14Type" minOccurs="0">
+            <xs:annotation>
+              <xs:documentation>Příspěvek zaměstnavatele na produkty spoření na stáří a pojištění dlouhodobé péče z osvobozených příjmů - celkem
+DS: Souhrnná data zaměstnance > Příjem > Příspěvek zaměstnavatele  (z úhrnu osvobozených příjmů) (ID 10417)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+</xs:schema>

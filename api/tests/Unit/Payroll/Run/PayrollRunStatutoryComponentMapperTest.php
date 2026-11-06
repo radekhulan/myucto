@@ -204,6 +204,45 @@ final class PayrollRunStatutoryComponentMapperTest extends TestCase
         self::assertSame(2_448_350, $tax[0]->amountMinorUnits);
     }
 
+    /**
+     * Spropitné nad 7 % (§ 6 odst. 9 písm. g) ZDP od 2027): osvobozená část mimo
+     * daň i vyměřovací základy (§ 5 odst. 1 z. č. 589/1992 Sb., § 3 odst. 1
+     * z. č. 592/1992 Sb.), přebytek je zdanitelný a vstupuje do obou základů.
+     */
+    public function testTipsOverTheCapAreTaxedAndInsured(): void
+    {
+        $mapper = new PayrollRunStatutoryComponentMapper();
+        $input = $this->input([
+            'code' => 'SPROPITNE',
+            'component_kind' => 'other',
+            'tax_treatment' => 'exempt',
+            'social_participation_treatment' => 'excluded',
+            'social_treatment' => 'excluded',
+            'health_participation_treatment' => 'excluded',
+            'health_treatment' => 'excluded',
+            'exemption_basket' => 'food_service_tips',
+        ]);
+        $input['amount_minor'] = 400_000;
+        $input['benefit_basket'] = 'food_service_tips';
+        $input['benefit_exempt_minor'] = 350_000;
+        $input['benefit_taxable_minor'] = 50_000;
+
+        $tax = $mapper->incomeTax($input, '2027-03-01');
+        $social = $mapper->social($input);
+        $health = $mapper->health($input, '2027-03-01');
+
+        self::assertSame(IncomeTaxComponentTreatment::Exempt, $tax[0]->treatment);
+        self::assertSame(350_000, $tax[0]->amountMinorUnits);
+        self::assertSame(IncomeTaxComponentTreatment::Included, $tax[1]->treatment);
+        self::assertSame(50_000, $tax[1]->amountMinorUnits);
+        self::assertSame(SocialComponentTreatment::Excluded, $social[0]->assessmentBaseTreatment);
+        self::assertSame(SocialComponentTreatment::Included, $social[1]->assessmentBaseTreatment);
+        self::assertSame(50_000, $social[1]->amountMinorUnits);
+        self::assertSame(HealthComponentTreatment::Excluded, $health[0]->assessmentBaseTreatment);
+        self::assertSame(HealthComponentTreatment::Included, $health[1]->assessmentBaseTreatment);
+        self::assertSame(50_000, $health[1]->amountMinorUnits);
+    }
+
     /** Rozpad, který nedává částku vstupu, je vada dat — ne tichá oprava. */
     public function testInconsistentSplitIsRejected(): void
     {

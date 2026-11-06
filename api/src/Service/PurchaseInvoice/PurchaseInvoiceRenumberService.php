@@ -210,6 +210,21 @@ final class PurchaseInvoiceRenumberService
                 AND (document_no IN (?, CONCAT('STORNO ', ?)) OR description REGEXP ?)"
         )->execute([$old, $new, $old, $new, $pattern, $new, $supplierId, $id, $old, $old, $pattern]);
 
+        // Další zápisy, které doklad vlastní ve skupině zaúčtování (DPH, ruční člen).
+        $pdo->prepare(
+            "UPDATE journal_document_postings jdp
+               JOIN journal_entries je ON je.supplier_id = jdp.supplier_id AND je.id = jdp.entry_id
+                SET je.document_no = CASE
+                        WHEN je.document_no = ? THEN ?
+                        WHEN je.document_no = CONCAT('STORNO ', ?) THEN CONCAT('STORNO ', ?)
+                        ELSE je.document_no END,
+                    je.description = REGEXP_REPLACE(je.description, ?, ?),
+                    je.row_version = je.row_version + 1
+              WHERE jdp.supplier_id = ? AND jdp.doc_type = 'purchase_invoice' AND jdp.doc_id = ?
+                AND NOT (je.source_type = 'purchase_invoice' AND je.source_id <=> ?)
+                AND (je.document_no IN (?, CONCAT('STORNO ', ?)) OR je.description REGEXP ?)"
+        )->execute([$old, $new, $old, $new, $pattern, $new, $supplierId, $id, $id, $old, $old, $pattern]);
+
         $pdo->prepare(
             "UPDATE stock_documents d
                JOIN purchase_invoices p ON p.id = d.purchase_invoice_id AND p.supplier_id = ?

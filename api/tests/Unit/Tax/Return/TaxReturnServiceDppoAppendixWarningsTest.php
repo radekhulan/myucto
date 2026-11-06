@@ -78,6 +78,15 @@ final class TaxReturnServiceDppoAppendixWarningsTest extends TestCase
         $ref = new ReflectionClass(TaxReturnService::class);
         $service = $ref->newInstanceWithoutConstructor();
 
+        $pdo = new \PDO('sqlite::memory:', options: [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+        $pdo->exec('CREATE TABLE accounting_periods (id INTEGER, supplier_id INTEGER, fiscal_year INTEGER, starts_on TEXT, ends_on TEXT, status TEXT, closed_at TEXT, created_at TEXT, row_version INTEGER, closed_by INTEGER, approved_at TEXT, approved_by INTEGER, reviewed_at TEXT, reviewed_by INTEGER, approval_body TEXT, approval_decision_ref TEXT, approval_document_hash TEXT, created_reason TEXT)');
+        $pdo->exec('CREATE TABLE supplier_accounting_modes (supplier_id INTEGER, effective_from TEXT, accounting_mode TEXT)');
+        $pdo->exec('CREATE TABLE supplier (id INTEGER, accounting_mode TEXT, tax_accounting_decree TEXT)');
+        $pdo->exec("INSERT INTO supplier VALUES (1, 'tax_evidence', '500')");
+        $db = new \MyInvoice\Infrastructure\Database\Connection(new \MyInvoice\Infrastructure\Config\Config([]));
+        (new \ReflectionProperty($db, 'pdo'))->setValue($db, $pdo);
+        $ref->getProperty('db')->setValue($service, $db);
+
         $method = new ReflectionMethod($service, 'buildStatementNotesAttachment');
         $result = $method->invoke($service, 1, 42, ['starts_on' => '2025-01-01', 'ends_on' => '2025-12-31']);
 

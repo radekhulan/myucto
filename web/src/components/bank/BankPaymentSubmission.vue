@@ -3,17 +3,19 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useDemoMode } from '@/composables/useDemoMode'
-import { bankConnectionsApi, type BankConnection, type BankPaymentSubmission } from '@/api/bankConnections'
+import { bankConnectionsApi, bankSignatureStatuses, needsItemReview, trustedBankSigningUrl, type BankConnection, type BankPaymentSubmission } from '@/api/bankConnections'
+import BankSubmissionItemsReview from './BankSubmissionItemsReview.vue'
 import type { PaymentOrderListItem } from '@/api/paymentOrders'
 import { apiErrorCode, apiErrorMessage } from '@/api/errors'
-import { bankConnectionErrorMessage } from '@/utils/bankConnectionError'
+import { bankConnectionErrorMessage, bankSubmissionNote } from '@/utils/bankConnectionError'
 import { sameBankConnectionAccount } from '@/utils/bankConnectionAccount'
 import { formatDate, formatDateTime, formatMoney } from '@/composables/useFormat'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { navigateFullPage } from '@/workspace/fullPageNavigation'
 
 const props = defineProps<{ orders: PaymentOrderListItem[]; modelValue: number | null }>()
 const emit = defineEmits<{ 'update:modelValue': [value: number | null] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 const auth = useAuthStore()
 const { blockDemoMutation } = useDemoMode()
 const selectedId = computed({ get: () => props.modelValue, set: value => emit('update:modelValue', value) })
@@ -32,11 +34,19 @@ const canSubmit = computed(() => auth.canWrite('settings.bank_accounts') && auth
 const matchingConnections = computed(() => {
   const current = order.value
   if (!current || current.currency !== 'CZK') return []
-  return connections.value.filter(connection => connection.enabled && connection.has_token && connection.validated_at && ['2010', '5500', '0300', '0100', '2250', '0600'].includes(connection.account.bank_code || '') && connection.account.code === 'CZK' && sameBankConnectionAccount(connection.account, {
+  return connections.value.filter(connection => connection.enabled && connection.has_token && connection.validated_at && ['2010', '5500', '0300', '0100', '2250', '0600', '0800'].includes(connection.account.bank_code || '') && connection.account.code === 'CZK' && sameBankConnectionAccount(connection.account, {
     account_number: current.payer_account_number, bank_code: current.payer_bank_code, iban: current.payer_iban,
   }))
 })
 const selectedConnection = computed(() => matchingConnections.value.find(c => c.id === selectedConnectionId.value) ?? null)
+// Archivovaný příkaz server už nepodepíše ani neověří; tlačítka se nenabízejí.
+const withdrawn = computed(() => submission.value?.error_code === 'payment_order_no_longer_payable')
+const awaitingSignature = computed(() => submission.value?.status === 'awaiting_signature' && !withdrawn.value)
+const bankStatusAvailable = computed(() => !!submission.value && bankSignatureStatuses.includes(submission.value.status) && !withdrawn.value)
+const reviewItems = computed(() => needsItemReview(submission.value))
+const loadItems = () => bankConnectionsApi.items(submission.value?.payment_order_id ?? 0)
+const interrupted = computed(() => submission.value?.status === 'creating')
+const note = computed(() => bankSubmissionNote(submission.value?.error_code, t, te))
 const disabledReason = computed(() => {
   if (!order.value) return t('bank_connection.payment_choose')
   if (order.value.currency !== 'CZK') return t('bank_connection.payment_czk_only')
@@ -72,6 +82,24 @@ async function load() {
   }
 }
 watch(selectedId, () => { void load() }, { immediate: true })
+async function send(current: PaymentOrderListItem, connectionId: number) {
+  submitting.value = true
+  error.value = ''
+  try {
+    submission.value = await bankConnectionsApi.submit(current.id, connectionId)
+  } catch (e) {
+    if (!['bank_rate_limited', 'bank_connection_busy'].includes(apiErrorCode(e))) uncertainOrders.value.add(current.id)
+    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.payment_unknown'), selectedConnection.value?.provider ?? submission.value?.provider ?? '')
+    try {
+      submission.value = await bankConnectionsApi.submission(current.id)
+      if (submission.value && submission.value.status !== 'creating') error.value = ''
+    } catch {
+      loaded.value = false
+    }
+  } finally {
+    submitting.value = false
+  }
+}
 async function submit() {
   if (disabledReason.value || submitting.value || loading.value || blockDemoMutation()) return
   const current = order.value
@@ -80,19 +108,41 @@ async function submit() {
     id: current.id, amount: formatMoney(current.total_amount, current.currency), count: current.item_count,
     account: `${current.payer_account_number || current.payer_iban || ''}${current.payer_bank_code ? ` / ${current.payer_bank_code}` : ''}`,
   }))) return
+  await send(current, connection.id)
+}
+async function resume() {
+  const current = order.value
+  const pending = submission.value
+  if (!current || !pending || pending.status !== 'creating' || !canSubmit.value || submitting.value || blockDemoMutation()) return
+  if (!window.confirm(t('bank_connection.payment_resume_confirm', { id: current.id }))) return
+  await send(current, pending.connection_id)
+}
+async function sign() {
+  const current = order.value
+  if (!current || !awaitingSignature.value || !canSubmit.value || submitting.value || blockDemoMutation()) return
   submitting.value = true
   error.value = ''
   try {
-    submission.value = await bankConnectionsApi.submit(current.id, connection.id)
+    const result = await bankConnectionsApi.sign(current.id)
+    submission.value = result.submission
+    const url = trustedBankSigningUrl(result.signing_url)
+    if (!url) throw new Error('untrusted signing url')
+    navigateFullPage(url)
   } catch (e) {
-    if (!['bank_rate_limited', 'bank_connection_busy'].includes(apiErrorCode(e))) uncertainOrders.value.add(current.id)
-    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.payment_unknown'))
-    try {
-      submission.value = await bankConnectionsApi.submission(current.id)
-      if (submission.value) error.value = ''
-    } catch {
-      loaded.value = false
-    }
+    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.payment_sign_failed'), 'csas')
+  } finally {
+    submitting.value = false
+  }
+}
+async function refreshFromBank() {
+  const current = order.value
+  if (!current || !bankStatusAvailable.value || !canSubmit.value || submitting.value) return
+  submitting.value = true
+  error.value = ''
+  try {
+    submission.value = await bankConnectionsApi.refreshFromBank(current.id)
+  } catch (e) {
+    error.value = bankConnectionErrorMessage(e, t, t('bank_connection.payment_status_check_failed'), 'csas')
   } finally {
     submitting.value = false
   }
@@ -114,16 +164,21 @@ async function submit() {
         <option v-for="connection in matchingConnections" :key="connection.id" :value="connection.id">{{ connection.account.label || connection.provider }} ({{ connection.account.code }})</option>
       </select>
     </label>
-    <div v-if="submission" class="rounded-md px-3 py-2 border text-sm space-y-1" :class="submission.status === 'accepted_awaiting_authorization' ? 'bg-warning-50 border-warning-500/40 text-warning-700' : 'bg-neutral-50 border-neutral-200 text-neutral-700'" role="status">
+    <div v-if="submission" class="rounded-md px-3 py-2 border text-sm space-y-1" :class="['accepted_awaiting_authorization', 'awaiting_signature', 'creating'].includes(submission.status) ? 'bg-warning-50 border-warning-500/40 text-warning-700' : 'bg-neutral-50 border-neutral-200 text-neutral-700'" role="status" data-test="submission-status">
       <p>{{ t(`bank_connection.payment_status_${submission.status}`) }}</p>
+      <p v-if="note">{{ note }}</p>
       <p v-if="submission.accepted_count != null">{{ t('bank_connection.payment_accepted_count', { count: submission.accepted_count }) }}</p>
       <p v-if="submission.rejected_count != null">{{ t('bank_connection.payment_rejected_count', { count: submission.rejected_count }) }}</p>
       <p v-if="submission.submitted_at">{{ formatDateTime(submission.submitted_at) }}</p>
       <p v-if="submission.provider_reference" class="break-all">{{ t('bank_connection.payment_reference', { reference: submission.provider_reference }) }}</p>
     </div>
+    <BankSubmissionItemsReview v-if="reviewItems && submission" :key="submission.id + submission.status" :load="loadItems" />
     <div class="flex flex-wrap gap-2">
-      <button v-if="canSubmit && !submission" type="button" :class="btnFilled('primary')" :disabled="!!disabledReason || loading || submitting" @click="submit"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.send" /></svg>{{ submitting ? t('common.loading') : t('bank_connection.payment_submit') }}</button>
-      <button v-if="selectedId" type="button" :class="btnOutline('neutral')" :disabled="loading || submitting" @click="load"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('bank_connection.payment_refresh') }}</button>
+      <button v-if="canSubmit && !submission" type="button" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="!!disabledReason || loading || submitting" @click="submit"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.send" /></svg>{{ submitting ? t('common.loading') : t('bank_connection.payment_submit') }}</button>
+      <button v-if="canSubmit && awaitingSignature" type="button" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="loading || submitting" data-test="sign" @click="sign"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.edit" /></svg>{{ t('bank_connection.payment_sign') }}</button>
+      <button v-if="canSubmit && interrupted" type="button" :class="btnFilled('warning')" class="whitespace-nowrap" :disabled="loading || submitting" data-test="resume" @click="resume"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.play" /></svg>{{ t('bank_connection.payment_resume') }}</button>
+      <button v-if="canSubmit && bankStatusAvailable" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="loading || submitting" data-test="bank-status" @click="refreshFromBank"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.badgeCheck" /></svg>{{ t('bank_connection.payment_check_status') }}</button>
+      <button v-if="selectedId" type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" :disabled="loading || submitting" @click="load"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('bank_connection.payment_refresh') }}</button>
     </div>
     <p v-if="disabledReason && !submission" class="text-xs text-warning-700">{{ disabledReason }}</p>
     <p v-if="error" class="text-sm text-danger-600" role="alert">{{ error }}</p>

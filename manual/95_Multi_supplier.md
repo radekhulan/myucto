@@ -27,7 +27,7 @@ variabilních symbolů, číselné cykly, e-mailové šablony a další nastaven
 ## 95.2 Než začnete
 
 1. **Oprávnění.** Novou firmu může založit superadmin nebo uživatel s pevnou rolí **Admin Plus**. Běžná role **Admin** pracuje jen s firmami, které jí přidělí superadmin. Smazat firmu smí superadmin. Údaje v detailu firmy smí měnit admin; jedinou výjimkou je zapnutí skladu, které smí přepnout i role **účetní**.
-2. **Přístup k firmám.** Ke každému uživateli lze v `Systém → Uživatelé` v editaci účtu v části **Přístup k firmám** zaškrtnout, ke kterým firmám smí. Bez zaškrtnutí vidí všechny.
+2. **Přístup k firmám.** Ke každému uživateli lze v `Systém → Uživatelé` v editaci účtu v části **Přístup k firmám** zaškrtnout, ke kterým firmám smí. Uživatel bez zaškrtnuté firmy nemá přístup k žádné firmě; systémový superadmin vidí všechny.
 3. **Pro přehled firem** potřebujete přístup k více než jedné firmě. Role klient k přehledu nemá přístup vůbec.
 4. **ARES a registr plátců DPH** pro automatické předvyplnění údajů nové firmy (volitelně).
 
@@ -59,18 +59,42 @@ Zvolená firma se uloží jako vaše **výchozí firma**. Otevře se i v jiném 
 
 ![Seznam dodavatelů](img/14_dodavatele_list.webp)
 
-3. Do pole **IČO - načtení z ARES** zadejte osmimístné IČO a klikněte na **Načíst z ARES**. Zbytek se předvyplní.
+3. Do pole **IČO - načtení z ARES** zadejte osmimístné IČO a klikněte na **Načíst z ARES**. Zbytek se předvyplní. U aktivní skupinové registrace ARES doplní skupinové DIČ a nastaví plátcovství; pokud skupinové DIČ v ARES chybí, neaktivní vlastní DIČ se místo něj nedoplní. IČO dál označuje konkrétní firmu a skupinové DIČ může sdílet více členů.
 
 ![Nový dodavatel - ARES](img/14_dodavatel_novy.webp)
 
 4. Zkontrolujte nebo doplňte údaje:
    - **Název firmy**,
-   - **DIČ** (volitelné, OSVČ neplátce nechte prázdné). S DIČ se po načtení z ARES rovnou dotáhne registr plátců DPH, potvrdí plátcovství a předvyplní zveřejněný účet (tlačítko **Načíst účet z registru DPH**),
+   - **DIČ** (volitelné, OSVČ neplátce nechte prázdné). U aktivní skupinové registrace zkontrolujte předvyplněné skupinové DIČ proti dokladům. Registr plátců DPH může vrátit účty sdílené skupinou. V tomto případě se účet nevybere automaticky ani při jediném výsledku; vyberte účet patřící této firmě. Účet načtete tlačítkem **Načíst účet z registru DPH**. Ručně zadaný účet zůstane zachovaný.
    - **Typ poplatníka**: *Podle ARES (automaticky)* (výchozí), fyzická osoba, nebo právnická osoba,
    - **Plátce DPH** a zdaňovací období. Nový plátce je ze zákona měsíční (§ 99 ZDPH); čtvrtletní zvolte, jen pokud splňujete § 99a,
    - **Ulice + č.p.**, **Město**, **PSČ** a **E-mail**,
    - volitelně první bankovní účet (číslo a kód banky; automaticky se založí v měně CZK).
-5. Klikněte na **Vytvořit**.
+5. Pokud se formulář nabídne, zkontrolujte sekci **Převzít ze stávajících firem** (popis níže).
+6. Klikněte na **Vytvořit**.
+
+### Převzetí AI klíče a certifikátu ze stávajících firem
+
+Když máte AI extrakci nebo certifikát nastavené ve všech svých firmách stejně, nemusíte je v nové firmě
+zadávat znovu. Formulář nové firmy nabídne sekci **Převzít ze stávajících firem** s položkami, které jsou
+předem zaškrtnuté:
+
+- **AI klíč a nastavení** (poskytovatel, model nebo endpoint, region dat, EU rezidence a míra uvažování
+  z `Firma → AI nastavení`, [§ 25](25_AI_extrakce.md)). Nabízí se jen tehdy, když mají všechny vaše firmy s nastavenou AI totéž nastavení
+  včetně stejného klíče. Firmy bez AI nevadí. Liší-li se klíč nebo nastavení mezi firmami, AI se nepřebírá
+  a formulář to oznámí; v nové firmě ho pak nastavte ručně. Klíč se do prohlížeče nikdy neposílá, porovnává
+  ho jen server.
+- **Certifikát** z vašeho osobního trezoru (`Systém → Elektronické podpisy`), který je platný a povolený ve
+  všech firmách, kde smíte spravovat podpisy. Certifikát se nekopíruje, nová firma k němu jen dostane
+  přístup stejně jako při ručním povolení v dalších firmách. Převzetí certifikátu potvrďte stejně jako jeho
+  sdílení: passkey, nebo heslem do MyÚčta (a kódem z autentikátoru, máte-li ho zapnutý). Bez platného
+  ověření se firma nezaloží.
+
+Do porovnání se počítají jen firmy, ke kterým máte přístup. Položku, kterou převzít nechcete, odškrtněte.
+Převzetí proběhne hned po založení firmy. Když se některá položka převzít nepodaří (například se nastavení
+mezitím v některé firmě změnilo), firma přesto vznikne a aplikace oznámí, co se nepřevzalo a proč; položku
+pak nastavte v nové firmě ručně. Převzetí je dostupné jen z webového rozhraní a zapisuje se do historie
+změn.
 
 **Jak poznáte, že je hotovo:** Firma je v tabulce a okamžitě i v přepínači. Admin Plus k nové firmě automaticky
 získá práva Admin a může na ni rovnou přepnout (**Přepnout**).
@@ -143,7 +167,7 @@ dodavatele, takže odpovědi klientů jdou rovnou na firemní poštu. Vlastní l
 3. Nahrajte **Logo** (PNG, JPG nebo SVG, nejvýše 1 MiB, ideálně do 200 KiB). Logo vyměníte tlačítkem **Nahradit logo**, odstraníte tlačítkem **Odebrat**.
 4. Zvolte **Akcent barvu** (hex `#RRGGBB`, color picker nebo textové pole; odkaz **↺ default** vrací výchozí).
 5. Zkontrolujte živý náhled e-mailu (přepínač jazyka **CS / EN**, tlačítko **↻** pro ruční obnovení).
-6. Pokud doklady tisknete černobíle, zapněte **Úsporná černobílá faktura (PDF)**. PDF faktury a výkazu pak
+6. Pokud doklady tisknete černobíle, zapněte **Úsporná černobílá faktura (nestandardní vzhled)**. PDF faktury a výkazu pak
    nemá barevné ani tmavé plochy a akcent barvu nahradí černá ([§ 16.10.4](16_Faktura_PDF.md#16104-pdf-struktura)).
    Volba je na brandingu nezávislá, funguje i při vypnutém **Použít vlastní branding**.
 
@@ -197,11 +221,14 @@ záměrně neposílá, o úhradě dodavatel ví.
 |---|---|
 | **Posílat poděkování za úhradu** | Hlavní vypínač funkce. Bez něj se zbylé volby neuplatní. |
 | **Automaticky při spárování platby z banky** | Jakmile se platba spáruje z bankovního výpisu nebo e-mailového avíza a faktura se označí jako zaplacená, pošle se poděkování samo. |
+| **Jen za platbu ne starší než** | Automatické poděkování se pošle jen k platbě, jejíž datum není starší než zadaný počet dní (výchozí 30). Starší platba, typicky z pozdě nahraného výpisu, poděkování nevyvolá. Hodnota 0 limit vypíná. |
 | **Předzaškrtnout při ručním označení jako zaplacené** | V okně ručního označení faktury jako zaplacené bude volba „Odeslat zákazníkovi poděkování“ předem zaškrtnutá (jinak prázdná). |
 | **Přiložit PDF faktury (se stavem Uhrazeno)** | K e-mailu se připojí PDF faktury označené jako uhrazené. |
 
 Poděkování jde poslat i ručně v detailu faktury nebo hromadně v seznamu faktur při označování plateb.
-Automatické poděkování se neopakuje; vědomé ruční odeslání může zprávu poslat znovu. U storna,
+Automatické poděkování se neopakuje; vědomé ruční odeslání může zprávu poslat znovu. Když smažete
+bankovní výpis a nahrajete ho znovu, za platby, které už aplikace znala, se automaticky neděkuje.
+U storna,
 neuhrazené faktury nebo chybějícího příjemce se neodesílá. Požadavek na poděkování se uloží
 společně s úhradou. Pokud se úhradu nebo požadavek nepodaří uložit, párování se neprovede
 a poděkování se neodešle.
@@ -286,7 +313,7 @@ vidět termíny a resty napříč všemi firmami najednou.
 **Jak poznáte, že je hotovo:** U všech firem vidíte termíny a resty a víte, kterou řešit jako první.
 
 Přehled respektuje **přístup k firmám**: pokud vám admin v `Systém → Uživatelé` zaškrtl jen některé firmy,
-vidíte v přehledu jen ty. Globální admin a účty bez omezení (nic nezaškrtnuto) vidí všechny firmy v instalaci.
+vidíte v přehledu jen ty. Systémový superadmin vidí všechny firmy v instalaci. Uživatel, kterému není zaškrtnuta žádná firma, nevidí žádnou.
 
 ## 95.11 Krok za krokem: smazat firmu
 
@@ -465,7 +492,7 @@ ručně, viz [Číslo dokladu - ruční zadání](15_Faktura_editor.md#cislo-dok
 | **Použít vlastní branding** | Přepínač vpravo nahoře (výchozí vypnuto = MyÚčto branding). Pokud je zapnutý, hlavička e-mailů i PDF se sestaví z polí níže. |
 | **Logo** | Nahrání PNG / JPG / SVG (nejvýše 1 MiB, ideálně do 200 KiB). Pro raster je ideální výška 240 px (v e-mailu se zobrazí jako 48 px pro 5× retinu). SVG: originál se uloží pro PDF (vektor = ostré v libovolném zoomu), pro e-mail se na serveru převede na průhledné PNG (Outlook a Gmail SVG odstraňují), primárně přes PHP rozšíření `Imagick` (Windows i Linux), záložně přes nástroj `rsvg-convert` (`librsvg2-bin`). Logo se v e-mailu připojí jako CID inline obrázek, takže se zobrazí bez výzvy „Display images" v Gmailu a Outlooku. |
 | **Akcent barva** | Hex `#RRGGBB`: akcentová barva celého e-mailu (částky, tlačítka, odkazy, náhradní „M" box) i PDF faktury (linka pod hlavičkou, hlavička tabulky položek, řádky „Celkem" a „K úhradě", popisky, QR a banky, nadpis a odkaz výkazu víceprací). Uplatní se jen při zapnutém brandingu; jinak výchozí `#3B2D83` (fialová MyÚčto). Sémantické barvy (dobropis červená, zelené „Schválit" a „Uhrazeno", oranžová „po splatnosti") zůstávají. Color picker, textové pole a odkaz **↺ default**. |
-| **Úsporná černobílá faktura (PDF)** | Výchozí vypnuto. Zapnutá volba připojí k PDF faktury a výkazu černobílý stylopis místo akcent barvy: bez plných ploch, černý text, tenké čáry, dobropis a storno rozlišené textem. Platí pro koncepty a nově vytvořená PDF, nezávisle na přepínači brandingu. Logo zůstává, jak je nahrané. |
+| **Úsporná černobílá faktura (nestandardní vzhled)** | Výchozí vypnuto. Zapnutá volba připojí k PDF faktury a výkazu černobílý stylopis místo akcent barvy: bez plných ploch, černý text, tenké čáry, dobropis a storno rozlišené textem. Platí pro koncepty a nově vytvořená PDF, nezávisle na přepínači brandingu. Logo zůstává, jak je nahrané. |
 
 V hlavičce se pak vykreslí logo vlevo (místo fialového „M" boxu, `max-height: 48px`), **název** dodavatele
 (zobrazované jméno, záložně název firmy) a **podtitulek** (tagline dodavatele, pokud je vyplněn).
@@ -511,6 +538,12 @@ zaúčtováním nebo převodem. Období, ve kterých ještě nic není (typicky 
 se po uložení smažou a aplikace založí období pro dnešní datum už v novém tvaru. Jakmile je v některém období
 zápis v deníku, uzávěrka nebo ho založil převod, uložit pole nejde, protože změna účetního roku je samostatný
 úkon s přechodným obdobím. Fyzická osoba vede vždy kalendářní rok.
+
+U podvojného účetnictví je na stejné záložce samostatná karta **Účetní rámec**. Ukazuje rámec platný
+k dnešku a jeho historii. Výchozí je **Podnikatelé (vyhláška 500)**. Nevýdělečné organizace zvolí rámec
+podle vyhlášky 504, viz kapitola [Nastavení](96_Nastaveni.md). Změna rámce se ukládá samostatným tlačítkem s datem prvního dne existujícího účetního období.
+Pokud jsou v dotčeném intervalu zaúčtované zápisy, aplikace změnu odmítne. Ostatní rozpracované údaje
+ve formuláři toto tlačítko neukládá.
 
 Pole smí měnit jen admin, stejně jako ostatní údaje v detailu dodavatele. Výjimkou je zapnutí skladu, které smí
 přepnout i role účetní.
@@ -559,6 +592,8 @@ podrobně viz [Sklad](37_Sklad.md).
 > [!TIP]
 > Obě pole skladu smí přepnout i role účetní, ne jen admin. Je to jediná výjimka z jinak admin-only nastavení
 > dodavatele.
+
+V podvojném účetnictví je účetní vyhláška závěrky pouze ke čtení a vychází z účetního rámce účinného k dnešnímu dni. Změna patří do sekce **Účetní rámec**. V daňové evidenci lze vyhlášku volit ručně; uložená ruční volba se při přepnutí režimu zachová.
 
 ### 95.13.6 Identifikace firmy v rozhraní API
 

@@ -224,7 +224,7 @@ stejně jako v popisu položky. Do částek ani DPH nevstupuje, viz
 [§ 15.9.3](15_Faktura_editor.md#1593-polozky). Šablona jen z textových řádků fakturu
 nevygeneruje.
 
-Vedle sazby má řádek volitelnou **klasifikaci DPH** - kód, podle kterého se plnění
+Šipka na konci řádku otevře účet položky a volitelné **členění DPH** - kód, podle kterého se plnění
 dostane na správný řádek přiznání a do kontrolního či souhrnného hlášení. Výchozí
 volba **Automaticky podle sazby** ho nechá odvodit při každém generování ze sazby a
 měrné jednotky, což stačí u drtivé většiny šablon. Vyplňte ho tam, kde odvození
@@ -405,6 +405,16 @@ Faktura nese datum konce období, i když fyzicky vznikla o den později.
    vícepráce) a odešle klientovi, faktura nese datum vystavení i DUZP **30. 6.** - a
    hned poté **otevře nový koncept na červenec** (datum vystavení i DUZP 31. 7.), takže
    do něj můžete zase celý měsíc psát.
+
+**Zakázka se schvalováním výkazu zákazníkem:** automatické uzavření konceptu
+schválení výkazu nekontroluje. Cron koncept na konci období vystaví (a podle
+nastavení odešle) i tehdy, když zakázka vyžaduje schválení a výkaz schválen nebyl;
+blokaci „Zakázka vyžaduje schválení výkazu zákazníkem“ hlídá jen ruční tlačítko
+**Vystavit** a ruční vystavení tedy bez schválení neprojde. Chcete-li schválení
+zachovat, nepoužívejte u takové zakázky pravidelnou fakturaci s automatickým
+vystavením; zvolte režim **Až při vystavení** bez volby **Po vygenerování rovnou
+vystavit** a výkaz nechte schválit v běžném postupu (viz
+[§ 19.5](19_Zakazky.md#195-krok-za-krokem-schvalovani-vykazu-zakaznikem)).
 
 Pokud koncept během měsíce vystavíte ručně, cron to pozná a v den vystavení už nic
 nevytvoří, jen posune rozvrh na další měsíc.

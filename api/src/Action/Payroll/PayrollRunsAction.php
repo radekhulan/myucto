@@ -31,6 +31,7 @@ use MyInvoice\Service\Payroll\Run\PayrollRunSourceDriftDetector;
 use MyInvoice\Service\Payroll\Run\PayrollRunStatus;
 use MyInvoice\Service\Payroll\Run\PayrollRunWorkflow;
 use MyInvoice\Service\Payroll\Run\PayrollTakeoverRunService;
+use MyInvoice\Service\Payroll\Security\PayrollEnforcementDisclosure;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -417,6 +418,9 @@ final class PayrollRunsAction
         );
         $items = $page['items'];
         $suppressions = $this->warningSuppressions->activeSet($this->currentSupplierId($request));
+        // Součet exekučních srážek běhu je u malého zaměstnavatele srážka
+        // jednoho člověka; bez práva na agendu se nevrací.
+        $canSeeEnforcement = PayrollEnforcementDisclosure::canSeeEnforcement($request);
         foreach ($items as &$item) {
             $status = PayrollTimeValue::string(
                 $item['status'] ?? null,
@@ -474,6 +478,10 @@ final class PayrollRunsAction
             $item['delete_blocker'] = $deletion === null
                 ? null
                 : $deletion->blockerMessage;
+            $snapshot = $item['result_snapshot'] ?? null;
+            if (!$canSeeEnforcement && is_array($snapshot)) {
+                $item['result_snapshot'] = PayrollEnforcementDisclosure::redactRunTotals($snapshot);
+            }
         }
         unset($item);
 
@@ -817,6 +825,14 @@ final class PayrollRunsAction
                 ? null
                 : (int) $run['revision_id'],
         );
+        // Snímek nese u každé osoby celý vstup výpočtu srážek. Obecné `payroll`
+        // READ na něj nestačí, platí totéž co pro exekuční a insolvenční agendu.
+        $snapshot = $run['result_snapshot'] ?? null;
+        $run['result_snapshot'] = PayrollEnforcementDisclosure::redactRunSnapshot(
+            is_array($snapshot) ? $snapshot : null,
+            PayrollEnforcementDisclosure::canSeeEnforcement($request),
+            PayrollEnforcementDisclosure::canSeeInsolvency($request),
+        );
 
         return Json::ok($response, ['run' => $run]);
     }
@@ -841,6 +857,10 @@ final class PayrollRunsAction
         );
         if ($history === null) {
             return Json::error($response, 'not_found', 'Mzdový běh neexistuje.', 404);
+        }
+
+        if (!PayrollEnforcementDisclosure::canSeeEnforcement($request)) {
+            $history = PayrollEnforcementDisclosure::redactRunHistory($history);
         }
 
         return Json::ok($response, ['history' => $history]);
@@ -1100,7 +1120,7 @@ final class PayrollRunsAction
         } catch (\InvalidArgumentException|\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
-        $payload = $this->serialize($result);
+        $payload = $this->serialize($result, $request);
         if ($command === PayrollRunCommand::PREPARE_PAYMENTS->value) {
             /*
              * Běh, kde není co platit (celá čistá mzda je zápočet na účet
@@ -1194,17 +1214,51 @@ final class PayrollRunsAction
     }
 
     /** @return array<string,mixed> */
-    private function serialize(PayrollRunCommandResult $result): array
+    private function serialize(PayrollRunCommandResult $result, Request $request): array
     {
         return [
             'command' => $result->command->value,
             'from_status' => $result->from->value,
             'to_status' => $result->to->value,
             'run' => $result->run,
-            'revision' => $result->revision,
+            'revision' => self::disclosedRevision($result->revision, $request),
             'idempotent_replay' => $result->idempotentReplay,
             'outcome' => $result->outcome?->toArray(),
         ];
+    }
+
+    /**
+     * Revize v odpovědi příkazu nese oba snímky. Výsledný se zúží stejně jako
+     * v detailu běhu; vstupní nese podklady srážek všech osob a žádná obrazovka
+     * ho z odpovědi nečte, takže ho volající bez práv k exekucím a insolvencím
+     * nedostane vůbec.
+     *
+     * @param array<string,mixed>|null $revision
+     * @return array<string,mixed>|null
+     */
+    private static function disclosedRevision(?array $revision, Request $request): ?array
+    {
+        if ($revision === null) {
+            return null;
+        }
+        $enforcement = PayrollEnforcementDisclosure::canSeeEnforcement($request);
+        $insolvency = PayrollEnforcementDisclosure::canSeeInsolvency($request);
+        if ($enforcement && $insolvency) {
+            return $revision;
+        }
+        $snapshot = $revision['result_snapshot'] ?? null;
+        $revision['result_snapshot'] = PayrollEnforcementDisclosure::redactRunSnapshot(
+            is_array($snapshot) ? $snapshot : null,
+            $enforcement,
+            $insolvency,
+        );
+        if (array_key_exists('input_snapshot', $revision)) {
+            $revision['input_snapshot'] = null;
+        }
+        // Surové JSON sloupce nesou totéž v nezúžené podobě.
+        unset($revision['result_snapshot_json'], $revision['input_snapshot_json']);
+
+        return $revision;
     }
 
     private function authorize(

@@ -12,12 +12,17 @@ final class AccountingModeRepository
 
     public function forYear(int $supplierId, int $year): string
     {
+        return $this->forDate($supplierId, sprintf('%04d-12-31', $year));
+    }
+
+    public function forDate(int $supplierId, string $date): string
+    {
         $stmt = $this->db->pdo()->prepare(
             'SELECT accounting_mode FROM supplier_accounting_modes
               WHERE supplier_id = ? AND effective_from <= ?
               ORDER BY effective_from DESC LIMIT 1'
         );
-        $stmt->execute([$supplierId, sprintf('%04d-12-31', $year)]);
+        $stmt->execute([$supplierId, $date]);
         $mode = $stmt->fetchColumn();
         if (is_string($mode) && $mode !== '') {
             return $mode;
@@ -25,6 +30,17 @@ final class AccountingModeRepository
         $fallback = $this->db->pdo()->prepare('SELECT accounting_mode FROM supplier WHERE id = ?');
         $fallback->execute([$supplierId]);
         return (string) ($fallback->fetchColumn() ?: 'tax_evidence');
+    }
+
+    public function effectiveDatesBetween(int $supplierId, string $startsOn, string $endsOn): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT effective_from FROM supplier_accounting_modes
+              WHERE supplier_id = ? AND effective_from > ? AND effective_from < ?
+              ORDER BY effective_from'
+        );
+        $stmt->execute([$supplierId, $startsOn, $endsOn]);
+        return $stmt->fetchAll(\PDO::FETCH_COLUMN);
     }
 
     public function record(int $supplierId, string $effectiveFrom, string $mode): void

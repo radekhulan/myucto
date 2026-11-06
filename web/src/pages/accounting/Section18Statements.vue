@@ -143,7 +143,8 @@ onMounted(async () => {
     </div>
     <div v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
 
-    <template v-if="data && !loading">
+    <p v-if="data?.available === false && !loading" class="rounded-md border border-neutral-200 bg-neutral-50 p-4 text-sm">{{ t('accounting.statement504.supplements_unavailable') }}</p>
+    <template v-else-if="data && !loading">
       <!-- Povinnost podle kategorie ÚJ. Malá jednotka výkazy sestavit může, do závěrky
            je ale přikládat nemusí — bez téhle věty by nevěděla, na čem je. -->
       <div class="mb-4 px-3 py-2 rounded-md text-sm border"

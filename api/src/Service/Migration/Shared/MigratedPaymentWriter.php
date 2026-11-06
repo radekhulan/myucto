@@ -5,11 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Migration\Shared;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Activation\OpeningBalanceDocuments;
 use PDO;
 
 /** Fyzické platby převzaté z účetního programu, bez přepočtu zdrojové částky. */
 final class MigratedPaymentWriter
 {
+    public const OPENING_CASH_NOTE = OpeningBalanceDocuments::NOTE;
+
     public function __construct(private readonly Connection $db) {}
 
     public function cashRegister(int $supplierId, string $name): int
@@ -34,6 +37,24 @@ final class MigratedPaymentWriter
             $description, abs($signedAmount), $draft ? 'draft' : 'posted', $userId,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    /**
+     * Potvrdí evidenční koncept a informativně naváže již ověřené otevírací zápisy.
+     * Důkaz zdroje a zámky dokladu i deníku zajistí adaptér před zavoláním celé dávky.
+     * @param non-empty-list<int> $entryIds
+     */
+    public function confirmOpeningCash(int $supplierId, int $cashId, array $entryIds, ?int $userId): void
+    {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) throw new \LogicException('Potvrzení počátečního stavu pokladny vyžaduje transakci převodu.');
+        if ($entryIds === []) throw new \InvalidArgumentException('Chybí ověřená otevírací kontace.');
+        $insert = $pdo->prepare("INSERT INTO journal_entry_document_links (supplier_id,entry_id,doc_type,doc_id,note,created_by) VALUES (?,?,'cash',?,?,?)");
+        foreach ($entryIds as $entryId) $insert->execute([$supplierId, $entryId, $cashId, self::OPENING_CASH_NOTE, $userId]);
+        // journal_entry_id se NESMÍ nastavit: storno dokladu by stornovalo celý otevírací zápis.
+        $promote = $pdo->prepare("UPDATE cash_documents SET status='posted' WHERE supplier_id=? AND id=? AND status='draft' AND journal_entry_id IS NULL");
+        $promote->execute([$supplierId, $cashId]);
+        if ($promote->rowCount() !== 1) throw new \InvalidArgumentException('Evidenční koncept pokladny byl změněn.');
     }
 
     /** @return int ID payment_matches nebo hotovostního dokladu pro mapu převodu. */

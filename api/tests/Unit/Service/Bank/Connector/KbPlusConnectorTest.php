@@ -18,6 +18,8 @@ use PHPUnit\Framework\TestCase;
 #[\PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations]
 final class KbPlusConnectorTest extends TestCase
 {
+    use \MyInvoice\Tests\Support\InlineOAuthRotation;
+
     private KbPlusApiClient&MockObject $api;
     private KbPlusCredentialVault $vault;
     private KbPlusConnector $connector;
@@ -29,6 +31,7 @@ final class KbPlusConnectorTest extends TestCase
             $this->api,
             $this->createMock(KbPlusOAuthRepository::class),
             $this->createMock(SecretEncryption::class),
+            $this->inlineRotationFlow(),
         );
         $this->connector = new KbPlusConnector($this->api, $this->vault, new KbPlusTransactionParser(), new KbPlusAboBatchMapper());
     }

@@ -13,9 +13,9 @@
  * společnou řadu s dodavatelem; nastavovat ji odsud by vyrobilo počítadlo, ze kterého
  * nikdo nečte (backend takový požadavek odmítá — VarsymbolGenerator::setCounter()).
  */
-import { ref, computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { settingsApi, type InvoiceCounterType, type InvoiceCounterResult } from '@/api/settings'
+import { settingsApi, type InvoiceCounterType } from '@/api/settings'
 import { useToast } from '@/composables/useToast'
 import { useDemoMode } from '@/composables/useDemoMode'
 import { hasCounterPlaceholder } from '@/utils/varsymbol'
@@ -46,10 +46,31 @@ const { blockDemoMutation } = useDemoMode()
 
 const nextNumber = ref('')
 const saving = ref(false)
-const result = ref<InvoiceCounterResult | null>(null)
+/** Aktuální příští číslo řady ze serveru: po načtení i po uložení. */
+const result = ref<{ next_number: number; preview: string } | null>(null)
 
 const template = computed(() => (props.template ?? '').trim())
 const supported = computed(() => template.value !== '' && hasCounterPlaceholder(template.value))
+
+/**
+ * Bez načtení po otevření stránky by pole zůstalo prázdné a uložené číslo by
+ * nebylo vidět, takže to vypadalo, že se nastavení neuložilo.
+ */
+async function load() {
+  if (!supported.value) return
+  try {
+    const r = await settingsApi.getInvoiceCounter(props.type, props.clientId, props.revenueCategoryId)
+    result.value = r.next_number === null ? null : { next_number: r.next_number, preview: r.preview }
+    if (result.value && nextNumber.value === '') nextNumber.value = String(result.value.next_number)
+  } catch {
+    result.value = null
+  }
+}
+
+watch(() => [props.type, props.clientId, props.revenueCategoryId, supported.value], () => {
+  nextNumber.value = ''
+  load()
+}, { immediate: true })
 
 const valid = computed(() => {
   const n = Number(nextNumber.value)
@@ -74,7 +95,7 @@ async function apply() {
   try {
     // Náhled bere ze SERVERU — ten zná uloženou šablonu i období, do kterého se
     // počítadlo zapsalo. Dopočet v prohlížeči by lhal nad rozepsanou, neuloženou šablonou.
-    result.value = await settingsApi.setInvoiceCounter(
+    await settingsApi.setInvoiceCounter(
       props.type,
       Number(nextNumber.value),
       undefined,
@@ -82,6 +103,10 @@ async function apply() {
       props.revenueCategoryId,
     )
     toast.success(t('settings.numbering_next_number_saved'))
+    // Po uložení znovu ze serveru: kdyby nastavené číslo kolidovalo s vystaveným
+    // dokladem, vystavení ho přeskočí a pole má ukázat to, co doklad opravdu dostane.
+    nextNumber.value = ''
+    await load()
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
   } finally {

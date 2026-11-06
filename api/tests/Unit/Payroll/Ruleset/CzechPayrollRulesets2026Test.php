@@ -59,7 +59,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
      * Platí proto pro VÝCHOZÍHO schvalovatele; instalace s jiným provozovatelem má
      * legitimně jiné číslo. Test si default proto vynutí sám.
      */
-    private const EXPECTED_MANIFEST_SHA256 = '1a497ca5598fa4fb45e35e4d9907becd7f645ddd1633da3ac75a172506dff3a4';
+    private const EXPECTED_MANIFEST_SHA256 = 'c23f8673f29c5cd02875be5f8403a6bb291396b973e76a66022fccaeb4ba3c0b';
 
     protected function setUp(): void
     {
@@ -367,7 +367,7 @@ final class CzechPayrollRulesets2026Test extends TestCase
                     $provider->forCalculation($domain, $date);
                     self::fail("Doména {$domain->value} je ruční posouzení a nesmí do výpočtu.");
                 } catch (PayrollRulesetException $exception) {
-                    self::assertStringContainsString('requires manual review', $exception->getMessage());
+                    self::assertStringContainsString('nemá hodnotu pro výpočet', $exception->getMessage());
                 }
                 continue;
             }

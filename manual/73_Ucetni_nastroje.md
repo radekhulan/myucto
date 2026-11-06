@@ -274,7 +274,9 @@ jim pošle pozvánku nebo reset hesla.
 Mzdové osobní údaje a bankovní exporty zůstávají v archivu kontextově zašifrované. Cílová instalace proto musí
 bezpečně převzít původní `app.secret_encryption_key`, případně jej po rotaci dočasně ponechat mezi
 `app.secret_encryption_previous_keys`. Pro mzdové vyhledávací a kontrolní otisky zachovejte i
-`app.payroll_hash_key`, případně původní `app.pepper`, pokud se používá jako jeho náhrada. Tyto klíče
+`app.payroll_hash_key`, případně původní `app.pepper`, pokud se používá jako jeho náhrada. V takovém případě
+musí mít cílová instalace `app.payroll_hash_key` prázdný, i když ho při instalaci vygeneroval instalátor
+nebo průvodce nastavením. Tyto klíče
 v exportu nejsou. Automatický round-trip test hlídá počty, vazby a hashe souborů, ale archiv stále nenahrazuje
 celoinstanční zálohu databáze.
 

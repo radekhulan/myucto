@@ -4,6 +4,7 @@
 
 import { i18n } from '@/i18n'
 import { isInvoiceDateOverdue } from '@/utils/invoiceOverdue'
+import { hasSubCentPrice, unitPriceDecimals } from '@/utils/unitPrice'
 
 // Per-currency default decimals (ISO 4217). JPY/KRW/HUF = 0, BHD/JOD = 3, ostatní 2.
 // Volající může override přes parametr `decimals`.
@@ -20,16 +21,24 @@ function activeLocale(): string {
   return i18n.global.locale.value === 'en' ? 'en-US' : 'cs-CZ'
 }
 
-export function formatHourlyRate(value: number, currency = 'CZK'): string {
-  if (value === Math.round(value * 100) / 100) return formatMoney(value, currency)
-  const decimals = Math.max(defaultDecimals(currency), Math.min(6, (value.toFixed(6).replace(/0+$/, '').split('.')[1] ?? '').length))
-  return formatMoney(value, currency, decimals)
+/** Jednotková cena: haléřová jako částka, přesnější (0,004 EUR/ks, sazba 333,333333) na svá místa, nejvýš šest. */
+export function formatUnitPrice(value: number | string | null | undefined, currency = 'CZK', localeOverride?: string): string {
+  const amount = Number(value)
+  if (value === null || value === undefined || !Number.isFinite(amount) || !hasSubCentPrice(amount)) return formatMoney(value, currency, undefined, localeOverride)
+  return formatMoney(amount, currency, Math.max(defaultDecimals(currency), unitPriceDecimals(amount)), localeOverride)
 }
 
-export function formatMoney(value: number | null | undefined, currency: string = 'CZK', decimals?: number): string {
-  if (value === null || value === undefined || Number.isNaN(value)) return '—'
+export function formatHourlyRate(value: number, currency = 'CZK', localeOverride?: string): string {
+  return formatUnitPrice(value, currency, localeOverride)
+}
+
+export function formatMoney(value: number | string | null | undefined, currency: string = 'CZK', decimals?: number, localeOverride?: string): string {
+  if (value === null || value === undefined) return '—'
+  // API posílá částky z DECIMAL sloupců i jako text („237600.60").
+  const amount = Number(value)
+  if (Number.isNaN(amount)) return '—'
   const dec = decimals ?? defaultDecimals(currency)
-  const formatter = new Intl.NumberFormat(activeLocale(), {
+  const formatter = new Intl.NumberFormat(localeOverride ? (localeOverride.startsWith('en') ? 'en-US' : 'cs-CZ') : activeLocale(), {
     style: 'decimal',
     minimumFractionDigits: dec,
     maximumFractionDigits: dec,
@@ -39,7 +48,17 @@ export function formatMoney(value: number | null | undefined, currency: string =
   // sloupci (účetní deník, banka) odlomilo „Kč" na druhý řádek a částka se
   // rozpadla na dva řádky. Odpovídá to i české typografii — číslo a jednotka
   // k sobě patří. Oddělovač tisíců z Intl(cs-CZ) je nezlomitelný už sám o sobě.
-  return `${formatter.format(value)} ${symbol}`
+  // Částka, která se zaokrouhlí na nulu, nesmí nést znaménko: Intl jinak vypíše „-0,00".
+  const shown = Number(amount.toFixed(dec)) === 0 ? 0 : amount
+  return `${formatter.format(shown)} ${symbol}`
+}
+
+/**
+ * Částka zaokrouhlená na celé jednotky měny, bez haléřů. Pro statistiky a KPI;
+ * seznamy a tabulky jednotlivých dokladů zůstávají na `formatMoney` (zarovnání sloupců).
+ */
+export function formatMoneyWhole(value: number | null | undefined, currency: string = 'CZK'): string {
+  return formatMoney(value, currency, 0)
 }
 
 /**

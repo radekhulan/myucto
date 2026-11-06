@@ -118,11 +118,11 @@ final class SecurityHardening202606Test extends TestCase
 
     public function testSupplierRedactionBroadened(): void
     {
+        // Denylist podle názvu sloupce nahradil allowlist (MYU-2026-H39); tajná pole
+        // v něm nejsou, hlídá SupplierResponseAllowlistTest.
         $code = $this->src('Action/Settings/SettingsAction.php');
-        foreach (["'password'", "'secret'", "'api_key'", "'access_token'"] as $needle) {
-            self::assertStringContainsString("str_contains(\$lk, $needle)", $code,
-                "Supplier redakce musí pokrýt $needle");
-        }
+        self::assertStringContainsString('SupplierResponseFields::full($row, $request)', $code,
+            'Detail firmy musí jít ven přes allowlist SupplierResponseFields.');
     }
 
     public function testPurchasePdfDedupScopedBySupplier(): void

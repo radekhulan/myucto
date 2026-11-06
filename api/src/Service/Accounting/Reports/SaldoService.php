@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Reports;
 
+use MyInvoice\Infrastructure\Cache\SupplierDataCache;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Repository\SaldoRepository;
+use MyInvoice\Service\Accounting\AdvanceDeductionService;
 use PDO;
 
 /**
@@ -68,7 +70,71 @@ final class SaldoService
         private readonly SaldoRepository $saldo,
         private readonly LedgerReportRepository $ledger,
         private readonly AccountingPeriodRepository $periods,
+        private readonly SupplierDataCache $cache,
+        private readonly AdvanceDeductionService $advances,
     ) {}
+
+    /**
+     * {@see build} pro zobrazení a export sestavy: sestava se drží v cache firmy,
+     * stránkuje se až z ní. U firmy s desítkami tisíc dokladů trvá sestavení sekundy
+     * a účetní ji otevírá opakovaně (přepnutí okna, export po náhledu). Cache zahodí
+     * každý zápis do dat firmy ({@see SupplierDataCache}), takže po spárování platby
+     * se sestava spočítá znovu.
+     *
+     * Výchozí sada účtů se skládá z cache jednotlivých účtů. Stránka saldokonta je
+     * načítá souběžně po účtech (každý účet počítá jiný PHP proces), export a ostatní
+     * klienti pak dostanou sestavu z jejich cache. Výsledek je stejný jako z {@see build}:
+     * stejné pořadí účtů, vynechané prázdné účty i společný strop položek.
+     *
+     * Jen pro samostatný request: generace dat se zvedá až na jeho konci, proto
+     * uzávěrka ani kontroly, které saldo čtou po vlastním zápisu, volají {@see build}.
+     *
+     * @return array<string,mixed>
+     * @throws ReportException 422 too_many_rows nad {@see MAX_OPEN_ITEMS}
+     */
+    public function buildCached(
+        int $supplierId,
+        int $periodId,
+        ?string $asOf,
+        ?string $accountFilter = null,
+        ?int $partnerId = null,
+        ?int $page = null,
+        ?int $perPage = null,
+    ): array {
+        $explicit = $accountFilter !== null && $accountFilter !== '' && $accountFilter !== 'all';
+        $data = null;
+        $accounts = [];
+        $count = 0;
+        foreach ($explicit ? [$accountFilter] : self::DEFAULT_ACCOUNTS as $code) {
+            $part = $this->cache->remember(
+                $supplierId,
+                'saldo:' . $periodId . ':' . ($asOf ?? '') . ':' . $code . ':' . ($partnerId ?? 0),
+                new \DateTimeImmutable(),
+                fn (): array => $this->build($supplierId, $periodId, $asOf, (string) $code, $partnerId),
+            );
+            $data ??= $part;
+            foreach ($part['accounts'] as $block) {
+                $count += (int) $block['open_items_count'];
+                if (!$explicit && self::cents($block['gl_balance']) === 0 && $block['partners'] === [] && empty($block['advance_deduction_issues'])) {
+                    continue;
+                }
+                $accounts[] = $block;
+            }
+        }
+        if ($count > self::MAX_OPEN_ITEMS) {
+            throw self::tooManyRows();
+        }
+        $data['accounts'] = $accounts;
+        $data['entity']['prepared_at'] = date('Y-m-d H:i');
+        if ($page !== null) {
+            foreach ($data['accounts'] as &$block) {
+                $block = self::paginatePartners($block, $page, $perPage);
+            }
+            unset($block);
+        }
+
+        return $data;
+    }
 
     /**
      * @param string|null $accountFilter kód účtu (311/321/…) nebo null/'all' = default sada
@@ -112,7 +178,9 @@ final class SaldoService
         $explicit = $accountFilter !== null && $accountFilter !== '' && $accountFilter !== 'all';
         $codes = $explicit ? [$accountFilter] : self::DEFAULT_ACCOUNTS;
         $balances = [];
-        foreach ($this->ledger->syntheticBalances($supplierId, $asOf, $anchorStartsOn) as $balance) {
+        // Zůstatky jen sestavovaných syntetik: buildAccount() hledá zůstatek pod kódem
+        // účtu z resolveAccount(), a ten je shodný se zadaným kódem.
+        foreach ($this->ledger->syntheticBalances($supplierId, $asOf, $anchorStartsOn, onlyCodes: $codes) as $balance) {
             $balances[(string) $balance['code']] = round((float) $balance['md'] - (float) $balance['d'], 2);
         }
 
@@ -129,7 +197,7 @@ final class SaldoService
             $budget -= $block['open_items_count'];
             // U default sady vynech účty bez zůstatku i bez položek (nezaplevelovat 314/324);
             // u explicitně zvoleného účtu zobraz vždy.
-            if (!$explicit && self::cents($block['gl_balance']) === 0 && $block['partners'] === []) {
+            if (!$explicit && self::cents($block['gl_balance']) === 0 && $block['partners'] === [] && empty($block['advance_deduction_issues'])) {
                 continue;
             }
             $accounts[] = $block;
@@ -178,7 +246,7 @@ final class SaldoService
      */
     private function buildAccount(int $supplierId, string $asOf, string $code, ?int $partnerId, array $balances, int $budget): ?array
     {
-        $acc = $this->saldo->resolveAccount($supplierId, $code);
+        $acc = $this->saldo->resolveAccount($supplierId, $code, $asOf);
         if ($acc === null) {
             return null;
         }
@@ -197,6 +265,7 @@ final class SaldoService
         $byPartner = [];
         $openTotalCents = 0;
         $openCount = 0;
+        $otherNumbers = $this->otherPurchaseNumbers($supplierId, $rawItems);
         foreach ($rawItems as $it) {
             if ($partnerId !== null && $it['partner_id'] !== $partnerId) {
                 continue; // pojistka — filtr partnera už provedlo SQL
@@ -218,13 +287,7 @@ final class SaldoService
                 continue; // plně uhrazené / netto vyrovnané = uzavřená položka
             }
             if (++$openCount > $budget) {
-                throw new ReportException(
-                    'too_many_rows',
-                    'Saldokonto má k tomuto dni víc než ' . self::MAX_OPEN_ITEMS
-                        . ' otevřených položek — zúžte výběr (jeden účet, jeden partner nebo dřívější datum). '
-                        . 'Useknutý seznam by konfrontaci se zůstatkem hlavní knihy vykázal jako inventarizační rozdíl.',
-                    422,
-                );
+                throw self::tooManyRows();
             }
             $kind = (string) ($it['kind'] ?? 'document');
             $advancePending = $kind === 'advance_pending';
@@ -247,6 +310,7 @@ final class SaldoService
                 'doc_type'      => $it['doc_type'],
                 'doc_id'        => $it['doc_id'],
                 'doc_no'        => $it['doc_no'],
+                'other_doc_no'  => $it['doc_type'] === 'purchase_invoice' ? ($otherNumbers[$it['doc_id']] ?? null) : null,
                 'issue_date'    => $it['issue_date'],
                 'due_date'      => $it['due_date'],
                 'currency_code' => $it['currency_code'],
@@ -263,6 +327,11 @@ final class SaldoService
                 'advance_payment_czk' => $advancePending ? abs($bookedNative) : null,
                 'advance_vat_czk'     => $advancePending ? abs($paidNative) : null,
                 'tax_document_id'     => $advancePending ? ($it['tax_document_id'] ?? null) : null,
+                // Položka, kterou jde vyrovnat: na 311/321/315/325 doklad s vlastním předpisem
+                // na účtu (rozpad zápisu v deníku, JournalSettlementService), na 314/324 záloha
+                // (čerpání konečnou fakturou, AdvanceDeductionService). Doklady jen z počátečních
+                // stavů 311/321 a úhrady před zaúčtováním ho nemají: jejich zbytek rozpad nesnižuje.
+                'settleable'          => !empty($it['settleable']),
             ];
             $byPartner[$pid]['total_remaining'] = round($byPartner[$pid]['total_remaining'] + $remaining, 2);
             $openTotalCents += self::cents($remaining);
@@ -287,7 +356,45 @@ final class SaldoService
             'difference'       => $difference,
             'matches'          => self::cents($difference) === 0,
             'partners'         => $partners,
+            // Zálohový účet: konečné faktury, jejichž čerpání záloh přesahuje stranu čerpání
+            // živého zaúčtování (přeúčtování, převod). Saldokonto by zálohy uzavřelo o čerpání,
+            // které hlavní kniha nenese, a rozdíl by z toho nebyl poznat.
+            ...(isset(AdvanceDeductionService::ACCOUNTS[$acc['code']])
+                ? ['advance_deduction_issues' => $this->advances->deductionIssues($supplierId, $acc['code'])]
+                : []),
         ];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $items položky z {@see SaldoRepository::openItems()}
+     * @return array<int,string> druhé číslo přijaté faktury vedle `doc_no` podle id dokladu
+     */
+    private function otherPurchaseNumbers(int $supplierId, array $items): array
+    {
+        $docNos = [];
+        foreach ($items as $it) {
+            if ($it['doc_type'] === 'purchase_invoice') {
+                $docNos[(int) $it['doc_id']] = (string) $it['doc_no'];
+            }
+        }
+        $out = [];
+        foreach (array_chunk(array_keys($docNos), 1000) as $ids) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT id, varsymbol, vendor_invoice_number FROM purchase_invoices
+                  WHERE supplier_id = ? AND id IN (' . implode(',', $ids) . ')'
+            );
+            $stmt->execute([$supplierId]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                foreach ([$r['varsymbol'], $r['vendor_invoice_number']] as $number) {
+                    $number = trim((string) $number);
+                    if ($number !== '' && $number !== $docNos[(int) $r['id']]) {
+                        $out[(int) $r['id']] = $number;
+                        break;
+                    }
+                }
+            }
+        }
+        return $out;
     }
 
     /**
@@ -344,6 +451,17 @@ final class SaldoService
             'address'     => implode(', ', $address),
             'prepared_at' => date('Y-m-d H:i'),
         ];
+    }
+
+    private static function tooManyRows(): ReportException
+    {
+        return new ReportException(
+            'too_many_rows',
+            'Saldokonto má k tomuto dni víc než ' . self::MAX_OPEN_ITEMS
+                . ' otevřených položek — zúžte výběr (jeden účet, jeden partner nebo dřívější datum). '
+                . 'Useknutý seznam by konfrontaci se zůstatkem hlavní knihy vykázal jako inventarizační rozdíl.',
+            422,
+        );
     }
 
     private static function cents(float|int|string|null $amount): int

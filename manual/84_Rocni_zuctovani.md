@@ -78,6 +78,25 @@ ukazuje úhrn rozepsaný na tohoto a předchozí zaměstnavatele.
 **Jak poznáte, že je hotovo:** Zpráva ukáže „Zúčtováno: N, přeskočeno: N,
 selhalo: N“. Už zúčtované osoby se přeskočí.
 
+### Hromadné nastavení stavu žádosti
+
+Když potřebujete u mnoha lidí (typicky brigádníků) jen zapsat, že o roční
+zúčtování nepožádali, nemusíte otevírat každého zvlášť.
+
+1. V `Mzdy → Roční zúčtování` zvolte rok a případně zúžte seznam hledáním nebo stavem.
+2. Zaškrtněte zaměstnance, nebo použijte **Vybrat vše na stránce**. Výběr zůstane
+   zachovaný i při listování na další stránky.
+3. Klikněte na **Nastavit: nepožádal** (nebo **Nastavit: požádal**) a potvrďte.
+
+Změní se jen stav žádosti. Lidem, kteří žádost zatím nemají, se založí s ostatními
+údaji ve stavu „Neznámé“, u ostatních zůstává datum, doklad i další evidence beze
+změny. Stav „požádal“ nastavený hromadně nemá datum žádosti, takže zúčtování takové
+osoby neproběhne, dokud datum nedoplníte v jejím detailu. Hromadně lze zpracovat
+nejvýše 1000 lidí najednou.
+
+**Jak poznáte, že je hotovo:** Zpráva ukáže, kolik žádostí se založilo a kolik změnilo,
+a seznam vlevo ukazuje nový stav.
+
 ## 84.6 Když něco nejde
 
 <!-- cols: 30 34 36 -->
@@ -89,13 +108,16 @@ selhalo: N“. Už zúčtované osoby se přeskočí.
 | Zastaveno kvůli prohlášení | V některém měsíci trvání vztahu je prohlášení výslovně neověřené, nebo jde o nerezidenta | Opravte zákonnou evidenci osoby. |
 | Zastaveno kvůli slevě na poplatníka | Prohlášení je podepsané, ale za rok není ani jeden měsíc nároku na základní slevu | Doplňte evidenci nároku a spusťte znovu. |
 | Zastaveno kvůli potvrzení od jiného plátce | Potvrzení chybí, je nedoložené, má prázdné pole, nebo bylo doručeno po 15. únoru | Doplňte údaje nebo zúčtování proveďte mimo aplikaci. |
-| Zastaveno kvůli ročním položkám | Zaměstnanec uplatňuje dary, úroky, penzijní nebo životní pojištění, DIP, pojištění dlouhodobé péče, slevu na manžela nebo za zastavenou exekuci | Zúčtování proveďte mimo aplikaci, nebo ať zaměstnanec podá přiznání. |
+| Zastaveno kvůli ročním položkám | Žádost uplatňuje něco, co aplikace neeviduje, nebo je rozpor mezi žádostí a evidencí položek | Opravte volbu v žádosti nebo doplňte položky v sekci **Ročně uplatňované položky**. Jde-li o položku, kterou aplikace neumí, proveďte zúčtování mimo aplikaci, nebo ať zaměstnanec podá přiznání. |
+| Zastaveno kvůli nedoložené položce | Některá roční položka nemá stav **Doloženo** | Doplňte doložení u položky, nebo ji odeberte. |
+| Zastaveno kvůli slevě na manžela | Nejsou splněné podmínky (manžel mimo evidenci vyživovaných osob, vlastní příjem manžela nad 68 000 Kč, žádný označený měsíc) | Přečtěte vypsané důvody a opravte evidenci vyživovaných osob nebo údaje slevy. |
 | Výpočet roku 2025 se zastaví | Výpočet potřebuje hodnotu, která pro rok 2025 není potvrzená | Viz [Legislativní pravidla mezd](92_Legislativni_pravidla_mezd.md#9281-ktere-roky-jsou-pokryte). |
 
 Časté chyby: zúčtování zaměstnance, který nesplňuje podmínky, pokus
 o zúčtování roku, který neskončil, podepsané prohlášení bez evidovaného
 nároku na slevu na poplatníka, chybějící příjem od jiného plátce, pravidla
-jiného roku, nahrazení nepodporovaného odpočtu obecnou částkou.
+jiného roku, nahrazení nepodporovaného odpočtu obecnou částkou, zadání
+příspěvku zaměstnavatele místo částky k odpočtu z potvrzení fondu.
 
 ## 84.7 Podrobnosti a pravidla
 
@@ -104,9 +126,8 @@ jiného roku, nahrazení nepodporovaného odpočtu obecnou částkou.
 Roční zúčtování je právní úkon zaměstnavatele podle § 38ch zákona o daních
 z příjmů, ne dopočet. Aplikace zpracuje podporované roční daňové údaje
 a připraví kontrolovatelný výsledek. Blokovaný nebo nepodporovaný případ
-dokončete mimo aplikaci; nevynucujte ho jiným polem. Některé roční odpočty
-aplikace nepokrývá; tyto případy zpracujte ručně nebo předejte daňovému
-specialistovi. Podklady uchovávejte podle [retenčních lhůt](93_Retencni_lhuty.md).
+dokončete mimo aplikaci; nevynucujte ho jiným polem. Roční odpočty, které
+aplikace nepokrývá, zpracujte ručně nebo předejte daňovému specialistovi. Podklady uchovávejte podle [retenčních lhůt](93_Retencni_lhuty.md).
 
 Zúčtovat lze i **rok 2025**: aplikace pro něj má ověřenou legislativní sadu,
 takže použije slevy, zvýhodnění a sazby platné tehdy. Několik hodnot roku 2025
@@ -143,12 +164,17 @@ Nezodpovězená otázka má stejný účinek jako záporná odpověď.
 - **Zaměstnanec nepodává daňové přiznání.** Kdo přiznání podá nebo ho podat
   musí, tomu zaměstnavatel zúčtování provést nesmí. Aplikace tuto povinnost
   neodvozuje (o většině skutečností neví), odpověď zadává mzdová účetní.
-- **Zaměstnanec neuplatňuje položky, které jdou jen ročně.** Dary, úroky
+- **Ročně uplatňované položky jsou zodpovězené a doložené.** Dary, úroky
   z úvěru na bytovou potřebu, penzijní a životní pojištění, dlouhodobý
-  investiční produkt, pojištění dlouhodobé péče, sleva na manžela a sleva za
-  zastavenou exekuci se podle § 38h odst. 6 uplatňují až v ročním zúčtování.
-  Aplikace pro ně nemá evidenci nároku ani doložení, a raději zúčtování
-  odmítne, než aby vydala nižší přeplatek.
+  investiční produkt, pojištění dlouhodobé péče, sleva na manžela, sleva za
+  umístění dítěte a sleva za zastavenou exekuci se podle § 38h odst. 6
+  uplatňují až v ročním zúčtování.
+  V žádosti zvolte **Uplatňuje, evidováno níže** a položky zapište v sekci
+  **Ročně uplatňované položky** ([§ 84.7.7](#8477-rocne-uplatnovane-polozky)).
+  Volba **Uplatňuje něco, co aplikace neeviduje** zúčtování zastaví, aby
+  nevyšel nižší přeplatek. Zastaví ho také rozpor mezi žádostí a evidencí
+  položek, nedoložená položka a nesplněné podmínky slevy na manžela nebo
+  slevy za umístění dítěte.
 
 Nesplněné podmínky se vypisují všechny najednou jako věty a tlačítko
 **Provést roční zúčtování** zůstává vidět zašedlé s vysvětlením.
@@ -202,9 +228,14 @@ při schválení každého mzdového běhu; roční zúčtování je sečte, por
 s roční daní a rozdíl vyčíslí zvlášť na dani a zvlášť na daňovém bonusu.
 Historické měsíce zůstávají nedotčené.
 
+Výsledek i tisk (tiskopis MFin 5460) ukazují základ daně před odpočty,
+jednotlivé nezdanitelné části, slevu za zastavenou exekuci a slevu na
+manžela. Základ se zaokrouhlí na celá sta dolů až po odpočtu.
+
 Základní sleva na poplatníka náleží za celé zdaňovací období v plné výši
 i tomu, kdo pracoval jediný měsíc. Slevy na invaliditu, sleva na držitele
-průkazu ZTP/P a daňové zvýhodnění na dítě se krátí po dvanáctinách za
+průkazu ZTP/P, sleva na studenta (od roku 2027) a daňové zvýhodnění na dítě
+se krátí po dvanáctinách za
 měsíce, na jejichž počátku byly podmínky splněné. Měsíce se berou z evidence
 nároků, ne z toho, kolik se měsíčně skutečně uplatnilo: měsíční sleva je
 omezená výší zálohy, takže z ní nárok zpětně vyčíst nejde.
@@ -233,6 +264,81 @@ daně jsou samostatná podání finančnímu úřadu. Aplikace je sama neodešle
 připraví XML pro EPO na `Mzdy → Přehled mezd`, panelu **Roční vyúčtování
 daně**, a podáte je přes EPO. Postup je v
 [§ 85.14.23](85_Podani_a_hlaseni.md#851423-vyuctovani-zalohove-a-srazkove-dane).
+
+### 84.7.7 Ročně uplatňované položky
+
+Položky podle § 38h odst. 6 zapište na detailu zaměstnance v ročním
+zúčtování v sekci **Ročně uplatňované položky**. Sekce se ukládá vlastním
+tlačítkem, nezávisle na žádosti. V žádosti pak zvolte **Uplatňuje,
+evidováno níže**. U každé položky vedete protistranu, doložení (stav
+a čím je doloženo) a poznámku. Nedoložená položka zúčtování zastaví.
+
+| Druh | Co zadat | Co aplikace uplatní |
+|---|---|---|
+| Dar | Hodnota daru | Jen když úhrn darů přesáhne 2 % základu daně nebo činí aspoň 1 000 Kč, nejvýše 15 % základu. |
+| Odběr krve | Počet odběrů | 3 000 Kč za odběr. |
+| Odběr orgánu od žijícího dárce | Počet odběrů | 20 000 Kč. |
+| Odběr krvetvorných buněk | Počet odběrů | 20 000 Kč za odběr. |
+| Úroky z úvěru na bytovou potřebu | Zaplacené úroky, měsíce placení, volba bytové potřeby obstarané před 1. 1. 2021 | Limit 150 000 Kč na domácnost, za každý měsíc placení 1/12. U bytové potřeby obstarané před 2021 limit 300 000 Kč; při souběhu nový úvěr nejvýše 150 000 Kč a oba dohromady 300 000 Kč. |
+| Penzijní připojištění, doplňkové penzijní spoření, penzijní pojištění | Částka k odpočtu z potvrzení fondu | Příspěvky zaměstnance nad hranicí nejvyššího státního příspěvku, nikdy příspěvek zaměstnavatele. |
+| Soukromé životní pojištění | Zaplacené pojistné | Společný limit 48 000 Kč. |
+| Dlouhodobý investiční produkt (DIP) | Zaplacená částka | Společný limit 48 000 Kč. |
+| Pojištění dlouhodobé péče | Zaplacené pojistné | Společný limit 48 000 Kč. |
+| Sleva za zastavenou exekuci (§ 35 odst. 4) | Výše náhrady přiznané exekutorem | Snižuje daň před ostatními slevami, nejvýše do výše daně. |
+
+Měsíce placení úroků se sčítají přes všechny úvěry, takže refinancování
+v polovině roku znamená dohromady 12 měsíců. Penzijní produkty, životní
+pojištění, DIP a pojištění dlouhodobé péče mají jeden společný limit
+48 000 Kč. Úhrn odpočtů je nejvýše do výše základu daně.
+
+**Sleva na manžela nebo manželku.** Manžela i dítě vyberte z evidence
+vyživovaných osob zaměstnance ([Zaměstnanci](86_Zamestnanci.md)); manžel
+musí mít vztah **manžel/manželka**. Dále označte:
+
+- měsíce, na jejichž počátku byly podmínky splněné (společná domácnost
+  s vyživovaným dítětem do 3 let),
+- měsíce ZTP/P manžela, za které náleží dvojnásobek, a to jen má-li manžel
+  v evidenci ZTP/P,
+- vlastní příjem manžela za rok (limit 68 000 Kč),
+- doložení.
+
+Sleva je 24 840 Kč ročně, za každý označený měsíc 1/12. Dítě, které dovrší
+tři roky v průběhu měsíce, zakládá nárok ještě za tento měsíc. Roční JMHZ
+vykazuje slevu na manžela s manželem, dítětem, počtem měsíců a ZTP/P.
+
+**Sleva za umístění dítěte (školkovné).** Uplatňuje se za zdaňovací období
+2027 a další (§ 35bd ZDP), jen ročně: k zálohám se nepřihlíží. Pro každé
+dítě přidejte jeden řádek a vyplňte:
+
+- dítě z evidence vyživovaných osob; vnuk jen tehdy, je-li v péči
+  nahrazující péči rodičů (zaškrtněte to u něj),
+- druh zařízení: mateřská škola, dětská skupina, nebo péče o dítě
+  provozovaná na živnostenské oprávnění (i obdobné zařízení v zahraničí),
+- výdaje za rok podle potvrzení zařízení, bez stravného,
+- počet domácností, ve kterých dítě žije, a u sdílené péče případně strop
+  z písemné dohody rodičů s odkazem na tuto dohodu,
+- vyživuje-li totéž dítě v roce i další poplatník (druhý rodič v jiné
+  domácnosti, manžel v téže domácnosti), jeho potvrzení: jméno, výši jím
+  uplatněné slevy (i 0 Kč) a odkaz na potvrzení; je-li zaměstnaný a dělá mu
+  roční zúčtování zaměstnavatel, potvrzení vydává zaměstnavatel,
+- doložení potvrzením zařízení.
+
+Sleva se rovná skutečně zaplaceným výdajům, nejvýše minimální mzdě
+platné k 1. lednu roku (pro rok 2027 je to 24 900 Kč) za každé dítě. Žije-li
+dítě ve více domácnostech, je strop podíl minimální mzdy a počtu domácností
+v celých korunách dolů, při střídavé péči ve dvou domácnostech 12 450 Kč;
+písemná dohoda rodičů může strop rozdělit jinak. Je to sleva na dani,
+ne odpočet: snižuje daň spolu se slevou na poplatníka a ostatními slevami,
+nejvýše do výše daně, a uplatní se před daňovým zvýhodněním na děti. Může
+tak zvýšit daňový bonus.
+
+Zúčtování zastaví nedoložená sleva a nesplněné podmínky: dítě v roce
+se zaměstnancem nežilo, slevu na totéž dítě v téže domácnosti uplatňuje
+jiná osoba, výdaje jsou uplatněné jako výdaj na dosažení příjmů,
+dohodnutý strop je vyšší než minimální mzda, chybí písemná dohoda nebo
+potvrzení dalšího poplatníka, nebo sleva zaměstnance spolu se slevou
+potvrzenou dalším poplatníkem překročí minimální mzdu. Které to jsou,
+vypíše výsledek u překážky.
 
 ## 84.8 Související kapitoly
 

@@ -85,7 +85,9 @@ export const useSessionSecurityStore = defineStore('session-security', () => {
       const auth = useAuthStore()
       if (next.session_state === 'active' && !auth.profileHydrated) {
         auth.setSessionCsrfToken(next.csrf_token)
-        if (!await auth.refresh()) {
+        const refreshed = await auth.refresh()
+        if (generation !== refreshGeneration) return false
+        if (!refreshed) {
           error.value = 'session_status_failed'
           return false
         }
@@ -138,8 +140,10 @@ export const useSessionSecurityStore = defineStore('session-security', () => {
       || state.value?.session_state === 'locked'
       || state.value?.lock_after_minutes === 0
     ) return
+    const generation = refreshGeneration
     try {
-      apply(await authApi.sessionActivity())
+      const next = await authApi.sessionActivity()
+      if (generation === refreshGeneration) apply(next)
     } catch {
       // 423 zpracuje interceptor; síťový výpadek nesmí lokálně odemknout.
     }
@@ -149,31 +153,41 @@ export const useSessionSecurityStore = defineStore('session-security', () => {
     if (state.value?.session_state !== 'active'
       || !state.value.unlock_methods.includes('passkey')
     ) return
-    apply(await authApi.sessionLock())
+    const generation = refreshGeneration
+    const next = await authApi.sessionLock()
+    if (generation !== refreshGeneration) return
+    apply(next)
     broadcastSessionEvent('locked')
   }
 
   async function unlock() {
+    const generation = refreshGeneration
     busy.value = true
     error.value = ''
     try {
       const flow = await authApi.sessionUnlockOptions()
+      if (generation !== refreshGeneration) return
       const credential = await getCredential(flow.public_key)
+      if (generation !== refreshGeneration) return
       const previousCsrf = canonicalDomainLoginSessionCsrf()
       const unlocked = await authApi.sessionUnlockVerify(flow.flow_token, credential, previousCsrf ?? undefined)
+      if (generation !== refreshGeneration) return
       if (previousCsrf) advanceCanonicalDomainLoginSession(previousCsrf, unlocked.csrf_token)
       const auth = useAuthStore()
       auth.setSessionCsrfToken(unlocked.csrf_token)
-      if (!await auth.refresh() || !auth.profileHydrated) {
+      const refreshed = await auth.refresh()
+      if (generation !== refreshGeneration) return
+      if (!refreshed || !auth.profileHydrated) {
         throw new Error('session_restore_failed')
       }
       apply(unlocked)
       broadcastSessionEvent('unlocked')
     } catch (e: any) {
+      if (generation !== refreshGeneration) return
       error.value = e?.response?.data?.error?.message || 'unlock_failed'
       markLocked()
     } finally {
-      busy.value = false
+      if (generation === refreshGeneration) busy.value = false
     }
   }
 

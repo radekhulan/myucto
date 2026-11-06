@@ -11,6 +11,8 @@ use MyInvoice\Repository\JournalEntryTemplateRepository;
 use MyInvoice\Repository\RoleRepository;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
+use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Sample\SampleDataGenerator;
 use MyInvoice\Service\Sample\SampleDataService;
@@ -35,6 +37,11 @@ final class DemoProvisioner
     {
         $this->assertSafeTarget();
         $this->assertSchemaReady();
+        $frameworkGuard = new AccountingFrameworkImportGuard($this->db);
+        $existing = $this->db->pdo()->query("SELECT id FROM supplier WHERE email IN ('demo-po@tenant.example.invalid', 'demo-osvc@tenant.example.invalid')")->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($existing as $supplierId) {
+            $frameworkGuard->assertCz500Periods((int) $supplierId, $this->frameworkPeriods((int) $supplierId));
+        }
 
         $roleId = $this->ensureRole();
         $userId = $this->ensureUser($roleId);
@@ -76,7 +83,9 @@ final class DemoProvisioner
         $skipped = [];
         foreach ($supplierIds as $supplierId) {
             if ($refreshSample && $this->sampleData->hasSampleData($supplierId)) {
-                $this->sampleData->purge($supplierId);
+                $frameworkPeriods = $this->frameworkPeriods($supplierId);
+                $frameworkGuard->assertCz500Periods($supplierId, $frameworkPeriods);
+                $this->sampleData->purge($supplierId, fn () => $frameworkGuard->assertCz500Periods($supplierId, $this->frameworkPeriods($supplierId, true), true));
                 $refreshed[] = $supplierId;
             }
             if ($this->sampleData->hasSampleData($supplierId)) {
@@ -89,8 +98,10 @@ final class DemoProvisioner
 
         foreach ($supplierIds as $supplierId) {
             if (!$this->accountingModes->hasDoubleEntry($supplierId)) continue;
-            $this->journalTemplates->ensurePayrollSeed($supplierId);
-            $this->journalTemplates->ensureClosingTemplatesSeed($supplierId);
+            $frameworkGuard->writeCz500Periods($supplierId, $this->frameworkPeriods($supplierId), function () use ($supplierId): void {
+                $this->journalTemplates->ensurePayrollSeed($supplierId);
+                $this->journalTemplates->ensureClosingTemplatesSeed($supplierId);
+            });
         }
 
         $this->enablePayrollModule($supplierIds);
@@ -105,6 +116,16 @@ final class DemoProvisioner
             'refreshed' => $refreshed,
             'skipped' => $skipped,
         ];
+    }
+
+    private function frameworkPeriods(int $supplierId, bool $currentRead = false): array
+    {
+        if ($currentRead) (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+        $year = (int) date('Y');
+        $periods = (new AccountingFrameworkImportGuard($this->db))->periodsForDates($supplierId, ($year - 2) . '-01-01', $year . '-12-31');
+        $stmt = $this->db->pdo()->prepare('SELECT fiscal_year AS year, starts_on, ends_on FROM accounting_periods WHERE supplier_id = ?' . ($currentRead ? ' FOR UPDATE' : ''));
+        $stmt->execute([$supplierId]);
+        return [...$periods, ...$stmt->fetchAll(PDO::FETCH_ASSOC)];
     }
 
     private function assertSafeTarget(): void
@@ -228,7 +249,7 @@ final class DemoProvisioner
                 throw new \RuntimeException("Demo e-mail {$data['email']} už používá jiná firma.");
             }
             $supplierId = (int) $rows[0]['id'];
-            BankRuleTemplateSeeder::seed($this->db->pdo(), $supplierId);
+            (new AccountingFrameworkImportGuard($this->db))->writeCz500Periods($supplierId, $this->frameworkPeriods($supplierId), fn () => BankRuleTemplateSeeder::seed($this->db->pdo(), $supplierId));
             return $supplierId;
         }
 

@@ -54,6 +54,8 @@ export interface PurchaseInvoiceSubmission {
   extraction_status?: 'not_started' | 'running' | 'succeeded' | 'failed'
   extraction_source?: string | null
   extraction_error?: string | null
+  /** Vytěžení se nedokončilo (přerušený požadavek); podání jde vytěžit znovu nebo smazat. */
+  processing_stale?: boolean
   document_sha256?: string
   thumb_status?: string
   processed_by?: number | null

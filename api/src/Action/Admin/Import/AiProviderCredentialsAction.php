@@ -168,6 +168,9 @@ final class AiProviderCredentialsAction
             if ($p === 'openai' && $creds !== null) {
                 $providers[$p]['base_url'] = $creds['base_url'] ?? null;
             }
+            if ($p === 'anthropic' && $creds !== null) {
+                $providers[$p]['workspace_id'] = $creds['workspace_id'] ?? null;
+            }
             if ($p === 'ollama' && $creds !== null) {
                 $providers[$p]['base_url']    = $creds['base_url'];
                 $providers[$p]['has_api_key'] = $creds['api_key'] !== '';
@@ -225,6 +228,17 @@ final class AiProviderCredentialsAction
 
         if ($provider === 'ollama') {
             return $this->updateOllama($request, $response, $supplierId, $body, $userId, $ip, $ua, $bulk, $onlyUnconfigured);
+        }
+
+        if ($provider === 'anthropic' && array_key_exists('workspace_id', $body)) {
+            if (!is_string($body['workspace_id']) && $body['workspace_id'] !== null) {
+                return Json::error($response, 'validation_failed', 'Neplatné ID workspace.', 400);
+            }
+            $body['workspace_id'] = trim((string) $body['workspace_id']);
+            $wsErr = AnthropicClient::workspaceIdError($body['workspace_id']);
+            if ($wsErr !== null) {
+                return Json::error($response, 'validation_failed', $wsErr, 400);
+            }
         }
 
         $existing = $this->clientFor($provider)->getCredentials($supplierId);
@@ -336,7 +350,7 @@ final class AiProviderCredentialsAction
             return Json::error($response, 'validation_failed', 'Neplatný provider.', 400);
         }
         match ($provider) {
-            'anthropic'    => $this->anthropic->setCredentials($supplierId, '', LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL),
+            'anthropic'    => $this->anthropic->setCredentials($supplierId, '', LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL, ''),
             'azure_openai' => $this->azure->clearCredentials($supplierId),
             'openai'       => $this->openai->clearCredentials($supplierId),
             'gemini'       => $this->gemini->clearCredentials($supplierId),
@@ -511,7 +525,9 @@ final class AiProviderCredentialsAction
         switch ($provider) {
             case 'anthropic':
                 $model = trim((string) ($body['default_model'] ?? '')) ?: LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL;
-                $this->anthropic->setCredentials($supplierId, $apiKey, $model);
+                // Bez pole v požadavku zůstává uložené ID workspace (null), validace proběhla v update().
+                $workspaceId = array_key_exists('workspace_id', $body) ? (string) $body['workspace_id'] : null;
+                $this->anthropic->setCredentials($supplierId, $apiKey, $model, $workspaceId);
                 break;
             case 'azure_openai':
                 $this->azure->setCredentials(
@@ -549,6 +565,9 @@ final class AiProviderCredentialsAction
                 $model = trim((string) ($body['default_model'] ?? ''));
                 if ($model !== '') {
                     $this->anthropic->updateDefaultModel($supplierId, $model);
+                }
+                if (array_key_exists('workspace_id', $body)) {
+                    $this->anthropic->updateWorkspaceId($supplierId, (string) $body['workspace_id']);
                 }
                 return null;
             case 'openai':
@@ -623,25 +642,13 @@ final class AiProviderCredentialsAction
      * libovolný host, a `azureRegion` by rezidenci odvozovala z crafted hostname
      * (`x-swedencentral.attacker.tld`). Povolené jen skutečné Azure hosty; region se
      * pak (pro ověřený Azure host) bere z deklarovaného ai_data_region.
+     *
+     * Stejné pravidlo se kontroluje i při každém volání a klienti nenásledují
+     * přesměrování ({@see AzureOpenAiClient::endpointError()}).
      */
     private static function validateAzureEndpoint(string $endpoint): ?string
     {
-        $endpoint = trim($endpoint);
-        if ($endpoint === '') {
-            return 'endpoint je povinný.';
-        }
-        $scheme = strtolower((string) parse_url($endpoint, PHP_URL_SCHEME));
-        $host   = strtolower((string) parse_url($endpoint, PHP_URL_HOST));
-        if ($scheme !== 'https') {
-            return 'azure endpoint musí používat https.';
-        }
-        $allowed = ['.openai.azure.com', '.cognitiveservices.azure.com', '.azure-api.net'];
-        foreach ($allowed as $suffix) {
-            if ($host !== '' && str_ends_with($host, $suffix)) {
-                return null;
-            }
-        }
-        return 'azure endpoint musí směřovat na *.openai.azure.com / *.cognitiveservices.azure.com / *.azure-api.net.';
+        return AzureOpenAiClient::endpointError($endpoint);
     }
 
     private static function validateOpenaiBaseUrl(string $baseUrl): ?string

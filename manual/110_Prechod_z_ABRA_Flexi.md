@@ -19,7 +19,14 @@
 1. **Cílová firma.** V MyÚčtu zvolte firmu, do které se bude převádět. Musí
    vést podvojné účetnictví a IČO musí odpovídat zdrojové firmě v ABRA Flexi.
    Cílové účetní období nesmí být uzavřené a datum počátečního stavu nesmí
-   spadat do uzamčeného období.
+   spadat do uzamčeného období. Převod účetnictví je podporován jen pro celé
+   vybrané období vedené podle vyhlášky 500. Pokud do něj zasahuje rámec 504,
+   převod se odmítne před změnou dokladů, nastavení nebo mapování importu.
+   Rozhoduje historický rámec vybraného období, nikoli dnešní nastavení firmy.
+   Převod nebyl ověřen pro neziskové organizace a SVJ. Je-li cílová firma
+   podle právní formy nezisková organizace nebo SVJ, nebo vedla-li někdy
+   účetnictví podle vyhlášky 504, ukáže průvodce výrazné upozornění. Před
+   převodem pak kontaktujte podporu.
 2. **Oprávnění.** Stránka vyžaduje oprávnění pro zápis importů (`utilities.import`).
 3. **Přístup do ABRA Flexi** (co připravíte ve starém programu):
    - HTTPS adresu konkrétní účetní firmy z webového rozhraní ABRA Flexi.
@@ -143,9 +150,22 @@ platí i pro období, které končí v následujícím kalendářním roce.
 ### 110.9.2 Faktury a DPH
 
 Faktury zaúčtované v ABRA Flexi se převedou jako vystavené nebo zaúčtované
-doklady a propojí se s převzatým deníkem. Totéž platí pro prodejky a závazky,
-které ABRA vede mimo evidence vydaných a přijatých faktur. Import jejich účetní
-zápisy nevytváří podruhé. Zahraniční DPH zůstává v částce faktury, ale nevstupuje
+doklady a propojí se s převzatým deníkem. Totéž platí pro prodejky a pro závazky
+s DPH, které ABRA vede mimo evidence vydaných a přijatých faktur. Import jejich
+účetní zápisy nevytváří podruhé.
+
+Ostatní pohledávky a závazky bez DPH (evidence `pohledavka` a `zavazek`, třeba
+splátky úvěru, závazky ke společníkům nebo zaměstnancům) se nepřevádějí jako
+faktury, ale do `Účetnictví → Ostatní pohledávky a závazky`. Doklad s jedním
+zápisem v deníku ho převezme i s kontací. Doklad o více řádcích (například
+splátka rozdělená na jistinu a úrok) nebo se zápisem, který nemění zůstatky,
+se uloží jako potvrzený bez vlastního zaúčtování, protože jeho zápisy už nese
+převzatý deník. Úhrady z banky a pokladny se k nim spárují. Co ABRA vede jako
+uhrazené jinak (zápočtem, interním dokladem nebo platbou v nepřeváděném roce),
+převezme se jako úhrada mimo banku a pokladnu, takže doklad nezůstane otevřený.
+Předpisy mezd, odvodů a DPH (účty 331, 336, 341, 342 a 343) zůstávají jen
+v deníku, stejně jako pohledávky s DPH a doklady v cizí měně nebo stornované;
+protokol na ně upozorní. Zahraniční DPH zůstává v částce faktury, ale nevstupuje
 do české daně v přiznání. Doklad s rozporným nebo neznámým členěním DPH,
 například s tuzemským nárokem na odpočet a nulovou daní, zůstane k ověření jako
 koncept; důvod se zobrazí v protokolu převodu.
@@ -217,7 +237,10 @@ Zdrojové bankovní účty se evidují také v `Peníze → Bankovní účty` na
 použitelného bankovního čísla, například virtuální platební účty, mají vlastní
 analytiku a vazbu na účet v měnách, ale nelze je vydávat za český bankovní účet.
 Pokud zdroj používá jinou syntetiku než 221, průvodce upozorní na nutnost
-kontroly historického zaúčtování. Rekonstruovaný soubor GPC lze stáhnout jen
+kontroly historického zaúčtování. Úvěrové účty, které ABRA vede jako bankovní
+účet na účtu 231, 232 nebo 461, se do banky nepřevádějí: jejich zůstatek je
+nesplacená jistina, ne peníze firmy. Splátky i jistina zůstávají v převzatém
+deníku. Rekonstruovaný soubor GPC lze stáhnout jen
 u výpisu s ověřenými stavy a platným číslem účtu i kódem banky. Kód banky se
 čte také ze zdrojového pole `smerKod`. U virtuálních účtů a neúplné bankovní
 identifikace se GPC nenabízí. Hodnoty přesahující pevnou šířku polí GPC nelze

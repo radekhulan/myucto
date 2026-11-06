@@ -17,7 +17,7 @@ vi.mock('@/composables/useDimensions', () => ({ useDimensions: () => ({
 }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: 1, currentSupplier: { company_name: 'Mateřská firma' } }) }))
 vi.mock('@/composables/useTheme', () => ({ useChartColors: () => ref({ primary: '#123456', primarySoft: '#654321', neutral: '#888888', success: '#009900', warning: '#aa8800', danger: '#aa0000', tick: '#333333', grid: '#cccccc', tooltipBg: '#000000' }) }))
-vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: number) => String(value) }))
+vi.mock('@/composables/useFormat', () => ({ formatMoneyWhole: (value: number) => String(value) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key, locale: ref('cs') }) }))
 vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }), useRouter: () => ({ replace: mocks.replace }) }))
 

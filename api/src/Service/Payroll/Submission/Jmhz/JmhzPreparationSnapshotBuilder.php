@@ -79,6 +79,9 @@ final class JmhzPreparationSnapshotBuilder
      *        `child_reference`. Nárok sám nese jen neosobní referenci, XSD
      *        (`osobaType`) ale u dítěte jméno vyžaduje — viz
      *        {@see \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository}.
+     * @param array<int,array<int,string>> $caregiverBirthNumberSources rodné číslo jiné
+     *        osoby vyživující tytéž děti (10434) podle `employee_id` a `id` nároku;
+     *        zmrazená evidence ho nenese, dohledá se z šifrovaného nároku
      */
     public function build(
         int $supplierId,
@@ -92,6 +95,7 @@ final class JmhzPreparationSnapshotBuilder
         ?array $annualEvidenceSources = null,
         ?array $employerAnnualEvidence = null,
         array $childIdentitySources = [],
+        array $caregiverBirthNumberSources = [],
     ): JmhzPreparationSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma musi byt kladne cislo.');
@@ -244,7 +248,11 @@ final class JmhzPreparationSnapshotBuilder
                             ? $selection['evidence']['scenario_key']
                             : null,
                     );
-                    if ($deferredType === '1' && $selection['supported']) {
+                    if (in_array(
+                        $deferredType,
+                        \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::SUPPORTED_TYPES,
+                        true,
+                    ) && $selection['supported']) {
                         $selection['preparation_supported'] = true;
                     }
                     if (!$selection['supported']) {
@@ -284,8 +292,7 @@ final class JmhzPreparationSnapshotBuilder
                 if ($deferredType === null) {
                     $this->inspectWorkMonth($entry['time_month'] ?? null, $employmentId, $issues);
                 }
-                $averageRequired = $scenarioKey === null
-                    || $this->scenarioRequiresAttribute($scenarioKey, '10345');
+                $averageRequired = $this->averageRequiredForScenario($scenarioKey);
                 $workSummary = is_array($entry['time_month'] ?? null)
                     ? ($entry['time_month']['jmhz_work_summary'] ?? null)
                     : null;
@@ -651,6 +658,7 @@ final class JmhzPreparationSnapshotBuilder
                 'child_credit_evidence' => $this->childCreditEvidence(
                     $person,
                     $childIdentitySources[$employeeId] ?? [],
+                    $caregiverBirthNumberSources[$employeeId] ?? [],
                 ),
                 'employments' => $normalizedEmployments,
             ];
@@ -727,6 +735,16 @@ final class JmhzPreparationSnapshotBuilder
                 'supplier',
                 $supplierId,
                 ['10038', '10039', '10452'],
+            );
+        } elseif ($employerAnnualEvidence === null
+            && JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2027
+        ) {
+            // Verze 2027: typy kolektivních smluv (10214) v souhrnu každý měsíc.
+            $issues[] = $this->issue(
+                'jmhz_employer_annual_collective_agreement_missing',
+                'supplier',
+                $supplierId,
+                ['10214'],
             );
         } elseif ($employerAnnualEvidence !== null) {
             if (($employerAnnualEvidence['schema_reference'] ?? null)
@@ -1023,6 +1041,40 @@ final class JmhzPreparationSnapshotBuilder
         }
 
         return $average;
+    }
+
+    /**
+     * Požaduje hlášení u tohoto vztahu průměrný hodinový výdělek (10345)?
+     *
+     * Rozhoduje scénář vztahu: například formulář `cinnostKS` (scénář 3,
+     * společník nebo jednatel) pole vůbec nemá. Předběžná kontrola před během
+     * se ptá tady, aby nežádala nic, co zmrazení hlášení nevyžaduje. Vztah,
+     * jehož scénář určit nejde, se bere jako povinný.
+     *
+     * @param array<string,mixed> $entry vztah ze snímku vstupů
+     */
+    public function averageEarningRequired(array $entry, string $periodStart): bool
+    {
+        $term = $entry['term'] ?? null;
+        $employment = $entry['employment'] ?? null;
+        if (!is_array($term) || array_is_list($term) || !is_array($employment)) {
+            return true;
+        }
+        $selection = $this->scenarioSelector()->resolve(
+            is_string($term['activity_code'] ?? null) ? $term['activity_code'] : null,
+            is_string($term['jmhz_relationship_detail_code'] ?? null)
+                ? $term['jmhz_relationship_detail_code']
+                : null,
+            self::deferredIncomeType($entry, $employment, $periodStart) === null ? null : 'scenario_8',
+        );
+        $scenarioKey = $selection['supported'] ? ($selection['evidence']['scenario_key'] ?? null) : null;
+
+        return $this->averageRequiredForScenario(is_string($scenarioKey) ? $scenarioKey : null);
+    }
+
+    private function averageRequiredForScenario(?string $scenarioKey): bool
+    {
+        return $scenarioKey === null || $this->scenarioRequiresAttribute($scenarioKey, '10345');
     }
 
     private function scenarioRequiresAttribute(string $scenarioKey, string $attributeId): bool
@@ -1712,9 +1764,10 @@ final class JmhzPreparationSnapshotBuilder
      *
      * @param array<string,mixed> $person řádek `input.people[]`
      * @param array<string,array{given_name:string,family_name:string,birth_date:string}> $identities
+     * @param array<int,string> $caregiverBirthNumbers `id` nároku → rodné číslo jiné vyživující osoby
      * @return array<string,mixed>
      */
-    private function childCreditEvidence(array $person, array $identities): array
+    private function childCreditEvidence(array $person, array $identities, array $caregiverBirthNumbers = []): array
     {
         // Chybějící evidence se NEVYKLÁDÁ jako „bez dětí": prázdný seznam
         // proti nenulovému zvýhodnění resolver zastaví jako rozpor podkladu.
@@ -1750,11 +1803,16 @@ final class JmhzPreparationSnapshotBuilder
                 : 'unknown';
             $statuses[$status] = true;
             if ($status === 'present') {
-                $caregivers[] = [
+                $caregiver = [
                     'given_name' => (string) ($claim['other_caregiver_given_name'] ?? ''),
                     'family_name' => (string) ($claim['other_caregiver_family_name'] ?? ''),
                     'birth_date' => (string) ($claim['other_caregiver_birth_date'] ?? ''),
                 ];
+                $birthNumber = is_int($claim['id'] ?? null) ? ($caregiverBirthNumbers[$claim['id']] ?? null) : null;
+                if (is_string($birthNumber)) {
+                    $caregiver['birth_number'] = $birthNumber;
+                }
+                $caregivers[] = $caregiver;
             }
             $child = [
                 'reference' => $reference,
@@ -1779,7 +1837,11 @@ final class JmhzPreparationSnapshotBuilder
         );
         $unique = [];
         foreach ($caregivers as $caregiver) {
-            $unique[implode('|', $caregiver)] = $caregiver;
+            // Tutéž osobu jmenuje každý nárok domácnosti; rodné číslo nemusí nést všechny.
+            $key = $caregiver['given_name'] . '|' . $caregiver['family_name'] . '|' . $caregiver['birth_date'];
+            if (!isset($unique[$key]) || isset($caregiver['birth_number'])) {
+                $unique[$key] = $caregiver;
+            }
         }
         ksort($unique);
 

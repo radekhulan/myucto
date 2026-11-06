@@ -70,6 +70,7 @@ final class RecurringInvoiceGenerator
         // sazbu tady by uživateli tiše vyměnilo jeho volbu za jinou.
         private readonly OssItemDeriver $ossDeriver,
         private readonly ClientRepository $clients,
+        private readonly InvoicePaymentService $payments,
     ) {}
 
     /**
@@ -659,10 +660,9 @@ final class RecurringInvoiceGenerator
     private function recurringRevenueAccount(int $supplierId, array $item): ?string
     {
         try {
-            return (new \MyInvoice\Service\Accounting\Product\ProductPostingDefaults($this->db))->validateAccount(
+            return (new \MyInvoice\Service\Accounting\Product\ProductPostingDefaults($this->db))->validateIssuedItemAccount(
                 $supplierId,
                 $item['revenue_account_code'] ?? null,
-                \MyInvoice\Service\Accounting\Product\ProductPostingDefaults::KIND_REVENUE,
             );
         } catch (\InvalidArgumentException) {
             return null;
@@ -802,6 +802,8 @@ final class RecurringInvoiceGenerator
             if ($issue->rowCount() === 0) {
                 throw new \RuntimeException('Faktura byla mezitím změněna.');
             }
+            // I dříve otevřený koncept může mít platby; PDF/statistiky obnoví stávající tok po commitu.
+            $this->payments->recompute($invoiceId, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $invoiceId, $issuerId);
             if ($stockEnabled) $this->stockIssue->issueForInvoice(
                 $supplierId,
@@ -845,6 +847,18 @@ final class RecurringInvoiceGenerator
         $this->stats->recomputeAfterCommit($invoiceId);
 
         return $varsymbol;
+    }
+
+    /**
+     * Rozhodné datum zámku období ({@see \MyInvoice\Service\Accounting\DocumentLockService::invoiceRefDate()})
+     * pro fakturu, kterou šablona vytvoří s daným datem vystavení: DUZP podle režimu
+     * šablony, u zálohové faktury (bez DUZP) datum vystavení.
+     */
+    public static function lockReferenceDate(array $template, string $issueDate): string
+    {
+        return (string) ($template['invoice_type'] ?? 'invoice') === 'proforma'
+            ? $issueDate
+            : self::computeTaxDate($issueDate, (string) ($template['tax_date_mode'] ?? 'same_as_issue'));
     }
 
     /**

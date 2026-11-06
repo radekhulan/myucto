@@ -43,14 +43,14 @@ function queued(overrides: Record<string, unknown> = {}) {
 
 const IsdsSendMethodsStub = {
   name: 'IsdsSendMethods',
-  props: ['outboxId', 'environment', 'transport', 'gatewayStart'],
+  props: ['outboxId', 'environment', 'transport', 'gatewayStart', 'gatewayOnly'],
   emits: ['sent'],
   template: '<div data-test="isds-send-methods-stub" />',
 }
 
-function mountDialog() {
+function mountDialog(clientMode = false) {
   return mount(TaxIsdsSendDialog, {
-    props: { submissionId: 12, title: 'DPH · 2026-09' },
+    props: { submissionId: 12, title: 'DPH · 2026-09', clientMode },
     global: { stubs: { IsdsSendMethods: IsdsSendMethodsStub } },
   })
 }
@@ -140,4 +140,14 @@ describe('TaxIsdsSendDialog', () => {
       .toBe('reports.submissions.isds.enqueue_failed')
     expect(wrapper.find('[data-test="isds-send-methods-stub"]').exists()).toBe(false)
   })
+})
+
+it('klientovi nabídne jen daňovou bránu a neschová za ni správu schránky', async () => {
+  m.enqueueIsds.mockResolvedValue(queued())
+  const wrapper = mountDialog(true)
+  await flushPromises()
+  expect(wrapper.getComponent(IsdsSendMethodsStub).props('gatewayOnly')).toBe(true)
+  expect(wrapper.getComponent(IsdsSendMethodsStub).props('gatewayStart')).toBe(m.gatewayStartTax)
+  expect(wrapper.find('[data-test="tax-isds-open-outbox"]').exists()).toBe(false)
+  expect(wrapper.find('[data-test="tax-isds-open-access"]').exists()).toBe(false)
 })

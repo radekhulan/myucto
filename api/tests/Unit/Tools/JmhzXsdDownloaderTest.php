@@ -40,6 +40,11 @@ final class JmhzXsdDownloaderTest extends TestCase
                 'regzeldopl' => ['1.2', '6f0eb190', 2, ['REGZELDOPL25.xsd']],
                 'dzmh' => ['1.1', '1e89ec55', 2, ['DZMH25.xsd']],
                 'orezam-zrezam' => ['1.0', '9a153012', 3, ['OREZAM26.xsd', 'ZREZAM26.xsd']],
+                'jmhz-2027' => ['1.5.0.3', 'e8fe64bb', 15, ['jmhzPodani.xsd']],
+                'regzec-2027' => ['1.5', '37a69516', 2, ['REGZEC27_1_5.xsd']],
+                'prezec-2027' => ['1.5', 'dc509815', 2, ['PREZEC26_1_5.xsd']],
+                'dzmh-2027' => ['1.5', '7ebe93ea', 2, ['DZMH25_1_5.xsd']],
+                'zrezam-2027' => ['1.5', '23320535', 2, ['ZREZAM27_1_5.xsd']],
             ],
             array_map(
                 static fn (array $package): array => [
@@ -58,13 +63,28 @@ final class JmhzXsdDownloaderTest extends TestCase
         $raw = require dirname(__DIR__, 4) . '/tools/jmhz-xsd-packages.php';
         self::assertIsArray($raw);
         self::assertSame('xsd_1_4_3_6/externi_xsd', $raw['jmhz']['xsd_root'] ?? null);
-        foreach (['regzec', 'prezec', 'regzeldopl', 'dzmh', 'orezam-zrezam'] as $flatPackage) {
+        foreach ([
+            'regzec', 'prezec', 'regzeldopl', 'dzmh', 'orezam-zrezam',
+            'jmhz-2027', 'regzec-2027', 'prezec-2027', 'dzmh-2027', 'zrezam-2027',
+        ] as $flatPackage) {
             self::assertIsArray($raw[$flatPackage]);
             self::assertArrayNotHasKey('xsd_root', $raw[$flatPackage]);
         }
+        // Schémata JMHZ 1.5.0.3 leží v archivu uvnitř vnějšího ZIPu, ostatní balíčky ne.
+        self::assertSame('JMHZ_podani_1.5.0.3_xsd.zip', $raw['jmhz-2027']['inner_archive'] ?? null);
+        foreach (array_keys($raw) as $id) {
+            if ($id !== 'jmhz-2027') {
+                self::assertArrayNotHasKey('inner_archive', $raw[$id]);
+            }
+        }
 
         foreach ($packages as $id => $package) {
-            self::assertSame($id . '-' . $package['version'], $package['target']);
+            // Balíčky 2027 mají cílový adresář podle verze schématu (`jmhz-1.5.0.3`),
+            // ne podle klíče manifestu (`jmhz-2027`), aby žily vedle balíčků 2026.
+            self::assertStringEndsWith('-' . $package['version'], $package['target']);
+            if (!str_ends_with($id, '-2027')) {
+                self::assertSame($id . '-' . $package['version'], $package['target']);
+            }
             self::assertMatchesRegularExpression('/\A[a-f0-9]{64}\z/', $package['sha256']);
             self::assertStringStartsWith('https://developers.mpsv.cz/assets/documents/', $package['url']);
             self::assertGreaterThanOrEqual(count($package['entry_points']), $package['xsd_count']);
@@ -102,6 +122,11 @@ final class JmhzXsdDownloaderTest extends TestCase
             'regzeldopl-1.2' => 2,
             'dzmh-1.1' => 2,
             'orezam-zrezam-1.0' => 3,
+            'jmhz-1.5.0.3' => 15,
+            'regzec-1.5' => 2,
+            'prezec-1.5' => 2,
+            'dzmh-1.5' => 2,
+            'zrezam-1.5' => 2,
         ];
 
         foreach ($expectedCounts as $relative => $expectedCount) {
@@ -212,6 +237,97 @@ final class JmhzXsdDownloaderTest extends TestCase
         self::assertFileExists($target . '/sample-9.9/base.xsd');
         self::assertFileDoesNotExist($target . '/sample-9.9/xsd/interni/message.xsd');
         self::assertFileDoesNotExist($target . '/sample-9.9/message.xsd');
+    }
+
+    /**
+     * JMHZ 1.5.0.3 veze schémata ve vnitřním archivu vedle HTML dokumentace.
+     * Vnější archiv je ověřený hashem, schémata se berou z vnitřního a
+     * metadata Finderu (`__MACOSX/`, `._*.xsd`) se nepřipínají.
+     */
+    public function testInnerArchivePinsOnlyTheNestedSchemasAndSkipsMacMetadata(): void
+    {
+        $inner = $this->createArchive([
+            'externi_xsd/main.xsd' => $this->schema('main'),
+            'externi_xsd/base.xsd' => $this->schema('base'),
+            '__MACOSX/externi_xsd/._main.xsd' => 'AppleDouble',
+            '__MACOSX/._externi_xsd' => 'AppleDouble',
+        ]);
+        $outer = $this->tempDir . '/outer.zip';
+        $zip = new ZipArchive();
+        self::assertTrue($zip->open($outer, ZipArchive::CREATE | ZipArchive::EXCL));
+        self::assertTrue($zip->addFromString('inner_xsd.zip', (string) file_get_contents($inner)));
+        self::assertTrue($zip->addFromString('index.html', '<html lang="cs"></html>'));
+        self::assertTrue($zip->addFromString('decoy.xsd', $this->schema('decoy')));
+        self::assertTrue($zip->close());
+        $target = $this->tempDir . '/jmhz';
+
+        $downloader = new JmhzXsdDownloader([
+            'sample' => [
+                'target' => 'sample-9.9',
+                'version' => '9.9',
+                'url' => $this->officialUrl(),
+                'sha256' => $this->hash($outer),
+                'xsd_count' => 2,
+                'entry_points' => ['main.xsd'],
+                'inner_archive' => 'inner_xsd.zip',
+            ],
+        ]);
+        $downloader->installFromArchives(['sample' => $outer], $target);
+
+        self::assertFileExists($target . '/sample-9.9/main.xsd');
+        self::assertFileExists($target . '/sample-9.9/base.xsd');
+        self::assertFileDoesNotExist($target . '/sample-9.9/decoy.xsd');
+        self::assertFileDoesNotExist($target . '/sample-9.9/externi_xsd/main.xsd');
+        self::assertSame([], glob($this->tempDir . '/.*stage*') ?: []);
+        self::assertSame([], glob($target . '/sample-9.9/.inner*') ?: []);
+    }
+
+    public function testMissingInnerArchiveFailsClosedAndLeavesTargetUntouched(): void
+    {
+        $outer = $this->createArchive(['other.zip' => 'PK', 'schema.xsd' => $this->schema('schema')]);
+        $target = $this->tempDir . '/jmhz';
+        self::assertTrue(mkdir($target, 0777, true));
+        self::assertSame(8, file_put_contents($target . '/keep.xsd', 'original'));
+        $downloader = new JmhzXsdDownloader([
+            'sample' => [
+                'target' => 'sample-1.0',
+                'version' => '1.0',
+                'url' => $this->officialUrl(),
+                'sha256' => $this->hash($outer),
+                'xsd_count' => 1,
+                'entry_points' => ['schema.xsd'],
+                'inner_archive' => 'inner_xsd.zip',
+            ],
+        ]);
+
+        try {
+            $downloader->installFromArchives(['sample' => $outer], $target);
+            self::fail('Chybějící vnitřní archiv musí být odmítnut.');
+        } catch (RuntimeException $e) {
+            self::assertStringContainsString('Inner archive', $e->getMessage());
+        }
+
+        self::assertSame('original', file_get_contents($target . '/keep.xsd'));
+        self::assertDirectoryDoesNotExist($target . '/sample-1.0');
+    }
+
+    public function testManifestRejectsAnUnsafeInnerArchivePath(): void
+    {
+        foreach (['../inner.zip', '/inner.zip', 'dir\\inner.zip', 'inner.txt', 'a/./inner.zip', ''] as $inner) {
+            try {
+                new JmhzXsdDownloader([
+                    'sample' => $this->package(
+                        $this->officialUrl(),
+                        str_repeat('0', 64),
+                        1,
+                        ['schema.xsd'],
+                    ) + ['inner_archive' => $inner],
+                ]);
+                self::fail("Nebezpečný inner_archive musí být odmítnut: {$inner}");
+            } catch (RuntimeException $e) {
+                self::assertStringContainsString('manifest entry', $e->getMessage());
+            }
+        }
     }
 
     public function testManifestRejectsAnUnsafeXsdRoot(): void

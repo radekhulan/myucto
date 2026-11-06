@@ -56,7 +56,8 @@ final class SyntheticNx1Archive
             $fields[$name] = [$type, $offset, $size];
             $offset += $size;
         }
-        $stride = max(4, ($offset + 3) & ~3);
+        $nullOffset = ($offset + 3) & ~3;
+        $stride = $nullOffset + 4 * intdiv(count($fields) + 31, 32);
         $blockSize = 4096;
         while ($stride + 40 > $blockSize) $blockSize *= 2;
         if ($blockSize > 65536) throw new \LogicException('Synthetic record too large.');
@@ -99,15 +100,23 @@ final class SyntheticNx1Archive
                 }
                 $byte = 0x20 + intdiv($slot, 8);
                 $block[$byte] = chr(ord($block[$byte]) | (1 << ($slot % 8)));
+                $fieldIndex = 0;
                 foreach ($fields as $name => [$type, $at, $size]) {
                     $v = $chunk[$slot][$name] ?? null;
+                    if ($v === null) {
+                        $nullByte = $start + $slot * $stride + $nullOffset + intdiv($fieldIndex, 8);
+                        $block[$nullByte] = chr(ord($block[$nullByte]) | (1 << ($fieldIndex % 8)));
+                        $fieldIndex++;
+                        continue;
+                    }
                     $encoded = match ($type) {
-                        'nxtBoolean' => chr($v === null ? 255 : (int) $v),
+                        'nxtBoolean' => $v ? "\xff" : "\0",
                         'nxtInt32' => pack('V', (int) $v),
                         'nxtDouble' => pack('e', (float) $v),
                         default => chr(strlen(self::cp1250((string) $v))) . self::cp1250((string) $v),
                     };
                     self::put($block, $start + $slot * $stride + $at, str_pad($encoded, $size, "\0"));
+                    $fieldIndex++;
                 }
             }
             $blocks[] = $block;

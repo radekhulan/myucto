@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/form/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/form/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:include schemaLocation="formCommonTypes.xsd"/>
+
+  <xs:element name="ozpTpp" type="ozpTppType"/>
+  <xs:complexType name="ozpTppType">
+    <xs:annotation>
+      <xs:documentation>DATOVÝ SCÉNÁŘ V MĚSÍČNÍM HLÁŠENÍ PODLE DRUHU ČINNOSTI:
+10</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="identifikace" type="identifikaceType"/>
+      <xs:element name="teoretickaPraktickaPriprava" type="tppType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="tppType">
+    <xs:annotation>
+      <xs:documentation>Průběh teoretické a praktické přípravy</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="obdobi" minOccurs="1" maxOccurs="unbounded">
+        <xs:annotation>
+          <xs:documentation>Průběh teoretické a praktické přípravy v období</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="datumOd" type="xs:date">
+              <xs:annotation>
+                <xs:documentation>Datum od
+DS: Průběh teoretické a praktické přípravy (ID 10263)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="datumDo" type="xs:date">
+              <xs:annotation>
+                <xs:documentation>Datum Do
+DS: Průběh teoretické a praktické přípravy (ID 10264)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

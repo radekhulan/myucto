@@ -114,6 +114,11 @@ final class MoneyS3BatchImporter
                 return self::result(MigrationBatchRunner::SKIPPED, $targetId, 'skipped', null, null,
                     $summary + ['note' => 'Firma už v MyÚčtu je, dávka ji podle volby přeskočila.'], null);
             }
+            $relink = $options->existing === MoneyS3BatchOptions::EXISTING_RELINK;
+            if ($targetId === null && $relink) {
+                return self::result(MigrationBatchRunner::SKIPPED, null, 'skipped', null, null,
+                    $summary + ['note' => 'Opravný převod vazeb opravuje jen firmy převedené dřív; firma v MyÚčtu není.'], null);
+            }
             if ($targetId === null && !$actor->canCreate) {
                 throw new MoneyS3Exception('create_forbidden', "Firma s IČO {$ico} v MyÚčtu není a zakládat firmy nemáte oprávnění.");
             }
@@ -139,7 +144,7 @@ final class MoneyS3BatchImporter
                     $targetId = $this->companies->create($identity, $actor->userId, $actor->assignCreator, $options->useRegistry);
                     $action = 'created';
                 }
-                if ($options->groupId !== null) {
+                if ($options->groupId !== null && !$relink) {
                     $this->companies->assignGroup($targetId, $options->groupId);
                 }
                 $firstPeriodStart = $action === 'created' ? ($summary['identity']['first_period_start'] ?? null) : null;
@@ -154,6 +159,8 @@ final class MoneyS3BatchImporter
                     false,
                     $fromYear,
                     $options->disposalYearTax,
+                    false,
+                    $relink,
                 );
                 [$protocol, $runId] = $this->runImport($targetId, $actor->userId, $backup, $lzPath, $agenda, $importOptions, $jobId, $progress, $cancel);
                 $result = $protocol->toArray();
@@ -166,7 +173,7 @@ final class MoneyS3BatchImporter
 
                 $notices = [];
                 if (!$dryRun && $summary['converted']) {
-                    if ($options->takeOverFilings && $perYear !== []) {
+                    if ($options->takeOverFilings && $perYear !== [] && !$relink) {
                         [$summary['filings'], $filingWarnings] = $this->takeOverFilings($targetId, $actor->userId, $perYear);
                         $notices = array_merge($notices, $filingWarnings);
                     }

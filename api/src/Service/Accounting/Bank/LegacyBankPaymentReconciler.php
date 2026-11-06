@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Bank;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use PDO;
 
@@ -122,14 +123,7 @@ final class LegacyBankPaymentReconciler
         }
 
         if ((string) $tx['invoice_type'] !== 'proforma') {
-            $predpisStmt = $pdo->prepare(
-                "SELECT 1 FROM journal_entries
-                  WHERE supplier_id = ? AND source_type = 'invoice' AND source_id = ?
-                    AND posted_at IS NOT NULL AND reversed_by IS NULL
-                  LIMIT 1"
-            );
-            $predpisStmt->execute([$supplierId, (int) $tx['invoice_id']]);
-            if ($predpisStmt->fetchColumn() === false) {
+            if (!(new DocumentPostingGroup($this->db))->hasActive($supplierId, 'invoice', (int) $tx['invoice_id'])) {
                 return false;
             }
         }

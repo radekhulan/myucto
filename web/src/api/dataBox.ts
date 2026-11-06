@@ -181,6 +181,8 @@ export interface OutboxSubmission {
   last_error_message: string | null
   row_version: number
   created_at: string
+  /** Úřad výsledek zpracování neposílá, povinnost splňuje samo dodání do schránky. */
+  settles_on_delivery?: boolean
   /**
    * Smí zrušená zpráva zmizet nadobro? Server ji doplňuje JEN u zrušených
    * řádků — jinde je `undefined`, protože se tam mazat nedá vůbec.
@@ -591,6 +593,8 @@ export interface InboxPollResult {
   failed: number
   unclassified: number
   error?: string | null
+  /** Doručenky odeslaných zpráv stažené ve stejné relaci; `null`, když se nestáhly. */
+  receipts?: { attached: number; pending: number; failed: number } | null
 }
 
 export interface MobileKeyInboxStart {
@@ -1003,6 +1007,8 @@ export const dataBoxApi = {
       apply_to_sender: applyToSender,
     }).then(r => r.data.item),
 
+  markAllInboxRead: (params: Record<string, unknown>) =>
+    api.post<{ updated: number }>('/submissions/inbox/read-all', null, { params }).then(r => r.data.updated),
   markInboxRead: (id: number, read: boolean) =>
     api.post<{ item: InboxMessage }>(`/submissions/inbox/${id}/read`, { read }).then(r => r.data.item),
 
@@ -1095,6 +1101,40 @@ export const dataBoxApi = {
       flow_token: flowToken,
       environment,
     }).then(r => r.data),
+
+  /** Dávka jménem a heslem: jedno zadání údajů pro všechna vybraná podání. */
+  passwordSendBatch: (outboxIds: number[], environment: string, username: string, password: string) =>
+    api.post<{ results: MobileKeyBatchItemResult[] }>('/submissions/outbox/password-send-batch', {
+      outbox_ids: outboxIds,
+      environment,
+      username,
+      password,
+    }).then(r => r.data.results),
+
+  /** Dávka systémovým certifikátem; `authorized` je vědomé potvrzení za celou dávku. */
+  certificateSendBatch: (outboxIds: number[], environment: string) =>
+    api.post<{ results: MobileKeyBatchItemResult[] }>('/submissions/outbox/certificate-send-batch', {
+      outbox_ids: outboxIds,
+      environment,
+      authorized: true,
+    }).then(r => r.data.results),
+
+  /** SMS kód pro dávku; přihlášení není vázané na jedno podání. */
+  smsSendStartBatch: (environment: string, username: string, password: string) =>
+    api.post<SmsInboxStart>('/submissions/outbox/sms/start-batch', {
+      environment,
+      username,
+      password,
+    }).then(r => r.data),
+
+  /** Ověří SMS kód a v jedné relaci odešle všechna vybraná podání. */
+  smsSendCompleteBatch: (outboxIds: number[], environment: string, flowToken: string, smsCode: string) =>
+    api.post<{ results: MobileKeyBatchItemResult[] }>('/submissions/outbox/sms/complete-batch', {
+      outbox_ids: outboxIds,
+      environment,
+      flow_token: flowToken,
+      sms_code: smsCode,
+    }).then(r => r.data.results),
 
   /**
    * Dodejky ke VŠEM odeslaným zprávám, které je ještě nemají, v jednom

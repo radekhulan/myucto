@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\EpoSigningCredentialRepository;
+use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
@@ -29,6 +30,7 @@ final class EpoDirectSubmissionAction
         private readonly EpoStepUpService $stepUp,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly TaxSubmissionRepository $submissionRepository,
     ) {}
 
     public function credentials(Request $request, Response $response): Response
@@ -39,6 +41,7 @@ final class EpoDirectSubmissionAction
         return Json::ok($response, $this->credentialService->listOwnedForSupplier(
             $this->userId($request),
             SupplierGuard::currentId($request),
+            RequestAuthorization::isClientType($request),
         ));
     }
 
@@ -75,6 +78,7 @@ final class EpoDirectSubmissionAction
                 (string) ($body['label'] ?? ''),
                 $bytes,
                 (string) ($body['pfx_password'] ?? ''),
+                RequestAuthorization::isClientType($request),
             );
             $this->audit(
                 $request,
@@ -153,7 +157,11 @@ final class EpoDirectSubmissionAction
                 'epo_signing_credential',
             );
             return Json::ok($response, [
-                'credentials' => $this->credentialService->listOwnedForSupplier($userId, $supplierId),
+                'credentials' => $this->credentialService->listOwnedForSupplier(
+                    $userId,
+                    $supplierId,
+                    RequestAuthorization::isClientType($request),
+                ),
             ]);
         } catch (EpoSubmissionException $e) {
             return $this->error($response, $e);
@@ -167,6 +175,9 @@ final class EpoDirectSubmissionAction
     ): Response {
         if (($denied = $this->guard($request, $response)) !== null) {
             return $denied;
+        }
+        if (!RequestAuthorization::canManageTaxSubmissionEvidence($request)) {
+            return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         $userId = $this->userId($request);
         $supplierId = SupplierGuard::currentId($request);
@@ -221,6 +232,9 @@ final class EpoDirectSubmissionAction
         $userId = $this->userId($request);
         $supplierId = SupplierGuard::currentId($request);
         $submissionId = (int) ($args['id'] ?? 0);
+        if (($denied = $this->deniedSubmission($request, $response, $submissionId, $supplierId)) !== null) {
+            return $denied;
+        }
         $body = (array) ($request->getParsedBody() ?? []);
         try {
             $this->stepUp->verify($request, $userId, $body, 'direct_submission');
@@ -277,6 +291,9 @@ final class EpoDirectSubmissionAction
         $userId = $this->userId($request);
         $supplierId = SupplierGuard::currentId($request);
         $submissionId = (int) ($args['id'] ?? 0);
+        if (($denied = $this->deniedSubmission($request, $response, $submissionId, $supplierId)) !== null) {
+            return $denied;
+        }
         $attemptId = (int) ($args['attemptId'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
         try {
@@ -343,6 +360,9 @@ final class EpoDirectSubmissionAction
         $userId = $this->userId($request);
         $supplierId = SupplierGuard::currentId($request);
         $submissionId = (int) ($args['id'] ?? 0);
+        if (($denied = $this->deniedSubmission($request, $response, $submissionId, $supplierId)) !== null) {
+            return $denied;
+        }
         $attemptId = (int) ($args['attemptId'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
         try {
@@ -370,9 +390,15 @@ final class EpoDirectSubmissionAction
         if (($denied = $this->guard($request, $response)) !== null) {
             return $denied;
         }
+        if (!RequestAuthorization::canManageTaxSubmissionEvidence($request)) {
+            return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
+        }
         $userId = $this->userId($request);
         $supplierId = SupplierGuard::currentId($request);
         $submissionId = (int) ($args['id'] ?? 0);
+        if (($denied = $this->deniedSubmission($request, $response, $submissionId, $supplierId)) !== null) {
+            return $denied;
+        }
         $attemptId = (int) ($args['attemptId'] ?? 0);
         $body = (array) ($request->getParsedBody() ?? []);
         try {
@@ -423,6 +449,9 @@ final class EpoDirectSubmissionAction
         $userId = $this->userId($request);
         $supplierId = SupplierGuard::currentId($request);
         $submissionId = (int) ($args['id'] ?? 0);
+        if (($denied = $this->deniedSubmission($request, $response, $submissionId, $supplierId)) !== null) {
+            return $denied;
+        }
         $body = (array) ($request->getParsedBody() ?? []);
         try {
             if ($stepUpPurpose !== null) {
@@ -455,6 +484,17 @@ final class EpoDirectSubmissionAction
             $this->auditFailure($request, $userId, $supplierId, $submissionId, $wrapped);
             return $this->error($response, $wrapped);
         }
+    }
+
+    private function deniedSubmission(Request $request, Response $response, int $id, int $supplierId): ?Response
+    {
+        $submission = $this->submissionRepository->find($id, $supplierId);
+        if ($submission === null) {
+            return Json::error($response, 'not_found', 'Podání nebylo nalezeno.', 404);
+        }
+        return RequestAuthorization::canAccessTaxSubmission($request, $submission)
+            ? null
+            : Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
     }
 
     private function guard(Request $request, Response $response): ?Response

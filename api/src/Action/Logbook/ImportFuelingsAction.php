@@ -50,7 +50,7 @@ final class ImportFuelingsAction
         try {
             $report = $this->importer->import($supplierId, $this->userId($request), $content, $name, $dryRun);
         } catch (\Throwable $e) {
-            return Json::error($response, 'import_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'import_failed', $e->getMessage(), 500);
         }
         if (empty($report['ok'])) {
             return Json::error($response, 'import_failed', (string) ($report['error'] ?? 'Import selhal.'), 400);

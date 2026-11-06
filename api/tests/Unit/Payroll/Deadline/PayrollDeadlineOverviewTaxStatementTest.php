@@ -85,14 +85,49 @@ final class PayrollDeadlineOverviewTaxStatementTest extends TestCase
     }
 
     /**
+     * Za rok 2026 se obě vyúčtování podávají v roce 2027 ještě podle dosavadního
+     * znění (čl. VII bod 6 zák. č. 360/2025 Sb.).
+     */
+    public function testStatementsFor2026AreStillRemindedIn2027(): void
+    {
+        $service = $this->service(
+            basis: [2026 => ['approved_runs' => 12, 'withholding_minor' => 5_000]],
+            filed: [],
+            today: '2027-03-10 08:30:00',
+        );
+
+        self::assertSame(
+            ['tax_statement:dpzvd6:2026', 'tax_statement:dpsvd2:2026'],
+            array_column($this->taxStatementItems($service), 'reference'),
+        );
+    }
+
+    /**
+     * Za rok 2027 vyúčtování neexistuje: § 38j odst. 4 až 9 ZDP zrušil
+     * zák. č. 360/2025 Sb. (čl. VI bod 80) a z příjmů podle § 6 odst. 4 se
+     * sráží záloha, ne srážková daň. Hlídač nesmí připomínat tiskopis, který
+     * se nepodává — ani když mzdy roku 2027 nesou samostatný základ.
+     */
+    public function testNoStatementDeadlineFor2027(): void
+    {
+        $service = $this->service(
+            basis: [2027 => ['approved_runs' => 12, 'withholding_minor' => 5_000]],
+            filed: [],
+            today: '2028-03-10 08:30:00',
+        );
+
+        self::assertSame([], $this->taxStatementItems($service));
+    }
+
+    /**
      * @param array<int,array{approved_runs:int,withholding_minor:int}> $basis
      * @param array<string,list<int>> $filed
      */
-    private function service(array $basis, array $filed): PayrollDeadlineOverviewService
+    private function service(array $basis, array $filed, string $today = self::TODAY): PayrollDeadlineOverviewService
     {
         $clock = $this->createStub(ClockInterface::class);
         $clock->method('now')->willReturn(
-            new \DateTimeImmutable(self::TODAY, new \DateTimeZone('Europe/Prague')),
+            new \DateTimeImmutable($today, new \DateTimeZone('Europe/Prague')),
         );
 
         $repository = $this->createStub(PayrollDeadlineOverviewRepository::class);

@@ -217,6 +217,18 @@ table.items-ld th { font-size: 7pt; letter-spacing: 0; padding-left: 1.5mm; padd
 table.items-ld td { padding-left: 1.5mm; padding-right: 1.5mm; }
 table.items-ld td.num { font-size: 8pt; }
 table.items-ld th.vat { font-size: 7pt; }
+/* Kompaktní řádky položek (volba firmy invoice_pdf_compact_items): víc řádků na stranu
+   u mnohopoložkových faktur. Jen odsazení, písmo a mezery, barvy zůstávají ze základních
+   pravidel (a černobílá varianta je tak pokrývá beze změny). */
+table.items-compact { font-size: 8pt; margin-bottom: 3mm; }
+table.items-compact th { font-size: 7pt; padding: 1.2mm 1.5mm; }
+table.items-compact td { padding: 0.6mm 1.5mm; line-height: 1.2; }
+/* Čísla o půl bodu menší, aby se i milionové částky vešly do užších sloupců. Se slevou
+   u řádku vyšší specificita, jinak by vyhrálo `table.items-ld td.num` (mPDF). */
+table.items-compact td.num { font-size: 7.5pt; }
+table.items-ld.items-compact td.num { font-size: 7.5pt; }
+table.items-compact .vat { font-size: 7.5pt; }
+table.items-compact th.vat { font-size: 7pt; }
 
 /* ─── SUMACE ─── */
 .totals {
@@ -361,6 +373,9 @@ table.czk-recap tr.grand td {
 .bank-value.paid-mark {
     color: #2E7D32;
 }
+/* Účet v patičce (volba firmy invoice_pdf_bank_in_footer): platební panel nese
+   jen QR s popiskem, zúží se na jeho šířku. */
+.pay-panel.pay-panel-qr { width: 48mm; }
 /* QR uvnitř panelu — bez vlastního rámečku/paddingu, splývá s podbarvením. */
 .pay-panel td.pay-qr {
     width: 40mm;
@@ -492,6 +507,16 @@ table.czk-recap tr.grand td {
     /* Bez letter-spacingu mPDF na 7.5pt přebíjí kern pár „Pl" tak, že „l" zmizí
        (např. „v Plzni" → „v P zni"). Drobné rozpáčení glyfy vrátí a zlepší čitelnost. */
     letter-spacing: 0.15pt;
+}
+/* Číslo účtu, IBAN, BIC a banka na patě každé stránky (volba invoice_pdf_bank_in_footer). */
+.page-bank {
+    text-align: center;
+    font-size: 8.5pt;
+    /* Údaje k platbě musí být čitelné: tučně a tmavě, ne šedivě jako attribution. */
+    font-weight: bold;
+    color: #2E2940;
+    font-family: 'montserrat', 'DejaVu Sans', sans-serif;
+    margin-bottom: 1mm;
 }
 /* mPDF htmlpagefooter — attribution na patě KAŽDÉ stránky */
 .page-attribution {

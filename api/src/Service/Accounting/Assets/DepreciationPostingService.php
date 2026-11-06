@@ -72,7 +72,6 @@ final class DepreciationPostingService
             'errors' => [],
         ];
 
-        $calendar = $this->supplierCalendar($supplierId);
         [$periodStart, $periodEnd] = $this->bookingWindow($supplierId, $fiscalYear, $taxEvidence);
 
         $pdo = $this->db->pdo();
@@ -85,7 +84,7 @@ final class DepreciationPostingService
                 // v autocommitu.
                 [$bookedSomething, $accAmount, $taxAmount] = TransactionFailure::retrying(
                     $pdo,
-                    fn (): array => $this->bookAsset($supplierId, $assetId, $fiscalYear, $calendar, $periodEnd, $taxEvidence, $meta, $allowClosingPeriod),
+                    fn (): array => $this->bookAsset($supplierId, $assetId, $fiscalYear, $periodEnd, $taxEvidence, $meta, $allowClosingPeriod),
                 );
                 if ($bookedSomething) {
                     $result['booked']++;
@@ -130,7 +129,6 @@ final class DepreciationPostingService
         int $supplierId,
         int $assetId,
         int $fiscalYear,
-        FiscalCalendar $calendar,
         string $periodEnd,
         bool $taxEvidence,
         array $meta,
@@ -142,6 +140,7 @@ final class DepreciationPostingService
             $pdo->beginTransaction();
         }
         try {
+            (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
             $lockedAsset = $this->assets->findForUpdate($supplierId, $assetId);
             if ($lockedAsset === null) {
                 throw new PostingException('not_found', 'Majetek během účtování odpisů zanikl.', 404);
@@ -157,10 +156,7 @@ final class DepreciationPostingService
             // majetek v něm ještě měl nenulovou daňovou ZC. Migrační počáteční stavy
             // (opening_tax_years) posunou první in-system rok, takže roky kryté migrací
             // (< systemStartYear) guard nezablokuje.
-            $firstYear = $asset['put_into_use_date'] !== null
-                ? $calendar->fiscalYearOfDate((string) $asset['put_into_use_date'])
-                : $fiscalYear;
-            $systemStartYear = $firstYear + (int) $asset['opening_tax_years'];
+            $systemStartYear = $ctx->firstSystemYear($fiscalYear);
             $priorYear = $fiscalYear - 1;
             if ($priorYear >= $systemStartYear
                 && $this->entries->findYear($assetId, 'tax', $priorYear) === null
@@ -366,6 +362,19 @@ final class DepreciationPostingService
      */
     public function postAccountingEntry(int $supplierId, array $asset, array $row, string $entryDate, array $meta = [], bool $allowClosingPeriod = false): int
     {
+        $guard = new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db);
+        return $guard->transaction(function () use ($guard, $supplierId, $asset, $row, $entryDate, $meta, $allowClosingPeriod): int {
+            $guard->lockPeriods($supplierId);
+            try {
+                return $this->postAccountingEntryLocked($supplierId, $asset, $row, $entryDate, $meta, $allowClosingPeriod);
+            } catch (\MyInvoice\Service\Nonprofit\Capital\CapitalException $e) {
+                throw new PostingException($e->errorCode, $e->getMessage(), $e->httpStatus);
+            }
+        });
+    }
+
+    private function postAccountingEntryLocked(int $supplierId, array $asset, array $row, string $entryDate, array $meta, bool $allowClosingPeriod): int
+    {
         $amount = round((float) $row['amount'], 2);
         $entryId = $this->entries->upsert([
             'supplier_id' => $supplierId,
@@ -405,6 +414,9 @@ final class DepreciationPostingService
             'allow_closing_period' => $allowClosingPeriod,
         ]);
 
+        (new \MyInvoice\Service\Nonprofit\Capital\CapitalService($this->db, $this->posting))->onDepreciation(
+            $supplierId, (int) $asset['id'], $entryId, $allowClosingPeriod, $meta['posted_by'] ?? $meta['user_id'] ?? null,
+        );
         return $entryId;
     }
 
@@ -427,6 +439,7 @@ final class DepreciationPostingService
         $confirmed = [];
         foreach ($this->entries->forAsset((int) $asset['id']) as $e) {
             $confirmed[] = [
+                ...$e,
                 'fiscal_year' => (int) $e['fiscal_year'],
                 'kind' => (string) $e['kind'],
                 'amount' => (float) $e['amount'],
@@ -439,27 +452,7 @@ final class DepreciationPostingService
 
         $calendar = $this->supplierCalendar((int) $asset['supplier_id']);
 
-        return new DepreciationContext(
-            inputPrice: (float) $asset['input_price'],
-            taxGroup: $asset['tax_group'] === null ? null : (int) $asset['tax_group'],
-            firstYearIncrease: (string) $asset['tax_first_year_increase'],
-            isFirstOwner: (bool) $asset['is_first_owner'],
-            // §30e platí jen pro vozidla pořízená od 1. 1. 2024 (zákon 349/2023 Sb.);
-            // u starších M1 se limit 2 mil. neaplikuje.
-            isM1Vehicle: (bool) $asset['is_m1_vehicle'] && (string) $asset['acquisition_date'] >= '2024-01-01',
-            m1LimitException: (bool) $asset['m1_limit_exception'],
-            putIntoUseDate: $asset['put_into_use_date'] === null ? null : (string) $asset['put_into_use_date'],
-            disposalDate: $asset['disposal_date'] === null ? null : (string) $asset['disposal_date'],
-            accUsefulLifeMonths: $asset['acc_useful_life_months'] === null ? null : (int) $asset['acc_useful_life_months'],
-            accResidualValue: (float) $asset['acc_residual_value'],
-            openingTaxYears: (int) $asset['opening_tax_years'],
-            openingTaxAmount: (float) $asset['opening_tax_amount'],
-            openingAccMonths: (int) $asset['opening_acc_months'],
-            openingAccAmount: (float) $asset['opening_acc_amount'],
-            improvements: $improvements,
-            confirmedEntries: $confirmed,
-            calendar: $calendar,
-        );
+        return DepreciationContext::fromAsset($asset, $calendar, $improvements, $confirmed);
     }
 
     /** @var array<int, FiscalCalendar> memo režimu firmy v rámci běhu */

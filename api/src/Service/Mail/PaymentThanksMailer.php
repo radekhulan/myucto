@@ -55,7 +55,7 @@ final class PaymentThanksMailer
     /** Chyby persistence fronty a zámků se propagují; nejde o best-effort consumer. */
     public function flushDeferred(?int $invoiceId = null, int $max = 25): array
     {
-        return (new PaymentThanksOutbox($this->db))->flush(fn (array $intent): array => $this->sendCommitted(
+        return (new PaymentThanksOutbox($this->db, $this->logger))->flush(fn (array $intent): array => $this->sendCommitted(
             $intent['invoice_id'], $intent['trigger'], $intent['user_id'], $intent['ip'],
             $intent['user_agent'], $intent['require_unsent'],
         ), $invoiceId, $max);
@@ -67,26 +67,45 @@ final class PaymentThanksMailer
         if (!$invoice) {
             return ['status' => 'skipped', 'reason' => 'not_found'];
         }
-        if (($invoice['invoice_type'] ?? '') === 'cancellation') {
-            return ['status' => 'skipped', 'reason' => 'cancellation'];
-        }
-        if (($invoice['status'] ?? '') !== 'paid') {
-            return ['status' => 'skipped', 'reason' => 'not_paid'];
-        }
-
         $supplierId = (int) ($invoice['supplier_id'] ?? 0);
         $settings = $this->supplierSettings($supplierId);
-        if (!$settings['enabled']) {
+        // Párování z banky volá poděkování u každé firmy; bez zapnuté funkce
+        // nepatří přeskočení do aktivity faktury.
+        if ($trigger === 'bank_match' && !$settings['enabled']) {
             return ['status' => 'skipped', 'reason' => 'disabled'];
         }
+        if (($invoice['invoice_type'] ?? '') === 'cancellation') {
+            return $this->logSkip($invoiceId, $invoice, 'cancellation', $trigger, $userId, $ip, $userAgent);
+        }
+        if (($invoice['status'] ?? '') !== 'paid') {
+            return $this->logSkip($invoiceId, $invoice, 'not_paid', $trigger, $userId, $ip, $userAgent);
+        }
+
+        if (!$settings['enabled']) {
+            return $this->logSkip($invoiceId, $invoice, 'disabled', $trigger, $userId, $ip, $userAgent);
+        }
         if ($trigger === 'bank_match' && !$settings['auto_send']) {
-            return ['status' => 'skipped', 'reason' => 'auto_disabled'];
+            return $this->logSkip($invoiceId, $invoice, 'auto_disabled', $trigger, $userId, $ip, $userAgent);
         }
 
         // Idempotence — auto odeslání jen jednou (ruční „odeslat znovu" by byla
         // samostatná vědomá akce; mark-paid stejně nejde na už zaplacené faktuře).
         if ($requireUnsent && !empty($this->sentAt($invoiceId))) {
             return $this->logSkip($invoiceId, $invoice, 'already_sent', $trigger, $userId, $ip, $userAgent);
+        }
+        // Auto poděkování patří čerstvé platbě. `paid_at` nese datum platby z banky,
+        // ne datum spárování — pozdě nahraný nebo znovu nahraný výpis by jinak
+        // děkoval za týdny staré úhrady. Ruční odeslání zůstává vědomou volbou.
+        if ($trigger === 'bank_match') {
+            $paidOn = substr((string) ($invoice['paid_at'] ?? ''), 0, 10);
+            $maxAge = $settings['max_age_days'];
+            if ($paidOn !== '' && $maxAge > 0 && $paidOn < date('Y-m-d', strtotime("-{$maxAge} days"))) {
+                return $this->logSkip($invoiceId, $invoice, 'stale_payment', $trigger, $userId, $ip, $userAgent);
+            }
+            $suppressedAt = $this->suppressedAt($invoiceId);
+            if ($suppressedAt !== null && $paidOn !== '' && $paidOn <= substr($suppressedAt, 0, 10)) {
+                return $this->logSkip($invoiceId, $invoice, 'suppressed_after_release', $trigger, $userId, $ip, $userAgent);
+            }
         }
 
         // Jednotný resolver (#86) — poděkování se váže k dokladu, účel `documents`.
@@ -150,14 +169,14 @@ final class PaymentThanksMailer
             : ['status' => 'sent', 'recipients' => $to];
     }
 
-    /** @return array{enabled:bool, auto_send:bool, attach_paid_pdf:bool} */
+    /** @return array{enabled:bool, auto_send:bool, attach_paid_pdf:bool, max_age_days:int} */
     private function supplierSettings(int $supplierId): array
     {
         if ($supplierId <= 0) {
-            return ['enabled' => false, 'auto_send' => false, 'attach_paid_pdf' => false];
+            return ['enabled' => false, 'auto_send' => false, 'attach_paid_pdf' => false, 'max_age_days' => 0];
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT payment_thanks_enabled, payment_thanks_auto_send, payment_thanks_attach_paid_pdf
+            'SELECT payment_thanks_enabled, payment_thanks_auto_send, payment_thanks_attach_paid_pdf, payment_thanks_max_age_days
                FROM supplier WHERE id = ?'
         );
         $stmt->execute([$supplierId]);
@@ -166,7 +185,16 @@ final class PaymentThanksMailer
             'enabled'         => (bool) ($row['payment_thanks_enabled'] ?? false),
             'auto_send'       => (bool) ($row['payment_thanks_auto_send'] ?? false),
             'attach_paid_pdf' => (bool) ($row['payment_thanks_attach_paid_pdf'] ?? false),
+            'max_age_days'    => (int) ($row['payment_thanks_max_age_days'] ?? 0),
         ];
+    }
+
+    private function suppressedAt(int $invoiceId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT payment_thanks_suppressed_at FROM invoices WHERE id = ?');
+        $stmt->execute([$invoiceId]);
+        $v = $stmt->fetchColumn();
+        return $v === false ? null : ($v ?: null);
     }
 
     private function sentAt(int $invoiceId): ?string

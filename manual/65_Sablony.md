@@ -13,7 +13,7 @@ Kapitolu otevřete, když:
 - převzali jste firmu s historickým účetnictvím a chcete z něj odvodit pravidla,
 - chcete doplnit předkontace o analytické účty.
 
-Stránka `Nástroje → Šablony účtování` má tři záložky. Nejde o jeden univerzální
+Stránka `Nástroje → Šablony účtování` má pět záložek. Nejde o jeden univerzální
 automat: každá záložka zasahuje do jiné části zpracování.
 
 <!-- cols: 26 44 30 -->
@@ -21,21 +21,24 @@ automat: každá záložka zasahuje do jiné části zpracování.
 |---|---|---|
 | **Šablony zápisů** | Předvyplnění řádků ručního účetního zápisu | [§ 65.3](#653-krok-za-krokem-sablona-ucetniho-zapisu) |
 | **Pravidla nákladů** | Návrh druhu nákladu a účtu na řádku přijaté faktury | [§ 65.4](#654-krok-za-krokem-pravidlo-nakladu) |
+| **Pravidla výnosů** | Účet položky vydané faktury podle kódu, textu nebo sazby DPH | [§ 65.10.9](#65109-pravidla-vynosu) |
 | **Pravidla účtování** | Návrh nebo automatizace opakovaných bankovních plateb | [§ 65.5](#655-krok-za-krokem-pravidlo-uctovani-banky) |
+| **Šablony pravidel** | Katalog předloh, ze kterých tlačítko **Ze šablony** založí pravidlo účtování | [§ 65.6](#656-krok-za-krokem-sablona-bankovniho-pravidla) |
 
-Vedle toho jsou v nabídce `Nástroje` samostatné stránky **Šablony bank. pravidel**
-(katalog typických bankovních pravidel, [§ 65.6](#656-krok-za-krokem-sablona-bankovniho-pravidla))
-a **Asistent nastavení účtování** ([§ 65.8](#658-krok-za-krokem-asistent-nastaveni-uctovani)).
+Záložka **Šablony pravidel** se zobrazí jen s oprávněním ke správě bankovních pravidel.
+Kdo toto oprávnění má, ale Šablony účtování nevidí, najde katalog v nabídce `Nástroje`
+jako samostatnou stránku **Šablony bank. pravidel**. Vedle toho je v nabídce `Nástroje`
+**Asistent nastavení účtování** ([§ 65.8](#658-krok-za-krokem-asistent-nastaveni-uctovani)).
 
 ## 65.2 Než začnete
 
-1. **Podvojné účetnictví.** Všechny tři záložky se zobrazují jen firmě v podvojném
+1. **Podvojné účetnictví.** Všechny záložky se zobrazují jen firmě v podvojném
    účetnictví. U firmy v daňové evidenci stránka nabídne odkaz **Otevřít Nastavení → Daně a účetnictví**.
 2. **Správná firma.** Šablony a pravidla jsou firemní a používají firmu zvolenou
    v hlavní liště aplikace. Pravidla druhé firmy se nepřimíchávají (u **Pravidel
    účtování** je jméno firmy uvedeno i nad seznamem).
 3. **Oprávnění.** Šablony zápisů si čtete s oprávněním k šablonám účtování a měníte
-   se zápisovou variantou téhož oprávnění. Pravidla nákladů používají účetní
+   se zápisovou variantou téhož oprávnění. Pravidla nákladů a výnosů používají účetní
    oprávnění. Bankovní pravidla a katalog jejich šablon řídí oprávnění ke správě
    bankovních pravidel: čtení zobrazí, zápis dovolí správu (viz [§ 65.10.6](#65106-opravneni-audit-a-chyby)).
 4. **Účtový rozvrh.** Účty použité v šabloně a pravidlech musí v osnově firmy
@@ -145,7 +148,7 @@ smazáním pravidla zůstanou.
 
 Každá firma má vlastní katalog typických bankovních pravidel.
 
-1. Otevřete `Nástroje → Šablony bank. pravidel`.
+1. Otevřete `Nástroje → Šablony účtování`, záložka **Šablony pravidel**.
 2. Chcete-li přidat vlastní šablonu, klikněte na **Nová šablona** a vyplňte název a klíč, směr a kritéria, předkontaci, pořadí a stav **Aktivní**.
 3. Na stránce bankovních pravidel klikněte u šablony na **Použít šablonu**. Vznikne pravidlo pro aktuální firmu.
 4. Chybí-li údaj, který šablona potřebuje (například VS ČSSZ, číslo zdravotního pojištění nebo DIČ), aplikace nabídne **Otevřít nastavení**.
@@ -219,7 +222,8 @@ doložených zaúčtovanou historií. Tímto krokem se historické doklady ani d
 přeúčtuje. Po ostrém běhu mají doklady nové kontace v deníku.
 
 > [!WARNING]
-> Volba **Přeúčtovat všechny doklady v období** může nahradit ručně zadané účtování. Ostrý běh
+> Volba **Přeúčtovat všechny doklady v období** může nahradit ručně zadané účtování (doklady převzaté z jiného
+> programu se ale nepřepisují nikdy). Ostrý běh
 > vyžaduje dokončený dry-run stejného balíčku se zcela shodným rozsahem dat i režimem výběru.
 > Smazání zálohy je nevratné: deník se nezmění, ale zmizí možnost obnovy daného běhu.
 
@@ -402,12 +406,50 @@ na drobný hmotný nebo nehmotný majetek, ve stejné transakci se synchronizuje
 `Nákup → Drobný majetek`. Dlouhodobý majetek zůstává kandidátem k ručnímu založení karty a odpisového plánu.
 Tento job mění pouze přijaté faktury; již zaúčtovanou bankovní historii nemění.
 
+Doklad převzatý z jiného účetního programu (například převodem z POHODY nebo jiného systému v části
+`Systém → Přechod z jiných účetních systémů`) se přeskočí vždy, i při volbě **Přeúčtovat všechny doklady
+v období**: jeho kontace se nepřepisuje a v dry-runu je uveden jako přeskočený. Přeskočí se také doklad s
+autoritativním rozdělením DPH a doklad bez aktivního účetního zápisu.
+
 Uzavřené, uzavírané a měkce uzamčené období se vždy přeskočí. Stav období se ověří při dry-runu a znovu
 atomicky bezprostředně před přepisem. Pokud se zápis nebo vypočtený výsledek od dry-runu změnil, asistent jej
 také přeskočí a vyžádá novou kontrolu. Po ostrém běhu lze původní účtování obnovit ze snapshotu; obnova opět
 smí změnit jen otevřené a nezamčené období a odmítne doklad mezitím ručně změněný. Jakmile už záloha není
 potřeba, lze snapshot samostatně a nevratně smazat. Smazání snapshotu účetní deník ani klasifikaci položek
 nemění, pouze odstraní možnost obnovy daného běhu.
+
+### 65.10.9 Pravidla výnosů
+
+Pravidlo výnosů určí účet položky vydané faktury. Hodí se hlavně u importovaných faktur,
+jejichž položky nejsou navázané na skladové karty, takže by celý výnos šel na předkontaci
+dokladu (602).
+
+1. Otevřete `Nástroje → Šablony účtování` a záložku **Pravidla výnosů**.
+2. Klikněte na **Nové pravidlo** a vyplňte **Název pravidla**.
+3. V části **Kritéria** vyplňte aspoň jedno z polí **Kód položky**, **Text položky obsahuje**
+   nebo **Sazba DPH (%)**. Vyplněná kritéria musí sedět všechna.
+4. Zvolte **Účet položky**: výnosový účet (601, 602, 604…), u přefakturace i rozvahový.
+   Saldokontní, daňové a peněžní účty povolené nejsou (stejně jako u účtu položky,
+   viz [§ 114.11.9](114_Dimenze.md#114119-produkt-a-kategorie)).
+5. Nastavte **Prioritu** (0 až 999, nižší jde první) a uložte.
+
+**Kód položky** je kód prodávajícího z ISDOC (`SellersItemIdentification`). Import vydaných
+faktur ho ukládá k položce a pravidlo s ním porovnává přesnou shodu bez ohledu na velikost
+písmen. **Text položky obsahuje** se porovnává bez ohledu na velikost písmen a diakritiku.
+
+Kdy se pravidlo uplatní:
+
+- **Import vydaných faktur** zapíše účet z pravidla na položku. Účetní ho vidí v editoru
+  faktury v poli **Účet položky** a může ho přepsat. Ve sloupci **Použití** se pravidlu
+  přičte každá takto označená položka.
+- **Zaúčtování** faktury i `Účetnictví → Doúčtovat doklady` doplní účet z pravidla
+  položkám, které nemají vlastní účet ani účet produktu nebo kategorie. Pořadí je tedy
+  prodej majetku > účet položky > produkt > kategorie > pravidlo výnosů > předkontace
+  dokladu. Slevový a textový řádek pravidlo nebere.
+
+Změna pravidla už uložený účet položky ani zaúčtované zápisy nemění. Pravidla výnosů se
+nastavují ručně, z historie se neučí. Evidenci DPH a kontrolní hlášení účet položky
+neovlivňuje.
 
 ## 65.11 Související kapitoly
 

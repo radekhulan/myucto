@@ -20,6 +20,7 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Daně | **jen čtení** — odhad DPH (měsíc i kvartál), KH, SH, daň z příjmů, kalendář |
 | Účetnictví | **jen čtení** — obratovka, rozvaha, výsledovka, hlavní kniha, saldo, deník |
 | Ostatní pohledávky a závazky | čtení; zápis **jen konceptů**: založení, úprava, smazání, splátkový kalendář a opakování bez automatického účtování (`src/other-item-tools.mjs`) |
+| SVJ | **jen čtení**: registr a předpisy, karta jednotky s hrubými pohledávkami a oddělenými kredity, doložené role dlužníků a ručitelů, historie úhrad a rekonciliace |
 | Dimenze | **jen čtení**: typy a hodnoty, zisk a roční statistika, nepřímé cash flow, filtry výkazů a deníku, přiřazení dokladů a kontrola pravidel |
 | Statistika | tržby, zisk, trendy, top odběratelé i dodavatelé, cash flow, platební morálka |
 | Všechny firmy | **jen čtení**: manažerské součty za přesné období, vývoj, roční predikce, prognóza toků, zůstatky a rizika přístupných firem přes `group_dashboard`; původní měny i samostatný přepočet CZK |
@@ -54,6 +55,23 @@ smlouvy) a analytické účty účtové osnovy
 (`create_analytic_account`, `update_analytic_account`), které server povoluje
 výčtem metoda a cesta (`BEARER_WRITE_EXCEPTIONS`); do deníku nic nezapisují.
 Syntetické účty a mazání účtů zůstávají ve webovém rozhraní.
+
+Karta SVJ (`property_receivable_card`) vyžaduje `unit_id`, `as_of` a `known_at` včetně
+času a offsetu. Vrací doložený historický stav podle tehdejší znalosti. Zachovejte
+`null`, `precision`, `review_required` a `coverage`: neúplný podklad neznamená nulový
+dluh. Popisky osob a jednotek se načítají z aktuálních číselníků. Pohledávky a kredity nesčítejte do jediného čistého salda. `source_snapshot_hash`
+je otisk původní doménové projekce před kurátorováním, nikoli odpovědi MCP.
+
+Operace (`list_property_payment_operations`) jsou vzestupné a `next_cursor` patří do
+`after_id`; potvrzená workflow (`property_payment_history`) jsou sestupná a kurzor
+patří do `before_id`. Obě stránky mají `limit` 1 až 100, výchozí 25. Částky workflow
+odpovídají okamžiku potvrzení, nikoli dnešní dostupnosti kreditu. Rekonciliace
+(`property_receivable_reconciliation`) používá účetní datum a současnou znalost
+účetnictví (`current_ledger`), nepřebírá historickou znalost z karty. Karta a
+rekonciliace interně načítají historii celé firmy i při omezení na jednu jednotku.
+Karta není stránkovaná a limit operací neomezuje počet jejich alokací. Tyto výstupy
+nejsou potvrzením dluhu ani oprávněním k zápisu; ABO soubory a platební dispozice
+přes tyto nástroje nejsou dostupné.
 
 ## Instalace
 
@@ -179,6 +197,60 @@ podle toho se nástroj skryje v režimu jen pro čtení a označí varováním v
 `destructive: true` navíc u mazání a nevratných kroků; k tomu patří `confirm: CONFIRM`
 ve schématu a `confirmed()` / `requireConfirm()` v `run()`, které bez potvrzení
 místo zápisu vrátí náhled dotčeného záznamu.
+
+Každý nástroj má přímo u definice deklaraci `api`, například
+`api: [['GET', '/api/invoices/{id}'], ['PUT', '/api/invoices/{id}/work-report']]`.
+Uvádějte všechny operace včetně podmíněného dohledávání v pomocných funkcích;
+každá operace mimo GET vyžaduje `write: true`. Nástroje, které nejsou převedené
+do klientského katalogu nebo API této instalace nevolají, mají výslovné
+`api: false` a `apiReason`. Na klientské doméně se nikdy nenabídnou.
+
+`npm run generate:api` v `MCP/` vytvoří `src/tool-api.generated.json`; tento
+manifest se commituje a neupravuje ručně. PHP jej načítá bez Node a podle
+stávající mapy API oprávnění, pravidel klientské domény a role uživatele posoudí
+každou operaci. Chybějící nebo poškozený manifest znamená prázdný katalog.
+Rozsah tokenu dále omezí nabídku v serverovém MCP. Při běhu se všechna práva
+a vazba na firmu ověřují znovu v API.
+
+`npm test` kontroluje shodu manifestu s deklaracemi i skutečná volání nástrojů
+nad zaznamenávajícím klientem. Pro každou novou větev doplňte syntetický scénář
+v `test/api-contracts.test.mjs`. Scénáře musí dojít i k podmíněným operacím a
+zápisům za potvrzovacími guardy. V klientském katalogu jsou deklarované dosavadní
+klientské nástroje, výkazy práce, sazby DPH, měny, nacenění ceníku, úpravy
+přijatých konceptů a nahrávání příloh faktur, PDF přijatých faktur a jejich
+strukturovaný import. Ke čtení jsou také zůstatky bankovních účtů, návrhy
+párování výpisů, historie faktur ze šablony, hledání zboží, jeho dostupnost
+a seznam/detail skladů. Čtení skladu zpřístupňuje i `stock_quantities`, lokace,
+balení a sledování šarží/sériových čísel. Server klientovi nevrací zdrojové
+objednávky, nabídky dodavatelů ani historii pohybů šarží/sériových čísel.
+Platební údaje přijaté faktury vyžadují její čtení; obrázek QR se do MCP
+nepředává. Kategorie nákladů vyžadují čtení nastavení firmy.
+Čtení vydaných faktur zpřístupňuje i přehledy kandidátů k propojení záloh,
+konečných faktur, záloh k postupnému čerpání a náhled úroku z prodlení. Čtení
+přijatých faktur zpřístupňuje jejich kandidáty záloh a vyúčtování. Jde pouze
+o GET. Zápisový token navíc umožňuje propojování a odpojování vydaných i přijatých
+záloh, postupné čerpání a jeho odebrání, vytvoření finální faktury ze zálohy
+a ručního daňového dokladu k platbě. Vazby a čerpání vyžadují zápis příslušné
+agendy; `create_final_invoice_from_proforma` právo `invoices.issue`
+a `create_payment_tax_document` právo `invoices.mark_paid`. Obecný zápis
+vydaných faktur tato dvě samostatná práva nenahrazuje.
+
+V ručním režimu dokladu k platbě vyber platbu přes `list_invoice_payments`,
+založ její koncept přes `create_payment_tax_document` a po kontrole jej vystav
+přes `issue_invoice`. Poté lze zálohu čerpat na konceptu běžné faktury přes
+`apply_invoice_advance_drawdown`, nebo založit finální koncept přes
+`create_final_invoice_from_proforma`. Vystavení finálu je samostatný krok.
+Opakované vytvoření dokladu k téže platbě nebo finálu vrací existující doklad;
+opakované čerpání na témže konceptu nahrazuje dosavadní odpočet. Čerpání
+vyžaduje vystavený doklad k platbě, stejnou protistranu a měnu, dostupný zůstatek
+a nepodporuje OSS. Nadále platí serverové zámky období a dokladů.
+
+Obě odpojení vazby a odebrání čerpání vyžadují `confirm: true`; bez něj
+zobrazí pouze náhled. Samotné odpojení vazby ponechá `advance_paid_amount`
+na dokladu. Odebrání čerpání naopak odstraní i odpočtové řádky konceptu.
+Vytvoření penalizační faktury zůstává mimo klientský katalog.
+Ostatní nástroje zůstávají výslovně vyloučené, dokud
+nebudou převedené se stejným ověřením závislostí.
 
 Ploché číselníky (výrobci, štítky, poplatky, parametry) generuje `codebookTools()` —
 pětice seznam/detail/založit/upravit/smazat z jedné konfigurace. Další číselník

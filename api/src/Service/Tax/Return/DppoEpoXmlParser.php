@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Tax\Return;
 
+use MyInvoice\Service\Xml\SafeXmlLoader;
+use MyInvoice\Service\Xml\UnsafeXmlException;
+
 /**
  * Parser podaného EPO XML DPPDP9 (daň z příjmů PO) — Featura A („Rekonciliace proti
  * PODANÉMU přiznání", `private/REAL_data_followup_UX.md` §A). Čte VetaD/VetaP/VetaO
@@ -22,6 +25,11 @@ namespace MyInvoice\Service\Tax\Return;
  */
 final class DppoEpoXmlParser
 {
+    /** Stejný strop jako upload v TaxReturnAction. */
+    private const MAX_XML_BYTES = 10 * 1024 * 1024;
+    /** Přiznání má stovky až nižší tisíce uzlů; strop s velkou rezervou. */
+    private const MAX_XML_NODES = 200_000;
+
     /** Rozpoznané „vedlejší" atributy VetaO mimo naši sadu řádků — jen popisky pro drill-down. */
     private const EXTRA_LABELS = [
         'kc_ii_220' => 'Základ daně před odečtem ztráty a darů (ř. 220)',
@@ -48,20 +56,17 @@ final class DppoEpoXmlParser
             throw new TaxReturnException('invalid_xml', 'Nahraný soubor je prázdný.', 400);
         }
 
-        $dom = new \DOMDocument();
-        $dom->resolveExternals = false;
-        $dom->substituteEntities = false;
-        libxml_use_internal_errors(true);
-        libxml_clear_errors();
-        $ok = @$dom->loadXML($xml, LIBXML_NONET | LIBXML_NOBLANKS);
-        if (!$ok) {
-            $err = libxml_get_errors();
-            libxml_clear_errors();
-            libxml_use_internal_errors(false);
-            $detail = $err !== [] ? trim($err[0]->message) : '';
-            throw new TaxReturnException('invalid_xml', 'Soubor není platné XML' . ($detail !== '' ? " ({$detail})" : '') . '.', 400);
+        // Sdílený loader: DOCTYPE v jakémkoli kódování a dokument, jehož DOM by
+        // stál násobky velikosti souboru, se odmítnou dřív, než se strom postaví.
+        try {
+            $dom = SafeXmlLoader::load($xml, self::MAX_XML_BYTES, 0, self::MAX_XML_NODES);
+        } catch (UnsafeXmlException $e) {
+            if ($e->reason === UnsafeXmlException::INVALID) {
+                $detail = $e->detail;
+                throw new TaxReturnException('invalid_xml', 'Soubor není platné XML' . ($detail !== '' ? " ({$detail})" : '') . '.', 400);
+            }
+            throw new TaxReturnException('invalid_xml', $e->getMessage(), 400);
         }
-        libxml_use_internal_errors(false);
 
         $root = $dom->getElementsByTagName('DPPDP9')->item(0);
         if ($root === null) {

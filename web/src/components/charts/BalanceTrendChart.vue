@@ -12,7 +12,7 @@ import {
   Filler,
 } from 'chart.js'
 import { useChartColors } from '@/composables/useTheme'
-import { formatCompactNumber, formatMoney, formatMonth } from '@/composables/useFormat'
+import { formatCompactNumber, formatMoneyWhole, formatMonth } from '@/composables/useFormat'
 import ChartEmptyState from './ChartEmptyState.vue'
 
 Chart.register(LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Filler)
@@ -94,7 +94,7 @@ function build() {
           callbacks: {
             title: (items) => (items.length ? formatMonth(String(items[0].label)) : ''),
             label: (ctx) => {
-              const value = formatMoney(Number(ctx.parsed.y ?? 0), props.currency)
+              const value = formatMoneyWhole(Number(ctx.parsed.y ?? 0), props.currency)
               return ctx.dataset.label ? `${ctx.dataset.label}: ${value}` : value
             },
           },

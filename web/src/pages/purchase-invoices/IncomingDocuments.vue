@@ -14,14 +14,16 @@ import { useSupplierStore } from '@/stores/supplier'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { apiErrorMessage } from '@/api/errors'
-import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
+import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
+import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
-import SubmissionPreview from '@/components/documents/SubmissionPreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import { useDimensions } from '@/composables/useDimensions'
+import { useSidePreview } from '@/composables/useSidePreview'
 import type { DimensionMap } from '@/api/dimensions'
 
 const { t } = useI18n()
@@ -29,6 +31,8 @@ const router = useRouter()
 const supplierStore = useSupplierStore()
 const auth = useAuthStore()
 const toast = useToast()
+// Fronta je třídění podle obsahu dokladu, proto je náhled ve výchozím stavu otevřený.
+const preview = useSidePreview('purchase_invoices', 'inbox_preview_open', { defaultOpen: true })
 
 const items = ref<PurchaseInvoiceSubmission[]>([])
 const selected = ref<PurchaseInvoiceSubmission | null>(null)
@@ -129,12 +133,14 @@ function canReview(item: PurchaseInvoiceSubmission): boolean {
     && item.replacement_submission_id === null && item.purchase_invoice_id === null
 }
 const canReviewSelected = computed(() => canWrite.value && selected.value !== null && canReview(selected.value))
-const canDeleteSelected = computed(() =>
-  canDelete.value
-  && selected.value !== null
-  && selected.value.status !== 'processed'
-  && selected.value.status !== 'processing',
-)
+/** Přerušené vytěžení (`processing_stale`) jde spustit znovu i smazat jako čekající podání. */
+function canExtract(item: PurchaseInvoiceSubmission): boolean {
+  return item.status === 'submitted' || !!item.processing_stale
+}
+function canDeleteItem(item: PurchaseInvoiceSubmission): boolean {
+  return item.status !== 'processed' && (item.status !== 'processing' || !!item.processing_stale)
+}
+const canDeleteSelected = computed(() => canDelete.value && selected.value !== null && canDeleteItem(selected.value))
 
 /** Hromadný výběr (checkboxy) je nezávislý na dokladu otevřeném v náhledu. */
 const checkedIds = ref<Set<number>>(new Set())
@@ -143,9 +149,9 @@ const bulkDims = ref<DimensionMap>({})
 const bulkProgress = ref<{ done: number; total: number } | null>(null)
 const checkedItems = computed(() => items.value.filter(i => checkedIds.value.has(i.id)))
 const allChecked = computed(() => items.value.length > 0 && checkedItems.value.length === items.value.length)
-const bulkCanExtract = computed(() => canWrite.value && canCreateInvoice.value && checkedItems.value.some(i => i.status === 'submitted'))
+const bulkCanExtract = computed(() => canWrite.value && canCreateInvoice.value && checkedItems.value.some(canExtract))
 const bulkCanReject = computed(() => canWrite.value && checkedItems.value.some(canReview))
-const bulkCanDelete = computed(() => canDelete.value && checkedItems.value.some(i => i.status !== 'processed' && i.status !== 'processing'))
+const bulkCanDelete = computed(() => canDelete.value && checkedItems.value.some(canDeleteItem))
 const bulkCanDimensions = computed(() => canWrite.value && dims.canEdit.value && dims.documentTypes.value.length > 0)
 const bulkNeedsReason = computed(() =>
   checkedItems.value.some(canReview),
@@ -197,7 +203,7 @@ function reportBulk(result: { ok: number; failed: number; lastError: string }, s
 
 async function bulkExtract() {
   if (acting.value || !bulkCanExtract.value) return
-  const targets = checkedItems.value.filter(i => i.status === 'submitted')
+  const targets = checkedItems.value.filter(canExtract)
   const skipped = checkedItems.value.length - targets.length
   const invoiceIds: number[] = []
   let duplicates = 0
@@ -243,7 +249,7 @@ async function bulkReject() {
 
 async function bulkDelete() {
   if (acting.value || !bulkCanDelete.value) return
-  const targets = checkedItems.value.filter(i => i.status !== 'processed' && i.status !== 'processing')
+  const targets = checkedItems.value.filter(canDeleteItem)
   const skipped = checkedItems.value.length - targets.length
   if (!confirm(t('purchase_submissions.bulk_delete_confirm', { n: targets.length }))) return
   acting.value = true
@@ -315,6 +321,12 @@ function addDroppedFiles(dropped: File[]) {
     ...files.value,
     ...dropped.filter(f => !known.has(`${f.name}:${f.size}:${f.lastModified}`)),
   ])
+}
+
+/** Fotka z fotoaparátu se přidá do výběru a odešle stejnou cestou jako vybrané soubory. */
+function onPhotoCaptured(photo: File) {
+  addDroppedFiles([photo])
+  void upload()
 }
 
 function clearFiles() {
@@ -620,6 +632,7 @@ onBeforeUnmount(() => { context++; loadRequest++ })
           {{ t('purchase_submissions.choose_files') }}
           <input ref="fileInput" type="file" multiple :accept="ALLOWED_FILES" class="hidden" @change="selectFiles" />
         </label>
+        <CapturePhotoButton :disabled="uploading" @captured="onPhotoCaptured" />
         <span v-if="files.length" class="text-sm text-neutral-600">
           {{ t('purchase_submissions.files_selected', { n: files.length }) }}
         </span>
@@ -719,8 +732,10 @@ onBeforeUnmount(() => { context++; loadRequest++ })
         </div>
       </div>
 
-      <section v-if="selected" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="p-4 border-b border-neutral-200 space-y-3">
+      <section v-if="selected" class="min-w-0">
+        <DocumentPreviewSplit :ctrl="preview" :show="preview.open.value" :src="purchaseInvoiceSubmissionsApi.previewUrl(selected.id)"
+          :file-name="selected.original_name" :doc-type="selected.doc_type" :empty-text="t('purchase_submissions.no_inline_preview')"
+          form-class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-4 space-y-3">
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <h2 class="font-semibold">{{ selected.original_name }}</h2>
@@ -754,9 +769,12 @@ onBeforeUnmount(() => { context++; loadRequest++ })
           <p v-if="selected.extraction_error" class="text-xs rounded bg-warning-50 text-warning-700 px-3 py-2">
             {{ selected.extraction_error }}
           </p>
+          <p v-if="selected.processing_stale" class="text-xs rounded bg-warning-50 text-warning-700 px-3 py-2">
+            {{ t('purchase_submissions.processing_stale') }}
+          </p>
 
           <div class="flex flex-wrap gap-2">
-            <button v-if="selected.status === 'submitted' && canWrite && canCreateInvoice" type="button"
+            <button v-if="canExtract(selected) && canWrite && canCreateInvoice" type="button"
               :disabled="acting" :class="btnFilled('primary')" @click="extract">
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3v18m9-9H3" /></svg>
               {{ acting ? t('purchase_submissions.processing') : t('purchase_submissions.extract') }}
@@ -774,6 +792,11 @@ onBeforeUnmount(() => { context++; loadRequest++ })
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4 4-4M5 20h14" /></svg>
               {{ t('purchase_submissions.download') }}
             </a>
+            <button type="button" :class="btnOutline('neutral')" data-testid="inbox-preview-toggle"
+              :aria-pressed="preview.open.value" @click="preview.toggle()">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="preview.open.value ? ICONS.eyeOff : ICONS.eye" /></svg>
+              {{ preview.open.value ? t('common.preview_side_hide') : t('common.preview_side_show') }}
+            </button>
           </div>
 
           <div v-if="canMove(selected)" class="space-y-2 pt-2 border-t border-neutral-100" data-testid="inbox-move">
@@ -849,10 +872,7 @@ onBeforeUnmount(() => { context++; loadRequest++ })
               {{ t('purchase_submissions.delete') }}
             </button>
           </details>
-        </div>
-
-        <SubmissionPreview :src="purchaseInvoiceSubmissionsApi.previewUrl(selected.id)"
-          :file-name="selected.original_name" :doc-type="selected.doc_type" />
+        </DocumentPreviewSplit>
       </section>
     </div>
     <ExtractionReviewModal v-if="reviewInvoiceId" :invoice-ids="[reviewInvoiceId]" silent-when-empty @close="onReviewClosed" />

@@ -160,9 +160,14 @@ Pohyby importované dřív se doplní samy při aktualizaci aplikace (krok auto-
 Platba kartou se páruje s přijatou fakturou nebo účtenkou podle koncovky karty, částky a data. V přehledu plateb bez dokladu otevře kliknutí na **Nespárováno** ruční párování. Doklad můžete dohledat podle dodavatele, čísla, VS nebo přesné částky. Po úspěšném spárování se přehled obnoví. Tato akce vyžaduje čtení banky a oprávnění k párování.
 
 - **Doklad se stejnou koncovkou** a sedící částkou se spáruje automaticky. Doklad přitom musí být vystavený nejvýš 7 dní před zaúčtováním platby v bance a nejvýš 2 dny po něm.
-- **Doklad placený kartou bez uvedené koncovky** je jen návrh ke kontrole, a to pouze tehdy, když si ho nemůže nárokovat platba jiné karty se stejnou částkou.
+- **Doklad placený kartou bez uvedené koncovky** se spáruje automaticky, když částka sedí na haléř ve stejné měně a o stejnou částku v okolí 7 dní nesoupeří žádná jiná nespárovaná platba kartou. Doklad si přitom koncovku karty zapamatuje. Sedí-li částka jen přibližně, je doklad jen návrh ke kontrole.
+- **Doklad bez formy úhrady kartou** (například faktura za předplatné služby s formou převod) se spáruje, když se dodavatel shoduje s obchodníkem z platby. Shoda se pozná podle významného slova názvu, i když ho obchodník píše dohromady (`ELEVENLABS.IO` a „Eleven Labs Inc."). Pozná se i podle dřívějšího ručního spárování: jakmile platbu obchodníka jednou ručně přiřadíte k dokladu dodavatele, aplikace si vazbu zapamatuje a další platby téhož obchodníka u tohoto dodavatele najde sama (například `www.cd.cz/eshop/` a „České dráhy").
+- **Doklad v cizí měně placený kartou z korunového účtu** se porovná přepočtem kurzem dokladu. Karetní schéma k němu přidává přirážku, proto platí u karty kurzová tolerance 6 % (u převodu 4 %). Rozdíl se zaúčtuje jako kurzový na 563/663.
+- **Doklad v jiné cizí měně, než je měna účtu** (dolarová služba zaplacená z eurového účtu) se spáruje podle původní částky nákupu, kterou banka u platby uvádí (CREDITAS). Závazek se odúčtuje v měně dokladu kurzem předpisu, banka v měně účtu kurzem dne úhrady a rozdíl je kurzový.
 - **Doklad jiné karty se nespáruje nikdy**, ani podle shody částky a data. Dvě stejné platby dvěma kartami téhož dne se proto nespárují křížem.
 - Dvě stejné platby toutéž kartou k jednomu dokladu jdou ke kontrole, aplikace nehádá, která z nich to byla.
+
+K platbě, ke které aplikace našla doklad ke kontrole, AI asistent kontaci nenavrhuje. Taková platba se účtuje přes doklad.
 
 Koncovku nese doklad vzniklý nahráním účtenky z přehledu plateb bez dokladu, účtenka z AI importu a doklad, ke kterému se připojil sken účtenky s koncovkou karty.
 

@@ -52,6 +52,7 @@ final class AbraPaymentMapper
                 'iban' => preg_match('/^[A-Z]{2}[0-9A-Z]{13,32}$/D', $iban) === 1 ? $iban : '',
                 'bic' => mb_substr(trim((string) ($row['bic'] ?? '')), 0, 11),
                 'accounting_code' => AbraSource::reference($row['primUcet'] ?? null),
+                'loan' => AbraSource::isLoanAccount($row['primUcet'] ?? null),
             ];
             $lookup['id:' . $id] = $account;
             $lookup['code:' . $code] = $account;
@@ -122,6 +123,7 @@ final class AbraPaymentMapper
             'amount' => $amount !== null ? round($amount, 2) : 0.0,
             'currency' => $currency,
             'account_key' => mb_substr($accountKey, 0, 80),
+            'loan_account' => (bool) ($bankAccount['loan'] ?? false),
             'statement_key' => mb_substr($kind === 'bank' && $date !== null ? substr($date, 0, 7)
                 : ($statementLabel !== '' ? $statementLabel : (string) ($date ?? 'unknown')), 0, 80),
             'statement_label' => mb_substr($kind === 'bank' && $date !== null ? substr($date, 0, 7)

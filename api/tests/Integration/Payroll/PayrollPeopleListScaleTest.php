@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Tests\Fixtures\Payroll\PayrollRunScaleFixture;
@@ -39,7 +38,7 @@ final class PayrollPeopleListScaleTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $people = $container->get(PayrollPeopleRepository::class);
         if (!$db instanceof Connection || !$people instanceof PayrollPeopleRepository) {
@@ -263,7 +262,9 @@ final class PayrollPeopleListScaleTest extends TestCase
         $needsSetup = $this->people->listForTenant($this->supplierId, 100, 0, 'needs_setup');
 
         self::assertSame(7, $all['total']);
-        self::assertSame([$loneId, $ids[0]], $flagged);
+        // Výchozí řazení je podle příjmení; osoba bez historie identit se řadí
+        // podle celého jména („Osoba bez vztahu" až za „Osoba 1").
+        self::assertSame([$ids[0], $loneId], $flagged);
         self::assertSame(
             $flagged,
             $this->pageIds($needsSetup),
@@ -363,6 +364,59 @@ final class PayrollPeopleListScaleTest extends TestCase
         self::assertSame(1, $exact['total']);
         self::assertSame([$ids[1]], $this->pageIds($exact));
         self::assertSame([$ids[1]], $this->pageIds($partial));
+    }
+
+    /**
+     * Výchozí pořadí je příjmení a jméno v české abecedě, ne celé jméno.
+     * Seznam dřív řadil podle „Jméno Příjmení", takže Adam Novák stál
+     * před Evou Adamovou.
+     */
+    public function testDefaultOrderIsLastNameThenFirstNameInCzechCollation(): void
+    {
+        $this->seed(4);
+        $ids = $this->employeeIds();
+        $this->renameParts($ids[0], 'Petr', 'Novák');
+        $this->renameParts($ids[1], 'Eva', 'Adamová');
+        $this->renameParts($ids[2], 'Adam', 'Novák');
+        $this->renameParts($ids[3], 'Jan', 'Šafr');
+        $svoboda = $this->employeeWithoutEmployment('Ota Svoboda');
+        $this->renameParts($svoboda, 'Ota', 'Svoboda');
+
+        self::assertSame(
+            [$ids[1], $ids[2], $ids[0], $svoboda, $ids[3]],
+            $this->pageIds($this->people->listForTenant($this->supplierId, 100)),
+            'Příjmení, pak jméno; Š patří v české abecedě až za S.',
+        );
+
+        $byFirstDesc = $this->pageIds($this->people->listForTenant(
+            $this->supplierId,
+            100,
+            0,
+            'all',
+            '',
+            [],
+            'first_name',
+            true,
+        ));
+        self::assertSame([$ids[0], $svoboda, $ids[3], $ids[1], $ids[2]], $byFirstDesc);
+    }
+
+    private function renameParts(int $employeeId, string $firstName, string $lastName): void
+    {
+        $fullName = $firstName . ' ' . $lastName;
+        $updated = $this->db->pdo()->prepare(
+            'UPDATE payroll_person_identity_history SET full_name = ?, first_name = ?, last_name = ?
+              WHERE supplier_id = ? AND employee_id = ?',
+        );
+        $updated->execute([$fullName, $firstName, $lastName, $this->supplierId, $employeeId]);
+        if ($updated->rowCount() === 0) {
+            $this->exec(
+                'INSERT INTO payroll_person_identity_history
+                    (supplier_id, employee_id, full_name, first_name, last_name, effective_from)
+                 VALUES (?, ?, ?, ?, ?, "2000-01-01")',
+                [$this->supplierId, $employeeId, $fullName, $firstName, $lastName],
+            );
+        }
     }
 
     /** @return list<int> */

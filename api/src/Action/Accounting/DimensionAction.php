@@ -211,7 +211,11 @@ final class DimensionAction
         $supplierId = $this->currentSupplierId($request);
         $body = (array) ($request->getParsedBody() ?? []);
         $enabled = (bool) ($body['enabled'] ?? false);
-        $this->dimensions->setEnabled($supplierId, $enabled);
+        try {
+            $this->dimensions->setEnabled($supplierId, $enabled);
+        } catch (DimensionException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
         if ($enabled && !empty($body['create_defaults'])) {
             $this->dimensions->ensureDefaultTypes($supplierId);
         }
@@ -242,7 +246,7 @@ final class DimensionAction
         return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
             $id = (int) ($args['id'] ?? 0);
             $body = (array) ($request->getParsedBody() ?? []);
-            $type = $this->dimensions->updateType($supplierId, $id, $body);
+            $type = $this->dimensions->updateType($supplierId, $id, $body, $this->userId($request), 'http');
             $this->log($request, 'dimension.type_updated', $id, ['fields' => array_keys($body)]);
             return $type;
         });
@@ -261,7 +265,7 @@ final class DimensionAction
     public function createValue(Request $request, Response $response, array $args): Response
     {
         return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
-            $value = $this->dimensions->createValue($supplierId, (int) ($args['id'] ?? 0), (array) ($request->getParsedBody() ?? []));
+            $value = $this->dimensions->createValue($supplierId, (int) ($args['id'] ?? 0), (array) ($request->getParsedBody() ?? []), $this->userId($request), 'http');
             $this->log($request, 'dimension.value_created', (int) $value['id'], ['type_id' => $value['type_id'], 'code' => $value['code']]);
             return $value;
         }, 201);
@@ -272,7 +276,7 @@ final class DimensionAction
         return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
             $id = (int) ($args['id'] ?? 0);
             $body = (array) ($request->getParsedBody() ?? []);
-            $value = $this->dimensions->updateValue($supplierId, $id, $body);
+            $value = $this->dimensions->updateValue($supplierId, $id, $body, $this->userId($request), 'http');
             $this->log($request, 'dimension.value_updated', $id, ['fields' => array_keys($body)]);
             return $value;
         });
@@ -282,7 +286,7 @@ final class DimensionAction
     {
         return $this->run($request, $response, function (int $supplierId) use ($request, $args): array {
             $id = (int) ($args['id'] ?? 0);
-            $result = $this->dimensions->deleteValue($supplierId, $id);
+            $result = $this->dimensions->deleteValue($supplierId, $id, $this->userId($request), 'http');
             $this->log($request, $result['deleted'] ? 'dimension.value_deleted' : 'dimension.value_closed', $id, []);
             return $result;
         });

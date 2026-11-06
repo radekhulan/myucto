@@ -127,6 +127,7 @@ final class PayrollDispatchCapabilityCatalog
      * Ročník v kódu se odřezává stejně jako v {@see PayrollAgendaGroupCatalog}:
      * historické povinnosti nesou `JMHZ`, nové `JMHZ25`, a obě znamenají totéž
      * měsíční hlášení. Bez normalizace by starší řádek dostal „neumíme".
+     * Ročník datové věty 2027 (`JMHZ27`, `REGZEC27`) patří k téže agendě.
      */
     public static function canonical(string $agendaCode): string
     {
@@ -146,9 +147,10 @@ final class PayrollDispatchCapabilityCatalog
                 self::MODE_VREP_JMHZ,
                 null,
                 // Datovka je u JMHZ rovnocenný druhý kanál (ČSSZ pro něj
-                // zřídila vlastní schránku), ale fronta nabízí VREP: je to
-                // jediná cesta, po které odpověď úřadu dorazí zpátky do
-                // aplikace bez ručního nahrávání doručenky.
+                // zřídila vlastní schránku) a odpověď z ní aplikace spáruje
+                // sama ({@see \MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor}).
+                // Výchozí zůstává VREP, když je zvolený podpisový certifikát;
+                // bez něj fronta nabídne datovku ({@see PayrollDispatchGate::channels()}).
                 alternateMode: self::MODE_ISDS_PAYROLL,
             ),
             new PayrollDispatchCapability(

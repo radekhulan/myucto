@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use DomainException;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorUnavailableException;
@@ -27,7 +26,7 @@ final class PayrollStatutoryAccumulatorRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer()
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build()
             ?? throw new \RuntimeException('DI kontejner není dostupný.');
         $db = $container->get(Connection::class);
         $repository = $container->get(PayrollStatutoryAccumulatorRepository::class);
@@ -191,6 +190,88 @@ final class PayrollStatutoryAccumulatorRepositoryTest extends TestCase
         self::assertSame($february, $state['before_revision_id']);
     }
 
+    public function testCorrectionAddingEmployeeStartsHisPeriodContribution(): void
+    {
+        $this->appendZeroTaxOpening();
+        $september = $this->createApprovedRevision('2026-09-01');
+        $this->repository->appendApprovedResult(
+            $this->supplierId,
+            $september,
+            $this->employeeId,
+            'income_tax',
+            $this->taxContribution(1, 100_000, 15_000),
+            $this->createStatutoryPersonResult($september, 'income_tax', 'calculated'),
+        );
+
+        $addedEmployeeId = $this->createEmployee($this->db->pdo(), $this->supplierId);
+        $this->repository->appendOpeningBalance(
+            $this->supplierId,
+            $addedEmployeeId,
+            2026,
+            'income_tax',
+            $this->taxContribution(0, 0, 0),
+            'synthetic-empty-opening',
+            ['verified' => true],
+            'synthetic-empty-tax-opening-added',
+        );
+        $correction = $this->createApprovedRevision(
+            '2026-09-01',
+            'correction',
+            $september,
+            employeeIds: [$this->employeeId, $addedEmployeeId],
+        );
+        $addedEntryId = $this->repository->appendApprovedResult(
+            $this->supplierId,
+            $correction,
+            $addedEmployeeId,
+            'income_tax',
+            $this->taxContribution(1, 40_000, 6_000),
+            $this->createStatutoryPersonResult(
+                $correction,
+                'income_tax',
+                'calculated',
+                $addedEmployeeId,
+            ),
+        );
+
+        $state = $this->repository->stateForYear(
+            $this->supplierId,
+            $addedEmployeeId,
+            2026,
+            'income_tax',
+        );
+        self::assertSame([$addedEntryId], array_column($state['approved_results'], 'id'));
+        self::assertNull($state['approved_results'][0]['replaces_entry_id']);
+        self::assertSame(40_000, $state['totals']['advance_base_minor_units']);
+    }
+
+    public function testCorrectionNotFollowingExistingPeriodContributionIsRejected(): void
+    {
+        $this->appendZeroTaxOpening();
+        $september = $this->createApprovedRevision('2026-09-01');
+        $this->repository->appendApprovedResult(
+            $this->supplierId,
+            $september,
+            $this->employeeId,
+            'income_tax',
+            $this->taxContribution(1, 100_000, 15_000),
+            $this->createStatutoryPersonResult($september, 'income_tax', 'calculated'),
+        );
+        $withoutEntry = $this->createApprovedRevision('2026-09-01', 'correction', $september);
+        $correction = $this->createApprovedRevision('2026-09-01', 'correction', $withoutEntry);
+
+        $this->expectException(DomainException::class);
+        $this->expectExceptionMessage('Opravná revize nenavazuje');
+        $this->repository->appendApprovedResult(
+            $this->supplierId,
+            $correction,
+            $this->employeeId,
+            'income_tax',
+            $this->taxContribution(1, 110_000, 16_500),
+            $this->createStatutoryPersonResult($correction, 'income_tax', 'calculated'),
+        );
+    }
+
     public function testSamePeriodRevisionIsExcludedFromItsOwnPriorState(): void
     {
         $this->appendZeroTaxOpening();
@@ -346,6 +427,7 @@ final class PayrollStatutoryAccumulatorRepositoryTest extends TestCase
         int $revisionId,
         string $calculationKind,
         string $resultStatus,
+        ?int $employeeId = null,
     ): string {
         $pdo = $this->db->pdo();
         $inputJson = '{"synthetic_input":true}';
@@ -385,7 +467,7 @@ final class PayrollStatutoryAccumulatorRepositoryTest extends TestCase
             $statutoryResultId,
             $revisionId,
             $calculationKind,
-            $this->employeeId,
+            $employeeId ?? $this->employeeId,
             $resultStatus,
             $inputJson,
             $inputHash,
@@ -396,11 +478,13 @@ final class PayrollStatutoryAccumulatorRepositoryTest extends TestCase
         return $resultHash;
     }
 
+    /** @param list<int>|null $employeeIds */
     private function createApprovedRevision(
         string $periodStart,
         string $revisionKind = 'regular',
         ?int $previousRevisionId = null,
         string $status = 'approved',
+        ?array $employeeIds = null,
     ): int {
         $pdo = $this->db->pdo();
         $revisionNo = 1;
@@ -456,11 +540,14 @@ final class PayrollStatutoryAccumulatorRepositoryTest extends TestCase
             ]), true),
         ]);
         $revisionId = (int) $pdo->lastInsertId();
-        $pdo->prepare(
+        $person = $pdo->prepare(
             'INSERT INTO payroll_run_persons
                 (supplier_id, revision_id, employee_id, status)
              VALUES (?, ?, ?, "calculated")'
-        )->execute([$this->supplierId, $revisionId, $this->employeeId]);
+        );
+        foreach ($employeeIds ?? [$this->employeeId] as $employeeId) {
+            $person->execute([$this->supplierId, $revisionId, $employeeId]);
+        }
 
         return $revisionId;
     }

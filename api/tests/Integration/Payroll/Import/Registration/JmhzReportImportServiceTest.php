@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll\Import\Registration;
 
 use MyInvoice\Action\Payroll\PayrollRegistrationImportAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -53,7 +52,7 @@ final class JmhzReportImportServiceTest extends TestCase
         if (!is_file(dirname(__DIR__, 6) . '/cfg.php')) {
             self::markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $this->container->get(Connection::class);
         $this->imports = $this->container->get(RegistrationImportService::class);
         if (!$this->db->hasTable('payroll_person_external_ids')) {
@@ -141,7 +140,7 @@ final class JmhzReportImportServiceTest extends TestCase
             'gross_minor' => 4_000_000,
             'tax_base_minor' => 4_000_000,
             'advance_tax_minor' => 216_300,
-            'bonus_minor' => 0,
+            'bonus_minor' => null,
             'social_base_minor' => 4_000_000,
             'worked_hours' => '168.000',
             'average_hourly_minor' => 23_810,

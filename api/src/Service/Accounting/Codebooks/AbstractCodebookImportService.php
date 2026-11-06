@@ -5,8 +5,9 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Codebooks;
 
 use MyInvoice\Support\LocaleNumber;
-use PhpOffice\PhpSpreadsheet\Cell\Coordinate;
-use PhpOffice\PhpSpreadsheet\IOFactory;
+use MyInvoice\Support\Spreadsheet\SafeSpreadsheetReader;
+use MyInvoice\Support\Spreadsheet\SpreadsheetLimitException;
+use PhpOffice\PhpSpreadsheet\Cell\Cell;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
 /**
@@ -164,59 +165,25 @@ abstract class AbstractCodebookImportService
      */
     protected function readSpreadsheet(string $content): array
     {
-        $base = tempnam(sys_get_temp_dir(), 'cbimp_');
-        $tmp = $base . '.xlsx';
-        file_put_contents($tmp, $content);
+        // Sdílený ohraničený reader: zip-bomba (součet NEkomprimovaných velikostí PŘED
+        // load()), read filtr za stropem řádků/sloupců, jen existující buňky.
+        $reader = new SafeSpreadsheetReader(self::MAX_ROWS + 1, self::MAX_COLUMNS, self::MAX_UNCOMPRESSED_BYTES);
         try {
-            // Zip-bomba: součet NEkomprimovaných velikostí položek ověřit PŘED load(),
-            // který by jinak celý obsah materializoval do paměti.
-            $zip = new \ZipArchive();
-            if ($zip->open($tmp) !== true) {
-                throw new CodebookImportException('bad_file', 'Soubor nelze přečíst jako XLSX.', 415);
-            }
-            $uncompressed = 0;
-            for ($i = 0; $i < $zip->numFiles; $i++) {
-                $uncompressed += (int) ($zip->statIndex($i)['size'] ?? 0);
-            }
-            $zip->close();
-            if ($uncompressed > self::MAX_UNCOMPRESSED_BYTES) {
-                throw new CodebookImportException('too_many_rows', 'Soubor je po rozbalení příliš velký.', 422);
-            }
-
-            $reader = IOFactory::createReader('Xlsx');
-            $reader->setReadDataOnly(true);
+            $spreadsheet = $reader->load($content, [SafeSpreadsheetReader::TYPE_XLSX], true);
             try {
-                $spreadsheet = $reader->load($tmp);
-            } catch (\Throwable $e) {
-                throw new CodebookImportException('bad_file', 'Soubor nelze přečíst jako XLSX.', 415);
+                $sheet = $spreadsheet->getSheetCount() > 0 ? $spreadsheet->getSheet(0) : $spreadsheet->getActiveSheet();
+                // getValue() = raw (formule zůstane textem "=…"); NIKDY getCalculatedValue().
+                return $reader->matrix($sheet, fn (Cell $cell): string => $this->cellToString($cell->getValue()));
+            } finally {
+                $spreadsheet->disconnectWorksheets();
             }
-            $sheet = $spreadsheet->getSheetCount() > 0 ? $spreadsheet->getSheet(0) : $spreadsheet->getActiveSheet();
-
-            $highestRow = $sheet->getHighestDataRow();
-            $highestColLetter = $sheet->getHighestDataColumn();
-            $highestCol = Coordinate::columnIndexFromString($highestColLetter);
-            if ($highestCol > self::MAX_COLUMNS) {
-                throw new CodebookImportException('bad_file', 'Soubor má příliš mnoho sloupců.', 422);
-            }
-            if ($highestRow - 1 > self::MAX_ROWS) {
-                throw new CodebookImportException('too_many_rows', 'Soubor má více než ' . self::MAX_ROWS . ' řádků.', 422);
-            }
-
-            $out = [];
-            for ($r = 1; $r <= $highestRow; $r++) {
-                $cells = [];
-                for ($c = 1; $c <= $highestCol; $c++) {
-                    // getValue() = raw (formule zůstane textem "=…"); NIKDY getCalculatedValue().
-                    $v = $sheet->getCell([$c, $r])->getValue();
-                    $cells[] = $this->cellToString($v);
-                }
-                $out[] = $cells;
-            }
-            $spreadsheet->disconnectWorksheets();
-            return $out;
-        } finally {
-            @unlink($tmp);
-            @unlink($base);
+        } catch (SpreadsheetLimitException $e) {
+            throw match ($e->reason) {
+                'too_many_rows'    => new CodebookImportException('too_many_rows', 'Soubor má více než ' . self::MAX_ROWS . ' řádků.', 422),
+                'too_many_columns' => new CodebookImportException('bad_file', 'Soubor má příliš mnoho sloupců.', 422),
+                'too_large'        => new CodebookImportException('too_many_rows', 'Soubor je po rozbalení příliš velký.', 422),
+                default            => new CodebookImportException('bad_file', 'Soubor nelze přečíst jako XLSX.', 415),
+            };
         }
     }
 

@@ -31,7 +31,8 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             enabled: true,
             senderWhitelist: 'info@rb.cz',
             subjectPattern: 'Pohyb\\s+na\\s+účtě|Pohyb\\s+na\\s+ucte',
-            bodyPattern: 'Variabilní\\s+symbol|Debetní\\s+karta',
+            // Řádek s částkou má každé avízo; VS chybí u úhrady jen se zprávou pro příjemce (#234).
+            bodyPattern: 'Částka\\s+v\\s+měně\\s+účtu|Variabilní\\s+symbol|Debetní\\s+karta',
             fieldPatterns: [],
             normalizerConfig: [],
             system: true,
@@ -53,8 +54,8 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             return false;
         }
 
-        $isTransfer = str_contains($folded, 'variabilni symbol')
-            && str_contains($folded, 'na ucet');
+        $isTransfer = str_contains($folded, 'na ucet')
+            && str_contains($folded, 'z uctu');
 
         return $isTransfer || $this->isCardTransaction($text);
     }
@@ -63,7 +64,8 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
     {
         $text = $this->normalizeText($message->text);
 
-        $postedAt = $this->required($text, '/Datum\s+a\s+čas\s*(?<value>\d{1,2}\.\s*\d{1,2}\.\s*\d{4}\s+\d{1,2}:\d{2})/iu', 'datum');
+        // Karetní platby uvádějí datum jako (opakovaný) ISO timestamp; bere se první výskyt.
+        $postedAt = $this->required($text, '/Datum\s+a\s+čas\s*(?<value>\d{1,2}\.\s*\d{1,2}\.\s*\d{4}\s+\d{1,2}:\d{2}|\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/iu', 'datum');
         $amountCurrency = $this->match($text, '/Částka\s+v\s+měně\s+účtu\s*(?<amount>[+\-]?[0-9 .]+,[0-9]{2})\s*(?<currency>[A-Z]{3})/iu');
         if ($amountCurrency === null) {
             throw new \RuntimeException('Raiffeisenbank parser nenašel částku a měnu.');
@@ -95,19 +97,23 @@ final class RaiffeisenbankEmailNoticeParser extends AbstractBankEmailNoticeParse
             );
         }
 
+        // Jméno protistrany končí následujícím návěstím; bez VS za účtem příjemce
+        // následuje rovnou zpráva nebo zůstatek (#234).
+        $nextLabel = '(?=Částka\s+v\s+měně\s+účtu|Variabilní\s+symbol|Konstantní\s+symbol|Specifický\s+symbol'
+            . '|Zpráva\s+pro|Kategorie\s+pohybu|Typ\s+pohybu|Disponibilní\s+zůstatek|$)';
         $to = $this->match(
             $text,
-            '/Na\s+účet\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)(?=Částka\s+v\s+měně\s+účtu|Variabilní\s+symbol)/isu',
+            '/Na\s+účet\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)' . $nextLabel . '/isu',
         );
         if ($to === null) {
             throw new \RuntimeException('Raiffeisenbank parser nenašel účet příjemce.');
         }
         $from = $this->match(
             $text,
-            '/Z\s+účtu\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)(?=Částka\s+v\s+měně\s+účtu|Variabilní\s+symbol)/isu',
+            '/Z\s+účtu\s*(?<account>[0-9\-]+\/[0-9]{4})(?<name>.*?)' . $nextLabel . '/isu',
         );
-        $variableSymbol = $this->required($text, '/Variabilní\s+symbol\s*(?<value>[0-9]+)/iu', 'variabilní symbol');
-        $note = $this->optional($text, '/Zpráva\s+pro\s+příjemce\s*(?<value>.*?)Disponibilní\s+zůstatek/isu');
+        $variableSymbol = $this->optional($text, '/Variabilní\s+symbol\s*(?<value>[0-9]+)/iu') ?? '';
+        $note = $this->optional($text, '/Zpráva\s+pro\s+příjemce\s*(?<value>.*?)(?:Zpráva\s+pro\s+mne|Disponibilní\s+zůstatek)/isu');
 
         $isOutgoing = $this->isOutgoingTransfer($text, $amount);
         if ($isOutgoing && $from === null) {

@@ -127,16 +127,26 @@ final class BankRepostLineGuardTest extends TestCase
         $lockStmt->method('fetchColumn')->willReturn($lockedUntil ?? false);
 
         $pdo = $this->createStub(PDO::class);
-        $pdo->method('inTransaction')->willReturn(false);
-        $pdo->method('beginTransaction')->willReturn(true);
-        $pdo->method('commit')->willReturn(true);
+        // Testovací PDO musí po beginTransaction vidět otevřenou transakci stejně
+        // jako skutečné PDO; přeúčtování nyní chrání i vnořená volání savepointem.
+        $inTransaction = false;
+        $pdo->method('inTransaction')->willReturnCallback(static function () use (&$inTransaction): bool {
+            return $inTransaction;
+        });
+        $pdo->method('beginTransaction')->willReturnCallback(static function () use (&$inTransaction): bool {
+            return $inTransaction = true;
+        });
+        $pdo->method('commit')->willReturnCallback(static function () use (&$inTransaction): bool {
+            $inTransaction = false;
+            return true;
+        });
         $pdo->method('prepare')->willReturn($lockStmt);
 
         $db = $this->createStub(Connection::class);
         $db->method('pdo')->willReturn($pdo);
 
         $journal = $this->createStub(JournalEntryRepository::class);
-        $journal->method('findBySource')->willReturn([
+        $journal->method('findBySourceForUpdate')->willReturn([
             'id' => 314, 'entry_date' => '2026-08-20', 'period_id' => 5,
             'document_no' => 'BV-1', 'description' => 'Úrok', 'reversed_by' => null,
         ]);
@@ -145,6 +155,7 @@ final class BankRepostLineGuardTest extends TestCase
         $periods = $this->createStub(AccountingPeriodRepository::class);
         $periods->method('findById')->willReturn(['id' => 5, 'status' => 'open']);
         $periods->method('findForDate')->willReturn(['id' => 6, 'status' => 'open']);
+        $periods->method('findForDateForUpdate')->willReturn(['id' => 6, 'status' => 'open']);
 
         $accounts = $this->createStub(ChartOfAccountsRepository::class);
         $accounts->method('idToAccountMap')->willReturn([]);

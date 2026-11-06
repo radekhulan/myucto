@@ -322,7 +322,7 @@ final class PayrollRegistrationChangeDetectorTest extends TestCase
             'free_access' => false,
             'free_access_reason_code' => null,
             'permit_type_code' => '1',
-            'issuing_labour_office_code' => null,
+            'issuing_labour_office_code' => 'HMP',
             'permit_identifier' => 'SYN-PERMIT-1',
             'permit_from' => '2026-01-01',
             'permit_to' => '2026-12-31',

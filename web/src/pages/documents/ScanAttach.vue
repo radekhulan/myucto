@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 /**
  * Připojení skenů k dokladům, které už v systému jsou.
  *
@@ -364,7 +365,7 @@ onUnmounted(stopPolling)
 </script>
 
 <template>
-  <div class="max-w-6xl">
+  <div>
     <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
       <div>
         <h1 class="text-2xl font-semibold">{{ t('scan_attach.title') }}</h1>
@@ -416,11 +417,11 @@ onUnmounted(stopPolling)
       <div class="flex flex-wrap gap-4">
         <label class="text-sm">
           <span class="block text-neutral-700 mb-1">{{ t('scan_attach.form_date_from') }}</span>
-          <input v-model="dateFrom" type="date" class="border border-neutral-300 rounded-md px-2 py-1.5 text-sm" :disabled="uploading" />
+          <DateInput v-model="dateFrom" class="border border-neutral-300 rounded-md px-2 py-1.5 text-sm" :disabled="uploading" />
         </label>
         <label class="text-sm">
           <span class="block text-neutral-700 mb-1">{{ t('scan_attach.form_date_to') }}</span>
-          <input v-model="dateTo" type="date" class="border border-neutral-300 rounded-md px-2 py-1.5 text-sm" :disabled="uploading" />
+          <DateInput v-model="dateTo" class="border border-neutral-300 rounded-md px-2 py-1.5 text-sm" :disabled="uploading" />
         </label>
       </div>
 

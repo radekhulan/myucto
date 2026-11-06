@@ -23,7 +23,7 @@ function deleteAction(statement: Record<string, unknown>, auth: Record<string, u
     computed, statement: stmt, auth,
     isVirtual: computed(() => stmt.value.source === 'email_notice' || stmt.value.source === 'idoklad'),
     t: (key: string) => key, rematching: ref(false), sendingUnmatched: ref(false), uploadingPdf: ref(false),
-    deletingStatement: ref(false), pdfInput: ref(null), bankApi: { unmatchedExportUrl: () => '', pdfUrl: () => '' },
+    deletingStatement: ref(false), bankDownloads: ref([]), bankDownloadsOpen: ref(false), pdfInput: ref(null), bankApi: { unmatchedExportUrl: () => '', pdfUrl: () => '' },
     statementHasGpc: () => false, statementGpcUrl: () => undefined, statementGpcTitle: () => 'gpc', router: {},
     downloadStatementFile: () => undefined, rematchStatement: () => undefined, sendUnmatchedToClient: () => undefined,
     onDeletePdf: () => undefined, onDeleteStatement: () => undefined,

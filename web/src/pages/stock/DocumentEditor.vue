@@ -9,7 +9,7 @@ import {
 } from '@/api/stock'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatMoney } from '@/composables/useFormat'
+import { formatUnitPrice } from '@/composables/useFormat'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
@@ -123,6 +123,8 @@ const itemsCache = new Map<number, StockItemSearchResult>()
 
 const isPosted = computed(() => doc.value?.status === 'posted')
 const isReversed = computed(() => doc.value?.status === 'reversed')
+/** Převzatý doklad (import historie skladu): storno backend odmítne, opravuje se vrácením importu. */
+const isImported = computed(() => !!doc.value?.history_import_job_id)
 const readOnly = computed(() => isPosted.value || isReversed.value)
 const isTransfer = computed(() => form.doc_type === 'transfer')
 const isReceipt = computed(() => form.doc_type === 'receipt')
@@ -141,7 +143,7 @@ async function onSearch(rowIndex: number, q: string) {
     rowOptions[rowIndex] = res.map(r => ({
       value: r.id,
       label: `${r.sku} - ${r.name}`,
-      secondary: r.sale_price_without_vat != null ? `${r.unit} · ${formatMoney(Number(r.sale_price_without_vat))}` : r.unit,
+      secondary: r.sale_price_without_vat != null ? `${r.unit} · ${formatUnitPrice(Number(r.sale_price_without_vat))}` : r.unit,
     }))
   } catch { rowOptions[rowIndex] = [] } finally { rowLoading[rowIndex] = false }
 }
@@ -407,7 +409,7 @@ const actions = computed<ActionItem[]>(() => [
   },
   {
     key: 'reverse', label: t('stock.documents.cancel'), icon: 'uturn', tier: 'overflow', variant: 'danger',
-    show: auth.canWrite('stock.documents.write') && isPosted.value, run: () => { reverseOpen.value = true },
+    show: auth.canWrite('stock.documents.write') && isPosted.value && !isImported.value, run: () => { reverseOpen.value = true },
   },
 ])
 
@@ -449,6 +451,9 @@ onMounted(async () => {
             </span>
             <span v-if="isPosted" class="text-xs px-2 py-0.5 rounded font-medium bg-primary-50 text-primary-700">
               {{ t('stock.documents.posted_badge') }}
+            </span>
+            <span v-if="isImported" data-test="imported-badge" class="text-xs px-2 py-0.5 rounded font-medium bg-neutral-100 text-neutral-600" :title="t('stock.history_import.imported_hint')">
+              {{ t('stock.history_import.imported_badge') }}
             </span>
           </p>
         </div>
@@ -588,7 +593,7 @@ onMounted(async () => {
               <div v-for="(allocation, ai) in row.tracking_allocations" :key="ai" class="grid grid-cols-1 sm:grid-cols-7 gap-2 mb-2">
                 <input v-if="row.tracking_mode === 'serial'" v-model="allocation.serial_number" :disabled="readOnly" :placeholder="t('stock.tracking.serial_number')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
                 <input v-else v-model="allocation.lot_code" :disabled="readOnly" :placeholder="t('stock.tracking.lot_code')" class="h-9 px-2 border border-neutral-300 rounded-md text-sm font-mono" />
-                <input v-if="row.tracking_mode === 'lot'" v-model="allocation.expires_on" type="date" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                <DateInput v-if="row.tracking_mode === 'lot'" v-model="allocation.expires_on" :disabled="readOnly" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
                 <input v-model="allocation.quantity" type="number" step="0.001" min="0.001" :disabled="readOnly || row.tracking_mode === 'serial'" class="h-9 px-2 border border-neutral-300 rounded-md text-sm text-right font-mono" />
                 <select v-model="allocation.unit_code" :disabled="readOnly || row.tracking_mode === 'serial'" class="h-9 px-2 border border-neutral-300 rounded-md bg-surface text-sm">
                   <option value="">{{ t('stock.tracking.base_unit', { unit: row.option?.secondary ?? '' }) }}</option>

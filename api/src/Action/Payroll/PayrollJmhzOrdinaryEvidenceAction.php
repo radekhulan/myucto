@@ -56,15 +56,26 @@ final class PayrollJmhzOrdinaryEvidenceAction
         $body = $request->getParsedBody();
         $bodyKeys = is_array($body) ? array_keys($body) : [];
         sort($bodyKeys, SORT_STRING);
+        // `ozp_wage` (datum úhrady 10347 a hotovost 10348) jen u vztahu
+        // s podporou zaměstnávání OZP; jinak se neposílá.
+        $ozpWage = is_array($body) ? ($body['ozp_wage'] ?? null) : null;
+        // `risk_shift_count` (10580, od 01/2027) jen u práce kategorie 4.
+        $riskShiftCount = is_array($body) ? ($body['risk_shift_count'] ?? null) : null;
+        $optionalKeys = array_values(array_diff($bodyKeys, ['evidence_confirmed', 'facts']));
         if (!is_array($body) || array_is_list($body)
-            || $bodyKeys !== ['evidence_confirmed', 'facts']
+            || !in_array('evidence_confirmed', $bodyKeys, true)
+            || !in_array('facts', $bodyKeys, true)
+            || array_diff($optionalKeys, ['ozp_wage', 'risk_shift_count']) !== []
             || !is_array($body['facts']) || array_is_list($body['facts'])
             || $body['evidence_confirmed'] !== true
+            || ($ozpWage !== null && (!is_array($ozpWage) || array_is_list($ozpWage)))
+            || ($riskShiftCount !== null && !is_int($riskShiftCount))
         ) {
             return Json::error(
                 $response,
                 'validation_failed',
-                'Tělo musí obsahovat přesně facts a výslovné evidence_confirmed=true.',
+                'Tělo musí obsahovat přesně facts, výslovné evidence_confirmed=true a případně ozp_wage'
+                    . ' a risk_shift_count.',
                 422,
             );
         }
@@ -89,6 +100,9 @@ final class PayrollJmhzOrdinaryEvidenceAction
                 $actor,
                 $this->ipMatcher->clientIpFromRequest($serverParams),
                 $request->getHeaderLine('User-Agent'),
+                'explicit_confirmation',
+                $ozpWage,
+                $riskShiftCount,
             );
         } catch (JmhzOrdinaryEvidenceException $exception) {
             return $this->domainError($response, $exception);

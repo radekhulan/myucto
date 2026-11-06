@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -73,7 +74,7 @@ final class StockLevelRepository
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
             $row = self::castLevel($r);
             if (in_array('sale_price', $extraColumns, true)) {
-                $row['sale_price'] = $r['sale_price'] !== null ? (string) $r['sale_price'] : null;
+                $row['sale_price'] = $r['sale_price'] !== null ? (string) UnitPricePrecision::toDecimalString($r['sale_price']) : null;
             }
             if (in_array('note', $extraColumns, true)) {
                 $row['note'] = $r['note'] !== null && $r['note'] !== '' ? (string) $r['note'] : null;
@@ -327,6 +328,7 @@ final class StockLevelRepository
             'unit_cost'      => (string) $r['unit_cost'],
             'value_total'    => (string) $r['value_total'],
             'note'           => $r['note'] !== null ? (string) $r['note'] : null,
+            'imported'       => (bool) $r['imported'],
             'invoice_id'     => $r['invoice_id'] !== null ? (int) $r['invoice_id'] : null,
             'invoice_number' => $r['invoice_number'] !== null ? (string) $r['invoice_number'] : null,
             'invoice_type'   => $r['invoice_type'] !== null ? (string) $r['invoice_type'] : null,
@@ -431,7 +433,8 @@ final class StockLevelRepository
             $sql = "SELECT l.id AS line_id, l.document_id, d.doc_number, d.doc_type, d.origin,
                            d.status, l.doc_date, l.line_no, {$warehouseExpr} AS warehouse_id,
                            w.code AS warehouse_code, {$signedQty} AS qty_signed,
-                           l.qty, l.unit_cost, l.value_total, l.note, " . ($receiptLeg ? 1 : 0) . " AS leg{$documentCols}
+                           l.qty, l.unit_cost, l.value_total, l.note, d.history_import_job_id IS NOT NULL AS imported,
+                           " . ($receiptLeg ? 1 : 0) . " AS leg{$documentCols}
                       FROM stock_document_lines l
                       JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
                       JOIN warehouses w ON w.id = {$warehouseExpr} AND w.supplier_id = l.supplier_id{$documentJoins}

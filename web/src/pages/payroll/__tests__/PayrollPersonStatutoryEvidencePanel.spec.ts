@@ -132,7 +132,7 @@ function validatorRejection(
   if (section === 'tax_credit_claims') {
     const kind = value('credit_kind')
     if (kind === null
-      || !['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p'].includes(kind)) {
+      || !['taxpayer', 'disability-basic', 'disability-extended', 'ztp-p', 'student', 'student-doctoral'].includes(kind)) {
       return 'Druh slevy musí být z číselníku.'
     }
     const verified = value('evidence_status') === 'verified'

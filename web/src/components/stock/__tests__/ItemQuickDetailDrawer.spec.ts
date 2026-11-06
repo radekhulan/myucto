@@ -14,7 +14,7 @@ vi.mock('@/api/stock', () => ({
     itemNeighbors: m.itemNeighbors,
   },
 }))
-vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: number) => `${value} Kč` }))
+vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: number) => `${value} Kč`, formatUnitPrice: (value: number) => `${value} Kč` }))
 vi.mock('@/components/ui/buttonStyles', () => ({ ICONS: new Proxy({}, { get: () => 'M0 0' }), btnFilled: () => '', btnOutline: () => '' }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${params.position}/${params.total}` : key }) }))
 

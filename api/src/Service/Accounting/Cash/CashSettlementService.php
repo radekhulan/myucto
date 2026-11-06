@@ -79,7 +79,7 @@ final class CashSettlementService
      *
      * @var list<string>
      */
-    private const NON_SETTLEABLE_INVOICE_TYPES = ['proforma', 'cancellation', 'payment_calendar'];
+    private const NON_SETTLEABLE_INVOICE_TYPES = ['proforma', 'cancellation', 'payment_calendar', 'rent_calendar', 'advance_calendar'];
 
     public function __construct(
         private readonly Connection $db,
@@ -283,8 +283,11 @@ final class CashSettlementService
      * Sesouhlasí hotovostní vyrovnání VYDANÉ faktury s volbou na dokladu.
      *
      * @return array{status:string, cash_document_id:?int, doc_number:?string, reason:?string}
+     *
+     * @param ?int $eetDeviceId pokladní zařízení EET pro tržbu z dokladu (rychlá účtenka
+     *                          ho zná); bez něj rozhodne mapování pokladny / výchozí zařízení
      */
-    public function syncInvoice(int $supplierId, int $invoiceId, ?int $userId): array
+    public function syncInvoice(int $supplierId, int $invoiceId, ?int $userId, ?int $eetDeviceId = null): array
     {
         $invoice = $this->invoices->find($invoiceId);
         if ($invoice === null || (int) $invoice['supplier_id'] !== $supplierId) {
@@ -365,7 +368,7 @@ final class CashSettlementService
             'total_amount' => $remaining,
             'invoice_id'   => $invoiceId,
             'post'         => true,
-        ], $userId);
+        ] + ($eetDeviceId !== null ? ['eet_device_id' => $eetDeviceId] : []), $userId);
         $this->markAuto($supplierId, (int) $created['id']);
 
         return self::result(self::CREATED, (int) $created['id'], $created['doc_number'] ?? null);
@@ -528,6 +531,17 @@ final class CashSettlementService
     private function remove(int $supplierId, int $cashDocumentId, ?array $existing = null): void
     {
         $doc = $existing ?? $this->documents->get($supplierId, $cashDocumentId);
+        // EET-07: vyrovnání s evidovanou tržbou se samo neruší. Storno PPD vytváří opravu
+        // EET (vrácení peněz), a to nesmí proběhnout jako vedlejší účinek úpravy nebo
+        // storna faktury. Uživatel doklad stornuje vědomě v Pokladně.
+        if ((new \MyInvoice\Service\Eet\EetHistoryGuard($this->db))->cashDocumentConflict($supplierId, $cashDocumentId) !== null) {
+            throw new CashException(
+                \MyInvoice\Service\Eet\EetHistoryGuard::ERROR_CODE,
+                'Pokladní doklad ' . (string) ($doc['doc_number'] ?? '') . ' má evidovanou tržbu EET a automaticky se nezruší. '
+                    . 'Pokud jste peníze vrátili, stornujte ho v Pokladně (storno vytvoří opravu EET).',
+                409,
+            );
+        }
         $numbered = trim((string) ($doc['doc_number'] ?? '')) !== '';
         $posted = (string) ($doc['status'] ?? '') === 'posted';
 

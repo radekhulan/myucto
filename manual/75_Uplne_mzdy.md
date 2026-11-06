@@ -308,9 +308,10 @@ kroků ve třech skupinách:
    průvodce předá štafetu běžnému měsíčnímu zpracování.
 
 Když první mzdové období neleží v lednu, přibude před první mzdový měsíc
-skupina **Přechod v průběhu roku** se sedmi kroky: převzaté mzdy, počáteční
-stavy, děti a prohlášení od začátku roku, identifikátory pro ČSSZ, průměrný
-výdělek pro první čtvrtletí, zůstatek dovolené a kontrola převzaté části roku.
+skupina **Přechod v průběhu roku** se sedmi kroky: **Převezměte mzdy za měsíce
+před přechodem**, **Zkontrolujte počáteční stavy**, **Děti a prohlášení od
+začátku roku**, **Identifikátory pro ČSSZ**, **Průměrný výdělek pro první
+čtvrtletí**, **Zůstatek dovolené** a **Kontrola převzaté části roku**.
 Podrobně je popisuje [Přechod mezd v průběhu roku](113_Prechod_mezd_v_prubehu_roku.md).
 
 Každý krok jde odškrtnout. Kroky, na které nemáte oprávnění, se nenabízejí;
@@ -384,11 +385,25 @@ Pořadí je dané a nedá se přeskočit.
 | Čeká na opravu / Zrušeno | **Otevřít opravu** | nová revize nad opravenými vstupy |
 
 Vedle jsou méně časté akce **Vyžádat opravu** a **Zrušit běh** (červeně úplně
-vpravo).
+vpravo). Důvod se píše u **Vyžádat opravu** schváleného běhu a u zrušení
+opravné revize, protože ta stojí nad schváleným výsledkem. Zrušení
+neschváleného běhu stačí potvrdit, docházka ani vstupy se nemažou a běh vrátí
+**Začít znovu a spočítat**. Zrušení uvolní jen vstupy zaměstnanců tohoto běhu.
+Vstupy, které drží běh jiné mzdové účtárny za stejný měsíc, zůstávají
+zamčené.
 
 **Kontrola před zahájením.** Každý nález má vyznačený dopad: **Bez tohohle se
-nedá počítat**, **Pozdější oprava znamená opravnou revizi**, nebo **Doplní se
-kdykoli, běh to nezdrží**.
+nedá počítat**, **Spočítat půjde, schválit ne** (červeně, například neschválená
+docházka, rozpracované vstupy nebo vztah bez mzdové složky), **Pozdější oprava
+znamená opravnou revizi**, nebo **Doplní se kdykoli, běh to nezdrží**. U
+červených nálezů jsou tlačítka, která je vyřeší rovnou: **Otevřít docházku
+a schválit měsíc**, **Schválit všechny mzdové vstupy** a **Otevřít měsíční
+vstupy**.
+
+**Běh nejde schválit.** Drží-li spočítaný běh neschválená docházka nebo
+rozpracované vstupy, karta běhu ukáže panel **Jak pokračovat** s očíslovanými
+kroky a tlačítkem u každého z nich. Běh nerušte: po opravě podkladů stačí
+kliknout na **Obnovit podklady a přepočítat**.
 
 **Uzamčení vstupů** vytvoří neměnný snímek zaměstnanců, vztahů, složek, data
 výplaty a podkladů srážek. Co zapíšete potom, se do výpočtu ani do hlášení
@@ -407,8 +422,8 @@ stopy. Bez převzetí odpovědnosti běh schválit nejde.
 čisté mzdy**, **Rozklad sociálního a zdravotního pojištění** a **Rozpad daně
 ze závislé činnosti**. Historie je pod odkazem **Zobrazit historii a změny**.
 
-**Schválení** uloží výsledek jako závazný, samo založí výplatní pásky každé
-zpracované osoby, v podvojném účetnictví připraví rozdílový mzdový deník
+**Schválení** uloží výsledek jako závazný, zařadí generování výplatních pásek
+každé zpracované osoby na pozadí, v podvojném účetnictví připraví rozdílový mzdový deník
 a zapíše kontrolu i schválení do historie běhu. Samostatná kontrola je
 součástí schválení.
 

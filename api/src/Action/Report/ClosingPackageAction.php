@@ -64,10 +64,16 @@ final class ClosingPackageAction
             return Json::error($response, 'not_found', 'Účetní období nenalezeno.', 404);
         }
 
-        return Json::ok($response, [
+        try {
+            $counts = $this->package->previewCounts($sid, $periodId);
+            $metadata = $this->package->previewMetadata($sid, $periodId);
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        return Json::ok($response, $metadata + [
             'period_id'   => $periodId,
             'fiscal_year' => (int) $period['fiscal_year'],
-            'counts'      => $this->package->previewCounts($sid, $periodId),
+            'counts'      => $counts,
         ]);
     }
 
@@ -100,9 +106,12 @@ final class ClosingPackageAction
 
         $body = (array) ($request->getParsedBody() ?? []);
         $rawParts = $body['parts'] ?? [];
-        $parts = ClosingPackageService::normalizeParts(
-            is_array($rawParts) ? array_map('strval', $rawParts) : []
-        );
+        try {
+            $parts = $this->package->partsForPeriod($sid, $periodId,
+                is_array($rawParts) ? array_map('strval', $rawParts) : []);
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
         $params = [
             'period_id'    => $periodId,
             'fiscal_year'  => (int) $period['fiscal_year'],

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Auth;
 
+use MyInvoice\Http\AfterResponseTasks;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
@@ -19,11 +20,22 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 /**
  * Vždy vrací 204 (i pro neexistující email) → ochrana proti enumeration.
  * Token se generuje jen pokud user existuje, hash se uloží do password_resets.
+ *
+ * Stejný kód nestačí, prozradit nesmí ani DOBA odpovědi: SMTP odeslání běží jen
+ * pro existující účet a trvá desítky až stovky ms. E-mail se proto posílá až po
+ * odeslání odpovědi ({@see AfterResponseTasks}); kde to SAPI neumí, posílá se
+ * synchronně a všechny tiché odpovědi se srovnají na společné minimum.
  */
 final class ForgotPasswordAction
 {
     /** Kolik nejnovějších reset tokenů necháváme současně platných (viz úklid níže). */
     private const KEEP_VALID_RESETS = 3;
+
+    /**
+     * Minimální délka tiché odpovědi (ms), když e-mail nejde odložit za odpověď.
+     * Musí pokrýt běžnou SMTP transakci, jinak by rozdíl zůstal měřitelný.
+     */
+    public const MIN_SYNC_RESPONSE_MS = 1500;
 
     /**
      * Platnost tokenu na OBNOVU hesla. Onboardingový odkaz na *nastavení* hesla má
@@ -42,10 +54,12 @@ final class ForgotPasswordAction
         private readonly BruteForceGuard $bf,
         private readonly TurnstileVerifier $turnstile,
         private readonly RateLimitMiddleware $rateLimit,
+        private readonly AfterResponseTasks $afterResponse,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
+        $started = hrtime(true);
         $body = (array) ($request->getParsedBody() ?? []);
         $email = trim((string) ($body['email'] ?? ''));
         $turnstileToken = (string) ($body['cf_turnstile_response'] ?? '');
@@ -71,7 +85,7 @@ final class ForgotPasswordAction
 
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
             // Pořád vrátíme 204
-            return Json::ok($response, ['ok' => true], 204);
+            return $this->silentOk($response, $started);
         }
 
         $stmt = $this->db->pdo()->prepare('SELECT id, email, name, locale FROM users WHERE email = ? AND is_active = 1');
@@ -83,7 +97,7 @@ final class ForgotPasswordAction
             // enumerace neexistujících adres zaplňovala čítače. Spam na neznámé
             // adresy brzdí per-IP limit v RateLimitMiddleware.
             $this->logger->log('auth.forgot_unknown', null, null, null, ['email' => $email], $ip, $request->getHeaderLine('User-Agent'));
-            return Json::ok($response, ['ok' => true], 204);
+            return $this->silentOk($response, $started);
         }
 
         // Per-email limit. RateLimitMiddleware ho vybrat neumí — běží před
@@ -120,7 +134,7 @@ final class ForgotPasswordAction
             $this->logger->log('auth.forgot_throttled', (int) $user['id'], 'user', (int) $user['id'], [
                 'email' => $email,
             ], $ip, $userAgent);
-            return Json::ok($response, ['ok' => true], 204);
+            return $this->silentOk($response, $started);
         }
 
         // Vygeneruj token
@@ -136,7 +150,28 @@ final class ForgotPasswordAction
         // Pošli email
         $appUrl = rtrim((string) $this->config->get('app.url', ''), '/');
         $resetLink = $appUrl . '/reset?token=' . $tokenRaw;
+        $userAgent = $request->getHeaderLine('User-Agent');
 
+        $deliver = function () use ($user, $resetLink, $newResetId, $ip, $userAgent): void {
+            $this->deliverReset($user, $resetLink, $newResetId, $ip, $userAgent);
+        };
+        if ($this->afterResponse->canDetach()) {
+            $this->afterResponse->defer($deliver);
+        } else {
+            $deliver();
+        }
+
+        return $this->silentOk($response, $started);
+    }
+
+    /**
+     * Odešle reset e-mail a uklidí staré tokeny. Běží po odeslání odpovědi,
+     * pokud to SAPI dovolí, jinak synchronně.
+     *
+     * @param array<string,mixed> $user
+     */
+    private function deliverReset(array $user, string $resetLink, int $newResetId, string $ip, string $userAgent): void
+    {
         $sent = true;
         try {
             $this->mailer->sendTemplate(
@@ -155,7 +190,7 @@ final class ForgotPasswordAction
             $this->logger->log('auth.forgot_mail_failed', (int) $user['id'], 'user', (int) $user['id'], [
                 'to' => [(string) $user['email']],
                 'error' => $e->getMessage(),
-            ], $ip, $request->getHeaderLine('User-Agent'));
+            ], $ip, $userAgent);
         }
 
         // Úklid starých tokenů AŽ TEĎ, ne před odesláním.
@@ -191,8 +226,22 @@ final class ForgotPasswordAction
         // Dříve jsme zde volali recordFailure i při success — matoucí semantika, RateLimit teď pokrývá lépe.
         $this->logger->log('auth.forgot_sent', (int) $user['id'], 'user', (int) $user['id'], [
             'to' => [(string) $user['email']],
-        ], $ip, $request->getHeaderLine('User-Agent'));
+        ], $ip, $userAgent);
+    }
 
+    /**
+     * Tichá 204 pro všechny větve, které nesmí jít od sebe rozlišit. Bez
+     * odloženého odeslání se délka srovná na {@see self::MIN_SYNC_RESPONSE_MS}.
+     */
+    private function silentOk(Response $response, int $started): Response
+    {
+        if (!$this->afterResponse->canDetach()) {
+            // usleep může na Windows skončit o pár milisekund dřív; spí se, dokud minimum
+            // skutečně neuplyne.
+            while (($remainingUs = self::MIN_SYNC_RESPONSE_MS * 1000 - intdiv(hrtime(true) - $started, 1000)) > 0) {
+                usleep($remainingUs);
+            }
+        }
         return Json::ok($response, ['ok' => true], 204);
     }
 }

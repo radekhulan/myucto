@@ -43,6 +43,22 @@ final class CardPaymentOverview
                 AND {$sba}.bank_code_norm = COALESCE({$bs}.bank_code, '')";
     }
 
+    /**
+     * Podmínka „k pohybu `$bt` je připojený dokument" (účtenka v DMS): přímo k pohybu, nebo
+     * k jeho živému bankovnímu zápisu v deníku. Takový pohyb doklad má, jen ne jako přijatou
+     * fakturu. Dva `?` = supplier_id.
+     */
+    public static function attachedDocumentSql(string $bt): string
+    {
+        return "(EXISTS (SELECT 1 FROM document_links dl
+                          WHERE dl.entity_type = 'bank_transaction' AND dl.entity_id = {$bt}.id AND dl.supplier_id = ?)
+                 OR EXISTS (SELECT 1 FROM journal_entries dje
+                              JOIN document_links djl ON djl.entity_type = 'journal_entry' AND djl.entity_id = dje.id
+                                                     AND djl.supplier_id = dje.supplier_id
+                             WHERE dje.supplier_id = ? AND dje.source_type = 'bank' AND dje.source_id = {$bt}.id
+                               AND dje.reversed_by IS NULL))";
+    }
+
     public function unmatched(int $supplierId, string $from, string $to, ?int $creditCardAccountId = null): array
     {
         // Platební a kreditní karty se nemíchají. Bez $creditCardAccountId jen platby z běžných
@@ -73,6 +89,7 @@ final class CardPaymentOverview
                      WHERE w.supplier_id = ? AND w.source_type = 'card_writeoff'
                        AND w.source_id = bt.id AND w.reversed_by IS NULL
                 )
+                AND NOT " . self::attachedDocumentSql('bt') . "
                 AND " . BankStatementOwnershipResolver::sql('bs') . "
               ORDER BY bt.posted_at DESC, bt.id DESC
               LIMIT " . (self::MAX_ROWS + 1)
@@ -80,7 +97,7 @@ final class CardPaymentOverview
         $stmt->execute(array_merge(
             [$supplierId],
             $creditCardAccountId === null ? [] : [$creditCardAccountId],
-            [$from, $to, $supplierId, $supplierId],
+            [$from, $to, $supplierId, $supplierId, $supplierId, $supplierId],
             BankStatementOwnershipResolver::params($supplierId),
         ));
         // Z kreditky jen nákupy: úrok, poplatek a výběr doklad nečekají.

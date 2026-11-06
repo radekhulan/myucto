@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\FiscalCalendar;
 use PDO;
 
 /**
@@ -238,6 +239,44 @@ final class AccountingPeriodRepository
     }
 
     /**
+     * Posune začátek období (CAS přes row_version). Volající drží zámky období
+     * a ručí za pravidla prvního období, viz AccountingPeriodAction::updateStart.
+     *
+     * @return bool false = version_conflict nebo období už není otevřené
+     */
+    public function updateStartsOnCas(int $id, int $supplierId, string $startsOn, int $expectedVersion): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE accounting_periods
+                SET starts_on = ?, row_version = row_version + 1
+              WHERE id = ? AND supplier_id = ? AND row_version = ?
+                AND status = 'open' AND approved_at IS NULL"
+        );
+        $stmt->execute([$startsOn, $id, $supplierId, $expectedVersion]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /**
+     * Zápisy deníku období s datem před daným dnem (včetně konceptů a otevíracích).
+     *
+     * @return array{count:int, first_date:?string}
+     */
+    public function journalEntriesBefore(int $supplierId, int $periodId, string $date): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) AS cnt, MIN(entry_date) AS first_date
+               FROM journal_entries
+              WHERE supplier_id = ? AND period_id = ? AND entry_date < ?'
+        );
+        $stmt->execute([$supplierId, $periodId, $date]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return [
+            'count' => (int) ($row['cnt'] ?? 0),
+            'first_date' => isset($row['first_date']) ? (string) $row['first_date'] : null,
+        ];
+    }
+
+    /**
      * První období překrývající interval <startsOn, endsOn> (validace R5 při
      * create/update: NOT (ends_on < starts OR starts_on > ends)).
      */
@@ -307,22 +346,80 @@ final class AccountingPeriodRepository
      * aby první období (převod z jiného programu, aktivace účetnictví, automatické
      * otevření) vzniklo hned ve správném tvaru. Bez nastavení kalendářní rok.
      */
-    public function fiscalCalendar(int $supplierId): \MyInvoice\Service\Accounting\FiscalCalendar
+    public function fiscalCalendar(int $supplierId): FiscalCalendar
     {
-        $fromPeriods = \MyInvoice\Service\Accounting\FiscalCalendar::forPeriods($this->listForTenant($supplierId));
-        if (!$fromPeriods->isCalendar()) {
-            return $fromPeriods;
+        return $this->fiscalCalendarSnapshot($supplierId)['calendar'];
+    }
+
+    /**
+     * Kalendář a jeho podklad pro náhled i atomické ověření před zápisem.
+     * Zamykací varianta nevrátí zastaralý snapshot. Při innodb_snapshot_isolation=ON
+     * může předat konflikt 1020 vlastníkovi transakce, který zopakuje celou operaci.
+     *
+     * @return array{calendar: FiscalCalendar, periods: list<array<string,mixed>>, supplier_start_month: int|null, fingerprint: string}
+     */
+    public function fiscalCalendarSnapshot(int $supplierId, bool $forUpdate = false): array
+    {
+        $pdo = $this->db->pdo();
+        if ($forUpdate && !$pdo->inTransaction()) {
+            throw new \LogicException('Zamknutí účetního kalendáře vyžaduje transakci.');
         }
-        return new \MyInvoice\Service\Accounting\FiscalCalendar($this->fiscalYearStartMonth($supplierId));
+        // Stejné pořadí zámků jako DimensionPeriodGuard a změna fiskálního roku firmy.
+        $stmt = $pdo->prepare(
+            'SELECT id, fiscal_year, starts_on, ends_on, status FROM accounting_periods
+              WHERE supplier_id = ? ORDER BY starts_on, id' . ($forUpdate ? ' FOR UPDATE' : '')
+        );
+        $stmt->execute([$supplierId]);
+        $periods = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $periodBounds = array_map(static fn (array $p): array => [(int) $p['fiscal_year'], (string) $p['starts_on'], (string) $p['ends_on']], $periods);
+        ['calendar' => $calendar, 'supplier_start_month' => $startMonth] = $this->resolveCalendar($supplierId, $periods, $forUpdate);
+        // Nepoužité nastavení firmy nemění účinný kalendář ani jeho otisk a není třeba je zamykat.
+        $fingerprint = hash('sha256', json_encode([
+            'calendar_start_month' => $calendar->startMonth(),
+            'periods' => $periodBounds,
+        ], JSON_THROW_ON_ERROR));
+        return ['calendar' => $calendar, 'periods' => $periods, 'supplier_start_month' => $startMonth, 'fingerprint' => $fingerprint];
+    }
+
+    /**
+     * Kalendář, který by firma měla s daným výčtem období — stejné pravidlo jako
+     * {@see fiscalCalendarSnapshot()}, jen nad navrhovanými hranicemi před zápisem.
+     *
+     * @param list<array<string,mixed>> $periods řádky s fiscal_year, starts_on, ends_on
+     */
+    public function fiscalCalendarFor(int $supplierId, array $periods, bool $forUpdate = false): FiscalCalendar
+    {
+        return $this->resolveCalendar($supplierId, $periods, $forUpdate)['calendar'];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $periods
+     * @return array{calendar: FiscalCalendar, supplier_start_month: int|null}
+     */
+    private function resolveCalendar(int $supplierId, array $periods, bool $forUpdate): array
+    {
+        // Historická změna hospodářského roku: rozhoduje nejnovější období, stejně jako listForTenant().
+        usort($periods, static fn (array $a, array $b): int => (int) $b['fiscal_year'] <=> (int) $a['fiscal_year']);
+        $calendar = FiscalCalendar::forPeriods($periods);
+        $startMonth = null;
+        if ($calendar->isCalendar()) {
+            $startMonth = $this->fiscalYearStartMonth($supplierId, $forUpdate);
+            $calendar = new FiscalCalendar($startMonth);
+        }
+        return ['calendar' => $calendar, 'supplier_start_month' => $startMonth];
     }
 
     /** Nastavení firmy „účetní rok začíná měsícem" (1 = kalendářní rok; migrace 2003). */
-    public function fiscalYearStartMonth(int $supplierId): int
+    public function fiscalYearStartMonth(int $supplierId, bool $forUpdate = false): int
     {
+        if ($forUpdate && !$this->db->pdo()->inTransaction()) {
+            throw new \LogicException('Zamknutí nastavení účetního roku vyžaduje transakci.');
+        }
         if (!$this->db->hasColumn('supplier', 'fiscal_year_start_month')) {
             return 1;
         }
-        $stmt = $this->db->pdo()->prepare('SELECT fiscal_year_start_month FROM supplier WHERE id = ?');
+        // Zámek chrání fiscal_year_start_month před souběžným uložením nastavení i u firmy bez období.
+        $stmt = $this->db->pdo()->prepare('SELECT fiscal_year_start_month FROM supplier WHERE id = ?' . ($forUpdate ? ' FOR UPDATE' : ''));
         $stmt->execute([$supplierId]);
         $month = (int) $stmt->fetchColumn();
         return $month >= 1 && $month <= 12 ? $month : 1;

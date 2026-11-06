@@ -32,6 +32,11 @@ final class EffectiveRole
             || ($this->type === 'staff' && in_array($this->systemKey, ['admin', 'admin_plus'], true));
     }
 
+    public function isInstanceAdmin(): bool
+    {
+        return $this->type === 'instance_admin' && $this->systemKey === 'instance_admin';
+    }
+
     public function canCreateSupplier(): bool
     {
         return $this->isSuperadmin()
@@ -47,6 +52,8 @@ final class EffectiveRole
     {
         if ($this->isSuperadmin()) return AccessLevel::WRITE;
         if (!$this->isActive) return AccessLevel::NONE;
+        // Technický účet nemůže získat obchodní práva ani poškozenou maticí v DB.
+        if ($this->type === 'instance_admin' || $this->systemKey === 'instance_admin') return AccessLevel::NONE;
         return AccessLevel::tryFrom((int) ($this->permissions[$key] ?? 0)) ?? AccessLevel::NONE;
     }
 }

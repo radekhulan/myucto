@@ -36,6 +36,8 @@ vi.mock('@/components/bank/useBankJournalNavigation', () => ({
 }))
 vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canRead: () => true, canWrite: () => true }) }))
+// Řádek pohybu se ptá na vazby SVJ jen u známé firmy; test žádnou nemá.
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplierId: null }) }))
 // Dimenze (Firma → Dimenze) jsou u firmy vypnuté — řádek pohybu je nevykreslí.
 vi.mock('@/composables/useDimensions', () => ({
   useDimensions: () => ({

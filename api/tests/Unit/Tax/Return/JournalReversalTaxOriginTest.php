@@ -29,7 +29,8 @@ final class JournalReversalTaxOriginTest extends TestCase
             CREATE TABLE journal_entry_lines (entry_id INTEGER, supplier_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER GENERATED ALWAYS AS (0) VIRTUAL, signed_amount REAL GENERATED ALWAYS AS (amount) VIRTUAL);
             CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, tax_deductibility TEXT, parent_id INTEGER, name TEXT);
             CREATE TABLE purchase_invoices (id INTEGER PRIMARY KEY, supplier_id INTEGER, tax_deductible INTEGER);
-            INSERT INTO chart_of_accounts VALUES (1,'518','expense','deductible',NULL,'Služby'),(2,'549','expense','non_deductible',NULL,'Manka'),(3,'552','expense','deductible',NULL,'Rezervy'),(4,'451','liability','deductible',NULL,'Rezervy');");
+            INSERT INTO chart_of_accounts (id, account_code, account_type, tax_deductibility, parent_id, name) VALUES (1,'518','expense','deductible',NULL,'Služby'),(2,'549','expense','non_deductible',NULL,'Manka'),(3,'552','expense','deductible',NULL,'Rezervy'),(4,'451','liability','deductible',NULL,'Rezervy');");
+        \MyInvoice\Tests\Support\AccountDefinitionSqliteFixture::install($this->pdo);
         $this->db = new Connection(new Config([]));
         (new \ReflectionProperty($this->db, 'pdo'))->setValue($this->db, $this->pdo);
     }

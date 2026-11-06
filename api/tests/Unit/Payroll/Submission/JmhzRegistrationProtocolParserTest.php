@@ -218,6 +218,28 @@ final class JmhzRegistrationProtocolParserTest extends TestCase
         ));
     }
 
+    /** REGZEC27 (události od 1. 1. 2027) má tentýž tvar protokolu, jen jiný ročník. */
+    public function testRegzec27ProtocolIsReadLikeRegzec25(): void
+    {
+        $report = (new JmhzProtocolParser())->parse(self::protocol('CSSZ_REGZEC', 'response', 'OK', [
+            self::item('REGZEC27', '', '', 'OK'),
+            self::item('REGZEC27', '1', self::BIRTH_NUMBER . ';' . self::OIC . ';' . self::ID_PPV, 'OK'),
+        ]));
+
+        self::assertSame(JmhzSubmissionStatus::ProcessedAndComplete, $report->status);
+        self::assertSame(self::OIC, self::onlyForm($report->parts)->ikMpsv);
+    }
+
+    public function testRegistrationProtocolMixingYearsIsRefused(): void
+    {
+        self::assertRefused('jmhz_protocol_part_unknown', self::protocol(
+            'CSSZ_REGZEC',
+            'response',
+            'OK',
+            [self::item('REGZEC25', '', '', 'OK'), self::item('REGZEC27', '1', ';;', 'OK')],
+        ));
+    }
+
     public function testDeclaredItemCodeMustMatchTheMessage(): void
     {
         self::assertRefused('jmhz_protocol_error_code_conflict', self::protocol(

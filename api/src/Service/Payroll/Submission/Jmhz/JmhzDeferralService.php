@@ -425,7 +425,7 @@ final readonly class JmhzDeferralService
             throw new JmhzXmlException(
                 'jmhz_deferral_still_blocked',
                 'Odložený vztah zatím doplnit nejde: '
-                    . JmhzBlockerExplainer::describe($still),
+                    . JmhzBlockerExplainer::describeNamed($still, $this->people, $supplierId),
             );
         }
 

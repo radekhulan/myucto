@@ -130,6 +130,7 @@ final class JmhzReportWriter
                         $monthStart,
                         $item->form->credits,
                         $reference,
+                        $item->form->birthDate,
                     )['sections'],
                     $userId,
                     $ip,

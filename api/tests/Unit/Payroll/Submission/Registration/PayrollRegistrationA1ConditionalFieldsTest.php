@@ -395,8 +395,8 @@ final class PayrollRegistrationA1ConditionalFieldsTest extends TestCase
     private static function foreignIdentity(): array
     {
         $identity = PayrollRegistrationA1SnapshotBuilderTest::identity();
-        $identity['citizenship_country_code'] = 'SK';
-        $identity['birth_country_code'] = 'SK';
+        $identity['citizenship_country_code'] = 'UA';
+        $identity['birth_country_code'] = 'UA';
 
         return $identity;
     }

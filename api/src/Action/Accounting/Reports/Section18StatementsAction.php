@@ -55,6 +55,7 @@ final class Section18StatementsAction
         private readonly ReportXlsxExporter $xlsx,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
+        private readonly \MyInvoice\Service\Accounting\Reports\StatementSupplementPolicy $frameworks,
     ) {}
 
     public function get(Request $request, Response $response): Response
@@ -71,6 +72,10 @@ final class Section18StatementsAction
         }
 
         try {
+            if ($this->frameworks->framework($supplierId, $periodId) === 'cz_504') {
+                return Json::ok($response, ['accounting_framework' => 'cz_504', 'available' => false,
+                    'reason' => 'statement_supplement_unsupported', 'required' => false, 'cash_flow' => null, 'equity' => null]);
+            }
             $cashFlow = $this->cashFlow->build($supplierId, $periodId);
             $equity   = $this->equity->build($supplierId, $periodId);
             $category = $this->categories->evaluate($supplierId, $periodId);

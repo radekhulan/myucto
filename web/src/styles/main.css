@@ -37,6 +37,24 @@ main.workspace-main-single > .workspace-host {
   }
 }
 
+/* Okno bez firmy (prvotní nastavení) se nevykresluje v iframu, ale přímo
+   v panelu. Okraje, které jednopanelový host ruší, mu proto vrací stejně
+   jako `body.workspace-window-single #app` uvnitř rámu. */
+main.workspace-main-single .workspace-inline-window {
+  padding-inline: 1.25rem;
+  padding-bottom: 1.5rem;
+}
+
+main.workspace-main-single:has(> .workspace-host:only-child) .workspace-inline-window {
+  padding-top: 1.5rem;
+}
+
+@container workspace (width >= 40rem) {
+  main.workspace-main-single .workspace-inline-window {
+    padding-inline: 2rem;
+  }
+}
+
 html.workspace-window-frame {
   scrollbar-gutter: auto;
   scrollbar-color: var(--color-neutral-300) var(--color-neutral-50);
@@ -151,15 +169,35 @@ input[type="file"].form-input::file-selector-button {
 
   /* ─── Semantic (pastel) ─── */
   --color-success-50:  #ECF6F0;
+  --color-success-100: #D6EDDF;
+  --color-success-200: #B3DCC3;
+  --color-success-300: #8BC9A3;
+  --color-success-400: #6BBB8D;
   --color-success-500: #4CAF7A;   /* soft sage */
   --color-success-600: #3B9665;   /* primary „go/potvrdit" button (Vystavit, Zaplaceno…) */
   --color-success-700: #2E7B53;   /* hover plného success tlačítka */
+  --color-success-800: #245F41;
+  --color-success-900: #1A4530;
   --color-warning-50:  #FDF6E9;
+  --color-warning-100: #FAEACB;
+  --color-warning-200: #F4D79E;
+  --color-warning-300: #EEC077;
+  --color-warning-400: #EBB15E;
   --color-warning-500: #E8A547;   /* soft amber */
   --color-warning-600: #C68A30;
+  --color-warning-700: #95661E;   /* text varování */
+  --color-warning-800: #765017;
+  --color-warning-900: #573B11;
   --color-danger-50:   #FBEDED;
+  --color-danger-100:  #F7DADA;
+  --color-danger-200:  #EFBDBD;
+  --color-danger-300:  #E39595;
+  --color-danger-400:  #DA7676;
   --color-danger-500:  #D45B5B;   /* soft coral */
   --color-danger-600:  #B84545;
+  --color-danger-700:  #9C3535;   /* text chyby */
+  --color-danger-800:  #7E2A2A;
+  --color-danger-900:  #5E2020;
 
   /* ─── Status badges (faktury) ─── */
   --color-status-draft-bg:     #F4F2F8;
@@ -176,11 +214,14 @@ input[type="file"].form-input::file-selector-button {
   --color-status-cancelled-fg: #A7A0BA;
 
   /* ─── Typografie ───
-     Self-hostované subsety, viz styles/fonts.css. Display řez (Instrument Serif)
-     je záměrně jen pro H1 stránek a hero čísla — v tabulkách a formulářích nikdy. */
+     Self-hostované subsety, viz styles/fonts.css. Utilita `font-mono` u částek a čísel
+     dokladů vede na Geist Mono bez znaků mezer: číslice (s přeškrtnutou nulou) mají
+     stejnou šířku pod sebou, ale mezeru mezi trojicemi vykreslí proporcionální Geist,
+     takže není široká jako celá číslice. Úplný řez nese kód přes --font-code. */
   --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --font-mono: "Geist Mono", ui-monospace, "SF Mono", Consolas, monospace;
-  --font-display: "Instrument Serif", "Iowan Old Style", Georgia, serif;
+  --font-mono: "Geist Mono Num", "Geist", ui-monospace, "SF Mono", Consolas, monospace;
+  --font-code: "Geist Mono", ui-monospace, "SF Mono", Consolas, monospace;
+  --font-display: var(--font-sans);
 
   --radius-sm: 5px;
   --radius-md: 7px;
@@ -250,6 +291,28 @@ input[type="file"].form-input::file-selector-button {
   --color-success-500: #56A98A;   /* border Upravit */
   --color-success-600: #46A074;   /* text + ikona Upravit (a ostatní success text) */
   --color-success-700: #2A6446;   /* hover bg tint */
+  /* Škály stavů v dark: tinty (100-200) tmavé, okraje (300-400) tlumené,
+     text (700-900, u success 800-900) zesvětlený, jinak by byl na tmavém nečitelný. */
+  --color-success-100: #1C3426;
+  --color-success-200: #244531;
+  --color-success-300: #336B4C;
+  --color-success-400: #3F8A62;
+  --color-success-800: #8FD1AE;
+  --color-success-900: #B8E3CA;
+  --color-warning-100: #3A2D15;
+  --color-warning-200: #4D3B18;
+  --color-warning-300: #7A5D22;
+  --color-warning-400: #B88A3A;
+  --color-warning-700: #E2AE5C;
+  --color-warning-800: #EBC27F;
+  --color-warning-900: #F3D8A8;
+  --color-danger-100:  #3A1D1D;
+  --color-danger-200:  #4E2525;
+  --color-danger-300:  #7A3838;
+  --color-danger-400:  #B05050;
+  --color-danger-700:  #E58A8A;
+  --color-danger-800:  #F0A8A8;
+  --color-danger-900:  #F7CACA;
   --color-accent-50:  #122231;
   /* accent-100 (soft pill bg — badge Proforma) — bez tohoto override by zůstal
      světlý #D7E8F6 a v dark módu zářil. Laděno k ostatním -50 stavům. */
@@ -328,6 +391,7 @@ input[type="file"].form-input::file-selector-button {
   --color-warning-100: #3D3013;
   --color-warning-700: #E7B968;
   --color-danger-50:  #34191C;
+  --color-danger-700: #EE9A9A;
   --color-accent-50:  #172B3D;
   --color-accent-100: #1C3A52;
   --color-teal-50:    #12313A;
@@ -415,6 +479,19 @@ body.workspace-window-frame #app {
   padding-bottom: 1rem;
 }
 
+/* Vystředěný dialog nesmí na nízkém displeji utéct z obrazovky: bez scrollu by šlo
+   k Uložit dojít jen přes zoom. Auto okraje středí jako items-center, ale při přetečení
+   začínají nahoře, takže zůstane dostupná i hlavička. Pravidlo drží všechny ruční
+   dialogy, hlídá ho dialogOverflowStructure.spec.ts. */
+.fixed.inset-0.flex.items-center.justify-center:not(.pointer-events-none) {
+  align-items: flex-start;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.fixed.inset-0.flex.items-center.justify-center:not(.pointer-events-none) > * {
+  margin-block: auto;
+}
+
 body.workspace-window-single #app {
   padding-top: 0;
   padding-bottom: 1.5rem;
@@ -469,15 +546,15 @@ body.workspace-window-single-padded #app {
   font-variant-numeric: tabular-nums;
   font-feature-settings: "tnum" 1;
 }
+:where(code, kbd, samp, pre) {
+  font-family: var(--font-code);
+}
 
-/* ═══════════════════════ DISPLAY ŘEZ ═══════════════════════
- * Instrument Serif má malý x-height a pod ~20 px se rozpadá — proto ho nosí jen
- * nadpisy stránek a hero čísla, nikdy ne tabulky, formuláře nebo popisky.
- *
- * H1 stylujeme globálně (mimo @layer, aby přebilo `font-semibold` z utilit):
- * v aplikaci je přes 140 nadpisů stránek a ručně jim třídu dopisovat by znamenalo
- * sáhnout do stovky souborů. font-weight musí být 400 — řez má jen jeden tah a
- * `font-semibold` by vyrobil ošklivý syntetický tučný text.
+/* ═══════════════════════ NADPISY ═══════════════════════
+ * Nadpisy stránek a hero čísla jsou v Geistu, řezu 500 s mírně staženým proložením.
+ * H1 stylujeme globálně (mimo @layer, aby přebilo utility z jednotlivých stránek):
+ * v aplikaci je přes 140 nadpisů a ručně jim třídu dopisovat by znamenalo sáhnout
+ * do stovky souborů.
  *
  * Opt-out je `class="font-sans"` na H1 — používá ho logo v hlavičce přihlašovacích
  * a veřejných stránek, kde H1 nese značku „MyÚčto.cz" a ta musí vypadat stejně
@@ -485,21 +562,16 @@ body.workspace-window-single-padded #app {
 .font-display,
 h1:not(.font-sans) {
   font-family: var(--font-display);
-  font-weight: 400;
-  letter-spacing: -0.015em;
-  line-height: 1.15;
+  font-weight: 500;
+  letter-spacing: -0.022em;
+  line-height: 1.2;
 }
-/* Serif s malým x-heightem opticky ubere velikost — nejčastější `text-2xl`
-   nadpisy proto o kus zvětšíme, ať mají stejnou váhu jako dřív groteskem. */
-h1:where(.text-2xl) { font-size: 1.75rem; }
-h1:where(.text-xl) { font-size: 1.5rem; }
 
 /* Nadpisy detailů nesou vedle názvu i odznaky stavu a akční tlačítka (číslo
-   faktury + „Vystaveno" + „Zaúčtováno" + …). Ty musí zůstat v groteskovém řezu —
-   `font-family` se dědí, takže by se serif propsal i do 11px pilulek, kde se
-   rozpadá. Poznáme je podle zaoblení (každý odznak i tlačítko má `rounded*`). */
+   faktury + „Vystaveno" + „Zaúčtováno" + …); stažené proložení nadpisu do nich
+   nepatří. Poznáme je podle zaoblení (každý odznak i tlačítko má `rounded*`). */
 h1 :where(.badge, button, [class*="rounded"]) {
-  font-family: var(--font-sans);
+  font-weight: 500;
   letter-spacing: normal;
 }
 

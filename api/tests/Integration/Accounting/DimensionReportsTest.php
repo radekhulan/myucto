@@ -167,6 +167,27 @@ final class DimensionReportsTest extends TestCase
         self::assertSame($a, $bs['dimension']['value_id']);
     }
 
+    public function testFilterLineSourceReadsOnlyEntriesInsideTheRequestedDates(): void
+    {
+        $a = $this->value($this->centerType, 'R-D');
+        $b = $this->value($this->centerType, 'R-E');
+        $this->post([
+            ['518', 'debit', 40.00, ['dimension_splits' => [$this->centerType => [$a => 0.5, $b => 0.5]]]],
+            ['321', 'credit', 40.00, ['dimensions' => [$this->centerType => $a]]],
+        ]);
+        $filter = $this->dimensions->filter($this->supplierId, $a);
+        $lines = function (?string $from, string $to) use ($filter): array {
+            [$sql, $params] = $filter->lineSource($this->supplierId, 'l', $from, $to);
+            $stmt = $this->db->pdo()->prepare("SELECT l.amount FROM {$sql} ORDER BY l.amount");
+            $stmt->execute($params);
+            return array_map('floatval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+        };
+        self::assertSame([20.0, 40.0], $lines(self::FROM, self::TO), 'Jediná hodnota v plné výši, rozpad dílem.');
+        self::assertSame([20.0, 40.0], $lines(null, self::DATE), 'Bez spodní meze od počátku historie, horní mez včetně.');
+        self::assertSame([], $lines(self::FROM, self::YEAR . '-05-09'), 'Zápis po horní mezi do zdroje nevstoupí.');
+        self::assertSame([], $lines(self::YEAR . '-05-11', self::TO), 'Zápis před spodní mezí do zdroje nevstoupí.');
+    }
+
     public function testSplitRemainderGoesToLargestShareIdenticallyEverywhere(): void
     {
         $a = $this->value($this->centerType, 'R-X');

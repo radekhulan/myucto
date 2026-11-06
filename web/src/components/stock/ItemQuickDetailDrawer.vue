@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { formatMoney } from '@/composables/useFormat'
+import { formatUnitPrice } from '@/composables/useFormat'
 import { stockApi, type StockItem, type StockItemNeighborsOptions } from '@/api/stock'
 import type { Manufacturer } from '@/api/eshop'
 import Drawer from '@/components/ui/Drawer.vue'
@@ -113,7 +113,7 @@ onBeforeUnmount(() => {
         </div>
         <div>
           <dt class="text-neutral-500">{{ t('stock.items.quick_detail.sale_price_without_vat') }}</dt>
-          <dd class="mt-0.5 font-mono text-neutral-900">{{ itemPrice == null ? '—' : formatMoney(Number(itemPrice)) }}</dd>
+          <dd class="mt-0.5 font-mono text-neutral-900">{{ itemPrice == null ? '—' : formatUnitPrice(Number(itemPrice)) }}</dd>
         </div>
         <div>
           <dt class="text-neutral-500">{{ t('stock.items.field_active') }}</dt>

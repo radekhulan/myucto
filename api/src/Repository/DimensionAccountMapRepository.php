@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\Dimension\DimensionValueLabel;
 use MyInvoice\Service\Accounting\TakenOverRecord;
 use PDO;
 
@@ -29,7 +30,7 @@ final class DimensionAccountMapRepository
      *
      * @return array{id:int, mask:string}|null
      */
-    public function drivingType(int $supplierId): ?array
+    public function drivingType(int $supplierId, bool $currentRead = false): ?array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.drives_accounts_mask
@@ -38,7 +39,7 @@ final class DimensionAccountMapRepository
               WHERE t.drives_accounts = 1 AND t.is_active = 1
                 AND (t.supplier_id = s.id OR (s.supplier_group_id IS NOT NULL AND t.supplier_group_id = s.supplier_group_id))
               ORDER BY t.supplier_id IS NULL, t.id
-              LIMIT 1'
+              LIMIT 1' . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -73,19 +74,19 @@ final class DimensionAccountMapRepository
      *
      * @return array<int,array<int,int>>
      */
-    public function activeMap(int $supplierId, int $typeId, string $date): array
+    public function activeMap(int $supplierId, int $typeId, string $date, bool $currentRead = false): array
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT m.synthetic_account_id, m.dimension_value_id, m.analytic_account_id
                FROM dimension_account_map m
-               JOIN chart_of_accounts s ON s.id = m.synthetic_account_id AND s.supplier_id = m.supplier_id
-               JOIN chart_of_accounts a ON a.id = m.analytic_account_id AND a.supplier_id = m.supplier_id
+               JOIN " . AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . " s ON s.id = m.synthetic_account_id AND s.supplier_id = m.supplier_id
+               JOIN " . AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . " a ON a.id = m.analytic_account_id AND a.supplier_id = m.supplier_id
               WHERE m.supplier_id = ? AND m.dimension_type_id = ?
                 AND (m.valid_from IS NULL OR m.valid_from <= ?)
                 AND (m.valid_to IS NULL OR m.valid_to >= ?)
                 AND s.is_active = 1 AND a.is_active = 1
                 AND " . self::VALID_PAIR_SQL . "
-              ORDER BY m.valid_from IS NULL, m.valid_from DESC, m.id"
+              ORDER BY m.valid_from IS NULL, m.valid_from DESC, m.id" . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $typeId, $date, $date]);
         $out = [];
@@ -121,23 +122,29 @@ final class DimensionAccountMapRepository
      *
      * @return list<array{account_id:int, account_code:string, name:string}>
      */
-    public function invalidRows(int $supplierId, int $typeId): array
+    public function invalidRows(int $supplierId, int $typeId, ?string $date = null, bool $currentRead = false): array
     {
+        $date = AccountDefinitionRepository::date($date ?? date('Y-m-d'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT DISTINCT a.id AS account_id, a.account_code, s.account_code AS synthetic_code, v.code AS value_code
+            "SELECT DISTINCT m.analytic_account_id AS account_id, identity_a.account_code, identity_s.account_code AS synthetic_code, v.code AS value_code, v.name AS value_name, v.semantic_key AS value_semantic_key
                FROM dimension_account_map m
-               JOIN chart_of_accounts s ON s.id = m.synthetic_account_id AND s.supplier_id = m.supplier_id
-               JOIN chart_of_accounts a ON a.id = m.analytic_account_id AND a.supplier_id = m.supplier_id
+               JOIN chart_of_accounts identity_s ON identity_s.id=m.synthetic_account_id AND identity_s.supplier_id=m.supplier_id
+               JOIN chart_of_accounts identity_a ON identity_a.id=m.analytic_account_id AND identity_a.supplier_id=m.supplier_id
+          LEFT JOIN " . AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . " s ON s.id = m.synthetic_account_id AND s.supplier_id = m.supplier_id
+          LEFT JOIN " . AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . " a ON a.id = m.analytic_account_id AND a.supplier_id = m.supplier_id
                JOIN dimension_values v ON v.id = m.dimension_value_id
               WHERE m.supplier_id = ? AND m.dimension_type_id = ?
-                AND NOT " . self::VALID_PAIR_SQL . "
-              ORDER BY a.account_code"
+                AND (m.valid_from IS NULL OR m.valid_from <= ?)
+                AND (m.valid_to IS NULL OR m.valid_to >= ?)
+                AND (s.id IS NULL OR a.id IS NULL OR s.is_active=0 OR a.is_active=0 OR NOT " . self::VALID_PAIR_SQL . ")
+              ORDER BY identity_a.account_code" . ($currentRead ? ' FOR UPDATE' : '')
         );
-        $stmt->execute([$supplierId, $typeId]);
+        $stmt->execute([$supplierId, $typeId, $date, $date]);
         return array_map(static fn (array $r): array => [
             'account_id' => (int) $r['account_id'],
             'account_code' => (string) $r['account_code'],
-            'name' => $r['value_code'] . ': ' . $r['synthetic_code'] . ' → ' . $r['account_code'],
+            'name' => DimensionValueLabel::short(['code' => $r['value_code'], 'name' => $r['value_name'], 'semantic_key' => $r['value_semantic_key']])
+                . ': ' . $r['synthetic_code'] . ' → ' . $r['account_code'],
         ], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
@@ -162,14 +169,16 @@ final class DimensionAccountMapRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT m.id, m.dimension_type_id, m.dimension_value_id, m.synthetic_account_id,
-                    s.account_code AS synthetic_code, s.name AS synthetic_name,
-                    m.analytic_account_id, a.account_code AS analytic_code, a.name AS analytic_name,
+                    identity_s.account_code AS synthetic_code, COALESCE(s.name,identity_s.account_code) AS synthetic_name,
+                    m.analytic_account_id, identity_a.account_code AS analytic_code, COALESCE(a.name,identity_a.account_code) AS analytic_name,
                     m.valid_from, m.valid_to
                FROM dimension_account_map m
-               JOIN chart_of_accounts s ON s.id = m.synthetic_account_id AND s.supplier_id = m.supplier_id
-               JOIN chart_of_accounts a ON a.id = m.analytic_account_id AND a.supplier_id = m.supplier_id
+               JOIN chart_of_accounts identity_s ON identity_s.id = m.synthetic_account_id AND identity_s.supplier_id = m.supplier_id
+               JOIN chart_of_accounts identity_a ON identity_a.id = m.analytic_account_id AND identity_a.supplier_id = m.supplier_id
+          LEFT JOIN ' . AccountDefinitionRepository::relation(date('Y-m-d'), $supplierId) . ' s ON s.id = m.synthetic_account_id AND s.supplier_id = m.supplier_id
+          LEFT JOIN ' . AccountDefinitionRepository::relation(date('Y-m-d'), $supplierId) . ' a ON a.id = m.analytic_account_id AND a.supplier_id = m.supplier_id
               WHERE m.supplier_id = ?' . ($valueId !== null ? ' AND m.dimension_value_id = ?' : '') . '
-              ORDER BY m.dimension_value_id, s.account_code, m.valid_from IS NULL DESC, m.valid_from, m.id'
+              ORDER BY m.dimension_value_id, identity_s.account_code, m.valid_from IS NULL DESC, m.valid_from, m.id'
         );
         $stmt->execute($valueId !== null ? [$supplierId, $valueId] : [$supplierId]);
         return array_map(static fn (array $r): array => [
@@ -240,7 +249,7 @@ final class DimensionAccountMapRepository
             "SELECT a.id AS account_id, a.account_code, a.name, COUNT(*) AS line_count, ROUND(SUM(l.signed_amount), 2) AS amount
                FROM journal_entry_lines l
                JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
-               JOIN chart_of_accounts a ON a.id = l.account_id AND a.supplier_id = l.supplier_id
+               " . AccountDefinitionRepository::journalJoin($supplierId) . "
               WHERE l.supplier_id = ?
                 AND e.entry_date BETWEEN ? AND ?
                 AND e.posted_at IS NOT NULL
@@ -272,11 +281,12 @@ final class DimensionAccountMapRepository
      *
      * @return array<int,array{code:string, name:string, parent_id:?int, account_type:string, tax_deductibility:string, is_active:bool}>
      */
-    public function accounts(int $supplierId): array
+    public function accounts(int $supplierId, ?string $date = null, bool $currentRead = false): array
     {
+        $date = AccountDefinitionRepository::date($date ?? date('Y-m-d'));
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, account_code, name, parent_id, account_type, tax_deductibility, is_active
-               FROM chart_of_accounts WHERE supplier_id = ?'
+               FROM ' . AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . ' a WHERE supplier_id = ?' . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId]);
         $out = [];

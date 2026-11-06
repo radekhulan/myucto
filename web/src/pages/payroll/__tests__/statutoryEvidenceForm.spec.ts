@@ -93,7 +93,8 @@ describe('statutoryEvidenceForm current state', () => {
   it('doklad a poznámka nejsou věcná pole — patří do sbaleného doplňku', () => {
     const row = { status: 'signed' }
 
-    expect(primaryFields(declarations, row).map(field => field.key)).toEqual(['status'])
+    expect(primaryFields(declarations, row).map(field => field.key)).toEqual(['status', 'signed_on'])
+    expect(primaryFields(declarations, { status: 'not-signed' }).map(field => field.key)).toEqual(['status'])
     expect(evidenceDetailFields(declarations, row).map(field => field.key))
       .toEqual(['evidence_reference'])
   })

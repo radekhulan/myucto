@@ -8,12 +8,13 @@ import { useWorkspaceStore, type WorkspaceWindowState } from '@/stores/workspace
 
 const mocks = vi.hoisted(() => ({
   select: vi.fn(),
+  closeWindow: vi.fn(),
   lockBodyScroll: vi.fn(),
   unlockBodyScroll: vi.fn(),
 }))
 
 vi.mock('@/workspace/windowRegistry', () => ({
-  getWindowManager: () => ({ select: mocks.select }),
+  getWindowManager: () => ({ select: mocks.select, closeWindow: mocks.closeWindow }),
 }))
 
 vi.mock('@/composables/useKeyboardShortcuts', () => ({
@@ -104,6 +105,7 @@ async function searchFor(query: string): Promise<void> {
 describe('WorkspaceWindowSwitcher', () => {
   beforeEach(() => {
     mocks.select.mockReset().mockResolvedValue(undefined)
+    mocks.closeWindow.mockReset().mockResolvedValue(undefined)
     mocks.lockBodyScroll.mockReset()
     mocks.unlockBodyScroll.mockReset()
     Object.defineProperty(Element.prototype, 'scrollIntoView', {
@@ -133,6 +135,21 @@ describe('WorkspaceWindowSwitcher', () => {
     await searchFor('nenalezené')
     expect(options()).toHaveLength(0)
     expect(document.body.textContent).toContain('Žádná okna')
+  })
+
+  it('křížek i Delete zavřou okno bez jeho otevření', async () => {
+    const workspace = await mountSwitcher()
+    await openSwitcher(workspace)
+
+    press('Delete')
+    await flushPromises()
+    expect(mocks.closeWindow).toHaveBeenCalledWith('previous')
+
+    document.body.querySelectorAll<HTMLButtonElement>('[data-close-window]')[2]!.click()
+    await flushPromises()
+    expect(mocks.closeWindow).toHaveBeenLastCalledWith('parked')
+    expect(workspace.windowSwitcherOpen).toBe(true)
+    expect(mocks.select).not.toHaveBeenCalled()
   })
 
   it('předvolí předchozí okno a Enter je vybere', async () => {

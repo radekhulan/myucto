@@ -67,6 +67,34 @@ final class SicknessCompensationCalculatorTest extends TestCase
     }
 
     /**
+     * Okno § 192 ZP přes konec čtvrtletí (30. 3. až 2. 4.): dny v dubnu berou průměr
+     * 2. čtvrtletí, který jim volající dal (§ 354 odst. 1 ZP). Shodně to vykázala
+     * podaná hlášení PAMICA (G5, sada eq_b2b).
+     */
+    public function testSegmentsInNextQuarterUseTheirOwnAverage(): void
+    {
+        $segments = [];
+        foreach (['2026-03-30', '2026-03-31', '2026-04-01', '2026-04-02'] as $date) {
+            $segments[] = [
+                'shift_id' => null,
+                'local_date' => $date,
+                'planned_minutes' => 480,
+                'eligible_minutes' => 480,
+            ] + ($date >= '2026-04-01' ? ['average_hourly_minor' => 27_571] : []);
+        }
+
+        $result = $this->calculator()->calculate('2026-03-30', 36_028, $segments);
+
+        $byMonth = [];
+        foreach ($result->segments as $segment) {
+            $month = substr((string) $segment['local_date'], 0, 7);
+            $byMonth[$month] = ($byMonth[$month] ?? 0) + (int) $segment['compensation_minor'];
+        }
+        self::assertSame(['2026-03' => 289_900, '2026-04' => 238_300], $byMonth);
+        self::assertSame(27_571, $result->segments[3]['hourly_average_minor']);
+    }
+
+    /**
      * Neschopnost přes přelom měsíce: zaokrouhluje se KAŽDÉ výplatní období
      * zvlášť (§ 142 odst. 2 ZP mluví o zúčtování mzdy za období) a součet
      * segmentů v každém měsíci musí dát měsíční částku na haléř — přesně to,

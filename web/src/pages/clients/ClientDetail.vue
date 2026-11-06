@@ -133,7 +133,9 @@ async function syncBankAccountsFromRegistry() {
   try {
     const result = await clientsApi.syncBankAccountsFromRegistry(client.value.id)
     client.value.bank_accounts = result.accounts
-    if (result.found && result.synced > 0) {
+    if (result.source === 'group_registration') {
+      toast.info(t('client.bank_accounts.sync_group'))
+    } else if (result.found && result.synced > 0) {
       toast.success(t('client.bank_accounts.synced', { count: result.synced }))
     } else {
       toast.info(t('client.bank_accounts.sync_empty'))
@@ -325,7 +327,7 @@ const projectsTable = computed(() => {
 // Smazat lze jen klienta bez navázaných faktur a zakázek (jinak archivovat)
 const canDelete = computed(() => {
   if (!client.value) return false
-  const projects = client.value.projects?.length ?? 0
+  const projects = client.value.projects_count ?? client.value.projects?.length ?? 0
   const invoices = client.value.invoices_count ?? 0
   return projects === 0 && invoices === 0
 })
@@ -435,7 +437,7 @@ useWindowTitle(
   () => client.value?.company_name ?? null,
   () => client.value ? [client.value.is_customer ? t('client.is_customer_label') : null, client.value.is_vendor ? t('client.is_vendor_label') : null].filter(Boolean).join(', ') : null,
 )
-useWindowRefresh(['clients', 'invoices', 'purchase-invoices', 'recurring', 'bank', 'bank-transactions', 'cash'], async () => {
+useWindowRefresh(async () => {
   const id = Number(route.params.id)
   const [updated, grouped, rec, purchased] = await Promise.all([
     clientsApi.get(id),
@@ -754,7 +756,7 @@ useWindowRefresh(['clients', 'invoices', 'purchase-invoices', 'recurring', 'bank
     </div>
 
     <!-- Zakázky — visible pokud is_customer NEBO existují zakázky; role client (F6) zakázky nevidí -->
-    <div v-if="!auth.isClientRole && (client.is_customer !== false || (client.projects?.length ?? 0) > 0)"
+    <div v-if="!auth.isClientRole && auth.canRead('projects') && (client.is_customer !== false || (client.projects?.length ?? 0) > 0)"
          class="bg-surface border border-neutral-200 rounded-lg shadow-sm">
       <div class="px-5 py-3 border-b border-neutral-200 flex items-center justify-between">
         <h3 class="font-semibold">{{ t('client.projects') }}</h3>

@@ -6,7 +6,9 @@ namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Component\PayrollBenefitBasketService;
+use MyInvoice\Service\Payroll\Component\PayrollBenefitBasketSplit;
 use MyInvoice\Service\Payroll\Component\PayrollBenefitExemptionBasket;
+use MyInvoice\Service\Payroll\Component\PayrollFoodServiceTipService;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefinitionFactory;
 use MyInvoice\Service\Payroll\Component\PayrollMealShiftEvidenceService;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -40,6 +42,7 @@ final class PayrollInputRepository
         private readonly PayrollComponentDefinitionFactory $definitionFactory,
         private readonly PayrollBenefitBasketService $baskets,
         private readonly PayrollMealShiftEvidenceService $mealEvidence,
+        private readonly PayrollFoodServiceTipService $tips,
     ) {}
 
     /**
@@ -1266,26 +1269,13 @@ final class PayrollInputRepository
                     }
                     $entitlements = $entitlement->count();
                 }
-                $split = $this->baskets->split(
+                $split = $this->basketSplit(
+                    $supplierId,
+                    $employeeId,
                     $definition->exemptionBasket,
                     $periodStart,
-                    $this->basketTotal(
-                        $supplierId,
-                        $employeeId,
-                        $definition->exemptionBasket,
-                        $taxYear,
-                        $periodStart,
-                    ),
                     $amountMinor,
                     $entitlements,
-                    $definition->exemptionBasket->scalesWithShifts()
-                        ? $this->mealBasketEntitlements(
-                            $supplierId,
-                            $employeeId,
-                            $definition->exemptionBasket,
-                            $periodStart,
-                        )
-                        : null,
                 );
             } catch (\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException $e) {
                 throw new PayrollInputApprovalException(
@@ -1331,8 +1321,56 @@ final class PayrollInputRepository
                     ? null
                     : CanonicalJson::encode($benefitAllocation),
             ],
-            'is_benefit' => $definition->kind->isBenefit(),
+            // Spropitné benefitem není, ale jeho měsíční koš se čerpá stejným
+            // akumulátorem jako koše benefitů.
+            'is_benefit' => $definition->kind->isBenefit()
+                || $definition->exemptionBasket === PayrollBenefitExemptionBasket::FoodServiceTips,
         ];
+    }
+
+    /**
+     * Rozpad plnění proti zákonnému koši, jak by se zmrazil při schválení.
+     *
+     * Jediná cesta pro schválení i náhled vstupu. Koš spropitného
+     * (§ 6 odst. 9 písm. g) ZDP) bere strop z evidence tržeb firmy, ostatní koše
+     * z rulesetu.
+     *
+     * @throws \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException limit nelze určit
+     */
+    public function basketSplit(
+        int $supplierId,
+        int $employeeId,
+        PayrollBenefitExemptionBasket $basket,
+        string $periodStart,
+        int $amountMinor,
+        int $shiftEntitlements = 0,
+    ): PayrollBenefitBasketSplit {
+        $used = $this->basketTotal(
+            $supplierId,
+            $employeeId,
+            $basket,
+            (int) substr($periodStart, 0, 4),
+            $periodStart,
+        );
+        if ($basket->limitFromCompanyEvidence()) {
+            return $this->baskets->splitWithLimit(
+                $basket,
+                $this->tips->limitMinor($supplierId, $employeeId, $periodStart),
+                $used,
+                $amountMinor,
+            );
+        }
+
+        return $this->baskets->split(
+            $basket,
+            $periodStart,
+            $used,
+            $amountMinor,
+            $shiftEntitlements,
+            $basket->scalesWithShifts()
+                ? $this->mealBasketEntitlements($supplierId, $employeeId, $basket, $periodStart)
+                : null,
+        );
     }
 
     /**

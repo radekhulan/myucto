@@ -195,6 +195,18 @@ final class OtherDocumentsPostingScenarios
     /** @var array<string,int> id dokladů scénářů pro testy */
     public array $ids = [];
 
+    /** Kontext po {@see run()}, aby šlo nad jednou commitnutou sadou scénářů pracovat z dalších testů. */
+    public function state(): array
+    {
+        return ['supplierId' => $this->supplierId, 'currencyId' => $this->currencyId, 'userId' => $this->userId, 'czId' => $this->czId,
+            'vatRateId' => $this->vatRateId, 'cashRegister' => $this->cashRegister, 'ids' => $this->ids];
+    }
+
+    public function restore(array $state): void
+    {
+        foreach ($state as $property => $value) $this->{$property} = $value;
+    }
+
     public function bankTransaction(float $amount, string $date): int
     {
         $pdo = $this->db->pdo();

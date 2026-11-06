@@ -10,7 +10,7 @@ use PDO;
 /** Polymorfní vazba dokument ↔ entita. */
 final class DocumentLinkRepository
 {
-    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document', 'other_item', 'invoice_payment'];
+    public const ENTITY_TYPES = ['client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction', 'cash_document', 'other_item', 'invoice_payment', 'internal_document'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -73,6 +73,8 @@ final class DocumentLinkRepository
             'other_item'       => 'SELECT 1 FROM other_items WHERE id = ? AND supplier_id = ? AND deleted_at IS NULL LIMIT 1',
             // Ruční úhrada faktury — pohyb peněžního deníku daňové evidence (migrace 1994).
             'invoice_payment'  => 'SELECT 1 FROM invoice_payments WHERE id = ? AND supplier_id = ? LIMIT 1',
+            // Interní doklad (migrace 2193): příloha k zápočtu, odpisu, přeúčtování.
+            'internal_document' => 'SELECT 1 FROM internal_documents WHERE id = ? AND supplier_id = ? LIMIT 1',
         };
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$id, $supplierId]);
@@ -229,6 +231,17 @@ final class DocumentLinkRepository
                         $stmt->execute([$supplierId, ...$ids]);
                         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
                             $labels['other_item:' . (int) $r['id']] = (string) $r['title'];
+                        }
+                        break;
+                    case 'internal_document':
+                        $stmt = $pdo->prepare(
+                            "SELECT id, document_no, title, document_date FROM internal_documents WHERE supplier_id = ? AND id IN ($place)"
+                        );
+                        $stmt->execute([$supplierId, ...$ids]);
+                        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                            $parts = [$r['document_no'] ? (string) $r['document_no'] : ('#' . (int) $r['id']), (string) $r['title']];
+                            if ($r['document_date']) $parts[] = (string) $r['document_date'];
+                            $labels['internal_document:' . (int) $r['id']] = implode(' · ', $parts);
                         }
                         break;
                     case 'invoice_payment':

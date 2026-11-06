@@ -10,6 +10,8 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Bank\Connector\BankConnectionService;
+use MyInvoice\Service\Bank\Connector\BankConnectorRegistry;
+use MyInvoice\Service\Bank\Connector\BankPaymentSignatureService;
 use MyInvoice\Service\Cron\CronPreflight;
 use MyInvoice\Service\Cron\CronRun;
 
@@ -26,8 +28,18 @@ if (!CronPreflight::hasBankConnections($connection->pdo())) {
 }
 
 try {
-    $service = Bootstrap::buildContainer()->get(BankConnectionService::class);
+    $container = Bootstrap::buildContainer();
+    $service = $container->get(BankConnectionService::class);
     $summary = $service->syncAll();
+    // Stav podpisu a provedení dávek, které se podepisují v bance (Česká spořitelna).
+    // Dotaz nic nezakládá; chyba jedné dávky jen odloží její další dotaz.
+    try {
+        $signatures = $container->get(BankPaymentSignatureService::class)
+            ->pollDue($container->get(BankConnectorRegistry::class)->signableProviders());
+    } catch (Throwable) {
+        $signatures = ['polled' => 0, 'errors' => 1];
+    }
+    $summary['payment_signatures'] = $signatures;
     echo '[' . date('Y-m-d H:i:s') . '] bank-connections: '
         . json_encode($summary, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n";
     $run->finish(

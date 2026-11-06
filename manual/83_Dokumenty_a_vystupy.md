@@ -43,7 +43,12 @@ Kapitolu otevřete, když:
 
 ## 83.3 Krok za krokem: měsíční dokumenty
 
-Výplatní pásky vznikají samy při schválení mzdového běhu.
+Schválení mzdového běhu samo zařadí generování výplatních pásek a měsíčního
+balíčku ZIP. Dávka běží na pozadí po osobách a pásky přibývají v seznamu
+postupně. Nespustila-li se nebo se zastavila, spustíte ji ručně tlačítkem
+**Dávka dokumentů ({účtárna})**; po dokončení všech osob je u ní **Stáhnout
+měsíční ZIP**. Neběží-li na instalaci zpracování na pozadí, nabídne aplikace
+**Spustit zpracování**.
 
 1. Otevřete `Mzdy → Dokumenty a výstupy`, záložku **Měsíční výstupy**,
    a zvolte období.
@@ -213,7 +218,8 @@ stáhne.
 | Daňové potvrzení blokované kvůli úhradě | Platební evidence nedokládá úplnou výplatu všech čistých mezd do 31. ledna následujícího roku | Doložte úhrady v [Mzdových příkazech a úhradách](82_Platby_a_uhrady.md). |
 | Potvrzení odmítnuto kvůli neúplným polím | Nedoložený nárok, nerezident bez částky pojistného, produkt spoření bez mapování, nepeněžní příjem nebo doplatek za minulý rok | Údaj se nikdy nedopočítá; doplňte podklad, nebo potvrzení vystavte mimo aplikaci. |
 | Srážkové potvrzení odmítnuto kvůli rezidenci | Tiskopis 25 5460/A je jen pro českého rezidenta nebo nerezidenta EU/EHP | Vystavte potvrzení mimo aplikaci. |
-| „Revize zatím nemá vygenerované výplatní pásky. Nejdřív spusťte generování dokumentů.“ | Pásky ke schválené revizi ještě nevznikly | Spusťte generování dokumentů a rozeslání zopakujte. |
+| Srážkové potvrzení za rok 2027 odmítnuto | Od roku 2027 se z příjmů podle § 6 odst. 4 ZDP sráží záloha, ne srážková daň | Příjem a záloha patří do potvrzení o zálohách. |
+| „Revize zatím nemá vygenerované výplatní pásky. Nejdřív spusťte generování dokumentů.“ | Dávka dokumentů ke schválené revizi ještě nedoběhla nebo se nespustila | Na záložce **Měsíční výstupy** spusťte **Dávka dokumentů ({účtárna})**, případně **Spustit zpracování**, a rozeslání zopakujte. |
 | Rozeslání pásek nezařadí nic | Není splněná podmínka zaměstnavatele (doručování na instanci, dokončené nastavení, kanál **Portál zaměstnance** s datem ověření) | Doplňte nastavení ([§ 83.4](#834-krok-za-krokem-rozeslat-vyplatni-pasky)). |
 | Zaměstnanci se páska neposlala | Volba papírového doručení nebo chybějící e-mail | Předejte pásku jinak, nebo doplňte kartu zaměstnance. |
 | Mzdový výměr nejde vydat | Chybí sjednaná mzda, mzdová politika s termínem výplaty nebo údaje zaměstnavatele | Panel řekne, co doplnit, a nabídne proklik. U dohod se výměr nevydává. |
@@ -240,7 +246,11 @@ nepřepisuje: nový výstup má vlastní revizi a původní zůstává dohledate
 
 ### 83.11.1 Měsíční balíček
 
-Pro každou poslední schválenou revizi období lze vytvořit měsíční ZIP.
+Pro každou poslední schválenou revizi období vzniká měsíční ZIP jako součást
+**Dávky dokumentů** na záložce **Měsíční výstupy** (**Stáhnout měsíční ZIP**).
+Od něj se liší archiv na záložce **Archiv mezd**
+([§ 83.9](#839-krok-za-krokem-archiv-mezd)), který se vytváří na požádání
+za celou firmu.
 Obsahuje dokumenty, které už byly k revizi archivovány, a strojově čitelný
 manifest s jejich otisky. Doplníte-li později další dokument, vznikne nová
 revize balíčku; opakované vytvoření nad stejnou sadou vrátí stejný výsledek.

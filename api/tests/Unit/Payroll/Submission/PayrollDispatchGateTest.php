@@ -218,6 +218,74 @@ final class PayrollDispatchGateTest extends TestCase
         }
     }
 
+    /**
+     * JMHZ bez zvoleného podpisového certifikátu nesmí jít na VREP, kde by
+     * spadlo na „není zvolený podpisový certifikát" — výchozí je datovka.
+     */
+    public function testJmhzWithoutCertificateDefaultsToDataBox(): void
+    {
+        $capability = (new PayrollDispatchCapabilityCatalog())->forAgenda('JMHZ25');
+
+        self::assertSame(
+            [
+                'default' => PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL,
+                'modes' => [PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL],
+            ],
+            $this->gate->channels($capability, 'production', false),
+        );
+    }
+
+    /** S certifikátem zůstává výchozí VREP a datovka je na výběr. */
+    public function testJmhzWithCertificateOffersBothChannelsVrepFirst(): void
+    {
+        $capability = (new PayrollDispatchCapabilityCatalog())->forAgenda('JMHZ25');
+
+        self::assertSame(
+            [
+                'default' => PayrollDispatchCapabilityCatalog::MODE_VREP_JMHZ,
+                'modes' => [
+                    PayrollDispatchCapabilityCatalog::MODE_VREP_JMHZ,
+                    PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL,
+                ],
+            ],
+            $this->gate->channels($capability, 'test', true),
+        );
+    }
+
+    /**
+     * NEMPRI má primární datovku; VREP formulářů je v ostrém prostředí zavřený,
+     * takže se tam nenabízí ani s certifikátem.
+     */
+    public function testNempriOffersVrepOnlyWhereItIsOpen(): void
+    {
+        $capability = (new PayrollDispatchCapabilityCatalog())->forAgenda('NEMPRI');
+
+        self::assertSame(
+            [PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL, PayrollDispatchCapabilityCatalog::MODE_VREP_CSSZ_FORM],
+            $this->gate->channels($capability, 'test', true)['modes'],
+        );
+        self::assertSame(
+            \MyInvoice\Service\Payroll\Submission\Vrep\CsszFormVrepTransportService::PRODUCTION_OPEN
+                ? [PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL, PayrollDispatchCapabilityCatalog::MODE_VREP_CSSZ_FORM]
+                : [PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL],
+            $this->gate->channels($capability, 'production', true)['modes'],
+        );
+    }
+
+    /** Bez připraveného kanálu zůstává primární; chybu pojmenuje jeho služba. */
+    public function testAgendaWithoutReadyChannelKeepsPrimaryMode(): void
+    {
+        $capability = (new PayrollDispatchCapabilityCatalog())->forAgenda('PREZEC26');
+
+        self::assertSame(
+            [
+                'default' => PayrollDispatchCapabilityCatalog::MODE_VREP_REGISTRATION,
+                'modes' => [PayrollDispatchCapabilityCatalog::MODE_VREP_REGISTRATION],
+            ],
+            $this->gate->channels($capability, 'test', false),
+        );
+    }
+
     private static function jmhz(): PayrollDispatchCapability
     {
         return new PayrollDispatchCapability(

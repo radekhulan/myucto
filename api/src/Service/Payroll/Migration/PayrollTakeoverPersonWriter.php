@@ -537,12 +537,43 @@ final class PayrollTakeoverPersonWriter
     /**
      * Odpověď „tytéž děti jiná osoba v domácnosti nevyživuje" (JMHZ 10453 = NE) u nároků,
      * které ji ještě nemají. Zdrojem je hlášení, které předchozí program za osobu podal;
-     * bez odpovědi se měsíční hlášení nezmrazí. Kladnou odpověď převod nezapisuje: hlášení
-     * pak musí jmenovat tu druhou osobu a to je rozhodnutí účetní.
+     * bez odpovědi se měsíční hlášení nezmrazí.
      *
      * @return array<string,int>
      */
     public function otherCaregiverNone(int $supplierId, int $employeeId, ?int $userId): array
+    {
+        return $this->otherCaregiverAnswer($supplierId, $employeeId, $userId, ['other_household_caregiver_status' => 'none']);
+    }
+
+    /**
+     * Kladná odpověď (10453 = ANO) i s tou druhou osobou (10431 až 10434), jak ji jmenovalo
+     * hlášení, které předchozí program podal a ČSSZ přijala. Bez data narození (z hlášení
+     * ani z rodného čísla) se nezapíše nic: nárok zůstane k doplnění účetní.
+     *
+     * @param array{given_name:string,family_name:string,birth_date:?string,birth_number?:?string} $caregiver
+     * @return array<string,int>
+     */
+    public function otherCaregiverPresent(int $supplierId, int $employeeId, array $caregiver, ?int $userId): array
+    {
+        if (($caregiver['birth_date'] ?? null) === null) {
+            return [];
+        }
+
+        return $this->otherCaregiverAnswer($supplierId, $employeeId, $userId, [
+            'other_household_caregiver_status' => 'present',
+            'other_caregiver_given_name' => $caregiver['given_name'],
+            'other_caregiver_family_name' => $caregiver['family_name'],
+            'other_caregiver_birth_date' => $caregiver['birth_date'],
+            'other_caregiver_birth_number' => $caregiver['birth_number'] ?? null,
+        ]);
+    }
+
+    /**
+     * @param array<string,?string> $answer
+     * @return array<string,int>
+     */
+    private function otherCaregiverAnswer(int $supplierId, int $employeeId, ?int $userId, array $answer): array
     {
         $today = date('Y-m-d');
         $view = $this->dependants->overview($supplierId, $employeeId, $today)
@@ -569,8 +600,7 @@ final class PayrollTakeoverPersonWriter
                         'ztp_p' => $claim['ztp_p'],
                         'effective_from' => $claim['effective_from'],
                         'effective_to' => $claim['effective_to'],
-                        'other_household_caregiver_status' => 'none',
-                    ]),
+                    ] + $answer),
                     $claim['row_version'],
                     $today,
                     $userId,
@@ -581,7 +611,7 @@ final class PayrollTakeoverPersonWriter
             }
         }
 
-        return $updated > 0 ? ['children_other_caregiver_none' => $updated] : [];
+        return $updated > 0 ? ['children_other_caregiver_' . $answer['other_household_caregiver_status'] => $updated] : [];
     }
 
     /**

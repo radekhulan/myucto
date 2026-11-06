@@ -13,6 +13,7 @@ import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import MigrationDifferences from '@/components/migration/MigrationDifferences.vue'
+import MigrationNonprofitNotice from '@/components/migration/MigrationNonprofitNotice.vue'
 import MoneyS3BatchWizard from '@/components/migration/MoneyS3BatchWizard.vue'
 import { migrationYearLabel } from '@/utils/migrationYear'
 
@@ -156,6 +157,8 @@ const actions = computed<ActionItem[]>(() => {
       <h1 class="text-2xl font-semibold">{{ t('money_s3.title') }}</h1>
       <p class="mt-1 text-sm text-neutral-500">{{ t('money_s3.subtitle') }}</p>
     </div>
+
+    <MigrationNonprofitNotice :notice="upload?.nonprofit_notice" />
 
     <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="money-s3-support-notice">
       <i18n-t keypath="money_s3.support_notice" tag="p">

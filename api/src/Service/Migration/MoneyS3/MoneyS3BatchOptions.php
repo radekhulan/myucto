@@ -13,6 +13,12 @@ final class MoneyS3BatchOptions
     public const EXISTING_SKIP = 'skip';
     /** Firma se zálohou už v MyÚčtu je: převést znovu (doplní jen to, co chybí). */
     public const EXISTING_UPDATE = 'update';
+    /**
+     * Firma se zálohou už v MyÚčtu je a účtuje se v něm: opravný převod vazeb
+     * ({@see ImportOptions::$relinkOnly}) - nic nového nezaloží, jen u převzatých záznamů
+     * znovu dopočítá úhrady, zápočty a zálohy. Firmu, která v MyÚčtu není, přeskočí.
+     */
+    public const EXISTING_RELINK = 'relink';
 
     /** Rok „od" automaticky: první rok, od kterého v Money navazují počáteční a konečné stavy. */
     public const FROM_YEAR_AUTO = 'auto';
@@ -37,8 +43,8 @@ final class MoneyS3BatchOptions
         if (!in_array($mode, [ImportOptions::MODE_DRY_RUN, ImportOptions::MODE_IMPORT], true)) {
             throw new MoneyS3Exception('invalid_mode', 'Neznámý režim převodu.');
         }
-        if (!in_array($existing, [self::EXISTING_SKIP, self::EXISTING_UPDATE], true)) {
-            throw new MoneyS3Exception('invalid_existing', 'Volba pro existující firmu čeká „skip" (přeskočit) nebo „update" (převést znovu).');
+        if (!in_array($existing, [self::EXISTING_SKIP, self::EXISTING_UPDATE, self::EXISTING_RELINK], true)) {
+            throw new MoneyS3Exception('invalid_existing', 'Volba pro existující firmu čeká „skip" (přeskočit), „update" (převést znovu) nebo „relink" (opravný převod vazeb).');
         }
         if (is_string($fromYear) && $fromYear !== self::FROM_YEAR_AUTO) {
             throw new MoneyS3Exception('invalid_from_year', 'První převáděný rok čeká rok nebo „auto".');

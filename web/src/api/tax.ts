@@ -34,15 +34,33 @@ export interface TaxActivity {
   income: number; expenses: number; active_months: number; allocation_note?: string | null
 }
 export interface TaxChildMonth { month: number; order: number; ztpp: boolean; claimed: boolean }
-export interface TaxChild {
-  first_name: string; last_name: string; birth_number?: string | null; birth_date?: string | null
+/**
+ * Rodné číslo dítěte a manžela/manželky (H28): server ho drží zapečetěné a vrací jen
+ * masku. `birth_number` je jen vstup pro NOVÉ číslo; prázdné u položky s `id` uložené
+ * číslo ponechá, `birth_number_clear` ho odebere. Plnou hodnotu vydá jen auditované
+ * {@link taxApi.revealFamily}.
+ */
+export interface TaxFamilyIdentity {
+  id?: number
+  birth_number?: string | null
+  birth_number_masked?: string | null
+  has_birth_number?: boolean
+  birth_number_clear?: boolean
+}
+export interface TaxChild extends TaxFamilyIdentity {
+  first_name: string; last_name: string; birth_date?: string | null
   shared_household_proved: boolean; other_parent_not_claimed_proved: boolean; evidence_ref?: string | null
   months: TaxChildMonth[]
 }
-export interface SpouseClaim {
-  first_name: string; last_name: string; birth_number?: string | null; birth_date?: string | null
+export interface SpouseClaim extends TaxFamilyIdentity {
+  first_name: string; last_name: string; birth_date?: string | null
   eligible_months: number; ztpp: boolean; own_income: number; income_proved: boolean
   shared_household_proved: boolean; child_under_three_proved: boolean; evidence_ref?: string | null
+}
+export interface TaxFamilyReveal {
+  year: number
+  children: { id: number; birth_number: string }[]
+  spouse: { id: number; birth_number: string } | null
 }
 export interface OsvcMonth {
   month: number; activity_status: 'inactive' | 'main' | 'secondary'; social_participates: boolean
@@ -103,6 +121,14 @@ export interface TaxConstantsData {
   child_bonus_min: number
   fixed_asset_limit: number
   transition_receivables_max_years: number
+  nonprofit_reduction_rate: number
+  nonprofit_reduction_min: number
+  nonprofit_reduction_max: number
+  nonprofit_reduction_university_min: number
+  nonprofit_reduction_university_max: number
+  tax_loss_carry_years: number
+  tax_loss_carryback_years: number
+  tax_loss_carryback_limit: number
 }
 
 /** Pravděpodobný čistý příjem za minulý kalendářní měsíc (odhad, viz TaxOptimizer::estimateMonthly). */
@@ -138,4 +164,13 @@ export const taxApi = {
     api.get<TaxAnalysis>('/tax/analysis', { params: { year } }).then(r => r.data),
   saveProfile: (payload: Partial<TaxProfile> & { year: number }) =>
     api.put<{ profile: TaxProfile }>('/tax/profile', payload).then(r => r.data.profile),
+  /**
+   * Odhalení rodných čísel rodiny z daňového profilu. `reason` jde do auditní stopy;
+   * formuláři stačí konstantní důvod (kdo a kdy plyne ze záznamu), stejně jako mzdám.
+   */
+  revealFamily: (year: number) =>
+    api.post<{ reveal: TaxFamilyReveal }>('/tax/profile/family-reveal', {
+      year,
+      reason: 'Zobrazení rodných čísel v daňovém profilu',
+    }).then(r => r.data.reveal),
 }

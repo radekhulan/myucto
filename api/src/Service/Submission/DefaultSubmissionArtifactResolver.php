@@ -59,6 +59,7 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         if (!$this->db->hasTable('tax_submissions')) {
             return null;
         }
+        (new AnonymizedCloneSubmissionProvenance($this->db))->assertDispatchable($supplierId, $id);
         // `epo_attempt_active` kopíruje podmínku TaxSubmissionEpoRepository::activeAttempt()
         // pro ostré prostředí: rozpracované asistované předání, nedořešený nebo potvrzený
         // přímý pokus. Jeden snapshot jde ven jen jednou cestou.
@@ -83,6 +84,12 @@ final readonly class DefaultSubmissionArtifactResolver implements SubmissionArti
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
             return null;
+        }
+
+        try {
+            (new \MyInvoice\Service\Tax\Return\AccountingDecreeService($this->db))->assertDppoSubmissionSupported($supplierId, $row, true);
+        } catch (\MyInvoice\Service\Tax\Return\TaxReturnException $e) {
+            throw new \MyInvoice\Service\Submission\Channel\SubmissionChannelException($e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
         $period = (string) $row['period_year'];

@@ -53,7 +53,7 @@ final class ChartJournalImporter
     {
         $p = $ctx->protocol;
         if ($this->accounts->count($ctx->supplierId) === 0) {
-            $p->setCount(self::STEP_CHART, 'seeded', $this->seeder->seedForSupplier($ctx->supplierId));
+            $p->setCount(self::STEP_CHART, 'seeded', $this->seeder->seedForSupplier($ctx->supplierId, $this->periods->findByYear($ctx->supplierId, $ctx->year)['starts_on'] ?? $ctx->startsOn()));
         }
         $chart = $this->premierChart($ctx);
         $p->setCount(self::STEP_CHART, 'premier_accounts', count($chart));

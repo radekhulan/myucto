@@ -42,6 +42,27 @@ final class PohodaPayrollCatalog
      */
     public const MEAL_ALLOWANCE_EXEMPT = 'PRISPEVEK_STRAVOVANI_PREVZATY';
 
+    /**
+     * Výchozí benefitní složky, na které převod mapuje Z23 a Z24 jen s příznaky zdroje
+     * bez daně a pojistného ({@see self::component()}). Výchozí číselník je zakládá
+     * k ručnímu posouzení a vstupní brána takovou složku odmítne; zacházení, které
+     * doložil zdrojový program, proto převod složce zapíše sám.
+     */
+    public const EXEMPT_BENEFITS = ['REKREACE_VOLNY_CAS', 'ZDRAVOTNI_BENEFIT'];
+
+    /** Zacházení se složkami {@see self::EXEMPT_BENEFITS}: osvobozeno v ročním koši, bez pojistného. */
+    public const EXEMPT_BENEFIT_TREATMENT = [
+        'tax_treatment' => 'exempt',
+        'social_participation_treatment' => 'excluded',
+        'social_treatment' => 'excluded',
+        'health_participation_treatment' => 'excluded',
+        'health_treatment' => 'excluded',
+        'average_earning_treatment' => 'excluded',
+        'enforcement_treatment' => 'excluded',
+        'jmhz_treatment' => 'included',
+        'exemption_basis' => 'benefit_basket',
+    ];
+
     /** Stravenkový paušál nad limit (Z21 `Hodnota4`) a paušál bez osvobození (Z21a). */
     public const MEAL_ALLOWANCE_TAXABLE = 'PRISPEVEK_STRAVOVANI_ZDANITELNY';
 
@@ -175,6 +196,15 @@ final class PohodaPayrollCatalog
         if (in_array($number, ['J07', 'J10', 'J11'], true) || self::leavePayout($normalized, $catalog)) {
             return ['meaning' => 'component', 'kind' => 'compensation', 'code' => VacationCompensationReturn::SETTLEMENT_CODE, 'header' => 'Proplacená / vrácená náhrada za dovolenou (Kč)'];
         }
+        // Odměna z dohody: D02 a D04 hodinovou sazbou (`Hodnota2`), D01 a D03 částkou.
+        // „Vč. pojistného" (D03, D04) je dohoda zakládající účast na pojištění; účast
+        // rozhoduje vztah a jeho měsíc, ne složka, takže druh odměny je u obou dvojic stejný.
+        if (in_array($number, ['D02', 'D04'], true)) {
+            return $component('hourly_wage');
+        }
+        if (in_array($number, ['D01', 'D03'], true)) {
+            return $component('task_wage');
+        }
         // Odstupné má v MyÚčtu vlastní složku (bez pojistného, JMHZ jako odstupné). Měsíc,
         // který počítá MyÚčto, ho bez ní nevyplatí; převzatý měsíc ho má v úhrnech PAMICA.
         if ($number === 'D06' || str_contains($normalized, 'odstupn')) {
@@ -194,6 +224,16 @@ final class PohodaPayrollCatalog
         }
         if ($number === 'Z21A') {
             return ['meaning' => 'component', 'kind' => 'other', 'code' => self::MEAL_ALLOWANCE_TAXABLE, 'header' => self::MEAL_ALLOWANCE_TAXABLE_HEADER];
+        }
+        // Zaměstnanecké benefity (Z23, firmy je přejmenovávají třeba na „Multisport karta")
+        // a zdravotní benefity (Z24): nepeněžní plnění osvobozené do poloviny průměrné mzdy
+        // (§ 6 odst. 9 písm. d) ZDP), bez daně i pojistného. Výchozí složky MyÚčta je vedou
+        // ve stejném ročním limitu; zacházení jim zapíše převod ({@see self::EXEMPT_BENEFIT_TREATMENT}).
+        if ($number === 'Z23' && self::untaxedFlags($catalog)) {
+            return ['meaning' => 'component', 'kind' => 'other', 'code' => 'REKREACE_VOLNY_CAS', 'header' => 'Rekreace a volnočasový benefit (Kč)'];
+        }
+        if ($number === 'Z24' && self::untaxedFlags($catalog)) {
+            return ['meaning' => 'component', 'kind' => 'other', 'code' => 'ZDRAVOTNI_BENEFIT', 'header' => 'Zdravotní benefit (Kč)'];
         }
         // Dál rozhoduje jen název a daňové příznaky číselníku: čísla těchto položek si
         // firmy přečíslovávají. Bez řádku číselníku zůstane položka neznámá.
@@ -239,6 +279,28 @@ final class PohodaPayrollCatalog
             'exempt' => ['header' => self::MEAL_ALLOWANCE_EXEMPT_HEADER, 'code' => self::MEAL_ALLOWANCE_EXEMPT, 'amount' => $amount - $taxable],
             'taxable' => ['header' => self::MEAL_ALLOWANCE_TAXABLE_HEADER, 'code' => self::MEAL_ALLOWANCE_TAXABLE, 'amount' => $taxable],
         ];
+    }
+
+    /**
+     * Číslo druhu nepřítomnosti, podle kterého se řádek `MZneprit` převádí. Placené volno
+     * (V03 mimo lékaře, V18 Sick days), za které PAMICA nic nezaplatila (sazba 0, vyčerpaný
+     * nárok), je ve skutečnosti volno bez náhrady (V04): jinak by za něj MyÚčto dopočítalo
+     * průměr. Sešit i evidence nepřítomností se musí shodnout, proto rozhoduje jen tady.
+     *
+     * @param array<string,mixed> $catalog řádek číselníku `sMZneprit`
+     * @param array<string,mixed> $row řádek `MZneprit`
+     */
+    public static function effectiveAbsenceNumber(array $catalog, array $row): string
+    {
+        $number = PohodaXml::text($catalog, 'Cislo');
+        if (self::absence($number, PohodaXml::text($catalog, 'Nazev'))['meaning'] === 'obstacle_employee_hours'
+            && PohodaXml::num($row, 'HodPrac') > 0
+            && PohodaXml::num($row, 'KcNahr') <= 0
+        ) {
+            return 'V04';
+        }
+
+        return $number;
     }
 
     /** @return array{meaning:string,header:string} */

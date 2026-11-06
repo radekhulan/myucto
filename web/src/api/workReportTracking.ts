@@ -1,3 +1,5 @@
+import type { PublicWorkReportBillingPreview } from './workReportBilling'
+import type { WorkReportDisplayOptions } from './invoices'
 import axios from 'axios'
 import { api } from './client'
 
@@ -25,8 +27,8 @@ export interface WrPreviewItem {
   description: string
   work_date: string | null
   duration_minutes?: number | null
-  hours: number
-  rate: number
+  hours: number | null
+  rate: number | null
   total_amount: number
 }
 
@@ -39,18 +41,23 @@ export interface WrPreviewMaterial {
 }
 
 export interface WrPreviewReport {
+  prices_include_vat?: boolean
+  billing_enabled?: boolean
+  billing_preview?: PublicWorkReportBillingPreview | null
+  billing_period?: string | null
   invoice_id: number
   label: string | null
   date: string
   currency: string
   project_name: string | null
   title: string
-  total_hours: number
-  total_amount: number
+  total_hours: number | null
+  total_amount: number | null
   items: WrPreviewItem[]
   material_title: string | null
   material_total: number
   materials: WrPreviewMaterial[]
+  effective_display_options?: WorkReportDisplayOptions
 }
 
 export interface WrSupplier {
@@ -92,7 +99,7 @@ export interface WrPreview {
   /** Logo dodavatele jako data: URI (jen při zapnutém brandingu), jinak null → MyInvoice. */
   logo_src: string | null
   reports: WrPreviewReport[]
-  total_hours: number
+  total_hours: number | null
   totals_by_currency: Array<{ currency: string; total_amount: number }>
 }
 

@@ -38,7 +38,21 @@ final class PohodaPayrollOtherCaregiverTest extends TestCase
         self::assertNull(PohodaPayrollJmhzWriter::otherCaregiver(['2026-07' => [self::form(null)]]));
     }
 
-    private static function form(?bool $otherCaregiver, bool $children = true, bool $signed = true): JmhzReportForm
+    public function testOtherCaregiverIsTakenFromTheLatestFormNamingThem(): void
+    {
+        $caregiver = ['given_name' => 'Jana', 'family_name' => 'Zkušební', 'birth_date' => null, 'birth_number' => '8551011238'];
+
+        self::assertSame(
+            ['given_name' => 'Jana', 'family_name' => 'Zkušební', 'birth_date' => '1985-01-01', 'birth_number' => '855101/1238'],
+            PohodaPayrollJmhzWriter::otherCaregiverPerson(['2026-05' => [self::form(true, caregivers: [$caregiver])]]),
+            'Datum narození z rodného čísla, když ho hlášení neuvádí.',
+        );
+        self::assertNull(PohodaPayrollJmhzWriter::otherCaregiverPerson(['2026-05' => [self::form(true)]]), 'Hlášení osobu nejmenuje.');
+        self::assertNull(PohodaPayrollJmhzWriter::otherCaregiverPerson(['2026-05' => [self::form(false, caregivers: [$caregiver])]]));
+    }
+
+    /** @param list<array<string,?string>> $caregivers */
+    private static function form(?bool $otherCaregiver, bool $children = true, bool $signed = true, array $caregivers = []): JmhzReportForm
     {
         return new JmhzReportForm(
             position: 1,
@@ -52,7 +66,7 @@ final class PohodaPayrollOtherCaregiverTest extends TestCase
                 'monthly' => 1267,
                 'applied' => 1267,
                 'other_caregiver' => $otherCaregiver,
-                'caregivers' => [],
+                'caregivers' => $caregivers,
                 'children' => $children ? [['order' => '1', 'given_name' => 'Dítě', 'family_name' => 'Zkušební', 'birth_number' => null, 'birth_date' => '2020-01-01', 'ztp_p' => false]] : [],
             ],
         );

@@ -11,6 +11,7 @@ import type {
   RegistrationRelationType,
 } from '@/api/payrollImports'
 import DateInput from '@/components/ui/DateInput.vue'
+import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { BTN_DISABLED_NOTE, btnFilled, btnIconSm, btnOutlineSm, disabledTitle, ICONS } from '@/components/ui/buttonStyles'
 import {
   buildPersonsPayload,
@@ -18,6 +19,8 @@ import {
   firstDayOfPeriod,
   guessRelationType,
   personCanBeCreated,
+  personCreateDetails,
+  type PersonCreateDetailKey,
   splitDisplayName,
   type ManualLinks,
   type PersonDraft,
@@ -170,6 +173,13 @@ function selectAllCreatable() {
   createKeys.value = creatable.value.map(person => person.key)
 }
 
+function detailValue(key: PersonCreateDetailKey, value: string, invalid: boolean): string {
+  if (invalid) return t('payroll_imports.attendance.persons.details.unreadable', { value })
+  if (key === 'start_on' || key === 'agreed_end_on') return formatDate(value)
+  if (key === 'hourly_rate' || key === 'monthly_wage') return formatMoneyMinor(Math.round(Number(value) * 100))
+  return value
+}
+
 function submitCreate() {
   if (createBlockedReason.value !== '') return
   emit('create', buildPersonsPayload(createPersons.value, drafts.value, createForm.value))
@@ -315,6 +325,12 @@ const SELECT_CLASS = 'h-8 w-full min-w-48 rounded-md border border-neutral-300 b
       <ul class="mt-4 divide-y divide-payroll-500/10 rounded-lg border border-payroll-500/20 bg-surface">
         <li v-for="person in createPersons" :key="person.key" class="flex flex-wrap items-end gap-2 px-3 py-2">
           <p class="w-full text-xs text-neutral-500 sm:w-48 sm:self-center">{{ person.display_name }}</p>
+          <dl class="order-last flex w-full flex-wrap gap-x-4 gap-y-0.5 text-[11px]" data-testid="attendance-create-details">
+            <div v-for="detail in personCreateDetails(person, createForm.planned_start_on)" :key="detail.key" class="flex gap-1">
+              <dt class="text-neutral-500">{{ t(`payroll_imports.attendance.persons.details.${detail.key}`) }}:</dt>
+              <dd :class="detail.invalid ? 'text-warning-700' : 'text-neutral-800'">{{ detailValue(detail.key, detail.value, detail.invalid) }}</dd>
+            </div>
+          </dl>
           <label class="block min-w-36 flex-1">
             <span class="mb-0.5 block text-[11px] text-neutral-500">{{ t('payroll_imports.attendance.persons.first_name') }}</span>
             <input :value="draftFor(person).first_name" class="h-8 w-full rounded-md border border-neutral-300 bg-surface px-2 text-sm" :disabled="disabled"

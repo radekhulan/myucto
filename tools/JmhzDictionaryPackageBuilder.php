@@ -11,10 +11,6 @@ require dirname(__DIR__) . '/api/vendor/autoload.php';
 
 final class JmhzDictionaryPackageBuilder
 {
-    private const DICTIONARY_SHA256 =
-        'e794a56d3baa48dd876ad45a0deb5b1bb77c17a0cb44a3511e8ef4028be69743';
-    private const CONTROL_CATALOG_SHA256 =
-        '38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2';
     private const CODEBOOK_ALIASES = [
         'klasifikace_zamestnani' => 'klasifikace_v_zamestnani',
         'klasifikace_postaveni_v_zamestnani' => 'klasifikace_v_zamestnani',
@@ -22,10 +18,13 @@ final class JmhzDictionaryPackageBuilder
         'duvod_ukonceni_sluzebniho_pomeru' => 'duvod_ukonceni_sluz_pomeru',
     ];
 
+    /** @param array<string,mixed> $profile profil z `tools/jmhz-spec-package-profiles.php` */
+    public function __construct(private readonly array $profile) {}
+
     public function build(string $dictionaryPath, string $controlCatalogPath, string $outputDirectory): void
     {
-        $this->assertSource($dictionaryPath, self::DICTIONARY_SHA256);
-        $this->assertSource($controlCatalogPath, self::CONTROL_CATALOG_SHA256);
+        $this->assertSource($dictionaryPath, (string) $this->profile['dictionary_sha256']);
+        $this->assertSource($controlCatalogPath, (string) $this->profile['control_catalog_sha256']);
 
         $reader = new \PhpOffice\PhpSpreadsheet\Reader\Xlsx();
         $reader->setReadDataOnly(true);
@@ -51,27 +50,20 @@ final class JmhzDictionaryPackageBuilder
             $codebookAliases,
         );
 
-        $packageKey = 'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1';
         $payload = [
             'schema_version' => 'jmhz-spec-package.v1',
-            'package_key' => $packageKey,
-            'versions' => [
-                'xsd' => '1.4.3.6',
-                'dictionary' => '1.4.1.6',
-                'control_catalog' => '1.4.2.10',
-                'process' => '1.4.0.2',
-                'instructions' => '1.4.13',
-            ],
+            'package_key' => $this->profile['package_key'],
+            'versions' => $this->profile['versions'],
             'sources' => [
                 [
                     'role' => 'dictionary',
                     'filename' => basename($dictionaryPath),
-                    'sha256' => self::DICTIONARY_SHA256,
+                    'sha256' => $this->profile['dictionary_sha256'],
                 ],
                 [
                     'role' => 'control_catalog_source',
                     'filename' => basename($controlCatalogPath),
-                    'sha256' => self::CONTROL_CATALOG_SHA256,
+                    'sha256' => $this->profile['control_catalog_sha256'],
                 ],
             ],
             'counts' => [
@@ -143,6 +135,7 @@ final class JmhzDictionaryPackageBuilder
     {
         $result = [];
         $seen = [];
+        $markers = $this->markerColumns($sheet);
         for ($row = 3; $row <= $sheet->getHighestDataRow(); ++$row) {
             $attributeId = $this->text($sheet, 'A', $row);
             if ($attributeId === null) {
@@ -173,15 +166,51 @@ final class JmhzDictionaryPackageBuilder
                 'regzec_xsd_mapping' => $this->text($sheet, 'I', $row),
                 'xsd_mapping' => $this->text($sheet, 'J', $row),
                 'codebook_key' => $codebookKey,
-                'employer_registration_marker' => $this->text($sheet, 'P', $row),
-                'employee_registration_marker' => $this->text($sheet, 'Q', $row),
-                'monthly_marker' => $this->text($sheet, 'R', $row),
+                'employer_registration_marker' => $this->text($sheet, $markers['employer'], $row),
+                'employee_registration_marker' => $this->text($sheet, $markers['employee'], $row),
+                'monthly_marker' => $this->text($sheet, $markers['monthly'], $row),
             ];
             $record['row_hash'] = hash('sha256', CanonicalJson::encode($record));
             $result[] = $record;
         }
 
         return $result;
+    }
+
+    /**
+     * Sloupce se sběrem atributů se hledají podle hlavičky řádku 2, protože
+     * slovník 1.5 vkládá před sloupec MĚSÍČNÍ nový sloupec (A3 DOHL - PRIO).
+     * Předchozí pevné písmena P, Q a R zůstávají platná pro slovník 1.4.
+     *
+     * @return array{employer:string,employee:string,monthly:string}
+     */
+    private function markerColumns(Worksheet $sheet): array
+    {
+        $labels = [
+            'employer' => 'REG. ZAMĚSTNAVATELE',
+            'employee' => 'REG. ZAMĚSTNANCE',
+            'monthly' => 'MĚSÍČNÍ',
+        ];
+        $found = [];
+        $lastColumn = Coordinate::columnIndexFromString($sheet->getHighestDataColumn());
+        for ($index = 1; $index <= $lastColumn; ++$index) {
+            $letter = Coordinate::stringFromColumnIndex($index);
+            $header = $this->text($sheet, $letter, 2);
+            $key = $header === null ? false : array_search(mb_strtoupper($header), $labels, true);
+            if ($key !== false) {
+                if (isset($found[$key])) {
+                    throw new RuntimeException("Hlavička {$labels[$key]} je v datovém slovníku vícekrát.");
+                }
+                $found[$key] = $letter;
+            }
+        }
+        foreach ($labels as $key => $label) {
+            if (!isset($found[$key])) {
+                throw new RuntimeException("Datový slovník neobsahuje sloupec {$label}.");
+            }
+        }
+
+        return ['employer' => $found['employer'], 'employee' => $found['employee'], 'monthly' => $found['monthly']];
     }
 
     /** @return array<string, mixed> */
@@ -328,10 +357,21 @@ final class JmhzDictionaryPackageBuilder
 if (PHP_SAPI !== 'cli') {
     throw new RuntimeException('Builder JMHZ je určen pouze pro CLI.');
 }
-if ($argc !== 4) {
-    fwrite(STDERR, "Použití: php tools/JmhzDictionaryPackageBuilder.php <slovník.xlsx> <kontroly.xlsx> <výstup>\n");
+$arguments = array_values(array_filter(
+    array_slice($argv, 1),
+    static fn (string $argument): bool => !str_starts_with($argument, '--profile='),
+));
+$profileKey = '2026';
+foreach (array_slice($argv, 1) as $argument) {
+    if (str_starts_with($argument, '--profile=')) {
+        $profileKey = substr($argument, strlen('--profile='));
+    }
+}
+$profiles = require __DIR__ . '/jmhz-spec-package-profiles.php';
+if (count($arguments) !== 3 || !isset($profiles[$profileKey])) {
+    fwrite(STDERR, "Použití: php tools/JmhzDictionaryPackageBuilder.php <slovník.xlsx> <kontroly.xlsx> <výstup> [--profile=2026|2027]\n");
     exit(2);
 }
 
-(new JmhzDictionaryPackageBuilder())->build($argv[1], $argv[2], $argv[3]);
+(new JmhzDictionaryPackageBuilder($profiles[$profileKey]))->build($arguments[0], $arguments[1], $arguments[2]);
 fwrite(STDOUT, "Balík JMHZ byl vytvořen.\n");

@@ -8,6 +8,7 @@ use DOMDocument;
 use DOMElement;
 use DOMXPath;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSchemaCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 
 /**
  * Sestavení GovTalk obálky pro VREP/APEP kolem podání JMHZ.
@@ -396,9 +397,24 @@ final readonly class JmhzGovTalkEnvelope
         JmhzSoftwareIdentification $software,
     ): void {
         if ($class === 'CSSZ_JMHZ') {
-            $this->assertJmhzPayload($payload, $variableSymbol, $software);
+            // Jmenný prostor těla musí patřit ročníku, který tvrdí `eType`:
+            // JMHZ25 nese `.../podani/1.0`, JMHZ27 `.../podani/2027`.
+            $namespace = JmhzSchemaCatalog::podaniNamespaceFor(
+                JmhzSpecVersion::forEnvelopeType($shape->bodyEnvelopeType) ?? JmhzSpecVersion::V2026,
+            );
+            $this->assertJmhzPayload($payload, $variableSymbol, $software, $namespace);
 
             return;
+        }
+        $version = JmhzSpecVersion::forEnvelopeType($shape->bodyEnvelopeType);
+        $bodyVersion = JmhzSpecVersion::fromDocumentNamespace(
+            (string) $payload->documentElement?->namespaceURI,
+        );
+        if ($version !== null && $bodyVersion !== null && $version !== $bodyVersion) {
+            throw new JmhzTransportException(
+                'jmhz_govtalk_envelope_type_mismatch',
+                'Ročník `eType` ČSSZ obálky neodpovídá ročníku datové věty v těle podání.',
+            );
         }
         $form = self::FORM_PAYLOADS[$shape->bodyEnvelopeType] ?? null;
         if ($form !== null) {
@@ -451,20 +467,22 @@ final readonly class JmhzGovTalkEnvelope
         DOMDocument $payload,
         string $variableSymbol,
         JmhzSoftwareIdentification $software,
+        string $namespace,
     ): void {
         $root = $payload->documentElement;
         if ($root === null
-            || $root->namespaceURI !== JmhzSchemaCatalog::NS_PODANI
+            || $root->namespaceURI !== $namespace
             || $root->localName !== 'jmhz'
         ) {
             throw new JmhzTransportException(
                 'jmhz_govtalk_payload_invalid',
-                'Tělo podání JMHZ musí mít kořen `jmhz` v jmenném prostoru podání.',
+                'Tělo podání JMHZ musí mít kořen `jmhz` v jmenném prostoru podání'
+                    . ' ročníku, který ohlašuje obálka.',
             );
         }
 
         $xpath = new DOMXPath($payload);
-        $xpath->registerNamespace('p', JmhzSchemaCatalog::NS_PODANI);
+        $xpath->registerNamespace('p', $namespace);
         $vendor = $xpath->query('/p:jmhz/p:VENDOR')->item(0);
         if (!$vendor instanceof DOMElement
             || $vendor->getAttribute('productName') !== $software->productName

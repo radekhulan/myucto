@@ -75,6 +75,14 @@ final class TrialBalanceReconciliationTest extends TestCase
         self::assertSame([], TrialBalanceReconciliation::balanceSheet(['checks' => ['balanced' => true]])['negative_net_rows']);
     }
 
+    public function test504ConversionBalanceDoesNotPretendToHave500Diagnostics(): void
+    {
+        $this->expectException(\MyInvoice\Service\Accounting\Reports\ReportException::class);
+        $this->expectExceptionMessage('Převod účetních výkazů podle vyhlášky 504');
+        TrialBalanceReconciliation::balanceSheet(['accounting_framework' => 'cz_504',
+            'checks' => ['balanced' => true, 'profit_matches' => true]]);
+    }
+
     public function testDocumentRow(): void
     {
         self::assertSame(

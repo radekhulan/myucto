@@ -25,9 +25,10 @@ final class LegalAllowanceCreationSplitTest extends TestCase
             CREATE TABLE journal_entry_lines (entry_id INTEGER, supplier_id INTEGER, account_id INTEGER, side TEXT, amount REAL, is_red_storno INTEGER GENERATED ALWAYS AS (0) VIRTUAL, signed_amount REAL GENERATED ALWAYS AS (amount) VIRTUAL);
             CREATE TABLE chart_of_accounts (id INTEGER PRIMARY KEY, account_code TEXT, account_type TEXT, tax_deductibility TEXT, parent_id INTEGER);
             CREATE TABLE accounting_closing_steps (supplier_id INTEGER, period_id INTEGER, step_key TEXT, payload TEXT);
-            INSERT INTO chart_of_accounts VALUES (1,'558','expense','deductible',NULL),(2,'391','asset','deductible',NULL),(3,'701','closing','deductible',NULL);
+            INSERT INTO chart_of_accounts (id, account_code, account_type, tax_deductibility, parent_id) VALUES (1,'558','expense','deductible',NULL),(2,'391','asset','deductible',NULL),(3,'701','closing','deductible',NULL);
             INSERT INTO journal_entries VALUES (10,1,2025,'provision',777,NULL,'2025-12-31','2025-12-31'),(20,1,2026,'opening',2026,NULL,'2026-01-01','2026-01-01');
             INSERT INTO journal_entry_lines VALUES (10,1,1,'debit',10000),(10,1,2,'credit',10000),(20,1,3,'debit',10000),(20,1,2,'credit',10000);");
+        \MyInvoice\Tests\Support\AccountDefinitionSqliteFixture::install($this->pdo);
         $db = new Connection(new Config([]));
         (new \ReflectionProperty($db, 'pdo'))->setValue($db, $this->pdo);
         $this->service = new LegalProvisionLedgerService($db);

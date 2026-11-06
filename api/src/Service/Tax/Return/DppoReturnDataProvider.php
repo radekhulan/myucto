@@ -55,6 +55,7 @@ final class DppoReturnDataProvider
         private readonly ?LegalProvisionLedgerService $legalProvisions = null,
         // Nezaúčtované odpisy roku do projekce uzávěrky — volitelná ze stejného důvodu jako $closing.
         private readonly ?DepreciationPostingService $depreciationPreview = null,
+        private readonly ?\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoDataProvider $nonprofit = null,
     ) {}
 
     /**
@@ -84,12 +85,18 @@ final class DppoReturnDataProvider
      */
     public function gather(int $supplierId, int $year, array $inputs = []): array
     {
+        $decree = (new AccountingDecreeService($this->db))->assertDppoSupported($supplierId, $year);
         $warnings = [];
         $bankAccounts = $this->bankAccounts($supplierId);
         $bankAccount = $this->pickBankAccount($bankAccounts, $inputs['bank_account_id'] ?? null, $warnings);
+        if ($decree === '504') {
+            if ($this->nonprofit === null) throw new TaxReturnException('nonprofit_dppo_provider_required', 'Výpočet504 vyžaduje úplný nativní zdroj podkladů.', 422);
+            return $this->nonprofit->gather($supplierId, $year, $inputs) + ['bank_accounts'=>$bankAccounts,'bank_account'=>$bankAccount];
+        }
         $period = $this->periods->findByYear($supplierId, $year);
         if ($period === null) {
             return [
+                'accounting_decree' => $decree,
                 'period' => null,
                 'vh' => 0.0,
                 'non_deductible_costs' => 0.0,
@@ -151,6 +158,7 @@ final class DppoReturnDataProvider
         ];
 
         return [
+            'accounting_decree' => $decree,
             'period' => [
                 'id' => (int) $period['id'],
                 'starts_on' => $startsOn,
@@ -293,7 +301,7 @@ final class DppoReturnDataProvider
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
-               JOIN chart_of_accounts a ON a.id = l.account_id
+               " . \MyInvoice\Repository\AccountDefinitionRepository::journalJoin($supplierId) . "
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND e.entry_date BETWEEN ? AND ?
                 AND " . JournalTaxOrigin::includedSql() . "
@@ -303,9 +311,19 @@ final class DppoReturnDataProvider
               ORDER BY turnover DESC"
         );
         $stmt->execute($params);
+        $groups = [];
+        foreach ($stmt->fetchAll() as $row) $groups[$row['account_code']][] = $row;
         $out = [];
-        foreach ($stmt->fetchAll() as $row) {
-            $amount = round((float) $row['turnover'], 2);
+        foreach ($groups as $rows) {
+            $row = $rows[0];
+            $total = $reviewable = 0.0;
+            foreach ($rows as $segment) {
+                $total += (float) $segment['turnover'];
+                if ($segment['tax_deductibility'] !== 'non_deductible') $reviewable += (float) $segment['turnover'];
+            }
+            $already = (int) round($reviewable * 100) === 0;
+            $amount = round($already ? $total : $reviewable, 2);
+            if (count($rows) > 1) $row['name'] = (new \MyInvoice\Repository\ChartOfAccountsRepository($this->db))->findByCode($supplierId, $row['account_code'], $endsOn)['name'] ?? $row['name'];
             if ((int) round($amount * 100) === 0) {
                 continue;
             }
@@ -315,7 +333,7 @@ final class DppoReturnDataProvider
                 'name' => (string) $row['name'],
                 'amount' => $amount,
                 'hint_key' => self::LIKELY_NONDEDUCTIBLE[$group] ?? 'taxReturn.suggest_other',
-                'already_non_deductible' => (string) $row['tax_deductibility'] === 'non_deductible',
+                'already_non_deductible' => $already,
             ];
         }
         return $out;

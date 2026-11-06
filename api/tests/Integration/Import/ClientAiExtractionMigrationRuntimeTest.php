@@ -81,8 +81,9 @@ final class ClientAiExtractionMigrationRuntimeTest extends TestCase
         $process = proc_open([
             PHP_BINARY, $this->root . '/api/bin/migrate.php', '--no-backfills', '--no-analyze',
             '--only=2014_client_ai_extraction.sql',
-        ], [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->root, $env, ['bypass_shell' => true]);
+        ], [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, $this->root, $env, ['bypass_shell' => true]);
         self::assertIsResource($process);
+        fclose($pipes[0]);
         $output = stream_get_contents($pipes[1]) . stream_get_contents($pipes[2]);
         fclose($pipes[1]);
         fclose($pipes[2]);

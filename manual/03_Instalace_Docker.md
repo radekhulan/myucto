@@ -61,12 +61,14 @@ Stáhne hotový multi-arch image `ghcr.io/radekhulan/myucto:latest` (`linux/amd6
 
 3. Počkejte, až skript doběhne. Postupně:
    1. vygeneruje `.env` s náhodnými hesly databáze (28 znaků base64),
-   2. vygeneruje `cfg.docker.php` z `cfg.sample.php` (host `db` / `redis`, náhodné `app.pepper` a `secret_encryption_key`, cookies vhodné pro HTTP na lokálním stroji),
+   2. vygeneruje `cfg.docker.php` z `cfg.sample.php` (host `db` / `redis`, náhodné `app.pepper`, `secret_encryption_key` a `payroll_hash_key`, produkční `app.env`; cookies se řídí schématem `app.url`: pro výchozí `http://localhost:8080` bez příznaku Secure, pro HTTPS adresu s ním),
    3. provede `docker compose pull` (stáhne image z GHCR),
    4. spustí stack, počká na zdravou databázi a spustí migrace.
 4. Otevřete aplikaci (viz [§ 3.6](#36-krok-za-krokem-prvni-otevreni-aplikace)).
 
 **Jak poznáte, že je hotovo:** skript skončí bez chyby a na `http://localhost:8080` se zobrazí průvodce prvním spuštěním.
+
+Volby skriptu (platí jen při prvním vygenerování `cfg.docker.php`): `--url=https://ucto.firma.cz` (PowerShell `-AppUrl`) nastaví veřejnou adresu a s HTTPS zapne Secure cookie, `--dev` (`-Dev`) zapne vývojový režim `app.env = development` jen pro čistě lokální instalaci. Pokud instalaci později zveřejníte přes HTTPS, nastavte `session.cookie_secure = true`; jinak na to upozorní stránka Aktualizace.
 
 Tato varianta používá `docker-compose.production.yml` (jen image, žádný blok `build:`). Další příkazy `docker compose` proto potřebují volbu `-f docker-compose.production.yml` (viz [§ 3.12.5](#3125-denni-provoz)).
 
@@ -90,13 +92,15 @@ Postaví image lokálně z repozitáře. Vhodné pro vývoj a vlastní úpravy.
 
 3. Počkejte, až skript doběhne. Postupně:
    1. vygeneruje `.env` s náhodnými hesly databáze (28 znaků base64),
-   2. vygeneruje `cfg.docker.php` z `cfg.sample.php` (host `db` / `redis`, náhodné `app.pepper` a `secret_encryption_key`, cookies vhodné pro HTTP na lokálním stroji),
+   2. vygeneruje `cfg.docker.php` z `cfg.sample.php` (host `db` / `redis`, náhodné `app.pepper`, `secret_encryption_key` a `payroll_hash_key`, produkční `app.env`; cookies se řídí schématem `app.url`: pro výchozí `http://localhost:8080` bez příznaku Secure, pro HTTPS adresu s ním),
    3. postaví image `myucto:latest` (multi-stage: build Vue, composer, PHP 8.5 + nginx + php-fpm z `Dockerfile.alpine`),
    4. spustí stack: **app** (nginx na portu 80, na hostu `8080`) a **db** (MariaDB 11.8),
    5. počká na zdravou databázi a spustí migrace.
 4. Otevřete aplikaci (viz [§ 3.6](#36-krok-za-krokem-prvni-otevreni-aplikace)).
 
 **Jak poznáte, že je hotovo:** skript skončí bez chyby a na `http://localhost:8080` se zobrazí průvodce prvním spuštěním.
+
+Volby skriptu (platí jen při prvním vygenerování `cfg.docker.php`): `--url=https://ucto.firma.cz` (PowerShell `-AppUrl`) nastaví veřejnou adresu a s HTTPS zapne Secure cookie, `--dev` (`-Dev`) zapne vývojový režim `app.env = development` jen pro čistě lokální instalaci. Pokud instalaci později zveřejníte přes HTTPS, nastavte `session.cookie_secure = true`; jinak na to upozorní stránka Aktualizace.
 
 ## 3.5 Krok za krokem: instalace bez klonu repozitáře
 
@@ -120,6 +124,8 @@ Skript se chová stejně jako [§ 3.3](#33-krok-za-krokem-instalace-z-hotoveho-i
 2. Spusťte `./docker-ghcr.sh`. Skript najde `docker-compose.production.yml` v aktuálním adresáři, nic nepřejmenovávejte.
 
 **Jak poznáte, že je hotovo:** skript skončí bez chyby a na `http://localhost:8080` se zobrazí průvodce prvním spuštěním.
+
+Volby skriptu (platí jen při prvním vygenerování `cfg.docker.php`): `--url=https://ucto.firma.cz` (PowerShell `-AppUrl`) nastaví veřejnou adresu a s HTTPS zapne Secure cookie, `--dev` (`-Dev`) zapne vývojový režim `app.env = development` jen pro čistě lokální instalaci. Pokud instalaci později zveřejníte přes HTTPS, nastavte `session.cookie_secure = true`; jinak na to upozorní stránka Aktualizace.
 
 `env-load.sh` je parser souboru `.env` (skript ho jinak dotáhne sám). Díky němu smí být v `.env` i hodnota s mezerou bez uvozovek.
 
@@ -591,6 +597,8 @@ faktury.tvojefirma.cz, portal.klient-a.cz, portal.klient-b.cz {
 U nginx, Traefiku nebo Cloudflare Tunnel platí stejný princip: všechny hostname vedou do stejné aplikace, ale `Host` se nesmí přepsat na interní název služby. Neznámý nebo neaktivní Host aplikace odmítne, nestačí tedy přidat DNS a certifikát. Konfigurace Apache, IIS i nginx v repozitáři posílá SPA fallback přes stejnou serverovou kontrolu hostname.
 
 Aktivní vlastní doména používá oddělenou host-only session cookie. Přihlášení včetně passkey proběhne na kanonické `app.url` a prohlížeč se vrátí jednorázovým PKCE tokenem. Pro každého klienta proto nemusíte (a nesmíte) registrovat novou WebAuthn RP doménu.
+
+Každé nové přihlášení z klientské domény vyžaduje nové ověření. Existující relace na hlavní adrese se automaticky nepřebírá; přihlášení klienta zachová účet správce otevřený v hlavním okně.
 
 ### 3.12.9 Image: Alpine/nginx (výchozí) a Debian
 

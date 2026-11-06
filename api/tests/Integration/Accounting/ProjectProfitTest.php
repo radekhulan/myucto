@@ -236,6 +236,95 @@ final class ProjectProfitTest extends TestCase
         }
     }
 
+    /**
+     * MYU-2026-H48: klientská role bez `projects` zakázku nepřiřadí vůbec a ani
+     * s `projects` nepřeřadí zaúčtovaný (zamčený) doklad, který by přerazítkoval deník.
+     */
+    public function testClientRoleCannotReassignProjectOnLockedDocuments(): void
+    {
+        $client = $this->client('Syntetický klient', true, true);
+        $a = $this->project($client, 'Projekt A', 'LOCK-A');
+        $b = $this->project($client, 'Projekt B', 'LOCK-B');
+        $sale = $this->sale('LOCK-SALE', $client, 1000.00, 210.00, $a);
+        $purchase = $this->purchase('LOCK-PURCHASE', $client, 1000.00, 210.00, $a);
+        $saleEntry = $this->postSale($sale);
+        $purchaseEntry = $this->postPurchase($purchase);
+        $clientWithProjects = new \MyInvoice\Security\EffectiveRole(0, 'Klient se zakázkami', 'client', true, [
+            'invoices' => 2, 'purchase_invoices' => 2, 'projects' => 1,
+        ]);
+
+        foreach ([
+            ['invoices', $sale, $saleEntry, \MyInvoice\Action\Invoice\SetInvoiceProjectAction::class],
+            ['purchase_invoices', $purchase, $purchaseEntry, \MyInvoice\Action\PurchaseInvoice\SetPurchaseInvoiceProjectAction::class],
+        ] as [$table, $id, $entry, $class]) {
+            $before = $this->journal->find($entry, $this->supplierId)['lines'];
+            $action = Bootstrap::buildContainer()->get($class);
+            $base = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/project')
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+                ->withParsedBody(['project_id' => $b]);
+
+            $legacyClient = $base->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']);
+            $response = $action($legacyClient, new \Slim\Psr7\Response(), ['id' => (string) $id]);
+            self::assertSame(403, $response->getStatusCode());
+            self::assertSame('forbidden_permission', json_decode((string) $response->getBody(), true)['error']['code']);
+
+            $delegated = $base->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId])
+                ->withAttribute('auth.effective_role', $clientWithProjects);
+            $response = $action($delegated, new \Slim\Psr7\Response(), ['id' => (string) $id]);
+            self::assertSame(403, $response->getStatusCode());
+            self::assertSame('document_locked', json_decode((string) $response->getBody(), true)['error']['code']);
+
+            $header = $this->db->pdo()->prepare("SELECT project_id FROM {$table} WHERE id = ? AND supplier_id = ?");
+            $header->execute([$id, $this->supplierId]);
+            self::assertSame($a, (int) $header->fetchColumn());
+            self::assertSame($before, $this->journal->find($entry, $this->supplierId)['lines']);
+        }
+
+        // Nezamčený doklad klientská role se `projects` přiřadit smí.
+        $draft = $this->sale('LOCK-OPEN', $client, 500.00, 105.00, null);
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\Invoice\SetInvoiceProjectAction::class);
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/project')
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId])
+            ->withAttribute('auth.effective_role', $clientWithProjects)
+            ->withParsedBody(['project_id' => $b]);
+        self::assertSame(200, $action($request, new \Slim\Psr7\Response(), ['id' => (string) $draft])->getStatusCode());
+    }
+
+    /** MYU-2026-H48: detail odběratele vrací zakázky a obrat po zakázkách jen s `projects`. */
+    public function testClientDetailHidesProjectsWithoutProjectsPermission(): void
+    {
+        $customer = $this->client('Odběratel se zakázkou', true, false);
+        $projectId = $this->project($customer, 'Tajná zakázka', 'TAJNA-01');
+        $this->db->pdo()->prepare('UPDATE projects SET hourly_rate = 1500 WHERE id = ?')->execute([$projectId]);
+        $this->sale('FV-TAJNA', $customer, 1000.00, 210.00, $projectId);
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\Client\GetClientAction::class);
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('GET', '/api/clients/' . $customer)
+            ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId);
+
+        $client = $action(
+            $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'client']),
+            new \Slim\Psr7\Response(),
+            ['id' => (string) $customer],
+        );
+        self::assertSame(200, $client->getStatusCode());
+        $body = (string) $client->getBody();
+        $data = json_decode($body, true);
+        self::assertSame([], $data['projects']);
+        self::assertSame([], $data['revenue_by_project']);
+        self::assertSame(1, $data['projects_count'], 'Počet zakázek zůstává kvůli nabídce smazání.');
+        self::assertStringNotContainsString('Tajná zakázka', $body);
+        self::assertStringNotContainsString('TAJNA-01', $body);
+
+        $staff = json_decode((string) $action(
+            $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant']),
+            new \Slim\Psr7\Response(),
+            ['id' => (string) $customer],
+        )->getBody(), true);
+        self::assertSame('Tajná zakázka', $staff['projects'][0]['name']);
+        self::assertSame('Tajná zakázka', $staff['revenue_by_project'][0]['project_name']);
+    }
+
     /** Zakázka cizího tenanta není vidět ani přes přímé ID (BOLA). */
     public function testForeignProjectIsNotVisible(): void
     {

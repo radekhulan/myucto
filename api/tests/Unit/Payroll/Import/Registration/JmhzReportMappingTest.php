@@ -174,6 +174,48 @@ final class JmhzReportMappingTest extends TestCase
         self::assertCount(1, $ended['warnings']);
     }
 
+    /**
+     * Sleva na studenta z hlášení (10565, doktorand 10566) se převezme jako
+     * druh evidence a nový řádek končí nejpozději posledním měsícem nároku
+     * podle věkové hranice § 35bc ZDP; bez data narození nebo před účinností
+     * slevy se nepřevezme.
+     */
+    public function testStudentCreditIsTakenWithAgeBoundedInterval(): void
+    {
+        $reference = 'jmhz-import:' . str_repeat('a', 64) . ':' . JmhzReportFixtures::guid(1, 101);
+        $kind = JmhzStatutoryChanges::studentCreditKind(false);
+        $claimed = JmhzStatutoryChanges::credits(
+            ['tax_credit_claims' => []],
+            null,
+            '2027-03-01',
+            ['taxpayer' => 2_735, $kind => 335],
+            $reference,
+            '2001-06-15',
+        );
+
+        self::assertSame('student', $kind);
+        self::assertSame('student-doctoral', JmhzStatutoryChanges::studentCreditKind(true));
+        self::assertContains(['kind' => 'student', 'action' => 'claim', 'current' => null], $claimed['changes']);
+        $student = array_values(array_filter(
+            $claimed['sections']['tax_credit_claims'],
+            static fn (array $row): bool => $row['credit_kind'] === 'student',
+        ));
+        self::assertSame('2027-03-01', $student[0]['effective_from']);
+        self::assertSame('2027-06-30', $student[0]['effective_to']);
+        self::assertSame([], $claimed['warnings']);
+
+        $withoutBirthDate = JmhzStatutoryChanges::credits(
+            ['tax_credit_claims' => []],
+            null,
+            '2027-03-01',
+            [$kind => 335],
+            $reference,
+        );
+        self::assertSame([], $withoutBirthDate['changes']);
+        self::assertSame([], $withoutBirthDate['sections']['tax_credit_claims']);
+        self::assertCount(1, $withoutBirthDate['warnings']);
+    }
+
     public function testDeclarationChangeSplitsTheCoveringVersionAtTheMonth(): void
     {
         $stored = [['id' => 9, 'row_version' => 2, 'status' => 'signed', 'evidence_reference' => 'declaration:x',

@@ -16,6 +16,7 @@ import { formatDate } from '@/composables/useFormat'
 import AiMarkdown from '@/components/ai/AiMarkdown.vue'
 import AiJournalProposal from '@/components/ai/AiJournalProposal.vue'
 import AiOtherItemProposal from '@/components/ai/AiOtherItemProposal.vue'
+import AiInternalDocumentProposal from '@/components/ai/AiInternalDocumentProposal.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -662,6 +663,18 @@ onMounted(async () => {
                   :link-document-ids="linkIdsFor(m)"
                   :applied-id="appliedFor(m, 'other_item', oii)"
                   @created="id => markApplied(m, 'other_item', oii, id)"
+                />
+              </div>
+
+              <div v-if="(m.response?.internal_documents ?? []).length" class="space-y-2">
+                <h4 class="text-xs font-semibold uppercase tracking-wide text-neutral-500">{{ t('accounting.ai_assistant.internal_document.heading') }}</h4>
+                <AiInternalDocumentProposal
+                  v-for="(idoc, idi) in m.response?.internal_documents ?? []"
+                  :key="idi"
+                  :doc="idoc"
+                  :link-document-ids="linkIdsFor(m)"
+                  :applied-id="appliedFor(m, 'internal_document', idi)"
+                  @created="id => markApplied(m, 'internal_document', idi, id)"
                 />
               </div>
 

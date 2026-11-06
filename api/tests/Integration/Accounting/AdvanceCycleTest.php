@@ -360,7 +360,8 @@ final class AdvanceCycleTest extends BankPostingTestCase
     }
 
     // (f1e) — vyúčtování s DDKP, ale bez odpočtového řádku (smazaný v konceptu / ručně
-    //         navázané vyúčtování): výnos by se přičetl podruhé → hlasitá chyba.
+    //         navázané vyúčtování): výnos by se přičetl podruhé → hlasitá chyba. Odpočet
+    //         nad částku DDKP taky. Menší odpočet je postupné čerpání (f4).
     public function testFinalWithoutDeductionRowsThrowsAmbiguous(): void
     {
         $client   = $this->client('Odběratel s.r.o.');
@@ -371,7 +372,7 @@ final class AdvanceCycleTest extends BankPostingTestCase
 
         foreach ([
             'bez odpočtu' => $this->saleWithItem('FV-F1E', $client, 1000.00, 210.00, 'invoice', $proforma),
-            'upravený odpočet' => $this->finalWithDeduction('FV-F1E2', $client, $proforma, 1000.00, 210.00, 500.00, 105.00),
+            'odpočet nad DDKP' => $this->finalWithDeduction('FV-F1E2', $client, $proforma, 2000.00, 420.00, 1500.00, 315.00),
         ] as $case => $final) {
             try {
                 $this->posting->buildFromInvoice($this->supplierId, $final);
@@ -381,6 +382,117 @@ final class AdvanceCycleTest extends BankPostingTestCase
             }
             $this->db->pdo()->prepare("UPDATE invoices SET status = 'cancelled' WHERE id = ?")->execute([$final]);
         }
+    }
+
+    // (f4) — postupné čerpání zálohy fakturami za milníky: každá zúčtuje 324/311 jen základ,
+    //        který sama odečetla. Po poslední je 324 na nule, 343 nese daň z celého plnění
+    //        právě jednou a na 311 zůstává jen doplatek milníků.
+    public function testMilestoneInvoicesDrawAdvanceStepByStep(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F4', $client, 1000.00, 210.00, 'proforma');
+        $tx = $this->payProformaViaBank($proforma, 1210.00);
+        $ddkp = $this->saleWithItem('DDKP-F4', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $ddkpEntry = $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+
+        $first = $this->finalWithDeduction('FV-F4a', $client, $proforma, 1000.00, 210.00, 300.00, 63.00);
+        $firstEntry = $this->postInvoiceEntry($first, self::YEAR . '-06-20');
+        $byAcc = $this->linesByAccountCode($firstEntry);
+        self::assertEqualsWithDelta(1147.00, $byAcc['311']['debit'] ?? 0.0, 0.001, '311 MD = faktura 847 + vrácený základ odpočtu 300.');
+        self::assertEqualsWithDelta(1000.00, $byAcc['602']['credit'] ?? 0.0, 0.001, '602 D = výnos za celý milník.');
+        self::assertEqualsWithDelta(147.00, $byAcc['343.200']['credit'] ?? 0.0, 0.001, '343 D = daň milníku po odpočtu daně zálohy.');
+        self::assertEqualsWithDelta(300.00, $byAcc['324']['debit'] ?? 0.0, 0.001, '324 MD = jen základ, který faktura odečetla.');
+        self::assertEqualsWithDelta(300.00, $byAcc['311']['credit'] ?? 0.0, 0.001, '311 D = vyrovnání odečtené části zálohy.');
+        $this->assertBalancedEntry($firstEntry);
+
+        $afterFirst = $this->accountSums([$this->entryIdForBankTx($tx), $ddkpEntry, $firstEntry]);
+        self::assertSame(-70000, self::cents($afterFirst['324'] ?? 0), 'Na 324 zbývá nevyčerpaný základ zálohy 700.');
+
+        $second = $this->finalWithDeduction('FV-F4b', $client, $proforma, 2000.00, 420.00, 700.00, 147.00);
+        $secondEntry = $this->postInvoiceEntry($second, self::YEAR . '-07-20');
+        $this->assertBalancedEntry($secondEntry);
+
+        $sum = $this->accountSums([$this->entryIdForBankTx($tx), $ddkpEntry, $firstEntry, $secondEntry]);
+        self::assertSame(0, self::cents($sum['324'] ?? 0), '324 po vyčerpání zálohy na nule.');
+        self::assertSame(242000, self::cents($sum['311'] ?? 0), 'Na 311 zůstává doplatek milníků 847 + 1573.');
+        self::assertSame(-300000, self::cents($sum['602'] ?? 0), 'Výnos za oba milníky.');
+        self::assertSame(-63000, self::cents($sum['343.200'] ?? 0), 'Daň 21 % z 3000 právě jednou.');
+    }
+
+    // (f4a) — postupné čerpání nad částku DDKP: faktura, která by zálohu přečerpala → hlasitá chyba.
+    public function testMilestoneInvoicesOverdrawingAdvanceThrowAmbiguous(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F4A', $client, 1000.00, 210.00, 'proforma');
+        $this->payProformaViaBank($proforma, 1210.00);
+        $ddkp = $this->saleWithItem('DDKP-F4A', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+
+        $first = $this->finalWithDeduction('FV-F4Aa', $client, $proforma, 1000.00, 210.00, 700.00, 147.00);
+        $this->postInvoiceEntry($first, self::YEAR . '-06-20');
+        $second = $this->finalWithDeduction('FV-F4Ab', $client, $proforma, 1000.00, 210.00, 700.00, 147.00);
+
+        try {
+            $this->posting->buildFromInvoice($this->supplierId, $second);
+            self::fail('Odpočty nad částku DDKP mají vyhodit advance_settlement_ambiguous.');
+        } catch (PostingException $e) {
+            self::assertSame('advance_settlement_ambiguous', $e->errorCode);
+        }
+    }
+
+    // (f4b) — postupné čerpání bez zaúčtované úhrady zálohy: zúčtování by čerpalo 324,
+    //         na kterém nic neleží → hlasitá chyba.
+    public function testMilestoneInvoiceWithoutPostedAdvancePaymentThrowsAmbiguous(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F4B', $client, 1000.00, 210.00, 'proforma');
+        $ddkp = $this->saleWithItem('DDKP-F4B', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $this->postInvoiceEntry($ddkp, self::YEAR . '-06-16');
+        $final = $this->finalWithDeduction('FV-F4B', $client, $proforma, 1000.00, 210.00, 300.00, 63.00);
+
+        try {
+            $this->posting->buildFromInvoice($this->supplierId, $final);
+            self::fail('Postupné čerpání bez zaúčtované úhrady zálohy má vyhodit advance_settlement_ambiguous.');
+        } catch (PostingException $e) {
+            self::assertSame('advance_settlement_ambiguous', $e->errorCode);
+        }
+    }
+
+    // (f4c) — služba čerpání: rozdělí odpočet podle DDKP, poslední čerpání bere přesný zbytek
+    //         a nad zbytek zálohy čerpat nedovolí.
+    public function testPartialDrawdownServiceSplitsAdvanceAcrossDrafts(): void
+    {
+        $client   = $this->client('Odběratel s.r.o.');
+        $proforma = $this->saleWithItem('PRO-F4C', $client, 1000.00, 210.00, 'proforma');
+        $this->saleWithItem('DDKP-F4C', $client, 1000.00, 210.00, 'tax_document', $proforma, 1);
+        $drawdown = $this->container->get(\MyInvoice\Service\Invoice\AdvancePartialDrawdown::class);
+
+        $first = $this->draftWithItem($client, 1000.00);
+        $res = $drawdown->apply($this->supplierId, $first, $proforma, 363.00);
+        self::assertEqualsWithDelta(847.00, $res['remaining'], 0.001);
+        $line = $this->deductionLine($first);
+        self::assertEqualsWithDelta(-300.00, $line['total_without_vat'], 0.001, 'Základ odpočtu 363 / 1,21.');
+        self::assertEqualsWithDelta(-63.00, $line['total_vat'], 0.001);
+        self::assertSame($proforma, $this->parentOf($first));
+
+        // Opakované čerpání téhož konceptu odpočet nahradí, nepřidá.
+        $drawdown->apply($this->supplierId, $first, $proforma, 363.00);
+        self::assertSame(1, $this->deductionCount($first));
+
+        $second = $this->draftWithItem($client, 2000.00);
+        try {
+            $drawdown->apply($this->supplierId, $second, $proforma, 900.00);
+            self::fail('Čerpání nad zbytek zálohy má selhat.');
+        } catch (\DomainException) {
+        }
+        $drawdown->apply($this->supplierId, $second, $proforma, 847.00);
+        $rest = $this->deductionLine($second);
+        self::assertEqualsWithDelta(-700.00, $rest['total_without_vat'], 0.001, 'Poslední čerpání = přesný zbytek základu DDKP.');
+        self::assertEqualsWithDelta(-147.00, $rest['total_vat'], 0.001);
+
+        $drawdown->remove($this->supplierId, $second);
+        self::assertSame(0, $this->deductionCount($second));
+        self::assertNull($this->parentOf($second));
     }
 
     // (f1f) — prodej drobného majetku přes proformu s DDKP: odpočtový řádek bez karty
@@ -812,6 +924,38 @@ final class AdvanceCycleTest extends BankPostingTestCase
     private static function cents(float|int|string|null $amount): int
     {
         return (int) round((float) $amount * 100.0);
+    }
+
+    private function draftWithItem(int $clientId, float $base): int
+    {
+        $id = $this->saleWithItem('', $clientId, $base, round($base * 0.21, 2));
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'draft', varsymbol = NULL WHERE id = ?")->execute([$id]);
+        return $id;
+    }
+
+    /** @return array{total_without_vat:float, total_vat:float} */
+    private function deductionLine(int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT total_without_vat, total_vat FROM invoice_items WHERE invoice_id = ? AND total_with_vat < 0');
+        $stmt->execute([$invoiceId]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($row, 'Koncept má nést odpočtový řádek.');
+        return ['total_without_vat' => (float) $row['total_without_vat'], 'total_vat' => (float) $row['total_vat']];
+    }
+
+    private function deductionCount(int $invoiceId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM invoice_items WHERE invoice_id = ? AND total_with_vat < 0');
+        $stmt->execute([$invoiceId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function parentOf(int $invoiceId): ?int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT parent_invoice_id FROM invoices WHERE id = ?');
+        $stmt->execute([$invoiceId]);
+        $parent = $stmt->fetchColumn();
+        return $parent === null || $parent === false ? null : (int) $parent;
     }
 
     private function saleWithItem(string $vs, int $clientId, float $base, float $vat, string $type = 'invoice', ?int $parentId = null, int $pricesIncludeVat = 0): int

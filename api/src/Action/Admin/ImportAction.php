@@ -88,7 +88,7 @@ final class ImportAction
                 null, null, $purchaseStatus,
             );
         } catch (\Throwable $e) {
-            return Json::error($response, 'import_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'import_failed', $e->getMessage(), 500);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

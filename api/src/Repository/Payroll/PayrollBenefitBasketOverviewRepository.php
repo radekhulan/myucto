@@ -63,14 +63,14 @@ final class PayrollBenefitBasketOverviewRepository
      * období. Měsíční koše (§ 6 odst. 9 písm. b) a i)) by tu ukázaly roční součet
      * proti limitu, který za rok neexistuje — a „zbývá" by lhalo.
      */
-    private const ANNUAL_BASKETS = '"non_cash_health", "non_cash_leisure", "old_age_savings"';
+    private const ANNUAL_BASKETS = '"non_cash_health", "non_cash_leisure", "old_age_savings", "recreation"';
 
     /**
      * Do MĚSÍČNÍHO přehledu patří naopak jen koše, jejichž rozhodným obdobím je
      * kalendářní měsíc. Roční koš by v něm ukázal jednu dvanáctinu čerpání proti
      * ročnímu limitu, tedy číslo, které nic neznamená.
      */
-    private const MONTHLY_BASKETS = '"meal_per_shift", "temporary_accommodation"';
+    private const MONTHLY_BASKETS = '"meal_per_shift", "temporary_accommodation", "food_service_tips"';
 
     /** Kolik nejvýš měsíců nabídne rozbalovátko období. */
     private const PERIOD_OPTIONS_LIMIT = 120;

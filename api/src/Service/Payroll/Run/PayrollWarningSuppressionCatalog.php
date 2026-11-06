@@ -37,6 +37,8 @@ final class PayrollWarningSuppressionCatalog
         'tax_declaration_not_signed_summary' => self::SUBJECT_EMPLOYEE,
         'time_month_missing' => self::SUBJECT_EMPLOYMENT,
         'employment_without_inputs' => self::SUBJECT_EMPLOYMENT,
+        // Jen upozornění předem; překročení limitu je jiný kód a skrýt nejde.
+        'dpp_annual_hours_approaching' => self::SUBJECT_EMPLOYMENT,
     ];
 
     /**

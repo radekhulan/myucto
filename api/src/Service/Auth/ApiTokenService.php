@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Auth;
 use MyInvoice\Infrastructure\Cache\RedisFactory;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\License\LicenseCapacityGate;
 use PDO;
 
 /**
@@ -31,6 +32,11 @@ final class ApiTokenService
     public function __construct(
         private readonly Connection $db,
         private readonly RedisFactory $redis,
+        /**
+         * Licenční brána pro tokeny se zápisem. Kontejner ji dosazuje vždy
+         * (Bootstrap); `null` mají jen přímo sestavené testy.
+         */
+        private readonly ?LicenseCapacityGate $capacity = null,
     ) {}
 
     /**
@@ -79,6 +85,7 @@ final class ApiTokenService
         string $scope,
         ?\DateTimeImmutable $expiresAt = null,
         bool $allowPayrollSubmissionDocs = false,
+        bool $seatGate = true,
     ): array {
         if (!$pdo->inTransaction() || $userId < 1) {
             throw new \LogicException('Vytvoření API tokenu vyžaduje aktivní transakci a uživatele.');
@@ -115,7 +122,14 @@ final class ApiTokenService
         if ($expiresAt !== null) {
             $params[] = $expiresAt->getTimestamp();
         }
-        $stmt->execute($params);
+        // ⚠️ Token se zápisem může podle parametru licence zabírat místo.
+        // `$seatGate = false` smí předat jen cesta, která počet přístupů
+        // nemění (obnova MCP oprávnění vytváří token jen dočasně).
+        if ($seatGate && $scope === 'read_write' && $this->capacity !== null) {
+            $this->capacity->mutateWriteTokens(static fn () => $stmt->execute($params));
+        } else {
+            $stmt->execute($params);
+        }
 
         return [
             'plaintext' => $plaintext,
@@ -142,7 +156,7 @@ final class ApiTokenService
 
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.user_id, t.supplier_id, t.name, t.prefix, t.scope, t.audience,
-                    t.allow_payroll_submission_docs,
+                    t.allow_payroll_submission_docs, t.eet_external_by_default,
                     t.expires_at, t.revoked_at,
                     u.email AS user_email, u.name AS user_name, u.role_id AS user_role_id,
                     r.name AS user_role_name, r.role_type AS user_role_type,
@@ -173,6 +187,7 @@ final class ApiTokenService
         $row['supplier_id']       = $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null;
         $row['user_is_active']    = true;
         $row['user_totp_enabled'] = (int) ($row['user_totp_enabled'] ?? 0) === 1;
+        $row['eet_external_by_default'] = (int) ($row['eet_external_by_default'] ?? 0) === 1;
         return $row;
     }
 
@@ -206,7 +221,7 @@ final class ApiTokenService
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT t.id, t.supplier_id, s.display_name AS supplier_name, s.company_name AS supplier_company,
-                    t.name, t.prefix, t.scope, t.allow_payroll_submission_docs,
+                    t.name, t.prefix, t.scope, t.allow_payroll_submission_docs, t.eet_external_by_default,
                     t.last_used_at, t.last_used_ip,
                     t.expires_at, t.revoked_at, t.created_at,
                     (SELECT COUNT(*) FROM api_token_ips ip WHERE ip.token_id = t.id) AS ip_rule_count
@@ -224,6 +239,7 @@ final class ApiTokenService
             // PDO vrací TINYINT jako řetězec, a "0" je v JS pravdivé — bez tohohle
             // přetypování by štítek schopnosti svítil i u tokenů, které ji nemají.
             $r['allow_payroll_submission_docs'] = (int) $r['allow_payroll_submission_docs'] === 1;
+            $r['eet_external_by_default'] = (int) $r['eet_external_by_default'] === 1;
             if ($r['last_used_ip'] !== null) {
                 $r['last_used_ip'] = @inet_ntop($r['last_used_ip']) ?: null;
             }
@@ -374,6 +390,50 @@ final class ApiTokenService
         );
         $stmt->execute([$tokenId, $userId]);
         return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * Volba „úhrady z tohoto klíče eviduje EET externí systém (e-shop)". Platí jen pro
+     * úhrady faktur bez kontextu EET ({@see \MyInvoice\Service\Eet\EetInvoicePaymentGate}).
+     * Jen vlastní token; vrací false, když token uživateli nepatří.
+     */
+    public function setEetExternalByDefault(int $tokenId, int $userId, bool $enabled): bool
+    {
+        $own = $this->db->pdo()->prepare('SELECT 1 FROM api_tokens WHERE id = ? AND user_id = ?');
+        $own->execute([$tokenId, $userId]);
+        if ($own->fetchColumn() === false) {
+            return false;
+        }
+        $this->db->pdo()->prepare('UPDATE api_tokens SET eet_external_by_default = ? WHERE id = ? AND user_id = ?')
+            ->execute([$enabled ? 1 : 0, $tokenId, $userId]);
+        return true;
+    }
+
+    /**
+     * Zruší všechny dosud platné tokeny uživatele (i přístupové tokeny MCP
+     * připojení). Vrací počet skutečně zrušených tokenů.
+     */
+    public function revokeAllForUser(int $userId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE api_tokens SET revoked_at = NOW()
+              WHERE user_id = ? AND revoked_at IS NULL
+                AND (expires_at IS NULL OR expires_at > NOW())'
+        );
+        $stmt->execute([$userId]);
+        return $stmt->rowCount();
+    }
+
+    /** Počet tokenů uživatele, které by teď prošly {@see validate()} (nezrušené a neexpirované). */
+    public function countActiveForUser(int $userId): int
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM api_tokens
+              WHERE user_id = ? AND revoked_at IS NULL
+                AND (expires_at IS NULL OR expires_at > NOW())'
+        );
+        $stmt->execute([$userId]);
+        return (int) $stmt->fetchColumn();
     }
 
     /**

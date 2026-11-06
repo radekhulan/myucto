@@ -104,7 +104,7 @@ final class PaymentCalendarTest extends TestCase
      */
     public function testCalendarWithoutScheduleIsRejected(): void
     {
-        $id = $this->calendar(12_000.0);
+        $id = $this->calendar(12_000.0, 'advance_calendar');
 
         $res = $this->issue($id);
 
@@ -118,7 +118,7 @@ final class PaymentCalendarTest extends TestCase
      */
     public function testScheduleTotalMustMatchInvoiceTotal(): void
     {
-        $id = $this->calendar(12_000.0);
+        $id = $this->calendar(12_000.0, 'advance_calendar');
         $this->schedule->replaceForInvoice($this->supplierId, $id, [
             ['due_on' => '2099-01-15', 'total_amount' => 1_000.0],
             ['due_on' => '2099-02-15', 'total_amount' => 1_000.0],
@@ -133,7 +133,7 @@ final class PaymentCalendarTest extends TestCase
     /** S úplným a sedícím rozpisem se kalendář vystaví. */
     public function testCalendarWithMatchingScheduleIsIssued(): void
     {
-        $id = $this->calendar(12_000.0);
+        $id = $this->calendar(12_000.0, 'advance_calendar');
         $rows = [];
         for ($m = 1; $m <= 12; $m++) {
             $rows[] = ['due_on' => sprintf('2099-%02d-15', $m), 'total_amount' => 1_000.0];
@@ -315,7 +315,7 @@ final class PaymentCalendarTest extends TestCase
 
     // ── fixtures ─────────────────────────────────────────────────────────────
 
-    private function calendar(float $total): int
+    private function calendar(float $total, string $type = 'payment_calendar'): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -323,9 +323,9 @@ final class PaymentCalendarTest extends TestCase
                 (supplier_id, client_id, invoice_type, issue_date, tax_date, due_date,
                  currency_id, reverse_charge, client_snapshot, supplier_snapshot,
                  total_without_vat, total_vat, total_with_vat, status, vat_classification_code, created_by)
-             VALUES (?, ?, "payment_calendar", "2099-01-01", "2099-01-01", "2099-01-15", ?, 0, "{}", "{}",
+             VALUES (?, ?, ?, "2099-01-01", "2099-01-01", "2099-01-15", ?, 0, "{}", "{}",
                      ?, 0, ?, "draft", "1", ?)'
-        )->execute([$this->supplierId, $this->clientId, $this->currencyId, $total, $total, $this->userId]);
+        )->execute([$this->supplierId, $this->clientId, $type, $this->currencyId, $total, $total, $this->userId]);
         $id = (int) $pdo->lastInsertId();
 
         $pdo->prepare(

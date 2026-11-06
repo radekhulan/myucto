@@ -166,7 +166,8 @@ podává za jednu registraci u OSSZ, takže vyžaduje běh zúžený na jednu
 odmítne.
 
 Zálohová a srážková daň se neslučují: každá má vlastní účet finančního úřadu
-a platební symboly.
+a platební symboly. Od mezd za rok 2027 srážková daň ze mzdy nevzniká; záloha
+ze samostatného základu podle § 6 odst. 4 se přičte k závazku zálohové daně.
 
 Opakované **Připravit závazky** je bezpečné a nevytvoří duplicity. Opravná
 revize nezapisuje znovu celou mzdu, jen rozdíl proti předchozím závazkům.

@@ -13,6 +13,8 @@ use PHPUnit\Framework\TestCase;
 
 final class FxLegacyCasePaymentProofTest extends TestCase
 {
+    use \MyInvoice\Tests\Support\SharedClassFixture;
+
     private Connection $db;
     private int $committedSupplier = 0;
     private ?Connection $other = null;
@@ -61,55 +63,23 @@ final class FxLegacyCasePaymentProofTest extends TestCase
         $c = Bootstrap::buildContainer();
         $this->db = $c->get(Connection::class);
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
-        $pdo->exec("INSERT INTO supplier(company_name,street,city,zip,email,country_id,default_currency_id,default_vat_rate_id,accounting_mode)
-            SELECT 'Synthetic FX historical proof','Test1','Test','10000','fx-proof@example.com',country_id,default_currency_id,default_vat_rate_id,'double_entry' FROM supplier ORDER BY id LIMIT 1");
-        $sid = (int) $pdo->lastInsertId();
-        $c->get(ChartOfAccountsSeeder::class)->seedForSupplier($sid);
-        $pid = $c->get(AccountingPeriodRepository::class)->create($sid,2098,'2098-01-01','2098-12-31');
-        $user = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
-        $this->previousRates = $pdo->query("SELECT rate_date,currency_code,rate FROM exchange_rates WHERE currency_code='EUR' AND rate_date IN (" . self::RATE_DATES . ')')->fetchAll(\PDO::FETCH_ASSOC);
-        $pdo->exec("INSERT INTO exchange_rates(rate_date,currency_code,rate) VALUES ('2098-06-15','EUR',24),('2098-06-16','EUR',26),('2098-09-15','EUR',24),('2098-12-31','EUR',25),('2099-06-15','EUR',24),('2099-12-31','EUR',25.25) ON DUPLICATE KEY UPDATE rate=VALUES(rate)");
-        $first = $this->invoice($sid,24,'2098-06-15','2098000701');
-        $this->invoice($sid,str_starts_with($mode,'prior_')?25.5:26,'2098-06-16','2098000702');
-        $closedHome = str_contains($mode, 'closed_home') ? $this->closedHomeDocument($sid, $user) : 0;
-        if (str_contains($mode, 'mixed_')) $c->get(PostingService::class)->postDocument($sid,'manual',null,[
-            ['account_code'=>'311','side'=>'debit','amount'=>1000],
-            ['account_code'=>'602','side'=>'credit','amount'=>1000],
-        ],['entry_date'=>'2098-07-01','posted'=>true]);
-        if ($mode === 'prior_native_mixed_manual') {
-            $entry = $c->get(PostingService::class)->postDocument($sid,'manual',null,[
-                ['account_code'=>'311','side'=>'credit','amount'=>500],
-                ['account_code'=>'395','side'=>'debit','amount'=>500],
-            ],['entry_date'=>'2098-08-01','posted'=>true]);
-            $c->get(\MyInvoice\Repository\JournalEntryDocumentLinkRepository::class)->add($entry,$sid,'invoice',$first,null,$user);
+        if (!str_starts_with($mode, 'prior_') || $mode === 'prior_native_current_step') {
+            $pdo->beginTransaction();
+            $s = $this->scenario($c, $mode);
+        } else {
+            // Uzavřený a otevřený rok 2098 sdílí režimy se stejnou přípravou; kurzy jsou
+            // globální číselník, do sdílené fixture se necommitují.
+            $s = $this->sharedFixture($pdo, self::priorKey($mode), function () use ($c, $mode, $pdo): array {
+                $s = $this->scenario($c, $mode);
+                $pdo->exec("DELETE FROM exchange_rates WHERE currency_code='EUR' AND rate_date IN (" . self::RATE_DATES . ')');
+                foreach ($this->previousRates as $row) $pdo->prepare('INSERT INTO exchange_rates(rate_date,currency_code,rate) VALUES (?,?,?)')->execute([$row['rate_date'],$row['currency_code'],$row['rate']]);
+                return [$s['sid'], $s];
+            });
+            $this->rates($pdo);
         }
-        if ($mode === 'prior_native_bad_foreign_opening') $c->get(PostingService::class)->postDocument($sid,'opening',$pid,[
-            ['account_code'=>'311','side'=>'debit','amount'=>4800,'currency_code'=>'EUR','amount_foreign'=>200,'fx_rate'=>24],
-            ['account_code'=>'701','side'=>'credit','amount'=>4800],
-            ['account_code'=>'701','side'=>'debit','amount'=>4800],
-            ['account_code'=>'411','side'=>'credit','amount'=>4800],
-        ],['entry_date'=>'2098-01-01','posted'=>true]);
+        ['sid' => $sid, 'pid' => $pid, 'user' => $user, 'first' => $first, 'closedHome' => $closedHome, 'booked' => $booked,
+            'opened' => $opened, 'oldState' => $oldState, 'target' => $target] = $s;
         $closing = $c->get(ClosingService::class);
-        $oldState = null;
-        if (str_starts_with($mode, 'prior_')) {
-            $pdo->prepare('INSERT INTO accounting_supplier_settings(supplier_id,fx_reversal_at_open) VALUES (?,0)')->execute([$sid]);
-            if (str_contains($mode, 'reverse') || str_contains($mode, 'reversal')) $pdo->exec('UPDATE accounting_supplier_settings SET fx_reversal_at_open=1 WHERE supplier_id='.$sid);
-            $version = fn (): int => (int) $pdo->query('SELECT row_version FROM accounting_periods WHERE id='.$pid)->fetchColumn();
-            $closing->start($sid,$pid,$version());
-            $closing->runPrecheck($sid,$pid,$version());
-            foreach (['depreciation','estimates','deferrals','provisions','income_tax'] as $step) $closing->confirmStep($sid,$pid,$step,'skipped',null,$version());
-            $booked = str_starts_with($mode, 'prior_legacy') ? \MyInvoice\Tests\Support\LegacyFxNetFixture::install($sid,$pid) : $closing->runFxRevaluation($sid,$pid,[],$version());
-            self::assertSame(str_starts_with($mode, 'prior_legacy') ? ['loss'=>0.0,'gain'=>500.0] : ['loss'=>500.0,'gain'=>$mode === 'prior_native_mixed_manual' ? 1500.0 : 1000.0], $booked['totals']);
-            $inventory=[];
-            foreach ($closing->inventoryPreview($sid,$pid)['rows'] as $row) $inventory[(int)$row['account_id']]=['counted_balance'=>(float)$row['book_balance'],'resolution'=>'resolved','note'=>null];
-            $closing->saveInventory($sid,$pid,$version(),['complete'=>true],$inventory);
-            $closing->closeBooks($sid,$pid,$version());
-            $opened=$closing->openNext($sid,$pid,$version());
-            self::assertTrue($c->get(AccountingPeriodRepository::class)->setStatusCas($pid,$sid,'approved',$version(),$user,['body'=>'Synthetic approval','decision_ref'=>'SYN-FX-2098']));
-            $oldState=$this->priorState($sid,$pid);
-            $target=(int)$opened['next_period_id'];
-        } else $target=$pid;
         $date=str_starts_with($mode,'prior_')?'2099-06-15':'2098-09-15';
         $tx=$this->payment($sid,$first,$date,$user,str_contains($mode,'full') ? 1000 : 500);
         if (str_ends_with($mode,'_matches')) {
@@ -235,6 +205,76 @@ final class FxLegacyCasePaymentProofTest extends TestCase
                 $closing->fxPreview($sid,$target);
             }
         }
+    }
+
+    /** Režimy se stejnou přípravou uzavřeného roku (vše, co scenario() čte z režimu). */
+    private static function priorKey(string $mode): string
+    {
+        return implode('|', [str_starts_with($mode, 'prior_legacy') ? 'legacy' : 'native', str_contains($mode, 'reverse') || str_contains($mode, 'reversal') ? 'reverse' : 'keep',
+            str_contains($mode, 'mixed_') ? 'mixed' : '', $mode === 'prior_native_mixed_manual' ? 'manual' : '', str_contains($mode, 'closed_home') ? 'home' : '',
+            $mode === 'prior_native_bad_foreign_opening' ? 'foreign_opening' : '']);
+    }
+
+    private function rates(\PDO $pdo): void
+    {
+        $pdo->exec("INSERT INTO exchange_rates(rate_date,currency_code,rate) VALUES ('2098-06-15','EUR',24),('2098-06-16','EUR',26),('2098-09-15','EUR',24),('2098-12-31','EUR',25),('2099-06-15','EUR',24),('2099-12-31','EUR',25.25) ON DUPLICATE KEY UPDATE rate=VALUES(rate)");
+    }
+
+    /** Firma, dvě EUR faktury a u režimů prior_ uzavřený, otevřený a schválený rok 2098. */
+    private function scenario(\Psr\Container\ContainerInterface $c, string $mode): array
+    {
+        $pdo = $this->db->pdo();
+        $pdo->exec("INSERT INTO supplier(company_name,street,city,zip,email,country_id,default_currency_id,default_vat_rate_id,accounting_mode)
+            SELECT 'Synthetic FX historical proof','Test1','Test','10000','fx-proof@example.com',country_id,default_currency_id,default_vat_rate_id,'double_entry' FROM supplier ORDER BY id LIMIT 1");
+        $sid = (int) $pdo->lastInsertId();
+        $c->get(ChartOfAccountsSeeder::class)->seedForSupplier($sid);
+        $pid = $c->get(AccountingPeriodRepository::class)->create($sid,2098,'2098-01-01','2098-12-31');
+        $user = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+        $this->previousRates = $pdo->query("SELECT rate_date,currency_code,rate FROM exchange_rates WHERE currency_code='EUR' AND rate_date IN (" . self::RATE_DATES . ')')->fetchAll(\PDO::FETCH_ASSOC);
+        $this->rates($pdo);
+        $first = $this->invoice($sid,24,'2098-06-15','2098000701');
+        $this->invoice($sid,str_starts_with($mode,'prior_')?25.5:26,'2098-06-16','2098000702');
+        $closedHome = str_contains($mode, 'closed_home') ? $this->closedHomeDocument($sid, $user) : 0;
+        if (str_contains($mode, 'mixed_')) $c->get(PostingService::class)->postDocument($sid,'manual',null,[
+            ['account_code'=>'311','side'=>'debit','amount'=>1000],
+            ['account_code'=>'602','side'=>'credit','amount'=>1000],
+        ],['entry_date'=>'2098-07-01','posted'=>true]);
+        if ($mode === 'prior_native_mixed_manual') {
+            $entry = $c->get(PostingService::class)->postDocument($sid,'manual',null,[
+                ['account_code'=>'311','side'=>'credit','amount'=>500],
+                ['account_code'=>'395','side'=>'debit','amount'=>500],
+            ],['entry_date'=>'2098-08-01','posted'=>true]);
+            $c->get(\MyInvoice\Repository\JournalEntryDocumentLinkRepository::class)->add($entry,$sid,'invoice',$first,null,$user);
+        }
+        if ($mode === 'prior_native_bad_foreign_opening') $c->get(PostingService::class)->postDocument($sid,'opening',$pid,[
+            ['account_code'=>'311','side'=>'debit','amount'=>4800,'currency_code'=>'EUR','amount_foreign'=>200,'fx_rate'=>24],
+            ['account_code'=>'701','side'=>'credit','amount'=>4800],
+            ['account_code'=>'701','side'=>'debit','amount'=>4800],
+            ['account_code'=>'411','side'=>'credit','amount'=>4800],
+        ],['entry_date'=>'2098-01-01','posted'=>true]);
+        $closing = $c->get(ClosingService::class);
+        $oldState = null;
+        $booked = null;
+        $opened = null;
+        if (str_starts_with($mode, 'prior_')) {
+            $pdo->prepare('INSERT INTO accounting_supplier_settings(supplier_id,fx_reversal_at_open) VALUES (?,0)')->execute([$sid]);
+            if (str_contains($mode, 'reverse') || str_contains($mode, 'reversal')) $pdo->exec('UPDATE accounting_supplier_settings SET fx_reversal_at_open=1 WHERE supplier_id='.$sid);
+            $version = fn (): int => (int) $pdo->query('SELECT row_version FROM accounting_periods WHERE id='.$pid)->fetchColumn();
+            $closing->start($sid,$pid,$version());
+            $closing->runPrecheck($sid,$pid,$version());
+            foreach (['depreciation','estimates','deferrals','provisions','income_tax'] as $step) $closing->confirmStep($sid,$pid,$step,'skipped',null,$version());
+            $booked = str_starts_with($mode, 'prior_legacy') ? \MyInvoice\Tests\Support\LegacyFxNetFixture::install($sid,$pid) : $closing->runFxRevaluation($sid,$pid,[],$version());
+            self::assertSame(str_starts_with($mode, 'prior_legacy') ? ['loss'=>0.0,'gain'=>500.0] : ['loss'=>500.0,'gain'=>$mode === 'prior_native_mixed_manual' ? 1500.0 : 1000.0], $booked['totals']);
+            $inventory=[];
+            foreach ($closing->inventoryPreview($sid,$pid)['rows'] as $row) $inventory[(int)$row['account_id']]=['counted_balance'=>(float)$row['book_balance'],'resolution'=>'resolved','note'=>null];
+            $closing->saveInventory($sid,$pid,$version(),['complete'=>true],$inventory);
+            $closing->closeBooks($sid,$pid,$version());
+            $opened=$closing->openNext($sid,$pid,$version());
+            self::assertTrue($c->get(AccountingPeriodRepository::class)->setStatusCas($pid,$sid,'approved',$version(),$user,['body'=>'Synthetic approval','decision_ref'=>'SYN-FX-2098']));
+            $oldState=$this->priorState($sid,$pid);
+            $target=(int)$opened['next_period_id'];
+        } else $target=$pid;
+        return compact('sid', 'pid', 'user', 'first', 'closedHome', 'booked', 'opened', 'oldState', 'target');
     }
 
     private static function assertSameLineIds(array $expected,array $actual): void

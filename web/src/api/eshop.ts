@@ -296,6 +296,7 @@ export interface Product {
   sku: string
   name: string
   item_type: 'material' | 'goods' | 'product'
+  eet_item_kind?: 'standard' | 'specific_voucher' | 'stored_value'
   unit: string
   tracking_mode: StockTrackingMode
   ean: string | null

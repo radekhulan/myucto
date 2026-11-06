@@ -97,6 +97,9 @@ final class DppoReturnCalculator
      */
     public function compute(array $data, array $inputs, array $c): array
     {
+        $nonprofit = ($data['accounting_decree'] ?? '500') === '504' ? \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoComputation::validate($data, $inputs) : null;
+        if ($nonprofit === null) AccountingDecreeService::assertSupportedDecree((string) ($data['accounting_decree'] ?? '500'));
+
         $warnings = [];
 
         // ── Podklady ────────────────────────────────────────────────────────
@@ -188,6 +191,11 @@ final class DppoReturnCalculator
         $line160Reported = TaxFormAmount::kc($disposalDecrease + ($decreaseByLine[160] ?? 0.0));
         $line162Reported = TaxFormAmount::kc($manualDecrease - $flatRateTravelDeduction - array_sum($decreaseByLine));
         $line112Reported = TaxFormAmount::kc($flatRateTravelDeduction + ($decreaseByLine[112] ?? 0.0));
+        if ($nonprofit !== null) {
+            $n=array_map(static fn(int $cents):float=>TaxFormAmount::kc($cents/100), $nonprofit['line_cents']);
+            $line10=$n[10];$line40Reported=$n[40];$line50=$n[50];$line62Reported=$n[62];$line150=$n[150];$line160Reported=$n[160];$line162Reported=$n[162];$line112Reported=$n[112];
+            $increaseLines=[20=>$n[20],30=>$n[30],61=>0.0];$decreaseLines=array_intersect_key($n,array_flip([100,101,109,110,111,112,120,130,140,160,161,162]));
+        }
         $line70Reported = $line40Reported + $line50 + $line62Reported
             + ($increaseLines[20] ?? 0.0) + ($increaseLines[30] ?? 0.0) + ($increaseLines[61] ?? 0.0);
         $line170Reported = $line150 + $line160Reported + $line162Reported + $line112Reported
@@ -252,6 +260,14 @@ final class DppoReturnCalculator
                 . number_format($eduClaimed - $eduApplied, 0, ',', ' ') . ' Kč se neodečte.';
         }
         $baseAfterDeductions = $baseAfterRnd - $eduApplied;
+        $reduction=0;
+        if ($nonprofit !== null) {
+            $limit=\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoReduction::limit((int)max(0,$baseAfterDeductions),$nonprofit['reduction_band'],$c);
+            $reduction=$nonprofit['reduction_claim_kc'];
+            if ($reduction>$limit) throw new TaxReturnException('nonprofit_dppo_reduction_exceeded','Snížení podle §20 odst.7 překračuje zákonný limit po všech odpočtech§34.',422);
+            $nonprofit['reduction_limit_kc']=$limit;
+        }
+
 
         // ř.260 odečet darů §20/8 — cap % ze základu sníženého podle § 34, tedy nejen
         // o ztrátu, ale i o odečty na VaV a odborné vzdělávání. Dokud odečty § 34 odst. 4
@@ -268,7 +284,7 @@ final class DppoReturnCalculator
         }
 
         // ř.270 základ zaokrouhlený dolů na celé tisíce
-        $roundedBase = $this->floorTo(max(0.0, $baseAfterDeductions - $donationApplied), $roundBase);
+        $roundedBase = $this->floorTo(max(0.0, $baseAfterDeductions - $donationApplied - $reduction), $roundBase);
 
         // ř.290 daň
         $taxGross = TaxFormAmount::kc($roundedBase * $rate);
@@ -287,6 +303,12 @@ final class DppoReturnCalculator
         // ř.310 / ř.340 daň po slevách (nezáporná)
         $taxAfterCredits = max(0.0, $taxGross - $credits);
         $totalTax = $taxAfterCredits;
+        if ($nonprofit !== null) {
+            $rateDecimal=rtrim(rtrim(number_format($rate,8,'.',''),'0'),'.');$rateDenominator=10**strlen(explode('.',$rateDecimal)[1]??'');$rateNumerator=(int)str_replace('.','',$rateDecimal);
+            $nonprofit['saving']=\MyInvoice\Service\Tax\Nonprofit\NonprofitDppoLegalRules::saving((int)max(0,$baseAfterDeductions-$donationApplied),$reduction,(int)$creditsEntitlement,$rateNumerator,$rateDenominator,$roundBase);
+            if ($nonprofit['saving']['tax_with_reduction_kc']!==(int)$totalTax) throw new TaxReturnException('nonprofit_dppo_saving_reconciliation_failed','Skutečná daňová úspora nesouhlasí s daní po stejných slevách a zaokrouhlení.',422);
+        }
+
 
         // FEATURE 1 — projekce závěrkových operací (§DP): pokud podklady nesou nezaúčtované
         // uzávěrkové kroky, dopočti PROJEKTOVANOU daň z projektovaného VH. Posted čísla zůstávají
@@ -394,6 +416,10 @@ final class DppoReturnCalculator
             $this->line(340, '340', 'Celková daňová povinnost', $totalTax, 'výsledná daň'),
             $this->line(360, '360', 'Poslední známá daň pro stanovení záloh (§38a)', $totalTax, 'ř. 340'),
         ];
+        if ($nonprofit !== null) {
+            $at=array_search(250,array_column($lines,'line'),true)+1;
+            array_splice($lines,$at,0,[$this->line(251,'251','Snížení základu veřejně prospěšného poplatníka (§20/7)',(float)$reduction,'výslovná doložená volba po odečtech§34')]);
+        }
         // Řádky ručních položek s explicitním řádkem jen, když na nich něco je - přiznání
         // bez takových položek má výpis řádků beze změny.
         $lines = array_values(array_filter($lines, fn (array $l): bool
@@ -401,6 +427,7 @@ final class DppoReturnCalculator
 
         return [
             'lines' => $lines,
+            ...$nonprofit !== null ? ['nonprofit'=>$nonprofit] : [],
             'tax' => $totalTax,
             'advances_paid' => $advancesPaid,
             'balance_due' => $balanceDue,

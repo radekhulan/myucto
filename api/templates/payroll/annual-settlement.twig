@@ -125,6 +125,27 @@
             <td class="amount">{{ total_advance_base_minor_units|minor_money }}</td>
         </tr>
     {% endif %}
+    {% if annual_claims_present %}
+        <tr>
+            <td>Základ daně před odpočtem nezdanitelných částí</td>
+            <td class="amount">{{ tax_base_before_deductions_minor_units|minor_money }}</td>
+        </tr>
+        {% for row in non_taxable_rows %}
+            <tr>
+                <td>
+                    &nbsp;&nbsp;{{ row.label }}
+                    {% if row.claimed_minor_units != row.amount_minor_units %}
+                        (uplatněno {{ row.claimed_minor_units|minor_money }} Kč, po limitu)
+                    {% endif %}
+                </td>
+                <td class="amount">- {{ row.amount_minor_units|minor_money }}</td>
+            </tr>
+        {% endfor %}
+        <tr>
+            <td>Nezdanitelné části základu daně celkem (§ 15)</td>
+            <td class="amount">- {{ non_taxable_deductions_minor_units|minor_money }}</td>
+        </tr>
+    {% endif %}
     <tr>
         <td>Základ daně zaokrouhlený na celá sta Kč dolů (§ 16 odst. 2)</td>
         <td class="amount">{{ rounded_tax_base_minor_units|minor_money }}</td>
@@ -141,6 +162,12 @@
         <th>Sleva</th>
         <th class="amount">Kč</th>
     </tr>
+    {% if enforcement_credit_minor_units > 0 %}
+        <tr>
+            <td>Sleva za zastavenou exekuci (§ 35 odst. 4), uplatněná před slevami níže</td>
+            <td class="amount">{{ enforcement_credit_minor_units|minor_money }}</td>
+        </tr>
+    {% endif %}
     {% for row in credit_rows %}
         <tr>
             <td>{{ row.label }}</td>

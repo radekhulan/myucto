@@ -20,6 +20,11 @@ import {
   payrollApi,
   type PayrollAnnualDocumentBatch,
   type PayrollAnnualDocumentBatchItem,
+  type PayrollAnnualClaimsSet,
+  type PayrollAnnualClaimsView,
+  type PayrollAnnualDependant,
+  type PayrollAnnualDeductionKind,
+  type PayrollAnnualPreschoolFacilityKind,
   type PayrollAnnualSettlementAnnualClaims,
   type PayrollAnnualSettlementCertificate,
   type PayrollAnnualSettlementCaregiverStatus,
@@ -33,9 +38,10 @@ import {
   type PayrollDocument,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
+import PayrollJmhzReturnBar from '@/pages/payroll/PayrollJmhzReturnBar.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { btnOutline, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
+import { btnFilledSm, btnOutline, btnOutlineSm, disabledTitle, BTN_DISABLED_NOTE, ICONS } from '@/components/ui/buttonStyles'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
@@ -148,6 +154,110 @@ interface CaregiverForm {
 const certificates = ref<CertificateForm[]>([])
 const savingCertificates = ref(false)
 
+/**
+ * Ročně uplatňované položky (nezdanitelné části § 15, sleva na manžela,
+ * zastavená exekuce). Částky jsou řetězce v korunách ze stejného důvodu jako
+ * u potvrzení: prázdné pole nesmí spadnout na nulu.
+ */
+interface DeductionForm {
+  kind: PayrollAnnualDeductionKind
+  amount: string
+  quantity: string
+  months: number[]
+  housing_acquired_before_2021: boolean
+  counterparty_name: string
+  evidence_status: 'unverified' | 'verified'
+  evidence_reference: string
+  note: string
+}
+
+interface SpouseForm {
+  spouse_dependant_id: number | null
+  child_dependant_id: number | null
+  months: number[]
+  ztp_p_months: number[]
+  spouse_income: string
+  evidence_status: 'unverified' | 'verified'
+  evidence_reference: string
+  note: string
+}
+
+/** Sleva za umístění dítěte (§ 35bd ZDP, od roku 2027) — jeden řádek na dítě. */
+interface PreschoolForm {
+  child_dependant_id: number | null
+  facility_kind: PayrollAnnualPreschoolFacilityKind
+  facility_name: string
+  expenses: string
+  households_count: number
+  agreed_cap: string
+  claimed_by_other_taxpayer: boolean
+  claimed_as_business_expense: boolean
+  grandchild_care_replaces_parents: boolean
+  other_supporting_taxpayer: boolean
+  other_taxpayer_name: string
+  other_taxpayer_claimed: string
+  other_taxpayer_confirmation_reference: string
+  agreement_reference: string
+  evidence_status: 'unverified' | 'verified'
+  evidence_reference: string
+  note: string
+}
+
+const PRESCHOOL_FACILITY_KINDS: readonly PayrollAnnualPreschoolFacilityKind[] = [
+  'kindergarten',
+  'children_group',
+  'licensed_care',
+]
+const PRESCHOOL_FAILURE_CODES: readonly string[] = [
+  'statute_not_effective',
+  'minimum_wage_unavailable',
+  'child_relation',
+  'child_not_in_household',
+  'claimed_by_other_taxpayer',
+  'claimed_as_business_expense',
+  'agreement_without_shared_care',
+  'agreed_cap_over_minimum_wage',
+  'agreement_document_missing',
+  'other_taxpayer_confirmation_missing',
+  'combined_credit_over_minimum_wage',
+]
+
+const deductions = ref<DeductionForm[]>([])
+const spouse = ref<SpouseForm | null>(null)
+const preschool = ref<PreschoolForm[]>([])
+const preschoolAvailable = ref(false)
+const dependants = ref<PayrollAnnualDependant[]>([])
+const newDeductionKind = ref<PayrollAnnualDeductionKind>('donation')
+const savingClaims = ref(false)
+
+const DEDUCTION_KINDS: readonly PayrollAnnualDeductionKind[] = [
+  'donation',
+  'blood_donation',
+  'organ_donation',
+  'stem_cell_donation',
+  'housing_interest',
+  'pension_savings',
+  'life_insurance',
+  'long_term_investment',
+  'long_term_care_insurance',
+  'enforcement_stop',
+]
+/**
+ * Odběry se oceňují pevnou částkou za odběr (§ 15 odst. 1 ZDP), částku nezadává
+ * uživatel. Částky posílá server ze zákonné tabulky ročníku, natvrdo tu nejsou.
+ */
+const quantityRates = ref<Partial<Record<PayrollAnnualDeductionKind, number>>>({})
+const SPOUSE_FAILURE_CODES: readonly string[] = [
+  'spouse_relation',
+  'child_relation',
+  'spouse_income_missing',
+  'spouse_income_over_limit',
+  'ztp_p_month_outside_claim',
+  'ztp_p_not_in_evidence',
+  'child_not_under_three',
+  'spouse_not_in_evidence',
+]
+
 /** Pořadí sloupců odpovídá § 38ch odst. 3 a řádkům tiskopisu 25 5460. */
 const CERTIFICATE_AMOUNTS = [
   'gross_income',
@@ -169,6 +279,36 @@ const canEditCertificates = canSettle
 const items = computed<PayrollAnnualSettlementListItem[]>(() => data.value?.items ?? [])
 const result = computed(() => preview.value?.result ?? null)
 const blockers = computed(() => result.value?.blockers ?? [])
+const nonTaxable = computed(() => result.value?.trace?.non_taxable ?? null)
+const spouseCreditFailures = computed<string[]>(() =>
+  (result.value?.trace?.spouse_credit_failures ?? [])
+    .filter(code => SPOUSE_FAILURE_CODES.includes(code)),
+)
+const spouseCandidates = computed(() =>
+  dependants.value.filter(row => row.relation === 'spouse'),
+)
+const childCandidates = computed(() =>
+  dependants.value.filter(row => row.relation.startsWith('child_')),
+)
+/** § 35bd odst. 5: vnuk jen v péči nahrazující péči rodičů — o tom rozhoduje příznak. */
+const preschoolChildCandidates = computed(() =>
+  dependants.value.filter(row => row.relation.startsWith('child_') || row.relation === 'grandchild'),
+)
+const preschoolCreditFailures = computed<Array<{ child: string, codes: string[] }>>(() => {
+  const failures = result.value?.trace?.preschool_credit_failures ?? {}
+  return Object.entries(failures).map(([reference, codes]) => {
+    const id = Number.parseInt(reference.replace('dependant-', ''), 10)
+    const person = dependants.value.find(row => row.id === id)
+    return {
+      child: person?.full_name ?? reference,
+      codes: codes.filter(code => PRESCHOOL_FAILURE_CODES.includes(code)),
+    }
+  })
+})
+const selectedSpouseHasZtpP = computed(() =>
+  spouseCandidates.value.some(row =>
+    row.id === spouse.value?.spouse_dependant_id && row.ztp_p),
+)
 const performed = computed(() => result.value?.performed === true)
 const annualBonusEligibilityReason = computed(() => {
   if (result.value?.annual_bonus_eligibility_reason) {
@@ -207,6 +347,7 @@ const BLOCKER_FIELDS: Record<string, () => HTMLElement | null> = {
   must_file_tax_return: () => filingObligationField.value,
   annual_only_claims_unknown: () => annualClaimsField.value,
   annual_only_claims_unsupported: () => annualClaimsField.value,
+  annual_claims_inconsistent: () => annualClaimsField.value,
   child_jmhz_evidence_incomplete: () => caregiverStatusField.value,
 }
 
@@ -431,12 +572,254 @@ async function select(employeeId: number): Promise<void> {
     // `?? []` schválně: chybějící seznam nesmí shodit celou obrazovku, protože
     // pak by uživatel neviděl ani výpočet, ani překážky.
     certificates.value = (response.certificates ?? []).map(certificateForm)
+    applyClaims(response.annual_claims)
   } catch (error) {
     preview.value = null
     certificates.value = []
+    applyClaims(undefined)
     toast.error(apiErrorMessage(error, t('payroll.annual_settlement.preview_failed')))
   } finally {
     previewLoading.value = false
+  }
+}
+
+function maskBitsToMonths(mask: number | null | undefined): number[] {
+  const value = mask ?? 0
+  return MONTHS.filter(month => (value & (1 << (month - 1))) !== 0)
+}
+
+function monthsToMaskBits(months: number[]): number {
+  return months.reduce((mask, month) => mask | (1 << (month - 1)), 0)
+}
+
+function deductionForm(row: PayrollAnnualClaimsSet['deductions'][number]): DeductionForm {
+  return {
+    kind: row.kind,
+    amount: amountToInput(row.amount_minor_units ?? null),
+    quantity: row.quantity === null || row.quantity === undefined ? '' : String(row.quantity),
+    months: maskBitsToMonths(row.months_mask),
+    housing_acquired_before_2021: row.housing_acquired_before_2021 === true,
+    counterparty_name: row.counterparty_name ?? '',
+    evidence_status: row.evidence_status,
+    evidence_reference: row.evidence_reference ?? '',
+    note: row.note ?? '',
+  }
+}
+
+function spouseForm(row: NonNullable<PayrollAnnualClaimsSet['spouse']>): SpouseForm {
+  return {
+    spouse_dependant_id: row.spouse_dependant_id,
+    child_dependant_id: row.child_dependant_id,
+    months: maskBitsToMonths(row.months_mask),
+    ztp_p_months: maskBitsToMonths(row.ztp_p_months_mask),
+    spouse_income: amountToInput(row.spouse_income_minor_units ?? null),
+    evidence_status: row.evidence_status,
+    evidence_reference: row.evidence_reference ?? '',
+    note: row.note ?? '',
+  }
+}
+
+function preschoolForm(row: PayrollAnnualClaimsSet['preschool'][number]): PreschoolForm {
+  return {
+    child_dependant_id: row.child_dependant_id,
+    facility_kind: row.facility_kind,
+    facility_name: row.facility_name ?? '',
+    expenses: amountToInput(row.expenses_minor_units),
+    households_count: row.households_count,
+    agreed_cap: amountToInput(row.agreed_cap_minor_units ?? null),
+    claimed_by_other_taxpayer: row.claimed_by_other_taxpayer,
+    claimed_as_business_expense: row.claimed_as_business_expense,
+    grandchild_care_replaces_parents: row.grandchild_care_replaces_parents,
+    other_supporting_taxpayer: row.other_supporting_taxpayer,
+    other_taxpayer_name: row.other_taxpayer_name ?? '',
+    other_taxpayer_claimed: amountToInput(row.other_taxpayer_claimed_minor_units ?? null),
+    other_taxpayer_confirmation_reference: row.other_taxpayer_confirmation_reference ?? '',
+    agreement_reference: row.agreement_reference ?? '',
+    evidence_status: row.evidence_status,
+    evidence_reference: row.evidence_reference ?? '',
+    note: row.note ?? '',
+  }
+}
+
+/** § 38l odst. 2 písm. g) bod 2: totéž dítě vyživuje další poplatník. */
+function preschoolNeedsOtherConfirmation(row: PreschoolForm): boolean {
+  return row.households_count > 1 || row.other_supporting_taxpayer
+}
+
+function addPreschool(): void {
+  const used = new Set(preschool.value.map(row => row.child_dependant_id))
+  preschool.value = [...preschool.value, {
+    child_dependant_id: preschoolChildCandidates.value.find(row => !used.has(row.id))?.id ?? null,
+    facility_kind: 'kindergarten',
+    facility_name: '',
+    expenses: '',
+    households_count: 1,
+    agreed_cap: '',
+    claimed_by_other_taxpayer: false,
+    claimed_as_business_expense: false,
+    grandchild_care_replaces_parents: false,
+    other_supporting_taxpayer: false,
+    other_taxpayer_name: '',
+    other_taxpayer_claimed: '',
+    other_taxpayer_confirmation_reference: '',
+    agreement_reference: '',
+    evidence_status: 'unverified',
+    evidence_reference: '',
+    note: '',
+  }]
+}
+
+function removePreschool(index: number): void {
+  preschool.value = preschool.value.filter((_, position) => position !== index)
+}
+
+function isGrandchild(id: number | null): boolean {
+  return dependants.value.some(row => row.id === id && row.relation === 'grandchild')
+}
+
+/** `?? []` schválně: chybějící blok nesmí shodit obrazovku (viz potvrzení). */
+function applyClaims(
+  claims: (Omit<PayrollAnnualClaimsSet, 'preschool'> & Partial<Pick<PayrollAnnualClaimsSet, 'preschool'>>
+    & Partial<Pick<PayrollAnnualClaimsView, 'dependants' | 'statute' | 'preschool_available'>>) | undefined,
+): void {
+  deductions.value = (claims?.deductions ?? []).map(deductionForm)
+  spouse.value = claims?.spouse ? spouseForm(claims.spouse) : null
+  preschool.value = (claims?.preschool ?? []).map(preschoolForm)
+  if (claims?.preschool_available !== undefined) {
+    preschoolAvailable.value = claims.preschool_available
+  }
+  dependants.value = claims?.dependants ?? []
+  if (claims?.statute) {
+    quantityRates.value = claims.statute.counted_donation_values
+  }
+}
+
+function addDeduction(): void {
+  deductions.value = [...deductions.value, {
+    kind: newDeductionKind.value,
+    amount: '',
+    quantity: '',
+    months: [],
+    housing_acquired_before_2021: false,
+    counterparty_name: '',
+    evidence_status: 'unverified',
+    evidence_reference: '',
+    note: '',
+  }]
+}
+
+function removeDeduction(index: number): void {
+  deductions.value = deductions.value.filter((_, position) => position !== index)
+}
+
+function toggleMonth(list: number[], month: number): number[] {
+  return list.includes(month) ? list.filter(value => value !== month) : [...list, month]
+}
+
+function addSpouse(): void {
+  spouse.value = {
+    spouse_dependant_id: spouseCandidates.value[0]?.id ?? null,
+    child_dependant_id: childCandidates.value[0]?.id ?? null,
+    months: [],
+    ztp_p_months: [],
+    spouse_income: '',
+    evidence_status: 'unverified',
+    evidence_reference: '',
+    note: '',
+  }
+}
+
+function quantityValue(row: DeductionForm): number | null {
+  const parsed = Number.parseInt(row.quantity.trim(), 10)
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+function quantityEvaluation(row: DeductionForm): number {
+  return (quantityValue(row) ?? 0) * (quantityRates.value[row.kind] ?? 0)
+}
+
+/** Sestaví tělo PUT. Částka u odběrů, měsíce mimo úroky a id se neposílají. */
+function buildClaimsPayload(): PayrollAnnualClaimsSet {
+  const claim = spouse.value
+  return {
+    deductions: deductions.value.map((row) => {
+      const isQuantity = quantityRates.value[row.kind] !== undefined
+      const isHousing = row.kind === 'housing_interest'
+      return {
+        kind: row.kind,
+        amount_minor_units: isQuantity ? null : inputToAmount(row.amount),
+        quantity: isQuantity ? quantityValue(row) : null,
+        months_mask: isHousing ? monthsToMaskBits(row.months) : null,
+        housing_acquired_before_2021: isHousing && row.housing_acquired_before_2021,
+        counterparty_name: row.counterparty_name.trim() || null,
+        evidence_status: row.evidence_status,
+        evidence_reference: row.evidence_reference.trim() || null,
+        note: row.note.trim() || null,
+      }
+    }),
+    spouse: claim === null || claim.spouse_dependant_id === null || claim.child_dependant_id === null
+      ? null
+      : {
+          spouse_dependant_id: claim.spouse_dependant_id,
+          child_dependant_id: claim.child_dependant_id,
+          months_mask: monthsToMaskBits(claim.months),
+          ztp_p_months_mask: selectedSpouseHasZtpP.value ? monthsToMaskBits(claim.ztp_p_months) : 0,
+          spouse_income_minor_units: inputToAmount(claim.spouse_income),
+          evidence_status: claim.evidence_status,
+          evidence_reference: claim.evidence_reference.trim() || null,
+          note: claim.note.trim() || null,
+        },
+    preschool: preschool.value
+      .filter(row => row.child_dependant_id !== null)
+      .map(row => ({
+        child_dependant_id: row.child_dependant_id as number,
+        facility_kind: row.facility_kind,
+        facility_name: row.facility_name.trim() || null,
+        expenses_minor_units: inputToAmount(row.expenses) ?? 0,
+        households_count: row.households_count,
+        agreed_cap_minor_units: row.households_count > 1 ? inputToAmount(row.agreed_cap) : null,
+        claimed_by_other_taxpayer: row.claimed_by_other_taxpayer,
+        claimed_as_business_expense: row.claimed_as_business_expense,
+        grandchild_care_replaces_parents: isGrandchild(row.child_dependant_id)
+          && row.grandchild_care_replaces_parents,
+        other_supporting_taxpayer: row.other_supporting_taxpayer,
+        other_taxpayer_name: preschoolNeedsOtherConfirmation(row)
+          ? row.other_taxpayer_name.trim() || null
+          : null,
+        other_taxpayer_claimed_minor_units: preschoolNeedsOtherConfirmation(row)
+          ? inputToAmount(row.other_taxpayer_claimed)
+          : null,
+        other_taxpayer_confirmation_reference: preschoolNeedsOtherConfirmation(row)
+          ? row.other_taxpayer_confirmation_reference.trim() || null
+          : null,
+        agreement_reference: row.households_count > 1 && row.agreed_cap.trim() !== ''
+          ? row.agreement_reference.trim() || null
+          : null,
+        evidence_status: row.evidence_status,
+        evidence_reference: row.evidence_reference.trim() || null,
+        note: row.note.trim() || null,
+      })),
+  }
+}
+
+/** Ukládá se CELÁ sada za rok, stejně jako potvrzení. */
+async function saveClaims(): Promise<void> {
+  if (selectedEmployeeId.value === null || savingClaims.value) return
+  savingClaims.value = true
+  try {
+    const saved = await payrollApi.saveAnnualSettlementAnnualClaims(
+      year.value,
+      selectedEmployeeId.value,
+      buildClaimsPayload(),
+    )
+    applyClaims({ ...saved, dependants: dependants.value })
+    toast.success(t('payroll.annual_settlement.claims.saved'))
+    // Přepočet — položky mění základ daně i slevy.
+    await select(selectedEmployeeId.value)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.claims.save_failed')))
+  } finally {
+    savingClaims.value = false
   }
 }
 
@@ -604,6 +987,62 @@ async function settle(): Promise<void> {
     toast.error(apiErrorMessage(error, t('payroll.annual_settlement.settle_failed')))
   } finally {
     settling.value = false
+  }
+}
+
+/**
+ * Hromadné nastavení stavu žádosti (typicky „nepožádal" u stovek brigádníků,
+ * u kterých měsíční JMHZ potřebuje odpověď). Výběr drží ID napříč stránkami;
+ * mění se jen stav žádosti, ostatní evidence zůstává.
+ */
+const bulkSelected = ref<Set<number>>(new Set())
+const bulkRequestSaving = ref(false)
+const allOnPageSelected = computed(() =>
+  items.value.length > 0 && items.value.every(item => bulkSelected.value.has(item.employee_id)))
+
+function toggleBulkPerson(employeeId: number): void {
+  const next = new Set(bulkSelected.value)
+  if (!next.delete(employeeId)) next.add(employeeId)
+  bulkSelected.value = next
+}
+
+function toggleBulkPage(): void {
+  const next = new Set(bulkSelected.value)
+  const everySelected = allOnPageSelected.value
+  for (const item of items.value) {
+    if (everySelected) next.delete(item.employee_id)
+    else next.add(item.employee_id)
+  }
+  bulkSelected.value = next
+}
+
+async function bulkSetRequestStatus(status: 'requested' | 'not_requested'): Promise<void> {
+  if (bulkRequestSaving.value || bulkSelected.value.size === 0) return
+  const count = bulkSelected.value.size
+  const label = t(`payroll.annual_settlement.request_status_options.${status}`)
+  if (!window.confirm(t('payroll.annual_settlement.bulk_request.confirm', {
+    count,
+    status: label,
+    year: year.value,
+  }))) return
+  bulkRequestSaving.value = true
+  try {
+    const response = await payrollApi.bulkSetAnnualSettlementRequestStatus(
+      year.value,
+      [...bulkSelected.value],
+      status,
+    )
+    toast.success(t('payroll.annual_settlement.bulk_request.done', {
+      created: response.created,
+      updated: response.updated,
+    }))
+    bulkSelected.value = new Set()
+    await load()
+    if (selectedEmployeeId.value !== null) await select(selectedEmployeeId.value)
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.annual_settlement.bulk_request.failed')))
+  } finally {
+    bulkRequestSaving.value = false
   }
 }
 
@@ -776,6 +1215,7 @@ watch(year, () => {
   certificates.value = []
   document.value = null
   offset.value = 0
+  bulkSelected.value = new Set()
   dismissBulk()
   void load()
 })
@@ -823,6 +1263,7 @@ onMounted(async () => {
 
 <template>
   <div class="space-y-6">
+    <PayrollJmhzReturnBar />
     <header class="flex flex-wrap items-start justify-between gap-4">
       <div>
         <h1 class="text-2xl font-semibold text-neutral-900">
@@ -1004,6 +1445,57 @@ onMounted(async () => {
 
     <div class="grid gap-6 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
       <section class="rounded-lg border border-neutral-200 bg-surface">
+        <div
+          v-if="!loading && items.length > 0 && canWrite"
+          class="flex flex-wrap items-center gap-2 border-b border-neutral-200 px-4 py-2"
+          data-test="annual-settlement-bulk-request-bar"
+        >
+          <label class="inline-flex items-center gap-2 text-xs text-neutral-600">
+            <input
+              type="checkbox"
+              :checked="allOnPageSelected"
+              data-test="annual-settlement-select-all"
+              @change="toggleBulkPage"
+            >
+            {{ t('payroll.annual_settlement.bulk_request.select_page') }}
+          </label>
+          <template v-if="bulkSelected.size > 0">
+            <span class="text-xs font-medium text-neutral-700" data-test="annual-settlement-bulk-request-count">
+              {{ t('payroll.annual_settlement.bulk_request.selected', { count: bulkSelected.size }) }}
+            </span>
+            <button
+              type="button"
+              data-test="annual-settlement-bulk-not-requested"
+              :class="[btnFilledSm('warning'), 'whitespace-nowrap']"
+              :disabled="bulkRequestSaving"
+              @click="bulkSetRequestStatus('not_requested')"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.x" />
+              </svg>
+              {{ t('payroll.annual_settlement.bulk_request.set_not_requested') }}
+            </button>
+            <button
+              type="button"
+              data-test="annual-settlement-bulk-requested"
+              :class="[btnFilledSm('success'), 'whitespace-nowrap']"
+              :disabled="bulkRequestSaving"
+              @click="bulkSetRequestStatus('requested')"
+            >
+              <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <path :d="ICONS.check" />
+              </svg>
+              {{ t('payroll.annual_settlement.bulk_request.set_requested') }}
+            </button>
+            <button
+              type="button"
+              :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']"
+              @click="bulkSelected = new Set()"
+            >
+              {{ t('payroll.annual_settlement.bulk_request.clear') }}
+            </button>
+          </template>
+        </div>
         <div v-if="loading" class="p-6 text-sm text-neutral-500">…</div>
         <EmptyState
           v-else-if="loadFailed && items.length === 0"
@@ -1021,11 +1513,20 @@ onMounted(async () => {
           :message="t('payroll.annual_settlement.no_employees_description')"
         />
         <ul v-else class="divide-y divide-neutral-200">
-          <li v-for="item in items" :key="item.employee_id">
+          <li v-for="item in items" :key="item.employee_id" class="flex items-center">
+            <input
+              v-if="canWrite"
+              type="checkbox"
+              class="ml-4 shrink-0"
+              :checked="bulkSelected.has(item.employee_id)"
+              :aria-label="t('payroll.annual_settlement.bulk_request.select_person', { name: item.employee_name })"
+              data-test="annual-settlement-person-check"
+              @change="toggleBulkPerson(item.employee_id)"
+            >
             <button
               type="button"
               data-test="annual-settlement-person"
-              class="cursor-pointer flex w-full flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-neutral-50"
+              class="cursor-pointer flex min-w-0 flex-1 flex-wrap items-center justify-between gap-2 px-4 py-3 text-left transition-colors hover:bg-neutral-50"
               :class="item.employee_id === selectedEmployeeId ? 'bg-primary-50' : ''"
               @click="select(item.employee_id)"
             >
@@ -1189,7 +1690,7 @@ onMounted(async () => {
                   class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
                 >
                   <option
-                    v-for="option in ['unknown', 'none', 'present_unsupported']"
+                    v-for="option in ['unknown', 'none', 'present', 'present_unsupported']"
                     :key="option"
                     :value="option"
                   >
@@ -1579,6 +2080,683 @@ onMounted(async () => {
             </div>
           </div>
 
+          <!--
+            Ročně uplatňované položky: nezdanitelné části (§ 15), sleva na manžela
+            (§ 35ba) a sleva za zastavenou exekuci. Vzor i ukládání jako u potvrzení
+            výše: ukládá se celá sada za rok jedním tlačítkem a výsledek se přepočte.
+          -->
+          <div
+            class="rounded-lg border border-neutral-200 bg-surface p-4"
+            data-test="annual-settlement-claims"
+          >
+            <h2 class="text-base font-semibold text-neutral-900">
+              {{ t('payroll.annual_settlement.claims.section') }}
+            </h2>
+            <p class="mt-1 text-sm text-neutral-500">
+              {{ t('payroll.annual_settlement.claims.hint') }}
+            </p>
+
+            <p
+              v-if="deductions.length === 0"
+              class="mt-4 rounded-md bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
+            >
+              {{ t('payroll.annual_settlement.claims.empty') }}
+            </p>
+
+            <div
+              v-for="(row, index) in deductions"
+              :key="index"
+              class="mt-4 rounded-md border border-neutral-200 p-3"
+              data-test="annual-settlement-deduction"
+            >
+              <p class="text-sm font-medium text-neutral-900">
+                {{ t(`payroll.annual_settlement.claims.kind.${row.kind}`) }}
+              </p>
+              <p class="mt-1 text-xs text-neutral-500">
+                {{ t(`payroll.annual_settlement.claims.kind_hint.${row.kind}`) }}
+              </p>
+
+              <div class="mt-3 grid gap-3 sm:grid-cols-2">
+                <label v-if="quantityRates[row.kind] === undefined" class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.claims.amount') }}
+                  </span>
+                  <input
+                    v-model="row.amount"
+                    type="text"
+                    inputmode="decimal"
+                    :disabled="!canEditCertificates"
+                    :placeholder="t('payroll.annual_settlement.certificate_amount_placeholder')"
+                    data-test="annual-settlement-deduction-amount"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-right text-sm tabular-nums text-neutral-900"
+                  >
+                </label>
+                <label v-else class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.claims.quantity') }}
+                  </span>
+                  <input
+                    v-model="row.quantity"
+                    type="text"
+                    inputmode="numeric"
+                    :disabled="!canEditCertificates"
+                    data-test="annual-settlement-deduction-quantity"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-right text-sm tabular-nums text-neutral-900"
+                  >
+                  <span class="mt-1 block text-xs text-neutral-500" data-test="annual-settlement-deduction-evaluation">
+                    {{ t('payroll.annual_settlement.claims.quantity_evaluation', {
+                      rate: money(quantityRates[row.kind]),
+                      total: money(quantityEvaluation(row)),
+                    }) }}
+                  </span>
+                </label>
+
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t(`payroll.annual_settlement.claims.counterparty.${row.kind}`) }}
+                  </span>
+                  <input
+                    v-model="row.counterparty_name"
+                    type="text"
+                    maxlength="255"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+
+                <fieldset v-if="row.kind === 'housing_interest'" class="sm:col-span-2">
+                  <legend class="mb-1 text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.claims.months') }}
+                  </legend>
+                  <div class="flex flex-wrap gap-x-3 gap-y-1">
+                    <label
+                      v-for="month in MONTHS"
+                      :key="month"
+                      class="inline-flex items-center gap-1 text-sm text-neutral-700"
+                    >
+                      <input
+                        type="checkbox"
+                        :checked="row.months.includes(month)"
+                        :disabled="!canEditCertificates"
+                        data-test="annual-settlement-deduction-month"
+                        @change="row.months = toggleMonth(row.months, month)"
+                      >
+                      {{ monthLabel(month) }}
+                    </label>
+                  </div>
+                  <label class="mt-2 inline-flex items-center gap-2 text-sm text-neutral-700">
+                    <input
+                      v-model="row.housing_acquired_before_2021"
+                      type="checkbox"
+                      :disabled="!canEditCertificates"
+                      data-test="annual-settlement-deduction-before-2021"
+                    >
+                    {{ t('payroll.annual_settlement.claims.housing_before_2021') }}
+                  </label>
+                </fieldset>
+
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.certificate_evidence_status') }}
+                  </span>
+                  <select
+                    v-model="row.evidence_status"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                    <option v-for="option in ['unverified', 'verified']" :key="option" :value="option">
+                      {{ t(`payroll.annual_settlement.certificate_evidence_options.${option}`) }}
+                    </option>
+                  </select>
+                </label>
+                <label class="block">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.claims.evidence_reference') }}
+                  </span>
+                  <input
+                    v-model="row.evidence_reference"
+                    type="text"
+                    maxlength="500"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+                <label class="block sm:col-span-2">
+                  <span class="mb-1 block text-xs font-medium text-neutral-600">
+                    {{ t('payroll.annual_settlement.claims.note') }}
+                  </span>
+                  <input
+                    v-model="row.note"
+                    type="text"
+                    maxlength="500"
+                    :disabled="!canEditCertificates"
+                    class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                  >
+                </label>
+              </div>
+
+              <div class="mt-3 flex flex-wrap justify-end gap-2">
+                <button
+                  type="button"
+                  :class="[btnOutline('danger'), 'whitespace-nowrap']"
+                  :disabled="!canEditCertificates || savingClaims"
+                  data-test="annual-settlement-deduction-remove"
+                  @click="removeDeduction(index)"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+                  {{ t('payroll.annual_settlement.certificate_remove') }}
+                </button>
+              </div>
+            </div>
+
+            <div class="mt-4 flex flex-wrap items-end gap-2">
+              <label class="block min-w-0 grow sm:grow-0">
+                <span class="mb-1 block text-xs font-medium text-neutral-600">
+                  {{ t('payroll.annual_settlement.claims.new_kind') }}
+                </span>
+                <select
+                  v-model="newDeductionKind"
+                  :disabled="!canEditCertificates"
+                  data-test="annual-settlement-new-deduction-kind"
+                  class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                >
+                  <option v-for="kind in DEDUCTION_KINDS" :key="kind" :value="kind">
+                    {{ t(`payroll.annual_settlement.claims.kind.${kind}`) }}
+                  </option>
+                </select>
+              </label>
+              <button
+                type="button"
+                :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+                :disabled="!canEditCertificates || savingClaims"
+                data-test="annual-settlement-deduction-add"
+                @click="addDeduction"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                {{ t('payroll.annual_settlement.claims.add') }}
+              </button>
+            </div>
+
+            <div class="mt-6 border-t border-neutral-200 pt-4" data-test="annual-settlement-spouse">
+              <h3 class="text-sm font-semibold text-neutral-900">
+                {{ t('payroll.annual_settlement.claims.spouse_section') }}
+              </h3>
+              <p class="mt-1 text-xs text-neutral-500">
+                {{ t('payroll.annual_settlement.claims.spouse_hint') }}
+              </p>
+
+              <p
+                v-if="spouseCandidates.length === 0"
+                class="mt-3 rounded-md bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
+                data-test="annual-settlement-spouse-missing"
+              >
+                {{ t('payroll.annual_settlement.claims.spouse_missing') }}
+                <RouterLink
+                  v-if="selectedEmployeeId !== null"
+                  :to="{ name: 'payroll-person', params: { id: selectedEmployeeId } }"
+                  :class="[btnOutline('warning'), 'ml-2 whitespace-nowrap']"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                  {{ t('payroll.annual_settlement.open_employee_card') }}
+                </RouterLink>
+              </p>
+
+              <template v-else>
+                <div v-if="spouse === null" class="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+                    :disabled="!canEditCertificates"
+                    data-test="annual-settlement-spouse-add"
+                    @click="addSpouse"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                    {{ t('payroll.annual_settlement.claims.spouse_add') }}
+                  </button>
+                </div>
+
+                <div v-else class="mt-3 grid gap-3 sm:grid-cols-2" data-test="annual-settlement-spouse-form">
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.spouse_person') }}
+                    </span>
+                    <select
+                      v-model="spouse.spouse_dependant_id"
+                      :disabled="!canEditCertificates"
+                      data-test="annual-settlement-spouse-person"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                      <option v-for="row in spouseCandidates" :key="row.id" :value="row.id">
+                        {{ row.full_name }}
+                      </option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.spouse_child') }}
+                    </span>
+                    <select
+                      v-model="spouse.child_dependant_id"
+                      :disabled="!canEditCertificates"
+                      data-test="annual-settlement-spouse-child"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                      <option v-for="row in childCandidates" :key="row.id" :value="row.id">
+                        {{ row.full_name }} ({{ formatDate(row.birth_date) }})
+                      </option>
+                    </select>
+                  </label>
+
+                  <fieldset class="sm:col-span-2">
+                    <legend class="mb-1 text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.spouse_months') }}
+                    </legend>
+                    <div class="flex flex-wrap gap-x-3 gap-y-1">
+                      <label
+                        v-for="month in MONTHS"
+                        :key="month"
+                        class="inline-flex items-center gap-1 text-sm text-neutral-700"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="spouse.months.includes(month)"
+                          :disabled="!canEditCertificates"
+                          data-test="annual-settlement-spouse-month"
+                          @change="spouse.months = toggleMonth(spouse.months, month)"
+                        >
+                        {{ monthLabel(month) }}
+                      </label>
+                    </div>
+                  </fieldset>
+                  <fieldset v-if="selectedSpouseHasZtpP" class="sm:col-span-2" data-test="annual-settlement-spouse-ztp-p">
+                    <legend class="mb-1 text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.spouse_ztp_p_months') }}
+                    </legend>
+                    <div class="flex flex-wrap gap-x-3 gap-y-1">
+                      <label
+                        v-for="month in MONTHS"
+                        :key="month"
+                        class="inline-flex items-center gap-1 text-sm text-neutral-700"
+                      >
+                        <input
+                          type="checkbox"
+                          :checked="spouse.ztp_p_months.includes(month)"
+                          :disabled="!canEditCertificates"
+                          data-test="annual-settlement-spouse-ztp-p-month"
+                          @change="spouse.ztp_p_months = toggleMonth(spouse.ztp_p_months, month)"
+                        >
+                        {{ monthLabel(month) }}
+                      </label>
+                    </div>
+                  </fieldset>
+
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.spouse_income') }}
+                    </span>
+                    <input
+                      v-model="spouse.spouse_income"
+                      type="text"
+                      inputmode="decimal"
+                      :disabled="!canEditCertificates"
+                      :placeholder="t('payroll.annual_settlement.certificate_amount_placeholder')"
+                      data-test="annual-settlement-spouse-income"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-right text-sm tabular-nums text-neutral-900"
+                    >
+                    <span class="mt-1 block text-xs text-neutral-500">
+                      {{ t('payroll.annual_settlement.claims.spouse_income_hint') }}
+                    </span>
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.certificate_evidence_status') }}
+                    </span>
+                    <select
+                      v-model="spouse.evidence_status"
+                      :disabled="!canEditCertificates"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                      <option v-for="option in ['unverified', 'verified']" :key="option" :value="option">
+                        {{ t(`payroll.annual_settlement.certificate_evidence_options.${option}`) }}
+                      </option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.evidence_reference') }}
+                    </span>
+                    <input
+                      v-model="spouse.evidence_reference"
+                      type="text"
+                      maxlength="500"
+                      :disabled="!canEditCertificates"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.note') }}
+                    </span>
+                    <input
+                      v-model="spouse.note"
+                      type="text"
+                      maxlength="500"
+                      :disabled="!canEditCertificates"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                  </label>
+
+                  <div class="flex flex-wrap justify-end gap-2 sm:col-span-2">
+                    <button
+                      type="button"
+                      :class="[btnOutline('danger'), 'whitespace-nowrap']"
+                      :disabled="!canEditCertificates || savingClaims"
+                      data-test="annual-settlement-spouse-remove"
+                      @click="spouse = null"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+                      {{ t('payroll.annual_settlement.claims.spouse_remove') }}
+                    </button>
+                  </div>
+                </div>
+              </template>
+            </div>
+
+            <div
+              v-if="preschoolAvailable || preschool.length > 0"
+              class="mt-6 border-t border-neutral-200 pt-4"
+              data-test="annual-settlement-preschool"
+            >
+              <h3 class="text-sm font-semibold text-neutral-900">
+                {{ t('payroll.annual_settlement.claims.preschool_section') }}
+              </h3>
+              <p class="mt-1 text-xs text-neutral-500">
+                {{ t('payroll.annual_settlement.claims.preschool_hint') }}
+              </p>
+
+              <p
+                v-if="preschoolChildCandidates.length === 0"
+                class="mt-3 rounded-md bg-neutral-50 px-4 py-3 text-sm text-neutral-600"
+                data-test="annual-settlement-preschool-missing"
+              >
+                {{ t('payroll.annual_settlement.claims.preschool_missing') }}
+                <RouterLink
+                  v-if="selectedEmployeeId !== null"
+                  :to="{ name: 'payroll-person', params: { id: selectedEmployeeId } }"
+                  :class="[btnOutline('warning'), 'ml-2 whitespace-nowrap']"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
+                  {{ t('payroll.annual_settlement.open_employee_card') }}
+                </RouterLink>
+              </p>
+
+              <template v-else>
+                <div
+                  v-for="(row, index) in preschool"
+                  :key="index"
+                  class="mt-3 grid gap-3 rounded-md border border-neutral-200 p-3 sm:grid-cols-2"
+                  data-test="annual-settlement-preschool-row"
+                >
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.preschool_child') }}
+                    </span>
+                    <select
+                      v-model="row.child_dependant_id"
+                      :disabled="!canEditCertificates"
+                      data-test="annual-settlement-preschool-child"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                      <option v-for="child in preschoolChildCandidates" :key="child.id" :value="child.id">
+                        {{ child.full_name }} ({{ formatDate(child.birth_date) }})
+                      </option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.preschool_facility_kind') }}
+                    </span>
+                    <select
+                      v-model="row.facility_kind"
+                      :disabled="!canEditCertificates"
+                      data-test="annual-settlement-preschool-kind"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                      <option v-for="kind in PRESCHOOL_FACILITY_KINDS" :key="kind" :value="kind">
+                        {{ t(`payroll.annual_settlement.claims.preschool_facility.${kind}`) }}
+                      </option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.preschool_facility_name') }}
+                    </span>
+                    <input
+                      v-model="row.facility_name"
+                      type="text"
+                      maxlength="191"
+                      :disabled="!canEditCertificates"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.preschool_expenses') }}
+                    </span>
+                    <input
+                      v-model="row.expenses"
+                      type="text"
+                      inputmode="decimal"
+                      :disabled="!canEditCertificates"
+                      :placeholder="t('payroll.annual_settlement.certificate_amount_placeholder')"
+                      data-test="annual-settlement-preschool-expenses"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-right text-sm tabular-nums text-neutral-900"
+                    >
+                    <span class="mt-1 block text-xs text-neutral-500">
+                      {{ t('payroll.annual_settlement.claims.preschool_expenses_hint') }}
+                    </span>
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.preschool_households') }}
+                    </span>
+                    <input
+                      v-model.number="row.households_count"
+                      type="number"
+                      min="1"
+                      max="9"
+                      :disabled="!canEditCertificates"
+                      data-test="annual-settlement-preschool-households"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-right text-sm tabular-nums text-neutral-900"
+                    >
+                    <span class="mt-1 block text-xs text-neutral-500">
+                      {{ t('payroll.annual_settlement.claims.preschool_households_hint') }}
+                    </span>
+                  </label>
+                  <label v-if="row.households_count > 1" class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.preschool_agreed_cap') }}
+                    </span>
+                    <input
+                      v-model="row.agreed_cap"
+                      type="text"
+                      inputmode="decimal"
+                      :disabled="!canEditCertificates"
+                      :placeholder="t('payroll.annual_settlement.certificate_amount_placeholder')"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-right text-sm tabular-nums text-neutral-900"
+                    >
+                    <span class="mt-1 block text-xs text-neutral-500">
+                      {{ t('payroll.annual_settlement.claims.preschool_agreed_cap_hint') }}
+                    </span>
+                  </label>
+                  <label v-if="row.households_count > 1 && row.agreed_cap.trim() !== ''" class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.preschool_agreement_reference') }}
+                    </span>
+                    <input
+                      v-model="row.agreement_reference"
+                      type="text"
+                      maxlength="500"
+                      :disabled="!canEditCertificates"
+                      data-test="annual-settlement-preschool-agreement-reference"
+                      :placeholder="t('payroll.annual_settlement.claims.preschool_agreement_reference_placeholder')"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                  </label>
+                  <div class="space-y-1 sm:col-span-2">
+                    <label class="flex items-center gap-2 text-sm text-neutral-700">
+                      <input v-model="row.claimed_by_other_taxpayer" type="checkbox" :disabled="!canEditCertificates">
+                      {{ t('payroll.annual_settlement.claims.preschool_other_taxpayer') }}
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-neutral-700">
+                      <input
+                        v-model="row.other_supporting_taxpayer"
+                        type="checkbox"
+                        :disabled="!canEditCertificates"
+                        data-test="annual-settlement-preschool-other-supporting"
+                      >
+                      {{ t('payroll.annual_settlement.claims.preschool_other_supporting') }}
+                    </label>
+                    <label class="flex items-center gap-2 text-sm text-neutral-700">
+                      <input v-model="row.claimed_as_business_expense" type="checkbox" :disabled="!canEditCertificates">
+                      {{ t('payroll.annual_settlement.claims.preschool_business_expense') }}
+                    </label>
+                    <label v-if="isGrandchild(row.child_dependant_id)" class="flex items-center gap-2 text-sm text-neutral-700">
+                      <input v-model="row.grandchild_care_replaces_parents" type="checkbox" :disabled="!canEditCertificates">
+                      {{ t('payroll.annual_settlement.claims.preschool_grandchild_care') }}
+                    </label>
+                  </div>
+                  <div
+                    v-if="preschoolNeedsOtherConfirmation(row)"
+                    class="grid gap-3 rounded-md border border-neutral-200 p-3 sm:col-span-2 sm:grid-cols-3"
+                    data-test="annual-settlement-preschool-other-confirmation"
+                  >
+                    <p class="text-xs text-neutral-500 sm:col-span-3">
+                      {{ t('payroll.annual_settlement.claims.preschool_other_confirmation_hint') }}
+                    </p>
+                    <label class="block">
+                      <span class="mb-1 block text-xs font-medium text-neutral-600">
+                        {{ t('payroll.annual_settlement.claims.preschool_other_taxpayer_name') }}
+                      </span>
+                      <input
+                        v-model="row.other_taxpayer_name"
+                        type="text"
+                        maxlength="191"
+                        :disabled="!canEditCertificates"
+                        class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                      >
+                    </label>
+                    <label class="block">
+                      <span class="mb-1 block text-xs font-medium text-neutral-600">
+                        {{ t('payroll.annual_settlement.claims.preschool_other_taxpayer_claimed') }}
+                      </span>
+                      <input
+                        v-model="row.other_taxpayer_claimed"
+                        type="text"
+                        inputmode="decimal"
+                        :disabled="!canEditCertificates"
+                        :placeholder="t('payroll.annual_settlement.certificate_amount_placeholder')"
+                        class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-right text-sm tabular-nums text-neutral-900"
+                      >
+                    </label>
+                    <label class="block">
+                      <span class="mb-1 block text-xs font-medium text-neutral-600">
+                        {{ t('payroll.annual_settlement.claims.preschool_other_confirmation_reference') }}
+                      </span>
+                      <input
+                        v-model="row.other_taxpayer_confirmation_reference"
+                        type="text"
+                        maxlength="500"
+                        :disabled="!canEditCertificates"
+                        :placeholder="t('payroll.annual_settlement.claims.preschool_other_confirmation_placeholder')"
+                        class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                      >
+                    </label>
+                  </div>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.certificate_evidence_status') }}
+                    </span>
+                    <select
+                      v-model="row.evidence_status"
+                      :disabled="!canEditCertificates"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                      <option v-for="option in ['unverified', 'verified']" :key="option" :value="option">
+                        {{ t(`payroll.annual_settlement.certificate_evidence_options.${option}`) }}
+                      </option>
+                    </select>
+                  </label>
+                  <label class="block">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.evidence_reference') }}
+                    </span>
+                    <input
+                      v-model="row.evidence_reference"
+                      type="text"
+                      maxlength="500"
+                      :disabled="!canEditCertificates"
+                      :placeholder="t('payroll.annual_settlement.claims.preschool_evidence_placeholder')"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                  </label>
+                  <label class="block sm:col-span-2">
+                    <span class="mb-1 block text-xs font-medium text-neutral-600">
+                      {{ t('payroll.annual_settlement.claims.note') }}
+                    </span>
+                    <input
+                      v-model="row.note"
+                      type="text"
+                      maxlength="500"
+                      :disabled="!canEditCertificates"
+                      class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm text-neutral-900"
+                    >
+                  </label>
+                  <div class="flex flex-wrap justify-end gap-2 sm:col-span-2">
+                    <button
+                      type="button"
+                      :class="[btnOutline('danger'), 'whitespace-nowrap']"
+                      :disabled="!canEditCertificates || savingClaims"
+                      data-test="annual-settlement-preschool-remove"
+                      @click="removePreschool(index)"
+                    >
+                      <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.trash" /></svg>
+                      {{ t('payroll.annual_settlement.claims.preschool_remove') }}
+                    </button>
+                  </div>
+                </div>
+
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+                    :disabled="!canEditCertificates || preschool.length >= preschoolChildCandidates.length"
+                    data-test="annual-settlement-preschool-add"
+                    @click="addPreschool"
+                  >
+                    <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                    {{ t('payroll.annual_settlement.claims.preschool_add') }}
+                  </button>
+                </div>
+              </template>
+            </div>
+
+            <div class="mt-4 flex flex-wrap justify-end gap-2">
+              <button
+                type="button"
+                data-test="annual-settlement-save-claims"
+                :class="[btnOutline('primary'), 'whitespace-nowrap']"
+                :disabled="!canEditCertificates || savingClaims"
+                @click="saveClaims"
+              >
+                <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                  <path :d="ICONS.check" />
+                </svg>
+                {{ t('payroll.annual_settlement.claims.save') }}
+              </button>
+            </div>
+          </div>
+
           <div class="rounded-lg border border-neutral-200 bg-surface p-4">
             <h2 class="text-base font-semibold text-neutral-900">
               {{ t('payroll.annual_settlement.preview_section') }}
@@ -1608,6 +2786,26 @@ onMounted(async () => {
                       {{ t(`payroll.annual_settlement.blocker.${code}`) }}
                     </button>
                     <span v-else>{{ t(`payroll.annual_settlement.blocker.${code}`) }}</span>
+                    <ul
+                      v-if="code === 'spouse_credit_conditions_not_met' && spouseCreditFailures.length > 0"
+                      class="basis-full space-y-1 pl-6 text-neutral-600"
+                      data-test="annual-settlement-spouse-failures"
+                    >
+                      <li v-for="failure in spouseCreditFailures" :key="failure">
+                        {{ t(`payroll.annual_settlement.spouse_failure.${failure}`) }}
+                      </li>
+                    </ul>
+                    <ul
+                      v-if="code === 'preschool_credit_conditions_not_met' && preschoolCreditFailures.length > 0"
+                      class="basis-full space-y-1 pl-6 text-neutral-600"
+                      data-test="annual-settlement-preschool-failures"
+                    >
+                      <template v-for="entry in preschoolCreditFailures" :key="entry.child">
+                        <li v-for="failure in entry.codes" :key="`${entry.child}-${failure}`">
+                          {{ entry.child }}: {{ t(`payroll.annual_settlement.preschool_failure.${failure}`) }}
+                        </li>
+                      </template>
+                    </ul>
                     <!--
                       Nárok na dítě se zadává v kartě zaměstnance, ne tady —
                       proklik vede rovnou tam, kde se doplní zpětně od ledna.
@@ -1678,6 +2876,57 @@ onMounted(async () => {
                 data-test="annual-settlement-result"
               >
                 <tbody class="divide-y divide-neutral-100">
+                  <template v-if="result.tax_base_before_deductions_minor_units !== undefined">
+                    <tr data-test="annual-settlement-base-before-deductions">
+                      <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_base_before_deductions') }}</td>
+                      <td class="py-2 text-right tabular-nums text-neutral-900">
+                        {{ money(result.tax_base_before_deductions_minor_units) }}
+                      </td>
+                    </tr>
+                    <tr data-test="annual-settlement-non-taxable">
+                      <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_non_taxable') }}</td>
+                      <td class="py-2 text-right tabular-nums text-neutral-900">
+                        −{{ money(result.non_taxable_deductions_minor_units ?? 0) }}
+                      </td>
+                    </tr>
+                    <tr v-if="nonTaxable?.donation" data-test="annual-settlement-trace-donation">
+                      <td class="py-2 pl-4 text-neutral-500">
+                        {{ t('payroll.annual_settlement.trace.donation', {
+                          claimed: money(nonTaxable.donation.claimed_minor_units),
+                          cap: money(nonTaxable.donation.cap_minor_units),
+                        }) }}
+                        <span v-if="!nonTaxable.donation.threshold_met">
+                          · {{ t('payroll.annual_settlement.trace.threshold_not_met') }}
+                        </span>
+                      </td>
+                      <td class="py-2 text-right tabular-nums text-neutral-700">
+                        −{{ money(nonTaxable.donation.deducted_minor_units) }}
+                      </td>
+                    </tr>
+                    <tr v-if="nonTaxable?.housing_interest" data-test="annual-settlement-trace-housing">
+                      <td class="py-2 pl-4 text-neutral-500">
+                        {{ t('payroll.annual_settlement.trace.housing_interest', {
+                          claimed: money(nonTaxable.housing_interest.claimed_minor_units),
+                          months: nonTaxable.housing_interest.months,
+                          cap: money(nonTaxable.housing_interest.cap_minor_units),
+                        }) }}
+                      </td>
+                      <td class="py-2 text-right tabular-nums text-neutral-700">
+                        −{{ money(nonTaxable.housing_interest.deducted_minor_units) }}
+                      </td>
+                    </tr>
+                    <tr v-if="nonTaxable?.retirement_and_care" data-test="annual-settlement-trace-retirement">
+                      <td class="py-2 pl-4 text-neutral-500">
+                        {{ t('payroll.annual_settlement.trace.retirement_and_care', {
+                          claimed: money(nonTaxable.retirement_and_care.claimed_minor_units),
+                          cap: money(nonTaxable.retirement_and_care.cap_minor_units),
+                        }) }}
+                      </td>
+                      <td class="py-2 text-right tabular-nums text-neutral-700">
+                        −{{ money(nonTaxable.retirement_and_care.deducted_minor_units) }}
+                      </td>
+                    </tr>
+                  </template>
                   <tr>
                     <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_rounded_base') }}</td>
                     <td class="py-2 text-right tabular-nums text-neutral-900">
@@ -1688,6 +2937,15 @@ onMounted(async () => {
                     <td class="py-2 text-neutral-600">{{ t('payroll.annual_settlement.row_tax') }}</td>
                     <td class="py-2 text-right tabular-nums text-neutral-900">
                       {{ money(result.tax_before_credits_minor_units) }}
+                    </td>
+                  </tr>
+                  <tr
+                    v-if="(result.enforcement_credit_minor_units ?? 0) > 0"
+                    data-test="annual-settlement-trace-enforcement"
+                  >
+                    <td class="py-2 pl-4 text-neutral-500">{{ t('payroll.annual_settlement.row_enforcement_credit') }}</td>
+                    <td class="py-2 text-right tabular-nums text-neutral-700">
+                      −{{ money(result.enforcement_credit_minor_units) }}
                     </td>
                   </tr>
                   <tr v-for="row in preview?.credit_rows ?? []" :key="row.label">

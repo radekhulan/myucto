@@ -77,6 +77,9 @@ export function cashErrorMessage(e: unknown, t: Translate): string {
 
   const short = shortCashErrorCode(code)
   if (short === 'validation' && message !== '') return message
+  // EET chyby (zařízení, kontext platby, nepodporovaný scénář) nesou přesný důvod v hlášce
+  // serveru; obecný překlad `cash.error.eet_*` slouží jen jako záloha bez ní.
+  if (short.startsWith('eet_') && message !== '') return message
 
   if (params !== null) {
     const detailKey = ERROR_PREFIX + short + '_detail'

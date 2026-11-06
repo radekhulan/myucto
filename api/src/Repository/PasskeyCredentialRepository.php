@@ -183,6 +183,53 @@ final class PasskeyCredentialRepository
         return $row !== false ? self::hydrate($row) : null;
     }
 
+    /**
+     * Čerstvě zaregistrovaná passkey, kterou ještě nikdo nepoužil — jen tu jde
+     * hned po registraci zkušebně ověřit a při neúspěchu sama odvolat.
+     */
+    public function findUnverifiedForUser(int $userId, int $credentialId, int $maxAgeSeconds): ?StoredPasskeyCredential
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT c.*, u.webauthn_user_handle
+               FROM webauthn_credentials c
+               JOIN users u ON u.id = c.user_id
+              WHERE c.id = ?
+                AND c.user_id = ?
+                AND c.revoked_at IS NULL
+                AND c.last_used_at IS NULL
+                AND c.created_at >= UTC_TIMESTAMP(6) - INTERVAL ? SECOND
+              LIMIT 1'
+        );
+        $stmt->execute([$credentialId, $userId, $maxAgeSeconds]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        return $row !== false ? self::hydrate($row) : null;
+    }
+
+    /**
+     * Odvolá passkey, která neprošla zkušebním ověřením hned po registraci.
+     * Podmínka „nikdy nepoužitá a čerstvá" je v SQL, aby se tudy nedala odvolat
+     * passkey, která už jednou fungovala.
+     */
+    public function revokeUnverifiedInTransaction(
+        PDO $pdo,
+        int $userId,
+        int $credentialId,
+        SecurityTime $cutoff,
+        int $maxAgeSeconds,
+    ): bool {
+        $stmt = $pdo->prepare(
+            'UPDATE webauthn_credentials
+                SET revoked_at = ?
+              WHERE id = ? AND user_id = ?
+                AND revoked_at IS NULL
+                AND last_used_at IS NULL
+                AND created_at >= ? - INTERVAL ? SECOND'
+        );
+        $stmt->execute([$cutoff->utcSql, $credentialId, $userId, $cutoff->utcSql, $maxAgeSeconds]);
+        return $stmt->rowCount() === 1;
+    }
+
     public function findActiveForUserByIdForUpdate(
         PDO $pdo,
         int $userId,

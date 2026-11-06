@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use DOMDocument;
 use DOMElement;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 
 final class PayrollRegistrationXmlSerializer
 {
@@ -32,6 +33,8 @@ final class PayrollRegistrationXmlSerializer
         'goldenhandshake',
         'severancepay',
         'disposal',
+        // REGZEC27 1.5, ID 10588: týž `t:simpleNType_string`.
+        'severencebenefit',
     ];
 
     /**
@@ -56,6 +59,23 @@ final class PayrollRegistrationXmlSerializer
     private const ROOT_ATTRIBUTES = [
         'PREZEC26' => ['version' => '1.2', 'partialAccept' => 'A'],
         'REGZEC25' => ['version' => '1.4', 'partialAccept' => 'A'],
+        'REGZEC27' => ['version' => '1.5', 'partialAccept' => 'A'],
+    ];
+
+    /**
+     * REGZEC27 (EDV 1.5.0.2, JMHZ-3393): odstupné, odchodné a odbytné
+     * (10531 až 10533) nahradil jediný atribut `severencebenefit` (10588).
+     * Událost A2 nese nejvýš jednu z částek (podle druhu zaměstnání), takže
+     * se do 10588 přepíše ta, která je vyplněná. `severance_benefit` je
+     * přímé zadání 10588.
+     *
+     * @var list<string>
+     */
+    private const SEVERANCE_BENEFIT_SOURCES = [
+        'severance_benefit',
+        'golden_handshake',
+        'severance_pay',
+        'disposal',
     ];
 
     public function serialize(PayrollRegistrationXmlPayload $payload): string
@@ -159,7 +179,7 @@ final class PayrollRegistrationXmlSerializer
         if ($payload->interaction->actionCode !== 1) {
             return $this->regzecEvent($payload);
         }
-        $namespace = 'http://schemas.cssz.cz/REGZEC/2025';
+        $namespace = $this->regzecNamespace($payload);
         $a1 = $payload->identity->regzecA1;
         if ($a1 === null) {
             throw new PayrollRegistrationXmlException(
@@ -187,7 +207,7 @@ final class PayrollRegistrationXmlSerializer
             );
         }
         $document = $this->document();
-        $root = $this->root($document, $namespace, 'REGZEC', 'REGZEC25');
+        $root = $this->root($document, $namespace, 'REGZEC', $payload->form());
         $this->appendVendor($document, $namespace, $root, $payload);
         $employees = $this->element($document, $namespace, 'employees');
         $employee = $this->element($document, $namespace, 'employee');
@@ -318,7 +338,7 @@ final class PayrollRegistrationXmlSerializer
             ]);
         }
         $employee->appendChild($job);
-        $this->appendA1EmployeeData($document, $namespace, $employee, $a1);
+        $this->appendA1EmployeeData($document, $namespace, $employee, $a1, $payload->specVersion);
         $employees->appendChild($employee);
         $root->appendChild($employees);
 
@@ -355,6 +375,7 @@ final class PayrollRegistrationXmlSerializer
         string $namespace,
         DOMElement $employee,
         PayrollRegistrationA1Snapshot $a1,
+        JmhzSpecVersion $version = JmhzSpecVersion::V2026,
     ): void {
         if ($a1->foreignInsurance !== null) {
             $this->appendForin($document, $namespace, $employee, $a1->foreignInsurance);
@@ -391,15 +412,11 @@ final class PayrollRegistrationXmlSerializer
         }
         if ($a1->foreignWorker !== null) {
             $foreign = $this->element($document, $namespace, 'nocitizen');
-            $this->setMappedAttributes($foreign, $a1->foreignWorker, [
-                'free_access' => 'freeacc',
-                'free_access_reason_code' => 'perm',
-                'permit_type_code' => 'permtype',
-                'issuing_labour_office_code' => 'issue',
-                'permit_identifier' => 'permid',
-                'permit_from' => 'permfro',
-                'permit_to' => 'permto',
-            ]);
+            $this->setMappedAttributes(
+                $foreign,
+                $a1->foreignWorker,
+                self::foreignWorkerMapping($version),
+            );
             $employee->appendChild($foreign);
         }
         if ($a1->foreignLegislation !== null) {
@@ -459,9 +476,10 @@ final class PayrollRegistrationXmlSerializer
                     . 'ho a připravte podání znovu.',
             );
         }
-        $namespace = 'http://schemas.cssz.cz/REGZEC/2025';
+        $namespace = $this->regzecNamespace($payload);
+        $version = $payload->specVersion;
         $document = $this->document();
-        $root = $this->root($document, $namespace, 'REGZEC', 'REGZEC25');
+        $root = $this->root($document, $namespace, 'REGZEC', $payload->form());
         $this->appendVendor($document, $namespace, $root, $payload);
         $employees = $this->element($document, $namespace, 'employees');
         $employee = $this->element($document, $namespace, 'employee');
@@ -487,6 +505,7 @@ final class PayrollRegistrationXmlSerializer
                         $this->eventNullableText($data, 'relationship_detail_code'),
                     ),
                 ),
+                self::textOrNull($payload->identity->identity['citizenship_country_code'] ?? null),
             );
         }
         $employee->appendChild($client);
@@ -532,6 +551,12 @@ final class PayrollRegistrationXmlSerializer
             if ($action === 4 && isset($delta['contract_start_on'])) {
                 $job->setAttribute('contractfro', (string) $delta['contract_start_on']);
             }
+            // EDV 1.4.0.7 i 1.5.0.3, ID 10225: A4-OST s datem skončení nese
+            // i příznak skončení smrtí (PayrollRegistrationRegisteredEnd).
+            $death = $data['ended_by_death'] ?? null;
+            if ($action === 4 && is_bool($death)) {
+                $job->setAttribute('endbydeath', $death ? 'A' : 'N');
+            }
             $this->regzecDeltaJob($document, $namespace, $job, $delta);
             if ($job->hasAttribute('fro')) {
                 $job->setAttribute('fro', PayrollRegistrationSpecialStartDate::reported(
@@ -558,6 +583,7 @@ final class PayrollRegistrationXmlSerializer
                 $namespace,
                 $employee,
                 $data['unemployment'],
+                $version,
             );
         }
         if (in_array($action, [3, 4], true)) {
@@ -566,7 +592,23 @@ final class PayrollRegistrationXmlSerializer
                 $namespace,
                 $employee,
                 $this->eventObject($data, 'delta'),
+                $version,
+                $action === 4 && is_array($data['unemployment'] ?? null)
+                    ? $data['unemployment']
+                    : null,
             );
+        }
+        if ($action === 7 && $version === JmhzSpecVersion::V2027) {
+            // EDV 1.5.0.1 (JMHZ-2997), ID 10428: u A7 je kód státu cizích
+            // předpisů POVINNÝ, 10427 se neuvádí. Skončení příslušnosti
+            // k českým předpisům znamená pojištění ve státě cizozemského
+            // nositele (10099), jiný zdroj státu událost nemá.
+            $legislation = $this->element($document, $namespace, 'forinreg');
+            $legislation->setAttribute(
+                'state',
+                $this->eventText($this->eventObject($data, 'foreign_insurance'), 'country_code'),
+            );
+            $employee->appendChild($legislation);
         }
         if (in_array($action, [4, 8], true) && is_array($data['explanation_attachment'] ?? null)) {
             // Storno z jiného důvodu než nenastoupení (A8) a oprava dne
@@ -626,6 +668,7 @@ final class PayrollRegistrationXmlSerializer
         DOMElement $client,
         array $data,
         bool $allowsPreviousSurnames,
+        ?string $citizenshipForForeignWorker = null,
     ): void {
         $delta = $this->eventObject($data, 'delta');
         if (isset($delta['birth_number'])) {
@@ -636,6 +679,14 @@ final class PayrollRegistrationXmlSerializer
             $client->setAttribute('bno', (string) $data['birth_number']);
         }
         $identity = is_array($delta['identity'] ?? null) ? $delta['identity'] : [];
+        if ($citizenshipForForeignWorker !== null
+            && is_array($delta['foreign_worker'] ?? null)
+            && !isset($identity['citizenship_country_code'])
+        ) {
+            // EDV 1.4.0.7 i 1.5.0.3, Vysvětlivky, Kontrola 5: sada údajů cizince v A3/A4
+            // nese vždy i státní občanství 10067, jinak ji DIS zamítne.
+            $identity['citizenship_country_code'] = $citizenshipForForeignWorker;
+        }
         $nameAttributes = array_filter([
             'sur' => $identity['last_name'] ?? null,
             'fir' => $identity['first_name'] ?? null,
@@ -814,16 +865,20 @@ final class PayrollRegistrationXmlSerializer
     }
 
     /**
-     * Části změny za `job` v pořadí `employeeType`: pens, insh, fact,
-     * nocitizen, forinreg.
+     * Části změny za `job` v pořadí `employeeType`: pens, insh, unemplcomp,
+     * fact, nocitizen, forinreg. Podklady pro podporu v nezaměstnanosti nese
+     * jen oprava A4 vztahu skončeného u ČSSZ.
      *
      * @param array<string,mixed> $delta
+     * @param array<string,mixed>|null $unemployment
      */
     private function regzecDeltaEmployeeData(
         DOMDocument $document,
         string $namespace,
         DOMElement $employee,
         array $delta,
+        JmhzSpecVersion $version = JmhzSpecVersion::V2026,
+        ?array $unemployment = null,
     ): void {
         if (is_array($delta['pension'] ?? null)) {
             $pension = $this->element($document, $namespace, 'pens');
@@ -840,7 +895,10 @@ final class PayrollRegistrationXmlSerializer
             $insurance->setAttribute('cnr', (string) $delta['health_insurance_code']);
             $employee->appendChild($insurance);
         }
-        $facts = is_array($delta['facts'] ?? null) ? $delta['facts'] : [];
+        if ($unemployment !== null) {
+            $this->appendUnemployment($document, $namespace, $employee, $unemployment, $version);
+        }
+        $facts =is_array($delta['facts'] ?? null) ? $delta['facts'] : [];
         if (isset($delta['highest_education_code'])) {
             $facts['highest_education_code'] = $delta['highest_education_code'];
         }
@@ -864,15 +922,11 @@ final class PayrollRegistrationXmlSerializer
         }
         if (is_array($delta['foreign_worker'] ?? null)) {
             $foreign = $this->element($document, $namespace, 'nocitizen');
-            $this->setMappedAttributes($foreign, $delta['foreign_worker'], [
-                'free_access' => 'freeacc',
-                'free_access_reason_code' => 'perm',
-                'permit_type_code' => 'permtype',
-                'issuing_labour_office_code' => 'issue',
-                'permit_identifier' => 'permid',
-                'permit_from' => 'permfro',
-                'permit_to' => 'permto',
-            ]);
+            $this->setMappedAttributes(
+                $foreign,
+                $delta['foreign_worker'],
+                self::foreignWorkerMapping($version),
+            );
             $employee->appendChild($foreign);
         }
         if (is_array($delta['foreign_legislation'] ?? null)) {
@@ -931,9 +985,10 @@ final class PayrollRegistrationXmlSerializer
         string $namespace,
         DOMElement $employee,
         array $data,
+        JmhzSpecVersion $version = JmhzSpecVersion::V2026,
     ): void {
         $node = $this->element($document, $namespace, 'unemplcomp');
-        foreach ([
+        $mapping = [
             'reason_not_provided' => 'rsn', 'employment_type' => 'typeempl',
             'entitlement' => 'belong', 'paid_in_full' => 'fullpay',
             'average_net_earnings' => 'avgmonear',
@@ -942,7 +997,24 @@ final class PayrollRegistrationXmlSerializer
             'replacement' => 'replacement', 'golden_handshake' => 'goldenhandshake',
             'severance_pay' => 'severancepay', 'disposal' => 'disposal',
             'early_termination_reason' => 'earlyterm',
-        ] as $key => $attribute) {
+        ];
+        if ($version === JmhzSpecVersion::V2027) {
+            unset($mapping['golden_handshake'], $mapping['severance_pay'], $mapping['disposal']);
+            $benefit = null;
+            foreach (self::SEVERANCE_BENEFIT_SOURCES as $key) {
+                if (isset($data[$key]) && (string) $data[$key] !== '0') {
+                    $benefit = (string) $data[$key];
+                    break;
+                }
+            }
+            if ($benefit !== null) {
+                $data['severance_benefit'] = $benefit;
+                $mapping = array_slice($mapping, 0, -1, true)
+                    + ['severance_benefit' => 'severencebenefit']
+                    + array_slice($mapping, -1, 1, true);
+            }
+        }
+        foreach ($mapping as $key => $attribute) {
             if (!isset($data[$key])) {
                 continue;
             }
@@ -1322,6 +1394,39 @@ final class PayrollRegistrationXmlSerializer
             $payload->identity->identifiers['ecp'],
             is_string($identity['birth_date'] ?? null) ? $identity['birth_date'] : null,
         );
+    }
+
+    /** Jmenný prostor REGZEC podle ročníku: `/REGZEC/2025`, nebo `/REGZEC/2027`. */
+    private function regzecNamespace(PayrollRegistrationXmlPayload $payload): string
+    {
+        return $payload->specVersion === JmhzSpecVersion::V2027
+            ? PayrollRegistrationSchemaCatalog::NS_REGZEC_2027
+            : PayrollRegistrationSchemaCatalog::NS_REGZEC_2026;
+    }
+
+    /**
+     * Atributy `nocitizen`. REGZEC27 přidává platnost pobytu 10568/10569
+     * (EDV 1.5, JMHZ-3428); REGZEC25 je nezná a jejich zápis by XSD zamítlo.
+     *
+     * @return array<string,string>
+     */
+    private static function foreignWorkerMapping(JmhzSpecVersion $version): array
+    {
+        $mapping = [
+            'free_access' => 'freeacc',
+            'free_access_reason_code' => 'perm',
+            'permit_type_code' => 'permtype',
+            'issuing_labour_office_code' => 'issue',
+            'permit_identifier' => 'permid',
+            'permit_from' => 'permfro',
+            'permit_to' => 'permto',
+        ];
+        if ($version === JmhzSpecVersion::V2027) {
+            $mapping['stay_valid_from'] = 'stayvalidfro';
+            $mapping['stay_valid_to'] = 'stayvalidto';
+        }
+
+        return $mapping;
     }
 
     private function document(): DOMDocument

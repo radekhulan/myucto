@@ -112,7 +112,7 @@ final class EmailOtpService
 
     /**
      * Ověří kód proti poslednímu aktivnímu záznamu uživatele.
-     * Při neúspěchu inkrementuje attempts; po překročení max_attempts kód
+     * Každý pokus (i úspěšný) atomicky inkrementuje attempts; po překročení max_attempts kód
      * zneplatní (uživatel musí požádat o nový).
      */
     public function verify(int $userId, string $code): bool
@@ -133,20 +133,27 @@ final class EmailOtpService
             return false;
         }
 
-        if (hash_equals((string) $active['code_hash'], hash('sha256', $code))) {
-            $stmt = $this->db->pdo()->prepare(
-                'UPDATE login_otps SET used_at = NOW()
-                  WHERE id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?'
-            );
-            $stmt->execute([(int) $active['id'], $this->maxAttempts()]);
-            return $stmt->rowCount() === 1;
-        }
-
-        $this->db->pdo()->prepare(
+        // Pokus se započte atomicky dřív, než se kód porovná. Porovnává jen
+        // požadavek, který pokus opravdu získal, takže souběžné hádání strop
+        // nepřekročí.
+        $reserve = $this->db->pdo()->prepare(
             'UPDATE login_otps SET attempts = attempts + 1
               WHERE id = ? AND used_at IS NULL AND expires_at > NOW() AND attempts < ?'
-        )->execute([(int) $active['id'], $this->maxAttempts()]);
-        return false;
+        );
+        $reserve->execute([(int) $active['id'], $this->maxAttempts()]);
+        if ($reserve->rowCount() !== 1) {
+            return false;
+        }
+        if (!hash_equals((string) $active['code_hash'], hash('sha256', $code))) {
+            return false;
+        }
+
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE login_otps SET used_at = NOW()
+              WHERE id = ? AND used_at IS NULL AND expires_at > NOW()'
+        );
+        $stmt->execute([(int) $active['id']]);
+        return $stmt->rowCount() === 1;
     }
 
     /** Smaže expirované / použité kódy starší než 24 h (volá cron-cleanup). */

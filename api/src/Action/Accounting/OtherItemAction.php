@@ -8,6 +8,7 @@ use MyInvoice\Http\Json;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
+use MyInvoice\Service\Accounting\OtherItemBankMatchService;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\Obligations\ExistingObligationSourceService;
@@ -22,6 +23,7 @@ final class OtherItemAction
 
     public function __construct(
         private readonly OtherItemService $service,
+        private readonly OtherItemBankMatchService $bankMatch,
         private readonly ExistingObligationSourceService $sources,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -34,6 +36,13 @@ final class OtherItemAction
         $filters = [];
         foreach (['side', 'status', 'kind', 'q', 'from', 'to', 'sort_by', 'sort_dir'] as $field) {
             if (isset($q[$field]) && is_scalar($q[$field])) $filters[$field] = trim((string) $q[$field]);
+        }
+        if (isset($q['kind_id']) && is_scalar($q['kind_id']) && trim((string) $q['kind_id']) !== '') {
+            $kindId = filter_var($q['kind_id'], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+            if ($kindId === false) {
+                return Json::error($response, 'other_items.error.invalid_kind', 'Neplatný druh dokladu.', 422);
+            }
+            $filters['kind_id'] = $kindId;
         }
         $hasFrom = isset($filters['from']);
         $hasTo = isset($filters['to']);
@@ -74,6 +83,7 @@ final class OtherItemAction
             array_filter($derived, static fn (array $row): bool =>
                 (!isset($filters['status']) || $filters['status'] === 'all' || (float) $row['remaining'] > 0)
                 && (!isset($filters['side']) || $row['side'] === $filters['side'])
+                && !isset($filters['kind_id'])
                 && (!isset($filters['kind']) || $row['kind'] === $filters['kind'])
                 && (!isset($filters['status']) || $filters['status'] === 'all'
                     || $filters['status'] === 'open' && $row['status'] !== 'paid'
@@ -95,7 +105,7 @@ final class OtherItemAction
         if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
         return $this->run($response, function () use ($request) {
             $item = $this->service->create($this->currentSupplierId($request), (array) ($request->getParsedBody() ?? []), $this->userId($request));
-            $this->log($request, 'other_item.created', (int) $item['id']);
+            $this->log($request, 'other_item.created', (int) $item['id'], $this->overridesContext($request, $item));
             return $item;
         }, 201);
     }
@@ -107,9 +117,61 @@ final class OtherItemAction
             $id = (int) $args['id'];
             $this->assertSessionForAutoPostDraft($request, $id, 'Upravit');
             $item = $this->service->update($this->currentSupplierId($request), $id, (array) ($request->getParsedBody() ?? []), $this->userId($request));
-            $this->log($request, 'other_item.updated', $id);
+            $this->log($request, 'other_item.updated', $id, $this->overridesContext($request, $item));
             return $item;
         });
+    }
+
+    /**
+     * Změna účtu protistrany u potvrzeného nebo zaúčtovaného dokladu (párování úhrad).
+     * API token ho nesmí (ApiScopeMiddleware), token a MCP upravují jen koncepty.
+     */
+    public function updateCounterpartyAccount(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $supplierId = $this->currentSupplierId($request);
+            $result = $this->service->updateCounterpartyAccount($supplierId, $id, (array) ($request->getParsedBody() ?? []));
+            if ($result['before'] !== $result['after']) {
+                $this->logger->log('other_item.counterparty_account_changed', $this->userId($request), 'other_item', $id,
+                    ['before' => $result['before'], 'after' => $result['after']],
+                    $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                    $request->getHeaderLine('User-Agent'), $supplierId);
+            }
+            return $result['item'];
+        });
+    }
+
+    /**
+     * Vlastní kontace úhrad potvrzené nebo zaúčtované položky (koncept ji nese v úpravě).
+     * Platí pro budoucí úhrady; webové rozhraní, token ji nemění.
+     */
+    public function setPostingOverrides(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        return $this->run($response, function () use ($request, $args) {
+            $id = (int) $args['id'];
+            $body = (array) ($request->getParsedBody() ?? []);
+            $result = $this->service->setPostingOverrides($this->currentSupplierId($request), $id,
+                $body['posting_overrides'] ?? $body, $this->userId($request));
+            $this->log($request, 'other_item.posting_overrides_updated', $id,
+                ['before' => $result['before'], 'after' => $result['after']]);
+            return $result['item'];
+        });
+    }
+
+    /**
+     * Audit změny vlastní kontace úhrad v těle založení či úpravy konceptu.
+     *
+     * @param array<string,mixed> $item
+     * @return array<string,mixed>
+     */
+    private function overridesContext(Request $request, array $item): array
+    {
+        $body = (array) ($request->getParsedBody() ?? []);
+        return array_key_exists('posting_overrides', $body)
+            ? ['posting_overrides' => $item['posting_overrides'] ?? null] : [];
     }
 
     public function delete(Request $request, Response $response, array $args): Response
@@ -148,6 +210,12 @@ final class OtherItemAction
             if ($existing['journal_entry_id'] !== null
                 && !$this->requirePermission($request, $response, 'accounting.journal.post', AccessLevel::WRITE, $err)) {
                 throw new OtherItemException('forbidden', 'Pro storno zaúčtovaného dokladu nemáš oprávnění.', 403);
+            }
+            // Položka ze zůstatku nese předpis v řádku zápisu; storno mění saldokonto stejně
+            // jako zrušení rozpadu zápisu, proto potřebuje i právo zápisu do deníku.
+            if ($existing['journal_entry_id'] === null && $this->service->hasJournalOrigin($supplierId, $id)
+                && !$this->requirePermission($request, $response, 'accounting.journal.write', AccessLevel::WRITE, $err)) {
+                throw new OtherItemException('forbidden', 'Pro storno položky ze zůstatku zápisu nemáš oprávnění.', 403);
             }
             $body = (array) ($request->getParsedBody() ?? []);
             $item = $this->service->reverse($supplierId, $id, (string) ($body['reason'] ?? ''),
@@ -195,6 +263,50 @@ final class OtherItemAction
             return ['items' => $this->service->paymentCandidates(
                 $this->currentSupplierId($request), (int) $args['id'],
                 (string) ($q['q'] ?? ''), (int) ($q['limit'] ?? 20), $canReadBank, $canReadCash)];
+        });
+    }
+
+    /** Otevřené ostatní položky pro dialog „Spárovat" u bankovního pohybu. */
+    public function bankMatchCandidates(Request $request, Response $response): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
+        if (RequestAuthorization::isClientType($request)
+            || !RequestAuthorization::allows($request, 'bank', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $q = $request->getQueryParams();
+        $txId = (int) ($q['bank_transaction_id'] ?? 0);
+        if ($txId <= 0) {
+            return Json::error($response, 'validation_failed', 'Chybí bankovní pohyb.', 422);
+        }
+        $search = is_string($q['q'] ?? null) ? mb_substr(trim($q['q']), 0, 100) : '';
+        return $this->run($response, fn (): array => ['candidates' => $this->bankMatch->candidates(
+            $this->currentSupplierId($request), $txId, $search, (int) ($q['limit'] ?? 25))]);
+    }
+
+    /** Přiřadí bankovní pohyb položce; nezaúčtovaný pohyb zároveň zaúčtuje proti jejímu účtu. */
+    public function matchBankTransaction(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)) return $err;
+        if (RequestAuthorization::isClientType($request) || !$this->canManagePayment($request, 'bank')) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $txId = (int) (((array) ($request->getParsedBody() ?? []))['bank_transaction_id'] ?? 0);
+        if ($txId <= 0) {
+            return Json::error($response, 'validation_failed', 'Chybí bankovní pohyb.', 422);
+        }
+        return $this->run($response, function () use ($request, $args, $txId) {
+            $id = (int) $args['id'];
+            $item = $this->bankMatch->match($this->currentSupplierId($request), $txId, $id,
+                $this->userId($request), $this->auditMeta($request),
+                // Stejná práva jako ruční zaúčtování pohybu (POST /bank-transactions/{id}/post).
+                RequestAuthorization::allows($request, 'bank.post', AccessLevel::WRITE)
+                    && RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE));
+            $this->logger->log('other_item.payment_allocated', $this->userId($request), 'other_item', $id,
+                ['bank_transaction_id' => $txId],
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'), $this->currentSupplierId($request));
+            return $item;
         });
     }
 
@@ -283,9 +395,10 @@ final class OtherItemAction
         }
     }
 
-    private function log(Request $request, string $action, int $id): void
+    /** @param array<string,mixed> $context */
+    private function log(Request $request, string $action, int $id, array $context = []): void
     {
-        $this->logger->log($action, $this->userId($request), 'other_item', $id, [],
+        $this->logger->log($action, $this->userId($request), 'other_item', $id, $context,
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'), $this->currentSupplierId($request));
     }

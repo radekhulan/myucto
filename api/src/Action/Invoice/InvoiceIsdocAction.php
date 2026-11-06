@@ -59,7 +59,7 @@ final class InvoiceIsdocAction
         try {
             $xml = $this->isdoc->buildXml($invoice, persistRate: !DemoReadOnlyMiddleware::enabled($request));
         } catch (\Throwable $e) {
-            return Json::error($response, 'export_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'export_failed', $e->getMessage(), 500);
         }
         try {
             $xml = $this->isdoc->signXml(
@@ -68,7 +68,7 @@ final class InvoiceIsdocAction
                 isset($user['id']) ? (int) $user['id'] : null,
             );
         } catch (\Throwable $e) {
-            return Json::error($response, 'signing_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'signing_failed', $e->getMessage(), 500);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

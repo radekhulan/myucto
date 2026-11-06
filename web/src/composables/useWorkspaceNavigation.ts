@@ -28,6 +28,11 @@ export function useWorkspaceNavigation() {
   }
 
   async function navigate(to: RouteLocationRaw, options?: { fresh?: boolean }): Promise<void> {
+    // Správa instance má vlastní layout mimo pracovní plochu, router panelu ji nezná.
+    if (router.resolve(to).matched.some(record => record.meta.instanceAdminOnly)) {
+      await router.push(to)
+      return
+    }
     const manager = getWindowManager()
     if (options?.fresh && manager) {
       await manager.open(to, workspace.activePaneId, options)

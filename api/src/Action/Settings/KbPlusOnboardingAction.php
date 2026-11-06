@@ -11,7 +11,9 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Bank\Connector\BankConnectorOperationException;
+use MyInvoice\Service\Bank\Connector\BankOAuthCallbackHandler;
 use MyInvoice\Service\Bank\Connector\KbPlusOnboardingService;
+use MyInvoice\Service\OAuth\OAuthCallbackDispatcher;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Log\LoggerInterface;
@@ -24,6 +26,7 @@ final class KbPlusOnboardingAction
         private readonly KbPlusOnboardingService $service,
         private readonly Config $config,
         private readonly LoggerInterface $logger,
+        private readonly OAuthCallbackDispatcher $callbacks,
     ) {}
 
     public function status(Request $request, Response $response, array $args): Response
@@ -106,10 +109,19 @@ final class KbPlusOnboardingAction
         }
     }
 
+    /**
+     * Redirect URI registrovaná u KB při registraci klienta: alias společného callbacku
+     * /api/oauth/callback pro přihlášení KB+. State, který společná vrstva nezná, patří
+     * přihlášení zahájenému před přechodem na ni (bank_oauth_sessions).
+     */
     public function oauthCallback(Request $request, Response $response): Response
     {
         if ($denied = $this->denied($request, $response, AccessLevel::WRITE)) {
             return $denied;
+        }
+        $location = $this->callbacks->dispatch($request, BankOAuthCallbackHandler::DOMAIN, KbPlusOnboardingService::PROVIDER);
+        if ($location !== null) {
+            return $this->redirect($response, $location);
         }
         $query = $request->getQueryParams();
         $state = is_string($query['state'] ?? null) ? $query['state'] : '';
@@ -174,15 +186,7 @@ final class KbPlusOnboardingAction
 
     private function cleanReturn(string $status, ?int $currencyId, ?string $errorCode = null): string
     {
-        $query = ['tab' => 'accounts', 'kb_plus' => $status];
-        if ($currencyId !== null && $currencyId > 0) {
-            $query['currency_id'] = $currencyId;
-        }
-        if ($errorCode !== null && preg_match('/^[a-z0-9_]{1,80}$/D', $errorCode)) {
-            $query['code'] = $errorCode;
-        }
-        $base = $this->baseUrl();
-        return ($base === '' ? '' : $base) . '/bank?' . http_build_query($query, '', '&', PHP_QUERY_RFC3986);
+        return BankOAuthCallbackHandler::kbPlusLocation(BankOAuthCallbackHandler::appBaseUrl($this->config), $status, $currencyId, $errorCode);
     }
 
     private function assertBankRedirect(string $url): void
@@ -199,19 +203,6 @@ final class KbPlusOnboardingAction
         ) {
             throw new BankConnectorOperationException('kb_plus_redirect_invalid');
         }
-    }
-
-    private function baseUrl(): string
-    {
-        $base = rtrim((string) $this->config->get('app.url', ''), '/');
-        $parts = parse_url($base);
-        if (($parts['scheme'] ?? null) !== 'https' || !isset($parts['host'])
-            || isset($parts['query']) || isset($parts['fragment']) || isset($parts['user']) || isset($parts['pass'])
-            || (isset($parts['path']) && $parts['path'] !== '' && $parts['path'] !== '/')
-        ) {
-            return '';
-        }
-        return $base;
     }
 
     private function redirect(Response $response, string $location): Response

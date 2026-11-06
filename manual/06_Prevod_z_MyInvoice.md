@@ -145,7 +145,7 @@ U více firem provádějte následující účetní kroky samostatně pro každ�
 > dokumenty a DPH. Účetnictví (ani daňová evidence) se samo nezapíná, jinak byste
 > hned po převodu měli v menu desítky stránek nad prázdnými tabulkami. Zapíná se
 > přepínačem **Vést účetnictví** v `Firma → Nastavení` na záložce **Daně a účetnictví**.
-> Je to licencovaný modul (viz [105. Licence a aktivace](105_Licence_a_aktivace.md)),
+> Je to licencovaný modul (viz [104. Licence a aktivace](104_Licence_a_aktivace.md)),
 > na nové instalaci ale prvních 60 dní zdarma.
 
 Právnická osoba (s.r.o., a.s.) zůstává po převodu v daňové evidenci, dokud
@@ -367,5 +367,5 @@ Návratové kódy `MyInvoiceMigrate.php`:
 
 - [Po instalaci a CLI nástroje](05_Po_instalaci.md)
 - [Instalace Docker](03_Instalace_Docker.md)
-- [Licence a aktivace](105_Licence_a_aktivace.md)
+- [Licence a aktivace](104_Licence_a_aktivace.md)
 - [Aktualizace](102_Aktualizace.md)

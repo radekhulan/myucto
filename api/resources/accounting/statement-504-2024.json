@@ -1,0 +1,1362 @@
+{
+  "version_code": "vyhl504-2002/2016",
+  "valid_from": "2024-01-01",
+  "sources": [
+    "https://adisspr.mfcr.cz/dpr/adis/idpr_pub/hlib/uv_info/info_detail.faces?platnost=2025&tabulka=18810",
+    "https://adisspr.mfcr.cz/dpr/adis/idpr_pub/hlib/uv_info/info_detail.faces?platnost=2025&tabulka=19810",
+    "https://adisspr.mfcr.cz/dpr/adis/idpr_pub/hlib/uv_info/info_detail.faces?platnost=2025&tabulka=27810"
+  ],
+  "rows": [
+    {
+      "sentence": "UR",
+      "number": 1,
+      "display_code": "A.",
+      "reduced": true,
+      "label": "Dlouhodobý majetek celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 2,
+      "display_code": "A.I.",
+      "reduced": true,
+      "label": "Dlouhodobý nehmotný majetek celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 3,
+      "display_code": "A.I.1.",
+      "reduced": false,
+      "label": "Nehmotné výsledky výzkumu a vývoje"
+    },
+    {
+      "sentence": "UR",
+      "number": 4,
+      "display_code": "A.I.2.",
+      "reduced": false,
+      "label": "Software"
+    },
+    {
+      "sentence": "UR",
+      "number": 5,
+      "display_code": "A.I.3.",
+      "reduced": false,
+      "label": "Ocenitelná práva"
+    },
+    {
+      "sentence": "UR",
+      "number": 6,
+      "display_code": "A.I.4.",
+      "reduced": false,
+      "label": "Drobný dlouhodobý nehmotný majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 7,
+      "display_code": "A.I.5.",
+      "reduced": false,
+      "label": "Ostatní dlouhodobý nehmotný majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 8,
+      "display_code": "A.I.6.",
+      "reduced": false,
+      "label": "Nedokončený dlouhodobý nehmotný majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 9,
+      "display_code": "A.I.7.",
+      "reduced": false,
+      "label": "Poskytnuté zálohy na dlouhodobý nehmotný majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 10,
+      "display_code": "A.II.",
+      "reduced": true,
+      "label": "Dlouhodobý hmotný majetek celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 11,
+      "display_code": "A.II.1.",
+      "reduced": false,
+      "label": "Pozemky"
+    },
+    {
+      "sentence": "UR",
+      "number": 12,
+      "display_code": "A.II.2.",
+      "reduced": false,
+      "label": "Umělecká díla, předměty a sbírky"
+    },
+    {
+      "sentence": "UR",
+      "number": 13,
+      "display_code": "A.II.3.",
+      "reduced": false,
+      "label": "Stavby"
+    },
+    {
+      "sentence": "UR",
+      "number": 14,
+      "display_code": "A.II.4.",
+      "reduced": false,
+      "label": "Hmotné movité věci a jejich soubory"
+    },
+    {
+      "sentence": "UR",
+      "number": 15,
+      "display_code": "A.II.5.",
+      "reduced": false,
+      "label": "Pěstitelské celky trvalých porostů"
+    },
+    {
+      "sentence": "UR",
+      "number": 16,
+      "display_code": "A.II.6.",
+      "reduced": false,
+      "label": "Dospělá zvířata a jejich skupiny"
+    },
+    {
+      "sentence": "UR",
+      "number": 17,
+      "display_code": "A.II.7.",
+      "reduced": false,
+      "label": "Drobný dlouhodobý hmotný majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 18,
+      "display_code": "A.II.8.",
+      "reduced": false,
+      "label": "Ostatní dlouhodobý hmotný majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 19,
+      "display_code": "A.II.9.",
+      "reduced": false,
+      "label": "Nedokončený dlouhodobý hmotný majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 20,
+      "display_code": "A.II.10.",
+      "reduced": false,
+      "label": "Poskytnuté zálohy na dlouhodobý hmotný majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 21,
+      "display_code": "A.III.",
+      "reduced": true,
+      "label": "Dlouhodobý finanční majetek celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 22,
+      "display_code": "A.III.1.",
+      "reduced": false,
+      "label": "Podíly - ovládaná nebo ovládající osoba"
+    },
+    {
+      "sentence": "UR",
+      "number": 23,
+      "display_code": "A.III.2.",
+      "reduced": false,
+      "label": "Podíly - podstatný vliv"
+    },
+    {
+      "sentence": "UR",
+      "number": 24,
+      "display_code": "A.III.3.",
+      "reduced": false,
+      "label": "Dluhové cenné papíry držené do splatnosti"
+    },
+    {
+      "sentence": "UR",
+      "number": 25,
+      "display_code": "A.III.4.",
+      "reduced": false,
+      "label": "Zápůjčky organizačním složkám"
+    },
+    {
+      "sentence": "UR",
+      "number": 26,
+      "display_code": "A.III.5.",
+      "reduced": false,
+      "label": "Ostatní dlouhodobé zápůjčky"
+    },
+    {
+      "sentence": "UR",
+      "number": 27,
+      "display_code": "A.III.6.",
+      "reduced": false,
+      "label": "Ostatní dlouhodobý finanční majetek"
+    },
+    {
+      "sentence": "UR",
+      "number": 29,
+      "display_code": "A.IV.",
+      "reduced": true,
+      "label": "Oprávky k dlouhodobému majetku celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 30,
+      "display_code": "A.IV.1.",
+      "reduced": false,
+      "label": "Oprávky k nehmotným výsledkům výzkumu a vývoje"
+    },
+    {
+      "sentence": "UR",
+      "number": 31,
+      "display_code": "A.IV.2.",
+      "reduced": false,
+      "label": "Oprávky k softwaru"
+    },
+    {
+      "sentence": "UR",
+      "number": 32,
+      "display_code": "A.IV.3.",
+      "reduced": false,
+      "label": "Oprávky k ocenitelným právům"
+    },
+    {
+      "sentence": "UR",
+      "number": 33,
+      "display_code": "A.IV.4.",
+      "reduced": false,
+      "label": "Oprávky k drobnému dlouhodobému nehmotnému majetku"
+    },
+    {
+      "sentence": "UR",
+      "number": 34,
+      "display_code": "A.IV.5.",
+      "reduced": false,
+      "label": "Oprávky k ostatnímu dlouhodobému nehmotnému majetku"
+    },
+    {
+      "sentence": "UR",
+      "number": 35,
+      "display_code": "A.IV.6.",
+      "reduced": false,
+      "label": "Oprávky ke stavbám"
+    },
+    {
+      "sentence": "UR",
+      "number": 36,
+      "display_code": "A.IV.7.",
+      "reduced": false,
+      "label": "Oprávky k samostatným hmotným movitým věcem a souborům hmotných movitých věcí"
+    },
+    {
+      "sentence": "UR",
+      "number": 37,
+      "display_code": "A.IV.8.",
+      "reduced": false,
+      "label": "Oprávky k pěstitelským celkům trvalých porostů"
+    },
+    {
+      "sentence": "UR",
+      "number": 38,
+      "display_code": "A.IV.9.",
+      "reduced": false,
+      "label": "Oprávky k základnímu stádu a tažným zvířatům"
+    },
+    {
+      "sentence": "UR",
+      "number": 39,
+      "display_code": "A.IV.10.",
+      "reduced": false,
+      "label": "Oprávky k drobnému dlouhodobému hmotnému majetku"
+    },
+    {
+      "sentence": "UR",
+      "number": 40,
+      "display_code": "A.IV.11.",
+      "reduced": false,
+      "label": "Oprávky k ostatnímu dlouhodobému hmotnému majetku"
+    },
+    {
+      "sentence": "UR",
+      "number": 41,
+      "display_code": "B.",
+      "reduced": true,
+      "label": "Krátkodobý majetek celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 42,
+      "display_code": "B.I.",
+      "reduced": true,
+      "label": "Zásoby celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 43,
+      "display_code": "B.I.1.",
+      "reduced": false,
+      "label": "Materiál na skladě"
+    },
+    {
+      "sentence": "UR",
+      "number": 44,
+      "display_code": "B.I.2.",
+      "reduced": false,
+      "label": "Materiál na cestě"
+    },
+    {
+      "sentence": "UR",
+      "number": 45,
+      "display_code": "B.I.3.",
+      "reduced": false,
+      "label": "Nedokončená výroba"
+    },
+    {
+      "sentence": "UR",
+      "number": 46,
+      "display_code": "B.I.4.",
+      "reduced": false,
+      "label": "Polotovary vlastní výroby"
+    },
+    {
+      "sentence": "UR",
+      "number": 47,
+      "display_code": "B.I.5.",
+      "reduced": false,
+      "label": "Výrobky"
+    },
+    {
+      "sentence": "UR",
+      "number": 48,
+      "display_code": "B.I.6.",
+      "reduced": false,
+      "label": "Mladá a ostatní zvířata a jejich skupiny"
+    },
+    {
+      "sentence": "UR",
+      "number": 49,
+      "display_code": "B.I.7.",
+      "reduced": false,
+      "label": "Zboží na skladě a v prodejnách"
+    },
+    {
+      "sentence": "UR",
+      "number": 50,
+      "display_code": "B.I.8.",
+      "reduced": false,
+      "label": "Zboží na cestě"
+    },
+    {
+      "sentence": "UR",
+      "number": 51,
+      "display_code": "B.I.9.",
+      "reduced": false,
+      "label": "Poskytnuté zálohy na zásoby"
+    },
+    {
+      "sentence": "UR",
+      "number": 52,
+      "display_code": "B.II.",
+      "reduced": true,
+      "label": "Pohledávky celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 53,
+      "display_code": "B.II.1.",
+      "reduced": false,
+      "label": "Odběratelé"
+    },
+    {
+      "sentence": "UR",
+      "number": 54,
+      "display_code": "B.II.2.",
+      "reduced": false,
+      "label": "Směnky k inkasu"
+    },
+    {
+      "sentence": "UR",
+      "number": 55,
+      "display_code": "B.II.3.",
+      "reduced": false,
+      "label": "Pohledávky za eskontované cenné papíry"
+    },
+    {
+      "sentence": "UR",
+      "number": 56,
+      "display_code": "B.II.4.",
+      "reduced": false,
+      "label": "Poskytnuté provozní zálohy"
+    },
+    {
+      "sentence": "UR",
+      "number": 57,
+      "display_code": "B.II.5.",
+      "reduced": false,
+      "label": "Ostatní pohledávky"
+    },
+    {
+      "sentence": "UR",
+      "number": 58,
+      "display_code": "B.II.6.",
+      "reduced": false,
+      "label": "Pohledávky za zaměstnanci"
+    },
+    {
+      "sentence": "UR",
+      "number": 59,
+      "display_code": "B.II.7.",
+      "reduced": false,
+      "label": "Pohledávky za institucemi sociálního zabezpečení a veřejného zdravotního pojištění"
+    },
+    {
+      "sentence": "UR",
+      "number": 60,
+      "display_code": "B.II.8.",
+      "reduced": false,
+      "label": "Daň z příjmů"
+    },
+    {
+      "sentence": "UR",
+      "number": 61,
+      "display_code": "B.II.9.",
+      "reduced": false,
+      "label": "Ostatní přímé daně"
+    },
+    {
+      "sentence": "UR",
+      "number": 62,
+      "display_code": "B.II.10.",
+      "reduced": false,
+      "label": "Daň z přidané hodnoty"
+    },
+    {
+      "sentence": "UR",
+      "number": 63,
+      "display_code": "B.II.11.",
+      "reduced": false,
+      "label": "Ostatní daně a poplatky"
+    },
+    {
+      "sentence": "UR",
+      "number": 64,
+      "display_code": "B.II.12.",
+      "reduced": false,
+      "label": "Nároky na dotace a ostatní zúčtování se státním rozpočtem"
+    },
+    {
+      "sentence": "UR",
+      "number": 65,
+      "display_code": "B.II.13.",
+      "reduced": false,
+      "label": "Nároky na dotace a ostatní zúčtování s rozpočtem orgánů územních samosprávných celků"
+    },
+    {
+      "sentence": "UR",
+      "number": 66,
+      "display_code": "B.II.14.",
+      "reduced": false,
+      "label": "Pohledávky za společníky sdruženými ve společnosti"
+    },
+    {
+      "sentence": "UR",
+      "number": 67,
+      "display_code": "B.II.15.",
+      "reduced": false,
+      "label": "Pohledávky z pevných termínovaných operací a opcí"
+    },
+    {
+      "sentence": "UR",
+      "number": 68,
+      "display_code": "B.II.16.",
+      "reduced": false,
+      "label": "Pohledávky z vydaných dluhopisů"
+    },
+    {
+      "sentence": "UR",
+      "number": 69,
+      "display_code": "B.II.17.",
+      "reduced": false,
+      "label": "Jiné pohledávky"
+    },
+    {
+      "sentence": "UR",
+      "number": 70,
+      "display_code": "B.II.18.",
+      "reduced": false,
+      "label": "Dohadné účty aktivní"
+    },
+    {
+      "sentence": "UR",
+      "number": 71,
+      "display_code": "B.II.19.",
+      "reduced": false,
+      "label": "Opravná položka k pohledávkám"
+    },
+    {
+      "sentence": "UR",
+      "number": 72,
+      "display_code": "B.III.",
+      "reduced": true,
+      "label": "Krátkodobý finanční majetek celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 73,
+      "display_code": "B.III.1.",
+      "reduced": false,
+      "label": "Peněžní prostředky v pokladně"
+    },
+    {
+      "sentence": "UR",
+      "number": 74,
+      "display_code": "B.III.2.",
+      "reduced": false,
+      "label": "Ceniny"
+    },
+    {
+      "sentence": "UR",
+      "number": 75,
+      "display_code": "B.III.3.",
+      "reduced": false,
+      "label": "Peněžní prostředky na účtech"
+    },
+    {
+      "sentence": "UR",
+      "number": 76,
+      "display_code": "B.III.4.",
+      "reduced": false,
+      "label": "Majetkové cenné papíry k obchodování"
+    },
+    {
+      "sentence": "UR",
+      "number": 77,
+      "display_code": "B.III.5.",
+      "reduced": false,
+      "label": "Dluhové cenné papíry k obchodování"
+    },
+    {
+      "sentence": "UR",
+      "number": 78,
+      "display_code": "B.III.6.",
+      "reduced": false,
+      "label": "Ostatní cenné papíry"
+    },
+    {
+      "sentence": "UR",
+      "number": 80,
+      "display_code": "B.III.7.",
+      "reduced": false,
+      "label": "Peníze na cestě"
+    },
+    {
+      "sentence": "UR",
+      "number": 81,
+      "display_code": "B.IV.",
+      "reduced": true,
+      "label": "Jiná aktiva celkem"
+    },
+    {
+      "sentence": "UR",
+      "number": 82,
+      "display_code": "B.IV.1",
+      "reduced": false,
+      "label": "Náklady příštích období"
+    },
+    {
+      "sentence": "UR",
+      "number": 83,
+      "display_code": "B.IV.2.",
+      "reduced": false,
+      "label": "Příjmy příštích období"
+    },
+    {
+      "sentence": "UR",
+      "number": 85,
+      "display_code": "",
+      "reduced": true,
+      "label": "Aktiva celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 1,
+      "display_code": "A.",
+      "reduced": true,
+      "label": "Vlastní zdroje celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 2,
+      "display_code": "A.I.",
+      "reduced": true,
+      "label": "Jmění celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 3,
+      "display_code": "A.I.1.",
+      "reduced": false,
+      "label": "Vlastní jmění"
+    },
+    {
+      "sentence": "US",
+      "number": 4,
+      "display_code": "A.I.2.",
+      "reduced": false,
+      "label": "Fondy"
+    },
+    {
+      "sentence": "US",
+      "number": 5,
+      "display_code": "A.I.3.",
+      "reduced": false,
+      "label": "Oceňovací rozdíly z přecenění finančního majetku a závazků"
+    },
+    {
+      "sentence": "US",
+      "number": 6,
+      "display_code": "A.II.",
+      "reduced": true,
+      "label": "Výsledek hospodaření celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 7,
+      "display_code": "A.II.1.",
+      "reduced": false,
+      "label": "Účet výsledku hospodaření"
+    },
+    {
+      "sentence": "US",
+      "number": 8,
+      "display_code": "A.II.2.",
+      "reduced": false,
+      "label": "Výsledek hospodaření ve schvalovacím řízení"
+    },
+    {
+      "sentence": "US",
+      "number": 9,
+      "display_code": "A.II.3.",
+      "reduced": false,
+      "label": "Nerozdělený zisk, neuhrazená ztráta minulých let"
+    },
+    {
+      "sentence": "US",
+      "number": 10,
+      "display_code": "B.",
+      "reduced": true,
+      "label": "Cizí zdroje celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 11,
+      "display_code": "B.I.",
+      "reduced": true,
+      "label": "Rezervy celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 12,
+      "display_code": "B.I.1.",
+      "reduced": false,
+      "label": "Rezervy"
+    },
+    {
+      "sentence": "US",
+      "number": 13,
+      "display_code": "B.II.",
+      "reduced": true,
+      "label": "Dlouhodobé závazky celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 14,
+      "display_code": "B.II.1.",
+      "reduced": false,
+      "label": "Dlouhodobé úvěry"
+    },
+    {
+      "sentence": "US",
+      "number": 15,
+      "display_code": "B.II.2.",
+      "reduced": false,
+      "label": "Vydané dluhopisy"
+    },
+    {
+      "sentence": "US",
+      "number": 16,
+      "display_code": "B.II.3.",
+      "reduced": false,
+      "label": "Závazky z pronájmu"
+    },
+    {
+      "sentence": "US",
+      "number": 17,
+      "display_code": "B.II.4.",
+      "reduced": false,
+      "label": "Přijaté dlouhodobé zálohy"
+    },
+    {
+      "sentence": "US",
+      "number": 18,
+      "display_code": "B.II.5.",
+      "reduced": false,
+      "label": "Dlouhodobé směnky k úhradě"
+    },
+    {
+      "sentence": "US",
+      "number": 19,
+      "display_code": "B.II.6.",
+      "reduced": false,
+      "label": "Dohadné účty pasivní"
+    },
+    {
+      "sentence": "US",
+      "number": 20,
+      "display_code": "B.II.7.",
+      "reduced": false,
+      "label": "Ostatní dlouhodobé závazky"
+    },
+    {
+      "sentence": "US",
+      "number": 21,
+      "display_code": "B.III.",
+      "reduced": true,
+      "label": "Krátkodobé závazky celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 22,
+      "display_code": "B.III.1.",
+      "reduced": false,
+      "label": "Dodavatelé"
+    },
+    {
+      "sentence": "US",
+      "number": 23,
+      "display_code": "B.III.2.",
+      "reduced": false,
+      "label": "Směnky k úhradě"
+    },
+    {
+      "sentence": "US",
+      "number": 24,
+      "display_code": "B.III.3.",
+      "reduced": false,
+      "label": "Přijaté zálohy"
+    },
+    {
+      "sentence": "US",
+      "number": 25,
+      "display_code": "B.III.4.",
+      "reduced": false,
+      "label": "Ostatní závazky"
+    },
+    {
+      "sentence": "US",
+      "number": 26,
+      "display_code": "B.III.5.",
+      "reduced": false,
+      "label": "Zaměstnanci"
+    },
+    {
+      "sentence": "US",
+      "number": 27,
+      "display_code": "B.III.6.",
+      "reduced": false,
+      "label": "Ostatní závazky vůči zaměstnancům"
+    },
+    {
+      "sentence": "US",
+      "number": 28,
+      "display_code": "B.III.7.",
+      "reduced": false,
+      "label": "Závazky k institucím sociálního zabezpečení a veřejného zdravotního pojištění"
+    },
+    {
+      "sentence": "US",
+      "number": 29,
+      "display_code": "B.III.8.",
+      "reduced": false,
+      "label": "Daň z příjmů"
+    },
+    {
+      "sentence": "US",
+      "number": 30,
+      "display_code": "B.III.9.",
+      "reduced": false,
+      "label": "Ostatní přímé daně"
+    },
+    {
+      "sentence": "US",
+      "number": 31,
+      "display_code": "B.III.10.",
+      "reduced": false,
+      "label": "Daň z přidané hodnoty"
+    },
+    {
+      "sentence": "US",
+      "number": 32,
+      "display_code": "B.III.11.",
+      "reduced": false,
+      "label": "Ostatní daně a poplatky"
+    },
+    {
+      "sentence": "US",
+      "number": 33,
+      "display_code": "B.III.12.",
+      "reduced": false,
+      "label": "Závazky ze vztahu k státnímu rozpočtu"
+    },
+    {
+      "sentence": "US",
+      "number": 34,
+      "display_code": "B.III.13.",
+      "reduced": false,
+      "label": "Závazky ze vztahu k rozpočtu orgánů územních samosprávných celků"
+    },
+    {
+      "sentence": "US",
+      "number": 35,
+      "display_code": "B.III.14.",
+      "reduced": false,
+      "label": "Závazky z upsaných nesplacených cenných papírů a podílů"
+    },
+    {
+      "sentence": "US",
+      "number": 36,
+      "display_code": "B.III.15.",
+      "reduced": false,
+      "label": "Závazky ke společníkům sdruženým ve společnosti"
+    },
+    {
+      "sentence": "US",
+      "number": 37,
+      "display_code": "B.III.16.",
+      "reduced": false,
+      "label": "Závazky z pevných termínovaných operací a opcí"
+    },
+    {
+      "sentence": "US",
+      "number": 38,
+      "display_code": "B.III.17.",
+      "reduced": false,
+      "label": "Jiné závazky"
+    },
+    {
+      "sentence": "US",
+      "number": 39,
+      "display_code": "B.III.18.",
+      "reduced": false,
+      "label": "Krátkodobé úvěry"
+    },
+    {
+      "sentence": "US",
+      "number": 40,
+      "display_code": "B.III.19.",
+      "reduced": false,
+      "label": "Eskontní úvěry"
+    },
+    {
+      "sentence": "US",
+      "number": 41,
+      "display_code": "B.III.20.",
+      "reduced": false,
+      "label": "Vydané krátkodobé dluhopisy"
+    },
+    {
+      "sentence": "US",
+      "number": 42,
+      "display_code": "B.III.21.",
+      "reduced": false,
+      "label": "Vlastní dluhopisy"
+    },
+    {
+      "sentence": "US",
+      "number": 43,
+      "display_code": "B.III.22.",
+      "reduced": false,
+      "label": "Dohadné účty pasivní"
+    },
+    {
+      "sentence": "US",
+      "number": 44,
+      "display_code": "B.III.23.",
+      "reduced": false,
+      "label": "Ostatní krátkodobé finanční výpomoci"
+    },
+    {
+      "sentence": "US",
+      "number": 45,
+      "display_code": "B.IV.",
+      "reduced": true,
+      "label": "Jiná pasiva celkem"
+    },
+    {
+      "sentence": "US",
+      "number": 46,
+      "display_code": "B.IV.1.",
+      "reduced": false,
+      "label": "Výdaje příštích období"
+    },
+    {
+      "sentence": "US",
+      "number": 47,
+      "display_code": "B.IV.2.",
+      "reduced": false,
+      "label": "Výnosy příštích období"
+    },
+    {
+      "sentence": "US",
+      "number": 49,
+      "display_code": "",
+      "reduced": true,
+      "label": "PASIVA CELKEM"
+    },
+    {
+      "sentence": "UT",
+      "number": 1,
+      "display_code": "A.",
+      "reduced": true,
+      "label": "Náklady"
+    },
+    {
+      "sentence": "UT",
+      "number": 2,
+      "display_code": "A.I.",
+      "reduced": true,
+      "label": "Spotřebované nákupy a nakupované služby"
+    },
+    {
+      "sentence": "UT",
+      "number": 3,
+      "display_code": "A.I.1.",
+      "reduced": false,
+      "label": "Spotřeba materiálu, energie a ostatních neskladovaných dodávek"
+    },
+    {
+      "sentence": "UT",
+      "number": 4,
+      "display_code": "A.I.2.",
+      "reduced": false,
+      "label": "Prodané zboží"
+    },
+    {
+      "sentence": "UT",
+      "number": 5,
+      "display_code": "A.I.3.",
+      "reduced": false,
+      "label": "Opravy a udržování"
+    },
+    {
+      "sentence": "UT",
+      "number": 6,
+      "display_code": "A.I.4.",
+      "reduced": false,
+      "label": "Náklady na cestovné"
+    },
+    {
+      "sentence": "UT",
+      "number": 7,
+      "display_code": "A.I.5.",
+      "reduced": false,
+      "label": "Náklady na reprezentaci"
+    },
+    {
+      "sentence": "UT",
+      "number": 8,
+      "display_code": "A.I.6.",
+      "reduced": false,
+      "label": "Ostatní služby"
+    },
+    {
+      "sentence": "UT",
+      "number": 9,
+      "display_code": "A.II.",
+      "reduced": true,
+      "label": "Změna stavu zásob vlastní činnosti a aktivace"
+    },
+    {
+      "sentence": "UT",
+      "number": 10,
+      "display_code": "A.II.7.",
+      "reduced": false,
+      "label": "Změna stavu zásob vlastní činnosti"
+    },
+    {
+      "sentence": "UT",
+      "number": 11,
+      "display_code": "A.II.8.",
+      "reduced": false,
+      "label": "Aktivace materiálu, zboží a vnitroorganizačních služeb"
+    },
+    {
+      "sentence": "UT",
+      "number": 12,
+      "display_code": "A.II.9.",
+      "reduced": false,
+      "label": "Aktivace dlouhodobého majetku"
+    },
+    {
+      "sentence": "UT",
+      "number": 13,
+      "display_code": "A.III.",
+      "reduced": true,
+      "label": "Osobní náklady"
+    },
+    {
+      "sentence": "UT",
+      "number": 14,
+      "display_code": "A.III.10.",
+      "reduced": false,
+      "label": "Mzdové náklady"
+    },
+    {
+      "sentence": "UT",
+      "number": 15,
+      "display_code": "A.III.11.",
+      "reduced": false,
+      "label": "Zákonné sociální pojištění"
+    },
+    {
+      "sentence": "UT",
+      "number": 16,
+      "display_code": "A.III.12.",
+      "reduced": false,
+      "label": "Ostatní sociální pojištění"
+    },
+    {
+      "sentence": "UT",
+      "number": 17,
+      "display_code": "A.III.13.",
+      "reduced": false,
+      "label": "Zákonné sociální náklady"
+    },
+    {
+      "sentence": "UT",
+      "number": 18,
+      "display_code": "A.III.14",
+      "reduced": false,
+      "label": "Ostatní sociální náklady"
+    },
+    {
+      "sentence": "UT",
+      "number": 19,
+      "display_code": "A.IV.",
+      "reduced": true,
+      "label": "Daně a poplatky"
+    },
+    {
+      "sentence": "UT",
+      "number": 20,
+      "display_code": "A.IV.15.",
+      "reduced": false,
+      "label": "Daně a poplatky"
+    },
+    {
+      "sentence": "UT",
+      "number": 21,
+      "display_code": "A.V.",
+      "reduced": true,
+      "label": "Ostatní náklady"
+    },
+    {
+      "sentence": "UT",
+      "number": 22,
+      "display_code": "A.V.16.",
+      "reduced": false,
+      "label": "Smluvní pokuty, úroky z prodlení, ostatní pokuty a penále"
+    },
+    {
+      "sentence": "UT",
+      "number": 23,
+      "display_code": "A.V.17",
+      "reduced": false,
+      "label": "Odpis nedobytné pohledávky"
+    },
+    {
+      "sentence": "UT",
+      "number": 24,
+      "display_code": "A.V.18.",
+      "reduced": false,
+      "label": "Nákladové úroky"
+    },
+    {
+      "sentence": "UT",
+      "number": 25,
+      "display_code": "A.V.19.",
+      "reduced": false,
+      "label": "Kursové ztráty"
+    },
+    {
+      "sentence": "UT",
+      "number": 26,
+      "display_code": "A.V.20.",
+      "reduced": false,
+      "label": "Dary"
+    },
+    {
+      "sentence": "UT",
+      "number": 27,
+      "display_code": "A.V.21.",
+      "reduced": false,
+      "label": "Manka a škody"
+    },
+    {
+      "sentence": "UT",
+      "number": 28,
+      "display_code": "A.V.22.",
+      "reduced": false,
+      "label": "Jiné ostatní náklady"
+    },
+    {
+      "sentence": "UT",
+      "number": 29,
+      "display_code": "A.VI.",
+      "reduced": true,
+      "label": "Odpisy, prodaný majetek, tvorba a použití rezerv a opravných položek"
+    },
+    {
+      "sentence": "UT",
+      "number": 30,
+      "display_code": "A.VI.23.",
+      "reduced": false,
+      "label": "Odpisy dlouhodobého majetku"
+    },
+    {
+      "sentence": "UT",
+      "number": 31,
+      "display_code": "A.VI.24.",
+      "reduced": false,
+      "label": "Prodaný dlouhodobý majetek"
+    },
+    {
+      "sentence": "UT",
+      "number": 32,
+      "display_code": "A.VI.25.",
+      "reduced": false,
+      "label": "Prodané cenné papíry a podíly"
+    },
+    {
+      "sentence": "UT",
+      "number": 33,
+      "display_code": "A.VI.26.",
+      "reduced": false,
+      "label": "Prodaný materiál"
+    },
+    {
+      "sentence": "UT",
+      "number": 34,
+      "display_code": "A.VI.27.",
+      "reduced": false,
+      "label": "Tvorba a použití rezerv a opravných položek"
+    },
+    {
+      "sentence": "UT",
+      "number": 35,
+      "display_code": "A.VII.",
+      "reduced": true,
+      "label": "Poskytnuté příspěvky"
+    },
+    {
+      "sentence": "UT",
+      "number": 36,
+      "display_code": "A.VII.28.",
+      "reduced": false,
+      "label": "Poskytnuté členské příspěvky a příspěvky zúčtované mezi organizačními složkami"
+    },
+    {
+      "sentence": "UT",
+      "number": 37,
+      "display_code": "A.VIII.",
+      "reduced": true,
+      "label": "Daň z příjmů"
+    },
+    {
+      "sentence": "UT",
+      "number": 38,
+      "display_code": "A.VIII.29",
+      "reduced": false,
+      "label": "Daň z příjmů"
+    },
+    {
+      "sentence": "UT",
+      "number": 39,
+      "display_code": "",
+      "reduced": true,
+      "label": "Náklady celkem"
+    },
+    {
+      "sentence": "UT",
+      "number": 40,
+      "display_code": "B.",
+      "reduced": true,
+      "label": "Výnosy"
+    },
+    {
+      "sentence": "UT",
+      "number": 41,
+      "display_code": "B.I.",
+      "reduced": true,
+      "label": "Provozní dotace"
+    },
+    {
+      "sentence": "UT",
+      "number": 42,
+      "display_code": "B.I.1.",
+      "reduced": false,
+      "label": "Provozní dotace"
+    },
+    {
+      "sentence": "UT",
+      "number": 43,
+      "display_code": "B.II.",
+      "reduced": true,
+      "label": "Přijaté příspěvky"
+    },
+    {
+      "sentence": "UT",
+      "number": 44,
+      "display_code": "B.II.2.",
+      "reduced": false,
+      "label": "Přijaté příspěvky zúčtované mezi organizačními složkami"
+    },
+    {
+      "sentence": "UT",
+      "number": 45,
+      "display_code": "B.II.3.",
+      "reduced": false,
+      "label": "Přijaté příspěvky (dary)"
+    },
+    {
+      "sentence": "UT",
+      "number": 46,
+      "display_code": "B.II.4.",
+      "reduced": false,
+      "label": "Přijaté členské příspěvky"
+    },
+    {
+      "sentence": "UT",
+      "number": 47,
+      "display_code": "B.III.",
+      "reduced": true,
+      "label": "Tržby za vlastní výkony a za zboží"
+    },
+    {
+      "sentence": "UT",
+      "number": 48,
+      "display_code": "B.IV.",
+      "reduced": true,
+      "label": "Ostatní výnosy"
+    },
+    {
+      "sentence": "UT",
+      "number": 49,
+      "display_code": "B.IV.5.",
+      "reduced": false,
+      "label": "Smluvní pokuty, úroky z prodlení, ostatní pokuty a penále"
+    },
+    {
+      "sentence": "UT",
+      "number": 50,
+      "display_code": "B.IV.6.",
+      "reduced": false,
+      "label": "Platby za odepsané pohledávky"
+    },
+    {
+      "sentence": "UT",
+      "number": 51,
+      "display_code": "B.IV.7.",
+      "reduced": false,
+      "label": "Výnosové úroky"
+    },
+    {
+      "sentence": "UT",
+      "number": 52,
+      "display_code": "B.IV.8.",
+      "reduced": false,
+      "label": "Kursové zisky"
+    },
+    {
+      "sentence": "UT",
+      "number": 53,
+      "display_code": "B.IV.9.",
+      "reduced": false,
+      "label": "Zúčtování fondů"
+    },
+    {
+      "sentence": "UT",
+      "number": 54,
+      "display_code": "B.IV.10.",
+      "reduced": false,
+      "label": "Jiné ostatní výnosy"
+    },
+    {
+      "sentence": "UT",
+      "number": 55,
+      "display_code": "B.V.",
+      "reduced": true,
+      "label": "Tržby z prodeje majetku"
+    },
+    {
+      "sentence": "UT",
+      "number": 56,
+      "display_code": "B.V.11.",
+      "reduced": false,
+      "label": "Tržby z prodeje dlouhodobého nehmotného a hmotného majetku"
+    },
+    {
+      "sentence": "UT",
+      "number": 57,
+      "display_code": "B.V.12.",
+      "reduced": false,
+      "label": "Tržby z prodeje cenných papírů a podílů"
+    },
+    {
+      "sentence": "UT",
+      "number": 58,
+      "display_code": "B.V.13.",
+      "reduced": false,
+      "label": "Tržby z prodeje materiálu"
+    },
+    {
+      "sentence": "UT",
+      "number": 59,
+      "display_code": "B.V.14.",
+      "reduced": false,
+      "label": "Výnosy z krátkodobého finančního majetku"
+    },
+    {
+      "sentence": "UT",
+      "number": 60,
+      "display_code": "B.V.15.",
+      "reduced": false,
+      "label": "Výnosy z dlouhodobého finančního majetku"
+    },
+    {
+      "sentence": "UT",
+      "number": 61,
+      "display_code": "",
+      "reduced": true,
+      "label": "Výnosy celkem"
+    },
+    {
+      "sentence": "UT",
+      "number": 62,
+      "display_code": "C.",
+      "reduced": true,
+      "label": "Výsledek hospodaření před zdaněním"
+    },
+    {
+      "sentence": "UT",
+      "number": 63,
+      "display_code": "D.",
+      "reduced": true,
+      "label": "Výsledek hospodaření po zdanění"
+    }
+  ]
+}

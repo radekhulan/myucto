@@ -32,8 +32,20 @@ test('shared manifest persists the audited client surface and legacy aliases', (
   //
   // 42 → 44: bank-statements a bank-detail (#160). Čtení banky je pro klienta
   // volitelné; obě routy i jejich API vyžadují přidělené bankovní oprávnění.
-  assert.equal(manifest.routes.length, 58)
-  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 58)
+  // Současně zahrnuje klientská podání i vlastní MCP připojení.
+  // Šablony účtování výkazů sdílejí oprávnění Ceníku i na vlastní doméně.
+  assert.equal(manifest.routes.length, 61)
+  assert.equal(new Set(manifest.routes.map(route => route.name)).size, 61)
+  assert.deepEqual(
+    manifest.routes.find(route => route.name === 'reports-submissions'),
+    {
+      name: 'reports-submissions',
+      path_pattern: '^/reports/submissions/?$',
+      kind: 'permission',
+      permission: 'reports.submissions',
+      access: 'read',
+    },
+  )
   assert.deepEqual(
     manifest.routes.find(route => route.name === 'purchase-invoice-ai-import'),
     {
@@ -58,7 +70,8 @@ test('navigation switches to the client experience for every locked custom domai
   assert.match(layout, /canExtractPurchase = computed\(\(\) => canUsePurchaseAiExtraction\(auth, supplierStore\.currentSupplier\)\)/)
   assert.match(layout, /\.\.\.\(canExtractPurchase\.value \? \[\{ to: '\/purchase-invoices\/ai-import'/)
   assert.match(layout, /if \(canExtractPurchase\.value\) \{[\s\S]*?const aiImport = \{ to: '\/purchase-invoices\/ai-import'/)
-  assert.equal((layout.match(/v-if="!clientExperience" to="\/admin\/support"/g) || []).length, 2)
+  // Podpora je jen v desktopové patičce; na mobilu je v menu a v patičce je místo ní Přidat.
+  assert.equal((layout.match(/v-if="!clientExperience" to="\/admin\/support"/g) || []).length, 1)
   assert.match(layout, /if \(!auth\.domainContext\?\.locked \|\| !canonicalBaseUrl\) return path/)
   assert.match(layout, /new URL\(canonicalBaseUrl\)\.origin/)
 })

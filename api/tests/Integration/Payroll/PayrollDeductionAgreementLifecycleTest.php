@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeductionAgreementConflictException;
 use MyInvoice\Repository\Payroll\PayrollDeductionAgreementRepository;
@@ -40,7 +39,7 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer()
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build()
             ?? throw new \RuntimeException('DI kontejner není dostupný.');
         $db = $container->get(Connection::class);
         $repository = $container->get(PayrollDeductionAgreementRepository::class);
@@ -129,6 +128,63 @@ final class PayrollDeductionAgreementLifecycleTest extends TestCase
         self::assertSame('updated', $updated['versions'][1]['change_kind']);
         self::assertSame('Stravenky — nová sazba', $updated['versions'][1]['title']);
         self::assertSame('2026-07-01', $updated['versions'][1]['effective_from']);
+    }
+
+    /**
+     * Věřitel a zařazení srážky pro JMHZ (10349 až 10353, migrace 2211) se
+     * uloží, propíše do historie verzí a úprava bez nich je ponechá. Databáze
+     * sama odmítne zařazení u srážky, jejímž věřitelem není zaměstnavatel.
+     */
+    public function testJmhzClassificationIsStoredVersionedAndKeptWhenNotSent(): void
+    {
+        $body = [
+            'title' => 'Syntetická zápůjčka',
+            'deduction_kind' => 'advance',
+            'priority_no' => 100,
+            'requested_minor' => 50_000,
+            'valid_from' => '2026-06-01',
+        ];
+        $created = $this->repository->create(
+            $this->supplierId,
+            $this->employeeId,
+            DeductionAgreementTerms::fromRequest($body + ['creditor_is_employer' => true, 'jmhz_target' => '10350']),
+            DeductionAgreementStatus::Active,
+            null,
+        );
+        self::assertTrue($created['creditor_is_employer']);
+        self::assertSame('10350', $created['jmhz_target']);
+        self::assertTrue($created['versions'][0]['creditor_is_employer']);
+        self::assertSame('10350', $created['versions'][0]['jmhz_target']);
+
+        $kept = $this->repository->update(
+            $this->supplierId,
+            (int) $created['id'],
+            DeductionAgreementTerms::fromRequest(['agreement_reference' => $created['agreement_reference']] + $body),
+            (int) $created['row_version'],
+            null,
+            null,
+            null,
+        );
+        self::assertTrue($kept['creditor_is_employer']);
+        self::assertSame('10350', $kept['jmhz_target']);
+
+        $moved = $this->repository->update(
+            $this->supplierId,
+            (int) $created['id'],
+            DeductionAgreementTerms::fromRequest(['agreement_reference' => $created['agreement_reference']]
+                + $body + ['creditor_is_employer' => true, 'jmhz_target' => '10353']),
+            (int) $kept['row_version'],
+            null,
+            'Zápůjčka vykázaná jako jiný závazek',
+            null,
+        );
+        self::assertSame('10353', $moved['jmhz_target']);
+        self::assertSame('10353', $moved['versions'][2]['jmhz_target']);
+
+        $this->expectException(\PDOException::class);
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_deduction_agreements SET creditor_is_employer = 0 WHERE supplier_id = ? AND id = ?',
+        )->execute([$this->supplierId, (int) $created['id']]);
     }
 
     public function testPauseAndEndStopFutureDeductionsButKeepLedgerHistory(): void

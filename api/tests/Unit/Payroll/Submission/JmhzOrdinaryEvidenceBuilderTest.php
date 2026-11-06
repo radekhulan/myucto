@@ -465,6 +465,368 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
     }
 
     /**
+     * Podpora zaměstnávání OZP (IN28): výdělek OZP z potvrzení účetní (10347,
+     * 10348) a srážky ve prospěch zaměstnavatele ze zmrazené revize podle
+     * zařazení dohody (10350 až 10353). Srážka ve prospěch třetí osoby, srážka
+     * ze zákona (§ 147 odst. 1 písm. c) ZP, datový slovník vede 10353 jako
+     * srážku „podle § 146 písm. b)") ani nulová srážka se nezapočítají.
+     * Dřív builder kladné IN28 odmítl (`positive_unsupported`).
+     */
+    public function testOzpSupportFreezesWageAndEmployerDeductionsByTarget(): void
+    {
+        $source = $this->ozpSource([
+            [['id' => 5, 'deduction_kind' => 'meal', 'creditor_is_employer' => true, 'jmhz_target' => '10352'], 120_000],
+            [['id' => 6, 'deduction_kind' => 'advance', 'creditor_is_employer' => true, 'jmhz_target' => '10350'], 40_000],
+            [['id' => 7, 'deduction_kind' => 'advance', 'creditor_is_employer' => true, 'jmhz_target' => '10350'], 10_000],
+            [['id' => 8, 'deduction_kind' => 'other', 'creditor_is_employer' => false], 50_000],
+            [['id' => 9, 'deduction_kind' => 'advance', 'legal_basis' => 'zp_147_1_c'], 30_000],
+            [['id' => 10, 'deduction_kind' => 'damage', 'creditor_is_employer' => true, 'jmhz_target' => '10351'], 0],
+        ]);
+
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
+            7,
+            $source,
+            101,
+            $this->facts(['ozp_employment_support_claimed' => true]),
+            12,
+            '2026-08-13T12:00:00Z',
+            'explicit_confirmation',
+            ['payment_date' => '2026-08-12', 'cash_paid' => true],
+        );
+
+        self::assertTrue($snapshot->payload['interaction_decisions'][1]['triggered']);
+        self::assertSame('IN28', $snapshot->payload['interaction_decisions'][1]['interaction_id']);
+        self::assertSame([
+            'payment_date' => '2026-08-12',
+            'cash_paid' => true,
+            'employer_deductions_made' => true,
+            'employer_deductions_minor' => [10350 => 50_000, 10352 => 120_000],
+            'employer_deduction_sources' => [
+                ['agreement_id' => 5, 'jmhz_target' => '10352', 'applied_minor_units' => 120_000],
+                ['agreement_id' => 6, 'jmhz_target' => '10350', 'applied_minor_units' => 40_000],
+                ['agreement_id' => 7, 'jmhz_target' => '10350', 'applied_minor_units' => 10_000],
+            ],
+        ], $snapshot->payload['ozp_wage']);
+
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $evidence = [
+            'id' => 1,
+            'source_manifest_sha256' => str_repeat('a', 64),
+            'snapshot_fingerprint' => str_repeat('b', 64),
+            'payload' => json_decode($snapshot->canonicalJson(), true, flags: JSON_THROW_ON_ERROR),
+        ];
+        (new JmhzOrdinaryEvidenceApplicability())->assertApplicable(
+            $evidence,
+            7,
+            $source['revision'],
+            11,
+            101,
+            $input['people'][0]['employments'][0]['term'],
+        );
+    }
+
+    /**
+     * Automatické doložení vztahu s IN28 nemá datum úhrady ani hotovost, takže
+     * se zastaví s pojmenovaným nálezem; datum se nikdy nedomýšlí. Dřív tu
+     * padalo obecné `monthly_exception_required`.
+     */
+    public function testDerivedConfirmationOfOzpSupportRequiresTheWageData(): void
+    {
+        try {
+            (new JmhzOrdinaryEvidenceBuilder())->build(
+                7,
+                $this->ozpSource([]),
+                101,
+                $this->facts(),
+                12,
+                '2026-08-13T12:00:00Z',
+                'derived_from_frozen_payroll_sources',
+            );
+            self::fail('Výdělek OZP bez data úhrady se nesmí zmrazit.');
+        } catch (JmhzOrdinaryEvidenceException $exception) {
+            self::assertSame('jmhz_ordinary_evidence_ozp_wage_required', $exception->validationCode);
+        }
+    }
+
+    /**
+     * Fail-closed případy výdělku OZP: dohoda bez rozhodnutí o věřiteli, datum
+     * úhrady po dni potvrzení (kontrola 20201, FAQ MPSV 11. 5. 2026 dotaz 12)
+     * a před vykazovaným měsícem, potvrzení v rozporu s nastavením vztahu
+     * a zaměstnavatel neuznaný na chráněném trhu práce.
+     */
+    public function testOzpWageFailsClosed(): void
+    {
+        $cases = [
+            'nerozhodnutý věřitel' => [
+                $this->ozpSource([[['id' => 5, 'deduction_kind' => 'meal'], 1_000]]),
+                $this->facts(['ozp_employment_support_claimed' => true]),
+                '2026-08-12',
+                'jmhz_ordinary_evidence_ozp_deduction_unclassified',
+            ],
+            'úhrada po potvrzení' => [
+                $this->ozpSource([]),
+                $this->facts(['ozp_employment_support_claimed' => true]),
+                '2026-08-14',
+                'jmhz_ordinary_evidence_ozp_payment_date_invalid',
+            ],
+            'úhrada před měsícem' => [
+                $this->ozpSource([]),
+                $this->facts(['ozp_employment_support_claimed' => true]),
+                '2026-06-30',
+                'jmhz_ordinary_evidence_ozp_payment_date_invalid',
+            ],
+            'potvrzení Ne proti nastavení vztahu' => [
+                $this->ozpSource([]),
+                $this->facts(),
+                null,
+                'jmhz_ordinary_evidence_ozp_profile_mismatch',
+            ],
+            'zaměstnavatel mimo chráněný trh' => [
+                $this->ozpSource([], false),
+                $this->facts(['ozp_employment_support_claimed' => true]),
+                '2026-08-12',
+                'jmhz_ordinary_evidence_ozp_employer_not_protected',
+            ],
+        ];
+        foreach ($cases as $label => [$source, $facts, $paymentDate, $code]) {
+            try {
+                (new JmhzOrdinaryEvidenceBuilder())->build(
+                    7,
+                    $source,
+                    101,
+                    $facts,
+                    12,
+                    '2026-08-13T12:00:00Z',
+                    'explicit_confirmation',
+                    $paymentDate === null ? null : ['payment_date' => $paymentDate, 'cash_paid' => false],
+                );
+                self::fail("{$label}: výdělek OZP se nesmí zmrazit.");
+            } catch (JmhzOrdinaryEvidenceException $exception) {
+                self::assertSame($code, $exception->validationCode, $label);
+            }
+        }
+    }
+
+    /**
+     * Od 01/2027 se 10347 dělí na datum úhrady mzdy 10589 a dny odvodu
+     * sociálního 10570 a zdravotního pojištění 10571: bez nich se výdělek OZP
+     * nezmrazí, s nimi je evidence nese a projde kontrolou použitelnosti.
+     * V roce 2026 zůstává tvar evidence beze změny.
+     */
+    public function testOzpWageFrom2027CarriesContributionDates(): void
+    {
+        $source = $this->atPeriod($this->ozpSource([]), '2027-01-01');
+        try {
+            (new JmhzOrdinaryEvidenceBuilder())->build(
+                7,
+                $source,
+                101,
+                $this->facts(['ozp_employment_support_claimed' => true]),
+                12,
+                '2027-02-13T12:00:00Z',
+                'explicit_confirmation',
+                ['payment_date' => '2027-02-10', 'cash_paid' => false],
+            );
+            self::fail('Výdělek OZP za 2027 bez dat odvodů se nesmí zmrazit.');
+        } catch (JmhzOrdinaryEvidenceException $exception) {
+            self::assertSame('jmhz_ordinary_evidence_ozp_wage_required', $exception->validationCode);
+        }
+
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
+            7,
+            $source,
+            101,
+            $this->facts(['ozp_employment_support_claimed' => true]),
+            12,
+            '2027-02-13T12:00:00Z',
+            'explicit_confirmation',
+            [
+                'payment_date' => '2027-02-10',
+                'cash_paid' => false,
+                'social_insurance_paid_on' => '2027-02-11',
+                'health_insurance_paid_on' => '2027-02-12',
+            ],
+        );
+
+        self::assertSame('2027-02-11', $snapshot->payload['ozp_wage']['social_insurance_paid_on']);
+        self::assertSame('2027-02-12', $snapshot->payload['ozp_wage']['health_insurance_paid_on']);
+        $this->assertApplicable($source, $snapshot->canonicalJson());
+    }
+
+    /**
+     * Práce kategorie 4 od 01/2027: počet směn (10580) mzdy neevidují, takže
+     * automatické doložení se zastaví a účetní ho zadá. V roce 2026 se nic
+     * nemění; u jiného vztahu počet směn uvést nejde.
+     */
+    public function testRiskShiftCountIsRequiredForCategoryFourFrom2027(): void
+    {
+        $risk = $this->sourceWithOrdinaryProfile();
+        $input = json_decode($risk['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $input['people'][0]['employments'][0]['term']['social_employer_rate_category'] = 'risk_employment';
+        $this->replaceInput($risk, $input);
+        $risk2027 = $this->atPeriod($risk, '2027-01-01');
+
+        (new JmhzOrdinaryEvidenceBuilder())->build(7, $risk, 101, $this->facts(), 12, '2026-08-13T12:00:00Z', 'derived_from_frozen_payroll_sources');
+        try {
+            (new JmhzOrdinaryEvidenceBuilder())->build(7, $risk2027, 101, $this->facts(), 12, '2027-02-13T12:00:00Z', 'derived_from_frozen_payroll_sources');
+            self::fail('Bez počtu směn se evidence 2027 rizikové práce nesmí zmrazit.');
+        } catch (JmhzOrdinaryEvidenceException $exception) {
+            self::assertSame('jmhz_ordinary_evidence_risk_shifts_required', $exception->validationCode);
+        }
+
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
+            7,
+            $risk2027,
+            101,
+            $this->facts(),
+            12,
+            '2027-02-13T12:00:00Z',
+            'explicit_confirmation',
+            null,
+            20,
+        );
+        self::assertSame(20, $snapshot->payload['risk_shift_count']);
+        $this->assertApplicable($risk2027, $snapshot->canonicalJson());
+
+        $this->expectException(JmhzOrdinaryEvidenceException::class);
+        (new JmhzOrdinaryEvidenceBuilder())->build(
+            7,
+            $this->atPeriod($this->source(), '2027-01-01'),
+            101,
+            $this->facts(),
+            12,
+            '2027-02-13T12:00:00Z',
+            'explicit_confirmation',
+            null,
+            3,
+        );
+    }
+
+    /**
+     * Kontrola 386 a IN42: 10580 jen při hodinách rizikové práce (10273 > 0).
+     * V měsíci bez odpracovaných hodin se počet směn nežádá, stejně jako ho
+     * resolver a serializér do věty nezapíšou ({@see Jmhz2027DocumentContract::riskShiftCountRequired()}).
+     */
+    public function testRiskShiftCountIsNotRequiredWithoutWorkedHours(): void
+    {
+        $risk = $this->sourceWithOrdinaryProfile();
+        $input = json_decode($risk['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        $input['people'][0]['employments'][0]['term']['social_employer_rate_category'] = 'risk_employment';
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']['values'] = [
+            'worked_millihours' => 0,
+            'overtime_millihours' => null,
+        ];
+        $this->replaceInput($risk, $input);
+        $risk2027 = $this->atPeriod($risk, '2027-01-01');
+
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(
+            7, $risk2027, 101, $this->facts(), 12, '2027-02-13T12:00:00Z', 'derived_from_frozen_payroll_sources',
+        );
+        self::assertArrayNotHasKey('risk_shift_count', $snapshot->payload);
+
+        $input['people'][0]['employments'][0]['time_month']['jmhz_work_summary']['values']['worked_millihours'] = 8_000;
+        $this->replaceInput($risk, $input);
+        try {
+            (new JmhzOrdinaryEvidenceBuilder())->build(
+                7, $this->atPeriod($risk, '2027-01-01'), 101, $this->facts(), 12, '2027-02-13T12:00:00Z',
+                'derived_from_frozen_payroll_sources',
+            );
+            self::fail('S hodinami rizikové práce se počet směn žádá.');
+        } catch (JmhzOrdinaryEvidenceException $exception) {
+            self::assertSame('jmhz_ordinary_evidence_risk_shifts_required', $exception->validationCode);
+        }
+    }
+
+    /**
+     * @param array{revision:array<string,mixed>} $source
+     * @return array{revision:array<string,mixed>}
+     */
+    private function atPeriod(array $source, string $periodStart): array
+    {
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['period_start'] = $periodStart;
+        $input['period_end'] = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $source['revision']['period_start'] = $periodStart;
+        $this->replaceInput($source, $input);
+
+        return $source;
+    }
+
+    /** @param array{revision:array<string,mixed>} $source */
+    private function assertApplicable(array $source, string $canonicalJson): void
+    {
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        (new JmhzOrdinaryEvidenceApplicability())->assertApplicable(
+            [
+                'id' => 1,
+                'source_manifest_sha256' => str_repeat('a', 64),
+                'snapshot_fingerprint' => str_repeat('b', 64),
+                'payload' => json_decode($canonicalJson, true, flags: JSON_THROW_ON_ERROR),
+            ],
+            7,
+            $source['revision'],
+            11,
+            101,
+            $input['people'][0]['employments'][0]['term'],
+        );
+    }
+
+    /**
+     * Bez IN28 evidence nenese klíč `ozp_wage` a má tvar jako dřív, takže
+     * otisky dosavadních potvrzení zůstávají stejné.
+     */
+    public function testEvidenceWithoutOzpSupportKeepsItsShape(): void
+    {
+        $snapshot = (new JmhzOrdinaryEvidenceBuilder())->build(7, $this->source(), 101, $this->facts(), 12, '2026-08-13T12:00:00Z');
+
+        self::assertSame([
+            'schema_reference', 'builder_version', 'scope', 'specification', 'source_revision',
+            'attribute_values', 'interaction_decisions', 'derived_interactions', 'confirmation',
+        ], array_keys($snapshot->payload));
+        self::assertSame([false, false, false], array_column($snapshot->payload['interaction_decisions'], 'triggered'));
+    }
+
+    /**
+     * Zdroj s vztahem, který má podporu zaměstnávání OZP a zaměstnavatele na
+     * chráněném trhu práce, a s dohodami a jejich sraženou částkou v měsíci.
+     *
+     * @param list<array{array<string,mixed>,int}> $agreements
+     * @return array{revision:array<string,mixed>}
+     */
+    private function ozpSource(array $agreements, bool $protectedEmployer = true): array
+    {
+        $source = $this->sourceWithOrdinaryProfile(['ozp_employment_support_applies' => true]);
+        $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($input);
+        $input['people'][0]['employments'][0]['term']['employer_protected_labor_market'] = $protectedEmployer;
+        $input['people'][0]['employments'][0]['term']['jmhz_ozp_employment_support_applies'] = true;
+        $input['people'][0]['deduction_agreements'] = array_map(
+            static fn (array $row): array => ['title' => 'Syntetická srážka'] + $row[0],
+            $agreements,
+        );
+        $this->replaceInput($source, $input);
+        $result = json_decode($source['revision']['result_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+        self::assertIsArray($result);
+        $result['people'][0]['statutory']['net_pay']['deductions'] = array_map(
+            static fn (array $row): array => [
+                'deduction_reference' => 'agreement:' . $row[0]['id'],
+                'priority' => 100,
+                'requested_minor_units' => $row[1],
+                'applied_minor_units' => $row[1],
+                'unapplied_minor_units' => 0,
+                'active' => true,
+            ],
+            $agreements,
+        );
+        $result['people'][0]['statutory']['net_pay']['deducted_minor_units'] = array_sum(array_column($agreements, 1));
+        $source['revision']['result_snapshot_json'] = CanonicalJson::encode($result);
+        $source['revision']['result_snapshot_hash'] = hash('sha256', $source['revision']['result_snapshot_json']);
+
+        return $source;
+    }
+
+    /**
      * Revize s `$count` osobami po jednom vztahu (101, 102, …). Každý vztah
      * nese výplň, aby snímek měl velikost srovnatelnou se skutečnou firmou.
      *
@@ -525,16 +887,19 @@ final class JmhzOrdinaryEvidenceBuilderTest extends TestCase
         return $source;
     }
 
-    /** @return array<string,false> */
-    private function facts(): array
+    /**
+     * @param array<string,bool> $overrides
+     * @return array<string,bool>
+     */
+    private function facts(array $overrides = []): array
     {
-        return [
+        return array_replace([
             'reportable_wage_deductions_recorded' => false,
             'employee_social_discount_claimed' => false,
             'specific_legal_fact_occurred' => false,
             'ozp_employment_support_claimed' => false,
             'deep_mining_work_occurred' => false,
-        ];
+        ], $overrides);
     }
 
     /** @return array{revision:array<string,mixed>} */

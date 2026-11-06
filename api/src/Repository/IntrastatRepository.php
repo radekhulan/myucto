@@ -189,6 +189,7 @@ final class IntrastatRepository implements IntrastatDataSource
                 AND d.doc_type = ?
                 AND d.status = 'posted'
                 AND d.doc_date >= ? AND d.doc_date < ?
+                AND d.history_import_job_id IS NULL
                 AND (d.invoice_id IS NOT NULL OR d.purchase_invoice_id IS NOT NULL)
                 AND ({$sourceFilter})
                 AND NOT EXISTS (

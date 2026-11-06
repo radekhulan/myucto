@@ -238,13 +238,19 @@ final class VatClassificationMapper
             }
         }
 
-        // Ř. 43/44 (odpočet ze samovyměření) je v přiznání protějškem ř. 3–13 a EPO ho
-        // kontroluje proti součtu TĚCH řádků, jak jsou vyplněné — tedy už zaokrouhlených
-        // na celé Kč (chyba č. 90). Součet haléřových částek zaokrouhlený až na konci se
-        // rozejde: ř. 5 = 50 646,20 a ř. 12 = 539,33 dávají ve formuláři 50 646 + 539
-        // = 51 185, ale round(51 185,53) = 51 186. Proto se zrcadlový řádek skládá ze
-        // zaokrouhlených podílů jednotlivých primárních řádků — stejně jako se ř. 46
-        // skládá z řádků 40–45.
+        // Ř. 43/44 (odpočet ze samovyměření) je v přiznání protějškem ř. 3–13: nárok na
+        // odpočet je ve výši daně, kterou plátce na výstupu PŘIZNAL (§ 72 odst. 2,
+        // § 73 odst. 1 písm. b) ZDPH), tedy součet řádků tak, jak jsou vyplněné na celé Kč.
+        // Samovyměření se tím přesně vyruší. Proto se zrcadlový řádek skládá ze
+        // zaokrouhlených podílů jednotlivých primárních řádků, stejně jako se ř. 46
+        // skládá z řádků 40–45, ne zaokrouhlením haléřového součtu.
+        //
+        // EPO ř. 43/44 ověřuje JINAK: výpočtem ze základu řádku krát sazba („Přesně
+        // vypočtená hodnota součtu daní na ř. 43 je …"). Obě cesty se mohou kvůli
+        // zaokrouhlení rozejít o koruny a EPO pak vytkne propustnou chybu; podání přijme
+        // (ověřeno zkušebním podáním, #264). Builder přiznání na to předem upozorní.
+        // Dřívější výklad, že EPO sčítá vyplněné řádky (chyba č. 90), byl nepřesný:
+        // hlášený případ ř. 5 = 50 646 a ř. 12 = 539 vyšel 51 185 oběma cestami.
         foreach ($mirrorParts as $mirrorLine => $parts) {
             $base = 0.0;
             $vat = 0.0;

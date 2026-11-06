@@ -25,7 +25,10 @@ final class AnnualSettlementPdfRenderer
     // v2: doklad rozepisuje úhrn na vlastní kumulace a na potvrzení od
     // předchozích plátců (§ 38ch odst. 3 a 4). Do v1 se úhrn tiskl jako jediné
     // číslo, ze kterého nešlo poznat, že část pochází od jiného plátce.
-    public const VERSION = 'mz-25-annual-settlement-v2';
+    // v3: u zúčtování s ročně uplatňovanými položkami (§ 38h odst. 6) doklad
+    // ukazuje základ před odpočtem, nezdanitelné části po druzích (dary,
+    // úroky, spoření na stáří) a slevu za zastavenou exekuci (§ 35 odst. 4).
+    public const VERSION = 'mz-25-annual-settlement-v3';
 
     private ?Environment $twig = null;
 

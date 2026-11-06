@@ -19,9 +19,10 @@ Kapitolu otevřete, když:
 <!-- cols: 26 40 34 -->
 | Kdy | Co udělat | Kde v aplikaci |
 |---|---|---|
-| na začátku měsíce | Rozvrhnout směny | `Mzdy → Docházka a směny`, **Rozvrhnout směny podle kalendáře** |
+| na začátku měsíce | Rozvrhnout směny (jen nepravidelná pracovní doba) | `Mzdy → Docházka a směny`, u řádku **Další → Rozvrhnout směny podle kalendáře** |
 | průběžně | Zapisovat skutečnost, přesčas a příznaky | `Mzdy → Docházka a směny` |
-| před mzdovým během | Schválit měsíc docházky | `Mzdy → Docházka a směny`, **Schválit měsíc** |
+| průběžně | Zadat dovolenou, nemoc a jinou nepřítomnost | `Mzdy → Docházka a směny`, **Zadat nepřítomnost** nebo u řádku **Nepřítomnost** |
+| před mzdovým během | Schválit měsíc docházky všem | `Mzdy → Docházka a směny`, **Schválit měsíc všem** |
 | jednou při sjednání | Nastavit sazby příplatků | `Mzdy → Nastavení mezd`, záložka **Politiky a připravenost**; karta pracovního vztahu |
 
 ## 77.2 Než začnete
@@ -42,16 +43,29 @@ Kapitolu otevřete, když:
 
 ## 77.3 Krok za krokem: docházka za měsíc
 
+Nahoře na stránce je průvodce **Jak zpracovat měsíc** se třemi kroky:
+odpracovaný čas, nepřítomnosti a schválení měsíce všem.
+
 1. Otevřete `Mzdy → Docházka a směny` a zvolte měsíc v poli **Období**.
-2. Zkontrolujte pracovní kalendář, úvazek a naplánované směny. Chybí-li
-   směny, klikněte na **Rozvrhnout směny podle kalendáře**. Směny potřebuje
-   i náhrada mzdy při nemoci a za dovolenou.
-3. Doplňte skutečně odpracovaný čas (**Skutečně odpracovaný čas**). Noční,
+2. Dovolenou, nemoc, ošetřovné a jiné nepřítomnosti zadejte tlačítkem
+   **Zadat nepřítomnost** (nebo **Nepřítomnost** u řádku zaměstnance).
+   Mřížka pak tyto dny vynechá. U nepravidelné pracovní doby zkontrolujte
+   naplánované směny: u řádku **Další → Rozvrhnout směny podle kalendáře**.
+   Směny potřebuje náhrada mzdy při nemoci a za dovolenou.
+3. Doplňte skutečně odpracovaný čas (**Skutečně odpracovaný čas**). V měsíční
+   mřížce můžete použít **Vyplnit pracovní dny**, **Zkopírovat minulý měsíc**
+   nebo **Import z CSV nebo XLSX** a změny uložit tlačítkem **Uložit mřížku**.
+   Noční,
    víkendovou, svátkovou práci a ztížené prostředí zapište jako příznak
    **k** odpracované době, ne místo ní.
 4. U směny s pracovní pohotovostí vyplňte **Pohotovost (min)**.
 5. Porovnejte docházku s absencemi, svátky a změnami vztahu.
-6. Vyřešte varování a klikněte na **Schválit měsíc**.
+6. Klikněte na **Schválit měsíc všem**. Dialog hromadného schválení předvyplní
+   souhrn pro každý vztah. Pokud pracovnímu poměru nepokryje fond odpracovaná
+   doba spolu se svátky v pracovní dny, dialog to ukáže a nabídne **Doplnit
+   chybějící pracovní dny podle kalendáře**. Vztahy s nepřítomností schválíte tlačítkem
+   **Schválit jednotlivě** přímo z dialogu. Jednotlivý měsíc schválíte také
+   tlačítkem **Schválit měsíc** u řádku.
 7. V dialogu **Potvrzení pracovního souhrnu JMHZ** zkontrolujte předvyplněné
    hodiny (fond, **Skutečně odpracováno**, neodpracované hodiny po druzích),
    výslovně odpovězte na otázky **Byly v měsíci neodpracované hodiny?**
@@ -66,7 +80,8 @@ a období je připravené pro [mzdový běh](80_Mzdove_behy.md).
 > [!WARNING]
 > Docházku schvalte dřív, než u mzdového běhu kliknete na **Spočítat mzdy**.
 > Po uzamčení vstupů se příplatky do běhu nedostanou a schválení měsíce
-> skončí chybou.
+> s příplatky skončí chybou. Pak v mzdovém běhu klikněte na **Zrušit běh**,
+> měsíc schvalte a v běhu dejte **Začít znovu a spočítat**.
 
 ## 77.4 Krok za krokem: import docházky z CSV nebo XLSX
 
@@ -135,6 +150,7 @@ jako dohodnutý a limity nařízeného přesčasu se na něj nevztahují.
 | Upozornění na limit přesčasu | Překročeno 8 hodin v týdnu, 150 hodin v roce nebo průměr ve vyrovnávacím období | Upravte rozvrh, případně zapište **Souhlas s přesčasem**. Výplatu to nezastaví. |
 | Upozornění u náhradního volna | Je zapsaná jen absence, nebo jen vazba na den přesčasu | Doplňte druhou stranu ([§ 77.6](#776-krok-za-krokem-nahradni-volno-za-prescas)). |
 | Upozornění na rozsah DPP nebo DPČ | Překročeno 300 hodin DPP v roce, nebo průměr DPČ | Upravte rozsah práce nebo smluvní vztah. Výplatu to nezastaví. |
+| Upozornění, že se DPP blíží limitu | Osoba má na DPP v roce 240 hodin a víc (80 % limitu) | Naplánujte zbývající hodiny, nebo včas upravte smluvní vztah. Výplatu to nezastaví. |
 | Import odmítl soubor | Vzorec, makro, vložený soubor, externí propojení, nebo překročené limity | Uložte tabulku jen se statickými hodnotami a v limitech ([§ 77.9.2](#7792-bezpecnost-a-limity-xlsx)). |
 
 Časté chyby: plánovaná směna považovaná za odpracovanou dobu, dvojí započtení
@@ -432,6 +448,17 @@ Překročení se u revize běhu objeví jako upozornění se jménem, obdobím
 a průměrem a s odkazem na podmínky vztahu. Výpočet ani schválení nezastaví:
 odpracovanou práci je potřeba zaplatit, jen je třeba upravit rozsah práce
 nebo smluvní vztah.
+
+U DPP hlásí aplikace i to, že se osoba k limitu **blíží**. Od **240 hodin**
+(80 % limitu) přidá kontrola mzdového běhu upozornění se jménem, počtem
+odpracovaných a zbývajících hodin, dokud osoba 300 hodin nepřekročí; přesně
+300 hodin je ještě v limitu. Upozornění je jen informace, výpočet nezastaví
+a v kontrole připravenosti běhu nic neblokuje. Totéž hlásí náhled importu
+docházky: k dosavadním hodinám roku do konce předchozího měsíce přičte
+odpracované hodiny z importovaného souboru a u osob přiřazených na DPP vypíše
+upozornění při dosažení prahu nebo překročení limitu. Přehled po osobách je
+v seznamu zaměstnanců ([§ 86](86_Zamestnanci.md)), včetně zobrazení
+**DPP u limitu 300 h**.
 
 ## 77.10 Související kapitoly
 

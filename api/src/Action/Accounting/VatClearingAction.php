@@ -56,7 +56,7 @@ final class VatClearingAction
         try {
             $status = $this->clearing->status($supplierId, $year, $month);
         } catch (\Throwable $e) {
-            return Json::error($response, 'preview_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'preview_failed', $e->getMessage(), 500);
         }
 
         return Json::ok($response, $status);
@@ -92,7 +92,7 @@ final class VatClearingAction
             // vědomě posunout zámek (admin endpoint), ne aby to udělal tenhle endpoint za něj.
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
-            return Json::error($response, 'clearing_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'clearing_failed', $e->getMessage(), 500);
         }
 
         $this->logger->log(

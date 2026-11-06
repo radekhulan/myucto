@@ -161,6 +161,36 @@ final class PayrollDependantValidatorTest extends TestCase
         self::assertSame('1990-04-11', $result['other_caregiver_birth_date']);
     }
 
+    /** Rodné číslo jiné vyživující osoby (10434) je nepovinné a musí sedět na její datum narození. */
+    public function testOtherCaregiverBirthNumberIsNormalizedAndMatchedToBirthDate(): void
+    {
+        $present = [
+            'other_household_caregiver_status' => 'present',
+            'other_caregiver_given_name' => 'Petr',
+            'other_caregiver_family_name' => 'Novák',
+            'other_caregiver_birth_date' => '1990-04-11',
+        ];
+
+        self::assertNull($this->validator->validateClaim($this->claim($present))['other_caregiver_birth_number']);
+        self::assertSame(
+            '900411/0005',
+            $this->validator->validateClaim($this->claim($present + ['other_caregiver_birth_number' => '9004110005']))['other_caregiver_birth_number'],
+        );
+
+        try {
+            $this->validator->validateClaim($this->claim(['other_caregiver_birth_date' => '1991-04-11'] + $present + ['other_caregiver_birth_number' => '9004110005']));
+            self::fail('Rodné číslo s jiným datem narození musí neprojít.');
+        } catch (InvalidArgumentException $e) {
+            self::assertStringContainsString('neodpovídá', $e->getMessage());
+        }
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->validator->validateClaim($this->claim([
+            'other_household_caregiver_status' => 'none',
+            'other_caregiver_birth_number' => '9004110005',
+        ]));
+    }
+
     public function testMissingCreditStatusMeansTheEmployeeClaims(): void
     {
         self::assertSame(

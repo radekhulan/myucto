@@ -7,9 +7,12 @@ namespace MyInvoice\Service\Logbook;
 use MyInvoice\Repository\CarRepository;
 use MyInvoice\Repository\FuelingRepository;
 use MyInvoice\Service\Bank\Card\CardNumberMask;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Service\Logbook\Fuel\FuelKeywords;
 use MyInvoice\Support\LocaleNumber;
-use PhpOffice\PhpSpreadsheet\IOFactory;
+use MyInvoice\Support\Spreadsheet\SafeSpreadsheetReader;
+use MyInvoice\Support\Spreadsheet\SpreadsheetLimitException;
+use PhpOffice\PhpSpreadsheet\Cell\Cell;
 use PhpOffice\PhpSpreadsheet\Shared\Date as ExcelDate;
 
 /**
@@ -68,9 +71,18 @@ final class FuelingImportService
     {
         $empty = ['ok' => false, 'dry_run' => $dryRun, 'created' => 0, 'updated' => 0, 'duplicates' => 0, 'failed' => 0, 'rows' => []];
         $ext = strtolower((string) pathinfo($filename, PATHINFO_EXTENSION));
-        $matrix = in_array($ext, ['xlsx', 'xls', 'ods'], true)
-            ? $this->readSpreadsheet($content, $ext)
-            : $this->readCsv($content);
+        try {
+            $matrix = in_array($ext, ['xlsx', 'xls', 'ods'], true)
+                ? $this->readSpreadsheet($content)
+                : $this->readCsv($content);
+        } catch (SpreadsheetLimitException $e) {
+            return $empty + ['error' => match ($e->reason) {
+                'too_many_rows'    => 'Soubor má více než ' . TripImportService::MAX_ROWS . ' řádků. Rozdělte ho prosím na menší části.',
+                'too_many_columns' => 'Soubor má více než ' . TripImportService::MAX_COLUMNS . ' sloupců.',
+                'too_large'        => 'Soubor je po rozbalení příliš velký.',
+                default            => 'Soubor nelze přečíst. Podporované formáty jsou CSV, XLSX, XLS a ODS.',
+            }];
+        }
         if ($matrix === []) {
             return $empty + ['error' => 'Soubor je prázdný nebo nečitelný.'];
         }
@@ -146,7 +158,7 @@ final class FuelingImportService
             throw new \InvalidArgumentException('Chybí kladná částka tankování.');
         }
         if ($quantity !== null && $quantity > 0 && $unitPrice === null) {
-            $unitPrice = round($amount / $quantity, 4);
+            $unitPrice = UnitPricePrecision::normalize($amount / $quantity);
         }
 
         $carRaw = $get('car');
@@ -258,37 +270,33 @@ final class FuelingImportService
         return $rows;
     }
 
-    /** @return list<list<string>> */
-    private function readSpreadsheet(string $content, string $ext): array
+    /**
+     * Ohraničené čtení sešitu přes sdílený {@see SafeSpreadsheetReader} se stejnými stropy
+     * jako import knihy jízd.
+     *
+     * @return list<list<string>>
+     */
+    private function readSpreadsheet(string $content): array
     {
-        $tmp = tempnam(sys_get_temp_dir(), 'fuelimp_') . '.' . $ext;
-        file_put_contents($tmp, $content);
+        $reader = new SafeSpreadsheetReader(TripImportService::MAX_ROWS + 1, TripImportService::MAX_COLUMNS, 10_000_000);
+        $spreadsheet = $reader->load($content, [
+            SafeSpreadsheetReader::TYPE_XLSX, SafeSpreadsheetReader::TYPE_XLS, SafeSpreadsheetReader::TYPE_ODS,
+        ], false);
         try {
-            $reader = IOFactory::createReaderForFile($tmp);
-            $reader->setReadDataOnly(false);
-            $sheet = $reader->load($tmp)->getActiveSheet();
-            $out = [];
-            foreach ($sheet->getRowIterator() as $row) {
-                $cellIter = $row->getCellIterator();
-                $cellIter->setIterateOnlyExistingCells(false);
-                $cells = [];
-                foreach ($cellIter as $cell) {
-                    $value = $cell->getValue();
-                    if (is_numeric($value) && ExcelDate::isDateTime($cell)) {
-                        $dt = ExcelDate::excelToDateTimeObject((float) $value);
-                        $cells[] = $dt->format('H:i:s') !== '00:00:00' ? $dt->format('Y-m-d H:i') : $dt->format('Y-m-d');
-                    } elseif (is_numeric($value)) {
-                        // Čísla surově — formátovaná hodnota („1 234,50 Kč") by se hůř parsovala.
-                        $cells[] = (string) $value;
-                    } else {
-                        $cells[] = (string) ($cell->getFormattedValue() ?? '');
-                    }
+            return $reader->matrix($spreadsheet->getActiveSheet(), static function (Cell $cell): string {
+                $value = $cell->getValue();
+                if (is_numeric($value) && ExcelDate::isDateTime($cell)) {
+                    $dt = ExcelDate::excelToDateTimeObject((float) $value);
+                    return $dt->format('H:i:s') !== '00:00:00' ? $dt->format('Y-m-d H:i') : $dt->format('Y-m-d');
                 }
-                $out[] = $cells;
-            }
-            return $out;
+                if (is_numeric($value)) {
+                    // Čísla surově — formátovaná hodnota („1 234,50 Kč") by se hůř parsovala.
+                    return (string) $value;
+                }
+                return (string) ($cell->getFormattedValue() ?? '');
+            });
         } finally {
-            @unlink($tmp);
+            $spreadsheet->disconnectWorksheets();
         }
     }
 

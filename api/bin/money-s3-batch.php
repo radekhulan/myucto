@@ -21,8 +21,10 @@ declare(strict_types=1);
  *   --from-year=auto|RRRR|all  první převáděný rok; auto (výchozí) = první rok, od kterého
  *                              v Money navazují počáteční a konečné stavy
  *   --dry-run                  zkouška nanečisto: nic nezůstane, ani založené firmy
- *   --existing=skip|update     firma už v MyÚčtu je: přeskočit (výchozí), nebo převést znovu
- *                              (převod doplní jen to, co chybí)
+ *   --existing=skip|update|relink  firma už v MyÚčtu je: přeskočit (výchozí), převést znovu
+ *                              (převod doplní jen to, co chybí), nebo opravný převod vazeb
+ *                              (firma se mezitím účtuje v MyÚčtu: nic nového nezaloží, jen
+ *                              převzatým dokladům znovu dopočítá úhrady, zápočty a zálohy)
  *   --dppo-dir=<adresář>       podaná přiznání k DPPO (EPO XML, i v podadresářích): identita
  *                              firmy (NACE, kategorie ÚJ, audit, sídlo) a převzetí do přiznání
  *                              a evidence ztrát po převodu
@@ -62,7 +64,7 @@ use MyInvoice\Service\Tax\Return\TaxReturnException;
 const MS3B_USAGE = <<<TXT
 Použití:
   php api/bin/money-s3-batch.php --dir=<adresář se zálohami .lz> (--all | --ico=<IČO>[,<IČO>…] | --list)
-      [--from-year=auto|RRRR|all] [--dry-run] [--existing=skip|update] [--dppo-dir=<adresář>]
+      [--from-year=auto|RRRR|all] [--dry-run] [--existing=skip|update|relink] [--dppo-dir=<adresář>]
       [--group="Název" | --group-id=N] [--related-parties] [--no-close] [--disposal-year-tax=half|none]
       [--no-registry] [--user-id=N] [--report=<soubor.json>]
 
@@ -203,7 +205,7 @@ $actor = MigrationBatchActor::cli($userId);
 printf("Databáze: %s\n%s %d firem, od roku %s, existující firmy: %s%s\n",
     (string) $pdo->query('SELECT DATABASE()')->fetchColumn(),
     $options->isDryRun() ? 'Zkouška nanečisto' : 'Ostrý převod', count($selected),
-    $fromYearOpt, $options->existing === 'update' ? 'převést znovu' : 'přeskočit',
+    $fromYearOpt, match ($options->existing) { 'update' => 'převést znovu', 'relink' => 'opravný převod vazeb', default => 'přeskočit' },
     $options->groupId !== null ? ", skupina #{$options->groupId}" : '');
 
 $started = microtime(true);

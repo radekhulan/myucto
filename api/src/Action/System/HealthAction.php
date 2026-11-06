@@ -15,6 +15,7 @@ use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\System\AppUrlConfiguration;
 use MyInvoice\Service\System\InstanceHealthProbe;
+use MyInvoice\Service\System\InstanceSecurityConfigurationCheck;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Update\VersionService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -48,6 +49,8 @@ final class HealthAction
         // Volitelná záměrně: bez probe (a bez DB) musí health pořád odpovědět
         // kompletním tvarem, jen s neznámými hodnotami.
         private readonly ?InstanceHealthProbe $probe = null,
+        // Volitelná ze stejného důvodu; v kontejneru ji dodává explicitní bind.
+        private readonly ?InstanceSecurityConfigurationCheck $securityConfig = null,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -140,6 +143,10 @@ final class HealthAction
                         . 'uživatelé nemají passkey. Zamčenou session pak lze jen odhlásit '
                         . '— registrujte jim passkey, nebo nastavte session.lock_after_minutes = 0.',
                 ];
+            }
+            // Produkční výchozí hodnoty (Secure cookie, app.env) a klíč mzdových otisků.
+            foreach ($this->securityConfig?->warnings() ?? [] as $securityWarning) {
+                $warnings[] = $securityWarning;
             }
             $payload['warnings'] = $warnings;
         }

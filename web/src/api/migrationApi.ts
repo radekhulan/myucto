@@ -2,6 +2,17 @@ import { api } from './client'
 import { uploadChunked, type ChunkedUploadProgress } from './chunkedUpload'
 
 /**
+ * Upozornění náhledu převodu, že cílová firma je nezisková organizace nebo SVJ
+ * (`NonprofitMigrationNotice` na serveru). Běžná firma ho v odpovědi nedostane.
+ */
+export interface MigrationNonprofitNotice {
+  level: 'warning'
+  code: 'migration_nonprofit_untested'
+  message: string
+  context?: { entity_profile: 'nonprofit' | 'svj' | 'unknown'; framework_504: boolean }
+}
+
+/**
  * Společný klient průvodců převodem z cizího programu (Money S3, POHODA, PREMIER).
  * Server pod `{base}` nabízí nahrání po částech, stav nahraného souboru, spuštění převodu
  * na pozadí a protokoly běhů; zdroj si ke klientovi přidá vlastní volání.

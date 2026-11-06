@@ -57,6 +57,25 @@ final class CreditasTransactionParserTest extends TestCase
         self::assertSame('EUR', $transaction['currency']);
     }
 
+    public function testKeepsOriginalCardAmountOnlyInOtherCurrency(): void
+    {
+        $base = [
+            'transactionId' => 'TX-CARD', 'category' => 'CARD', 'type' => 'DEBIT',
+            'amount' => ['value' => '22.41', 'currency' => 'EUR'], 'effectiveDate' => '2026-09-06',
+        ];
+        $foreign = (new CreditasTransactionParser())->parse(
+            [$base + ['originalAmount' => ['value' => '25', 'currency' => 'USD']]], '1000000005', '2026-09-07',
+        )['transactions'][0];
+        self::assertSame(-25.0, $foreign['original_amount']);
+        self::assertSame('USD', $foreign['original_currency']);
+
+        $same = (new CreditasTransactionParser())->parse(
+            [$base + ['originalAmount' => ['value' => '22.41', 'currency' => 'EUR']]], '1000000005', '2026-09-07',
+        )['transactions'][0];
+        self::assertArrayNotHasKey('original_amount', $same);
+        self::assertArrayNotHasKey('original_currency', $same);
+    }
+
     /** @return iterable<string,array{string}> */
     public static function invalidAmountProvider(): iterable
     {

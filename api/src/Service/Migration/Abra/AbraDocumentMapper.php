@@ -167,6 +167,9 @@ final class AbraDocumentMapper
         $type = mb_strtolower(AbraSource::reference($row['typDokl'] ?? null));
         $isCredit = str_contains($type, 'dobrop') || str_contains($type, 'oprav') || $total['total'] < 0;
         $isAdvance = str_contains($type, 'zaloh') || str_contains($type, 'záloh');
+        // ZDD = daňový doklad k přijaté platbě zálohy (§ 28 odst. 9 ZDPH); k záloze ho váže
+        // AbraDocumentRelationLinker podle společné platby.
+        $isTaxDocument = $kind === 'purchase' && !$isAdvance && $type === 'zdd';
         $storno = AbraSource::bool($row['storno'] ?? null) === true;
         $posted = AbraSource::bool($row['zuctovano'] ?? null) === true;
         $readyStatus = $storno ? 'cancelled' : ($kind === 'issued' ? 'sent' : ($posted ? 'booked' : 'received'));
@@ -194,7 +197,8 @@ final class AbraDocumentMapper
             'exchange_rate' => $exchangeRate,
             'prices_include_vat' => $pricesIncludeVat,
             'invoice_type' => $storno ? 'cancellation' : ($isAdvance ? 'proforma' : ($isCredit ? 'credit_note' : 'invoice')),
-            'document_kind' => $isAdvance ? 'advance' : ($isCredit || $storno ? 'credit_note' : 'invoice'),
+            'document_kind' => $isAdvance ? 'advance' : ($isCredit || $storno ? 'credit_note'
+                : ($isTaxDocument ? 'tax_document' : 'invoice')),
             'status' => $taxClassificationRequiresReview && !$storno ? 'draft' : $readyStatus,
             'ready_status' => $readyStatus,
             'source_cancelled' => $storno,
@@ -209,6 +213,10 @@ final class AbraDocumentMapper
                 && count(array_column($items, 'is_fixed_asset')) === count($items)
                 && !in_array(false, array_column($items, 'is_fixed_asset'), true),
             'partner' => $partner,
+            'settlement_account' => AbraSource::account($row['primUcet'] ?? null),
+            'counter_account' => AbraSource::account($row['protiUcet'] ?? null),
+            'document_type' => AbraSource::reference($row['typDokl'] ?? null),
+            'title' => mb_substr(trim((string) ($row['popis'] ?? '')) ?: ($docCode !== '' ? $docCode : $key), 0, 255),
             'items' => $items,
             'total_without_vat' => $total['base'],
             'total_vat' => $total['vat'],
@@ -325,6 +333,8 @@ final class AbraDocumentMapper
             'import_tax_base_czk' => $purchase && $foreign ? AbraSource::number($item['sumZkl'] ?? null) : null,
             'import_tax_vat_czk' => $purchase && $foreign ? AbraSource::number($item['sumDph'] ?? null) : null,
             'import_tax_excluded' => $purchase && in_array($sourceVatClass, ['000P', '000U'], true),
+            'base_czk' => AbraSource::number($item['sumZkl'] ?? null),
+            'total_czk' => AbraSource::number($item['sumCelkem'] ?? null),
         ];
     }
 

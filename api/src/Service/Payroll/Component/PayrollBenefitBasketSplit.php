@@ -14,7 +14,8 @@ final readonly class PayrollBenefitBasketSplit implements \JsonSerializable
 {
     public function __construct(
         public PayrollBenefitExemptionBasket $basket,
-        public int $limitMinor,
+        /** `null` = osvobozeno bez číselného limitu (§ 6 odst. 9 písm. d) bod 2 od 2027). */
+        public ?int $limitMinor,
         public int $usedBeforeMinor,
         public int $amountMinor,
         public int $exemptMinor,
@@ -34,9 +35,11 @@ final readonly class PayrollBenefitBasketSplit implements \JsonSerializable
         return $this->usedBeforeMinor + $this->amountMinor;
     }
 
-    public function remainingMinor(): int
+    public function remainingMinor(): ?int
     {
-        return max(0, $this->limitMinor - $this->usedAfterMinor());
+        return $this->limitMinor === null
+            ? null
+            : max(0, $this->limitMinor - $this->usedAfterMinor());
     }
 
     public function exceedsLimit(): bool
@@ -58,6 +61,7 @@ final readonly class PayrollBenefitBasketSplit implements \JsonSerializable
             'exempt_minor' => $this->exemptMinor,
             'taxable_minor' => $this->taxableMinor,
             'limit_exceeded' => $this->exceedsLimit(),
+            ...($this->limitMinor === null ? ['unlimited' => true] : []),
             'allocation' => $this->allocation,
         ];
     }

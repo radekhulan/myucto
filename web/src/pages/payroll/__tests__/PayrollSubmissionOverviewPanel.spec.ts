@@ -473,6 +473,10 @@ describe('PayrollSubmissionOverviewPanel — odvození období', () => {
     expect(m.enqueueHealthIsds).toHaveBeenCalledTimes(2)
     expect(m.enqueueHealthIsds).toHaveBeenCalledWith(57, '205')
     expect(m.enqueueHealthIsds).toHaveBeenCalledWith(58, '207')
+    // Dávka nabízí stejné způsoby jako jedna karta, ne jen Mobilní klíč.
+    for (const method of ['mobile_key', 'password', 'sms', 'certificate']) {
+      expect(wrapper.find(`[data-test="isds-batch-method-${method}"]`).exists()).toBe(true)
+    }
 
     const batchButton = wrapper.get('[data-test="mobile-key-batch-send-action"]')
     await batchButton.trigger('click')

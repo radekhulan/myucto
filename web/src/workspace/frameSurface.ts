@@ -29,6 +29,12 @@ export interface FrameAppearance {
   singlePanel?: boolean
 }
 
+export interface FrameMutation {
+  resource: string
+  /** Cesta API bez dotazu, podle ní `dataDependencies.ts` pozná dotčené agendy. */
+  path: string
+}
+
 interface FrameSurfaceOptions {
   id: string
   supplierId: number
@@ -44,7 +50,7 @@ interface FrameSurfaceOptions {
   error: (error: unknown) => void
   accessRevoked: () => void
   switchCompany: (id: number, to?: RouteLocationRaw) => void
-  mutation?: (resource: string) => void
+  mutation?: (change: FrameMutation) => void
 }
 
 export function createFrameSurface(options: FrameSurfaceOptions) {
@@ -77,7 +83,7 @@ export function createFrameSurface(options: FrameSurfaceOptions) {
     else if (data.type === 'myucto-window-activity') window.dispatchEvent(new CustomEvent('myucto:window-activity'))
     else if (data.type === 'myucto-window-demo-read-only') window.dispatchEvent(new CustomEvent('myinvoice:demo-read-only'))
     else if (data.type === 'myucto-window-quota' && data.headers && typeof data.headers === 'object' && typeof data.trusted === 'boolean') readStorageQuotaHeaders(data.headers, { trusted: data.trusted })
-    else if (data.type === 'myucto-window-mutation' && typeof data.resource === 'string' && /^[a-z0-9-]+$/.test(data.resource)) options.mutation?.(data.resource)
+    else if (data.type === 'myucto-window-mutation' && typeof data.resource === 'string' && /^[a-z0-9-]+$/.test(data.resource)) options.mutation?.({ resource: data.resource, path: typeof data.path === 'string' && data.path.startsWith('/') ? data.path : `/${data.resource}` })
     else if (data.type === 'myucto-window-key' && data.event && typeof data.event.key === 'string' && typeof data.event.code === 'string') {
       const keyboard = data.event
       options.keyboard({ key: keyboard.key, code: keyboard.code, altKey: keyboard.altKey === true, ctrlKey: keyboard.ctrlKey === true,
@@ -95,7 +101,7 @@ export function createFrameSurface(options: FrameSurfaceOptions) {
   return {
     iframe,
     update: (refreshAuth = false) => { if (initialized) send('myucto-window-state', { refreshAuth }) },
-    invalidate: (supplierId: number, resource: string) => { if (initialized) send('myucto-window-state', { invalidation: { supplierId, resource } }) },
+    invalidate: (supplierId: number, resource: string, self = false) => { if (initialized) send('myucto-window-state', { invalidation: { supplierId, resource, ...(self ? { self } : {}) } }) },
     focus: () => iframe.contentWindow?.focus(),
     destroy: () => {
       destroyed = true

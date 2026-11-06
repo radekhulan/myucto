@@ -18,7 +18,8 @@ import {
   type LegalProvisionSection,
   type ProvisionsPreview,
   type IncomeTaxPreview,
-  type ProfitDistributionPreview,
+  type ProfitDistribution500Preview as ProfitDistributionPreview,
+  type ProfitDistribution504Preview,
   type ProfitDistributionAllocation,
   type SmallAssetAccrualPreview,
   type SmallAssetAccrualMode,
@@ -38,6 +39,11 @@ import FxSaldoDetails from '@/components/accounting/FxSaldoDetails.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
+import ResultDecision504 from '@/components/accounting/ResultDecision504.vue'
+import DeferredTax504Panel from '@/components/accounting/DeferredTax504Panel.vue'
+import AssetReserve504 from '@/components/accounting/AssetReserve504.vue'
+import LegalProvisions504 from '@/components/accounting/LegalProvisions504.vue'
+import FxRevaluation504 from '@/components/accounting/FxRevaluation504.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -47,11 +53,13 @@ const pageId = useId()
 
 const periodId = Number(route.params.id)
 
-const STEP_ORDER: ClosingStepKey[] = [
+const BASE_STEP_ORDER: ClosingStepKey[] = [
   'precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'stock', 'close_books', 'open_next',
 ]
 
 const state = ref<ClosingState | null>(null)
+const stepOrder = computed<ClosingStepKey[]>(() => state.value?.accounting_framework === 'cz_504'
+  ? BASE_STEP_ORDER.flatMap(key => key === 'income_tax' ? [key, 'deferred_tax'] : [key]) : BASE_STEP_ORDER)
 const loading = ref(false)
 const busy = ref(false)
 const selected = ref<ClosingStepKey>('precheck')
@@ -113,7 +121,7 @@ async function load() {
   try {
     state.value = await closingApi.state(periodId)
     // Předvyber první nehotový krok — nerelevantní kroky přeskoč.
-    const firstPending = STEP_ORDER.find(
+    const firstPending = stepOrder.value.find(
       k => stepApplicable(k) && (stepsByKey.value[k]?.status ?? 'pending') === 'pending',
     )
     if (firstPending && (stepsByKey.value[selected.value]?.status ?? 'pending') !== 'pending') {
@@ -171,16 +179,45 @@ function abortClosing() {
 }
 
 // ── Precheck ───────────────────────────────────────────────────────────────
-const precheckItems = computed<PrecheckItem[]>(() => {
+const precheckSnapshot = computed<PrecheckItem[]>(() => {
   const p = step('precheck')?.payload
   if (!p) return []
   if (Array.isArray(p)) return p as unknown as PrecheckItem[]
   return p.checks ?? []
 })
 
+/**
+ * Řádky kontrol počítané živě. Snímek kroku je auditní záznam z okamžiku spuštění, kdežto
+ * popup nálezů čte vždy aktuální data. Ze snímku by řádek hlásil „9 nálezů" a popup žádný,
+ * snímek navíc neobsahuje kontroly přidané později. Bez živých dat zůstává snímek.
+ */
+const liveChecks = ref<PrecheckItem[] | null>(null)
+const liveChecksLoading = ref(false)
+let liveChecksRequest = 0
+
+async function loadLiveChecks() {
+  const request = ++liveChecksRequest
+  liveChecksLoading.value = true
+  try {
+    const result = await closingApi.monthlyCheck(periodId)
+    if (request === liveChecksRequest) liveChecks.value = result.checks
+  } catch {
+    if (request === liveChecksRequest) liveChecks.value = null
+  } finally {
+    if (request === liveChecksRequest) liveChecksLoading.value = false
+  }
+}
+
+watch([selected, state], () => {
+  if (selected.value === 'precheck' && step('precheck')?.status === 'done') void loadLiveChecks()
+})
+
+const precheckItems = computed<PrecheckItem[]>(() => liveChecks.value ?? precheckSnapshot.value)
+
 // Uložený precheck snímek zastaral (BE porovná živé error-kontroly proti snímku).
 // Typicky po uzavření předchozího období: staré červené chyby už neplatí.
-const precheckStale = computed(() => state.value?.precheck_stale ?? false)
+// Živé řádky zastarat nemohou.
+const precheckStale = computed(() => liveChecks.value === null && (state.value?.precheck_stale ?? false))
 
 // Blokují jen SKUTEČNĚ NEsplněné (ok=false) error kontroly — ne error-severity kontrola,
 // která prošla (např. u prvního období „předchozí období není uzavřené" = ok, není žádné).
@@ -300,6 +337,7 @@ async function bookDepreciation() {
 // ── Kurzové rozdíly ────────────────────────────────────────────────────────
 const fxPreview = ref<FxPreview | null>(null)
 const fxLoading = ref(false)
+const fxError = ref<string | null>(null)
 interface BankRowForm { account_code: string; currency_code: string; foreign_balance: number | null }
 const bankRows = ref<BankRowForm[]>([])
 const fxLoaded = ref(false)
@@ -315,6 +353,7 @@ function validBankRows() {
 }
 
 async function loadFxPreview(withRows: boolean) {
+  if (state.value?.accounting_framework === 'cz_504') return
   fxLoading.value = true
   try {
     fxPreview.value = await closingApi.fxPreview(periodId, withRows ? validBankRows() : undefined)
@@ -339,7 +378,10 @@ async function loadFxPreview(withRows: boolean) {
       }
     }
     fxLoaded.value = true
+    fxError.value = null
   } catch (e: any) {
+    // Bez náhledu je panel prázdný, důvod proto musí zůstat vidět i po zmizení hlášky.
+    fxError.value = e?.response?.data?.error?.message ?? null
     handleApiError(e)
   } finally {
     fxLoading.value = false
@@ -630,7 +672,7 @@ function bookIncomeTax() {
 }
 
 watch(selected, (k) => {
-  if (k === 'provisions' && !provisionsPreview.value) loadProvisions()
+  if (k === 'provisions' && state.value?.accounting_framework !== 'cz_504' && !provisionsPreview.value) loadProvisions()
   if (k === 'income_tax' && !incomeTaxPreview.value) loadIncomeTax()
   if (k === 'deferrals' && !peAccrualPreview.value) loadPrepaidExpenseAccrual()
   if (k === 'deferrals' && !drAccrualPreview.value) loadDeferredRevenueAccrual()
@@ -641,6 +683,7 @@ watch(selected, (k) => {
 // ── D10: rozdělení výsledku hospodaření (431 → 428/429/364…) ────────────────
 const showProfitDistribution = ref(false)
 const pdPreview = ref<ProfitDistributionPreview | null>(null)
+const pd504Preview = ref<ProfitDistribution504Preview | null>(null)
 const pdAllocations = ref<ProfitDistributionAllocation[]>([])
 const pdDecisionDate = ref('')
 const pdWithholdingRate = ref(0.15)
@@ -651,7 +694,14 @@ const pdRemaining = computed(() => Math.abs(pdPreview.value?.available_profit ??
 async function openProfitDistribution() {
   showProfitDistribution.value = true
   try {
-    pdPreview.value = await closingApi.profitDistributionPreview(periodId)
+    const preview = await closingApi.profitDistributionPreview(periodId)
+    if (preview.accounting_framework === 'cz_504') {
+      pd504Preview.value = preview
+      pdPreview.value = null
+      return
+    }
+    pd504Preview.value = null
+    pdPreview.value = preview
     pdWithholdingRate.value = pdPreview.value.withholding_rate
     if (!pdAllocations.value.length) {
       pdAllocations.value = [{ account_code: pdPreview.value.is_loss ? '429' : '428', amount: 0, kind: pdPreview.value.is_loss ? 'loss_coverage' : 'retained' }]
@@ -786,7 +836,7 @@ function stepIcon(key: ClosingStepKey): string {
   const st = step(key)?.status ?? 'pending'
   if (st === 'done') return '✓'
   if (st === 'skipped') return '–'
-  return String(STEP_ORDER.indexOf(key) + 1)
+  return String(stepOrder.value.indexOf(key) + 1)
 }
 function stepIconClass(key: ClosingStepKey): string {
   if (!stepApplicable(key)) return 'bg-neutral-100 text-neutral-400'
@@ -819,9 +869,14 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
           </span>
         </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex flex-wrap items-center gap-2">
         <RouterLink to="/accounting/periods" class="text-sm text-neutral-500 hover:text-neutral-700">
           {{ t('common.back') }}
+        </RouterLink>
+        <RouterLink v-if="state?.accounting_framework === 'cz_504' && auth.can('accounting')"
+          :to="{ name: 'accounting-nonprofit-tax', params: { id: periodId } }" :class="btnOutline('neutral')">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.chart" /></svg>
+          {{ t('nonprofitTax.title') }}
         </RouterLink>
         <RouterLink v-if="auth.can('accounting')" :to="{ name: 'accounting-statement-notes', params: { id: periodId } }"
           :class="btnOutline('neutral')">
@@ -850,7 +905,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
     <div v-else-if="state" class="grid grid-cols-1 lg:grid-cols-[280px_1fr] gap-4">
       <!-- Levý sloupec: kroky -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-2 h-fit">
-        <button v-for="key in STEP_ORDER" :key="key" @click="selected = key"
+        <button v-for="key in stepOrder" :key="key" @click="selected = key"
           class="cursor-pointer w-full flex items-center gap-3 px-3 py-2.5 rounded-md text-left text-sm"
           :class="selected === key ? 'bg-primary-50 text-primary-700 font-medium' : 'hover:bg-neutral-50'">
           <span class="w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0"
@@ -888,7 +943,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
           <div v-if="precheckStale" class="rounded-lg border border-warning-200 bg-warning-50 dark:bg-warning-500/[0.06] px-3 py-2 text-sm text-warning-800 dark:text-warning-200">
             {{ t('accounting.closing.precheck_stale_hint') }}
           </div>
-          <div v-if="precheckItems.length" class="overflow-x-auto" :class="{ 'opacity-50': precheckStale }">
+          <div v-if="precheckItems.length" class="overflow-x-auto" :class="{ 'opacity-50': precheckStale || liveChecksLoading }">
             <table class="w-full text-sm">
               <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
                 <tr>
@@ -971,11 +1026,17 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
 
         <!-- 3) Kurzové rozdíly -->
         <template v-else-if="selected === 'fx_revaluation'">
-          <div v-if="!isClosing && step('fx_revaluation')?.status === 'pending'" class="text-sm text-neutral-500">
+          <FxRevaluation504 v-if="state.accounting_framework === 'cz_504'" :supplier-id="state.period.supplier_id" :period-id="state.period.id"
+            :row-version="rowVersion" :ends-on="state.period.ends_on" :can-write="isClosing && auth.canWrite('accounting.periods.close')"
+            :can-revert="!!state.can_revert_fx_revaluation" @updated="load" />
+          <div v-else-if="!isClosing && step('fx_revaluation')?.status === 'pending'" class="text-sm text-neutral-500">
             {{ t('accounting.closing.fx.needs_closing') }}
           </div>
           <template v-else>
             <div v-if="fxLoading" class="text-sm text-neutral-500">{{ t('common.loading') }}</div>
+            <div v-else-if="fxError && !fxPreview" data-testid="fx-error" class="rounded-lg border border-warning-200 bg-warning-50 dark:bg-warning-500/[0.06] px-3 py-2 text-sm text-warning-800 dark:text-warning-200">
+              {{ fxError }}
+            </div>
             <template v-else-if="fxPreview">
               <div v-if="fxPreview.rate_info?.length" class="flex flex-wrap gap-2 text-xs text-neutral-500">
                 <span v-for="ri in fxPreview.rate_info" :key="ri.currency"
@@ -1301,9 +1362,10 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
                       </tr>
                     </thead>
                     <tbody>
-                      <tr v-for="it in drAccrualPreview.items" :key="it.item_id" class="border-b border-neutral-100">
+                      <tr v-for="it in drAccrualPreview.items" :key="`${it.source}:${it.item_id}`" class="border-b border-neutral-100">
                         <td class="py-1 pr-2">
-                          <RouterLink :to="`/invoices/${it.invoice_id}`" class="text-primary-700 hover:underline">{{ it.invoice_number }}</RouterLink>
+                          <RouterLink v-if="it.invoice_id !== null" :to="`/invoices/${it.invoice_id}`" class="text-primary-700 hover:underline">{{ it.invoice_number }}</RouterLink>
+                          <span v-else>{{ it.invoice_number }}</span>
                           <span class="block text-xs text-neutral-400">{{ it.description }}</span>
                         </td>
                         <td class="py-1 px-2 whitespace-nowrap">{{ formatDate(it.accrual_from) }} – {{ formatDate(it.accrual_to) }}</td>
@@ -1367,10 +1429,12 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
 
         <!-- D9) Opravné položky k pohledávkám -->
         <template v-else-if="selected === 'provisions'">
-          <div v-if="!isClosing && step('provisions')?.status === 'pending'" class="text-sm text-neutral-500">
+          <AssetReserve504 v-if="state?.accounting_framework === 'cz_504' && auth.can('assets')" :period-id="periodId" :row-version="rowVersion" :can-write="auth.canWrite('accounting.periods.close')" :is-closing="isClosing" @updated="load" />
+          <LegalProvisions504 v-if="state?.accounting_framework === 'cz_504'" :period-id="periodId" :row-version="rowVersion" :can-write="auth.canWrite('accounting.periods.close')" :is-closing="isClosing" @updated="load" />
+          <div v-if="state?.accounting_framework !== 'cz_504' && !isClosing && step('provisions')?.status === 'pending'" class="text-sm text-neutral-500">
             {{ t('accounting.closing.assist.needs_closing') }}
           </div>
-          <template v-else>
+          <template v-else-if="state?.accounting_framework !== 'cz_504'">
             <div class="flex flex-wrap items-center gap-2">
               <button @click="loadProvisions()" :disabled="busy || provisionsLoading" :class="btnOutline('neutral')">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
@@ -1471,6 +1535,10 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
               {{ t('accounting.closing.step_done_at', { date: formatDate(step('provisions')?.done_at) }) }}
             </div>
           </template>
+        </template>
+
+        <template v-else-if="selected === 'deferred_tax' && state?.accounting_framework === 'cz_504'">
+          <DeferredTax504Panel :period-id="periodId" :row-version="rowVersion" :can-write="isClosing && auth.canWrite('accounting.periods.close') && !busy" @updated="load" />
         </template>
 
         <!-- D11) Splatná daň z příjmů -->
@@ -1787,8 +1855,8 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
       class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-5 mt-4 space-y-3">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 class="text-lg font-semibold">{{ t('accounting.closing.profit_distribution.title') }}</h2>
-          <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.closing.profit_distribution.description') }}</p>
+          <h2 class="text-lg font-semibold">{{ t(state.accounting_framework === 'cz_504' ? 'accounting.result504.title' : 'accounting.closing.profit_distribution.title') }}</h2>
+          <p v-if="state.accounting_framework !== 'cz_504'" class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.closing.profit_distribution.description') }}</p>
         </div>
         <button v-if="!showProfitDistribution" @click="openProfitDistribution" :disabled="busy" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.coin" /></svg>
@@ -1796,6 +1864,7 @@ const canOpenNextStage = computed(() => ['closed', 'reviewed', 'approved'].inclu
         </button>
       </div>
 
+      <ResultDecision504 v-if="showProfitDistribution && pd504Preview" :period-id="periodId" :initial="pd504Preview" :can-write="auth.canWrite('accounting.periods.close')" @updated="load" />
       <template v-if="showProfitDistribution && pdPreview">
         <div class="text-sm flex flex-wrap gap-x-6 gap-y-1">
           <div>{{ t('accounting.closing.profit_distribution.target_period') }}: <strong>{{ pdPreview.target_period.fiscal_year }}</strong></div>

@@ -9,6 +9,8 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Bank\Connector\BankConnectorOperationException;
+use MyInvoice\Service\Bank\Connector\BankPaymentSignatureService;
+use MyInvoice\Service\Bank\Connector\BankPaymentSubmissionHttp;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Payment\PayrollBankSubmissionService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -22,6 +24,7 @@ final class PayrollBankSubmissionAction
         private readonly PayrollBankSubmissionService $service,
         private readonly PayrollModuleAccess $moduleAccess,
         private readonly ActivityLogger $activity,
+        private readonly BankPaymentSignatureService $signatures,
     ) {}
 
     public function get(Request $request, Response $response, array $args): Response
@@ -57,6 +60,44 @@ final class PayrollBankSubmissionAction
         }
     }
 
+    /** Adresa podpisu mzdové dávky v bance (Česká spořitelna). */
+    public function sign(Request $request, Response $response, array $args): Response
+    {
+        if ($denied = $this->denied($request, $response, AccessLevel::WRITE)) return $denied;
+        $userId = $this->userId($request);
+        if ($userId === null) return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        try {
+            return Json::ok($response, $this->signatures->startSignature($this->currentSupplierId($request), (int) $args['batchId'],
+                'payroll', $userId))->withHeader('Cache-Control', 'no-store');
+        } catch (BankConnectorOperationException $e) {
+            return $this->signatureFailure($response, $e);
+        }
+    }
+
+    /** Stav podpisu a provedení mzdové dávky u banky; nic znovu neposílá. */
+    public function refresh(Request $request, Response $response, array $args): Response
+    {
+        if ($denied = $this->denied($request, $response, AccessLevel::WRITE)) return $denied;
+        try {
+            return Json::ok($response, ['submission' => $this->signatures->refresh($this->currentSupplierId($request),
+                (int) $args['batchId'], 'payroll')])->withHeader('Cache-Control', 'no-store');
+        } catch (BankConnectorOperationException $e) {
+            return $this->signatureFailure($response, $e);
+        }
+    }
+
+    /** Položky nejasného nebo přerušeného odeslání mzdové dávky ke kontrole v George. */
+    public function items(Request $request, Response $response, array $args): Response
+    {
+        if ($denied = $this->denied($request, $response, AccessLevel::READ)) return $denied;
+        try {
+            return Json::ok($response, ['items' => $this->signatures->items($this->currentSupplierId($request), (int) $args['batchId'], 'payroll')])
+                ->withHeader('Cache-Control', 'no-store');
+        } catch (BankConnectorOperationException $e) {
+            return $this->signatureFailure($response, $e);
+        }
+    }
+
     private function denied(Request $request, Response $response, AccessLevel $minimum): ?Response
     {
         if (!RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response);
@@ -69,6 +110,13 @@ final class PayrollBankSubmissionAction
     private function failure(Response $response, BankConnectorOperationException $e): Response
     {
         return Json::error($response, $e->errorCode, 'Mzdový příkaz se nepodařilo bezpečně předat bance.',
-            $e->errorCode === 'payment_order_not_found' ? 404 : 409);
+            $e->errorCode === 'payment_order_not_found' ? 404 : 409, $e->details);
+    }
+
+    /** Podpis a stav dávky mají stejné HTTP stavy jako u platebních příkazů. */
+    private function signatureFailure(Response $response, BankConnectorOperationException $e): Response
+    {
+        return Json::error($response, $e->errorCode, 'Mzdový příkaz se nepodařilo bezpečně předat bance.',
+            BankPaymentSubmissionHttp::forError($e->errorCode), $e->details);
     }
 }

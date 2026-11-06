@@ -77,6 +77,21 @@ RUN install-php-extensions \
 # denní DB dump (kritická úloha). Per issue #34 bez něj fail out-of-the-box
 # na fresh deployi a uživatel nemá jak ho doinstalovat persistentně.
 
+# Restriktivní ImageMagick policy (docker/imagemagick-policy.xml): zakáže MVG, MSL,
+# URL/HTTP(S), TEXT, EPHEMERAL, PostScript apod., PDF/SVG/HEIC nechá. Adresář
+# konfigurace se liší podle verze ImageMagicku (6/7), proto se policy zapíše do
+# každého /etc/ImageMagick-*. Build selže, pokud se policy neuplatní.
+COPY docker/imagemagick-policy.xml /tmp/imagemagick-policy.xml
+RUN set -e; \
+    major="$(php -r 'preg_match("/ImageMagick (\d+)/", Imagick::getVersion()["versionString"], $m); echo $m[1] ?? "";')"; \
+    [ -n "$major" ]; \
+    mkdir -p "/etc/ImageMagick-$major"; \
+    for d in /etc/ImageMagick-*; do install -m 0644 /tmp/imagemagick-policy.xml "$d/policy.xml"; done; \
+    rm -f /tmp/imagemagick-policy.xml; \
+    printf 'viewbox 0 0 1 1\n' > /tmp/policy-probe.mvg; \
+    php -r 'try { (new Imagick())->readImage("mvg:/tmp/policy-probe.mvg"); fwrite(STDERR, "ImageMagick policy se neuplatnila\n"); exit(1); } catch (ImagickException $e) { if (!preg_match("/security policy|not authorized/i", $e->getMessage())) { fwrite(STDERR, $e->getMessage() . "\n"); exit(1); } echo "ImageMagick policy OK\n"; }'; \
+    rm -f /tmp/policy-probe.mvg
+
 # PHP runtime config
 RUN { \
         echo 'memory_limit = 512M'; \
@@ -85,6 +100,7 @@ RUN { \
         echo 'max_execution_time = 60'; \
         echo 'date.timezone = Europe/Prague'; \
         echo 'expose_php = Off'; \
+        echo 'session.upload_progress.enabled = 0'; \
         echo 'opcache.enable = 1'; \
         echo 'opcache.memory_consumption = 128'; \
         echo 'opcache.interned_strings_buffer = 16'; \

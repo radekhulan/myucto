@@ -12,6 +12,15 @@
 #   6. Prints the URL where the setup wizard is available
 #
 # Přebití: MYINVOICE_INSTALL_MODE=registry|source   nebo argument  --build.
+#
+# Konfigurace (jen při prvním vygenerování cfg.docker.php):
+#   --url=https://ucto.firma.cz   veřejná adresa (app.url); jinak MYINVOICE_APP_URL,
+#                                 výchozí http://localhost:${APP_PORT}
+#   --dev                         čistě lokální vývojová instalace (app.env=development);
+#                                 nikdy ji nevystavuj do sítě
+# Výchozí je produkční režim (app.env=production). Secure cookie se řídí schématem
+# app.url: https → cookie_secure=true s prefixem __Host-, http → false (jinak by se
+# přes http://localhost nešlo přihlásit).
 # Idempotent — safe to re-run.
 set -Eeuo pipefail
 
@@ -26,7 +35,16 @@ trap 'rc=$?; {
 } >&2; exit "$rc"' ERR
 
 FORCE_BUILD=0
-[[ "${1:-}" == "--build" ]] && FORCE_BUILD=1
+INSTALL_DEV=0
+INSTALL_URL=""
+for arg in "$@"; do
+  case "$arg" in
+    --build) FORCE_BUILD=1 ;;
+    --dev)   INSTALL_DEV=1 ;;
+    --url=*) INSTALL_URL="${arg#--url=}" ;;
+    *) echo "    Pozn.: neznámý argument '${arg}' ignoruji (povolené: --build, --dev, --url=URL)." >&2 ;;
+  esac
+done
 
 if ! command -v docker >/dev/null 2>&1; then
   echo "ERROR: docker not found in PATH" >&2; exit 1
@@ -78,12 +96,28 @@ if [[ ! -f cfg.docker.php ]]; then
   echo "==> Generating cfg.docker.php from cfg.sample.php with Docker defaults…"
   PEPPER=$(openssl rand -base64 32)
   ENC_KEY=$(openssl rand -base64 32)
+  # Nová instalace = nová data, takže samostatný klíč mzdových otisků je bezpečný.
+  # (Na existující instalaci se nesmí měnit, viz cfg.sample.php.)
+  PAYROLL_HASH_KEY=$(openssl rand -base64 32)
+
+  APP_URL="${INSTALL_URL:-${MYINVOICE_APP_URL:-http://localhost:${APP_PORT}}}"
+  APP_URL="${APP_URL%/}"
+  url_re='^https?://[][A-Za-z0-9.:-]+$'
+  if [[ ! "$APP_URL" =~ $url_re ]]; then
+    echo "ERROR: --url musí být jen origin ve tvaru http(s)://host[:port], dostal jsem '${APP_URL}'." >&2
+    exit 1
+  fi
+  APP_LOCAL=0
+  local_re='^https?://(localhost|127\.[0-9.]+|\[::1\])(:[0-9]+)?$'
+  [[ "$APP_URL" =~ $local_re ]] && APP_LOCAL=1
+  APP_ENV="production"
+  [[ "$INSTALL_DEV" == "1" ]] && APP_ENV="development"
+
   cp cfg.sample.php cfg.docker.php
   # In-place tweaks: Docker hostnames + generated secrets.
   # cfg.sample.php has TWO `'host' => '127.0.0.1',` lines (db block then redis block).
   # First occurrence becomes 'db', second becomes 'redis' — done via perl (portable;
   # BSD sed on macOS does not support GNU's `0,/pat/` range addressing).
-  APP_URL="http://localhost:${APP_PORT}"
   perl -i -pe '
       BEGIN { $n = 0 }
       if (/host.*127\.0\.0\.1/) {
@@ -98,14 +132,29 @@ if [[ ! -f cfg.docker.php ]]; then
       -e "s|'pass'    => 'CHANGE-ME',|'pass'    => '${DB_PASSWORD}',|" \
       -e "s|'pepper' => 'CHANGE-ME',|'pepper' => '${PEPPER}',|" \
       -e "s|'secret_encryption_key' => '',|'secret_encryption_key' => '${ENC_KEY}',|" \
-      -e "s|'env'    => 'production',|'env'    => 'development',|" \
+      -e "s|'payroll_hash_key' => '',|'payroll_hash_key' => '${PAYROLL_HASH_KEY}',|" \
+      -e "s|'env'    => 'production',|'env'    => '${APP_ENV}',|" \
       -e "s|'url'    => 'https://dev.example.com',|'url'    => '${APP_URL}',|" \
-      -e "s|'cookie_name'   => '__Host-myinvoice_session',|'cookie_name'   => 'myinvoice_session',|" \
-      -e "s|'cookie_secure' => true,|'cookie_secure' => false,|" \
-      -e "s|'trusted_cookie_name'     => '__Host-myinvoice_td',|'trusted_cookie_name'     => 'myinvoice_td',|" \
       cfg.docker.php
+  # Secure cookie podle schématu: přes plain HTTP by prohlížeč Secure cookie
+  # (i prefix __Host-) zahodil a přihlášení by nefungovalo. U https zůstávají
+  # produkční hodnoty z cfg.sample.php.
+  if [[ "$APP_URL" == http://* ]]; then
+    sed -i.bak \
+        -e "s|'cookie_name'   => '__Host-myinvoice_session',|'cookie_name'   => 'myinvoice_session',|" \
+        -e "s|'cookie_secure' => true,|'cookie_secure' => false,|" \
+        -e "s|'trusted_cookie_name'     => '__Host-myinvoice_td',|'trusted_cookie_name'     => 'myinvoice_td',|" \
+        cfg.docker.php
+  fi
   rm -f cfg.docker.php.bak
-  echo "    cfg.docker.php written"
+  echo "    cfg.docker.php written (app.env=${APP_ENV}, app.url=${APP_URL})"
+  if [[ "$APP_URL" == http://* && "$APP_LOCAL" != "1" ]]; then
+    echo "    !!  app.url je HTTP mimo localhost: přihlašovací cookie půjde po síti nešifrovaně.  !!" >&2
+    echo "    !!  Pro provoz dej před aplikaci HTTPS proxy a nastav https adresu + cookie_secure. !!" >&2
+  fi
+  if [[ "$APP_ENV" == "development" ]]; then
+    echo "    !!  Vývojový režim (--dev): instalaci nevystavuj do sítě.  !!" >&2
+  fi
   echo ""
   echo "    !!  Edit cfg.docker.php to fill in SMTP, Cloudflare Turnstile, IP allowlist  !!"
   echo ""

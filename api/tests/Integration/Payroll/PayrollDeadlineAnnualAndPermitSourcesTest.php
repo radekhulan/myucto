@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -35,7 +34,7 @@ final class PayrollDeadlineAnnualAndPermitSourcesTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->repository = $container->get(PayrollDeadlineOverviewRepository::class);
         $pdo = $this->db->pdo();

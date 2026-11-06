@@ -126,6 +126,22 @@ final class AbraConnectionServiceTest extends TestCase
         self::assertSame(0, (int) $stmt->fetch(\PDO::FETCH_ASSOC)['oss_enabled']);
     }
 
+    public function testStatusReportsIcoMismatchBeforeTransferStarts(): void
+    {
+        $supplier = $this->suppliers[0];
+        self::assertFalse($this->service->status($supplier)['ico_mismatch']);
+        $setIco = $this->db->pdo()->prepare('UPDATE supplier SET ic = ? WHERE id = ?');
+        $setIco->execute(['12345678', $supplier]);
+        $status = $this->save($supplier);
+        self::assertTrue($status['ico_mismatch']);
+        self::assertSame(['name' => 'Synthetic ABRA 1', 'ico' => '12345678'], $status['target_company']);
+        self::assertSame('88888888', $status['source_company']['ico']);
+        $setIco->execute(['088 888 888', $supplier]);
+        self::assertFalse($this->service->status($supplier)['ico_mismatch']);
+        $setIco->execute([null, $supplier]);
+        self::assertTrue($this->service->status($supplier)['ico_mismatch']);
+    }
+
     public function testDiscoveryWarningForUnselectedYearIsHidden(): void
     {
         $supplier = $this->suppliers[0];

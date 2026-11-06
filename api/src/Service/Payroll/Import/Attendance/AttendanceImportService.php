@@ -16,7 +16,9 @@ use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollImportLinkRepository;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollInputImportRepository;
+use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
@@ -27,8 +29,11 @@ use MyInvoice\Service\Payroll\Net\DeductionAgreementStatus;
 use MyInvoice\Service\Payroll\Net\DeductionAgreementTerms;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
+use MyInvoice\Service\Payroll\PayrollPersonProfileValidator;
+use MyInvoice\Service\Payroll\Payment\PayrollPersonAccountVerificationService;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveData;
 use MyInvoice\Service\Payroll\Security\PayrollSensitiveField;
+use MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours;
 use MyInvoice\Service\Payroll\Time\PayrollTimeImportApprovalService;
 use MyInvoice\Service\Payroll\Time\PayrollTimeImportSummaryWriter;
 
@@ -113,6 +118,10 @@ final class AttendanceImportService
         private readonly PayrollTimeImportApprovalService $timeApprovals,
         private readonly PayrollImportAbsenceCompensationMaterializer $absenceCompensations,
         private readonly PayrollDeductionAgreementRepository $deductions,
+        private readonly PayrollPersonProfileValidator $profileValidator,
+        private readonly PayrollPersonProfileRepository $personProfiles,
+        private readonly PayrollPersonAccountVerificationService $accountVerification,
+        private readonly DemoMode $demo,
     ) {
     }
 
@@ -141,7 +150,7 @@ final class AttendanceImportService
 
         return self::public($this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta))
             + [
-                'upgrade_available' => self::sampleUpgrade($modifiedSamples),
+                'upgrade_available' => self::sampleUpgrade($modifiedSamples, $profileMeta['id']),
                 'source_checks' => $this->sourceChecks($supplierId, $periodStart, $files, $read['sheets']),
             ];
     }
@@ -520,9 +529,9 @@ final class AttendanceImportService
     }
 
     /**
-     * Osobní údaje z podkladů podle klíče osoby: rodné číslo, datum narození
-     * a kód zdravotní pojišťovny. Klient zná rodné číslo jen maskované a
-     * ostatní údaje vůbec, takže je při zakládání osob doplní server ze
+     * Osobní údaje z podkladů podle klíče osoby: rodné číslo, datum narození,
+     * kód zdravotní pojišťovny a číslo účtu. Klient zná rodné číslo a účet jen
+     * maskované a ostatní údaje vůbec, takže je při zakládání osob doplní server ze
      * stejných souborů a stejného mapování, ze kterých vznikl náhled.
      *
      * @param list<array{name:string,content:string,sha256:string,extension:string}> $files
@@ -547,7 +556,12 @@ final class AttendanceImportService
         $computed = $this->compute($supplierId, $periodStart, $files, $read, $validated, $profileComponents, $profileMeta);
         $data = [];
         foreach ($computed['persons'] as $person) {
-            foreach (['birth_number' => '_birth_number', 'birth_date' => '_birth_date', 'health_insurer_code' => '_health_insurer_code'] as $field => $internal) {
+            foreach ([
+                'birth_number' => '_birth_number',
+                'birth_date' => '_birth_date',
+                'health_insurer_code' => '_health_insurer_code',
+                'bank_account' => '_bank_account',
+            ] as $field => $internal) {
                 $value = $person[$internal] ?? null;
                 if (is_string($value) && trim($value) !== '') {
                     $data[(string) $person['key']][$field] = trim($value);
@@ -730,35 +744,41 @@ final class AttendanceImportService
     }
 
     /**
-     * Znovu založí vzorový profil GIRITON, třeba po omylem smazaném. Vzor vznikne
-     * v aktuální verzi a dál se sám aktualizuje; existující vzor se vrátí beze
-     * změny. Obsadil-li jeho název vlastní profil, dostane vzor příponu.
+     * Znovu založí vestavěný vzor (GIRITON, MyÚčto), třeba po omylem smazaném.
+     * Vzor vznikne v aktuální verzi a dál se sám aktualizuje; existující vzor
+     * téhož klíče se vrátí beze změny. Obsadil-li jeho název vlastní profil,
+     * dostane vzor příponu.
      *
      * @return array{profile:array<string,mixed>,restored:bool}
      */
-    public function restoreSampleProfile(int $supplierId, ?int $userId): array
+    public function restoreSampleProfile(int $supplierId, ?int $userId, string $sampleKey = AttendanceSampleProfiles::GIRITON): array
     {
+        if (!AttendanceSampleProfiles::isKey($sampleKey)) {
+            throw new \InvalidArgumentException('Neznámý vzor profilu mapování.');
+        }
         $existing = $this->profiles->list($supplierId, AttendanceMeaning::SOURCE_SYSTEM);
         foreach ($existing as $profile) {
-            if (!empty($profile['is_sample'])) {
+            if (!empty($profile['is_sample']) && $profile['sample_key'] === $sampleKey) {
                 return ['profile' => $profile, 'restored' => false];
             }
         }
         $taken = array_map(static fn (array $profile): string => mb_strtolower((string) $profile['name'], 'UTF-8'), $existing);
-        $name = AttendanceSampleProfile::NAME;
+        $base = AttendanceSampleProfiles::name($sampleKey);
+        $name = $base;
         for ($suffix = 2; in_array(mb_strtolower($name, 'UTF-8'), $taken, true); ++$suffix) {
-            $name = AttendanceSampleProfile::NAME . " ({$suffix})";
+            $name = $base . " ({$suffix})";
         }
         $profile = $this->profiles->save(
             $supplierId,
             AttendanceMeaning::SOURCE_SYSTEM,
             null,
             $name,
-            AttendanceSampleProfile::rules(),
+            AttendanceSampleProfiles::rules($sampleKey),
             $userId,
-            AttendanceSampleProfile::components(),
+            AttendanceSampleProfiles::components($sampleKey),
             true,
-            AttendanceSampleProfile::VERSION,
+            AttendanceSampleProfiles::version($sampleKey),
+            $sampleKey,
         ) ?? throw new \RuntimeException('Vzorový profil se nepodařilo založit.');
 
         return ['profile' => $profile, 'restored' => true];
@@ -854,52 +874,73 @@ final class AttendanceImportService
     }
 
     /**
-     * Založí vzor firmě, která ho ještě nedostala, a nedotčený starší vzor
-     * převede na aktuální verzi.
+     * Založí firmě vestavěné vzory, které ještě nedostala, a nedotčené starší
+     * vzory převede na aktuální verzi — každý vzor podle svého klíče.
      *
-     * @return list<array{id:int,name:string,sample_version:?int}> upravené vzory starší verze
+     * @return list<array{id:int,name:string,sample_key:string,sample_version:?int}> upravené vzory starší verze
      */
     private function ensureSampleProfile(int $supplierId): array
     {
-        $this->profiles->seedSampleOnce(
-            $supplierId,
-            AttendanceMeaning::SOURCE_SYSTEM,
-            AttendanceSampleProfile::NAME,
-            AttendanceSampleProfile::rules(),
-            AttendanceSampleProfile::components(),
-            AttendanceSampleProfile::VERSION,
-        );
+        // Ukázka je jen ke čtení: otevřením importu se vzory nezakládají, nepřevádějí
+        // ani se na firmě nenastavuje značka, že je dostala. Zobrazí se, co v datech je.
+        if ($this->demo->enabled()) {
+            return [];
+        }
+        $modified = [];
+        foreach (AttendanceSampleProfiles::keys() as $key) {
+            $this->profiles->seedSampleOnce(
+                $supplierId,
+                AttendanceMeaning::SOURCE_SYSTEM,
+                $key,
+                AttendanceSampleProfiles::name($key),
+                AttendanceSampleProfiles::rules($key),
+                AttendanceSampleProfiles::components($key),
+                AttendanceSampleProfiles::version($key),
+            );
+            array_push($modified, ...$this->profiles->upgradeSample(
+                $supplierId,
+                AttendanceMeaning::SOURCE_SYSTEM,
+                $key,
+                AttendanceSampleProfiles::version($key),
+                AttendanceSampleProfiles::rules($key),
+                AttendanceSampleProfiles::components($key),
+            ));
+        }
 
-        return $this->profiles->upgradeSample(
-            $supplierId,
-            AttendanceMeaning::SOURCE_SYSTEM,
-            AttendanceSampleProfile::VERSION,
-            AttendanceSampleProfile::rules(),
-            AttendanceSampleProfile::components(),
-        );
+        return $modified;
     }
 
     /**
      * Nabídka nové verze vzoru pro upravený profil. Nese i pravidla a složky
      * vzoru: uloží-li je účetní do profilu (běžné uložení profilu), vzor se
-     * při dalším načtení označí jako aktuální.
+     * při dalším načtení označí jako aktuální. Přednost má vzor, podle kterého
+     * náhled právě počítal.
      *
-     * @param list<array{id:int,name:string,sample_version:?int}> $modified
+     * @param list<array{id:int,name:string,sample_key:string,sample_version:?int}> $modified
      * @return array<string,mixed>|null
      */
-    private static function sampleUpgrade(array $modified): ?array
+    private static function sampleUpgrade(array $modified, ?int $usedProfileId = null): ?array
     {
         if ($modified === []) {
             return null;
         }
+        $offer = $modified[0];
+        foreach ($modified as $candidate) {
+            if ($candidate['id'] === $usedProfileId) {
+                $offer = $candidate;
+                break;
+            }
+        }
+        $key = $offer['sample_key'];
 
         return [
-            'profile_id' => $modified[0]['id'],
-            'name' => $modified[0]['name'],
-            'version' => $modified[0]['sample_version'],
-            'latest_version' => AttendanceSampleProfile::VERSION,
-            'rules' => AttendanceSampleProfile::rules(),
-            'components' => AttendanceSampleProfile::components(),
+            'profile_id' => $offer['id'],
+            'name' => $offer['name'],
+            'sample_key' => $key,
+            'version' => $offer['sample_version'],
+            'latest_version' => AttendanceSampleProfiles::version($key),
+            'rules' => AttendanceSampleProfiles::rules($key),
+            'components' => AttendanceSampleProfiles::components($key),
         ];
     }
 
@@ -1058,6 +1099,19 @@ final class AttendanceImportService
                     $person['birth_number_masked'] = null;
                 }
             }
+            $bankAccount = $person['_bank_account'] ?? null;
+            if (is_string($bankAccount)) {
+                try {
+                    $bankAccount = $this->profileValidator->normalizeBankAccount($bankAccount);
+                    $person['_bank_account'] = $bankAccount;
+                    $person['bank_account_masked'] = $this->sensitive->mask($bankAccount, PayrollSensitiveField::BANK_ACCOUNT);
+                } catch (\InvalidArgumentException $e) {
+                    // Existující osobě import účet nemění, varování patří jen zakládané.
+                    if (!in_array($person['match']['status'], ['linked', 'matched'], true)) {
+                        $person['warnings'][] = self::bankAccountNote($e, false);
+                    }
+                }
+            }
             foreach (array_keys($person['_components']) as $code) {
                 $usedCodes[(string) $code] = true;
             }
@@ -1067,6 +1121,7 @@ final class AttendanceImportService
             }
         }
         unset($person);
+        $persons = $this->withAgreementHours($supplierId, $periodStart, $persons, $matched['options']);
 
         $codes = [];
         foreach ($mapped['sheets'] as $sheet) {
@@ -1475,6 +1530,140 @@ final class AttendanceImportService
     }
 
     /**
+     * Roční limit DPP (§ 75 ZP) s odpracovanými hodinami z importovaného měsíce.
+     * Součet za celý rok bere {@see PayrollAgreementAnnualHours::yearWithoutMonth()}
+     * bez uloženého souhrnu importovaných vztahů za importovaný měsíc, protože
+     * dávka ho teprve zapíše nebo přepíše. Pozdější měsíce (import staršího
+     * měsíce) i jiná dohoda téže osoby za týž měsíc se tak počítají.
+     *
+     * @param list<array<string,mixed>> $persons
+     * @param list<array<string,mixed>> $options
+     * @return list<array<string,mixed>>
+     */
+    private function withAgreementHours(int $supplierId, string $periodStart, array $persons, array $options): array
+    {
+        $employeeIds = array_keys(self::importedAgreementMillihours($persons, $options));
+        if ($employeeIds === []) {
+            return $persons;
+        }
+        $agreements = self::agreementEmploymentIds($options);
+        $employmentIds = [];
+        foreach ($persons as $person) {
+            if (self::agreementEmployeeId($person, $agreements) !== null) {
+                $employmentIds[(int) $person['match']['employment_id']] = true;
+            }
+        }
+        $stored = (new PayrollAgreementAnnualHours($this->db))->yearWithoutMonth(
+            $supplierId,
+            $employeeIds,
+            $periodStart,
+            array_keys($employmentIds),
+        );
+
+        return self::annotateAgreementHours($persons, $options, $stored, (int) substr($periodStart, 0, 4));
+    }
+
+    /**
+     * Připíše k osobám přiřazeným na DPP roční součet po importu a při dosažení
+     * prahu nebo překročení limitu varování. Import nezastavuje.
+     *
+     * @param list<array<string,mixed>> $persons
+     * @param list<array<string,mixed>> $options volby vztahů s `employment_id` a `relation_type`
+     * @param array<int,array{own_minutes:int,takeover_minutes:int,total_minutes:int}> $prior roční součet
+     *        bez uloženého souhrnu importovaných vztahů za importovaný měsíc
+     * @return list<array<string,mixed>>
+     */
+    public static function annotateAgreementHours(array $persons, array $options, array $prior, int $year): array
+    {
+        $imported = self::importedAgreementMillihours($persons, $options);
+        $agreements = self::agreementEmploymentIds($options);
+        foreach ($persons as &$person) {
+            $employeeId = self::agreementEmployeeId($person, $agreements);
+            if ($employeeId === null) {
+                continue;
+            }
+            $before = $prior[$employeeId] ?? ['own_minutes' => 0, 'takeover_minutes' => 0, 'total_minutes' => 0];
+            $importedMinutes = intdiv(($imported[$employeeId] ?? 0) * 60, 1000);
+            $summary = PayrollAgreementAnnualHours::summary($year, [
+                'own_minutes' => $before['own_minutes'] + $importedMinutes,
+                'takeover_minutes' => $before['takeover_minutes'],
+                'total_minutes' => $before['total_minutes'] + $importedMinutes,
+            ]);
+            $person['dpp_annual_hours'] = $summary + ['imported_minutes' => $importedMinutes];
+            if ($summary['status'] !== PayrollAgreementAnnualHours::STATUS_OK) {
+                $name = $person['match']['employee_name'] ?? null;
+                $person['warnings'][] = 'Se započtením této docházky: ' . PayrollAgreementAnnualHours::statusMessage(
+                    $summary['status'],
+                    is_string($name) && $name !== '' ? $name : (string) ($person['display_name'] ?? ''),
+                    $year,
+                    $summary['total_minutes'],
+                    $summary['takeover_minutes'],
+                );
+            }
+        }
+        unset($person);
+
+        return $persons;
+    }
+
+    /**
+     * Importované odpracované hodiny po osobách, jen u řádků přiřazených na DPP.
+     *
+     * @param list<array<string,mixed>> $persons
+     * @param list<array<string,mixed>> $options
+     * @return array<int,int> employee_id => tisíciny hodiny
+     */
+    private static function importedAgreementMillihours(array $persons, array $options): array
+    {
+        $agreements = self::agreementEmploymentIds($options);
+        $result = [];
+        foreach ($persons as $person) {
+            $employeeId = self::agreementEmployeeId($person, $agreements);
+            if ($employeeId === null) {
+                continue;
+            }
+            $worked = $person['_metrics']['worked_hours']['millihours'] ?? 0;
+            $result[$employeeId] = ($result[$employeeId] ?? 0) + (is_int($worked) ? $worked : 0);
+        }
+
+        return $result;
+    }
+
+    /**
+     * @param array<string,mixed> $person
+     * @param array<int,true> $agreements ID vztahů DPP
+     */
+    private static function agreementEmployeeId(array $person, array $agreements): ?int
+    {
+        $match = is_array($person['match'] ?? null) ? $person['match'] : [];
+        if (!in_array($match['status'] ?? null, ['linked', 'matched'], true)
+            || !is_int($match['employment_id'] ?? null)
+            || !is_int($match['employee_id'] ?? null)
+            || !isset($agreements[$match['employment_id']])
+        ) {
+            return null;
+        }
+
+        return $match['employee_id'];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $options
+     * @return array<int,true>
+     */
+    private static function agreementEmploymentIds(array $options): array
+    {
+        $result = [];
+        foreach ($options as $option) {
+            if (($option['relation_type'] ?? null) === 'dpp' && is_int($option['employment_id'] ?? null)) {
+                $result[$option['employment_id']] = true;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
      * @param array<string,mixed> $item
      * @return array{employee_id:int,employment_id:int,message:?string}
      */
@@ -1509,6 +1698,11 @@ final class AttendanceImportService
         if ($monthlyGross !== null && !is_int($monthlyGross)) {
             throw new \InvalidArgumentException('Měsíční mzda musí být celé číslo v korunách.');
         }
+        $notes = $weeklyNote === null ? [] : [$weeklyNote];
+        $plannedStart = is_string($item['planned_start_on'] ?? null) ? $item['planned_start_on'] : '';
+        [$hourlyMinor, $hourlyNote] = self::hourlyRateMinor($item['hourly_rate'] ?? null);
+        [$fixedEnd, $endNote] = self::fixedTermEnd($item['fixed_term_end_on'] ?? null, $plannedStart);
+        array_push($notes, ...array_filter([$hourlyNote, $endNote]));
         $input = [
             'full_name' => $item['full_name'] ?? null,
             'first_name' => $item['first_name'] ?? null,
@@ -1520,14 +1714,28 @@ final class AttendanceImportService
             'planned_start_on' => $item['planned_start_on'] ?? null,
             'weekly_hours' => $weeklyHours,
             'monthly_gross' => $monthlyGross,
+            'fixed_term_end_on' => $fixedEnd,
+            // Sazbu ze smlouvy aplikace jinde neeviduje; jako pravděpodobný
+            // výdělek (§ 355 ZP) poslouží průměru, dokud nevznikne skutečný.
+            'probable_hourly_earning_minor' => $hourlyMinor,
+            'probable_earning_rationale' => $hourlyMinor === null ? null : sprintf(
+                'Sjednaná hodinová sazba %s Kč z podkladů importu docházky.',
+                number_format($hourlyMinor / 100, 2, ',', ' '),
+            ),
         ];
         $person = $this->personCreate->create($supplierId, $input, $userId, $ip, $userAgent);
         $employeeId = (int) ($person['id'] ?? 0);
         $employment = $this->imports->latestEmploymentOfEmployee($supplierId, $employeeId)
             ?? throw new \LogicException('Nově založený pracovní vztah nebyl nalezen.');
 
-        $message = $weeklyNote;
-        $plannedStart = is_string($input['planned_start_on']) ? $input['planned_start_on'] : '';
+        $bankAccount = $item['bank_account'] ?? null;
+        if (is_string($bankAccount) && trim($bankAccount) !== '') {
+            $accountNote = $this->savePayoutAccount($supplierId, $employeeId, trim($bankAccount), $plannedStart, $userId);
+            if ($accountNote !== null) {
+                $notes[] = $accountNote;
+            }
+        }
+        $message = $notes === [] ? null : implode(' ', $notes);
         if (($item['activate'] ?? false) === true) {
             if ($plannedStart <= $today) {
                 $this->employments->transition(
@@ -1563,6 +1771,143 @@ final class AttendanceImportService
         );
 
         return ['employee_id' => $employeeId, 'employment_id' => $employment['id'], 'message' => $message];
+    }
+
+    /**
+     * Hodinová sazba z podkladů v haléřích. Nečitelná nebo nekladná osobu
+     * neshodí: vztah vznikne bez ní a vrátí se, co doplnit.
+     *
+     * @return array{0:?int,1:?string}
+     */
+    private static function hourlyRateMinor(mixed $raw): array
+    {
+        if (is_int($raw) || is_float($raw)) {
+            $raw = (string) $raw;
+        }
+        if ($raw === null || (is_string($raw) && trim($raw) === '')) {
+            return [null, null];
+        }
+        $text = is_string($raw) ? trim($raw) : '';
+        $number = $text === '' ? null : AttendanceDecimal::parseNumber($text);
+        $minor = $number === null || str_starts_with($number, '-') ? 0 : AttendanceDecimal::scaled($number, 2);
+        if ($minor <= 0) {
+            return [null, sprintf(
+                'Hodinovou sazbu „%s“ z podkladů nejde přečíst jako kladnou částku, vztah je založený bez ní. '
+                    . 'Doplňte ji na kartě vztahu jako pravděpodobný výdělek.',
+                mb_substr($text, 0, 40),
+            )];
+        }
+
+        return [$minor, null];
+    }
+
+    /**
+     * Sjednaný konec dohody nebo doby určité. Nečitelné datum nebo konec před
+     * nástupem osobu neshodí: vztah vznikne bez konce a vrátí se, co doplnit.
+     *
+     * @return array{0:?string,1:?string}
+     */
+    private static function fixedTermEnd(mixed $raw, string $plannedStart): array
+    {
+        if ($raw === null || (is_string($raw) && trim($raw) === '')) {
+            return [null, null];
+        }
+        $text = is_string($raw) ? trim($raw) : '';
+        $end = AttendancePersonAggregator::isoDate($text);
+        if ($end === null) {
+            return [null, sprintf(
+                'Konec dohody „%s“ z podkladů nejde přečíst, vztah je založený bez něj. Doplňte ho na kartě vztahu.',
+                mb_substr($text, 0, 40),
+            )];
+        }
+        if ($plannedStart !== '' && $end < $plannedStart) {
+            return [null, 'Konec dohody ' . self::czechDate($end) . ' je před nástupem, vztah je založený bez něj. '
+                . 'Opravte ho na kartě vztahu.'];
+        }
+
+        return [$end, null];
+    }
+
+    /**
+     * Výplatní účet nové osoby z podkladů, stejnou cestou a validací jako
+     * osobní karta. Účet zůstane neověřený; neplatný osobu neshodí.
+     *
+     * @return ?string co doplnit, když se účet nezapsal
+     */
+    private function savePayoutAccount(int $supplierId, int $employeeId, string $bankAccount, string $from, ?int $userId): ?string
+    {
+        $current = $this->personProfiles->get($supplierId, $employeeId);
+        if ($current === null) {
+            return 'Osobní karta nové osoby nebyla nalezena, číslo účtu doplňte na kartě.';
+        }
+        try {
+            $this->personProfiles->save($supplierId, $employeeId, $this->profileValidator->validate([
+                'row_version' => $current['row_version'],
+                'profile_status' => $current['profile_status'] === 'missing' ? 'setup' : $current['profile_status'],
+                'payout_method' => 'bank',
+                'partner_settlement_account_code' => $current['partner_settlement_account_code'],
+                'cash_allocation_basis_points' => 0,
+                'payout_effective_on' => $from !== '' ? $from : ($current['payout_effective_on'] ?? date('Y-m-d')),
+                'secure_delivery_channel' => $current['secure_delivery_channel'],
+                'identity_history' => [],
+                'addresses' => [],
+                'contacts' => [],
+                'identifiers' => [],
+                'accounts' => [[
+                    'id' => null,
+                    'label' => 'Výplatní účet z importu docházky',
+                    'bank_account' => $bankAccount,
+                    'allocation_basis_points' => 10000,
+                    'effective_from' => $from !== '' ? $from : date('Y-m-d'),
+                    'effective_to' => null,
+                    'is_active' => true,
+                ]],
+            ]), $current['row_version'], $userId, null, null);
+        } catch (\InvalidArgumentException|\DomainException $e) {
+            return self::bankAccountNote($e, true);
+        }
+
+        return $this->verifyPayoutAccount($supplierId, $employeeId, $userId);
+    }
+
+    /**
+     * Účet z podkladů rovnou ověří uživatel, který import spustil (stejně jako převod
+     * mezd ověřuje účty z předchozího systému). Bez přihlášeného uživatele ověřit nejde
+     * (`verified_by` je povinné), účet pak zůstane k ověření na kartě osoby.
+     */
+    private function verifyPayoutAccount(int $supplierId, int $employeeId, ?int $userId): ?string
+    {
+        $pending = 'Číslo účtu je uložené, ověřte ho na kartě osoby.';
+        if ($userId === null) {
+            return $pending;
+        }
+        $profile = $this->personProfiles->get($supplierId, $employeeId);
+        foreach ($profile['accounts'] ?? [] as $account) {
+            if ($account['verification_source'] !== null || $account['is_active'] !== true) {
+                continue;
+            }
+            try {
+                $this->accountVerification->verify(
+                    $supplierId,
+                    $employeeId,
+                    (int) $account['id'],
+                    'user_verified',
+                    date('Y-m-d'),
+                    $userId,
+                    (int) $account['row_version'],
+                );
+            } catch (\DomainException|\InvalidArgumentException|\RuntimeException) {
+                return $pending;
+            }
+        }
+
+        return null;
+    }
+
+    private static function bankAccountNote(\Throwable $e, bool $created): string
+    {
+        return 'Číslo účtu z podkladů neplatí (' . rtrim($e->getMessage(), '.') . '), '
+            . ($created ? 'osoba je založená bez něj. Doplňte ho na kartě osoby.' : 'nová osoba se založí bez něj.');
     }
 
     /**

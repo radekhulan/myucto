@@ -129,7 +129,7 @@ final class CzechPayrollRulesets2025Test extends TestCase
     {
         $provider = CzechPayrollRulesets::provider();
 
-        self::assertSame([2025, 2026], (new SupportMatrix($provider))->supportedYears());
+        self::assertSame([2025, 2026, 2027], (new SupportMatrix($provider))->supportedYears());
 
         foreach ([
             PayrollRulesetDomain::Deadlines,

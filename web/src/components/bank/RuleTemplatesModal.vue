@@ -82,8 +82,8 @@ async function applyTemplate(template: BankRuleTemplate) {
 </script>
 
 <template>
-  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4" @click.self="emit('close')">
-    <div class="bg-surface rounded-xl shadow-lg w-full max-w-3xl max-h-[90vh] flex flex-col">
+  <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4 text-left whitespace-normal font-normal" @click.self="emit('close')">
+    <div class="bg-surface rounded-xl shadow-lg w-full max-w-3xl max-h-[90vh] flex flex-col text-left">
       <div class="flex items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 sm:px-5">
         <h3 class="text-lg font-semibold text-neutral-800">{{ t('bank.templates.title') }}</h3>
         <button type="button" :class="btnOutline('neutral')" @click="emit('close')">
@@ -92,18 +92,18 @@ async function applyTemplate(template: BankRuleTemplate) {
         </button>
       </div>
 
-      <div class="overflow-y-auto p-4 sm:p-5">
+      <div class="overflow-y-auto overflow-x-hidden p-4 sm:p-5">
         <div v-if="loading" class="text-center text-neutral-500 py-10 text-sm">{{ t('common.loading') }}</div>
         <EmptyState v-else-if="!hasTemplates" dense accent="neutral" icon="copy" :title="t('bank.templates.empty')" />
         <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <article v-for="template in templates" :key="template.template_key"
-            class="border border-neutral-200 rounded-lg p-4 flex flex-col gap-3 bg-surface">
-            <div>
-              <h4 class="font-medium text-neutral-800">{{ template.name }}</h4>
-              <p class="text-sm text-neutral-600 mt-1">{{ sentence(template) }}</p>
+            class="min-w-0 border border-neutral-200 rounded-lg p-4 flex flex-col items-start gap-3 bg-surface text-left">
+            <div class="min-w-0 w-full">
+              <h4 class="font-medium text-neutral-800 break-words">{{ template.name }}</h4>
+              <p class="text-sm text-neutral-600 mt-1 break-words">{{ sentence(template) }}</p>
             </div>
 
-            <div v-if="template.vs_placeholder" class="text-xs">
+            <div v-if="template.vs_placeholder" class="text-xs min-w-0 max-w-full">
               <span v-if="template.vs_value"
                 class="inline-flex items-center gap-1 rounded-full bg-success-50 text-success-600 px-2 py-1 font-medium">
                 <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
@@ -117,20 +117,20 @@ async function applyTemplate(template: BankRuleTemplate) {
               </div>
             </div>
 
-            <div class="mt-auto">
+            <div class="mt-auto w-full">
               <div v-if="template.already_instantiated" class="flex items-center gap-2 flex-wrap">
-                <button type="button" :class="btnFilled('primary')" disabled>
+                <button type="button" :class="btnFilled('primary')" class="whitespace-nowrap" disabled>
                   <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
                   {{ t('bank.templates.already_used') }}
                 </button>
                 <RouterLink v-if="template.rule_id"
                   :to="{ path: '/templates', query: { section: 'posting', rule: String(template.rule_id) } }"
-                  class="text-sm text-primary-600 hover:underline" @click="emit('close')">
+                  class="text-sm text-primary-600 hover:underline whitespace-nowrap" @click="emit('close')">
                   {{ t('bank.templates.open_rule') }}
                 </RouterLink>
               </div>
               <button v-else type="button" :class="btnFilled('primary')"
-                class="w-full sm:w-auto justify-center"
+                class="whitespace-nowrap"
                 :disabled="busyKey === template.template_key || (!!template.vs_placeholder && !template.vs_value)"
                 @click="applyTemplate(template)">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>

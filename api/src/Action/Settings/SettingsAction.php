@@ -6,9 +6,11 @@ namespace MyInvoice\Action\Settings;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Service\Invoice\DefaultInvoiceNote;
+use MyInvoice\Service\Invoice\InvoiceNumberFormat;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\LicenseMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -17,6 +19,9 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\OperationalSettingsAccess;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\AccountingFrameworkException;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Bank\CurrencyBankAccountFields;
 use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
 use MyInvoice\Service\Codebook\UnitPrecision;
 use MyInvoice\Service\IpMatcher;
@@ -28,12 +33,19 @@ use MyInvoice\Service\Mail\SafeLogoPath;
 use MyInvoice\Service\Payroll\PayrollEmployerLegacyIdentifierCarryOver;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
+use MyInvoice\Service\Epo\EpoStepUpService;
+use MyInvoice\Service\Epo\EpoSubmissionException;
+use MyInvoice\Service\Supplier\SupplierCarryOver;
+use MyInvoice\Service\Supplier\SupplierBrandingSettings;
+use MyInvoice\Service\Supplier\SupplierInvoiceDefaults;
 use MyInvoice\Service\Supplier\SupplierCreator;
 use MyInvoice\Service\Supplier\SupplierDirectory;
 use MyInvoice\Service\Supplier\SupplierDirectoryQuery;
 use MyInvoice\Service\Supplier\SupplierInitializer;
 use MyInvoice\Service\Supplier\SupplierPersonTitle;
+use MyInvoice\Service\Supplier\SupplierResponseFields;
 use MyInvoice\Service\Tax\Return\TaxpayerTypeCodebook;
+use MyInvoice\Service\Tax\Return\AccountingDecreeService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -52,12 +64,6 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  */
 final class SettingsAction
 {
-    /**
-     * Strop výchozí poznámky pod položkami (#79). Sloupec je TEXT, limit je tu
-     * proti překlepu typu vložená smlouva — na doklad se text tiskne celý.
-     */
-    private const DEFAULT_NOTE_MAX_LENGTH = 5000;
-
     private const UNIT_DECIMALS_ERROR = 'Desetinná místa množství musí být 0 až 3, nebo prázdné (bez omezení).';
 
     /**
@@ -67,7 +73,6 @@ final class SettingsAction
      * Hodnota v mapě je to, co se místo prázdného pole uloží (nullable sloupec → NULL).
      */
     private const SUPPLIER_BLANK_VALUES = [
-        'default_hourly_rate' => '0',
         'oss_valid_from' => null,
         'oss_valid_to' => null,
         'tax_entity_status_date' => null,
@@ -76,7 +81,7 @@ final class SettingsAction
     /** NOT NULL sloupce bez smysluplné prázdné hodnoty: prázdné pole nechá uloženou hodnotu. */
     private const SUPPLIER_BLANK_KEEPS_CURRENT = [
         'country_id', 'default_currency_id', 'default_vat_rate_id',
-        'default_payment_due_days', 'reminder_days_after_due', 'fiscal_year_start_month',
+        'reminder_days_after_due', 'fiscal_year_start_month',
     ];
 
     /**
@@ -138,6 +143,12 @@ final class SettingsAction
         private readonly SupplierCreator $supplierCreator,
         private readonly SupplierDirectory $supplierDirectory,
         private readonly \MyInvoice\Service\Accounting\FiscalYearStartChanger $fiscalYearStart,
+        // Převzetí AI klíče a certifikátu ze stávajících firem do nové firmy.
+        private readonly SupplierCarryOver $carryOver,
+        private readonly EpoStepUpService $stepUp,
+        private readonly AccountingFrameworkService $accountingFramework,
+        private readonly AccountingDecreeService $accountingDecree,
+        private readonly SupplierBrandingSettings $brandingSettings,
     ) {}
 
     /**
@@ -218,7 +229,7 @@ final class SettingsAction
     public function getSupplier(Request $request, Response $response): Response
     {
         $id = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
-        return $this->respondSupplier($response, $id);
+        return $this->respondSupplier($request, $response, $id);
     }
 
     /** Update aktuálního supplier (admin). */
@@ -333,7 +344,14 @@ final class SettingsAction
         return $this->pendingBackfill->count($supplierId);
     }
 
-    /** GET /api/suppliers/{id}. Epic F0: firma mimo membership → 404 (konvence pro cizí entity). */
+    /**
+     * GET /api/suppliers/{id}. Epic F0: firma mimo membership → 404 (konvence pro cizí entity).
+     *
+     * Route mapa sem pouští už s `profile` READ (endpoint patří k přepínači firem),
+     * plný detail ale dostane jen ten, kdo smí číst nastavení TÉTO firmy: aktuální firma
+     * požadavku a `settings.company` READ, nebo globální správce. Ostatním jde stejný
+     * bezpečný výřez jako v seznamu firem, ne 403, aby se nerozbili stávající volající.
+     */
     public function getSupplierById(Request $request, Response $response, array $args): Response
     {
         $id = (int) ($args['id'] ?? 0);
@@ -341,7 +359,11 @@ final class SettingsAction
             return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         }
 
-        return $this->respondSupplier($response, $id);
+        $currentId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+        $full = RequestAuthorization::isSuperadmin($request)
+            || ($id === $currentId && RequestAuthorization::allows($request, 'settings.company', AccessLevel::READ));
+
+        return $this->respondSupplier($request, $response, $id, !$full);
     }
 
     /** Epic F0: true = supplier je mimo bound PAT nebo membership. Nebound globální admin vidí vše. */
@@ -383,6 +405,12 @@ final class SettingsAction
         $assignCreator = !RequestAuthorization::isSuperadmin($request);
 
         $b = (array) ($request->getParsedBody() ?? []);
+        try {
+            $carryOver = SupplierCarryOver::parse($b['carry_over'] ?? null);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+        unset($b['carry_over']);
         if (array_key_exists('person_title', $b)) {
             try {
                 $b['person_title'] = SupplierPersonTitle::normalize($b['person_title']);
@@ -404,6 +432,23 @@ final class SettingsAction
             return $claimed;
         }
 
+        // Převzetí z ostatních firem jen z přihlášené relace, stejně jako hromadné
+        // akce, které kopíruje. Certifikát navíc chce tentýž step-up jako jeho
+        // sdílení v trezoru; ověří se PŘED založením, aby odmítnutí nenechalo
+        // firmu napůl hotovou.
+        if ($carryOver !== null) {
+            if (!RequestAuthorization::isSessionAuth($request) || $creatorUserId <= 0) {
+                return Json::sessionRequired($response, 'Převzetí ze stávajících firem lze potvrdit jen z webového rozhraní.');
+            }
+            if ($carryOver['certificate_ids'] !== []) {
+                try {
+                    $this->stepUp->verify($request, $creatorUserId, $carryOver['step_up'], 'credential_supplier_access');
+                } catch (EpoSubmissionException $e) {
+                    return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+                }
+            }
+        }
+
         $isVatPayer = SupplierCreator::isVatPayer($b);
 
         try {
@@ -412,7 +457,7 @@ final class SettingsAction
             return Json::error($response, 'license_company_limit',
                 'Byl dosažen počet firem podle vaší licence. Rozšiřte předplatné na myucto.cz.', 403);
         } catch (\Throwable $e) {
-            return Json::error($response, 'create_failed', 'Vytvoření supplier selhalo: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'create_failed', 'Vytvoření supplier selhalo: ' . $e->getMessage(), 500);
         }
 
         // Po commitu (mimo DB transakci — síťová volání na ARES a registr plátců):
@@ -426,7 +471,21 @@ final class SettingsAction
         );
 
         $this->log($request, 'supplier.created', $newSupplierId, ['company_name' => $b['company_name'], 'ic' => $b['ic'] ?? null]);
-        return Json::ok($response, ['id' => $newSupplierId], 201);
+        if ($carryOver === null) {
+            return Json::ok($response, ['id' => $newSupplierId], 201);
+        }
+
+        // Firma už stojí; nepovedené převzetí se jen ohlásí v odpovědi.
+        return Json::ok($response, [
+            'id'                => $newSupplierId,
+            'carry_over_result' => $this->carryOver->apply(
+                $request,
+                $newSupplierId,
+                $carryOver,
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+            ),
+        ], 201);
     }
 
     /** PUT /api/suppliers/{id} (admin; výjimka stock_enabled/stock_auto_issue níže). */
@@ -474,7 +533,7 @@ final class SettingsAction
         // přepínat i účetní, ne jen admin — cílený bypass guard() JEN pro tato pole
         // (least-invasive: guard() zůstává admin-only pro všechno ostatní; sem se
         // accountant dostane pouze pokud body neobsahuje NIC jiného než tato pole).
-        $stockOnlyFields = ['stock_enabled', 'stock_auto_issue', 'stock_in_transit_from', 'invoice_pdf_show_base_qty'];
+        $stockOnlyFields = ['stock_enabled', 'stock_auto_issue', 'stock_in_transit_from'];
         $isStockOnlyUpdate = $body !== [] && array_diff(array_keys($body), $stockOnlyFields) === [];
         if ($isStockOnlyUpdate) {
             if (!RequestAuthorization::allows($request, 'stock', AccessLevel::WRITE)) {
@@ -488,11 +547,46 @@ final class SettingsAction
             return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         }
 
+        $hasAccountingFramework = array_key_exists('accounting_framework', $body);
+        $hasAccountingFrameworkDate = array_key_exists('accounting_framework_effective_from', $body);
+        if ($hasAccountingFramework !== $hasAccountingFrameworkDate) {
+            return Json::error(
+                $response,
+                'accounting_framework_pair_required',
+                'Účetní rámec a datum účinnosti musí být zadány společně.',
+                400,
+            );
+        }
+        $accountingFramework = null;
+        $accountingFrameworkEffectiveFrom = null;
+        if ($hasAccountingFramework) {
+            if (!is_string($body['accounting_framework'])
+                || !is_string($body['accounting_framework_effective_from'])
+            ) {
+                return Json::error(
+                    $response,
+                    'accounting_framework_pair_required',
+                    'Účetní rámec a datum účinnosti musí být textové hodnoty.',
+                    400,
+                );
+            }
+            $accountingFramework = trim($body['accounting_framework']);
+            $accountingFrameworkEffectiveFrom = trim($body['accounting_framework_effective_from']);
+        }
+
+        try {
+            $body = SupplierBrandingSettings::validate($body, blankColorUsesDefault: true);
+            $body = SupplierInvoiceDefaults::validate($body);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+
         // Široká správa firmy nesmí obnovit odvolané provozní oprávnění.
         // Starší formuláře posílají i nezměněné hodnoty; ty odstraňujeme z UPDATE.
         foreach ([
             [OperationalSettingsAccess::paymentQr($request), SupplierPaymentQrSettingsRepository::FIELDS],
-            [OperationalSettingsAccess::branding($request), ['email_branding_enabled', 'email_accent_color', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled']],
+            [OperationalSettingsAccess::branding($request), SupplierBrandingSettings::FIELDS],
+            [OperationalSettingsAccess::invoiceDefaults($request), SupplierInvoiceDefaults::FIELDS],
         ] as [$allowedArea, $fields]) {
             if ($allowedArea) continue;
             $postedFields = array_values(array_intersect($fields, array_keys($body)));
@@ -501,9 +595,9 @@ final class SettingsAction
             $current->execute([$id]);
             $stored = $current->fetch(\PDO::FETCH_ASSOC);
             foreach ($postedFields as $field) {
-                $same = $stored !== false && ($field === 'email_accent_color'
-                    ? strtoupper((string) $body[$field]) === strtoupper((string) $stored[$field])
-                    : (bool) $body[$field] === (bool) $stored[$field]);
+                $same = $stored !== false && (in_array($field, SupplierInvoiceDefaults::FIELDS, true)
+                    ? SupplierInvoiceDefaults::sameValue($field, $body[$field], $stored[$field])
+                    : SupplierBrandingSettings::sameValue($field, $body[$field], $stored[$field]));
                 if (!$same) return Json::error($response, 'forbidden_permission', 'Nemáš oprávnění měnit toto provozní nastavení firmy.', 403);
                 unset($body[$field]);
             }
@@ -600,6 +694,7 @@ final class SettingsAction
             'opr_jmeno', 'opr_prijmeni', 'opr_postaveni', 'person_title',
             // Děkovný e-mail za úhradu (issue #57)
             'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf',
+            'payment_thanks_max_age_days',
             // Kopie odchozích e-mailů dodavateli (migrace 0102) — JSON, validace níže
             'self_copy',
             // Režim účetnictví (Epic F0, migrace 1001) — daňová evidence vs podvojné
@@ -626,9 +721,18 @@ final class SettingsAction
             'invoice_pdf_show_issued_by',
             // Ceníková cena a sleva u položky na PDF faktury (migrace 2035), výchozí vypnuto.
             'invoice_pdf_show_line_discount',
+            // Kompaktní řádky položek na PDF faktury (migrace 2199), výchozí vypnuto.
+            'invoice_pdf_compact_items', 'work_report_display_options',
+            // Bankovní spojení v patičce PDF faktury, u součtu jen QR (migrace 2200), výchozí vypnuto.
+            'invoice_pdf_bank_in_footer',
             // Auto-post hook (A2, migrace 1035) — auto-zaúčtování FV po vystavení / PF po
             // přijetí; admin-only (jako ostatní účetní nastavení firmy), účinek jen v double_entry.
             'auto_post_invoices', 'auto_post_purchases',
+            // Automatické párování banky s ostatními pohledávkami a závazky (migrace 2239),
+            // výchozí vypnuto; účinek i v daňové evidenci (přiřazení bez zaúčtování).
+            'auto_match_other_items',
+            // Účet závazku pro účtenky / paragony (migrace 2204), viz PurchasePayableAccount.
+            'receipt_payable_account_code',
             // F7 — AI provider selection (NON-secret; secrety `*_enc` jdou VÝHRADNĚ přes
             // AiProviderCredentialsAction, NIKDY tady — mustFix #11).
             'ai_provider', 'ai_data_region', 'ai_eu_residency_required', 'client_ai_extraction_enabled', 'client_ai_extraction_monthly_limit',
@@ -670,35 +774,6 @@ final class SettingsAction
             );
         }
 
-        // Výchozí poznámka pod položkami (#79). Text se ukládá tak, jak ho uživatel
-        // napsal (včetně odřádkování), jen oříznutý o okrajové mezery; prázdný text
-        // je NULL, ať „nevyplněno" a „vyplněno mezerou" neznamenají dvě různé věci.
-        foreach (DefaultInvoiceNote::COLUMNS as $lang => $column) {
-            if (!array_key_exists($column, $body)) continue;
-            if ($body[$column] !== null && !is_string($body[$column])) {
-                return Json::error($response, 'validation_failed', "$column musí být text.", 400);
-            }
-            $text = trim((string) ($body[$column] ?? ''));
-            if (mb_strlen($text) > self::DEFAULT_NOTE_MAX_LENGTH) {
-                return Json::error(
-                    $response,
-                    'validation_failed',
-                    "Výchozí poznámka pod položkami ($lang) je delší než " . self::DEFAULT_NOTE_MAX_LENGTH . ' znaků.',
-                    400,
-                );
-            }
-            $body[$column] = $text === '' ? null : $text;
-        }
-
-        // Prázdnou sazbu už převedl normalizeSupplierBlankFields(); tady se čistí zápis čísla.
-        if (array_key_exists('default_hourly_rate', $body)) {
-            $rate = str_replace([' ', "\u{00A0}", ','], ['', '', '.'], trim((string) $body['default_hourly_rate']));
-            if (!is_numeric($rate) || (float) $rate < 0) {
-                return Json::error($response, 'validation_failed', 'Výchozí hodinová sazba musí být nezáporné číslo.', 400);
-            }
-            $body['default_hourly_rate'] = $rate;
-        }
-
         // F7 — ENUM validace AI provider selection (§3.8).
         if (array_key_exists('ai_provider', $body)
             && !in_array($body['ai_provider'], \MyInvoice\Service\Import\LlmProviderRegistry::PROVIDERS, true)
@@ -716,6 +791,15 @@ final class SettingsAction
             && !in_array($body['accounting_mode'], ['tax_evidence', 'double_entry'], true)
         ) {
             return Json::error($response, 'validation_failed', "accounting_mode musí být 'tax_evidence' nebo 'double_entry'.", 400);
+        }
+
+        if (array_key_exists('receipt_payable_account_code', $body)) {
+            try {
+                $body['receipt_payable_account_code'] = (new \MyInvoice\Service\Accounting\PurchasePayableAccount($this->db))
+                    ->validateReceiptSetting($id, $body['receipt_payable_account_code']);
+            } catch (\MyInvoice\Service\Accounting\PostingException $e) {
+                return Json::error($response, $e->errorCode, $e->getMessage(), 422, $e->context);
+            }
         }
 
         // Vědomé příznaky poplatníka (migrace 1782). CHECK constraint v DB by z cizí
@@ -982,15 +1066,6 @@ final class SettingsAction
             $body,
             array_flip(['taxpayer_type', 'payroll_enabled', ...PayrollEmployerLegacyIdentifierCarryOver::LEGACY_FIELDS]),
         ) !== [];
-        // Validace email_accent_color — musí být hex (#RRGGBB)
-        if (array_key_exists('email_accent_color', $body)) {
-            $v = trim((string) ($body['email_accent_color'] ?? ''));
-            if ($v === '') {
-                $body['email_accent_color'] = '#3B2D83';
-            } elseif (!preg_match('/^#[0-9A-Fa-f]{6}$/', $v)) {
-                return Json::error($response, 'validation_failed', "email_accent_color musí být hex barva (#RRGGBB).", 400);
-            }
-        }
         // Validace per-supplier varsymbol templatů: prázdný string → NULL (= fallback na cfg);
         // jinak max 60 znaků a musí obsahovat alespoň jeden counter placeholder {C+}.
         foreach (['invoice_number_format', 'proforma_number_format', 'credit_note_number_format', 'simplified_number_format', 'purchase_invoice_number_format',
@@ -1006,6 +1081,15 @@ final class SettingsAction
                     }
                     if (!preg_match('/\{C+\}/', $v)) {
                         return Json::error($response, 'validation_failed', "Pole '$f' musí obsahovat counter placeholder, např. {CCC}.", 400);
+                    }
+                    // Řady vydaných dokladů renderuje VarsymbolGenerator — neznámý placeholder
+                    // (`{1YY}`) by prošel do čísla faktury doslova.
+                    if (in_array($f, InvoiceNumberFormat::SUPPLIER_COLUMNS, true)) {
+                        try {
+                            InvoiceNumberFormat::templateOrNull($v, $f);
+                        } catch (\InvalidArgumentException $e) {
+                            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+                        }
                     }
                     $body[$f] = $v;
                 }
@@ -1039,11 +1123,6 @@ final class SettingsAction
         ) {
             return Json::error($response, 'validation_failed', "Neplatné invoice_number_period (year|month|none).", 400);
         }
-        if (array_key_exists('default_payment_due_unit', $body)
-            && !in_array($body['default_payment_due_unit'], ['days', 'month'], true)
-        ) {
-            return Json::error($response, 'validation_failed', "default_payment_due_unit musí být 'days' nebo 'month'.", 400);
-        }
         // Legacy: pokud frontend pošle 'default_currency' jako code, převedeme na id (scoped to supplier)
         if (isset($body['default_currency']) && !isset($body['default_currency_id'])) {
             $stmt = $this->db->pdo()->prepare(
@@ -1056,6 +1135,10 @@ final class SettingsAction
         // ať přímý API caller neuloží nesmyslnou hodnotu.
         if (array_key_exists('reminder_days_after_due', $body)) {
             $body['reminder_days_after_due'] = max(1, min(365, (int) $body['reminder_days_after_due']));
+        }
+        // 0 = auto poděkování bez omezení stáří platby (migrace 2073).
+        if (array_key_exists('payment_thanks_max_age_days', $body)) {
+            $body['payment_thanks_max_age_days'] = max(0, min(365, (int) $body['payment_thanks_max_age_days']));
         }
         // Kopie odchozích e-mailů dodavateli — JSON {typ: 'off'|'cc'|'bcc'},
         // klíče = typy zpráv resolveru. Ukládají se jen explicitně zvolené typy;
@@ -1105,133 +1188,186 @@ final class SettingsAction
             }
             if (array_key_exists($f, $body)) {
                 $sets[] = "$f = ?";
-                $params[] = in_array($f, ['is_vat_payer', 'simplified_hide_customer_default', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'public_isdoc_enabled', 'email_attach_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'invoice_pdf_show_issued_by', 'invoice_pdf_show_line_discount', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'ai_eu_residency_required', 'client_ai_extraction_enabled', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', 'allow_refund_invoices', DefaultInvoiceNote::ENABLED_COLUMN], true)
+                $params[] = in_array($f, ['is_vat_payer', 'simplified_hide_customer_default', 'is_identified', 'oss_enabled', 'auto_send_reminders', 'auto_generate_recurring', 'embed_isdoc', 'public_isdoc_enabled', 'email_attach_isdoc', 'default_prices_include_vat', 'email_branding_enabled', 'pdf_logo_show_name', 'invoice_pdf_monochrome', 'branding_profiles_enabled', 'payment_thanks_enabled', 'payment_thanks_auto_send', 'payment_thanks_default_checked', 'payment_thanks_attach_paid_pdf', 'stock_enabled', 'stock_auto_issue', 'invoice_pdf_show_base_qty', 'invoice_pdf_show_issued_by', 'invoice_pdf_show_line_discount', 'invoice_pdf_compact_items', 'invoice_pdf_bank_in_footer', 'dimensions_enabled', 'accounting_enabled', 'payroll_enabled', 'auto_post_invoices', 'auto_post_purchases', 'auto_match_other_items', 'ai_eu_residency_required', 'client_ai_extraction_enabled', 'tax_investment_incentive', 'tax_atad_cfc', 'tax_public_benefit', 'tax_cooperating_person', 'tax_foreign_income_credit', 'allow_refund_invoices', DefaultInvoiceNote::ENABLED_COLUMN], true)
                     ? ((int) (bool) $body[$f])
                     : $body[$f];
             }
         }
 
-        if ($replaceUnusedPeriods) {
+        $frameworkTransactionActive = $accountingFramework !== null;
+        $frameworkTransactionOwner = false;
+        $frameworkChanged = false;
+        if ($frameworkTransactionActive) {
+            $pdo = $this->db->pdo();
+            $frameworkTransactionOwner = !$pdo->inTransaction();
+            if ($frameworkTransactionOwner) {
+                $pdo->beginTransaction();
+            } else {
+                $pdo->exec('SAVEPOINT settings_accounting_framework');
+            }
             try {
-                $this->fiscalYearStart->replaceUnusedPeriods(
+                $frameworkChanged = $this->accountingFramework->changeFromSettings(
                     $id,
-                    (int) $body['fiscal_year_start_month'],
+                    (string) $accountingFrameworkEffectiveFrom,
+                    $accountingFramework,
                     (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
                 );
-            } catch (\DomainException) {
-                return Json::error($response, 'fiscal_year_conflicts_periods',
-                    'Firma už má použitá účetní období jiného tvaru. Začátek účetního roku se nastavuje předem; '
-                        . 'změna účetního roku se řeší přechodným obdobím na stránce Účetní období.', 409);
-            }
-        }
-        if (!empty($sets)) {
-            $params[] = $id;
-            $sql = 'UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?';
-            $persist = fn (): bool => $this->db->pdo()->prepare($sql)->execute($params);
-            try {
-                if (array_key_exists('payroll_enabled', $body)) {
-                    $this->licenseCapacity->mutateSeats($persist);
-                } else {
-                    $persist();
-                }
-            } catch (LicensePayrollLimitExceeded) {
+            } catch (AccountingFrameworkException $e) {
+                $this->rollbackFrameworkTransaction($frameworkTransactionOwner, $e);
                 return Json::error(
                     $response,
-                    'license_payroll_user_limit',
-                    'Zapnutí Mezd by překročilo zaplacený počet uživatelů mzdového modulu. Navyšte rozsah doplňku.',
-                    403,
-                    ['buy_url' => '/activation/purchase#payroll-addon'],
+                    $e->errorCode,
+                    $e->getMessage(),
+                    $e->httpStatus,
+                    $e->errorCode === AccountingFrameworkService::CONVERSION_REQUIRED
+                        ? ['conversion_url' => AccountingFrameworkService::CONVERSION_ROUTE]
+                        : [],
                 );
+            } catch (\Throwable $e) {
+                $this->rollbackFrameworkTransaction($frameworkTransactionOwner, $e);
+                throw $e;
             }
         }
-        if ($settlesEmployerIdentifiers) {
-            $settled = $this->employerIdentifiers->settle(
-                $id,
-                (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
-            );
-            if ($settled['carried'] !== [] || $settled['cleared'] !== []) {
-                $this->log($request, 'supplier.employer_identifiers_moved_to_payroll', $id, [
-                    'carried' => array_keys($settled['carried']),
-                    'cleared' => $settled['cleared'],
-                ]);
-            }
-        }
-        if ($paymentQrBody !== []) {
-            $qrResult = $this->paymentQrSettings->update($id, $paymentQrBody);
-            $invalidated = 0;
-            if (SupplierPaymentQrSettingsRepository::invalidatesInvoicePdfs($qrResult['changed'])) {
-                $invalidated = $this->pdf->invalidatePaymentQrBySupplier($id);
-            }
-            if ($qrResult['changed'] !== []) {
-                $changes = [];
-                foreach ($qrResult['changed'] as $field) {
-                    $changes[$field] = [
-                        'before' => $qrResult['before'][$field],
-                        'after' => $qrResult['settings'][$field],
-                    ];
+
+        try {
+            if ($replaceUnusedPeriods) {
+                try {
+                    $this->fiscalYearStart->replaceUnusedPeriods(
+                        $id,
+                        (int) $body['fiscal_year_start_month'],
+                        (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
+                    );
+                } catch (\DomainException) {
+                    if ($frameworkTransactionActive) {
+                        $this->rollbackFrameworkTransaction($frameworkTransactionOwner);
+                    }
+                    return Json::error($response, 'fiscal_year_conflicts_periods',
+                        'Firma už má použitá účetní období jiného tvaru. Začátek účetního roku se nastavuje předem; '
+                            . 'změna účetního roku se řeší přechodným obdobím na stránce Účetní období.', 409);
                 }
-                $this->log($request, 'supplier.payment_qr_settings_updated', $id, [
-                    'changes' => $changes,
-                    'invalidated_invoice_pdfs' => $invalidated,
+            }
+            if (!empty($sets)) {
+                $params[] = $id;
+                $sql = 'UPDATE supplier SET ' . implode(', ', $sets) . ' WHERE id = ?';
+                $persist = fn (): bool => $this->brandingSettings->persist(
+                    $id, $body, fn (): bool => $this->db->pdo()->prepare($sql)->execute($params),
+                );
+                try {
+                    if (array_key_exists('payroll_enabled', $body)) {
+                        $this->licenseCapacity->mutateSeats($persist);
+                    } else {
+                        $persist();
+                    }
+                } catch (LicensePayrollLimitExceeded) {
+                    if ($frameworkTransactionActive) {
+                        $this->rollbackFrameworkTransaction($frameworkTransactionOwner);
+                    }
+                    return Json::error(
+                        $response,
+                        'license_payroll_user_limit',
+                        'Zapnutí Mezd by překročilo zaplacený počet uživatelů mzdového modulu. Navyšte rozsah doplňku.',
+                        403,
+                        ['buy_url' => '/activation/purchase#payroll-addon'],
+                    );
+                }
+            }
+            if ($settlesEmployerIdentifiers) {
+                $settled = $this->employerIdentifiers->settle(
+                    $id,
+                    (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
+                );
+                if ($settled['carried'] !== [] || $settled['cleared'] !== []) {
+                    $this->log($request, 'supplier.employer_identifiers_moved_to_payroll', $id, [
+                        'carried' => array_keys($settled['carried']),
+                        'cleared' => $settled['cleared'],
+                    ]);
+                }
+            }
+            if ($paymentQrBody !== []) {
+                $qrResult = $this->paymentQrSettings->update($id, $paymentQrBody);
+                $invalidated = 0;
+                if (SupplierPaymentQrSettingsRepository::invalidatesInvoicePdfs($qrResult['changed'])) {
+                    $invalidated = $this->pdf->invalidatePaymentQrBySupplier($id);
+                }
+                if ($qrResult['changed'] !== []) {
+                    $changes = [];
+                    foreach ($qrResult['changed'] as $field) {
+                        $changes[$field] = [
+                            'before' => $qrResult['before'][$field],
+                            'after' => $qrResult['settings'][$field],
+                        ];
+                    }
+                    $this->log($request, 'supplier.payment_qr_settings_updated', $id, [
+                        'changes' => $changes,
+                        'invalidated_invoice_pdfs' => $invalidated,
+                    ]);
+                }
+            }
+            if ($vatStatusEffectiveFrom !== null) {
+                // Stejná kódová cesta jako správa historie (VatStatusHistoryAction):
+                // upsert řádku + přepočet živé cache z historie. Budoucí účinnost tak
+                // cache nemění — propíše ji až cron vat-status-apply v den účinnosti.
+                $this->vatStatus->upsert(
+                    $id,
+                    $vatStatusEffectiveFrom,
+                    array_key_exists('is_vat_payer', $body)
+                        ? !empty($body['is_vat_payer'])
+                        : !empty($cur['is_vat_payer']),
+                    array_key_exists('is_identified', $body)
+                        ? !empty($body['is_identified'])
+                        : !empty($cur['is_identified']),
+                    null,
+                    (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
+                );
+                $this->vatStatus->refreshLiveCache($id);
+            }
+            if ($modeEffectiveFrom !== null) {
+                $this->accountingModes->record($id, $modeEffectiveFrom, (string) $body['accounting_mode']);
+            }
+            // Branding (barva/toggle) se v PDF renderuje živě → po změně invaliduj cached
+            // draft PDF dodavatele, ať se přegenerují s novou barvou (mtime cache je sama
+            // od sebe neobnoví). Vystavené regenerují přes ?regenerate=1.
+            if (array_intersect(SupplierBrandingSettings::FIELDS, array_keys($body)) !== []) {
+                $this->pdf->invalidateDraftsBySupplier($id);
+            }
+            // Epic F1: zapnutí podvojného účetnictví → naseeduj směrnou osnovu (idempotentní,
+            // takže opakované uložení double_entry nic nerozbije). Bez osnovy by PostingService
+            // neměl na co mapovat account_code.
+            // Audit 2026-07 (G5): seed osnovy NEDOÚČTOVÁVÁ historické doklady (FV/PF/pokladna) —
+            // ty zůstanou beze zápisu v deníku, dokud se ručně nespustí backfill CLI
+            // (api/bin/backfill-accounting.php, api/bin/backfill-cash-accounting.php). Pending
+            // počet se zaloguje do audit logu, FE si stav před přepnutím ověří přes
+            // GET /api/settings/mode-switch-preview a nabídne uživateli instrukci k backfillu.
+            if (array_key_exists('accounting_mode', $body) && $body['accounting_mode'] === 'double_entry') {
+                $this->coaSeeder->seedForSupplier($id);
+                $pending = $this->pendingAccountingBackfillCounts($id);
+                if ($pending['total'] > 0) {
+                    $this->log($request, 'supplier.mode_switch_pending_backfill', $id, $pending);
+                }
+            }
+            // F7 (mustFix #9) — WARN (nebrání) při přepnutí ai_provider na providera BEZ
+            // nakonfigurovaných credentials → extrakce by tiše selhala. Audit warning;
+            // FE si stav creds tahá z /ai/credentials a zobrazí banner.
+            if (array_key_exists('ai_provider', $body) && !$this->aiProviderHasCredentials($id, (string) $body['ai_provider'])) {
+                $this->log($request, 'supplier.ai_provider_no_credentials', $id, ['ai_provider' => (string) $body['ai_provider']]);
+            }
+            if ($frameworkChanged) {
+                $this->log($request, 'supplier.accounting_framework_changed', $id, [
+                    'accounting_framework' => $accountingFramework,
+                    'effective_from' => $accountingFrameworkEffectiveFrom,
                 ]);
             }
-        }
-        if ($vatStatusEffectiveFrom !== null) {
-            // Stejná kódová cesta jako správa historie (VatStatusHistoryAction):
-            // upsert řádku + přepočet živé cache z historie. Budoucí účinnost tak
-            // cache nemění — propíše ji až cron vat-status-apply v den účinnosti.
-            $this->vatStatus->upsert(
-                $id,
-                $vatStatusEffectiveFrom,
-                array_key_exists('is_vat_payer', $body)
-                    ? !empty($body['is_vat_payer'])
-                    : !empty($cur['is_vat_payer']),
-                array_key_exists('is_identified', $body)
-                    ? !empty($body['is_identified'])
-                    : !empty($cur['is_identified']),
-                null,
-                (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0) ?: null,
-            );
-            $this->vatStatus->refreshLiveCache($id);
-        }
-        if ($modeEffectiveFrom !== null) {
-            $this->accountingModes->record($id, $modeEffectiveFrom, (string) $body['accounting_mode']);
-        }
-        // Branding (barva/toggle/černobílá varianta) i řádek „Vystavil" se v PDF renderují živě → po změně invaliduj cached
-        // draft PDF dodavatele, ať se přegenerují s novou barvou (mtime cache je sama
-        // od sebe neobnoví). Vystavené regenerují přes ?regenerate=1.
-        if (array_key_exists('email_accent_color', $body)
-            || array_key_exists('email_branding_enabled', $body)
-            || array_key_exists('pdf_logo_show_name', $body)
-            || array_key_exists('invoice_pdf_show_issued_by', $body)
-            || array_key_exists('invoice_pdf_monochrome', $body)
-            || array_key_exists('invoice_pdf_show_line_discount', $body)
-        ) {
-            $this->pdf->invalidateDraftsBySupplier($id);
-        }
-        // Epic F1: zapnutí podvojného účetnictví → naseeduj směrnou osnovu (idempotentní,
-        // takže opakované uložení double_entry nic nerozbije). Bez osnovy by PostingService
-        // neměl na co mapovat account_code.
-        // Audit 2026-07 (G5): seed osnovy NEDOÚČTOVÁVÁ historické doklady (FV/PF/pokladna) —
-        // ty zůstanou beze zápisu v deníku, dokud se ručně nespustí backfill CLI
-        // (api/bin/backfill-accounting.php, api/bin/backfill-cash-accounting.php). Pending
-        // počet se zaloguje do audit logu, FE si stav před přepnutím ověří přes
-        // GET /api/settings/mode-switch-preview a nabídne uživateli instrukci k backfillu.
-        if (array_key_exists('accounting_mode', $body) && $body['accounting_mode'] === 'double_entry') {
-            $this->coaSeeder->seedForSupplier($id);
-            $pending = $this->pendingAccountingBackfillCounts($id);
-            if ($pending['total'] > 0) {
-                $this->log($request, 'supplier.mode_switch_pending_backfill', $id, $pending);
+            $this->log($request, 'supplier.updated', $id, ['fields' => array_keys(array_intersect_key($body, array_flip($allowed)))]);
+            if ($frameworkTransactionActive) {
+                $this->finishFrameworkTransaction($frameworkTransactionOwner);
             }
+        } catch (\Throwable $e) {
+            if ($frameworkTransactionActive) {
+                $this->rollbackFrameworkTransaction($frameworkTransactionOwner, $e);
+            }
+            throw $e;
         }
-        // F7 (mustFix #9) — WARN (nebrání) při přepnutí ai_provider na providera BEZ
-        // nakonfigurovaných credentials → extrakce by tiše selhala. Audit warning;
-        // FE si stav creds tahá z /ai/credentials a zobrazí banner.
-        if (array_key_exists('ai_provider', $body) && !$this->aiProviderHasCredentials($id, (string) $body['ai_provider'])) {
-            $this->log($request, 'supplier.ai_provider_no_credentials', $id, ['ai_provider' => (string) $body['ai_provider']]);
-        }
-        $this->log($request, 'supplier.updated', $id, ['fields' => array_keys(array_intersect_key($body, array_flip($allowed)))]);
-        return $this->respondSupplier($response, $id);
+        return $this->respondSupplier($request, $response, $id);
     }
 
     /**
@@ -1274,6 +1410,7 @@ final class SettingsAction
             'invoices'           => 'vydané faktury',
             'purchase_invoices'  => 'přijaté faktury',
             'journal_entries'    => 'účetní deník',
+            'accounting_account_definition_history' => 'historii definic účetního rozvrhu',
             'cash_documents'     => 'pokladní doklady',
             'cash_registers'     => 'pokladny',
             'assets'             => 'majetek',
@@ -1282,6 +1419,13 @@ final class SettingsAction
             'warehouses'         => 'sklady',
             'documents'          => 'dokumenty (DMS)',
             'income_tax_returns' => 'přiznání k dani z příjmů',
+            'nonprofit_tax_assessments' => 'potvrzená daňová posouzení',
+            'property_objects' => 'registr domů, jednotek a služeb',
+            'property_module_profiles' => 'potvrzené profily SVJ',
+            'unit_charge_components' => 'složky předpisů SVJ',
+            'unit_charge_versions' => 'verze předpisů SVJ',
+            'unit_charge_batches' => 'dávky vydaných předpisů SVJ',
+            'unit_charges' => 'vydané předpisy SVJ',
             'tax_submissions'    => 'daňové výkazy (DPH/KH/SH)',
             'payment_orders'     => 'příkazy k úhradě',
             'bank_statements'    => 'bankovní výpisy',
@@ -1311,6 +1455,17 @@ final class SettingsAction
         // spustil ON DELETE CASCADE a nic nezůstalo osiřelé.
         $pdo->beginTransaction();
         try {
+            (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->lockContext($id);
+            $supplierLock = $pdo->prepare('SELECT id FROM supplier WHERE id = ? FOR UPDATE');
+            $supplierLock->execute([$id]);
+            if ((new \MyInvoice\Service\Property\PropertyHistoryUseGuard($this->db))->supplierHasHistory($id, true)) {
+                $pdo->rollBack();
+                return Json::error($response, 'has_dependencies', 'Firmu nelze smazat, obsahuje potvrzené podklady registru SVJ.', 409);
+            }
+            if ((new \MyInvoice\Repository\AccountDefinitionRepository($this->db))->hasHistory($id, null, true)) {
+                $pdo->rollBack();
+                return Json::error($response, 'has_dependencies', 'Firmu nelze smazat, obsahuje historii definic účetního rozvrhu.', 409);
+            }
             $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
             try {
                 foreach ([
@@ -1341,7 +1496,7 @@ final class SettingsAction
             $pdo->commit();
         } catch (\Throwable $e) {
             $pdo->rollBack();
-            return Json::error($response, 'delete_failed', 'Smazání selhalo: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'delete_failed', 'Smazání selhalo: ' . $e->getMessage(), 500);
         }
 
         // MS-P3-4: smaž PDF cache subfolder pro tohoto supplier
@@ -1362,7 +1517,37 @@ final class SettingsAction
         return Json::ok($response, ['deleted' => true]);
     }
 
-    private function respondSupplier(Response $response, int $id): Response
+    private function finishFrameworkTransaction(bool $ownsTransaction): void
+    {
+        if ($ownsTransaction) {
+            $this->db->pdo()->commit();
+        } else {
+            $this->db->pdo()->exec('RELEASE SAVEPOINT settings_accounting_framework');
+        }
+    }
+
+    private function rollbackFrameworkTransaction(bool $ownsTransaction, ?\Throwable $failure = null): void
+    {
+        $pdo = $this->db->pdo();
+        if ($failure !== null && TransactionFailure::rollbackIfAborted($pdo, $failure)) {
+            return;
+        }
+        if (!$pdo->inTransaction()) {
+            return;
+        }
+        if ($ownsTransaction) {
+            $pdo->rollBack();
+        } else {
+            $pdo->exec('ROLLBACK TO SAVEPOINT settings_accounting_framework');
+            $pdo->exec('RELEASE SAVEPOINT settings_accounting_framework');
+        }
+    }
+
+    /**
+     * Detail firmy. Sloupce se načtou všechny kvůli dopočtům níže, ven ale jde jen
+     * allowlist {@see SupplierResponseFields} podle oprávnění volajícího.
+     */
+    private function respondSupplier(Request $request, Response $response, int $id, bool $minimal = false): Response
     {
         if ($id <= 0) return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         $stmt = $this->db->pdo()->prepare(
@@ -1377,6 +1562,17 @@ final class SettingsAction
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         if (!$row) return Json::error($response, 'not_found', 'Supplier nenalezen.', 404);
         $row['id']                       = (int) $row['id'];
+        if ($minimal) {
+            $row['is_vat_payer']    = (bool) $row['is_vat_payer'];
+            $row['accounting_mode'] = (string) ($row['accounting_mode'] ?? 'tax_evidence');
+            return Json::ok($response, SupplierResponseFields::minimal($row));
+        }
+        $row['accounting_framework']     = $this->accountingFramework->forDate($id, date('Y-m-d'));
+        $row['accounting_framework_history'] = $this->accountingFramework->history($id);
+        $row['tax_accounting_decree_effective'] = $this->accountingDecree->forDate($id, date('Y-m-d'));
+        $accountingMode = $this->accountingModes->forDate($id, date('Y-m-d'));
+        $row['tax_accounting_decree_is_derived'] = $accountingMode === 'double_entry';
+        $row['accounting_profile_recommendation'] = \MyInvoice\Service\Accounting\LegalFormProfileRecommendation::forLegalForm($row['legal_form'] ?? null, $accountingMode);
         $row['is_vat_payer']             = (bool) $row['is_vat_payer'];
         // Uložený CZ-NACE přeložený přes číselník ČINNOSTI — UI z něj pozná, že kód
         // sice existuje, ale po přechodu na NACE rev. 2.1 (1. 1. 2026) už EXPIROVAL
@@ -1406,9 +1602,7 @@ final class SettingsAction
         $row['oss_return_currency']      = (string) ($row['oss_return_currency'] ?? 'EUR');
         $row['default_vat_rate_id']      = (int) $row['default_vat_rate_id'];
         $row['default_currency_id']      = (int) $row['default_currency_id'];
-        $row['default_payment_due_days'] = (int) $row['default_payment_due_days'];
-        $row['default_payment_due_unit'] = (string) ($row['default_payment_due_unit'] ?? 'days');
-        $row['default_hourly_rate']      = (float) $row['default_hourly_rate'];
+        $row = SupplierInvoiceDefaults::normalizeResponse($row);
         $row['auto_send_reminders']      = (bool) $row['auto_send_reminders'];
         $row['reminder_days_after_due']  = (int) ($row['reminder_days_after_due'] ?? 3);
         $row['auto_generate_recurring']  = (bool) ($row['auto_generate_recurring'] ?? true);
@@ -1449,15 +1643,10 @@ final class SettingsAction
         // v InTransitRepository::inTransitStates(), jinak by obrazovka ukazovala
         // jiný stav, než podle kterého se doopravdy počítá.
         $row['stock_in_transit_from']    = (string) ($row['stock_in_transit_from'] ?? 'sent');
-        // Rozpis balení na PDF faktury (migrace 1832) — výchozí zapnuto.
-        $row['invoice_pdf_show_base_qty'] = (bool) ($row['invoice_pdf_show_base_qty'] ?? true);
-        // Řádek „Vystavil" na PDF faktury (migrace 2032), výchozí vypnuto.
-        $row['invoice_pdf_show_issued_by'] = (bool) ($row['invoice_pdf_show_issued_by'] ?? false);
-        // Ceníková cena a sleva u položky na PDF faktury (migrace 2035), výchozí vypnuto.
-        $row['invoice_pdf_show_line_discount'] = (bool) ($row['invoice_pdf_show_line_discount'] ?? false);
         // Auto-post hook (A2, migrace 1035) — opt-in auto-zaúčtování; FE gatuje na double_entry.
         $row['auto_post_invoices']       = (bool) ($row['auto_post_invoices'] ?? false);
         $row['auto_post_purchases']      = (bool) ($row['auto_post_purchases'] ?? false);
+        $row['auto_match_other_items']   = (bool) ($row['auto_match_other_items'] ?? false);
         // Datum přijetí u importu (migrace 1848). Chybějící hodnota = nedoběhlá migrace;
         // fallback drží VÝCHOZÍ režim a hlavně nenechá FE select bez vybrané položky.
         $row['purchase_import_received_at'] = in_array(
@@ -1466,24 +1655,13 @@ final class SettingsAction
             true,
         ) ? (string) $row['purchase_import_received_at']
           : \MyInvoice\Service\Import\ImportedReceivedDatePolicy::DEFAULT_MODE;
-        // Výchozí poznámka pod položkami (#79, migrace 1855). Chybějící sloupce =
-        // nedoběhlá migrace; fallback drží dnešní chování (vypnuto, prázdno), ať
-        // formulář nastavení nevykreslí `undefined` do textarey.
-        $row[DefaultInvoiceNote::ENABLED_COLUMN] = (bool) ($row[DefaultInvoiceNote::ENABLED_COLUMN] ?? false);
-        foreach (DefaultInvoiceNote::COLUMNS as $column) {
-            $row[$column] = isset($row[$column]) ? (string) $row[$column] : null;
-        }
         // F7 — AI provider selection (non-secret; klíče `*_enc` jsou níže redigovány).
         $row['ai_provider']              = (string) ($row['ai_provider'] ?? 'anthropic');
         $row['ai_data_region']           = (string) ($row['ai_data_region'] ?? 'us');
         $row['client_ai_extraction_enabled'] = (bool) ($row['client_ai_extraction_enabled'] ?? false);
         $row['client_ai_extraction_monthly_limit'] = (int) ($row['client_ai_extraction_monthly_limit'] ?? 100);
         $row['ai_eu_residency_required'] = (bool) ($row['ai_eu_residency_required'] ?? false);
-        $row['email_branding_enabled']   = (bool) ($row['email_branding_enabled'] ?? false);
-        $row['email_accent_color']       = (string) ($row['email_accent_color'] ?? '#3B2D83');
-        $row['pdf_logo_show_name']       = (bool) ($row['pdf_logo_show_name'] ?? false);
-        $row['invoice_pdf_monochrome']   = (bool) ($row['invoice_pdf_monochrome'] ?? false);
-        $row['branding_profiles_enabled'] = (bool) ($row['branding_profiles_enabled'] ?? false);
+        $row = SupplierBrandingSettings::normalizeResponse($row);
         $row['default_branding_profile_id'] = $row['default_branding_profile_id'] !== null
             ? (int) $row['default_branding_profile_id']
             : null;
@@ -1492,6 +1670,7 @@ final class SettingsAction
         $row['payment_thanks_auto_send']      = (bool) ($row['payment_thanks_auto_send'] ?? false);
         $row['payment_thanks_default_checked']= (bool) ($row['payment_thanks_default_checked'] ?? false);
         $row['payment_thanks_attach_paid_pdf']= (bool) ($row['payment_thanks_attach_paid_pdf'] ?? false);
+        $row['payment_thanks_max_age_days']   = (int) ($row['payment_thanks_max_age_days'] ?? 30);
         // Kopie odchozích e-mailů dodavateli (migrace 0102) — parsed objekt nebo null.
         $sc = $row['self_copy'] !== null ? json_decode((string) $row['self_copy'], true) : null;
         $row['self_copy'] = is_array($sc) && $sc !== [] ? $sc : null;
@@ -1503,30 +1682,6 @@ final class SettingsAction
             'approvals'          => ((bool) $this->config->get('approval.cc_supplier_on_approval', true)) ? 'bcc' : 'off',
             'approval_reminders' => ((bool) $this->config->get('approval.cc_supplier_on_approval_reminder', true)) ? 'bcc' : 'off',
         ];
-        // Bezpečnost: do API NIKDY neposílat žádná tajemství. Redakce vzorem `*_enc`
-        // je odolná vůči nově přidaným šifrovaným sloupcům (původní explicitní výčet
-        // nechával unikat idoklad/fakturoid/anthropic credentials). Doplněno o
-        // obecné secret-ish názvy, aby se případný budoucí tajný sloupec BEZ přípony
-        // `_enc` taky neprosákl (defense-in-depth — allowlist by byl křehčí, supplier
-        // má desítky legitimních polí, které FE potřebuje).
-        foreach (array_keys($row) as $k) {
-            $lk = strtolower((string) $k);
-            if (str_ends_with($lk, '_enc')
-                || str_contains($lk, 'password')
-                || str_contains($lk, 'secret')
-                || str_contains($lk, 'api_key')
-                || str_contains($lk, 'access_token')
-                || str_contains($lk, 'passphrase')
-                || str_contains($lk, 'private_key')
-                // Pseudonymizační salt (ai_pseudo_salt) = random_bytes(32) — tajemství,
-                // které nesmí ven; navíc jde o binární data (nevalidní UTF-8), takže
-                // by shodilo json_encode(JSON_THROW_ON_ERROR) celého endpointu.
-                || str_contains($lk, 'salt')
-            ) {
-                unset($row[$k]);
-            }
-        }
-        unset($row['idoklad_access_token']);
         // Globální cfg fallback pro varsymbol — UI ho použije jako placeholder
         // u prázdných per-supplier polí (aby uživatel viděl, jaká šablona by se
         // použila kdyby ponechal pole prázdné).
@@ -1541,7 +1696,10 @@ final class SettingsAction
         // supplier-wide i per-client šablonami). FE dělá živou kontrolu jen nad
         // supplier-wide poli; backend navíc pokrývá per-client přepsání.
         $row['number_series_collisions'] = $this->seriesCollisions->findForSupplier($id);
-        return Json::ok($response, $row);
+        // Bezpečnost: ven jde jen allowlist, ne `s.*` minus denylist. Tajemství (`*_enc`,
+        // salt, tokeny integrací), adresy AI endpointů, počítadla a interní značky
+        // v něm nejsou vůbec; citlivé skupiny dostane jen ten, kdo je smí upravovat.
+        return Json::ok($response, SupplierResponseFields::full($row, $request));
     }
 
     private function nullable(array $b, string $key): ?string
@@ -1663,6 +1821,9 @@ final class SettingsAction
             return Json::error($response, 'validation_failed', 'Název účtu je povinný.', 400,
                 ['fields' => ['label' => ['Název účtu je povinný.']]]);
         }
+        if (($bankErrors = CurrencyBankAccountFields::validationErrors($body)) !== []) {
+            return Json::error($response, 'validation_failed', (string) reset($bankErrors)[0], 400, ['fields' => $bankErrors]);
+        }
         $allowed = ['label', 'symbol', 'decimals', 'is_active', 'is_default', 'account_number', 'bank_code', 'bank_name', 'iban', 'bic'];
         $sets = [];
         $params = [];
@@ -1676,6 +1837,8 @@ final class SettingsAction
                 } elseif ($f === 'symbol') {
                     // NOT NULL sloupec — prázdné ulož jako '' (ne null).
                     $params[] = (string) $body[$f];
+                } elseif (in_array($f, ['account_number', 'bank_code', 'bank_name', 'iban', 'bic'], true)) {
+                    $params[] = CurrencyBankAccountFields::normalized($body[$f]);
                 } else {
                     $params[] = ($body[$f] === '' || $body[$f] === null) ? null : $body[$f];
                 }
@@ -1832,7 +1995,15 @@ final class SettingsAction
             return Json::error($response, 'has_dependencies',
                 "Sazbu nelze smazat — používá ji $count položek faktur. Nastav jí konec platnosti (valid_to).", 409);
         }
-        $this->db->pdo()->prepare('DELETE FROM vat_rates WHERE id = ?')->execute([$id]);
+        try {
+            $this->db->pdo()->prepare('DELETE FROM vat_rates WHERE id = ?')->execute([$id]);
+        } catch (\PDOException $e) {
+            if ($e->getCode() !== '23000') {
+                throw $e;
+            }
+            return Json::error($response, 'has_dependencies',
+                'Sazbu nelze smazat — používají ji jiné záznamy (klienti, karty, ceník, doklady). Nastav jí konec platnosti (valid_to).', 409);
+        }
         $this->log($request, 'vat_rate.deleted', $id, []);
         return Json::ok($response, ['deleted' => true]);
     }
@@ -1944,6 +2115,9 @@ final class SettingsAction
         }
         $label = trim((string) ($b['label'] ?? "$code — výchozí"));
         if ($label === '') $label = $code;
+        if (($bankErrors = CurrencyBankAccountFields::validationErrors($b)) !== []) {
+            return Json::error($response, 'validation_failed', (string) reset($bankErrors)[0], 400, ['fields' => $bankErrors]);
+        }
         if (($claimed = $this->rejectForeignBankAccount($request, $response, $sid, $b)) !== null) {
             return $claimed;
         }
@@ -1974,11 +2148,11 @@ final class SettingsAction
             (int) ($b['decimals'] ?? 2),
             array_key_exists('is_active', $b) ? ((int) (bool) $b['is_active']) : 1,
             $isDefault,
-            ($b['account_number'] ?? '') !== '' ? (string) $b['account_number'] : null,
-            ($b['bank_code'] ?? '') !== '' ? (string) $b['bank_code'] : null,
-            ($b['bank_name'] ?? '') !== '' ? (string) $b['bank_name'] : null,
-            ($b['iban'] ?? '') !== '' ? (string) $b['iban'] : null,
-            ($b['bic'] ?? '') !== '' ? (string) $b['bic'] : null,
+            CurrencyBankAccountFields::normalized($b['account_number'] ?? null),
+            CurrencyBankAccountFields::normalized($b['bank_code'] ?? null),
+            CurrencyBankAccountFields::normalized($b['bank_name'] ?? null),
+            CurrencyBankAccountFields::normalized($b['iban'] ?? null),
+            CurrencyBankAccountFields::normalized($b['bic'] ?? null),
         ]);
         $newId = (int) $pdo->lastInsertId();
         // Nová měna může rovnou nést vlastní účet (typicky EUR účet vedle CZK) —

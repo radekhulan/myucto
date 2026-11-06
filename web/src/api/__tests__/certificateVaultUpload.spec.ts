@@ -24,4 +24,22 @@ describe('certificate vault upload', () => {
     expect(data.getAll('pfx_password')).toEqual(['heslo-souboru'])
     expect(data.getAll('password')).toEqual(['heslo-uctu'])
   })
+
+  it('náhrada starého certifikátu má přednost před prostým sdílením', async () => {
+    post.mockResolvedValueOnce({ data: { id: 2 } })
+
+    await settingsApi.uploadCertificate({
+      file: new File(['synthetic'], 'synteticky.p12'),
+      label: 'Syntetický certifikát',
+      password: 'heslo-souboru',
+      proof: { password: 'heslo-uctu' },
+      shareWithOtherSuppliers: true,
+      shareOnlyWithoutValid: true,
+      replaceCredentialId: 40,
+    })
+
+    const data = post.mock.calls.at(-1)![1] as FormData
+    expect(data.getAll('replace_credential_id')).toEqual(['40'])
+    expect(data.getAll('share_with_other_suppliers')).toEqual([])
+  })
 })

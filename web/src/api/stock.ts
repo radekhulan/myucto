@@ -10,7 +10,9 @@ import { downloadApiFilePost } from '@/utils/downloadFile'
  * Vše pod `X-Supplier-Id` hlavičkou (auto přes api/client.ts interceptor).
  */
 
-export type StockItemType = 'material' | 'goods' | 'product'
+export type StockItemType = 'material' | 'goods' | 'product' | 'service'
+/** Druh položky pro EET: běžné zboží, dárkový poukaz na konkrétní plnění, hodnotový poukaz / kredit. */
+export type StockItemEetKind = 'standard' | 'specific_voucher' | 'stored_value'
 export type StockItemLifecycleStatus = 'draft' | 'ready' | 'retired'
 export type StockTrackingMode = 'none' | 'lot' | 'serial'
 export type StockDocType = 'receipt' | 'issue' | 'transfer'
@@ -45,6 +47,7 @@ export interface StockItem extends StockItemEffectivePrice {
   sku: string
   name: string
   item_type: StockItemType
+  eet_item_kind?: StockItemEetKind
   manufacturer_id: number | null
   unit: string
   tracking_mode?: StockTrackingMode
@@ -84,6 +87,7 @@ export interface StockItemPayload {
   sku?: string
   name: string
   item_type: StockItemType
+  eet_item_kind?: StockItemEetKind
   unit: string
   tracking_mode?: StockTrackingMode
   ean?: string | null
@@ -205,6 +209,7 @@ export interface ProductAssemblyListResponse {
 }
 
 export interface StockItemSearchResult extends StockItemEffectivePrice {
+  item_type?: StockItemType
   id: number
   sku: string
   name: string
@@ -620,6 +625,8 @@ export interface StockLedgerRow {
   unit_cost: string
   value_total: string
   note: string | null
+  /** Pohyb z převzaté historie skladu (import historických dokladů). */
+  imported?: boolean
   /** Faktura/dobropis, který výdej či vratku vyvolal (null bez práva k fakturám). */
   invoice_id: number | null
   invoice_number: string | null
@@ -689,6 +696,8 @@ export interface StockDocument {
   purchase_invoice_id: number | null
   purchase_order_id: number | null
   stock_take_id: number | null
+  /** Úloha importu historie skladu, která doklad převzala (převzatý doklad nejde stornovat). */
+  history_import_job_id?: number | null
   journal_entry_id: number | null
   reversal_document_id: number | null
   status: StockDocStatus

@@ -31,6 +31,11 @@ final class AbraBankAccountImporter
             $id = AbraSource::reference($row['id'] ?? null);
             $source = $lookup['id:' . $id] ?? null;
             if ($id === '' || $source === null || $source['currency'] === '') continue;
+            if ($source['loan']) {
+                // Úvěrový účet není peněžní účet firmy: jistina zůstává v deníku na účtu úvěru.
+                $warnings[] = 'bank_loan_account_not_transferred';
+                continue;
+            }
             $accountCode = AbraSource::account($source['accounting_code']);
             $suffix = preg_match('/^221\.([0-9]{1,6})$/D', $accountCode, $parts) === 1 ? $parts[1] : null;
             if ($suffix === null) $warnings[] = 'bank_account_source_analytic_not_221';

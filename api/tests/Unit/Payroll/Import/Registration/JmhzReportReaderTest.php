@@ -42,7 +42,7 @@ final class JmhzReportReaderTest extends TestCase
         self::assertSame('200000000000000000101', $form->employmentIdentifier);
         self::assertTrue($form->hasSummary);
         self::assertSame(40_000, $form->incomeTotal);
-        self::assertSame(['base' => 40_000, 'computed' => 6_000, 'after_credits' => 2_163, 'bonus' => 0], $form->advance);
+        self::assertSame(['base' => 40_000, 'computed' => 6_000, 'after_credits' => 2_163, 'bonus' => null], $form->advance);
         self::assertTrue($form->declarationSigned);
         self::assertSame(['taxpayer' => 2_570, 'ztp-p' => 4_790], $form->credits);
         self::assertSame(1_267, $form->childCredit['monthly']);

@@ -38,6 +38,8 @@ if (!is_file($cfgPath)) {
     echo "  2. Otevři cfg.php a vyplň hodnoty označené CHANGE-ME:\n";
     echo "     - app.url       (https://tvoje-domena.cz)\n";
     echo "     - app.pepper    (32B base64: openssl rand -base64 32)\n";
+    echo "     - app.secret_encryption_key a app.payroll_hash_key (každý vlastní 32B base64;\n";
+    echo "       payroll_hash_key setup doplní sám, pokud chybí)\n";
     echo "     - db.host / db.name / db.user / db.pass\n";
     echo "     - smtp.* pro odesílání e-mailů\n";
     echo "     - cloudflare.turnstile.* (volitelné)\n";
@@ -58,6 +60,8 @@ use MyInvoice\Service\Ares\AresClient;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\WebAuthnConfig;
 use MyInvoice\Service\Config\CfgLocalWriter;
+use MyInvoice\Service\Config\FreshInstallSecrets;
+use MyInvoice\Service\System\ManagedModeGuard;
 use Monolog\Logger;
 
 // === Krok 2: načti config ===
@@ -294,13 +298,24 @@ try {
 }
 
 // === Zapiš obecnou MFA politiku a vypni legacy TOTP-only přepínač ===
+// Čerstvá instalace (výše ověřeno: žádný admin ani dodavatel, tedy ani mzdová
+// data) dostane navíc samostatný app.payroll_hash_key, pokud ho konfigurace
+// ještě nemá. Na existující instalaci se klíč nikdy negeneruje, změna by
+// zneplatnila uložené mzdové otisky.
+$localKeys = [
+    'auth.require_mfa' => $requireMfa,
+    'auth.allowed_mfa_methods' => $allowedMfaMethods,
+    'auth.require_totp' => false,
+];
+if (!(new ManagedModeGuard($config))->isManaged()) {
+    $localKeys += FreshInstallSecrets::forFreshInstall($config);
+}
 try {
-    CfgLocalWriter::setKeys(CfgLocalWriter::resolveTargetDir($rootDir), [
-        'auth.require_mfa' => $requireMfa,
-        'auth.allowed_mfa_methods' => $allowedMfaMethods,
-        'auth.require_totp' => false,
-    ]);
+    CfgLocalWriter::setKeys(CfgLocalWriter::resolveTargetDir($rootDir), $localKeys);
     echo "\n🔒  Nastavení MFA zapsáno do cfg.local.php.\n";
+    if (isset($localKeys[FreshInstallSecrets::KEY_PAYROLL_HASH])) {
+        echo "🔑  Vygenerován app.payroll_hash_key (cfg.local.php). Zálohujte ho spolu s pepperem.\n";
+    }
 } catch (\Throwable $e) {
     echo "\n⚠   Nepodařilo se zapsat cfg.local.php: " . $e->getMessage() . "\n";
     echo "    Nastav ručně auth.require_mfa a auth.allowed_mfa_methods.\n";

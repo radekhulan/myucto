@@ -105,7 +105,10 @@ export interface Client {
   active_projects_count?: number
   invoices_count?: number
   purchase_invoices_count?: number
+  /** Zakázky odběratele; bez oprávnění `projects` přijde prázdný seznam. */
   projects?: ProjectSummary[]
+  /** Počet všech zakázek (i archivovaných) bez ohledu na oprávnění; řídí nabídku smazání. */
+  projects_count?: number
   // total_czk fieldy slouží pro multi-currency klienty, kde frontend agreguje obraty z více měn
   // do CZK (přepočet přes i.exchange_rate fixovaný k DUZP). Single-currency klienti je ignorují.
   revenue_by_month?: Array<{ month: string; currency: string; total: number; total_czk: number }>

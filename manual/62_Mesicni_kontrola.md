@@ -163,11 +163,12 @@ Kontrola porovnává evidenční stav dokladu, platební vazby a deník:
 
 - zaplacené vydané faktury s otevřeným saldem na 311,
 - zaplacené přijaté faktury s otevřeným saldem na 321,
-- zaplacené proformy bez zaúčtované přijaté zálohy na 324,
+- zaplacené proformy, které nemají inkaso na účtu přijatých záloh ani na 311,
 - zaplacené zálohové přijaté faktury bez úhrady na 314,
 - doklady stále ve stavu odeslané/přijaté, přestože účetní saldo už je
   vyrovnané,
-- nesoulady spárované platby v částce, měně, protistraně nebo použití kurzu,
+- nesoulady spárované platby v částce, měně, protistraně nebo použití kurzu;
+  u plateb kartou se protistrana neporovnává, banka v ní neuvádí obchodníka,
 - realizované kurzové rozdíly, které nebyly zaúčtované na 563/663,
 - otevřené cizoměnové položky určené k přecenění,
 - řádky devizových účtů s neúplnou stopou měny a
@@ -178,6 +179,11 @@ Kontrola ČNB je upozornění, ne automatická oprava. Pevný kurz, celní kurz 
 jiný doložený zákonný postup může odchylku vysvětlit. Historický kurz
 nepřepisujte jen proto, aby kontrola zezelenala; kurz faktury, kurz úhrady a
 závěrkový kurz mají rozdílnou funkci.
+
+Dvě varování hlídají agendu [Ostatní pohledávky a závazky](52_Ucetni_denik.md#521414-ostatni-pohledavky-a-zavazky):
+
+- **Splátky ostatních položek po splatnosti bez úhrady** - potvrzená nebo zaúčtovaná položka má splátku s termínem do konce zvoleného rozsahu a zbývá z ní něco k úhradě. Nález je jedna položka, ukazuje součet zbytků splátek po splatnosti a nejstarší termín a odkazuje na detail položky. Zbytek počítá stejné pravidlo jako tabulka splátek (úhrada se váže na splátku, přebytek kryje další splátky). Řešení: přiřadit úhradu v detailu položky nebo v bance, případně opravit splátkový kalendář.
+- **Zůstatek účtů ostatních pohledávek a závazků nesedí na otevřené položky** - jen podvojné účetnictví. Pro každý účet, na kterém leží zaúčtované ostatní položky (výchozí 315 a 325, jinak zvolený účet včetně analytiky), porovná zůstatek hlavní knihy k datu **Do** se součtem otevřených zbytků položek (zaúčtované položky bez úhrad, v Kč). Rozdíl nad 1 Kč je varování, ne chyba: účet mohou legitimně používat i jiné zápisy (ruční zápis, převzatý zůstatek, kurzové přecenění cizoměnové položky). Prověřte opis účtu a doložte rozdíl. Firmy v daňové evidenci tuto kontrolu nedostanou.
 
 ### 62.6.6 Majetek, daně a další zákonné oblasti
 

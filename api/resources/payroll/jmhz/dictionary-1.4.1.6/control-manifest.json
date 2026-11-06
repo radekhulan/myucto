@@ -1,32 +1,32 @@
 {
-    "manifest_sha256": "565bfb145efd1e7c0893e81c26b3d865c486929dc44cef72620340b663b4e493",
+    "manifest_sha256": "05e26c2722a72c989282ed72939faa3cedc02789239b0a798f4ecd33b4dca195",
     "payload": {
         "schema_version": "jmhz-control-source-catalog.v4",
-        "catalog_key": "jmhz-controls-1.4.2.10-source-v4",
-        "version": "1.4.2.10",
-        "spec_package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1",
-        "spec_manifest_sha256": "de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d",
+        "catalog_key": "jmhz-controls-1.4.2.11-source-v4",
+        "version": "1.4.2.11",
+        "spec_package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.11_manifest-v1",
+        "spec_manifest_sha256": "39bb516b4fff204c44f0b8a6b9e0ec40601ef73af79460bdf937777e046c00d8",
         "source": {
-            "filename": "Katalog kontrol MH(public)_1.4.2.10.xlsx",
-            "sha256": "38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2",
+            "filename": "Katalog kontrol MH(public)_1.4.2.11.xlsx",
+            "sha256": "e5b664c135b63774b555e067c5ed83991bd919f023f3f577bcfafd030b441b62",
             "sheets": [
                 "MH",
                 "Parametrické konstanty"
             ]
         },
         "counts": {
-            "controls": 200,
-            "attribute_refs": 827,
-            "unique_attributes": 219,
+            "controls": 203,
+            "attribute_refs": 851,
+            "unique_attributes": 227,
             "symbolic_attribute_refs": 1,
-            "source_anomalies": 1,
+            "source_anomalies": 0,
             "parameters": 22,
             "parameter_control_refs": 30,
             "unique_parameter_controls": 19,
             "missing_parameter_control_refs": 10,
             "parameter_values": 50,
-            "blocking_remote_controls": 178,
-            "passable_remote_controls": 18,
+            "blocking_remote_controls": 180,
+            "passable_remote_controls": 19,
             "unavailable_remote_controls": 4
         },
         "controls": [
@@ -1414,7 +1414,7 @@
                 "control_id": 90,
                 "source_row": 40,
                 "name": "Měsíc",
-                "attribute_refs_raw": "10010",
+                "attribute_refs_raw": "10010\n10011",
                 "symbolic_attribute_refs": [],
                 "area": "Meta atributy",
                 "scope": "global",
@@ -1435,9 +1435,14 @@
                         "attribute_id": "10010",
                         "ordinal": 1,
                         "row_hash": "2e7fd320efec56f37ab8aa4c67a6f31b2437f283d6dd12f1134bb4d4ee686f66"
+                    },
+                    {
+                        "attribute_id": "10011",
+                        "ordinal": 2,
+                        "row_hash": "4b1dbaebe42bde1d79a77937e6452f6af0ed2d765a555ce58dab1cc2f7962a28"
                     }
                 ],
-                "row_hash": "aef73e252d32f340d1962f23d5f7c6050d0ccbf8c0774575fa104583a5e3523c"
+                "row_hash": "d4873abf211fae0f3aa0fd045b2b2f42e2f85271f20945c1e8fa698b9bdfd607"
             },
             {
                 "control_id": 93,
@@ -1547,7 +1552,7 @@
                 "category": "F4",
                 "detail_text": "(10261) >= 0\n---\n10261 Stanovená týdenní pracovní doba zaměstnance (§79 zákoníku práce)",
                 "detail_formula": null,
-                "error_message": "Stanovená týdenní pracovní doba musí být kladná hodnota.",
+                "error_message": "Stanovená týdenní pracovní doba musí být kladná nebo nulová hodnota.",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": null,
@@ -1558,7 +1563,7 @@
                         "row_hash": "dcdcb49a88e26f6d5d5122dbfd1932ccfdf03475bc9f94e023936f1d501c3d42"
                     }
                 ],
-                "row_hash": "19e9dedd2934ae3b3f42cc805193905a7e3ba7e649a60beb74d9ff9724f40f87"
+                "row_hash": "27b7be083cab2674771e1bb0661fc0a9bb4d17e7a4204ecdfa301785da56dbc1"
             },
             {
                 "control_id": 97,
@@ -2562,7 +2567,7 @@
                 "control_id": 132,
                 "source_row": 67,
                 "name": "Kontrola roku pro podání opravného hlášení.",
-                "attribute_refs_raw": "10011",
+                "attribute_refs_raw": "10011\n10006\n10007",
                 "symbolic_attribute_refs": [],
                 "area": "Meta atributy",
                 "scope": "global",
@@ -2583,9 +2588,19 @@
                         "attribute_id": "10011",
                         "ordinal": 1,
                         "row_hash": "a845881c43dd46161b14020a5bbe4582d547c8c6b26e8560801e84fc1589d4a6"
+                    },
+                    {
+                        "attribute_id": "10006",
+                        "ordinal": 2,
+                        "row_hash": "928bcb934678092e24f6e417764d1fcda6b5cb38cca254eb2772fa51c9ec121c"
+                    },
+                    {
+                        "attribute_id": "10007",
+                        "ordinal": 3,
+                        "row_hash": "02fe87d5e91c9d4de987137df383b65978471f406b16f9bbf030505f7aae29cd"
                     }
                 ],
-                "row_hash": "726127bf323784f88ee2b4ca446df3644fba7dc6a58754f9d8ae7f4caa393a9d"
+                "row_hash": "32de16b0ed2cc5871f80ec5f9ea8afd3224e3029c381626bbf93fbf83b52288e"
             },
             {
                 "control_id": 133,
@@ -3295,7 +3310,7 @@
                 "error_message": "Slevu na pojistném zaměstnavatele (zkrácené úvazky) nelze uplatnit po lhůtě splatnosti pojistného.",
                 "error_message_formula": null,
                 "source_label": "nová",
-                "note": "DŮLEŽITÉ:\ntato kontrola 164 bude pro podání za měsíce 1,2,3/2026 vypnuta, tento bypass platí do 30. 06. 2026\n\nvysvětlení lhůta splatnosti: pojistné je splatné od 1. do 20. dne následujícího kalendářního měsíce. Připadne-li 20. den na sobotu, neděli nebo státní svátek, považuje se za den splatnosti nejbližší následující pracovní den.",
+                "note": "Vysvětlení lhůta splatnosti: pojistné je splatné od 1. do 20. dne následujícího kalendářního měsíce. Připadne-li 20. den na sobotu, neděli nebo státní svátek, považuje se za den splatnosti nejbližší následující pracovní den.",
                 "attribute_refs": [
                     {
                         "attribute_id": "10032",
@@ -3318,7 +3333,7 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "89b17e4c14c08c1c116efc5060e60ee9a636f5b50fdaff0a63fd29c096177a82"
+                "row_hash": "8783e57816a79527ed87c09eea1f652161d4e9a97bf535b2f59bf2f6d85e087d"
             },
             {
                 "control_id": 165,
@@ -3509,7 +3524,7 @@
                 "control_id": 190,
                 "source_row": 95,
                 "name": "Stornování celého řádného podání",
-                "attribute_refs_raw": "10007\n10010\n10011",
+                "attribute_refs_raw": "10006\n10007\n10010\n10011",
                 "symbolic_attribute_refs": [],
                 "area": "Meta atributy",
                 "scope": "global",
@@ -3527,22 +3542,27 @@
                 "note": null,
                 "attribute_refs": [
                     {
-                        "attribute_id": "10007",
+                        "attribute_id": "10006",
                         "ordinal": 1,
-                        "row_hash": "334f645a5c679a91a832581bced2be002b336e9cd1c11df95817395b5dba8895"
+                        "row_hash": "7330ab5d410e4ed0c81c177c7a873430cd6cd3c2b93d91572912b168b4d33a59"
+                    },
+                    {
+                        "attribute_id": "10007",
+                        "ordinal": 2,
+                        "row_hash": "f8ac4a710fd25956a1e3cf88edbe04ca9963f5a26336d843c798389531c96a3c"
                     },
                     {
                         "attribute_id": "10010",
-                        "ordinal": 2,
-                        "row_hash": "401856d0f8b6e4ee5fc339c34a704607ec55f412640f41ff52e8e3db8bf3d0ef"
+                        "ordinal": 3,
+                        "row_hash": "00f3934eaacfb65c9de9c735dcfe768b54f821f9ac9fb32db4e7da58893ed36e"
                     },
                     {
                         "attribute_id": "10011",
-                        "ordinal": 3,
-                        "row_hash": "9a2f99811f84b2ce408ab27a555b078465a1c840531c498253836aca6c1d7a8a"
+                        "ordinal": 4,
+                        "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "ed5ffbc7f740baa56f28d28db19b4730142bfedcd534f011fe1e44370f2ed2c5"
+                "row_hash": "5432cf3e7ac16e0e0c072a7eceba3c7de54ea80ac630407be034c6224af2b96a"
             },
             {
                 "control_id": 191,
@@ -3839,7 +3859,7 @@
                 "control_id": 204,
                 "source_row": 100,
                 "name": "Stornování součástí individualizované části",
-                "attribute_refs_raw": "10007\n10010\n10011",
+                "attribute_refs_raw": "10007\n10016\n10010\n10011",
                 "symbolic_attribute_refs": [],
                 "area": "Meta atributy",
                 "scope": "employee_form",
@@ -3862,17 +3882,22 @@
                         "row_hash": "334f645a5c679a91a832581bced2be002b336e9cd1c11df95817395b5dba8895"
                     },
                     {
-                        "attribute_id": "10010",
+                        "attribute_id": "10016",
                         "ordinal": 2,
-                        "row_hash": "401856d0f8b6e4ee5fc339c34a704607ec55f412640f41ff52e8e3db8bf3d0ef"
+                        "row_hash": "b64b2f24105d69aff9e0013fe905df13b29584ade16ef56b19f88f8c4629a60a"
+                    },
+                    {
+                        "attribute_id": "10010",
+                        "ordinal": 3,
+                        "row_hash": "00f3934eaacfb65c9de9c735dcfe768b54f821f9ac9fb32db4e7da58893ed36e"
                     },
                     {
                         "attribute_id": "10011",
-                        "ordinal": 3,
-                        "row_hash": "9a2f99811f84b2ce408ab27a555b078465a1c840531c498253836aca6c1d7a8a"
+                        "ordinal": 4,
+                        "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "90f781abd7d8cdd1aac533ae867d28f8a96ee093f76103d385736c17fc6e51da"
+                "row_hash": "0208cd69e67d73346036499dd9d806038189600605314937a00135fa38f11570"
             },
             {
                 "control_id": 207,
@@ -4329,14 +4354,14 @@
                 "remote_system": "cjmhz",
                 "remote_passability": "blocking",
                 "category": "F5",
-                "detail_text": "Pro každý variabilní symbol a jemu odpovídající měsíční podání bude ověřeno, že počet individualizovaných řádných součástí v rámci měsíčního hlášení (tj. řádného podání a na něj navazujících opravných podání) odpovídá počtu pracovněprávních vztahů evidovaných v registru zaměstnanců za dané rozhodné období.\n\npozn.: Chybějící pracovněprávní vztahy, které nebyly zaslány v rámci měsíčního hlášení, budou v protokolu o kompletnosti označeny jako \"Chybějící formuláře\". Tyto chybějící formuláře je nutné doplnit v opravném hlášení (s vazbou na GUID řádného podání) jako řádné individualizované součásti.\n\nTato nepropustná kontrola nezamítá celé podání, jedná se o výjimku v katalogu kontrol, kdy je výsledkem podání částečné přijetí.",
+                "detail_text": "Pro každý variabilní symbol a jemu odpovídající měsíční podání bude ověřeno, že počet individualizovaných řádných součástí v rámci měsíčního hlášení (tj. řádného podání a na něj navazujících opravných podání) s vyjímkou formulářů pro odložený příjem odpovídá počtu pracovněprávních vztahů evidovaných v registru zaměstnanců za dané rozhodné období.\n\npozn.: Chybějící pracovněprávní vztahy, které nebyly zaslány v rámci měsíčního hlášení, budou v protokolu o kompletnosti označeny jako \"Chybějící formuláře\". Tyto chybějící formuláře je nutné doplnit v opravném hlášení (s vazbou na GUID řádného podání) jako řádné individualizované součásti.\n\nTato nepropustná kontrola nezamítá celé podání, jedná se o výjimku v katalogu kontrol, kdy je výsledkem podání částečné přijetí.",
                 "detail_formula": null,
                 "error_message": "V podání nebyly nalezeny očekávané individualizované součásti dle evidence registru zaměstnanců za dané rozhodné období. \n\na) Některé individualizované součásti jsou evidované jako chybějící a je nutné je doplnit prostřednictvím opravného hlášení {chybějící_idppv}.\n\nb) Některé individualizované součásti jsou evidované jako přebývající a je nutné je odstranit prostřednictvím opravného hlášení {přebývající_idppv}. V případě přebývajících ID zaměstnání, je tato součást zamítnutá a podání je ve stavu částečně přijato. Následně je třeba znovu zaslat opravné hlášení pouze s nezměněnou souhrnnou částí (poté dojde k znovuvyhodnocení kontrol a měsíční hlášení přejde do stavu zpracováno a je úplné).",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": "Měsíční podání JMHZ (nezařazeno) - tzn. při vyhodnocení této nepropustné kontroly dojde k částečnému přijetí podání, které musí zaměstnavatel doplnit formou opravného hlášení. Pokud zaměstnavatel opravné hlášení nepodá do 20. dne rozhodného období, bude mu doručena formální výzva k podání opravného hlášení.",
                 "attribute_refs": [],
-                "row_hash": "8c269d7596a6f9c280a14638a2c82e78a96561c59bb76dcd5508aa5d6f928468"
+                "row_hash": "9f642f348d0ab3f04430278819bba1b332df4aca70fae4285416bda44f080c60"
             },
             {
                 "control_id": 227,
@@ -4504,7 +4529,7 @@
                 "control_id": 235,
                 "source_row": 121,
                 "name": "Neodpovídá skutečný počet formulářů",
-                "attribute_refs_raw": "10015",
+                "attribute_refs_raw": "10015\n10002\n10007",
                 "symbolic_attribute_refs": [],
                 "area": "Meta atributy",
                 "scope": "global",
@@ -4525,9 +4550,19 @@
                         "attribute_id": "10015",
                         "ordinal": 1,
                         "row_hash": "818626776569df8896d19a4c01a457b0b7135ec4f9a13f8dfa5fb85464795bd0"
+                    },
+                    {
+                        "attribute_id": "10002",
+                        "ordinal": 2,
+                        "row_hash": "26f75e85b75775d1de70ca95e4fa89f5830a76f8291e2ac057f84408501c4625"
+                    },
+                    {
+                        "attribute_id": "10007",
+                        "ordinal": 3,
+                        "row_hash": "02fe87d5e91c9d4de987137df383b65978471f406b16f9bbf030505f7aae29cd"
                     }
                 ],
-                "row_hash": "08aeeaf2afaae5a38a7dc30fd2d5f05ebff9e57db8f4ec3a269f578e2eccd685"
+                "row_hash": "cc253e3da7683f11314897d131e7656dd2ad2e29ecd3d370bb2322b0f5c2418a"
             },
             {
                 "control_id": 236,
@@ -4608,7 +4643,7 @@
                 "category": "T9",
                 "detail_text": "Pro opravné podání (10016) = \"O\" součásti individualizované části musí odpovídat dvojice klíčů (10051) a (10228) předchozím hodnotám ze zpracovaného řádného podání (10016) = \"R\", tj. pro konkrétní GUID formuláře (10012) musí být použita vždy stejná kombinace IK MPSV a ID pracovněprávního vztahu.\n---\n10012 GUID formuláře\n10016 Typ formuláře\n10051 IK MPSV\n10228 ID pracovněprávního vztahu",
                 "detail_formula": null,
-                "error_message": "V rámci opravného podání nebyl nalezen GUID součásti (a zároveň odpovídající klíčů OIČ a ID zaměstnání).\n\na1) Pošlete NOVÝ ŘÁDNÝ formulář zaměstnance (typ formuláře = řádný) s NOVĚ vygenerovaným GUID formuláře, OIČ {ikmpsv} a ID zaměstnání {idppv} beze změny.\na2) Pro opravný formulář typu odložený příjem s GUID {guid} a ID zaměstnání {idppv} nebyl nalezen odpovídající ŘÁDNÝ formulář.\n\nb) Zaslaná součást (formulář) musí mít stejný GUID, pošlete OPRAVNÝ formulář zaměstnance (typ formuláře = opravný) s EXISTUJÍCÍM {guid} formuláře (GUID přijatého řádného formuláře — NEgenerujte nový), OIČ {ikmpsv} a ID zaměstnání {idppv} beze změny.",
+                "error_message": "V rámci opravného podání nebyl nalezen GUID součásti (a zároveň odpovídající klíčů OIČ a ID zaměstnání). \n\na) Pošlete NOVÝ ŘÁDNÝ formulář zaměstnance(typ formuláře = řádný) s NOVĚ vygenerovaným GUID formuláře, OIČ {ikmpsv} a ID zaměstnání {idppv} beze změny.\n\nb) Zaslaná součást (formulář) musí mít stejný GUID, pošlete OPRAVNÝ formulář zaměstnance (typ formuláře = opravný) s EXISTUJÍCÍM {guid} formuláře (GUID přijatého řádného formuláře — Negenerujte nový), OIČ {ikmpsv} a ID zaměstnání {idppv} beze změny.",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": null,
@@ -4634,7 +4669,7 @@
                         "row_hash": "2dadc73feb24b06f6a53bf0ffda1ff9f4b9b06aa253ff84291fa47eb5feb6cd9"
                     }
                 ],
-                "row_hash": "075025b36520ccdf4bab0170c9b4ce596e36696ce0fc913dee7f9254b6ad14c2"
+                "row_hash": "4656a8d5c320ea39198551a33f478f9abd897616d6c94fddee24726d1969fcf0"
             },
             {
                 "control_id": 240,
@@ -6745,7 +6780,7 @@
                 "category": "F5",
                 "detail_text": "1) nutná podmínka nalezení konkrétního OZUSPOJ:\nTrvání zaměstnání (10223, 10224) v průběhu vykazovaného měsíce (10010, 10011), ze kterého je uplatňována sleva na pojistném zaměstnavatele za zaměstnance (10372 = ANO), musí spadat do ZAMERY_SLEV.ZAMER_DO období, na které byl oznámen záměr uplatňovat tuto slevu.\nOZUSPOJ je evidován jako časové období, jehož konec může být nevyplněný.\nTedy (ZAMEST_OD) >= ZAMERY_SLEV.ZAMER_OD a (ZAMERY_SLEV.ZAMER_DO je nevyplněný nebo ZAMERY_SLEV.ZAMER_DO >= 10224).\n\n2a) varianta vyhodnocení datumu podání platná pro období 1–3/2026:\nSleva náleží zaměstnavateli pouze tehdy, pokud nejpozději s uplatněním této slevy oznámil ČSSZ záměr uplatňovat tuto slevu za tohoto zaměstnance.\nU měsíců leden, únor a březen 2026 se z důvodu přechodných ustanovení považuje sleva za uplatněnou poslední den splatnosti pojistného. Tento den tedy musí být nejpozději datem oznámení záměru.\nTedy: ZAMERY_SLEV.DATUM_PRIJETI_FORMULARE ≤ poslední den splatnosti pojistného (20. 2. 2026 pro PVPOJ 1/2026, 20. 3. 2026 pro PVPOJ 2/2026 a 20. 4. 2026 pro PVPOJ 3/2026).\n\n2b) varianta vyhodnocení datumu platná od období 4/2026 a dále:\nSleva náleží zaměstnavateli pouze tehdy, pokud nejpozději s uplatněním této slevy oznámil ČSSZ záměr uplatňovat slevu za tohoto zaměstnance.\nTedy: ZAMERY_SLEV.DATUM_PRIJETI_FORMULARE ≤ (10006).\n---\natributy datové věty MH:\n10372 Sleva na pojistném zaměstnavatele\n10010 Měsíc\n10011 Rok\n10223 Datum nástupu do zaměstnání\n10224 Datum skončení zaměstnání\n10006 Datum a čas přijetí podání\nZAMEST_OD - vždy novější datum, buď 10223 (Datum nástupu do zaměstnání) a nebo první den v měcíci podle (10010, 10011)\n\natributy systému OZUSPOJ:\nZAMERY_SLEV.ZAMER_OD\nZAMERY_SLEV.ZAMER_DO\nZAMERY_SLEV.DATUM_PRIJETI_FORMULARE",
                 "detail_formula": null,
-                "error_message": "1) Záměr uplatňovat slevu na pojistném zaměstnavatele nebyl za zaměstnance oznámen nebo je sleva na pojistném zaměstnavatele za zaměstnance uplatňována ze zaměstnání, jehož trvání je mimo období, na které byl oznámen záměr uplatňovat tuto slevu. Pokud jste záměr uplatňovat slevu na pojistném za zaměstnance oznámili, může být předmětem došetřování. Obraťte se na příslušnou OSSZ.\n\n2a) Záměr uplatňovat slevu na pojistném zaměstnavatele za zaměstnance byl podán až po splatnosti pojistného, avšak slevu lze uplatnit jen do dne splatnosti pojistného a záměr musí být oznámen nejpozději s prvním uplatněním této slevy za příslušného zaměstnance, tj. nejpozději poslední den splatnosti pojistného.\n\n2b) Záměr uplatňovat slevu na pojistném zaměstnavatele za zaměstnance byl podán až po vlastním uplatnění slevy (záměr musí být oznámen nejpozději s uplatněním této slevy za příslušného zaměstnance).",
+                "error_message": "Pokud po uplynutí zákonné lhůty, zaměstnavatel v opravném hlášením snížil uplatněnou slevu, nelze již v následném opravném podání vykázat vyšší slevu, než v předchozím hlášení, jehož pojistná část byla akceptována.",
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": "kontrola 291 pokrývá i původní kontrolu 295, tyto kontroly jsou nově spojeny (od verze 1.4.2.3)",
@@ -6781,7 +6816,7 @@
                         "row_hash": "5e88a50b6459dea3fc708a6d6cd0beead6979f6a72be16c52d1e7eca62ce0b11"
                     }
                 ],
-                "row_hash": "e66fd43e7baf65373a59f0773c2b00ffe0b6fd8d189f47f34d0333d9dd6f4800"
+                "row_hash": "3948bc46f4bccd1ce298b3a917e57ece6cc71050068a70d227e459e9d747377a"
             },
             {
                 "control_id": 292,
@@ -7036,7 +7071,7 @@
                 "error_message": "Zadaný počet formulářů neodpovídá maximálnímu počtu formulářů (1502 celkem).",
                 "error_message_formula": null,
                 "source_label": "nová",
-                "note": "první dílčí podání vždy obsahuje souhrnnou, pojistnou část  a min. jednu součást indiv. části (povinné části podání, T4 řešeno na úrovni xsd )",
+                "note": "první dílčí podání vždy obsahuje souhrnnou, pojistnou část  a min. jednu součást indiv. části (povinné části podání, T4 řešeno na úrovni xsd)",
                 "attribute_refs": [
                     {
                         "attribute_id": "10015",
@@ -7044,7 +7079,7 @@
                         "row_hash": "818626776569df8896d19a4c01a457b0b7135ec4f9a13f8dfa5fb85464795bd0"
                     }
                 ],
-                "row_hash": "bf14108bf6362aa62c050c5f87694410d09810ebe2529890f1200414c9a900c2"
+                "row_hash": "0414d23321be64bab6e32d4ee6a97ac71453e02b8ddde6edf354832922650612"
             },
             {
                 "control_id": 301,
@@ -7210,7 +7245,7 @@
                 "control_id": 306,
                 "source_row": 172,
                 "name": "Jedinečnost GUID formuláře",
-                "attribute_refs_raw": "10012\n10010\n10011\n10221\n10228",
+                "attribute_refs_raw": "10001\n10012\n10010\n10011\n10221\n10228",
                 "symbolic_attribute_refs": [],
                 "area": "Meta atributy",
                 "scope": "employee_form",
@@ -7228,32 +7263,37 @@
                 "note": "Storno individualizované součásti zneplatní GUID. Nová řádná individualizovaná součást musí být identifikována novým jedinečným GUID.",
                 "attribute_refs": [
                     {
-                        "attribute_id": "10012",
+                        "attribute_id": "10001",
                         "ordinal": 1,
-                        "row_hash": "1d2502d8fe5312348b671a554a7391a2c648951ac6b7f1c3b351bc143046c2ff"
+                        "row_hash": "0abcbf086cb749ffeefdeb98c806d736e928e1abe25f5ca2278cd97fc2c533db"
+                    },
+                    {
+                        "attribute_id": "10012",
+                        "ordinal": 2,
+                        "row_hash": "e8da0563153dc4c8f429c1507e3a4057e493486a6f36c3dcccaf7a4ec8ff5530"
                     },
                     {
                         "attribute_id": "10010",
-                        "ordinal": 2,
-                        "row_hash": "401856d0f8b6e4ee5fc339c34a704607ec55f412640f41ff52e8e3db8bf3d0ef"
+                        "ordinal": 3,
+                        "row_hash": "00f3934eaacfb65c9de9c735dcfe768b54f821f9ac9fb32db4e7da58893ed36e"
                     },
                     {
                         "attribute_id": "10011",
-                        "ordinal": 3,
-                        "row_hash": "9a2f99811f84b2ce408ab27a555b078465a1c840531c498253836aca6c1d7a8a"
+                        "ordinal": 4,
+                        "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     },
                     {
                         "attribute_id": "10221",
-                        "ordinal": 4,
-                        "row_hash": "a0eba463b23a28a0a7f011df03b874d2eb8be1ceb670547a64a3c07f724dc3ea"
+                        "ordinal": 5,
+                        "row_hash": "21a0e3ffe0c0d92e075d73eee5c31d7e1964ffa8af09511c12812a3785f74728"
                     },
                     {
                         "attribute_id": "10228",
-                        "ordinal": 5,
-                        "row_hash": "fabb0c4bd0ab59a513f24a452adc4cc72316546bbbfd87e87840763424e4fb0f"
+                        "ordinal": 6,
+                        "row_hash": "26c1de7cb18e15407c6fefc57ea17c15f236e20d9084335f2c409fa39b6d64e1"
                     }
                 ],
-                "row_hash": "03907b415e69001aa29093fe4733f41c0dabb8c5ea96840b5bae17ffce1d470f"
+                "row_hash": "1ef3b8f250ed853d9c1928a47762232f02931e688dec3800efae8fd887c7fc56"
             },
             {
                 "control_id": 307,
@@ -8410,7 +8450,7 @@
                 "control_id": 330,
                 "source_row": 186,
                 "name": "Kontrola povinnosti uvedení kódu ELDP při započtených dnech důchodového pojištění",
-                "attribute_refs_raw": null,
+                "attribute_refs_raw": "10240\n10356",
                 "symbolic_attribute_refs": [],
                 "area": "Průběh pojištění v daném měsíci",
                 "scope": "employee_form",
@@ -8426,8 +8466,19 @@
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": null,
-                "attribute_refs": [],
-                "row_hash": "06c460e3986eb7ebf3d724c15daf795eaeb0e4b7074aa89aec24fe17deea97c9"
+                "attribute_refs": [
+                    {
+                        "attribute_id": "10240",
+                        "ordinal": 1,
+                        "row_hash": "bf856b33f300e6f37affaa9e8f371171a5feaa73ad3c97ef277e1d85447a2b7c"
+                    },
+                    {
+                        "attribute_id": "10356",
+                        "ordinal": 2,
+                        "row_hash": "65512114b77f95ffe1ec0d25d13f09a48129e6c18b21922818ae334906992845"
+                    }
+                ],
+                "row_hash": "1344b1658eb2f119264cfdd07d83d4fc3a90be1cefe6cf9e786a9b52f28a687e"
             },
             {
                 "control_id": 331,
@@ -8496,7 +8547,7 @@
                 "control_id": 333,
                 "source_row": 189,
                 "name": "Časové omezení uplatnění slevy na pojistném (01–03/2026)",
-                "attribute_refs_raw": "10006\n10032\n10010\n10011",
+                "attribute_refs_raw": "10495\n10016",
                 "symbolic_attribute_refs": [],
                 "area": "Přehled o výši pojistného",
                 "scope": "pvpoj",
@@ -8512,49 +8563,19 @@
                 "error_message_formula": null,
                 "source_label": "nová",
                 "note": null,
-                "source_anomaly": {
-                    "code": "official_detail_attribute_mismatch",
-                    "source_cells": [
-                        "B189",
-                        "C189",
-                        "L189",
-                        "M189"
-                    ],
-                    "declared_attribute_ids": [
-                        "10006",
-                        "10032",
-                        "10010",
-                        "10011"
-                    ],
-                    "detail_attribute_ids": [
-                        "10016",
-                        "10495"
-                    ],
-                    "resolution": "fail_closed_not_evaluable"
-                },
                 "attribute_refs": [
                     {
-                        "attribute_id": "10006",
+                        "attribute_id": "10495",
                         "ordinal": 1,
-                        "row_hash": "7330ab5d410e4ed0c81c177c7a873430cd6cd3c2b93d91572912b168b4d33a59"
+                        "row_hash": "8ed7c0a54fe016a28f001b022018d437ef0022c318e3d4e48a234b515e7fd38c"
                     },
                     {
-                        "attribute_id": "10032",
+                        "attribute_id": "10016",
                         "ordinal": 2,
-                        "row_hash": "01868e67218fb4467b67e4c2d8f975dd76807e23e1a4485f799218b078026933"
-                    },
-                    {
-                        "attribute_id": "10010",
-                        "ordinal": 3,
-                        "row_hash": "00f3934eaacfb65c9de9c735dcfe768b54f821f9ac9fb32db4e7da58893ed36e"
-                    },
-                    {
-                        "attribute_id": "10011",
-                        "ordinal": 4,
-                        "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
+                        "row_hash": "b64b2f24105d69aff9e0013fe905df13b29584ade16ef56b19f88f8c4629a60a"
                     }
                 ],
-                "row_hash": "0e019679efd0fb4cf07bca8be906669df513abb87a6258f6a078252da80f4360"
+                "row_hash": "a51da86f93dadd539b22d871a3b58db1ef9dd3298fafc290fa01adbf25eb1232"
             },
             {
                 "control_id": 334,
@@ -8643,7 +8664,7 @@
                 "control_id": 336,
                 "source_row": 192,
                 "name": "Kontrola vazby odloženého příjmu na ukončený pracovněprávní vztah",
-                "attribute_refs_raw": "10548\n10228\n10010\n10011",
+                "attribute_refs_raw": "10548\n10228\n10224\n10010\n10011",
                 "symbolic_attribute_refs": [],
                 "area": "Vykonávaná pozice zaměstnance",
                 "scope": "employee_form",
@@ -8653,7 +8674,7 @@
                 "remote_system": "cjmhz",
                 "remote_passability": "blocking",
                 "category": "F5",
-                "detail_text": "Pro odložený příjem \n(10548) = \"Příjem po skončení zaměstnaneckého poměru (např. vyplácení bonusů)\" nebo\n(10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá\" nebo\n(10548) = \"Roční zúčtování po skončení zaměstnaneckého poměru\" nebo\n(10548) = \"Příjem po skončení zaměstnaneckého poměru + Roční zúčtování po skončení zaměstnaneckého poměru\" nebo\n(10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru + Roční zúčtování po skončení zaměstnaneckého poměru\"\nmusí platit, že tento PPV (10228) je uzavřený, tedy v rozhodném období (10010, 10011), za které se hlášení podává, musí být PPV již ukončeno.\n---\n10548 Typ Odloženého příjmu\n10228 ID pracovněprávního vztahu (Identifikátor zaměstnání)\n10010 Měsíc\n10011 Rok",
+                "detail_text": "Pro odložený příjem:\n (10548) = \"Příjem po skončení zaměstnaneckého poměru (např. vyplácení bonusů)\",\n (10548) = \"Roční zúčtování po skončení zaměstnaneckého poměru\" nebo\n (10548) = \"Příjem po skončení zaměstnaneckého poměru + Roční zúčtovní po skončení zaměstnaneckého poměru\"\nmusí platit, že tento PPV (10228) je uzavřený, tedy před rozhodným období (10010, 10011), za které se hlášení podává, musí být PPV již ukončeno. Tedy Datum skončení zaměstnání (10224) musí spadat před rozhodné období (10010, 10011).\n---\n10548 Typ Odloženého příjmu\n10228 ID pracovněprávního vztahu (Identifikátor zaměstnání)\n10224 Datum skončení zaměstnání\n10010 Měsíc\n10011 Rok",
                 "detail_formula": null,
                 "error_message": "Daný typ odloženého příjmu je možné navázat pouze na ukončený pracovněprávní vztah.",
                 "error_message_formula": null,
@@ -8671,17 +8692,22 @@
                         "row_hash": "fcc45a746b364a5ff1cc1d870836a4ab97567a7eacfe12996a5a1fe4525680df"
                     },
                     {
-                        "attribute_id": "10010",
+                        "attribute_id": "10224",
                         "ordinal": 3,
-                        "row_hash": "00f3934eaacfb65c9de9c735dcfe768b54f821f9ac9fb32db4e7da58893ed36e"
+                        "row_hash": "67241bb9b60afba77ad50c29090ffe722a3001cf1875981f4f052fc8e5c043a6"
+                    },
+                    {
+                        "attribute_id": "10010",
+                        "ordinal": 4,
+                        "row_hash": "0e7daa864119dd7553c958a69d6fb30d219bd1c0cdbff977964e8ba4c5188cf2"
                     },
                     {
                         "attribute_id": "10011",
-                        "ordinal": 4,
-                        "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
+                        "ordinal": 5,
+                        "row_hash": "39066a8f084ac5b0c3b43a02f0a8d3db4e47a44d82f40ecdcd858b3d2725c258"
                     }
                 ],
-                "row_hash": "e82361a070ff09bb83322af7107aaa6f0cd43c2d470a638c4443a2c79be0b275"
+                "row_hash": "97dac1f093239c6cb7fc30af75435b7773ed44dd57c4039e6e80bb060fb84dad"
             },
             {
                 "control_id": 337,
@@ -8697,7 +8723,7 @@
                 "remote_system": "cjmhz",
                 "remote_passability": "blocking",
                 "category": "F5",
-                "detail_text": "Pro odložený příjem (10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále probíhá\"\nmusí platit, že tento PPV (10228) je otevřený, tedy v rozhodném období (10010, 10011), za které se hlášení podává, musí PPV trvat – tzn. PPV je aktivní k poslednímu dni měsíce určeného atributy (10010) Měsíc a (10011) Rok.\n---\n10548 Typ Odloženého příjmu\n10228 ID pracovněprávního vztahu (Identifikátor zaměstnání)\n10010 Měsíc\n10011 Rok",
+                "detail_text": "Pro odložený příjem (10548) = „Náhrada mzdy při neplatném ukončení pracovního poměru – PPV dále probíhá“ musí platit, že příslušný PPV (10228) stále trvá v rámci období určeném atributy (10010, 10011), za které je hlášení podáváno.\n---\n10548 Typ Odloženého příjmu\n10228 ID pracovněprávního vztahu (Identifikátor zaměstnání)\n10010 Měsíc\n10011 Rok",
                 "detail_formula": null,
                 "error_message": "Daný typ odloženého příjmu je možné navázat pouze na otevřený pracovněprávní vztah.",
                 "error_message_formula": null,
@@ -8725,7 +8751,7 @@
                         "row_hash": "38fd76e818d18ca12c4c57a8ce3220fd19d2c396e6d9c13a9b8492bd48879e25"
                     }
                 ],
-                "row_hash": "ff2e4685295cf968005d91d7d8e84f40df76d772f3262b55c4f5f8ef25d6013b"
+                "row_hash": "5ed6a90f589ec9418a3cfda3e960c8f56d2c55d8851eee3780eaf848712fbd01"
             },
             {
                 "control_id": 338,
@@ -8775,7 +8801,7 @@
                 "remote_system": "cjmhz",
                 "remote_passability": "blocking",
                 "category": "F5",
-                "detail_text": "Pro odložený příjem:\n (10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá\" nebo\n (10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále probíhá\"\n (10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá + Roční zúčtování po skončení zaměstnaneckého poměru\"\nmusí platit, že PPV (10228) byl aktivní alespoň jeden den v měsíci, za který je odložený příjem hlášen, tj. v období určeném atributy (10537) Měsíc a (10538) Rok.\n---\n10548 Typ Odloženého příjmu\n10228 ID pracovněprávního vztahu (Identifikátor zaměstnání)\n10537 Měsíc\n10538 Rok",
+                "detail_text": "Pro odložený příjem\n (10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá\",\n (10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále probíhá\" nebo\n (10548) = \"Náhrada mzdy při neplatném ukončení pracovního poměru - PPV dále neprobíhá + Roční zúčtování po skončení zaměstnaneckého poměru\"\nmusí platit, že PPV (10228) byl aktivní alespoň jeden den v měsíci, za který je odložený příjem hlášen, tj. v období určeném atributy (10537) Měsíc a (10538) Rok.\n---\n10548 Typ Odloženého příjmu\n10228 ID pracovněprávního vztahu (Identifikátor zaměstnání)\n10537 Měsíc\n10538 Rok",
                 "detail_formula": null,
                 "error_message": "Daný typ odloženého příjmu nelze navázat na zadaný pracovněprávní vztah - zadaný pracovněprávní vztah nebyl u zaměstnavatele nalezen.",
                 "error_message_formula": null,
@@ -8803,7 +8829,7 @@
                         "row_hash": "ae92abcd22522cea53b05f970adbb92f8dea8e4b143bc33bf375ac8bdf54aa1b"
                     }
                 ],
-                "row_hash": "7f9d76c12e54607000152e642bc518a18a9377b1de3736db3a990507ddd4ea30"
+                "row_hash": "c8d490c06acdd3e9fd60f0d993f9ed690a3f1b0ac19dea01a87799877d2eb5bd"
             },
             {
                 "control_id": 341,
@@ -8975,6 +9001,153 @@
                     }
                 ],
                 "row_hash": "158765c2f48fbf70fccd1768c0360e727410e7fe95feec2278bd01c0c6cc82a4"
+            },
+            {
+                "control_id": 368,
+                "source_row": 202,
+                "name": "Počet kalendářních dnů platnosti kódu v daném kalendářním měsíci - interval",
+                "attribute_refs_raw": "10356\n10241\n10242",
+                "symbolic_attribute_refs": [],
+                "area": "Průběh pojištění v daném měsíci",
+                "scope": "employee_form",
+                "owner": "ČSSZ",
+                "portal_system": "eportal",
+                "portal_passability": "blocking",
+                "remote_system": "dis",
+                "remote_passability": "blocking",
+                "category": "F4",
+                "detail_text": "Uvedený počet dnů (10356) <= (10242) – (10241)\n---\n10356 Počet kalendářních dnů trvání doby důchodového pojištění v daném kalendářním měsíci\n10241 Platnost kódu od\n10242 Platnost kódu do",
+                "detail_formula": null,
+                "error_message": "Počet kalendářních dnů trvání pojištění neodpovídá intervalu platnosti kódu ELDP.",
+                "error_message_formula": null,
+                "source_label": "nová",
+                "note": null,
+                "attribute_refs": [
+                    {
+                        "attribute_id": "10356",
+                        "ordinal": 1,
+                        "row_hash": "eeefcfd5179d98a63abc59782c55e1b85de12c216e8e89cb28033e536db6f2e2"
+                    },
+                    {
+                        "attribute_id": "10241",
+                        "ordinal": 2,
+                        "row_hash": "42b3f6184646af272be20adc6ad75e99cd9dc5b56d9c63320ad1677ca29bd6d7"
+                    },
+                    {
+                        "attribute_id": "10242",
+                        "ordinal": 3,
+                        "row_hash": "fd22861a8233b656806f4ea28b969d32fd217602fbb1d254c9afe6c5f1d9c436"
+                    }
+                ],
+                "row_hash": "8c3118770b7650374c958d7caabc07a1a1471ac06799496fd1c3e5f22eef180b"
+            },
+            {
+                "control_id": 369,
+                "source_row": 203,
+                "name": "Kontrola povinného uvedení období platnosti kódu ELDP",
+                "attribute_refs_raw": "10240\n10241\n10242",
+                "symbolic_attribute_refs": [],
+                "area": "Průběh pojištění v daném měsíci",
+                "scope": "employee_form",
+                "owner": "ČSSZ",
+                "portal_system": "eportal",
+                "portal_passability": "blocking",
+                "remote_system": "dis",
+                "remote_passability": "blocking",
+                "category": "F4",
+                "detail_text": "Je-li uveden kód ELDP (10240), musí být současně uvedeny atributy Platnost kódu od (10241) a Platnost kódu do (10242).\n---\n10240 Kód ELDP\n10241 Platnost kódu od\n10242 Platnost kódu do",
+                "detail_formula": null,
+                "error_message": "Je-li uveden kód ELDP, musí být vyplněny oba údaje o platnosti kódu, datum od i datum do.",
+                "error_message_formula": null,
+                "source_label": "nová",
+                "note": null,
+                "attribute_refs": [
+                    {
+                        "attribute_id": "10240",
+                        "ordinal": 1,
+                        "row_hash": "bf856b33f300e6f37affaa9e8f371171a5feaa73ad3c97ef277e1d85447a2b7c"
+                    },
+                    {
+                        "attribute_id": "10241",
+                        "ordinal": 2,
+                        "row_hash": "42b3f6184646af272be20adc6ad75e99cd9dc5b56d9c63320ad1677ca29bd6d7"
+                    },
+                    {
+                        "attribute_id": "10242",
+                        "ordinal": 3,
+                        "row_hash": "fd22861a8233b656806f4ea28b969d32fd217602fbb1d254c9afe6c5f1d9c436"
+                    }
+                ],
+                "row_hash": "30dab9e518c810fc06d916e0019fdfe0c592a107c7e41e41744e9cc9693e1a7b"
+            },
+            {
+                "control_id": 371,
+                "source_row": 204,
+                "name": "Kontrola na vyplněné atributy cizinců",
+                "attribute_refs_raw": "10414\n10105 \n10106 \n10107\n10108\n10109\n10110\n10067\n10007",
+                "symbolic_attribute_refs": [],
+                "area": "Volný přístup na trh práce",
+                "scope": "global",
+                "owner": "MPSV",
+                "portal_system": "unavailable",
+                "portal_passability": "unavailable",
+                "remote_system": "cjmhz",
+                "remote_passability": "passable",
+                "category": "I1",
+                "detail_text": "Pro řádné podání typu (10007) = „R“ jsou definovány kontroly na chybějící údaje, pro pokrytí datové konzistence, které jsou vykonávány nad registrem zaměstnanců. Tyto kontroly vyzvou zaměstnavatele k doplnění příslušných údajů za jednotlivé PPV v rámci registrace zaměstnance.\n---\n10414 Volný přístup na trh práce\n10105 Důvod pro volný přístup na trh práce\n10106 Druh pracovního oprávnění\n10107 Vydala Krajská pobočka ÚP ČR\n10108 Identifikátor pracovního oprávnění\n10109 Trvání oprávnění od\n10110 Trvání oprávnění do\n10067 Státní občanství\n10007 Typ podání",
+                "detail_formula": null,
+                "error_message": "V rámci registrace zaměstnance nejsou  správně vyplněny atributy související se zaměstnáním cizinců. Proveďte aktualizaci registrace zaměstnance prostřednictvím podání REGZEC akce A3 (změna) s vyplněným atributem (10068) s hodnotou odlišnou od „CZ“. Počet ZEC: {celkový počet}. OIČ: {prvních max. 40 IKMPSV}.",
+                "error_message_formula": null,
+                "source_label": "nová",
+                "note": "Jedná se o informativní hlášku určenou zaměstnavateli, která nezpůsobuje neúčinnost podání, jeho části ani součásti a nevychází ze zákona o JMHZ.\n\npozn.: OIČ je osobní identifikační číslo",
+                "attribute_refs": [
+                    {
+                        "attribute_id": "10414",
+                        "ordinal": 1,
+                        "row_hash": "745328bd68f9ef6084e72ed30f7eb96d2eeebe6c4e78845ea545ea6702678964"
+                    },
+                    {
+                        "attribute_id": "10105",
+                        "ordinal": 2,
+                        "row_hash": "ef8f4d897845d9aebae43c4c666c59c5a0338c5b8203c50c80af8d6b5d9a8e5a"
+                    },
+                    {
+                        "attribute_id": "10106",
+                        "ordinal": 3,
+                        "row_hash": "16adae6be392c72119490d99cc826600118969ff62d7188de193eba121088299"
+                    },
+                    {
+                        "attribute_id": "10107",
+                        "ordinal": 4,
+                        "row_hash": "a676ee948ce3aceb5caa1c767067899a28800ce1a9c58d235c73538f273cd66d"
+                    },
+                    {
+                        "attribute_id": "10108",
+                        "ordinal": 5,
+                        "row_hash": "ababdee4dd307cbb27d7b5f6994b18455918a35027dbaf14ba7bdbd8e4956db2"
+                    },
+                    {
+                        "attribute_id": "10109",
+                        "ordinal": 6,
+                        "row_hash": "0abe41ad034ca13952483da020170abe7996590e771bd3dc79f7ab051b896cc2"
+                    },
+                    {
+                        "attribute_id": "10110",
+                        "ordinal": 7,
+                        "row_hash": "d9c32f4534ddcec58ba9d586f7a1905aa6a4bcccb3dacea632479871cc22d118"
+                    },
+                    {
+                        "attribute_id": "10067",
+                        "ordinal": 8,
+                        "row_hash": "00244d1a54be6e6144c2891c55ccffd74a2798d789f4446a228c8cfb2c8b9daa"
+                    },
+                    {
+                        "attribute_id": "10007",
+                        "ordinal": 9,
+                        "row_hash": "d1bcf6b87c39d93a6be00ca1e500655df946c96511d82c14bd0914d32b52eb10"
+                    }
+                ],
+                "row_hash": "41ec0d75c4e337dd01d8fbebecd99ef5b22fa539c2faf8c45a6a2721a2bd67ad"
             }
         ],
         "parameters": [

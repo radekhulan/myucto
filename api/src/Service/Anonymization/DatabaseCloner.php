@@ -31,7 +31,8 @@ final class DatabaseCloner
      *   source:string, charset:string, collation:string,
      *   tables: array<string, array{ddl:string, columns:string}>,
      *   system_versioned: list<string>, views: list<string>,
-     *   triggers: list<array{table:string, ddl:string}>, routines: list<string>
+     *   triggers: list<array{table:string, ddl:string, sql_mode:string}>, routines: list<string>,
+     *   routine_sql_modes: list<string>
      * }
      */
     public function plan(string $source): array
@@ -51,6 +52,7 @@ final class DatabaseCloner
             'views' => [],
             'triggers' => [],
             'routines' => [],
+            'routine_sql_modes' => [],
         ];
 
         $baseTables = [];
@@ -83,19 +85,31 @@ final class DatabaseCloner
                 'ddl' => $this->showCreate('TABLE', $source, $name),
                 'columns' => implode(', ', $byTable[$name]),
             ];
+            // MariaDB 11.8 hlásí v SHOW FULL TABLES verzovanou tabulku jako BASE TABLE.
+            // Verzování proto prozradí až definice. Bez toho by kopie po pseudonymizaci
+            // nesla původní hodnoty v historii řádků.
+            if (!in_array($name, $plan['system_versioned'], true)
+                && preg_match('/\bWITH SYSTEM VERSIONING\b/i', $plan['tables'][$name]['ddl']) === 1) {
+                $plan['system_versioned'][] = $name;
+            }
         }
 
         foreach (TriggerMetadata::read($this->pdo, $source) as $trigger) {
             $plan['triggers'][] = [
                 'table' => (string) $trigger['EVENT_OBJECT_TABLE'],
                 'ddl' => $this->showCreate('TRIGGER', $source, (string) $trigger['TRIGGER_NAME']),
+                'sql_mode' => (string) $trigger['SQL_MODE'],
             ];
         }
 
         $routines = $this->pdo->prepare('SELECT ROUTINE_NAME, ROUTINE_TYPE FROM information_schema.ROUTINES WHERE ROUTINE_SCHEMA = ? ORDER BY ROUTINE_TYPE, ROUTINE_NAME');
         $routines->execute([$source]);
         foreach ($routines->fetchAll(PDO::FETCH_ASSOC) as $routine) {
-            $plan['routines'][] = $this->showCreate((string) $routine['ROUTINE_TYPE'], $source, (string) $routine['ROUTINE_NAME']);
+            // sql_mode z SHOW CREATE: information_schema.ROUTINES v MariaDB 11.8 vypisuje
+            // ALLOW_INVALID_DATES jako INVALID_DATES a tuhle hodnotu server pak nepřijme.
+            $row = $this->showCreateRow((string) $routine['ROUTINE_TYPE'], $source, (string) $routine['ROUTINE_NAME']);
+            $plan['routines'][] = self::createStatement($row, (string) $routine['ROUTINE_TYPE'], (string) $routine['ROUTINE_NAME']);
+            $plan['routine_sql_modes'][] = (string) ($row['sql_mode'] ?? '');
         }
 
         return $plan;
@@ -139,7 +153,10 @@ final class DatabaseCloner
     }
 
     /**
-     * @param array{views: list<string>, triggers: list<array{table:string, ddl:string}>, routines: list<string>} $plan
+     * Trigger i rutina si berou sql_mode ze spojení, které je zakládá, a podle něj
+     * se pak vyhodnocuje jejich tělo. Zakládají se proto pod sql_mode originálu.
+     *
+     * @param array{views: list<string>, triggers: list<array{table:string, ddl:string, sql_mode?:string}>, routines: list<string>, routine_sql_modes?: list<string>} $plan
      */
     public function finalize(array $plan, string $target): void
     {
@@ -147,11 +164,19 @@ final class DatabaseCloner
         foreach ($plan['views'] as $ddl) {
             $this->pdo->exec($ddl);
         }
-        foreach ($plan['triggers'] as $trigger) {
-            $this->pdo->exec($trigger['ddl']);
-        }
-        foreach ($plan['routines'] as $ddl) {
-            $this->pdo->exec($ddl);
+        $session = (string) $this->pdo->query('SELECT @@SESSION.sql_mode')->fetchColumn();
+        $mode = $this->pdo->prepare('SET SESSION sql_mode = ?');
+        try {
+            foreach ($plan['triggers'] as $trigger) {
+                $mode->execute([$trigger['sql_mode'] ?? $session]);
+                $this->pdo->exec($trigger['ddl']);
+            }
+            foreach ($plan['routines'] as $index => $ddl) {
+                $mode->execute([$plan['routine_sql_modes'][$index] ?? $session]);
+                $this->pdo->exec($ddl);
+            }
+        } finally {
+            $mode->execute([$session]);
         }
     }
 
@@ -175,11 +200,23 @@ final class DatabaseCloner
 
     private function showCreate(string $kind, string $schema, string $name): string
     {
+        return self::createStatement($this->showCreateRow($kind, $schema, $name), $kind, $name);
+    }
+
+    /** @return array<string,mixed> */
+    private function showCreateRow(string $kind, string $schema, string $name): array
+    {
         $statement = $this->pdo->query('SHOW CREATE ' . $kind . ' ' . self::quote($schema) . '.' . self::quote($name));
         $row = $statement === false ? false : $statement->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
             throw new \RuntimeException("Nelze načíst definici {$kind} {$name}.");
         }
+        return $row;
+    }
+
+    /** @param array<string,mixed> $row */
+    private static function createStatement(array $row, string $kind, string $name): string
+    {
         foreach ($row as $key => $value) {
             if (str_starts_with(strtolower((string) $key), 'create ') || $key === 'SQL Original Statement') {
                 if ($value === null || $value === '') {

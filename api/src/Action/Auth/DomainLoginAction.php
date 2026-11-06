@@ -46,17 +46,28 @@ final class DomainLoginAction
             return Json::sessionRequired($response, 'Je nutné přihlášení browserovou session.');
         }
         $body = (array) ($request->getParsedBody() ?? []);
+        $requestToken = (string) ($body['request_token'] ?? '');
+        $state = (string) ($body['state'] ?? '');
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
         try {
+            // Náhled pro potvrzovací obrazovku kód nevydává ani nespotřebuje.
+            if (($body['preview'] ?? false) === true) {
+                return Json::ok($response, [
+                    'confirmation' => $this->login->describe($request, $requestToken, $state, $user, $session),
+                ]);
+            }
             $result = $this->login->authorize(
                 $request,
-                (string) ($body['request_token'] ?? ''),
-                (string) ($body['state'] ?? ''),
-                (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []),
-                (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []),
+                $requestToken,
+                $state,
+                $user,
+                $session,
+                ($body['confirmed'] ?? false) === true,
             );
             return Json::ok($response, $result);
         } catch (DomainLoginException $e) {
-            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->details);
         }
     }
 

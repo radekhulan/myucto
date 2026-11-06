@@ -165,6 +165,8 @@ final class StatementNotesService
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly AccountingPeriodRepository $periods,
         private readonly FinancialStatementService $statements,
+        private readonly StatementSupplementPolicy $frameworks,
+        private readonly DeferredTax504Statement $deferredTax,
     ) {}
 
     /**
@@ -184,19 +186,24 @@ final class StatementNotesService
             throw new ReportException('period_not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);
         }
         $fiscalYear = (int) $period['fiscal_year'];
-        $category = $this->categoryFor($supplierId, $periodId);
-        $scopes = self::scopesFor($category, $this->isAudited($supplierId));
+        $is504 = $this->frameworks->framework($supplierId, $periodId) === 'cz_504';
+        $categoryInfo504 = $is504 ? $this->categories->evaluate($supplierId, $periodId) : null;
+        $category = $is504 ? (string) $categoryInfo504['category'] : $this->categoryFor($supplierId, $periodId);
+        $full504 = $is504 && ($this->isAudited($supplierId) || $categoryInfo504['scope'] === 'full' || !in_array($category, ['micro', 'small'], true));
+        $definitions = $is504 ? StatementNotes504Definition::sections() : self::SECTIONS;
+        $scopes = $is504 ? ($full504 ? ['all', 'full504'] : ['all']) : self::scopesFor($category, $this->isAudited($supplierId));
         $storedRows = $this->storedRows($supplierId, $fiscalYear);
         $stored = [];
         foreach ($storedRows as $key => $row) {
             $stored[$key] = $row['content'];
         }
         $auto = $this->autoValues($supplierId, $fiscalYear, $category);
-        $offsetText = $this->taxAuthorityOffsetText($supplierId, $periodId);
+        if ($is504) $auto = $this->auto504($auto, $period);
+        $offsetText = $is504 ? null : $this->taxAuthorityOffsetText($supplierId, $periodId);
 
         $sections = [];
         $missing = [];
-        foreach (self::SECTIONS as $key => $def) {
+        foreach ($definitions as $key => $def) {
             if (!in_array($def['scope'], $scopes, true)) {
                 continue;
             }
@@ -223,12 +230,14 @@ final class StatementNotesService
             ];
         }
 
+        if ($is504 && ($deferredNote = $this->deferredTax->note($supplierId, $period)) !== null) $sections[] = $deferredNote;
+
         // Nabídka převzetí: má smysl jen tehdy, když loni něco vyplněného je a letos
         // je aspoň jedna neautomatická sekce prázdná.
         $previous = $this->storedRows($supplierId, $fiscalYear - 1);
         $carryOverAvailable = 0;
         foreach ($previous as $key => $row) {
-            if (!isset(self::SECTIONS[$key]) || self::SECTIONS[$key]['auto'] || trim($row['content']) === '') {
+            if (!isset($definitions[$key]) || $definitions[$key]['auto'] || trim($row['content']) === '') {
                 continue;
             }
             if (trim((string) ($stored[$key] ?? '')) === '') {
@@ -236,7 +245,8 @@ final class StatementNotesService
             }
         }
 
-        return [
+        return ($is504 ? ['accounting_framework' => 'cz_504', 'legal_basis' => StatementNotes504Definition::LEGAL,
+            'scope' => $full504 ? 'full' : 'small', 'period' => ['id' => $periodId, 'starts_on' => $period['starts_on'], 'ends_on' => $period['ends_on']]] : []) + [
             'fiscal_year'    => $fiscalYear,
             'category'       => $category,
             'category_label' => self::categoryLabel($category),
@@ -269,7 +279,12 @@ final class StatementNotesService
     public function freezeAutoValues(int $supplierId, int $fiscalYear, int $periodId, ?int $userId = null): int
     {
         $stored = $this->stored($supplierId, $fiscalYear);
-        $auto = $this->autoValues($supplierId, $fiscalYear, $this->categoryFor($supplierId, $periodId));
+        $is504 = $this->frameworks->framework($supplierId, $periodId) === 'cz_504';
+        $category = $is504 ? (string) $this->categories->evaluate($supplierId, $periodId)['category'] : $this->categoryFor($supplierId, $periodId);
+        $auto = $this->autoValues($supplierId, $fiscalYear, $category);
+        if ($is504) {
+            $auto = $this->auto504($auto, $this->periods->findById($supplierId, $periodId));
+        }
 
         $frozen = 0;
         foreach ($auto as $key => $content) {
@@ -306,13 +321,14 @@ final class StatementNotesService
      */
     public function carryOverFromPreviousYear(int $supplierId, int $fiscalYear, ?int $userId): array
     {
+        $definitions = $this->definitionsForYear($supplierId, $fiscalYear);
         $sourceYear = $fiscalYear - 1;
         $previous = $this->storedRows($supplierId, $sourceYear);
         $current = $this->storedRows($supplierId, $fiscalYear);
 
         $copied = [];
         foreach ($previous as $key => $row) {
-            if (!isset(self::SECTIONS[$key]) || self::SECTIONS[$key]['auto']) {
+            if (!isset($definitions[$key]) || $definitions[$key]['auto']) {
                 continue;
             }
             $existing = $current[$key]['content'] ?? '';
@@ -340,7 +356,8 @@ final class StatementNotesService
         ?int $carriedOverFromYear = null,
     ): void
     {
-        if (!isset(self::SECTIONS[$key])) {
+        $definitions = $this->definitionsForYear($supplierId, $fiscalYear);
+        if (!isset($definitions[$key])) {
             throw new \InvalidArgumentException('Neznámá sekce přílohy: ' . $key);
         }
         $content = $content !== null && trim($content) !== '' ? $content : null;
@@ -480,6 +497,21 @@ final class StatementNotesService
             $fmt((float) $amounts['current']),
             $fmt((float) $amounts['previous']),
         );
+    }
+
+    private function definitionsForYear(int $supplierId, int $fiscalYear): array
+    {
+        $period = $this->periods->findByYear($supplierId, $fiscalYear);
+        return $period !== null && $this->frameworks->framework($supplierId, (int) $period['id']) === 'cz_504'
+            ? StatementNotes504Definition::sections() : self::SECTIONS;
+    }
+
+    private function auto504(array $auto, array $period): array
+    {
+        $date = static fn (string $value): string => (new \DateTimeImmutable($value))->format('d.m.Y');
+        return ['n504_identification' => $auto['entity_identification'] ?? '',
+            'n504_category' => $auto['entity_category'] ?? '',
+            'n504_period' => 'Účetní období od ' . $date($period['starts_on']) . ' do ' . $date($period['ends_on']) . '.'];
     }
 
     private function categoryFor(int $supplierId, int $periodId): string

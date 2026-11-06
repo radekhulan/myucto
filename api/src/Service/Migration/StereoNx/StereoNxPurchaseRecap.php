@@ -49,6 +49,7 @@ final class StereoNxPurchaseRecap
         $code = trim((string) ($header['TypDPH'] ?? ''));
         $description = trim((string) ($header['Text'] ?? ''));
         foreach (['z', 's', 't', '0'] as $slot) {
+            if (StereoNxRecapAmounts::isUnusedBucket($header, $slot)) continue;
             $base = self::money($header, $slot === '0' ? 'BezDane' : 'ZaklDPH' . $slot);
             $sourceVat = $slot === '0' ? 0.0 : self::money($header, 'DPH' . $slot);
             if ($base === 0.0 && $sourceVat === 0.0) continue;
@@ -103,8 +104,9 @@ final class StereoNxPurchaseRecap
         $base = round(array_sum(array_column($items, 'total_without_vat')), 2);
         $vat = round(array_sum(array_column($items, 'total_vat')), 2);
         $total = round($base + $vat, 2);
-        $rounding = self::money($header, 'Zaokrouhleni');
         $sourceTotal = self::money($header, 'Celkem');
+        $rounding = StereoNxRecapAmounts::isUnassignedZeroRounding($header, $total, $sourceTotal)
+            ? 0.0 : self::money($header, 'Zaokrouhleni');
         if ((int) round(($total + $rounding) * 100) !== (int) round($sourceTotal * 100)) {
             throw new StereoNxException('purchase_recap_mismatch', 'Součet rekapitulace a uloženého zaokrouhlení nesouhlasí s celkem dokladu.');
         }

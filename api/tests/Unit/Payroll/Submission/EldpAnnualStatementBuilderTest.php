@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatement;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpAnnualStatementBuilder;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpValidationException;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpXmlSerializer;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpXmlValidator;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -285,14 +287,15 @@ final class EldpAnnualStatementBuilderTest extends TestCase
     /**
      * § 38 odst. 1 věta druhá zákona č. 582/1991 Sb. ve znění od 1. 1. 2025:
      * za poživatele starobního důchodu v plné výši, který není účasten
-     * pojištění v cizině, se evidenční list nevede.
+     * pojištění v cizině, se evidenční list nevede. Výplata od prosince 2024
+     * znamená, že za rok 2025 se nevede žádný měsíc.
      */
     public function testFullOldAgePensionerForWholeYear2025HasNoStatement(): void
     {
         try {
             $this->build(
                 $this->withWorkingPensionerDiscount($this->wholeYear(2025)),
-                confirmation: $this->confirmation(pension: ['full_pension_paid_from' => '2025-01']),
+                confirmation: $this->confirmation(pension: ['full_pension_paid_from' => '2024-12']),
             );
             self::fail('Za plného starobního důchodce se list za rok 2025 nevede.');
         } catch (EldpValidationException $exception) {
@@ -300,7 +303,12 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         }
     }
 
-    public function testFullOldAgePensionFromJuly2025KeepsOnlyJanuaryToJune(): void
+    /**
+     * List se vede „do měsíce, od něhož náleží výplata starobního důchodu
+     * v plné výši" včetně tohoto měsíce (Metodická pomůcka ELDP, příklad 8a:
+     * důchod od 1. 5., list do 31. 5.).
+     */
+    public function testFullOldAgePensionFromJuly2025KeepsJanuaryToJuly(): void
     {
         $statement = $this->build(
             $this->wholeYear(2025),
@@ -311,11 +319,51 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         self::assertCount(1, $sections);
         self::assertSame('1++', $sections[0]['code']);
         self::assertSame('2025-01-01', $sections[0]['valid_from']);
-        self::assertSame('2025-06-30', $sections[0]['valid_to']);
-        self::assertSame(181, $sections[0]['insurance_days']);
-        self::assertSame(60_000, $sections[0]['assessment_base_czk']);
-        self::assertCount(6, $statement->payload['source_revisions']);
-        self::assertSame('2025-07-01', $statement->payload['pension']['not_kept_from']);
+        self::assertSame('2025-07-31', $sections[0]['valid_to']);
+        self::assertSame(212, $sections[0]['insurance_days']);
+        self::assertSame(70_000, $sections[0]['assessment_base_czk']);
+        self::assertCount(7, $statement->payload['source_revisions']);
+        self::assertSame('2025-08-01', $statement->payload['pension']['not_kept_from']);
+    }
+
+    /**
+     * Důchod přiznaný od 15. 4. náleží k výplatě od dubna: list se vede do
+     * měsíce, od něhož náleží výplata (Všeobecné zásady ELDP; Metodická pomůcka
+     * ELDP, příklad 8a), tedy do 30. 4., ne do května. Měsíc výplaty odvozuje
+     * ze zákonné evidence {@see PayrollPensionStatus::forInterval()}. Důchod
+     * od 1. 4. končí list týmž měsícem (diskuse JMHZ #363: první měsíc bez
+     * ELDP je květen); sleva pracujícího důchodce za duben na tom nic nemění.
+     */
+    #[DataProvider('aprilPensionStarts')]
+    public function testFullOldAgePensionFromMidAprilEndsTheStatementInApril(string $effectiveFrom): void
+    {
+        $evidence = PayrollPensionStatus::normalize([], [[
+            'pension_type_code' => '1',
+            'early_retirement' => '0',
+            'reduced_retirement_age' => '0',
+            'effective_from' => $effectiveFrom,
+            'effective_to' => null,
+        ]]);
+        $pension = PayrollPensionStatus::forInterval($evidence, '2025-01-01', '2025-12-31');
+        self::assertSame('2025-04', $pension['full_pension_paid_from']);
+
+        $statement = $this->build(
+            $this->wholeYear(2025),
+            confirmation: $this->confirmation(pension: ['full_pension_paid_from' => $pension['full_pension_paid_from']]),
+        );
+
+        $sections = $statement->sections();
+        self::assertCount(1, $sections);
+        self::assertSame('2025-04-30', $sections[0]['valid_to']);
+        self::assertSame(120, $sections[0]['insurance_days']);
+        self::assertSame('2025-05-01', $statement->payload['pension']['not_kept_from']);
+    }
+
+    /** @return iterable<string,array{string}> */
+    public static function aprilPensionStarts(): iterable
+    {
+        yield 'důchod od 15. 4.' => ['2025-04-15'];
+        yield 'důchod od 1. 4.' => ['2025-04-01'];
     }
 
     public function testFullOldAgePensionerInsuredAbroadKeepsTheWholeYear(): void
@@ -398,8 +446,12 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         }
     }
 
-    /** Poživatel předčasného starobního důchodu: list se vede, s kódem D. */
-    public function testEarlyOldAgePensionerKeepsStatementWithCodeD(): void
+    /**
+     * Poživatel předčasného starobního důchodu před dovršením věku: list se
+     * vede s běžným kódem, D mu nepatří (Zadání ELDP12 v1.04, údaj 20: D jen
+     * po splnění podmínky nároku podle § 29 odst. 1 nebo 3).
+     */
+    public function testEarlyOldAgePensionerKeepsStatementWithoutCodeD(): void
     {
         $sections = $this->build(
             $this->withWorkingPensionerDiscount($this->wholeYear(2025)),
@@ -407,7 +459,7 @@ final class EldpAnnualStatementBuilderTest extends TestCase
         )->sections();
 
         self::assertCount(1, $sections);
-        self::assertSame('1D+', $sections[0]['code']);
+        self::assertSame('1++', $sections[0]['code']);
         self::assertSame(365, $sections[0]['insurance_days']);
     }
 

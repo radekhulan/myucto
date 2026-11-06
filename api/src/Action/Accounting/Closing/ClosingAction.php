@@ -8,6 +8,8 @@ use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\AccountingFrameworkRepository;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\Closing\ClosingException;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
 use MyInvoice\Service\Accounting\FindingRemedyService;
@@ -52,8 +54,9 @@ final class ClosingAction
 
     private const RUNNABLE_STEPS  = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock'];
     private const REVERTIBLE_STEPS = ['precheck', 'depreciation', 'fx_revaluation', 'estimates', 'deferrals', 'provisions', 'income_tax', 'deferred_tax', 'stock', 'close_books', 'open_next'];
-    private const ASSIST_STEPS = ['estimates', 'deferrals'];
+    private const ASSIST_STEPS = ['estimates', 'deferrals', 'provisions'];
     private const ASSIST_RULE_KEYS = [
+        'provisions' => ['reserve.repairs.create', 'reserve.repairs.release'],
         'estimates' => ['estimate.asset', 'estimate.liability'],
         'deferrals' => ['accrual.prepaid.expense', 'accrual.accrued.expense', 'accrual.deferred.revenue', 'accrual.accrued.revenue', 'accrual.small_asset.defer'],
     ];
@@ -123,6 +126,27 @@ final class ClosingAction
         return Json::ok($response, $data);
     }
 
+    public function fxCasePreview(Request $request, Response $response, array $args): Response
+    {
+        if (!RequestAuthorization::isSessionAuth($request)) return Json::error($response, 'fx_case_session_only', 'Posouzení kurzových případů je dostupné pouze v přihlášené relaci.', 403);
+        if (!$this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $body = $request->getParsedBody();
+        if (!is_array($body) || array_diff(array_keys($body), ['account_decisions', 'case_decisions', 'securities_evidence']) !== []
+            || !is_array($body['account_decisions'] ?? null) || !is_array($body['case_decisions'] ?? null)
+            || ($body['account_decisions'] !== [] && array_is_list($body['account_decisions'])) || !array_is_list($body['case_decisions'])
+            || (array_key_exists('securities_evidence', $body) && (!is_array($body['securities_evidence']) || array_is_list($body['securities_evidence'])))) {
+            return Json::error($response, 'validation_failed', 'Zadejte strukturované posouzení účtů a úplný seznam doložených účetních případů.', 422);
+        }
+        try {
+            $data = $this->closing->fxPreview($supplierId, (int) ($args['id'] ?? 0), [], $body['account_decisions'], $body['case_decisions'], $body['securities_evidence'] ?? null);
+        } catch (\Throwable $e) {
+            return $this->mapError($response, $e, 'Náhled kurzových případů selhal');
+        }
+        return Json::ok($response, $data);
+    }
+
     /**
      * Náhled kurzových rozdílů k rozvahovému dni (R10) — bez zápisu. Volitelný
      * query param bank_rows (JSON pole {account_code, currency_code, foreign_balance});
@@ -145,8 +169,16 @@ final class ClosingAction
         $bankRows = $this->parseBankRows($raw, $response, $err);
         if ($bankRows === null) return $err;
 
+        $accountDecisions = null;
+        if (array_key_exists('account_decisions', $request->getQueryParams())) {
+            $rawDecisions = $request->getQueryParams()['account_decisions'];
+            $accountDecisions = is_string($rawDecisions) ? json_decode($rawDecisions, true) : null;
+            if (!is_array($accountDecisions) || ($accountDecisions !== [] && array_is_list($accountDecisions))) {
+                return Json::error($response, 'validation_failed', 'Posouzení účtů musí být platný JSON objekt.', 422);
+            }
+        }
         try {
-            $data = $this->closing->fxPreview($supplierId, $periodId, $bankRows);
+            $data = $this->closing->fxPreview($supplierId, $periodId, $bankRows, $accountDecisions);
         } catch (\Throwable $e) {
             return $this->mapError($response, $e, 'Náhled kurzových rozdílů selhal');
         }
@@ -365,6 +397,70 @@ final class ClosingAction
      * Náhled OP k pohledávkám k rozvahovému dni (D9) — aging 311 + návrh §8a/§8c.
      *   GET /api/accounting/periods/{id}/closing/provisions-preview
      */
+    public function legalProvisionsWorkspace(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        try {
+            return Json::ok($response, (new \MyInvoice\Service\Accounting\Closing\AssetReserveWorkspace($this->db, $this->closing))->read($supplierId, (int) $args['id'], $request->getQueryParams(), false));
+        } catch (\Throwable $e) { return $this->mapError($response, $e, 'Podklady rezervy se nepodařilo načíst'); }
+    }
+
+    public function assetReserveWorkspace(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $err)) return $err;
+        if (!$this->requirePermission($request, $response, 'assets', AccessLevel::READ, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        try {
+            return Json::ok($response, (new \MyInvoice\Service\Accounting\Closing\AssetReserveWorkspace($this->db, $this->closing))->read($supplierId, (int) $args['id'], $request->getQueryParams()));
+        } catch (\Throwable $e) { return $this->mapError($response, $e, 'Podklady rezervy se nepodařilo načíst'); }
+    }
+
+    public function assetReservePreview(Request $request, Response $response, array $args): Response
+    {
+        return $this->assetReserveRequest($request, $response, $args, 'preview');
+    }
+
+    public function assetReserveCorrectionPreview(Request $request, Response $response, array $args): Response
+    {
+        return $this->assetReserveRequest($request, $response, $args, 'correction-preview');
+    }
+
+    public function assetReserveCorrect(Request $request, Response $response, array $args): Response
+    {
+        return $this->assetReserveRequest($request, $response, $args, 'correct');
+    }
+
+    private function assetReserveRequest(Request $request, Response $response, array $args, string $operation): Response
+    {
+        if ($operation === 'correct') {
+            if (!$this->requireClose($request, $response, $err)) return $err;
+        } elseif (!$this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $err)) return $err;
+        if (!$this->requirePermission($request, $response, 'assets', AccessLevel::READ, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $body = (array) ($request->getParsedBody() ?? []);
+        if ($operation !== 'preview' && !in_array($body['mode'] ?? null, ['same_period', 'prospective_closed_history'], true)) {
+            return Json::error($response, 'validation_failed', 'Vyberte způsob opravy zdroje.', 422);
+        }
+        if ($operation === 'correct') {
+            $version = $this->rowVersion($request, $response, $err, $body);
+            if ($version === null) return $err;
+            $body['row_version'] = $version;
+        }
+        try {
+            $id = (int) $args['id'];
+            $data = match ($operation) {
+                'preview' => $this->closing->assetReservePreview($supplierId, $id, is_array($body['reserve_source'] ?? null) ? $body['reserve_source'] : [], $body['amount'] ?? null),
+                'correction-preview' => $this->closing->assetReserveCorrectionPreview($supplierId, $id, $body),
+                'correct' => $this->closing->correctAssetReserveSource($supplierId, $id, $body, $this->auditMeta($request)),
+            };
+            return Json::ok($response, $data);
+        } catch (\Throwable $e) { return $this->mapError($response, $e, 'Doložený zdroj rezervy se nepodařilo zpracovat'); }
+    }
+
     public function provisionsPreview(Request $request, Response $response, array $args): Response
     {
         $supplierId = $this->currentSupplierId($request);
@@ -497,6 +593,24 @@ final class ClosingAction
      * Ruční tituly (opravné položky, rezervy nad rámec ZoR) jdou v query jako
      * `manual[popis]=částka` — systém je z dat spolehlivě neodliší, proto se zadávají.
      */
+    public function deferredTax504Preview(Request $request, Response $response, array $args): Response
+    {
+        if (!RequestAuthorization::isSessionAuth($request) || !RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
+            return Json::error($response, 'forbidden', 'Náhled vyžaduje přihlášenou relaci s oprávněním číst účetnictví.', 403);
+        }
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $body = $request->getParsedBody();
+        if (!is_array($body) || !is_array($body['method'] ?? null) || !is_array($body['titles'] ?? null) || ($body['method']['enabled'] ?? false) !== true) {
+            return Json::error($response, 'deferred_tax_method_required', 'Doplňte výslovné rozhodnutí o vlastní metodě a strukturované daňové tituly.', 422);
+        }
+        try {
+            $data = $this->closing->deferredTax504Preview($supplierId, (int) ($args['id'] ?? 0), $body);
+        } catch (\Throwable $e) { return $this->mapError($response, $e, 'Náhled vlastní metody odložené daně selhal'); }
+        return Json::ok($response, $data);
+    }
+
+
     public function deferredTaxPreview(Request $request, Response $response, array $args): Response
     {
         $supplierId = $this->currentSupplierId($request);
@@ -550,7 +664,8 @@ final class ClosingAction
         $periodId = (int) ($args['id'] ?? 0);
 
         try {
-            $data = $this->closing->profitDistributionPreview($supplierId, $periodId);
+            $date = $this->nullableString($request->getQueryParams()['decision_date'] ?? null);
+            $data = $this->closing->profitDistributionPreview($supplierId, $periodId, $date);
         } catch (\Throwable $e) {
             return $this->mapError($response, $e, 'Náhled rozdělení výsledku hospodaření selhal');
         }
@@ -700,7 +815,7 @@ final class ClosingAction
             } elseif ($step === 'fx_revaluation') {
                 $bankRows = $this->parseBankRows($body['bank_rows'] ?? [], $response, $err);
                 if ($bankRows === null) return $err;
-                $data = $this->closing->runFxRevaluation($supplierId, $periodId, $bankRows, $rowVersion, $meta);
+                $data = $this->closing->runFxRevaluation($supplierId, $periodId, $bankRows, $rowVersion, $meta, $body);
             } elseif ($step === 'stock') {
                 // SKLAD §3.4 (způsob B) — konečný stav 112/501+132/504, manko 549,
                 // přebytek 648; otevření roku (501/112) se poste v open_next.
@@ -736,6 +851,9 @@ final class ClosingAction
                 $status = trim((string) ($body['status'] ?? ''));
                 if ($status === 'skipped') {
                     $data = $this->closing->confirmStep($supplierId, $periodId, 'deferred_tax', 'skipped', $this->nullableString($body['note'] ?? null), $rowVersion, $meta);
+                } elseif (array_key_exists('decision_504', $body)) {
+                    if (!is_array($body['decision_504'])) return Json::error($response, 'validation_failed', 'Rozhodnutí odložené daně musí být objekt.', 422);
+                    $data = $this->closing->runDeferredTax504($supplierId, $periodId, $body['decision_504'], $rowVersion, $meta);
                 } elseif (!is_numeric($body['amount'] ?? null)) {
                     return Json::error($response, 'validation_failed', 'amount (odložená daň) musí být číslo; záporná = pohledávka.', 422);
                 } else {
@@ -859,14 +977,16 @@ final class ClosingAction
         if ($rowVersion === null) return $err;
 
         $step = trim((string) ($body['step'] ?? ''));
-        if (!in_array($step, self::ASSIST_STEPS, true)) {
-            return Json::error($response, 'validation_failed', "step musí být 'estimates' nebo 'deferrals'.", 422);
+        if (!in_array($step, self::ASSIST_STEPS, true)
+            || ($step === 'provisions' && !$this->periodUsesFramework504($supplierId, $periodId))) {
+            return Json::error($response, 'validation_failed', 'Nepodporovaný krok asistovaného zápisu.', 422);
         }
         $ruleKey = trim((string) ($body['rule_key'] ?? ''));
         if (!in_array($ruleKey, self::ASSIST_RULE_KEYS[$step], true)) {
             return Json::error($response, 'validation_failed',
                 "rule_key pro krok '{$step}' musí být jeden z: " . implode(', ', self::ASSIST_RULE_KEYS[$step]) . '.', 422);
         }
+        if (isset($body['legal_decision']['reserve_source']) && !$this->requirePermission($request, $response, 'assets', AccessLevel::READ, $err)) return $err;
         $amount = (float) ($body['amount'] ?? 0);
         if (!is_numeric($body['amount'] ?? null) || $amount <= 0) {
             return Json::error($response, 'validation_failed', 'amount musí být kladné číslo.', 422);
@@ -880,7 +1000,8 @@ final class ClosingAction
         try {
             $data = $this->closing->createAssistedEntry($supplierId, $periodId, $step, [
                 'rule_key'        => $ruleKey,
-                'amount'          => round($amount, 2),
+                'amount'          => $step === 'provisions' ? $body['amount'] : round($amount, 2),
+                'legal_decision'  => $body['legal_decision'] ?? null,
                 'description'     => $description,
                 'counter_account' => $counterAccount,
                 'row_version'     => $rowVersion,
@@ -890,6 +1011,23 @@ final class ClosingAction
         }
 
         return Json::ok($response, $data, 201);
+    }
+
+    /**
+     * Asistovaná zákonná rezerva přes API patří uzávěrce podle vyhlášky 504; u rámce 500
+     * vede krok rezerv průvodce opravných položek a jeho payload by zápis přepsal.
+     * Neexistující období propustí, chybu 404 vrátí služba.
+     */
+    private function periodUsesFramework504(int $supplierId, int $periodId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT ends_on FROM accounting_periods WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$supplierId, $periodId]);
+        $endsOn = $stmt->fetchColumn();
+        if ($endsOn === false) {
+            return true;
+        }
+        $frameworks = new AccountingFrameworkService($this->db, new AccountingFrameworkRepository($this->db));
+        return $frameworks->forDate($supplierId, (string) $endsOn) === AccountingFrameworkService::CZ_504;
     }
 
     public function reverseEntry(Request $request, Response $response, array $args): Response

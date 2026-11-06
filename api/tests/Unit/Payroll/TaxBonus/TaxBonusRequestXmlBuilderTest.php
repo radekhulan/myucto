@@ -224,6 +224,47 @@ final class TaxBonusRequestXmlBuilderTest extends TestCase
         );
     }
 
+    public function testRepresentativeIsWrittenToBothRequestsAndPassesXsd(): void
+    {
+        $builder = new TaxBonusRequestXmlBuilder();
+        $advisor = [
+            'represented' => true, 'type' => 'P', 'code' => '4c',
+            'company_name' => 'Poradna s.r.o.', 'ico' => '87654321', 'ev_number' => '123',
+            'signer_first_name' => 'Karel', 'signer_last_name' => 'Jednatel', 'signer_position' => 'jednatel',
+        ];
+        $attorney = [
+            'represented' => true, 'type' => 'F', 'code' => '4a',
+            'first_name' => 'Petr', 'last_name' => 'Zmocněnec', 'birth_date' => '1980-02-03',
+        ];
+        foreach (['dpzmb1' => $this->monthlyClaim(), 'dpzdb1' => $this->annualClaim()] as $schema => $claim) {
+            $plain = $builder->build($this->supplier(), $claim, self::DISPOSITION);
+            self::assertSame(
+                $plain['xml'],
+                $builder->build($this->supplier(), $claim, self::DISPOSITION + ['representation' => ['represented' => false]])['xml'],
+                $schema,
+            );
+            self::assertStringNotContainsString('zast_', $plain['xml'], $schema);
+
+            foreach ([$advisor, $attorney] as $rep) {
+                $built = $builder->build($this->supplier(), $claim, self::DISPOSITION + ['representation' => $rep]);
+                $dom = new \DOMDocument();
+                $dom->loadXML($built['xml']);
+                $payer = $dom->getElementsByTagName('VetaP')->item(0);
+                self::assertSame($rep['type'], $payer?->getAttribute('zast_typ'), $schema);
+                self::assertSame($rep['code'], $payer?->getAttribute('zast_kod'), $schema);
+                if ($rep['type'] === 'P') {
+                    self::assertSame('Poradna s.r.o.', $payer?->getAttribute('zast_nazev'), $schema);
+                    self::assertSame('Karel', $payer?->getAttribute('opr_jmeno'), $schema);
+                } else {
+                    self::assertSame('03.02.1980', $payer?->getAttribute('zast_dat_nar'), $schema);
+                    self::assertFalse($payer?->hasAttribute('opr_jmeno'), $schema);
+                }
+                self::assertSame($plain['warnings'], $built['warnings'], $schema);
+                $this->assertXsdPasses($schema, $built['xml']);
+            }
+        }
+    }
+
     private function assertPassesXsd(string $formCode, TaxBonusClaim $claim): void
     {
         $result = (new TaxBonusRequestXmlBuilder())->build($this->supplier(), $claim, self::DISPOSITION);

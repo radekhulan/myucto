@@ -45,6 +45,11 @@ describe('navigace nálezů měsíčního hlášení', () => {
       context,
     )).toEqual({ name: 'payroll-settings', query: { tab: 'submissions' }, hash: '#jmhz-employer-annual-evidence' })
     expect(jmhzRemediationTarget(
+      blocker({ code: 'jmhz_deferred_annual_settlement_income_present', remediation: { kind: 'deferred_income', field: null } }),
+      7,
+      context,
+    )).toEqual({ name: 'payroll-people', query: { person: '3', employment: '7', panel: 'deferred_income' } })
+    expect(jmhzRemediationTarget(
       blocker({ code: 'jmhz_xml_form_limit_exceeded', remediation: { kind: 'manual', field: null } }),
       7,
       context,

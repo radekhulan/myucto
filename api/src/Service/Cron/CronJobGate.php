@@ -63,12 +63,16 @@ final class CronJobGate
 
     /** Aspoň jedno zapnuté bankovní napojení s tokenem. */
     public const USAGE_BANK_CONNECTIONS = 'bank_connections';
+    /** Aspoň jedno auto přiřazené k účtu u zdroje automatického stavu tachometru. */
+    public const USAGE_ODOMETER_SOURCE = 'odometer_source';
     /** Aspoň jedna zapnutá IMAP schránka bankovních avíz. */
     public const USAGE_BANK_EMAIL_NOTICES = 'bank_email_notices';
     /** Fronta katalogových úloh nebo napojení e-shopu. */
     public const USAGE_CATALOG = 'catalog';
     /** Přímé podání EPO čekající na stav. */
     public const USAGE_EPO_PENDING = 'epo_pending';
+    /** Tržba EET čekající na odeslání nebo opakování. */
+    public const USAGE_EET_PENDING = 'eet_pending';
     /** Mzdové podání čekající na protokol ČSSZ nebo na uzavření transakce. */
     public const USAGE_JMHZ_TRANSPORT = 'jmhz_transport';
     /** Aspoň jedna firma se zapnutým automatickým stahováním objednávek ze Shoptetu. */
@@ -87,8 +91,10 @@ final class CronJobGate
     private const USAGE_PROBES = [
         self::USAGE_BANK_CONNECTIONS   => [CronPreflight::class, 'hasBankConnections'],
         self::USAGE_BANK_EMAIL_NOTICES => [CronPreflight::class, 'hasBankEmailNoticeAccounts'],
+        self::USAGE_ODOMETER_SOURCE      => [CronPreflight::class, 'hasOdometerSourceConnections'],
         self::USAGE_CATALOG            => [CronPreflight::class, 'hasCatalogWorkerUse'],
         self::USAGE_EPO_PENDING        => [CronPreflight::class, 'hasPendingEpoAttempts'],
+        self::USAGE_EET_PENDING        => [CronPreflight::class, 'hasEetDispatchWork'],
         self::USAGE_JMHZ_TRANSPORT     => [CronPreflight::class, 'hasOpenJmhzTransport'],
         self::USAGE_SHOPTET_ORDERS     => [CronPreflight::class, 'hasShoptetAutoFetch'],
     ];

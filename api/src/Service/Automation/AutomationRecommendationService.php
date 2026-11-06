@@ -106,7 +106,7 @@ final class AutomationRecommendationService
             "{$alias}.supplier_id IN ({$in})",
             "{$alias}.booked_at IS NULL",
             "{$alias}.status NOT IN ('draft','cancelled')",
-            "NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.supplier_id={$alias}.supplier_id AND je.source_type='{$sourceType}' AND je.source_id={$alias}.id AND je.posted_at IS NOT NULL AND je.reversed_by IS NULL)",
+            'NOT ' . \MyInvoice\Service\Accounting\DocumentPostingGroup::activePostingExistsSql("'{$sourceType}'", "{$alias}.id", "{$alias}.supplier_id"),
             "EXISTS (SELECT 1 FROM accounting_periods ap WHERE ap.supplier_id={$alias}.supplier_id AND {$date} BETWEEN ap.starts_on AND ap.ends_on AND ap.status='open')",
             "NOT EXISTS (SELECT 1 FROM accounting_supplier_settings aset WHERE aset.supplier_id={$alias}.supplier_id AND aset.locked_until IS NOT NULL AND {$date} <= aset.locked_until)",
         ];
@@ -492,6 +492,10 @@ final class AutomationRecommendationService
 
     private function bankRuleCoversProposal(array $rule, array $proposal): bool
     {
+        // Pravidlo omezené na vlastní účet nepokryje návrh pro pohyby ostatních účtů.
+        if ((int) ($rule['bank_account_id'] ?? 0) > 0 && (int) ($rule['bank_account_id'] ?? 0) !== (int) ($proposal['bank_account_id'] ?? 0)) {
+            return false;
+        }
         $criterionCovers = static function (mixed $existing, mixed $proposed, callable $normalize): bool {
             $existing = $normalize((string) ($existing ?? ''));
             if ($existing === null || $existing === '') {

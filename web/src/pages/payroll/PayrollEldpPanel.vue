@@ -81,7 +81,7 @@ const authorityDueOnRequired = computed(() =>
   requestedByAuthority.value && year.value >= LAST_ANNUAL_ELDP_YEAR + 2)
 /*
  * Důchodové údaje zmrazená revize nenese, a přitom na nich stojí kód ELDP
- * (D od dovršení důchodového věku nebo předčasného důchodu) i to, zda se list
+ * (D od dovršení důchodového věku) i to, zda se list
  * za poživatele plného starobního důchodu vůbec vede. Potvrzení je výslovné
  * i tehdy, když nic z toho nenastalo.
  */

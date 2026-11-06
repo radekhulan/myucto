@@ -138,6 +138,36 @@ final class StorageUsageMeterTest extends TestCase
         self::assertSame(50000, $meter->measureBackups());
     }
 
+    /**
+     * Výchozí konfigurace míří oběma klíči do téhož adresáře. Zálohy se pak
+     * nesmí sečíst dvakrát, ani když je cesta napsaná jinak.
+     */
+    public function testSameBackupDirectoryUnderBothKeysIsCountedOnce(): void
+    {
+        $config = new Config([
+            'cron'    => ['backup' => ['output_dir' => $this->root . '/storage/backup']],
+            'storage' => ['backup_dir' => $this->root . '/storage/backup/'],
+        ]);
+        $meter = new StorageUsageMeter(new Connection($config), $config);
+
+        self::assertCount(1, $meter->backupDirectories());
+        self::assertSame(50000, $meter->measureBackups());
+    }
+
+    /** Dva různé adresáře záloh se sčítají dál. */
+    public function testDifferentBackupDirectoriesAreSummed(): void
+    {
+        mkdir($this->root . '/jine-zalohy', 0777, true);
+        file_put_contents($this->root . '/jine-zalohy/dump.sql', str_repeat('x', 700));
+        $config = new Config([
+            'cron'    => ['backup' => ['output_dir' => $this->root . '/storage/backup']],
+            'storage' => ['backup_dir' => $this->root . '/jine-zalohy'],
+        ]);
+        $meter = new StorageUsageMeter(new Connection($config), $config);
+
+        self::assertSame(50700, $meter->measureBackups());
+    }
+
     private static function normalized(string $path): string
     {
         $real = realpath($path);

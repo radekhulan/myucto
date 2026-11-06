@@ -10,6 +10,19 @@ menu. Smí vystavovat a upravovat vlastní doklady, dokud je účetní nezaúčt
 
 Administrátor může klientské roli zpřístupnit také **Peníze → Bankovní účty**. Čtení banky, nahrávání výpisů, párování a ignorování plateb jsou volitelná oprávnění; klient bez jejich přidělení banku neuvidí. Přístup se týká pouze jeho firmy, včetně přihlášení na klientské doméně. Podrobnosti popisuje kapitola [Banka](29_Banka.md).
 
+Samostatně může správce povolit **Daně → EPO podání a archív**. Klient pak čte připravená přiznání k DPH,
+kontrolní a souhrnná hlášení své firmy, stahuje archivované XML a potvrzení a vidí platební údaje DPH.
+S dalším právem k podávání je může odeslat přes EPO nebo odesílací bránu datové schránky.
+Výchozí klientská role tato práva nemá; postup a hranice přístupu popisuje
+[Klientské podávání připravených výkazů](49_Archiv_podani_a_rekonciliace.md#4921-klientske-podavani-pripravenych-vykazu).
+
+V části **Firma → MCP server** může klient spravovat připojení svého AI asistenta.
+Nové připojení na vlastní doméně firmy vyžaduje výslovně přidělené oprávnění
+**Připojit AI asistenta (MCP)**. Přihlášení a souhlas probíhají na hlavní doméně
+MyÚčta, připojení zůstává omezené na firmu klientské domény a aktuální práva
+uživatele. Vlastní připojení lze odvolat i po odebrání tohoto oprávnění.
+Postup popisuje [MCP server](105_MCP_server.md#10541-pripojeni-klienta-na-vlastni-domene-firmy).
+
 Superadmin má v nabídce **Dokumenty → Předat doklady účetní** také přístup
 k předávání dokladů a odpovědím na požadavky účetní v právě vybrané firmě.
 Zároveň mu zůstávají dostupné účetní funkce.
@@ -34,14 +47,14 @@ Kapitolu otevřete, když:
 | Klient | Vystaví fakturu, nahraje přijatou fakturu, přidá kontakt | úvodní stránka **Přehled firmy**, rychlé odkazy |
 | Klient, superadmin | Předá doklady účetní | `Dokumenty → Předat doklady účetní` |
 | Klient | Odpoví na požadavek účetní | `Dokumenty → Chybějící doklady` |
-| Účetní | Vyžádá chybějící doklad | `Firma → Chybějící doklady` |
+| Účetní | Vyžádá chybějící doklad | `Dokumenty → Chybějící doklady` |
 | Účetní | Zpracuje předané doklady | `Nákup → Příchozí doklady` |
 | Účetní, admin | Zkontroluje, co vidí klient | `Grafy → Přehled firmy` |
 
 ## 9.2 Než začnete
 
 1. **Účet superadmina.** Klientské uživatele zakládá jen superadmin v `Systém → Uživatelé`.
-2. **Aktivní role typu client.** Role se vybírá při zakládání uživatele. Role typu **readonly** je něco jiného: je to interní pracovník, který smí jen číst. Klient je externí osoba, která smí vystavovat a upravovat vlastní doklady, ale nevidí účetnictví, reporty ani nastavení systému; banku vidí jen s výslovně přidělenými bankovními oprávněními (viz [§ 96.2.2 Role](96_Nastaveni.md#96164-role-a-opravneni)).
+2. **Aktivní role typu client.** Role se vybírá při zakládání uživatele. Role typu **readonly** je něco jiného: je to interní pracovník, který smí jen číst. Klient je externí osoba, která smí vystavovat a upravovat vlastní doklady, ale nevidí účetnictví, obecné reporty ani nastavení systému; banku a archiv připravených výkazů DPH, KH a SH vidí jen s výslovně přidělenými oprávněními (viz [§ 96.2.2 Role](96_Nastaveni.md#96164-role-a-opravneni)).
 3. **Firma, ke které klient patří.** Bez přiřazené firmy klient po přihlášení uvidí jen prázdný stav. Přístup je záměrně zamčený: žádná firma mu není vidět, dokud ji superadmin nepřiřadí.
 4. **Pro klientské nastavení firmy** musí mít jeho role právo **Zápis** alespoň u jedné provozní oblasti: odesílací profily, e-mailové šablony, branding, platební QR nebo firemní podpisové profily a PDF podpisy.
 5. **Pro vlastní doménu** musí správce serveru zapnout funkci v konfiguraci (viz [§ 9.11.11](#91111-vlastni-domena-pravidla)).
@@ -109,7 +122,7 @@ Samotné nahrání nic nezaúčtuje a faktura v té chvíli ještě nevzniká.
 
 Provede účetní.
 
-1. Otevřete `Firma → Chybějící doklady` a klikněte na **Nový požadavek**.
+1. Otevřete `Dokumenty → Chybějící doklady` a klikněte na **Nový požadavek**.
 2. Vyplňte popis (co chybí), volitelně částku, kontextové datum a termín.
 3. Požadavek uložte.
 
@@ -214,12 +227,15 @@ Každá provozní oblast má samostatné oprávnění **Zápis**. Klient vidí a
 - odesílací profily, odesílatele, Reply-To, DKIM a SMTP/IMAP nastavení firmy,
 - firemní podpisové profily s podporovaným nativním backendem a šifrovaně uloženým heslem k certifikátu; klientský správce může nahrát P12/PFX, nastavit použití pro PDF a vybrat profil v odesílacím profilu pro S/MIME e-mail,
 - obsah e-mailových šablon firmy v češtině a angličtině,
-- branding komunikace, logo, barvy, patičky a brandingové profily,
-- dvě samostatné volby, zda do nově generovaných platebních QR kódů vystavených a přijatých dokladů zahrnout datum splatnosti.
+- branding komunikace, logo, barvy, patičky a brandingové profily; také volby vzhledu PDF, jako jsou kompaktní řádky položek, zobrazení autora, rozpis slevy a balení, bankovní spojení v patičce a sloupce a kompaktní zobrazení výkazu práce,
+- dvě samostatné volby, zda do nově generovaných platebních QR kódů vystavených a přijatých dokladů zahrnout datum splatnosti,
+- výchozí hodnoty nových dokladů: splatnost, hodinovou sazbu a zapnutí a text poznámky pod položkami v češtině a angličtině.
+
+Záložka **Výchozí hodnoty dokladů** vyžaduje stejnojmenné oprávnění se zápisem. Změna platí pro nově zakládané doklady a nepřepisuje již uložené koncepty ani vystavené doklady. Neumožňuje měnit měnu, sazbu DPH, ceny s DPH ani zaokrouhlování. Správce může právo samostatně přidělit i odebrat; samotný přístup k nastavení firmy je nenahrazuje.
 
 Firemní šablony otevřete na záložce **E-mailové šablony** v `Nastavení firmy`. U každého typu zprávy a jazyka vidíte, zda se používá vlastní firemní, společná nebo výchozí šablona. Úprava uloží vlastní kopii firmy; volba **Používat společnou šablonu** ji odstraní. Editor nabízí přehled proměnných a náhled na syntetických datech. Seznam typů a pravidla dědění popisuje [§ 96.6](96_Nastaveni.md#966-krok-za-krokem-e-mailove-sablony).
 
-Zápis neotevře původní administrátorskou stránku nastavení ani obecné nastavení dodavatele. Klient proto nemůže měnit obchodní jméno, IČ, DIČ, bankovní účty, číslování dokladů, DPH, účetní režim, integrace, přístupové údaje AI, uživatele ani role. Osobní podpisové profily, osobní trezor certifikátů, nepodporované backendy a systémový `sendmail` zůstávají ve správě administrátora.
+Klient nastavení otevře v `Firma → Nastavení firmy` na příslušné povolené záložce. Nemůže měnit obchodní jméno, IČ, DIČ, bankovní účty, číslování dokladů, DPH, účetní režim, integrace, přístupové údaje AI, uživatele ani role. Volby vzhledu PDF nemění účetní ani daňové údaje. Kontaktní údaje brandingových profilů spravuje na záložce **Branding**. Osobní podpisové profily, osobní trezor certifikátů, nepodporované backendy a systémový `sendmail` zůstávají ve správě administrátora.
 
 SMTP a IMAP hesla se po uložení nikdy nevracejí do prohlížeče, rozhraní ukáže jen informaci, zda je heslo nastavené. Změny i testovací odeslání se zapisují do historie akcí bez tajných hodnot a požadavky podléhají stejnému rate limitu jako ostatní mutace. Všechny operace používají firmu z ověřeného kontextu, ID firmy zaslané v těle požadavku rozsah nerozšíří.
 
@@ -245,7 +261,7 @@ Tři karty vedle sebe:
 
 #### DPH a daňové termíny
 
-U plátců DPH ukazuje karta **DPH** aktuální **Období**, daň na výstupu, daň na vstupu, výslednou povinnost (nebo nadměrný odpočet) a **Termín podání**. U neplátců se zobrazí „Firma není plátce DPH." Karta **Daňové termíny** vypisuje termíny v okně 35 dní dopředu, barevně podle závažnosti (viz [Výkazy DPH](41_Vykazy_DPH.md)). Bez blízkých termínů ukáže „Žádné blízké termíny."
+U plátců DPH ukazuje karta **DPH** aktuální zdaňovací **Období** podle nastavení firmy: měsíc u měsíčního plátce a celé čtvrtletí u čtvrtletního plátce. Dále zobrazuje daň na výstupu, daň na vstupu, výslednou povinnost (nebo nadměrný odpočet) a **Termín podání**. U neplátců se zobrazí „Firma není plátce DPH." Karta **Daňové termíny** vypisuje termíny v okně 35 dní dopředu, barevně podle závažnosti (viz [Výkazy DPH](41_Vykazy_DPH.md)). Bez blízkých termínů ukáže „Žádné blízké termíny."
 
 #### Pruh „Účetní čeká na doklady"
 
@@ -318,7 +334,7 @@ Každá firma může vedle výchozí adresy instalace (`app.url`) používat vla
 
 Firma může mít víc aktivních aliasů, ale pro každý účel nejvýše jednu primární doménu. Nově odesílané odkazy používají primární doménu, starší canonical odkazy na `app.url` zůstávají platné. Deaktivace poslední použitelné domény vrátí nové odkazy na `app.url`.
 
-Aktivní vlastní doména jednoznačně určuje firmu. Přepínač firem se na ní nezobrazuje a firmu nelze podvrhnout hlavičkou, parametrem URL ani API tokenem. Uživatel musí mít k firmě stále platné přiřazení. Jedinou výjimkou je globální superadmin, který může firmu určenou aktivní doménou otevřít i bez přiřazení. Výjimka obchází jen kontrolu přiřazení: stav a účel domény, vazba hostname na firmu, canonical přihlášení, PKCE a bezpečná návratová cesta se ověřují stejně jako u ostatních. Veřejný token jiné firmy na této doméně vrátí „nenalezeno", stejný token na canonical adrese zůstává funkční.
+Aktivní vlastní doména jednoznačně určuje firmu. Přepínač firem se na ní nezobrazuje a firmu nelze podvrhnout hlavičkou, parametrem URL ani API tokenem. Uživatel musí mít k firmě stále platné přiřazení. Výjimkou je globální superadmin, který má přístup ke všem firmám. Na vlastní doménu firmy se dostane i bez přiřazení, předání přihlášení ale musí vždy výslovně potvrdit, i když se právě přihlásil. Jeho relace pak platí jen na této doméně, jen pro tuto firmu a jen pro klientské rozhraní. Stav a účel domény, vazba hostname na firmu, canonical přihlášení, PKCE a bezpečná návratová cesta se ověřují pro všechny stejně. Veřejný token jiné firmy na této doméně vrátí „nenalezeno", stejný token na canonical adrese zůstává funkční.
 
 Vlastní doména zpřístupní jen klientské agendy podle skutečných oprávnění uživatele. Zakázky, platební příkazy, příchozí fronta účetní, API tokeny, systémová nastavení a ostatní interní agendy na ní nejsou dostupné, jejich přímý odkaz se otevře na canonical adrese `app.url`. Na canonical adrese se v novém panelu otevírá také uživatelský manuál.
 
@@ -326,11 +342,13 @@ Neznámý, neověřený, deaktivovaný nebo účelově nekompatibilní hostname 
 
 ### 9.11.12 Přihlášení a passkeys na vlastní doméně
 
-Přihlášení se dokončuje na canonical adrese z `app.url`, kde jsou zaregistrované passkeys a WebAuthn RP ID. Po heslu, TOTP nebo passkey se prohlížeč vrátí na přesnou původně otevřenou stránku vlastní domény jednorázovým krátkodobým kódem svázaným s PKCE. Session token se v URL nepřenáší, cílová doména dostane novou host-only cookie, kterou jiná doména nemůže číst.
+Přihlášení se dokončuje na canonical adrese z `app.url`, kde jsou zaregistrované passkeys a WebAuthn RP ID. Po heslu, TOTP nebo passkey se prohlížeč vrátí na přesnou původně otevřenou stránku vlastní domény jednorázovým krátkodobým kódem svázaným s PKCE. Session token se v URL nepřenáší, cílová doména dostane novou host-only cookie, kterou jiná doména nemůže číst. Takto vzniklou relaci server přijme jen na této vlastní doméně, na hlavní adrese ani na jiné doméně neplatí. Na vlastní doméně naopak neplatí relace z hlavní adresy.
 
-Přihlášení zahájené na vlastní doméně přihlásí uživatele do portálu. Pokud kvůli ověření vznikne dočasná relace na hlavní adrese, při předání do portálu se ukončí. Samostatné přihlášení na hlavní adrese, které existovalo už před otevřením portálu, zůstává zachované.
+Přihlášení zahájené na vlastní doméně vždy vyžaduje nové ověření heslem, TOTP nebo passkey na hlavní adrese. Existující přihlášení hlavní adresy se nepřebírá. Klient se tak může přihlásit vlastním účtem, zatímco správce zůstává ve vedlejším okně přihlášený ke správě instance. Dočasná relace klientského přihlášení má vlastní šifrovanou HttpOnly cookie svázanou s konkrétním požadavkem; při předání do portálu se ukončí a samostatné přihlášení hlavní adresy zůstává zachované.
 
-Po odhlášení portál zobrazí přihlašovací obrazovku a zůstane odhlášený i po obnovení stránky. Další přihlášení zahájí až tlačítko **Přihlásit se**. Pokud je uživatel stále samostatně přihlášený na hlavní adrese, může se toto přihlášení při návratu do portálu použít bez dalšího zadávání hesla.
+Po odhlášení portál zobrazí přihlašovací obrazovku a zůstane odhlášený i po obnovení stránky. Další přihlášení zahájí až tlačítko **Přihlásit se** a znovu vyžaduje ověření klientského účtu.
+
+Server odmítá předat běžnou relaci hlavní adresy i při výslovném potvrzení cílové domény. Pokud u oddělené dočasné relace vyžaduje dodatečné potvrzení předání, hlavní adresa zobrazí přesný hostname a název firmy. **Pokračovat** potvrdí tento cíl, **Zrušit** požadavek zahodí. Potvrzení nikdy nenahrazuje nové přihlášení. Relace vydaná portálu nadále platí jen na jeho vlastní doméně. Superadmin bez přiřazení k firmě předání vždy výslovně potvrzuje, i po novém přihlášení; běžný uživatel musí mít přiřazení k firmě.
 
 Na canonical adrese probíhá také **správa přístupových klíčů** a vynucené první nastavení MFA. WebAuthn klíče jsou svázané s RP ID a originem z `app.url`, takže vlastní doména tyto obrazovky neotevře s nefunkčním bezpečnostním dialogem. Místo toho zahájí jednorázový přechod na canonical adresu a po dokončení se vrátí na předchozí bezpečnou stránku vlastní domény. Po úspěšném přidání klíče proběhne návrat automaticky a dočasná relace na hlavní adrese se ukončí. Bez přidání klíče se vraťte tlačítkem **Vrátit se do klientského rozhraní**. Pokud návrat selže, obrazovka zobrazí chybu a umožní jej zopakovat. Cílová firma i hostname jsou po celou dobu svázané se serverovým požadavkem a nelze je změnit parametrem návratové URL.
 

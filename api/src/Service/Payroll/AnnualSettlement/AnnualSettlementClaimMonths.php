@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\AnnualSettlement;
 
+use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxEvidenceStatus;
 use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
@@ -109,6 +110,13 @@ final class AnnualSettlementClaimMonths
                 $blockers[] = AnnualSettlementBlocker::CreditEvidenceUnverified;
                 continue;
             }
+            // Věková hranice ukončí nárok na slevu na studenta vždy; otevřený
+            // interval je proto vada evidence, stejně jako v měsíční větvi
+            // (`student-credit-interval-open`).
+            if (StudentTaxCredit::isStudent($kind) && self::nullableDate($row['effective_to'] ?? null) === null) {
+                $blockers[] = AnnualSettlementBlocker::CreditEvidenceUnverified;
+                continue;
+            }
             foreach ($covered as $month) {
                 $months[$kind->value][$month] = true;
             }
@@ -120,6 +128,13 @@ final class AnnualSettlementClaimMonths
         $basic = $months[TaxCreditKind::DisabilityBasic->value] ?? [];
         $extended = $months[TaxCreditKind::DisabilityExtended->value] ?? [];
         if (array_intersect_key($basic, $extended) !== []) {
+            $blockers[] = AnnualSettlementBlocker::CreditEvidenceUnverified;
+        }
+        // § 35bc odst. 2: sleva na studenta je jedna, ať jde o soustavnou přípravu,
+        // nebo o doktorské studium. Souběh obou druhů v měsíci je vada evidence.
+        $student = $months[TaxCreditKind::Student->value] ?? [];
+        $doctoral = $months[TaxCreditKind::StudentDoctoral->value] ?? [];
+        if (array_intersect_key($student, $doctoral) !== []) {
             $blockers[] = AnnualSettlementBlocker::CreditEvidenceUnverified;
         }
 

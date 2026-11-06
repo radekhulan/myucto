@@ -45,7 +45,7 @@ final class KhEvidenceAction
         try {
             $report = $this->service->current(SupplierGuard::currentId($request), ...$params);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
         return Json::ok($response, $report);
     }
@@ -66,7 +66,7 @@ final class KhEvidenceAction
         try {
             $report = $this->service->current(SupplierGuard::currentId($request), ...$params);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $this->logger->log('report.kh_evidence_downloaded', (int) ($user['id'] ?? 0), null, null, [
@@ -124,7 +124,7 @@ final class KhEvidenceAction
         } catch (\DomainException $e) {
             return Json::error($response, 'kh_evidence_unavailable', $e->getMessage(), 422);
         } catch (\Throwable $e) {
-            return Json::error($response, 'build_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
         }
     }
 

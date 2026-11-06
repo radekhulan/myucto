@@ -34,7 +34,7 @@ Kapitolu otevřete, když:
 1. Otevřete `Účetnictví → Měsíční přehled`.
 2. V poli **Období** zvolte rok a měsíc.
 3. Ověřte v náhledu měsíc a rozhodné datum (dřívější z posledního dne měsíce a dnešního dne).
-4. Volitelně doplňte **Komentář účetní**. Zobrazí se v PDF i v e-mailu.
+4. Volitelně doplňte **Komentář účetní**. Zobrazí se v PDF i v e-mailu. Mají-li doklady období od–do a chcete je rozložit do měsíců, zaškrtněte **Průběžné časové rozlišení** ([§ 63.6.2.1](#63621-vysledovka-za-mesic)).
 5. Klikněte na **Obnovit náhled** a zkontrolujte KPI: **Výsledek hospodaření (YTD)**, **DPH k úhradě** (nebo **Nadměrný odpočet**) s termínem podání, **Pohledávky po splatnosti** a **Závazky po splatnosti**.
 6. Ověřte výsledovku, rozvahu, saldokonto a DPH v jejich samostatných sestavách.
 7. Klikněte na **Stáhnout PDF** a projděte i sekce, které webový náhled nezobrazuje celé (plná rozvaha, kumulovaná výsledovka, nadcházející termíny).
@@ -69,6 +69,10 @@ Kapitolu otevřete, když:
 | Tlačítko **Odeslat klientovi** nejde použít | Máte právo jen pro čtení | Požádejte správce o právo zápisu do účetnictví. |
 
 ## 63.6 Podrobnosti a pravidla
+
+Pro účetní rámec podle vyhlášky č. 504/2002 Sb. přehled zobrazuje výsledovku za měsíc i od začátku účetního období ve sloupcích **Hlavní činnost, Hospodářská činnost a Celkem**. Měsíční částky jsou rozdílem kumulovaných sestav, také při hospodářském roce. Chybějící klasifikace činnosti na zaúčtovaném řádku sestavení zastaví.
+
+Rozvahová část tohoto manažerského přehledu pro rámec 504 obsahuje počáteční a konečné zůstatky účtů. Kreditní zůstatky jsou záporné. Nevypořádaný účet 931 se zobrazí s upozorněním a odsouhlasením; nezmizí z přehledu ani se automaticky nepřevede na jiný účet. Oficiální rozvahu sestavíte v samostatné sestavě **Rozvaha**.
 
 ### 63.6.1 Volba měsíce a rozhodné datum
 
@@ -105,6 +109,12 @@ mapování účtů se nepřepočítávají v reportu; přebírají se ze samosta
 
 KPI **Výsledek hospodaření (YTD)** je kontrolní hodnota výsledku za období, nikoli prostý součet libovolně
 zobrazených detailních řádků na stránce.
+
+Volba **Průběžné časové rozlišení** platí pro náhled, PDF i odeslání a sestaví výsledovku
+i rozvahu stejně jako samostatné výkazy ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni)).
+Oba kumulované snímky se počítají s rozlišením ke svému dni, takže v měsíci je jen poměrná
+část dokladu připadající na tento měsíc. Úprava není zaúčtovaná v deníku a PDF na ni
+upozorňuje. Rámec 504 volbu nenabízí. Zapamatovaná volba je společná s Výsledovkou a Rozvahou.
 
 #### 63.6.2.2 Rozvaha
 

@@ -138,10 +138,30 @@ describe('validace běhu', () => {
     expect(firstStatutoryReviewId(componentMissing)).toBeNull()
     const mixed = [
       ...componentMissing,
-      validation({ id: 22, entity_id: 34, remediation_path: '/payroll/people?person=34&panel=statutory_evidence' }),
+      validation({ id: 22, entity_id: 34, remediation_path: '/payroll/people?person=34&panel=statutory_evidence&field=statutory.social_jurisdictions' }),
     ]
     expect(statutoryReviewEmployeeIds(mixed)).toEqual([34])
     expect(firstStatutoryReviewId(mixed)).toBe(22)
+  })
+
+  it('nabízí doplnění jen u sekcí, které výchozí údaje opravdu doplní', () => {
+    const deadEnds = [
+      // Zdravotní pojištění výchozí údaje nedoplní.
+      validation({ id: 30, entity_id: 40, remediation_path: '/payroll/people?person=40&panel=statutory_evidence' }),
+      // Počáteční úhrny se zadávají na kartě vztahu, ne v zákonné evidenci.
+      validation({ id: 31, entity_id: 41, remediation_path: '/payroll/people?person=41&panel=opening_balances' }),
+    ]
+    expect(statutoryReviewEmployeeIds(deadEnds)).toEqual([])
+    expect(firstStatutoryReviewId(deadEnds)).toBeNull()
+
+    const fixable = [
+      ...deadEnds,
+      validation({ id: 32, entity_id: 42, remediation_path: '/payroll/people?person=42&panel=statutory_evidence&field=statutory.tax_residences' }),
+      validation({ id: 33, entity_id: 43, remediation_path: '/payroll/people?person=43&panel=statutory_evidence&field=statutory.tax_declarations' }),
+      validation({ id: 34, entity_id: 44, remediation_path: '/payroll/people?person=44&panel=statutory_evidence&field=statutory.social_discount_claims' }),
+    ]
+    expect(statutoryReviewEmployeeIds(fixable)).toEqual([42, 43, 44])
+    expect(firstStatutoryReviewId(fixable)).toBe(32)
   })
 })
 

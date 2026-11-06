@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpExcludedPeriodDeriver;
 use MyInvoice\Service\Payroll\Submission\Eldp\EldpPensionAgeCode;
@@ -164,6 +165,23 @@ final class JmhzEldpEvidenceBuilder
     /** Vyloučená doba, jejímž jediným zdrojem je druh z {@see HOURS_OPTIONAL_ABSENCE_TYPES}. */
     private const HOURS_OPTIONAL_EXCLUDED_ATTRIBUTE = 'vyloucenePar16';
 
+    /**
+     * Typy odloženého příjmu (10548), které se hlásí bez důchodových nároků:
+     * roční zúčtování po skončení (typ 4). Pravidla podání JMHZ 1.4.5,
+     * kap. 6 bod 3 c): „10356 … VŽDY JE vykázána 0", „10240 Kód ELDP
+     * V těchto případech SE KÓD NEUVÁDÍ"; 10476, 10477 a 10286 jsou vždy 0.
+     */
+    private const DEFERRED_TYPES_WITHOUT_ELDP = ['4'];
+
+    /**
+     * Typy s příjmem po skončení, jejichž ELDP za měsíc zúčtování nese kód
+     * s „P", 0 dnů a vyměřovací základ zúčtovaného příjmu (kap. 6 bod 1):
+     * typ 1 a typ 5. Typ 5 je typ 1 spolu s ročním zúčtováním po skončení
+     * (číselník 10548, „znak 1 + znak 4"); roční zúčtování se do ELDP
+     * nepromítá, nese ho souhrn zaměstnance.
+     */
+    private const DEFERRED_TYPES_WITH_INCOME_ELDP = ['1', '5'];
+
     /** @var array{manifest_sha256:string,payload:array<string,mixed>}|null */
     private ?array $specManifest = null;
 
@@ -176,8 +194,9 @@ final class JmhzEldpEvidenceBuilder
 
     /**
      * Odvodí potvrzení běžného řezu. Vyloučené doby se dopočítají ze zmrazených
-     * absencí týmž modulem jako u ročního evidenčního listu; odečítané doby
-     * zůstávají neuvedené (viz {@see EldpExcludedPeriodDeriver}). Výsledný
+     * absencí týmž modulem jako u ročního evidenčního listu, u kódu D bez
+     * starobního důchodu i odečtené doby (dny pojištění pak krátí a zapínají
+     * IN04, viz {@see monthDeductedDays()}). Výsledný
      * kandidát vždy projde stejnou úplnou validací jako ručně dodané potvrzení.
      *
      * @param array<string,mixed> $source
@@ -205,7 +224,11 @@ final class JmhzEldpEvidenceBuilder
         $source = self::withEmployeePensionStatus($source, $employeeId);
         $employment = $this->object($entry['employment'] ?? null, 'employment');
         $term = $this->object($entry['term'] ?? null, 'term');
-        if (self::deferredIncomeType($entry, $employment, $periodStart) !== null) {
+        $deferredType = self::deferredIncomeType($entry, $employment, $periodStart);
+        if (in_array($deferredType, self::DEFERRED_TYPES_WITHOUT_ELDP, true)) {
+            return self::deferredAnnualConfirmation();
+        }
+        if ($deferredType !== null) {
             $this->assertDeferredIncomeRelation((string) ($employment['relation_type'] ?? ''));
 
             return $this->deferredConfirmation(
@@ -242,7 +265,7 @@ final class JmhzEldpEvidenceBuilder
         );
         $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
         $participates = $this->participationMode($relationType, $relationship, $employmentId);
-        $eldpReported = $participates && !self::workingPensioner($input, $employeeId);
+        $eldpReported = $participates && !self::pensionerWithoutEldp($input, $employeeId, $source, $periodStart);
         $assessmentBaseMinor = $this->nonNegativeInt(
             $relationship['assessment_base_minor_units'] ?? null,
             'assessment_base_minor_units',
@@ -258,18 +281,48 @@ final class JmhzEldpEvidenceBuilder
                 $insuranceFrom,
                 $insuranceTo,
             );
+        $code = $eldpReported
+            ? $this->eldpCode($activityCode, $source, $insuranceFrom, $insuranceTo)
+            : null;
+        // Odečtené doby (kód D bez starobního důchodu) odvozuje tentýž kód
+        // jako build(), který potvrzení ověří; účetní je nepotvrzuje.
+        $deducted = null;
+        if ($eldpReported && is_array($absences) && array_is_list($absences)
+            && $this->pensionAgeWithoutPension($source, $insuranceFrom, $insuranceTo)
+        ) {
+            $deducted = $this->monthDeductedDays(
+                $absences,
+                $insuranceFrom,
+                $insuranceTo,
+                $this->excludedPeriods(
+                    $absences,
+                    $insuranceFrom,
+                    $insuranceTo,
+                    $outsideInsurance ? 0 : $insuranceDays,
+                    $assessmentBaseMinor,
+                    EldpExcludedPeriodDeriver::concurrentIncomeDays(
+                        $input,
+                        $result,
+                        $employeeId,
+                        $employmentId,
+                        $insuranceFrom,
+                        $insuranceTo,
+                    ),
+                ),
+                $outsideInsurance,
+            );
+        }
+        $deductedTotal = $deducted['total'] ?? 0;
         $confirmation = [
             'insurance_from' => $insuranceFrom,
             'insurance_to' => $insuranceTo,
             'valid_from' => $eldpReported ? $insuranceFrom : null,
             'valid_to' => $eldpReported ? $insuranceTo : null,
-            'insurance_days' => $eldpReported && !$outsideInsurance ? $insuranceDays : 0,
-            'code' => $eldpReported
-                ? $this->eldpCode($activityCode, $source, $insuranceFrom, $insuranceTo)
-                : null,
+            'insurance_days' => $eldpReported && !$outsideInsurance ? $insuranceDays - $deductedTotal : 0,
+            'code' => $code,
             'assessment_base_czk' => $eldpReported ? intdiv($assessmentBaseMinor, 100) : null,
             'in03_active' => false,
-            'in04_active' => false,
+            'in04_active' => $deductedTotal > 0,
             'confirmation_note' => '',
         ];
 
@@ -422,9 +475,11 @@ final class JmhzEldpEvidenceBuilder
          * pojištění (10356), který se vykáže jako 0". Nemocensky pojištěný
          * zůstává, takže vyloučené dny § 18 odst. 7 se vykazují dál. Přijatá
          * hlášení dvou jiných mzdových systémů to tak mají. Vyměřovací základ
-         * a pojistné (10477, 10370) nejsou třída ELDP a zůstávají.
+         * a pojistné (10477, 10370) nejsou třída ELDP a zůstávají. Měsíc,
+         * od kterého výplata důchodu náleží, ještě třídu ELDP nese
+         * ({@see pensionerWithoutEldp()}).
          */
-        $eldpReported = $participates && !self::workingPensioner($input, $employeeId);
+        $eldpReported = $participates && !self::pensionerWithoutEldp($input, $employeeId, $source, $periodStart);
         $insuranceFrom = $this->date($confirmation['insurance_from'] ?? null, 'insurance_from');
         $insuranceTo = $this->date($confirmation['insurance_to'] ?? null, 'insurance_to');
         $validFrom = $eldpReported ? $this->date($confirmation['valid_from'] ?? null, 'valid_from') : null;
@@ -453,22 +508,37 @@ final class JmhzEldpEvidenceBuilder
             $insuranceTo,
         );
         $insured = $eldpReported && !$outsideInsurance;
-        $days = $insured
+        /*
+         * Celý měsíc po dovršení důchodového věku bez starobního důchodu (kód
+         * D, IN04): dny pojištění jsou interval minus odečtené doby, takže je
+         * nejde poměřit s intervalem dřív, než se odečtené doby odvodí.
+         */
+        $deductionApplies = $eldpReported
+            && $this->pensionAgeWithoutPension($source, $insuranceFrom, $insuranceTo);
+        $days = $insured && !$deductionApplies
             ? $this->positiveInt($confirmation['insurance_days'] ?? null, 'insurance_days')
             : $this->nonNegativeInt($confirmation['insurance_days'] ?? null, 'insurance_days');
         $inclusiveDays = (new \DateTimeImmutable($insuranceFrom))
             ->diff(new \DateTimeImmutable($insuranceTo))->days + 1;
-        if (($insured && $days !== $inclusiveDays) || (!$insured && $days !== 0)) {
+        if (!$deductionApplies
+            && (($insured && $days !== $inclusiveDays) || (!$insured && $days !== 0))
+        ) {
             $this->invalid('jmhz_eldp_days_mismatch', 'Počet dnů ELDP neodpovídá inkluzivnímu intervalu.');
         }
         // Sekce bez třídy ELDP vyloučené doby nevykazuje; odvozují se jen
         // kvůli kontrole nepřítomností proti pracovnímu souhrnu, takže se
-        // poměřují s intervalem vztahu, ne s nulou dnů pojištění.
+        // poměřují s intervalem vztahu, ne s nulou dnů pojištění. U kódu D
+        // leží vyloučené doby v odečtených a dny pojištění přesáhnout smějí
+        // (logický test ELDP12 č. 37 se na kód D nevztahuje).
         $excluded = $this->excludedPeriods(
             $absences,
             $insuranceFrom,
             $insuranceTo,
-            $eldpReported ? $days : $inclusiveDays,
+            match (true) {
+                !$eldpReported => $inclusiveDays,
+                $deductionApplies => $insured ? $inclusiveDays : 0,
+                default => $days,
+            },
             $uncappedBase,
             EldpExcludedPeriodDeriver::concurrentIncomeDays(
                 $input,
@@ -479,6 +549,16 @@ final class JmhzEldpEvidenceBuilder
                 $insuranceTo,
             ),
         );
+        $deducted = null;
+        if ($deductionApplies) {
+            $deducted = $this->monthDeductedDays($absences, $insuranceFrom, $insuranceTo, $excluded, $outsideInsurance);
+            if ($days !== $inclusiveDays - $deducted['total']) {
+                $this->invalid(
+                    'jmhz_eldp_days_mismatch',
+                    'Počet dnů ELDP neodpovídá intervalu zmenšenému o odečtené doby (kontrola 309).',
+                );
+            }
+        }
         // Měsíc mimo dobu pojištění vztah a jeho nemocenské pojištění neruší,
         // takže vyloučené dny § 18 odst. 7 se v něm vykazují dál — přijatá
         // hlášení mají u celého měsíce neplaceného volna 31 dnů při nule dnů
@@ -496,7 +576,8 @@ final class JmhzEldpEvidenceBuilder
             $relationType,
             $absences,
             $excluded,
-            $insured ? $days : $inclusiveDays,
+            // Evidenční stav (10265) je trvání vztahu, odečtené doby ho nekrátí.
+            $insured && !$deductionApplies ? $days : $inclusiveDays,
             $summaryVersion,
             $insuranceFrom,
             $insuranceTo,
@@ -531,39 +612,21 @@ final class JmhzEldpEvidenceBuilder
             if ($confirmedBase * 100 !== $uncappedBase) {
                 $this->invalid('jmhz_eldp_assessment_base_mismatch', 'Potvrzený základ ELDP neodpovídá zákonnému výsledku.');
             }
-            if (($code[strlen($code) - 2] ?? '') === 'D'
-                && $this->pensionAgeWithoutPension($source, $splitFrom ?? $insuranceFrom, $insuranceTo)
-            ) {
-                /*
-                 * Odečtené doby (10375 a 10462–10469, interakce IN04) má jen
-                 * pojištěnec po dovršení důchodového věku, který starobní
-                 * důchod nepobírá; předčasný důchod je důchod. Dny jsou pak
-                 * interval minus odečtené doby. Odvodí je tentýž modul jako
-                 * u ročního listu; měsíční hlášení je ale zatím zapsat neumí,
-                 * takže měsíc s nenulovými odečtenými dobami zastaví — nikdy
-                 * je nevynechá, ČSSZ by hlášení odmítla (logické testy 39 a 48).
-                 */
-                $deducted = (new EldpExcludedPeriodDeriver())->deriveDeducted(
-                    $absences,
-                    $insuranceFrom,
-                    $insuranceTo,
-                    $excluded,
-                    $outsideInsurance,
-                );
-                // Dobu § 16 odst. 4 písm. j) žádná složka odečtených dob
-                // nenese a vyloučené doby musí ležet v odečtených (logické
-                // testy ELDP12 č. 39 a 48) — takový měsíc se proto nevykáže.
-                if ($deducted['total'] > 0
-                    || ($excluded['components'][self::HOURS_OPTIONAL_EXCLUDED_ATTRIBUTE] ?? 0) > 0
-                ) {
+            if ($deducted !== null) {
+                // Kontrola 59 část 4: kód D bez započtených dnů, jehož odečtené
+                // doby jsou celé vyloučenou dobou, nese základ 0.
+                if ($days === 0 && $deducted['total'] === $excluded['total'] && $uncappedBase > 0) {
                     $this->invalid(
-                        'jmhz_eldp_deducted_days_unsupported',
-                        "Měsíc s kódem ELDP {$code} (po dovršení důchodového věku) má {$deducted['total']} "
-                            . 'dnů odečtených dob (neplacené volno, neomluvená absence, nemoc, měsíc bez '
-                            . 'účasti). Měsíční hlášení je zatím vykázat neumí (interakce IN04); hlášení '
-                            . 'zaměstnance podejte mimo aplikaci.',
+                        'jmhz_eldp_base_with_fully_excluded_section',
+                        'Měsíc s kódem D nemá započtené dny a jeho odečtené doby jsou celé vyloučenou '
+                            . 'dobou, ale nese vyměřovací základ; ČSSZ takové hlášení odmítne (kontrola 59).',
                     );
                 }
+            } elseif ($splitFrom !== null
+                && ($code[strlen($code) - 2] ?? '') === 'D'
+                && $this->pensionAgeWithoutPension($source, $splitFrom, $insuranceTo)
+            ) {
+                $this->assertSplitMonthWithoutDeductedDays($absences, $splitFrom, $insuranceTo, $code);
             } elseif ($days > 0 && $days === $excluded['total'] && $uncappedBase > 0) {
                 // Kontrola 59 část 2: celý měsíc vyloučená doba a základ. Krytí
                 // příjmem takový měsíc nedovolí; kdyby vznikl, nesmí odejít.
@@ -583,10 +646,17 @@ final class JmhzEldpEvidenceBuilder
                 'Neúčastný vztah i poživatel starobního důchodu mají bezkódovou ELDP sekci s nulou dnů a bez základu.',
             );
         }
+        // IN04 se neodvozuje od účetní: je aktivní právě tehdy, když měsíc
+        // nese odečtené doby (Pokyny MH k 10375, „nadřazený řídicí atribut").
+        $reportedDeducted = $deducted !== null && $deducted['total'] > 0 ? $deducted : null;
+        $in04Active = $reportedDeducted !== null;
         if (($confirmation['in03_active'] ?? null) !== false
-            || ($confirmation['in04_active'] ?? null) !== false
+            || ($confirmation['in04_active'] ?? null) !== $in04Active
         ) {
-            $this->invalid('jmhz_eldp_interaction_unsupported', 'První ELDP řez vyžaduje explicitní Ne pro IN03 i IN04.');
+            $this->invalid(
+                'jmhz_eldp_interaction_unsupported',
+                'ELDP řez vyžaduje explicitní Ne pro IN03 a pro IN04 hodnotu odvozenou z odečtených dob.',
+            );
         }
         $note = $confirmation['confirmation_note'] ?? '';
         if (!is_string($note) || mb_strlen(trim($note), 'UTF-8') > 500) {
@@ -683,17 +753,25 @@ final class JmhzEldpEvidenceBuilder
                 'section18_days_provenance' => $section18['provenance'] ?? [],
                 /*
                  * Odečítané doby (10375, 10462–10469) se týkají VÝHRADNĚ dob
-                 * po dosažení důchodového věku (kód D). Měsíc s kódem D a
-                 * nenulovými odečtenými dobami se výš zastaví
-                 * (`jmhz_eldp_deducted_days_unsupported`), takže sem dojde jen
-                 * sekce, která žádné nemá; `null` znamená NEUVEDENO. Element
-                 * `odecitaneDny` je v XSD nepovinný a do hlášení se nezapíše.
+                 * po dosažení důchodového věku bez starobního důchodu (kód D).
+                 * `null` znamená NEUVEDENO: sekce bez odečtených dob element
+                 * `odecitaneDny` nenese (Pravidla podání kap. 4: při nule se
+                 * atributy nezobrazují). Rozpad `deducted_days` (jen nenulové
+                 * složky v pořadí `odecitaneDnyType`) je podmíněný klíč, který
+                 * vznikne jen u sekce s odečtenými dobami, takže otisk všech
+                 * ostatních řezů zůstává stejný.
                  */
-                'deducted_days_total' => null,
+                'deducted_days_total' => $reportedDeducted['total'] ?? null,
+                ...($reportedDeducted !== null
+                    ? ['deducted_days' => array_filter(
+                        $reportedDeducted['components'],
+                        static fn (int $value): bool => $value > 0,
+                    )]
+                    : []),
             ]],
             'confirmation' => [
                 'in03_active' => false,
-                'in04_active' => false,
+                'in04_active' => $in04Active,
                 'note' => trim($note),
             ],
         ];
@@ -702,19 +780,19 @@ final class JmhzEldpEvidenceBuilder
 
     /**
      * Kód ELDP měsíčního hlášení: druh činnosti, „+" a „+", a druhý znak „D"
-     * od dne dovršení důchodového věku nebo přiznání předčasného starobního
-     * důchodu. Pravidlo je společné s ročním evidenčním listem
+     * od dne dovršení důchodového věku (předčasný starobní důchod kód D
+     * nezakládá). Pravidlo je společné s ročním evidenčním listem
      * ({@see EldpPensionAgeCode}), takže se osoba v listu a v hlášení nemůže
      * rozejít.
      *
-     * Důchodové údaje čte z `$source['pension_status']` (`pension_age_reached_on`,
-     * `early_pension_from`); bez nich zůstává „++". Zdroj řezu
+     * Důchodové údaje čte z `$source['pension_status']`
+     * (`pension_age_reached_on`); bez nich zůstává „++". Zdroj řezu
      * ({@see \MyInvoice\Repository\Payroll\JmhzEldpEvidenceSnapshotRepository::lockSource()})
      * je plní ze zákonné evidence osoby (sekce Důchod) k vykazovanému měsíci
      * týmž pravidlem jako roční evidenční list
      * ({@see \MyInvoice\Service\Payroll\Pension\PayrollPensionStatus}); už
-     * zmrazené řezy se tím nemění. Předčasný důchod uprostřed měsíce se
-     * zastaví, protože pravidla podání rozdělení základu nestanoví.
+     * zmrazené řezy se tím nemění. Dovršení věku uprostřed měsíce dělí měsíc
+     * na dvě sekce ({@see self::pensionAgeSplitFrom()}).
      *
      * @param array<string,mixed> $source
      */
@@ -727,16 +805,6 @@ final class JmhzEldpEvidenceBuilder
         $code = $activityCode . '++';
         $codeFrom = $this->pensionAgeCodeFrom($source);
         $placement = EldpPensionAgeCode::placement($codeFrom, $insuranceFrom, $insuranceTo);
-        if ($placement === EldpPensionAgeCode::MID_INTERVAL
-            && $this->pensionAgeSplitFrom($source, $insuranceFrom, $insuranceTo) === null
-        ) {
-            $this->invalid(
-                'eldp_pension_age_mid_month_unsupported',
-                "Kód ELDP se mění uprostřed měsíce (od {$codeFrom}: přiznání předčasného starobního "
-                . 'důchodu). Rozdělení vyměřovacího základu mezi dvě sekce pro tento případ pravidla'
-                . ' podání nestanoví.',
-            );
-        }
 
         // Měsíc, ve kterém kód D začíná dovršením důchodového věku, potvrzuje
         // účetní kódem D; sekci před tím dnem odvodí řez sám.
@@ -754,28 +822,19 @@ final class JmhzEldpEvidenceBuilder
      * Kontrola 59 (3. část) určuje rozdělení základu: navazuje-li na sekci
      * před dovršením věku sekce s kódem D téže činnosti a se započtenými dny,
      * má sekce před dovršením základ 0 a celý základ měsíce nese sekce D.
-     * Pravidlo mluví o dovršení důchodového věku; pro předčasný starobní
-     * důchod uvnitř měsíce rozdělení nestanoví, a ten se proto nedělí.
+     * Kód D začíná jen dovršením věku ({@see EldpPensionAgeCode::codeFrom()}),
+     * takže se tak dělí i měsíc poživatele předčasného starobního důchodu.
      *
      * @param array<string,mixed> $source
      */
     private function pensionAgeSplitFrom(array $source, string $intervalFrom, string $intervalTo): ?string
     {
         $codeFrom = $this->pensionAgeCodeFrom($source);
-        if (EldpPensionAgeCode::placement($codeFrom, $intervalFrom, $intervalTo)
-            !== EldpPensionAgeCode::MID_INTERVAL
-        ) {
-            return null;
-        }
-        $status = $this->object($source['pension_status'] ?? null, 'pension_status');
-        $earlyFrom = $status['early_pension_from'] ?? null;
-        if (($status['pension_age_reached_on'] ?? null) !== $codeFrom
-            || (is_string($earlyFrom) && $earlyFrom <= $intervalTo)
-        ) {
-            return null;
-        }
 
-        return $codeFrom;
+        return EldpPensionAgeCode::placement($codeFrom, $intervalFrom, $intervalTo)
+            === EldpPensionAgeCode::MID_INTERVAL
+            ? $codeFrom
+            : null;
     }
 
     /**
@@ -908,8 +967,8 @@ final class JmhzEldpEvidenceBuilder
      * Dovršila osoba důchodový věk před intervalem a nepobírá v něm starobní
      * důchod? Jen pro ni se vedou odečítané doby (datový slovník JMHZ 1.4.1.6
      * u 10375: „pojištěnec, který … nepobírá starobní důchod a je výdělečně
-     * činný po dovršení důchodového věku"). Předčasný důchod je důchod, takže
-     * kód D z něj odečítané doby nezakládá.
+     * činný po dovršení důchodového věku"). Pravidlo sdílí s ročním listem
+     * {@see EldpPensionAgeCode::deductsPeriods()}; tady se jen ověří tvar dat.
      *
      * @param array<string,mixed> $source
      */
@@ -920,19 +979,114 @@ final class JmhzEldpEvidenceBuilder
             return false;
         }
         $status = $this->object($status, 'pension_status');
-        $reachedOn = ($status['pension_age_reached_on'] ?? null) === null
-            ? null
-            : $this->date($status['pension_age_reached_on'], 'pension_status.pension_age_reached_on');
-        if ($reachedOn === null || $reachedOn > $intervalFrom) {
-            return false;
+        $pension = [];
+        foreach (['pension_age_reached_on', 'early_pension_from'] as $key) {
+            $pension[$key] = ($status[$key] ?? null) === null
+                ? null
+                : $this->date($status[$key], "pension_status.{$key}");
         }
-        $earlyFrom = ($status['early_pension_from'] ?? null) === null
-            ? null
-            : $this->date($status['early_pension_from'], 'pension_status.early_pension_from');
         $fullPaidFrom = $status['full_pension_paid_from'] ?? null;
+        $pension['full_pension_paid_from'] = is_string($fullPaidFrom) ? $fullPaidFrom : null;
 
-        return ($earlyFrom === null || $earlyFrom > $intervalTo)
-            && (!is_string($fullPaidFrom) || $fullPaidFrom > substr($intervalTo, 0, 7));
+        return EldpPensionAgeCode::deductsPeriods($pension, $intervalFrom, $intervalTo);
+    }
+
+    /**
+     * Odečtené doby měsíce, který celý leží po dovršení důchodového věku
+     * a ve kterém osoba nepobírá starobní důchod (kód D, interakce IN04).
+     *
+     * Počítá je TÝŽ modul jako roční evidenční list
+     * ({@see EldpExcludedPeriodDeriver::deriveDeducted()}) nad týmž intervalem
+     * a týmiž vyloučenými dobami, takže se měsíční hlášení a list nerozejdou.
+     * Dny pojištění jsou interval minus odečtené doby (Pokyny MH k 10356
+     * a 10375, kontrola 309).
+     *
+     * Zastaví se případy, které hlášení podle pravidel zapsat nejde:
+     * - doba § 16 odst. 4 písm. j) (10536): žádná složka 10462–10469 ji
+     *   nenese, a vyloučené doby přitom musí ležet v odečtených (logické
+     *   testy ELDP12 č. 39 a 48);
+     * - odečtené dny bez složky (dny měsíce bez účasti „X", které nevysvětluje
+     *   žádná nepřítomnost se složkou): Pravidla podání kap. 4 žádají součet
+     *   složek rovný 10375 a Pokyny MH při 10375 > 0 aspoň jednu vyplněnou
+     *   složku, jenže pro „X" složka není;
+     * - vyloučené doby nad odečtenými (logický test ELDP12 č. 39).
+     *
+     * @param list<array<string,mixed>> $absences
+     * @param array{components:array<string,int>,total:int,provenance:list<array<string,mixed>>} $excluded
+     * @return array{components:array<string,int>,total:int}
+     */
+    private function monthDeductedDays(
+        array $absences,
+        string $intervalFrom,
+        string $intervalTo,
+        array $excluded,
+        bool $outsideInsurance,
+    ): array {
+        if (($excluded['components'][self::HOURS_OPTIONAL_EXCLUDED_ATTRIBUTE] ?? 0) > 0) {
+            $this->invalid(
+                'jmhz_eldp_deducted_days_invalid_termination_unsupported',
+                'Měsíc po dovršení důchodového věku obsahuje dobu po neplatném skončení vztahu '
+                    . '(§ 16 odst. 4 písm. j) zákona č. 155/1995 Sb.). Odečítané doby pro ni složku '
+                    . 'nemají a vyloučená doba musí ležet v odečtených (logické testy ELDP12 č. 39 a 48); '
+                    . 'hlášení zaměstnance podejte mimo aplikaci.',
+            );
+        }
+        $deducted = (new EldpExcludedPeriodDeriver())->deriveDeducted(
+            $absences,
+            $intervalFrom,
+            $intervalTo,
+            $excluded,
+            $outsideInsurance,
+        );
+        $withComponent = array_sum($deducted['components']);
+        if ($withComponent !== $deducted['total']) {
+            $this->invalid(
+                'jmhz_eldp_deducted_days_without_component_unsupported',
+                "Měsíc po dovršení důchodového věku má {$deducted['total']} dnů odečtených dob, ale jen "
+                    . "{$withComponent} z nich má složku 10462–10469 (zbytek je měsíc bez účasti na "
+                    . 'pojištění). Pravidla podání žádají součet složek rovný 10375 a pro takové dny '
+                    . 'složka není; hlášení zaměstnance podejte mimo aplikaci.',
+            );
+        }
+        if ($excluded['total'] > $deducted['total']) {
+            $this->invalid(
+                'jmhz_eldp_excluded_days_exceed_period',
+                'Vyloučené doby měsíce s kódem D přesahují odečtené doby (logický test ELDP12 č. 39).',
+            );
+        }
+
+        return $deducted;
+    }
+
+    /**
+     * Měsíc, uvnitř kterého zaměstnanec dovršil důchodový věk, se dělí na dvě
+     * sekce ELDP. Odečtené doby sekce D v něm hlášení zatím nevykáže: kontrola
+     * 309 poměřuje dny pojištění s intervalem celého formuláře (10354–10355),
+     * ne s platností sekce, a katalog pro dvě sekce výpočet nestanoví. Měsíc
+     * s nenulovými odečtenými dobami v sekci D proto zastaví; bez nich projde
+     * jako dřív.
+     *
+     * @param list<array<string,mixed>> $absences
+     */
+    private function assertSplitMonthWithoutDeductedDays(
+        array $absences,
+        string $splitFrom,
+        string $intervalTo,
+        string $code,
+    ): void {
+        $deriver = new EldpExcludedPeriodDeriver();
+        $partExcluded = $deriver->derive($absences, $splitFrom, $intervalTo, substr($splitFrom, 0, 7));
+        $deducted = $deriver->deriveDeducted($absences, $splitFrom, $intervalTo, $partExcluded, false);
+        if ($deducted['total'] > 0
+            || ($partExcluded['components'][self::HOURS_OPTIONAL_EXCLUDED_ATTRIBUTE] ?? 0) > 0
+        ) {
+            $this->invalid(
+                'jmhz_eldp_deducted_days_split_month_unsupported',
+                "Sekce {$code} od dovršení důchodového věku ({$splitFrom}) má {$deducted['total']} dnů "
+                    . 'odečtených dob. Pro měsíc rozdělený na dvě sekce katalog kontrol výpočet dnů '
+                    . 'pojištění s odečtenými dobami nestanoví; hlášení zaměstnance podejte mimo aplikaci.',
+            );
+        }
     }
 
     /**
@@ -965,6 +1119,37 @@ final class JmhzEldpEvidenceBuilder
         }
 
         return false;
+    }
+
+    /**
+     * Hlásí se za osobu ve vykazovaném měsíci místo třídy ELDP jen interval
+     * 10354 a 10355 s 10356 = 0?
+     *
+     * Ověřená sleva pracujícího důchodce ({@see workingPensioner()}) náleží
+     * i za měsíc, od jehož prvního dne se důchod vyplácí. Ten ale ELDP ještě
+     * nese: vyplňuje se „pouze do měsíce, od něhož náleží výplata starobního
+     * důchodu v plné výši" včetně něj (diskuse JMHZ #363, Metodická pomůcka
+     * ELDP, příklad 8a), stejně jako roční evidenční list
+     * ({@see PayrollPensionStatus::eldpKeptInMonth()}). Bez starobního důchodu
+     * v zákonné evidenci osoby rozhoduje sleva sama, jako dřív.
+     *
+     * @param array<string,mixed> $input
+     * @param array<string,mixed> $source
+     */
+    private static function pensionerWithoutEldp(
+        array $input,
+        int $employeeId,
+        array $source,
+        string $periodStart,
+    ): bool {
+        if (!self::workingPensioner($input, $employeeId)) {
+            return false;
+        }
+        $status = $source['pension_status'] ?? null;
+        $fullPaidFrom = is_array($status) ? ($status['full_pension_paid_from'] ?? null) : null;
+
+        return !is_string($fullPaidFrom)
+            || !PayrollPensionStatus::eldpKeptInMonth($fullPaidFrom, $periodStart);
     }
 
     /**
@@ -1033,6 +1218,30 @@ final class JmhzEldpEvidenceBuilder
     }
 
     /**
+     * Potvrzení ELDP pro roční zúčtování po skončení (typ 4): sekce bez kódu,
+     * bez platnosti a bez vyměřovacího základu, 0 dnů pojištění (Pravidla
+     * podání JMHZ 1.4.5, kap. 6 bod 3 c). 10245 a 10241/10242 jsou podmíněné
+     * kódem ELDP (interakce IN35), bez kódu se neuvádějí.
+     *
+     * @return array<string,mixed>
+     */
+    private static function deferredAnnualConfirmation(): array
+    {
+        return [
+            'insurance_from' => null,
+            'insurance_to' => null,
+            'valid_from' => null,
+            'valid_to' => null,
+            'insurance_days' => 0,
+            'code' => null,
+            'assessment_base_czk' => null,
+            'in03_active' => false,
+            'in04_active' => false,
+            'confirmation_note' => '',
+        ];
+    }
+
+    /**
      * ELDP řez odloženého příjmu. Pracovní souhrn ani interval pojištění
      * nemá (vztah v měsíci netrvá), zbytek zmrazeného snímku je stejný jako
      * u běžného řezu, aby ho resolver hlášení četl jednou cestou.
@@ -1059,19 +1268,49 @@ final class JmhzEldpEvidenceBuilder
         string $deferredType,
         array $confirmation,
     ): JmhzEldpEvidenceSnapshot {
-        if ($deferredType !== '1') {
+        $withoutEldp = in_array($deferredType, self::DEFERRED_TYPES_WITHOUT_ELDP, true);
+        // Typy 2, 3 a 6 zůstávají zastavené; důvody u
+        // {@see \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::INVALID_TERMINATION_TYPES}.
+        if (!$withoutEldp && !in_array($deferredType, self::DEFERRED_TYPES_WITH_INCOME_ELDP, true)) {
             $this->invalid(
                 'jmhz_deferred_income_type_unsupported',
-                'Aplikace zpracuje sama jen odložený příjem typu 1.',
+                'Aplikace zpracuje sama jen odložený příjem typu 1, 4 a 5. Náhradu mzdy při neplatném'
+                    . ' skončení (typy 2, 3 a 6) podejte ručně přes ePortál ČSSZ.',
             );
         }
-        $this->assertDeferredIncomeRelation($relationType);
+        if (in_array($deferredType, ['4', '5'], true)
+            && !in_array(substr($periodStart, 5, 2), ['01', '02', '03'], true)
+        ) {
+            $this->invalid(
+                'jmhz_deferred_annual_settlement_period_invalid',
+                'Roční zúčtování po skončení se hlásí jen za leden, únor nebo březen.',
+            );
+        }
+        if (!$withoutEldp) {
+            $this->assertDeferredIncomeRelation($relationType);
+        }
         $selection = ($this->scenarioSelector ??= JmhzScenarioSelectorResolver::load())
             ->resolve($activityCode, $relationshipDetailCode, 'scenario_8');
         if (!$selection['supported'] || !is_array($selection['evidence'] ?? null)) {
             $this->invalid('jmhz_eldp_scenario_unsupported', 'Pracovní vztah nepatří do podporovaného scénáře.');
         }
         $relationship = $this->socialRelationship($result, $employeeId, $employmentId);
+        if ($withoutEldp) {
+            return $this->buildDeferredAnnual(
+                $supplierId,
+                $runId,
+                $revisionId,
+                $revision,
+                $employeeId,
+                $employmentId,
+                $periodStart,
+                $term,
+                $relationship,
+                $selection['evidence'],
+                $deferredType,
+                $confirmation,
+            );
+        }
         if (!$this->participationMode($relationType, $relationship, $employmentId)) {
             $this->invalid(
                 'jmhz_eldp_social_relationship_unsupported',
@@ -1145,6 +1384,115 @@ final class JmhzEldpEvidenceBuilder
                 'valid_to' => $periodEnd,
                 'insurance_days' => 0,
                 'assessment_base_czk' => intdiv($base, 100),
+                'excluded_days' => null,
+                'excluded_days_total' => null,
+                'excluded_days_provenance' => [],
+                'section18_days' => null,
+                'section18_days_total' => null,
+                'section18_days_provenance' => [],
+                'deducted_days_total' => null,
+            ]],
+            'confirmation' => [
+                'in03_active' => false,
+                'in04_active' => false,
+                'note' => '',
+            ],
+        ]);
+    }
+
+    /**
+     * ELDP řez ročního zúčtování po skončení (typ 4). Pravidla podání JMHZ
+     * 1.4.5, kap. 6 bod 3: navazuje na skončený vztah, hlásí se za leden až
+     * březen a bez zúčtovaného příjmu; důchodové nároky jsou jediná bezkódová
+     * sekce s 10356 = 0 a období (10537/10538) je měsíc hlášení (vzorové
+     * hlášení MPSV `TEST_odložený příjem_1.1.2026.xlsx`, list SLOVNÍK,
+     * sloupce O a P). Příjem v měsíci by patřil do typu 5, proto ho řez
+     * odmítne; o účasti na pojištění se tu nerozhoduje.
+     *
+     * @param array<string,mixed> $revision
+     * @param array<string,mixed> $term
+     * @param array<string,mixed> $relationship
+     * @param array<string,mixed> $scenarioResolution
+     * @param array<string,mixed> $confirmation
+     */
+    private function buildDeferredAnnual(
+        int $supplierId,
+        int $runId,
+        int $revisionId,
+        array $revision,
+        int $employeeId,
+        int $employmentId,
+        string $periodStart,
+        array $term,
+        array $relationship,
+        array $scenarioResolution,
+        string $deferredType,
+        array $confirmation,
+    ): JmhzEldpEvidenceSnapshot {
+        $month = (int) substr($periodStart, 5, 2);
+        foreach (['assessment_base_minor_units', 'capped_assessment_base_minor_units'] as $key) {
+            if ($this->nonNegativeInt($relationship[$key] ?? null, $key) !== 0) {
+                $this->invalid(
+                    'jmhz_deferred_annual_settlement_income_present',
+                    'Roční zúčtování po skončení se hlásí bez zúčtovaného příjmu. Příjem zúčtovaný'
+                        . ' v tomtéž měsíci potvrďte jako odložený příjem typu 5.',
+                );
+            }
+        }
+        if ($confirmation !== self::deferredAnnualConfirmation()) {
+            $this->invalid('jmhz_eldp_deferred_section_invalid', 'ELDP odloženého příjmu neodpovídá zmrazenému výsledku.');
+        }
+        $spec = $this->specManifest();
+        $codebook = $this->findCodebook($spec['payload'], 'kod_eldp');
+
+        return new JmhzEldpEvidenceSnapshot([
+            'schema_reference' => JmhzEldpEvidenceSnapshot::SCHEMA_REFERENCE,
+            'builder_version' => self::BUILDER_VERSION,
+            'scope' => [
+                'supplier_id' => $supplierId,
+                'run_id' => $runId,
+                'source_revision_id' => $revisionId,
+                'employee_id' => $employeeId,
+                'employment_id' => $employmentId,
+                'period_start' => $periodStart,
+                'scenario_key' => 'scenario_8',
+            ],
+            'specification' => [
+                'package_key' => JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
+                'spec_manifest_sha256' => JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
+                'scenario_catalog_key' => JmhzScenarioRequirementSourceCatalog::CATALOG_KEY,
+                'scenario_manifest_sha256' => JmhzScenarioRequirementSourceCatalog::MANIFEST_SHA256,
+                'control_catalog_key' => JmhzControlSourceCatalog::CATALOG_KEY,
+                'control_manifest_sha256' => JmhzControlSourceCatalog::MANIFEST_SHA256,
+                'eldp_codebook_content_sha256' => $codebook['content_hash'],
+                'eldp_code_row_sha256' => null,
+            ],
+            'source_revision' => [
+                'input_snapshot_hash' => $revision['input_snapshot_hash'],
+                'result_snapshot_hash' => $revision['result_snapshot_hash'],
+                'ruleset_manifest_hash' => $revision['ruleset_manifest_hash'],
+            ],
+            'source_evidence' => [
+                'term_id' => $term['id'] ?? null,
+                'term_row_version' => $term['row_version'] ?? null,
+                'work_summary_id' => null,
+                'work_summary_sha256' => null,
+                'social_relationship' => $relationship,
+                'scenario_resolution' => $scenarioResolution,
+                'attribute_ids' => self::ATTRIBUTE_IDS,
+            ],
+            'insurance_interval' => null,
+            'deferred_income' => [
+                'type' => $deferredType,
+                'periods' => [['month' => $month, 'year' => (int) substr($periodStart, 0, 4)]],
+            ],
+            'eldp_sections' => [[
+                'ordinal' => 1,
+                'code' => null,
+                'valid_from' => null,
+                'valid_to' => null,
+                'insurance_days' => 0,
+                'assessment_base_czk' => null,
                 'excluded_days' => null,
                 'excluded_days_total' => null,
                 'excluded_days_provenance' => [],

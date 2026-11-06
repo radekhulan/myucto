@@ -119,7 +119,20 @@ final class UpdateInvoiceAction
         $isForce = $request->getQueryParams()['force'] ?? null;
         $canEditIssued = RequestAuthorization::canEditIssuedInvoice($request);
 
+        // Splátka sedí na řádek vytištěného kalendáře, opravuje se dobropisem.
+        if (!empty($existing['calendar_id'])) {
+            return Json::error($response, 'calendar_instalment_locked', 'Doklad splátky kalendáře nejde upravit. Opravte ho dobropisem.', 409);
+        }
+
         $body = (array) ($request->getParsedBody() ?? []);
+        if ((isset($body['currency_id']) && (int) $body['currency_id'] !== (int) $existing['currency_id'])
+            || (isset($body['currency']) && (string) $body['currency'] !== (string) $existing['currency'])) {
+            $billingReport = (new \MyInvoice\Repository\WorkReportRepository($this->db))->findByInvoice($id, (int) $existing['supplier_id']);
+            if (($billingReport['billing_snapshot'] ?? null) !== null) {
+                return Json::error($response, 'billing_currency_mismatch', 'Nejprve zrušte cenové ujednání výkazu; jeho měna musí odpovídat faktuře.', 400);
+            }
+        }
+
         // effective_tax_date je generovaný sloupec (COALESCE(tax_date, issue_date)) a z těla se
         // neukládá. invoiceRefDate() ho bere přednostně, takže podvržená hodnota by zámek
         // období i kontrolu podaného DPH období vyhodnotila nad jiným datem, než se uloží.
@@ -164,13 +177,13 @@ final class UpdateInvoiceAction
             }
         }
 
-        // Vyprázdnění položek dokladu, který nějaké má → 422 ({@see DocumentItemsPayload}).
+        // Vyprázdnění položek mimo koncept → 422 ({@see DocumentItemsPayload}).
         // 422, ne 400: tělo je tvarem v pořádku (`items` JE pole), odmítá se až to, co
         // požadavek znamená proti STAVU tohohle dokladu — táž třída jako `force_mode_required`
         // níž. 400 `validation_failed` je tu vyhrazené pro schéma pole po poli (mapa `fields`).
         // Musí to být PŘED přečíslováním při změně typu: to už sahá na čítač řady, takže
         // pozdější odmítnutí by po sobě nechalo spálené číslo.
-        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []))) {
+        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []), (string) $existing['status'])) {
             return Json::error(
                 $response,
                 DocumentItemsPayload::EMPTY_ERROR_CODE,
@@ -236,7 +249,7 @@ final class UpdateInvoiceAction
         $validTypes    = ['invoice', 'proforma', 'credit_note'];
         // Kalendář (§ 31) smí měnit typ jen DRAFT: vlastní číselnou řadu nemá, takže
         // přečíslování vystaveného dokladu na kalendář by spadlo na generátoru varsymbolu.
-        $draftTypes    = [...$validTypes, 'payment_calendar'];
+        $draftTypes    = [...$validTypes, 'payment_calendar', 'rent_calendar', 'advance_calendar'];
         $requestedType = (string) ($body['invoice_type'] ?? '');
         $isIssued      = $existing['status'] !== 'draft';
         $existingType  = (string) $existing['invoice_type'];
@@ -537,7 +550,7 @@ final class UpdateInvoiceAction
             } catch (\InvalidArgumentException | \RuntimeException $e) {
                 if (TransactionFailure::rollbackIfAborted($pdo, $e)) throw $e;
                 if ($renumberTx && $pdo->inTransaction()) $pdo->rollBack();
-                return Json::error($response, 'varsymbol_failed', $e->getMessage(), 500);
+                return Json::internalError($response, 'varsymbol_failed', $e->getMessage(), 500);
             }
             $body['varsymbol'] = $newVs;
             $renumber['to'] = $newVs;
@@ -1108,7 +1121,13 @@ final class UpdateInvoiceAction
             && $this->repo->clientIsEuForeign((int) $body['client_id']);
 
         if (!empty($body['items']) && is_array($body['items'])) {
-            foreach ($body['items'] as &$item) {
+            // Víceúčelový poukaz klasifikaci nenese (MultiPurposeVoucher), stejně jako při založení.
+            $annotated = \MyInvoice\Service\Invoice\MultiPurposeVoucher::annotate($this->db->pdo(), $supplierId, $body['items']);
+            foreach ($body['items'] as $key => &$item) {
+                if (is_array($annotated[$key] ?? null) && \MyInvoice\Service\Invoice\MultiPurposeVoucher::isLine($annotated[$key])) {
+                    $item['vat_classification_code'] = null;
+                    continue;
+                }
                 if (!empty($item['vat_classification_code']) || InvoiceItemKind::isText($item)) continue;
                 $rateId = (int) ($item['vat_rate_id'] ?? 0);
                 $rate = (float) ($vatRates[$rateId] ?? 0);
@@ -1120,7 +1139,10 @@ final class UpdateInvoiceAction
             unset($item);
         }
 
-        if (empty($body['vat_classification_code']) && $headerItems !== []) {
+        // O kódu hlavičky rozhodují jen plnění; doklad jen z poukazů zůstane bez kódu.
+        $headerSupplies = \MyInvoice\Service\Invoice\MultiPurposeVoucher::withoutLines($this->db->pdo(), $supplierId, $headerItems);
+        if (empty($body['vat_classification_code']) && $headerItems !== [] && $headerSupplies !== []) {
+            $headerItems = $headerSupplies;
             $itemsWithTotals = array_map(function ($it) use ($vatRates) {
                 $rateId = (int) ($it['vat_rate_id'] ?? 0);
                 $rate = (float) ($vatRates[$rateId] ?? 0);

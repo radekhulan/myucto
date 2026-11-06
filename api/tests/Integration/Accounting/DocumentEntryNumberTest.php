@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Service\Accounting\DocumentEntryNumberBackfill;
+use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
 use PHPUnit\Framework\Attributes\Group;
 
@@ -29,16 +30,33 @@ final class DocumentEntryNumberTest extends BankPostingTestCase
         self::assertSame('DB-DOCNO-1', $this->documentNo($this->post('invoice', $credit, '602', '311', 200.0)));
     }
 
-    public function testPurchaseEntryCarriesVendorNumberWithFallbackToInternalNumber(): void
+    public function testPurchaseEntryCarriesOurNumberWithFallbackToVendorNumber(): void
     {
         $vendor = $this->client('Dodavatel čísla dokladu');
-        $withVendorNo = $this->purchaseInvoice('DOD-2099-17', $vendor, 500.0);
-        $withoutVendorNo = $this->purchaseInvoice('', $vendor, 300.0);
+        $withOurNo = $this->purchaseInvoice('DOD-2099-17', $vendor, 500.0);
         $this->db->pdo()->prepare("UPDATE purchase_invoices SET varsymbol = 'PF-DOCNO-2' WHERE id = ?")
-            ->execute([$withoutVendorNo]);
+            ->execute([$withOurNo]);
+        $withoutOurNo = $this->purchaseInvoice('DOD-2099-18', $vendor, 300.0);
 
-        self::assertSame('DOD-2099-17', $this->documentNo($this->post('purchase_invoice', $withVendorNo, '518', '321', 500.0)));
-        self::assertSame('PF-DOCNO-2', $this->documentNo($this->post('purchase_invoice', $withoutVendorNo, '518', '321', 300.0)));
+        self::assertSame('PF-DOCNO-2', $this->documentNo($this->post('purchase_invoice', $withOurNo, '518', '321', 500.0)));
+        self::assertSame('DOD-2099-18', $this->documentNo($this->post('purchase_invoice', $withoutOurNo, '518', '321', 300.0)));
+    }
+
+    /** Starý zápis s číslem dodavatele backfill nepřepisuje, přeúčtování bez čísla dá naše. */
+    public function testHistoricalVendorNumberStaysUntilEntryIsReposted(): void
+    {
+        $invoice = $this->purchaseInvoice('DOD-2099-19', $this->client('Dodavatel historie'), 400.0);
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE purchase_invoices SET varsymbol = 'PF-DOCNO-7' WHERE id = ?")->execute([$invoice]);
+        $entry = $this->post('purchase_invoice', $invoice, '518', '321', 400.0);
+        $pdo->prepare("UPDATE journal_entries SET document_no = 'DOD-2099-19' WHERE id = ?")->execute([$entry]);
+
+        (new DocumentEntryNumberBackfill($this->db))->run($this->supplierId, true);
+        self::assertSame('DOD-2099-19', $this->documentNo($entry));
+
+        $again = $this->post('purchase_invoice', $invoice, '518', '321', 400.0);
+        self::assertSame($entry, $again, 'Přeúčtování přepisuje týž zápis.');
+        self::assertSame('PF-DOCNO-7', $this->documentNo($entry));
     }
 
     public function testRepostOfEntryWithoutNumberFillsIt(): void
@@ -91,6 +109,32 @@ final class DocumentEntryNumberTest extends BankPostingTestCase
 
         self::assertNotContains($entry, array_column($result['changes'], 'entry_id'));
         self::assertNull($this->documentNo($entry));
+    }
+
+    /** Saldokonto ukáže vedle doc_no druhé číslo a doc_no samotné nemění. */
+    public function testSaldoShowsOtherNumberBesideDocNo(): void
+    {
+        $vendor = $this->client('Dodavatel saldokonta');
+        $both = $this->purchaseInvoice('DOD-2099-30', $vendor, 500.0);
+        $vendorOnly = $this->purchaseInvoice('DOD-2099-31', $vendor, 300.0);
+        $this->db->pdo()->prepare("UPDATE purchase_invoices SET varsymbol = 'PF-DOCNO-30' WHERE id = ?")->execute([$both]);
+        $this->post('purchase_invoice', $both, '518', '321', 500.0);
+        $this->post('purchase_invoice', $vendorOnly, '518', '321', 300.0);
+
+        $items = [];
+        $saldo = $this->container->get(SaldoService::class)->build($this->supplierId, $this->periodId, self::YEAR . '-12-31', '321');
+        foreach ($saldo['accounts'] as $account) {
+            foreach ($account['partners'] as $partner) {
+                foreach ($partner['items'] as $item) {
+                    $items[$item['doc_id']] = $item;
+                }
+            }
+        }
+
+        self::assertSame('PF-DOCNO-30', $items[$both]['doc_no']);
+        self::assertSame('DOD-2099-30', $items[$both]['other_doc_no']);
+        self::assertSame('#' . $vendorOnly, $items[$vendorOnly]['doc_no'], 'doc_no otevřené faktury zůstává podle SaldoRepository.');
+        self::assertSame('DOD-2099-31', $items[$vendorOnly]['other_doc_no']);
     }
 
     /** @param array<string,mixed> $meta */

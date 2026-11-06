@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\ActivityLogHashChain;
 use PDO;
 
 /**
@@ -352,6 +353,11 @@ final class LedgerInvariantService
         $since = $this->pdo()->query('SELECT MIN(created_at) FROM activity_log')->fetchColumn();
         if ($since === false || $since === null) {
             return $this->skipped('I28', 'zaúčtovaný zápis má auditní stopu', '§ 33a ZoÚ', 'activity_log je prázdný');
+        }
+        // Retence spravovaného provozu: před hranicí promazání stopa úplná být nemá.
+        $prunedBefore = (new ActivityLogHashChain($this->db))->prunedBefore();
+        if ($prunedBefore !== null && $prunedBefore > (string) $since) {
+            $since = $prunedBefore;
         }
 
         return $this->run(

@@ -6,6 +6,7 @@ import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import MatchSuggestionPanel from './MatchSuggestionPanel.vue'
 import PaymentMethodModal from '@/components/invoices/PaymentMethodModal.vue'
 import type { BankTransactionActions } from '@/composables/useBankTransactionActions'
+import type { MatchCandidate } from '@/api/bank'
 
 const props = defineProps<{
   actions: BankTransactionActions
@@ -30,6 +31,22 @@ const {
   acceptTxSuggestion, rejectTxSuggestion,
   purchaseShortfall, closePurchaseShortfall, onPurchaseShortfallSettled,
 } = props.actions
+
+function candidateLabel(c: MatchCandidate): string {
+  if (c.type === 'other_item') return t(c.side === 'payable' ? 'bank.candidate_other_payable' : 'bank.candidate_other_receivable')
+  return c.type === 'invoice' ? t('bank.candidate_issued') : t('bank.candidate_purchase')
+}
+
+/** Proč se ostatní položka nabízí: VS, účet protistrany, splátka, celý zbývající dluh. */
+function otherItemReasons(c: MatchCandidate): string[] {
+  if (c.type !== 'other_item') return []
+  return (c.match_reasons || []).map(reason => t(`bank.other_item_match.${reason}`, { number: c.installment?.position ?? '' }))
+}
+
+function candidateBadgeClass(c: MatchCandidate): string {
+  if (c.type === 'other_item') return 'bg-primary-50 text-primary-600'
+  return c.type === 'invoice' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'
+}
 </script>
 
 <template>
@@ -110,9 +127,8 @@ const {
             <button type="button" @click="confirmCandidate(c)" :disabled="matchingCandidate || !actions.canMatchDocument(c.type)"
               class="w-full text-left px-3 py-2 hover:bg-primary-50 flex items-center justify-between gap-2 disabled:opacity-50">
               <span class="min-w-0">
-                <span class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold"
-                  :class="c.type === 'invoice' ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
-                  {{ c.type === 'invoice' ? t('bank.candidate_issued') : t('bank.candidate_purchase') }}
+                <span class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold" :class="candidateBadgeClass(c)">
+                  {{ candidateLabel(c) }}
                 </span>
                 <span v-if="c.paid" class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-neutral-200 text-neutral-600 ml-1">
                   {{ t('bank.candidate_paid') }}
@@ -123,6 +139,10 @@ const {
                 </span>
                 <span class="font-mono text-sm ml-1">{{ c.ref || `#${c.id}` }}</span>
                 <span v-if="c.party" class="text-xs text-neutral-500 block truncate">{{ c.party }}</span>
+                <span v-if="otherItemReasons(c).length" class="mt-0.5 flex flex-wrap gap-1" data-testid="other-item-reasons">
+                  <span v-for="label in otherItemReasons(c)" :key="label"
+                    class="text-[10px] uppercase px-1.5 py-0.5 rounded font-semibold bg-success-50 text-success-700">{{ label }}</span>
+                </span>
               </span>
               <span class="text-right whitespace-nowrap shrink-0">
                 <span class="font-mono text-sm">{{ formatMoney(c.amount, c.currency) }}</span>

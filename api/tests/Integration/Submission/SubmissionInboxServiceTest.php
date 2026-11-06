@@ -818,6 +818,82 @@ final class SubmissionInboxServiceTest extends TestCase
     }
 
     /** Ruční zařazení nesmí vytvořit nezařazenou zprávu s vazbou na podání. */
+    /**
+     * Zpráva, jejíž dřívější ingest skončil fatalem (záznam založený, dokument
+     * nedoplněný), se při dalším stažení nezkouší znovu: jinak by jedna
+     * jedovatá příloha shodila každý další poll schránky.
+     */
+    public function testMessageInterruptedDuringIngestDoesNotBlockLaterPolls(): void
+    {
+        $this->enablePolling();
+        $this->transport->inboxMessages = [
+            [
+                'message_id' => 'DM-POISON',
+                'sender_box_id' => 'qqqqqqq',
+                'sender_name' => 'Syntetický odesílatel',
+                'subject' => 'Jedovatá příloha',
+                'sender_ident' => null,
+                'delivered_at' => '2026-08-15 08:00:00',
+                'accepted_at' => null,
+            ],
+            [
+                'message_id' => 'DM-NEXT',
+                'sender_box_id' => 'qqqqqqq',
+                'sender_name' => 'Syntetický odesílatel',
+                'subject' => 'Další zpráva',
+                'sender_ident' => null,
+                'delivered_at' => '2026-08-15 08:01:00',
+                'accepted_at' => null,
+            ],
+        ];
+        $this->transport->downloads['DM-NEXT'] = $this->syntheticZfo();
+
+        // Stav po fatalu uprostřed ingestu: záznam je založený, dokument ne.
+        $claimed = $this->inbox->claim($this->inboxRow('DM-POISON'));
+        self::assertNotNull($claimed);
+        self::assertNull($this->inbox->claim($this->inboxRow('DM-POISON')),
+            'Druhé založení téže zprávy musí poznat, že zpráva už je cizí.');
+
+        $result = $this->pollInteractively();
+
+        self::assertSame(1, $result['skipped']);
+        self::assertSame(1, $result['stored']);
+        self::assertSame(0, $result['failed']);
+        self::assertNull($result['error']);
+        $next = $this->inbox->find($this->supplierId, 'isds', 'test', 'DM-NEXT');
+        self::assertNotNull($next);
+        self::assertNotNull($next['document_id']);
+    }
+
+    /** Obyčejná výjimka při ingestu záznam zruší, takže se zpráva zkusí znovu. */
+    public function testIngestExceptionReleasesClaimForRetry(): void
+    {
+        $this->enablePolling();
+        $this->transport->inboxMessages = [[
+            'message_id' => 'DM-RETRY',
+            'sender_box_id' => 'qqqqqqq',
+            'sender_name' => 'Syntetický odesílatel',
+            'subject' => 'Zpráva',
+            'sender_ident' => null,
+            'delivered_at' => '2026-08-15 08:00:00',
+            'accepted_at' => null,
+        ]];
+        // Prázdný obsah DocumentStorage odmítne výjimkou (empty_file).
+        $this->transport->downloads['DM-RETRY'] = '';
+
+        $first = $this->pollInteractively();
+        self::assertSame(1, $first['failed']);
+        self::assertFalse($this->inbox->exists($this->supplierId, 'isds', 'test', 'DM-RETRY'),
+            'Po výjimce nesmí zůstat záznam bez dokumentu, jinak by se zpráva už nikdy nestáhla.');
+
+        $this->transport->downloads['DM-RETRY'] = $this->syntheticZfo();
+        $second = $this->pollInteractively();
+        self::assertSame(1, $second['stored']);
+        $stored = $this->inbox->find($this->supplierId, 'isds', 'test', 'DM-RETRY');
+        self::assertNotNull($stored);
+        self::assertNotNull($stored['document_id']);
+    }
+
     public function testUnclassifiedCannotBeLinkedToASubmission(): void
     {
         $this->expectException(SubmissionChannelException::class);

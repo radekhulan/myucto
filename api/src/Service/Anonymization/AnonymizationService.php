@@ -80,21 +80,11 @@ final class AnonymizationService
 
         try {
             $cloner->copyTables($plan, $options->target, $log);
-            $report = $this->anonymize($pdo, $options, $log);
-            $log('Vypínám odchozí integrace…');
-            foreach (AnonymizationPolicy::POST_SQL as $sql) {
-                $pdo->exec($sql);
-            }
-            $this->resealAuditChain($options->target, $log);
-            foreach ($plan['system_versioned'] as $table) {
-                $pdo->exec('DELETE HISTORY FROM ' . DatabaseCloner::quote($table));
-            }
+            $transformed = $this->transform($pdo, $options, $plan['system_versioned'], $log);
+            $report = $transformed['report'];
             $log('Zakládám pohledy, triggery a rutiny…');
             $cloner->finalize($plan, $options->target);
-            $pdo->prepare('REPLACE INTO app_meta (k, v) VALUES (?, ?)')->execute([
-                self::MARKER_KEY,
-                (string) json_encode(['created_at' => gmdate('c'), 'tool' => 'anonymize-clone'], JSON_UNESCAPED_SLASHES),
-            ]);
+            $this->writeMarker($pdo, $transformed['archives'], $transformed['transport']);
         } catch (\Throwable $e) {
             $pdo->exec('DROP DATABASE IF EXISTS ' . DatabaseCloner::quote($options->target));
             throw $e;
@@ -121,10 +111,138 @@ final class AnonymizationService
     }
 
     /**
+     * Anonymizuje na místě kopii, kterou už {@see DatabaseCloner::copyTables()} založil
+     * a která ještě nemá triggery: zachycení, pseudonymizace, přepisy grafů, nové
+     * zapečetění auditní stopy a smazání historie proběhnou přesně jako v {@see run()}.
+     * Nekopíruje, nezakládá triggery a nesrovnává s originálem (kontrola úniků).
+     *
+     * Slouží testům přepisů jednotlivých grafů, kterým stačí kopie bez zakládání
+     * dalších databází. Cílem nesmí být databáze, se kterou instance pracuje.
+     *
+     * @param callable(string):void $log
+     * @return array{truncated:int, changed_rows:array<string,int>, dictionary:int, archives:int, submissions:int}
+     */
+    public function anonymizeCopy(AnonymizationOptions $options, callable $log): array
+    {
+        $target = $options->target;
+        $live = (string) $this->config->get('db.name', '');
+        if (!AnonymizationOptions::isSafeDatabaseName($target)
+            || ($live !== '' && strcasecmp($live, $target) === 0)
+            || in_array(strtolower($target), ['mysql', 'information_schema', 'performance_schema', 'sys'], true)) {
+            throw new \InvalidArgumentException("Databázi {$target} nelze anonymizovat na místě.");
+        }
+        $pdo = $this->serverPdo();
+        $cloner = new DatabaseCloner($pdo);
+        $plan = $cloner->plan($target);
+        if ($plan['triggers'] !== [] || $plan['views'] !== []) {
+            throw new \RuntimeException("Databáze {$target} už má triggery nebo pohledy, není to kopie před dokončením.");
+        }
+        $problems = $this->coverageProblems($pdo, $target);
+        if ($problems !== []) {
+            throw new \RuntimeException("Politika anonymizace nepokrývá strukturu databáze:\n  " . implode("\n  ", $problems));
+        }
+        // Stejný stav spojení, v jakém transformaci zanechá DatabaseCloner::copyTables().
+        $pdo->exec('USE ' . DatabaseCloner::quote($target));
+        $pdo->exec('SET SESSION FOREIGN_KEY_CHECKS = 0');
+        $transformed = $this->transform($pdo, $options, $plan['system_versioned'], $log);
+        $this->writeMarker($pdo, $transformed['archives'], $transformed['transport']);
+
+        return $transformed['report'] + ['archives' => $transformed['archives'], 'submissions' => $transformed['transport']['count']];
+    }
+
+    /**
+     * Vše mezi kopií tabulek a založením triggerů. Spojení musí stát v cílové databázi.
+     *
+     * @param list<string> $systemVersioned
+     * @param callable(string):void $log
+     * @return array{report:array{truncated:int, changed_rows:array<string,int>, dictionary:int}, archives:int, transport:array{count:int, root:?string}}
+     */
+    private function transform(PDO $pdo, AnonymizationOptions $options, array $systemVersioned, callable $log): array
+    {
+        $protectedRows = CloneProtectedRows::create($pdo, $options->target);
+        $captureConnection = Connection::withoutSharedTestConnection(fn () => new Connection($this->targetConfig($options->target)));
+        try {
+            $payrollInputs = PayrollCostCenterCloneScrubber::capture($captureConnection);
+            $settlementInputs = SettlementCloneScrubber::captureInputs($captureConnection);
+            $securitiesDebtInputs = SecuritiesDebt504CloneScrubber::captureInputs($captureConnection);
+            $frameworkConversionInputs = FrameworkConversionCloneScrubber::captureInputs($captureConnection);
+            $capitalInputs = CapitalCloneScrubber::capture($captureConnection);
+            $membershipInputs = MembershipCloneScrubber::capture($captureConnection);
+            // Stránkované posouzení J6 nemá typový přepis grafu; kopie se zastaví dřív,
+            // než by jeho otisky zůstaly k pseudonymizovaným podkladům neplatné.
+            foreach (['nonprofit_tax_drafts', 'nonprofit_tax_snapshot_manifests', 'nonprofit_tax_calculation_manifests', 'nonprofit_tax_source_evidence_manifests'] as $pagedTable) {
+                if ($captureConnection->pdo()->query('SELECT 1 FROM ' . $pagedTable . ' LIMIT 1')->fetchColumn() !== false) {
+                    throw new \RuntimeException('Anonymizace stránkovaného daňového posouzení neziskové organizace není podporována. Zdrojová databáze zůstala zachovaná.');
+                }
+            }
+            $log('Zachytávám finanční archivy DPPO 504…');
+            $archiveCount = NonprofitDppoArchiveCloneCapture::capture($captureConnection, $protectedRows);
+            NonprofitTaxSavingsCloneScrubber::capture($captureConnection);
+            $dppoInputs = NonprofitDppoCloneScrubber::capture($captureConnection);
+            $nonprofitInputs = NonprofitFundingCloneScrubber::capture($captureConnection);
+        }
+        finally { $captureConnection->close(); }
+        $report = $this->anonymize($pdo, $options, $log, $protectedRows);
+        $log('Vypínám odchozí integrace…');
+        foreach (AnonymizationPolicy::POST_SQL as $sql) {
+            $pdo->exec($sql);
+        }
+        LegacyCostCenterCloneScrubber::run($pdo, $this->scrubber);
+        $payrollConnection = Connection::withoutSharedTestConnection(fn () => new Connection($this->targetConfig($options->target)));
+        try { PayrollCostCenterCloneScrubber::run($payrollConnection, $this->scrubber, $payrollInputs); } finally { $payrollConnection->close(); }
+        (new JointAllocationCloneScrubber($pdo, $this->scrubber))->run();
+        $registryMap = (new PropertyCloneScrubber($pdo, $this->scrubber))->run();
+        $versionMap = (new ChargesCloneScrubber($pdo, $this->scrubber))->run($registryMap);
+        $targetConnection = Connection::withoutSharedTestConnection(fn () => new Connection($this->targetConfig($options->target)));
+        try {
+            $issuanceMap = (new IssuanceCloneScrubber($targetConnection, $this->scrubber))->run($registryMap, $versionMap);
+            $paymentMap = (new PaymentsCloneScrubber($targetConnection, $this->scrubber))->run($issuanceMap,$registryMap,$settlementInputs);
+            (new ReceivablesCloneScrubber($targetConnection, $this->scrubber))->run($registryMap, $issuanceMap, $paymentMap);
+            SecuritiesDebt504CloneScrubber::run($targetConnection, $this->scrubber, $securitiesDebtInputs);
+            AccountDefinitionCloneScrubber::run($targetConnection, $this->scrubber);
+            FrameworkConversionCloneScrubber::run($targetConnection, $this->scrubber, $frameworkConversionInputs);
+            CapitalCloneScrubber::run($targetConnection, $this->scrubber, $capitalInputs);
+            $legalHashes = NonprofitDppoCloneScrubber::runProfiles($targetConnection, $this->scrubber, $dppoInputs);
+            MembershipCloneScrubber::run($targetConnection, $this->scrubber, $membershipInputs, $legalHashes);
+            NonprofitFundingCloneScrubber::run($targetConnection, $this->scrubber, $nonprofitInputs, $legalHashes);
+            $log('Přepisuji finanční archivy DPPO 504…');
+            $archivedSubmissions = (new NonprofitDppoArchiveCloneAdapter($targetConnection, $this->scrubber, $protectedRows))->run();
+            NonprofitTaxSavingsCloneScrubber::run($targetConnection, $this->scrubber);
+            $transport = (new TaxSubmissionTransportCloneScrubber($targetConnection))->run($archivedSubmissions);
+        } finally {
+            $targetConnection->close();
+        }
+        $protectedRows->drop();
+        $this->resealAuditChain($options->target, $log);
+        foreach ($systemVersioned as $table) {
+            $pdo->exec('DELETE HISTORY FROM ' . DatabaseCloner::quote($table));
+        }
+
+        return ['report' => $report, 'archives' => $archiveCount, 'transport' => $transport];
+    }
+
+    /** @param array{count:int, root:?string} $transport */
+    private function writeMarker(PDO $pdo, int $archives, array $transport): void
+    {
+        $pdo->prepare('REPLACE INTO app_meta (k, v) VALUES (?, ?)')->execute([
+            self::MARKER_KEY,
+            (string) json_encode([
+                'created_at' => gmdate('c'),
+                'tool' => 'anonymize-clone',
+                'financial_archive' => [
+                    'archives' => $archives,
+                    'submissions' => $transport['count'],
+                    'transport_root' => $transport['root'],
+                ],
+            ], JSON_UNESCAPED_SLASHES),
+        ]);
+    }
+
+    /**
      * @param callable(string):void $log
      * @return array{truncated:int, changed_rows:array<string,int>, dictionary:int}
      */
-    private function anonymize(PDO $pdo, AnonymizationOptions $options, callable $log): array
+    private function anonymize(PDO $pdo, AnonymizationOptions $options, callable $log, ?CloneProtectedRows $protectedRows = null): array
     {
         $secret = $options->seed !== null && $options->seed !== ''
             ? hash('sha256', 'myucto-anonymize:' . $options->seed, true)
@@ -163,7 +281,7 @@ final class AnonymizationService
                 if ($selected === []) {
                     continue;
                 }
-                $count = $this->processTable($pdo, $scrubber, $table, $selected, $meta[$table] ?? [], $keys[$table] ?? []);
+                $count = $this->processTable($pdo, $scrubber, $table, $selected, $meta[$table] ?? [], $keys[$table] ?? [], $protectedRows);
                 if ($count > 0) {
                     $changed[$table] = ($changed[$table] ?? 0) + $count;
                 }
@@ -182,8 +300,15 @@ final class AnonymizationService
      * @param array<string, array{nullable:bool, type:string, max:?int, json:bool}> $meta
      * @param list<array{name:string, integer:bool}> $primaryKey
      */
-    private function processTable(PDO $pdo, TextScrubber $scrubber, string $table, array $columns, array $meta, array $primaryKey): int
-    {
+    private function processTable(
+        PDO $pdo,
+        TextScrubber $scrubber,
+        string $table,
+        array $columns,
+        array $meta,
+        array $primaryKey,
+        ?CloneProtectedRows $protectedRows = null,
+    ): int {
         if ($primaryKey === []) {
             throw new \RuntimeException("Tabulka {$table} nemá primární klíč — nelze ji pseudonymizovat po řádcích.");
         }
@@ -223,14 +348,28 @@ final class AnonymizationService
             $pdo->query("SELECT {$selectSql} FROM " . DatabaseCloner::quote($table) . " ORDER BY {$order}")->fetchAll(PDO::FETCH_ASSOC),
             self::PAGE,
         );
+        // Zachycené archivy DPPO 504 přepisuje typově NonprofitDppoArchiveCloneAdapter; obecný
+        // průchod je přeskočí po stránkách, aby se jejich zapečetěný obsah nezměnil napůl.
+        $protectedTable = $keyset && $protectedRows !== null && $pkNames === ['id'] ? FinancialArchiveProtectedTable::tryFrom($table) : null;
         while (true) {
-            if ($keyset) {
+            $pageEnd = null;
+            if ($protectedTable !== null) {
+                $pageEnd = $protectedRows->lastIdOfPage($protectedTable, $last === null ? null : (int) $last, self::PAGE);
+                if ($pageEnd === null) {
+                    break;
+                }
+                $rows = $protectedRows->selectUnprotectedRange($protectedTable, $select, $last === null ? null : (int) $last, $pageEnd);
+            } elseif ($keyset) {
                 $sql = "SELECT {$selectSql} FROM " . DatabaseCloner::quote($table)
                     . ($last === null ? '' : ' WHERE ' . $order . ' > ' . (int) $last)
                     . " ORDER BY {$order} LIMIT " . self::PAGE;
                 $rows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
             } else {
                 $rows = array_shift($pending) ?? [];
+            }
+            if ($rows === [] && $pageEnd !== null) {
+                $last = $pageEnd;
+                continue;
             }
             if ($rows === []) {
                 break;
@@ -269,6 +408,10 @@ final class AnonymizationService
             } catch (\Throwable $e) {
                 $pdo->rollBack();
                 throw new \RuntimeException("Pseudonymizace tabulky {$table} selhala: " . $e->getMessage(), 0, $e);
+            }
+            if ($pageEnd !== null) {
+                $last = $pageEnd;
+                continue;
             }
             $last = $keyset ? end($rows)[$pkNames[0]] : null;
             if ($keyset ? count($rows) < self::PAGE : $pending === []) {
@@ -309,6 +452,8 @@ final class AnonymizationService
                 'password' => $this->passwordHash,
                 'blob_pdf' => $old === '' ? $old : PlaceholderFiles::pdf(),
                 'blob_text' => $old === '' ? $old : PlaceholderFiles::content('txt'),
+                'json' => $old === '' ? $old : ($table === 'accounting_closing_steps' && $column === 'payload'
+                    ? AssetReserveSourceCloneScrubber::payload(Fx504CloneScrubber::payload($old), $scrubber) : $this->cached($scrubber, $strategy, $table === 'activity_log' && $column === 'payload' ? Fx504CloneScrubber::payload($old) : $old)),
                 default => $old === '' ? $old : $this->cached($scrubber, $strategy, $old),
             };
             if ($new !== null) {
@@ -378,6 +523,7 @@ final class AnonymizationService
         $type = $spec['type_column'] !== null ? (string) ($row[$spec['type_column']] ?? '') : $spec['field'];
         [$field, $kind] = match ($type) {
             'birth_number', 'personal_identifier' => [PayrollSensitiveField::PERSONAL_IDENTIFIER, 'birth_number'],
+            'tax_family_identifier' => [PayrollSensitiveField::TAX_FAMILY_IDENTIFIER, 'birth_number'],
             'ecp', 'vcp', 'health_insurance_number' => [PayrollSensitiveField::PERSONAL_IDENTIFIER, 'shape'],
             'foreign_tax_identifier' => [PayrollSensitiveField::FOREIGN_TAX_IDENTIFIER, 'shape'],
             'email', 'contact_email' => [PayrollSensitiveField::CONTACT_EMAIL, 'email'],

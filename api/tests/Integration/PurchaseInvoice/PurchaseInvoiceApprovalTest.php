@@ -182,6 +182,35 @@ final class PurchaseInvoiceApprovalTest extends TestCase
         self::assertGreaterThan(0, $this->auditCount($id, 'purchase_invoice.approval_approved'));
     }
 
+    public function testFullyPaidDraftStaysPendingUntilApprovalThenBecomesPaid(): void
+    {
+        $id = $this->createInvoice([6000.0], header: 'A');
+        $pdo = $this->db->pdo();
+        $q = $pdo->prepare('SELECT total_with_vat FROM purchase_invoices WHERE supplier_id=? AND id=?');
+        $q->execute([$this->supplierId, $id]);
+        $amount = (float) $q->fetchColumn();
+        $writer = new \MyInvoice\Service\Migration\Shared\BankStatementImportWriter($this->db, 'synthetic-approval');
+        $statement = $writer->createStatement($this->supplierId, 'draft-paid', 'SYN-APPROVAL',
+            '1000000005', '0100', 'CZK', '2098-03-15', $this->accountantId);
+        $transaction = $writer->insertTransaction($this->supplierId, $statement, 'draft-paid', [
+            'source_ref' => 'synthetic-approval', 'posted_at' => '2098-03-15',
+            'amount' => number_format(-$amount, 2, '.', ''), 'currency' => 'CZK', 'bank_ref' => null,
+        ]);
+        $pdo->prepare("INSERT INTO payment_matches(supplier_id,bank_transaction_id,purchase_invoice_id,amount,match_type)
+            VALUES (?,?,?,?,'manual')")->execute([$this->supplierId, $transaction, $id, $amount]);
+
+        [$status, $body] = $this->transition($id);
+        self::assertSame(200, $status);
+        self::assertSame('draft', $this->invoiceStatus($id));
+        self::assertTrue($body['approval_requested']);
+        [$status, $decided] = $this->decide($this->approverA, $body['approvals'][0]['id'], 'approve');
+        self::assertSame(200, $status, json_encode($decided));
+        self::assertSame('paid', $this->invoiceStatus($id));
+        $q = $pdo->prepare('SELECT paid_at FROM purchase_invoices WHERE supplier_id=? AND id=?');
+        $q->execute([$this->supplierId, $id]);
+        self::assertSame('2098-03-15', $q->fetchColumn());
+    }
+
     public function testItemCentersNeedEveryApprover(): void
     {
         $id = $this->createInvoice([1000.0, 2500.0], items: [1 => 'A', 2 => 'B']);

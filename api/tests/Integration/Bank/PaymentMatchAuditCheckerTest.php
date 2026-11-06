@@ -336,6 +336,31 @@ final class PaymentMatchAuditCheckerTest extends TestCase
         self::assertEqualsWithDelta(227.63, $found['detail']['fx_on_czk_czk']['amount'], 0.01);
     }
 
+    /**
+     * Bankovní zápis převzatý z jiného programu (POHODA): kurzový rozdíl i částku úhrady
+     * zaúčtoval zdroj. Doklad převzatý v Kč z cizí měny nese kurzový rozdíl na CZK pohybu
+     * a částka nesedí kvůli jinému kanálu úhrady. Nic z toho se nehlásí.
+     */
+    public function testDoesNotFlagAmountOrFxOnTakenOverBankEntry(): void
+    {
+        $date = self::YEAR . '-06-02';
+        $pfId = $this->createPurchaseInvoice('PMA-TAKEN-001', $this->czkId, 1000.0, 1.0, 'paid', $date);
+        $txId = $this->createBankTx('CZK', -1300.0, $date);
+        $this->linkPaymentMatch($txId, $pfId, 1300.0);
+        $entryId = $this->posting->postDocument($this->supplierId, 'bank', $txId, [
+            ['account_code' => '321', 'side' => 'debit', 'amount' => 1000.0],
+            ['account_code' => '563', 'side' => 'debit', 'amount' => 300.0],
+            ['account_code' => '221', 'side' => 'credit', 'amount' => 1300.0],
+        ], ['entry_date' => $date, 'posted_by' => $this->userId, 'user_id' => $this->userId]);
+        $this->db->pdo()->prepare(
+            "INSERT INTO pohoda_import_map (supplier_id, kind, pohoda_key, target_id) VALUES (?, 'journal_entry', 'test|pma', ?)"
+        )->execute([$this->supplierId, $entryId]);
+
+        $items = $this->checker->audit($this->supplierId, self::YEAR . '-01-01', self::YEAR . '-12-31');
+
+        self::assertNull($this->findForTx($items, $txId));
+    }
+
     /** Protistrana platby (bank výpis) zjevně neodpovídá protistraně dokladu. */
     public function testFlagsCounterpartyMismatch(): void
     {
@@ -383,6 +408,24 @@ final class PaymentMatchAuditCheckerTest extends TestCase
     }
 
     /** Popis karetní transakce (zakončený kódem země) také není jméno protistrany. */
+    /** Banka u karty uvádí v protistraně sebe. Jiná než kartová platba se hlásí dál. */
+    public function testDoesNotFlagCounterpartyForCardPayment(): void
+    {
+        $date = self::YEAR . '-03-10';
+        $card = $this->createPurchaseInvoice('KARTA-1', $this->czkId, 500.00, 1.0, 'paid', $date, 'Obchod Karta s.r.o.');
+        $cardTx = $this->createBankTx('CZK', -500.00, $date, 'Banka Příkladová');
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '1234' WHERE id = ?")->execute([$cardTx]);
+        $this->linkPaymentMatch($cardTx, $card, 500.00);
+        $transfer = $this->createPurchaseInvoice('PREVOD-1', $this->czkId, 500.00, 1.0, 'paid', $date, 'Obchod Převod s.r.o.');
+        $transferTx = $this->createBankTx('CZK', -500.00, $date, 'Banka Příkladová');
+        $this->linkPaymentMatch($transferTx, $transfer, 500.00);
+
+        $items = $this->checker->audit($this->supplierId, self::STARTS_ON, self::ENDS_ON);
+
+        self::assertNull($this->findForTx($items, $cardTx));
+        self::assertContains('counterparty_mismatch', $this->findForTx($items, $transferTx)['issues'] ?? []);
+    }
+
     public function testDoesNotFlagCounterpartyForCardTransactionDescriptor(): void
     {
         $date = self::YEAR . '-07-04';

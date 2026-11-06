@@ -135,6 +135,7 @@ final class TenantPredicateTest extends TestCase
         'cash_registers',
         'cash_documents',
         'bank_posting_rules',
+        'bank_posting_rule_dimensions',
         'bank_posting_suggestions',
         'supplier_bank_accounts',
         'bank_transfer_matches',
@@ -160,6 +161,8 @@ final class TenantPredicateTest extends TestCase
         // §DM (1093_expense_classification_rules.sql) — per-tenant pravidla klasifikace
         // druhu výdaje.
         'expense_classification_rules',
+        // Pravidla výnosů (2217): účet položky vydané faktury.
+        'revenue_classification_rules',
         // §DM (1094_small_assets.sql) — karty evidence drobného majetku (§28/5 ZoÚ).
         'small_assets',
         // NEMPRI/HZUPN (1654, 1655) — případy dávek nemocenského pojištění.
@@ -408,6 +411,8 @@ final class TenantPredicateTest extends TestCase
         'LedgerInvariantService.php::ledgerIsEmpty' => 'invariant nad deníkem celé instance (viz docblock služby)',
         'LedgerInvariantService.php::i25AccumulatedNotAboveInputPrice' => 'invariant nad veškerým majetkem instance',
         'ActivityLogHashChain.php::verify' => 'hash chain auditního logu je jeden pro celou instanci',
+        'ActivityLogHashChain.php::prune' => 'retence spravovaného provozu promazává jediný hash chain celé instance',
+        'ActivityLogHashChain.php::lastIdCreatedBefore' => 'hledá hranici retence v jediném hash chainu celé instance',
         'AnonymizationService.php::resealAuditChain' => 'znovu zapečetí jediný hash chain celé anonymizované kopie instance',
         // Vrací POUZE bool „existuje někde práce?", žádná data nepřecházejí mezi
         // tenanty. Protějšek AiWorker::run(), který stejně tak jede přes všechny
@@ -416,8 +421,8 @@ final class TenantPredicateTest extends TestCase
         // přestala by pouštět práci ostatním.
         'CronPreflight.php::hasAiWork' => 'instance-wide brána cronu, vrací jen bool',
         // Tentýž případ jako hasAiWork: vrací POUZE bool „má tahle instalace kde
-        // číst poštu?". Dodavatele vybírá až samotná úloha podle
-        // `app.scan_all_suppliers` — cron žádný uživatelský kontext nemá.
+        // číst poštu?". Dodavatele vybírá až samotná úloha podle zapnutých
+        // schránek — cron žádný uživatelský kontext nemá.
         // Zúžení na jednu firmu by bránu rozbilo: instalace skenující všechny
         // dodavatele by přestala skenovat ty ostatní.
         'CronPreflight.php::hasBankEmailNoticeAccounts' => 'instance-wide brána cronu, vrací jen bool',
@@ -426,6 +431,7 @@ final class TenantPredicateTest extends TestCase
         // zápisu nad pěti firmami je jedno licenční místo. Zúžit počítání na
         // jednu firmu by limit rozbilo — každá firma by měla vlastní počet.
         'SeatPolicy.php::seatConditionSql' => 'licenční místa se počítají za celou instalaci',
+        'SeatPolicy.php::countActiveWriteTokens' => 'tokeny se zápisem se do licenčních míst počítají za celou instalaci',
 
         // Superadmin-only endpointy (jinak 403) — globální rozsah je jejich smysl.
         'ListSentEmailsAction.php::__invoke'         => 'superadmin přehled odeslaných e-mailů napříč instancí',

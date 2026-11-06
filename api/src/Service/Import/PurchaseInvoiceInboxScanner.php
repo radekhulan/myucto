@@ -204,8 +204,8 @@ final class PurchaseInvoiceInboxScanner
             // 2) Dedup — stačí, aby už systém znal KTERÝKOLIV soubor zásilky.
             $known = null;
             foreach ($members as $info) {
-                $existingId = $this->purchaseRepo->findIdByPdfHash($supplierId, $info['sha'])
-                    ?? $this->purchaseRepo->findIdBySourceHash($supplierId, $info['sha']);
+                $existingId = $this->purchaseRepo->findIdByPdfHash($supplierId, $info['sha'], activeOnly: true)
+                    ?? $this->purchaseRepo->findIdBySourceHash($supplierId, $info['sha'], activeOnly: true);
                 if ($existingId !== null) {
                     $known = ['file' => $info['real'], 'id' => $existingId];
                     break;

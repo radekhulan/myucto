@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Registration;
 
 use DOMDocument;
 use MyInvoice\Service\Payroll\Submission\CsszEmployerVariableSymbol;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 
 final readonly class PayrollRegistrationXmlValidator
 {
@@ -38,9 +39,7 @@ final readonly class PayrollRegistrationXmlValidator
                     . 'znovu, ať se soubor vytvoří z aktuálních dat.',
             );
         }
-        $schema = $this->schemas->schemaFor(
-            $payload->interaction->documentType,
-        );
+        $schema = $this->schemas->schemaFor($payload->form());
         $document = new DOMDocument();
         $previous = libxml_use_internal_errors(true);
         libxml_clear_errors();
@@ -262,6 +261,7 @@ final readonly class PayrollRegistrationXmlValidator
         } elseif ($payload->interaction->actionCode >= 2) {
             $this->validateEventSnapshot($payload);
         }
+        PayrollRegistrationSpecVersionRules::assert($payload);
     }
 
     private function validateEventSnapshot(
@@ -363,7 +363,11 @@ final readonly class PayrollRegistrationXmlValidator
                     && is_string($data['explanation_attachment']['name'] ?? null)),
             default => false,
         };
-        if ($valid && $action === 3) {
+        // EDV 1.5 (Changelog ř. 220, JMHZ-4797): pravidlo devíti dnů u 10223
+        // platí od REGZEC27 jen pro A1.
+        if ($valid && $action === 3
+            && $payload->specVersion === JmhzSpecVersion::V2026
+        ) {
             $this->validateA3StartWindow($payload, $data);
         }
         if (!$valid) {

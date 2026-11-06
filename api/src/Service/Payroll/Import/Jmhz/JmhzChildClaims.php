@@ -244,6 +244,7 @@ final class JmhzChildClaims
             'other_caregiver_given_name' => $claim['other_caregiver_given_name'] ?? null,
             'other_caregiver_family_name' => $claim['other_caregiver_family_name'] ?? null,
             'other_caregiver_birth_date' => $claim['other_caregiver_birth_date'] ?? null,
+            'other_caregiver_birth_number' => $claim['other_caregiver_birth_number'] ?? null,
         ]);
     }
 
@@ -318,6 +319,7 @@ final class JmhzChildClaims
             'other_caregiver_given_name' => null,
             'other_caregiver_family_name' => null,
             'other_caregiver_birth_date' => null,
+            'other_caregiver_birth_number' => null,
         ];
         $flag = $childCredit['other_caregiver'] ?? null;
         if ($flag === false) {
@@ -337,12 +339,18 @@ final class JmhzChildClaims
             $warnings[] = 'Hlášení uvádí víc jiných vyživujících osob; evidence drží jednu, převezme se první z nich.';
         }
         $birthDate = $first['birth_date'] ?? null;
-        if ($birthDate === null && is_string($first['birth_number'] ?? null)) {
+        $birthNumber = null;
+        if (is_string($first['birth_number'] ?? null)) {
             try {
-                $birthDate = CzechBirthNumber::birthDate(CzechBirthNumber::normalize($first['birth_number']));
+                $birthNumber = CzechBirthNumber::normalize($first['birth_number']);
+                $birthDate ??= CzechBirthNumber::birthDate($birthNumber);
             } catch (\InvalidArgumentException) {
-                $birthDate = null;
+                $birthNumber = null;
             }
+        }
+        // Rodné číslo (10434), které nesedí na datum narození z hlášení, se nepřebírá.
+        if ($birthNumber !== null && $birthDate !== CzechBirthNumber::birthDate($birthNumber)) {
+            $birthNumber = null;
         }
         if ($birthDate === null) {
             $warnings[] = 'Jiná vyživující osoba nemá v hlášení datum narození ani platné rodné číslo; '
@@ -356,6 +364,7 @@ final class JmhzChildClaims
             'other_caregiver_given_name' => (string) $first['given_name'],
             'other_caregiver_family_name' => (string) $first['family_name'],
             'other_caregiver_birth_date' => $birthDate,
+            'other_caregiver_birth_number' => $birthNumber,
         ];
     }
 

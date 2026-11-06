@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use DOMDocument;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Xml2027\JmhzCancellationXml2027Serializer;
 
 /**
  * Opravné podání, které pouze stornuje součásti individualizované části:
@@ -32,6 +33,7 @@ final class JmhzComponentCancellationXmlSerializer
 
     public function __construct(
         private readonly JmhzPackageSplitter $packageSplitter = new JmhzPackageSplitter(),
+        private readonly ?JmhzCancellationXml2027Serializer $serializer2027 = null,
     ) {}
 
     /**
@@ -71,6 +73,10 @@ final class JmhzComponentCancellationXmlSerializer
         array $cancellations,
         JmhzSubmissionEnvelope $envelope,
     ): array {
+        if (JmhzCancellationXmlSerializer::isVersion2027($request)) {
+            return ($this->serializer2027 ?? new JmhzCancellationXml2027Serializer($this->packageSplitter))
+                ->serializeComponentPackages($request, $cancellations, $envelope);
+        }
         if ($cancellations === []) {
             throw new JmhzXmlException(
                 'jmhz_amendment_without_components',

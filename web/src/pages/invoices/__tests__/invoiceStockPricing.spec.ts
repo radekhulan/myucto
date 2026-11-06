@@ -19,6 +19,7 @@ import {
   quoteFailureFallback,
   quoteQuantity,
   rowUnitOptions,
+  rowsToConfirmRepricing,
   rowsToRequote,
   stockUnitChoices,
   toBaseQuantity,
@@ -65,8 +66,10 @@ describe('invoice stock pricing', () => {
 
   it('záložní cena balení vynásobí cenu za základní jednotku poměrem', () => {
     expect(unitPriceForUnit(154.32, 'KT', 'ks', units)).toBe(1234.56)
-    expect(unitPriceForUnit(10, 'BAL', 'ks', units)).toBe(3.33)
+    expect(unitPriceForUnit(10, 'BAL', 'ks', units)).toBe(3.333333)
     expect(unitPriceForUnit(10, 'ks', 'ks', units)).toBe(10)
+    expect(unitPriceForUnit(0.0108, 'ks', 'ks', units)).toBe(0.0108)
+    expect(unitPriceForUnit(0.004, 'KT', 'ks', units)).toBe(0.032)
   })
 
   it('nacení kladným množstvím, prázdné jako jeden kus', () => {
@@ -103,6 +106,13 @@ describe('invoice stock pricing: žádná regrese editoru faktury', () => {
   const on = { stockEnabled: true, loaded: true }
   const pending = (over: Partial<PendingQuote> = {}): PendingQuote => ({
     seq: 7, stockItemId: 1, requestUnit: 'KT', unitAtRequest: 'ks', priceAtRequest: 99, ...over,
+  })
+
+  it('záporné ceny se nenaceňují automaticky ani při změně balení', () => {
+    const row = { stock_item_id: 1, unit: 'ks', unit_price_without_vat: -100 }
+    expect(rowsToRequote([row], () => auto(-100), on)).toEqual([])
+    expect(shouldRequoteOnUnitChange(auto(-100), -100, 'ks', 'KT', 'ks', units)).toBe(false)
+    expect(convertUnitPrice(-12.5, 'ks', 'KT', 'ks', units)).toBe(-100)
   })
 
   it('sklad vypnutý: jednotky z číselníku a nic se nepřeceňuje', () => {
@@ -281,5 +291,32 @@ describe('invoice stock pricing: cenové hladiny odběratelů', () => {
     expect(legacyRestorePrice({ unit: 'ks', sale_price_without_vat: null })).toBeNull()
     expect(legacyRestorePrice({ unit: 'ks', effective_price: null, sale_price_without_vat: 'abc' })).toBeNull()
     expect(legacyRestorePrice(undefined)).toBeNull()
+  })
+})
+
+describe('invoice stock pricing: přecenění uloženého dokladu po změně hladiny', () => {
+  const on = { stockEnabled: true, loaded: true, storedDocument: true }
+
+  it('zápornou jednotkovou cenu nepřecení, dobropis se záporným množstvím ponechá ve výběru', () => {
+    const returned = { stock_item_id: 1, unit: 'ks', quantity: 1, unit_price_without_vat: -100 }
+    const credit = { stock_item_id: 2, unit: 'ks', quantity: -1, unit_price_without_vat: 100 }
+    expect(rowsToConfirmRepricing([returned, credit], () => undefined, on)).toEqual([credit])
+  })
+
+  it('nabídne skladové řádky s uloženou i ručně přepsanou cenou, automatické nechá automatice', () => {
+    const stored = { id: 'stored', stock_item_id: 1, unit: 'ks', unit_price_without_vat: 100 }
+    const manual = { id: 'manual', stock_item_id: 2, unit: 'ks', unit_price_without_vat: 85 }
+    const autoRow = { id: 'auto', stock_item_id: 3, unit: 'ks', unit_price_without_vat: 99 }
+    const freeText = { id: 'text', stock_item_id: null, unit: 'hod', unit_price_without_vat: 100 }
+    const states: Record<string, StockQuoteState | undefined> = { manual: auto(99), auto: auto(99) }
+    const rows = rowsToConfirmRepricing([stored, manual, autoRow, freeText], row => states[row.id], on)
+    expect(rows.map(row => row.id)).toEqual(['stored', 'manual'])
+  })
+
+  it('nový doklad, vypnutý sklad a doklad před dokončením načtení se neptají', () => {
+    const stored = { stock_item_id: 1, unit: 'ks', unit_price_without_vat: 100 }
+    expect(rowsToConfirmRepricing([stored], () => undefined, { ...on, storedDocument: false })).toEqual([])
+    expect(rowsToConfirmRepricing([stored], () => undefined, { ...on, stockEnabled: false })).toEqual([])
+    expect(rowsToConfirmRepricing([stored], () => undefined, { ...on, loaded: false })).toEqual([])
   })
 })

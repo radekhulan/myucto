@@ -1008,6 +1008,19 @@ final class AiPdfExtractorUnitTest extends TestCase
             \MyInvoice\Service\Import\AiPdfExtractor::reconcileLineAmount(0.5, 235.05, 117.52));
     }
 
+    public function testReconcile_unitPricePrintedInCents_keepsQuantityWithExactPrice(): void
+    {
+        // Doklad tiskne 0,01 EUR/ks, řádek 2 700,00 za 250 000 ks → přesná cena 0,0108.
+        self::assertSame([250000.0, 0.0108],
+            \MyInvoice\Service\Import\AiPdfExtractor::reconcileLineAmount(250000.0, 0.01, 2700.0));
+        // 0,00 EUR/ks a řádek 1 000,00 → 0,004, ne 1 ks × 1 000.
+        self::assertSame([250000.0, 0.004],
+            \MyInvoice\Service\Import\AiPdfExtractor::reconcileLineAmount(250000.0, 0.0, 1000.0));
+        // Sleva: záporná cena zaokrouhlená na haléře drží znaménko.
+        self::assertSame([3.0, -0.333333],
+            \MyInvoice\Service\Import\AiPdfExtractor::reconcileLineAmount(3.0, -0.33, -1.0));
+    }
+
     public function testReconcile_negativeLineTotal_preservesSign(): void
     {
         // Záporný řádek (sleva/storno) s nesedícím součinem (5 × −23 = −115 ≠ −69)

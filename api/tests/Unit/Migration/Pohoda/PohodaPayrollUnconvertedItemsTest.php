@@ -89,6 +89,21 @@ final class PohodaPayrollUnconvertedItemsTest extends TestCase
         self::assertSame(15.0, $unconverted['absence:H08']['hours'] ?? null);
     }
 
+    /**
+     * Pojišťovna mimo číselník (PAMICA „Samoplátce", kód 300) se hlásí k doplnění jen
+     * tam, kde vztah na zdravotní pojištění odvádí; dohoda bez účasti ji nepotřebuje.
+     */
+    public function testUnknownInsurerIsReportedOnlyWhenTheRelationIsInsured(): void
+    {
+        $xml = str_replace('<Kod>111</Kod>', '<Kod>300</Kod>', PohodaPayrollMealAllowanceAndSickDaysTest::payrollXml());
+        file_put_contents($this->file, $xml);
+        self::assertNotSame([], array_filter($this->month()['omitted'], static fn (string $t): bool => str_contains($t, 'pojišťovny 300')));
+
+        $xml = str_replace(['<JeDPP>0</JeDPP>', '<RefPoj>1</RefPoj><KcPrum>'], ['<JeDPP>1</JeDPP>', '<RefPoj>1</RefPoj><BezZdr>1</BezZdr><KcPrum>'], $xml);
+        file_put_contents($this->file, $xml);
+        self::assertSame([], array_values(array_filter($this->month()['omitted'], static fn (string $t): bool => str_contains($t, 'pojišťovny'))));
+    }
+
     /** Vědomě vynechaná položka katalogu má význam `ignore`, neznámá `unknown`. */
     public function testCatalogDistinguishesDeliberateIgnoreFromUnknown(): void
     {

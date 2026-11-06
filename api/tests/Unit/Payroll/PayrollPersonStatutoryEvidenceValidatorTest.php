@@ -35,6 +35,31 @@ final class PayrollPersonStatutoryEvidenceValidatorTest extends TestCase
         );
     }
 
+    /**
+     * Den podpisu prohlášení (JMHZ 10575) jde do snímku jen zadaný a jen
+     * u podepsaného prohlášení; bez něj zůstává snímek beze změny.
+     */
+    public function testDeclarationSignatureDateIsKeptOnlyForSignedDeclaration(): void
+    {
+        $raw = $this->completeRaw();
+        self::assertArrayNotHasKey(
+            'signed_on',
+            $this->validator->normalize(42, '2026-06-30', $raw)['income_tax']['declaration'],
+        );
+
+        $raw['income_tax']['declarations'][0]['signed_on'] = '2026-01-05';
+        self::assertSame(
+            '2026-01-05',
+            $this->validator->normalize(42, '2026-06-30', $raw)['income_tax']['declaration']['signed_on'],
+        );
+
+        $raw['income_tax']['declarations'][0]['status'] = 'not-signed';
+        $raw['income_tax']['declarations'][0]['evidence_reference'] = null;
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('podepsaného');
+        $this->validator->normalize(42, '2026-06-30', $raw);
+    }
+
     public function testRejectsOverlappingSingularAndScopedIntervals(): void
     {
         $raw = $this->completeRaw();

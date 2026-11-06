@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
 use DOMDocument;
+use MyInvoice\Service\Payroll\Submission\Jmhz\Xml2027\JmhzCancellationXml2027Serializer;
 
 /**
  * Stornující podání (typ „S") — zneplatnění všech dosud podaných hlášení
@@ -29,10 +30,24 @@ final class JmhzCancellationXmlSerializer
 {
     private const XMLNS = 'http://www.w3.org/2000/xmlns/';
 
+    public function __construct(
+        private readonly JmhzCancellationXml2027Serializer $serializer2027 = new JmhzCancellationXml2027Serializer(),
+    ) {}
+
+    /** Storno za období verze 2027 staví serializér 2027; o verzi rozhoduje období. */
+    public static function isVersion2027(JmhzCancellationRequest $request): bool
+    {
+        return $request->year >= 2000 && $request->year <= 2999
+            && JmhzSpecVersion::forPeriod($request->year, $request->month) === JmhzSpecVersion::V2027;
+    }
+
     public function serialize(
         JmhzCancellationRequest $request,
         JmhzSubmissionEnvelope $envelope,
     ): string {
+        if (self::isVersion2027($request)) {
+            return $this->serializer2027->serialize($request, $envelope);
+        }
         JmhzSubmissionFlagMatrix::assertAllowed(
             JmhzSubmissionFlagMatrix::TYPE_CANCELLATION,
             false,

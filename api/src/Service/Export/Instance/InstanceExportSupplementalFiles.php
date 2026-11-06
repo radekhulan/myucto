@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Export\Instance;
 
 use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Service\Migration\Shared\ImportJobReportFiles;
 use PDO;
 
 final class InstanceExportSupplementalFiles
@@ -27,12 +28,14 @@ final class InstanceExportSupplementalFiles
         $stmt->execute([$supplierId]);
         while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
             $id = (int) $row['id'];
-            $storagePath = 'import-jobs/' . $supplierId . '/reports/' . $id . '.json';
-            if ((string) $row['result_path'] !== $storagePath) {
-                continue;
-            }
-            $this->add($files, RuntimePaths::storage('import-jobs/' . $supplierId . '/reports'), $id . '.json',
-                $storagePath, 'prilohy/importy/' . $id . '.json', 'import_report');
+            $storagePath = (string) $row['result_path'];
+            $source = ImportJobReportFiles::resolve($supplierId, $id, $storagePath);
+            if ($source === null) continue;
+            $files[] = [
+                'source' => $source, 'storage_path' => $storagePath,
+                'entry' => 'prilohy/importy/' . basename($source),
+                'sha256' => hash_file('sha256', $source) ?: null, 'kind' => 'import_report',
+            ];
         }
         $stmt->closeCursor();
         return $files;

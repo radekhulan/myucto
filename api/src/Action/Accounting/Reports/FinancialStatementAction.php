@@ -233,8 +233,10 @@ final class FinancialStatementAction
         $params = $this->validateParams($request, $response, $supplierId, $err);
         if ($params === null) return $err;
 
+        $columns = (string) ($request->getQueryParams()['columns'] ?? '') === '1' ? $this->columnOptions($request) : null;
+
         try {
-            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null);
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $columns);
         } catch (ReportException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         } catch (\Throwable $e) {
@@ -274,7 +276,7 @@ final class FinancialStatementAction
         }
 
         try {
-            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null);
+            $data = $this->statements->accountView($supplierId, $params['period_id'], $params['as_of'], $params['dimension'] ?? null, $this->columnOptions($request));
             $out = $format === 'pdf'
                 ? [
                     'bytes'    => $this->accountViewPdf->render($data + ['part' => $part, 'unit' => $unit]),
@@ -300,6 +302,20 @@ final class FinancialStatementAction
             ->withHeader('Content-Disposition', 'attachment; filename="' . $out['filename'] . '"')
             ->withHeader('Content-Length', (string) strlen($out['bytes']))
             ->withHeader('Cache-Control', 'private, no-store');
+    }
+
+    /**
+     * Přepínače sloupcového pohledu, stejné pro obrazovku, XLSX i PDF.
+     *
+     * @return array{hide_zero:bool, analytics:bool}
+     */
+    private function columnOptions(Request $request): array
+    {
+        $q = $request->getQueryParams();
+        return [
+            'hide_zero' => (string) ($q['hide_zero'] ?? '1') !== '0',
+            'analytics' => (string) ($q['analytics'] ?? '1') !== '0',
+        ];
     }
 
     /** @param 'balance_sheet'|'income_statement'|'income_statement_purpose' $type */
@@ -370,7 +386,7 @@ final class FinancialStatementAction
         }
 
         $this->logger->log('report.accounting_export', $this->userId($request), 'report', null,
-            ['report' => $type, 'format' => $format],
+            ['report' => $type, 'format' => $format] + (($params['accrual_spread'] ?? false) ? ['accrual_spread' => true] : []),
             $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
             $request->getHeaderLine('User-Agent'), $supplierId);
 
@@ -384,15 +400,16 @@ final class FinancialStatementAction
 
     /**
      * @param 'balance_sheet'|'income_statement'|'income_statement_purpose' $type
-     * @param array{period_id:int, as_of:?string, scope:string, dimension:?\MyInvoice\Service\Accounting\Dimension\DimensionFilter} $params
+     * @param array{period_id:int, as_of:?string, scope:string, dimension:?\MyInvoice\Service\Accounting\Dimension\DimensionFilter, accrual_spread?:bool} $params
      */
     private function buildStatement(int $supplierId, string $type, array $params): array
     {
+        $spread = $params['accrual_spread'] ?? false;
         return match ($type) {
-            'balance_sheet' => $this->statements->balanceSheet($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null),
+            'balance_sheet' => $this->statements->balanceSheet($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null, $spread),
             FinancialStatementService::TYPE_PURPOSE => $this->statements
-                ->incomeStatementByFunction($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null),
-            default => $this->statements->incomeStatement($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null),
+                ->incomeStatementByFunction($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null, $spread),
+            default => $this->statements->incomeStatement($supplierId, $params['period_id'], $params['as_of'], $params['scope'], $params['dimension'] ?? null, $spread),
         };
     }
 
@@ -441,12 +458,20 @@ final class FinancialStatementAction
         $dimension = $this->dimensionFilterParam($this->dimensions, $request, $response, $supplierId, $err);
         if ($dimension === false) return null;
 
+        // Průběžné časové rozlišení mimo deník: jen pohled výkazu, výchozí vypnutý.
+        $spread = trim((string) ($q['accrual_spread'] ?? '0'));
+        if (!in_array($spread, ['', '0', '1'], true)) {
+            $err = Json::error($response, 'validation_failed', "accrual_spread musí být 0 nebo 1.", 422);
+            return null;
+        }
+
         $err = null;
         return [
             'period_id' => $periodId,
             'as_of'     => $asOf === '' ? null : $asOf,
             'scope'     => $scope,
             'dimension' => $dimension,
+            'accrual_spread' => $spread === '1',
         ];
     }
 

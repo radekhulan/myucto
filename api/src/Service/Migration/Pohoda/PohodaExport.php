@@ -149,6 +149,24 @@ final class PohodaExport
     }
 
     /**
+     * Agenda vedená v osnově pro neziskové organizace (vyhláška 504): vlastní zdroje na
+     * skupině 9, žádný účet základního kapitálu 411. Hranice platí pro MDB i XML export,
+     * typ účetní jednotky z konfigurace POHODY XML export nenese.
+     */
+    public function hasNonprofitChart(): bool
+    {
+        $equity504 = false;
+        foreach ($this->records('chart', 'itemAccount') as $r) {
+            $code = (string) ($r['@code'] ?? '');
+            if (str_starts_with($code, '411')) {
+                return false;
+            }
+            $equity504 = $equity504 || str_starts_with($code, '901') || str_starts_with($code, '931');
+        }
+        return $equity504;
+    }
+
+    /**
      * @return \Generator<int,array<string,mixed>>
      */
     public function records(string $key, string $tag): \Generator

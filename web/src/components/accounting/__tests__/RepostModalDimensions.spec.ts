@@ -28,6 +28,7 @@ vi.mock('@/api/accounting', () => ({
     repost: (...args: unknown[]) => m.repost(...args),
   },
   postingErrorI18nKey: (code: string) => `err.${code}`,
+  postingErrorMessage: (_t: unknown, e: any) => `err.${e?.response?.data?.error?.code}`,
 }))
 vi.mock('@/api/dimensions', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/dimensions')>()),

@@ -958,28 +958,40 @@ final class PayrollRetroactiveYearFlowTest extends TestCase
     /** @return ?array<string,int> */
     private function personResult(int $revisionId, int $employeeId): ?array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT person.result_snapshot_json
-               FROM payroll_statutory_person_results person
-               JOIN payroll_statutory_results result
-                 ON result.supplier_id = person.supplier_id AND result.id = person.statutory_result_id
-              WHERE result.supplier_id = ? AND result.revision_id = ? AND result.calculation_kind = "net_pay"',
-        );
-        $stmt->execute([$this->supplierId, $revisionId]);
-        foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $json) {
-            $row = json_decode((string) $json, true);
-            if (is_array($row) && in_array("employee:{$employeeId}", [$row['person_reference'] ?? null, $row['person_id'] ?? null], true)) {
+        // Výsledky schválené revize se nemění: snímky všech osob se načtou jednou za revizi.
+        if (!isset($this->personResults[$revisionId])) {
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT person.result_snapshot_json
+                   FROM payroll_statutory_person_results person
+                   JOIN payroll_statutory_results result
+                     ON result.supplier_id = person.supplier_id AND result.id = person.statutory_result_id
+                  WHERE result.supplier_id = ? AND result.revision_id = ? AND result.calculation_kind = "net_pay"',
+            );
+            $stmt->execute([$this->supplierId, $revisionId]);
+            $results = [];
+            foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $json) {
+                $row = json_decode((string) $json, true);
+                if (!is_array($row)) {
+                    continue;
+                }
                 $out = [];
                 foreach (['cash_income', 'employee_social', 'employee_health', 'advance_tax', 'withholding_tax', 'tax_bonus', 'annual_settlement', 'deducted', 'net_payable'] as $field) {
                     $out[$field] = (int) ($row["{$field}_minor_units"] ?? 0);
                 }
-
-                return $out;
+                foreach ([$row['person_reference'] ?? null, $row['person_id'] ?? null] as $reference) {
+                    if (is_string($reference)) {
+                        $results[$reference] ??= $out;
+                    }
+                }
             }
+            $this->personResults[$revisionId] = $results;
         }
 
-        return null;
+        return $this->personResults[$revisionId]["employee:{$employeeId}"] ?? null;
     }
+
+    /** @var array<int,array<string,array<string,int>>> výsledky čisté mzdy podle revize a osoby */
+    private array $personResults = [];
 
     /** @return array<string,string> identifikátor PPV => formulář */
     private static function forms(string $xml): array

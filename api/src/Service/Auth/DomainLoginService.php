@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Auth;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\TenantDomainMiddleware;
+use MyInvoice\Middleware\DomainLoginSessionMiddleware;
 use MyInvoice\Repository\UserSupplierRepository;
 use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\Tenant\ClientRoutePolicy;
@@ -14,7 +15,7 @@ use MyInvoice\Service\Tenant\TenantDomainResolver;
 use PDO;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
-/** Jednorázový PKCE přechod z canonical loginu na host-only session vlastní domény. */
+/** Jednorázový PKCE přechod z canonical loginu na session svázanou s vlastní doménou. */
 final class DomainLoginService
 {
     private const REQUEST_TTL_MINUTES = 10;
@@ -110,6 +111,35 @@ final class DomainLoginService
     }
 
     /**
+     * Popis čekajícího předání pro potvrzovací obrazovku na canonical adrese.
+     * Ověří totéž co autorizace (platnost, stav, doménu i členství), ale kód
+     * nevydá a požadavek nespotřebuje.
+     *
+     * @param array<string,mixed> $user
+     * @param array<string,mixed> $session
+     * @return array{target_hostname:string,supplier_name:string}
+     */
+    public function describe(
+        Request $request,
+        string $requestToken,
+        string $state,
+        array $user,
+        array $session,
+    ): array {
+        $userId = $this->assertCanonicalAuthorization($request, $requestToken, $state, $user, $session);
+        $row = $this->authorizableRequest($this->db->pdo(), $requestToken, $state, $userId, false);
+        return self::confirmationDetails($row);
+    }
+
+    /**
+     * Vydá jednorázový autorizační kód pro vlastní doménu.
+     *
+     * Bez výslovného potvrzení (`$confirmed`) projde jen session, která vznikla
+     * až v rámci tohoto předání, tedy přihlášením na canonical adrese po
+     * založení požadavku. Starší session by jinak po jediném kliknutí na
+     * podstrčený odkaz předala přihlášení doméně, kterou ovládá kdokoli s její DNS.
+     * Superadmin bez přiřazení k firmě potvrzuje předání vždy, i hned po přihlášení.
+     *
      * @param array<string,mixed> $user
      * @param array<string,mixed> $session
      * @return array{redirect_url:string}
@@ -120,49 +150,21 @@ final class DomainLoginService
         string $state,
         array $user,
         array $session,
+        bool $confirmed = false,
     ): array {
-        $context = self::context($request);
-        if ($context->mode !== TenantDomainContext::CANONICAL) {
-            throw new DomainLoginException('canonical_origin_required', 'Domain login lze autorizovat jen na canonical originu.', 403);
-        }
-        self::assertOpaqueToken($requestToken);
-        self::assertOpaqueToken($state);
-        $userId = (int) ($user['id'] ?? 0);
-        if ($userId < 1 || ($session['assurance_level'] ?? 'setup') === 'setup') {
-            throw new DomainLoginException('authentication_required', 'Nejdřív dokonči přihlášení včetně MFA.', 401);
-        }
+        $userId = $this->assertCanonicalAuthorization($request, $requestToken, $state, $user, $session);
 
         $pdo = $this->db->pdo();
         $pdo->beginTransaction();
         try {
-            $stmt = $pdo->prepare(
-                "SELECT r.*, d.status AS domain_status, d.purpose AS domain_purpose
-                   FROM supplier_domain_login_requests r
-                   JOIN supplier_domains d
-                     ON d.id = r.supplier_domain_id AND d.supplier_id = r.supplier_id
-                  WHERE r.request_token_hash = ?
-                    AND r.expires_at > UTC_TIMESTAMP(6)
-                    AND r.used_at IS NULL
-                  LIMIT 1 FOR UPDATE"
-            );
-            $stmt->execute([self::hash($requestToken)]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($row === false
-                || !hash_equals((string) $row['state_hash'], self::hash($state))
-                || $row['domain_status'] !== 'active'
-                || !in_array($row['domain_purpose'], ['portal', 'all'], true)
-                || $row['authorization_code_hash'] !== null
-            ) {
-                throw new DomainLoginException('invalid_domain_login_request', 'Požadavek na přihlášení je neplatný nebo expiroval.', 400);
-            }
-
-            $supplierId = (int) $row['supplier_id'];
-            // Globální superadmin má výjimku pouze z membershipu; platnost
-            // domény, účel a vazbu na supplier už nezávisle ověřily guardy výše.
-            if (!$this->roles->isSuperadmin($userId)
-                && !in_array($supplierId, $this->memberships->allowedSupplierIds($userId), true)
-            ) {
-                throw new DomainLoginException('forbidden_supplier', 'K portálu této firmy nemáš oprávnění.', 403);
+            $row = $this->authorizableRequest($pdo, $requestToken, $state, $userId, true);
+            if (!$confirmed && (!self::sessionStartedWithin($session, $row) || $row['superadmin_without_membership'])) {
+                throw new DomainLoginException(
+                    'domain_login_confirmation_required',
+                    'Předání přihlášení na vlastní doménu je potřeba potvrdit.',
+                    409,
+                    self::confirmationDetails($row),
+                );
             }
 
             $code = self::randomToken();
@@ -198,6 +200,108 @@ final class DomainLoginService
                 . '?request=' . rawurlencode($requestToken)
                 . '&code=' . rawurlencode($code)
                 . '&state=' . rawurlencode($state),
+        ];
+    }
+
+    /**
+     * @param array<string,mixed> $user
+     * @param array<string,mixed> $session
+     */
+    private function assertCanonicalAuthorization(
+        Request $request,
+        string $requestToken,
+        string $state,
+        array $user,
+        array $session,
+    ): int {
+        $context = self::context($request);
+        if ($context->mode !== TenantDomainContext::CANONICAL) {
+            throw new DomainLoginException('canonical_origin_required', 'Domain login lze autorizovat jen na canonical originu.', 403);
+        }
+        self::assertOpaqueToken($requestToken);
+        self::assertOpaqueToken($state);
+        $flow = $request->getAttribute(DomainLoginSessionMiddleware::ATTR_VERIFIED_FLOW);
+        // Potvrzení cílové domény nenahrazuje nové přihlášení do oddělené relace.
+        if (!is_array($flow)
+            || !hash_equals(self::hash($requestToken), (string) ($flow['request_token_hash'] ?? ''))
+            || !hash_equals(self::hash($state), (string) ($flow['state_hash'] ?? ''))
+        ) {
+            throw new DomainLoginException('fresh_authentication_required', 'Pro klientskou doménu je nutné nové přihlášení.', 401);
+        }
+        $userId = (int) ($user['id'] ?? 0);
+        if ($userId < 1 || ($session['assurance_level'] ?? 'setup') === 'setup') {
+            throw new DomainLoginException('authentication_required', 'Nejdřív dokonči přihlášení včetně MFA.', 401);
+        }
+        return $userId;
+    }
+
+    /**
+     * Načte platný, dosud neautorizovaný požadavek a ověří členství uživatele
+     * ve firmě, které doména patří. Superadmin smí i bez přiřazení (má přístup
+     * ke všem firmám), vždy ale s výslovným potvrzením. Session domény je pak
+     * svázaná s jejím hostname, zamčená na její firmu a na doméně projdou jen
+     * cesty klientského rozhraní, takže víc než canonical adresa nedává.
+     *
+     * @return array<string,mixed>
+     */
+    private function authorizableRequest(PDO $pdo, string $requestToken, string $state, int $userId, bool $lock): array
+    {
+        $stmt = $pdo->prepare(
+            "SELECT r.*, UNIX_TIMESTAMP(r.created_at) AS created_epoch,
+                    d.status AS domain_status, d.purpose AS domain_purpose,
+                    COALESCE(NULLIF(s.display_name, ''), s.company_name) AS supplier_name
+               FROM supplier_domain_login_requests r
+               JOIN supplier_domains d
+                 ON d.id = r.supplier_domain_id AND d.supplier_id = r.supplier_id
+               LEFT JOIN supplier s ON s.id = r.supplier_id
+              WHERE r.request_token_hash = ?
+                AND r.expires_at > UTC_TIMESTAMP(6)
+                AND r.used_at IS NULL
+              LIMIT 1" . ($lock ? ' FOR UPDATE' : '')
+        );
+        $stmt->execute([self::hash($requestToken)]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false
+            || !hash_equals((string) $row['state_hash'], self::hash($state))
+            || $row['domain_status'] !== 'active'
+            || !in_array($row['domain_purpose'], ['portal', 'all'], true)
+            || $row['authorization_code_hash'] !== null
+        ) {
+            throw new DomainLoginException('invalid_domain_login_request', 'Požadavek na přihlášení je neplatný nebo expiroval.', 400);
+        }
+
+        $member = in_array((int) $row['supplier_id'], $this->memberships->allowedSupplierIds($userId), true);
+        if (!$member && !$this->roles->isSuperadmin($userId)) {
+            throw new DomainLoginException('forbidden_supplier', 'K portálu této firmy nemáš oprávnění.', 403);
+        }
+        $row['superadmin_without_membership'] = !$member;
+        return $row;
+    }
+
+    /**
+     * Session vznikla až po založení požadavku, tedy přihlášením v rámci
+     * tohoto předání. Rotace zamčené session zachovává původní `created_at`,
+     * takže odemčení starší session čerstvé přihlášení nepředstírá.
+     *
+     * @param array<string,mixed> $session
+     * @param array<string,mixed> $row
+     */
+    private static function sessionStartedWithin(array $session, array $row): bool
+    {
+        $sessionCreated = (int) ($session['created_at'] ?? 0);
+        $requestCreated = (int) floor((float) ($row['created_epoch'] ?? 0));
+        return $sessionCreated > 0 && $requestCreated > 0 && $sessionCreated >= $requestCreated;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array{target_hostname:string,supplier_name:string}
+     */
+    private static function confirmationDetails(array $row): array
+    {
+        return [
+            'target_hostname' => (string) $row['target_hostname'],
+            'supplier_name' => (string) ($row['supplier_name'] ?? ''),
         ];
     }
 
@@ -272,10 +376,9 @@ final class DomainLoginService
                 throw new DomainLoginException('authentication_expired', 'Uživatel už není aktivní.', 401);
             }
             $userId = (int) $user['id'];
-            // Roli i membership ověř znovu těsně před session. Výjimka globálního
-            // superadmina nemění vazbu requestu na doménu, firmu, hostname a PKCE.
-            if (!$this->roles->isSuperadmin($userId)
-                && !in_array($context->supplierId, $this->memberships->allowedSupplierIds($userId), true)
+            // Membership ověř znovu těsně před session (superadmin má přístup ke všem firmám).
+            if (!in_array($context->supplierId, $this->memberships->allowedSupplierIds($userId), true)
+                && !$this->roles->isSuperadmin($userId)
             ) {
                 throw new DomainLoginException('forbidden_supplier', 'Přístup k firmě byl mezitím odebrán.', 403);
             }
@@ -288,6 +391,9 @@ final class DomainLoginService
                     : null,
                 $row['auth_credential_id'] !== null ? (int) $row['auth_credential_id'] : null,
             );
+            // Výměnu volá hostname vlastní domény, tedy strana, která drží PKCE
+            // verifier i výsledný token. Session proto platí jen na této doméně
+            // a na canonical adrese ani jiné doméně ji AuthMiddleware nepřijme.
             $session = $this->sessions->createInTransaction(
                 $pdo,
                 $cutoff,
@@ -295,6 +401,7 @@ final class DomainLoginService
                 $ip,
                 $request->getHeaderLine('User-Agent'),
                 $authContext,
+                (int) $row['supplier_domain_id'],
             );
             $used = $pdo->prepare(
                 'UPDATE supplier_domain_login_requests SET used_at = ? WHERE id = ? AND used_at IS NULL'

@@ -12,6 +12,7 @@ use MyInvoice\Repository\AssetRepository;
 use MyInvoice\Repository\DepreciationEntryRepository;
 use MyInvoice\Service\Accounting\Assets\AssetException;
 use MyInvoice\Service\Accounting\Assets\AssetService;
+use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Reports\AssetDepreciationCardReportService;
 use MyInvoice\Service\Accounting\Reports\ReportException;
 use MyInvoice\Service\ActivityLogger;
@@ -141,6 +142,8 @@ final class AssetAction
             $result = $this->service->update($supplierId, $id, $body);
         } catch (AssetException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (PostingException $e) {
+            return $this->mapPostingError($response, $e);
         } catch (\Throwable $e) {
             return $this->serverError($response, $e, 'Kartu majetku se nepodařilo upravit');
         }

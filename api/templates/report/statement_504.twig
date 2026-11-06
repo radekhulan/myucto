@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="cs"><head><meta charset="utf-8"><style>
+body { font-family: dejavusans, sans-serif; font-size: 8pt; color: #15131d; }
+h1 { font-size: 16pt; margin-bottom: 2mm; } h2 { font-size: 11pt; margin: 5mm 0 2mm; }
+.meta { color: #555; margin-bottom: 1mm; } .entity { margin: 3mm 0; }
+table { width: 100%; border-collapse: collapse; } th { background: #eeeeee; text-align: left; font-size: 7pt; }
+td, th { padding: 1.3mm; border-bottom: 0.3pt solid #ddd; vertical-align: top; }
+.number { text-align: right; width: 25mm; } .code { width: 17mm; } .note { color: #555; font-size: 7pt; margin-top: 4mm; }
+.warning { color: #a11; padding: 2mm; border: 0.5pt solid #a11; margin: 3mm 0; }
+.header-cell { border: 0; padding: 0 0 4mm; }
+</style></head><body>
+<table><tr><td class="header-cell">
+<h1>{{ title }}</h1>
+<div class="meta">{{ legal }} · {{ scope_label }} · {{ unit_label }}</div>
+<div class="meta">Účetní období {{ period_label }} · k {{ date_label }}</div>
+{% if interim %}<div class="meta">Průběžný výkaz v rámci účetního období</div>{% endif %}
+<div class="entity"><strong>{{ entity.name }}</strong>{% if entity.ico %} · IČO {{ entity.ico }}{% endif %}<br>{{ entity.address }}</div>
+{% if entity.prepared_at %}<div class="meta">Okamžik sestavení: {{ entity.prepared_at }}</div>{% endif %}
+{% if dimension and dimension.label %}<div class="meta">Dimenze: {{ dimension.label }}</div>{% endif %}
+</td></tr></table>
+{% if management %}<div class="meta">Pracovní přehled zůstatků, nikoli závěrkový formulář. Kreditní zůstatky jsou záporné.</div>{% endif %}
+{% if checks.unresolved_pending_result is defined and checks.unresolved_pending_result != 0 %}<div class="warning">Výsledek ve schvalovacím řízení není vypořádán: {{ checks.unresolved_pending_result|cz_money }} Kč.</div>{% endif %}
+{% if checks.balanced is defined and not checks.balanced %}<div class="warning">Aktiva a pasiva se nerovnají.</div>{% endif %}
+{% if checks.reconciliation_difference is defined and checks.reconciliation_difference != 0 %}<div class="warning">Rozdíl účetního odsouhlasení: {{ checks.reconciliation_difference|cz_money }} Kč.</div>{% endif %}
+{% for table in tables %}{% if table.title != title %}<h2>{{ table.title }}</h2>{% endif %}<table><thead><tr>
+{% for header in table.headers %}<th{% if loop.index > 2 %} class="number"{% elseif loop.first %} class="code"{% endif %}>{{ header }}</th>{% endfor %}
+</tr></thead><tbody>{% for row in table.rows %}<tr>
+{% for cell in row %}<td{% if loop.index > 2 %} class="number"{% endif %}>{% if loop.index > 2 %}{% if cell is not null %}{{ cell|number_format(unit_label == 'v Kč' ? 2 : 0, ',', ' ') }}{% endif %}{% else %}{{ cell }}{% endif %}</td>{% endfor %}
+</tr>{% endfor %}</tbody></table>{% endfor %}
+{% if rounding_note %}<div class="note">{{ rounding_note }}</div>{% endif %}
+{% if deferred_tax_note is defined %}<div class="note">{{ deferred_tax_note|nl2br }}</div>{% endif %}
+</body></html>

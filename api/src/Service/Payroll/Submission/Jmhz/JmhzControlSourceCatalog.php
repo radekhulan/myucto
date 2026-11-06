@@ -8,8 +8,30 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 
 final class JmhzControlSourceCatalog
 {
-    public const CATALOG_KEY = 'jmhz-controls-1.4.2.10-source-v4';
-    public const MANIFEST_SHA256 = '565bfb145efd1e7c0893e81c26b3d865c486929dc44cef72620340b663b4e493';
+    public const CATALOG_KEY = 'jmhz-controls-1.4.2.11-source-v4';
+    public const MANIFEST_SHA256 = '05e26c2722a72c989282ed72939faa3cedc02789239b0a798f4ecd33b4dca195';
+
+    /**
+     * Katalog kontrol 1.5.0.4 pro vykazovaná období od 01/2027
+     * ({@see JmhzSpecVersion}). Leží v balíku slovníku 1.5.0.3 a odkazuje na jeho
+     * manifest ({@see JmhzSpecPackageCatalog::PACKAGE_KEY_2027}).
+     */
+    public const CATALOG_KEY_2027 = 'jmhz-controls-1.5.0.4-source-v4';
+    public const MANIFEST_SHA256_2027 = 'f7e56868eba2cf20790f46619686077be83a45922e4ff77e9dfcad9f15ba94d3';
+
+    /** @var array<string, array{directory:string,catalog_key:string,manifest_sha256:string}> */
+    private const PINS = [
+        '2026' => [
+            'directory' => 'dictionary-1.4.1.6',
+            'catalog_key' => self::CATALOG_KEY,
+            'manifest_sha256' => self::MANIFEST_SHA256,
+        ],
+        '2027' => [
+            'directory' => 'dictionary-1.5.0.3',
+            'catalog_key' => self::CATALOG_KEY_2027,
+            'manifest_sha256' => self::MANIFEST_SHA256_2027,
+        ],
+    ];
 
     /** @var array<int, JmhzControlDefinition> */
     private array $definitions = [];
@@ -23,8 +45,9 @@ final class JmhzControlSourceCatalog
     public function __construct(
         private readonly array $manifest,
         array $specManifest,
+        private readonly JmhzSpecVersion $version = JmhzSpecVersion::V2026,
     ) {
-        self::validateManifest($manifest, $specManifest);
+        self::validateManifest($manifest, $specManifest, $version);
         foreach (self::rows($manifest['payload'], 'controls') as $row) {
             $id = self::positiveInt($row, 'control_id');
             $this->definitions[$id] = new JmhzControlDefinition(
@@ -52,17 +75,26 @@ final class JmhzControlSourceCatalog
 
     public static function load(?string $resourceRoot = null): self
     {
+        return self::loadFor(JmhzSpecVersion::V2026, $resourceRoot);
+    }
+
+    /**
+     * Katalog kontrol ročníku specifikace. Ročník 2027 se načte jen s připnutým
+     * balíkem slovníku ({@see JmhzSpecPackageCatalog::requirePin()}).
+     */
+    public static function loadFor(JmhzSpecVersion $version, ?string $resourceRoot = null): self
+    {
         $root = $resourceRoot ?? dirname(__DIR__, 5) . '/resources/payroll/jmhz';
-        $directory = $root . DIRECTORY_SEPARATOR . 'dictionary-1.4.1.6';
+        $pin = self::PINS[$version->value];
+        $directory = $root . DIRECTORY_SEPARATOR . $pin['directory'];
         $manifest = self::decode($directory . DIRECTORY_SEPARATOR . 'control-manifest.json');
-        if (!hash_equals(self::MANIFEST_SHA256, $manifest['manifest_sha256'])) {
+        if (!hash_equals($pin['manifest_sha256'], $manifest['manifest_sha256'])) {
             throw new \UnexpectedValueException('Katalog kontrol JMHZ nemá připnutý hash manifestu.');
         }
-        $specManifest = (new JmhzSpecPackageCatalog($root))->load(
-            JmhzSpecPackageCatalog::DEFAULT_PACKAGE_KEY,
-            JmhzSpecPackageCatalog::DEFAULT_MANIFEST_SHA256,
-        );
-        $catalog = new self($manifest, $specManifest);
+        $packages = new JmhzSpecPackageCatalog($root);
+        $specPin = $packages->requirePin($version);
+        $specManifest = $packages->load($specPin['package_key'], $specPin['manifest_sha256']);
+        $catalog = new self($manifest, $specManifest, $version);
         $source = $manifest['payload']['source'] ?? null;
         if (!is_array($source)) {
             throw new \UnexpectedValueException('Katalog kontrol JMHZ nemá zdroj.');
@@ -114,22 +146,41 @@ final class JmhzControlSourceCatalog
         return $this->manifest;
     }
 
+    public function version(): JmhzSpecVersion
+    {
+        return $this->version;
+    }
+
+    public function catalogKey(): string
+    {
+        return self::PINS[$this->version->value]['catalog_key'];
+    }
+
+    public function manifestSha256(): string
+    {
+        return self::PINS[$this->version->value]['manifest_sha256'];
+    }
+
     /**
      * @param array{manifest_sha256:string,payload:array<string, mixed>} $manifest
      * @param array{manifest_sha256:string,payload:array<string, mixed>} $specManifest
      */
-    public static function validateManifest(array $manifest, array $specManifest): void
-    {
+    public static function validateManifest(
+        array $manifest,
+        array $specManifest,
+        JmhzSpecVersion $version = JmhzSpecVersion::V2026,
+    ): void {
+        $pin = self::PINS[$version->value];
         JmhzSpecPackageCatalog::validateManifest($specManifest);
         $payload = $manifest['payload'];
         $actualHash = hash('sha256', CanonicalJson::encode($payload));
         if (!hash_equals($manifest['manifest_sha256'], $actualHash)
-            || !hash_equals(self::MANIFEST_SHA256, $actualHash)
+            || !hash_equals($pin['manifest_sha256'], $actualHash)
         ) {
             throw new \UnexpectedValueException('Manifest katalogu kontrol JMHZ má neplatný hash.');
         }
         if (self::string($payload, 'schema_version') !== 'jmhz-control-source-catalog.v4'
-            || self::string($payload, 'catalog_key') !== self::CATALOG_KEY
+            || self::string($payload, 'catalog_key') !== $pin['catalog_key']
             || self::string($payload, 'spec_package_key') !== ($specManifest['payload']['package_key'] ?? null)
             || self::string($payload, 'spec_manifest_sha256') !== $specManifest['manifest_sha256']
         ) {
@@ -181,18 +232,11 @@ final class JmhzControlSourceCatalog
             $remote = JmhzControlPassability::from(self::string($row, 'remote_passability'));
             ++$remoteCounts[$remote->value];
             self::verifyRowHash($row, "kontrola {$id}");
+            // Katalog 1.4.2.11 sjednotil atributy kontroly 333 s jejím pravidlem,
+            // takže připnutý katalog nemá žádnou zdrojovou anomálii. Marker, který
+            // by se objevil bez vědomého připnutí, se odmítne.
             $anomaly = $row['source_anomaly'] ?? null;
-            $expectedAnomaly = $id === 333 ? [
-                'code' => 'official_detail_attribute_mismatch',
-                'source_cells' => ['B189', 'C189', 'L189', 'M189'],
-                'declared_attribute_ids' => ['10006', '10032', '10010', '10011'],
-                'detail_attribute_ids' => ['10016', '10495'],
-                'resolution' => 'fail_closed_not_evaluable',
-            ] : null;
-            if (($anomaly === null || $expectedAnomaly === null)
-                ? $anomaly !== $expectedAnomaly
-                : CanonicalJson::encode($anomaly) !== CanonicalJson::encode($expectedAnomaly)
-            ) {
+            if ($anomaly !== null) {
                 throw new \UnexpectedValueException("Kontrola JMHZ {$id} má neplatně doloženou anomálii.");
             }
             $sourceAnomalyCount += $anomaly === null ? 0 : 1;

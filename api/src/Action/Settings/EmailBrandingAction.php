@@ -84,7 +84,7 @@ final class EmailBrandingAction
         try {
             $file->moveTo($tmpPath);
         } catch (\Throwable $e) {
-            return Json::error($response, 'move_failed', 'Nepodařilo se přesunout soubor: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'move_failed', 'Nepodařilo se přesunout soubor: ' . $e->getMessage(), 500);
         }
 
         try {

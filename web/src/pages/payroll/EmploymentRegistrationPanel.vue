@@ -105,7 +105,9 @@ const showXml = ref(false)
 const environment = ref<PayrollJmhzTransportEnvironment>('production')
 const { testAllowed: submissionTestAllowed } = useSubmissionEnvironment(environment)
 const transport =ref<PayrollJmhzTransportPoll | null>(null)
-const transportBusy = ref<'send' | 'poll' | 'close' | null>(null)
+const transportBusy = ref<'send' | 'poll' | 'close' | 'reprepare' | null>(null)
+/** Odeslání odmítlo zastaralý formát věty (REGZEC25 od 23. 12. 2026). */
+const staleSendRejected = ref(false)
 const transportMessage = ref('')
 const changeDetection = ref<PayrollRegistrationChangeDetection | null>(null)
 const changesBusy = ref(false)
@@ -157,7 +159,7 @@ const unemploymentMode = ref<
 const earlyTerminationReason = ref('')
 const averageNetEarnings = ref('')
 const pensionPeriods = ref([{ from: '', to: '' }])
-const employmentType = ref<'omit' | '1' | '2'>('omit')
+const employmentType = ref<'omit' | '1' | '2' | '3' | '4'>('omit')
 const terminationReason = ref('')
 const entitlement = ref<'omit' | 'yes' | 'no'>('omit')
 const paidInFull = ref<'yes' | 'no'>('no')
@@ -569,12 +571,16 @@ const a1InsurerOptions = computed(() => {
  * Postavení v zaměstnání — jen čtyřmístné kódy NKPZ (ČSSZ kratší odmítá).
  * U druhu činnosti 15 a 16 číselník podle EDV zužuje na 1341 a 1342. Uložený
  * kód mimo nabídku (dřív se ukládaly dva znaky) se ukáže označený, aby ho
- * první uložení tiše nesmazalo.
+ * první uložení tiše nesmazalo. Nástup od 1. 1. 2027 bere číselník ČSÚ
+ * (REGZEC 2027), dřívější vložený ze slovníku 1.4.1.6.
  */
 const a1EmploymentStatusOptions = computed(() => {
   const activity = a1Form.value.employment.activity_code
   const restricted = activity === '15' || activity === '16' ? ['1341', '1342'] : null
-  const options = (jmhzOptions.value?.employment_status_codes ?? [])
+  const source = a1FromNextVintage.value
+    ? jmhzOptions.value?.from_2027?.employment_status_codes
+    : jmhzOptions.value?.employment_status_codes
+  const options = (source ?? [])
     .filter(option => restricted === null || restricted.includes(option.code))
     .map(option => ({ code: option.code, label: `${option.code} · ${option.label}` }))
   const current = a1Form.value.employment.employment_status_code?.trim() ?? ''
@@ -734,6 +740,52 @@ function a1CodeOptions(
   }
   return options
 }
+
+/** První den, od kterého ČSSZ přijímá hodnoty číselníků EDV 1.5.0.3 (REGZEC27). */
+const FIRST_2027_EVENT_DATE = '2027-01-01'
+/** Státní zaměstnanci vykonávají od tohoto dne práci v pracovním poměru (zákon č. 195/2026 Sb.). */
+const STATE_EMPLOYEES_EMPLOYMENT_FROM = '2026-11-01'
+
+function isIsoDate(value: string | null | undefined): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/u.test(value)
+}
+
+/** Nástup z formuláře A1 rozhoduje o ročníku věty, a tím o nabídce číselníků. */
+const a1FromNextVintage = computed(() => {
+  const start = a1Form.value.employment.actual_start_on
+  return isIsoDate(start) && start >= FIRST_2027_EVENT_DATE
+})
+
+/** Důvody volného přístupu: od 1. 1. 2027 přibývají 22 a 23. */
+const freeAccessReasonOptions = computed(() => [
+  ...(jmhzOptions.value?.foreign_worker_free_access_reason_codes ?? []),
+  ...(a1FromNextVintage.value ? jmhzOptions.value?.from_2027?.free_access_reason_codes ?? [] : []),
+])
+
+/** Skončení od 1. 1. 2027 zná i služební poměr podle zákonů č. 361/2003 a 221/1999 Sb. */
+const a2FromNextVintage = computed(
+  () => isIsoDate(effectiveOn.value) && effectiveOn.value >= FIRST_2027_EVENT_DATE,
+)
+
+const a2ServiceReasonOptions = computed(() =>
+  (jmhzOptions.value?.from_2027?.service_termination_reasons ?? [])
+    .filter(option => option.employment_types.includes(employmentType.value))
+    .map(option => ({ code: option.code, label: option.label })),
+)
+
+/**
+ * Státní zaměstnanci od 1. 11. 2026 (zákon č. 195/2026 Sb.): měkké upozornění
+ * podle zvoleného druhu zaměstnání. Nikdy nic nezakazuje, režim vztahu z dat
+ * nepoznáme.
+ */
+const stateEmployeeWarning = computed<'service_1_11' | 'service_after' | null>(() => {
+  if (unemploymentMode.value !== 'provided' || employmentType.value !== '2') return null
+  if (!isIsoDate(effectiveOn.value) || effectiveOn.value < STATE_EMPLOYEES_EMPLOYMENT_FROM) return null
+  if (effectiveOn.value === STATE_EMPLOYEES_EMPLOYMENT_FROM) {
+    return terminationReason.value === '5' ? null : 'service_1_11'
+  }
+  return 'service_after'
+})
 
 const selectedMunicipality = computed(() => {
   const code = a1Form.value.employment.workplace_municipality_code
@@ -1413,17 +1465,39 @@ const canSend = computed(() => transportAttempt.value === null || [
   'expired',
 ].includes(transportAttempt.value.status))
 
+/**
+ * Změna nebo oprava připravená ve formátu REGZEC25, kterou ČSSZ od 23. 12. 2026
+ * nepřijme: místo odeslání se nabízí Připravit znovu.
+ */
+const vintageExpired = computed(() => submission.value !== null
+  && transportAttempt.value === null
+  && (submission.value.vintage_expired === true || staleSendRejected.value))
+
 const transportActions = computed<ActionItem[]>(() => {
   if (!submission.value) return []
 
   return [
+    {
+      key: 'registration-reprepare',
+      label: t('payroll.people.registration.reprepare'),
+      icon: 'cycle',
+      tier: 'primary',
+      variant: 'warning',
+      show: vintageExpired.value,
+      disabled: !props.canWrite || transportBusy.value !== null,
+      disabledReason: !props.canWrite
+        ? t('payroll.people.registration.write_required')
+        : undefined,
+      loading: transportBusy.value === 'reprepare',
+      run: reprepare,
+    },
     {
       key: 'registration-send',
       label: t(`payroll.people.registration.send_${environment.value}`),
       icon: 'send',
       tier: 'primary',
       variant: 'primary',
-      show: canSend.value,
+      show: canSend.value && !vintageExpired.value,
       disabled: !props.canWrite || transportBusy.value !== null,
       disabledReason: !props.canWrite
         ? t('payroll.people.registration.write_required')
@@ -1465,6 +1539,7 @@ const transportActions = computed<ActionItem[]>(() => {
 function resetPreparedFiling(): void {
   preview.value = null
   submission.value = null
+  staleSendRejected.value = false
   transport.value = null
   transportMessage.value = ''
   showXml.value = false
@@ -1962,7 +2037,7 @@ watch(eventInteraction, () => {
   deltaField.value = deltaFieldOptions.value[0] ?? 'title_prefix'
 })
 watch(employmentType, value => {
-  settlementAmountKind.value = value === '2' ? 'severance_pay' : 'replacement'
+  settlementAmountKind.value = ['2', '3', '4'].includes(value) ? 'severance_pay' : 'replacement'
 })
 // UI-26: po uložení kmenových dat na kartě osoby (občanství, rodné příjmení,
 // podmínky vztahu) se profil A1 načte znovu. Dřív držel stav z načtení karty
@@ -2046,6 +2121,7 @@ async function run(action: 'preview' | 'prepare'): Promise<void> {
   error.value = ''
   errorCode.value = ''
   errorProblems.value = []
+  staleSendRejected.value = false
   try {
     if (action === 'preview') {
       submission.value = null
@@ -2157,9 +2233,38 @@ async function send(): Promise<void> {
       report: null,
     }
   } catch (exception) {
+    if (apiErrorCode(exception) === 'registration_regzec25_change_stale') {
+      staleSendRejected.value = true
+    }
     error.value = serverErrorMessage(
       exception,
       t('payroll.people.registration.send_failed'),
+    )
+  } finally {
+    transportBusy.value = null
+  }
+}
+
+/** Nová věta REGZEC27 ze stejné události; zastaralé podání server zruší. */
+async function reprepare(): Promise<void> {
+  if (!submission.value || !props.canWrite || selectedEventId.value === null) return
+  transportBusy.value = 'reprepare'
+  error.value = ''
+  transportMessage.value = ''
+  try {
+    submission.value = await payrollApi.prepareEmploymentRegistration(
+      props.employmentId,
+      environment.value,
+      selectedEventId.value,
+      'auto',
+      { replacesSubmissionId: submission.value.submission_id },
+    )
+    staleSendRejected.value = false
+    transport.value = null
+  } catch (exception) {
+    error.value = serverErrorMessage(
+      exception,
+      t('payroll.people.registration.reprepare_failed'),
     )
   } finally {
     transportBusy.value = null
@@ -2995,6 +3100,13 @@ async function copyXml(): Promise<void> {
                 :class="a1NoteClass('employment.activity_code')"
               >
                 {{ a1NoteText('employment.activity_code') }}
+              </span>
+              <span
+                v-if="a1Form.employment.activity_code === '13'"
+                class="mt-1 block text-xs text-neutral-500"
+                data-test="a1-election-commission-hint"
+              >
+                {{ t('payroll.people.registration.a1.employment.election_commission_hint') }}
               </span>
             </label>
             <label class="block">
@@ -3872,7 +3984,7 @@ async function copyXml(): Promise<void> {
                 :data-a1-field="'foreign_worker.free_access_reason_code'"
                 :model-value="a1Form.foreign_worker.free_access_reason_code"
                 :options="a1CodeOptions(
-                  jmhzOptions?.foreign_worker_free_access_reason_codes,
+                  freeAccessReasonOptions,
                   a1Form.foreign_worker.free_access_reason_code,
                 )"
                 :placeholder="t('payroll.people.registration.a1.foreign_worker.free_access_reason_select')"
@@ -3962,6 +4074,32 @@ async function copyXml(): Promise<void> {
                 v-bind="a1FieldAttrs('foreign_worker.permit_to')"
                 :disabled="a1Busy"
                 data-test="a1-foreign-worker-permit-to" />
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.stay_valid_from') }}
+              </span>
+              <DateInput
+                v-model="a1Form.foreign_worker.stay_valid_from"
+                v-bind="a1FieldAttrs('foreign_worker.stay_valid_from')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-stay-valid-from" />
+              <span
+                v-if="a1NoteText('foreign_worker.stay_valid_from')"
+                :class="a1NoteClass('foreign_worker.stay_valid_from')"
+              >
+                {{ a1NoteText('foreign_worker.stay_valid_from') }}
+              </span>
+            </label>
+            <label class="block">
+              <span :class="a1LabelClass">
+                {{ t('payroll.people.registration.a1.foreign_worker.stay_valid_to') }}
+              </span>
+              <DateInput
+                v-model="a1Form.foreign_worker.stay_valid_to"
+                v-bind="a1FieldAttrs('foreign_worker.stay_valid_to')"
+                :disabled="a1Busy"
+                data-test="a1-foreign-worker-stay-valid-to" />
             </label>
           </div>
         </div>
@@ -4452,15 +4590,47 @@ async function copyXml(): Promise<void> {
           <div v-if="unemploymentMode === 'provided'" class="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <label class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.employment_type') }}
-              <select v-model="employmentType" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900">
+              <select v-model="employmentType" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-a2-employment-type">
                 <option value="omit">{{ t('payroll.people.registration.event.not_applicable') }}</option>
                 <option value="1">{{ t('payroll.people.registration.event.employment_type_1') }}</option>
                 <option value="2">{{ t('payroll.people.registration.event.employment_type_2') }}</option>
+                <template v-if="a2FromNextVintage">
+                  <option
+                    v-for="option in jmhzOptions?.from_2027?.employment_types ?? []"
+                    :key="option.code"
+                    :value="option.code"
+                  >{{ option.label }}</option>
+                </template>
               </select>
+              <span class="mt-1 block text-xs font-normal text-neutral-500" data-test="registration-a2-state-employee-hint">
+                {{ t('payroll.people.registration.event.state_employee_hint') }}
+              </span>
+              <span
+                v-if="stateEmployeeWarning"
+                class="mt-1 block rounded-md border border-warning-200 bg-warning-50 p-2 text-xs font-normal text-warning-800"
+                data-test="registration-a2-state-employee-warning"
+              >
+                {{ stateEmployeeWarning === 'service_1_11'
+                  ? t('payroll.people.registration.event.state_employee_warning_service_1_11')
+                  : t('payroll.people.registration.event.state_employee_warning_service_after') }}
+              </span>
             </label>
             <label v-if="employmentType !== 'omit'" class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.termination_reason') }}
-              <input v-model="terminationReason" inputmode="numeric" maxlength="3" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-a2-termination-reason" />
+              <select
+                v-if="a2FromNextVintage && employmentType !== '1'"
+                v-model="terminationReason"
+                class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900"
+                data-test="registration-a2-termination-reason"
+              >
+                <option value="">{{ t('payroll.people.registration.event.select_placeholder') }}</option>
+                <option
+                  v-for="option in a2ServiceReasonOptions"
+                  :key="option.code"
+                  :value="option.code"
+                >{{ option.code }} - {{ option.label }}</option>
+              </select>
+              <input v-else v-model="terminationReason" inputmode="numeric" maxlength="3" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm text-neutral-900" data-test="registration-a2-termination-reason" />
             </label>
             <label v-if="employmentType !== 'omit' && settlementNeeded" class="text-xs font-medium text-neutral-700">
               {{ t('payroll.people.registration.event.entitlement') }}
@@ -4794,6 +4964,14 @@ async function copyXml(): Promise<void> {
       </p>
       <p class="mt-1 break-all font-mono text-xs text-success-700">
         {{ submission.artifact_sha256.slice(0, 16) }}…
+      </p>
+      <p
+        v-if="vintageExpired"
+        class="mt-2 rounded-md border border-warning-300 bg-warning-50 px-2 py-1 text-xs text-warning-800"
+        role="alert"
+        data-test="registration-vintage-expired"
+      >
+        {{ t('payroll.people.registration.vintage_expired') }}
       </p>
 
       <div class="mt-3 border-t border-success-500/20 pt-3" data-test="registration-transport-actions">

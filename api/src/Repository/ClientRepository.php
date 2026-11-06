@@ -13,6 +13,7 @@ use MyInvoice\Service\Mail\ClientIsdocPreference;
 use MyInvoice\Service\Oss\OssClientContext;
 use MyInvoice\Support\PaymentMethods;
 use PDO;
+use MyInvoice\Support\Sql\AdvanceSettledSql;
 
 final class ClientRepository
 {
@@ -201,8 +202,7 @@ final class ClientRepository
                               SUM(IF(pi.status NOT IN ('draft', 'cancelled')
                                      AND NOT (COALESCE(pi.document_kind, '') = 'advance'
                                               AND (pi.status = 'paid'
-                                                   OR EXISTS (SELECT 1 FROM purchase_invoices adv_s
-                                                               WHERE adv_s.advance_purchase_invoice_id = pi.id)))
+                                                   OR " . AdvanceSettledSql::purchase('pi') . "))
                                      -- DDKP (daňový doklad k platbě) = jen odpočet DPH ze zálohy,
                                      -- nikdy náklad → bezpodmínečně ven (shoda s CRM/dashboard).
                                      AND COALESCE(pi.document_kind, '') <> 'tax_document',
@@ -484,6 +484,27 @@ final class ClientRepository
         $this->db->pdo()
             ->prepare('UPDATE clients SET is_vat_payer = ? WHERE id = ?')
             ->execute([$isVatPayer ? 1 : 0, $id]);
+    }
+
+    /**
+     * Převezme DIČ aktivní skupinové registrace DPH na kartu člena skupiny. Přepíše jen
+     * prázdné DIČ nebo vlastní DIČ člena (číslice = IČO karty), jiné ručně zadané DIČ
+     * nechá. Vrací true, když se DIČ změnilo.
+     */
+    public function adoptGroupVatDic(int $id, string $ic, string $groupDic): bool
+    {
+        $icDigits = \MyInvoice\Support\CompanyIdNormalizer::ic($ic);
+        if ($icDigits === null) {
+            return false;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            "UPDATE clients SET dic = ?
+              WHERE id = ?
+                AND " . \MyInvoice\Support\CompanyIdNormalizer::icSql('ic') . " = ?
+                AND (dic IS NULL OR REGEXP_REPLACE(dic, '[^0-9]', '') IN ('', ?))"
+        );
+        $stmt->execute([$groupDic, $id, $icDigits, $icDigits]);
+        return $stmt->rowCount() === 1;
     }
 
     /**
@@ -828,6 +849,14 @@ final class ClientRepository
         );
         $stmt->execute([$clientId]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /** Počet všech zakázek odběratele (i archivovaných), stejné pravidlo jako blokace smazání klienta. */
+    public function projectsCountForClient(int $clientId): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM projects WHERE client_id = ?');
+        $stmt->execute([$clientId]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function countryIdFromIso2(string $iso2): int

@@ -5,6 +5,8 @@
 
 ## 70.1 Kdy to potřebujete
 
+Tento kalkulátor používá strukturu vyhlášky 500/2002 Sb. Pro období podle vyhlášky 504/2002 Sb. se zobrazí informace o nedostupnosti; nevytvoří se výkaz s účty jiného rámce. Závěrka 504 zahrnuje rozvahu, výsledovku a přílohu. Dobrovolné přehledy peněžních toků a změn vlastního jmění současný kalkulátor pro tento rámec nepodporuje.
+
 Kapitolu otevřete, když:
 
 - připravujete účetní závěrku a potřebujete oba přehledy jako její přílohy,

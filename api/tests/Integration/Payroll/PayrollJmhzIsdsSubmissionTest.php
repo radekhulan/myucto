@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Submission\IsdsGatewayAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -25,6 +24,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsInboxProcessor;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzProtocolSignatureVerifierInterface;
 use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionDispatchProjection;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionQueueService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementPolicy;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementService;
 use MyInvoice\Service\Payroll\Submission\PayrollObligationService;
@@ -69,11 +69,12 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
     private SubmissionOutboxService $outboxService;
     private JmhzIsdsSubmissionService $isds;
     private IsdsGatewayAction $gatewayAction;
+    private PayrollSubmissionQueueService $queue;
     private int $supplierId;
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $encryption = $container->get(SecretEncryption::class);
         $outbox = $container->get(SubmissionOutboxService::class);
@@ -107,6 +108,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
             $outbox,
         ));
         $this->gatewayAction = $container->get(IsdsGatewayAction::class);
+        $this->queue = $container->get(PayrollSubmissionQueueService::class);
     }
 
     protected function tearDown(): void
@@ -313,6 +315,92 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
         self::assertSame($submissionId, (int) $outcomes[0]['submission_id']);
     }
 
+    /**
+     * Fronta „K odeslání" posílala JMHZ vždy přes VREP a firma bez podpisového
+     * certifikátu dostala „není zvolený podpisový certifikát". Bez certifikátu
+     * musí jít datovkou — tou TOUŽ cestou jako „Připravit datovou zprávu",
+     * takže odpověď ČSSZ se k podání spáruje stejně.
+     */
+    public function testQueueSendsJmhzWithoutCertificateViaDataBoxAndPairsTheProtocol(): void
+    {
+        $submissionId = $this->frozenSubmission('queue-isds');
+        $listed = null;
+        foreach ($this->queue->queue($this->supplierId, 'test', 200, 0)['items'] as $item) {
+            if ((int) $item['submission_id'] === $submissionId) {
+                $listed = $item;
+            }
+        }
+        self::assertNotNull($listed);
+        self::assertTrue($listed['dispatch']['dispatchable']);
+        self::assertSame(PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL, $listed['dispatch']['default_mode']);
+        self::assertSame([PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL], $listed['dispatch']['modes']);
+
+        $result = $this->queue->dispatch(
+            $this->supplierId,
+            'test',
+            $submissionId,
+            'queue-isds-' . bin2hex(random_bytes(6)),
+            null,
+        );
+        self::assertSame(PayrollDispatchCapabilityCatalog::MODE_ISDS_PAYROLL, $result['mode']);
+        self::assertIsArray($result['outbox']);
+
+        $outbox = new SubmissionOutboxRepository($this->db);
+        $userId = (int) $this->db->pdo()->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $claimed = $outbox->claimForManualSending($this->supplierId, (int) $result['outbox']['id'], $userId);
+        self::assertNotNull($claimed);
+        $outbox->markSentManually(
+            $this->supplierId,
+            (int) $result['outbox']['id'],
+            '1752953499',
+            new \DateTimeImmutable('2026-08-15 08:00:00'),
+            (int) $claimed['row_version'],
+        );
+        $zfo = SyntheticZfoBuilder::receivedMessage([[
+            'name' => 'JMH-PROTOKOL-O-KOMPLETNOSTI-VS' . self::VARIABLE_SYMBOL . '-2026-07.xml',
+            'mime' => 'application/xml',
+            'bytes' => JmhzTransportSample::processingProtocol(self::GUID, variableSymbol: self::VARIABLE_SYMBOL),
+            'meta_type' => 'main',
+        ]], ['message_id' => 'DM-JMHZ-QUEUE']);
+
+        $processed = $this->inboxProcessor()->process(
+            $this->supplierId,
+            'test',
+            987658,
+            new InboxMessageHeader(
+                'DM-JMHZ-QUEUE',
+                '9tsaf6s',
+                'Česká správa sociálního zabezpečení',
+                'Protokol o kompletnosti podání JMH VS' . self::VARIABLE_SYMBOL . ' 07/2026',
+                null,
+                new \DateTimeImmutable('2026-08-15 09:30:00'),
+                null,
+            ),
+            ['classification' => 'cssz_protocol', 'matched_outbox_id' => null],
+            $zfo,
+            $userId,
+        );
+
+        self::assertSame('processed', $processed['status'], json_encode($processed, JSON_THROW_ON_ERROR));
+        self::assertSame($submissionId, $processed['submission_id']);
+    }
+
+    /** Výslovně zvolený kanál, který agenda v katalogu nemá, se odmítne. */
+    public function testQueueRejectsModeOutsideTheAgendaCatalog(): void
+    {
+        $submissionId = $this->frozenSubmission('queue-mode');
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->queue->dispatch(
+            $this->supplierId,
+            'test',
+            $submissionId,
+            'queue-mode-' . bin2hex(random_bytes(6)),
+            null,
+            PayrollDispatchCapabilityCatalog::MODE_ISDS_HEALTH,
+        );
+    }
+
     /** Protokol vystavený na jiné období se k podání přiřadit nesmí. */
     public function testDeliveredProtocolOfAnotherPeriodIsRefused(): void
     {
@@ -439,7 +527,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
                 return $bytes;
             }
         };
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $processor = new JmhzIsdsInboxProcessor(
             $outbox,
             new PayrollSubmissionRepository($this->db),
@@ -611,7 +699,7 @@ final class PayrollJmhzIsdsSubmissionTest extends TestCase
 
     private function inboxProcessor(): JmhzIsdsInboxProcessor
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $signatures = new class implements JmhzProtocolSignatureVerifierInterface {
             public function verifiedProtocolXml(string $bytes, string $environment): string
             {

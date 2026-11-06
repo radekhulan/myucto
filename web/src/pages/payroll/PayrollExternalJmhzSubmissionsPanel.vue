@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -721,13 +722,11 @@ onMounted(async () => {
         </fieldset>
         <label class="block">
           <span class="text-xs font-medium text-neutral-600">{{ t('payroll.external_jmhz.attest.date') }}</span>
-          <input
+          <DateInput
             v-model="attestDate"
-            type="date"
             :max="todayIso()"
             class="mt-1 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm"
-            data-test="external-jmhz-attest-date"
-          >
+            data-test="external-jmhz-attest-date" />
         </label>
         <label class="block">
           <span class="text-xs font-medium text-neutral-600">{{ t('payroll.external_jmhz.attest.note') }}</span>

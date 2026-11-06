@@ -87,7 +87,7 @@ final class SeatPolicyTest extends TestCase
     {
         self::assertFalse(
             $this->seats->roleGrantsWrite($this->readonlyRoleId),
-            'Právo na vlastní profil z účtu nedělá licenční místo.',
+            'Vestavěná čtecí role nemá právo zápisu mimo správu vlastních tokenů.',
         );
         self::assertTrue(
             $this->seats->roleGrantsWrite($this->accountantRoleId),
@@ -122,7 +122,7 @@ final class SeatPolicyTest extends TestCase
         self::assertSame($before + 1, $this->seats->countActiveSeats());
     }
 
-    public function testInactiveWritingRoleDoesNotOccupyASeat(): void
+    public function testActiveUserWithInactiveCustomRoleStillOccupiesASeat(): void
     {
         $pdo = $this->db->pdo();
         $pdo->prepare("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, ?, 'staff', 1)")
@@ -137,12 +137,12 @@ final class SeatPolicyTest extends TestCase
 
         $pdo->prepare('UPDATE roles SET is_active = 0 WHERE id = ?')->execute([$roleId]);
         self::assertFalse($this->seats->roleGrantsWrite($roleId));
-        self::assertSame($before, $this->seats->countActiveSeats());
+        self::assertSame($before + 1, $this->seats->countActiveSeats());
     }
 
     public function testSelfServiceExceptionIsExplicitAndNarrow(): void
     {
-        self::assertTrue(SeatPolicy::isSelfServicePermission('profile'));
+        self::assertFalse(SeatPolicy::isSelfServicePermission('profile'));
         self::assertTrue(SeatPolicy::isSelfServicePermission('profile.tokens'));
         self::assertFalse(SeatPolicy::isSelfServicePermission('invoices'));
     }
@@ -209,6 +209,78 @@ final class SeatPolicyTest extends TestCase
             ['invoices' => 2],
             (string) $role['updated_at'],
         );
+    }
+
+    public function testCustomReadOnlyStaffAndClientRolesStillOccupySeats(): void
+    {
+        $pdo = $this->db->pdo();
+        foreach (['staff', 'client'] as $type) {
+            $pdo->prepare('INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, ?, ?, 1)')
+                ->execute(['Pouze pro čtení', $type]);
+            $roleId = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO role_permissions (role_id, permission_key, access_level) VALUES (?, 'invoices', 1)")->execute([$roleId]);
+            $before = $this->seats->countActiveSeats();
+            $this->createUser($roleId);
+            self::assertSame($before + 1, $this->seats->countActiveSeats(), $type);
+            self::assertTrue($this->seats->occupiesSeat($roleId));
+        }
+    }
+
+    public function testNonWritingOverrideRemovesBuiltInReadOnlyExemption(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE role_permissions SET access_level=1 WHERE role_id=? AND permission_key <> 'profile.tokens'")->execute([$this->readonlyRoleId]);
+        $pdo->prepare("INSERT INTO roles (system_key, name, role_type, is_active) VALUES (NULL, 'Auditor', 'staff', 1)")->execute();
+        $roleId = (int) $pdo->lastInsertId();
+        $before = $this->seats->countActiveSeats();
+        $userId = $this->createUser($this->readonlyRoleId);
+        self::assertSame($before, $this->seats->countActiveSeats());
+        $supplierId = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        self::assertGreaterThan(0, $supplierId);
+        $pdo->prepare('INSERT INTO user_suppliers (user_id, supplier_id, role_id) VALUES (?, ?, ?)')->execute([$userId, $supplierId, $roleId]);
+        self::assertSame($before + 1, $this->seats->countActiveSeats());
+        self::assertTrue($this->seats->occupiesSeat($this->readonlyRoleId, [$roleId]));
+    }
+
+    public function testBuiltInReadOnlyCannotReceiveProfileWrite(): void
+    {
+        $repo = Bootstrap::buildContainer()->get(RoleRepository::class);
+        $role = $repo->find($this->readonlyRoleId);
+        self::assertIsArray($role);
+        $this->expectException(SystemRoleLocked::class);
+        $repo->update($this->readonlyRoleId, (string) $role['name'], true, ['profile' => 2], (string) $role['updated_at']);
+    }
+
+    public function testBuiltInReadOnlyCanManageOwnTokensWithoutASeat(): void
+    {
+        $repo = Bootstrap::buildContainer()->get(RoleRepository::class);
+        $role = $repo->find($this->readonlyRoleId);
+        self::assertIsArray($role);
+        $repo->update($this->readonlyRoleId, (string) $role['name'], true, ['profile' => 1, 'profile.tokens' => 2], (string) $role['updated_at']);
+        $before = $this->seats->countActiveSeats();
+        $this->createUser($this->readonlyRoleId);
+        self::assertSame($before, $this->seats->countActiveSeats());
+        self::assertFalse($this->seats->occupiesSeat($this->readonlyRoleId));
+        self::assertFalse($this->seats->roleGrantsWrite($this->readonlyRoleId));
+    }
+
+    public function testDisablingBuiltInReadOnlyRoleDoesNotAddSeats(): void
+    {
+        $before = $this->seats->countActiveSeats();
+        $this->createUser($this->readonlyRoleId);
+        $this->db->pdo()->prepare('UPDATE roles SET is_active = 0 WHERE id = ?')->execute([$this->readonlyRoleId]);
+        self::assertSame($before, $this->seats->countActiveSeats());
+        self::assertFalse($this->seats->occupiesSeat($this->readonlyRoleId));
+    }
+
+    public function testCorruptedBuiltInReadOnlyRoleWithWriteConsumesSeats(): void
+    {
+        $before = $this->seats->countActiveSeats();
+        $this->createUser($this->readonlyRoleId);
+        self::assertSame($before, $this->seats->countActiveSeats());
+        $this->db->pdo()->prepare("UPDATE role_permissions SET access_level = 2 WHERE role_id = ? AND permission_key = 'invoices'")->execute([$this->readonlyRoleId]);
+        self::assertTrue($this->seats->occupiesSeat($this->readonlyRoleId));
+        self::assertSame($before + 1, $this->seats->countActiveSeats());
     }
 
     // ── helpers ───────────────────────────────────────────────────────────

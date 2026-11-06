@@ -11,6 +11,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\Assets\AssetException;
 use MyInvoice\Service\Accounting\Assets\AssetService;
+use MyInvoice\Service\Accounting\Assets\ImportedPlanRevisionService;
+use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Accounting\Assets\DepreciationPostingService;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\UnbalancedEntryException;
@@ -38,6 +40,7 @@ final class DepreciationAction
 
     public function __construct(
         private readonly AssetService $service,
+        private readonly ImportedPlanRevisionService $revisions,
         private readonly DepreciationPostingService $posting,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
@@ -61,6 +64,33 @@ final class DepreciationAction
         }
 
         return Json::ok($response, $data);
+    }
+
+    public function previewRevision(Request $request, Response $response, array $args): Response
+    {
+        return $this->revision($request, $response, $args, false);
+    }
+
+    public function revise(Request $request, Response $response, array $args): Response
+    {
+        return $this->revision($request, $response, $args, true);
+    }
+
+    private function revision(Request $request, Response $response, array $args, bool $save): Response
+    {
+        if (!$this->requirePermission($request, $response, 'assets.depreciation', AccessLevel::WRITE, $err)) return $err;
+        $userId = $this->userId($request);
+        if ($userId === null) return Json::error($response, 'forbidden', 'Revize vyžaduje přihlášeného uživatele.', 403);
+        try {
+            $method = $save ? 'revise' : 'preview';
+            $result = $this->revisions->{$method}($this->currentSupplierId($request), (int) ($args['id'] ?? 0),
+                (array) ($request->getParsedBody() ?? []), $userId);
+        } catch (AssetException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            return $this->serverError($response, $e, 'Revizi odpisového plánu se nepodařilo zpracovat');
+        }
+        return Json::ok($response, $result);
     }
 
     public function bookYear(Request $request, Response $response): Response

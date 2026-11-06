@@ -51,4 +51,18 @@ final class CronPreflightBankEmailTest extends TestCase
 
         self::assertTrue(CronPreflight::hasBankEmailNoticeAccounts($this->pdo));
     }
+
+    public function testScanSelectsEverySupplierWithEnabledMailboxOnce(): void
+    {
+        $this->pdo->exec('INSERT INTO bank_email_imap_settings (supplier_id, enabled) VALUES (1, 0), (7, 1), (7, 1), (9, 1), (12, 0)');
+
+        self::assertSame([7, 9], CronPreflight::bankEmailNoticeSupplierIds($this->pdo));
+    }
+
+    public function testScanSelectsNoSuppliersWithoutEnabledMailboxes(): void
+    {
+        $this->pdo->exec('INSERT INTO bank_email_imap_settings (supplier_id, enabled) VALUES (1, 0)');
+
+        self::assertSame([], CronPreflight::bankEmailNoticeSupplierIds($this->pdo));
+    }
 }

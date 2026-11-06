@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDocumentBatchRepository;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
@@ -35,7 +34,7 @@ final class PayrollDocumentBatchQueueServiceTest extends TestCase
         $this->dataDir = sys_get_temp_dir()
             . '/myucto-payroll-document-queue-' . bin2hex(random_bytes(6));
         putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->queue = $container->get(PayrollDocumentBatchQueueService::class);
         $this->batches = $container->get(PayrollDocumentBatchRepository::class);

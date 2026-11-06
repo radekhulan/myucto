@@ -225,13 +225,47 @@ final class PayrollDocumentAccessServiceTest extends TestCase
             'code_hash' => hash('sha256', '123456'),
             'attempts' => 2,
         ]);
-        $this->links->method('bumpCodeAttempts')->willReturn(3);
+        $this->links->expects(self::once())
+            ->method('reserveCodeAttempt')
+            ->with(1, 7, 3)
+            ->willReturn(true);
         // Třetí chybný pokus kód spálí — hádání šestimístného čísla tak není
         // průchozí cesta, protože další kód jde vydat až po cooldownu.
         $this->links->expects(self::once())->method('markCodeUsed');
         $this->links->expects(self::never())->method('createSession');
 
         self::assertNull($this->service->verifyCode($this->linkRow(), '999999', null));
+    }
+
+    public function testCodeIsNotComparedWhenConcurrentGuessesTookTheLastAttempt(): void
+    {
+        // Načtený stav ještě pokus dovoluje, ale souběžné požadavky už strop
+        // vyčerpaly. Ani správný kód pak nesmí otevřít relaci.
+        $this->links->method('activeCode')->willReturn([
+            'id' => 7,
+            'code_hash' => hash('sha256', '123456'),
+            'attempts' => 0,
+        ]);
+        $this->links->expects(self::once())->method('reserveCodeAttempt')->willReturn(false);
+        $this->links->expects(self::once())->method('markCodeUsed');
+        $this->links->expects(self::never())->method('consumeCode');
+        $this->links->expects(self::never())->method('createSession');
+
+        self::assertNull($this->service->verifyCode($this->linkRow(), '123456', null));
+    }
+
+    public function testCorrectCodeConsumedConcurrentlyIssuesNoSecondSession(): void
+    {
+        $this->links->method('activeCode')->willReturn([
+            'id' => 7,
+            'code_hash' => hash('sha256', '123456'),
+            'attempts' => 0,
+        ]);
+        $this->links->method('reserveCodeAttempt')->willReturn(true);
+        $this->links->expects(self::once())->method('consumeCode')->willReturn(false);
+        $this->links->expects(self::never())->method('createSession');
+
+        self::assertNull($this->service->verifyCode($this->linkRow(), '123456', null));
     }
 
     public function testExhaustedCodeCannotBeUsedEvenWithTheRightValue(): void
@@ -264,7 +298,9 @@ final class PayrollDocumentAccessServiceTest extends TestCase
             'code_hash' => hash('sha256', '123456'),
             'attempts' => 0,
         ]);
-        $this->links->expects(self::once())->method('markCodeUsed');
+        $this->links->expects(self::once())->method('reserveCodeAttempt')->willReturn(true);
+        $this->links->expects(self::once())->method('consumeCode')->with(1, 7)->willReturn(true);
+        $this->links->expects(self::never())->method('markCodeUsed');
         $storedHash = null;
         $this->links->expects(self::once())
             ->method('createSession')

@@ -8,6 +8,7 @@ vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
 vi.mock('@/pages/admin/EmailProfiles.vue', () => ({ default: { template: '<div data-test="email-profiles" />' } }))
 vi.mock('@/pages/admin/Branding.vue', () => ({ default: { template: '<div data-test="branding" />' } }))
 vi.mock('@/components/settings/ClientSigningProfiles.vue', () => ({ default: { template: '<div data-test="signing-profiles" />' } }))
+vi.mock('@/components/settings/ClientInvoiceDefaults.vue', () => ({ default: { template: '<div data-test="invoice-defaults" />' } }))
 vi.mock('@/components/settings/ClientPaymentQrSettings.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/settings/CompanyEmailTemplates.vue', () => ({ default: { props: { clientScoped: Boolean }, template: '<div data-test="company-templates">{{ clientScoped }}</div>' } }))
 import ClientCompanySettings from './ClientCompanySettings.vue'
@@ -70,4 +71,14 @@ describe('client operational settings tabs', () => {
     expect(wrapper.get('[data-test="company-templates"]').text()).toBe('true')
     wrapper.unmount()
   })
+  it.each([true, false])('opens invoice defaults with a targeted grant (client=%s)', client => {
+    m.client = client
+    m.permissions = ['settings.invoice_defaults']
+    m.route = reactive({ query: { tab: 'invoice-defaults' } })
+    const wrapper = mount(ClientCompanySettings)
+    expect(wrapper.findAll('nav button').map(b => b.text())).toEqual(['settings.invoice_defaults_title'])
+    expect(wrapper.find('[data-test="invoice-defaults"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
 })

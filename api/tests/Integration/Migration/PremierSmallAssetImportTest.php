@@ -110,8 +110,8 @@ final class PremierSmallAssetImportTest extends TestCase
 
         // Karta s plnou cenou položky (ne snížená o odpočet zálohy) a vyřazený vrácený notebook.
         self::assertSame([
-            ['Monitor', 'tangible', '2025-11-05', '1.000', '20000.00', '20000.00', 'in_use', null, 'PF250007/2025'],
-            ['Notebook', 'tangible', '2025-09-10', '1.000', '15000.00', '15000.00', 'disposed', '2025-10-01', 'PF250005/2025'],
+            ['Monitor', 'tangible', '2025-11-05', '1.000', '20000.000000', '20000.00', 'in_use', null, 'PF250007/2025'],
+            ['Notebook', 'tangible', '2025-09-10', '1.000', '15000.000000', '15000.00', 'disposed', '2025-10-01', 'PF250005/2025'],
         ], $this->cards($supplierId), $this->explain($first));
         $counts = self::stepCounts($first, 'small_assets');
         self::assertSame([2, 1], [$counts['created'] ?? 0, $counts['disposed_by_credit_note'] ?? 0], $this->explain($first));
@@ -165,9 +165,9 @@ final class PremierSmallAssetImportTest extends TestCase
         self::assertArrayNotHasKey('small_asset_items', self::stepCounts($first, 'purchase_invoices'));
 
         self::assertSame([
-            ['Kancelářská židle', 'DM-001', 'tangible', '2025-03-10', '2025-03-10', '2.000', '4500.00', '9000.00', 'Kancelář 1', 'Jan Zkušební', 'in_use', null],
-            ['Notebook do terénu', 'DH-001', 'tangible', '2025-02-01', '2025-02-03', '1.000', '25000.00', '25000.00', 'Sklad', 'Eva Vzorová', 'in_use', null],
-            ['Skartovačka', 'DM-002', 'tangible', '2024-05-01', '2024-05-01', '1.000', '3000.00', '3000.00', null, null, 'disposed', '2025-06-30'],
+            ['Kancelářská židle', 'DM-001', 'tangible', '2025-03-10', '2025-03-10', '2.000', '4500.000000', '9000.00', 'Kancelář 1', 'Jan Zkušební', 'in_use', null],
+            ['Notebook do terénu', 'DH-001', 'tangible', '2025-02-01', '2025-02-03', '1.000', '25000.000000', '25000.00', 'Sklad', 'Eva Vzorová', 'in_use', null],
+            ['Skartovačka', 'DM-002', 'tangible', '2024-05-01', '2024-05-01', '1.000', '3000.000000', '3000.00', null, null, 'disposed', '2025-06-30'],
         ], $this->fetch('SELECT name, inventory_number, asset_kind, acquisition_date, put_into_use_date, quantity, unit_price, price, location,
                                 responsible_person, status, disposed_at
                            FROM small_assets WHERE supplier_id = ? ORDER BY name', $supplierId), $this->explain($first));

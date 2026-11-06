@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use PDO;
 
 /**
@@ -15,6 +16,12 @@ use PDO;
  */
 final class StockItemRepository
 {
+    /**
+     * Služba zásobu nevede, návratem na jiný typ se evidence zase zapne. Parametr = nový typ;
+     * v UPDATE musí stát před `item_type`, přiřazení se vyhodnocují zleva.
+     */
+    private const IS_STOCKED_BY_TYPE_SQL = "CASE WHEN ? = 'service' THEN 0 WHEN item_type = 'service' THEN 1 ELSE is_stocked END";
+
     public const SORT_FIELDS = ['sku', 'name', 'type', 'qty', 'value'];
     public const AVAILABILITY_FILTERS = ['in_stock', 'out_of_stock', 'below_min'];
     public const MISSING_FIELDS = ['manufacturer', 'category', 'image', 'price', 'ean'];
@@ -46,7 +53,7 @@ final class StockItemRepository
            WHERE siav.supplier_id = si.supplier_id AND siav.stock_item_id = si.id AND siav.attribute_id = ?)';
 
     private const COLUMNS =
-        'id, supplier_id, sku, name, item_type, manufacturer_id, unit, default_sale_unit, tracking_mode, ean, vat_rate_id,
+        'id, supplier_id, sku, name, item_type, eet_item_kind, manufacturer_id, unit, default_sale_unit, tracking_mode, ean, vat_rate_id,
          sale_price_without_vat, min_qty, warranty_months, delivery_days, export_eshop,
          is_stocked, weight_g, intrastat_cn8_code, intrastat_country_of_origin, intrastat_net_mass_kg,
          intrastat_supplementary_unit, intrastat_supplementary_unit_coefficient,
@@ -527,7 +534,7 @@ final class StockItemRepository
 
         $identifiers = self::identifierSearchable($q);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT si.id, si.sku, si.name, si.unit, si.default_sale_unit, si.tracking_mode, si.vat_rate_id, si.sale_price_without_vat, si.is_stocked
+            'SELECT si.id, si.sku, si.name, si.unit, si.default_sale_unit, si.tracking_mode, si.vat_rate_id, si.sale_price_without_vat, si.is_stocked, si.item_type
                FROM stock_items si
               WHERE si.supplier_id = ? AND si.is_active = 1 AND si.lifecycle_status = \'ready\'
                 AND (si.sku LIKE ? OR si.name LIKE ? OR si.ean LIKE ?
@@ -547,8 +554,9 @@ final class StockItemRepository
                 'default_sale_unit'      => $r['default_sale_unit'] !== null ? (string) $r['default_sale_unit'] : null,
                 'tracking_mode'          => (string) $r['tracking_mode'],
                 'vat_rate_id'            => $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null,
-                'sale_price_without_vat' => $r['sale_price_without_vat'],
+                'sale_price_without_vat' => UnitPricePrecision::toDecimalString($r['sale_price_without_vat']),
                 'is_stocked'             => (bool) $r['is_stocked'],
+                'item_type'              => (string) $r['item_type'],
             ];
         }, $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
@@ -590,8 +598,8 @@ final class StockItemRepository
                 (supplier_id, sku, name, item_type, unit, tracking_mode, ean, vat_rate_id,
                  sale_price_without_vat, min_qty, intrastat_cn8_code, intrastat_country_of_origin,
                  intrastat_net_mass_kg, intrastat_supplementary_unit,
-                 intrastat_supplementary_unit_coefficient, is_active, note)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 intrastat_supplementary_unit_coefficient, is_active, note, is_stocked)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             (string) $data['sku'],
@@ -611,6 +619,7 @@ final class StockItemRepository
                 ? (string) $data['intrastat_supplementary_unit_coefficient'] : null,
             (int) ($data['is_active'] ?? true),
             $data['note'] ?? null,
+            (int) (($data['item_type'] ?? 'goods') !== 'service'),
         ]);
         return (int) $pdo->lastInsertId();
     }
@@ -624,6 +633,7 @@ final class StockItemRepository
     {
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
+                is_stocked = ' . self::IS_STOCKED_BY_TYPE_SQL . ',
                 sku = ?, name = ?, item_type = ?, unit = ?, tracking_mode = COALESCE(?, tracking_mode), ean = ?, vat_rate_id = ?,
                 sale_price_without_vat = ?, min_qty = ?,
                 intrastat_cn8_code = CASE WHEN ? THEN ? ELSE intrastat_cn8_code END,
@@ -636,6 +646,7 @@ final class StockItemRepository
               WHERE id = ? AND supplier_id = ?' . ($expectedVersion === null ? '' : ' AND row_version = ?')
         );
         $stmt->execute([
+            (string) ($data['item_type'] ?? 'goods'),
             (string) $data['sku'],
             (string) $data['name'],
             (string) ($data['item_type'] ?? 'goods'),
@@ -688,11 +699,22 @@ final class StockItemRepository
             ->execute([...$params, $id, $supplierId]);
     }
 
+    /**
+     * Druh položky pro EET ({@see \MyInvoice\Service\Eet\EetStoredValueCalculator::ITEM_KINDS},
+     * migrace 2185). Samostatně od úpravy karty, hodnotu ověřuje volající.
+     */
+    public function updateEetItemKind(int $supplierId, int $id, string $kind): void
+    {
+        $this->db->pdo()->prepare('UPDATE stock_items SET eet_item_kind = ? WHERE id = ? AND supplier_id = ?')
+            ->execute([$kind, $id, $supplierId]);
+    }
+
     /** @param array<string,mixed> $data */
     public function updateVersioned(int $supplierId, int $id, int $expectedVersion, array $data): bool
     {
         $stmt = $this->db->pdo()->prepare(
             'UPDATE stock_items SET
+                is_stocked = ' . self::IS_STOCKED_BY_TYPE_SQL . ',
                 sku = ?, name = ?, item_type = ?, unit = ?, tracking_mode = COALESCE(?, tracking_mode), ean = ?, vat_rate_id = ?,
                 sale_price_without_vat = ?, min_qty = ?,
                 intrastat_cn8_code = CASE WHEN ? THEN ? ELSE intrastat_cn8_code END,
@@ -705,6 +727,7 @@ final class StockItemRepository
               WHERE id = ? AND supplier_id = ? AND row_version = ?'
         );
         $stmt->execute([
+            (string) ($data['item_type'] ?? 'goods'),
             (string) $data['sku'],
             (string) $data['name'],
             (string) ($data['item_type'] ?? 'goods'),
@@ -746,7 +769,7 @@ final class StockItemRepository
             'UPDATE stock_items SET
                 manufacturer_id = ?, warranty_months = ?, delivery_days = ?,
                 export_eshop = CASE WHEN lifecycle_status = \'ready\' THEN ? ELSE 0 END,
-                is_stocked = ?, weight_g = ?, pricing_base = ?,
+                is_stocked = CASE WHEN item_type = \'service\' THEN 0 ELSE ? END, weight_g = ?, pricing_base = ?,
                 row_version = row_version + 1
               WHERE id = ? AND supplier_id = ?'
         );
@@ -786,9 +809,11 @@ final class StockItemRepository
             if (!array_key_exists($field, $data)) {
                 continue;
             }
-            $set[] = $field === 'export_eshop'
-                ? "export_eshop = CASE WHEN lifecycle_status = 'ready' THEN ? ELSE 0 END"
-                : $field . ' = ?';
+            $set[] = match ($field) {
+                'export_eshop' => "export_eshop = CASE WHEN lifecycle_status = 'ready' THEN ? ELSE 0 END",
+                'is_stocked' => "is_stocked = CASE WHEN item_type = 'service' THEN 0 ELSE ? END",
+                default => $field . ' = ?',
+            };
             $params[] = $cast($data[$field]);
         }
         $set[] = 'row_version = row_version + 1';
@@ -848,9 +873,16 @@ final class StockItemRepository
         return $stmt->rowCount() > 0;
     }
 
-    /** Hard delete — volající MUSÍ nejdřív ověřit hasMovements() === false. */
+    /**
+     * Hard delete — volající MUSÍ nejdřív ověřit hasMovements() === false a volat v transakci.
+     * Odkaz na řádcích objednávek se uvolní, ostatní vazby zastaví cizí klíč.
+     */
     public function delete(int $supplierId, int $id): bool
     {
+        foreach (['purchase_order_lines', 'sales_order_lines'] as $table) {
+            $this->db->pdo()->prepare("UPDATE {$table} SET stock_item_id = NULL WHERE supplier_id = ? AND stock_item_id = ?")
+                ->execute([$supplierId, $id]);
+        }
         $stmt = $this->db->pdo()->prepare(
             'DELETE FROM stock_items WHERE id = ? AND supplier_id = ?'
         );
@@ -865,6 +897,9 @@ final class StockItemRepository
         $r['supplier_id'] = (int) $r['supplier_id'];
         $r['vat_rate_id'] = $r['vat_rate_id'] !== null ? (int) $r['vat_rate_id'] : null;
         $r['is_active'] = (bool) $r['is_active'];
+        if (array_key_exists('sale_price_without_vat', $r)) {
+            $r['sale_price_without_vat'] = UnitPricePrecision::toDecimalString($r['sale_price_without_vat']);
+        }
         if (array_key_exists('row_version', $r)) {
             $r['row_version'] = (int) $r['row_version'];
         }

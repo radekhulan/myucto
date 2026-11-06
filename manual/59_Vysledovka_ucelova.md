@@ -38,8 +38,9 @@ Cesta: `Účetnictví → Výsledovka - účelová`. Výkaz je dostupný jen pro
 1. Otevřete `Účetnictví → Výsledovka - účelová`.
 2. Vpravo nahoře vyberte fiskální rok a klikněte na **Načíst**. Výkaz se sestaví k dřívějšímu z posledního dne období a dneška, rozsah se zvolí automaticky podle kategorie účetní jednotky.
 3. Zkontrolujte sloupce **Běžné období** a **Minulé období**.
-4. Klikněte na **Export PDF** nebo **Export XLSX**. Export jde jen u sestaveného, úplně namapovaného výkazu.
-5. Chcete-li výsledek ověřit, porovnejte ho s [druhovou výsledovkou](58_Vysledovka_druhova.md). Celkový výsledek hospodaření musí být shodný, liší se jen členění provozních nákladů.
+4. Pro průběžný výkaz klientovi můžete vedle výběru roku zaškrtnout **Průběžné časové rozlišení**; pravidla jsou stejná jako u druhové výsledovky ([§ 58.7.7](58_Vysledovka_druhova.md#5877-prubezne-casove-rozliseni)).
+5. Klikněte na **Export PDF** nebo **Export XLSX**. Export jde jen u sestaveného, úplně namapovaného výkazu.
+6. Chcete-li výsledek ověřit, porovnejte ho s [druhovou výsledovkou](58_Vysledovka_druhova.md). Celkový výsledek hospodaření musí být shodný, liší se jen členění provozních nákladů.
 
 **Jak poznáte, že je hotovo:** Výkaz je sestavený, PDF a XLSX se stáhly a výsledek za období odpovídá druhové výsledovce.
 

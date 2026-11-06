@@ -45,6 +45,9 @@ export interface CashRegister {
   is_default: boolean; is_active: boolean
   /** L-3: pokladna má vlastní číselnou řadu PPD/VPD; false = společná řada firmy. */
   own_series?: boolean
+  /** Počáteční stav valutové pokladny ve valutě k začátku dne `opening_foreign_date`. */
+  opening_foreign_amount?: number | null
+  opening_foreign_date?: string | null
   documents_count: number
   balance: number; balance_date: string   // v list i detail response (O12 — bez /balance endpointu)
   balance_foreign?: number | null          // duální zůstatek valutové pokladny (§11); null u CZK
@@ -53,6 +56,7 @@ export interface CashRegister {
 
 export interface CashRegisterPayload {
   name: string; account_code: string; currency_code?: string; is_default?: boolean; own_series?: boolean
+  opening_foreign_amount?: string | number | null; opening_foreign_date?: string | null
 }
 
 export interface CashDocument {
@@ -85,6 +89,8 @@ export interface CreateCashDocumentPayload {
   invoice_id?: number | null; purchase_invoice_id?: number | null
   rule_key?: string | null; counter_account_code?: string | null
   post?: boolean                          // default true — create+post v 1 transakci (O2)
+  /** EET: zařízení pro tržbu, když pokladna žádné namapované nemá. */
+  eet_device_id?: number | null
 }
 
 export interface CashDocumentCreateResult {
@@ -186,12 +192,16 @@ export const cashApi = {
   updateDocument: (id: number, p: CreateCashDocumentPayload) =>
     api.put<CashDocument>(`/accounting/cash-documents/${id}`, p).then(r => r.data),
   // Zaúčtování draftu (přidělí číslo řady a založí deníkový zápis).
-  postDocument: (id: number) =>
-    api.post<CashDocumentPostResult>(`/accounting/cash-documents/${id}/post`).then(r => r.data),
+  postDocument: (id: number, eetDeviceId?: number | null) =>
+    api.post<CashDocumentPostResult>(`/accounting/cash-documents/${id}/post`,
+      eetDeviceId ? { eet_device_id: eetDeviceId } : undefined).then(r => r.data),
   // Storno vrací varování stejně jako zaúčtování (posunutý protizápis, záporná pokladna).
-  reverseDocument: (id: number, reason: string, entryDate?: string) =>
+  reverseDocument: (id: number, reason: string, entryDate?: string, eetCorrectionReason?: string) =>
     api.post<{ reversal_entry_id: number | null; warnings: string[] }>(
-      `/accounting/cash-documents/${id}/reverse`, { reason, entry_date: entryDate }).then(r => r.data),
+      `/accounting/cash-documents/${id}/reverse`,
+      eetCorrectionReason
+        ? { reason, entry_date: entryDate, eet_correction_reason: eetCorrectionReason }
+        : { reason, entry_date: entryDate }).then(r => r.data),
   // force=1 → smaže doklad i s účetními zápisy (bez force jen draft).
   deleteDocument: (id: number, force = false) =>
     api.delete<CashDocumentDeleteResult>(`/accounting/cash-documents/${id}`,

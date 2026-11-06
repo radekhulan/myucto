@@ -198,6 +198,102 @@ final class PayrollAnnualSettlementRepository
         }
     }
 
+    /**
+     * Hromadně nastaví JEN stav žádosti o roční zúčtování.
+     *
+     * Lidem bez řádku založí žádost s ostatními poli ve výchozím `unknown`,
+     * u existujících přepíše pouze `request_status` a zvýší `row_version`.
+     * Datum ani doklad se nesahá: `requested` bez data je legitimní
+     * rozdělaná evidence, překážku provedení hlídá způsobilost.
+     *
+     * Cizí nebo neexistující ID celou dávku odmítne (`InvalidArgumentException`),
+     * aby se tiše neuložila jen její část.
+     *
+     * @param list<int> $employeeIds
+     * @return array{created:int,updated:int}
+     */
+    public function bulkSetRequestStatus(
+        int $supplierId,
+        int $taxYear,
+        array $employeeIds,
+        string $requestStatus,
+        ?int $actorUserId,
+    ): array {
+        $ids = array_values(array_unique(array_map('intval', $employeeIds)));
+        if ($ids === []) {
+            return ['created' => 0, 'updated' => 0];
+        }
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+
+        try {
+            $created = 0;
+            $updated = 0;
+            foreach (array_chunk($ids, 500) as $chunk) {
+                $placeholders = implode(', ', array_fill(0, count($chunk), '?'));
+
+                $known = $pdo->prepare(
+                    'SELECT COUNT(*) FROM payroll_employees
+                      WHERE supplier_id = ? AND id IN (' . $placeholders . ')'
+                );
+                $known->execute([$supplierId, ...$chunk]);
+                if ((int) $known->fetchColumn() !== count($chunk)) {
+                    throw new \InvalidArgumentException(
+                        'Některý ze zaměstnanců neexistuje nebo nepatří do této firmy.',
+                    );
+                }
+
+                $existing = $pdo->prepare(
+                    'SELECT COUNT(*) FROM payroll_annual_settlement_requests
+                      WHERE supplier_id = ? AND tax_year = ?
+                        AND employee_id IN (' . $placeholders . ')'
+                );
+                $existing->execute([$supplierId, $taxYear, ...$chunk]);
+                $existingCount = (int) $existing->fetchColumn();
+
+                $rows = implode(', ', array_fill(0, count($chunk), '(?, ?, ?, ?, ?, ?)'));
+                $params = [];
+                foreach ($chunk as $employeeId) {
+                    array_push(
+                        $params,
+                        $supplierId,
+                        $employeeId,
+                        $taxYear,
+                        $requestStatus,
+                        $actorUserId,
+                        $actorUserId,
+                    );
+                }
+                $pdo->prepare(
+                    'INSERT INTO payroll_annual_settlement_requests
+                        (supplier_id, employee_id, tax_year, request_status,
+                         created_by, updated_by)
+                     VALUES ' . $rows . '
+                     ON DUPLICATE KEY UPDATE
+                        request_status = VALUES(request_status),
+                        updated_by = VALUES(updated_by),
+                        row_version = row_version + 1'
+                )->execute($params);
+
+                $updated += $existingCount;
+                $created += count($chunk) - $existingCount;
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return ['created' => $created, 'updated' => $updated];
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
     /** @return list<array<string,mixed>> */
     private function otherCaregiversForRequest(
         int $supplierId,
@@ -744,6 +840,270 @@ final class PayrollAnnualSettlementRepository
     }
 
     /**
+     * Ročně uplatňované položky a slevu na manžela za rok (§ 38h odst. 6).
+     *
+     * Slevu na manžela doplňuje o údaje osob z evidence vyživovaných osob
+     * (vztah, narození, trvání, ZTP/P), podle kterých se posuzují podmínky
+     * nároku. Rodné číslo se nikdy nenačítá.
+     *
+     * @return array{
+     *   deductions:list<array<string,mixed>>,
+     *   spouse:?array<string,mixed>,
+     *   preschool:list<array<string,mixed>>
+     * }
+     */
+    public function annualClaimsForYear(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+    ): array {
+        $pdo = $this->db->pdo();
+        $deductions = $pdo->prepare(
+            'SELECT * FROM payroll_annual_settlement_deductions
+              WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?
+              ORDER BY sort_order, id'
+        );
+        $deductions->execute([$supplierId, $employeeId, $taxYear]);
+
+        $spouse = $pdo->prepare(
+            'SELECT claim.*,
+                    spouse.relation AS spouse_relation,
+                    spouse.full_name AS spouse_full_name,
+                    spouse.birth_date AS spouse_birth_date,
+                    spouse.existence_from AS spouse_existence_from,
+                    spouse.existence_to AS spouse_existence_to,
+                    spouse.ztp_p AS spouse_ztp_p,
+                    child.relation AS child_relation,
+                    child.full_name AS child_full_name,
+                    child.birth_date AS child_birth_date,
+                    child.existence_from AS child_existence_from,
+                    child.existence_to AS child_existence_to,
+                    child.ztp_p AS child_ztp_p
+               FROM payroll_annual_settlement_spouse_claims claim
+               JOIN payroll_dependants spouse
+                 ON spouse.supplier_id = claim.supplier_id
+                AND spouse.id = claim.spouse_dependant_id
+               JOIN payroll_dependants child
+                 ON child.supplier_id = claim.supplier_id
+                AND child.id = claim.child_dependant_id
+              WHERE claim.supplier_id = ? AND claim.employee_id = ?
+                AND claim.tax_year = ?'
+        );
+        $spouse->execute([$supplierId, $employeeId, $taxYear]);
+        $spouseRow = $spouse->fetch(PDO::FETCH_ASSOC);
+
+        $preschool = $pdo->prepare(
+            'SELECT claim.*,
+                    child.relation AS child_relation,
+                    child.full_name AS child_full_name,
+                    child.birth_date AS child_birth_date,
+                    child.existence_from AS child_existence_from,
+                    child.existence_to AS child_existence_to
+               FROM payroll_annual_settlement_preschool_claims claim
+               JOIN payroll_dependants child
+                 ON child.supplier_id = claim.supplier_id
+                AND child.id = claim.child_dependant_id
+              WHERE claim.supplier_id = ? AND claim.employee_id = ?
+                AND claim.tax_year = ?
+              ORDER BY claim.id'
+        );
+        $preschool->execute([$supplierId, $employeeId, $taxYear]);
+
+        return [
+            'deductions' => array_map(
+                self::castDeduction(...),
+                array_values($deductions->fetchAll(PDO::FETCH_ASSOC)),
+            ),
+            'spouse' => $spouseRow === false ? null : self::castSpouseClaim($spouseRow),
+            'preschool' => array_map(
+                self::castPreschoolClaim(...),
+                array_values($preschool->fetchAll(PDO::FETCH_ASSOC)),
+            ),
+        ];
+    }
+
+    /**
+     * Přepíše celou sadu ročních nároků za rok (položky i slevu na manžela).
+     *
+     * Celá sada najednou ze stejného důvodu jako {@see self::replaceCertificates()}:
+     * § 38h odst. 6 se uplatňuje jako celek a půlka sady by zúčtování zkreslila.
+     * Volá se uvnitř transakce volajícího.
+     *
+     * @param list<array<string,mixed>> $deductions
+     * @param array<string,mixed>|null $spouse
+     * @param list<array<string,mixed>> $preschool
+     */
+    public function replaceAnnualClaims(
+        int $supplierId,
+        int $employeeId,
+        int $taxYear,
+        array $deductions,
+        ?array $spouse,
+        ?int $actorUserId,
+        array $preschool = [],
+    ): void {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException(
+                'Přepis ročních nároků musí běžet v transakci.',
+            );
+        }
+
+        foreach ([
+            'payroll_annual_settlement_deductions',
+            'payroll_annual_settlement_spouse_claims',
+            'payroll_annual_settlement_preschool_claims',
+        ] as $table) {
+            $delete = $pdo->prepare(
+                "DELETE FROM {$table}
+                  WHERE supplier_id = ? AND employee_id = ? AND tax_year = ?"
+            );
+            $delete->execute([$supplierId, $employeeId, $taxYear]);
+        }
+
+        if ($deductions !== []) {
+            $insert = $pdo->prepare(
+                'INSERT INTO payroll_annual_settlement_deductions
+                    (supplier_id, employee_id, tax_year, kind, amount_minor,
+                     quantity, months_mask, housing_acquired_before_2021,
+                     counterparty_name, evidence_status, evidence_reference,
+                     note, sort_order, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            foreach (array_values($deductions) as $position => $row) {
+                $insert->execute([
+                    $supplierId,
+                    $employeeId,
+                    $taxYear,
+                    $row['kind'],
+                    $row['amount_minor'] ?? null,
+                    $row['quantity'] ?? null,
+                    $row['months_mask'] ?? null,
+                    !empty($row['housing_acquired_before_2021']) ? 1 : 0,
+                    $row['counterparty_name'] ?? null,
+                    $row['evidence_status'] ?? 'unverified',
+                    $row['evidence_reference'] ?? null,
+                    $row['note'] ?? null,
+                    $position,
+                    $actorUserId,
+                    $actorUserId,
+                ]);
+            }
+        }
+
+        if ($spouse !== null) {
+            $pdo->prepare(
+                'INSERT INTO payroll_annual_settlement_spouse_claims
+                    (supplier_id, employee_id, tax_year, spouse_dependant_id,
+                     child_dependant_id, months_mask, ztp_p_months_mask,
+                     spouse_income_minor, evidence_status, evidence_reference,
+                     note, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            )->execute([
+                $supplierId,
+                $employeeId,
+                $taxYear,
+                $spouse['spouse_dependant_id'],
+                $spouse['child_dependant_id'],
+                $spouse['months_mask'],
+                $spouse['ztp_p_months_mask'] ?? 0,
+                $spouse['spouse_income_minor'] ?? null,
+                $spouse['evidence_status'] ?? 'unverified',
+                $spouse['evidence_reference'] ?? null,
+                $spouse['note'] ?? null,
+                $actorUserId,
+                $actorUserId,
+            ]);
+        }
+
+        if ($preschool !== []) {
+            $insert = $pdo->prepare(
+                'INSERT INTO payroll_annual_settlement_preschool_claims
+                    (supplier_id, employee_id, tax_year, child_dependant_id,
+                     facility_kind, facility_name, expenses_minor, households_count,
+                     agreed_cap_minor, claimed_by_other_taxpayer,
+                     claimed_as_business_expense, grandchild_care_replaces_parents,
+                     other_supporting_taxpayer, other_taxpayer_name,
+                     other_taxpayer_claimed_minor, other_taxpayer_confirmation_reference,
+                     agreement_reference,
+                     evidence_status, evidence_reference, note, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+            );
+            foreach ($preschool as $row) {
+                $insert->execute([
+                    $supplierId,
+                    $employeeId,
+                    $taxYear,
+                    $row['child_dependant_id'],
+                    $row['facility_kind'],
+                    $row['facility_name'] ?? null,
+                    $row['expenses_minor'],
+                    $row['households_count'] ?? 1,
+                    $row['agreed_cap_minor'] ?? null,
+                    !empty($row['claimed_by_other_taxpayer']) ? 1 : 0,
+                    !empty($row['claimed_as_business_expense']) ? 1 : 0,
+                    !empty($row['grandchild_care_replaces_parents']) ? 1 : 0,
+                    !empty($row['other_supporting_taxpayer']) ? 1 : 0,
+                    $row['other_taxpayer_name'] ?? null,
+                    $row['other_taxpayer_claimed_minor'] ?? null,
+                    $row['other_taxpayer_confirmation_reference'] ?? null,
+                    $row['agreement_reference'] ?? null,
+                    $row['evidence_status'] ?? 'unverified',
+                    $row['evidence_reference'] ?? null,
+                    $row['note'] ?? null,
+                    $actorUserId,
+                    $actorUserId,
+                ]);
+            }
+        }
+    }
+
+    /**
+     * Osoby v evidenci zaměstnance pro výběr manžela a dítěte. Bez rodného čísla.
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function dependantsForEmployee(int $supplierId, int $employeeId): array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, relation, full_name, birth_date, ztp_p
+               FROM payroll_dependants
+              WHERE supplier_id = ? AND employee_id = ?
+              ORDER BY birth_date, id'
+        );
+        $statement->execute([$supplierId, $employeeId]);
+
+        return array_map(
+            static function (array $row): array {
+                $row['id'] = (int) $row['id'];
+                $row['ztp_p'] = (int) $row['ztp_p'] === 1;
+
+                return $row;
+            },
+            array_values($statement->fetchAll(PDO::FETCH_ASSOC)),
+        );
+    }
+
+    /**
+     * Patří osoba z evidence tomuto zaměstnanci a firmě?
+     *
+     * @return array<string,mixed>|null
+     */
+    public function findDependant(int $supplierId, int $employeeId, int $dependantId): ?array
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT id, relation, full_name, birth_date, existence_from,
+                    existence_to, ztp_p
+               FROM payroll_dependants
+              WHERE supplier_id = ? AND employee_id = ? AND id = ?'
+        );
+        $statement->execute([$supplierId, $employeeId, $dependantId]);
+        $row = $statement->fetch(PDO::FETCH_ASSOC);
+
+        return $row === false ? null : $row;
+    }
+
+    /**
      * Intervaly prohlášení k dani a rezidentství zasahující do roku.
      *
      * Vrací ŘÁDKY, ne vyhodnocený stav: co z nich plyne, rozhoduje
@@ -910,6 +1270,73 @@ final class PayrollAnnualSettlementRepository
             if (array_key_exists($key, $row) && $row[$key] !== null) {
                 $row[$key] = (int) $row[$key];
             }
+        }
+
+        return $row;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castDeduction(array $row): array
+    {
+        foreach (['id', 'supplier_id', 'employee_id', 'tax_year', 'sort_order'] as $key) {
+            $row[$key] = (int) $row[$key];
+        }
+        foreach (['amount_minor', 'quantity', 'months_mask'] as $key) {
+            if ($row[$key] !== null) {
+                $row[$key] = (int) $row[$key];
+            }
+        }
+        $row['housing_acquired_before_2021'] = (int) $row['housing_acquired_before_2021'] === 1;
+
+        return $row;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castSpouseClaim(array $row): array
+    {
+        foreach ([
+            'id', 'supplier_id', 'employee_id', 'tax_year', 'spouse_dependant_id',
+            'child_dependant_id', 'months_mask', 'ztp_p_months_mask',
+        ] as $key) {
+            $row[$key] = (int) $row[$key];
+        }
+        if ($row['spouse_income_minor'] !== null) {
+            $row['spouse_income_minor'] = (int) $row['spouse_income_minor'];
+        }
+        $row['spouse_ztp_p'] = (int) $row['spouse_ztp_p'] === 1;
+        $row['child_ztp_p'] = (int) $row['child_ztp_p'] === 1;
+
+        return $row;
+    }
+
+    /**
+     * @param array<string,mixed> $row
+     * @return array<string,mixed>
+     */
+    private static function castPreschoolClaim(array $row): array
+    {
+        foreach ([
+            'id', 'supplier_id', 'employee_id', 'tax_year', 'child_dependant_id',
+            'expenses_minor', 'households_count',
+        ] as $key) {
+            $row[$key] = (int) $row[$key];
+        }
+        foreach (['agreed_cap_minor', 'other_taxpayer_claimed_minor'] as $key) {
+            if ($row[$key] !== null) {
+                $row[$key] = (int) $row[$key];
+            }
+        }
+        foreach ([
+            'claimed_by_other_taxpayer', 'claimed_as_business_expense',
+            'grandchild_care_replaces_parents', 'other_supporting_taxpayer',
+        ] as $key) {
+            $row[$key] = (int) $row[$key] === 1;
         }
 
         return $row;

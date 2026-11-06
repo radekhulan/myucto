@@ -33,7 +33,7 @@ final class AccountDetailService
      */
     public function build(int $supplierId, int $accountId, string $from, string $to, bool $afterClosing = false): array
     {
-        $account = $this->accounts->findById($supplierId, $accountId);
+        $account = $this->accounts->findById($supplierId, $accountId, $to);
         if ($account === null) {
             throw new ReportException('account_not_found', 'Účet #' . $accountId . ' neexistuje.', 404);
         }
@@ -44,7 +44,7 @@ final class AccountDetailService
 
         $parent = null;
         if ($account['parent_id'] !== null) {
-            $p = $this->accounts->findById($supplierId, (int) $account['parent_id']);
+            $p = $this->accounts->findById($supplierId, (int) $account['parent_id'], $to);
             if ($p !== null) {
                 $parent = [
                     'id'   => (int) $p['id'],
@@ -55,7 +55,7 @@ final class AccountDetailService
         }
 
         $children = [];
-        foreach ($this->accounts->childrenOf($supplierId, $accountId) as $c) {
+        foreach ($this->accounts->childrenOf($supplierId, $accountId, $to) as $c) {
             $childId = (int) $c['id'];
             $children[] = [
                 'id'        => $childId,

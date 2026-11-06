@@ -16,7 +16,7 @@ import {
   type MobileKeyBatchItemResult,
   type MobileKeyReceiptSession,
 } from '@/api/dataBox'
-import { btnFilledSm, btnOutlineSm } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilledSm, btnOutlineSm } from '@/components/ui/buttonStyles'
 
 const props = defineProps<{
   outboxIds: number[]
@@ -127,6 +127,9 @@ async function poll() {
       data-test="mobile-key-batch-send-action"
       @click="openPanel"
     >
+      <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <path :d="ICONS.send" />
+      </svg>
       {{ t('payroll.submissions.overview.mobile_key_batch.action', { count: outboxIds.length }) }}
     </button>
     <div
@@ -182,6 +185,9 @@ async function poll() {
           data-test="mobile-key-batch-send-request"
           @click="start"
         >
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <path :d="ICONS.send" />
+          </svg>
           {{ t('databox.outbox.mobileKey.request') }}
         </button>
         <button type="button" :class="btnOutlineSm('neutral')" @click="close">

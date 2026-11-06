@@ -22,6 +22,9 @@ final class InvoiceNumberFormat
 
     public const PERIODS = ['year', 'month', 'none'];
 
+    /** Řady vydaných dokladů na firmě, které renderuje {@see VarsymbolGenerator}. */
+    public const SUPPLIER_COLUMNS = ['invoice_number_format', 'proforma_number_format', 'credit_note_number_format', 'simplified_number_format'];
+
     /**
      * Datumové tokeny řady včetně volitelného posunu — `{YY+30}`, `{MM-1}`, `{YYYY+1}`.
      * Posun je čistě ZOBRAZOVACÍ: neovlivňuje `invoice_number_period`, tedy kdy se čítač

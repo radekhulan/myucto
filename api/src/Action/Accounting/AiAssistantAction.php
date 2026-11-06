@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Accounting;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Middleware\AuthMiddleware;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Ai\AccountingAssistantException;
 use MyInvoice\Service\Ai\AccountingAssistantService;
 use MyInvoice\Service\Ai\AiAssistantHistoryService;
@@ -74,6 +75,7 @@ final class AiAssistantAction
                 $documentIds,
                 in_array($body['include_chart'] ?? '0', ['1', 1, true, 'true'], true),
                 $body['model'] ?? null,
+                RequestAuthorization::canCreateInternalDocument($request),
             );
             if ($userId !== null) {
                 $attachments = [

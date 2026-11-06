@@ -61,6 +61,9 @@ SH);
             'skip data runs no data checks' => [1, 0, 1, true, false, true, 0],
             'green cache skips test execution' => [0, 2, 0, true, false, true, 0],
             'green cache still checks data' => [0, 2, 2, false, false, true, 0],
+            'core failure in full suite fails without rerun' => [2, 0, 0, true, false, true, 1],
+            'core failure in full suite still checks data' => [2, 0, 0, false, false, true, 1],
+            'full run overrides core failure of full suite' => [2, 0, 0, true, true, true, 0],
             'missing optional scripts are skipped' => [1, 0, 2, false, false, false, 0],
             'successful tests and data pass' => [1, 0, 0, false, false, true, 0],
         ];
@@ -83,6 +86,11 @@ SH);
         int $expectedExit,
     ): void {
         $shell = $extension === 'ps1' ? 'pwsh' : (getenv('MYINVOICE_TEST_BASH_BIN') ?: 'bash');
+        if ($extension === 'sh' && PHP_OS_FAMILY === 'Windows' && !getenv('MYINVOICE_TEST_BASH_BIN')) {
+            $git = (new \Symfony\Component\Process\ExecutableFinder())->find('git');
+            $gitBash = $git === null ? null : dirname($git, 2) . '/bin/bash.exe';
+            if ($gitBash !== null && is_file($gitBash)) $shell = $gitBash;
+        }
         $probe = new Process($extension === 'ps1' ? [$shell, '-NoProfile', '-Command', 'exit 0'] : [$shell, '--version']);
         $probe->run();
         if (!$probe->isSuccessful()) {
@@ -121,7 +129,8 @@ SH);
         );
         $testCalls = array_values(array_filter($calls, static fn (array $call): bool => $call['script'] === 'test-parallel.php' && !$call['green_check']));
         $dataCalls = array_values(array_filter($calls, static fn (array $call): bool => $call['script'] !== 'test-parallel.php'));
-        self::assertCount($full || $green !== 0 ? 1 : 0, $testCalls, $output);
+        // green = výsledek --audit-check: 0 jádro bez pádu, 1 běh plné sady chybí, 2 jádro padlo.
+        self::assertCount($full || $green === 1 ? 1 : 0, $testCalls, $output);
         if ($testCalls !== []) {
             self::assertSame('audit_gate_runner_test', $testCalls[0]['database']);
             self::assertSame($this->fixture . '/api', $testCalls[0]['cwd']);

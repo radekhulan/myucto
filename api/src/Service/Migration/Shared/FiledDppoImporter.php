@@ -169,27 +169,30 @@ final class FiledDppoImporter
         bool $replaceDraft = false,
         bool $registerLosses = true,
     ): array {
-        $preview = $this->preview($supplierId, $xml, $year, $variant, $variantSeq);
-        if ($preview['blocked'] !== null) {
-            throw new TaxReturnException('return_finalized', $preview['blocked'], 409);
-        }
-        $filedYear = (int) $preview['year'];
-        $status = 'created';
-        if ($preview['current']['exists']) {
-            if (!$replaceDraft) {
-                $preview['status'] = 'kept';
-                $preview['notices'][] = 'Rozpracované přiznání za tento rok už existuje, vstupy se nepřepsaly.';
-                return $preview;
+        return (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $xml, $userId, $year, $variant, $variantSeq, $replaceDraft, $registerLosses): array {
+            $this->losses->lockNativeContext($supplierId, 'po');
+            $preview = $this->preview($supplierId, $xml, $year, $variant, $variantSeq);
+            if ($preview['blocked'] !== null) {
+                throw new TaxReturnException('return_finalized', $preview['blocked'], 409);
             }
-            $status = 'replaced';
-        }
-        $this->service->saveInputs($supplierId, $filedYear, 'po', (array) $preview['proposed'], (int) $preview['current']['row_version'], $userId, $variant, $variantSeq);
-        $preview['status'] = $status;
+            $filedYear = (int) $preview['year'];
+            $status = 'created';
+            if ($preview['current']['exists']) {
+                if (!$replaceDraft) {
+                    $preview['status'] = 'kept';
+                    $preview['notices'][] = 'Rozpracované přiznání za tento rok už existuje, vstupy se nepřepsaly.';
+                    return $preview;
+                }
+                $status = 'replaced';
+            }
+            $this->service->saveInputs($supplierId, $filedYear, 'po', (array) $preview['proposed'], (int) $preview['current']['row_version'], $userId, $variant, $variantSeq);
+            $preview['status'] = $status;
 
-        if ($registerLosses) {
-            $preview['notices'] = array_merge($preview['notices'], $this->registerLosses($supplierId, $filedYear, $preview['losses']['year_loss'], $preview['losses']['applied']));
-        }
-        return $preview;
+            if ($registerLosses) {
+                $preview['notices'] = array_merge($preview['notices'], $this->registerLosses($supplierId, $filedYear, $preview['losses']['year_loss'], $preview['losses']['applied']));
+            }
+            return $preview;
+        });
     }
 
     /**
@@ -199,6 +202,14 @@ final class FiledDppoImporter
      * @return list<string> hlášení pro uživatele
      */
     public function registerLosses(int $supplierId, int $year, float $yearLoss, float $appliedLoss): array
+    {
+        return (new \MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $year, $yearLoss, $appliedLoss): array {
+            $this->losses->lockNativeContext($supplierId, 'po');
+            return $this->registerLossesInTransaction($supplierId, $year, $yearLoss, $appliedLoss);
+        });
+    }
+
+    private function registerLossesInTransaction(int $supplierId, int $year, float $yearLoss, float $appliedLoss): array
     {
         foreach ($this->returns->listVariants($supplierId, $year, 'po') as $v) {
             if (($v['status'] ?? '') === 'final') {

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Document;
 
+use MyInvoice\Support\Imaging\ImagickGuard;
+
 /**
  * Generuje náhledy (thumbnaily) pro PDF (1. strana) a rastrové obrázky.
  * Best-effort: Imagick (pokud dostupný) zvládá PDF i obrázky, jinak GD jen
@@ -14,6 +16,8 @@ namespace MyInvoice\Service\Document;
 final class ThumbnailGenerator
 {
     private const MAX_DIM = 480;
+    /** GD dekóduje celý rastr do paměti PHP (~4 B/px), proto nižší strop než Imagick. */
+    private const GD_MAX_PIXELS = 40_000_000;
 
     /**
      * @return array{status:'generated'|'unsupported'|'failed', path:?string}
@@ -49,29 +53,53 @@ final class ThumbnailGenerator
         return ['status' => 'unsupported', 'path' => null];
     }
 
+    /**
+     * Doc_type pochází z přípony, obsah ale určuje uživatel. Coder proto bereme z magic
+     * bytes a vynucujeme prefixem; nepodporovaný obsah do Imagicku vůbec nepustíme.
+     * Rastr musí projít stropem pixelů už při pingImage(), tedy před dekódováním.
+     */
     private function viaImagick(string $src, string $docType, string $out): bool
     {
-        $im = new \Imagick();
         if ($docType === 'pdf') {
-            $im->setResolution(120, 120);
-            $im->readImage($src . '[0]'); // jen první strana
-            $im->setImageBackgroundColor('white');
-            $im = $im->flattenImages();
-        } else {
-            $im->readImage($src);
-            if ($im->getNumberImages() > 1) {
-                $im->setIteratorIndex(0);
-                $im = $im->getImage();
+            if (!ImagickGuard::isPdf($src)) {
+                return false;
             }
+            $spec = 'pdf:' . $src . '[0]'; // jen první strana
+        } else {
+            $coder = ImagickGuard::rasterCoder($src);
+            if ($coder === null) {
+                return false;
+            }
+            $spec = $coder . ':' . $src . '[0]'; // jen první snímek
         }
-        $im->setImageColorspace(\Imagick::COLORSPACE_SRGB);
-        $im->thumbnailImage(self::MAX_DIM, self::MAX_DIM, true);
-        $im->setImageFormat('jpeg');
-        $im->setImageCompressionQuality(82);
-        $ok = $im->writeImage($out);
-        $im->clear();
-        $im->destroy();
-        return $ok && is_file($out);
+
+        return ImagickGuard::withLimits(function () use ($spec, $docType, $out): bool {
+            $im = new \Imagick();
+            if ($docType === 'pdf') {
+                $im->setResolution(120, 120);
+                $im->readImage($spec);
+                $im->setImageBackgroundColor('white');
+                $im = $im->flattenImages();
+            } else {
+                $size = ImagickGuard::ping($spec);
+                if ($size === null || !ImagickGuard::withinPixelLimit($size[0], $size[1])) {
+                    return false;
+                }
+                // JPEG stačí dekódovat ve zmenšeném měřítku (libjpeg DCT scaling).
+                if (str_starts_with($spec, 'jpeg:')) {
+                    $im->setOption('jpeg:size', (self::MAX_DIM * 2) . 'x' . (self::MAX_DIM * 2));
+                }
+                $im->readImage($spec);
+            }
+            $im->setImageColorspace(\Imagick::COLORSPACE_SRGB);
+            $im->thumbnailImage(self::MAX_DIM, self::MAX_DIM, true);
+            $im->setImageFormat('jpeg');
+            $im->setImageCompressionQuality(82);
+            $ok = $im->writeImage('jpeg:' . $out);
+            $im->clear();
+            $im->destroy();
+            return $ok && is_file($out);
+        });
     }
 
     private function viaGd(string $src, string $out): bool
@@ -79,7 +107,7 @@ final class ThumbnailGenerator
         $info = @getimagesize($src);
         if ($info === false) return false;
         [$w, $h] = $info;
-        if ($w < 1 || $h < 1 || (int) ($w * $h) > 40_000_000) return false; // pixel-bomb guard
+        if ($w < 1 || $h < 1 || (int) ($w * $h) > self::GD_MAX_PIXELS) return false; // pixel-bomb guard
 
         $img = match ($info[2]) {
             IMAGETYPE_JPEG => @imagecreatefromjpeg($src),

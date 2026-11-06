@@ -19,6 +19,9 @@ use MyInvoice\Service\Mail\RateLimit\MailRecipientBatcher;
 use MyInvoice\Service\Mail\RateLimit\MailSendCounter;
 use MyInvoice\Service\Signing\Email\EmailSigningService;
 use MyInvoice\Service\System\ManagedModeGuard;
+use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\InstanceAdmin\InstanceSmtpRepository;
+use MyInvoice\Service\InstanceAdmin\NeutralSmtpTestSender;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Mailer\Envelope;
 use Symfony\Component\Mailer\Mailer as SymfonyMailer;
@@ -64,6 +67,8 @@ final class Mailer
     private ?MailOutbox $outbox = null;
     /** Reentrance guard: vyprazdňování fronty volá zpátky sendTemplateDetailed(). */
     private bool $draining = false;
+    private bool $instanceSmtpLoaded = false;
+    private ?array $instanceSmtp = null;
 
     public function __construct(
         private readonly Config $config,
@@ -75,6 +80,7 @@ final class Mailer
         private readonly ?SentMailAppenderInterface $sentMailImap = null,
         ?MailRateLimiter $rateLimiter = null,
         private readonly ?InvoiceIsdocAttachments $invoiceIsdoc = null,
+        private readonly ?\MyInvoice\Service\ActivityLogger $activity = null,
     ) {
         // ⚠️ Vědomě NENÍ promoted readonly property: PHP-DI optional class-param
         // nevyplní, takže by tu při ručním bindingu v Bootstrapu zůstal null a
@@ -341,7 +347,7 @@ final class Mailer
         }
 
         // From: per-supplier override (vars['supplier'].email + display_name) > globální cfg
-        $globalFromEmail = (string) $this->config->get('smtp.from_email');
+        $globalFromEmail = (string) ($this->instanceSmtp()['from_email'] ?? $this->config->get('smtp.from_email'));
         $globalFromName  = (string) $this->config->get('smtp.from_name');
         $supplier = is_array($vars['supplier'] ?? null) ? $vars['supplier'] : null;
         $emailProfile = $managedSystemMail ? null : ($emailProfileOverride ?? $this->defaultEmailProfile($supplier));
@@ -662,6 +668,7 @@ final class Mailer
                     // Zpráva JE doručená, selhalo jen uložení kopie do IMAP —
                     // opakovat by znamenalo poslat ji příjemci podruhé.
                     $this->outbox()->markSent($item['id'], $now);
+                    $this->logDeferredPaymentThanks($item, true, null);
                     $report['sent']++;
                     continue;
                 } catch (\Throwable $e) {
@@ -672,6 +679,7 @@ final class Mailer
                         $e->getMessage(),
                         $item['attempts'],
                     );
+                    $this->logDeferredPaymentThanks($item, false, $e->getMessage());
                     $report['failed']++;
                     continue;
                 }
@@ -690,6 +698,7 @@ final class Mailer
                 }
 
                 $this->outbox()->markSent($item['id'], $now);
+                $this->logDeferredPaymentThanks($item, true, (string) ($result['smtp_response'] ?? ''));
                 $report['sent']++;
             }
         } finally {
@@ -697,6 +706,32 @@ final class Mailer
         }
 
         return $report;
+    }
+
+    /**
+     * Poděkování za úhradu zbrzděné limitem se v aktivitě faktury objevilo jen jako
+     * „ve frontě" — skutečné doručení nebo selhání z fronty se k faktuře dopisuje tady.
+     *
+     * @param array{template:string, payload:array<string,mixed>} $item
+     */
+    private function logDeferredPaymentThanks(array $item, bool $sent, ?string $detail): void
+    {
+        $invoiceId = (int) ($item['payload']['vars']['invoice']['id'] ?? 0);
+        if ($this->activity === null || $item['template'] !== 'invoice_payment_thanks' || $invoiceId <= 0) {
+            return;
+        }
+        $this->activity->log(
+            $sent ? 'invoice.payment_thanks_sent' : 'invoice.payment_thanks_failed',
+            isset($item['payload']['user_id']) ? (int) $item['payload']['user_id'] : null,
+            'invoice',
+            $invoiceId,
+            [
+                'varsymbol'  => $item['payload']['vars']['invoice']['varsymbol'] ?? null,
+                'recipients' => array_values((array) ($item['payload']['to'] ?? [])),
+                'deferred'   => true,
+                $sent ? 'smtp_response' : 'reason' => $detail,
+            ],
+        );
     }
 
     private function drainDeferredIfCli(DateTimeImmutable $now): void
@@ -759,7 +794,7 @@ final class Mailer
     private function sendPlainAlert(string $to, string $subject, string $body): bool
     {
         try {
-            $from = (string) $this->config->get('smtp.from_email', '');
+            $from = (string) ($this->instanceSmtp()['from_email'] ?? $this->config->get('smtp.from_email', ''));
             if ($from === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
                 return false;
             }
@@ -917,11 +952,26 @@ final class Mailer
             return Transport::fromDsn($this->sendmailDsn($command));
         }
 
+        if (($instance = $this->instanceSmtp()) !== null) {
+            return NeutralSmtpTestSender::transport($instance);
+        }
+
         // Bez profilu (nebo profil s transport_type='global'): použij PŮVODNÍ globální
         // transport přes Transport::fromDsn(buildDsn()) — bit-za-bit shodný s masterem.
         // Ruční EsmtpTransport (smtpTransport) se tak dotkne JEN profilů s vlastním SMTP;
         // instalace, které si SMTP v profilu vědomě nenastaví, mají zaručeně 0 regresí.
         return Transport::fromDsn($this->buildDsn());
+    }
+
+    /** Schválený transport je opt-in; staré instalace a konfigurace hostingu se nemění. */
+    private function instanceSmtp(): ?array
+    {
+        if (!$this->instanceSmtpLoaded) {
+            $this->instanceSmtp = (new InstanceSmtpRepository($this->db, $this->config,
+                new SecretEncryption($this->config), new ManagedModeGuard($this->config)))->runtime();
+            $this->instanceSmtpLoaded = true;
+        }
+        return $this->instanceSmtp;
     }
 
     /**

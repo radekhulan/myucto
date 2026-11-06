@@ -28,7 +28,10 @@ use MyInvoice\Service\Currency\PurchaseInvoiceRateReloader;
 use MyInvoice\Service\Invoice\DocumentItemsPayload;
 use MyInvoice\Service\Invoice\PurchaseInvoiceCalculator;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatment;
+use MyInvoice\Service\PurchaseInvoice\PurchaseVatTreatmentConflict;
 use MyInvoice\Service\PurchaseInvoice\VendorNumberDuplicates;
+use MyInvoice\Service\Vat\PurchaseFiledVatPeriod;
 use MyInvoice\Service\Validation\PurchaseInvoiceValidation;
 use MyInvoice\Service\Ai\AiSuggestionService;
 use MyInvoice\Support\ExchangeRateDate;
@@ -63,6 +66,7 @@ final class UpdatePurchaseInvoiceAction
         private readonly PurchaseInvoiceRateReloader $rateReloader,
         private readonly CashSettlementService $cashSettlement,
         private readonly \MyInvoice\Service\Document\AttachmentCheck\AttachmentCheckService $attachmentChecks,
+        private readonly PurchaseFiledVatPeriod $filedPeriods,
     ) {}
 
     /**
@@ -193,23 +197,51 @@ final class UpdatePurchaseInvoiceAction
                 }
             }
         }
+        // Podané období DPH (symetrie s vystavenou fakturou, {@see \MyInvoice\Action\Invoice\UpdateInvoiceAction}):
+        // finanční změnu nedraftového dokladu, jehož období odpočtu nebo nové DUZP spadá do
+        // podaného přiznání či KH, provede jen správce. Opravu řeší opravné tvrzení.
+        if ($existing['status'] !== 'draft'
+            && $isForce
+            && !RequestAuthorization::canChangeFiledVatPeriod($request)
+            && self::financialFieldsChanged($body, $existing) !== []
+            && ($filed = $this->filedPeriods->describe($supplierId, $id, [DocumentLockService::purchaseRefDate($body)])) !== null) {
+            return Json::error($response, 'period_filed', PurchaseFiledVatPeriod::message($filed), 409);
+        }
+
         $errors = PurchaseInvoiceValidation::invoice($body, $this->repo->vatRateMap());
         if (!empty($errors)) {
             return Json::error($response, 'validation_failed', 'Validace selhala', 400, ['fields' => $errors]);
         }
 
-        // Vyprázdnění položek dokladu, který nějaké má → 422 ({@see DocumentItemsPayload}).
+        // Vyprázdnění položek mimo koncept → 422 ({@see DocumentItemsPayload}).
         // 422, ne 400: tělo je tvarem v pořádku (`items` JE pole), odmítá se až to, co
         // požadavek znamená proti STAVU tohohle dokladu — táž třída jako `force_mode_required`
         // a `financial_change_not_allowed` níž. 400 `validation_failed` je v téhle codebase
         // vyhrazené pro schéma pole po poli (nese mapu `fields`).
-        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []))) {
+        if (DocumentItemsPayload::emptiesExisting($body, (array) ($existing['items'] ?? []), (string) $existing['status'])) {
             return Json::error(
                 $response,
                 DocumentItemsPayload::EMPTY_ERROR_CODE,
                 DocumentItemsPayload::emptyErrorMessage(),
                 422,
             );
+        }
+
+        // Změna nároku na odpočet v hlavičce u dokladu s rozpisem DPH: evidence čte nárok
+        // z rozpisu, takže samotná hlavička by se s ní tiše rozešla. Jednoznačný případ se
+        // promítne do rozpisu, nejednoznačný se odmítne ({@see PurchaseVatTreatment}).
+        try {
+            $syncedAllocations = PurchaseVatTreatment::syncAllocationsWithHeader(
+                ['vat_deduction' => $existing['vat_deduction'] ?? null, 'vat_deduction_percent' => $existing['vat_deduction_percent'] ?? null],
+                ['vat_deduction' => $body['vat_deduction'] ?? null, 'vat_deduction_percent' => $body['vat_deduction_percent'] ?? null],
+                array_values((array) ($existing['vat_allocations'] ?? [])),
+                array_key_exists('vat_allocations', $sent) && is_array($sent['vat_allocations']) ? array_values($sent['vat_allocations']) : null,
+            );
+        } catch (PurchaseVatTreatmentConflict $e) {
+            return Json::error($response, PurchaseVatTreatmentConflict::ERROR_CODE, $e->getMessage(), 422);
+        }
+        if ($syncedAllocations !== null) {
+            $body['vat_allocations'] = $syncedAllocations;
         }
 
         // BOLA guard (security report 2026-08, R2 #5 / sweep F5) — vendor_id má vlastní
@@ -397,7 +429,12 @@ final class UpdatePurchaseInvoiceAction
             }
             // Přesný duplikát PF: stejný dodavatel + číslo dokladu + datum (uq_pi_vendor_invoice) → 409.
             if ($dupMsg = self::vendorInvoiceDuplicateMessage($e, $body['vendor_invoice_number'] ?? null)) {
-                return Json::error($response, 'vendor_invoice_duplicate', $dupMsg, 409, ['can_confirm' => true]);
+                $dup = VendorNumberDuplicates::describe(VendorNumberDuplicates::existing(
+                    $this->db->pdo(), $supplierId, (int) $vendor['id'],
+                    (string) ($body['vendor_invoice_number'] ?? ''), (string) ($body['issue_date'] ?? ''), $id,
+                ), $body['vendor_invoice_number'] ?? null);
+                return Json::error($response, 'vendor_invoice_duplicate', $dup['message'] ?? $dupMsg, 409,
+                    ['can_confirm' => true] + $dup['details']);
             }
             throw $e;
         } catch (\Throwable $e) {

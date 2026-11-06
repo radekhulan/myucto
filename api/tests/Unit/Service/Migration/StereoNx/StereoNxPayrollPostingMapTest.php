@@ -9,6 +9,23 @@ use PHPUnit\Framework\TestCase;
 
 final class StereoNxPayrollPostingMapTest extends TestCase
 {
+    public function testNumericAnalyticsUseTargetCodesAndPreserveSourceEvidence(): void
+    {
+        $parameters = [['TypPar' => 1, 'Text' => 'Hrubá mzda (z)', 'UcetMD' => '521001', 'UcetD' => '331001']];
+        $transfer = [['DoklRadaU' => 'MZ']];
+        $journal = [$this->line('MZ', 'Hrubá mzda (z)', '521001', '331001', 28_000.0)];
+        $rows = StereoNxPayrollPostingMap::fromTables($parameters, $transfer, $journal)->postingRows();
+        self::assertCount(1, $rows);
+        self::assertSame('521.001', $rows[0]->debitAccount);
+        self::assertSame('331.001', $rows[0]->creditAccount);
+        self::assertSame('521001', $rows[0]->debitSourceCode);
+        self::assertSame('331001', $rows[0]->creditSourceCode);
+        $legacy = StereoNxPayrollPostingMap::fromTables($parameters, $transfer, $journal,
+            accountCodes: ['521001' => '521001', '331001' => '331001'])->postingRows();
+        self::assertSame('521001', $legacy[0]->debitAccount);
+        self::assertSame('331001', $legacy[0]->creditAccount);
+    }
+
     public function testOnlyVerifiedEmployeeJournalRowsBecomePostingEvidence(): void
     {
         $parameters = [

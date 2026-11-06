@@ -14,9 +14,10 @@ use GuzzleHttp\Psr7\FnStream;
 use GuzzleHttp\Psr7\PumpStream;
 use GuzzleHttp\Psr7\Response;
 use GuzzleHttp\Psr7\Utils;
-use MyInvoice\Service\Bank\Connector\BankConnector;
+use MyInvoice\Service\Bank\Connector\BankConnectorOperationException;
 use MyInvoice\Service\Bank\Connector\BankConnectorException;
 use MyInvoice\Service\Bank\Connector\FioBankConnector;
+use MyInvoice\Service\Bank\Connector\StructuredBankConnector;
 use MyInvoice\Service\Payment\AboPaymentOrderWriter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -26,27 +27,26 @@ final class FioBankConnectorTest extends TestCase
 {
     private const TOKEN = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
-    public function testImplementsGenericContractAndIdentifiesProvider(): void
+    public function testImplementsStructuredContractAndIdentifiesProvider(): void
     {
-        $connector = $this->connectorWith(new Response(200, [], $this->gpc()));
+        $connector = $this->connectorWith(new Response(200, [], $this->xml()));
 
-        self::assertInstanceOf(BankConnector::class, $connector);
+        self::assertInstanceOf(StructuredBankConnector::class, $connector);
         self::assertSame('fio', $connector->provider());
+        self::assertSame('json', $connector->statementFormat());
     }
 
-    public function testDownloadsRawGpcFromPeriodsEndpointWithHardenedOptions(): void
+    public function testDownloadsFioXmlFromPeriodsEndpointWithHardenedOptions(): void
     {
         $history = [];
-        $raw = $this->gpc(chr(0xE1));
-        $connector = $this->connectorWith(new Response(200, ['Content-Type' => 'text/plain'], $raw), $history);
+        $connector = $this->connectorWith(new Response(200, ['Content-Type' => 'text/xml'], $this->xml()), $history);
 
         $result = $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31');
 
-        self::assertSame($raw, $result);
         self::assertCount(1, $history);
         self::assertSame('GET', $history[0]['request']->getMethod());
         self::assertSame(
-            'https://fioapi.fio.cz/v1/rest/periods/' . self::TOKEN . '/2026-08-01/2026-08-31/transactions.gpc',
+            'https://fioapi.fio.cz/v1/rest/periods/' . self::TOKEN . '/2026-08-01/2026-08-31/transactions.xml',
             (string) $history[0]['request']->getUri(),
         );
         self::assertFalse($history[0]['options']['allow_redirects']);
@@ -54,13 +54,83 @@ final class FioBankConnectorTest extends TestCase
         self::assertTrue($history[0]['options']['stream']);
         self::assertSame(5.0, $history[0]['options']['connect_timeout']);
         self::assertSame(30.0, $history[0]['options']['timeout']);
+        self::assertStringNotContainsString('<Transaction>', $result, 'Ukládá se kompaktní JSON, ne syrové XML.');
+
+        $parsed = $connector->parseStatement($result);
+        self::assertSame('1000000005', $parsed['header']['account_number']);
+        self::assertSame('CZK', $parsed['header']['currency']);
+        self::assertSame('2026-08-31', $parsed['header']['statement_date']);
+        self::assertSame(1500.0, $parsed['header']['curr_balance']);
+        self::assertSame([
+            'posted_at' => '2026-08-15',
+            'amount' => 1250.5,
+            'currency' => 'CZK',
+            'variable_symbol' => '2026001',
+            'constant_symbol' => '0308',
+            'specific_symbol' => null,
+            'counterparty_account' => '2000000018',
+            'counterparty_bank' => '0100',
+            'counterparty_name' => 'Synteticka firma',
+            'card_last4' => null,
+            'description' => 'Platba faktury | Faktura 2026001',
+            'bank_ref' => '10000000001',
+        ], $parsed['transactions'][0]);
+    }
+
+    /**
+     * #222: GPC u zahraniční platby nese IBAN jen v 20znakovém poli názvu, ořízne ho,
+     * a zprávu pro příjemce nenese vůbec. Z XML musí projít celé.
+     */
+    public function testForeignPaymentKeepsFullIbanNameAndMessage(): void
+    {
+        $iban = 'SK3112000000198742637541';
+        $connector = $this->connectorWith(new Response(200, [], $this->xml($this->xmlTransaction('10000000002', [
+            1 => '99.90', 14 => 'EUR', 2 => $iban, 10 => 'Synthetic Payer s.r.o.', 16 => 'Faktura 2026002',
+            8 => 'Okamžitá příchozí platba', 26 => 'GIBASKBX',
+        ]), 'EUR')));
+
+        $tx = $connector->parseStatement($connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'))['transactions'][0];
+
+        self::assertSame($iban, $tx['counterparty_account']);
+        self::assertNull($tx['counterparty_bank']);
+        self::assertSame('Synthetic Payer s.r.o.', $tx['counterparty_name']);
+        self::assertSame('Synthetic Payer s.r.o. | Faktura 2026002', $tx['description']);
+        self::assertSame('EUR', $tx['currency']);
+    }
+
+    public function testCzechIbanCounterpartyIsStoredInDomesticForm(): void
+    {
+        $connector = $this->connectorWith(new Response(200, [], $this->xml($this->xmlTransaction('10000000003', [
+            1 => '-10.00', 14 => 'CZK', 2 => 'CZ6508000000192000145399', 7 => 'Nákup: SYNTH SHOP, PK: 516844******1234',
+        ]))));
+
+        $tx = $connector->parseStatement($connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'))['transactions'][0];
+
+        self::assertSame('19-2000145399', $tx['counterparty_account']);
+        self::assertSame('0800', $tx['counterparty_bank']);
+        self::assertSame('1234', $tx['card_last4']);
+    }
+
+    public function testCredentialsKeepPlainTokenSoExistingConnectionsStayValid(): void
+    {
+        $connector = $this->connectorWith(new Response(200, [], $this->xml()));
+
+        self::assertSame(self::TOKEN, $connector->credentials([], [], ' ' . self::TOKEN . ' '));
+        foreach ([[[], null, 'token_required'], [[], 'short', 'token_invalid'], [['x' => 1], self::TOKEN, 'credential_format_invalid']] as [$input, $token, $code]) {
+            try {
+                $connector->credentials($input, [], $token);
+                self::fail('Neplatné přihlašovací údaje.');
+            } catch (BankConnectorOperationException $e) {
+                self::assertSame($code, $e->errorCode);
+            }
+        }
     }
 
     #[DataProvider('invalidDateProvider')]
     public function testRejectsInvalidOrReversedDateRange(string $from, string $to, string $errorCode): void
     {
         $history = [];
-        $connector = $this->connectorWith(new Response(200, [], $this->gpc()), $history);
+        $connector = $this->connectorWith(new Response(200, [], $this->xml()), $history);
 
         try {
             $connector->downloadStatement(self::TOKEN, $from, $to);
@@ -85,7 +155,7 @@ final class FioBankConnectorTest extends TestCase
     public function testRejectsMalformedTokenWithoutDisclosingIt(): void
     {
         $secret = 'token-that-must-not-appear';
-        $connector = $this->connectorWith(new Response(200, [], $this->gpc()));
+        $connector = $this->connectorWith(new Response(200, [], $this->xml()));
 
         try {
             $connector->downloadStatement($secret, '2026-08-01', '2026-08-31');
@@ -97,12 +167,12 @@ final class FioBankConnectorTest extends TestCase
         }
     }
 
-    public function testRejectsMalformedGpcInsteadOfPassingAnErrorPageToParser(): void
+    public function testRejectsMalformedXmlInsteadOfPassingAnErrorPageToParser(): void
     {
         $connector = $this->connectorWith(new Response(200, [], '<html>synthetic error</html>'));
 
         $this->expectException(BankConnectorException::class);
-        $this->expectExceptionMessage('neplatný formát GPC');
+        $this->expectExceptionMessage('neplatný výpis Fio XML');
         $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31');
     }
 
@@ -114,8 +184,8 @@ final class FioBankConnectorTest extends TestCase
             'fio_statement_failed',
             self::callback(static function (array $context) use ($raw): bool {
                 $serialized = json_encode($context);
-                return $context['stage'] === 'gpc'
-                    && $context['reason'] === 'line_ending_invalid'
+                return $context['stage'] === 'xml'
+                    && $context['reason'] === 'xml_invalid'
                     && $context['http_status'] === 200
                     && $context['response_bytes'] === strlen($raw)
                     && !str_contains($serialized, $raw)
@@ -131,21 +201,21 @@ final class FioBankConnectorTest extends TestCase
 
     public function testReadsEntireChunkedStatementResponse(): void
     {
-        $chunks = [substr($this->gpc(), 0, 40), substr($this->gpc(), 40)];
+        $chunks = [substr($this->xml(), 0, 40), substr($this->xml(), 40)];
         $stream = new PumpStream(static function () use (&$chunks): ?string {
             return array_shift($chunks);
         });
         $connector = $this->connectorWith(new Response(200, [], $stream));
 
         self::assertSame(
-            $this->gpc(),
+            $this->connectorWith(new Response(200, [], $this->xml()))->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'),
             $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'),
         );
     }
 
     public function testToleratesTransientEmptyReadsBeforeEndOfStream(): void
     {
-        $raw = $this->gpc() . $this->gpcTransaction('0000001000000005') . $this->gpcTransaction('0000001000000005');
+        $raw = $this->xml($this->xmlTransaction('10000000004', [1 => '1.00']) . $this->xmlTransaction('10000000005', [1 => '2.00']));
         $inner = Utils::streamFor($raw);
         $empty = true;
         $stream = FnStream::decorate($inner, [
@@ -156,12 +226,12 @@ final class FioBankConnectorTest extends TestCase
         ]);
         $connector = $this->connectorWith(new Response(200, ['Transfer-Encoding' => 'chunked'], $stream));
 
-        self::assertSame($raw, $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'));
+        self::assertCount(2, $connector->parseStatement($connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'))['transactions']);
     }
 
     public function testLogsExactReadFailureReasonAndTransferHeaders(): void
     {
-        $inner = Utils::streamFor($this->gpc());
+        $inner = Utils::streamFor($this->xml());
         $stream = FnStream::decorate($inner, [
             'read' => static fn (int $length): string => throw new \RuntimeException('Unable to read from stream'),
         ]);
@@ -175,7 +245,7 @@ final class FioBankConnectorTest extends TestCase
             }),
         );
         $http = new Client(['handler' => new MockHandler([new Response(200, [
-            'Content-Type' => 'text/plain; charset=windows-1250',
+            'Content-Type' => 'text/xml; charset=utf-8',
             'Transfer-Encoding' => 'chunked',
         ], $stream)])]);
         $connector = new FioBankConnector($http, $logger);
@@ -190,8 +260,8 @@ final class FioBankConnectorTest extends TestCase
         self::assertSame('stream_error', $logged['reason']);
         self::assertSame('unable_to_read', $logged['stream_error']);
         self::assertSame(0, $logged['response_bytes']);
-        self::assertSame('text/plain', $logged['content_type']);
-        self::assertSame('windows-1250', $logged['content_charset']);
+        self::assertSame('text/xml', $logged['content_type']);
+        self::assertSame('utf-8', $logged['content_charset']);
         self::assertSame('chunked', $logged['transfer_encoding']);
         self::assertStringNotContainsString(self::TOKEN, (string) json_encode($logged));
     }
@@ -221,31 +291,21 @@ final class FioBankConnectorTest extends TestCase
         self::assertSame(0, $logged['content_length']);
     }
 
-    public function testRejectsSecondHeaderAndTransactionFromDifferentAccount(): void
+    public function testRejectsDuplicateMovementIdEntitiesAndMissingAccount(): void
     {
         foreach ([
-            $this->gpc() . $this->gpc(),
-            $this->gpc() . $this->gpcTransaction('0000002000000018'),
+            $this->xml($this->xmlTransaction('10000000006', [1 => '1.00']) . $this->xmlTransaction('10000000006', [1 => '2.00'])),
+            '<?xml version="1.0"?><!DOCTYPE x [<!ENTITY e "x">]><AccountStatement/>',
+            str_replace('<accountId>1000000005</accountId>', '', $this->xml()),
         ] as $invalid) {
             $connector = $this->connectorWith(new Response(200, [], $invalid));
             try {
                 $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31');
-                self::fail('Inconsistent GPC should be rejected.');
+                self::fail('Inconsistent XML should be rejected.');
             } catch (BankConnectorException $e) {
                 self::assertSame(BankConnectorException::INVALID_RESPONSE, $e->errorCode);
             }
         }
-    }
-
-    public function testAcceptsTransactionsOnlyForHeaderAccount(): void
-    {
-        $raw = $this->gpc() . $this->gpcTransaction('0000001000000005');
-        $connector = $this->connectorWith(new Response(200, [], $raw));
-
-        self::assertSame(
-            $raw,
-            $connector->downloadStatement(self::TOKEN, '2026-08-01', '2026-08-31'),
-        );
     }
 
     public function testMapsFioCooldownWithoutReturningRawResponse(): void
@@ -468,14 +528,31 @@ final class FioBankConnectorTest extends TestCase
         return new FioBankConnector(new Client(['handler' => $handler]));
     }
 
-    private function gpc(string $lastByte = ' '): string
+    private function xml(?string $transactions = null, string $currency = 'CZK'): string
     {
-        return '074' . '0000001000000005' . str_repeat(' ', 108) . $lastByte . "\r\n";
+        $transactions ??= $this->xmlTransaction('10000000001', [
+            1 => '1250.50', 14 => 'CZK', 2 => '2000000018', 3 => '0100', 10 => 'Synteticka firma',
+            4 => '0308', 5 => '2026001', 7 => 'Platba faktury', 16 => 'Faktura 2026001', 8 => 'Bezhotovostní příjem',
+        ]);
+
+        return '<?xml version="1.0" encoding="UTF-8"?><AccountStatement><Info>'
+            . '<accountId>1000000005</accountId><bankId>2010</bankId><currency>' . $currency . '</currency>'
+            . '<iban>CZ5520100000001000000005</iban><bic>FIOBCZPPXXX</bic>'
+            . '<openingBalance>249.50</openingBalance><closingBalance>1500.00</closingBalance>'
+            . '<dateStart>2026-08-01+0200</dateStart><dateEnd>2026-08-31+0200</dateEnd></Info>'
+            . '<TransactionList>' . $transactions . '</TransactionList></AccountStatement>';
     }
 
-    private function gpcTransaction(string $account): string
+    /** @param array<int,string> $columns */
+    private function xmlTransaction(string $id, array $columns): string
     {
-        return '075' . $account . str_repeat('0', 109) . "\r\n";
+        $xml = '<Transaction><column_22 name="ID pohybu" id="22">' . $id . '</column_22>'
+            . '<column_0 name="Datum" id="0">2026-08-15+0200</column_0>';
+        foreach ($columns as $column => $value) {
+            $xml .= '<column_' . $column . ' name="Sloupec" id="' . $column . '">' . htmlspecialchars($value, ENT_XML1) . '</column_' . $column . '>';
+        }
+
+        return $xml . '</Transaction>';
     }
 
     private function abo(): string

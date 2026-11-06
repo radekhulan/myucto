@@ -4,6 +4,8 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
   accountingApi,
+  isStatement504,
+  type Statement504Report,
   type AccountingPeriod,
   type BalanceSheetReport,
   type EntityCategory,
@@ -12,6 +14,7 @@ import {
   type StatementAccountsReport,
   type StatementParams,
 } from '@/api/accounting'
+import Statement504Table from '@/components/accounting/Statement504Table.vue'
 import StatementAccountsTable from '@/components/accounting/StatementAccountsTable.vue'
 import { useToast } from '@/composables/useToast'
 import { formatMoney } from '@/composables/useFormat'
@@ -20,28 +23,45 @@ import ActivationBanner from '@/components/settings/activation/ActivationBanner.
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
+import AccrualSpreadToggle from '@/components/accounting/AccrualSpreadToggle.vue'
+import AccrualSpreadNote from '@/components/accounting/AccrualSpreadNote.vue'
+import { useAccrualSpread } from '@/composables/useAccrualSpread'
 
 const { t, locale } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const accrualSpread = useAccrualSpread()
+const accrualSpreadOn = accrualSpread.enabled
+
+function onAccrualSpread(value: boolean) {
+  accrualSpread.set(value)
+  void load()
+}
 
 // Klientský přepínač Kč / tis. Kč (F4 R17) — jen formátování při renderu, data beze změny.
 const unit = ref<'czk' | 'thousands'>('czk')
 function fm(value: number | null | undefined): string {
   if (unit.value === 'czk') return formatMoney(value)
   if (value === null || value === undefined || Number.isNaN(value)) return '—'
+  if (view.value === 'accounts' ? accounts504.value : report504.value) {
+    return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', { maximumFractionDigits: 0 })
+      .format(Math.sign(value) * Math.round(Math.abs(value) / 1000))
+  }
   return new Intl.NumberFormat(locale.value === 'en' ? 'en-US' : 'cs-CZ', { maximumFractionDigits: 0 })
     .format(Math.round(value / 1000))
 }
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<BalanceSheetReport | null>(null)
+const report504 = ref<Statement504Report | null>(null)
+const accounts504 = ref<Statement504Report | null>(null)
 const view = ref<'statement' | 'accounts'>('statement')
 const accountsReport = ref<StatementAccountsReport | null>(null)
-const hasData = computed(() => view.value === 'accounts' ? !!accountsReport.value : !!report.value)
+const hasData = computed(() => view.value === 'accounts' ? !!(accountsReport.value || accounts504.value) : !!(report.value || report504.value))
 const category = ref<EntityCategory | null>(null)
 const loading = ref(false)
 const rangeAdjusted = ref(false)
@@ -50,7 +70,7 @@ const filters = reactive({
   period_id: '' as number | '',
   as_of: '',
   scope: 'auto' as StatementScope,
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
 })
 const selectedPeriod = computed(() => findAccountingPeriod(periods.value, filters.period_id))
@@ -60,15 +80,32 @@ function queryParams() {
     period_id: Number(filters.period_id),
     as_of: filters.as_of || undefined,
     scope: filters.scope,
-    ...(filters.dimension_value_id
-      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+    ...(filters.dimension_value_ids.length > 0
+      ? { dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids), dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
       : {}),
+    ...accrualSpread.param(),
   }
 }
 
+const hideZero = ref(true)
+const showAnalytics = ref(true)
+
 function accountsParams(): Omit<StatementParams, 'scope'> {
   const { period_id, as_of, dimension_value_id, dimension_descendants } = queryParams() as StatementParams
-  return { period_id, as_of, dimension_value_id, dimension_descendants }
+  return {
+    period_id, as_of, dimension_value_id, dimension_descendants,
+    columns: 1, hide_zero: hideZero.value ? 1 : 0, analytics: showAnalytics.value ? 1 : 0,
+  }
+}
+
+function onHideZero(value: boolean) {
+  hideZero.value = value
+  void load()
+}
+
+function onShowAnalytics(value: boolean) {
+  showAnalytics.value = value
+  void load()
 }
 
 function switchView(next: 'statement' | 'accounts') {
@@ -77,8 +114,8 @@ function switchView(next: 'statement' | 'accounts') {
   void load()
 }
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   void load()
 }
 
@@ -93,9 +130,13 @@ async function load() {
   expandedRowCode.value = null
   try {
     if (view.value === 'accounts') {
-      accountsReport.value = await accountingApi.getStatementAccounts(accountsParams())
+      const result = await accountingApi.getStatementAccounts(accountsParams())
+      accounts504.value = isStatement504(result) ? result : null
+      accountsReport.value = isStatement504(result) ? null : result
     } else {
-      report.value = await accountingApi.getBalanceSheet(queryParams())
+      const result = await accountingApi.getBalanceSheet(queryParams())
+      report504.value = isStatement504(result) ? result : null
+      report.value = isStatement504(result) ? null : result
     }
     if (view.value === 'statement' && filters.scope === 'auto') {
       try {
@@ -112,13 +153,15 @@ async function load() {
       to: filters.as_of || selectedPeriod.value?.ends_on || '',
       ...(filters.scope !== 'auto' ? { scope: filters.scope } : {}),
       ...(view.value === 'accounts' ? { view: 'accounts' } : {}),
-      ...(filters.dimension_value_id ? {
-        dimension_value_id: String(filters.dimension_value_id),
+      ...(filters.dimension_value_ids.length > 0 ? {
+        dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids),
         dimension_descendants: filters.dimension_descendants ? '1' : '0',
       } : {}),
     } })
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
+    report504.value = null
+    accounts504.value = null
     report.value = null
     accountsReport.value = null
   } finally {
@@ -153,13 +196,13 @@ async function exportFile(format: 'pdf' | 'xlsx') {
   if (!filters.period_id || !hasData.value) return
   exporting.value = true
   try {
-    if (view.value === 'accounts' && accountsReport.value) {
+    if (view.value === 'accounts' && (accountsReport.value || accounts504.value)) {
       const r = await accountingApi.exportReport('/accounting/reports/statement-accounts/export',
         { ...accountsParams(), part: 'balance', unit: unit.value, format })
-      downloadBlob(r.data as unknown as Blob, `rozvaha-po-uctech-${accountsReport.value.as_of}.${format}`)
-    } else if (report.value) {
+      downloadBlob(r.data as unknown as Blob, `rozvaha-po-uctech-${(accountsReport.value || accounts504.value)!.as_of}.${format}`)
+    } else if (report.value || report504.value) {
       const r = await accountingApi.exportReport('/accounting/reports/balance-sheet/export', { ...queryParams(), format })
-      downloadBlob(r.data as unknown as Blob, `rozvaha-${report.value.as_of}.${format}`)
+      downloadBlob(r.data as unknown as Blob, `rozvaha-${(report.value || report504.value)!.as_of}.${format}`)
     }
   } catch (e: any) {
     toast.error(e?.response?.data?.error?.message || t('common.error'))
@@ -178,6 +221,7 @@ function downloadBlob(blob: Blob, filename: string) {
 }
 
 onMounted(async () => {
+  await accrualSpread.restore()
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
   const open = periods.value.filter(p => p.status === 'open')
   const def = open.length
@@ -198,8 +242,7 @@ onMounted(async () => {
     if (typeof q.scope === 'string' && ['auto', 'full', 'small', 'micro'].includes(q.scope)) filters.scope = q.scope as StatementScope
     if (q.view === 'accounts') view.value = 'accounts'
     if (toQuery && toQuery >= selectedPeriod.starts_on && toQuery <= selectedPeriod.ends_on) filters.as_of = toQuery
-    const valueId = Number(q.dimension_value_id)
-    if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+    filters.dimension_value_ids = parseDimensionValueIds(q.dimension_value_id)
     filters.dimension_descendants = q.dimension_descendants !== '0'
     await load()
   }
@@ -247,7 +290,7 @@ onMounted(async () => {
               class="px-3 py-2 text-sm font-medium border-b-2 -mb-px whitespace-nowrap"
               :class="view === 'accounts' ? 'border-primary-600 text-primary-700' : 'border-transparent text-neutral-500 hover:text-neutral-700'"
               @click="switchView('accounts')">
-        {{ t('accounting.statement_accounts.tab_accounts_balance') }}
+        {{ t((view === 'accounts' ? accounts504 : report504) ? 'accounting.statement504.management' : 'accounting.statement_accounts.tab_accounts_balance') }}
       </button>
     </div>
 
@@ -281,29 +324,37 @@ onMounted(async () => {
             {{ t(`accounting.balance_sheet.category_${category.category}`) }}
           </span>
         </div>
+        <div v-if="view === 'statement' && !report504" class="flex items-end pb-2">
+          <AccrualSpreadToggle :model-value="accrualSpreadOn" @update:model-value="onAccrualSpread" />
+        </div>
       </div>
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
     </div>
     <DimensionReportLinks current="balance" :from="selectedPeriod?.starts_on ?? ''" :to="filters.as_of || selectedPeriod?.ends_on || ''"
-      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+      :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants" />
     <p v-if="rangeAdjusted" class="mb-3 rounded-md border border-warning-500/30 bg-warning-50 px-3 py-2 text-xs text-warning-700" data-test="balance-range-adjusted">{{ t('dimensions.balance_range_adjusted') }}</p>
     <p v-if="view === 'statement' && report?.dimension" class="mb-3 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800" data-test="balance-dimension-note">
       {{ t('dimensions.balance_filter_note') }}
     </p>
+    <AccrualSpreadNote v-if="view === 'statement' && report?.accrual_spread" :spread="report.accrual_spread" :format="fm" />
 
     <div v-if="loading" class="text-center text-neutral-500 py-12 text-sm">{{ t('common.loading') }}</div>
 
     <EmptyState v-else-if="!hasData" boxed accent="neutral" icon="doc" :title="t('accounting.balance_sheet.empty')" />
 
+    <Statement504Table v-else-if="view === 'accounts' && accounts504" :report="accounts504" :format="fm" :unit="unit" part="balance" />
+    <Statement504Table v-else-if="view === 'statement' && report504" :report="report504" :format="fm" :unit="unit" />
     <template v-else-if="view === 'accounts' && accountsReport">
       <div class="text-xs text-neutral-500 mb-3">
         {{ accountsReport.entity.name }}<template v-if="accountsReport.entity.ico"> · IČO {{ accountsReport.entity.ico }}</template>
         · {{ t('accounting.balance_sheet.prepared_at') }}: {{ accountsReport.entity.prepared_at }}
         <template v-if="unit === 'thousands'"> · {{ t('reports.unit_thousands_note') }}</template>
       </div>
-      <StatementAccountsTable :report="accountsReport" part="balance" :format="fm" />
+      <StatementAccountsTable :report="accountsReport" part="balance" :format="fm"
+        :hide-zero="hideZero" :show-analytics="showAnalytics"
+        @update:hide-zero="onHideZero" @update:show-analytics="onShowAnalytics" />
     </template>
 
     <template v-else-if="report">

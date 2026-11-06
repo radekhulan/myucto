@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Eshop\Import;
 
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 use MyInvoice\Support\LocaleNumber;
 
 final class CatalogImportProfile
@@ -160,11 +161,13 @@ final class CatalogImportProfile
         }
         if ($field === 'min_qty' || $field === 'price') {
             $value = LocaleNumber::parse($value) ?? '';
-            $pattern = $field === 'price' ? '/^\d{1,10}(?:\.\d{1,2})?$/D' : '/^\d{1,11}(?:\.\d{1,3})?$/D';
+            $pattern = $field === 'price' ? '/^\d{1,10}(?:\.\d{1,6})?$/D' : '/^\d{1,11}(?:\.\d{1,3})?$/D';
             if (!preg_match($pattern, $value)) {
                 throw new \InvalidArgumentException('import_decimal_invalid');
             }
-            return bcadd($value, '0', $field === 'price' ? 2 : 3);
+            return $field === 'price'
+                ? (string) UnitPricePrecision::toDecimalString(bcadd($value, '0', UnitPricePrecision::DECIMALS))
+                : bcadd($value, '0', 3);
         }
         $limit = match ($field) {
             'sku', 'manufacturer_code' => 50,

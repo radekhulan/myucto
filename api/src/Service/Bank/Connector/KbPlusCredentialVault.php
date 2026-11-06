@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Bank\Connector;
 
 use MyInvoice\Repository\KbPlusOAuthRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
+use MyInvoice\Service\OAuth\OAuthClientFlow;
+use MyInvoice\Service\OAuth\OAuthException;
 
 final class KbPlusCredentialVault
 {
@@ -23,36 +25,76 @@ final class KbPlusCredentialVault
         private readonly KbPlusApiClient $api,
         private readonly KbPlusOAuthRepository $repository,
         private readonly SecretEncryption $secrets,
+        private readonly OAuthClientFlow $flow,
     ) {}
 
-    /** @return array{credentials:array<string,mixed>,access_token:string} */
+    /**
+     * Platný přístup. Propadlý access token obnoví přes společnou vrstvu ({@see OAuthClientFlow::rotate()}):
+     * pod zámkem napojení načte uložený přístup znovu (souběžný požadavek ho mohl obnovit)
+     * a obnovený refresh token uloží dřív, než se použije.
+     *
+     * @return array{credentials:array<string,mixed>,access_token:string}
+     */
     public function access(#[\SensitiveParameter] string $serialized): array
     {
         $credentials = $this->decode($serialized);
-        if ((int) $credentials['access_expires_at'] > time() + 30) {
-            return ['credentials' => $credentials, 'access_token' => (string) $credentials['access_token']];
-        }
-
-        $tokens = $this->api->refreshAccessToken($credentials);
-        $credentials['access_token'] = $tokens['access_token'];
-        $credentials['access_expires_at'] = time() + (int) $tokens['expires_in'];
-        $credentials['scope'] = $tokens['scope'];
-        if (isset($tokens['refresh_token'])) {
-            $credentials['refresh_token'] = $tokens['refresh_token'];
-        }
-        $updated = $this->encode($credentials);
-        $ciphertext = $this->secrets->encryptFor(
-            $updated,
-            self::context((int) $credentials['supplier_id'], (int) $credentials['connection_id']),
-        );
-        if (!str_starts_with($ciphertext, 'enc:v2:') || !$this->repository->replaceConnectionCredential(
-            (int) $credentials['supplier_id'],
-            (int) $credentials['connection_id'],
-            $ciphertext,
-        )) {
-            throw new BankConnectorException('credential_rotation_failed', 'Obnovené credentials KB+ nelze bezpečně uložit.');
+        if (!self::fresh($credentials)) {
+            $supplierId = (int) $credentials['supplier_id'];
+            $connectionId = (int) $credentials['connection_id'];
+            try {
+                $credentials = $this->flow->rotate('bank-token', $supplierId . ':' . $connectionId,
+                    fn (): array => $this->stored($supplierId, $connectionId),
+                    static fn (array $current): bool => self::fresh($current),
+                    function (array $current): array {
+                        $tokens = $this->api->refreshAccessToken($current);
+                        $current['access_token'] = $tokens['access_token'];
+                        $current['access_expires_at'] = time() + (int) $tokens['expires_in'];
+                        $current['scope'] = $tokens['scope'];
+                        if (isset($tokens['refresh_token'])) {
+                            $current['refresh_token'] = $tokens['refresh_token'];
+                        }
+                        return $current;
+                    },
+                    function (array $current) use ($supplierId, $connectionId): bool {
+                        $ciphertext = $this->secrets->encryptFor($this->encode($current), self::context($supplierId, $connectionId));
+                        return str_starts_with($ciphertext, 'enc:v2:')
+                            && $this->repository->replaceConnectionCredential($supplierId, $connectionId, $ciphertext);
+                    },
+                    static fn (): BankConnectorOperationException => new BankConnectorOperationException('bank_connection_busy'));
+            } catch (OAuthException) {
+                throw new BankConnectorException('credential_rotation_failed', 'Obnovené credentials KB+ nelze bezpečně uložit.');
+            }
         }
         return ['credentials' => $credentials, 'access_token' => (string) $credentials['access_token']];
+    }
+
+    /** @param array<string,mixed> $credentials */
+    private static function fresh(#[\SensitiveParameter] array $credentials): bool
+    {
+        return (int) $credentials['access_expires_at'] > time() + 30;
+    }
+
+    /**
+     * Přístup tak, jak je teď uložený u napojení; bez přístupu (odpojeno) ho obnovit nejde.
+     *
+     * @return array<string,mixed>
+     */
+    private function stored(int $supplierId, int $connectionId): array
+    {
+        $ciphertext = $this->repository->connectionCredential($supplierId, $connectionId);
+        if ($ciphertext === null) {
+            throw new BankConnectorException('credential_rotation_failed', 'Obnovené credentials KB+ nelze bezpečně uložit.');
+        }
+        try {
+            $serialized = $this->secrets->decryptFor($ciphertext, self::context($supplierId, $connectionId));
+        } catch (\Throwable) {
+            throw $this->invalid();
+        }
+        $credentials = $this->decode($serialized);
+        if ($credentials['supplier_id'] !== $supplierId || $credentials['connection_id'] !== $connectionId) {
+            throw $this->invalid();
+        }
+        return $credentials;
     }
 
     /** @return array<string,mixed> */

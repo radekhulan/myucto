@@ -10,6 +10,7 @@
     .header-table td { vertical-align: top; }
     .header-title { font-size: 16pt; font-weight: bold; }
     .header-meta { font-size: 8.5pt; color: #555; margin-top: 1mm; }
+    .header-scope { font-size: 8pt; color: #555; margin-bottom: 3mm; }
     .entity-info { text-align: right; font-size: 9pt; }
     .section-title { font-size: 11pt; font-weight: bold; margin: 5mm 0 2mm; border-bottom: 0.5pt solid #999; padding-bottom: 1mm; }
     table.statement { width: 100%; border-collapse: collapse; margin-top: 1mm; margin-bottom: 3mm; }
@@ -49,6 +50,8 @@
         </td>
     </tr>
 </table>
+
+{% include '_accrual_spread_note.twig' with { accrual_spread: income_statement_ytd.accrual_spread|default(null) } only %}
 
 <div class="section-title">Výsledovka — {{ period.month|cz_month }} {{ period.year }}</div>
 <table class="statement">

@@ -400,21 +400,28 @@ final class MfaStepUpServiceTest extends TestCase
     }
 
     /**
-     * Záložní kód TOTP nezřídí: nově zřízený TOTP by hned uspokojil vydání
-     * API tokenu, které je záložnímu kódu záměrně odepřené. Po ztrátě passkey
-     * si uživatel kódem zaregistruje nový passkey a TOTP až poté.
+     * Záložní kód zřídí TOTP stejně jako nový passkey. Uživatel, kterému správce
+     * klíčů vrací neplatné ověření, by si nový passkey uložil do téhož správce;
+     * TOTP je jediná cesta ven bez zásahu na serveru.
      */
-    public function testRecoveryCodeCannotAuthorizeTotpEnrollment(): void
+    public function testRecoveryCodeCanAuthorizeTotpEnrollment(): void
     {
         $proofs = $this->createMock(MfaStepUpProofStore::class);
-        $proofs->expects(self::never())->method('issue');
+        $proofs->expects(self::once())
+            ->method('issue')
+            ->with(17, 'session', MfaStepUpService::OPERATION_TOTP_ENABLE, 'recovery', null)
+            ->willReturn('proof-token');
+        $policy = $this->createMock(MfaPolicyService::class);
+        $policy->expects(self::never())->method('isMethodAllowed');
         $service = new MfaStepUpService(
             $proofs,
-            $this->createMock(MfaPolicyService::class),
+            $policy,
             $this->createMock(PasskeyCredentialRepository::class),
         );
 
-        $this->expectException(StepUpOperationException::class);
-        $service->issue(17, 'session', MfaStepUpService::OPERATION_TOTP_ENABLE, 'recovery');
+        self::assertSame(
+            'proof-token',
+            $service->issue(17, 'session', MfaStepUpService::OPERATION_TOTP_ENABLE, 'recovery'),
+        );
     }
 }

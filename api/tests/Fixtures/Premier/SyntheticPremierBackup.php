@@ -155,6 +155,18 @@ final class SyntheticPremierBackup
      *   `rc_uncoded_line`       služba z EU PF 250002 má navíc položku 200 Kč bez kódu DPH (poplatek mimo přiznání)
      *   `cash_duplicate`        další dva pokladní doklady PP 1 z 2. 1. 2025 (jiný sborník), tedy tři
      *                           doklady se stejnou řadou i číslem a dva i se stejným datem
+     *   `issued_series`         vydané faktury v řadě VFA (`FA_OUT.DOKLAD`), sborník deníku i vazby
+     *                           úhrad je dál označují kódem agendy VF
+     *   `credit_note_link`      s `small_assets`: vazba `VAZBY` dobropisu PF 250006 na fakturu PF 250005
+     *   `credit_note_offset`    VF 250010 (2 420) uhrazená bankou BV 10 (1 210) a zápočtem dobropisu VF 250011
+     *                           (-1 210) interním dokladem INT 2 přes 395
+     *   `invoice_prepayment`    přijatá PF 250012 je záloha zaúčtovaná fakturou na 314 (1 000 + DPH), konečná
+     *                           PF 250013 ji odečítá řádkem na 314 s vazbou `VAZBY` na řádek zálohy
+     *   `prepayment_unlinked`   s `invoice_prepayment`: odpočet zálohy bez vazby `VAZBY` (jen zaúčtování na 314)
+     *   `advance_settlement`    VF 250014 (1 000 + 210) uhrazená přijatou zálohou: řádek `IKOD` Z „Vypořádání
+     *                           zálohy" 324/311 bez kódu DPH, záloha zaplacená bankou BV 13 na 324
+     *   `payment_reassigned`    VF 250009 (1 210) bez vlastní úhrady: VF 250001 dostala bankou BV 9 o 1 210
+     *                           víc a interní doklad INT 1 (325/311) úhradu přeúčtoval z VF 250001 na VF 250009
      *
      * @param array<string,bool> $flags
      * @return array<string,array{0:list<array{0:string,1:string,2?:int,3?:int}>,1:list<array<string,mixed>>}>
@@ -463,6 +475,104 @@ final class SyntheticPremierBackup
                 $rows[] = ['ROK' => self::YEAR1, 'MESIC' => 12, 'KOMPLET' => false, 'PU' => false];
             }
             $tables['PERIODY'] = [[['ROK', 'N', 4], ['MESIC', 'N', 2], ['KOMPLET', 'L'], ['PU', 'L']], $rows];
+        }
+        if (!empty($flags['issued_series'])) {
+            foreach ($tables['FA_OUT'][1] as &$header) {
+                if ($header['DOKLAD'] === 'VF') {
+                    $header['DOKLAD'] = 'VFA';
+                }
+            }
+            unset($header);
+        }
+        if (!empty($flags['payment_reassigned'])) {
+            $chart[] = ['325', '000', 'Ostatní závazky'];
+            $customer = ['CISLO_ODB' => '1', 'NAZEV_ODB' => 'Odběratel Fiktivní s.r.o.', 'ICO_ODB' => self::CUSTOMER_ICO, 'DIC_ODB' => 'CZ' . self::CUSTOMER_ICO, 'ID_PAR' => 'P1'];
+            array_push($tables['PUB_UCTO'][1],
+                self::row(94, '2025-03-01', 'VF', '250009', 'Servis', 1000, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 10) + $customer),
+                self::row(95, '2025-03-01', 'VF', '250009', 'DPH', 210, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 10) + $customer),
+                self::row(96, '2025-03-10', 'BV', '9', 'Úhrada VF 250001', 1210, '221001', '311000', $customer),
+                self::row(97, '2025-03-31', 'INT', '1', 'Úhrada VF 250009', 1210, '325000', '311000', $customer),
+                self::row(98, '2025-03-31', 'INT', '1', 'Úhrada VF 250001', -1210, '325000', '311000', $customer),
+            );
+            array_push($tables['VAZBY'][1],
+                ['KOD_ZDR' => 'UD', 'INT_ZDR' => 96, 'KOD_TER' => 'VF', 'INT_TER' => 1],
+                ['KOD_ZDR' => 'UD', 'INT_ZDR' => 97, 'KOD_TER' => 'VF', 'INT_TER' => 10],
+                ['KOD_ZDR' => 'UD', 'INT_ZDR' => 98, 'KOD_TER' => 'VF', 'INT_TER' => 1],
+            );
+            $tables['FA_OUT'][1][] = self::header(10, 'VF', '250009', '2025-03-01', 'Servis',
+                ['VS' => '250009', 'FORMA' => 'převodem', 'ULICE_ODB' => 'Zkušební 10', 'MESTO_ODB' => 'Praha', 'PSC_ODB' => '110 00', 'STAT_ODB' => 'Česká republika'] + $customer);
+            $tables['POLOZKY'][1][] = self::item(10, 1, 'Servis', 1, 'ks', 1000, 210, 21, self::CODE_SALE);
+        }
+        if (!empty($flags['credit_note_offset'])) {
+            $chart[] = ['395', '000', 'Vnitřní zúčtování'];
+            $customer = ['CISLO_ODB' => '1', 'NAZEV_ODB' => 'Odběratel Fiktivní s.r.o.', 'ICO_ODB' => self::CUSTOMER_ICO, 'DIC_ODB' => 'CZ' . self::CUSTOMER_ICO, 'ID_PAR' => 'P1'];
+            array_push($tables['PUB_UCTO'][1],
+                self::row(110, '2025-04-01', 'VF', '250010', 'Vývoj', 2000, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 11) + $customer),
+                self::row(111, '2025-04-01', 'VF', '250010', 'DPH', 420, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 11) + $customer),
+                self::row(112, '2025-04-15', 'VF', '250011', 'Sleva na vývoj', -1000, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 12) + $customer),
+                self::row(113, '2025-04-15', 'VF', '250011', 'DPH', -210, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 12) + $customer),
+                self::row(114, '2025-04-20', 'BV', '10', 'Úhrada VF 250010 po dobropisu', 1210, '221001', '311000', $customer),
+                self::row(115, '2025-04-30', 'INT', '2', 'Zápočet dobropisu 250011 s VF 250010', 1210, '395000', '311000', $customer),
+                self::row(116, '2025-04-30', 'INT', '2', 'Zápočet dobropisu 250011 s VF 250010', 1210, '311000', '395000', $customer),
+            );
+            array_push($tables['VAZBY'][1],
+                ['KOD_ZDR' => 'UD', 'INT_ZDR' => 114, 'KOD_TER' => 'VF', 'INT_TER' => 11],
+                ['KOD_ZDR' => 'UD', 'INT_ZDR' => 115, 'KOD_TER' => 'VF', 'INT_TER' => 11],
+                ['KOD_ZDR' => 'UD', 'INT_ZDR' => 116, 'KOD_TER' => 'VF', 'INT_TER' => 12],
+            );
+            $header = ['FORMA' => 'převodem', 'ULICE_ODB' => 'Zkušební 10', 'MESTO_ODB' => 'Praha', 'PSC_ODB' => '110 00', 'STAT_ODB' => 'Česká republika'] + $customer;
+            array_push($tables['FA_OUT'][1],
+                self::header(11, 'VF', '250010', '2025-04-01', 'Vývoj', ['VS' => '250010'] + $header),
+                self::header(12, 'VF', '250011', '2025-04-15', 'Sleva na vývoj', ['VS' => '250011'] + $header),
+            );
+            array_push($tables['POLOZKY'][1],
+                self::item(11, 1, 'Vývoj', 1, 'ks', 2000, 420, 21, self::CODE_SALE),
+                self::item(12, 1, 'Sleva na vývoj', 1, 'ks', -1000, -210, 21, self::CODE_SALE),
+            );
+        }
+        if (!empty($flags['invoice_prepayment'])) {
+            $chart[] = ['314', '000', 'Poskytnuté zálohy'];
+            $vendor = ['CISLO_ODB' => '2', 'NAZEV_ODB' => 'Dodavatel Fiktivní s.r.o.', 'ICO_ODB' => self::VENDOR_ICO, 'DIC_ODB' => 'CZ' . self::VENDOR_ICO, 'ID_PAR' => 'P2'];
+            $vat = static fn (string $kind, int $inter): array => self::vat(self::CODE_PURCHASE, $kind, 'PF', $inter) + $vendor;
+            array_push($tables['PUB_UCTO'][1],
+                self::row(120, '2025-06-02', 'PF', '250012', 'Záloha na server', 1000, '314000', '321000', $vat('P', 120)),
+                self::row(121, '2025-06-02', 'PF', '250012', 'DPH', 210, '343021', '321000', $vat('D', 120)),
+                self::row(122, '2025-06-20', 'PF', '250013', 'Server', 2000, '518100', '321000', $vat('P', 121)),
+                self::row(123, '2025-06-20', 'PF', '250013', 'Odpočet zálohy', -1000, '314000', '321000', $vat('P', 121)),
+                self::row(124, '2025-06-20', 'PF', '250013', 'DPH', 210, '343021', '321000', $vat('D', 121)),
+                self::row(125, '2025-06-05', 'BV', '11', 'Úhrada zálohy PF 250012', 1210, '321000', '221001', $vendor),
+                self::row(126, '2025-06-25', 'BV', '12', 'Úhrada PF 250013', 1210, '321000', '221001', $vendor),
+            );
+            array_push($tables['VAZBY'][1],
+                ['KOD_ZDR' => 'UD', 'INT_ZDR' => 125, 'KOD_TER' => 'PF', 'INT_TER' => 120],
+                ['KOD_ZDR' => 'UD', 'INT_ZDR' => 126, 'KOD_TER' => 'PF', 'INT_TER' => 121],
+            );
+            if (empty($flags['prepayment_unlinked'])) {
+                $tables['VAZBY'][1][] = ['KOD_ZDR' => 'PF', 'INT_ZDR' => 121, 'KOD_TER' => 'UD', 'INT_TER' => 120];
+            }
+            $header = $vendor + ['ULICE_ODB' => 'Vzorová 5', 'MESTO_ODB' => 'Ostrava', 'PSC_ODB' => '70200', 'UCET_ODB' => '1000000005/0100', 'FORMA' => 'příkazem'];
+            array_push($tables['FA_IN'][1],
+                self::header(120, 'PF', '250012', '2025-06-02', 'Záloha na server', ['VARIABL' => '9012', 'CISLO_PF' => 'D-2025-9012'] + $header),
+                self::header(121, 'PF', '250013', '2025-06-20', 'Server', ['VARIABL' => '9013', 'CISLO_PF' => 'D-2025-9013'] + $header),
+            );
+        }
+        if (!empty($flags['advance_settlement'])) {
+            $chart[] = ['324', '000', 'Přijaté zálohy'];
+            $customer = ['CISLO_ODB' => '1', 'NAZEV_ODB' => 'Odběratel Fiktivní s.r.o.', 'ICO_ODB' => self::CUSTOMER_ICO, 'DIC_ODB' => 'CZ' . self::CUSTOMER_ICO, 'ID_PAR' => 'P1'];
+            array_push($tables['PUB_UCTO'][1],
+                self::row(130, '2025-07-01', 'BV', '13', 'Úhrada ZVF 250014', 1210, '221001', '324000', $customer),
+                self::row(131, '2025-07-10', 'VF', '250014', 'Dodávka', 1000, '311000', '602100', self::vat(self::CODE_SALE, 'P', 'VF', 14) + $customer),
+                self::row(132, '2025-07-10', 'VF', '250014', 'DPH', 210, '311000', '343021', self::vat(self::CODE_SALE, 'D', 'VF', 14) + $customer),
+                self::row(133, '2025-07-10', 'VF', '250014', 'Vypořádání zálohy', 1210, '324000', '311000', ['IKOD' => 'Z', 'SB_KOD' => 'VF', 'SBORNIK' => 14] + $customer),
+            );
+            $tables['VAZBY'][1][] = ['KOD_ZDR' => 'UD', 'INT_ZDR' => 130, 'KOD_TER' => 'VF', 'INT_TER' => 14];
+            $tables['FA_OUT'][1][] = self::header(14, 'VF', '250014', '2025-07-10', 'Dodávka',
+                ['VS' => '250014', 'FORMA' => 'převodem', 'ULICE_ODB' => 'Zkušební 10', 'MESTO_ODB' => 'Praha', 'PSC_ODB' => '110 00', 'STAT_ODB' => 'Česká republika'] + $customer);
+            $tables['POLOZKY'][1][] = self::item(14, 1, 'Dodávka', 1, 'ks', 1000, 210, 21, self::CODE_SALE);
+        }
+        if (!empty($flags['credit_note_link'])) {
+            $tables['VAZBY'][1][] = ['KOD_ZDR' => 'PF', 'INT_ZDR' => 107, 'KOD_TER' => 'PF', 'INT_TER' => 106];
+            $tables['VAZBY'][1][] = ['KOD_ZDR' => 'PF', 'INT_ZDR' => 106, 'KOD_TER' => 'PF', 'INT_TER' => 107];
         }
         foreach ([self::YEAR1, self::YEAR2] as $year) {
             foreach ($chart as [$synthetic, $analytic, $name]) {

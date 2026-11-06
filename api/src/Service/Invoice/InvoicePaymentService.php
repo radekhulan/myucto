@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\Accounting\GoPay\GoPayPendingService;
+use MyInvoice\Service\Eet\PaymentEventReconciliation;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use PDO;
@@ -77,6 +78,9 @@ final class InvoicePaymentService
         private readonly FinalFromProformaCreator $finalCreator,
         private readonly PaymentTaxDocumentCreator $taxDocCreator,
         private readonly GoPayPendingService $goPayPending,
+        private readonly PaymentEventReconciliation $eetReconciliation,
+        // DocumentAutoPoster se bere až při použití: přes BankPostingService závisí na téhle službě.
+        private readonly \Psr\Container\ContainerInterface $container,
     ) {}
 
     /**
@@ -249,6 +253,21 @@ final class InvoicePaymentService
 
         $this->afterTransition($invoiceId, $transition);
 
+        // Daňový doklad k úhradě splátky kalendáře rovnou platí, nečeká na vystavení, které
+        // jinak spouští automatické zaúčtování. Chybu auto-post jen zaloguje.
+        if (!empty($documents['tax_document_id'])) {
+            $calendar = $pdo->prepare('SELECT calendar_id FROM invoices WHERE id = ?');
+            $calendar->execute([(int) $documents['tax_document_id']]);
+            if (!empty($calendar->fetchColumn())) {
+                $this->container->get(\MyInvoice\Service\Accounting\DocumentAutoPoster::class)->maybeAutoPost(
+                    (int) $invoice['supplier_id'],
+                    'invoice',
+                    (int) $documents['tax_document_id'],
+                    isset($opts['created_by']) && (int) $opts['created_by'] > 0 ? (int) $opts['created_by'] : null,
+                );
+            }
+        }
+
         return [
             'payment_id'  => $paymentId,
             'amount'      => $amount,
@@ -278,7 +297,14 @@ final class InvoicePaymentService
             $pdo->beginTransaction();
         }
         try {
-            $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
+            $locked = $pdo->prepare('SELECT other_item_id FROM invoices WHERE id = ? FOR UPDATE');
+            $locked->execute([$invoiceId]);
+            // Úhrada faktury kryté ostatní pohledávkou patří pohledávce (migrace 2246); faktura
+            // ji jen zrcadlí ({@see InvoiceOtherItemPayments}). Jiná platba by ji přeplatila.
+            $otherItemId = $locked->fetchColumn();
+            if ($otherItemId !== null && $otherItemId !== false) {
+                throw new \RuntimeException('Faktura je navázaná na ostatní pohledávku. Úhradu spárujte s pohledávkou, faktura ji převezme.');
+            }
             if (($opts['source'] ?? '') === 'bank') {
                 $amount = $this->settleableBankAmount($pdo, $invoiceId, $amount);
             }
@@ -308,6 +334,15 @@ final class InvoicePaymentService
                 $this->clientBankAccounts->captureForInvoiceTransaction(
                     $invoiceId,
                     (int) $opts['bank_transaction_id'],
+                );
+                // Banka nikdy nezakládá tržbu EET. Potvrzený QR příkaz téže faktury tahle
+                // úhrada jen vypořádá, takže zůstane jedna úhrada i jeden záznam EET.
+                $this->eetReconciliation->attachBankPayment(
+                    (int) $invoice['supplier_id'],
+                    $invoiceId,
+                    $paymentId,
+                    (int) $opts['bank_transaction_id'],
+                    $amount,
                 );
             }
 
@@ -477,6 +512,11 @@ final class InvoicePaymentService
                 'Platba je navázaná na bankovní transakci. Zruš spárování v detailu výpisu.'
             );
         }
+        if ($payment['source'] === InvoiceOtherItemPayments::SOURCE) {
+            throw new \RuntimeException(
+                'Platba je úhradou navázané ostatní pohledávky. Odpojte úhradu v detailu pohledávky, nebo fakturu od pohledávky odpojte.'
+            );
+        }
         if ($payment['tax_document_invoice_id'] !== null) {
             $pdo = $this->db->pdo();
             $td = $pdo->prepare("SELECT status FROM invoices WHERE id = ?");
@@ -495,7 +535,12 @@ final class InvoicePaymentService
             $pdo->beginTransaction();
         }
         try {
+            // Pojistka EET až pod zámkem faktury: souběžný platební příkaz zakládá tržbu
+            // se zámkem téže faktury, takže kontrola před transakcí by ji nemusela vidět.
+            $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([(int) $payment['invoice_id']]);
+            $this->assertNoEetRecord('a.invoice_payment_id = ?', [$paymentId]);
             $this->goPayPending->releaseForPayment($paymentId);
+            $this->eetReconciliation->releaseInvoicePayment((int) $payment['supplier_id'], $paymentId);
             self::releaseCreditNotes($pdo, 'p.id = ?', [$paymentId]);
             $pdo->prepare('DELETE FROM invoice_payments WHERE id = ?')->execute([$paymentId]);
             $transition = $this->recomputeLocked($pdo, (int) $payment['invoice_id']);
@@ -529,10 +574,18 @@ final class InvoicePaymentService
             $pdo->beginTransaction();
         }
         try {
+            $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
+            $this->assertNoEetRecord('a.invoice_payment_id IN (SELECT p.id FROM invoice_payments p WHERE p.invoice_id = ?)', [$invoiceId]);
             $this->goPayPending->releaseForInvoice($invoiceId);
+            // Zrcadlo úhrad ostatní pohledávky zůstává: peníze patří pohledávce, ne faktuře.
+            $payments = $pdo->prepare('SELECT id, supplier_id FROM invoice_payments WHERE invoice_id = ? AND source <> ?');
+            $payments->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
+            foreach ($payments->fetchAll(PDO::FETCH_ASSOC) ?: [] as $p) {
+                $this->eetReconciliation->releaseInvoicePayment((int) $p['supplier_id'], (int) $p['id']);
+            }
             self::releaseCreditNotes($pdo, 'p.invoice_id = ?', [$invoiceId]);
-            $del = $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ?');
-            $del->execute([$invoiceId]);
+            $del = $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ? AND source <> ?');
+            $del->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
             $count = $del->rowCount();
             $transition = $this->recomputeLocked($pdo, $invoiceId);
             if ($ownsTransaction) {
@@ -592,9 +645,11 @@ final class InvoicePaymentService
      * stav faktury měnily mimo evidenci plateb (zrušení párování z doby před
      * evidencí), ať o stavu rozhoduje totéž pravidlo jako po každé platbě.
      *
+     * Volající s vlastním obnovením PDF/statistik po commitu vypne refreshOutputs.
+     *
      * @return array{became_paid: bool, became_unpaid: bool, remaining: float, paid_total: float}
      */
-    public function recompute(int $invoiceId): array
+    public function recompute(int $invoiceId, bool $refreshOutputs = true): array
     {
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -613,7 +668,9 @@ final class InvoicePaymentService
             throw $e;
         }
 
-        $this->afterTransition($invoiceId, $transition);
+        if ($refreshOutputs) {
+            $this->afterTransition($invoiceId, $transition);
+        }
         return $transition;
     }
 
@@ -664,7 +721,7 @@ final class InvoicePaymentService
      *
      * @return array{became_paid: bool, became_unpaid: bool, remaining: float, paid_total: float}
      */
-    private function recomputeLocked(PDO $pdo, int $invoiceId): array
+    public static function recomputeLocked(PDO $pdo, int $invoiceId): array
     {
         $pdo->prepare(
             'UPDATE invoices i
@@ -710,6 +767,7 @@ final class InvoicePaymentService
             )->execute([$invoiceId]);
             $becameUnpaid = true;
         }
+        CalendarInstalmentService::syncCalendarStatus($pdo, $invoiceId);
 
         return [
             'became_paid'   => $becamePaid,
@@ -753,6 +811,40 @@ final class InvoicePaymentService
         // cache se dopočte při nejbližší přímé akci / cronu).
         if ($committed) {
             $this->stats->recomputeAfterCommit($invoiceId);
+        }
+    }
+
+    /**
+     * Úhrada, kterou platební příkaz EET zachytil jako evidovanou tržbu, se fyzicky
+     * nemaže: evidence je neměnná a smazáním by zmizela vazba tržby na doklad.
+     * Vrácení peněz nebo neprovedenou platbu řeší oprava EET (záporná tržba).
+     * Alokace s bankovním pohybem je jen důkaz o připsání, ne zachycení tržby,
+     * takže zrušení bankovního spárování neblokuje.
+     *
+     * Tržba, kterou opravy EET už celou vynulovaly (storno pokladního dokladu, oprava
+     * duplicity), úhradu nedrží: evidence sedí s penězi i bez ní.
+     *
+     * @param list<int> $params
+     */
+    private function assertNoEetRecord(string $allocationWhere, array $params): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT r.sequence_number
+               FROM payment_event_allocations a
+               JOIN eet_records r ON r.payment_event_id = a.payment_event_id AND r.supplier_id = a.supplier_id
+                                 AND r.kind = 'sale'
+              WHERE {$allocationWhere} AND a.bank_transaction_id IS NULL
+                AND r.total_amount + COALESCE((SELECT SUM(c.total_amount) FROM eet_records c
+                                                WHERE c.supplier_id = r.supplier_id AND c.corrects_record_id = r.id
+                                                  AND c.kind = 'correction'), 0) > 0
+              LIMIT 1"
+        );
+        $stmt->execute($params);
+        $sequence = $stmt->fetchColumn();
+        if ($sequence !== false) {
+            throw new \MyInvoice\Service\Eet\EetHistoryExistsException(
+                'Úhrada má evidenci EET (tržba ' . $sequence . '). Nelze ji smazat, použijte opravu EET.'
+            );
         }
     }
 

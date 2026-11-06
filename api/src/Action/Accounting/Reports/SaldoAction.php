@@ -57,7 +57,7 @@ final class SaldoAction
         if ($params === null) return $err;
 
         try {
-            $data = $this->saldo->build(
+            $data = $this->saldo->buildCached(
                 $supplierId,
                 $params['period_id'],
                 $params['as_of'],
@@ -110,7 +110,7 @@ final class SaldoAction
         $detail = (string) ($request->getQueryParams()['detail'] ?? '1') !== '0' || $aging === null;
 
         try {
-            $data = $this->saldo->build($supplierId, $params['period_id'], $params['as_of'], $params['account'], $params['partner_id']);
+            $data = $this->saldo->buildCached($supplierId, $params['period_id'], $params['as_of'], $params['account'], $params['partner_id']);
             if ($format === 'pdf' && $aging !== null) {
                 $data['aging'] = SaldoAgingBuckets::build($data, $aging);
             }

@@ -5,6 +5,8 @@ import type { RouteLocationRaw } from 'vue-router'
 export interface WindowContext {
   paneId: ComputedRef<PaneId | null>
   active: ComputedRef<boolean>
+  /** Okno je vidět v některém panelu, i když aktivní je jiný. Bez hodnoty platí `active`. */
+  visible?: ComputedRef<boolean>
   root: HTMLElement
   portal: HTMLElement
   navigate?: (to: RouteLocationRaw) => Promise<void>

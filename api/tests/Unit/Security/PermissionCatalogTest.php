@@ -12,6 +12,23 @@ use PHPUnit\Framework\TestCase;
 
 final class PermissionCatalogTest extends TestCase
 {
+    public function testInvoiceDefaultsAreExplicitlyDelegatedAndNotGrantedToAccountants(): void
+    {
+        $catalog = new PermissionCatalog();
+        self::assertTrue($catalog->allowsRoleType('settings.invoice_defaults', 'staff'));
+        self::assertTrue($catalog->allowsRoleType('settings.invoice_defaults', 'client'));
+        self::assertArrayNotHasKey('settings.invoice_defaults', $catalog->legacyPreset('accountant'));
+        self::assertArrayNotHasKey('settings.invoice_defaults', $catalog->legacyPreset('client'));
+    }
+
+    public function testReadOnlyPresetContainsNoWriteIncludingProfile(): void
+    {
+        $preset = (new PermissionCatalog())->legacyPreset('readonly');
+        self::assertSame(1, $preset['profile']);
+        self::assertSame(1, $preset['profile.tokens']);
+        foreach ($preset as $key => $level) self::assertLessThan(2, $level, $key);
+    }
+
     public function testClientBankPermissionsAreOptInAndActionChecksRequireRead(): void
     {
         $catalog = new PermissionCatalog();
@@ -29,6 +46,24 @@ final class PermissionCatalogTest extends TestCase
                 self::assertSame($type === 'staff', \MyInvoice\Security\RequestAuthorization::allows($request, $key, AccessLevel::WRITE));
             }
         }
+    }
+
+    public static function disallowedRequestGrants(): array
+    {
+        return [
+            'client accounting' => ['client', 'accounting'],
+            'client lifecycle' => ['client', 'property.settlements.post'],
+            'staff client portal' => ['staff', 'documents.submit'],
+            'unknown permission' => ['staff', 'synthetic.unknown.permission'],
+        ];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('disallowedRequestGrants')]
+    public function testBrowserChecksRejectCatalogDisallowedGrants(string $type, string $key): void
+    {
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/')
+            ->withAttribute('auth.effective_role', new EffectiveRole(99, 'Synthetic inconsistent role', $type, true, [$key => 2]));
+        self::assertFalse(\MyInvoice\Security\RequestAuthorization::allows($request, $key, AccessLevel::WRITE));
     }
 
     public function testPriceListCanBeDelegatedWithoutGivingItToClientsByDefault(): void
@@ -231,6 +266,67 @@ final class PermissionCatalogTest extends TestCase
         self::assertFalse($canChangeFiled(new EffectiveRole(9, 'Fakturantka a účetní', 'staff', true, [
             'invoices.edit_issued' => AccessLevel::WRITE->value,
             'accounting.journal.post' => AccessLevel::WRITE->value,
+        ])));
+    }
+
+    /**
+     * Oprava DPH zařazení přijaté faktury je běžná práce účetní: výchozí účetní právo má,
+     * jen pro čtení a klient ne. Přeúčtování zaúčtovaného dokladu chce navíc právo zaúčtovat.
+     */
+    public function testPurchaseVatTreatmentBelongsToAccountant(): void
+    {
+        $catalog = new PermissionCatalog();
+        self::assertSame(['staff'], $catalog->all()['purchase_invoices.vat_treatment']['role_types']);
+        self::assertSame(AccessLevel::WRITE->value, $catalog->legacyPreset('accountant')['purchase_invoices.vat_treatment'] ?? null);
+        self::assertArrayNotHasKey('purchase_invoices.vat_treatment', $catalog->legacyPreset('readonly'));
+        self::assertArrayNotHasKey('purchase_invoices.vat_treatment', $catalog->legacyPreset('client'));
+
+        $request = static fn (EffectiveRole $role) => (new \Slim\Psr7\Factory\ServerRequestFactory())
+            ->createServerRequest('POST', '/')
+            ->withAttribute('auth.effective_role', $role);
+        $can = static fn (EffectiveRole $role): bool
+            => \MyInvoice\Security\RequestAuthorization::canChangePurchaseVatTreatment($request($role));
+        $canRepost = static fn (EffectiveRole $role): bool
+            => \MyInvoice\Security\RequestAuthorization::canRepostPurchaseVatTreatment($request($role));
+
+        $accountant = new EffectiveRole(4, 'Účetní', 'staff', true, $catalog->legacyPreset('accountant'), 'accountant');
+        self::assertTrue($can(new EffectiveRole(2, 'Admin', 'staff', true, [], 'admin')));
+        self::assertTrue($can($accountant));
+        self::assertTrue($canRepost($accountant));
+        self::assertFalse($can(new EffectiveRole(5, 'Jen čtení', 'staff', true, $catalog->legacyPreset('readonly'), 'readonly')));
+        self::assertFalse($can(new EffectiveRole(6, 'Klient', 'client', true, [
+            'purchase_invoices.vat_treatment' => AccessLevel::WRITE->value,
+        ])), 'Klientská role právo nedostane ani poškozeným řádkem.');
+        self::assertFalse($canRepost(new EffectiveRole(7, 'Jen DPH zařazení', 'staff', true, [
+            'purchase_invoices.vat_treatment' => AccessLevel::WRITE->value,
+        ])), 'Přeúčtování chce i právo zaúčtovat.');
+        self::assertFalse(\MyInvoice\Security\RequestAuthorization::canChangeFiledVatPeriod($request($accountant)),
+            'Podané období DPH mění jen správce.');
+    }
+    public function testClientMcpPermissionIsOptInAndDoesNotElevateLegacyAccountant(): void
+    {
+        $catalog = new \MyInvoice\Security\PermissionCatalog();
+        self::assertArrayNotHasKey('profile.mcp', $catalog->legacyPreset('client'));
+        self::assertArrayNotHasKey('profile.mcp', $catalog->legacyPreset('accountant'));
+        self::assertSame(1, $catalog->legacyPreset('accountant')['profile.tokens']);
+        self::assertTrue($catalog->allowsRoleType('profile.mcp', 'client'));
+    }
+
+
+    /** Vrácení importu historie skladu je rozhodnutí správce, právo zapisovat skladové doklady nestačí. */
+    public function testStockHistoryRollbackIsCompanyAdminOnly(): void
+    {
+        $request = static fn (EffectiveRole $role) => (new \Slim\Psr7\Factory\ServerRequestFactory())
+            ->createServerRequest('POST', '/')
+            ->withAttribute('auth.effective_role', $role);
+        $can = static fn (EffectiveRole $role): bool
+            => \MyInvoice\Security\RequestAuthorization::canRollbackStockHistoryImport($request($role));
+
+        self::assertTrue($can(new EffectiveRole(1, 'Superadmin', 'superadmin', true, [], 'superadmin')));
+        self::assertTrue($can(new EffectiveRole(2, 'Admin', 'staff', true, [], 'admin')));
+        self::assertFalse($can(new EffectiveRole(3, 'Skladník', 'staff', true, [
+            'stock' => AccessLevel::WRITE->value,
+            'stock.documents.write' => AccessLevel::WRITE->value,
         ])));
     }
 }

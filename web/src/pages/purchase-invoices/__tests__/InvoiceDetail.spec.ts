@@ -14,6 +14,8 @@ const m = vi.hoisted(() => ({
   stockEnabled: false,
   stockRead: true,
   stockWrite: true,
+  offsetsWrite: true,
+  isClientRole: false,
 }))
 
 // vue-router — useRoute (id), useRouter (push), RouterLink jako jednoduchý stub.
@@ -68,9 +70,9 @@ vi.mock('@/api/errors', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     canRead: (permission: string) => permission === 'stock' ? m.stockRead : true,
-    canWrite: (permission: string) => permission === 'stock' ? m.stockWrite : true,
+    canWrite: (permission: string) => permission === 'stock' ? m.stockWrite : permission === 'accounting.offsets' ? m.offsetsWrite : true,
     hasCommercialFeatures: true,
-    isClientRole: false,
+    get isClientRole() { return m.isClientRole },
     isSuperadmin: false,
     user: { id: 1 },
   }),
@@ -88,6 +90,7 @@ vi.mock('@/stores/supplier', () => ({
 vi.mock('@/api/accounting', () => ({
   accountingApi: { postPurchase: vi.fn() },
   postingErrorI18nKey: () => 'error',
+  postingErrorMessage: () => 'error',
 }))
 
 vi.mock('@/api/stock', () => ({
@@ -253,7 +256,50 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     m.stockEnabled = false
     m.stockRead = true
     m.stockWrite = true
+    m.offsetsWrite = true
+    m.isClientRole = false
     if (m.route) m.route.params.id = '258'
+  })
+
+  it.each([
+    ['period_closed', true], ['period_closing', true], ['date_locked', true],
+    ['booked', false], ['posted', false], ['accountant_managed', false],
+  ] as const)('klientské smazání konceptu při zámku %s: %s', async (reason, visible) => {
+    m.isClientRole = true
+    m.get.mockResolvedValue(makeInvoice({
+      status: 'draft',
+      bank_payments: [], cash_payments: [], settlement_payments: [],
+      locked: { is_locked: true, reasons: [reason], booked_at: null, journal_entry_id: null,
+        period_status: null, date_locked: false, accountant_managed: reason === 'accountant_managed' },
+    }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    try {
+      const actions = wrapper.getComponent({ name: 'ActionBar' }).props('actions') as { key: string; show?: boolean }[]
+      expect(actions.find(a => a.key === 'delete')?.show).toBe(visible)
+      expect(actions.find(a => a.key === 'edit')?.show).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it.each(['bank_payments', 'cash_payments', 'settlement_payments', 'unavailable'] as const)('klient nesmaže zamčený koncept při %s', async field => {
+    m.isClientRole = true
+    m.get.mockResolvedValue(makeInvoice({
+      status: 'draft', paid_amount: 0,
+      bank_payments: [], cash_payments: [], settlement_payments: [],
+      ...(field === 'unavailable' ? { bank_payments: undefined } : { [field]: [{ id: 7 }] }),
+      locked: { is_locked: true, reasons: ['period_closed'], booked_at: null, journal_entry_id: null,
+        period_status: 'closed', date_locked: false, accountant_managed: false },
+    }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    try {
+      const actions = wrapper.getComponent({ name: 'ActionBar' }).props('actions') as { key: string; show?: boolean }[]
+      expect(actions.find(a => a.key === 'delete')?.show).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
   })
 
   it('zavře párování s bankou při přechodu na jiný doklad', async () => {
@@ -372,6 +418,22 @@ describe('InvoiceDetail.vue — bankovní úhrady', () => {
     expect(actions.find(a => a.key === 'settle-rest')?.show).toBe(true)
   })
 
+  it('neuhrazená faktura nabídne vzájemný zápočet s dodavatelem jen s právem k zápočtům', async () => {
+    m.get.mockResolvedValue(makeInvoice({ status: 'received', amount_to_pay: 1200, remaining_amount: 1200 }))
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    const offset = () => (wrapper.getComponent({ name: 'ActionBar' }).props('actions') as { key: string; show?: boolean; to?: unknown }[])
+      .find(a => a.key === 'mutual-offset')
+    expect(offset()?.show).toBe(true)
+    expect(offset()?.to).toEqual({ name: 'accounting-offsets', query: { partner_id: '5', docs: 'purchase_invoice:258' } })
+
+    m.offsetsWrite = false
+    const denied = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    expect((denied.getComponent({ name: 'ActionBar' }).props('actions') as { key: string; show?: boolean }[])
+      .find(a => a.key === 'mutual-offset')?.show).toBe(false)
+  })
+
   it('plně uhrazená faktura → bez upozornění i bez akce vyrovnání', async () => {
     m.get.mockResolvedValue(makeInvoice({ status: 'paid', paid_amount: 1210, remaining_amount: 0, paid_shortfall: false }))
     const wrapper = mount(InvoiceDetail, { global: { stubs } })
@@ -440,6 +502,7 @@ describe('InvoiceDetail.vue — skladové příjemky', () => {
     m.stockEnabled = true
     m.stockRead = true
     m.stockWrite = true
+    m.offsetsWrite = true
     if (m.route) m.route.params.id = '258'
   })
 

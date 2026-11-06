@@ -365,6 +365,364 @@ final class GeneralLedgerReportTest extends TestCase
         );
     }
 
+    public function testDetailedExportAcrossBatchesMatchesSummaryAndChronologicalBalances(): void
+    {
+        $this->manual([self::l('518', 'debit', 10.11), self::l('211', 'credit', 10.11)], '2099-01-01');
+        // Záměrně obrácené pořadí vložení; dva řádky stejného účtu v jednom zápisu.
+        $this->manual([self::l('518', 'debit', 4.44), self::l('211', 'credit', 4.44)], '2099-03-02');
+        $this->manual([self::l('518', 'debit', 1.11), self::l('518', 'debit', 2.22), self::l('211', 'credit', 3.33)], '2099-03-01');
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, '2099-02-01', null);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '5', '5');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $events = iterator_to_array($detail->events($this->supplierId, $data, [], false, 1));
+        self::assertSame(['start', 'line', 'line', 'line', 'end'], array_column($events, 'kind'));
+        self::assertEquals(10.11, $events[0]['account']['opening_md']);
+        self::assertEquals([11.22, 13.44, 17.88], array_column(array_column(array_slice($events, 1, 3), 'item'), 'balance'));
+        self::assertSame('211', $events[1]['item']['counter_accounts']);
+        self::assertEquals(17.88, $events[4]['account']['closing_md']);
+    }
+
+    public function testDetailedExportUsesSameSourceAndDimensionFilters(): void
+    {
+        $vendor = $this->insertClient('Syntetický dodavatel exportu');
+        $purchase = $this->insertPurchaseWithItem($vendor, 'Testovaný materiál', 12.34, '2099-03-01');
+        $entry = $this->insertJournalEntry('purchase_invoice', $purchase, '518', '321', 12.34, '2099-03-01');
+        $this->manual([self::l('518', 'debit', 99), self::l('211', 'credit', 99)], '2099-03-02');
+        $this->db->pdo()->prepare('UPDATE journal_entry_lines SET cost_center = ? WHERE supplier_id = ? AND entry_id = ? AND side = ?')
+            ->execute(['DEMO', $this->supplierId, $entry, 'debit']);
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        foreach ([['vendor' => 'Syntetický dodavatel exportu'], ['item' => 'Testovaný materiál'],
+            ['dimension' => new \MyInvoice\Service\Accounting\Dimension\DimensionFilter(999999, 999999, [999999], ['DEMO'])]] as $filters) {
+            $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, $filters);
+            $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '5', '5');
+            $events = iterator_to_array($detail->events($this->supplierId, $data, $filters, false, 1));
+            self::assertCount(3, $events);
+            self::assertEquals(12.34, $events[1]['item']['amount']);
+        }
+    }
+
+    public function testDetailedExportAllPeriodsAndEmptyRange(): void
+    {
+        $this->manual([self::l('518', 'debit', 10), self::l('211', 'credit', 10)], '2099-01-01');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        foreach ([false, true] as $afterClosing) {
+            $data = $this->generalLedger->buildAllPeriods($this->supplierId, null, null, false, [], $afterClosing);
+            $events = iterator_to_array($detail->events($this->supplierId, $data, [], $afterClosing, 1));
+            self::assertSame(['start', 'line', 'end', 'start', 'line', 'end'], array_column($events, 'kind'));
+            $empty = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '9', '9');
+            self::assertSame([], iterator_to_array($detail->events($this->supplierId, $empty, [], $afterClosing)));
+        }
+    }
+
+    /**
+     * Za všechna období patří otevírací zápis druhého roku do rozpisu jen v knize po
+     * uzávěrce (vedle závěrkového zápisu prvního roku). Před uzávěrkou ho souhrn
+     * vynechává, rozpis tedy taky, jinak by rozpis 211 hlásil nesoulad.
+     */
+    public function testDetailedExportAllPeriodsKeepsSecondYearOpeningOnlyAfterClosing(): void
+    {
+        $this->manual([self::l('211', 'debit', 1000.00), self::l('602', 'credit', 1000.00)], self::YEAR . '-06-10');
+        $this->insertJournalEntry('closing', $this->periodId, '702', '211', 1000.00, self::YEAR . '-12-31');
+        $this->periodId = $this->periods->create($this->supplierId, self::YEAR + 1, (self::YEAR + 1) . '-01-01', (self::YEAR + 1) . '-12-31');
+        $this->insertJournalEntry('opening', $this->periodId, '211', '701', 1000.00, (self::YEAR + 1) . '-01-01');
+        $this->manual([self::l('211', 'debit', 200.00), self::l('602', 'credit', 200.00)], (self::YEAR + 1) . '-03-15');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $expected = [
+            false => [[self::YEAR . '-06-10', 'debit', 1000.0], [(self::YEAR + 1) . '-03-15', 'debit', 200.0]],
+            true => [
+                [self::YEAR . '-06-10', 'debit', 1000.0],
+                [self::YEAR . '-12-31', 'credit', 1000.0],
+                [(self::YEAR + 1) . '-01-01', 'debit', 1000.0],
+                [(self::YEAR + 1) . '-03-15', 'debit', 200.0],
+            ],
+        ];
+        foreach ([false, true] as $afterClosing) {
+            $data = $this->generalLedger->buildAllPeriods($this->supplierId, null, null, false, [], $afterClosing);
+            $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '211', '211');
+            $lines = array_map(
+                static fn (array $e): array => [$e['item']['entry_date'], $e['item']['side'], (float) $e['item']['amount']],
+                array_values(array_filter(
+                    iterator_to_array($detail->events($this->supplierId, $data, [], $afterClosing, 1), false),
+                    static fn (array $e): bool => $e['kind'] === 'line',
+                )),
+            );
+            self::assertSame($expected[$afterClosing], $lines, $afterClosing ? 'po uzávěrce' : 'před uzávěrkou');
+        }
+    }
+
+    public function testDetailedExportKeepsRedStornoEvenWhenAccountTurnoverIsZero(): void
+    {
+        $this->manual([self::l('518', 'debit', 12.34), self::l('211', 'credit', 12.34)], '2099-03-01');
+        $this->manual([
+            self::l('518', 'debit', 12.34) + ['is_red_storno' => true],
+            self::l('211', 'credit', 12.34) + ['is_red_storno' => true],
+        ], '2099-03-02');
+        $filters = [];
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, $filters, false, true);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '5', '5');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $events = iterator_to_array($detail->events($this->supplierId, $data, $filters, false, 1));
+        self::assertSame(['start', 'line', 'line', 'end'], array_column($events, 'kind'));
+        self::assertEquals(-12.34, $events[2]['item']['amount']);
+        self::assertEquals(0, $events[3]['account']['closing_md']);
+    }
+
+    public function testDetailedExportShowsOwnPairAsCounterAccount(): void
+    {
+        // Pokladní doklad o dvou dvojicích: rozpis 211 má u každého řádku jen protiúčet svého páru.
+        $this->manual([self::l('501', 'debit', 300), self::l('211', 'credit', 300), self::l('513', 'debit', 700), self::l('211', 'credit', 700)], '2099-07-31');
+        $filters = [];
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, $filters, false, true);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '211', '211');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $lines = array_column(array_column(array_filter(iterator_to_array($detail->events($this->supplierId, $data, $filters, false, 1)), static fn (array $e): bool => $e['kind'] === 'line'), 'item'), 'counter_accounts', 'amount');
+        self::assertSame(['300' => '501', '700' => '513'], array_combine(array_map(static fn ($k) => (string) (int) $k, array_keys($lines)), array_values($lines)));
+    }
+
+    public function testDetailedExportCounterAccountOfRedStornoUsesEffectiveSide(): void
+    {
+        $this->manual([
+            self::l('518', 'debit', 10) + ['is_red_storno' => true],
+            self::l('501', 'debit', 5) + ['is_red_storno' => true],
+            self::l('211', 'credit', 15) + ['is_red_storno' => true],
+        ], '2099-03-02');
+        $filters = [];
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, $filters, false, true);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '518', '518');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $events = iterator_to_array($detail->events($this->supplierId, $data, $filters, false, 1));
+        self::assertEquals(-10, $events[1]['item']['amount']);
+        // Účinně je 518 na straně D, protiúčtem je tedy 211 (účinně MD), ne 501.
+        self::assertSame('211', $events[1]['item']['counter_accounts']);
+    }
+
+    public function testDetailedExportRedStornoUnderDimensionWithZeroShareKeepsEffectiveSide(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,'test_split','Synthetic split','custom')")->execute([$this->supplierId]);
+        $type = (int) $pdo->lastInsertId();
+        $values = [];
+        foreach (['a', 'b'] as $code) {
+            $pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')
+                ->execute([$type, $this->supplierId, $code, 'Synthetic ' . $code]);
+            $values[$code] = (int) $pdo->lastInsertId();
+        }
+        $entry = $this->manual([
+            self::l('518', 'debit', 0.01) + ['is_red_storno' => true],
+            self::l('501', 'debit', 5) + ['is_red_storno' => true],
+            self::l('211', 'credit', 5.01) + ['is_red_storno' => true],
+        ], '2099-03-02');
+        // 0,01 Kč napůl: jeden díl se zaokrouhlí na 0,01, druhý na 0,00.
+        foreach ($values as $value) {
+            $pdo->prepare("INSERT INTO journal_entry_line_dimension_splits (line_id,dimension_type_id,dimension_value_id,supplier_id,share)
+                SELECT l.id, ?, ?, l.supplier_id, 0.5 FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+                 WHERE l.entry_id = ? AND a.account_code = '518'")->execute([$type, $value, $entry]);
+        }
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $amounts = [];
+        foreach ($values as $value) {
+            $filters = ['dimension' => new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($type, $value, [$value])];
+            $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, $filters, false, true);
+            $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '518', '518');
+            foreach (iterator_to_array($detail->events($this->supplierId, $data, $filters, false, 1)) as $event) {
+                if ($event['kind'] !== 'line') continue;
+                $amounts[] = (float) $event['item']['amount'];
+                self::assertSame('211', $event['item']['counter_accounts']);
+            }
+        }
+        self::assertContains(0.0, $amounts, 'Test musí projít i díl rozpadu 0,00 Kč.');
+    }
+
+    public function testSummaryWithoutExportOptionIsUnchanged(): void
+    {
+        $this->manual([self::l('518', 'debit', 12.34), self::l('211', 'credit', 12.34)], '2099-03-01');
+        $this->manual([self::l('518', 'debit', 12.34) + ['is_red_storno' => true], self::l('211', 'credit', 12.34) + ['is_red_storno' => true]], '2099-03-02');
+        $this->manual([self::l('501', 'debit', 7), self::l('211', 'credit', 7)], '2099-04-01');
+        foreach ([false, true] as $analytics) {
+            $plain = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, $analytics);
+            $withZero = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, $analytics, [], false, true);
+            // Souhrn bez volby exportu: žádné nové klíče a celé rozmezí účtů = beze změny.
+            $selected = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($plain);
+            self::assertSame($plain['accounts'], $selected['accounts']);
+            self::assertEquals($plain['totals'], $selected['totals']);
+            foreach ($plain['accounts'] as $a) self::assertArrayNotHasKey('line_count', $a);
+            // Volba exportu jen přidá účty s nulovým obratem a pohybem (storno) a počet řádků.
+            $strip = static fn (array $a): array => array_diff_key($a, ['line_count' => true]);
+            $extra = array_values(array_udiff(array_map($strip, $withZero['accounts']), $plain['accounts'], static fn ($x, $y) => strcmp($x['account_code'], $y['account_code'])));
+            self::assertSame(['518'], array_column($extra, 'account_code'));
+            self::assertSame(array_column($plain['accounts'], null, 'account_code'), array_intersect_key(array_column(array_map($strip, $withZero['accounts']), null, 'account_code'), array_column($plain['accounts'], null, 'account_code')));
+            self::assertEquals($plain['totals'], $withZero['totals']);
+        }
+    }
+
+    public function testDetailedExportRejectsRowsOutOfSummaryOrder(): void
+    {
+        $this->manual([self::l('518', 'debit', 10), self::l('211', 'credit', 10)], '2099-03-01');
+        $this->manual([self::l('501', 'debit', 5), self::l('211', 'credit', 5)], '2099-03-02');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '5', '5');
+        // Rozpis jde po kódech účtů jako souhrn; řádek účtu, který v pořadí souhrnu už prošel, je nesoulad.
+        $data['accounts'] = array_reverse($data['accounts']);
+        try {
+            iterator_to_array($detail->events($this->supplierId, $data, [], false, 1));
+            self::fail('Řádek mimo pořadí souhrnu musí skončit chybou.');
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            self::assertSame('ledger_detail_mismatch', $e->errorCode);
+        }
+    }
+
+    public function testDetailedExportOpeningClosingAndAccountWithOpeningOnly(): void
+    {
+        $this->insertJournalEntry('opening', $this->periodId, '211', '701', 100, '2099-01-01');
+        $this->insertJournalEntry('closing', $this->periodId, '702', '211', 100, '2099-12-31');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        foreach ([false, true] as $afterClosing) {
+            $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, [], $afterClosing);
+            $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '211', '211');
+            $events = iterator_to_array($detail->events($this->supplierId, $data, [], $afterClosing, 1));
+            self::assertCount($afterClosing ? 3 : 2, $events);
+            self::assertEquals(100, $events[0]['account']['opening_md']);
+            self::assertEquals($afterClosing ? 0 : 100, $events[count($events) - 1]['account']['closing_md']);
+        }
+    }
+
+    public function testDetailedExportAnalyticsAndSyntheticRollupAgree(): void
+    {
+        $this->db->pdo()->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id)
+            SELECT supplier_id, ?, ?, account_type, normal_side, 0, id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?")
+            ->execute(['518.123', 'Syntetická analytika pro test', $this->supplierId, '518']);
+        $this->manual([self::l('518.123', 'debit', 12.34), self::l('211', 'credit', 12.34)], '2099-03-01');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        foreach ([false, true] as $analytics) {
+            $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, $analytics);
+            $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '5', '5');
+            $events = iterator_to_array($detail->events($this->supplierId, $data, [], false, 1));
+            self::assertCount(3, $events);
+            self::assertSame($analytics ? '518.123' : '518', $events[0]['account']['account_code']);
+            self::assertSame('518.123', $events[1]['item']['account_code']);
+            self::assertEquals(12.34, $events[2]['account']['closing_md']);
+        }
+    }
+
+    public function testDetailedExportReadsChartDefinitionsLikeSummary(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id)
+            SELECT supplier_id, ?, ?, account_type, normal_side, 0, id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?")
+            ->execute(['518.124', 'Syntetická analytika s pozdější definicí', $this->supplierId, '518']);
+        $pdo->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id)
+            SELECT supplier_id, ?, ?, account_type, normal_side, 0, id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?")
+            ->execute(['518.123', 'Syntetická analytika bez historie', $this->supplierId, '518']);
+        $this->manual([self::l('518.123', 'debit', 10), self::l('211', 'credit', 10)], '2099-03-01');
+        $this->manual([self::l('518.124', 'debit', 5), self::l('211', 'credit', 5)], '2099-03-02');
+        // Definice analytiky platí až po konci období: souhrn ji k datu `to` nevidí.
+        $row = $pdo->query("SELECT * FROM chart_of_accounts WHERE supplier_id = {$this->supplierId} AND account_code = '518.124'")->fetch(PDO::FETCH_ASSOC);
+        $definition = \MyInvoice\Repository\AccountDefinitionRepository::definition($row);
+        $pdo->prepare('INSERT INTO accounting_account_definition_history (supplier_id, account_id, effective_from, name, normal_side, tax_deductibility, is_active, definition_json, definition_hash, evidence, recorded_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))')->execute([
+            $this->supplierId, (int) $row['id'], '2100-01-01', ...array_values($definition),
+            \MyInvoice\Repository\AccountDefinitionRepository::encode($definition),
+            \MyInvoice\Repository\AccountDefinitionRepository::definitionHash($this->supplierId, (int) $row['id'], '2100-01-01', $definition),
+            'Syntetický test',
+        ]);
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '518', '518');
+        $events = iterator_to_array($detail->events($this->supplierId, $data, [], false, 1));
+        self::assertSame(['start', 'line', 'end'], array_column($events, 'kind'));
+        self::assertEquals(10, $events[2]['account']['closing_md']);
+    }
+
+    public function testDetailedExportMismatchCarriesAccountForLog(): void
+    {
+        $this->manual([self::l('518', 'debit', 10), self::l('211', 'credit', 10)], '2099-03-01');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '518', '518');
+        $data['accounts'][0]['turnover_md'] += 0.01;
+        try {
+            iterator_to_array($detail->events($this->supplierId, $data, [], false, 1));
+            self::fail('Nesoulad rozpisu se souhrnem musí skončit chybou.');
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            self::assertSame('ledger_detail_mismatch', $e->errorCode);
+            self::assertSame('518', $e->context['account_code']);
+            self::assertSame(1000, $e->context['detail_cents']['md']);
+        }
+    }
+
+    public function testDetailedExportMismatchCatchesLineCountWhenAmountsCancelOut(): void
+    {
+        // Zápis a jeho červené storno: částky účtu jsou nulové, chybějící nebo zdvojenou dvojici
+        // pozná jen počet řádků.
+        $this->manual([self::l('518', 'debit', 10), self::l('211', 'credit', 10)], '2099-03-01');
+        $this->manual([self::l('518', 'debit', 10) + ['is_red_storno' => true], self::l('211', 'credit', 10) + ['is_red_storno' => true]], '2099-03-02');
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, [], false, true);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '518', '518');
+        self::assertSame(2, $data['accounts'][0]['line_count']);
+        iterator_to_array($detail->events($this->supplierId, $data, [], false, 1));
+        $data['accounts'][0]['line_count'] = 4;
+        try {
+            iterator_to_array($detail->events($this->supplierId, $data, [], false, 1));
+            self::fail('Nesoulad počtu řádků musí skončit chybou i při sedících částkách.');
+        } catch (\MyInvoice\Service\Accounting\Reports\ReportException $e) {
+            self::assertSame('ledger_detail_mismatch', $e->errorCode);
+            self::assertSame(['detail' => 2, 'summary' => 4], $e->context['lines']);
+        }
+    }
+
+    public function testDetailedExportCountsLinesForSizeLimit(): void
+    {
+        $this->manual([self::l('518', 'debit', 1), self::l('211', 'credit', 1)], '2099-03-01');
+        $this->manual([self::l('518', 'debit', 2), self::l('211', 'credit', 2)], '2099-03-02');
+        $this->manual([self::l('518', 'debit', 3), self::l('211', 'credit', 3)], '2099-03-03');
+        $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, false, [], false, true);
+        $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '518', '518');
+        self::assertSame(3, $data['accounts'][0]['line_count']);
+        $summary = $this->generalLedger->build($this->supplierId, $this->periodId, null, null);
+        self::assertArrayNotHasKey('line_count', $summary['accounts'][0], 'Souhrn hlavní knihy se nemění.');
+    }
+
+    public function testDetailedExportWithTwoDimensionsMatchesSummary(): void
+    {
+        $pdo = $this->db->pdo();
+        $ids = [];
+        foreach (['test_project' => ['a', 'b'], 'test_centre' => ['x', 'y']] as $typeCode => $values) {
+            $pdo->prepare("INSERT INTO dimension_types (supplier_id,code,name,kind) VALUES (?,?,?,'custom')")
+                ->execute([$this->supplierId, $typeCode, 'Synthetic ' . $typeCode]);
+            $ids[$typeCode] = ['id' => (int) $pdo->lastInsertId()];
+            foreach ($values as $code) {
+                $pdo->prepare('INSERT INTO dimension_values (type_id,supplier_id,code,name) VALUES (?,?,?,?)')
+                    ->execute([$ids[$typeCode]['id'], $this->supplierId, $code, 'Synthetic ' . $code]);
+                $ids[$typeCode][$code] = (int) $pdo->lastInsertId();
+            }
+        }
+        foreach ([[100, 'a', 'x'], [40, 'a', 'y'], [7, 'b', 'x']] as $i => [$amount, $project, $centre]) {
+            $entry = $this->manual([self::l('518', 'debit', $amount), self::l('211', 'credit', $amount)], sprintf('2099-03-%02d', $i + 1));
+            foreach (['test_project' => $project, 'test_centre' => $centre] as $typeCode => $value) {
+                $pdo->prepare("INSERT INTO journal_entry_line_dimensions (supplier_id,line_id,dimension_type_id,dimension_value_id)
+                    SELECT supplier_id, id, ?, ? FROM journal_entry_lines WHERE entry_id = ? AND side = 'debit'")
+                    ->execute([$ids[$typeCode]['id'], $ids[$typeCode][$value], $entry]);
+            }
+        }
+        $filter = \MyInvoice\Service\Accounting\Dimension\DimensionFilter::all([
+            new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($ids['test_project']['id'], $ids['test_project']['a'], [$ids['test_project']['a']]),
+            new \MyInvoice\Service\Accounting\Dimension\DimensionFilter($ids['test_centre']['id'], $ids['test_centre']['x'], [$ids['test_centre']['x']]),
+        ]);
+        $filters = ['dimension' => $filter];
+        $detail = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::class);
+        foreach ([false, true] as $analytics) {
+            $data = $this->generalLedger->build($this->supplierId, $this->periodId, null, null, $analytics, $filters, false, true);
+            $data = \MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService::selectAccounts($data, '5', '5');
+            self::assertSame(1, $data['accounts'][0]['line_count']);
+            $events = iterator_to_array($detail->events($this->supplierId, $data, $filters, false, 1));
+            self::assertSame(['start', 'line', 'end'], array_column($events, 'kind'));
+            self::assertEquals(100, $events[1]['item']['amount']);
+            self::assertEquals(100, $events[2]['account']['closing_md']);
+        }
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /**

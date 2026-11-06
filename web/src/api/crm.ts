@@ -204,8 +204,8 @@ export const crmApi = {
     api.post<{ ok: boolean }>('/crm/action-items/restore', { item_type: itemType }).then(r => r.data),
   restoreAllActionItems: () =>
     api.post<{ ok: boolean; restored: number }>('/crm/action-items/restore-all', {}).then(r => r.data),
-  cashFlowForecast: (weeks = 4, currency = 'CZK') =>
-    api.get<CashFlowResult>('/crm/cash-flow-forecast', { params: { weeks, currency } }).then(r => r.data),
+  cashFlowForecast: (weeks = 4, currency = 'CZK', includeDrafts = false) =>
+    api.get<CashFlowResult>('/crm/cash-flow-forecast', { params: { weeks, currency, ...(includeDrafts ? { include_drafts: 1 } : {}) } }).then(r => r.data),
   lateRisk: (limit = 10) =>
     api.get<LateRiskClient[]>('/crm/late-risk', { params: { limit } }).then(r => r.data),
   reminderEffectiveness: (months = 12) =>
@@ -244,6 +244,7 @@ export interface ActionItemsResult {
   items: ActionItem[]
   total: number
   dismissed_count: number
+  dismissed_types?: string[]
 }
 
 export interface CashFlowWeek {
@@ -253,6 +254,9 @@ export interface CashFlowWeek {
   out: number
   net: number
   running: number
+  draft_in?: number
+  outlook_net?: number
+  outlook_running?: number
 }
 export interface CashFlowResult {
   currency: string
@@ -260,6 +264,9 @@ export interface CashFlowResult {
   total_in: number
   total_out: number
   total_net: number
+  total_draft_in?: number
+  total_outlook_net?: number
+  unscheduled_draft_count?: number
 }
 
 export interface LateRiskClient {

@@ -8,6 +8,9 @@ const m = vi.hoisted(() => ({
   setEnabled: vi.fn(),
   createValue: vi.fn(),
   updateValue: vi.fn(),
+  updateType: vi.fn(),
+  deleteType: vi.fn(),
+  deleteValue: vi.fn(),
   createDefaults: vi.fn(),
   responsibleCandidates: vi.fn(),
   accountMap: vi.fn(),
@@ -28,6 +31,9 @@ vi.mock('@/api/dimensions', async (importOriginal) => ({
     setEnabled: m.setEnabled,
     createValue: m.createValue,
     updateValue: m.updateValue,
+    updateType: m.updateType,
+    deleteType: m.deleteType,
+    deleteValue: m.deleteValue,
     createDefaults: m.createDefaults,
     responsibleCandidates: m.responsibleCandidates,
     accountMap: m.accountMap,
@@ -43,7 +49,8 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canRead: () => true, canWrite: () => true, isCompanyAdminRole: true, get hasCommercialFeatures() { return m.commercial } }),
 }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: m.toastSuccess, error: m.toastError }) }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+const builtinKey = 'dimensions.system_values.activity.main'
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => (key === builtinKey ? 'Hlavní činnost' : key), te: (key: string) => key === builtinKey, locale: { value: 'cs' } }) }))
 vi.mock('vue-router', () => ({
   RouterLink: { name: 'RouterLink', props: ['to'], template: '<a><slot /></a>' },
 }))
@@ -69,7 +76,7 @@ function overview(): DimensionOverview {
 
 describe('Dimensions.vue', () => {
   beforeEach(() => {
-    for (const fn of [m.overview, m.group, m.setEnabled, m.createValue, m.updateValue, m.createDefaults, m.patchSupplier, m.toastSuccess, m.toastError]) fn.mockReset()
+    for (const fn of [m.updateType, m.deleteType, m.deleteValue, m.overview, m.group, m.setEnabled, m.createValue, m.updateValue, m.createDefaults, m.patchSupplier, m.toastSuccess, m.toastError]) fn.mockReset()
     m.supplier.currentSupplier.dimensions_enabled = true
     m.commercial = true
     m.overview.mockResolvedValue(overview())
@@ -78,6 +85,83 @@ describe('Dimensions.vue', () => {
     for (const fn of [m.accountMap, m.accountCandidates, m.saveAccountMap]) fn.mockReset()
     m.accountMap.mockResolvedValue([])
     m.accountCandidates.mockResolvedValue([])
+  })
+
+  it('protects builtin meaning but keeps responsibility editable', async () => {
+    const data = overview()
+    data.types[0] = { ...data.types[0], system_key: 'activity' }
+    data.values = [{ ...data.values[0], code: 'main', name: 'Hlavni cinnost z DB', semantic_key: 'main' }]
+    m.overview.mockResolvedValue(data)
+    const wrapper = mount(Dimensions, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="dimension-system-key"]').text()).toContain('dimensions.system_badge')
+    expect(wrapper.get('[data-test="dimension-type-active"] button').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="dimension-type-delete"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="dimension-value-new"]').exists()).toBe(false)
+    const row = wrapper.get('[data-test="dimension-value-main"]')
+    expect(row.text()).toContain('dimensions.builtin_badge')
+    expect(row.text()).toContain('Hlavní činnost')
+    expect(row.text()).not.toContain('main')
+    expect(row.text()).not.toContain('z DB')
+    expect(row.get('[data-test="dimension-value-active"] button').attributes('disabled')).toBeDefined()
+    expect(row.get('[data-test="dimension-value-delete"]').attributes('disabled')).toBeDefined()
+    await row.get('button[title="common.edit"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="dimension-value-name"]').attributes('disabled')).toBeDefined()
+    expect((wrapper.get('[data-test="dimension-value-name"]').element as HTMLInputElement).value).toBe('Hlavní činnost')
+    expect(wrapper.find('[data-test="dimension-value-code"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="dimension-value-parent"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-test="dimension-value-responsible"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="dimension-value-responsible"]').setValue('3')
+    await wrapper.get('[data-test="dimension-value-save"]').trigger('click')
+    await flushPromises()
+    expect(m.updateValue).toHaveBeenCalledWith(11, expect.objectContaining({ responsible_user_id: 3 }))
+    expect(m.updateValue.mock.calls[0][1]).not.toHaveProperty('name')
+    expect(m.updateValue.mock.calls[0][1]).not.toHaveProperty('parent_id')
+    expect(m.updateValue.mock.calls[0][1]).not.toHaveProperty('is_active')
+  })
+
+  it('allows retirement of custom activity kinds without inventing defaults or used metadata', async () => {
+    const data = overview()
+    data.types[0] = { ...data.types[0], system_key: 'activity_kind' }
+    data.values = [{ ...data.values[0], semantic_key: null }]
+    m.overview.mockResolvedValue(data)
+    const wrapper = mount(Dimensions)
+    await flushPromises()
+    expect(wrapper.find('[data-test="dimension-value-new"]').exists()).toBe(true)
+    const row = wrapper.get('[data-test="dimension-value-VYROBA"]')
+    expect(row.get('[data-test="dimension-value-active"] button').attributes('disabled')).toBeUndefined()
+    await row.get('[data-test="dimension-value-active"] button').trigger('click')
+    await flushPromises()
+    expect(m.updateValue).toHaveBeenCalledWith(11, { is_active: false })
+    expect(m.createValue).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('dimensions.system_assignment_hint')
+  })
+
+  it('does not infer system meaning from legacy codes without metadata', async () => {
+    const data = overview()
+    data.types[0] = { ...data.types[0], code: 'activity', system_key: null }
+    data.values = [{ ...data.values[0], code: 'main', semantic_key: null }]
+    m.overview.mockResolvedValue(data)
+    const wrapper = mount(Dimensions)
+    await flushPromises()
+    expect(wrapper.find('[data-test="dimension-system-key"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="dimension-type-delete"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-test="dimension-value-main"] [data-test="dimension-value-delete"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-test="dimension-value-new"]').exists()).toBe(true)
+  })
+
+  it('explains backend protection on a custom historical edit and keeps the form open', async () => {
+    m.updateValue.mockRejectedValue({ response: { status: 409, data: { error: { code: 'system_dimension_immutable' } } } })
+    const wrapper = mount(Dimensions, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    await wrapper.get('[data-test="dimension-value-VYROBA"] button[title="common.edit"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="dimension-value-name"]').setValue('New meaning')
+    await wrapper.get('[data-test="dimension-value-save"]').trigger('click')
+    await flushPromises()
+    expect(m.toastError).toHaveBeenCalledWith('dimensions.system_history_conflict')
+    expect(wrapper.find('[data-test="dimension-value-form"]').exists()).toBe(true)
   })
 
   it('ukáže firemní typy a strom hodnot, podřízené se rozbalí', async () => {
@@ -150,6 +234,9 @@ describe('Dimensions.vue', () => {
     await edit!.trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="dimension-account-map-row-0"]').exists()).toBe(true)
+    const dates = wrapper.get('[data-test="dimension-account-map-row-0"]').findAll('input[type="text"]')
+    expect(dates).toHaveLength(2)
+    for (const date of dates) expect(date.classes()).toContain('h-9')
     await wrapper.get('[data-test="dimension-account-map-add"]').trigger('click')
     const row = () => wrapper.get('[data-test="dimension-account-map-row-1"]')
     await row().findAll('select')[0].setValue('100')

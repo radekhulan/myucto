@@ -37,6 +37,11 @@ final class DepreciationCalculator
      */
     public function plan(DepreciationContext $ctx, string $taxMethod, string $accMethod = 'straight_line'): array
     {
+        if ($ctx->importedPlan !== null) {
+            $this->assertImportedMethods($taxMethod, $accMethod);
+            return ['tax' => ImportedDepreciationPlan::rows($ctx, 'tax'),
+                'accounting' => ImportedDepreciationPlan::rows($ctx, 'accounting')];
+        }
         return [
             'tax' => $this->taxStrategy($taxMethod)?->plan($ctx) ?? [],
             'accounting' => $this->accountingStrategy($accMethod, $taxMethod)->plan($ctx),
@@ -46,6 +51,10 @@ final class DepreciationCalculator
     /** @return array<string,mixed>|null */
     public function taxYearRow(DepreciationContext $ctx, string $taxMethod, int $fiscalYear): ?array
     {
+        if ($ctx->importedPlan !== null) {
+            $this->assertImportedMethods($taxMethod, 'straight_line');
+            return array_column(ImportedDepreciationPlan::rows($ctx, 'tax', $fiscalYear), null, 'fiscal_year')[$fiscalYear] ?? null;
+        }
         return $this->taxStrategy($taxMethod)?->yearRow($ctx, $fiscalYear);
     }
 
@@ -56,7 +65,18 @@ final class DepreciationCalculator
         string $accMethod = 'straight_line',
         string $taxMethod = 'none',
     ): ?array {
+        if ($ctx->importedPlan !== null) {
+            $this->assertImportedMethods($taxMethod, $accMethod);
+            return array_column(ImportedDepreciationPlan::rows($ctx, 'accounting', $fiscalYear), null, 'fiscal_year')[$fiscalYear] ?? null;
+        }
         return $this->accountingStrategy($accMethod, $taxMethod)->yearRow($ctx, $fiscalYear);
+    }
+
+    private function assertImportedMethods(string $taxMethod, string $accMethod): void
+    {
+        if ($taxMethod !== 'by_accounting' || $accMethod !== 'straight_line') {
+            throw new AssetException('imported_plan_invalid', 'Převzatý plán vyžaduje účetní odpisy s odpovídajícím daňovým plánem.');
+        }
     }
 
     private function taxStrategy(string $taxMethod): ?TaxDepreciationStrategyInterface

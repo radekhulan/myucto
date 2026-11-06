@@ -72,6 +72,17 @@ final class ListActivityLogAction
         foreach ($rows as &$r) {
             if ($r['payload'] !== null) {
                 $r['payload'] = json_decode((string) $r['payload'], true);
+                // Starší záznamy ručního spuštění cronu nesou absolutní cesty serveru
+                // (PHP, log). Řádky auditu jsou v hashovém řetězci a nepřepisují se,
+                // proto se cesty skrývají až při čtení.
+                if ($r['action'] === 'admin.cron.run_now' && is_array($r['payload'])) {
+                    unset($r['payload']['php_bin']);
+                    foreach (['log_file', 'diag'] as $key) {
+                        if (is_string($r['payload'][$key] ?? null)) {
+                            $r['payload'][$key] = RunCronJobAction::withoutPaths($r['payload'][$key]);
+                        }
+                    }
+                }
             }
             if ($r['ip'] !== null && $r['ip'] !== '') {
                 $r['ip'] = @inet_ntop($r['ip']) ?: null;

@@ -689,8 +689,13 @@ final class PayrollRegistrationChangeDeltaPlanner
             }
             $worker[$field] = $value;
         }
-        $office = $current->get('foreign_worker.issuing_labour_office_code');
-        if ($office !== null) {
+        // Kontrola 5 (EDV 1.4.0.7): úřad práce 10107 patří jen k povolení
+        // k zaměstnání (druh 1), u jiného druhu oprávnění je zakázaný.
+        if ($worker['permit_type_code'] === '1') {
+            $office = $current->get('foreign_worker.issuing_labour_office_code');
+            if ($office === null) {
+                return null;
+            }
             $worker['issuing_labour_office_code'] = $office;
         }
         ksort($worker, SORT_STRING);

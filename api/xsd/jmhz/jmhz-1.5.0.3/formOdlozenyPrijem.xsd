@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/form/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:st="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/form/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" schemaLocation="simpleTypes.xsd"/>
+  <xs:include schemaLocation="formCommonTypes.xsd"/>
+
+  <xs:element name="odlozenyPrijem" type="odlozenyPrijemType"/>
+  <xs:complexType name="odlozenyPrijemType">
+    <xs:annotation>
+      <xs:documentation>ODLOŽENÝ PŘÍJEM</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="typ" type="st:znakType">
+        <xs:annotation>
+          <xs:documentation>Typ Odloženého příjmu
+DS: Meta atributy > Formulář (ID 10548)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="identifikace" type="identifikaceType"/>
+      <xs:element name="souhrnDataZec" type="souhrnDataZecOdlozenyPrijemType" minOccurs="0"/>
+      <xs:element name="pojisteni" type="pojisteniOdlozenyPrijemType"/>
+      <xs:element name="prijem" type="prijemType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="souhrnDataZecOdlozenyPrijemType">
+    <xs:sequence>
+      <xs:element name="prijmy" type="prijmyExtType"/>
+      <xs:element name="zalohaNaDan" type="zalohaNaDanType"/>
+      <xs:element name="rocniUhrny" type="rocniUhrnyType" minOccurs="0"/>          
+      <xs:element name="mzdaCista" type="mzdaCistaOdlozenyPrijemType"/>
+      <xs:element name="zdravPojZamestnavatel" type="zdravPojZamestnavatelType" />
+      <xs:element name="zdravPojZamestnanec" type="zdravPojZamestnanecType" />
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="mzdaCistaOdlozenyPrijemType">
+    <xs:complexContent>
+      <xs:extension base="mzdaCistaType">
+        <xs:sequence>
+          <xs:element name="vydelekOZP" type="vydelekOsobOZPType" minOccurs="0"/>
+          <xs:element name="srazky" type="srazkyType" minOccurs="0"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="pojisteniOdlozenyPrijemType">
+    <xs:sequence>
+      <xs:element name="vymerovaciZaklad" type="vymerovaciZakladType" minOccurs="0"/>
+      <xs:element name="vymerovaciZakladParagraf5" type="vymerovaciZakladParagraf5Type" minOccurs="0"/>
+      <xs:element name="eldpObdobi" type="eldpObdobiType" minOccurs="0"/>
+      <xs:element name="nemocenskePojisteni" type="nemocenskePojisteniType" minOccurs="0"/>
+      <xs:element name="pojisteniZamestnanec" type="pojisteniZamestnanecType" minOccurs="0"/>
+      <xs:element name="pojisteniZamestnavatel" type="pojisteniZamestnavatelType" minOccurs="0"/>
+      <xs:element name="slevaZamestnance" type="slevaZamestnanceType"/>
+      <xs:element name="slevaZamestnavatele" type="slevaZamestnavateleType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="eldpObdobiType">
+    <xs:sequence>
+      <xs:element name="obdobi" maxOccurs="unbounded">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="mesic" type="st:mesicType" minOccurs="0">
+              <xs:annotation>
+                <xs:documentation>Měsíc, za který je hlášeno
+DS:Průběh pojištění v daném měsíci > ELDP	> Odložený příjem (ID 10537)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="rok" type="st:rokType" minOccurs="0">
+              <xs:annotation>
+                <xs:documentation>Rok, za který je hlášeno
+DS:Průběh pojištění v daném měsíci > ELDP	> Odložený příjem (ID 10538)</xs:documentation>
+                </xs:annotation>
+              </xs:element>
+            <xs:element name="eldpSeznam" type="eldpType"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

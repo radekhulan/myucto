@@ -235,6 +235,7 @@ final class PasskeyService
         CredentialRecord $storedCredential,
         bool $discoverable,
     ): CredentialRecord {
+        $stage = PasskeyVerificationException::REASON_MALFORMED;
         try {
             $this->initialize();
             $config = $this->config();
@@ -245,7 +246,9 @@ final class PasskeyService
             self::validateCredentialShape($credential);
             self::rejectCrossOrigin($credential);
             if (!hash_equals($storedCredential->publicKeyCredentialId, $credential->rawId)) {
-                throw new \UnexpectedValueException('Credential ID mismatch.');
+                throw new PasskeyVerificationException(
+                    reason: PasskeyVerificationException::REASON_CREDENTIAL_MISMATCH,
+                );
             }
             $responseUserHandle = $credential->response->userHandle;
             if ($discoverable
@@ -253,13 +256,18 @@ final class PasskeyService
                     || $responseUserHandle === ''
                     || !hash_equals($storedCredential->userHandle, $responseUserHandle))
             ) {
-                throw new \UnexpectedValueException('Discoverable assertion user handle mismatch.');
+                throw new PasskeyVerificationException(
+                    reason: PasskeyVerificationException::REASON_USER_HANDLE_MISMATCH,
+                    detail: 'discoverable',
+                );
             }
             if (!$discoverable
                 && $responseUserHandle !== null
                 && !hash_equals($storedCredential->userHandle, $responseUserHandle)
             ) {
-                throw new \UnexpectedValueException('User handle mismatch.');
+                throw new PasskeyVerificationException(
+                    reason: PasskeyVerificationException::REASON_USER_HANDLE_MISMATCH,
+                );
             }
 
             $options = $this->deserializeOptions($storedOptions, PublicKeyCredentialRequestOptions::class);
@@ -277,6 +285,7 @@ final class PasskeyService
             // signature counterem) se kontrola přeskakuje jen tehdy, když je
             // přijatý i uložený counter nula — autentikátor ho pak nepodporuje.
             $verified = clone $storedCredential;
+            $stage = PasskeyVerificationException::REASON_ASSERTION_INVALID;
             return $this->assertionValidator->check(
                 $verified,
                 $credential->response,
@@ -284,8 +293,21 @@ final class PasskeyService
                 $config->rpId(),
                 $discoverable ? null : $verified->userHandle,
             );
-        } catch (\Throwable) {
-            throw new PasskeyVerificationException('Ověření passkey selhalo.');
+        } catch (PasskeyVerificationException $e) {
+            throw $e;
+        } catch (\Throwable $e) {
+            // Hláška validátoru (např. „Invalid origin", „User authentication required")
+            // je jediné vodítko, proč konkrétní správce klíčů neprošel. Jde jen do
+            // auditního logu, klient dostane obecnou chybu. U nerozparsovaného
+            // payloadu jen třída výjimky: chyba deserializace může citovat vstup.
+            // Předchozí výjimku schválně nepřikládáme, aby se materiál credential
+            // nedostal do trasování.
+            throw new PasskeyVerificationException(
+                reason: $stage,
+                detail: $stage === PasskeyVerificationException::REASON_MALFORMED
+                    ? (new \ReflectionClass($e))->getShortName()
+                    : $e->getMessage(),
+            );
         }
     }
 
@@ -312,7 +334,7 @@ final class PasskeyService
             }
             return $decoded;
         } catch (\Throwable) {
-            throw new PasskeyVerificationException('Ověření passkey selhalo.');
+            throw new PasskeyVerificationException(reason: PasskeyVerificationException::REASON_MALFORMED, detail: 'rawId');
         }
     }
 
@@ -394,7 +416,10 @@ final class PasskeyService
         if ($credential->response->clientDataJSON->crossOrigin === true
             || $credential->response->clientDataJSON->topOrigin !== null
         ) {
-            throw new \UnexpectedValueException('Cross-origin WebAuthn ceremony není povolená.');
+            throw new PasskeyVerificationException(
+                'Cross-origin WebAuthn ceremony není povolená.',
+                PasskeyVerificationException::REASON_CROSS_ORIGIN,
+            );
         }
     }
 }

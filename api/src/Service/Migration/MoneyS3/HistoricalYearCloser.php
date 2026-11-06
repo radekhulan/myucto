@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\ClosingRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
 use MyInvoice\Service\Accounting\Closing\ClosingService;
+use MyInvoice\Service\Accounting\AccountingFrameworkImportGuard;
 
 /**
  * Uzávěrka historických let po převodu.
@@ -49,6 +50,7 @@ final class HistoricalYearCloser
 
     public function run(ImportContext $ctx): void
     {
+        (new AccountingFrameworkImportGuard($this->db))->assertCz500Periods($ctx->supplierId, array_values($ctx->periods));
         $p = $ctx->protocol;
         $years = array_keys($ctx->periods);
         sort($years);
@@ -160,7 +162,7 @@ final class HistoricalYearCloser
         }
         try {
             $meta = ['user_id' => $ctx->userId > 0 ? $ctx->userId : null, 'posted_by' => $ctx->userId > 0 ? $ctx->userId : null];
-            $this->closing->openNext($ctx->supplierId, $periodId, $rowVersion, $meta);
+            $this->frameworkMutation($ctx, fn () => $this->closing->openNext($ctx->supplierId, $periodId, $rowVersion, $meta));
             $after = $this->repo->openingBalancesInPeriod($ctx->supplierId, $nextPeriodId);
             if (count($this->repo->openingEntriesInPeriod($ctx->supplierId, $nextPeriodId)) !== 1 || self::differs($before, $after)) {
                 throw new MoneyS3Exception('opening_changed', 'po otevření dalšího roku se počáteční stavy liší od převzatých z Money.');
@@ -198,9 +200,9 @@ final class HistoricalYearCloser
         };
 
         if ($this->closing->state($supplierId, $periodId)['period']['status'] === 'open') {
-            $this->closing->start($supplierId, $periodId, $rv(), $meta);
+            $this->frameworkMutation($ctx, fn () => $this->closing->start($supplierId, $periodId, $rv(), $meta));
         }
-        $this->closing->runPrecheck($supplierId, $periodId, $rv(), $meta);
+        $this->frameworkMutation($ctx, fn () => $this->closing->runPrecheck($supplierId, $periodId, $rv(), $meta));
 
         $state = $this->closing->state($supplierId, $periodId);
         if (!empty($state['stock_step_required'])) {
@@ -212,14 +214,14 @@ final class HistoricalYearCloser
         }
         foreach ($skip as $step) {
             if (!$isDone($step)) {
-                $this->closing->confirmStep($supplierId, $periodId, $step, 'skipped', self::SKIP_NOTE, $rv(), $meta);
+                $this->frameworkMutation($ctx, fn () => $this->closing->confirmStep($supplierId, $periodId, $step, 'skipped', self::SKIP_NOTE, $rv(), $meta));
             }
         }
         if (!$isDone('fx_revaluation')) {
             if (self::hasFxItems($this->closing->fxPreview($supplierId, $periodId, []))) {
                 throw new MoneyS3Exception('fx_required', 'rok má co přeceňovat kurzem, jinak by se deník rozešel s Money.');
             }
-            $this->closing->runFxRevaluation($supplierId, $periodId, [], $rv(), $meta);
+            $this->frameworkMutation($ctx, fn () => $this->closing->runFxRevaluation($supplierId, $periodId, [], $rv(), $meta));
         }
 
         $state = $this->closing->state($supplierId, $periodId);
@@ -235,8 +237,8 @@ final class HistoricalYearCloser
         }
 
         $reason = $this->unpostedFromMoney($ctx, $periodId);
-        $result = $this->closing->closeBooks($supplierId, $periodId, $rv(), $meta, $reason !== null, $reason);
-        $this->closing->openNext($supplierId, $periodId, $rv(), $meta);
+        $result = $this->frameworkMutation($ctx, fn () => $this->closing->closeBooks($supplierId, $periodId, $rv(), $meta, $reason !== null, $reason));
+        $this->frameworkMutation($ctx, fn () => $this->closing->openNext($supplierId, $periodId, $rv(), $meta));
         return $result;
     }
 
@@ -284,11 +286,17 @@ final class HistoricalYearCloser
         return "Převod z Money S3: {$total} dokladů převzatých z Money nemá v deníku Money zápis, Money rok uzavřelo bez nich.";
     }
 
+    private function frameworkMutation(ImportContext $ctx, callable $write): mixed
+    {
+        return (new AccountingFrameworkImportGuard($this->db))->writeCz500Periods($ctx->supplierId, array_values($ctx->periods), $write);
+    }
+
     private function abortIfClosing(ImportContext $ctx, int $periodId): void
     {
         try {
             $state = $this->closing->state($ctx->supplierId, $periodId);
             if (($state['period']['status'] ?? null) === 'closing' && !empty($state['can_abort'])) {
+                // Abort only restores closing status and refuses posted closing entries; cleanup must preserve the original import error.
                 $this->closing->abort($ctx->supplierId, $periodId, (int) $state['row_version'], ['user_id' => $ctx->userId > 0 ? $ctx->userId : null]);
             }
         } catch (\Throwable) {

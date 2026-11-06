@@ -145,6 +145,87 @@ final class ArchiveRestoreRoundTripTest extends TestCase
         self::assertSame($restoredPartner, (int) $item['partner_id']);
     }
 
+    public function testOtherItemKindIsRemappedOnItemsAndScheduleTemplate(): void
+    {
+        $container = Bootstrap::buildContainer();
+        $kinds = $container->get(\MyInvoice\Service\Accounting\OtherItemKindService::class);
+        $items = $container->get(\MyInvoice\Service\Accounting\OtherItemService::class);
+        $plans = $container->get(\MyInvoice\Service\Accounting\OtherItemScheduleService::class);
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'tax_evidence' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $kind = $kinds->create($this->supplierId, ['side' => 'payable', 'name' => 'Syntetické nájemné'], $this->userId);
+        $source = $items->create($this->supplierId, [
+            'side' => 'payable', 'kind_id' => $kind['id'], 'title' => 'Syntetický archivní nájem druhu',
+            'issued_on' => '2097-01-01', 'due_on' => '2097-01-20', 'currency' => 'CZK', 'amount' => 900,
+        ], $this->userId);
+        $items->post($this->supplierId, (int) $source['id'], $this->userId);
+        $plans->create($this->supplierId, (int) $source['id'], ['frequency' => 'monthly'], $this->userId);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $newSid = (int) $this->restore->restore($path)['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        $restoredKind = array_values(array_filter($kinds->list($newSid), static fn (array $k): bool => !$k['builtin']));
+        self::assertCount(1, $restoredKind);
+        self::assertNotSame((int) $kind['id'], $restoredKind[0]['id']);
+        $pdo = $this->db->pdo();
+        $schedule = (int) $pdo->query('SELECT id FROM other_item_schedules WHERE supplier_id = ' . $newSid)->fetchColumn();
+        $generated = $plans->generate($newSid, $schedule, '2097-02-01', $this->userId);
+        self::assertCount(1, $generated['created_ids']);
+        foreach ($items->list($newSid, ['status' => 'all'], 1, 10)['items'] as $item) {
+            self::assertSame($restoredKind[0]['id'], (int) $item['kind_id'], (string) $item['title']);
+        }
+    }
+
+    public function testInternalDocumentsSurviveArchiveRoundTrip(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET accounting_mode = 'double_entry' WHERE id = ?")
+            ->execute([$this->supplierId]);
+        $service = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\InternalDocumentService::class);
+        $lines = [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 700],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 700],
+        ];
+        $posted = $service->create($this->supplierId, ['kind' => 'correction', 'title' => 'Syntetická oprava',
+            'document_date' => '2097-02-01', 'lines' => $lines], $this->userId);
+        $posted = $service->post($this->supplierId, (int) $posted['id'], ['user_id' => $this->userId]);
+        $pdo = $this->db->pdo();
+        $invoiceId = $this->saleInvoice('97001', $this->client(), 700);
+        $service->create($this->supplierId, ['kind' => 'offset', 'title' => 'Syntetický koncept',
+            'document_date' => '2097-02-02', 'lines' => $lines,
+            'document_links' => [['doc_type' => 'invoice', 'doc_id' => $invoiceId]]], $this->userId);
+
+        $meta = $this->archive->export($this->supplierId, $this->userId);
+        $path = $this->archive->filePath($this->supplierId, $meta);
+        $this->tempFiles[] = $path;
+        $report = $this->restore->restore($path);
+        $newSid = (int) $report['new_supplier_id'];
+        $this->cleanupSuppliers[] = $newSid;
+
+        $stmt = $pdo->prepare('SELECT COUNT(*) FROM internal_document_lines WHERE supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertSame(4, (int) $stmt->fetchColumn());
+        $stmt = $pdo->prepare("SELECT d.document_no, d.journal_entry_id, je.document_no AS entry_no
+            FROM internal_documents d JOIN journal_entries je ON je.id = d.journal_entry_id AND je.supplier_id = d.supplier_id
+            WHERE d.supplier_id = ? AND d.status = 'posted'");
+        $stmt->execute([$newSid]);
+        $restored = $stmt->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($restored);
+        self::assertSame($posted['document_no'], $restored['document_no']);
+        self::assertSame($posted['document_no'], $restored['entry_no']);
+        self::assertNotEquals($posted['journal_entry_id'], (int) $restored['journal_entry_id']);
+        $stmt = $pdo->prepare("SELECT document_links_json FROM internal_documents WHERE supplier_id = ? AND status = 'draft'");
+        $stmt->execute([$newSid]);
+        $links = json_decode((string) $stmt->fetchColumn(), true);
+        self::assertSame('invoice', $links[0]['doc_type']);
+        self::assertNotSame($invoiceId, (int) $links[0]['doc_id']);
+        $stmt = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ?');
+        $stmt->execute([$newSid]);
+        self::assertSame((int) $stmt->fetchColumn(), (int) $links[0]['doc_id']);
+    }
+
     protected function setUp(): void
     {
         $rootDir = dirname(__DIR__, 4);

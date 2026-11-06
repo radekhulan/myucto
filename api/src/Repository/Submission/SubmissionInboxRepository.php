@@ -87,6 +87,30 @@ final class SubmissionInboxRepository
      */
     public function record(array $data): array
     {
+        return $this->claim($data) ?? $this->find(
+            $data['supplier_id'],
+            $data['channel'],
+            $data['environment'],
+            $data['external_message_id'],
+        ) ?? throw new \RuntimeException('Zprávu se nepodařilo uložit ani dohledat.');
+    }
+
+    /**
+     * Založí záznam zprávy, pokud ještě neexistuje.
+     *
+     * Na rozdíl od {@see record()} vrací null, když zprávu už založil někdo jiný
+     * (souběžné stažení). Volající tak pozná, že zpracování není jeho.
+     *
+     * @param array{
+     *   supplier_id:int, environment:string, channel:string, external_message_id:string,
+     *   sender_box_id:?string, sender_name:?string, subject:?string, sender_ident:?string,
+     *   classification:string, matched_outbox_id:?int, document_id:?int,
+     *   delivered_at:?string, accepted_at:?string, raw_sha256:?string
+     * } $data
+     * @return array<string,mixed>|null
+     */
+    public function claim(array $data): ?array
+    {
         $this->assertAvailable();
         try {
             $stmt = $this->db->pdo()->prepare(
@@ -117,11 +141,10 @@ final class SubmissionInboxRepository
                 throw $e;
             }
             // Zpráva už je stažená — opakované stažení nesmí založit druhou.
-            $existing = $this->find($data['supplier_id'], $data['channel'], $data['environment'], $data['external_message_id']);
-            if ($existing === null) {
+            if (!$this->exists($data['supplier_id'], $data['channel'], $data['environment'], $data['external_message_id'])) {
                 throw $e;
             }
-            return $existing;
+            return null;
         }
 
         $found = $this->find($data['supplier_id'], $data['channel'], $data['environment'], $data['external_message_id']);
@@ -129,6 +152,32 @@ final class SubmissionInboxRepository
             throw new \RuntimeException('Zpráva se uložila, ale nepodařilo se ji načíst.');
         }
         return $found;
+    }
+
+    /** Doplní uložený dokument k zprávě založené přes {@see claim()}; vrátí aktuální řádek. */
+    public function attachDocument(int $supplierId, int $messageId, ?int $documentId): ?array
+    {
+        $this->assertAvailable();
+        if ($documentId !== null) {
+            $this->db->pdo()->prepare(
+                'UPDATE ' . self::TABLE . ' SET document_id = ?
+                  WHERE supplier_id = ? AND id = ? AND document_id IS NULL'
+            )->execute([$documentId, $supplierId, $messageId]);
+        }
+        return $this->findById($supplierId, $messageId);
+    }
+
+    /**
+     * Zruší záznam zprávy, jejíž uložení selhalo výjimkou, aby se o ni další
+     * stažení pokusilo znovu. Jen dokud k ní není navázaný dokument.
+     */
+    public function releaseClaim(int $supplierId, int $messageId): void
+    {
+        $this->assertAvailable();
+        $this->db->pdo()->prepare(
+            'DELETE FROM ' . self::TABLE . '
+              WHERE supplier_id = ? AND id = ? AND document_id IS NULL'
+        )->execute([$supplierId, $messageId]);
     }
 
     /** @return array<string,mixed>|null */
@@ -540,6 +589,29 @@ final class SubmissionInboxRepository
         $stmt->execute($read ? [$userId, $supplierId, $id] : [$supplierId, $id]);
 
         return $stmt->rowCount() > 0 || $this->findById($supplierId, $id) !== null;
+    }
+
+    /**
+     * Označí za přečtené všechny nepřečtené zprávy, které odpovídají filtru seznamu.
+     * Filtr „přečtené / nepřečtené" se nepoužije: týká se vždy jen nepřečtených.
+     *
+     * @return int počet změněných zpráv
+     */
+    public function markAllRead(int $supplierId, string $environment, SubmissionInboxListQuery $query, ?int $userId): int
+    {
+        $this->assertAvailable();
+        if (!$this->supportsCategories()) {
+            throw new \DomainException('Stav přečtení není v databázi k dispozici (chybí migrace 1982).');
+        }
+        [$where, $params] = $this->browseWhere($supplierId, $environment, $query, 'read');
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE ' . self::TABLE . ' m' . self::ENVELOPE_JOIN
+            . ' SET m.read_at = UTC_TIMESTAMP(), m.read_by = ?'
+            . $where . ' AND m.read_at IS NULL',
+        );
+        $stmt->execute([$userId, ...$params]);
+
+        return $stmt->rowCount();
     }
 
     /** @return array<string,mixed>|null */

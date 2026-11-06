@@ -50,6 +50,22 @@ final class PohodaMdbAccountingTest extends TestCase
         self::assertSame('2026-02-03', $records[0]['date']);
     }
 
+    /** Partner řádku deníku v tvaru XML; RefAD 0 znamená bez vazby, starší export sloupce nemá. */
+    public function testJournalCarriesPartnerOfTheRow(): void
+    {
+        $rows = iterator_to_array($this->mapper(['pUD' => [
+            ['ID' => '1', 'RelUdAg' => '29', 'RefAD' => '7', 'Firma' => 'Test s.r.o.', 'ParICO' => '11223344'],
+            ['ID' => '2', 'RelUdAg' => '29', 'RefAD' => '0', 'Firma' => 'Bez vazby s.r.o.'],
+            ['ID' => '3', 'RelUdAg' => '29'],
+        ]])->records('journal'));
+
+        $first = PohodaJournal::partner($rows[0]);
+        self::assertSame(['7', 'Test s.r.o.', '11223344'], [$first['pohoda_id'], $first['name'], $first['ico']]);
+        self::assertSame('', PohodaJournal::partner($rows[1])['pohoda_id']);
+        $last = PohodaJournal::partner($rows[2]);
+        self::assertSame(['', '', ''], [$last['pohoda_id'], $last['name'], $last['ico']]);
+    }
+
     public function testReceivedProformaAndCorrectiveDocumentsKeepTheirTypesAndPayments(): void
     {
         $mapper = $this->mapper([

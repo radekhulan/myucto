@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Stock;
 
+use MyInvoice\Action\Auth\MeAction;
 use MyInvoice\Action\Invoice\BulkReissueAction;
 use MyInvoice\Action\Invoice\CancelInvoiceAction;
 use MyInvoice\Action\Invoice\CreateInvoiceAction;
@@ -194,6 +195,27 @@ final class InvoiceLineDiscountTest extends StockTestCase
         self::assertMatchesRegularExpression('/Bike\s+1\s+ks\s+1,000\.00\s+12\.45 %\s+875\.50/u', $text);
     }
 
+    public function testManualLineWithDiscountFromEditorIsSavedAndPrinted(): void
+    {
+        $sid = $this->createSupplier();
+        $this->enableOption($sid);
+        // Ruční řádek bez karty: sleva zadaná v editoru pošle ceníkovou cenu i cenu po slevě.
+        $id = $this->createInvoice($sid, [
+            $this->line('Servis', 1, 874.13, 999),
+            $this->line('Dárek', 1, 0, 250),
+        ]);
+
+        // Cena po slevě se zaokrouhlí na haléře, uložené procento z ní vyjde 12,499; PDF tiskne dvě místa.
+        $items = $this->storedItems($id);
+        self::assertSame([[999.0, 12.499], [250.0, 100.0]], array_map(
+            static fn (array $i): array => [$i['list_unit_price'], $i['line_discount_pct']],
+            $items,
+        ));
+        $text = $this->pdfText($id);
+        self::assertMatchesRegularExpression('/Servis\s+1\s+ks\s+999,00\s+12,5 %\s+874,13\s+21 %/u', $text);
+        self::assertMatchesRegularExpression('/Dárek\s+1\s+ks\s+250,00\s+100 %\s+0,00\s+21 %/u', $text);
+    }
+
     // ── exporty a nastavení ─────────────────────────────────────────────────
 
     public function testIsdocAndPohodaExportsIgnoreListPrice(): void
@@ -227,6 +249,30 @@ final class InvoiceLineDiscountTest extends StockTestCase
         self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
         $res = $settings->getSupplier($this->request('GET', $sid, null), new Psr7Response());
         self::assertTrue($this->body($res)['invoice_pdf_show_line_discount']);
+    }
+
+    public function testEditorReadsOptionFromSession(): void
+    {
+        $sid = $this->createSupplier();
+        $read = function () use ($sid): bool {
+            $request = $this->request('GET', $sid, null)->withAttribute(AuthMiddleware::ATTR_USER, [
+                'id' => $this->userId, 'role' => 'admin', 'is_superadmin' => true,
+            ]);
+            $res = $this->container->get(MeAction::class)($request, new Psr7Response());
+            $supplier = array_values(array_filter(
+                (array) ($this->body($res)['suppliers'] ?? []),
+                static fn (array $s): bool => $s['id'] === $sid,
+            ))[0];
+            return $supplier['invoice_pdf_show_line_discount'];
+        };
+
+        self::assertFalse($read());
+        $res = $this->container->get(SettingsAction::class)->updateSupplier(
+            $this->request('PUT', $sid, ['invoice_pdf_show_line_discount' => true]),
+            new Psr7Response(),
+        );
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertTrue($read(), 'Editor faktury čte volbu z /auth/me, pole Sleva % ukáže jen s ní.');
     }
 
     public function testChangingPdfLineDiscountOptionInvalidatesCachedDraft(): void

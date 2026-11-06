@@ -26,6 +26,10 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
  *  - min. roční vyměřovací základ: soc. hlavní 30 % (2024) / 35 % (2025) / 35 % (2026, z. 90/2026 Sb.
  *    místo původních 40 %) prům. mzdy, zdravotní 50 % prům. mzdy × 12
  *
+ * Ročník 2027 ověřen k 2026-11-03 proti znění zákonů účinnému od 1. 1. 2027
+ * (ZDP, ZDPH, z. č. 589/1992, 592/1992 a 155/1995 Sb.) a nař. vlády č. 177/2026 Sb.
+ * (průměrná mzda 51 663 Kč); jednotlivé klíče nesou citaci u hodnoty.
+ *
  * Ročníky 2019–2023 slouží importu historického účetnictví. Ověřeny k 2026-09 dle
  * NV o minimální mzdě a o VVZ, ČSSZ (rozhodné částky, minimální zálohy), MF/GFŘ
  * (paušální daň, slevy) a znění ZDP/ZDPH platného v daném roce. Rok před 2019
@@ -33,11 +37,27 @@ use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
  */
 final class TaxConstants
 {
+    private const NONPROFIT_REDUCTION_V1 = [
+        'nonprofit_reduction_rate' => 0.30,
+        'nonprofit_reduction_min' => 300000,
+        'nonprofit_reduction_max' => 1000000,
+        'nonprofit_reduction_university_min' => 1000000,
+        'nonprofit_reduction_university_max' => 3000000,
+    ];
+
+    public static function legacyNonprofitReduction(string $ruleset, int $year): array
+    {
+        if ($ruleset !== 'cz-dppo504-2026-v1' || !in_array($year, [2024, 2025, 2026], true)) {
+            throw new \OutOfRangeException('Unknown legacy nonprofit reduction ruleset or year.');
+        }
+        return self::NONPROFIT_REDUCTION_V1;
+    }
+
     /**
      * Roky, pro které existuje mzdový ruleset ({@see CzechPayrollRulesets}).
      * Pro ně je zdrojem mzdových hodnot ruleset, ne {@see self::TABLE}.
      */
-    private const RULESET_YEARS = [2025, 2026];
+    private const RULESET_YEARS = [2025, 2026, 2027];
 
     /**
      * Zástupná hodnota v {@see self::TABLE} pro klíč, jehož číslo drží mzdový
@@ -474,6 +494,7 @@ final class TaxConstants
             'separate_base_rate' => 0.15,
             'transition_receivables_max_years' => 9,
             'tax_loss_carry_years' => 5,
+            ...self::NONPROFIT_REDUCTION_V1,
             // Zpětné uplatnění ztráty (zák. 299/2020 Sb.) šlo i DO roku 2019 — sada se
             // čte za rok, od jehož základu se ztráta odečítá.
             'tax_loss_carryback_years' => 2,
@@ -612,6 +633,7 @@ final class TaxConstants
             'separate_base_rate' => 0.15,
             'transition_receivables_max_years' => 9,
             'tax_loss_carry_years' => 5,
+            ...self::NONPROFIT_REDUCTION_V1,
             'tax_loss_carryback_years' => 2,
             'tax_loss_carryback_limit' => 30000000,
             'tax_rate_low'        => 0.15,
@@ -737,6 +759,7 @@ final class TaxConstants
             'separate_base_rate' => 0.15,
             'transition_receivables_max_years' => 9,
             'tax_loss_carry_years' => 5,
+            ...self::NONPROFIT_REDUCTION_V1,
             'tax_loss_carryback_years' => 2,
             'tax_loss_carryback_limit' => 30000000,
             'tax_rate_low'        => 0.15,
@@ -857,6 +880,7 @@ final class TaxConstants
             'separate_base_rate' => 0.15,
             'transition_receivables_max_years' => 9,
             'tax_loss_carry_years' => 5,
+            ...self::NONPROFIT_REDUCTION_V1,
             'tax_loss_carryback_years' => 2,
             'tax_loss_carryback_limit' => 30000000,
             'tax_rate_low'        => 0.15,
@@ -978,6 +1002,7 @@ final class TaxConstants
             'separate_base_rate' => 0.15,
             'transition_receivables_max_years' => 9,
             'tax_loss_carry_years' => 5,
+            ...self::NONPROFIT_REDUCTION_V1,
             'tax_loss_carryback_years' => 2,
             'tax_loss_carryback_limit' => 30000000,
             'tax_rate_low'        => 0.15,
@@ -1104,6 +1129,7 @@ final class TaxConstants
             'separate_base_rate' => 0.15,
             'transition_receivables_max_years' => 9,
             'tax_loss_carry_years' => 5,
+            ...self::NONPROFIT_REDUCTION_V1,
             // § 34 odst. 1 ZDP ve znění novely 299/2020 — ztrátu lze uplatnit i ZPĚTNĚ
             // ve 2 obdobích bezprostředně předcházejících, a to nejvýše v souhrnné výši
             // 30 000 000 Kč (limit se počítá na jednotlivou ztrátu, ne na rok uplatnění).
@@ -1298,6 +1324,7 @@ final class TaxConstants
             'separate_base_rate' => 0.15,
             'transition_receivables_max_years' => 9,
             'tax_loss_carry_years' => 5,
+            ...self::NONPROFIT_REDUCTION_V1,
             // § 34 odst. 1 ZDP ve znění novely 299/2020 — ztrátu lze uplatnit i ZPĚTNĚ
             // ve 2 obdobích bezprostředně předcházejících, a to nejvýše v souhrnné výši
             // 30 000 000 Kč (limit se počítá na jednotlivou ztrátu, ne na rok uplatnění).
@@ -1511,6 +1538,7 @@ final class TaxConstants
             'separate_base_rate' => 0.15,
             'transition_receivables_max_years' => 9,
             'tax_loss_carry_years' => 5,
+            ...self::NONPROFIT_REDUCTION_V1,
             // § 34 odst. 1 ZDP ve znění novely 299/2020 — ztrátu lze uplatnit i ZPĚTNĚ
             // ve 2 obdobích bezprostředně předcházejících, a to nejvýše v souhrnné výši
             // 30 000 000 Kč (limit se počítá na jednotlivou ztrátu, ne na rok uplatnění).
@@ -1630,6 +1658,166 @@ final class TaxConstants
             'sickness_participation_threshold' => self::FROM_PAYROLL_RULESET,
             'donation_cap_po_pct' => 0.30,
             'donation_cap_fo_pct' => 0.30,
+            'donation_min_fo'     => 1000,
+            'donation_min_fo_pct' => 0.02,
+            'donation_min_po' => 2000,
+            'disabled_employee_credit'        => 18000,
+            'disabled_employee_credit_severe' => 60000,
+            'advance_threshold_low'  => 30000,
+            'advance_threshold_high' => 150000,
+            'advance_semiannual_rate' => 0.40,
+            'advance_quarterly_rate' => 0.25,
+            'advance_rounding_step' => 100,
+            'advance_semiannual_months' => [6, 12],
+            'advance_quarterly_months' => [3, 6, 9, 12],
+            'm1_depreciation_limit' => 2000000,
+            'extraordinary_depreciation' => ['eligible_from' => '2024-01-01', 'eligible_to' => '2028-12-31', 'total_months' => 24, 'phase1_months' => 12, 'phase1_share' => 0.60],
+            'depreciation_straight_rates' => [
+                'basic' => [1 => [20.0,40.0,33.3], 2 => [11.0,22.25,20.0], 3 => [5.5,10.5,10.0], 4 => [2.15,5.15,5.0], 5 => [1.4,3.4,3.4], 6 => [1.02,2.02,2.0]],
+                'p20' => [1 => [40.0,30.0,33.3], 2 => [31.0,17.25,20.0], 3 => [24.4,8.4,10.0]],
+                'p15' => [1 => [35.0,32.5,33.3], 2 => [26.0,18.5,20.0], 3 => [19.0,9.0,10.0]],
+                'p10' => [1 => [30.0,35.0,33.3], 2 => [21.0,19.75,20.0], 3 => [15.4,9.4,10.0]],
+            ],
+            'depreciation_accelerated_coefficients' => [1 => [3,4,3], 2 => [5,6,5], 3 => [10,11,10], 4 => [20,21,20], 5 => [30,31,30], 6 => [50,51,50]],
+            'entity_category_thresholds' => [
+                'micro' => ['assets_net' => 11000000, 'net_turnover' => 22000000, 'employees' => 10],
+                'small' => ['assets_net' => 120000000, 'net_turnover' => 240000000, 'employees' => 50],
+                'medium' => ['assets_net' => 600000000, 'net_turnover' => 1200000000, 'employees' => 250],
+            ],
+            'filing_deadlines' => ['dpfo_paper' => '04-01', 'dpfo_electronic' => '05-02', 'advisor' => '07-01', 'insurance_electronic' => '06-02', 'insurance_advisor' => '08-01', 'health_advance_day' => 8, 'tax_advance_day' => 15],
+            'rounding_base_po' => 1000,
+            'rounding_base_fo' => 100,
+        ],
+        2027 => [
+            'year' => 2027,
+            // Paušální záloha § 38lk ZDP = záloha na daň (odst. 7: 100 / 4 963 / 9 320 Kč)
+            // + záloha na důchodové pojištění + záloha na zdravotní pojištění.
+            // 1. pásmo: vyměřovací základ § 14 odst. 3 písm. a) z. č. 589/1992 Sb. je nejnižší
+            // měsíční VZ podle odst. 5 (35 % × 51 663 = 18 082,05 → 18 083 Kč, odst. 13)
+            // zvýšený o 15 % = 20 795,45 → 20 796 Kč; 29,2 % = 6 072,43 → 6 073 Kč.
+            // Zdravotní záloha je 13,5 % z dvanáctiny minimálního VZ § 3a odst. 2 a 5 písm. a)
+            // z. č. 592/1992 Sb. (50 % × 51 663 = 25 831,50 Kč) = 3 487,25 → 3 488 Kč.
+            // 100 + 6 073 + 3 488 = 9 661 Kč. Tisk uvádí 9 662 Kč, protože zvyšuje o 15 %
+            // až zálohu (5 281 × 1,15), ne vyměřovací základ, jak říká zákon. Finanční
+            // správa částku k 3. 11. 2026 nezveřejnila; liší-li se, opraví ji override.
+            // 2. a 3. pásmo mají vyměřovací základy pevně v zákoně (§ 14 odst. 3 písm. b), c)
+            // z. č. 589/1992 Sb.: 28 050 / 42 900 Kč, § 3a odst. 5 z. č. 592/1992 Sb.:
+            // 319 200 / 470 400 Kč ročně), proto se nemění.
+            'pausal_monthly' => [
+                ['from' => '2027-01-01', 'band1' => 9661, 'band2' => 16745, 'band3' => 27139],
+            ],
+            'band_ceilings' => [
+                30 => ['band1' => 1000000, 'band2' => 1500000, 'band3' => 2000000],
+                40 => ['band1' => 1000000, 'band2' => 1500000, 'band3' => 2000000],
+                60 => ['band1' => 1500000, 'band2' => 2000000, 'band3' => 2000000],
+                80 => ['band1' => 2000000, 'band2' => 2000000, 'band3' => 2000000],
+            ],
+            // § 35ba a § 35c ZDP ve znění od 1. 1. 2027 — beze změny proti 2026.
+            'credit_taxpayer' => 30840,
+            'credit_spouse'   => 24840,
+            'credit_disability_12' => 2520,
+            'credit_disability_3'  => 5040,
+            'credit_ztpp'          => 16140,
+            'child_credits'   => [15204, 22320, 27840],
+            'child_bonus_min' => 100,
+            // Mzdové hodnoty drží pro rok 2027 mzdový ruleset (CzechPayrollRulesets2027)
+            // a doplní je {@see self::withDerived()}.
+            'minimum_wage' => self::FROM_PAYROLL_RULESET,
+            'payroll' => self::FROM_PAYROLL_RULESET,
+            'advance_tax_high_threshold' => self::FROM_PAYROLL_RULESET,
+
+            // § 35c odst. 4 ZDP — šestinásobek minimální mzdy 24 900 Kč.
+            'child_bonus_min_income' => 149400,
+            'spouse_income_limit' => 68000,
+            'spouse_child_max_age' => 3,
+            'fixed_asset_limit' => 80000,
+            // § 38g odst. 1 a 2 ZDP ve znění zák. č. 180/2026 Sb. (§ 30 body 21 a 22),
+            // poprvé za zdaňovací období 2027: 100 000 Kč a 40 000 Kč.
+            'filing_duty_income_limit' => 100000,
+            'filing_duty_other_income_limit' => 40000,
+            'separate_base_rate' => 0.15,
+            'transition_receivables_max_years' => 9,
+            'tax_loss_carry_years' => 5,
+            // § 20 odst. 7 ZDP ve znění od 1. 1. 2027 — 30 %, 300 000 / 1 000 000 Kč
+            // a u vysokých škol a v. v. i. 1 000 000 / 3 000 000 Kč, beze změny.
+            ...self::NONPROFIT_REDUCTION_V1,
+            'tax_loss_carryback_years' => 2,
+            'tax_loss_carryback_limit' => 30000000,
+            'tax_rate_low'        => 0.15,
+            'tax_rate_high'       => 0.23,
+            'tax_high_threshold'  => 1859868, // 36× průměrné mzdy 2027 (51 663), § 16 odst. 1 ZDP
+            'social_rate'         => 0.292,
+            'health_rate'         => 0.135,
+            'social_assessment_pct' => 0.55,
+            'health_assessment_pct' => 0.50,
+            // § 14 odst. 5 věta první a odst. 13 z. č. 589/1992 Sb.: 35 % × 51 663 =
+            // 18 082,05 → 18 083 Kč měsíčně, ročně × 12.
+            'social_min_base_main'      => 216996,
+            // § 14 odst. 5 věta třetí: 11 % × 51 663 = 5 682,93 → 5 683 Kč × 12.
+            'social_min_base_secondary' => 68196,
+            'social_max_base'           => 2479824, // 48 × průměrná mzda (§15a z. 589/1992 Sb.)
+            // § 10 odst. 2 z. č. 155/1995 Sb.: 2,4 × (48 900 × 1,0565 = 51 662,85)
+            // = 123 990,84 → nahoru 123 991 Kč (počítá se z nezaokrouhleného součinu).
+            'social_secondary_participation_threshold' => 123991,
+            'health_min_base'           => 309978, // 12 × 50 % × 51 663 (§ 3a odst. 2 z. č. 592/1992 Sb.)
+            'expense_caps' => [30 => 600000, 40 => 800000, 60 => 1200000, 80 => 1600000],
+            'mortgage_cap' => 150000,
+            'mortgage_cap_pre2021' => 300000,
+            'mortgage_pre2021_cutoff' => '2020-12-31',
+            'pension_cap'  => 48000,
+            // § 6 a § 47 ZDPH ve znění od 1. 1. 2027 — beze změny.
+            'vat_limit_low'  => 2000000,
+            'vat_limit_high' => 2536500,
+            'vat_rate_standard' => 21.0,
+            'penalty_repo_surcharge_points' => 8.0,
+            'vat_quarterly_turnover_limit' => 15000000,
+            'vat_rate_reduced'  => 12.0,
+            'kh_item_threshold' => 10000,
+            'cash_payment_limit' => 270000,
+            'vat_coefficient_full_threshold_pct' => 95,
+            'oss_threshold_eur' => 10000,
+            'bad_debt_provision_8a_50pct_months' => 18,
+            'bad_debt_provision_8a_100pct_months' => 30,
+            'bad_debt_provision_8c_months' => 12,
+            'bad_debt_provision_8c_limit' => 30000,
+            'receivable_limitation_warning_months' => 36,
+            // § 46 odst. 1 písm. i) ZDPH ve znění zák. č. 180/2026 Sb. (účinnost 1. 1. 2027):
+            // pohledávka nejvýš 20 000 Kč vč. daně, aspoň 3 měsíce po splatnosti, souhrn
+            // za dlužníka nejvýš 100 000 Kč za kalendářní rok. Podle § 33 bodu 2 zák.
+            // č. 180/2026 Sb. platí pro opravy uplatněné za období od 1. 1. 2027 u plnění
+            // uskutečněných od 1. 1. 2025 — rozhoduje tedy rok opravy, ne rok plnění.
+            'bad_debt_small_receivable_limit' => 20000,
+            'bad_debt_small_receivable_debtor_year_limit' => 100000,
+            'bad_debt_small_receivable_months' => 3,
+            'unpaid_liability_aging_months' => 30,
+            'advance_employment_exempt_share' => 0.50,
+            'advance_employment_half_share' => 0.15,
+            's74b_aging_months' => 6,
+            's79_claim_window_months' => 12,
+            'vat_adjustment_period_years' => [5, 10],
+            'vat_adjustment_tolerance_points' => 10,
+            'assessment_period_years' => 3,
+            'simplified_document_limit_with_vat' => 10000,
+            'oss_evidence_retention_years' => 10,
+            'vat_registration_application_deadline_working_days' => 10,
+            'corporate_tax_rate' => 0.21,
+            'withholding_rate'   => 0.15,
+            // `dpp_withholding_limit` drží mzdový ruleset (`dpp.withholding.threshold`
+            // 12 500 Kč). Od 2027 už to není hranice srážky, ale samostatného základu
+            // zálohy (§ 6 odst. 4 ZDP ve znění zák. č. 360/2025 Sb.); legacy výpočet
+            // takový měsíc odmítne ({@see \MyInvoice\Service\Accounting\Payroll\WithholdingTaxCalculator}).
+            'author_fee_withholding_limit' => 10000,
+            'sickness_rate'             => 0.027,
+            // § 5b odst. 4 z. č. 589/1992 Sb.: dvojnásobek rozhodného příjmu 5 000 Kč
+            // (sdělení MPSV č. 186/2026 Sb.).
+            'sickness_min_monthly_base' => 10000,
+            'sickness_participation_threshold' => self::FROM_PAYROLL_RULESET,
+            // § 15 odst. 1 a § 20 odst. 8 ZDP: 15 % (FO) a 10 % (PO). Zvýšený strop 30 %
+            // prodloužil zák. č. 24/2025 Sb. jen pro FO za roky 2022 až 2026 a pro PO za
+            // období končící do 28. 2. 2027. Hospodářský rok PO končící v lednu nebo únoru
+            // 2027 ještě 30 % má; tahle kalendářní sada ho nerozliší.
+            'donation_cap_po_pct' => 0.10,
+            'donation_cap_fo_pct' => 0.15,
             'donation_min_fo'     => 1000,
             'donation_min_fo_pct' => 0.02,
             'donation_min_po' => 2000,

@@ -32,6 +32,7 @@ const EMPLOYMENT_KINDS: PayrollJmhzRemediationKind[] = [
   'averages',
   'time',
   'workplace',
+  'deferred_income',
 ]
 
 export function jmhzRemediationKind(blocker: PayrollJmhzXmlDryRunBlocker): PayrollJmhzRemediationKind {
@@ -146,6 +147,8 @@ export function jmhzRemediationTarget(
       return { name: 'payroll-settings', query: { tab: 'employer' }, hash: '#payroll-employer-offices' }
     case 'annual_settlement':
       return { name: 'payroll-annual-settlement' }
+    case 'deferred_income':
+      return { name: 'payroll-people', query: { ...scope, panel: 'deferred_income' } }
     case 'takeover':
       return { name: 'payroll-imports', query: { tab: 'reconciliation' } }
     case 'correction':

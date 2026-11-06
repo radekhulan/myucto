@@ -4,7 +4,7 @@ import { useWindowTitle } from '@/composables/useWindowTitle'
 import ClientQuickLinks from '@/components/clients/ClientQuickLinks.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import AttachmentCheckBadge from '@/components/documents/AttachmentCheckBadge.vue'
-import DocumentSidePreview from '@/components/documents/DocumentSidePreview.vue'
+import DocumentPreviewSplit from '@/components/documents/DocumentPreviewSplit.vue'
 import PdfDropzone from '@/components/purchase/PdfDropzone.vue'
 import ExtractionWarningText from '@/components/purchase/ExtractionWarningText.vue'
 import PurchaseItemMeta from '@/components/purchase/PurchaseItemMeta.vue'
@@ -12,16 +12,18 @@ import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice
 import { ref, reactive, computed, onMounted, onBeforeUnmount, watch, defineAsyncComponent } from 'vue'
 import { useRoute, useRouter, RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse } from '@/api/purchaseInvoices'
-import { formatMoney, formatHourlyRate, formatDate } from '@/composables/useFormat'
-import { formatDuration, isTimeItem, itemQuantity } from '@/utils/timeBilling'
+import { purchaseInvoicesApi, type PurchaseInvoice, type PurchaseInvoiceStatus, type PurchaseInvoiceBrief, type PaymentQrResponse, type VatDeduction, type PurchaseForceMode } from '@/api/purchaseInvoices'
+import { formatMoney, formatUnitPrice, formatDate } from '@/composables/useFormat'
+import { formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity } from '@/utils/timeBilling'
 import { useToast } from '@/composables/useToast'
 import { accountingApi } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { canSaveToCompanyFolder, pdfFileName, savePdfToCompanyFolder } from '@/composables/useCompanyPdfSave'
 import { apiErrorMessage } from '@/api/errors'
+import { draftDeletionLockedForClient } from '@/api/locks'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
+import { offsetRoute } from '@/components/accounting/offsetLink'
 import { ICONS, btnFilledSm, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import LockedBadge from '@/components/ui/LockedBadge.vue'
 import PostingBadge from '@/components/ui/PostingBadge.vue'
@@ -40,9 +42,13 @@ import { purchaseApprovalsApi, approvalErrorMessage } from '@/api/purchaseApprov
 import { announceApprovalRequested } from '@/utils/purchaseApproval'
 import { useDimensions } from '@/composables/useDimensions'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
+import ListNavArrows from '@/components/ui/ListNavArrows.vue'
+import { useListNavigation } from '@/composables/useListNavigation'
 
 const ExtractionReviewModal = defineAsyncComponent(() => import('@/components/purchase/ExtractionReviewModal.vue'))
 const PaymentCalendarModal = defineAsyncComponent(() => import('@/components/purchase/PaymentCalendarModal.vue'))
+const PurchaseVatTreatmentModal = defineAsyncComponent(() => import('@/components/purchase/PurchaseVatTreatmentModal.vue'))
+const PurchaseForceModeDialog = defineAsyncComponent(() => import('@/components/purchase/PurchaseForceModeDialog.vue'))
 const PaymentMethodModal = defineAsyncComponent(() => import('@/components/invoices/PaymentMethodModal.vue'))
 const ExpenseRuleTemplateModal = defineAsyncComponent(() => import('@/components/accounting/ExpenseRuleTemplateModal.vue'))
 const RuleFormModal = defineAsyncComponent(() => import('@/components/bank/RuleFormModal.vue'))
@@ -55,6 +61,16 @@ const router = useRouter()
 const toast = useToast()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
+const listNav = useListNavigation({
+  kind: 'purchase-invoices',
+  currentId: () => Number(route.params.id) || 0,
+  detailRoute: id => ({ name: 'purchase-invoice-detail', params: { id } }),
+  fetchPage: async (params, page) => {
+    const result = await purchaseInvoicesApi.listGrouped({ ...(params as Parameters<typeof purchaseInvoicesApi.listGrouped>[0]), page })
+    return { ids: result.data.flatMap(g => g.invoices.map(inv => inv.id)), pages: result.meta.pages ?? 1 }
+  },
+  scope: () => supplierStore.currentSupplierId,
+})
 
 // Chrome/Edge: dialog Uložit jako ve složce, kam se naposledy ukládalo PDF této firmy
 // (#104). Jinde odkaz stáhne PDF jako dřív.
@@ -86,7 +102,10 @@ const bankMatchTarget = ref<{ id: number; ref: string | null } | null>(null)
 const canMatchBankPayment = computed(() => !!invoice.value && !lockedForMe.value
   && !auth.isClientRole && auth.canRead('bank') && auth.canWrite('bank.match')
   && Number(invoice.value.amount_to_pay) !== 0
-  && ['received', 'booked', 'paid'].includes(invoice.value.status))
+  && ['received', 'booked', 'paid'].includes(invoice.value.status)
+  // Úhrady už pokrývají celý doklad: není co párovat.
+  && !((invoice.value.paid_amount ?? 0) > 0.005 && invoice.value.remaining_amount !== undefined
+    && Math.abs(invoice.value.remaining_amount) <= 0.005))
 function openBankMatch() {
   if (invoice.value && canMatchBankPayment.value) bankMatchTarget.value = { id: invoice.value.id, ref: invoice.value.vendor_invoice_number || invoice.value.varsymbol }
 }
@@ -102,7 +121,7 @@ let loadGeneration = 0
 // unit_price_without_vat už netto → vracíme ho beze změny.
 function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: number; total_without_vat?: number; unit?: string; duration_minutes?: number | null; stock_item_id?: number | null }): number {
   if (invoice.value?.prices_include_vat && Number(it.quantity)) {
-    if (isTimeItem(it) && (it.duration_minutes != null || it.unit_price_without_vat !== Math.round(it.unit_price_without_vat * 100) / 100)) {
+    if (isPreciseUnitPrice(it)) {
       return Math.round(((it.total_without_vat ?? 0) / itemQuantity(it)) * 1e6) / 1e6
     }
     return Math.round(((it.total_without_vat ?? 0) / Number(it.quantity)) * 100) / 100
@@ -113,9 +132,6 @@ function displayUnitPriceNet(it: { quantity: number; unit_price_without_vat: num
 // lepkavá (user_preferences), aby při procházení dokladů nemusel klikat u každého znovu.
 const pdfPreview = useSidePreview('purchase_invoices')
 const pdfPreviewOpen = pdfPreview.open
-// Nad prahem (viz useSidePreview) jde náhled do sloupce vpravo, pod prahem zůstává pod
-// dokladem. Bez archivovaného PDF se sloupec nevykreslí vůbec a doklad má celou šířku.
-const pdfSideBySide = computed(() => !!invoice.value?.pdf_path && pdfPreviewOpen.value && pdfPreview.wide.value)
 const pdfInlineUrl = computed(() => (invoice.value ? `${purchaseInvoicesApi.pdfUrl(invoice.value.id, true)}#view=FitH` : ''))
 const dismissingWarning = ref(false)
 const reviewOpen = ref(false)
@@ -247,11 +263,9 @@ async function dismissAdvanceSuggestion() {
 const activity = ref<Array<{
   id: number
   user_id: number | null
-  user_email: string | null
   user_name: string | null
   action: string
   payload: Record<string, unknown> | null
-  ip: string | null
   created_at: string
 }>>([])
 const activityOpen = ref(false)
@@ -269,6 +283,24 @@ const vatClassificationLabel = computed(() => {
   if (!code) return null
   return vatClassifications.value.find(vc => vc.code === code)?.label ?? null
 })
+
+// Skutečný nárok na odpočet (rozpis DPH má přednost před hlavičkou) — počítá server.
+const vatTreatment = computed(() => invoice.value?.vat_treatment ?? null)
+const itemVatStates = computed(() => new Map((vatTreatment.value?.items ?? []).map(i => [i.id, i])))
+const effectiveDeduction = computed<VatDeduction | 'mixed'>(() =>
+  vatTreatment.value?.effective ?? invoice.value?.vat_deduction ?? 'full')
+const effectivePercent = computed(() => vatTreatment.value?.source === 'allocations'
+  ? (vatTreatment.value.parts[0]?.vat_deduction_percent ?? 100)
+  : (invoice.value?.vat_deduction_percent ?? 100))
+function deductionLabel(mode: VatDeduction | string, percent: number | null | undefined): string {
+  const label = t('purchase_invoice.vat_deduction.' + mode)
+  return mode === 'proportional' ? `${label} (${Number(percent ?? 0)} %)` : label
+}
+function deductionClass(mode: VatDeduction | 'mixed'): string {
+  if (mode === 'none') return 'text-danger-600'
+  if (mode === 'proportional' || mode === 'mixed') return 'text-warning-600'
+  return 'text-neutral-700'
+}
 
 async function loadVatClassifications() {
   try {
@@ -563,6 +595,8 @@ const allowedTransitions = computed<PurchaseInvoiceStatus[]>(() => {
     case 'cancelled': targets = ['received']; break                  // un-cancel
     default:          targets = []
   }
+  // DDKP (§ 28 ZDPH) se neplatí, úhrada patří na zálohu (BE 409 tax_document_not_payable).
+  if (invoice.value.document_kind === 'tax_document') targets = targets.filter(s => s !== 'paid')
   // Client (F6): whitelist cílů received ⇄ paid — booked/cancelled jsou pro klienta
   // VŽDY 403 forbidden_transition; na zamčeném dokladu žádné přechody.
   if (auth.isClientRole) {
@@ -580,11 +614,36 @@ const canForceEdit = computed(() =>
   ['received', 'booked', 'paid'].includes(invoice.value.status)
 )
 
+// Oprava DPH zařazení bez storna: správce nebo role s právem purchase_invoices.vat_treatment,
+// stejně jako RequestAuthorization::canChangePurchaseVatTreatment na serveru.
+const canChangeVatTreatment = computed(() => !!invoice.value && !auth.isClientRole
+  && invoice.value.status !== 'cancelled'
+  && (auth.isCompanyAdminRole || auth.canWrite('purchase_invoices.vat_treatment')))
+const vatTreatmentOpen = ref(false)
+function onVatTreatmentSaved() {
+  vatTreatmentOpen.value = false
+  void load()
+  postingPanelRef.value?.reload()
+}
+
+// Zaúčtovaný doklad v uzavřeném období: server chce zvolený režim (reconcile / notes_only),
+// jinak by uložení skončilo 422 force_mode_required.
+const forceModeOpen = ref(false)
 function confirmForceEdit() {
   if (!invoice.value) return
+  const reasons = invoice.value.locked?.reasons ?? []
+  if (reasons.includes('posted') && reasons.includes('period_closed')) {
+    forceModeOpen.value = true
+    return
+  }
   const status = t('purchase_invoice.status.' + invoice.value.status)
   if (!confirm(t('purchase_invoice.force_edit_confirm', { status }))) return
   router.push(`/purchase-invoices/${invoice.value.id}/edit?force=1`)
+}
+function onForceModeChosen(mode: PurchaseForceMode) {
+  forceModeOpen.value = false
+  if (!invoice.value) return
+  router.push(`/purchase-invoices/${invoice.value.id}/edit?force=1&force_mode=${mode}`)
 }
 const canDelete = computed(() => invoice.value?.status === 'draft')
 
@@ -725,12 +784,15 @@ function transitionLabel(target: PurchaseInvoiceStatus): string {
 const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
-  && !invoice.value.booked_at
   && !invoice.value.locked?.journal_entry_id
   && invoice.value.document_kind !== 'advance'
   && invoice.value.status !== 'draft'
   && invoice.value.status !== 'cancelled'
   && auth.canWrite('purchase_invoices'))
+
+// Doklad označený jako zaúčtovaný (booked_at), ke kterému v deníku zápis není - typicky
+// po převodu z jiného programu, kde doklad zaúčtovaný nebyl. Zaúčtování zůstává dostupné.
+const bookedWithoutEntry = computed(() => canPostToJournal.value && !!invoice.value?.booked_at)
 
 // Místo slepého confirm() se otevře náhled kontace — u dokladu v cizí měně nebo
 // v přenesené daňové povinnosti má zápis víc než dva řádky a odklepnout ho neviděný
@@ -824,8 +886,15 @@ const purchaseActions = computed<ActionItem[]>(() => {
   items.push({ key: 'edit', label: t('common.edit'), icon: 'edit', tier: 'secondary', variant: 'success',
     show: canEdit.value && w && !lockedForMe.value, to: `/purchase-invoices/${inv.id}/edit` })
 
+  // Vzájemný zápočet s partnerem: stránka Zápočty předvyplněná dodavatelem a touto fakturou.
+  items.push({ key: 'mutual-offset', label: t('accounting.offsets.mutual_offset_action'), icon: 'swap', tier: 'secondary', variant: 'primary',
+    show: isDoubleEntry.value && auth.canWrite('accounting.offsets') && ['invoice', 'receipt'].includes(inv.document_kind)
+      && ['received', 'booked'].includes(inv.status) && (inv.currency ?? 'CZK') === 'CZK' && Number(inv.remaining_amount ?? 0) > 0.005,
+    to: offsetRoute(Number(inv.vendor_id), [{ doc_type: 'purchase_invoice', doc_id: inv.id, amount: null }]) })
+
   // Platební kalendář (issue #140): další platby se stejným číslem dokladu podle tohoto vzoru.
-  items.push({ key: 'payment-calendar', label: t('purchase_invoice.payment_calendar.action'), icon: 'cycle', tier: 'secondary', variant: 'primary',
+  // Týká se jen dokladů pro opakované platby (nájem, energie), proto v „…", ne v hlavní liště.
+  items.push({ key: 'payment-calendar', label: t('purchase_invoice.payment_calendar.action'), icon: 'cycle', tier: 'overflow', variant: 'primary',
     show: ['invoice', 'receipt', 'advance'].includes(inv.document_kind) && inv.status !== 'cancelled'
       && Number(inv.total_with_vat) > 0 && auth.canWrite('purchase_invoices.create'),
     disabled: acting.value, run: () => { paymentCalendarOpen.value = true } })
@@ -861,11 +930,19 @@ const purchaseActions = computed<ActionItem[]>(() => {
   items.push({ key: 'settle-rest', label: t('purchase_invoice.payment_summary.settle_rest'), icon: 'coin', tier: 'secondary', variant: 'warning',
     show: canSettleRest.value, run: () => { settleRestOpen.value = true } })
 
+  items.push({ key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
+    show: canPostToJournal.value, disabled: acting.value, loading: acting.value, run: postToJournal })
+
+  // V liště jsou nejvýš 3 akce: platba, zaúčtování a dodavatel. Ostatní jdou do „…".
+  items.push({ key: 'vendor', label: t('purchase_invoice.vendor_detail'), icon: 'user', tier: 'secondary', variant: 'neutral',
+    show: !!inv.vendor_id, to: `/clients/${inv.vendor_id}` })
+
   items.push({ key: 'qr', label: t('purchase_invoice.qr.button'), icon: 'qr', tier: 'secondary', variant: 'primary',
     show: canPayWithQr.value, run: openQr })
 
-  items.push({ key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
-    show: canPostToJournal.value, disabled: acting.value, loading: acting.value, run: postToJournal })
+  items.push({ key: 'vat-treatment', label: t('purchase_invoice.vat_treatment.change.action'), icon: 'tag', tier: 'secondary', variant: 'warning',
+    show: canChangeVatTreatment.value, title: t('purchase_invoice.vat_treatment.change.action_hint') as string,
+    disabled: acting.value, run: () => { vatTreatmentOpen.value = true } })
 
   items.push({ key: 'expense-template', label: t('accounting.template.create_expense'), icon: 'doc', tier: 'overflow', variant: 'neutral',
     show: isDoubleEntry.value && auth.canWrite('accounting') && inv.vendor_id > 0,
@@ -874,7 +951,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
     show: isDoubleEntry.value && auth.canWrite('bank.rules'), run: () => { postingRuleOpen.value = true } })
 
   items.push({ key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
-    show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
+    show: isDoubleEntry.value && !!inv.locked?.journal_entry_id,
     to: { name: 'accounting-journal', query: { source_type: 'purchase_invoice', source_id: String(inv.id) } } })
 
   items.push({ key: 'stock-receipt', label: t('stock.receipt.action'), icon: 'box', tier: 'secondary', variant: 'success',
@@ -893,14 +970,15 @@ const purchaseActions = computed<ActionItem[]>(() => {
   items.push({ key: 'exp-pohoda', label: t('purchase_invoice.export.pohoda'), icon: 'doc', tier: 'overflow', variant: 'warning',
     href: purchaseInvoicesApi.pohodaUrl(inv.id) })
 
-  items.push({ key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
-    show: canDelete.value && canDeletePermission && !lockedForMe.value, disabled: acting.value, run: remove })
-
-  // odkaz na dodavatele + admin „force" akce (pod „Pokročilé")
-  items.push({ key: 'vendor', label: t('purchase_invoice.vendor_detail'), icon: 'user', tier: 'overflow', variant: 'neutral',
-    show: !!inv.vendor_id, to: `/clients/${inv.vendor_id}` })
-  items.push({ key: 'force-edit', label: t('purchase_invoice.force_edit'), icon: 'edit', tier: 'advanced', variant: 'warning',
+  items.push({ key: 'force-edit', label: t('purchase_invoice.force_edit'), icon: 'edit', tier: 'overflow', variant: 'warning',
     show: canForceEdit.value, title: t('purchase_invoice.force_edit_hint') as string, run: confirmForceEdit })
+
+  items.push({ key: 'delete', label: t('common.delete'), icon: 'trash', tier: 'overflow', variant: 'danger',
+    show: canDelete.value && canDeletePermission && !(auth.isClientRole && draftDeletionLockedForClient(inv.locked,
+      !!inv.bank_payments?.length || !!inv.cash_payments?.length || !!inv.settlement_payments?.length,
+      Array.isArray(inv.bank_payments) && Array.isArray(inv.cash_payments) && Array.isArray(inv.settlement_payments))), disabled: acting.value, run: remove })
+
+  // admin „force" smazání (pod „Pokročilé")
   items.push({ key: 'force-delete', label: t('purchase_invoice.force_delete'), icon: 'trash', tier: 'advanced', variant: 'danger',
     show: canForceDelete.value, title: t('purchase_invoice.confirm.force_delete_warning') as string, run: forceDelete })
 
@@ -910,7 +988,7 @@ useWindowTitle(
   () => invoice.value ? [t(`purchase_invoice.document_kind.${invoice.value.document_kind}`), invoice.value.varsymbol || invoice.value.vendor_invoice_number].filter(Boolean).join(' ') : null,
   () => invoice.value?.vendor_company_name ?? null,
 )
-useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', 'cash', 'accounting', 'stock'], async () => {
+useWindowRefresh(async () => {
   const generation = loadGeneration
   const invoiceId = id.value
   const [updated, events] = await Promise.all([purchaseInvoicesApi.get(invoiceId), purchaseInvoicesApi.activity(invoiceId)])
@@ -929,14 +1007,16 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
     <div class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</div>
   </div>
 
-  <!-- Nad prahem (useSidePreview) jde náhled originálu do sloupce vpravo, jinak
-       zůstává rozbalený pod dokladem. Bez PDF se sloupec nevykreslí a doklad má
-       celou šířku - proto je vnější div v ostatních případech jen průhledný obal. -->
-  <div v-else-if="invoice" :class="pdfSideBySide ? 'flex items-start gap-4' : ''">
-    <div class="max-w-5xl space-y-4 min-w-0" :class="pdfSideBySide ? 'flex-1' : ''">
-      <RouterLink to="/purchase-invoices" class="text-sm text-neutral-600 hover:text-neutral-900">
-        {{ t('purchase_invoice.back_to_list') }}
-      </RouterLink>
+  <div v-else-if="invoice">
+    <DocumentPreviewSplit :ctrl="pdfPreview" :show="!!invoice.pdf_path && pdfPreviewOpen" :src="pdfInlineUrl"
+      :file-name="invoice.pdf_original_name" form-class="space-y-4" narrow-class="max-w-5xl">
+      <div class="flex items-center gap-2">
+        <ListNavArrows v-if="listNav.active.value" :has-previous="listNav.hasPrevious.value" :has-next="listNav.hasNext.value"
+          :busy="listNav.busy.value" @previous="listNav.previous" @next="listNav.next" />
+        <RouterLink :to="listNav.listPath.value ?? '/purchase-invoices'" class="text-sm text-neutral-600 hover:text-neutral-900">
+          {{ t('purchase_invoice.back_to_list') }}
+        </RouterLink>
+      </div>
 
       <!-- AI extraction warning — uživatel by měl řádky ověřit proti PDF před zaúčtováním. -->
       <div v-if="invoice.extraction_warning" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md flex gap-3 items-start">
@@ -1020,6 +1100,12 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
             :can-acknowledge="auth.canWrite('purchase_invoices')" />
         </h1>
         <ActionBar :actions="purchaseActions" />
+      </div>
+
+      <!-- Příznak zaúčtování bez zápisu v deníku (např. převzato z jiného programu nezaúčtované). -->
+      <div v-if="bookedWithoutEntry" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700" data-test="booked-without-entry">
+        <div class="font-medium">{{ t('common.booked_without_entry_title') }}</div>
+        <div class="mt-1 text-warning-700/90">{{ t('common.booked_without_entry_hint') }}</div>
       </div>
 
       <div v-if="invoice.document_kind === 'advance' && isDoubleEntry"
@@ -1192,6 +1278,9 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
 
       <PaymentCalendarModal v-if="paymentCalendarOpen" :invoice-id="invoice.id" :due-date="invoice.due_date"
         :amount="Number(invoice.total_with_vat)" :currency="invoice.currency" @close="paymentCalendarOpen = false" />
+      <PurchaseVatTreatmentModal v-if="vatTreatmentOpen" :invoice="invoice" :vat-classifications="vatClassifications"
+        :is-admin="auth.isCompanyAdminRole" @close="vatTreatmentOpen = false" @saved="onVatTreatmentSaved" />
+      <PurchaseForceModeDialog v-if="forceModeOpen" @close="forceModeOpen = false" @choose="onForceModeChosen" />
 
       <!-- ═══ Úhrady dokladu → provenience (banka + pokladna + zaúčtování úhrady) ═══ -->
       <div v-if="(invoice.bank_payments && invoice.bank_payments.length) || (invoice.cash_payments && invoice.cash_payments.length) || (invoice.settlement_payments && invoice.settlement_payments.length)"
@@ -1379,11 +1468,24 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
             </div>
             <div class="flex justify-between gap-3">
               <dt class="text-neutral-500">{{ t('purchase_invoice.classification.vat_deduction') }}</dt>
-              <dd class="font-medium text-right" :class="invoice.vat_deduction === 'none' ? 'text-danger-600' : (invoice.vat_deduction === 'proportional' ? 'text-warning-600' : 'text-neutral-700')">
-                {{ t('purchase_invoice.vat_deduction.' + (invoice.vat_deduction || 'full')) }}<span v-if="invoice.vat_deduction === 'proportional'"> ({{ invoice.vat_deduction_percent }} %)</span>
+              <dd class="font-medium text-right" :class="deductionClass(effectiveDeduction)" data-test="effective-vat-deduction">
+                <template v-if="effectiveDeduction === 'mixed'">{{ t('purchase_invoice.vat_treatment.mixed') }}</template>
+                <template v-else>{{ deductionLabel(effectiveDeduction, effectivePercent) }}</template>
+                <span v-if="vatTreatment?.source === 'allocations'" class="block text-xs font-normal text-neutral-500">
+                  {{ t('purchase_invoice.vat_treatment.by_allocations') }}
+                </span>
               </dd>
             </div>
+            <ul v-if="effectiveDeduction === 'mixed'" class="space-y-1 text-xs text-neutral-600" data-test="vat-treatment-parts">
+              <li v-for="(p, i) in vatTreatment?.parts ?? []" :key="i" class="flex justify-between gap-3">
+                <span>{{ deductionLabel(p.vat_deduction, p.vat_deduction_percent) }}</span>
+                <span class="font-mono whitespace-nowrap">{{ t('purchase_invoice.vat_treatment.part_amounts', { base: formatMoney(p.base_amount, invoice.currency), vat: formatMoney(p.vat_amount, invoice.currency) }) }}</span>
+              </li>
+            </ul>
           </dl>
+          <ul v-if="vatTreatment?.warnings?.length" class="mt-3 space-y-1 p-2 rounded-md bg-warning-50 border border-warning-500/40 text-xs text-warning-700" data-test="vat-treatment-warnings">
+            <li v-for="w in vatTreatment.warnings" :key="w">⚠ {{ t(`purchase_invoice.vat_treatment.warning.${w}`, { header: deductionLabel(invoice.vat_deduction || 'full', invoice.vat_deduction_percent) }) }}</li>
+          </ul>
         </div>
 
         <!-- Platba v jiné měně -->
@@ -1401,10 +1503,6 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
       <!-- Schvalování manažerem střediska (F6): kola, stavy a komentáře schvalovatelů. -->
       <PurchaseApprovalPanel v-if="showApprovalPanel" :invoice-id="invoice.id"
         :approval-status="invoice.approval_status ?? 'none'" :refresh-key="approvalRefreshKey" />
-
-      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
-           se přerazítkují. -->
-      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
 
       <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
            samotná kontace se dál načítá na pozadí. -->
@@ -1503,6 +1601,9 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
           </table>
         </div>
       </DocumentPostingPanel>
+      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
+           se přerazítkují. Sbalené pod zaúčtováním, stejně jako u vydané faktury. -->
+      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" collapsible :initially-open="missingDimensions(invoice).length > 0" @saved="postingPanelRef?.reload()" />
       <!-- ═══ Položky ═══ -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>
@@ -1526,11 +1627,11 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
                 <!-- Daňové zařazení položky: druh nákladu (§DM — z něj se odvozuje
                      dlouhodobý/drobný majetek), klasifikace plnění a časové rozlišení
                      (§DČR), plus karta drobného majetku. Sdílené s mobilní kartou. -->
-                <PurchaseItemMeta :item="it" />
+                <PurchaseItemMeta :item="it" :vat-state="itemVatStates.get(it.id ?? 0)" />
               </td>
               <td class="py-2 px-2 text-right font-mono">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</td>
               <td class="py-2 px-2">{{ it.unit }}</td>
-              <td class="py-2 px-2 text-right font-mono">{{ (isTimeItem(it) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(it), invoice.currency) }}</td>
+              <td class="py-2 px-2 text-right font-mono">{{ formatUnitPrice(displayUnitPriceNet(it), invoice.currency) }}</td>
               <td class="py-2 px-2 text-right">{{ it.vat_rate_snapshot }}%</td>
               <td class="py-2 px-5 text-right font-mono">{{ formatMoney(it.total_with_vat, invoice.currency) }}</td>
             </tr>
@@ -1542,13 +1643,13 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
         <div class="md:hidden divide-y divide-neutral-100">
           <div v-for="it in invoice.items" :key="`m-${it.id}`" class="p-3 space-y-1.5">
             <div class="text-sm text-neutral-900 whitespace-pre-wrap">{{ it.description }}</div>
-            <PurchaseItemMeta :item="it" />
+            <PurchaseItemMeta :item="it" :vat-state="itemVatStates.get(it.id ?? 0)" />
             <div class="flex items-baseline justify-between text-xs text-neutral-500">
               <span>
                 <span class="font-mono text-neutral-700">{{ isTimeItem(it) && it.duration_minutes != null ? formatDuration(it.duration_minutes) : it.quantity }}</span>
                 <span class="ml-1">{{ it.unit }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
-                <span class="font-mono">{{ (isTimeItem(it) ? formatHourlyRate : formatMoney)(displayUnitPriceNet(it), invoice.currency) }}</span>
+                <span class="font-mono">{{ formatUnitPrice(displayUnitPriceNet(it), invoice.currency) }}</span>
                 <span class="text-neutral-400 mx-1.5">·</span>
                 <span>{{ it.vat_rate_snapshot }}%</span>
               </span>
@@ -1876,16 +1977,6 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
             </button>
           </div>
         </div>
-        <!-- Inline PDF preview přes browser PDF viewer. Musí být ?inline=1 (jinak
-             Content-Disposition: attachment a Edge/IE blokují embed). Nad prahem se
-             tenhle blok nevykresluje — náhled je vedle dokladu (DocumentSidePreview). -->
-        <div v-if="pdfPreviewOpen && !pdfSideBySide" class="bg-neutral-100">
-          <iframe
-            :src="pdfInlineUrl"
-            class="w-full h-[80vh] border-0"
-            :title="invoice.pdf_original_name || 'PDF'"
-          ></iframe>
-        </div>
       </div>
       <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
@@ -1930,7 +2021,7 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
                   <td class="px-5 py-2 whitespace-nowrap">
                     <span class="text-xs px-2 py-0.5 rounded font-medium" :class="actionBadgeClass(a.action)">{{ actionShortLabel(a.action) }}</span>
                   </td>
-                  <td class="px-3 py-2 text-xs text-neutral-500 whitespace-nowrap">{{ a.user_name || a.user_email || '—' }}</td>
+                  <td class="px-3 py-2 text-xs text-neutral-500 whitespace-nowrap">{{ a.user_name || '—' }}</td>
                   <td class="px-3 py-2 font-mono text-xs text-neutral-400 whitespace-nowrap">{{ a.created_at.replace('T', ' ').slice(0, 19) }}</td>
                   <td class="px-3 py-2 text-xs text-neutral-600 break-all whitespace-pre-wrap leading-snug">{{ payloadText(a.payload) }}</td>
                 </tr>
@@ -1944,7 +2035,7 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
                 <span class="text-xs px-2 py-0.5 rounded font-medium" :class="actionBadgeClass(a.action)">{{ actionShortLabel(a.action) }}</span>
                 <span class="font-mono text-xs text-neutral-400 whitespace-nowrap">{{ a.created_at.replace('T', ' ').slice(0, 19) }}</span>
               </div>
-              <div class="text-xs text-neutral-500">{{ a.user_name || a.user_email || '—' }}</div>
+              <div class="text-xs text-neutral-500">{{ a.user_name || '—' }}</div>
               <div v-if="a.payload" class="text-xs text-neutral-600 break-all whitespace-pre-wrap leading-snug">{{ payloadText(a.payload) }}</div>
             </li>
           </ul>
@@ -2014,13 +2105,7 @@ useWindowRefresh(['purchase-invoices', 'clients', 'bank', 'bank-transactions', '
 
       <StockReceiptModal v-if="stockReceiptOpen && invoice" :purchase-invoice-id="invoice.id"
         @close="stockReceiptOpen = false" @created="onStockReceiptCreated" />
-    </div>
-    <DocumentSidePreview
-      v-if="pdfSideBySide"
-      :src="pdfInlineUrl"
-      :file-name="invoice.pdf_original_name"
-      @close="pdfPreview.close()"
-    />
+    </DocumentPreviewSplit>
   </div>
     <PostingPreviewModal
       v-if="invoice"

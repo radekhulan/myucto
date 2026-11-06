@@ -40,6 +40,14 @@ final class CatalogImportReaderTest extends TestCase
         self::assertSame(['000013', '=1+1', '100'], $rows[3]);
     }
 
+    public function testRowLimitIsCallerParameter(): void
+    {
+        $path = $this->file("sku\n001\n002\n003\n");
+        self::assertCount(4, iterator_to_array((new CatalogImportReader())->rows($path, 'csv', [], 0, 3)));
+        $this->expectExceptionMessage('import_too_many_rows');
+        iterator_to_array((new CatalogImportReader())->rows($path, 'csv', [], 0, 2));
+    }
+
     public function testLegacyEncodingIsExplicitAndConverted(): void
     {
         $path = $this->file(iconv('UTF-8', 'Windows-1250', "sku;nazev\n001;Žluťoučký\n"));

@@ -13,8 +13,11 @@ declare(strict_types=1);
  *     sha256:string,
  *     xsd_count:int,
  *     entry_points:list<string>,
- *     xsd_root?:string
+ *     xsd_root?:string,
+ *     inner_archive?:string
  * }>
+ * `inner_archive` je cesta schématového ZIPu uvnitř vnějšího archivu (JMHZ 1.5.0.3
+ * veze schémata v `JMHZ_podani_1.5.0.3_xsd.zip` vedle HTML dokumentace).
  */
 return [
     'jmhz' => [
@@ -65,5 +68,48 @@ return [
         'sha256' => '9a153012035ac821a30bd9f5e437ea4b92b662ae058fefa319d6972dcd6c43dc',
         'xsd_count' => 3,
         'entry_points' => ['OREZAM26.xsd', 'ZREZAM26.xsd'],
+    ],
+    // Balíčky pro rok 2027 (vykazované období od 1. 1. 2027). Žijí vedle balíčků
+    // 2026, výběr podle období dělá až katalog schémat.
+    'jmhz-2027' => [
+        'target' => 'jmhz-1.5.0.3',
+        'version' => '1.5.0.3',
+        'url' => 'https://developers.mpsv.cz/assets/documents/99dab4c2-7b7c-4422-bf9e-b5cb8192f426/JMHZ_podani_1.5.0.3.zip',
+        'sha256' => 'e8fe64bb6bea0e12e921995efd2014f8e80360d6df9e3cb00189bc4a87763941',
+        'xsd_count' => 15,
+        'entry_points' => ['jmhzPodani.xsd'],
+        'inner_archive' => 'JMHZ_podani_1.5.0.3_xsd.zip',
+    ],
+    'regzec-2027' => [
+        'target' => 'regzec-1.5',
+        'version' => '1.5',
+        'url' => 'https://developers.mpsv.cz/assets/documents/c3045862-665b-4a15-bc2f-9eac5b68ab96/REGZEC27_podan%C3%AD_1.5.zip',
+        'sha256' => '37a69516ac8eeb5b18f07da94355e6d6cd2b6b0967526ff10733df4a8c8068ae',
+        'xsd_count' => 2,
+        'entry_points' => ['REGZEC27_1_5.xsd'],
+    ],
+    'prezec-2027' => [
+        'target' => 'prezec-1.5',
+        'version' => '1.5',
+        'url' => 'https://developers.mpsv.cz/assets/documents/0dcadaa1-dd30-4a8a-b95a-8a262787a007/PREZEC26_podani%CC%81_1_5.zip',
+        'sha256' => 'dc509815450ea60c4763fe354e3f423e0d3c133694e54c2fcb7430cff64af3ef',
+        'xsd_count' => 2,
+        'entry_points' => ['PREZEC26_1_5.xsd'],
+    ],
+    'dzmh-2027' => [
+        'target' => 'dzmh-1.5',
+        'version' => '1.5',
+        'url' => 'https://developers.mpsv.cz/assets/documents/d6178272-fa28-4891-b95d-f324385f6c3d/DZMH25_podani_1.5.zip',
+        'sha256' => '7ebe93ea3898e88d5097ae5a9b6ef10521c27bfa87aea90b519f8ab9d4971e23',
+        'xsd_count' => 2,
+        'entry_points' => ['DZMH25_1_5.xsd'],
+    ],
+    'zrezam-2027' => [
+        'target' => 'zrezam-1.5',
+        'version' => '1.5',
+        'url' => 'https://developers.mpsv.cz/assets/documents/6f8b270d-6669-4776-a6ae-2a6d43584b24/ZREZAM_podani_1.5.zip',
+        'sha256' => '23320535b04b83a7b992456f18ffb7ff800967da5288587e8b9d932cede1e114',
+        'xsd_count' => 2,
+        'entry_points' => ['ZREZAM27_1_5.xsd'],
     ],
 ];

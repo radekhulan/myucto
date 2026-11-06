@@ -78,7 +78,7 @@ final class CarsAction
             if (str_contains($e->getMessage(), 'Duplicate')) {
                 return Json::error($response, 'duplicate', 'Auto s touto SPZ už existuje.', 409);
             }
-            return Json::error($response, 'create_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'create_failed', $e->getMessage(), 500);
         }
         $this->repo->updateUsage($id, $supplierId, $usage);
         $this->log($request, 'car.created', $id, $body);
@@ -112,7 +112,7 @@ final class CarsAction
             if (str_contains($e->getMessage(), 'Duplicate')) {
                 return Json::error($response, 'duplicate', 'Auto s touto SPZ už existuje.', 409);
             }
-            return Json::error($response, 'update_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'update_failed', $e->getMessage(), 500);
         }
         $this->repo->updateUsage($id, $supplierId, $usage);
         $this->log($request, 'car.updated', $id, $body);

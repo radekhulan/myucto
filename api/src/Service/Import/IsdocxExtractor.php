@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Import;
 
+use MyInvoice\Service\Xml\SafeXmlLoader;
+use MyInvoice\Service\Xml\UnsafeXmlException;
+
 /**
  * Rozbalí ISDOCX balíček (ISDOC Package) — ZIP archiv, do kterého řada českých
  * účetních systémů balí strukturovaný ISDOC i čitelné PDF faktury najednou.
@@ -32,8 +35,15 @@ namespace MyInvoice\Service\Import;
 final class IsdocxExtractor
 {
     private const ZIP_MAGIC = "PK\x03\x04";
-    /** Zip-bomb guard — žádný vnitřní člen nečteme nad tento limit. */
+    /**
+     * Zip-bomb guard — žádný vnitřní člen nečteme nad tento limit. Hlídá jen
+     * bajty; cenu parsování XML (DOM bývá mnohonásobně větší) hlídá
+     * {@see SafeXmlLoader} počtem uzlů.
+     */
     private const MAX_MEMBER_BYTES = 20 * 1024 * 1024; // 20 MiB
+    /** Skutečný manifest má pár set bajtů a jeden element `maindocument`. */
+    private const MAX_MANIFEST_BYTES = 64 * 1024;
+    private const MAX_MANIFEST_NODES = 1_000;
 
     /** Rychlý test ZIP magic bytes (bez otevírání archivu). */
     public static function isZip(string $bytes): bool
@@ -97,7 +107,7 @@ final class IsdocxExtractor
     {
         $manifestName = $this->findMemberCi($zip, 'manifest.xml');
         if ($manifestName !== null) {
-            $manifest = $this->readMember($zip, $manifestName);
+            $manifest = $this->readMember($zip, $manifestName, self::MAX_MANIFEST_BYTES);
             if ($manifest !== null) {
                 $declared = $this->mainDocumentFromManifest($manifest);
                 if ($declared !== null) {
@@ -132,19 +142,18 @@ final class IsdocxExtractor
      */
     private function mainDocumentFromManifest(string $xml): ?string
     {
-        $prev = libxml_use_internal_errors(true);
         try {
-            $doc = simplexml_load_string($xml);
-        } finally {
-            libxml_clear_errors();
-            libxml_use_internal_errors($prev);
-        }
-        if ($doc === false) {
+            $dom = SafeXmlLoader::load($xml, self::MAX_MANIFEST_BYTES, 0, self::MAX_MANIFEST_NODES);
+        } catch (UnsafeXmlException) {
+            // Nepoužitelný manifest = fallback na `.isdoc` podle názvu, jako dřív.
             return null;
         }
-        $nodes = $doc->xpath('//*[local-name()="maindocument"]') ?: [];
-        foreach ($nodes as $node) {
-            $fn = trim((string) ($node['filename'] ?? ''));
+        $nodes = (new \DOMXPath($dom))->query('//*[local-name()="maindocument"]');
+        foreach ($nodes ?: [] as $node) {
+            if (!$node instanceof \DOMElement) {
+                continue;
+            }
+            $fn = trim($node->getAttribute('filename'));
             if ($fn !== '') {
                 return $fn;
             }
@@ -202,17 +211,17 @@ final class IsdocxExtractor
     }
 
     /** Přečte člen archivu se zip-bomb guardem; null při chybě/přetečení limitu. */
-    private function readMember(\ZipArchive $zip, string $name): ?string
+    private function readMember(\ZipArchive $zip, string $name, int $maxBytes = self::MAX_MEMBER_BYTES): ?string
     {
         $idx = $zip->locateName($name);
         if ($idx === false) {
             return null;
         }
         $stat = $zip->statIndex($idx);
-        if (is_array($stat) && (int) ($stat['size'] ?? 0) > self::MAX_MEMBER_BYTES) {
+        if (is_array($stat) && (int) ($stat['size'] ?? 0) > $maxBytes) {
             return null;
         }
-        $data = $zip->getFromIndex($idx, self::MAX_MEMBER_BYTES);
+        $data = $zip->getFromIndex($idx, $maxBytes);
         return $data === false ? null : $data;
     }
 }

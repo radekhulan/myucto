@@ -83,7 +83,16 @@ final class PostingOriginService
     {
         $entry = $this->journal->findBySource($supplierId, $sourceType, $docId);
         $entryId = $entry === null || $entry['reversed_by'] !== null ? null : (int) $entry['id'];
-        $usedAccounts = $entryId === null ? [] : $this->entryAccountCodes($supplierId, $entryId);
+        $entryIds = $entryId === null ? [] : [$entryId];
+        if (in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
+            $active = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $docId);
+            $activeIds = array_map(static fn (array $row): int => (int) $row['id'], $active);
+            // Přímý koncept tu jako dosud reprezentuje plánovanou kontaci. Skupinu
+            // po stornu přímého člena dál reprezentuje její živý vlastněný člen.
+            $entryId ??= $activeIds[0] ?? null;
+            $entryIds = array_values(array_unique([...$entryIds, ...$activeIds]));
+        }
+        $usedAccounts = $this->entryAccountCodes($supplierId, $entryIds);
 
         $out = [
             'source_type'   => $sourceType,
@@ -404,16 +413,18 @@ final class PostingOriginService
         return false;
     }
 
-    /** @return list<string> */
-    private function entryAccountCodes(int $supplierId, int $entryId): array
+    /** @param list<int> $entryIds @return list<string> */
+    private function entryAccountCodes(int $supplierId, array $entryIds): array
     {
+        if ($entryIds === []) return [];
+        $placeholders = implode(',', array_fill(0, count($entryIds), '?'));
         $stmt = $this->db->pdo()->prepare(
             'SELECT DISTINCT c.account_code
                FROM journal_entry_lines jel
-               JOIN chart_of_accounts c ON c.id = jel.account_id
-              WHERE jel.entry_id = ? AND jel.supplier_id = ?'
+               JOIN chart_of_accounts c ON c.id = jel.account_id AND c.supplier_id = jel.supplier_id
+              WHERE jel.supplier_id = ? AND jel.entry_id IN (' . $placeholders . ')'
         );
-        $stmt->execute([$entryId, $supplierId]);
+        $stmt->execute([$supplierId, ...$entryIds]);
 
         return array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN));
     }

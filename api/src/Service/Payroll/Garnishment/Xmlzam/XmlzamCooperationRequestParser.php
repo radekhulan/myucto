@@ -4,27 +4,39 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Garnishment\Xmlzam;
 
-use DOMDocument;
 use DOMElement;
 use DomainException;
+use MyInvoice\Service\Xml\SafeXmlLoader;
+use MyInvoice\Service\Xml\UnsafeXmlException;
 
 final readonly class XmlzamCooperationRequestParser
 {
     private const XSI_NAMESPACE = 'http://www.w3.org/2001/XMLSchema-instance';
+    /** Požadavek na součinnost je krátký dokument; stropy s velkou rezervou. */
+    private const MAX_XML_BYTES = 5 * 1024 * 1024;
+    private const MAX_XML_NODES = 100_000;
 
     public function __construct(private XmlzamSchemaCatalog $schemas) {}
 
     public function parse(string $xml): XmlzamCooperationRequest
     {
+        // Rychlé odmítnutí čitelné deklarace (i nevalidní varianty `<!doctype`).
+        // Regex nad surovými bajty ale DTD v UTF-16 nevidí; rozhoduje proto
+        // sdílený loader podle toho, co skutečně čte parser, včetně počtu uzlů.
         if (preg_match('/<!\s*(?:DOCTYPE|ENTITY)\b/i', $xml) === 1) {
             throw new DomainException('XMLZAM nesmí obsahovat deklaraci DTD.');
         }
-        $document = new DOMDocument();
+        try {
+            $document = SafeXmlLoader::load($xml, self::MAX_XML_BYTES, 0, self::MAX_XML_NODES);
+        } catch (UnsafeXmlException $e) {
+            throw new DomainException(match ($e->reason) {
+                UnsafeXmlException::DOCTYPE => 'XMLZAM nesmí obsahovat deklaraci DTD.',
+                UnsafeXmlException::INVALID => 'XMLZAM není platný XML dokument.',
+                default                     => 'XMLZAM je příliš rozsáhlý na zpracování.',
+            });
+        }
         $previous = libxml_use_internal_errors(true);
         try {
-            if (!$document->loadXML($xml, LIBXML_NONET | LIBXML_NOBLANKS | LIBXML_COMPACT)) {
-                throw new DomainException('XMLZAM není platný XML dokument.');
-            }
             $root = $document->documentElement;
             if (!$root instanceof DOMElement || $root->localName !== 'dokument') {
                 throw new DomainException('XMLZAM nemá kořenový element dokument.');

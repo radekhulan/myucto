@@ -54,7 +54,7 @@ export interface WindowFrameStateMessage {
   csrfToken?: string
   accent?: string
   singlePanel?: boolean
-  invalidation?: { supplierId: number; resource: string }
+  invalidation?: { supplierId: number; resource: string; self?: boolean }
 }
 
 export type WindowFrameParentMessage = WindowFrameInitMessage | WindowFrameStateMessage
@@ -69,7 +69,7 @@ export type WindowFrameChildMessage =
   | { type: 'myucto-window-activity'; id: string }
   | { type: 'myucto-window-demo-read-only'; id: string }
   | { type: 'myucto-window-quota'; id: string; headers: Record<string, string | null>; trusted: boolean }
-  | { type: 'myucto-window-mutation'; id: string; resource: string }
+  | { type: 'myucto-window-mutation'; id: string; resource: string; path?: string }
   | { type: 'myucto-window-global'; id: string; to: RouteLocationRaw; mode?: 'assign' | 'replace' }
   | { type: 'myucto-window-company'; id: string; supplierId: number; to?: RouteLocationRaw }
   | { type: 'myucto-window-locked'; id: string }
@@ -105,7 +105,8 @@ export function isWindowFrameParentMessage(value: unknown, id: string): value is
   if (message.invalidation !== undefined) {
     const invalidation = message.invalidation as Record<string, unknown> | null
     if (!invalidation || typeof invalidation !== 'object' || !Number.isSafeInteger(invalidation.supplierId)
-      || typeof invalidation.resource !== 'string' || !/^[a-z0-9-]+$/.test(invalidation.resource)) return false
+      || typeof invalidation.resource !== 'string' || !/^[a-z0-9-]+$/.test(invalidation.resource)
+      || (invalidation.self !== undefined && typeof invalidation.self !== 'boolean')) return false
   }
   if (message.type === 'myucto-window-init') {
     return typeof message.to === 'string' || (!!message.to && typeof message.to === 'object')

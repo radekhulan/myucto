@@ -18,6 +18,7 @@ final class CatalogJobAccessPolicy
         'product_content_transfer_preview', 'product_content_transfer_apply',
         'integration_reconcile',
         'stock_opening_import_stage', 'stock_opening_import_apply',
+        'stock_history_import_stage', 'stock_history_import_apply', 'stock_history_import_rollback',
     ];
 
     public static function allows(Request $request, string $kind, bool $write = false, bool $audit = false): bool
@@ -31,8 +32,9 @@ final class CatalogJobAccessPolicy
         if ($kind === 'stock_valuation') {
             return RequestAuthorization::allows($request, 'stock', $write ? AccessLevel::WRITE : AccessLevel::READ);
         }
-        if (str_starts_with($kind, 'stock_opening_import_')) {
+        if (str_starts_with($kind, 'stock_opening_import_') || str_starts_with($kind, 'stock_history_import_')) {
             return (!$write || RequestAuthorization::isSessionAuth($request))
+                && (!$write || $kind !== 'stock_history_import_rollback' || RequestAuthorization::canRollbackStockHistoryImport($request))
                 && RequestAuthorization::allows($request, 'stock.documents.write', AccessLevel::WRITE);
         }
         if ($kind === 'integration_reconcile') {

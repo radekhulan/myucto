@@ -110,6 +110,64 @@ final class SampleDimensionGeneratorTest extends TestCase
         self::assertSame([$types['cost_center'] => $value['id']], $dimensions->documentDimensions($this->supplierId, 'invoice', $invoice)['header']);
     }
 
+    public function testJournalAssignmentReadsDoNotGrowPerLineAndAmountsSurvivePurge(): void
+    {
+        $invoice = $this->invoice($this->projectId);
+        $entry = $this->journal($invoice);
+        $this->pdo->exec('SAVEPOINT sample_dimension_single');
+        $beforeSelects = $this->selectCount();
+        $single = $this->generate();
+        $singleSelects = $this->selectCount() - $beforeSelects;
+        self::assertSame(1, $single['dimension_journal_lines']);
+        $this->pdo->exec('ROLLBACK TO SAVEPOINT sample_dimension_single');
+        $this->pdo->exec('RELEASE SAVEPOINT sample_dimension_single');
+        $manualEntry = $this->journal(null, revenueLines: 19);
+        $before = $this->rows('SELECT id, account_id, side, amount FROM journal_entry_lines WHERE supplier_id=? ORDER BY id', [$this->supplierId]);
+        $beforeSelects = $this->selectCount();
+        $many = $this->generate();
+        $manySelects = $this->selectCount() - $beforeSelects;
+        self::assertSame(20, $many['dimension_journal_lines']);
+        self::assertSame(20, (int) $this->scalar('SELECT COUNT(*) FROM sample_data_entries WHERE supplier_id=? AND entity_type="dim_line"', [$this->supplierId]));
+        $assignments = $this->container->get(DimensionAssignmentRepository::class);
+        self::assertCount(1, $assignments->entryLineDimensions($this->supplierId, $entry));
+        self::assertCount(19, $assignments->entryLineDimensions($this->supplierId, $manualEntry));
+        self::assertSame($before, $this->rows('SELECT id, account_id, side, amount FROM journal_entry_lines WHERE supplier_id=? ORDER BY id', [$this->supplierId]));
+        self::assertSame([], $this->rows('SELECT entry_id FROM journal_entry_lines WHERE supplier_id=? GROUP BY entry_id HAVING SUM(CASE WHEN side="debit" THEN amount ELSE -amount END)<>0', [$this->supplierId]));
+        $this->container->get(SampleDimensionPurger::class)->purge($this->supplierId);
+        self::assertSame([], $assignments->entryLineDimensions($this->supplierId, $entry));
+        self::assertSame([], $assignments->entryLineDimensions($this->supplierId, $manualEntry));
+        self::assertSame($before, $this->rows('SELECT id, account_id, side, amount FROM journal_entry_lines WHERE supplier_id=? ORDER BY id', [$this->supplierId]));
+        self::assertLessThanOrEqual($singleSelects + 25, $manySelects, "SELECT při 1/20 řádcích: {$singleSelects}/{$manySelects}");
+    }
+
+    public function testJournalBatchPreservesExistingValuesAndSplits(): void
+    {
+        $dimensions = $this->container->get(DimensionService::class);
+        $dimensions->setEnabled($this->supplierId, true);
+        $types = $dimensions->ensureDefaultTypes($this->supplierId);
+        $centerType = $types['cost_center'];
+        $a = $dimensions->createValue($this->supplierId, $centerType, ['code' => 'PUVODNI-A', 'name' => 'Původní středisko A']);
+        $b = $dimensions->createValue($this->supplierId, $centerType, ['code' => 'PUVODNI-B', 'name' => 'Původní středisko B']);
+        $entry = $this->journal(null, revenueLines: 3);
+        $lineIds = array_map('intval', array_column($this->rows('SELECT l.id FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id=l.account_id WHERE l.supplier_id=? AND l.entry_id=? AND a.account_code="602" ORDER BY l.id', [$this->supplierId, $entry]), 'id'));
+        $assignments = $this->container->get(DimensionAssignmentRepository::class);
+        $originalDimensions = [$lineIds[0] => [$centerType => (int) $a['id']]];
+        $originalSplits = [$lineIds[1] => [$centerType => [(int) $a['id'] => 0.25, (int) $b['id'] => 0.75]]];
+        $assignments->insertLineAssignments($this->supplierId, [
+            $lineIds[0] => ['dimensions' => $originalDimensions[$lineIds[0]]],
+            $lineIds[1] => ['dimension_splits' => $originalSplits[$lineIds[1]]],
+        ]);
+        $before = $this->rows('SELECT id, account_id, side, amount FROM journal_entry_lines WHERE supplier_id=? ORDER BY id', [$this->supplierId]);
+        self::assertSame(1, $this->generate()['dimension_journal_lines']);
+        $sampleCenter = (int) $this->values()['cost_center']['id'];
+        self::assertSame($originalDimensions + [$lineIds[2] => [$centerType => $sampleCenter]], $assignments->lineDimensions($this->supplierId, $lineIds));
+        self::assertSame($originalSplits, $assignments->lineSplits($this->supplierId, $lineIds));
+        $this->container->get(SampleDimensionPurger::class)->purge($this->supplierId);
+        self::assertSame($originalDimensions, $assignments->lineDimensions($this->supplierId, $lineIds));
+        self::assertSame($originalSplits, $assignments->lineSplits($this->supplierId, $lineIds));
+        self::assertSame($before, $this->rows('SELECT id, account_id, side, amount FROM journal_entry_lines WHERE supplier_id=? ORDER BY id', [$this->supplierId]));
+    }
+
     public function testExternalDocumentsChildrenAndJournalBlockButVerifiedLaterJournalCanBeRemoved(): void
     {
         $this->generate();
@@ -161,14 +219,15 @@ final class SampleDimensionGeneratorTest extends TestCase
         return $id;
     }
 
-    private function journal(?int $invoiceId, bool $tracked = true): int
+    private function journal(?int $invoiceId, bool $tracked = true, int $revenueLines = 1): int
     {
         $revenue = (int) $this->scalar('SELECT id FROM chart_of_accounts WHERE supplier_id=? AND account_code="602"', [$this->supplierId]);
         $receivable = (int) $this->scalar('SELECT id FROM chart_of_accounts WHERE supplier_id=? AND account_code="311"', [$this->supplierId]);
-        $id = $this->container->get(JournalEntryRepository::class)->insert(['supplier_id' => $this->supplierId, 'period_id' => $this->periodId, 'entry_date' => '2098-06-01', 'source_type' => $invoiceId === null ? 'manual' : 'invoice', 'source_id' => $invoiceId], [
-            ['account_id' => $receivable, 'side' => 'debit', 'amount' => 1000.0],
-            ['account_id' => $revenue, 'side' => 'credit', 'amount' => 1000.0],
-        ]);
+        $lines = [['account_id' => $receivable, 'side' => 'debit', 'amount' => 1000.0 * $revenueLines]];
+        for ($line = 0; $line < $revenueLines; $line++) {
+            $lines[] = ['account_id' => $revenue, 'side' => 'credit', 'amount' => 1000.0];
+        }
+        $id = $this->container->get(JournalEntryRepository::class)->insert(['supplier_id' => $this->supplierId, 'period_id' => $this->periodId, 'entry_date' => '2098-06-01', 'source_type' => $invoiceId === null ? 'manual' : 'invoice', 'source_id' => $invoiceId], $lines);
         if ($tracked) $this->track('journal_entry', $id);
         return $id;
     }
@@ -206,6 +265,11 @@ final class SampleDimensionGeneratorTest extends TestCase
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute($params);
         return $stmt->fetchColumn();
+    }
+
+    private function selectCount(): int
+    {
+        return (int) $this->pdo->query("SHOW SESSION STATUS LIKE 'Com_select'")->fetch(PDO::FETCH_NUM)[1];
     }
 
     private function rows(string $sql, array $params): array

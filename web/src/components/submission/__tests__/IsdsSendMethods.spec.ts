@@ -178,3 +178,15 @@ describe('IsdsSendMethods', () => {
     expect(wrapper.get('[data-test="isds-send-error"]').text()).toBe('databox.send.notDispatched')
   })
 })
+
+it('klientská daňová brána nenačítá nastavení ani nenabízí obecné odesílání', async () => {
+  const wrapper = mountMethods({ gatewayOnly: true, transport: { automatic: true, channel: 'gateway' } })
+  await flushPromises()
+  expect(m.gatewayCapabilities).not.toHaveBeenCalled()
+  expect(m.credentials).not.toHaveBeenCalled()
+  expect(wrapper.find('[data-test="isds-send-method-gateway"]').exists()).toBe(true)
+  for (const method of ['mobile_key', 'password', 'sms', 'certificate']) {
+    expect(wrapper.find(`[data-test="isds-send-method-${method}"]`).exists()).toBe(false)
+  }
+  expect(wrapper.find('a[href^="/admin/databox"]').exists()).toBe(false)
+})

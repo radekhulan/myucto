@@ -48,12 +48,13 @@ final class CronDispatcherTest extends TestCase
     {
         // 13:37 — v katalogu na tuhle minutu nepadá nic kromě úloh běžících
         // každou minutu. Pošta čeká na potvrzené úhrady, ostatní mají bránu (SQLite tabulky
-        // neexistují → fail-open → stav EPO i fronta dokumentů se spustí).
+        // neexistují → fail-open → fronta EET, stav EPO i fronta dokumentů se spustí).
         $report = $this->dispatcher()->tick(new DateTimeImmutable('2026-08-03 13:37:00'));
 
         self::assertSame(
             [
                 'cron-payment-thanks',
+                'cron-eet-dispatch',
                 'cron-epo-status',
                 'cron-payroll-document-worker',
                 'cron-payroll-period-export-worker',

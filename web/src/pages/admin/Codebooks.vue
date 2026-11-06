@@ -762,8 +762,8 @@ async function removeHoliday(h: PublicHoliday) {
 const taxYears = ref<TaxConstantsYear[]>([])
 const taxYear = ref<number>(0)
 const taxModel = ref<TaxConstantsData | null>(null)
-const taxConstantsTab = ref<'fo' | 'osvc' | 'payroll' | 'po' | 'vat' | 'assets' | 'reporting'>('fo')
-const taxConstantTabs = ['fo', 'osvc', 'payroll', 'po', 'vat', 'assets', 'reporting'] as const
+const taxConstantsTab = ref<'fo' | 'osvc' | 'payroll' | 'po' | 'nonprofit' | 'vat' | 'assets' | 'reporting'>('fo')
+const taxConstantTabs = ['fo', 'osvc', 'payroll', 'po', 'nonprofit', 'vat', 'assets', 'reporting'] as const
 const taxScalarFields: Record<typeof taxConstantTabs[number], readonly string[]> = {
   fo: ['tax_rate_low', 'tax_rate_high', 'tax_high_threshold', 'credit_taxpayer', 'credit_spouse',
     'spouse_income_limit', 'spouse_child_max_age', 'minimum_wage', 'child_bonus_min',
@@ -781,7 +781,9 @@ const taxScalarFields: Record<typeof taxConstantTabs[number], readonly string[]>
   vat: ['vat_rate_standard', 'vat_rate_reduced', 'vat_limit_low', 'vat_limit_high',
     'kh_item_threshold', 'vat_coefficient_full_threshold_pct'],
   assets: ['fixed_asset_limit', 'm1_depreciation_limit'],
-  reporting: ['transition_receivables_max_years', 'tax_loss_carry_years'],
+  nonprofit: ['nonprofit_reduction_rate', 'nonprofit_reduction_min', 'nonprofit_reduction_max',
+    'nonprofit_reduction_university_min', 'nonprofit_reduction_university_max'],
+  reporting: ['transition_receivables_max_years', 'tax_loss_carry_years', 'tax_loss_carryback_years', 'tax_loss_carryback_limit'],
 }
 const taxIsOverride = ref(false)
 const taxIsNew = ref(false)   // nově přidaný, ještě neuložený rok
@@ -1601,10 +1603,11 @@ watch(tab, (newTab) => {
         <div class="space-y-4">
           <div class="bg-surface border border-neutral-200 rounded-lg p-4 shadow-sm">
             <h3 class="text-xs font-semibold uppercase tracking-wide text-neutral-500 mb-3">{{ t(`codebooks.tax_tab_${taxConstantsTab}`) }}</h3>
+            <p v-if="taxConstantsTab === 'nonprofit'" class="text-sm text-neutral-500 mb-3">{{ t('codebooks.tax_nonprofit_hint') }}</p>
             <div class="grid sm:grid-cols-2 lg:grid-cols-4 gap-3">
               <label v-for="key in taxScalarFields[taxConstantsTab]" :key="key" class="block">
                 <span class="text-xs text-neutral-500">{{ t(`codebooks.tax_f_${key}`) }}</span>
-                <input v-model.number="taxModel[key]" type="number" step="any" class="mt-0.5 h-9 w-full px-2 border border-neutral-300 rounded text-sm font-mono" />
+                <input v-model.number="taxModel[key]" :data-tax-key="key" type="number" :min="taxConstantsTab === 'nonprofit' ? 0 : undefined" :max="key === 'nonprofit_reduction_rate' ? 1 : undefined" :step="taxConstantsTab === 'nonprofit' && key !== 'nonprofit_reduction_rate' ? 1 : 'any'" class="mt-0.5 h-9 w-full px-2 border border-neutral-300 rounded text-sm font-mono" />
               </label>
             </div>
           </div>

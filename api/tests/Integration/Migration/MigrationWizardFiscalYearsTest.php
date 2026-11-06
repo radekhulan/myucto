@@ -203,6 +203,39 @@ final class MigrationWizardFiscalYearsTest extends TestCase
         self::assertNull(PohodaImportJobService::companyYears($meta, SyntheticPohodaExport::ICO, $calendar, $this->supplierId, $token));
     }
 
+    /**
+     * Náhled převodu upozorní jen neziskovou organizaci (právní forma nebo rámec 504 kdykoli
+     * v historii), že převod pro ni nebyl ověřen. Běžná firma dostane odpověď bez klíče.
+     */
+    public function testPreviewWarnsOnlyNonprofitTarget(): void
+    {
+        $this->supplierId = $this->supplier(SyntheticPremierBackup::ICO, SyntheticPremierBackup::NAME, 1);
+        $token = $this->premierUpload(self::FOUNDED_IN_FEBRUARY);
+        $premier = $this->container->get(PremierMigrationAction::class);
+        $pdo = $this->db->pdo();
+
+        $pdo->prepare("UPDATE supplier SET legal_form = '112' WHERE id = ?")->execute([$this->supplierId]);
+        self::assertArrayNotHasKey('nonprofit_notice', $this->json($this->call($premier, 'show', [], $token)));
+
+        $pdo->prepare("UPDATE supplier SET legal_form = '706' WHERE id = ?")->execute([$this->supplierId]);
+        $notice = $this->json($this->call($premier, 'show', [], $token))['nonprofit_notice'] ?? null;
+        self::assertSame(['warning', 'migration_nonprofit_untested', ['entity_profile' => 'nonprofit', 'framework_504' => false]],
+            [$notice['level'] ?? null, $notice['code'] ?? null, $notice['context'] ?? null]);
+
+        $pdo->prepare("UPDATE supplier SET legal_form = NULL WHERE id = ?")->execute([$this->supplierId]);
+        $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '1900-01-01', 'cz_500'), (?, '2020-01-01', 'cz_504'), (?, '2022-01-01', 'cz_500')")
+            ->execute([$this->supplierId, $this->supplierId, $this->supplierId]);
+        $notice = $this->json($this->call($premier, 'show', [], $token))['nonprofit_notice'] ?? null;
+        self::assertSame(['entity_profile' => 'unknown', 'framework_504' => true], $notice['context'] ?? null);
+
+        $pohodaSupplier = $this->supplierId = $this->supplier(SyntheticPohodaExport::ICO, SyntheticPohodaExport::NAME, 1);
+        $pohodaToken = $this->pohodaUpload(false);
+        $pohoda = $this->container->get(PohodaMigrationAction::class);
+        self::assertArrayNotHasKey('nonprofit_notice', $this->json($this->call($pohoda, 'show', [], $pohodaToken)));
+        $pdo->prepare("UPDATE supplier SET legal_form = '145' WHERE id = ?")->execute([$pohodaSupplier]);
+        self::assertSame('svj', $this->json($this->call($pohoda, 'show', [], $pohodaToken))['nonprofit_notice']['context']['entity_profile'] ?? null);
+    }
+
     private function supplier(string $ico, string $name, int $startMonth): int
     {
         $pdo = $this->db->pdo();

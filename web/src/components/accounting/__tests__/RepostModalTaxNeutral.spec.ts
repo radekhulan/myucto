@@ -1,10 +1,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import { defineComponent, ref } from 'vue'
 
 const m = vi.hoisted(() => ({
   plan: {} as Record<string, unknown>,
   linesPlan: {} as Record<string, unknown>,
   planForLines: null as unknown as ReturnType<typeof vi.fn<(...args: unknown[]) => Promise<unknown>>>,
+  repost: vi.fn(),
+  savePending: vi.fn(),
 }))
 
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
@@ -20,14 +23,30 @@ vi.mock('@/api/accounting', () => {
       repostPlan: () => Promise.resolve(m.plan),
       repostPlanForLines: (...args: unknown[]) => m.planForLines(...args),
       listAccounts: () => Promise.resolve([]),
-      repost: vi.fn(),
+      repost: m.repost,
     },
     postingErrorI18nKey: (code: string) => `err.${code}`,
+    postingErrorMessage: (_t: unknown, e: any) => `err.${e?.response?.data?.error?.code}`,
   }
 })
 vi.mock('@/components/ui/Modal.vue', () => ({ default: { template: '<div><slot /></div>' } }))
 vi.mock('@/components/accounting/PostingOriginRow.vue', () => ({ default: { template: '<div />' } }))
-vi.mock('@/components/accounting/JournalEntryNotes.vue', () => ({ default: { props: ['entryId'], template: '<div class="notes" />' } }))
+vi.mock('@/components/accounting/JournalEntryNotes.vue', () => ({
+  default: defineComponent({
+    setup(_, { expose }) {
+      const draft = ref('')
+      expose({
+        get hasPending() { return draft.value.trim() !== '' },
+        async savePending() {
+          m.savePending(draft.value.trim())
+          draft.value = ''
+        },
+      })
+      return { draft }
+    },
+    template: '<textarea data-test="journal-note" v-model="draft" />',
+  }),
+}))
 vi.mock('@/components/accounting/JournalLinesEditor.vue', () => ({
   default: { name: 'JournalLinesEditor', props: ['modelValue', 'accounts', 'listId'], setup: () => ({ valid: true }), template: '<div />' },
 }))
@@ -67,6 +86,8 @@ describe('RepostModal — přepis na místě v zamčeném datu', () => {
     vi.useFakeTimers()
     m.plan = lockedPlan()
     m.planForLines.mockClear()
+    m.repost.mockReset().mockResolvedValue({})
+    m.savePending.mockReset()
   })
   afterEach(() => {
     vi.useRealTimers()
@@ -77,6 +98,63 @@ describe('RepostModal — přepis na místě v zamčeném datu', () => {
     expect(wrapper.find('[data-test="repost-tax-neutral-pending"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('accounting.repost.strategy_reverse')
     expect(wrapper.find('[data-test="repost-confirm-shift"]').exists()).toBe(false)
+  })
+
+  it('ukáže všechny členy skupiny, předvyplní stávající zaúčtování a předpis z dokladu jen nabídne', async () => {
+    const members = [
+      { id: 9, entry_date: '2026-01-21', row_version: 2 },
+      { id: 10, entry_date: '2026-01-21', row_version: 1 },
+    ]
+    m.plan = { ...lockedPlan(), reason_code: 'posting_group', tax_neutral_available: false,
+      date_shifted: false, target_date: '2026-01-21', locked_until: null,
+      posting_entries: members, lines: [...ORIGINAL, ORIGINAL[1], { account_code: '321.100', side: 'credit', amount: 210 }],
+      suggested_lines: ORIGINAL,
+    }
+    const wrapper = await mountModal()
+    expect(wrapper.get('[data-test="repost-posting-group"]').text()).toContain('#9')
+    expect(wrapper.get('[data-test="repost-posting-group"]').text()).toContain('#10')
+    const editor = wrapper.findComponent({ name: 'JournalLinesEditor' })
+    // Potvrzení beze změn nesmí převzaté kontace nahradit návrhem z dokladu.
+    expect(editor.props('modelValue')).toHaveLength(5)
+    expect(wrapper.find('[data-test="repost-suggestion"]').exists()).toBe(true)
+    await wrapper.get('[data-test="repost-use-suggested"]').trigger('click')
+    expect(wrapper.findComponent({ name: 'JournalLinesEditor' }).props('modelValue')).toHaveLength(3)
+    expect(wrapper.find('[data-test="repost-use-current"]').exists()).toBe(true)
+    await wrapper.get('[data-test="repost-submit"]').trigger('click')
+    await flushPromises()
+    expect(m.repost).toHaveBeenCalledWith('purchase-invoices', 43, expect.objectContaining({
+      expected_posting_entries: [{ id: 9, row_version: 2 }, { id: 10, row_version: 1 }],
+      lines: expect.arrayContaining([expect.objectContaining({ account_code: '343.100', amount: 210 })]),
+    }))
+    wrapper.unmount()
+  })
+
+  it('u skupiny uloží samotnou poznámku bez přeúčtování, ale explicitní Přeúčtovat stále odešle skupinu', async () => {
+    m.plan = { ...lockedPlan(), reason_code: 'posting_group', tax_neutral_available: false,
+      date_shifted: false, target_date: '2026-01-21', locked_until: null,
+      posting_entries: [{ id: 9, entry_date: '2026-01-21', row_version: 2 }, { id: 10, entry_date: '2026-01-21', row_version: 1 }],
+      lines: [...ORIGINAL, ORIGINAL[1], { account_code: '321.100', side: 'credit', amount: 210 }],
+      suggested_lines: ORIGINAL,
+    }
+    const wrapper = await mountModal()
+    await wrapper.get('[data-test="repost-notes"]').setValue('Prověřit převzatý předpis')
+    await wrapper.get('[data-test="repost-submit"]').trigger('click')
+    await flushPromises()
+
+    expect(m.savePending).toHaveBeenCalledExactlyOnceWith('Prověřit převzatý předpis')
+    expect(m.repost).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('u skupiny vyžaduje výslovné potvrzení přesunu do jiného období', async () => {
+    m.plan = { ...lockedPlan(), reason_code: 'posting_group', tax_neutral_available: false,
+      posting_entries: [{ id: 9, entry_date: '2026-01-21', row_version: 1 }, { id: 10, entry_date: '2026-01-21', row_version: 1 }],
+    }
+    const wrapper = await mountModal()
+    expect(wrapper.get('[data-test="repost-submit"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-test="repost-confirm-shift"] input').setValue(true)
+    expect(wrapper.get('[data-test="repost-submit"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
   })
 
   it('změna jen analytiky nákladu se přepíše na místě bez zaškrtávátka', async () => {

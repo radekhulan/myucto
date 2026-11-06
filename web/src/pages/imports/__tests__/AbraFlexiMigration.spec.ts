@@ -79,6 +79,16 @@ describe('ABRA Flexi transfer', () => {
     expect(m.start).not.toHaveBeenCalled()
   })
 
+  it('warns about a different source company and does not allow starting the transfer', async () => {
+    m.connection.mockResolvedValue({ ...state(), source_company: { name: 'Source s.r.o.', ico: '10000009' }, target_company: { name: 'Target s.r.o.', ico: '20000002' }, ico_mismatch: true })
+    const wrapper = await page()
+    expect(wrapper.get('[data-testid="abra-ico-mismatch"]').text()).toContain('abra_flexi.ico_mismatch_title')
+    const start = wrapper.get('[data-action="start"]')
+    expect(start.attributes('disabled')).toBeDefined()
+    await start.trigger('click')
+    expect(m.start).not.toHaveBeenCalled()
+  })
+
   it('clears plaintext immediately on submission even when saving fails', async () => {
     m.connection.mockResolvedValue({ ...state(), configured: false })
     let reject!: (reason: unknown) => void

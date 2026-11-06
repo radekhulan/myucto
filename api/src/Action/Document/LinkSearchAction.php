@@ -17,7 +17,7 @@ use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
 /**
- * GET /api/documents/link-search?q=&types=invoice,purchase_invoice,client,project,cash_document,other_item
+ * GET /api/documents/link-search?q=&types=invoice,purchase_invoice,client,project,cash_document,other_item,internal_document
  *
  * Našeptávač pro párování dokumentů s entitami. Hledá napříč vystavenými i
  * přijatými fakturami (číslo dokladu / VS / číslo dodavatele), klienty/dodavateli
@@ -42,7 +42,7 @@ final class LinkSearchAction
 
         $types = isset($params['types']) && $params['types'] !== ''
             ? array_map('trim', explode(',', (string) $params['types']))
-            : ['invoice', 'purchase_invoice', 'client', 'project', 'cash_document', 'other_item'];
+            : ['invoice', 'purchase_invoice', 'client', 'project', 'cash_document', 'other_item', 'internal_document'];
 
         if (mb_strlen($q) < 2) {
             return Json::ok($response, ['results' => [], 'query' => $q]);
@@ -128,7 +128,42 @@ final class LinkSearchAction
             }
         }
 
+        if (in_array('internal_document', $types, true) && RequestAuthorization::allows($request, 'accounting', AccessLevel::READ)) {
+            foreach ($this->searchInternalDocuments($q, $sid) as $r) {
+                $results[] = [
+                    'entity_type' => 'internal_document',
+                    'entity_id'   => (int) $r['id'],
+                    'label'       => $r['document_no'] !== null ? (string) $r['document_no'] : ('#' . $r['id']),
+                    'sublabel'    => trim((string) $r['title'] . ' · ' . (string) $r['document_date']),
+                    'meta'        => $this->fmtMoney((float) $r['amount'], 'CZK'),
+                ];
+            }
+        }
+
         return Json::ok($response, ['results' => $results, 'query' => $q]);
+    }
+
+    /** Interní doklady: každý token matchne číslo dokladu nebo popis. */
+    private function searchInternalDocuments(string $q, int $sid): array
+    {
+        $toks = $this->tokens($q);
+        if ($toks === []) return [];
+        $where = ['supplier_id = ?'];
+        $params = [$sid];
+        foreach ($toks as $tk) {
+            $esc = '%' . addcslashes($tk, '%_\\') . '%';
+            $where[] = '(document_no LIKE ? OR title LIKE ?)';
+            $params[] = $esc;
+            $params[] = $esc;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, document_no, title, document_date, amount FROM internal_documents
+              WHERE ' . implode(' AND ', $where) . '
+              ORDER BY document_date DESC, id DESC
+              LIMIT 8'
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     }
 
     /** Pokladní doklady: každý token matchne číslo dokladu, partnera nebo popis. */

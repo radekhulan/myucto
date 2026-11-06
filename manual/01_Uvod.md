@@ -502,7 +502,7 @@ součást postupu, účtování i výkazy si MyÚčto zvládne samo.
 Nad tím vším je **REST API v1 popsané specifikací OpenAPI 3.1** s tokenovou
 autentizací a výběrem firmy hlavičkou `X-Supplier-Id`. Napojí se na
 něj e-shop, CRM, BI nástroj i automatizační platforma typu Make nebo Zapier.
-Viz [104. REST API](104_API.md), [20. Exporty](20_Exporty.md),
+Viz [103. REST API](103_API.md), [20. Exporty](20_Exporty.md),
 [21. Importy](21_Importy.md) a [45. Hromadný export](48_Hromadny_export.md).
 
 ### 1.5.18 Multi-supplier - víc firem z jedné instalace
@@ -536,7 +536,7 @@ Viz [95. Více dodavatelů](95_Multi_supplier.md).
 
 Viz [96. Nastavení](96_Nastaveni.md),
 [100. Elektronické podpisy](99_Elektronicke_podpisy.md) a
-[103. Aktualizace](102_Aktualizace.md).
+[106. Aktualizace](102_Aktualizace.md).
 
 ### 1.5.20 Bezpečnost
 
@@ -547,7 +547,7 @@ stát s účetnictvím** (detail v [102. Bezpečnost](101_Bezpecnost.md)).
 
 - **Hesla**: bcrypt s pepperem uloženým mimo databázi, min. 12 znaků bez
   horního limitu, indikátor síly
-- **2FA (TOTP)**: Google Authenticator, Authy, 1Password, Bitwarden...; správce
+- **2FA (TOTP)**: Proton Authenticator, Ente Auth, Google Authenticator, 1Password, Bitwarden...; správce
   ho může vynutit pro všechny uživatele instalace
 - **Ověření e-mailem** jako alternativní druhý faktor, reset hesla odkazem
   s platností jedné hodiny

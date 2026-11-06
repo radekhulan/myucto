@@ -9,6 +9,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Import\LlmProviderCapabilities;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ServerRequestInterface;
@@ -370,6 +371,62 @@ final class AiProviderCredentialsActionTest extends TestCase
         $res = $this->mockedAction($history)->update($req, new Psr7Response());
         self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
         self::assertNull($this->ollamaRow()['ollama_api_key_enc']);
+    }
+
+    /**
+     * ID workspace u klíče Anthropic bez přiřazeného workspace: uloží se oříznuté, status
+     * ho vrací pro formulář, neplatná hodnota je 400 bez zápisu, prázdná ho smaže a smazání
+     * klíče ho zahodí taky. Config-only uložení nevolá poskytovatele.
+     */
+    public function testAnthropicWorkspaceIdSaveValidateAndClear(): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT anthropic_api_key_enc, anthropic_default_model, anthropic_workspace_id FROM supplier WHERE id = ?');
+        $stmt->execute([$this->supplierId]);
+        $saved = (array) $stmt->fetch(\PDO::FETCH_ASSOC);
+        $workspace = function () use ($pdo): mixed {
+            $s = $pdo->prepare('SELECT anthropic_workspace_id FROM supplier WHERE id = ?');
+            $s->execute([$this->supplierId]);
+            return $s->fetchColumn();
+        };
+        try {
+            $crypto = Bootstrap::buildContainer()->get(\MyInvoice\Service\Auth\SecretEncryption::class);
+            $pdo->prepare('UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_workspace_id = NULL WHERE id = ?')
+                ->execute([$crypto->encrypt('sk-ant-' . str_repeat('a', 40)), $this->supplierId]);
+
+            $ok = $this->call('update', 'PUT', 'admin', ['provider' => 'anthropic', 'workspace_id' => '  wrkspc_01AbC-9  ']);
+            self::assertSame(200, $ok['status'], json_encode($ok['body']) ?: '');
+            self::assertFalse($ok['body']['tested']);
+            self::assertSame('wrkspc_01AbC-9', $workspace());
+            self::assertSame('wrkspc_01AbC-9', $this->call('status', 'GET', 'admin')['body']['providers']['anthropic']['workspace_id'] ?? null);
+
+            foreach (["wrkspc_01\r\nX-Evil: 1", 'wrkspc 01', str_repeat('a', 129), ['pole']] as $bad) {
+                $res = $this->call('update', 'PUT', 'admin', ['provider' => 'anthropic', 'workspace_id' => $bad]);
+                self::assertSame(400, $res['status']);
+                self::assertSame('validation_failed', $res['body']['error']['code'] ?? null);
+                self::assertSame('wrkspc_01AbC-9', $workspace(), 'neplatná hodnota nesmí nic zapsat');
+            }
+
+            $this->call('update', 'PUT', 'admin', ['provider' => 'anthropic', 'default_model' => LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL]);
+            self::assertSame('wrkspc_01AbC-9', $workspace(), 'vynechané pole ID workspace nemaže');
+
+            $cleared = $this->call('update', 'PUT', 'admin', ['provider' => 'anthropic', 'workspace_id' => '   ']);
+            self::assertSame(200, $cleared['status']);
+            self::assertNull($workspace());
+
+            $pdo->prepare('UPDATE supplier SET anthropic_workspace_id = ? WHERE id = ?')->execute(['wrkspc_01Del', $this->supplierId]);
+            $res = $this->action->delete($this->req('DELETE', 'admin')->withQueryParams(['provider' => 'anthropic']), new Psr7Response());
+            self::assertSame(200, $res->getStatusCode());
+            self::assertNull($workspace());
+        } finally {
+            $pdo->prepare('UPDATE supplier SET anthropic_api_key_enc = ?, anthropic_default_model = ?, anthropic_workspace_id = ? WHERE id = ?')
+                ->execute([
+                    $saved['anthropic_api_key_enc'] ?? null,
+                    $saved['anthropic_default_model'] ?? LlmProviderCapabilities::ANTHROPIC_DEFAULT_MODEL,
+                    $saved['anthropic_workspace_id'] ?? null,
+                    $this->supplierId,
+                ]);
+        }
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────

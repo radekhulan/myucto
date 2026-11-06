@@ -9,9 +9,9 @@ use PHPUnit\Framework\TestCase;
 
 final class OdometerGapCalculatorTest extends TestCase
 {
-    private static function reading(int $id, string $date, int $odometer): array
+    private static function reading(int $id, string $date, int $odometer, string $source = 'manual'): array
     {
-        return ['id' => $id, 'date' => $date, 'odometer' => $odometer];
+        return ['id' => $id, 'date' => $date, 'odometer' => $odometer, 'source' => $source];
     }
 
     private static function trip(string $date, ?int $end): array
@@ -106,5 +106,18 @@ final class OdometerGapCalculatorTest extends TestCase
         );
 
         self::assertSame(87, $gaps[0]['km']);
+    }
+
+    public function testManualReadingOfTheDayTakesPrecedenceOverAutomaticOne(): void
+    {
+        $gaps = OdometerGapCalculator::gaps(
+            [self::reading(1, '2099-01-10', 1100, 'fake_source'), self::reading(2, '2099-01-10', 1050),
+                self::reading(3, '2099-01-11', 1120, 'fake_source')],
+            [],
+            ['odometer' => 1000, 'date' => '2099-01-09'],
+        );
+
+        self::assertSame([[2, 1000, 1050], [3, 1050, 1120]],
+            array_map(static fn (array $g): array => [$g['reading_id'], $g['odometer_from'], $g['odometer_to']], $gaps));
     }
 }

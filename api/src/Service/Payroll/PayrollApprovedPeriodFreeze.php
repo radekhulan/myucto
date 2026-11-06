@@ -56,4 +56,24 @@ final class PayrollApprovedPeriodFreeze
             ->modify('last day of this month')
             ->format('Y-m-d');
     }
+
+    /**
+     * Nejdřívější měsíc, od kterého smí hromadná akce zapsat novou větu:
+     * zadaný měsíc, leží-li za hranicí, jinak první měsíc po ní.
+     *
+     * Karta osoby smí chybějící řádek doplnit i do zmrazeného období (schválená
+     * revize si drží vlastní snímek), hromadné akce ale do historie schválené
+     * mzdy nesahají vůbec. Pravidlo sdílí hromadné doplnění evidence
+     * i hromadný podpis prohlášení.
+     */
+    public static function firstOpenMonth(string $monthStart, ?string $frozenThrough): string
+    {
+        if ($frozenThrough === null || $monthStart > $frozenThrough) {
+            return $monthStart;
+        }
+
+        return (new DateTimeImmutable($frozenThrough))
+            ->modify('first day of next month')
+            ->format('Y-m-d');
+    }
 }

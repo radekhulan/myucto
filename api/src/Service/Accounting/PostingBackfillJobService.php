@@ -22,9 +22,9 @@ use MyInvoice\Service\Accounting\Activation\DocumentBackfill;
  * Na migraci s tisíci doklady to znamená osmkrát ručně naklikat výběr.
  *
  * A automatika účtování to nespraví ani omylem: `maybeAutoPost()` je HÁČEK NA VZNIK
- * dokladu (vystavení, přechod přijaté faktury do stavu „přijatá", opakovaná fakturace),
- * ne zametač existujících. Doklad, který už v systému leží — typicky naimportovaný —
- * jí neprojde nikdy, ať je zapnutá jakkoli.
+ * dokladu (vystavení, přijetí přijaté faktury včetně importu rovnou jako přijaté,
+ * opakovaná fakturace), ne zametač existujících. Doklad, který už v systému leží —
+ * typicky naimportovaná vydaná faktura — jí neprojde nikdy, ať je zapnutá jakkoli.
  *
  * Účtovací logika se tu NEOPAKUJE: běh je tenká obálka nad `DocumentBackfill`, tedy
  * nad týmž kódem, který používá průvodce. Přidává jen to, co dělá z operace úlohu —

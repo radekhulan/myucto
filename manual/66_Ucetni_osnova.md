@@ -60,6 +60,8 @@ předkontacích a šablonách.
 > či mzdového nastavení. Používaný účet místo mazání deaktivujte. Kód účtu je součást průkazné
 > účetní stopy.
 
+Má-li firma datované definice účtů, změna názvu nebo aktivity platí od dne provedení. Starší výkazy používají definici odpovídající svému účetnímu datu. Změnu zasahující do již zaúčtovaných řádků nebo uzamčeného období aplikace odmítne. Nový účet vzniká k datu založení a nenabízí se pro starší zápisy. Analytiku s datovanou historií nelze smazat; pro ukončení jejího používání ji deaktivujte.
+
 ## 66.5 Krok za krokem: import a export osnovy
 
 Tlačítka **Export XLSX** a **Import** pracují s XLSX nebo CSV. Export zahrnuje i neaktivní účty,
@@ -140,11 +142,24 @@ aktivovat nebo opravit pravidlo.
 
 ### 66.8.2 Automatické založení osnovy
 
-Při zahájení aktivace podvojného účetnictví aplikace idempotentně založí standardní syntetické účty,
+Při zahájení aktivace podvojného účetnictví aplikace vybere šablonu podle účetního rámce firmy
+účinného k datu založení. Pro rámec **500/2002 Sb.** idempotentně založí standardní syntetické účty,
 vybrané analytiky (mimo jiné **343.100 / 343.200 / 343.900**, viz [§ 66.8.5](#6685-analytiky-dph-343100-343200-a-343900),
 a nedaňové nákladové analytiky **501.990 / 511.990 / 518.990 / 548.990**) a systémové předkontace.
 Stejné založení lze bezpečně spustit znovu: existující firemní účty ani jejich názvy se neduplikují.
 Aktivační průvodce je popsán v kapitole [Aktivace účetnictví](68_Aktivace_ucetnictvi.md).
+
+Rámec **504/2002 Sb.** má samostatnou šablonu osnovy, která existující osnovu jiného rámce nepřevádí
+ani nedoplňuje. Zapíná se v [Nastavení](96_Nastaveni.md) nebo řízeným převodem z rámce 500. Používá třídy 0 až 3, 5, 6
+a 9, včetně vlastního jmění a fondů 901/911, výsledku hospodaření 931/932/933 a závěrkových účtů
+961/962. Náklady této šablony nemají potvrzenou daňovou uznatelnost; výchozí nedaňový příznak
+nenahrazuje posouzení konkrétní činnosti a účetního případu.
+
+Import kontroluje účetní rámec firmy platný k datu importu. Pro rámec 504 musí syntetika mít
+třímístný číselný kód v přípustné účtové skupině a odpovídající typ a obvyklou stranu. Analytika
+rozvíjí kód svého syntetického rodiče a dědí jeho typ i stranu. Volné třídy 4, 7 a 8 lze importovat
+jen jako výslovně podrozvahové účty podle vnitřního předpisu, nikoli jako kapitálové nebo závěrkové
+účty osnovy 500. Stejné kontroly platí v náhledu i při zápisu; jediná chyba zabrání celému importu.
 
 Účty jsou vždy oddělené podle firmy. Aplikace při každém čtení i zápisu používá aktuální firmu; znalost
 identifikátoru účtu jiné firmy nestačí k jeho načtení nebo změně.

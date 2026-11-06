@@ -23,11 +23,11 @@ use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\InvoiceDefaults;
 use MyInvoice\Service\Invoice\InvoiceNoteAlias;
+use MyInvoice\Service\Invoice\NewInvoiceVatClassification;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Oss\OssDocumentCoherence;
 use MyInvoice\Service\Oss\OssItemDeriver;
 use MyInvoice\Service\Oss\OssItemPlanner;
-use MyInvoice\Service\Report\VatClassificationDefaulter;
 use MyInvoice\Service\Validation\InvoiceValidation;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -45,7 +45,7 @@ final class CreateInvoiceAction
         private readonly ClientRepository $clients,
         private readonly InvoiceDefaults $defaults,
         private readonly InvoiceCalculator $calc,
-        private readonly VatClassificationDefaulter $vatDefaulter,
+        private readonly NewInvoiceVatClassification $vatClassification,
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly ExchangeRateApplier $rateApplier,
@@ -283,46 +283,11 @@ final class CreateInvoiceAction
 
     /**
      * Auto-default vat_classification_code podle vat_rate na řádcích a header.
-     * Aplikuje se jen pokud user nezadal (NULL nebo prázdný).
+     * Aplikuje se jen pokud user nezadal (NULL nebo prázdný). Pravidlo drží
+     * {@see NewInvoiceVatClassification}, sdílené s rychlou účtenkou.
      */
     private function applyVatClassificationDefaults(array &$body, int $supplierId): void
     {
-        $vatRates = $this->repo->vatRateMap();
-        $reverseCharge = !empty($body['reverse_charge']);
-        // Country-aware RC: tuzemský odběratel → §92a (ř.25), zahraniční EU → dodání do JČS (ř.20).
-        $customerEuForeign = $reverseCharge
-            && (int) ($body['client_id'] ?? 0) > 0
-            && $this->repo->clientIsEuForeign((int) $body['client_id']);
-
-        if (!empty($body['items']) && is_array($body['items'])) {
-            foreach ($body['items'] as &$item) {
-                if (!empty($item['vat_classification_code']) || InvoiceItemKind::isText($item)) continue;
-                $rateId = (int) ($item['vat_rate_id'] ?? 0);
-                $rate = (float) ($vatRates[$rateId] ?? 0);
-                $taxDate = $body['tax_date'] ?? $body['issue_date'] ?? null;
-                // Měrná jednotka řádku je signál zboží/služba pro RC prodej do EU (ř.20 vs ř.21).
-                $units = ((string) ($item['unit'] ?? '') !== '') ? [(string) $item['unit']] : [];
-                $item['vat_classification_code'] = $this->vatDefaulter->defaultForSale($rate, $reverseCharge, $taxDate, $supplierId, $customerEuForeign, $units);
-            }
-            unset($item);
-        }
-
-        if (empty($body['vat_classification_code']) && !empty($body['items'])) {
-            $itemsWithTotals = array_map(function ($it) use ($vatRates) {
-                $rateId = (int) ($it['vat_rate_id'] ?? 0);
-                $rate = (float) ($vatRates[$rateId] ?? 0);
-                $qty = (float) ($it['quantity'] ?? 1);
-                $price = (float) ($it['unit_price_without_vat'] ?? 0);
-                return ['vat_rate' => $rate, 'total_with_vat' => $qty * $price * (1 + $rate / 100), 'unit' => (string) ($it['unit'] ?? '')];
-            }, InvoiceItemKind::amountLines((array) $body['items']));
-            $body['vat_classification_code'] = $this->vatDefaulter->suggestHeaderForInvoice(
-                $itemsWithTotals,
-                (bool) ($body['reverse_charge'] ?? false),
-                'sale',
-                $body['tax_date'] ?? $body['issue_date'] ?? null,
-                $supplierId,
-                $customerEuForeign,
-            );
-        }
+        $this->vatClassification->apply($body, $supplierId);
     }
 }

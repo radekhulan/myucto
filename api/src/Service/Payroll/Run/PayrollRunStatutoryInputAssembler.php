@@ -628,7 +628,7 @@ final class PayrollRunStatutoryInputAssembler
                 && $employmentTo < $periodStart
                 && $mapping->aggregationGroup
                     === SocialParticipationAggregationGroup::RegularRelationship
-                && self::deferredIncomeType($snapshot) === '1'
+                && self::deferredWithPostTerminationIncome($snapshot)
             ) {
                 /*
                  * Odložený příjem typu 1 potvrzený účetní (JMHZ scénář 8):
@@ -640,7 +640,7 @@ final class PayrollRunStatutoryInputAssembler
                     SocialIncomeAttribution::PostTerminationPaymentMonthVerified;
             } elseif ($employmentTo !== null
                 && $employmentTo < $periodStart
-                && self::deferredIncomeType($snapshot) === '1'
+                && self::deferredWithPostTerminationIncome($snapshot)
             ) {
                 /*
                  * Tentýž odložený příjem u vztahu, jehož účast stojí na výši
@@ -659,6 +659,16 @@ final class PayrollRunStatutoryInputAssembler
                     $relationshipReference,
                 );
                 $attribution = SocialIncomeAttribution::Unverified;
+            } elseif (self::deferredMonthWithoutIncome($snapshot, $periodStart)) {
+                /*
+                 * Roční zúčtování po skončení (typ 4): měsíc hlášení je
+                 * ověřený účetní, příjem v něm ale není (Pravidla podání JMHZ
+                 * 1.4.5, kap. 6 bod 3). Nulový příjem nic nezakládá; vstup
+                 * s příjmem by u dohod a ZMR skončil ruční kontrolou účasti
+                 * a hlášení typu 4 ho odmítne (patří do typu 5).
+                 */
+                $attribution =
+                    SocialIncomeAttribution::PostTerminationPaymentMonthVerified;
             } else {
                 $this->issue(
                     'social_insurance',
@@ -669,14 +679,19 @@ final class PayrollRunStatutoryInputAssembler
                 $attribution = SocialIncomeAttribution::Unverified;
             }
         }
+        $deferredWithoutIncome = self::deferredMonthWithoutIncome($snapshot, $periodStart);
         $components = $this->socialComponents(
             $snapshot['inputs'] ?? null,
             $personReference,
             $relationshipReference,
             $periodStart,
             $snapshot['absences'] ?? null,
+            $deferredWithoutIncome,
         );
-        if ($components === [] && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)) {
+        if ($components === []
+            && !$deferredWithoutIncome
+            && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)
+        ) {
             return null;
         }
 
@@ -1395,6 +1410,22 @@ final class PayrollRunStatutoryInputAssembler
             ) {
                 $attribution =
                     HealthIncomeAttribution::PostTerminationPaymentMonthVerified;
+            } elseif (self::deferredMonthWithoutIncome($snapshot, $periodStart)) {
+                /*
+                 * Dohoda s ročním zúčtováním po skončení (typ 4). Pojistné
+                 * z příjmu po skončení dohody patří do měsíce jejího konce,
+                 * pozdější měsíc bez příjmu zdravotní výpočet přiřadit neumí
+                 * a vztah bez zdravotního výsledku by výpočet osoby nedokončil.
+                 * Zastaví se proto s vlastním pokynem: hlášení typu 4 za
+                 * dohodu podá účetní ručně přes ePortál ČSSZ.
+                 */
+                $this->issue(
+                    'health_insurance',
+                    'post_termination_annual_settlement_agreement_unsupported',
+                    $personReference,
+                    $relationshipReference,
+                );
+                $attribution = HealthIncomeAttribution::Unverified;
             } else {
                 $this->issue(
                     'health_insurance',
@@ -1405,14 +1436,19 @@ final class PayrollRunStatutoryInputAssembler
                 $attribution = HealthIncomeAttribution::Unverified;
             }
         }
+        $deferredWithoutIncome = self::deferredMonthWithoutIncome($snapshot, $periodStart);
         $components = $this->healthComponents(
             $snapshot['inputs'] ?? null,
             $personReference,
             $relationshipReference,
             $periodStart,
             $snapshot['absences'] ?? null,
+            $deferredWithoutIncome,
         );
-        if ($components === [] && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)) {
+        if ($components === []
+            && !$deferredWithoutIncome
+            && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)
+        ) {
             return null;
         }
 
@@ -1701,14 +1737,19 @@ final class PayrollRunStatutoryInputAssembler
             );
             return null;
         }
+        $deferredWithoutIncome = self::deferredMonthWithoutIncome($snapshot, $periodStart);
         $components = $this->taxComponents(
             $snapshot['inputs'] ?? null,
             $personReference,
             $relationshipReference,
             $periodStart,
             $snapshot['absences'] ?? null,
+            $deferredWithoutIncome,
         );
-        if ($components === [] && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)) {
+        if ($components === []
+            && !$deferredWithoutIncome
+            && !$this->monthWithoutInputsExplained($snapshot['absences'] ?? null)
+        ) {
             return null;
         }
 
@@ -1909,6 +1950,7 @@ final class PayrollRunStatutoryInputAssembler
         string $relationshipReference,
         string $periodStart,
         mixed $absences = null,
+        bool $deferredWithoutIncome = false,
     ): array {
         $inputs = $this->componentInputs(
             $raw,
@@ -1916,6 +1958,7 @@ final class PayrollRunStatutoryInputAssembler
             $personReference,
             $relationshipReference,
             $absences,
+            $deferredWithoutIncome,
         );
         $domainTotal = $this->domainTotal($inputs, 'social_insurance');
         $result = [];
@@ -1970,6 +2013,7 @@ final class PayrollRunStatutoryInputAssembler
         string $relationshipReference,
         string $periodStart,
         mixed $absences = null,
+        bool $deferredWithoutIncome = false,
     ): array {
         $inputs = $this->componentInputs(
             $raw,
@@ -1977,6 +2021,7 @@ final class PayrollRunStatutoryInputAssembler
             $personReference,
             $relationshipReference,
             $absences,
+            $deferredWithoutIncome,
         );
         $domainTotal = $this->domainTotal($inputs, 'health_insurance');
         $result = [];
@@ -2031,6 +2076,7 @@ final class PayrollRunStatutoryInputAssembler
         string $relationshipReference,
         string $periodStart,
         mixed $absences = null,
+        bool $deferredWithoutIncome = false,
     ): array {
         $inputs = $this->componentInputs(
             $raw,
@@ -2038,6 +2084,7 @@ final class PayrollRunStatutoryInputAssembler
             $personReference,
             $relationshipReference,
             $absences,
+            $deferredWithoutIncome,
         );
         $domainTotal = $this->domainTotal($inputs, 'income_tax');
         $result = [];
@@ -2146,9 +2193,10 @@ final class PayrollRunStatutoryInputAssembler
         string $personReference,
         string $relationshipReference,
         mixed $absences = null,
+        bool $deferredWithoutIncome = false,
     ): array {
         $inputs = $this->list($raw);
-        if ($inputs === [] && $this->monthWithoutInputsExplained($absences)) {
+        if ($inputs === [] && ($deferredWithoutIncome || $this->monthWithoutInputsExplained($absences))) {
             return [];
         }
         if ($inputs === null || $inputs === []) {
@@ -2826,6 +2874,43 @@ final class PayrollRunStatutoryInputAssembler
         $type = is_array($deferred) ? ($deferred['deferred_type'] ?? null) : null;
 
         return is_string($type) ? $type : null;
+    }
+
+    /**
+     * Potvrzený odložený příjem s příjmem po skončení (typ 1, nebo 5 spolu
+     * s ročním zúčtováním): pojistné patří do měsíce zúčtování.
+     *
+     * @param array<string,mixed> $snapshot
+     */
+    private static function deferredWithPostTerminationIncome(array $snapshot): bool
+    {
+        return in_array(
+            self::deferredIncomeType($snapshot),
+            \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITH_POST_TERMINATION_INCOME,
+            true,
+        );
+    }
+
+    /**
+     * Skončený vztah s potvrzeným odloženým příjmem, který se hlásí bez
+     * zúčtovaného příjmu (typ 4, roční zúčtování po skončení; Pravidla podání
+     * JMHZ 1.4.5, kap. 6 bod 3: 10286, 10476 a 10477 jsou vždy 0). Měsíc bez
+     * vstupu je tu stav, ne zapomenutá mzda, a spočítá se s nulovým základem.
+     *
+     * @param array<string,mixed> $snapshot
+     */
+    private static function deferredMonthWithoutIncome(array $snapshot, string $periodStart): bool
+    {
+        $employment = $snapshot['employment'] ?? null;
+        $endDate = is_array($employment) ? ($employment['end_date'] ?? null) : null;
+
+        return is_string($endDate)
+            && $endDate < $periodStart
+            && in_array(
+                self::deferredIncomeType($snapshot),
+                \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
+                true,
+            );
     }
 
     /**

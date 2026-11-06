@@ -4,11 +4,22 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository;
 
+use MyInvoice\Service\Accounting\AccountCodeRange;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
-use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Accounting\Allocation\JointAllocationJournalProof;
+use MyInvoice\Service\Accounting\Allocation\JointAllocationAudit;
+use MyInvoice\Service\Accounting\Allocation\JointAllocationException;
+use MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard;
+use MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard;
+use MyInvoice\Service\Nonprofit\Membership\MembershipUseGuard;
+use MyInvoice\Service\Property\Charges\Issuance\IssuanceReversalIntent;
+use MyInvoice\Service\Accounting\Closing\Fx504JournalProof;
 use PDO;
 
 /**
@@ -20,6 +31,7 @@ use PDO;
  */
 final class JournalEntryRepository
 {
+    public const int SECURITIES_DEBT_GUARD_VERSION = 1;
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $activity,
@@ -35,34 +47,47 @@ final class JournalEntryRepository
      * } $header
      * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, is_red_storno?:bool, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
      */
+    public const FRAMEWORK_CONVERSION_OWNER_VERSION = 1;
+
+    public function cancelFrameworkConversion(int $supplier,int $conversion,int $actor,string $receiptHash):void
+    {
+        (new DimensionPeriodGuard($this->db))->transaction(function()use($supplier,$conversion,$actor,$receiptHash):void{
+            $proof=\MyInvoice\Service\Accounting\Conversion\FrameworkConversionCancellationProof::current($this->db,$supplier,$conversion);
+            \MyInvoice\Service\Accounting\Conversion\FrameworkConversionException::need(hash_equals($proof->row['receipt_hash'],$receiptHash),'conversion_preview_stale');
+            $entry=(int)$proof->row['opening_entry_id'];
+            $q=$this->db->pdo()->prepare('UPDATE accounting_framework_conversion_cells SET opening_line_id=NULL WHERE supplier_id=? AND conversion_id=?');$q->execute([$supplier,$conversion]);
+            $q=$this->db->pdo()->prepare("UPDATE accounting_framework_conversions SET status='cancelled',opening_entry_id=NULL,source_entry_id=NULL,cancelled_by=?,cancelled_at=UTC_TIMESTAMP(6) WHERE supplier_id=? AND id=? AND opening_entry_id=? AND status='applied'");$q->execute([$actor,$supplier,$conversion,$entry]);
+            \MyInvoice\Service\Accounting\Conversion\FrameworkConversionException::need($q->rowCount()===1,'conversion_write_conflict');
+            $this->deleteLines($entry,$supplier);$q=$this->db->pdo()->prepare('DELETE FROM journal_entries WHERE supplier_id=? AND id=?');$q->execute([$supplier,$entry]);
+            \MyInvoice\Service\Accounting\Conversion\FrameworkConversionException::need($q->rowCount()===1,'conversion_write_conflict');
+        });
+    }
+
+    public function insertFrameworkConversion(int $supplier,int $conversion):int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function()use($supplier,$conversion):int{
+            $proof=\MyInvoice\Service\Accounting\Conversion\FrameworkConversionJournalProof::pending($this->db,$supplier,$conversion);
+            (new SystemDimensionWritePolicy($this->db))->assertClosingCarry($proof);
+            $entry=$this->persistJournal($proof->header,$proof->lines);
+            $this->activity->log('accounting.posted',(int)$proof->header['posted_by'],'journal_entry',$entry,
+                ['source_type'=>$proof->header['source_type'],'source_id'=>$proof->header['source_id'],'framework_conversion_id'=>$conversion],null,null,$supplier);
+            return $entry;
+        });
+    }
+
     public function insert(array $header, array $lines): int
     {
+        \MyInvoice\Service\Property\Services\Settlement\SettlementUseGuard::assertGenericInsert($header);
+        \MyInvoice\Service\Property\Funds\FundingUseGuard::assertGenericInsert($header);
+        \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard::assertGenericInsert($header);
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
         if ($ownTx) {
             $pdo->beginTransaction();
         }
         try {
-            $pdo->prepare(
-                'INSERT INTO journal_entries
-                    (supplier_id, period_id, entry_date, document_date, document_no, description,
-                     source_type, source_id, posted_at, posted_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-            )->execute([
-                $header['supplier_id'],
-                $header['period_id'],
-                $header['entry_date'],
-                $header['document_date'] ?? null,
-                $header['document_no'] ?? null,
-                $header['description'] ?? null,
-                $header['source_type'] ?? 'manual',
-                $header['source_id'] ?? null,
-                $header['posted_at'] ?? null,
-                $header['posted_by'] ?? null,
-            ]);
-            $entryId = (int) $pdo->lastInsertId();
-
-            $this->insertLines($pdo, $entryId, (int) $header['supplier_id'], $lines);
+            (new SystemDimensionWritePolicy($this->db))->assertJournal($header, $lines);
+            $entryId = $this->persistJournal($header, $lines);
 
             if ($ownTx) {
                 $pdo->commit();
@@ -74,6 +99,539 @@ final class JournalEntryRepository
             }
             throw $e;
         }
+    }
+
+    public function insertPropertyOpening(\MyInvoice\Service\Property\Opening\OpeningOwnerProof $proof):array
+    {
+            $original=$proof->original($this->db);$journals=[];
+            foreach($proof->parts($this->db) as $part){
+                $journal=$proof->journal($this->db,$part);
+                (new SystemDimensionWritePolicy($this->db))->assertPropertyOpening($journal['header'],$journal['lines'],$proof,$part);
+                $journals[$part]=$journal;
+            }
+            $result=['journal_entry_id'=>null,'reversal_entry_id'=>null];
+            foreach($journals as $part=>$journal){
+                $entry=$this->persistJournal($journal['header'],$journal['lines']);
+                if($part==='reversal'){
+                    if($original===null||!$this->setReversedByLocked($original['entry']['id'],$proof->supplier,$entry))\MyInvoice\Service\Property\Opening\OpeningException::reject('reversal_conflict');
+                    $result['reversal_entry_id']=$entry;
+                }else $result['journal_entry_id']=$entry;
+                $this->auditTypedPosting($journal['header'],$entry,$part==='reversal'?(int)$original['entry']['id']:null,['property_opening'=>$part]);
+            }
+            return $result;
+    }
+
+    public function insertPropertyClearing(\MyInvoice\Service\Property\Payments\Workflow\PaymentClearingIntent $intent, ?string $documentNumber = null): int
+    {
+        $intent->assertConnection($this->db);
+        $proof = $intent->journal();
+        if ($documentNumber !== null) {
+            if ($proof['header']['source_type'] !== 'cash' || trim($documentNumber) === '' || mb_strlen($documentNumber) > 100) throw new \LogicException('A cash number requires the current cash owner.');
+            $proof['header']['document_no'] = $documentNumber;
+        }
+        $entry = $this->persistJournal($proof['header'], $proof['lines']);
+        $this->auditTypedPosting($proof['header'], $entry, null, ['property_clearing' => true]);
+        $intent->bindJournal($entry);
+        return $entry;
+    }
+
+    public function insertPropertySourceRevision(\MyInvoice\Service\Property\Payments\Workflow\ClearingRevisionIntent $intent): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
+            $proof = $intent->journal($this->db);
+            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $this->auditTypedPosting($proof['header'], $entry, null, ['property_source_revision' => true]);
+            $intent->complete($this->db, $entry);
+            return $entry;
+        });
+    }
+
+    public function insertPropertySettlement(\MyInvoice\Service\Property\Payments\Workflow\PaymentSettlementIntent $intent): int
+    {
+        $proof = $intent->journal($this->db);
+        $entry = $this->persistJournal($proof['header'], $proof['lines']);
+        $this->auditTypedPosting($proof['header'], $entry, null, ['property_settlement' => true]);
+        $stmt = $this->db->pdo()->prepare("UPDATE unit_payment_operations SET journal_entry_id=? WHERE supplier_id=? AND id=? AND status='pending' AND journal_entry_id IS NULL");
+        $stmt->execute([$entry, $intent->supplier, $intent->operationId]);
+        if ($stmt->rowCount() !== 1) \MyInvoice\Service\Property\Payments\PaymentException::reject('settlement_intent');
+        return $entry;
+    }
+
+    public function insertNonprofitCapital(\MyInvoice\Service\Nonprofit\Capital\CapitalJournalProof $proof):int
+    {
+        return(new DimensionPeriodGuard($this->db))->transaction(function()use($proof):int{
+            $journal=$proof->journal($this->db);
+            (new SystemDimensionWritePolicy($this->db))->assertNonprofitCapital($journal['header'],$journal['lines'],$proof);
+            \MyInvoice\Service\Accounting\PostingService::assertBalanced($journal['lines']);
+            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines']):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
+            $this->auditTypedPosting($journal['header'],$entry,$journal['source_entry_id'],['typed_owner'=>$proof::class]);
+            $proof->complete($this->db,$entry);return $entry;
+        });
+    }
+
+    public function insertPropertyFunding(\MyInvoice\Service\Property\Funds\FundingProof $proof):int
+    {
+        return(new DimensionPeriodGuard($this->db))->transaction(function()use($proof):int{
+            $journal=$proof->journal($this->db);
+            (new SystemDimensionWritePolicy($this->db))->assertPropertyFunding($journal['header'],$journal['lines'],$proof);
+            \MyInvoice\Service\Accounting\PostingService::assertBalanced($journal['lines']);
+            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines']):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
+            $this->auditTypedPosting($journal['header'],$entry,$journal['source_entry_id'],['typed_owner'=>$proof::class]);
+            $proof->complete($this->db,$entry);return $entry;
+        });
+    }
+    public function insertPropertyServiceLifecycle(\MyInvoice\Service\Property\Services\Settlement\ServiceLifecycleProof $proof):int
+    {
+        return(new DimensionPeriodGuard($this->db))->transaction(function()use($proof):int{
+            $journal=$proof->journal($this->db);
+            (new SystemDimensionWritePolicy($this->db))->assertPropertyServiceLifecycle($journal['header'],$journal['lines'],$proof);
+            \MyInvoice\Service\Accounting\PostingService::assertBalanced($journal['lines']);
+            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines']):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
+            $this->auditTypedPosting($journal['header'],$entry,$journal['source_entry_id'],['typed_owner'=>$proof::class]);
+            $proof->complete($this->db,$entry);return $entry;
+        });
+    }
+
+    public function insertPropertyServiceSettlement(\MyInvoice\Service\Property\Services\Settlement\SettlementApplicationIntent $intent): int
+    {
+        $intent->claim($this->db);
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
+            $proof = $intent->journal($this->db);
+            if ($proof['source_entry_id'] !== null) throw new \LogicException('An application cannot reverse a source.');
+            (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->assertPropertyServiceSettlementJournal($proof['header'], $proof['lines'], $intent->carrier($this->db));
+            \MyInvoice\Service\Accounting\PostingService::assertBalanced($proof['lines']);
+            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $this->auditTypedPosting($proof['header'], $entry, null, ['property_service_settlement' => true]);
+            $intent->complete($this->db, $entry);
+            return $entry;
+        });
+    }
+
+    public function insertPropertyServiceSettlementReversal(\MyInvoice\Service\Property\Services\Settlement\SettlementReversalIntent $intent): int
+    {
+        $intent->claim($this->db);
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
+            $proof = $intent->journal($this->db);
+            if ($proof['source_entry_id'] === null) throw new \LogicException('A reversal requires its current source.');
+            $entry = $this->insertReversalLocked($proof['header'], $proof['lines'], $proof['source_entry_id']);
+            $this->auditTypedPosting($proof['header'], $entry, $proof['source_entry_id'], ['property_service_settlement' => true]);
+            $intent->complete($this->db, $entry);
+            return $entry;
+        });
+    }
+
+    public function insertPropertySetoff(\MyInvoice\Service\Property\Payments\Workflow\PaymentSetoffIntent $intent): int
+    {
+        $intent->claim($this->db);
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
+            $proof = $intent->journal($this->db);
+            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $this->auditTypedPosting($proof['header'], $entry, null, ['property_setoff' => true]);
+            $intent->complete($this->db, $entry);
+            return $entry;
+        });
+    }
+
+    public function insertPropertyPaymentReversal(\MyInvoice\Service\Property\Payments\PaymentReversalIntent $intent): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
+        $intent = $intent->current($this->db);
+        $source = $this->currentEntryForDimensionWrite($intent->sourceEntryId, $intent->supplierId);
+        if ($source === null) \MyInvoice\Service\Property\Payments\PaymentException::reject('reversal_intent');
+        $period = (new AccountingPeriodRepository($this->db))->findForDateForUpdate($intent->supplierId, $intent->accountingDate);
+        if ($period === null || $period['status'] !== 'open') \MyInvoice\Service\Property\Payments\PaymentException::reject('target_period_not_open');
+        $lines = array_map(static fn (array $line): array => array_replace($line, JournalLineAmount::reversal($line)), $source['lines']);
+        $header = [
+            'supplier_id' => $intent->supplierId, 'period_id' => (int) $period['id'],
+            'entry_date' => $intent->accountingDate, 'document_date' => $source['document_date'],
+            'document_no' => $source['document_no'] === null ? null : mb_substr('STORNO ' . $source['document_no'], 0, 50),
+            'description' => $intent->description, 'source_type' => $source['source_type'], 'source_id' => null,
+            'posted_at' => date('Y-m-d H:i:s'), 'posted_by' => $intent->actor,
+        ];
+        $entry = $this->insertReversalLocked($header, $lines, $intent->sourceEntryId);
+        $intent->complete($this->db, $entry);
+        $this->activity->log('accounting.reversed', $intent->actor, 'journal_entry', $entry,
+            ['original_entry_id' => $intent->sourceEntryId, 'reversal_entry_id' => $entry, 'lines' => $lines], null, null, $intent->supplierId);
+        return $entry;
+        });
+    }
+
+    public function insertCurrentAllocation(int $supplierId, int $batchId): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $batchId): int {
+            $proof = (new JointAllocationJournalProof($this->db))->apply($supplierId, $batchId);
+            $entryId = $this->persistJournal($proof['header'], $proof['lines']);
+            $this->auditTypedPosting($proof['header'], $entryId, null, ['joint_allocation_batch_id' => $batchId]);
+            $stmt = $this->db->pdo()->prepare('UPDATE joint_allocation_batches SET journal_entry_id = ? WHERE supplier_id = ? AND id = ? AND journal_entry_id IS NULL');
+            $stmt->execute([$entryId, $supplierId, $batchId]);
+            if ($stmt->rowCount() !== 1) {
+                throw new JointAllocationException('allocation_changed', 'Alokace se během zápisu změnila.', 409);
+            }
+            $batch = $proof['batch'];
+            (new JointAllocationAudit($this->db))->record($supplierId, 'batch', $batchId, 'apply', [
+                'journal_entry_id' => $entryId, 'key_version_id' => (int) $batch['key_version_id'],
+                'preview_hash' => $batch['preview_hash'], 'reason' => $batch['reason'],
+            ], $batch['created_by'] === null ? null : (int) $batch['created_by']);
+            return $entryId;
+        });
+    }
+
+    public function reverseCurrentAllocation(int $supplierId, int $cancellationId): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $cancellationId): int {
+            $proof = (new JointAllocationJournalProof($this->db))->cancellation($supplierId, $cancellationId);
+            $entryId = $this->persistJournal($proof['header'], $proof['lines']);
+            $this->auditTypedPosting($proof['header'], $entryId, null, ['joint_allocation_cancellation_id' => $cancellationId]);
+            $pdo = $this->db->pdo();
+            $stmt = $pdo->prepare('UPDATE joint_allocation_cancellations SET reversal_entry_id = ? WHERE supplier_id = ? AND id = ? AND reversal_entry_id IS NULL');
+            $stmt->execute([$entryId, $supplierId, $cancellationId]);
+            if ($stmt->rowCount() !== 1) {
+                throw new JointAllocationException('allocation_changed', 'Zrušení alokace se během zápisu změnilo.', 409);
+            }
+            $batch = $proof['batch'];
+            $release = $pdo->prepare('DELETE FROM joint_allocation_source_claims WHERE supplier_id = ? AND batch_id = ?');
+            $release->execute([$supplierId, $batch['id']]);
+            if ($release->rowCount() !== count($proof['source_line_ids'])) {
+                throw new JointAllocationException('allocation_changed', 'Vazby zdrojových řádků se změnily.', 409);
+            }
+            $cancellation = $proof['cancellation'];
+            (new JointAllocationAudit($this->db))->record($supplierId, 'cancellation', $cancellationId, 'cancel', [
+                'batch_id' => (int) $batch['id'], 'reversal_entry_id' => $entryId, 'reason' => $cancellation['reason'],
+            ], $cancellation['created_by'] === null ? null : (int) $cancellation['created_by']);
+            return $entryId;
+        });
+    }
+
+    public function insertCurrentLegalClosing(int $supplierId, int $periodId, int $expectedVersion): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $periodId, $expectedVersion): int {
+            $proof = \MyInvoice\Service\Accounting\Closing\ClosingLegal504Proof::forPending($this->db, $this, $supplierId, $periodId, $expectedVersion);
+            (new SystemDimensionWritePolicy($this->db))->assertLegalClosing($proof);
+            if ($proof->pending['status'] === 'written') return (int) $proof->pending['entry_id'];
+            $entryId = $this->persistJournal($proof->header, $proof->lines);
+            $payload = $proof->stepRow['decoded_payload'];
+            $payload['entries'][] = ['entry_id' => $entryId] + $proof->record;
+            $payload['legal_pending'] = array_replace($proof->pending, ['status' => 'written', 'entry_id' => $entryId,
+                'entry_version' => 1, 'source_line_ids' => $proof->sourceLineIds]);
+            $stmt = $this->db->pdo()->prepare('UPDATE accounting_closing_steps SET payload=? WHERE id=? AND supplier_id=? AND payload <=> ?');
+            $stmt->execute([json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), $proof->stepRow['id'], $supplierId, $proof->stepRow['payload']]);
+            if ($stmt->rowCount() !== 1) throw $proof::changed();
+            $stmt = $this->db->pdo()->prepare("UPDATE accounting_periods SET row_version=row_version+1 WHERE supplier_id=? AND id=? AND status='closing' AND row_version=?");
+            $stmt->execute([$supplierId, $periodId, $expectedVersion]);
+            if ($stmt->rowCount() !== 1) throw $proof::changed();
+            $meta = $proof->pending['meta'] ?? [];
+            $this->activity->log('accounting.posted', $meta['user_id'] ?? null, 'journal_entry', $entryId,
+                ['source_type' => 'manual', 'source_id' => null, 'legal_source_line_ids' => $proof->sourceLineIds],
+                $meta['ip'] ?? null, $meta['user_agent'] ?? null, $supplierId);
+            return $entryId;
+        });
+    }
+
+    public function insertCurrentAssetReserveCorrection(int $supplierId, int $periodId, int $expectedVersion): array
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $periodId, $expectedVersion): array {
+            $proof = \MyInvoice\Service\Accounting\Closing\AssetReserveCorrection504Proof::forPending($this->db, $this, $supplierId, $periodId, $expectedVersion);
+            if ($proof->pending['status'] === 'written') return $proof->revision;
+            $entryId = null;
+            if ($proof->lines !== []) {
+                (new SystemDimensionWritePolicy($this->db))->assertAssetReserveCorrection($proof);
+                $entryId = $this->persistJournal($proof->header, $proof->lines);
+                $meta = $proof->pending['meta'] ?? [];
+                $this->activity->log('accounting.posted', $meta['user_id'] ?? null, 'journal_entry', $entryId,
+                    ['source_type' => $proof->header['source_type'] ?? 'manual', 'source_id' => $proof->header['source_id'] ?? null, 'asset_reserve_correction' => true],
+                    $meta['ip'] ?? null, $meta['user_agent'] ?? null, $supplierId);
+            }
+            $stmt = $this->db->pdo()->prepare('SELECT id FROM journal_entries WHERE supplier_id=? ORDER BY id DESC LIMIT 1 FOR UPDATE');
+            $stmt->execute([$supplierId]);
+            $lastId = (int) $stmt->fetchColumn();
+            $revision = \MyInvoice\Service\Accounting\Closing\AssetReserveSourceDecision::sealRevision($proof->revision + ['entry_id' => $entryId, 'sequence_entry_id' => $lastId]);
+            $payload = $proof->stepRow['decoded_payload'];
+            $payload['asset_source_revisions'][] = $revision;
+            $payload['asset_correction_pending'] = array_replace($proof->pending, ['status' => 'written', 'revision_index' => array_key_last($payload['asset_source_revisions'])]);
+            $stmt = $this->db->pdo()->prepare('UPDATE accounting_closing_steps SET payload=? WHERE id=? AND supplier_id=? AND payload <=> ?');
+            $stmt->execute([\MyInvoice\Service\Accounting\Allocation\JointAllocationKeyVersion::encodeJson($payload), $proof->stepRow['id'], $supplierId, $proof->stepRow['payload']]);
+            if ($stmt->rowCount() !== 1) throw \MyInvoice\Service\Accounting\Closing\AssetReserveSourceDecision::changed();
+            $stmt = $this->db->pdo()->prepare("UPDATE accounting_periods SET row_version=row_version+1 WHERE supplier_id=? AND id=? AND status='closing' AND row_version=?");
+            $stmt->execute([$supplierId, $periodId, $expectedVersion]);
+            if ($stmt->rowCount() !== 1) throw \MyInvoice\Service\Accounting\Closing\AssetReserveSourceDecision::changed();
+            return $revision;
+        });
+    }
+
+    public function insertCurrentDeferredTax504(int $supplierId, int $periodId, int $expectedVersion): array
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $periodId, $expectedVersion): array {
+            $proof = \MyInvoice\Service\Accounting\Closing\DeferredTax504Proof::forPending($this->db, $this, $supplierId, $periodId, $expectedVersion);
+            if ($proof->pending['status'] === 'written') return ['entry_ids' => array_column($proof->batches, 'entry_id'), 'assessment' => $proof->assessment];
+            $policy = new SystemDimensionWritePolicy($this->db);
+            foreach (array_keys($proof->batches) as $index) $policy->assertDeferredTax504($proof->batch($index));
+            $batches = [];
+            foreach ($proof->batches as $batch) {
+                $entryId = $this->persistJournal($batch['header'], $batch['lines']);
+                $batches[] = ['phase' => $batch['phase'], 'entry_id' => $entryId, 'entry_version' => 1];
+                $meta = $proof->pending['meta'] ?? [];
+                $this->activity->log('accounting.posted', $meta['user_id'] ?? null, 'journal_entry', $entryId,
+                    ['source_type' => 'manual', 'source_id' => null, 'deferred_tax_method' => $proof->assessment['method']['version']],
+                    $meta['ip'] ?? null, $meta['user_agent'] ?? null, $supplierId);
+            }
+            $payload = $proof->stepRow['decoded_payload'];
+            $payload['deferred504_decisions'][] = ['body' => $proof->pending['body'], 'assessment' => $proof->assessment, 'batches' => $batches];
+            $payload['deferred504_pending'] = array_replace($proof->pending, ['status' => 'written', 'record_index' => array_key_last($payload['deferred504_decisions']), 'source_line_ids' => $proof->sourceLineIds]);
+            $stmt = $this->db->pdo()->prepare("UPDATE accounting_closing_steps SET payload=?,status='done',done_at=NOW(),done_by=? WHERE id=? AND supplier_id=? AND payload <=> ?");
+            $stmt->execute([json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), $proof->pending['meta']['user_id'] ?? null, $proof->stepRow['id'], $supplierId, $proof->stepRow['payload']]);
+            if ($stmt->rowCount() !== 1) throw $proof::changed();
+            $stmt = $this->db->pdo()->prepare("UPDATE accounting_periods SET row_version=row_version+1 WHERE supplier_id=? AND id=? AND status='closing' AND row_version=?");
+            $stmt->execute([$supplierId, $periodId, $expectedVersion]);
+            if ($stmt->rowCount() !== 1) throw $proof::changed();
+            return ['entry_ids' => array_column($batches, 'entry_id'), 'assessment' => $proof->assessment];
+        });
+    }
+
+    public function upsertCurrentFx504(int $supplierId, int $stepId, string $slot, int $expectedVersion): ?int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $stepId, $slot, $expectedVersion): ?int {
+            $proof = Fx504JournalProof::forPending($this->db, $supplierId, $stepId, $slot, $expectedVersion);
+            (new SystemDimensionWritePolicy($this->db))->assertFx504($proof);
+            $header = $proof->header;
+            $previous = $this->findActiveBySourceForUpdate($supplierId, 'fx_revaluation', $header['source_id']);
+            $record = $proof->record['slots'][$slot];
+            if (($previous === null ? null : (int) $previous['id']) !== ($record['previous_entry_id'] ?? null)
+                || ($previous === null ? null : (int) $previous['row_version']) !== ($record['previous_entry_version'] ?? null)) throw Fx504JournalProof::changed();
+            $entryId = null;
+            if ($proof->lines === []) {
+                if ($previous !== null) throw Fx504JournalProof::changed();
+            } elseif ($previous === null) {
+                $entryId = $this->persistJournal($header, $proof->lines);
+            } else {
+                $entryId = (int) $previous['id'];
+                (new \MyInvoice\Service\Accounting\Closing\SecuritiesDebt504UseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+                (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+                $stmt = $this->db->pdo()->prepare('UPDATE journal_entries SET document_no = ?, description = ?, posted_at = ?, posted_by = ?, row_version = row_version + 1
+                    WHERE supplier_id = ? AND id = ? AND period_id = ? AND entry_date = ? AND row_version = ? AND reversed_by IS NULL');
+                $stmt->execute([$header['document_no'], $header['description'], $header['posted_at'], $header['posted_by'], $supplierId, $entryId,
+                    $header['period_id'], $header['entry_date'], $previous['row_version']]);
+                if ($stmt->rowCount() !== 1) throw Fx504JournalProof::changed();
+                $this->deleteLines($entryId, $supplierId);
+                $this->insertLines($this->db->pdo(), $entryId, $supplierId, $proof->lines);
+                $this->logReleasedPairings($supplierId, $entryId, (new JournalLinePairingRepository($this->db))->releaseStale($supplierId, $entryId), 'repost');
+            }
+            if ($entryId !== null) {
+                $postedBy = $record['posted_by'] ?? $proof->record['posted_by'] ?? null;
+                $this->activity->log($previous === null ? 'accounting.posted' : 'accounting.reposted', $postedBy === null ? null : (int) $postedBy, 'journal_entry', $entryId,
+                    ['source_type' => 'fx_revaluation', 'source_id' => $header['source_id'], 'fx504_slot' => $slot], null, null, $supplierId);
+            }
+            $payload = $proof->stepRow['decoded_payload'];
+            $payload['fx504']['slots'][$slot] = array_replace($record, ['status' => 'written', 'entry_id' => $entryId]);
+            $stmt = $this->db->pdo()->prepare('UPDATE accounting_closing_steps SET payload = ? WHERE supplier_id = ? AND id = ? AND payload <=> ?');
+            $stmt->execute([json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), $supplierId, $stepId, $proof->stepRow['payload']]);
+            if ($stmt->rowCount() !== 1) throw Fx504JournalProof::changed();
+            return $entryId;
+        });
+    }
+
+    public function upsertCurrentClosingCarry(int $supplierId, int $periodId, string $step, int $expectedVersion): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $periodId, $step, $expectedVersion): int {
+            $proof = \MyInvoice\Service\Accounting\Closing\ClosingCarryJournalProof::forPending($this->db, $supplierId, $periodId, $step, $expectedVersion);
+            (new SystemDimensionWritePolicy($this->db))->assertClosingCarry($proof);
+            $header = $proof->header;
+            $existing = $this->findActiveBySourceForUpdate($supplierId, $header['source_type'], $header['source_id']);
+            if ($proof->record['status'] === 'written') {
+                if ($existing === null || (int) $existing['id'] !== ($proof->record['entry_id'] ?? 0)
+                    || (int) $existing['row_version'] !== ($proof->record['entry_version'] ?? 0)) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
+                foreach ($header as $field => $value) {
+                    if ((string) ($existing[$field] ?? '') !== (string) ($value ?? '')) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
+                }
+                $current = $this->currentEntryForDimensionWrite((int) $existing['id'], $supplierId);
+                if (count($current['lines']) !== count($proof->lines)) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
+                foreach ($proof->lines as $index => $line) {
+                    $old = $current['lines'][$index];
+                    if (!SystemDimensionWritePolicy::sameLedgerLine($line, $old)
+                        || ($line['dimensions'] ?? []) !== $old['dimensions']
+                        || !DimensionAssignmentRepository::sameSplits($line['dimension_splits'] ?? [], $old['dimension_splits'])) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
+                }
+                return (int) $existing['id'];
+            }
+            if (($existing === null ? null : (int) $existing['id']) !== ($proof->record['previous_entry_id'] ?? null)
+                || ($existing === null ? null : (int) $existing['row_version']) !== ($proof->record['previous_entry_version'] ?? null)) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
+            if ($existing === null) {
+                $entryId = $this->persistJournal($header, $proof->lines);
+                $entryVersion = 1;
+            } else {
+                $entryId = (int) $existing['id'];
+                (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
+                (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+                (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+                (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this))->assertEntriesMutable($supplierId, [$entryId]);
+                $locked = $this->db->pdo()->prepare('SELECT locked_until FROM accounting_supplier_settings WHERE supplier_id = ? FOR UPDATE');
+                $locked->execute([$supplierId]);
+                $lockedUntil = $locked->fetchColumn();
+                if ($lockedUntil && $existing['entry_date'] <= $lockedUntil) throw new PostingException('date_locked', 'Datum původního zápisu leží v uzamčené části účetnictví.', 422);
+                $this->replaceVerifiedClosingCarry($entryId, (int) $existing['row_version'], $proof);
+                $entryVersion = (int) $existing['row_version'] + 1;
+            }
+            $payload = $proof->stepRow['decoded_payload'];
+            $payload['carry'][$step] = array_replace($proof->record, ['status' => 'written', 'entry_id' => $entryId,
+                'entry_version' => $entryVersion, 'source_line_ids' => $proof->sourceLineIds]);
+            $cas = $this->db->pdo()->prepare('UPDATE accounting_closing_steps SET payload = ? WHERE id = ? AND supplier_id = ? AND payload <=> ?');
+            $cas->execute([json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE), $proof->stepRow['id'], $supplierId, $proof->stepRow['payload']]);
+            if ($cas->rowCount() !== 1) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
+            $meta = $proof->record['meta'] ?? [];
+            $this->activity->log($existing === null ? 'accounting.posted' : 'accounting.reposted', $meta['user_id'] ?? null, 'journal_entry', $entryId,
+                ['source_type' => $header['source_type'], 'source_id' => $header['source_id'], 'closing_carry_source_hash' => $proof->record['source_hash']],
+                $meta['ip'] ?? null, $meta['user_agent'] ?? null, $supplierId);
+            return $entryId;
+        });
+    }
+
+    private function replaceVerifiedClosingCarry(int $entryId, int $entryVersion, \MyInvoice\Service\Accounting\Closing\ClosingCarryJournalProof $proof): void
+    {
+        $proof->assertConnection($this->db);
+        $header = $proof->header;
+        $stmt = $this->db->pdo()->prepare('UPDATE journal_entries SET entry_date = ?, document_date = ?, document_no = ?, description = ?,
+            posted_at = ?, posted_by = ?, row_version = row_version + 1 WHERE supplier_id = ? AND id = ? AND period_id = ? AND row_version = ? AND reversed_by IS NULL');
+        $stmt->execute([$header['entry_date'], $header['document_date'], $header['document_no'], $header['description'], $header['posted_at'], $header['posted_by'],
+            $header['supplier_id'], $entryId, $header['period_id'], $entryVersion]);
+        if ($stmt->rowCount() !== 1) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
+        $this->deleteLines($entryId, $header['supplier_id']);
+        $this->insertLines($this->db->pdo(), $entryId, $header['supplier_id'], $proof->lines);
+        $this->logReleasedPairings($header['supplier_id'], $entryId,
+            (new JournalLinePairingRepository($this->db))->releaseStale($header['supplier_id'], $entryId), 'repost');
+    }
+
+    /** § 33a: typovaný zapisovač nejde přes PostingService, auditní stopu zápisu proto zapisuje sám (invariant I28). */
+    private function auditTypedPosting(array $header, int $entryId, ?int $sourceEntryId, array $context): void
+    {
+        $actor = isset($header['posted_by']) ? (int) $header['posted_by'] : null;
+        $payload = $sourceEntryId === null
+            ? ['source_type' => $header['source_type'] ?? 'manual', 'source_id' => $header['source_id'] ?? null]
+            : ['original_entry_id' => $sourceEntryId, 'reversal_entry_id' => $entryId];
+        $this->activity->log($sourceEntryId === null ? 'accounting.posted' : 'accounting.reversed', $actor, 'journal_entry', $entryId,
+            $payload + $context, null, null, (int) $header['supplier_id']);
+    }
+
+    private function persistJournal(array $header, array $lines): int
+    {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('Journal persistence requires a transaction.');
+        }
+        (new MembershipUseGuard($this->db))->assertHeaderOwner($header);
+        if (($header['posted_at'] ?? null) !== null) (new \MyInvoice\Service\Accounting\Funding\NativeCostCoverage($this->db))->assertCreditNotePosting($header);
+        $pdo->prepare(
+            'INSERT INTO journal_entries
+                (supplier_id, period_id, entry_date, document_date, document_no, description,
+                 source_type, source_id, posted_at, posted_by)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $header['supplier_id'],
+            $header['period_id'],
+            $header['entry_date'],
+            $header['document_date'] ?? null,
+            $header['document_no'] ?? null,
+            $header['description'] ?? null,
+            $header['source_type'] ?? 'manual',
+            $header['source_id'] ?? null,
+            $header['posted_at'] ?? null,
+            $header['posted_by'] ?? null,
+        ]);
+        $entryId = (int) $pdo->lastInsertId();
+        $this->insertLines($pdo, $entryId, (int) $header['supplier_id'], $lines);
+        return $entryId;
+    }
+
+    public function insertReversal(array $header, array $lines, int $sourceEntryId): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($header, $lines, $sourceEntryId): int {
+            (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable((int) $header['supplier_id'], [$sourceEntryId]);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable((int) $header['supplier_id'], [$sourceEntryId]);
+            return $this->insertReversalLocked($header, $lines, $sourceEntryId);
+        });
+    }
+
+    public function insertPropertyChargeReversal(int $supplierId, int $intentId): int
+    {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $intentId): int {
+            return $this->persistPropertyChargeReversal(IssuanceReversalIntent::fromCurrentRequest($this->db,$supplierId,$intentId));
+        });
+    }
+
+    public function insertPropertyCorrectionChargeReversal(\MyInvoice\Service\Property\Payments\PaymentCorrectionReversalIntent $correction):array
+    {
+        $correction->claim($this->db);
+        return (new DimensionPeriodGuard($this->db))->transaction(function()use($correction):array{
+            $correction->prepareWrite($this->db);
+            $intent=IssuanceReversalIntent::fromPaymentCorrection($this->db,$correction);
+            $this->persistPropertyChargeReversal($intent);
+            return $correction->complete($this->db);
+        });
+    }
+
+    private function persistPropertyChargeReversal(IssuanceReversalIntent $intent):int
+    {
+        $supplierId=$intent->supplierId;
+        $source = $this->currentEntryForDimensionWrite($intent->sourceEntryId, $supplierId);
+        if ($source === null) throw new PostingException('entry_not_found', 'Účetní zápis nebyl nalezen.', 404);
+        $lines = array_map(static fn (array $line): array => array_replace($line, JournalLineAmount::reversal($line)), $source['lines']);
+        $header = [
+            'supplier_id' => $supplierId, 'period_id' => $intent->targetPeriodId,
+            'entry_date' => $intent->accountingDate, 'document_date' => $source['document_date'],
+            'document_no' => $source['document_no'] === null ? null : mb_substr('STORNO ' . $source['document_no'], 0, 50),
+            'description' => $intent->description, 'source_type' => $source['source_type'], 'source_id' => null,
+            'posted_at' => date('Y-m-d H:i:s'), 'posted_by' => $intent->actor,
+        ];
+        $reversalId = $this->insertReversalLocked($header, $lines, $intent->sourceEntryId);
+        $intent->complete($this->db, $reversalId);
+        $this->activity->log('accounting.reversed', $intent->actor, 'journal_entry', $reversalId,
+            ['original_entry_id' => $intent->sourceEntryId, 'reversal_entry_id' => $reversalId, 'lines' => $lines], null, null, $supplierId);
+        return $reversalId;
+    }
+
+    private function insertReversalLocked(array $header, array $lines, int $sourceEntryId): int
+    {
+        $supplierId = (int) $header['supplier_id'];
+        (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$sourceEntryId]);
+        (new \MyInvoice\Service\Accounting\Closing\SecuritiesDebt504UseGuard($this->db))->assertEntriesMutable($supplierId, [$sourceEntryId]);
+        $source = $this->currentEntryForDimensionWrite($sourceEntryId, $supplierId);
+        (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$sourceEntryId]);
+        (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this))->assertReversal($supplierId, $sourceEntryId);
+        $invalid = static fn (): PostingException => new PostingException('invalid_reversal_source', 'Protizápis neodpovídá živému zaúčtovanému zdroji.', 422);
+        if ($source === null || $source['posted_at'] === null || $source['reversed_by'] !== null || $source['source_type'] === 'payroll'
+            || ($header['source_type'] ?? 'manual') !== $source['source_type']
+            || ($header['source_id'] ?? null) !== null || ($header['posted_at'] ?? null) === null
+            || count($source['lines']) !== count($lines) || $lines === []) {
+            throw $invalid();
+        }
+        $period = $this->db->pdo()->prepare('SELECT status FROM accounting_periods WHERE id = ? AND supplier_id = ? AND starts_on <= ? AND ends_on >= ? FOR UPDATE');
+        $period->execute([(int) $header['period_id'], $supplierId, $header['entry_date'], $header['entry_date']]);
+        if (!in_array($period->fetchColumn(), ['open', 'closing'], true)) {
+            throw $invalid();
+        }
+        $dimensions = static function (array $values): array {
+            $values = array_map('intval', $values);
+            ksort($values);
+            return $values;
+        };
+        $mirror = [];
+        foreach (array_values($lines) as $index => $line) {
+            $original = $source['lines'][$index];
+            $expected = array_replace($original, JournalLineAmount::reversal($original));
+            if (!SystemDimensionWritePolicy::sameLedgerLine($line, $expected)
+                || $dimensions($line['dimensions'] ?? []) !== $dimensions($original['dimensions'])
+                || !DimensionAssignmentRepository::sameSplits($line['dimension_splits'] ?? [], $original['dimension_splits'])) {
+                throw $invalid();
+            }
+            unset($expected['id'], $expected['entry_id'], $expected['supplier_id']);
+            $expected['line_no'] = $index;
+            $mirror[] = $expected;
+        }
+        // Přesné storno ověřeného aktuálního zdroje zachová i chybějící historické
+        // dimenze. Nové povinnosti ani alokační pravidla jeho význam nedoplňují.
+        $reversalId = $this->persistJournal($header, $mirror);
+        if (!$this->setReversedByLocked($sourceEntryId, $supplierId, $reversalId)) {
+            throw new PostingException('already_reversed', 'Zápis #' . $sourceEntryId . ' byl mezitím stornován.');
+        }
+        return $reversalId;
     }
 
     /**
@@ -90,6 +648,31 @@ final class JournalEntryRepository
      */
     public function replace(int $id, array $header, array $lines): void
     {
+        (new MembershipUseGuard($this->db))->assertHeaderOwner($header);
+        (new MembershipUseGuard($this->db))->assertEntriesMutable((int) $header['supplier_id'], [$id]);
+        (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable((int) $header['supplier_id'], [$id]);
+        $previous = $this->currentEntryForDimensionWrite($id, (int) $header['supplier_id']);
+        (new JointAllocationUseGuard($this->db))->assertEntriesMutable((int) $header['supplier_id'], [$id]);
+        if ($previous === null || $previous['reversed_by'] !== null) {
+            throw new PostingException('entry_reversed', 'Zápis #' . $id . ' byl mezitím stornován — přepis není možný (§35).');
+        }
+        if ((new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this))->assertEntryChange(
+            (int) $header['supplier_id'], $id, $lines, $header['entry_date'], $header,
+        )) return;
+        if ((new \MyInvoice\Service\Tax\Nonprofit\NonprofitTaxSavingUseGuard($this->db, $this))->assertEntryChange((int) $header['supplier_id'], $id, $lines, $header['entry_date'], $header)) return;
+        if ((new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this))->assertEntryChange((int) $header['supplier_id'], $id, $lines, $header['entry_date'], $header)) return;
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable((int) $header['supplier_id'], [$id]);
+        if (($header['posted_at'] ?? null) !== null) (new \MyInvoice\Service\Accounting\Funding\NativeCostCoverage($this->db))->assertCreditNotePosting($header);
+        (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntryChange((int) $header['supplier_id'], $id, $lines);
+        $validationPrevious = SystemDimensionWritePolicy::canRetainEntryAssignments($header, $previous) ? $previous['lines'] : [];
+        (new SystemDimensionWritePolicy($this->db))->assertJournal($header, $lines, $validationPrevious);
+        $retained = SystemDimensionWritePolicy::retainedAssignments($lines, $previous['lines']);
+        foreach ($retained as $index => $assignment) {
+            $lines[$index]['dimension_origins'] = ($assignment['dimension_origins'] ?? []) + ($lines[$index]['dimension_origins'] ?? []);
+            foreach ($assignment['dimension_split_origins'] ?? [] as $typeId => $origins) {
+                $lines[$index]['dimension_split_origins'][$typeId] = $origins + ($lines[$index]['dimension_split_origins'][$typeId] ?? []);
+            }
+        }
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             'UPDATE journal_entries
@@ -118,7 +701,7 @@ final class JournalEntryRepository
             );
         }
 
-        $this->deleteLines($id);
+        $this->deleteLines($id, (int) $header['supplier_id']);
         $this->insertLines($pdo, $id, (int) $header['supplier_id'], $lines);
 
         // Okruh drží řádek přes (zápis, pořadí), takže přeúčtování ho přežije. Pokud
@@ -144,6 +727,28 @@ final class JournalEntryRepository
      */
     public function replaceSomeLines(int $entryId, int $supplierId, int $expectedRowVersion, array $removeLineIds, array $addLines): void
     {
+        (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
+        $entry = $this->currentEntryForDimensionWrite($entryId, $supplierId);
+        (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        if ($entry === null || $entry['reversed_by'] !== null || (int) $entry['row_version'] !== $expectedRowVersion) {
+            throw new PostingException('version_conflict', 'Zápis #' . $entryId . ' se mezitím změnil nebo byl stornován — načtěte aktuální stav.', 409);
+        }
+        if ($entry['posted_at'] !== null) (new \MyInvoice\Service\Accounting\Funding\NativeCostCoverage($this->db))->assertCreditNotePosting($entry);
+        (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertLinesRemovable($supplierId, $entryId, $removeLineIds);
+        $remove = array_fill_keys(array_map('intval', $removeLineIds), true);
+        $retained = array_values(array_filter($entry['lines'], static fn (array $line): bool => !isset($remove[(int) $line['id']])));
+        $nextLineNo = $retained === [] ? 0 : max(array_column($retained, 'line_no')) + 1;
+        foreach ($addLines as $i => $line) {
+            unset($addLines[$i]['id']);
+            $addLines[$i]['line_no'] = $nextLineNo + $i;
+        }
+        if ((new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this))->assertEntryChange(
+            $supplierId, $entryId, [...$retained, ...$addLines], $entry['entry_date'], $entry)) return;
+        if ((new \MyInvoice\Service\Tax\Nonprofit\NonprofitTaxSavingUseGuard($this->db, $this))->assertEntryChange($supplierId, $entryId, [...$retained, ...$addLines], $entry['entry_date'], $entry)) return;
+        if ((new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this))->assertEntryChange($supplierId, $entryId, [...$retained, ...$addLines], $entry['entry_date'], $entry)) return;
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new SystemDimensionWritePolicy($this->db))->assertJournal($entry, [...$retained, ...$addLines], $retained);
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
             'UPDATE journal_entries SET row_version = row_version + 1
@@ -191,9 +796,11 @@ final class JournalEntryRepository
         ], null, null, $supplierId);
     }
 
-    public function deleteLines(int $entryId): void
+    private function deleteLines(int $entryId, int $supplierId): void
     {
-        $this->db->pdo()->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ?')->execute([$entryId]);
+        (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+        (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
+        $this->db->pdo()->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ? AND supplier_id = ?')->execute([$entryId, $supplierId]);
     }
 
     /**
@@ -239,6 +846,11 @@ final class JournalEntryRepository
             $pdo->beginTransaction();
         }
         try {
+            (new \MyInvoice\Service\Accounting\Closing\SecuritiesDebt504UseGuard($this->db))->assertEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Property\Opening\OpeningUseGuard($this->db))->assertDescriptionMutable($supplierId, $id);
+            (new \MyInvoice\Service\Property\Services\Settlement\SettlementUseGuard($this->db))->assertDescriptionMutable($supplierId,$id);
+            try { \MyInvoice\Service\Property\Funds\FundingUseGuard::assertEntriesMutable($this->db,$supplierId,[$id]); }
+            catch (\MyInvoice\Service\Property\Funds\FundingException $e) { throw new PostingException($e->errorCode,$e->getMessage(),$e->httpStatus,$e->details); }
             // Zamkni řádek zápisu + načti guard stav (vč. stavu jeho období) a row_version.
             $stmt = $pdo->prepare(
                 'SELECT je.description, je.source_type, je.reversed_by, je.posted_at,
@@ -306,6 +918,8 @@ final class JournalEntryRepository
                 return ['before' => $before, 'after' => $text, 'posted' => $posted, 'changed' => false];
             }
 
+            (new \MyInvoice\Service\Tax\Nonprofit\NonprofitTaxSavingUseGuard($this->db, $this))->assertEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this))->assertEntriesMutable($supplierId, [$id]);
             $pdo->prepare(
                 'UPDATE journal_entries SET description = ?, row_version = row_version + 1
                   WHERE id = ? AND supplier_id = ?'
@@ -344,15 +958,165 @@ final class JournalEntryRepository
     }
 
     /**
+     * Doplní číslo dokladu ručnímu zápisu, který žádné nemá (hlavička interního dokladu
+     * nad existujícím zápisem). Stejné pojistky jako {@see updateDescription()}: jen ruční,
+     * nestornovaný zápis v otevřeném období, guardy navazujících agend. §35 audit
+     * `accounting.document_no_assigned` se zapisuje v téže transakci před commitem.
+     *
+     * @throws PostingException 404 not_found | 409 entry_not_manual|entry_reversed|period_not_open|document_no_present
+     */
+    public function assignDocumentNo(
+        int $id,
+        int $supplierId,
+        string $documentNo,
+        ?int $userId = null,
+        ?string $ip = null,
+        ?string $userAgent = null,
+    ): void {
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            (new \MyInvoice\Service\Accounting\Closing\SecuritiesDebt504UseGuard($this->db))->assertEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Property\Opening\OpeningUseGuard($this->db))->assertDescriptionMutable($supplierId, $id);
+            (new \MyInvoice\Service\Property\Services\Settlement\SettlementUseGuard($this->db))->assertDescriptionMutable($supplierId, $id);
+            try { \MyInvoice\Service\Property\Funds\FundingUseGuard::assertEntriesMutable($this->db, $supplierId, [$id]); }
+            catch (\MyInvoice\Service\Property\Funds\FundingException $e) { throw new PostingException($e->errorCode, $e->getMessage(), $e->httpStatus, $e->details); }
+            $stmt = $pdo->prepare(
+                'SELECT je.document_no, je.source_type, je.source_id, je.reversed_by, p.status AS period_status
+                   FROM journal_entries je
+              LEFT JOIN accounting_periods p ON p.id = je.period_id AND p.supplier_id = je.supplier_id
+                  WHERE je.id = ? AND je.supplier_id = ?
+                  FOR UPDATE'
+            );
+            $stmt->execute([$id, $supplierId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row === false) {
+                throw new PostingException('not_found', 'Účetní zápis nenalezen.', 404);
+            }
+            if ((string) $row['source_type'] !== 'manual' || $row['source_id'] !== null) {
+                throw new PostingException('entry_not_manual', 'Číslo dokladu lze doplnit jen ručnímu zápisu.', 409);
+            }
+            if ($row['reversed_by'] !== null) {
+                throw new PostingException('entry_reversed', 'Zápis #' . $id . ' je stornovaný, číslo dokladu nelze měnit (§35).', 409);
+            }
+            if ($row['period_status'] !== null && (string) $row['period_status'] !== 'open') {
+                throw new PostingException('period_not_open', 'Zápis #' . $id . ' je v období "' . $row['period_status']
+                    . '", do uzavřeného období nelze zasahovat (§35 ZoÚ).', 409);
+            }
+            if ($row['document_no'] !== null && trim((string) $row['document_no']) !== '') {
+                throw new PostingException('document_no_present', 'Zápis už číslo dokladu má.', 409);
+            }
+            (new \MyInvoice\Service\Tax\Nonprofit\NonprofitTaxSavingUseGuard($this->db, $this))->assertEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this))->assertEntriesMutable($supplierId, [$id]);
+            $pdo->prepare(
+                'UPDATE journal_entries SET document_no = ?, row_version = row_version + 1
+                  WHERE id = ? AND supplier_id = ?'
+            )->execute([$documentNo, $id, $supplierId]);
+            $this->activity->log(
+                'accounting.document_no_assigned',
+                $userId,
+                'journal_entry',
+                $id,
+                ['before' => $row['document_no'], 'after' => $documentNo],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    /**
      * Označí zápis za zaúčtovaný (koncept → zaúčtováno, §12 průkaznost).
      */
     public function markPosted(int $id, int $supplierId, ?int $postedBy): bool
     {
-        $stmt = $this->db->pdo()->prepare(
-            'UPDATE journal_entries SET posted_at = NOW(), posted_by = ? WHERE id = ? AND supplier_id = ?'
-        );
-        $stmt->execute([$postedBy, $id, $supplierId]);
-        return $stmt->rowCount() > 0;
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        try {
+            (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$id]);
+            $entry = $this->currentEntryForDimensionWrite($id, $supplierId);
+            if ($entry !== null && $entry['source_type'] === 'nonprofit_membership' && $entry['posted_at'] !== null) {
+                if ($ownTx) $pdo->commit();
+                return false;
+            }
+            (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$id]);
+            (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$id]);
+            if ($entry !== null && $entry['posted_at'] !== null
+                && (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this))->assertEntryChange(
+                    $supplierId, $id, $entry['lines'], $entry['entry_date'], $entry)) {
+                if ($ownTx) $pdo->commit();
+                return false;
+            }
+            if ($entry !== null && $entry['posted_at'] !== null
+                && (new \MyInvoice\Service\Tax\Nonprofit\NonprofitTaxSavingUseGuard($this->db, $this))->assertEntryChange(
+                    $supplierId, $id, $entry['lines'], $entry['entry_date'], $entry)) {
+                if ($ownTx) $pdo->commit();
+                return false;
+            }
+            if ($entry !== null && $entry['posted_at'] !== null
+                && (new \MyInvoice\Service\Nonprofit\Capital\CapitalUseGuard($this->db, $this))->assertEntryChange(
+                    $supplierId, $id, $entry['lines'], $entry['entry_date'], $entry)) {
+                if ($ownTx) $pdo->commit();
+                return false;
+            }
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$id]);
+            if ($entry !== null) (new \MyInvoice\Service\Accounting\Funding\NativeCostCoverage($this->db))->assertCreditNotePosting($entry);
+            if ($entry !== null && $entry['posted_at'] === null) {
+                (new SystemDimensionWritePolicy($this->db))->assertJournal($entry, $entry['lines']);
+            }
+            $stmt = $pdo->prepare(
+                'UPDATE journal_entries SET posted_at = NOW(), posted_by = ? WHERE id = ? AND supplier_id = ?'
+            );
+            $stmt->execute([$postedBy, $id, $supplierId]);
+            $changed = $stmt->rowCount() > 0;
+            if ($ownTx) {
+                $pdo->commit();
+            }
+            return $changed;
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function currentEntryForDimensionWrite(int $entryId, int $supplierId): ?array
+    {
+        (new SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+        (new IssuanceUseGuard($this->db))->lockClaims($supplierId);
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->acquire($supplierId);
+        $entry = $this->findForUpdate($entryId, $supplierId);
+        if ($entry === null) {
+            return null;
+        }
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $dimensions = $assignments->entryLineDimensions($supplierId, $entryId, true);
+        $splits = $assignments->entryLineSplits($supplierId, $entryId, true);
+        $origins = $assignments->entryLineOrigins($supplierId, $entryId, true);
+        $splitOrigins = $assignments->entryLineSplitOrigins($supplierId, $entryId, true);
+        foreach ($entry['lines'] as $i => $line) {
+            $lineId = (int) $line['id'];
+            $entry['lines'][$i]['dimensions'] = $dimensions[$lineId] ?? [];
+            $entry['lines'][$i]['dimension_splits'] = $splits[$lineId] ?? [];
+            $entry['lines'][$i]['dimension_origins'] = $origins[$lineId] ?? [];
+            $entry['lines'][$i]['dimension_split_origins'] = $splitOrigins[$lineId] ?? [];
+        }
+        return $entry;
     }
 
     /**
@@ -365,6 +1129,19 @@ final class JournalEntryRepository
      */
     public function setReversedBy(int $id, int $supplierId, int $reversalEntryId): bool
     {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($id, $supplierId, $reversalEntryId): bool {
+            (new SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+            (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$id, $reversalEntryId]);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$id, $reversalEntryId]);
+            (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this))->assertReversal($supplierId, $id);
+            return $this->setReversedByLocked($id, $supplierId, $reversalEntryId);
+        });
+    }
+
+    private function setReversedByLocked(int $id, int $supplierId, int $reversalEntryId): bool
+    {
+        (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$id, $reversalEntryId]);
         $stmt = $this->db->pdo()->prepare(
             'UPDATE journal_entries SET reversed_by = ?
               WHERE id = ? AND supplier_id = ? AND reversed_by IS NULL'
@@ -392,6 +1169,19 @@ final class JournalEntryRepository
      */
     public function detachSource(int $entryId, int $supplierId): bool
     {
+        return (new DimensionPeriodGuard($this->db))->transaction(function () use ($entryId, $supplierId): bool {
+            (new SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+            (new IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            (new JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
+            (new \MyInvoice\Service\Accounting\Closing\AssetReserveSourceUseGuard($this->db, $this))->assertEntriesMutable($supplierId, [$entryId]);
+            return $this->detachSourceLocked($entryId, $supplierId);
+        });
+    }
+
+    private function detachSourceLocked(int $entryId, int $supplierId): bool
+    {
+        (new MembershipUseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
         $stmt = $this->db->pdo()->prepare(
             'UPDATE journal_entries SET source_id = NULL WHERE id = ? AND supplier_id = ?'
         );
@@ -411,7 +1201,7 @@ final class JournalEntryRepository
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $n = 0;
-        $assignments = null;
+        $assignmentLines = [];
         foreach ($lines as $line) {
             $lineStmt->execute([
                 $entryId,
@@ -432,17 +1222,13 @@ final class JournalEntryRepository
             $hasDims = !empty($line['dimensions']) && is_array($line['dimensions']);
             $hasSplits = !empty($line['dimension_splits']) && is_array($line['dimension_splits']);
             if ($hasDims || $hasSplits) {
-                $assignments ??= new DimensionAssignmentRepository($this->db);
                 $lineId = (int) $pdo->lastInsertId();
-                if ($hasDims) {
-                    $assignments->insertLineDimensions($supplierId, $lineId, $line['dimensions']);
-                }
-                if ($hasSplits) {
-                    // Rozpad řádku mezi víc hodnot typu (pravidla dimenzí, EP-6).
-                    $assignments->insertLineSplits($supplierId, $lineId, $line['dimension_splits']);
-                }
+                $assignmentLines[$lineId] = $line;
             }
             $n++;
+        }
+        if ($assignmentLines !== []) {
+            (new DimensionAssignmentRepository($this->db))->insertLineAssignments($supplierId, $assignmentLines);
         }
     }
 
@@ -502,8 +1288,27 @@ final class JournalEntryRepository
     }
 
     /**
-     * Existující zápis pro zdrojový doklad (idempotence zaúčtování).
+     * Poslední zápisy pro dávku zdrojů bez dotazu pro každý rok odpisů.
      */
+    public function latestBySourceIds(int $supplierId, string $sourceType, array $sourceIds): array
+    {
+        if ($sourceIds === []) return [];
+        $placeholders = implode(',', array_fill(0, count($sourceIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "WITH ranked AS (
+                SELECT id, source_id, reversed_by,
+                       ROW_NUMBER() OVER (PARTITION BY source_id ORDER BY id DESC) AS position
+                  FROM journal_entries
+                 WHERE supplier_id = ? AND source_type = ? AND source_id IN ($placeholders)
+            ) SELECT id, source_id, reversed_by FROM ranked WHERE position = 1"
+        );
+        $stmt->execute([$supplierId, $sourceType, ...$sourceIds]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $out[(int) $row['source_id']] = $row;
+        return $out;
+    }
+
+    /** Existující zápis pro zdrojový doklad (idempotence zaúčtování). */
     public function findBySource(int $supplierId, string $sourceType, int $sourceId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
@@ -991,12 +1796,14 @@ final class JournalEntryRepository
     /** Je aktivní filtr na rozsah účtu (account_from/account_to)? SSOT pro buildWhere() i paginate(). */
     private static function hasAccountRangeFilter(array $filters): bool
     {
-        return !empty($filters['account_from']) || !empty($filters['account_to']);
+        // Kód „0“ (třída 0) je platná mez, proto porovnání s prázdným řetězcem, ne empty().
+        return (string) ($filters['account_from'] ?? '') !== '' || (string) ($filters['account_to'] ?? '') !== '';
     }
 
     /**
-     * Normalizované meze rozsahu účtu z filtru — chybějící strana se doplní neutrální
-     * hranicí. SSOT pro EXISTS filtr v buildWhere() i pro FILTERED_NET_AMOUNT_SUBQUERY
+     * Meze rozsahu účtu z filtru pro `BETWEEN ? AND ?`. Rozsah je prefixový včetně krajů
+     * (5 až 5 = třída 5, 501 až 518 včetně 518.100), pravidlo drží
+     * AccountCodeRange. SSOT pro EXISTS filtr v buildWhere() i pro FILTERED_NET_AMOUNT_SUBQUERY
      * v paginate() (obojí musí vidět STEJNÝ rozsah, jinak by se řádek objevil v seznamu,
      * ale sloupec Částka by počítal jiný rozsah účtů, než podle kterého se filtrovalo).
      *
@@ -1004,10 +1811,9 @@ final class JournalEntryRepository
      */
     private static function accountRangeBounds(array $filters): array
     {
-        return [
-            (string) ($filters['account_from'] ?? '0'),
-            (string) ($filters['account_to'] ?? 'ZZZZZZZZZZ'),
-        ];
+        // Vstup od uživatele už ověřil JournalAction (parse); kód z hledání účtu přichází
+        // z databáze a nemusí abecedou projít, proto se tu jen sestaví meze.
+        return AccountCodeRange::sqlBoundsFor((string) ($filters['account_from'] ?? ''), (string) ($filters['account_to'] ?? ''));
     }
 
     /**
@@ -1090,7 +1896,7 @@ final class JournalEntryRepository
         // Hodnota dimenze (včetně podřízených): zápis projde, nese-li ji aspoň jeden
         // jeho řádek. Sémantiku řádku sdílí se sestavami přes DimensionFilter.
         if (($filters['dimension'] ?? null) instanceof DimensionFilter) {
-            [$dimSql, $dimParams] = $filters['dimension']->entrySql('je');
+            [$dimSql, $dimParams] = $filters['dimension']->entrySql('je', $supplierId);
             $where[] = $dimSql;
             array_push($params, ...$dimParams);
         }

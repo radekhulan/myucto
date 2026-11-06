@@ -412,6 +412,20 @@ describe('PayrollRuns', () => {
     expect(m.runDetail).toHaveBeenCalledWith(15)
   })
 
+  // Bez práva `payroll.enforcement` posílá server součet srážek jako null;
+  // dlaždice se pak nevykreslí, místo aby ukázala nulu, která by lhala.
+  it('hides the garnishment total when the API withholds it', async () => {
+    m.runs.mockResolvedValue([
+      run({ id: 15, result_snapshot: { totals: { cash_payable_minor: 100_000, enforcement_withheld_minor: null, payable_after_enforcement_minor: 90_000 } } }),
+      run({ id: 16, period_start: '2026-05-01', result_snapshot: { totals: { cash_payable_minor: 100_000, enforcement_withheld_minor: 10_000, payable_after_enforcement_minor: 90_000 } } }),
+    ])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-test="run-enforcement-withheld"]')).toHaveLength(1)
+  })
+
   it('loads revision history lazily and shows the audit trail with a safe total diff', async () => {
     m.runs.mockResolvedValue([run({
       revision_id: 10,
@@ -1011,7 +1025,7 @@ describe('PayrollRuns', () => {
     })
   })
 
-  it('reopens a cancelled run from corrected inputs with the required reason', async () => {
+  it('reopens a cancelled run in one click, without asking for a reason again', async () => {
     m.runs.mockResolvedValue([run({
       status: 'cancelled',
       can_delete: false,
@@ -1024,12 +1038,29 @@ describe('PayrollRuns', () => {
     expect(reopen.text()).toContain('payroll.runs.commands.reopen_cancelled')
 
     await reopen.trigger('click')
-    const textarea = document.body.querySelector<HTMLTextAreaElement>(
-      '[data-test="run-command-reason"]',
-    )!
-    textarea.value = 'Opravené vstupy po zrušeném pokusu.'
-    textarea.dispatchEvent(new Event('input'))
     await flushPromises()
+
+    expect(document.body.querySelector('[data-test="run-command-reason"]')).toBeNull()
+    expect(m.commandRun).toHaveBeenCalledWith(
+      15,
+      'reopen',
+      { row_version: 2 },
+      expect.any(String),
+    )
+  })
+
+  it('cancels an unapproved run without a mandatory reason', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-cancel"]').trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('[data-test="run-cancel-hint"]')).not.toBeNull()
     document.body.querySelector<HTMLButtonElement>(
       '[data-test="run-command-dialog"] button[type="submit"]',
     )?.click()
@@ -1037,10 +1068,67 @@ describe('PayrollRuns', () => {
 
     expect(m.commandRun).toHaveBeenCalledWith(
       15,
-      'reopen',
-      { row_version: 2, reason: 'Opravené vstupy po zrušeném pokusu.' },
+      'cancel',
+      { row_version: 2 },
       expect.any(String),
     )
+    wrapper.unmount()
+  })
+
+  it('requires a reason to cancel a correction revision of an approved run', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      revision_kind: 'correction',
+      available_commands: ['calculate', 'approve', 'cancel'],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+    await wrapper.get('[data-testid="payroll-run-15-cancel"]').trigger('click')
+    await flushPromises()
+    const textarea = document.body.querySelector<HTMLTextAreaElement>(
+      '[data-test="run-command-reason"]',
+    )!
+    expect(textarea.required).toBe(true)
+    expect(document.body.querySelector('[data-test="run-cancel-hint"]')?.textContent)
+      .toContain('payroll.runs.cancel_correction_hint')
+    document.body.querySelector<HTMLFormElement>('[data-test="run-command-dialog"]')
+      ?.dispatchEvent(new Event('submit'))
+    await flushPromises()
+    expect(m.commandRun).not.toHaveBeenCalled()
+
+    textarea.value = 'Oprava se nakonec nedělá.'
+    textarea.dispatchEvent(new Event('input'))
+    document.body.querySelector<HTMLFormElement>('[data-test="run-command-dialog"]')
+      ?.dispatchEvent(new Event('submit'))
+    await flushPromises()
+    expect(m.commandRun).toHaveBeenCalledWith(
+      15,
+      'cancel',
+      { row_version: 2, reason: 'Oprava se nakonec nedělá.' },
+      expect.any(String),
+    )
+    wrapper.unmount()
+  })
+  it('guides a run held by unapproved attendance and inputs to refresh instead of cancelling', async () => {
+    m.runs.mockResolvedValue([run({
+      status: 'calculated',
+      can_delete: false,
+      available_commands: ['calculate', 'refresh_inputs', 'approve', 'cancel'],
+      validations: [
+        validation({ id: 91, code: 'time_month_not_approved', severity: 'blocker', requires_override: false }),
+        validation({ id: 92, code: 'draft_inputs_present', severity: 'blocker', requires_override: false }),
+      ],
+    })])
+
+    const wrapper = mount(PayrollRuns)
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-time"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-inputs"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="payroll-run-15-next-step-refresh"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it('keeps distinct readable enforcement findings instead of calling all of them net-pay errors', async () => {

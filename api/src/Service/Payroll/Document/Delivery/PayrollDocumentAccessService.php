@@ -206,14 +206,21 @@ final class PayrollDocumentAccessService
             return null;
         }
         $codeId = (int) $active['id'];
-        if ((int) $active['attempts'] >= $this->policy->maxCodeAttempts()) {
+        $maxAttempts = $this->policy->maxCodeAttempts();
+        if ((int) $active['attempts'] >= $maxAttempts) {
+            $this->links->markCodeUsed($supplierId, $codeId);
+            return null;
+        }
+
+        // Pokus se započte dřív, než se kód porovná. Načtený počet pokusů je
+        // jen orientační, o tom, zda se smí porovnávat, rozhoduje atomický UPDATE.
+        if (!$this->links->reserveCodeAttempt($supplierId, $codeId, $maxAttempts)) {
             $this->links->markCodeUsed($supplierId, $codeId);
             return null;
         }
 
         if (!hash_equals((string) $active['code_hash'], hash('sha256', $code))) {
-            $attempts = $this->links->bumpCodeAttempts($supplierId, $codeId);
-            if ($attempts >= $this->policy->maxCodeAttempts()) {
+            if ((int) $active['attempts'] + 1 >= $maxAttempts) {
                 // Vyčerpané pokusy kód spálí. Další se dá vyžádat až po cooldownu,
                 // takže hádání šestimístného čísla není průchozí cesta.
                 $this->links->markCodeUsed($supplierId, $codeId);
@@ -221,7 +228,9 @@ final class PayrollDocumentAccessService
             return null;
         }
 
-        $this->links->markCodeUsed($supplierId, $codeId);
+        if (!$this->links->consumeCode($supplierId, $codeId)) {
+            return null;
+        }
         $sessionToken = bin2hex(random_bytes(32));
         $this->links->createSession(
             $supplierId,

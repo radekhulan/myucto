@@ -93,7 +93,8 @@ final class TaxReturnFoApiTest extends TestCase
         $req = (new ServerRequestFactory())
             ->createServerRequest($method, '/api/tax-return/fo/' . self::YEAR)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role]);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
         if ($body !== []) {
             $req = $req->withParsedBody($body);
         }
@@ -263,7 +264,8 @@ final class TaxReturnFoApiTest extends TestCase
         $req = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/tax-return/po/' . self::YEAR . '/insurance')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant']);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
         $r = $this->action->insurance($req, new Psr7Response(), ['type' => 'po', 'year' => (string) self::YEAR]);
         self::assertSame(400, $r->getStatusCode());
     }
@@ -275,7 +277,8 @@ final class TaxReturnFoApiTest extends TestCase
         $req = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/tax-return/fo/' . $year . '/insurance')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant']);
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'accountant'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
 
         $r = $this->action->insurance($req, new Psr7Response(), ['type' => 'fo', 'year' => (string) $year]);
         $body = $this->json($r);

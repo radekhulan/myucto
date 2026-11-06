@@ -68,6 +68,7 @@ final class CashFlowStatementService
     public function __construct(
         private readonly Connection $db,
         private readonly AccountingPeriodRepository $periods,
+        private readonly StatementSupplementPolicy $supplements,
         // Mezičlen plateb kartou může ležet pod 261 — jeho analytiky ale peníze nejsou:
         // platba kartou odešla z banky v den platby, ne až při vypořádání s dokladem.
         private readonly \MyInvoice\Service\Accounting\Card\CardClearingAccounts $cardAccounts,
@@ -98,6 +99,7 @@ final class CashFlowStatementService
      */
     public function build(int $supplierId, int $periodId): array
     {
+        $this->supplements->assert500Supplement($supplierId, $periodId);
         $period = $this->periods->findById($supplierId, $periodId);
         if ($period === null) {
             throw new ReportException('period_not_found', 'Účetní období #' . $periodId . ' neexistuje.', 404);

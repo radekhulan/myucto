@@ -7,17 +7,21 @@ import {
 } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { getWindowManager } from '@/workspace/windowRegistry'
-import { hasPendingCanonicalDomainLoginCleanup, pendingCanonicalDomainLoginQuery } from '@/security/domainLogin'
+import { captureCanonicalDomainLogin, hasPendingCanonicalDomainLogin, hasPendingCanonicalDomainLoginCleanup, pendingCanonicalDomainLoginQuery } from '@/security/domainLogin'
 import type { DomainContext } from '@/api/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { OPERATIONAL_SETTINGS_KEYS, type AccessLevel, type PermissionKey } from '@/security/permissions'
-import { ensureNamespaces, namespacesForRoute } from '@/i18n'
+import { ensureNamespaces, i18n, namespacesForRoute } from '@/i18n'
+import { hasFrameworkScope, type FrameworkScope } from '@/security/frameworkScope'
+import { useToast } from '@/composables/useToast'
 import { createWorkspaceRoutes } from './workspaceRoutes'
 import { workspaceShellRoutes } from './workspaceShellRoutes'
 import { switchSupplierForDeepLink } from './supplierDeepLink'
+import { isInstanceAdminRouteName } from '@/security/instanceAdminRoutePolicy'
 import { payrollStartPeriodGuard } from './payrollStartPeriodGuard'
 import {
+  canonicalDomainLoginHandoffPath,
   clientDomainCanonicalHandoffPath,
   clientDomainRedirect,
   isClientDomainAuthenticatedPath,
@@ -32,6 +36,9 @@ declare module 'vue-router' {
     access?: AccessLevel
     staffOnly?: boolean
     superadminOnly?: boolean
+    /** Na ukázkové instanci (demo) se stránka nesmí otevřít vůbec, ani superadminovi. */
+    demoHidden?: boolean
+    instanceAdminOnly?: boolean
     adminPlusOnly?: boolean
     companyAdminOnly?: boolean
     requiresSupplier?: boolean
@@ -44,6 +51,7 @@ declare module 'vue-router' {
     commercialOnly?: boolean
     requiresNoStock?: boolean
     requiresOss?: boolean
+    frameworkScope?: FrameworkScope
     requiresAuth?: boolean
     public?: boolean
     totpSetupOnly?: boolean
@@ -53,13 +61,22 @@ declare module 'vue-router' {
 
 const routes: RouteRecordRaw[] = [
   {
+    path: '/instance-admin',
+    component: () => import('@/components/layout/InstanceAdminLayout.vue'),
+    meta: { requiresAuth: true, instanceAdminOnly: true },
+    children: [
+      { path: '', name: 'instance-admin', component: () => import('@/pages/admin/InstanceAdmin.vue') },
+      { path: 'profile', name: 'instance-admin-profile', component: () => import('@/pages/PasswordChange.vue') },
+    ],
+  },
+  {
     path: '/',
     component: () => import('@/components/layout/AppLayout.vue'),
     meta: { requiresAuth: true },
     children: workspaceShellRoutes(createWorkspaceRoutes()),
   },
   { path: '/login',  name: 'login',  component: () => import('@/pages/Login.vue'),          meta: { public: true } },
-  { path: '/oauth/continue', name: 'mcp-oauth-continue', component: () => import('@/pages/McpOAuthContinue.vue'), meta: { requiresAuth: true } },
+  { path: '/oauth/continue', name: 'mcp-oauth-continue', component: () => import('@/pages/McpOAuthContinue.vue'), meta: { requiresAuth: true, canonicalOnly: true } },
   { path: '/domain-login/callback', name: 'domain-login-callback', component: () => import('@/pages/DomainLoginCallback.vue'), meta: { public: true } },
   { path: '/setup',  name: 'setup',  component: () => import('@/pages/Setup.vue'),          meta: { public: true } },
   { path: '/setup-mfa', name: 'setup-mfa', component: () => import('@/pages/ForcedMfaSetup.vue'), meta: { requiresAuth: true, mfaSetupOnly: true } },
@@ -78,6 +95,9 @@ const routes: RouteRecordRaw[] = [
   // Web faktura — veřejný náhled vystavené faktury (singular /invoice/…, interní UI je /invoices/…)
   { path: '/invoice/:token([a-f0-9]{32,128})', name: 'invoice-public',
     component: () => import('@/pages/InvoicePublic.vue'), meta: { public: true } },
+  // Veřejná účtenka zákazníka (QR z mobilní aplikace) — token s omezenou platností, bez přihlášení
+  { path: '/r/:token([a-f0-9]{64})', name: 'receipt-public',
+    component: () => import('@/pages/public/PublicReceipt.vue'), meta: { public: true } },
   {
     path: '/:pathMatch(.*)*',
     name: 'not-found',
@@ -86,6 +106,7 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[], AccessLevel?]> = {
+  'admin-work-report-billing-templates': ['price_list'],
   'admin-price-list': ['price_list'], 'admin-price-list-view': ['price_list'],
   'admin-price-list-new': ['price_list', 'write'], 'admin-price-list-edit': ['price_list', 'write'],
   home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
@@ -122,6 +143,9 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'scan-attach': ['documents.upload', 'write'],
   'accounting-accounts': ['accounting'], 'accounting-account-detail': ['accounting'],
   'accounting-journal': ['accounting'], 'accounting-journal-new': ['accounting.journal.write', 'write'], 'accounting-ai-assistant': ['accounting'],
+  // Interní doklady: čtení jako deník, koncept jako ruční zápis (zaúčtování hlídá server právem accounting.journal.post).
+  'accounting-internal-documents': ['accounting'], 'accounting-internal-document-detail': ['accounting'],
+  'accounting-internal-document-new': ['accounting.journal.write', 'write'], 'accounting-internal-document-edit': ['accounting.journal.write', 'write'],
   // Čtení = zobrazení rozpadu mzdy; samotné zaúčtování hlídá server (accounting.journal.post).
   // Bez záznamu v téhle mapě guard route zahodí na homepage (deny-by-default, :327).
   'accounting-payroll': ['accounting'],
@@ -165,11 +189,14 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'accounting-general-ledger': ['accounting'], 'accounting-trial-balance': ['accounting'], 'accounting-account-statement': ['accounting'],
   'accounting-balance-sheet': ['accounting'], 'accounting-income-statement': ['accounting'], 'accounting-income-statement-by-function': ['accounting'], 'accounting-saldo': ['accounting'],
   'accounting-dimension-profit': ['accounting'], 'company-dimensions': ['accounting'],
+  'accounting-joint-allocations': ['accounting'],
+  'accounting-nonprofit-tax': ['accounting'], 'accounting-nonprofit-dppo': ['accounting'], 'accounting-nonprofit-funding': ['accounting'], 'accounting-nonprofit-capital': ['accounting'],
+  'accounting-nonprofit-membership': ['accounting'],
   'accounting-statement-mapping': ['accounting'],
   'accounting-document-completeness': ['accounting'],
   'accounting-balance-inventory': ['accounting'],
   'accounting-section18-statements': ['accounting'],
-  'accounting-periods': ['accounting'],
+  'accounting-periods': ['accounting'], 'accounting-securities-debt': ['accounting'], 'accounting-framework-conversion': ['accounting'],
   'accounting-monthly-check': ['accounting'], 'accounting-parallel-run': ['accounting'], 'accounting-monthly-report': ['accounting'], 'accounting-offsets': ['accounting.offsets'],
   'accounting-tax-base-adjustments': ['accounting'],
   'manual-posting-queue': ['accounting'],
@@ -184,6 +211,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'stock-items': ['stock'], 'stock-item-new': ['stock.items.write', 'write'], 'stock-item-detail': ['stock'], 'stock-item-edit': ['stock.items.write', 'write'],
   'stock-documents': ['stock'], 'stock-document-new': ['stock.documents.write', 'write'], 'stock-document-detail': ['stock'],
   'stock-opening-import': ['stock.documents.write', 'write'],
+  'stock-history-import': ['stock.documents.write', 'write'],
   'stock-sales-orders': ['stock'], 'stock-sales-order-new': ['stock.orders.write', 'write'], 'stock-sales-order-detail': ['stock'],
   'stock-fulfillment': ['stock'],
   'stock-purchase-orders': ['stock'], 'stock-purchase-order-new': ['stock.orders.write', 'write'], 'stock-purchase-order-detail': ['stock'],
@@ -192,23 +220,25 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'stock-assemblies': ['stock'], 'eshop-set-editor': ['eshop'],
   'stock-takes': ['stock'], 'stock-take-detail': ['stock'], 'stock-reports': ['stock'], 'stock-intrastat': ['stock'], 'eshop-jobs': ['eshop'], 'eshop-integrations': ['eshop.integrations'], 'eshop-shoptet': ['eshop'], eshop: ['eshop'],
   'eshop-product-master-new': ['eshop.write', 'write'], 'eshop-product-master-detail': ['eshop'],
-  logbook: ['logbook'], stats: ['dashboard'], 'group-stats': ['dashboard.portfolio'], 'purchase-stats': ['dashboard'], 'dimension-stats': ['accounting'], 'bank-statements': ['bank'], 'bank-detail': ['bank'], gopay: ['bank'],
+  logbook: ['logbook'], 'property-registry': ['property'], 'property-charges': ['property'], 'property-charge-issues': ['property'], 'property-payments': ['property'], 'property-openings': ['property'], 'property-funds': ['property'], 'property-service-settlements': ['property'], 'property-service-lifecycles': ['property'], stats: ['dashboard'], 'group-stats': ['dashboard.portfolio'], 'purchase-stats': ['dashboard'], 'dimension-stats': ['accounting'], 'bank-statements': ['bank'], 'bank-detail': ['bank'], gopay: ['bank'],
   'admin-electronic-signatures': ['settings.signing', 'write'], 'admin-databox': ['settings.signing', 'write'], templates: ['accounting.templates'], tools: ['utilities'], 'crm-dashboard': ['dashboard.portfolio'], 'portfolio-overview': ['dashboard.portfolio'],
   'automation-cockpit': ['accounting'],
   'admin-settings': ['settings.company.write', 'write'], 'admin-branding': ['settings.branding', 'write'], 'admin-integrations': ['settings.company.write', 'write'], 'admin-codebooks': ['settings.company'], 'admin-bank-rule-templates': ['bank.rules'], 'admin-approvals': ['invoices.approval'], 'admin-support': ['profile'],
   'accounting-activation': ['accounting.periods.manage', 'write'],
   'payment-cards': ['settings.bank_accounts'], 'payment-card-new': ['settings.bank_accounts', 'write'], 'payment-card-detail': ['settings.bank_accounts'],
+  'eet-settings': ['eet.settings', 'read'],
+  'eet-records': ['eet', 'read'], 'eet-record-detail': ['eet', 'read'],
   // Kreditní karty čte RoutePermissionMap jako bankovní data (`bank`).
   'credit-cards': ['bank'], 'credit-card-detail': ['bank'],
   'reports-dph': ['reports'], 'reports-kh': ['reports'], 'reports-dph-book': ['reports'], 'reports-s74b': ['reports'], 'reports-related-parties': ['reports'], 'reports-vat-coefficient': ['reports'], 'reports-s46': ['reports'], 'reports-vat-corrections': ['reports'], 'reports-shv': ['reports'], 'reports-oss': ['reports'],
-  'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-invoice-series-completeness': ['reports'], 'reports-foreign-income': ['reports'], 'reports-submissions': ['reports'], 'reports-submissions-kh-evidence': ['reports'],'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
-  'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'mcp-oauth-continue': ['profile.tokens'], 'profile-shortcuts': ['profile', 'write'],
+  'reports-income-tax': ['reports'], 'reports-cnb-rate-audit': ['reports'], 'reports-invoice-series-completeness': ['reports'], 'reports-foreign-income': ['reports'], 'reports-submissions': [['reports', 'reports.submissions']], 'reports-submissions-kh-evidence': ['reports'],'reports-monthly-export': ['reports.export'], 'tax-optimizer': ['reports'], recurring: ['recurring'], 'recurring-new': ['recurring.create', 'write'],
+  'recurring-detail': ['recurring'], 'recurring-edit': ['recurring', 'write'], 'profile-api-tokens': ['profile.tokens'], 'profile-mcp-server': ['profile.tokens'], 'mcp-oauth-continue': ['profile'], 'profile-shortcuts': ['profile', 'write'],
 }
 
 const superadminRouteNames = new Set([
   'activity-log', 'sent-emails', 'cron-jobs', 'admin-users', 'admin-roles',
   'admin-tax-constants', 'admin-email-templates', 'admin-emails', 'admin-update',
-  'admin-isds-gateway',
+  'admin-isds-gateway', 'admin-instance',
   'activation-license', 'activation-terms', 'activation-purchase',
   'admin-diagnostics',
   // Obojí čte administrátorské endpointy (/api/admin/*, /api/license/status),
@@ -230,7 +260,7 @@ const companyAdminRouteNames = new Set([] as string[])
 // home → setup-mfa → home (#5). Deny-by-default to neoslabuje — routa je pořád za
 // `requiresAuth` a `mfaSetupOnly` je sama gate: koho MFA nečeká, toho guard níž
 // pošle z té stránky pryč.
-const selfServiceRouteNames = new Set(['profile-password', 'setup-totp', 'isds-gateway-callback'])
+const selfServiceRouteNames = new Set(['profile-password', 'setup-totp', 'isds-gateway-callback', 'portal-mcp'])
 const commercialOnlyRouteNames = new Set([
   'accounting-activation',
   // GoPay vede podvojné účetnictví i daňová evidence (requiresAccountingMode), licence platí stejně.
@@ -257,7 +287,7 @@ export function applyAuthorizationMeta(records: RouteRecordRaw[], inheritedRequi
     if (superadminRouteNames.has(name)) record.meta = { ...record.meta, superadminOnly: true }
     if (adminPlusRouteNames.has(name)) record.meta = { ...record.meta, adminPlusOnly: true }
     if (companyAdminRouteNames.has(name)) record.meta = { ...record.meta, companyAdminOnly: true }
-    if (record.meta?.requiresDoubleEntry || record.meta?.requiresStock || commercialOnlyRouteNames.has(name)) {
+    if (record.meta?.requiresDoubleEntry || record.meta?.requiresStock || record.meta?.frameworkScope === 'svj' || commercialOnlyRouteNames.has(name)) {
       record.meta = { ...record.meta, commercialOnly: true }
     }
     if (name === 'admin-branding') record.meta = { ...record.meta, staffOnly: true }
@@ -276,7 +306,7 @@ export function applyAuthorizationMeta(records: RouteRecordRaw[], inheritedRequi
     // bez logu. Upozorni na to hned při startu, ne až po hodině hledání v produkci.
     if (import.meta.env.DEV && name && requiresAuth && !rule
       && !superadminRouteNames.has(name) && !selfServiceRouteNames.has(name)
-      && !adminPlusRouteNames.has(name)
+      && !adminPlusRouteNames.has(name) && !isInstanceAdminRouteName(name)
       && !companyAdminRouteNames.has(name)
       && !record.meta?.mfaSetupOnly
       && !record.meta?.public && !record.redirect) {
@@ -326,7 +356,7 @@ export const router = createRouter({
  * stránku zobrazit prázdný stav / chybu z API než točit prohlížeč donekonečna.
  */
 function denyFallback(toName: unknown, auth: ReturnType<typeof useAuthStore>) {
-  const target = auth.isClientRole ? 'portal' : 'home'
+  const target = auth.isInstanceAdmin ? 'instance-admin' : auth.isClientRole ? 'portal' : 'home'
   return toName === target ? true : { name: target }
 }
 
@@ -402,6 +432,11 @@ export async function authorizationGuard(
     }
   }
 
+  if (to.name === 'login' && auth.domainContext?.mode === 'canonical') {
+    captureCanonicalDomainLogin(to.query.domain_login_request, to.query.state, to.query.domain_login_handoff)
+  }
+  if (auth.prepareDomainLogin()) useSessionSecurityStore().clear()
+
   if (auth.needsSetup && to.name !== 'setup') {
     return { name: 'setup' }
   }
@@ -410,7 +445,9 @@ export async function authorizationGuard(
   }
 
   const requiresAuth = to.matched.some((r) => r.meta.requiresAuth)
-  if (requiresAuth && auth.domainContext?.mode === 'canonical' && hasPendingCanonicalDomainLoginCleanup()) {
+  if (requiresAuth && auth.domainContext?.mode === 'canonical' && hasPendingCanonicalDomainLogin()
+      && (hasPendingCanonicalDomainLoginCleanup()
+        || (to.name !== 'setup-mfa' && canonicalDomainLoginHandoffPath(to.fullPath) === null))) {
     // Obnovení stránky po MFA nesmí pustit dočasnou relaci do hlavní aplikace.
     return { name: 'login', query: pendingCanonicalDomainLoginQuery() ?? {} }
   }
@@ -445,6 +482,9 @@ export async function authorizationGuard(
     // vrací false, ale známou identitu si záměrně drží.
     await auth.refresh()
     if (!auth.isAuthenticated) {
+      if (auth.domainContext?.mode === 'canonical' && hasPendingCanonicalDomainLogin()) {
+        return { name: 'login', query: pendingCanonicalDomainLoginQuery() ?? {} }
+      }
       recordLoginBounce()
       if (auth.domainContext?.locked && isClientDomainAuthenticatedPath(to.fullPath)) {
         return { name: 'login', query: { return_to: to.fullPath } }
@@ -472,6 +512,19 @@ export async function authorizationGuard(
   if (auth.isClientRole && to.name === 'home') {
     return { name: 'portal' }
   }
+  // Technický účet nesmí namontovat obchodní shell ani při zamčené relaci.
+  if (auth.isInstanceAdmin && to.name === 'profile-password') return { name: 'instance-admin-profile', query: to.query }
+  if (auth.isInstanceAdmin && !isInstanceAdminRouteName(to.name)) {
+    return { name: 'instance-admin' }
+  }
+  const instanceAdminOnly = to.matched.some(r => r.meta.instanceAdminOnly)
+  if (instanceAdminOnly && auth.isSuperadmin && !auth.isInstanceAdmin && !auth.isManagedInstallation) {
+    // Superadmin používá běžné panely; oddělený shell patří technickému účtu.
+    return { name: to.name === 'instance-admin-profile' ? 'profile-password' : 'admin-instance', query: to.query, hash: to.hash }
+  }
+  if (instanceAdminOnly && !auth.isInstanceAdmin) return denyFallback(to.name, auth)
+  // Na spravované instalaci se o provoz stará provozovatel, API správy tam vrací 404.
+  if (to.name === 'admin-instance' && auth.isManagedInstallation) return denyFallback(to.name, auth)
   if (requiresAuth && auth.lockedSession) {
     useSessionSecurityStore().apply(auth.lockedSession)
     return true
@@ -500,8 +553,11 @@ export async function authorizationGuard(
   if (auth.isAuthenticated && !mustSetupMfa && !auth.shouldOfferMfa && mfaSetupRoute) {
     const domainLoginQuery = auth.domainContext?.mode === 'canonical' ? pendingCanonicalDomainLoginQuery() : null
     if (domainLoginQuery) return { name: 'login', query: domainLoginQuery }
-    return { name: 'home' }
+    return { name: auth.isInstanceAdmin ? 'instance-admin' : 'home' }
   }
+
+  if (instanceAdminOnly) return true
+  if (auth.isInstanceAdmin && mfaSetupRoute) return true
 
   // Odkaz na doklad jiné firmy, do které uživatel smí: přepnout firmu dřív, než
   // kontroly níž (režim účetnictví, sklad…) posoudí cíl podle špatné firmy.
@@ -512,6 +568,8 @@ export async function authorizationGuard(
   }
 
   if (auth.isClientRole && to.matched.some(r => r.meta.staffOnly)) return denyFallback(to.name, auth)
+
+  if (auth.isDemo && to.matched.some((r) => r.meta.demoHidden)) return denyFallback(to.name, auth)
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
   if (superadminOnly && !auth.isSuperadmin) {
@@ -573,6 +631,14 @@ export async function authorizationGuard(
     return { name: 'home' }
   }
 
+  // Agendy NNO/504 a SVJ: menu je běžné firmě neukáže, přímá adresa ji vrátí
+  // na přehled s vysvětlením, proč stránka pro tuto firmu není.
+  const frameworkScope = [...to.matched].reverse().find(r => r.meta.frameworkScope)?.meta.frameworkScope
+  if (frameworkScope && !hasFrameworkScope(useSupplierStore().currentSupplier, frameworkScope)) {
+    useToast().warning(i18n.global.t(`nav.framework_scope_denied.${frameworkScope}`))
+    return { name: 'home' }
+  }
+
   // Daňová evidence (Epic DE) je dostupná jen firmám v režimu daňové evidence.
   // Nav sekci gatuje AppLayout; tady tvrdě blokujeme i přímý přístup přes URL (zrcadlo double_entry).
   const requiresTaxEvidence = to.matched.some((r) => r.meta.requiresTaxEvidence)
@@ -623,7 +689,7 @@ export function canonicalInternalUrl(
   to: RouteLocationNormalized,
   context: DomainContext | null,
 ): string | null {
-  if (!context?.locked || isClientDomainRouteName(to.name)) return null
+  if (!context?.locked || (!to.meta.canonicalOnly && isClientDomainRouteName(to.name))) return null
   if (!context.canonical_base_url || !to.fullPath.startsWith('/') || to.fullPath.startsWith('//')) return null
   try {
     const origin = new URL(context.canonical_base_url).origin

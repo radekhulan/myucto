@@ -28,6 +28,9 @@ require __DIR__ . '/../vendor/autoload.php';
 // naopak nevadí. Regenerace: průnik `createMock|createStub|createPartialMock|
 // createConfiguredMock|getMockBuilder` v `tests/` s `final class` v `src/`.
 \DG\BypassFinals::allowPaths([
+    '*/api/src/Infrastructure/Database/ReadOnlySnapshot.php',
+    '*/api/src/Repository/BankEmailNoticeRepository.php',
+    '*/api/src/Service/Bank/EmailNotice/Parser/BankEmailNoticeParserRepository.php',
     '*/api/src/Service/Migration/Myucto/MyuctoExportReader.php',
     '*/api/src/Service/Migration/Myucto/MyuctoImporter.php',
     '*/api/src/Service/Migration/Myucto/MyuctoImportWorkflow.php',
@@ -56,6 +59,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Infrastructure/Cache/RedisProbe.php',
     '*/api/src/Infrastructure/Config/Config.php',
     '*/api/src/Infrastructure/Database/Connection.php',
+    '*/api/src/Repository/AccountingFrameworkRepository.php',
     '*/api/src/Middleware/FirstRunLockMiddleware.php',
     '*/api/src/Repository/ChartOfAccountsRepository.php',
     '*/api/src/Repository/BankConnectionRepository.php',
@@ -65,6 +69,8 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/Payroll/Payment/PayrollPaymentExportStorage.php',
     '*/api/src/Repository/KbPlusOAuthRepository.php',
     '*/api/src/Repository/CsasOAuthRepository.php',
+    '*/api/src/Service/OAuth/OAuthClientFlow.php',
+    '*/api/src/Security/CrossSupplierAuthorization.php',
     '*/api/src/Service/Bank/Connector/CsasApiClient.php',
     '*/api/src/Service/Bank/Connector/CsasCredentialVault.php',
     '*/api/src/Service/Bank/Connector/KbPlusApiClient.php',
@@ -94,6 +100,9 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/Payroll/PayrollStatutoryResultRepository.php',
     '*/api/src/Repository/PurchaseInvoiceRepository.php',
     '*/api/src/Repository/JournalEntryRepository.php',
+    '*/api/src/Repository/Property/Payments/CreditSetoffRepository.php',
+    '*/api/src/Repository/Property/Payments/PaymentRepository.php',
+    '*/api/src/Repository/Property/Charges/Issuance/IssuanceRepository.php',
     '*/api/src/Repository/AccountingPeriodRepository.php',
     '*/api/src/Repository/SigningProfileRepository.php',
     '*/api/src/Repository/SupplierPaymentQrSettingsRepository.php',
@@ -107,6 +116,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Security/UserRoleProfile.php',
     '*/api/src/Service/Accounting/DocumentAutoPoster.php',
     '*/api/src/Service/Accounting/DocumentLockService.php',
+    '*/api/src/Service/Accounting/DocumentPaymentLinks.php',
     '*/api/src/Service/Accounting/PostingService.php',
     '*/api/src/Service/Accounting/Bank/BankPostingService.php',
     '*/api/src/Service/Automation/AutomationRecommendationService.php',
@@ -166,6 +176,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Service/License/LicenseClient.php',
     '*/api/src/Service/License/LicenseState.php',
     '*/api/src/Service/License/LicenseService.php',
+    '*/api/src/Service/License/LicenseConsistency.php',
     '*/api/src/Service/Mail/Mailer.php',
     '*/api/src/Service/Payroll/Document/Delivery/PayrollDeliveryRecipientResolver.php',
     '*/api/src/Service/Payroll/Document/PayrollDocumentDeliveryLedgerService.php',
@@ -787,6 +798,19 @@ function __normalizeTestTenant(array $cfg, string $chosenDb): void
                     }
                 }
             }
+        });
+
+        // Licence testovací DB: bez klíče ve zkušebním období. Klon starší než
+        // zkušební doba by jinak zavřel placené moduly testům, které licenci
+        // neřeší (brána i služby placených modulů ji ověřují samostatně).
+        // Testy jiných stavů si řádek mění samy uvnitř transakce.
+        $step('licence-zkusebni-obdobi', static function () use ($pdo): void {
+            $pdo->exec(
+                "UPDATE license SET trial_started_at = NOW()
+                  WHERE id = 1 AND (license_key IS NULL OR license_key = '')
+                    AND trial_started_at < NOW() - INTERVAL 30 DAY"
+            );
+            $pdo->exec("DELETE FROM app_meta WHERE k = 'license_consistency'");
         });
 
         // Účetní období pro AKTUÁLNÍ rok — několik testů skipuje na

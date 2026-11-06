@@ -30,7 +30,8 @@ namespace MyInvoice\Service\Payroll\Ruleset;
  *
  * ## Údržba
  *
- * Změna kterékoli hodnoty v {@see CzechPayrollRulesets2026} tenhle seznam rozbije.
+ * Změna kterékoli hodnoty v {@see CzechPayrollRulesets2026} (a v ostatních
+ * ročnících) tenhle seznam rozbije.
  * To je záměr — je to okamžik, kdy dodavatel znovu podepisuje, co dodává.
  * Správné otisky vypíše `CzechPayrollRulesets2026Test::testVendorManifestPinsEveryDeliveredVersion`
  * v hlášce o selhání.
@@ -47,6 +48,8 @@ final class VendorRulesetManifest
         '52b5f1f0d2580e659e300874f0b0591129640cf38bc67714afb2b4728339d582',
         // cz-jmhz-deadlines-2026.transition.v1
         '9e30371cd82fcf6005bee2954c79b8e13b84f0b487b24df12272d4ba9951e999',
+        // cz-jmhz-deadlines-2027.regular.v1
+        '939bd74de70d4042192e5070ce17bc244588018347c2f973f880592fcd8bcfe8',
         // cz-payroll-2025.compensation-averages.v1
         'cd123a9889377736f0cbfcfb8bd9163163bae6feb31acbbaaab043d187c481e5',
         // cz-payroll-2025.employment-thresholds.v1
@@ -80,7 +83,19 @@ final class VendorRulesetManifest
         // cz-payroll-2026.travel-allowances.v1
         '4894d8ce93b013d4314c89362c39a7667f33185c8348e2a6ece9fe4a0024b8dd',
         // cz-payroll-2026.travel-allowances.v2
-        '6a6a888ca73de0a7b6e33619cfc2799929d4b39ea9fa9ba1904ab17e9abd3538',
+        '1d319cb56061a70e650e90683a023716778ab9d292cbfd59b22241447858c9b1',
+        // cz-payroll-2026.travel-allowances.v3
+        '6b14aa4bc26b5a4f23b0982253c4bb1ecc38402dbed1e6ce7615fd958cc95c7a',
+        // cz-payroll-2027.compensation-averages.v1
+        '62cda166198f62d43f4bb120694f9bf42ec8694ec19afad32ffea60cfad0efb3',
+        // cz-payroll-2027.employment-thresholds.v1
+        '955e2f361a56a74f6f6e8d2240fdbcd6e4123d043882ef6079399fad504cae49',
+        // cz-payroll-2027.health-insurance.v1
+        'dc2ad8a5e8091f9adccac0300c8c20cea85d1c3c9b5a7adbb90f7b9ca5865741',
+        // cz-payroll-2027.income-tax.v1
+        'c68578188a3689dc8f4e422bb0572dcd3179a5ee8f91d1fcce01031202bf75b5',
+        // cz-payroll-2027.social-insurance.v1
+        '85811872429f34f325481585310c9dccc39eb17bf231e5e306d4d926f024a439',
     ];
 
     public static function contains(string $contentHash): bool

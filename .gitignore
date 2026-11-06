@@ -57,3 +57,4 @@ web/src/i18n/chunks/
 # Vyplnena konfigurace pripojeni k SQL Serveru exportnich nastroju (obsahuje heslo)
 tools/pohoda-export/pohoda-sql.json
 tools/pamica-export/pamica-sql.json
+tools/regression/**/__pycache__/

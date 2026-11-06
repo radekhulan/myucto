@@ -3,6 +3,7 @@ import { useI18n } from 'vue-i18n'
 import { dimensionsApi, type DimensionOverview, type DimensionType, type DimensionValue } from '@/api/dimensions'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { dimensionValueLabel, dimensionValueName } from '@/utils/dimensionValueLabel'
 
 /**
  * Číselník dimenzí firmy (Firma → Dimenze) sdílený všemi výběry na stránce.
@@ -28,7 +29,7 @@ export interface DimensionOption {
 export function useDimensions() {
   const supplier = useSupplierStore()
   const auth = useAuthStore()
-  const { t } = useI18n()
+  const { t, te } = useI18n()
 
   /** Sekce je zapnutá a uživatel smí číst účetnictví — jinak se nic neukazuje. */
   const enabled = computed(() => auth.hasCommercialFeatures && supplier.currentSupplier?.dimensions_enabled === true && auth.canRead('accounting'))
@@ -63,6 +64,15 @@ export function useDimensions() {
   const documentTypes = computed(() => types.value.filter(ty => ty.is_active && ty.show_on_documents))
   const valueById = computed(() => new Map(values.value.map(v => [v.id, v])))
   const typeById = computed(() => new Map(types.value.map(ty => [ty.id, ty])))
+  const valuesByType = computed(() => {
+    const out = new Map<number, DimensionValue[]>()
+    for (const v of values.value) {
+      const list = out.get(v.type_id)
+      if (list) list.push(v)
+      else out.set(v.type_id, [v])
+    }
+    return out
+  })
 
   function pathOf(value: DimensionValue): string[] {
     const out: string[] = []
@@ -72,7 +82,7 @@ export function useDimensions() {
       seen.add(parentId)
       const parent = valueById.value.get(parentId)
       if (!parent) break
-      out.unshift(parent.name)
+      out.unshift(nameOf(parent))
       parentId = parent.parent_id
     }
     return out
@@ -100,8 +110,12 @@ export function useDimensions() {
     return out
   }
 
+  function nameOf(value: DimensionValue): string {
+    return dimensionValueName({ t, te }, value, typeById.value.get(value.type_id)?.system_key, valuesByType.value.get(value.type_id))
+  }
+
   function labelOf(value: DimensionValue): string {
-    return value.code === value.name ? value.name : `${value.code} – ${value.name}`
+    return dimensionValueLabel({ t, te }, value, typeById.value.get(value.type_id)?.system_key, ' – ', valuesByType.value.get(value.type_id))
   }
 
   /**
@@ -145,6 +159,7 @@ export function useDimensions() {
     treeOf,
     options,
     pathOf,
+    nameOf,
     labelOf,
     valueLabel,
   }

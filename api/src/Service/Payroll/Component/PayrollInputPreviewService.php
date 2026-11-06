@@ -16,7 +16,6 @@ final class PayrollInputPreviewService
         private readonly PayrollComponentRepository $components,
         private readonly PayrollInputRepository $inputs,
         private readonly PayrollComponentDefinitionFactory $factory,
-        private readonly PayrollBenefitBasketService $baskets,
         private readonly PayrollMealShiftEvidenceService $mealEvidence,
     ) {}
 
@@ -143,29 +142,14 @@ final class PayrollInputPreviewService
         if ($definition->exemptionBasket === null) {
             return null;
         }
-        $taxYear = (int) substr($input['period_start'], 0, 4);
-
         return [
-                ...$this->baskets->split(
+                ...$this->inputs->basketSplit(
+                    $supplierId,
+                    $input['employee_id'],
                     $definition->exemptionBasket,
                     $input['period_start'],
-                    $this->inputs->basketTotal(
-                        $supplierId,
-                        $input['employee_id'],
-                        $definition->exemptionBasket,
-                        $taxYear,
-                        $input['period_start'],
-                    ),
                     $input['amount_minor'],
                     $entitlement?->count() ?? 0,
-                    $definition->exemptionBasket->scalesWithShifts()
-                        ? $this->inputs->mealBasketEntitlements(
-                            $supplierId,
-                            $input['employee_id'],
-                            $definition->exemptionBasket,
-                            $input['period_start'],
-                        )
-                        : null,
                 )->jsonSerialize(),
                 'entitlement' => $entitlement?->jsonSerialize(),
             ];

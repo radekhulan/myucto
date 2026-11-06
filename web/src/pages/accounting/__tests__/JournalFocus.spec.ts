@@ -43,6 +43,7 @@ vi.mock('vue-i18n', async importOriginal => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true, isDemo: false }) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_framework: 'cz_500', entity_profile: 'unknown' } }) }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ error: vi.fn(), success: vi.fn() }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatDateTime: (v: string) => v, formatMoney: (v: number) => String(v) }))
 vi.mock('@/composables/useUserPrefs', () => ({ ensurePrefsLoaded: vi.fn().mockResolvedValue(undefined), getPagePrefs: () => ref({}) }))
@@ -61,7 +62,7 @@ vi.mock('@/composables/useSavedFilters', () => ({
 }))
 
 import Journal from '@/pages/accounting/Journal.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
 
 const FilterBarStub = {
   name: 'FilterBar',
@@ -85,7 +86,7 @@ function mountJournal() {
       directives: { 'column-labels': {} },
       stubs: {
         FilterBar: FilterBarStub,
-        DimensionReportFilter: true,
+        DimensionReportFilters: true,
         ActivationBanner: true,
         SavedFiltersMenu: true,
         ColumnPicker: true,
@@ -202,11 +203,11 @@ describe('journal entry focus', () => {
     m.routeQuery = reactive({ entry_id: '7' })
     const wrapper = mountJournal()
     await flushPromises()
-    wrapper.findComponent(DimensionReportFilter).vm.$emit('update:valueId', 5)
+    wrapper.findComponent(DimensionReportFilters).vm.$emit('update:valueIds', [5])
     await flushPromises()
     finish(entry(7))
     await flushPromises()
-    expect(lastListCall()).toMatchObject({ dimension_value_id: 5, entry_id: undefined })
+    expect(lastListCall()).toMatchObject({ dimension_value_id: '5', entry_id: undefined })
     expect(wrapper.findAll('journal-entry-detail-panel-stub')).toHaveLength(0)
     expect(scroll).not.toHaveBeenCalled()
     expect(wrapper.text()).not.toContain('common.loading')

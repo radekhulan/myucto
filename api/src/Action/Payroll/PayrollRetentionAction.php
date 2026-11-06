@@ -292,6 +292,11 @@ final class PayrollRetentionAction
         if ($asOf === null) {
             return Json::error($response, 'validation_failed', 'as_of musí být ve tvaru Y-m-d.', 422);
         }
+        // Datum v budoucnosti by retenční lhůty vyhodnotilo jako uplynulé už dnes
+        // a výmaz by šel provést předčasně (i omylem napsaným rokem).
+        if ($asOf > date('Y-m-d')) {
+            return Json::error($response, 'validation_failed', 'Datum výmazu nesmí být v budoucnosti.', 422);
+        }
         $body = (array) ($request->getParsedBody() ?? []);
 
         $id = $this->proposals->create(
@@ -454,6 +459,10 @@ final class PayrollRetentionAction
             return date('Y-m-d');
         }
         if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $raw) !== 1) {
+            return null;
+        }
+        $date = \DateTimeImmutable::createFromFormat('!Y-m-d', $raw);
+        if ($date === false || $date->format('Y-m-d') !== $raw) {
             return null;
         }
 

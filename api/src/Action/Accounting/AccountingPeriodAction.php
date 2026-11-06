@@ -22,6 +22,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   GET  /api/accounting/periods              — seznam období firmy
  *   POST /api/accounting/periods              — nové období — účetní|admin
  *   POST /api/accounting/periods/{id}/status  — přechody stavů dle matice F4 §2.4 — admin
+ *   PATCH /api/accounting/periods/{id}        — začátek prvního otevřeného období — účetní|admin
  *
  * Stavový automat (R2): open|closing|closed|reviewed|approved. Přes /status jdou POUZE
  * closed→reviewed (vratná interní kontrola), reviewed→closed (zrušení kontroly, reason),
@@ -323,6 +324,137 @@ final class AccountingPeriodAction
                 }
             }
             $this->log($request, $action, $id, $payload);
+            if ($ownTx) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return Json::ok($response, $this->periods->findById($supplierId, $id));
+    }
+
+    /**
+     * Změna začátku PRVNÍHO účetního období (§ 3 ZoÚ: první období začíná dnem vzniku
+     * účetní jednotky). Automat zakládá období podle kalendáře firmy, takže firma
+     * vzniklá v průběhu roku dostala 1. 1. – 31. 12. (#227).
+     *
+     * Jen nejstarší otevřené období, nový začátek ve stejném účetním roce a před koncem
+     * období, a žádný zápis deníku s datem před novým začátkem — jinak by zápis ležel
+     * mimo své období (výkazy, PS, otevírací zápis s entry_date = starts_on).
+     * Konec období ani štítek roku se nemění. Kalendář firmy (kalendářní vs. hospodářský
+     * rok) musí po změně zůstat stejný, jinak by automat zakládal další roky jinak.
+     */
+    public function updateStart(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requireWrite($request, $response, $err)) return $err;
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $id = (int) ($args['id'] ?? 0);
+        $body = (array) ($request->getParsedBody() ?? []);
+
+        $startsOn = trim((string) ($body['starts_on'] ?? ''));
+        if (!$this->isDate($startsOn)) {
+            return Json::error($response, 'validation_failed', 'starts_on musí být datum (YYYY-MM-DD).', 422);
+        }
+        $rowVersion = $body['row_version'] ?? null;
+        if (!is_numeric($rowVersion) || (int) $rowVersion < 1) {
+            return Json::error($response, 'validation_failed', 'row_version je povinný (celé číslo ≥ 1).', 422);
+        }
+        $rowVersion = (int) $rowVersion;
+
+        $pdo = $this->db->pdo();
+        $ownTx = !$pdo->inTransaction();
+        if ($ownTx) {
+            $pdo->beginTransaction();
+        }
+        $fail = function (string $code, string $message, int $status, array $extra = []) use ($pdo, $ownTx, $response): Response {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            return Json::error($response, $code, $message, $status, $extra);
+        };
+        try {
+            // Zámek všech období firmy ve stejném pořadí jako účtování (DimensionPeriodGuard),
+            // takže souběžně nevznikne zápis do dnů, které se z období vyjímají.
+            $before = $this->periods->fiscalCalendarSnapshot($supplierId, true);
+            $period = null;
+            foreach ($before['periods'] as $candidate) {
+                if ((int) $candidate['id'] === $id) {
+                    $period = $candidate;
+                }
+            }
+            if ($period === null) {
+                return $fail('not_found', 'Účetní období nenalezeno.', 404);
+            }
+            $oldStart = (string) $period['starts_on'];
+            $endsOn = (string) $period['ends_on'];
+            $fiscalYear = (int) $period['fiscal_year'];
+            if ($startsOn === $oldStart) {
+                if ($ownTx) {
+                    $pdo->commit();
+                }
+                return Json::ok($response, $this->periods->findById($supplierId, $id));
+            }
+            if ((string) $period['status'] !== 'open') {
+                return $fail('period_not_open', 'Začátek jde změnit jen u otevřeného období.', 422);
+            }
+            foreach ($before['periods'] as $other) {
+                if ((int) $other['id'] !== $id && (string) $other['starts_on'] < $oldStart) {
+                    return $fail('not_first_period',
+                        'Začátek jde změnit jen u prvního účetního období firmy. Navazující období začíná dnem po konci předchozího.', 422);
+                }
+            }
+            if ($startsOn >= $endsOn) {
+                return $fail('validation_failed', 'Začátek období musí být před jeho koncem.', 422);
+            }
+            if ($before['calendar']->fiscalYearOfDate($startsOn) !== $fiscalYear) {
+                return $fail('validation_failed',
+                    'Nový začátek musí patřit do účetního roku ' . $fiscalYear . '. Období se jen zkracuje nebo prodlužuje v rámci téhož roku.', 422);
+            }
+            $overlap = $this->periods->overlapping($supplierId, $startsOn, $endsOn, $id);
+            if ($overlap !== null) {
+                return $fail('period_overlap',
+                    'Období by se překrývalo s obdobím ' . $overlap['fiscal_year'] . '.', 422);
+            }
+            $activation = $pdo->prepare('SELECT accounting_activation_status FROM supplier WHERE id = ?');
+            $activation->execute([$supplierId]);
+            if ((string) $activation->fetchColumn() === 'running') {
+                return $fail('activation_running',
+                    'Právě běží doúčtování dokladů při aktivaci účetnictví. Začátek období změňte, až doběhne.', 409);
+            }
+            $entries = $this->periods->journalEntriesBefore($supplierId, $id, $startsOn);
+            if ($entries['count'] > 0) {
+                return $fail('entries_before_start',
+                    'V období je ' . $entries['count'] . ' zápisů v deníku s datem před novým začátkem (nejstarší '
+                    . $entries['first_date'] . '). Nejprve je stornujte nebo přeúčtujte do pozdějšího data.', 409,
+                    ['entries_count' => $entries['count'], 'first_entry_date' => $entries['first_date']]);
+            }
+            $proposed = array_map(
+                static fn (array $p): array => (int) $p['id'] === $id ? array_replace($p, ['starts_on' => $startsOn]) : $p,
+                $before['periods'],
+            );
+            if ($this->periods->fiscalCalendarFor($supplierId, $proposed, true)->startMonth() !== $before['calendar']->startMonth()) {
+                return $fail('fiscal_calendar_changed',
+                    'Změna by firmě změnila začátek účetního roku. Nejprve v Nastavení firmy vyplňte, kterým měsícem účetní rok začíná.', 422);
+            }
+            if (!$this->periods->updateStartsOnCas($id, $supplierId, $startsOn, $rowVersion)) {
+                return $fail('version_conflict', 'Období mezitím změnil jiný uživatel — načtěte aktuální stav.', 409);
+            }
+            // Doklady starší než začátek účetnictví se neúčtují; aktivace účetnictví tak
+            // nebude doúčtovávat dny, které do prvního období nepatří.
+            $pdo->prepare(
+                'UPDATE supplier SET accounting_starts_on = ?
+                  WHERE id = ? AND accounting_starts_on IS NOT NULL AND accounting_starts_on < ?'
+            )->execute([$startsOn, $supplierId, $startsOn]);
+            $this->log($request, 'accounting.period_start_changed', $id, [
+                'fiscal_year' => $fiscalYear,
+                'from' => $oldStart,
+                'to' => $startsOn,
+            ]);
             if ($ownTx) {
                 $pdo->commit();
             }

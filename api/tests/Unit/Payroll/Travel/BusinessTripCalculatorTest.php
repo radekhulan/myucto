@@ -181,6 +181,28 @@ final class BusinessTripCalculatorTest extends TestCase
         self::assertContains('cz-payroll-2026.travel-allowances.v2', $after->rulesetIds);
     }
 
+    public function testPetrolAveragePriceChangesOnFirstOctober2026(): void
+    {
+        $before = $this->calculator->calculate(new BusinessTrip(
+            '2026-09-30 08:00',
+            '2026-09-30 11:00',
+            items: [$this->vehicleItem('2026-09-30', 100_000, 6_000, TravelFuelKind::PETROL_95)],
+        ));
+        $after = $this->calculator->calculate(new BusinessTrip(
+            '2026-10-01 08:00',
+            '2026-10-01 11:00',
+            items: [$this->vehicleItem('2026-10-01', 100_000, 6_000, TravelFuelKind::PETROL_95)],
+        ));
+
+        self::assertTrue($before->isSupported());
+        self::assertTrue($after->isSupported());
+        // Vyhláška č. 175/2026 Sb.: 6 l × 34,70 Kč vs. 6 l × 41,80 Kč.
+        self::assertSame(20_820, $before->items[0]['fuel_cost_minor']);
+        self::assertSame(25_080, $after->items[0]['fuel_cost_minor']);
+        self::assertContains('cz-payroll-2026.travel-allowances.v2', $before->rulesetIds);
+        self::assertContains('cz-payroll-2026.travel-allowances.v3', $after->rulesetIds);
+    }
+
     public function testDocumentedFuelPriceOverridesTheAveragePrice(): void
     {
         $result = $this->calculator->calculate(new BusinessTrip(

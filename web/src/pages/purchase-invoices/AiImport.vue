@@ -13,6 +13,8 @@ import { useSupplierStore } from '@/stores/supplier'
 import { canUsePurchaseAiExtraction } from '@/security/purchaseAiExtraction'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
+import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -267,6 +269,16 @@ async function runAiExtract() {
   }
 }
 
+// Doklad spojený z více částí jde do stejného vytěžení jako jeden nahraný soubor.
+function importMerged(file: File) {
+  if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value) return
+  aiBatchQueue.value = []
+  aiBatchId.value = ''
+  aiPdfFile.value = file
+  aiResult.value = null
+  void runAiExtract()
+}
+
 /** Doklad jiné firmy: kde skončil (faktura v ní, nebo její příchozí doklady). */
 function targetLabel(result: AiExtractResult): string {
   const company = result.target_supplier_name ?? ''
@@ -337,6 +349,9 @@ watch(() => suppliers.currentSupplierId, () => {
       <p class="text-xs text-neutral-500 mb-4">{{ t('integrations.ai.extract_hint') }}</p>
 
       <div class="space-y-3">
+        <div v-if="!quotaExhausted" class="flex flex-wrap gap-2 justify-end">
+          <CapturePhotoButton :disabled="aiExtracting || aiBatchRunning" @captured="(f: File) => acceptAiFiles([f])" />
+        </div>
         <label class="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition"
           :class="aiDragOver
             ? 'border-primary-500 bg-primary-50'
@@ -531,6 +546,8 @@ watch(() => suppliers.currentSupplierId, () => {
         </details>
       </div>
     </div>
+    <MergeDocumentsPanel v-if="canExtract && aiConfigured" :disabled="!canStartExtraction"
+      :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" :only-flagged="!auth.isClientRole" @close="reviewIds = null" />
   </div>
 </template>

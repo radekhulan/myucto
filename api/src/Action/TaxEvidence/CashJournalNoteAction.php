@@ -24,7 +24,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *   PATCH  /api/tax-evidence/cash-journal/notes/{source}/{id}/{noteId}  — úprava {body?, pinned?}
  *   DELETE /api/tax-evidence/cash-journal/notes/{source}/{id}/{noteId}  — smazání (soft)
  *
- * `source` je typ řádku deníku (cash, bank, invoice_payment, purchase_invoice, gopay).
+ * `source` je typ řádku deníku (cash, bank, invoice_payment, purchase_invoice, gopay, credit_note_offset).
  * Přílohy jdou existující vazbou dokument ↔ entita (document_links), viz
  * {@see CashJournalNoteRepository::ATTACHMENT_ENTITY}. Poznámka nemění částky ani
  * zařazení pohybu, proto ji uzávěrka roku neblokuje (shodně s poznámkami zápisu).

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Time;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollAbsenceRepository;
 use MyInvoice\Service\Payroll\Absence\PayrollWageReplacementTitle;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzControlSourceCatalog;
@@ -295,6 +296,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         private readonly Connection $db,
         private readonly PayrollCalendarFundService $fund,
         private readonly PayrollJmhzAbsenceHoursDeriver $absenceHours,
+        private readonly PayrollAbsenceRepository $absences,
     ) {}
 
     /**
@@ -327,8 +329,14 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * nebo nepřetržitém režimu má fond z 37,5 h, ne ze 40 h. Mimo to rozmezí
      * (vztah bez vyplněného úvazku, stanovená doba zkrácená kolektivní smlouvou)
      * zůstává zákonných 40 h.
+     *
+     * Fond se počítá jen za pracovní dny, kdy vztah v měsíci trval (`$from`–`$to`,
+     * průnik trvání s měsícem): datový slovník u dohody „pracovní dny trvání dohody",
+     * a stejně tak u pracovního poměru, který v měsíci začal nebo skončil. Přijatá
+     * hlášení jiného systému mají u dohody skončené 19. 4. 2026 fond 104 h a u
+     * nástupu 20. 4. 2026 72 h, ne 176 h. Vztah trvající celý měsíc se nemění.
      */
-    private function standardFundSuggestion(string $periodStart, string $relationType, ?string $statedWeeklyHours = null): string
+    private function standardFundSuggestion(string $periodStart, string $relationType, ?string $statedWeeklyHours = null, ?\DateTimeImmutable $from = null, ?\DateTimeImmutable $to = null): string
     {
         if (!self::requiresShiftCalendar($relationType)) {
             return '0';
@@ -345,8 +353,14 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             substr($periodStart, 0, 7),
             array_fill_keys([1, 2, 3, 4, 5], $daily),
         );
+        $fromDate = $from?->format('Y-m-d');
+        $toDate = $to?->format('Y-m-d');
         $minutes = 0;
         foreach ($month['days'] as $day) {
+            $date = (string) $day['date'];
+            if (($fromDate !== null && $date < $fromDate) || ($toDate !== null && $date > $toDate)) {
+                continue;
+            }
             $minutes += $day['weekday'] <= 5 ? $daily : 0;
         }
 
@@ -412,12 +426,13 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'overtime_minutes' => (int) $workedSource['overtime_minutes'],
         ];
         $entryIssues = $workedSource['issues'];
-        $derivedAbsences = $this->absenceHours->derive(
+        $derivedAbsences = $this->entryAbsenceHours(
             $supplierId,
             $employmentId,
-            $periodStart,
-            $periodEnd->format('Y-m-d'),
+            $period,
+            $periodEnd,
             $absences,
+            $calendars,
         );
         [$agreedMinutes, $calendarIssues] = match (true) {
             !self::requiresShiftCalendar($employment['relation_type']) => [0, []],
@@ -448,6 +463,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'absences' => $absences,
         ];
         $sourceJson = CanonicalJson::encode($source);
+        [$durationFrom, $durationTo] = self::employmentInterval($employment, $period, $periodEnd);
 
         return [
             'derivation_version' => self::DERIVATION_VERSION,
@@ -456,7 +472,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
-                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type'], $employment['stated_weekly_hours']),
+                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type'], $employment['stated_weekly_hours'], $durationFrom, $durationTo),
                 'agreed_fund_hours' => self::minutesSuggestion($agreedMinutes),
                 'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
                     ? self::WEEKLY_WORK_MISSING_VALUE
@@ -573,6 +589,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'absences' => $absences,
         ];
         $sourceJson = CanonicalJson::encode($source);
+        [$durationFrom, $durationTo] = self::employmentInterval($employment, $period, $periodEnd);
 
         return [
             'derivation_version' => self::IMPORT_SUMMARY_DERIVATION_VERSION,
@@ -581,7 +598,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'source_snapshot_json' => $sourceJson,
             'source_snapshot_sha256' => hash('sha256', $sourceJson),
             'suggestions' => [
-                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type'], $employment['stated_weekly_hours']),
+                'standard_fund_hours' => $this->standardFundSuggestion($periodStart, $employment['relation_type'], $employment['stated_weekly_hours'], $durationFrom, $durationTo),
                 'agreed_fund_hours' => $agreedSuggestion,
                 'weekly_work_hours' => self::weeklyWorkMissingValue($employment['relation_type'])
                     ? self::WEEKLY_WORK_MISSING_VALUE
@@ -693,8 +710,34 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         if ($dated === []) {
             return [];
         }
-        // Plánované minuty dne z kalendáře vztahu; svátek jen tam, kde se počítá (nemoc).
-        $dayMinutes = static function (string $iso, bool $holidays) use ($calendars): int {
+        try {
+            $derived = $this->absenceHours->deriveFromCalendar($supplierId, $employmentId, $periodStart, $periodEnd, $dated, self::calendarDayMinutes($calendars));
+        } catch (\UnexpectedValueException) {
+            return null;
+        }
+        if (!$derived['supported']) {
+            return null;
+        }
+
+        return array_diff_key($derived['minutes'], array_flip(['vacation', 'employee_obstacle_paid', 'employer_obstacle']));
+    }
+
+    /**
+     * Plánované minuty dne z kalendáře vztahu; svátek jen tam, kde se počítá
+     * (nemoc). Den bez jediného platného kalendáře shodí odvození výjimkou
+     * `\UnexpectedValueException`.
+     *
+     * Svátkem je den kalendáře označený jako svátek, a s `$publicHolidays` i
+     * státní svátek, který kalendář jinak neoznačuje — týž výklad jako
+     * {@see holidayMinutes()}, které takový svátek v nepřítomnosti vykazuje samo.
+     *
+     * @param list<array<string,mixed>> $calendars
+     * @param array<string,true> $publicHolidays
+     * @return \Closure(string,bool):int
+     */
+    private static function calendarDayMinutes(array $calendars, array $publicHolidays = []): \Closure
+    {
+        return static function (string $iso, bool $holidays) use ($calendars, $publicHolidays): int {
             $matching = array_values(array_filter(
                 $calendars,
                 static fn (array $calendar): bool => $calendar['valid_from'] <= $iso
@@ -715,19 +758,67 @@ final class PayrollJmhzWorkMonthSummaryBuilder
 
                 return (int) $day['planned_minutes'];
             }
+            if (isset($publicHolidays[$iso]) && !$holidays) {
+                return 0;
+            }
 
             return $planned;
         };
-        try {
-            $derived = $this->absenceHours->deriveFromCalendar($supplierId, $employmentId, $periodStart, $periodEnd, $dated, $dayMinutes);
-        } catch (\UnexpectedValueException) {
-            return null;
-        }
-        if (!$derived['supported']) {
-            return null;
-        }
+    }
 
-        return array_diff_key($derived['minutes'], array_flip(['vacation', 'employee_obstacle_paid', 'employer_obstacle']));
+    /**
+     * Rozpad nepřítomností měsíce z docházky po druzích.
+     *
+     * Měří se stejně jako krácení mzdy: má-li vztah v měsíci publikované směny,
+     * směnami, jinak pracovním kalendářem vztahu
+     * ({@see PayrollAbsenceRepository::hasPublishedShiftsInMonth()}). Bez
+     * kalendářní cesty by měsíc s pravidelným kalendářem bez rozvrhu směn
+     * (typicky celý měsíc rodičovské) neměl k nepřítomnosti žádné hodiny
+     * a příprava hlášení by se zastavila na `jmhz_eldp_work_summary_mismatch`.
+     *
+     * @param list<array<string,mixed>> $absences
+     * @param list<array<string,mixed>> $calendars
+     * @return array{supported:bool,minutes:array<string,int>,total:int,paid:int}
+     */
+    private function entryAbsenceHours(
+        int $supplierId,
+        int $employmentId,
+        \DateTimeImmutable $period,
+        \DateTimeImmutable $periodEnd,
+        array $absences,
+        array $calendars,
+    ): array {
+        $periodStart = $period->format('Y-m-d');
+        if ($absences === []
+            || $this->absences->hasPublishedShiftsInMonth(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $periodEnd->modify('-1 day')->format('Y-m-d'),
+            )
+        ) {
+            return $this->absenceHours->derive($supplierId, $employmentId, $periodStart, $periodEnd->format('Y-m-d'), $absences);
+        }
+        // Svátek uvnitř nepřítomnosti vykazuje holidayMinutes() zvlášť, do
+        // hodin nepřítomnosti proto nepatří (u nemoci naopak ano).
+        $publicHolidays = [];
+        foreach ($this->fund->month(substr($periodStart, 0, 7), [])['days'] as $day) {
+            if ($day['is_holiday'] === true) {
+                $publicHolidays[(string) $day['date']] = true;
+            }
+        }
+        try {
+            return $this->absenceHours->deriveFromCalendar(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $periodEnd->format('Y-m-d'),
+                $absences,
+                self::calendarDayMinutes($calendars, $publicHolidays),
+            );
+        } catch (\UnexpectedValueException) {
+            return $this->absenceHours->derive($supplierId, $employmentId, $periodStart, $periodEnd->format('Y-m-d'), $absences);
+        }
     }
 
     /**

@@ -21,6 +21,21 @@ function mountFor(checkKey: string) {
   })
 }
 
+describe('CheckFindings — počet v řádku', () => {
+  it('nový výsledek kontroly přebije dříve načtený detail', async () => {
+    const { closingApi } = await import('../../../api/closing')
+    vi.mocked(closingApi.checkFindings).mockResolvedValue({ key: 'x', severity: 'warning', ok: false, value: { count: 9, findings: [] } })
+    const wrapper = mount(CheckFindings, {
+      props: { checkKey: 'x', label: 'X', periodId: 3, value: { count: 9, findings: [{ doc_id: 1 }] } },
+      global: { stubs: { RouterLink: { template: '<a><slot /></a>' }, Modal: { template: '<div><slot /></div>' } } },
+    })
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    await wrapper.setProps({ value: { count: 0, findings: [] } })
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
+})
+
 describe('CheckFindings — nález marked_paid_unposted', () => {
   it('u přijatých faktur má vlastní popisek bez GoPay', async () => {
     const wrapper = mountFor('paid_purchases_open_saldo')
@@ -50,5 +65,48 @@ describe('CheckFindings FX', () => {
     expect(wrapper.text()).toContain('checks.issue.fx_settlement_unproven')
     expect(wrapper.text()).not.toContain('0,00')
     expect(wrapper.text()).toContain('EUR')
+  })
+})
+
+it.each([
+  [{ applicable: false, complete: false }, 'not_applicable'],
+  [{ applicable: true, complete: false }, 'pending'],
+  [{ applicable: true, complete: true }, 'completed'],
+])('shows deferred tax assessment state %j', (value, key) => {
+  const wrapper = mount(CheckFindings, { props: { checkKey: 'deferred_tax_assessment', label: 'Deferred tax', value } })
+  expect(wrapper.text()).toContain(`checks.value.${key}`)
+})
+
+it.each([
+  ['filing_required', 'other_taxable_income', true],
+  ['filing_not_required', 'only_exempt_or_withheld_income', true],
+  ['unassessed', 'assessment_incomplete', false],
+])('ukáže předkontrolu SVJ %s', (status, reason, complete) => {
+  const value = { applicable: true, complete, findings: [], svj_precheck: { status, reason, legal_basis: 'zdp_38mb_b', taxable_source_count: 2 } }
+  const wrapper = mount(CheckFindings, { props: { checkKey: 'nonprofit_tax_assessment', label: 'Tax', value } })
+  const text = wrapper.get('[data-test="svj-precheck"]').text()
+  expect(text).toContain(`checks.svj_precheck.status.${status}`)
+  expect(text).toContain(`checks.svj_precheck.reason.${reason}`)
+  expect(wrapper.text()).toContain(complete ? 'checks.value.completed' : 'checks.value.pending')
+})
+
+it('neukáže předkontrolu SVJ u jiného poplatníka 504', () => {
+  const wrapper = mount(CheckFindings, { props: { checkKey: 'nonprofit_tax_assessment', label: 'Tax', value: { applicable: true, complete: true, findings: [] } } })
+  expect(wrapper.find('[data-test="svj-precheck"]').exists()).toBe(false)
+})
+
+describe('CheckFindings - ostatní položky', () => {
+  it('nález typu other_item odkazuje na detail položky', async () => {
+    const wrapper = mount(CheckFindings, {
+      props: { checkKey: 'other_item_installments_overdue', label: 'OI', value: { kind: 'document', count: 1,
+        findings: [{ doc_type: 'other_item', doc_id: 42, doc_no: 'OP1', amount: 500 }] } },
+      global: { stubs: {
+        RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+        Modal: { template: '<div><slot /></div>' },
+      } },
+    })
+    await wrapper.find('button').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('a[data-to]').attributes('data-to')).toBe('{"name":"other-item-detail","params":{"id":42}}')
   })
 })

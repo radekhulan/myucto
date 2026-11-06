@@ -66,7 +66,9 @@ Kapitolu otevřete, když:
 9. Klikněte na **Schválit**.
 
 **Jak poznáte, že je hotovo:** Běh má stav **Schváleno** a hlavní tlačítko
-nabízí **Zaúčtovat**. Každý zaměstnanec má výplatní pásku a v podvojném
+nabízí **Zaúčtovat**. Výplatní pásky zaměstnanců se generují na pozadí
+(viz [§ 83.3](83_Dokumenty_a_vystupy.md#833-krok-za-krokem-mesicni-dokumenty))
+a v podvojném
 účetnictví vznikl mzdový deník.
 
 > [!TIP]
@@ -141,20 +143,22 @@ pro JMHZ. Aplikace nabízí tři hromadné akce.
 **Výchozí zákonná evidence** (daňová rezidence, příslušnost k pojištění):
 
 1. U blokace na kartě běhu klikněte na **Doplnit výchozí údaje (N osob)**.
-   Totéž je v `Mzdy → Zaměstnanci` pod **Doplnit výchozí zákonné údaje**;
+   Totéž je v `Mzdy → Zaměstnanci → Další funkce` pod **Doplnit výchozí zákonné údaje**;
    tam zvolíte měsíc, od kterého údaje platí.
 2. Projděte náhled: komu se údaje doplní, kdo je vyřazený a proč, kdo nemá
    zdravotní pojišťovnu a kdo nemá prohlášení poplatníka. Náhled nic
    nezapisuje.
 3. Chcete-li chybějící prohlášení zapsat jako nepodepsané, zaškrtněte
    **Zapsat chybějící prohlášení jako nepodepsané (N osob)**. Nejdřív si
-   přečtěte, komu by to přepnulo zdanění na srážkovou daň.
+   přečtěte, komu by to přepnulo zdanění na srážkovou daň. Podepsaná
+   prohlášení zapíšete odkazem **Podepsaná prohlášení hromadně**
+   ([§ 86.4.1](86_Zamestnanci.md#8641-podepsana-prohlaseni-hromadne)).
 4. Údaje uložte a pokračujte krokem, který nabídne dialog (**Spočítat mzdy**,
    **Obnovit podklady**, nová revize nebo **Vyžádat opravu**).
 
 **Zdravotní pojišťovny:**
 
-1. V `Mzdy → Zaměstnanci` klikněte na **Zdravotní pojišťovny hromadně**
+1. V `Mzdy → Zaměstnanci → Další funkce` klikněte na **Zdravotní pojišťovny hromadně**
    (výsledek importu hlášení na akci odkáže sám).
 2. U každé osoby vyberte pojišťovnu a měsíc, od kterého platí. **Doplnit
    prázdné** vyplní stejnou pojišťovnu všem, kdo ji zatím nemají.
@@ -362,7 +366,8 @@ Oprava nepřepíše původní pohyb: zvýšení přidá jen rozdíl a snížení
 reverzi navázanou na původní sražení. Opakované schválení částku nezapíše
 podruhé.
 
-Schválení zároveň vytvoří výplatní pásku každé zpracované osoby a v podvojném
+Schválení zároveň zařadí generování výplatní pásky každé zpracované osoby
+(vzniknou na pozadí) a v podvojném
 účetnictví rozdílový mzdový deník. Použijí se předkontace zmrazené při
 uzamknutí vstupů, takže pozdější změna nastavení nezmění zkontrolovanou
 revizi. Je-li účetní období uzamčené, datum deníku se posune na první otevřený
@@ -484,7 +489,9 @@ Skrývat a obnovovat smí uživatel s právem schvalovat mzdové běhy.
 
 Skrýt nejde blokující chyby, varování s výjimkou ani překročení zákonných
 limitů (dohoda o provedení práce nad 300 hodin, průměr dohody o pracovní
-činnosti, přesčasy, exekuce, sleva na pojistném).
+činnosti, přesčasy, exekuce, sleva na pojistném). Upozornění, že se dohoda
+o provedení práce blíží limitu (od 240 hodin), skrýt jde po vztazích. Až
+hodiny limit překročí, objeví se samostatné varování, které skrýt nejde.
 
 ### 80.11.12 Převzaté měsíce roku přechodu
 
@@ -503,7 +510,7 @@ jen tehdy, když v něm měsíc čeká na převzetí) a u firmy bez převzatých
 se nezobrazí. Převod z Money S3 převzaté mzdy jednotlivých zaměstnanců nemá
 (Money je vede v šifrované databázi agendy); protokol převodu ukáže jen
 kontrolní úhrny celé firmy po měsících, viz
-[§ 103.10.2.2](103_Prechod_z_Money_S3.md#1031022-mzdy).
+[§ 106.10.2.2](106_Prechod_z_Money_S3.md#1061022-mzdy).
 
 **Převzatý běh** je zrcadlo cizího výpočtu, ne pracovní dokument:
 

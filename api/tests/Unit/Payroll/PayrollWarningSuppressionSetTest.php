@@ -148,6 +148,8 @@ final class PayrollWarningSuppressionSetTest extends TestCase
         foreach (['dpp_annual_hours_exceeded', 'dpc_weekly_average_exceeded', 'enforcement_case_received', 'part_time_discount_intent_missing'] as $code) {
             self::assertFalse(PayrollWarningSuppressionCatalog::isHideableCode($code), $code);
         }
+        self::assertTrue(PayrollWarningSuppressionCatalog::isHideable('dpp_annual_hours_approaching', 'warning', false));
+        self::assertSame('employment', PayrollWarningSuppressionCatalog::subjectType('dpp_annual_hours_approaching'));
     }
 
     /** @return array<string,mixed> */

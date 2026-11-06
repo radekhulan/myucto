@@ -22,6 +22,8 @@ use MyInvoice\Service\Submission\SubmissionOutboxService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use MyInvoice\Repository\Submission\SubmissionOutboxRepository;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
+use MyInvoice\Service\Payroll\Submission\PayrollSubmissionSettlementPolicy;
 use MyInvoice\Support\PeriodFilter;
 
 /**
@@ -71,8 +73,17 @@ final class SubmissionOutboxAction
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
+        $settlement = new PayrollSubmissionSettlementPolicy(new PayrollDispatchCapabilityCatalog());
+
         return Json::ok($response, [
-            'items' => $page['items'],
+            // Řádek musí poznat agendu, na kterou úřad výsledek neposílá:
+            // „zatím nevíme" by tam slibovalo odpověď, která nikdy nepřijde.
+            'items' => array_map(
+                static fn (array $row): array => $row + [
+                    'settles_on_delivery' => $settlement->settlesOnDelivery((string) $row['agenda_code']),
+                ],
+                $page['items'],
+            ),
             'total' => $page['total'],
             'years' => $page['years'],
             'limit' => $limit,
@@ -649,6 +660,197 @@ final class SubmissionOutboxAction
             'results' => $results,
             'receipt_session' => $followUp,
         ]);
+    }
+
+    /**
+     * Hromadné odeslání jménem a heslem: jedno zadání údajů pro všechna
+     * vybraná podání. Heslo se stejně jako u {@see passwordSend()} neukládá
+     * a autentizuje každý požadavek do ISDS zvlášť, takže dávka nedrží žádnou
+     * relaci navíc.
+     */
+    public function passwordSendBatch(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (($ids = $this->batchIds($body, $response)) instanceof Response) {
+            return $ids;
+        }
+        $environment = (string) ($body['environment'] ?? 'production');
+        $username = trim((string) ($body['username'] ?? ''));
+        $password = (string) ($body['password'] ?? '');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        if ($username === '' || strlen($username) > 128 || preg_match('/[\x00-\x20:\x7f]/', $username) === 1) {
+            return Json::error($response, 'isds_username_invalid', 'Vyplňte platné uživatelské jméno k datové schránce.', 400);
+        }
+        if ($password === '' || strlen($password) > 512 || preg_match('/[\x00-\x1f\x7f]/', $password) === 1) {
+            return Json::error($response, 'isds_password_invalid', 'Vyplňte heslo k datové schránce.', 400);
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $context = new ChannelContext(
+            $supplierId,
+            $environment,
+            new ChannelCredentials(
+                boxId: '',
+                authMode: 'password',
+                username: SensitiveValue::fromProducer(static fn (): string => $username),
+                password: SensitiveValue::fromProducer(static fn (): string => $password),
+            ),
+        );
+
+        return $this->sendBatchWithContext($response, $supplierId, $ids, $this->userId($request), $context);
+    }
+
+    /**
+     * Hromadné odeslání systémovým certifikátem firmy. Potvrzení `authorized`
+     * platí pro celou dávku — účetní vidí, kolik zpráv odesílá.
+     */
+    public function certificateSendBatch(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (($ids = $this->batchIds($body, $response)) instanceof Response) {
+            return $ids;
+        }
+        if (($body['authorized'] ?? null) !== true) {
+            return Json::error(
+                $response,
+                'isds_certificate_send_unauthorized',
+                'Odeslání systémovým certifikátem potvrďte — za certifikátem nestojí člověk.',
+                400,
+            );
+        }
+        $environment = (string) ($body['environment'] ?? 'production');
+        if (!in_array($environment, ['production', 'test'], true)) {
+            return Json::error($response, 'invalid_environment', 'Neznámé prostředí.', 400);
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        try {
+            $context = $this->credentials->unlock($supplierId, $environment);
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return $this->sendBatchWithContext($response, $supplierId, $ids, $this->userId($request), $context);
+    }
+
+    /**
+     * Vyžádá SMS kód pro HROMADNÉ odeslání. Bez `{id}` ze stejného důvodu
+     * jako {@see mobileKeyStartBatch()}: přihlášení není vázané na podání.
+     */
+    public function smsStartBatch(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        try {
+            $result = $this->sms->start(
+                SupplierGuard::currentId($request),
+                $this->userId($request),
+                (string) ($body['environment'] ?? 'production'),
+                (string) ($body['username'] ?? ''),
+                (string) ($body['password'] ?? ''),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Ověří SMS kód a v té JEDNÉ relaci odešle všechna vybraná podání. Relace
+     * se po dávce odhlásí, ať odeslání skončí jakkoli.
+     */
+    public function smsCompleteBatch(Request $request, Response $response): Response
+    {
+        if (($denied = $this->guard($request, $response, AccessLevel::WRITE)) !== null) {
+            return $denied;
+        }
+        $body = (array) ($request->getParsedBody() ?? []);
+        if (($ids = $this->batchIds($body, $response)) instanceof Response) {
+            return $ids;
+        }
+        $flowToken = (string) ($body['flow_token'] ?? '');
+        if ($flowToken === '' || strlen($flowToken) > 8192) {
+            return Json::error($response, 'isds_sms_flow_invalid', 'Přihlášení pomocí SMS není platné. Vyžádejte nový kód.', 400);
+        }
+        $supplierId = SupplierGuard::currentId($request);
+        $userId = $this->userId($request);
+        try {
+            $context = $this->sms->complete(
+                $flowToken,
+                (string) ($body['sms_code'] ?? ''),
+                $supplierId,
+                $userId,
+                (string) ($body['environment'] ?? 'production'),
+            );
+        } catch (SubmissionChannelException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+
+        try {
+            return $this->sendBatchWithContext($response, $supplierId, $ids, $userId, $context);
+        } finally {
+            $this->sms->logout($context);
+        }
+    }
+
+    /**
+     * Seznam podání dávky: kladná ID bez opakování, nejvýš 50 jako
+     * u {@see mobileKeyConfirmBatch()}.
+     *
+     * @param array<string,mixed> $body
+     * @return list<int>|Response
+     */
+    private function batchIds(array $body, Response $response): array|Response
+    {
+        $ids = [];
+        foreach ((array) ($body['outbox_ids'] ?? []) as $raw) {
+            $id = (int) $raw;
+            if ($id > 0) {
+                $ids[] = $id;
+            }
+        }
+        $ids = array_values(array_unique($ids));
+        if ($ids === []) {
+            return Json::error($response, 'submission_not_found', 'Nevybrali jste žádné podání k odeslání.', 400);
+        }
+        if (count($ids) > 50) {
+            return Json::error($response, 'validation_failed', 'Najednou lze odeslat nejvýš 50 podání.', 422);
+        }
+
+        return $ids;
+    }
+
+    /**
+     * Společný závěr hromadných cest: každé podání má vlastní výsledek
+     * ({@see SubmissionOutboxService::confirmAndSendBatch()}), pád jednoho
+     * nezastaví ostatní.
+     *
+     * @param list<int> $ids
+     */
+    private function sendBatchWithContext(
+        Response $response,
+        int $supplierId,
+        array $ids,
+        int $userId,
+        ChannelContext $context,
+    ): Response {
+        $results = $this->outbox->confirmAndSendBatch($supplierId, $ids, $userId, $context);
+        foreach ($results as $item) {
+            if ($item['dispatched']) {
+                $this->logger->log('submission_outbox_sent', $userId, 'submission_outbox', $item['id'], null, null, null, $supplierId);
+            }
+        }
+
+        return Json::ok($response, ['results' => $results]);
     }
 
     /**

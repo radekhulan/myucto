@@ -16,6 +16,7 @@ use MyInvoice\Service\Migration\Premier\PremierImporter;
 use MyInvoice\Service\Migration\Premier\PremierJournal;
 use MyInvoice\Service\Migration\Premier\PremierReconciler;
 use MyInvoice\Service\Migration\Premier\PremierVat;
+use MyInvoice\Service\Accounting\Reports\SaldoService;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
 use MyInvoice\Tests\Fixtures\Premier\SyntheticPremierBackup;
 use PHPUnit\Framework\Attributes\Group;
@@ -35,6 +36,7 @@ final class PremierImportTest extends TestCase
     private PremierReconciler $reconciler;
     private DocumentLinker $linker;
     private DphPriznaniBuilder $dph;
+    private SaldoService $saldo;
     private string $tmp = '';
     private int $userId = 0;
     private int $anyCurrencyId = 0;
@@ -54,6 +56,7 @@ final class PremierImportTest extends TestCase
             $this->reconciler = $container->get(PremierReconciler::class);
             $this->linker = $container->get(DocumentLinker::class);
             $this->dph = $container->get(DphPriznaniBuilder::class);
+            $this->saldo = $container->get(SaldoService::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
         }
@@ -300,6 +303,203 @@ final class PremierImportTest extends TestCase
         self::assertSame([['250005', '1000000005', '0100', 'SYN-TX-0001', 'Vlastní popis']], $this->fetch(
             "SELECT t.variable_symbol, t.counterparty_account, t.counterparty_bank, t.bank_ref, t.description FROM bank_transactions t JOIN bank_statements s ON s.id = t.statement_id
               WHERE s.supplier_id = ? AND t.source_ref = 'BV 8 #50'", $supplierId));
+    }
+
+    /**
+     * Bankovní úhrada vydané faktury je evidovaná platba (`invoice_payments`), ze které
+     * saldokonto čte uhrazenost - jinak by uhrazená faktura na 311 zůstala otevřená. Haléřové
+     * vyrovnání v zápisu pohybu patří k platbě, zápočet ani vrácení dobropisu platbu nezakládá.
+     * Opakovaný převod platby nezdvojí a chybějící (převod starší verzí) doplní.
+     */
+    public function testIssuedPaymentsAreRecordedAndBackfilledOnRerun(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup(false, ['bank_split' => true]);
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $expected = [
+            ['250001', '2025-02-20', '12100.00', 'bank', 'BV 2 #14'],
+            ['250005', '2025-10-15', '1210.00', 'bank', 'BV 8 #50'],
+            ['250006', '2025-10-15', '2420.00', 'bank', 'BV 8 #52'],
+        ];
+        $payments = "SELECT i.varsymbol, p.paid_on, p.amount, p.source, t.source_ref FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id
+                       LEFT JOIN bank_transactions t ON t.id = p.bank_transaction_id WHERE p.supplier_id = ? ORDER BY i.varsymbol, p.id";
+        self::assertSame($expected, $this->fetch($payments, $supplierId));
+        self::assertSame(3, self::stepCounts($protocol, 'payments')['issued_payments_recorded'] ?? null, $this->explain($protocol));
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame($expected, $this->fetch($payments, $supplierId), 'Opakovaný převod platby nezdvojí.');
+        self::assertArrayNotHasKey('issued_payments_recorded', self::stepCounts($again, 'payments'));
+
+        // Firma převedená verzí, která platby nezakládala: úhrady jsou spárované, platby chybí.
+        $this->db->pdo()->prepare('DELETE FROM invoice_payments WHERE supplier_id = ?')->execute([$supplierId]);
+        $backfill = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($backfill->hasErrors(), $this->explain($backfill));
+        self::assertSame(3, self::stepCounts($backfill, 'payments')['issued_payments_recorded'] ?? null, $this->explain($backfill));
+        self::assertSame($expected, $this->fetch($payments, $supplierId));
+    }
+
+    /**
+     * Saldokonto 311 po převodu sedí na hlavní knihu: uhrazené vydané faktury nejsou
+     * otevřené položky (platby z banky), vrácený dobropis také ne.
+     */
+    public function testReceivablesSaldoMatchesLedgerAfterImport(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup();
+        foreach ([SyntheticPremierBackup::YEAR1, SyntheticPremierBackup::YEAR2] as $year) {
+            $protocol = $this->importer->run($supplierId, $this->userId, $backup, $year, false);
+            self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+            $saldo = $this->saldo311($supplierId, $year);
+            self::assertSame([0.0, 0.0, 0], [round((float) $saldo['gl_balance'], 2), round((float) $saldo['open_items_total'], 2), (int) $saldo['open_items_count']],
+                $year . ': ' . json_encode($saldo['partners'], JSON_UNESCAPED_UNICODE));
+        }
+        self::assertSame([['250001', '12100.00'], ['260001', '24200.00']],
+            $this->fetch('SELECT i.varsymbol, p.amount FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id WHERE p.supplier_id = ? ORDER BY i.varsymbol', $supplierId));
+    }
+
+    /**
+     * Firma s více řadami vydaných faktur (`VFA`, `VFP`…): deník (`SB_KOD`) i vazby úhrad
+     * označují fakturu kódem agendy `VF` a jejím `INTER`. Faktura se přesto naváže na svůj
+     * zápis (je zaúčtovaná, částky z deníku), úhrada se k ní spáruje a saldo 311 sedí.
+     */
+    public function testIssuedSeriesOtherThanAgendaCodeIsLinked(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(false, ['issued_series' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $this->assertReconciled($protocol, SyntheticPremierBackup::YEAR1);
+        self::assertSame(
+            [['250001', 'invoice', 'paid', '12100.00', '1'], ['250002', 'credit_note', 'paid', '-1210.00', '1']],
+            $this->fetch("SELECT varsymbol, invoice_type, status, total_with_vat, booked_at IS NOT NULL FROM invoices WHERE supplier_id = ? ORDER BY varsymbol", $supplierId)
+        );
+        self::assertSame(2, $this->rows('journal_entries', $supplierId, "source_type = 'invoice'"));
+        self::assertArrayNotHasKey('document_missing', self::stepCounts($protocol, 'link'), $this->explain($protocol));
+        self::assertSame(2, $this->rows('payment_matches', $supplierId, 'invoice_id IS NOT NULL'));
+        self::assertSame(1, $this->rows('invoice_payments', $supplierId, "amount = 12100.00 AND source = 'bank'"));
+        $saldo = $this->saldo311($supplierId, SyntheticPremierBackup::YEAR1);
+        self::assertSame([0.0, 0.0], [round((float) $saldo['gl_balance'], 2), round((float) $saldo['open_items_total'], 2)]);
+    }
+
+    /**
+     * Přeplatek bankovní úhrady jedné faktury, který interní doklad přeúčtoval na jinou
+     * fakturu, je platbou té druhé - jinak by zůstala v saldu otevřená, přestože 311 je na nule.
+     */
+    public function testPaymentReassignedByInternalDocumentPaysTheOtherInvoice(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup(false, ['payment_reassigned' => true]);
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $payments = "SELECT i.varsymbol, p.amount, t.source_ref FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id
+                       LEFT JOIN bank_transactions t ON t.id = p.bank_transaction_id WHERE p.supplier_id = ? ORDER BY i.varsymbol, p.id";
+        $expected = [['250001', '12100.00', 'BV 2 #14'], ['250009', '1210.00', 'BV 9 #96']];
+        self::assertSame($expected, $this->fetch($payments, $supplierId));
+        $saldo = $this->saldo311($supplierId, SyntheticPremierBackup::YEAR1);
+        self::assertSame([0.0, 0.0], [round((float) $saldo['gl_balance'], 2), round((float) $saldo['open_items_total'], 2)],
+            json_encode($saldo['partners'], JSON_UNESCAPED_UNICODE));
+
+        $again = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($again->hasErrors(), $this->explain($again));
+        self::assertSame($expected, $this->fetch($payments, $supplierId), 'Opakovaný převod přeúčtovanou platbu nezdvojí.');
+    }
+
+    /**
+     * Zápočet dobropisu s fakturou interním dokladem: dobropis má vazbu na fakturu a zápočet
+     * (`credit_note_offsets`), faktura evidovanou platbu se zdrojem `credit_note`. Saldo sedí,
+     * opakovaný převod nic nezdvojí a chybějící zápočet doplní.
+     */
+    public function testCreditNoteOffsetByInternalDocumentIsRecorded(): void
+    {
+        $supplierId = $this->supplier();
+        $backup = $this->backup(false, ['credit_note_offset' => true]);
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $offsets = 'SELECT i.varsymbol, c.varsymbol, o.amount, o.offset_on, c.parent_invoice_id = i.id, p.source, p.amount
+                      FROM credit_note_offsets o JOIN invoices i ON i.id = o.invoice_id JOIN invoices c ON c.id = o.credit_note_id
+                      LEFT JOIN invoice_payments p ON p.id = o.invoice_payment_id WHERE o.supplier_id = ?';
+        $expected = [['250010', '250011', '1210.00', '2025-04-30', '1', 'credit_note', '1210.00']];
+        self::assertSame($expected, $this->fetch($offsets, $supplierId));
+        self::assertSame([['bank', '1210.00'], ['credit_note', '1210.00']], $this->fetch(
+            "SELECT p.source, p.amount FROM invoice_payments p JOIN invoices i ON i.id = p.invoice_id WHERE p.supplier_id = ? AND i.varsymbol = '250010' ORDER BY p.source", $supplierId));
+        $saldo = $this->saldo311($supplierId, SyntheticPremierBackup::YEAR1);
+        self::assertSame([0.0, 0.0], [round((float) $saldo['gl_balance'], 2), round((float) $saldo['open_items_total'], 2)],
+            json_encode($saldo['partners'], JSON_UNESCAPED_UNICODE));
+
+        $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertSame($expected, $this->fetch($offsets, $supplierId), 'Opakovaný převod zápočet nezdvojí.');
+        $this->db->pdo()->prepare('DELETE FROM credit_note_offsets WHERE supplier_id = ?')->execute([$supplierId]);
+        $this->db->pdo()->prepare("DELETE FROM invoice_payments WHERE supplier_id = ? AND source = 'credit_note'")->execute([$supplierId]);
+        $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertSame($expected, $this->fetch($offsets, $supplierId), 'Opakovaný převod chybějící zápočet doplní.');
+    }
+
+    /**
+     * Záloha zaúčtovaná přijatou fakturou na 314 a čerpaná konečnou fakturou (vazba na řádek
+     * zálohy): čerpání v `purchase_advance_deductions`, saldo 314 sedí na hlavní knihu.
+     */
+    #[\PHPUnit\Framework\Attributes\TestWith([false])]
+    #[\PHPUnit\Framework\Attributes\TestWith([true])]
+    public function testInvoicePrepaymentDeductedByFinalInvoice(bool $unlinked): void
+    {
+        $supplierId = $this->supplier();
+        // Bez vazby se čerpání odvodí ze zaúčtování na 314 (záloha téhož dodavatele).
+        $backup = $this->backup(false, ['invoice_prepayment' => true, 'prepayment_unlinked' => $unlinked]);
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $deductions = 'SELECT f.varsymbol, a.varsymbol, d.amount FROM purchase_advance_deductions d
+                         JOIN purchase_invoices f ON f.id = d.final_invoice_id JOIN purchase_invoices a ON a.id = d.advance_invoice_id WHERE d.supplier_id = ?';
+        self::assertSame([['PF250013/2025', 'PF250012/2025', '1000.00']], $this->fetch($deductions, $supplierId));
+        $saldo = $this->saldo311($supplierId, SyntheticPremierBackup::YEAR1, '314');
+        self::assertSame([0.0, 0.0], [round((float) $saldo['gl_balance'], 2), round((float) $saldo['open_items_total'], 2)],
+            json_encode($saldo['partners'], JSON_UNESCAPED_UNICODE));
+        $this->importer->run($supplierId, $this->userId, $backup, SyntheticPremierBackup::YEAR1, false);
+        self::assertSame([['PF250013/2025', 'PF250012/2025', '1000.00']], $this->fetch($deductions, $supplierId));
+    }
+
+    /**
+     * Vydaná faktura uhrazená přijatou zálohou (řádek „Vypořádání zálohy" 324/311 bez kódu
+     * DPH): vypořádání je odpočet zálohy, ne položka - do DPH nevstoupí a faktura je uhrazená.
+     */
+    public function testAdvanceSettlementRowIsNotTaxedAsItem(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(false, ['advance_settlement' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $this->assertReconciled($protocol, SyntheticPremierBackup::YEAR1);
+        self::assertSame([['1210.00', '1210.00', '0.00', 'paid']], $this->fetch(
+            "SELECT total_with_vat, advance_paid_amount, amount_to_pay, status FROM invoices WHERE supplier_id = ? AND varsymbol = '250014'", $supplierId));
+        self::assertSame([['1000.00', '210.00', '1']], $this->fetch(
+            "SELECT it.total_without_vat, it.total_vat, it.vat_classification_code FROM invoice_items it JOIN invoices i ON i.id = it.invoice_id
+              WHERE i.supplier_id = ? AND i.varsymbol = '250014'", $supplierId));
+        $july = $this->dph->build($supplierId, SyntheticPremierBackup::YEAR1, 7, 'monthly')['summary']['lines'];
+        self::assertEqualsWithDelta(1000.0, (float) ($july['1']['base'] ?? 0), 0.005, json_encode($july, JSON_UNESCAPED_UNICODE));
+        $saldo = $this->saldo311($supplierId, SyntheticPremierBackup::YEAR1);
+        self::assertSame([0.0, 0.0], [round((float) $saldo['gl_balance'], 2), round((float) $saldo['open_items_total'], 2)],
+            json_encode($saldo['partners'], JSON_UNESCAPED_UNICODE));
+    }
+
+    /** Dobropis navázaný v PREMIER na opravovanou fakturu (`VAZBY` PF ↔ PF) má vazbu na ni. */
+    public function testCreditNoteIsLinkedToCorrectedInvoice(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->backup(false, ['small_assets' => true, 'credit_note_link' => true]), SyntheticPremierBackup::YEAR1, false);
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        self::assertSame([['PF250006/2025', 'credit_note', 'PF250005/2025']], $this->fetch(
+            'SELECT c.varsymbol, c.document_kind, p.varsymbol FROM purchase_invoices c JOIN purchase_invoices p ON p.id = c.parent_purchase_invoice_id WHERE c.supplier_id = ?', $supplierId));
+        self::assertSame(1, self::stepCounts($protocol, 'payments')['credit_notes_linked'] ?? null, $this->explain($protocol));
+    }
+
+    /** @return array<string,mixed> blok účtu 311 saldokonta ke konci roku */
+    private function saldo311(int $supplierId, int $year, string $account = '311'): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id, ends_on FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = ?');
+        $stmt->execute([$supplierId, $year]);
+        $period = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($period);
+        $report = $this->saldo->build($supplierId, (int) $period['id'], (string) $period['ends_on'], $account);
+        return $report['accounts'][0];
     }
 
     /**
@@ -684,7 +884,7 @@ final class PremierImportTest extends TestCase
     private function snapshot(int $supplierId): array
     {
         $out = [];
-        foreach (['journal_entries', 'journal_entry_lines', 'accounting_periods', 'purchase_invoices', 'invoices', 'clients', 'cash_documents', 'cash_registers',
+        foreach (['journal_entries', 'journal_entry_lines', 'accounting_periods', 'purchase_invoices', 'invoices', 'invoice_payments', 'clients', 'cash_documents', 'cash_registers',
             'payment_matches', 'bank_statements', 'journal_entry_document_links', 'chart_of_accounts', 'supplier_bank_accounts'] as $t) {
             $out[$t] = $this->rows($t, $supplierId);
         }

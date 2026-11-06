@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Document;
 
 use DomainException;
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 
 /**
  * Čísla vzorů tiskopisů jsou skutečně ročníková — MF vydává nový vzor každý rok
@@ -65,6 +66,18 @@ final class AnnualTaxCertificateFormCatalog
      */
     public static function resolve(int $taxYear, PayrollDocumentKind $kind): array
     {
+        // Od zdaňovacího období 2027 není z příjmů ze závislé činnosti srážková
+        // daň (§ 6 odst. 4 ZDP ve znění zák. č. 360/2025 Sb. je samostatný
+        // základ ZÁLOHY), takže potvrzení o sražené dani nemá co potvrdit.
+        // Údaje o záloze ze samostatného základu nese doklad podle § 38j odst. 3.
+        if ($kind === PayrollDocumentKind::TaxableIncomeWithholdingCertificate
+            && SeparateTaxBaseRegime::forTaxYear($taxYear)->isAdvance()
+        ) {
+            throw new DomainException(
+                "Za rok {$taxYear} se potvrzení o srážkové dani ze závislé činnosti nevystavuje:"
+                . ' od roku 2027 se z příjmů podle § 6 odst. 4 ZDP sráží záloha, ne srážková daň.',
+            );
+        }
         $year = self::FORMS[$taxYear] ?? throw new DomainException(
             "Pro rok {$taxYear} není znám vzor tiskopisu ročního daňového potvrzení;"
             . ' doplň ho do katalogu podle vydání Ministerstva financí.',

@@ -175,6 +175,7 @@ final class SupplierCreator
                     $accountingMode,
                     $isVatPayer,
                     $isIdentified,
+                    $creatorUserId > 0 ? $creatorUserId : null,
                 );
                 if ($assignCreator) {
                     $pdo->prepare(

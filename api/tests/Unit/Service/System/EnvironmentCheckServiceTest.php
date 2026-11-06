@@ -15,6 +15,37 @@ use PHPUnit\Framework\TestCase;
  */
 final class EnvironmentCheckServiceTest extends TestCase
 {
+    public function testManagedReportDropsDiskSpaceIncludingItsEffectOnVerdict(): void
+    {
+        $report = EnvironmentCheckService::withoutDiskSpace([
+            'summary' => ['status' => 'fail', 'ok' => 1, 'warn' => 0, 'fail' => 1, 'skip' => 0],
+            'checks'  => [
+                ['id' => 'php_version', 'status' => 'ok'],
+                EnvironmentCheckService::diskSpaceCheck(1024, 2048),
+            ],
+            'facts'   => ['storage' => ['free_bytes' => 1024, 'total_bytes' => 2048, 'log_bytes' => 5]],
+        ]);
+
+        self::assertSame(['php_version'], array_column($report['checks'], 'id'));
+        self::assertSame(['status' => 'ok', 'ok' => 1, 'warn' => 0, 'fail' => 0, 'skip' => 0], $report['summary']);
+        self::assertSame(['log_bytes' => 5], $report['facts']['storage']);
+    }
+
+    public function testDiskSpaceShowsFreeAndTotalAndOnlyFreeDecidesStatus(): void
+    {
+        $gb = 1024 ** 3;
+        $check = EnvironmentCheckService::diskSpaceCheck(40 * $gb, 100 * $gb);
+        self::assertSame('ok', $check['status']);
+        self::assertSame(EnvironmentCheckService::humanBytes(40 * $gb), $check['actual']);
+        self::assertSame(EnvironmentCheckService::humanBytes(100 * $gb), $check['info']);
+
+        self::assertSame('warn', EnvironmentCheckService::diskSpaceCheck($gb, 100 * $gb)['status']);
+        self::assertSame('fail', EnvironmentCheckService::diskSpaceCheck(1024 ** 2, 100 * $gb)['status']);
+
+        $unknown = EnvironmentCheckService::diskSpaceCheck(null, null);
+        self::assertSame(['skip', '?', ''], [$unknown['status'], $unknown['actual'], $unknown['info']]);
+    }
+
     #[DataProvider('iniValueProvider')]
     public function testIniBytesParsesPhpNotation(string $input, int $expected): void
     {

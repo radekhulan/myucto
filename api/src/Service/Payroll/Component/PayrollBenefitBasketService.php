@@ -47,11 +47,29 @@ final class PayrollBenefitBasketService
         PayrollBenefitExemptionBasket $basket,
         string $periodStart,
         int $shiftEntitlements = 0,
-    ): int {
+    ): ?int {
+        $taxYear = (int) substr($periodStart, 0, 4);
+        // Koš rekreace a zájezdů (§ 6 odst. 9 písm. d) bod 3) existuje až od
+        // roku 2027; v dřívějším období by tvrdil limit, který tehdy neplatil.
+        if (!$basket->existsIn($taxYear)) {
+            throw new PayrollRulesetException(
+                "Koš {$basket->value} ({$basket->statute()}) pro rok {$taxYear} neexistuje.",
+            );
+        }
+        // `null` = bez číselného limitu (§ 6 odst. 9 písm. d) bod 2 od 2027).
+        if ($basket->isUnlimited($taxYear)) {
+            return null;
+        }
+        $key = $basket->rulesetKey();
+        if ($key === null) {
+            throw new PayrollRulesetException(
+                "Limit koše {$basket->value} ({$basket->statute()}) stojí na evidenci firmy, ne v rulesetu.",
+            );
+        }
         $effectiveOn = $this->effectiveOn($basket, $periodStart);
         $incomeTax = $this->rulesets
             ->forCalculation(PayrollRulesetDomain::IncomeTax, $effectiveOn);
-        $value = $incomeTax->parameter($basket->rulesetKey())->value;
+        $value = $incomeTax->parameter($key)->value;
         if (!is_int($value) || $value <= 0) {
             throw new PayrollRulesetException(
                 "Limit koše {$basket->rulesetKey()} není částka v haléřích.",
@@ -129,7 +147,7 @@ final class PayrollBenefitBasketService
     ): PayrollBenefitBasketSplit {
         $limit = $this->limitMinor($basket, $periodStart, $shiftEntitlements);
         $amount = max(0, $amountMinor);
-        if ($basket->scalesWithShifts()) {
+        if ($limit !== null && $basket->scalesWithShifts()) {
             return $this->splitMeal(
                 $basket,
                 $limit,
@@ -140,17 +158,42 @@ final class PayrollBenefitBasketService
                 $periodStart,
             );
         }
-        $headroom = max(0, $limit - max(0, $usedBeforeMinor));
-        $exempt = min($amount, $headroom);
+        return $this->splitWithLimit(
+            $basket,
+            $limit,
+            $usedBeforeMinor,
+            $amount,
+            $basket->scalesWithShifts() ? $shiftEntitlements : null,
+        );
+    }
+
+    /**
+     * Rozpad proti známému limitu — sdílená aritmetika košů z rulesetu
+     * i košů, jejichž limit stojí na evidenci firmy (spropitné).
+     *
+     * `$limitMinor = null` znamená osvobození bez číselného limitu: celé
+     * plnění je osvobozené a nadlimitní část nevzniká.
+     */
+    public function splitWithLimit(
+        PayrollBenefitExemptionBasket $basket,
+        ?int $limitMinor,
+        int $usedBeforeMinor,
+        int $amountMinor,
+        ?int $shiftEntitlements = null,
+    ): PayrollBenefitBasketSplit {
+        $amount = max(0, $amountMinor);
+        $exempt = $limitMinor === null
+            ? $amount
+            : min($amount, max(0, $limitMinor - max(0, $usedBeforeMinor)));
 
         return new PayrollBenefitBasketSplit(
             basket: $basket,
-            limitMinor: $limit,
+            limitMinor: $limitMinor,
             usedBeforeMinor: max(0, $usedBeforeMinor),
             amountMinor: $amount,
             exemptMinor: $exempt,
             taxableMinor: $amount - $exempt,
-            shiftEntitlements: $basket->scalesWithShifts() ? $shiftEntitlements : null,
+            shiftEntitlements: $shiftEntitlements,
         );
     }
 

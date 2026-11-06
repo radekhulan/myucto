@@ -95,8 +95,24 @@ nikdy nepatří do pole s heslem k certifikátu.
 U každého platného certifikátu v trezoru je navíc tlačítko **Povolit v dalších firmách**, které udělá totéž pro
 certifikát nahraný dříve. Obě akce vyžadují stejné ověření jako nahrání certifikátu. Po dokončení se zobrazí přehled
 po firmách: **Povoleno**, **Už bylo povoleno**, **Přeskočeno, má platný certifikát** a **Přeskočeno, chybí oprávnění**.
-Firmy, kde nejste členem, se akce nedotkne. Povolení certifikát ve firmě jen zpřístupní. Který certifikát se v dané
+Firmy, kde nejste členem, se akce nedotkne. Výjimkou je správce systému, který není členem žádné firmy a vidí proto
+všechny: u něj se akce týká všech firem. Povolení certifikát ve firmě jen zpřístupní. Který certifikát se v dané
 firmě skutečně použije pro podpisový profil, EPO nebo mzdová podání, se dál volí v příslušném nastavení té firmy.
+
+**Nahradit certifikát ve všech firmách.** Když certifikát obnovíte, vyberte v poli **Nahradit certifikát** ten starý
+a nový nahrajte, nebo u už nahraného nového klikněte na **Povolit v dalších firmách**. Aplikace se jednou zeptá na
+potvrzení a pak:
+
+- nový certifikát povolí ve všech firmách, kam akce dosáhne, i v aktuální firmě a i tam, kde už platný certifikát je
+  (volba **Jen do firem bez platného certifikátu** se při náhradě nepoužije),
+- přepojí na něj přístup k datové schránce, osobní podpisové profily a volbu certifikátu pro mzdová podání, které
+  používaly starý certifikát.
+
+V přehledu po firmách je u takové firmy **Nahrazeno** a počet přepojených míst. Starý certifikát zůstane v trezoru
+a když ho už nic nepoužívá, smažete ho běžně. Nemění se odesílací brána ISDS (je společná pro celou instalaci
+a registrovaná přímo v ISDS) ani registrace certifikátu u ČSSZ: nový certifikát je potřeba u ČSSZ zaregistrovat
+a obrazovka mezd to do té doby hlásí. Přístup k datové schránce bude po náhradě potřeba znovu ověřit přihlášením.
+Dříve podepsaná PDF zůstávají podepsaná starým certifikátem.
 
 **Soubor se zastaralým šifrováním (RC2).** Starší exporty certifikátů, zejména z Windows a od některých autorit, jsou
 chráněné zastaralou šifrou RC2, kterou server nepodporuje. Aplikace to ohlásí výslovnou hláškou, že soubor používá
@@ -536,6 +552,7 @@ Správa i použití podpisů se zapisuje do activity logu. Typické události:
 | `certificate_vault_delete` | Certifikát byl smazán z trezoru. |
 | `report.epo_credential_deleted` | Smazáním certifikátu z trezoru zanikla jeho volba pro EPO. |
 | `certificate_vault_supplier_enabled` | Certifikát byl povolen v další firmě (zapisuje se do logu dotčené firmy, při nahrání i při **Povolit v dalších firmách**). |
+| `certificate_vault_replaced` | Nový certifikát nahradil starý v dotčené firmě; v záznamu jsou otisky obou certifikátů a počty přepojených míst. |
 
 ## 99.13 Související kapitoly
 

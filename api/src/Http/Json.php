@@ -21,12 +21,30 @@ final class Json
             ->withHeader('Cache-Control', 'no-store');
     }
 
+    /**
+     * Interní značka „hláška u 5xx je napsaná pro uživatele". Odstraní ji
+     * {@see \MyInvoice\Middleware\InternalErrorRedactionMiddleware}, ven nejde.
+     */
+    public const HEADER_PUBLIC_MESSAGE = 'X-MyInvoice-Public-Error';
+
     public static function error(Response $response, string $code, string $message, int $status = 400, array $extra = []): Response
     {
         $message = ErrorCatalog::lookup($message, Locale::current());
-        return self::ok($response, [
+        $response = self::ok($response, [
             'error' => array_merge(['code' => $code, 'message' => $message], $extra),
         ], $status);
+
+        return $status >= 500 ? $response->withHeader(self::HEADER_PUBLIC_MESSAGE, '1') : $response;
+    }
+
+    /**
+     * Chyba, jejíž text pochází z výjimky (SQLSTATE, cesty, hodnoty z dotazu).
+     * V produkci ji middleware nahradí obecnou hláškou a původní text zapíše
+     * do logu. Pro 5xx s textem výjimky používej tuhle metodu, ne error().
+     */
+    public static function internalError(Response $response, string $code, string $message, int $status = 500, array $extra = []): Response
+    {
+        return self::error($response, $code, $message, $status, $extra)->withoutHeader(self::HEADER_PUBLIC_MESSAGE);
     }
 
     /**

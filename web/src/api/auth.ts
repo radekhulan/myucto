@@ -8,6 +8,7 @@ export interface User {
   name: string
   role: RoleSummary
   is_superadmin: boolean
+  is_instance_admin?: boolean
   can_create_supplier?: boolean
   locale: 'cs' | 'en'
   totp_enabled?: boolean
@@ -27,7 +28,7 @@ export interface User {
 export interface RoleSummary {
   id: number
   name: string
-  type: 'superadmin' | 'staff' | 'client'
+  type: 'superadmin' | 'staff' | 'client' | 'instance_admin'
   is_active?: boolean
   system_key?: string | null
 }
@@ -51,6 +52,7 @@ export interface SupplierBrief {
   oss_enabled: boolean
   /** 'fo' = OSVČ (fyzická osoba), 'po' = s.r.o. (právnická osoba), null = nenastaveno. */
   taxpayer_type: 'fo' | 'po' | null
+  default_hourly_rate?: number
   default_payment_due_days: number
   default_payment_due_unit: 'days' | 'month'
   /** Výchozí režim cen u nových faktur (false = bez DPH, true = ceny s DPH). */
@@ -59,6 +61,9 @@ export interface SupplierBrief {
   default_rounding_mode?: InvoiceRoundingMode
   /** Vyúčtování s výsledkem k vyplacení (migrace 1937): editor povolí zápornou fakturu. */
   allow_refund_invoices: boolean
+  /** Rozpis slevy z ceníkové ceny na PDF (migrace 2035); editor podle ní ukáže u řádku pole „Sleva %". */
+  work_report_display_options?: import('./invoices').WorkReportDisplayOptions
+  invoice_pdf_show_line_discount?: boolean
   /** Výchozí „netisknout odběratele" na zjednodušeném dokladu (migrace 2037). */
   simplified_hide_customer_default?: boolean
   /**
@@ -77,6 +82,9 @@ export interface SupplierBrief {
   payment_thanks_default_checked: boolean
   /** Režim účetnictví (Epic F1). 'double_entry' zpřístupní účetní UI (deník, osnova, období). */
   accounting_mode?: 'tax_evidence' | 'double_entry'
+  accounting_framework?: 'cz_500' | 'cz_504'
+  /** Profil podle právní formy (`LegalFormProfileRecommendation`); `undefined` = starší backend. */
+  entity_profile?: 'nonprofit' | 'svj' | 'unknown'
   /** Měsíc začátku účetního roku (1 = kalendářní rok, 2–12 = hospodářský rok; migrace 2003). */
   fiscal_year_start_month?: number
   /** Skladová evidence (Epic SKLAD) — gate sekce Sklad v menu + editorů. Funguje nezávisle na accounting_mode. */
@@ -111,6 +119,8 @@ export interface SetupStatus {
     password: string
   }
   passwordless_login_enabled: boolean
+  /** Ohlášení plánované údržby. `undefined` = starší backend bez pole. */
+  maintenance_notices?: import('@/api/maintenanceNotice').MaintenanceNotice[]
   captcha: {
     provider: 'turnstile' | 'none'
     site_key: string
@@ -209,6 +219,11 @@ export interface DomainLoginStart {
   state: string
   login_url: string
   expires_in: number
+}
+
+export interface DomainLoginConfirmation {
+  target_hostname: string
+  supplier_name: string
 }
 
 export interface PasskeyCredential {
@@ -321,11 +336,20 @@ export const authApi = {
       handoff_path: handoffPath || undefined,
     }).then((r) => r.data),
 
-  domainLoginAuthorize: (requestToken: string, state: string, csrf?: string) =>
+  domainLoginAuthorize: (requestToken: string, state: string, csrf?: string, confirmed = false) =>
     api.post<{ redirect_url: string }>('/auth/domain-login/authorize', {
       request_token: requestToken,
       state,
+      ...(confirmed ? { confirmed: true } : {}),
     }, csrfHeaders(csrf)).then((r) => r.data),
+
+  /** Cíl čekajícího předání pro potvrzovací obrazovku. Kód nevydá. */
+  domainLoginPreview: (requestToken: string, state: string, csrf?: string) =>
+    api.post<{ confirmation: DomainLoginConfirmation }>('/auth/domain-login/authorize', {
+      request_token: requestToken,
+      state,
+      preview: true,
+    }, csrfHeaders(csrf)).then((r) => r.data.confirmation),
 
   domainLoginExchange: (requestToken: string, code: string, state: string, codeVerifier: string) =>
     api.post<{ csrf_token: string; return_path: string; supplier_id: number }>('/auth/domain-login/exchange', {
@@ -412,6 +436,12 @@ export const authApi = {
     api.patch<{ credential: PasskeyCredential }>(`/auth/webauthn/credentials/${id}`, { label }).then(r => r.data.credential),
   passkeyRevoke: (id: number, stepUpToken: string) =>
     api.delete(`/auth/webauthn/credentials/${id}`, { data: { step_up_token: stepUpToken } }),
+  passkeyTestOptions: (id: number) =>
+    api.post<WebAuthnFlow>(`/auth/webauthn/credentials/${id}/test/options`).then(r => r.data),
+  passkeyTestVerify: (id: number, flowToken: string, credential: Record<string, any>) =>
+    api.post<{ verified: true }>(`/auth/webauthn/credentials/${id}/test/verify`, {
+      flow_token: flowToken, credential,
+    }).then(r => r.data),
   passkeyStepUpOptions: (operation: string) =>
     api.post<WebAuthnFlow>('/auth/webauthn/step-up/options', { operation }).then(r => r.data),
   passkeyStepUpVerify: (flowToken: string, operation: string, credential: Record<string, any>) =>

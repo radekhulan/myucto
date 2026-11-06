@@ -147,6 +147,26 @@ final class PurchaseInvoiceMissingTaxDateTransitionTest extends TestCase
             'Legacy zaúčtovaný doklad bez DUZP nesmí uváznout — přechod na paid kontrolu DUZP neprovádí.');
     }
 
+    /** DDKP (§ 28 ZDPH) se neuhrazuje: úhrada patří na zálohu, ruční „uhrazeno" 409. */
+    public function testTaxDocumentCannotBeMarkedPaid(): void
+    {
+        $id = $this->createInvoice('DUZP-2098-004', '2098-03-15');
+        self::assertSame(200, $this->transition($id, 'received')->getStatusCode());
+        $this->db->pdo()->prepare(
+            "UPDATE purchase_invoices SET document_kind = 'tax_document' WHERE id = ? AND supplier_id = ?"
+        )->execute([$id, $this->supplierId]);
+
+        $paid = $this->transition($id, 'paid', '2098-04-01');
+        self::assertSame(409, $paid->getStatusCode());
+        $paid->getBody()->rewind();
+        $payload = json_decode((string) $paid->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame('tax_document_not_payable', $payload['error']['code'] ?? null);
+
+        $status = $this->db->pdo()->prepare('SELECT status FROM purchase_invoices WHERE id = ?');
+        $status->execute([$id]);
+        self::assertSame('received', $status->fetchColumn());
+    }
+
     private function createInvoice(string $vendorInvoiceNumber, ?string $taxDate): int
     {
         $body = [

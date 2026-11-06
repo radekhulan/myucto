@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import DateInput from '@/components/ui/DateInput.vue'
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -7,7 +8,7 @@ import { useSupplierStore } from '@/stores/supplier'
 import { groupDashboardApi, type Aging, type CashWeek, type Financial, type GroupCompany, type GroupDashboard, type GroupSection, type Monthly, type Risk } from '@/api/groupDashboard'
 import { GROUP_SECTIONS, SECTION_FIELDS, accountingGroupKey, groupRiskDestination, margin, metricState, yearChange, type GroupField, type MetricState } from '@/utils/groupDashboard'
 import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
-import { formatMoney, formatNumber } from '@/composables/useFormat'
+import { formatMoneyWhole, formatNumber } from '@/composables/useFormat'
 import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
 import GroupDashboardChart, { type GroupChartSeries } from '@/components/group-dashboard/GroupDashboardChart.vue'
 import GroupForecast from '@/components/group-dashboard/GroupForecast.vue'
@@ -44,7 +45,7 @@ const report = computed(() => {
   return data && currencyChoice.value === ALL_CURRENCIES && data.converted_czk ? { ...data, companies: data.converted_czk.companies, totals: data.converted_czk.totals } : data
 })
 const fields = computed(() => SECTION_FIELDS[active.value])
-const money = (value: number | null | undefined, code: string) => value === null || value === undefined ? '-' : formatMoney(value, code)
+const money = (value: number | null | undefined, code: string) => value === null || value === undefined ? '-' : formatMoneyWhole(value, code)
 const date = (value: string | null | undefined) => value ? new Intl.DateTimeFormat(locale.value).format(new Date(`${value.slice(0, 10)}T12:00:00`)) : '-'
 const pct = (value: number | null | undefined) => value === null || value === undefined ? '-' : `${formatNumber(value, { maximumFractionDigits: 1 })} %`
 const resultClass = (value: number | null | undefined) => value === null || value === undefined ? 'text-neutral-400' : value < 0 ? 'text-danger-600' : value > 0 ? 'text-success-600' : 'text-neutral-700'
@@ -206,8 +207,8 @@ const tabIcons: Record<GroupSection, string> = { overview: ICONS.chart, trends: 
           <select v-model="currencyChoice" class="input w-40" data-test="group-currency"><option :value="ALL_CURRENCIES">{{ t('group_stats.all_currencies') }}</option><option v-for="code in currencies" :key="code" :value="code">{{ code }}</option></select>
         </label>
         <form v-if="['overview', 'trends', 'risks'].includes(active)" class="flex flex-wrap items-end gap-3" @submit.prevent="applyRange">
-          <label class="space-y-1 text-sm text-neutral-600"><span class="block">{{ t('group_stats.date_from') }}</span><input v-model="draftFrom" type="date" required :max="draftTo || undefined" class="input w-40" data-test="group-from" /></label>
-          <label class="space-y-1 text-sm text-neutral-600"><span class="block">{{ t('group_stats.date_to') }}</span><input v-model="draftTo" type="date" required :min="draftFrom || undefined" class="input w-40" data-test="group-to" /></label>
+          <label class="space-y-1 text-sm text-neutral-600"><span class="block">{{ t('group_stats.date_from') }}</span><DateInput v-model="draftFrom" required :max="draftTo || undefined" class="input w-40" data-test="group-from" /></label>
+          <label class="space-y-1 text-sm text-neutral-600"><span class="block">{{ t('group_stats.date_to') }}</span><DateInput v-model="draftTo" required :min="draftFrom || undefined" class="input w-40" data-test="group-to" /></label>
           <button type="submit" :class="btnOutline('primary')" :disabled="loading || !draftFrom || !draftTo || draftFrom > draftTo" data-test="group-apply-range"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.search" /></svg>{{ t('group_stats.apply_range') }}</button>
           <button type="button" :class="btnOutline('neutral')" :disabled="loading" data-test="group-reset-range" @click="resetRange"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path :d="ICONS.calendar" /></svg>{{ t('group_stats.last_12_months') }}</button>
         </form>

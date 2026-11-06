@@ -107,6 +107,7 @@ final class TaxPartialUpdateTest extends TestCase
             ->createServerRequest($method, '/api/tax')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => $role])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session')
             ->withParsedBody($body);
         return [$req, new Psr7Response()];
     }

@@ -84,6 +84,13 @@ final class PublicWorkReportGetAction
         ]);
     }
 
+    /**
+     * Náhled bez e-mailového kódu jen pro interního uživatele firmy odkazu:
+     * přihlášená session (ne API token), členství v link.supplier_id, ne
+     * klientská role a právo na správu veřejných odkazů (clients.public_links,
+     * stejný klíč jako WorkReportLinkAction) i na vydané faktury, protože náhled
+     * ukazuje jejich koncepty. Ostatní jdou standardním OTP tokem.
+     */
     private function canPreviewAsStaff(Request $request, int $supplierId): bool
     {
         if (!RequestAuthorization::isSessionAuth($request)) return false;
@@ -91,6 +98,9 @@ final class PublicWorkReportGetAction
         $access = $this->supplierAccess->resolve($scoped);
         if ($access->denied || $access->supplierId !== $supplierId) return false;
         $role = $this->permissions->resolve($scoped);
-        return $role->isActive && !$role->isClientType() && $role->level('invoices')->allows(AccessLevel::READ);
+        return $role->isActive
+            && !$role->isClientType()
+            && $role->level('clients.public_links')->allows(AccessLevel::READ)
+            && $role->level('invoices')->allows(AccessLevel::READ);
     }
 }

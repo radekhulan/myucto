@@ -16,7 +16,8 @@ import { apiErrorMessage } from '@/api/errors'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { formatAccountNumber } from '@/utils/bankAccount'
-import { statementClosingBalance, statementGpcUrl, statementGpcTitle, statementHasGpc } from '@/utils/bankStatement'
+import { statementClosingBalance, statementDownloadsWithMovements, statementGpcUrl, statementGpcTitle, statementHasGpc } from '@/utils/bankStatement'
+import Modal from '@/components/ui/Modal.vue'
 import { downloadApiFile } from '@/utils/downloadFile'
 import RuleHintBanner from '@/components/bank/RuleHintBanner.vue'
 import BankTransactionRow from '@/components/bank/BankTransactionRow.vue'
@@ -26,7 +27,7 @@ import BankCreatePurchaseModal from '@/components/bank/BankCreatePurchaseModal.v
 import BankRequestDocModal from '@/components/bank/BankRequestDocModal.vue'
 import type { PostResult } from '@/api/bankPosting'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
-import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
+import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { useBankTransactionActions } from '@/composables/useBankTransactionActions'
 import { useBankTransactionSort } from '@/composables/useBankTransactionSort'
 import { useFillViewportHeight } from '@/composables/useFillViewportHeight'
@@ -97,14 +98,15 @@ function onTxPosted(payload: { result: PostResult; debit: string; credit: string
     hintTx.value = tx
     hintData.value = { count: payload.result.similar.count, debit: payload.debit, credit: payload.credit }
   }
-  load()
+  // Šetrné obnovení: zachová načtené stránky i pozici rolování (#272).
+  void refreshTransactions()
 }
 function closeHint() { hintTx.value = null; hintData.value = null }
 
 // Sdílená akční logika nad transakcí (match/ignore/unmatch/create/request-doc/…) —
 // extrahováno do BankTransactionRow.vue + useBankTransactionActions, ať ji sdílí
 // i „Všechny pohyby" (UnpostedTransactions.vue), #52.
-const bankActions = useBankTransactionActions({ reload: () => load(), refresh: () => refreshTransactions() })
+const bankActions = useBankTransactionActions({ reload: () => refreshTransactions(), refresh: () => refreshTransactions() })
 
 // E-mailová avíza jsou měsíční agregát (statement_date = 1. den měsíce) → název měsíce.
 function monthLabel(dateStr: string): string {
@@ -383,6 +385,15 @@ async function onDeletePdf() {
   }
 }
 
+// Stažení z banky jsou za jednou akcí, u účtu s feedem jich jsou za měsíc desítky.
+// Prázdná se nenabízejí, duplicita je vždycky stažení s pohyby.
+const bankDownloads = computed(() => statementDownloadsWithMovements(statement.value))
+const bankDownloadsOpen = ref(false)
+function openBankDownload(id: number) {
+  bankDownloadsOpen.value = false
+  void router.push({ name: 'bank-detail', params: { id } })
+}
+
 // Smazání avízo-výpisu (e-mailová avíza, iDoklad) smí každý s bankou k zápisu, kdo
 // není klient — stejně jako backend. Backend ho odmítne, dokud na výpisu visí živě
 // spárovaná položka (typicky před převzetím oficiálním výpisem); tlačítko je pak
@@ -499,13 +510,15 @@ const statementActions = computed<ActionItem[]>(() => {
       tier: 'overflow' as const,
       run: () => { void downloadStatementFile(bankApi.pdfUrl(pdf.id), pdf.pdf_name ?? 'vypis.pdf') },
     })),
-    ...(s.evidence_statements ?? []).map(source => ({
-      key: `evidence_statement_${source.id}`,
-      label: t('bank.evidence_statement', { name: source.file_name ?? String(source.id), count: source.transaction_count }),
-      icon: 'eye' as const,
-      tier: 'overflow' as const,
-      run: () => { void router.push({ name: 'bank-detail', params: { id: source.id } }) },
-    })),
+    {
+      key: 'bank_downloads',
+      label: t('bank.downloads_action', { count: bankDownloads.value.length }),
+      icon: 'eye',
+      tier: 'overflow',
+      show: !auth.isClientRole && bankDownloads.value.length > 0,
+      title: t('bank.downloads_hint'),
+      run: () => { bankDownloadsOpen.value = true },
+    },
     {
       key: 'pdf_upload',
       label: t('bank.pdf_upload'),
@@ -540,7 +553,7 @@ const statementActions = computed<ActionItem[]>(() => {
     },
   ]
 })
-useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-suggestions', 'accounting', 'invoices', 'purchase-invoices', 'clients'], refreshTransactions)
+useWindowRefresh(refreshTransactions)
 </script>
 
 <template>
@@ -714,7 +727,7 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
           <BankTransactionRow v-for="tx in filteredTransactions" :key="tx.id"
             layout="desktop" :tx="tx" :is-double-entry="isDoubleEntry"
             :fallback-currency="statement.currency" :colspan="isDoubleEntry ? 8 : 7" :show-counter-account="isDoubleEntry" :actions="bankActions"
-            @posted="onTxPosted" @changed="load" />
+            @posted="onTxPosted" @changed="refreshTransactions" />
         </tbody>
       </table>
       </div>
@@ -724,7 +737,7 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
         <BankTransactionRow v-for="tx in filteredTransactions" :key="`m-${tx.id}`"
           layout="mobile" :tx="tx" :is-double-entry="isDoubleEntry"
           :fallback-currency="statement.currency" :show-counter-account="isDoubleEntry" :actions="bankActions"
-          @posted="onTxPosted" @changed="load" />
+          @posted="onTxPosted" @changed="refreshTransactions" />
       </div>
 
       <div v-if="txPage < txPages" ref="loadMoreTarget" class="text-center border-t border-neutral-200 pointer-fine-hidden">
@@ -739,5 +752,21 @@ useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-su
     <BankMatchModal :actions="bankActions" :fallback-currency="statement.currency" />
     <BankCreatePurchaseModal :actions="bankActions" />
     <BankRequestDocModal :actions="bankActions" />
+
+    <Modal v-if="bankDownloadsOpen" :title="t('bank.downloads_title')" width-class="max-w-lg" @close="bankDownloadsOpen = false">
+      <p class="text-sm text-neutral-500 mb-3">{{ t('bank.downloads_hint') }}</p>
+      <ul class="divide-y divide-neutral-200 max-h-96 overflow-y-auto" data-test="bank-downloads">
+        <li v-for="source in bankDownloads" :key="source.id" class="py-2 flex items-center justify-between gap-3 text-sm">
+          <span>
+            {{ source.statement_date ? formatDate(source.statement_date) : '—' }}
+            <span class="text-neutral-500">· {{ t('bank.downloads_movements', { count: source.transaction_count }) }}</span>
+          </span>
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="openBankDownload(source.id)">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>
+            {{ t('bank.downloads_open') }}
+          </button>
+        </li>
+      </ul>
+    </Modal>
   </div>
 </template>

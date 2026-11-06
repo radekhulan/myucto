@@ -101,6 +101,23 @@ final class AiExtractionZeroLinesTest extends StockTestCase
     }
 
     /**
+     * Řádek mimo daňovou rekapitulaci (spropitné) chybí v položkách: rozdíl „K úhradě“
+     * proti řádkům nad korunu se nesmí tiše zahodit, má se ohlásit (PR #237).
+     */
+    public function testTotalGapAboveRoundingIsReported(): void
+    {
+        $id = $this->createDraft(
+            [['description' => 'Potraviny', 'quantity' => 1, 'unit_price_without_vat' => 1000.00, 'vat_rate' => 21]],
+            1000.00,
+            // Rekapitulace sedí na řádky (1 000 + 210), „K úhradě" je o 20 Kč víc (spropitné).
+            ['total_with_vat_rounded' => 1230.00],
+        );
+
+        $warning = (string) $this->db->pdo()->query('SELECT extraction_warning FROM purchase_invoices WHERE id = ' . $id)->fetchColumn();
+        self::assertStringContainsString('rozdíl 20,00 CZK', $warning);
+    }
+
+    /**
      * @param list<array<string,mixed>> $items
      * @param array<string,mixed>       $extra
      */

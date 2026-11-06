@@ -72,5 +72,7 @@ describe('varsymbolSeriesType, řada zjednodušeného dokladu', () => {
     expect(varsymbolSeriesType('proforma', true)).toBe('proforma')
     expect(varsymbolSeriesType('credit_note', true)).toBe('credit_note')
     expect(varsymbolSeriesType('payment_calendar', true)).toBe('payment_calendar')
+    expect(varsymbolSeriesType('rent_calendar', true)).toBe('rent_calendar')
+    expect(varsymbolSeriesType('advance_calendar', true)).toBe('advance_calendar')
   })
 })

@@ -78,6 +78,7 @@ final class PayrollBenefitBasketOverviewService
                 reversedMinor: (int) $row['reversed_minor'],
                 takenOverMinor: (int) $row['taken_over_minor'],
                 takenOverMonths: (int) $row['taken_over_months'],
+                unlimited: $rowBasket->isUnlimited($taxYear),
             );
         }
 

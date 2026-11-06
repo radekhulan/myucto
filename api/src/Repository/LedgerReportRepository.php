@@ -41,13 +41,16 @@ final class LedgerReportRepository
      *        dle protistrany/položky zdrojového dokladu (viz {@see counterpartyFilter()})
      * @return list<array<string,mixed>> {id, account_code, name, account_type,
      *                                    normal_side, is_synthetic, parent_id, parent_code,
-     *                                    parent_name, ps_md, ps_d, to_md, to_d}
+     *                                    parent_name, parent_normal_side, ps_md, ps_d, to_md, to_d,
+     *                                    to_count (počet řádků obratu, pro limit rozpisu)}
      */
     public function trialBalanceRows(int $supplierId, string $from, string $to, string $periodStart, bool $analytics = false, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
+        $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         $anchor = $this->openingAnchor($supplierId, $from);
         [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
-        [$linesSql, $linesParams] = $this->lineSource($supplierId, $filters['dimension'] ?? null);
+        // Rozvahové účty čtou od kotvy, výsledkové od začátku období; bez kotvy celou historii.
+        [$linesSql, $linesParams] = $this->lineSource($supplierId, $filters['dimension'] ?? null, $anchor !== null ? min($anchor, $periodStart) : null, $to);
         // Inventarizace/rozvaha k rozvahovému dni potřebuje zůstatky PŘED uzavřením knih —
         // close_books zápis (source_type='closing', source_id = period_id < STOCK_SLOT_BASE, UZ)
         // převádí rozvahové účty na 702/710 a jinak by je vynuloval. Otevírací
@@ -80,26 +83,29 @@ final class LedgerReportRepository
                     SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
                               AND l.side = 'debit'  THEN l.signed_amount ELSE 0 END) AS to_md,
                     SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql}
-                              AND l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS to_d
+                              AND l.side = 'credit' THEN l.signed_amount ELSE 0 END) AS to_d,
+                    SUM(CASE WHEN e.entry_date >= ? AND {$turnoverOpeningSql} THEN 1 ELSE 0 END) AS to_count
                 FROM {$linesSql}
                 JOIN journal_entries e   ON e.id = l.entry_id
                 " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-                JOIN chart_of_accounts a ON a.id = l.account_id
+                JOIN {$accountDefinitions} a ON a.id = l.account_id
                 WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date <= ?{$filterSql}{$closingSql}
                 GROUP BY acc_id
             )
             SELECT c.id, c.account_code, c.name, c.account_type, c.normal_side, c.is_synthetic,
                    p.id AS parent_id, p.account_code AS parent_code, p.name AS parent_name,
-                   agg.ps_md, agg.ps_d, agg.to_md, agg.to_d
+                   p.normal_side AS parent_normal_side,
+                   agg.ps_md, agg.ps_d, agg.to_md, agg.to_d, agg.to_count
               FROM agg
-              JOIN chart_of_accounts c ON c.id = agg.acc_id
-              LEFT JOIN chart_of_accounts p ON p.id = c.parent_id
+              JOIN {$accountDefinitions} c ON c.id = agg.acc_id
+              LEFT JOIN {$accountDefinitions} p ON p.id = c.parent_id
              ORDER BY c.account_code"
         );
         $stmt->execute([
             $analytics ? 1 : 0,
             $from, $from, $periodStart, $anchor, $anchor,
             $from, $from, $periodStart, $anchor, $anchor,
+            $from, ...$turnoverOpeningParams,
             $from, ...$turnoverOpeningParams,
             $from, ...$turnoverOpeningParams,
             ...$linesParams,
@@ -142,8 +148,9 @@ final class LedgerReportRepository
      */
     public function monthlyTurnovers(int $supplierId, string $from, string $to, bool $analytics, array $filters = [], bool $excludeClosing = false, bool $excludeAllOpenings = false): array
     {
+        $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
-        [$linesSql, $linesParams] = $this->lineSource($supplierId, $filters['dimension'] ?? null);
+        [$linesSql, $linesParams] = $this->lineSource($supplierId, $filters['dimension'] ?? null, $from, $to);
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
         $openingSql = $excludeAllOpenings
@@ -158,7 +165,7 @@ final class LedgerReportRepository
                FROM {$linesSql}
                JOIN journal_entries e   ON e.id = l.entry_id
                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-               JOIN chart_of_accounts a ON a.id = l.account_id
+               JOIN {$accountDefinitions} a ON a.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL AND e.entry_date BETWEEN ? AND ?
                 {$openingSql}{$filterSql}{$closingSql}
               GROUP BY acc_id, ym"
@@ -184,18 +191,24 @@ final class LedgerReportRepository
      * účtu vedl na tentýž doklad jako z deníku (bez toho končila banka/pokladna/majetek
      * jen v deníku). JOINy jsou 1:1 přes PK, řádky se tedy neznásobují.
      *
+     * Filtr protiúčtu běží nad hotovým běžícím zůstatkem, takže vyfiltrovaný řádek ukazuje
+     * skutečný zůstatek účtu po tomto pohybu, ne součet jen vybraných řádků.
+     *
      * @return list<array<string,mixed>>
      */
-    public function accountLines(int $supplierId, int $accountId, string $from, string $to, int $limit, int $offset, bool $excludeClosing = false): array
+    public function accountLines(int $supplierId, int $accountId, string $from, string $to, int $limit, int $offset, bool $excludeClosing = false, ?int $counterAccountId = null): array
     {
+        $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         $limit = max(1, $limit);
         $offset = max(0, $offset);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
+        [$counterSql, $counterParams] = $this->counterAccountFilter('t.entry_id', 't.effective_side', 't.amount', $supplierId, $counterAccountId);
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT * FROM (
                 SELECT e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
                        ca.id AS line_account_id, ca.account_code, ca.name AS line_account_name,
                        l.id AS line_id, l.side, l.amount, l.is_red_storno, l.line_no, l.currency_code, l.amount_foreign,
+                       " . self::effectiveSideSql('l') . " AS effective_side,
                        bt.statement_id AS source_statement_id,
                        bt.bank_ref AS source_bank_ref,
                        cd.doc_number AS source_doc_number,
@@ -210,7 +223,7 @@ final class LedgerReportRepository
                   FROM journal_entry_lines l
                   JOIN journal_entries e    ON e.id = l.entry_id
                   " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-                  JOIN chart_of_accounts ca ON ca.id = l.account_id
+                  JOIN {$accountDefinitions} ca ON ca.id = l.account_id
              LEFT JOIN bank_transactions bt ON e.source_type = 'bank' AND bt.id = e.source_id
              LEFT JOIN cash_documents cd    ON e.source_type = 'cash' AND cd.id = e.source_id
              LEFT JOIN invoice_settlements stl ON e.source_type = 'settlement'
@@ -227,10 +240,11 @@ final class LedgerReportRepository
                    AND (l.account_id = ? OR ca.parent_id = ?)
                    AND e.entry_date BETWEEN ? AND ?{$technicalSql}
             ) t
+            WHERE 1 = 1{$counterSql}
             ORDER BY t.entry_date, t.entry_id, t.line_no
             LIMIT {$limit} OFFSET {$offset}"
         );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams]);
+        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams, ...$counterParams]);
         return array_map(static function (array $r): array {
             $r['entry_id'] = (int) $r['entry_id'];
             $r['line_id'] = (int) $r['line_id'];
@@ -291,6 +305,7 @@ final class LedgerReportRepository
      */
     public function accountOpening(int $supplierId, int $accountId, string $from, string $periodStart, bool $excludeClosing = false): float
     {
+        $accountDefinitions=AccountDefinitionRepository::relation($from,$supplierId);
         $anchor = $this->openingAnchor($supplierId, $from);
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $stmt = $this->db->pdo()->prepare(
@@ -298,7 +313,7 @@ final class LedgerReportRepository
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-               JOIN chart_of_accounts ca ON ca.id = l.account_id
+               JOIN {$accountDefinitions} ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
                 -- Otevírací zápis z prvního dne období patří do počátečního stavu,
@@ -318,21 +333,183 @@ final class LedgerReportRepository
     /**
      * Celkový počet řádků opisu účtu v rozsahu (pro paginaci).
      */
-    public function accountLinesTotal(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false): int
+    public function accountLinesTotal(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false, ?int $counterAccountId = null): int
     {
+        $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
+        [$counterSql, $counterParams] = $this->counterAccountFilter('l.entry_id', self::effectiveSideSql('l'), 'l.amount', $supplierId, $counterAccountId);
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COUNT(*)
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-               JOIN chart_of_accounts ca ON ca.id = l.account_id
+               JOIN {$accountDefinitions} ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
-                AND e.entry_date BETWEEN ? AND ?{$technicalSql}"
+                AND e.entry_date BETWEEN ? AND ?{$technicalSql}{$counterSql}"
         );
-        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams]);
+        $stmt->execute([$supplierId, $accountId, $accountId, $from, $to, ...$technicalParams, ...$counterParams]);
         return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * Součty MD a D opisu účtu rozdělené podle protiúčtu, přes stejnou množinu řádků jako
+     * {@see accountTurnovers()}.
+     *
+     * Protiúčet je účet na opačné ÚČINNÉ straně téhož zápisu (červené storno stranu
+     * obrací, viz {@see effectiveSideSql()}). Řádky se shodnou částkou tvoří dvojici, když
+     * jich je na obou stranách stejně (pokladní doklad 501 / 211 a 513 / 211): spárovaný
+     * řádek se dělí rovným dílem jen mezi řádky své dvojice.
+     * Ostatní řádky se dělí poměrem jen mezi nespárované řádky protistrany, takže 311 MD
+     * 1 210 má protiúčty 602 za 1 000 a 343 za 210 i vedle dvojice v témže zápisu.
+     * Řádek bez protistrany (jednostranný zápis) má protiúčet NULL.
+     *
+     * Stejné pravidlo žije třikrát (výkon nedovoluje jednu implementaci): tady v SQL,
+     * ve filtru {@see pairedSql()} a v PHP v {@see \MyInvoice\Service\Accounting\Reports\JournalLineContext}.
+     * Při změně upravte všechna tři místa, jinak se rozejde protiúčet řádku, filtr a součty.
+     *
+     * @return list<array{account_id:?int, account_code:?string, name:?string, parent_id:?int, md:float, d:float}>
+     */
+    public function accountCounterTotals(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false): array
+    {
+        $accountDefinitions = AccountDefinitionRepository::relation($to, $supplierId);
+        [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
+        // Jeden průchod řádky zápisů účtu, bez spojení řádku s protistranou: každý řádek zápisu
+        // dostane okny součty vlastních řádků (podle účinné a zapsané strany) a z nich svůj díl.
+        // CTE odkazované dvakrát MariaDB materializuje dvakrát, proto se na `counterpart`
+        // odkazuje jen jednou. `paired` = částka se stejným počtem řádků na obou stranách,
+        // `free_total` = nespárovaná částka strany, `own_*` = vlastní řádky (u = nespárované
+        // za zápis, p = spárované za částku; d/c účinná strana, md/d strana výsledku).
+        $ownSum = static fn (string $paired, string $eff, string $side, string $partition): string =>
+            "SUM(CASE WHEN x.is_own AND " . ($paired === 'p' ? '' : 'NOT ') . "x.paired AND x.effective_side = '{$eff}' AND x.side = '{$side}'"
+            . " THEN x.signed_amount END) OVER (PARTITION BY {$partition})";
+        $own = [];
+        foreach (['u' => 'x.entry_id', 'p' => 'x.entry_id, x.amount'] as $kind => $partition) {
+            foreach (['d' => 'debit', 'c' => 'credit'] as $e => $eff) {
+                foreach (['md' => 'debit', 'd' => 'credit'] as $res => $side) {
+                    $own[] = $ownSum($kind, $eff, $side, $partition) . " AS own_{$kind}{$e}_{$res}";
+                }
+            }
+        }
+        $freeMd = "(CASE WHEN c.effective_side = 'debit' THEN c.own_uc_md ELSE c.own_ud_md END)";
+        $freeD = "(CASE WHEN c.effective_side = 'debit' THEN c.own_uc_d ELSE c.own_ud_d END)";
+        // Podíl nespárovaného řádku na své straně; násobit před dělením (decimal drží jen 4 místa
+        // navíc). free_total > 0: nespárovaný řádek se do něj počítá a částka je kladná
+        // (chk_jel_amount_positive).
+        $freeShare = static fn (string $sum): string => "({$sum} * c.amount / c.free_total)";
+        $stmt = $this->db->pdo()->prepare(
+            ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . ", " : "WITH ") . "own_accounts AS (
+                SELECT ca.id FROM {$accountDefinitions} ca WHERE ca.id = ? OR ca.parent_id = ?
+            ),
+            entries AS (
+                SELECT DISTINCT l.entry_id
+                  FROM journal_entry_lines l
+                  JOIN journal_entries e ON e.id = l.entry_id
+                  " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
+                 WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
+                   AND l.account_id IN (SELECT id FROM own_accounts)
+                   AND e.entry_date BETWEEN ? AND ?{$technicalSql}
+            ),
+            -- Pořadí a index pevně: řádky hledáme jen pro zápisy účtu. Plánovač jinak
+            -- staví rowid filtr nad celou firmou a na tisíci řádcích je to desetkrát pomalejší.
+            counterpart AS (
+                SELECT x.*,
+                       SUM(CASE WHEN x.paired THEN 0 ELSE x.amount END) OVER (PARTITION BY x.entry_id, x.effective_side) AS free_total,
+                       SUM(NOT x.paired AND x.effective_side = 'debit') OVER (PARTITION BY x.entry_id) AS free_d,
+                       SUM(NOT x.paired AND x.effective_side = 'credit') OVER (PARTITION BY x.entry_id) AS free_c,
+                       " . implode(",
+                       ", $own) . "
+                  FROM (SELECT o.entry_id, o.account_id, o.amount, o.side, o.signed_amount, " . self::effectiveSideSql('o') . " AS effective_side,
+                               o.account_id IN (SELECT id FROM own_accounts) AS is_own,
+                               SUM(" . self::effectiveSideSql('o') . " = 'debit') OVER (PARTITION BY o.entry_id, o.amount) AS n_debit,
+                               SUM(" . self::effectiveSideSql('o') . " = 'debit') OVER (PARTITION BY o.entry_id, o.amount)
+                                 = SUM(" . self::effectiveSideSql('o') . " = 'credit') OVER (PARTITION BY o.entry_id, o.amount) AS paired
+                          FROM entries e
+                          STRAIGHT_JOIN journal_entry_lines o FORCE INDEX (idx_jel_supplier_entry)
+                               ON o.supplier_id = ? AND o.entry_id = e.entry_id) x
+            ),
+            -- Díl řádku jako protiúčtu vlastních řádků opačné strany; k = 1 je vlastní
+            -- nespárovaný řádek bez nespárované protistrany (protiúčet NULL).
+            shares AS (
+                SELECT CASE WHEN k.k = 0 THEN c.account_id END AS account_id,
+                       CASE WHEN k.k = 1 THEN (CASE WHEN c.side = 'debit' THEN c.signed_amount ELSE 0 END)
+                            WHEN c.paired THEN (CASE WHEN c.effective_side = 'debit' THEN c.own_pc_md ELSE c.own_pd_md END) / c.n_debit
+                            ELSE " . $freeShare($freeMd) . " END AS md,
+                       CASE WHEN k.k = 1 THEN (CASE WHEN c.side = 'credit' THEN c.signed_amount ELSE 0 END)
+                            WHEN c.paired THEN (CASE WHEN c.effective_side = 'debit' THEN c.own_pc_d ELSE c.own_pd_d END) / c.n_debit
+                            ELSE " . $freeShare($freeD) . " END AS d
+                  FROM counterpart c
+                  JOIN (SELECT 0 AS k UNION ALL SELECT 1) k
+                       ON k.k = 0 OR (c.is_own AND NOT c.paired AND (CASE WHEN c.effective_side = 'debit' THEN c.free_c ELSE c.free_d END) = 0)
+            ),
+            allocated AS (
+                SELECT account_id, SUM(md) AS md, SUM(d) AS d FROM shares
+                 WHERE md IS NOT NULL OR d IS NOT NULL
+                 GROUP BY account_id
+            )
+            SELECT x.account_id, a.account_code, a.name, a.parent_id, x.md, x.d
+              FROM allocated x
+         LEFT JOIN {$accountDefinitions} a ON a.id = x.account_id
+             ORDER BY a.account_code IS NULL, a.account_code"
+        );
+        $stmt->execute([$accountId, $accountId, $supplierId, $from, $to, ...$technicalParams, $supplierId]);
+        return array_map(static fn (array $r): array => [
+            'account_id'   => $r['account_id'] === null ? null : (int) $r['account_id'],
+            'account_code' => $r['account_code'] === null ? null : (string) $r['account_code'],
+            'name'         => $r['name'] === null ? null : (string) $r['name'],
+            'parent_id'    => $r['parent_id'] === null ? null : (int) $r['parent_id'],
+            'md'           => (float) $r['md'],
+            'd'            => (float) $r['d'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    /**
+     * Omezení řádků opisu na ty, jejichž zápis má na opačné účinné straně daný účet
+     * (nebo jeho analytiku). Spárovaný řádek (viz {@see accountCounterTotals()}) jen
+     * v rámci své dvojice, nespárovaný jen mezi nespárovanými, stejně jako součty
+     * a zobrazený protiúčet. Prázdný filtr nepřidá nic.
+     *
+     * Shodná částka je vždy ve stejné skupině (dvojice je vlastnost částky v zápisu), takže
+     * spárovanost se zjišťuje jen u řádků s jinou částkou; běžný zápis 311 / 602 ji nečte.
+     *
+     * Skalární poddotaz místo EXISTS záměrně: EXISTS plánovač převede na semi-join řízený
+     * řádky protiúčtu, u účtu s tisíci pohyby pak dotaz běžel přes sekundu místo milisekund.
+     *
+     * @return array{0:string, 1:list<int>}
+     */
+    private function counterAccountFilter(string $entryExpr, string $sideExpr, string $amountExpr, int $supplierId, ?int $counterAccountId): array
+    {
+        if ($counterAccountId === null) {
+            return ['', []];
+        }
+        return [
+            " AND (SELECT 1 FROM journal_entry_lines cl
+                     JOIN chart_of_accounts cc ON cc.id = cl.account_id
+                    WHERE cl.supplier_id = ? AND cl.entry_id = {$entryExpr}
+                      AND (cl.account_id = ? OR cc.parent_id = ?)
+                      AND " . self::effectiveSideSql('cl') . " <> {$sideExpr}
+                      AND (cl.amount = {$amountExpr}
+                           OR (NOT " . self::pairedSql($entryExpr, $amountExpr) . "
+                               AND NOT " . self::pairedSql('cl.entry_id', 'cl.amount') . "))
+                    LIMIT 1) = 1",
+            [$supplierId, $counterAccountId, $counterAccountId, $supplierId, $supplierId],
+        ];
+    }
+
+    /** Tvoří řádky dané částky v zápisu dvojici? Pravidlo viz {@see accountCounterTotals()}. */
+    private static function pairedSql(string $entryExpr, string $amountExpr): string
+    {
+        return "(SELECT SUM(" . self::effectiveSideSql('pg') . " = 'debit') = SUM(" . self::effectiveSideSql('pg') . " = 'credit')
+                   FROM journal_entry_lines pg
+                  WHERE pg.supplier_id = ? AND pg.entry_id = {$entryExpr} AND pg.amount = {$amountExpr})";
+    }
+
+    /** Strana, na které řádek skutečně působí: červené storno MD je účinkem Dal a naopak. */
+    private static function effectiveSideSql(string $alias): string
+    {
+        return "CASE WHEN {$alias}.is_red_storno = 1
+                     THEN (CASE WHEN {$alias}.side = 'debit' THEN 'credit' ELSE 'debit' END)
+                     ELSE {$alias}.side END";
     }
 
     /**
@@ -342,6 +519,7 @@ final class LedgerReportRepository
      */
     public function accountTurnovers(int $supplierId, int $accountId, string $from, string $to, bool $excludeClosing = false): array
     {
+        $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         [$technicalSql, $technicalParams] = $this->technicalEntryFilter($from, $excludeClosing);
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS md,
@@ -349,7 +527,7 @@ final class LedgerReportRepository
                FROM journal_entry_lines l
                JOIN journal_entries e    ON e.id = l.entry_id
                " . ($excludeClosing ? JournalTaxOrigin::join() : "") . "
-               JOIN chart_of_accounts ca ON ca.id = l.account_id
+               JOIN {$accountDefinitions} ca ON ca.id = l.account_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND (l.account_id = ? OR ca.parent_id = ?)
                 AND e.entry_date BETWEEN ? AND ?{$technicalSql}"
@@ -379,7 +557,7 @@ final class LedgerReportRepository
     {
         $closingSql = $excludeClosing ? " AND " . JournalTaxOrigin::includedSql() : '';
         $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
-        [$linesSql, $linesParams] = $this->lineSource($supplierId, $dimension);
+        [$linesSql, $linesParams] = $this->lineSource($supplierId, $dimension, $from, $to);
         $stmt = $this->db->pdo()->prepare(
             ($excludeClosing ? "WITH RECURSIVE " . JournalTaxOrigin::cte($supplierId) . " " : "") . "SELECT COALESCE(SUM(CASE WHEN l.side = 'debit'  THEN l.signed_amount ELSE 0 END), 0) AS md,
                     COALESCE(SUM(CASE WHEN l.side = 'credit' THEN l.signed_amount ELSE 0 END), 0) AS d
@@ -424,7 +602,17 @@ final class LedgerReportRepository
      * (221 −) s běžným účtem (221 +) přes syntetiku (§58 vyhl. 500/2002 Sb.). Pro účty mimo
      * `$splitCodes` (balance_condition='any') zůstává chování beze změny (jedno netto číslo).
      *
+     * `$onlyCodes` omezí výsledek na vyjmenované syntetiky (saldokonto čte šest účtů
+     * z několika stovek). Vynechané účty se vůbec nečtou, zůstatky vyjmenovaných jsou
+     * stejné jako bez filtru.
+     *
+     * `$extraDeltas` (účet => MD − D) přičte k zůstatkům listových účtů úpravu mimo deník
+     * (průběžné časové rozlišení ve výkazu) ještě před roll-upem, aby úprava prošla stejnou
+     * syntetikou, analytikou i rozdělením salda jako zápisy deníku.
+     *
      * @param list<string> $splitCodes syntetické prefixy k rozdělení per analytika
+     * @param list<string>|null $onlyCodes jen tyto syntetiky; null = všechny
+     * @param array<string,float> $extraDeltas listový účet => změna zůstatku MD − D
      * @return list<array{account_id:int, code:string, name:string, account_type:string, md:float, d:float}>
      */
     public function syntheticBalances(
@@ -434,11 +622,15 @@ final class LedgerReportRepository
         array $splitCodes = [],
         array $preserveCodes = [],
         ?DimensionFilter $dimension = null,
+        ?array $onlyCodes = null,
+        array $extraDeltas = [],
     ): array
     {
+        $accountDefinitions=AccountDefinitionRepository::relation($asOf,$supplierId);
         $anchor = $this->openingAnchor($supplierId, $asOf);
         $plCond = '';
-        [$linesSql, $linesParams] = $this->lineSource($supplierId, $dimension);
+        $lowerBound = $anchor !== null && $plFrom !== null ? min($anchor, $plFrom) : null;
+        [$linesSql, $linesParams] = $this->lineSource($supplierId, $dimension, $lowerBound, $asOf);
         $params = [...$linesParams, $supplierId, ClosingSourceId::STOCK_SLOT_BASE, $asOf];
         if ($plFrom !== null) {
             $plCond = " AND (a.account_type NOT IN ('revenue','expense') OR e.entry_date >= ?)";
@@ -452,9 +644,18 @@ final class LedgerReportRepository
         // všechny řádky deníku firmy za celou historii; s indexem (supplier_id, entry_date)
         // čte jen dotčené období. Bez kotvy nebo bez plFrom mez neexistuje.
         $lowerBoundSql = '';
-        if ($anchor !== null && $plFrom !== null) {
+        if ($lowerBound !== null) {
             $lowerBoundSql = ' AND e.entry_date >= ?';
-            $params[] = min($anchor, $plFrom);
+            $params[] = $lowerBound;
+        }
+        $onlyCodesSql = '';
+        if ($onlyCodes !== null) {
+            $onlyCodes = array_values(array_unique(array_map('strval', $onlyCodes)));
+            if ($onlyCodes === []) {
+                return [];
+            }
+            $onlyCodesSql = ' AND COALESCE(p.account_code, a.account_code) IN (' . implode(',', array_fill(0, count($onlyCodes), '?')) . ')';
+            array_push($params, ...$onlyCodes);
         }
         // Agregace per LIST účet (a.id) + jeho syntetika — roll-up i případný D2 split
         // (kladné/záporné saldo per analytika) se dopočítá v PHP.
@@ -471,19 +672,77 @@ final class LedgerReportRepository
                FROM {$linesSql}
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
-               JOIN chart_of_accounts a ON a.id = l.account_id
-               LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
+               JOIN {$accountDefinitions} a ON a.id = l.account_id
+               LEFT JOIN {$accountDefinitions} p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND a.account_type NOT IN ('offbalance','closing')
                 AND " . JournalTaxOrigin::includedSql() . "
                 AND e.entry_date <= ?{$plCond}
-                AND (a.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?){$lowerBoundSql}
+                AND (a.account_type NOT IN ('asset','liability','equity') OR ? IS NULL OR e.entry_date >= ?){$lowerBoundSql}{$onlyCodesSql}
               GROUP BY COALESCE(p.id, a.id), COALESCE(p.account_code, a.account_code),
                        COALESCE(p.name, a.name), a.account_type, a.id
               ORDER BY code"
         );
         $stmt->execute($params);
-        return $this->rollupSyntheticBalances($stmt->fetchAll(PDO::FETCH_ASSOC), $splitCodes, $preserveCodes);
+        $leafRows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($extraDeltas !== []) {
+            $leafRows = $this->applyLeafDeltas($supplierId, $asOf, $leafRows, $extraDeltas);
+        }
+        return $this->rollupSyntheticBalances($leafRows, $splitCodes, $preserveCodes);
+    }
+
+    /**
+     * Přičte změny zůstatků (účet => MD − D) k listovým řádkům zůstatků. Účet bez pohybu
+     * v deníku se doplní z osnovy platné k `asOf` se svou syntetikou. Účet, který osnova
+     * nezná, je chyba: úprava by z výkazu tiše vypadla a rozvaha by nebilancovala.
+     *
+     * @param list<array<string,mixed>> $leafRows
+     * @param array<string,float> $deltas
+     * @return list<array<string,mixed>>
+     */
+    private function applyLeafDeltas(int $supplierId, string $asOf, array $leafRows, array $deltas): array
+    {
+        $byCode = [];
+        foreach ($leafRows as $i => $r) {
+            $byCode[(string) $r['leaf_code']] = $i;
+        }
+        $missing = array_values(array_filter(array_map('strval', array_keys($deltas)), static fn (string $c): bool => !isset($byCode[$c])));
+        if ($missing !== []) {
+            $accountDefinitions = AccountDefinitionRepository::relation($asOf, $supplierId);
+            $stmt = $this->db->pdo()->prepare(
+                "SELECT COALESCE(p.id, a.id) AS account_id,
+                        COALESCE(p.account_code, a.account_code) AS code,
+                        COALESCE(p.name, a.name) AS name,
+                        a.account_type,
+                        a.id AS leaf_id,
+                        a.account_code AS leaf_code,
+                        a.name AS leaf_name
+                   FROM {$accountDefinitions} a
+                   LEFT JOIN {$accountDefinitions} p ON p.id = a.parent_id
+                  WHERE a.supplier_id = ? AND a.account_code IN (" . implode(',', array_fill(0, count($missing), '?')) . ')'
+            );
+            $stmt->execute([$supplierId, ...$missing]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $byCode[(string) $r['leaf_code']] = count($leafRows);
+                $leafRows[] = $r + ['md' => 0.0, 'd' => 0.0];
+            }
+        }
+        foreach ($deltas as $code => $delta) {
+            $i = $byCode[(string) $code] ?? null;
+            if ($i === null) {
+                throw new \MyInvoice\Service\Accounting\Reports\ReportException(
+                    'accrual_account_missing',
+                    'Účet ' . $code . ' z průběžného časového rozlišení není v účtové osnově firmy.',
+                );
+            }
+            $delta = round((float) $delta, 2);
+            if ($delta > 0) {
+                $leafRows[$i]['md'] = round((float) $leafRows[$i]['md'] + $delta, 2);
+            } else {
+                $leafRows[$i]['d'] = round((float) $leafRows[$i]['d'] - $delta, 2);
+            }
+        }
+        return $leafRows;
     }
 
     /**
@@ -604,6 +863,7 @@ final class LedgerReportRepository
      */
     public function netTurnoverForCodes(int $supplierId, string $from, string $to, array $codes): float
     {
+        $accountDefinitions=AccountDefinitionRepository::relation($to,$supplierId);
         if ($codes === []) {
             return 0.0;
         }
@@ -620,8 +880,8 @@ final class LedgerReportRepository
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
-               JOIN chart_of_accounts a ON a.id = l.account_id
-               LEFT JOIN chart_of_accounts p ON p.id = a.parent_id
+               JOIN {$accountDefinitions} a ON a.id = l.account_id
+               LEFT JOIN {$accountDefinitions} p ON p.id = a.parent_id
               WHERE l.supplier_id = ? AND e.posted_at IS NOT NULL
                 AND " . JournalTaxOrigin::includedSql() . "
                 AND e.entry_date BETWEEN ? AND ?
@@ -703,13 +963,104 @@ final class LedgerReportRepository
 
     /**
      * Zdroj řádků deníku pod aliasem `l`: bez filtru tabulka sama, s filtrem na dimenzi
-     * řádky dané hodnoty včetně poměrného dílu řádků s rozpadem ({@see DimensionFilter::lineSource()}).
+     * řádky dané hodnoty včetně poměrného dílu řádků s rozpadem ({@see DimensionFilter::lineSource()})
+     * omezené na interval dat zápisu, který sestava čte.
      *
      * @return array{0:string, 1:list<int|string>}
      */
-    private function lineSource(int $supplierId, ?DimensionFilter $dimension): array
+    private function lineSource(int $supplierId, ?DimensionFilter $dimension, ?string $from, string $to): array
     {
-        return $dimension !== null ? $dimension->lineSource($supplierId, 'l') : ['journal_entry_lines l', []];
+        return $dimension !== null ? $dimension->lineSource($supplierId, 'l', $from, $to) : ['journal_entry_lines l', []];
+    }
+
+    /** @return array{name:string, ic:string} */
+    public function supplierIdentity(int $supplierId): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT company_name, ic FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        return ['name' => (string) ($row['company_name'] ?? ''), 'ic' => (string) ($row['ic'] ?? '')];
+    }
+
+    /**
+     * Pohyby podrobné hlavní knihy, řazené účtem a chronologicky. Jediný proudový
+     * dotaz se odloží do dočasného proudu (nad 2 MB na disk), pak se předává po
+     * dávkách. Kontext může používat totéž PDO až po uzavření nebufferovaného
+     * kurzoru. Bez odložení by každá dávka znovu řadila celý roční deník.
+     * Filtry PS/obratů i osnova k datu `to` zůstávají stejné jako v trialBalanceRows,
+     * jinak by kontrola souhlasu se souhrnem hlásila nesoulad.
+     * @return \Generator<int,list<array<string,mixed>>>
+     */
+    public function generalLedgerLineBatches(int $supplierId, array $data, array $filters, bool $afterClosing, int $batchSize = 500): \Generator
+    {
+        $ids = array_column($data['accounts'], 'account_id');
+        if ($ids === []) return;
+        $batchSize = max(1, min(1000, $batchSize));
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $accountDefinitions = AccountDefinitionRepository::relation($data['to'], $supplierId);
+        // Účty řádků předem, aby úzký rozsah (501–501) šel po indexu účtu, ne přes celý rok.
+        $lineAccountSql = !empty($data['analytics'])
+            ? "l.account_id IN ({$marks})"
+            : "l.account_id IN (SELECT ca.id FROM chart_of_accounts ca WHERE ca.supplier_id = ? AND (ca.id IN ({$marks}) OR ca.parent_id IN ({$marks})))";
+        $lineAccountParams = !empty($data['analytics']) ? $ids : [$supplierId, ...$ids, ...$ids];
+        [$source, $sourceParams] = $this->lineSource($supplierId, $filters['dimension'] ?? null, $data['from'], $data['to']);
+        // Dimenzní zdroj řádků nenese is_red_storno a znaménko dílu nestačí (díl rozpadu může být 0,00).
+        // Příznak účinné strany protiúčtu se proto bere ze základního řádku po primárním klíči.
+        $stornoSql = isset($filters['dimension']) ? 'raw.is_red_storno' : 'l.is_red_storno';
+        $stornoJoin = isset($filters['dimension']) ? 'JOIN journal_entry_lines raw ON raw.id = l.id AND raw.supplier_id = l.supplier_id' : '';
+        [$filterSql, $filterParams] = $this->counterpartyFilter($filters, 'e');
+        $excludeClosing = !$afterClosing;
+        $closingSql = $excludeClosing ? ' AND ' . JournalTaxOrigin::includedSql() : '';
+        $closingParams = $excludeClosing ? [ClosingSourceId::STOCK_SLOT_BASE] : [];
+        $openingSql = !empty($data['all_periods']) && !$afterClosing
+            ? " AND e.source_type <> 'opening'"
+            : " AND NOT (e.entry_date = ? AND e.source_type = 'opening')";
+        $openingParams = !empty($data['all_periods']) && !$afterClosing ? [] : [$data['from']];
+        $group = !empty($data['analytics']) ? 'a.id' : 'COALESCE(a.parent_id, a.id)';
+        $sql = ($excludeClosing ? 'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . ' ' : '') . "
+                SELECT g.id AS group_id, g.account_code AS group_code,
+                       e.id AS entry_id, e.entry_date, e.document_no, e.description, e.source_type, e.source_id,
+                       l.id AS line_id, l.line_no, l.account_id, a.account_code, l.side, l.signed_amount AS amount,
+                       {$stornoSql} AS is_red_storno
+                  FROM {$source}
+                  {$stornoJoin}
+                  JOIN journal_entries e ON e.id = l.entry_id AND e.supplier_id = l.supplier_id
+                  " . ($excludeClosing ? JournalTaxOrigin::join() : '') . "
+                  JOIN {$accountDefinitions} a ON a.id = l.account_id
+                  JOIN {$accountDefinitions} g ON g.id = {$group}
+                 WHERE l.supplier_id = ? AND e.supplier_id = ? AND e.posted_at IS NOT NULL
+                   AND e.entry_date >= ? AND e.entry_date <= ? AND {$lineAccountSql} AND g.id IN ({$marks})
+                   {$filterSql}{$closingSql}{$openingSql}
+                 ORDER BY g.account_code, e.entry_date, e.id, l.line_no, l.id";
+        $pdo = $this->db->pdo();
+        $buffered = $pdo->getAttribute(\Pdo\Mysql::ATTR_USE_BUFFERED_QUERY);
+        $spool = new \SplTempFileObject(2 * 1024 * 1024);
+        $stmt = null;
+        try {
+            $pdo->setAttribute(\Pdo\Mysql::ATTR_USE_BUFFERED_QUERY, false);
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([...$sourceParams, $supplierId, $supplierId, $data['from'], $data['to'], ...$lineAccountParams, ...$ids,
+                ...$filterParams, ...$closingParams, ...$openingParams]);
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $encoded = json_encode($row, JSON_THROW_ON_ERROR) . "\n";
+                if ($spool->fwrite($encoded) !== strlen($encoded)) throw new \RuntimeException('Nelze uložit dočasná data exportu.');
+            }
+        } finally {
+            $stmt?->closeCursor();
+            $pdo->setAttribute(\Pdo\Mysql::ATTR_USE_BUFFERED_QUERY, $buffered);
+        }
+        $spool->rewind();
+        $batch = [];
+        while (!$spool->eof()) {
+            $encoded = $spool->fgets();
+            if ($encoded === '') continue;
+            $batch[] = json_decode($encoded, true, 512, JSON_THROW_ON_ERROR);
+            if (count($batch) === $batchSize) {
+                yield $batch;
+                $batch = [];
+            }
+        }
+        if ($batch !== []) yield $batch;
     }
 
     private static function escapeLike(string $value): string
@@ -723,7 +1074,7 @@ final class LedgerReportRepository
      * zaúčtované uzávěrky → volající nechává kumulativní okno (dnešní chování).
      * Počítá se jednou per volání sestavy (žádný N+1).
      */
-    public function openingAnchor(int $supplierId, string $date): ?string
+    public function openingAnchor(int $supplierId, string $date, bool $currentRead = false): ?string
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT MAX(p.starts_on)
@@ -731,7 +1082,7 @@ final class LedgerReportRepository
               WHERE p.supplier_id = ? AND p.starts_on <= ?
                 AND EXISTS (SELECT 1 FROM journal_entries e
                              WHERE e.supplier_id = p.supplier_id AND e.period_id = p.id
-                               AND e.source_type = 'opening' AND e.posted_at IS NOT NULL)"
+                               AND e.source_type = 'opening' AND e.posted_at IS NOT NULL)" . ($currentRead ? ' FOR UPDATE' : '')
         );
         $stmt->execute([$supplierId, $date]);
         $val = $stmt->fetchColumn();

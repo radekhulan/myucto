@@ -31,7 +31,7 @@ if (!existsSync(manualDir)) {
 // Řetězce, které vypadají jako název kapitoly, ale nejsou jí — hodnoty číselníků
 // apod. Whitelist je záměrně na přesnou hodnotu, ne na soubor: jinak by v tom
 // souboru propadl i skutečně rozbitý odkaz.
-const NOT_A_CHAPTER = new Set(['9_ending'])
+const NOT_A_CHAPTER = new Set(['9_ending', '1_30', '31_90', '91_plus'])
 
 const manualFiles = readdirSync(manualDir)
   .filter(file => file.endsWith('.md'))

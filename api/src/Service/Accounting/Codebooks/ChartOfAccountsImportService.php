@@ -6,6 +6,10 @@ namespace MyInvoice\Service\Accounting\Codebooks;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ChartOfAccountsRepository;
+use MyInvoice\Repository\AccountingFrameworkRepository;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\ChartOfAccounts504Policy;
+use MyInvoice\Service\Accounting\ChartOfAccountsTemplate504;
 
 /**
  * Import účtové osnovy z XLSX/CSV (Epic F5 §4.4). Identita řádku = account_code
@@ -16,6 +20,9 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
  */
 final class ChartOfAccountsImportService extends AbstractCodebookImportService
 {
+    private ?string $accountingDate = null;
+    private ?int $metadataActor = null;
+
     /** normalizovaný alias => kanonický account_type */
     private const TYPE_ALIASES = [
         'asset' => 'asset', 'aktiva' => 'asset',
@@ -39,6 +46,22 @@ final class ChartOfAccountsImportService extends AbstractCodebookImportService
         private readonly ChartOfAccountsRepository $accounts,
         private readonly Connection $db,
     ) {}
+
+    public function import(int $supplierId, ?int $userId, string $content, string $filename, bool $dryRun, ?string $date = null): array
+    {
+        $previousDate = $this->accountingDate;
+        $previousActor = $this->metadataActor;
+        $this->metadataActor = $userId;
+        $this->accountingDate = $date;
+        try {
+            return parent::import($supplierId, $userId, $content, $filename, $dryRun);
+        } catch (\MyInvoice\Service\Accounting\AccountDefinitionException $e) {
+            throw new CodebookImportException($e->errorCode,$e->getMessage(),$e->httpStatus);
+        } finally {
+            $this->accountingDate = $previousDate;
+            $this->metadataActor = $previousActor;
+        }
+    }
 
     public static function columns(): array
     {
@@ -67,10 +90,13 @@ final class ChartOfAccountsImportService extends AbstractCodebookImportService
     protected function process(int $supplierId, array $map, array $rows, bool $dryRun): array
     {
         $pdo = $this->db->pdo();
+        $framework = (new AccountingFrameworkService($this->db, new AccountingFrameworkRepository($this->db)))
+            ->forDate($supplierId, $this->accountingDate ?? date('Y-m-d'));
 
+        $physicalCodes=$this->accounts->physicalCodeMap($supplierId);
         $dbByCode = [];
         $dbById = [];
-        foreach ($this->accounts->listForTenant($supplierId, true) as $acc) {
+        foreach ($this->accounts->listForTenant($supplierId, true, $this->accountingDate) as $acc) {
             $dbByCode[(string) $acc['account_code']] = $acc;
             $dbById[(int) $acc['id']] = $acc;
         }
@@ -100,6 +126,7 @@ final class ChartOfAccountsImportService extends AbstractCodebookImportService
         foreach ($parsed as $line => $p) {
             $code = $p['code'];
             $row = ['line' => $line, 'key' => $code, 'status' => 'skip'];
+            if(isset($physicalCodes[$code])&&!isset($dbByCode[$code])){$reportRows[$line]=$this->err($row,'Účet existuje až od pozdějšího data. Zvolte odpovídající datum importu.');continue;}
 
             if ($code === '') {
                 $reportRows[$line] = $this->err($row, 'Chybí kód účtu.');
@@ -122,6 +149,22 @@ final class ChartOfAccountsImportService extends AbstractCodebookImportService
 
             $existing = $dbByCode[$code] ?? null;
             $isAnalytic = $p['parent'] !== '';
+            if ($framework === AccountingFrameworkService::CZ_504) {
+                $parent = $isAnalytic ? ($availableSynthetic[$p['parent']] ?? null) : null;
+                $type = $isAnalytic ? ($parent['type'] ?? $p['type']) : ($p['type'] ?? $existing['account_type'] ?? null);
+                $default = ChartOfAccounts504Policy::defaultAccount($isAnalytic ? $p['parent'] : $code);
+                $side = $isAnalytic ? ($parent['side'] ?? null)
+                    : ($p['sideRaw'] !== '' ? $p['side'] : ($existing !== null ? $existing['normal_side'] : ($default['normal_side'] ?? null)));
+                $error = ChartOfAccounts504Policy::validationError($code, $type, $side, $isAnalytic ? $p['parent'] : null);
+                if ($error !== null) {
+                    $reportRows[$line] = $this->err($row, $error);
+                    continue;
+                }
+                if (!$isAnalytic && $existing === null && $p['sideRaw'] === '') {
+                    $p['side'] = $side;
+                }
+                $p['tax_deductibility'] = ChartOfAccountsTemplate504::taxDeductibility($code);
+            }
 
             if (!$isAnalytic) {
                 $reportRows[$line] = $this->handleSynthetic($supplierId, $pdo, $row, $p, $existing, $writers, $availableSynthetic, $idResolver);
@@ -216,10 +259,11 @@ final class ChartOfAccountsImportService extends AbstractCodebookImportService
             'is_synthetic' => true,
             'parent_id'    => null,
             'is_active'    => $p['active'] ?? true,
+            'tax_deductibility' => $p['tax_deductibility'] ?? 'deductible',
         ];
         $availableSynthetic[$code] = ['type' => $p['type'], 'side' => $p['side']];
         $writers[] = function () use ($supplierId, $data, $code, &$idResolver): void {
-            $idResolver[$code] = $this->accounts->insert($supplierId, $data);
+            $idResolver[$code] = $this->accounts->insert($supplierId, $data, $this->accountingDate, $this->metadataActor);
         };
         $row['status'] = 'create';
         return $row;
@@ -278,11 +322,12 @@ final class ChartOfAccountsImportService extends AbstractCodebookImportService
             'normal_side'  => $parentSide,
             'is_synthetic' => false,
             'is_active'    => $p['active'] ?? true,
+            'tax_deductibility' => $p['tax_deductibility'] ?? 'deductible',
         ];
         $writers[] = function () use ($supplierId, $data, $parentCode, &$idResolver): void {
             $d = $data;
             $d['parent_id'] = $idResolver[$parentCode] ?? null;
-            $this->accounts->insert($supplierId, $d);
+            $this->accounts->insert($supplierId, $d, $this->accountingDate, $this->metadataActor);
         };
         $row['status'] = 'create';
         if ($message !== null) {
@@ -330,7 +375,7 @@ final class ChartOfAccountsImportService extends AbstractCodebookImportService
 
         $id = (int) $existing['id'];
         $writers[] = function () use ($supplierId, $id, $data): void {
-            $this->accounts->update($supplierId, $id, $data);
+            $this->accounts->update($supplierId, $id, $data, $this->accountingDate, null, $this->metadataActor);
         };
         return $row;
     }

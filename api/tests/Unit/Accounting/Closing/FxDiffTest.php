@@ -46,7 +46,7 @@ final class FxDiffTest extends TestCase
         self::assertSame(0, self::cents($preview['totals']['loss']));
 
         // MD 311 600 / D 663
-        $entries = $service->buildEntries(self::SUPPLIER, $preview);
+        $entries = $service->buildEntries(self::SUPPLIER, $preview, '2099-12-31');
         $this->assertEntryPair($entries['saldo'], '311', 'debit', 600.00, '663', 'credit');
         // FX stopa na saldokontním řádku (R20): měna, kurz ČNB, amount_foreign 0
         $accountLine = $entries['saldo'][0];
@@ -70,7 +70,7 @@ final class FxDiffTest extends TestCase
         self::assertSame('loss', $preview['saldo']['detail'][0]['direction']);
 
         // MD 563 400 / D 311
-        $entries = $service->buildEntries(self::SUPPLIER, $preview);
+        $entries = $service->buildEntries(self::SUPPLIER, $preview, '2099-12-31');
         $this->assertEntryPair($entries['saldo'], '563', 'debit', 400.00, '311', 'credit');
     }
 
@@ -89,7 +89,7 @@ final class FxDiffTest extends TestCase
         self::assertSame('gain', $preview['saldo']['detail'][0]['direction'], 'Dluh v Kč klesl o 1 200 = kurzový zisk.');
 
         // MD 321 1 200 / D 663
-        $entries = $service->buildEntries(self::SUPPLIER, $preview);
+        $entries = $service->buildEntries(self::SUPPLIER, $preview, '2099-12-31');
         $this->assertEntryPair($entries['saldo'], '321', 'debit', 1200.00, '663', 'credit');
     }
 
@@ -108,7 +108,7 @@ final class FxDiffTest extends TestCase
         self::assertSame('loss', $preview['saldo']['detail'][0]['direction'], 'Dluh v Kč vzrostl o 1 000 = kurzová ztráta.');
 
         // MD 563 1 000 / D 321
-        $entries = $service->buildEntries(self::SUPPLIER, $preview);
+        $entries = $service->buildEntries(self::SUPPLIER, $preview, '2099-12-31');
         $this->assertEntryPair($entries['saldo'], '563', 'debit', 1000.00, '321', 'credit');
     }
 
@@ -146,7 +146,7 @@ final class FxDiffTest extends TestCase
         self::assertSame('gain', $bank['direction']);
 
         // MD 221 200 / D 663
-        $entries = $service->buildEntries(self::SUPPLIER, $preview);
+        $entries = $service->buildEntries(self::SUPPLIER, $preview, '2099-12-31');
         self::assertSame([], $entries['saldo'], 'Bez saldokontních položek žádný slot 1.');
         $this->assertEntryPair($entries['bank'], '221', 'debit', 200.00, '663', 'credit');
 
@@ -218,7 +218,7 @@ final class FxDiffTest extends TestCase
         ]);
 
         self::assertCount(2, $preview['bank']['lines'], 'Dva různé účty = dva řádky.');
-        $entries = $service->buildEntries(self::SUPPLIER, $preview);
+        $entries = $service->buildEntries(self::SUPPLIER, $preview, '2099-12-31');
         self::assertCount(4, $entries['bank'], 'Dva přeceňovací páry (2× MD/D).');
     }
 
@@ -255,7 +255,7 @@ final class FxDiffTest extends TestCase
         self::assertSame(self::cents(600.00), self::cents($preview['totals']['gain']));
         self::assertSame(0, self::cents($preview['totals']['loss']));
 
-        $entries = $service->buildEntries(self::SUPPLIER, $preview);
+        $entries = $service->buildEntries(self::SUPPLIER, $preview, '2099-12-31');
         $this->assertEntryPair($entries['saldo'], '311', 'debit', 600.00, '663', 'credit');
     }
 
@@ -268,7 +268,7 @@ final class FxDiffTest extends TestCase
             ['EUR' => 25.10],
         );
         $preview = $service->preview(self::SUPPLIER, self::PERIOD);
-        $saldo = $service->buildEntries(self::SUPPLIER, $preview)['saldo'];
+        $saldo = $service->buildEntries(self::SUPPLIER, $preview, '2099-12-31')['saldo'];
 
         $reversal = $service->buildReversal($saldo);
 
@@ -341,7 +341,12 @@ final class FxDiffTest extends TestCase
 
         $accounts = $this->createStub(ChartOfAccountsRepository::class);
 
-        return new FxRevaluationService($repo, $cnb, $rules, $accounts);
+        $pdo = new \PDO('sqlite::memory:');
+        $pdo->exec('CREATE TABLE supplier_accounting_frameworks (id INTEGER PRIMARY KEY, supplier_id INTEGER, effective_from TEXT, accounting_framework TEXT)');
+        $db = $this->createStub(\MyInvoice\Infrastructure\Database\Connection::class);
+        $db->method('pdo')->willReturn($pdo);
+        $roles = \MyInvoice\Service\Accounting\AccountRoleResolver::fromConnection($db);
+        return new FxRevaluationService($repo, $cnb, $rules, $accounts, $roles);
     }
 
     /**

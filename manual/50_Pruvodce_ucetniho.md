@@ -180,7 +180,7 @@ zaúčtování téhož dokladu - viz [Účetní deník](52_Ucetni_denik.md).
 | # | Vrstva | Co určuje | Na co se použije | Kde ji najdete |
 |---|---|---|---|---|
 | 1 | **Předkontace** | výchozí dvojici účtů **MD/Dal** pro systémový typ operace (stabilní klíč, například `invoice.services.issued` nebo `payment.receivable.bank`) | každý doklad, který systém účtuje sám | **Nástroje → Účetní nastavení**, záložka **Předkontace** |
-| 2 | **Pravidla nákladů** | druh řádku přijaté faktury a konkrétní nákladový účet | řádky přijatých faktur | **Nástroje → Šablony účtování**, záložka **Pravidla nákladů** |
+| 2 | **Pravidla nákladů** a **výnosů** | druh řádku přijaté faktury a konkrétní nákladový účet; účet řádku vydané faktury podle kódu, textu nebo sazby DPH | řádky přijatých a vydaných faktur | **Nástroje → Šablony účtování**, záložky **Pravidla nákladů** a **Pravidla výnosů** |
 | 3 | **Pravidla účtování** | kontaci opakovaného bankovního pohybu, ke kterému neexistuje doklad | bankovní pohyby bez faktury (poplatky, odvody, úroky, nájem, splátky) | **Nástroje → Šablony účtování**, záložka **Pravidla účtování**, nebo **Účetnictví → Automat**, záložka **Pravidla** |
 | 4 | **Šablony zápisů** | předvyplněné řádky ručního zápisu | ruční zápis v deníku a náhled kontace dokladu | **Nástroje → Šablony účtování**, záložka **Šablony zápisů** |
 
@@ -445,7 +445,7 @@ Bankovní pravidlo založíte na záložce **Pravidla účtování** tlačítkem
 **Nové pravidlo**, rovnou z rozbalovacího menu pohybu volbou
 **Vytvořit účtovací pravidlo** (formulář se předvyplní protistranou, zprávou,
 směrem a měnou), nebo z hotové **šablony** v katalogu
-**Nástroje → Šablony bank. pravidel** (odvody, bankovní poplatky, přijaté úroky,
+**Nástroje → Šablony účtování → Šablony pravidel** (odvody, bankovní poplatky, přijaté úroky,
 nájem, předplatné). Pravidlo obsahuje:
 
 - **směr** (příchozí/odchozí),
@@ -489,7 +489,10 @@ který není vydanou ani přijatou fakturou. Zadejte titul, protistranu, částk
 v CZK, datum vzniku a splatnosti. Cizoměnové položky tato agenda zatím
 nepřijímá, protože by vyžadovaly kurzové přecenění při uzávěrce.
 V podvojném účetnictví vyberte účet
-pohledávky nebo závazku a protiúčet podle skutečného případu. Před potvrzením
+pohledávky nebo závazku a protiúčet podle skutečného případu, nebo je nechte
+prázdné a doplní je účetní profil druhu (nastavení v okně **Druhy** tlačítkem
+**Účtování**, viz [§ 52.14.14.12](52_Ucetni_denik.md#52141412-ucetni-profily-druhu-a-vlastni-kontace)).
+Profil určuje i kontaci úhrady z banky a z pokladny. Před potvrzením
 je položka konceptem. Tlačítko **Zaúčtovat** vytvoří jediný zápis v deníku a
 přidělí číslo řady OP nebo OZ. Storno vytvoří opravný zápis; položku s
 přiřazenou úhradou je třeba nejprve od úhrady odpojit.
@@ -498,14 +501,91 @@ Zadáte nový účet, protiúčet, datum a důvod. Systém v jedné operaci stor
 původní zápis a vytvoří nový, doklad si zachová ID a číslo. Datum musí
 spadat do otevřeného období.
 
+Pole **Účet protistrany** je nepovinné. Zadejte český účet ve tvaru
+`předčíslí-číslo/kód banky` (například `19-1000000005/0100`) nebo IBAN.
+Český účet se ověří kontrolou modulo 11, IBAN kontrolními číslicemi. Český
+IBAN se uloží jako národní číslo účtu s kódem banky. Účet se zobrazí na detailu
+a opakování ho přenáší do každé nově vzniklé položky. Podle účtu aplikace
+nabízí úhrady z banky. U potvrzené nebo zaúčtované položky účet doplníte či
+opravíte přímo v detailu tlačítkem **Upravit** u pole **Účet protistrany**.
+Změna nemění zaúčtování ani saldo a zapíše se do aktivity položky.
+
 Na detailu lze připojit originály ze [skladu dokumentů](34_Dokumenty.md) a
-přiřadit volnou bankovní či pokladní úhradu. Částečná úhrada sníží zbývající
-částku. U zaúčtované položky musí být bankovní nebo pokladní zápis veden
-proti stejnému účtu pohledávky či závazku. Cizoměnové úhrady vyžadují
-samostatné kurzové vypořádání a v této agendě se automaticky nepárují.
+akcí **Připojit úhradu** přiřadit volnou bankovní či pokladní úhradu. Bez
+zapnutého automatického párování (níže) se úhrady párují jen ručně. Výběr
+nabízí platby seřazené podle síly shody a u každé ukáže důvod:
+
+| Pořadí | Shoda |
+|---|---|
+| 1 | variabilní symbol, účet protistrany a částka splátky |
+| 2 | variabilní symbol |
+| 3 | účet protistrany a částka splátky |
+| 4 | částka splátky, platba nejvýše 15 dní od splatnosti splátky |
+| 5 | celý zbývající dluh |
+| 6 | částka splátky dál od splatnosti |
+| 7 | jen účet protistrany |
+
+Částka splátky znamená neuhrazený zbytek splátky z kalendáře, tolerance je
+±0,01 Kč. Bez hledání se pod shodami nabízejí i nejnovější volné platby.
+Částečná úhrada sníží zbývající částku, přeplatek aplikace odmítne. U
+zaúčtované položky musí být bankovní nebo pokladní zápis veden proti stejnému
+účtu pohledávky či závazku. Úhrady v cizí měně tato agenda nepřiřazuje,
+vyžadují samostatné kurzové vypořádání.
 Storno účetního zápisu platby znovu otevře zůstatek. Pokud stejnou platbu
 zaúčtujete znovu, přiřaďte ji k položce znovu ve stejné částce. Původní
 úhrada tak zůstane správně započtená v historickém saldu před stornem.
+
+Má-li položka **splátkový kalendář**, každá úhrada se váže ke splátce. Platba
+ve výši neuhrazeného zbytku některé splátky uhradí tuto splátku, jiná platba
+hradí první neuhrazenou splátku. Část platby nad zbytek splátky pokryje další
+neuhrazené splátky podle pořadí; platba zůstává u položky jedním řádkem
+a saldo se nemění. Stejně podle pořadí se započte i část uhrazená mimo banku a
+pokladnu. Tabulka splátek ukazuje u každé splátky stav **Neuhrazeno**,
+**Částečně** (se zbývající částkou), **Uhrazeno** nebo **Po splatnosti**.
+Podle zbytků splátek počítá i předpověď cash-flow.
+
+**Automatické párování z banky.** Volba **Automaticky párovat ostatní
+pohledávky a závazky** v Nastavení firmy na záložce **Daně a účetnictví** je výchozí vypnutá.
+Se zapnutou volbou MyÚčto při importu výpisu a při **Přepárovat výpis** přiřadí
+bankovní pohyb ostatní položce samo, ale jen když pohyb nespárovala žádná
+faktura a právě jedna položka má jistou shodu:
+
+| Jistá shoda | Podmínka |
+|---|---|
+| VS a účet | variabilní symbol i účet protistrany |
+| VS a splátka | variabilní symbol a částka příští neuhrazené splátky |
+| VS a zbytek | variabilní symbol a celý zbývající dluh |
+| Účet a splátka | účet protistrany a částka příští neuhrazené splátky splatné nejvýše 15 dní od platby |
+
+Platba vyšší než zbývající dluh se automaticky nepřiřadí nikdy. Přiřazení
+jde stejnou cestou jako ruční párování: nezaúčtovaný pohyb se zaúčtuje proti
+účtu položky (v daňové evidenci se nic neúčtuje) a uzavřené období nebo pohyb
+zaúčtovaný jinam přiřazení zastaví. Slabší nebo nejednoznačná shoda zůstane
+k ručnímu výběru v okně **Spárovat** u pohybu. Automaticky přiřazená úhrada má
+v detailu položky štítek **automaticky** s důvodem shody. Přiřazení, které
+zrušíte nebo které storno zápisu pohybu stornuje, automatika znovu nevytvoří.
+
+Opakované platby bez VS lze vázat na položku i **pravidlem účtování banky**
+s vybranou položkou (pole **Přiřadit k ostatní položce**, viz
+[§ 29.13.14](29_Banka.md#291314-pravidla-uctovani-opakovanych-plateb)).
+Pravidlo účtuje na účet položky a úhradu k ní přiřadí jedním zápisem; když
+položku uhradit nejde, vytvoří jen návrh ke kontrole.
+
+Potvrzený nebo zaúčtovaný **závazek s účtem protistrany** zaplatíte i
+[platebním příkazem](26_Platebni_prikazy.md#26812-ostatni-zavazky) spolu s přijatými
+fakturami. Stránka **Nákup → Platební příkazy** nabízí nejbližší neuhrazenou splátku,
+bez kalendáře celý zbytek, s účtem protistrany a variabilním symbolem z položky.
+Zařazená splátka se podruhé nenabídne, dokud příkaz nesmažete. Zařazení závazek
+neuhradí: úhrada se zapíše až přiřazením odchozí platby z výpisu, jako u jiné platby.
+
+U úvěru, půjčky nebo leasingu je částkou položky jistina. Splátky lze rozdělit
+na jistinu, úrok a poplatek a nechat si je spočítat jako anuitní nebo lineární
+splácení. Platba splátky se pak rozdělí nejdřív na úrok, potom poplatek a nakonec
+jistinu. Saldo položky snižuje jen jistina, úrok a poplatek se v podvojném
+účetnictví zaúčtují s úhradou z banky do nákladů nebo výnosů (výchozí 562 a 568
+u přijatého úvěru, 662 a 668 u poskytnuté půjčky) a předpověď cash-flow počítá
+s celou splátkou. Podrobnosti v
+[§ 52.14.14.13](52_Ucetni_denik.md#52141413-uvery-a-leasing-jistina-urok-a-poplatek).
 
 Seznam lze řadit kliknutím na názvy sloupců podle názvu, protistrany,
 splatnosti, částky, zůstatku a stavu. Řazení zahrnuje celý filtrovaný seznam.

@@ -3,6 +3,7 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore } from '@/stores/workspace'
+import { TOP_NAV_ITEM, TOP_NAV_ITEM_ACTIVE, TOP_NAV_ITEM_PADDING } from './navStyles'
 
 interface NavItem {
   to: string
@@ -63,7 +64,7 @@ const ACCENT_PILL: Record<NonNullable<NavSection['accent']>, string> = {
   payroll: 'bg-payroll-50',
 }
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   sections: NavSection[]
   isActive: (item: NavItem) => boolean
   canCreate: (item: NavItem) => boolean
@@ -72,7 +73,11 @@ const props = defineProps<{
   shortcutFor: (to: string) => string
   quickNewLabel: string
   menuLabel: string
-}>()
+  /** Šipka ˅ u položek; bez ní se šetří místo, rozbalování zůstává. */
+  showArrows?: boolean
+  /** Užší vodorovný padding položek (úsporný režim lišty). */
+  tight?: boolean
+}>(), { showArrows: true, tight: false })
 
 const visibleSections = computed(() => props.sections.filter(section => !(
   (section.key === 'system_global' || section.key === 'system_signing')
@@ -179,10 +184,14 @@ onBeforeUnmount(() => {
       -->
       <button
         type="button"
-        class="cursor-pointer group relative inline-flex min-w-0 self-center items-center gap-1.5 px-2.5 xl:px-3 h-8 rounded-lg text-sm font-medium whitespace-nowrap text-neutral-600 hover:bg-neutral-100 hover:text-neutral-900 transition-colors"
-        :class="sectionIsActive(section)
-          ? `${ACCENT_PILL[section.accent ?? 'primary']} text-neutral-900 font-semibold`
-          : (openSection === section.key ? 'bg-neutral-100 text-neutral-900' : '')"
+        :class="[
+          TOP_NAV_ITEM,
+          showArrows ? 'gap-1.5' : '',
+          tight ? 'px-1.5' : TOP_NAV_ITEM_PADDING,
+          sectionIsActive(section)
+          ? `${ACCENT_PILL[section.accent ?? 'primary']} ${TOP_NAV_ITEM_ACTIVE}`
+          : (openSection === section.key ? 'bg-neutral-100 text-neutral-900' : ''),
+        ]"
         :aria-expanded="openSection === section.key"
         aria-haspopup="menu"
         @click.stop="activateSection(section)"
@@ -194,6 +203,7 @@ onBeforeUnmount(() => {
           šipek vedle sebe přebíjelo samotné názvy sekcí.
         -->
         <svg
+          v-if="showArrows"
           class="w-3 h-3 shrink-0 transition-transform opacity-45 group-hover:opacity-70"
           :class="openSection === section.key ? 'rotate-180 opacity-70' : ''"
           fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"

@@ -98,7 +98,7 @@ const FORMS = [
         'xsd_dir' => 'api/xsd/jmhz/jmhz-1.4.3.6',
         'sources' => [
             'XSD JMHZ 1.4.3.6 (3. 9. 2026)',
-            'Katalog kontrol 1.4.2.10 (23. 9. 2026)',
+            'Katalog kontrol 1.4.2.11 (14. 10. 2026)',
             'Datovy slovnik 1.4.1.6 (12. 6. 2026)',
             'Datove scenare 1.4.0.2 (19. 3. 2026)',
             'Pokyny k vyplneni MH 1.4.14',

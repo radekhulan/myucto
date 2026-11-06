@@ -6,15 +6,23 @@
 [![Vue 3](https://img.shields.io/badge/Vue-3-4FC08D?logo=vuedotjs&logoColor=white)](https://vuejs.org/)
 [![Docker](https://img.shields.io/badge/Docker-multi--arch-2496ED?logo=docker&logoColor=white)](https://github.com/radekhulan/myucto/pkgs/container/myucto)
 
-> **MyÚčto.cz je nástupcem open-source systému
-> [MyInvoice](https://github.com/radekhulan/myinvoice), známého také z
-> [myinvoice.cz](https://myinvoice.cz/). Veškeré funkce MyInvoice zůstávají
-> v MyÚčto navždy zdarma a plně použitelné i bez aktivní licence.**
+> [!CAUTION]
+> ## ⚠️ Zdrojové kódy jsou veřejné, ale MyÚčto.cz NENÍ open-source
 >
-> Komerční licence přidává podvojné účetnictví, účetní nástroje a uzávěrky,
-> sklad a napojení e-shopu, evidenci majetku, EPO podání a archív a rozšířené
-> opravy DPH (§ 74b, § 43, § 46 a § 79). Celý rozsah lze prvních 60 dní
-> bezplatně vyzkoušet.
+> **Kromě menší části převzaté z projektu MyInvoice pod licencí MIT podléhá
+> MyÚčto.cz komerční licenci.**
+>
+> **Bez zakoupené komerční licence NENÍ dovoleno tyto zdrojové kódy používat,
+> kopírovat, upravovat ani z nich vytvářet odvozená díla pro jakékoli použití
+> mimo samotný produkt MyÚčto.cz.** Veřejně dostupný kód není udělením licence.
+> Podrobnosti uvádí článek 3 souboru [LICENCE.txt](LICENCE.txt), o komerční
+> licenci se domluvíte přes [myucto.cz](https://myucto.cz/).
+
+Bezplatná část MyÚčto zůstává navždy zdarma a plně použitelná i bez aktivní
+licence. Komerční licence přidává podvojné účetnictví, účetní nástroje
+a uzávěrky, sklad a napojení e-shopu, evidenci majetku, EPO podání a archív
+a rozšířené opravy DPH (§ 74b, § 43, § 46 a § 79). Celý rozsah lze prvních
+60 dní bezplatně vyzkoušet.
 
 ### Účetnictví od dokladu po uzávěrku. Vaše data, vaše servery.
 
@@ -69,7 +77,7 @@ Každý modul má vlastní kapitolu manuálu — odkazy vedou na detail.
 | **Mzdy a personalistika** | [Karty zaměstnanců](manual/86_Zamestnanci.md) s více pracovními vztahy a souběhy, [mzdové složky](manual/91_Mzdove_slozky_a_vstupy.md), [absence a dovolená](manual/76_Absence_a_dovolena.md), [docházka a směny](manual/77_Dochazka_a_smeny.md), [mzdové běhy](manual/80_Mzdove_behy.md), [srážky a exekuce](manual/88_Srazky_a_exekuce.md), [roční zúčtování](manual/84_Rocni_zuctovani.md), [podání a hlášení](manual/85_Podani_a_hlaseni.md), [shoda účtování mezd](manual/81_Shoda_uctovani_mezd.md). |
 | **Majetek a sklad** | Karty majetku a odpisy, skladové karty a pohyby, inventura, automatická výdejka při fakturaci, napojení e-shopu. |
 | **Reporting a portál** | Přehled tržeb, nákladů, pohledávek a cash-flow, [klientský portál](manual/50_Pruvodce_ucetniho.md), responzivní rozhraní, role admin / účetní / klient / pouze pro čtení. |
-| **Více firem a API** | [Neomezený počet firemních agend](manual/95_Multi_supplier.md) v jedné instalaci, [REST API v1](manual/104_API.md) s osobními tokeny a scopes. |
+| **Více firem a API** | [Neomezený počet firemních agend](manual/95_Multi_supplier.md) v jedné instalaci, [REST API v1](manual/103_API.md) s osobními tokeny a scopes. |
 
 ![Vydané faktury](manual/img/08_faktury_list.webp)
 
@@ -268,7 +276,7 @@ postup v [SECURITY.md](SECURITY.md).
 Veřejné REST API v1 používá osobní přístupové tokeny, které lze omezit na čtení
 nebo zápis, konkrétní firmu a dobu platnosti. Určené pro integrace s e-shopy,
 CRM, BI a automatizačními platformami. OpenAPI specifikace:
-[api/openapi.yaml](api/openapi.yaml), postup: [kapitola REST API](manual/104_API.md).
+[api/openapi.yaml](api/openapi.yaml), postup: [kapitola REST API](manual/103_API.md).
 
 ## Technologický základ
 
@@ -303,7 +311,7 @@ Kompletní pořadí je v [manual/INDEX.md](manual/INDEX.md).
 |---|---|
 | `api/` | PHP backend, služby, repository, CLI a PHPUnit testy |
 | `web/` | Vue 3 + TypeScript frontend |
-| `dist/` | produkční frontendový build |
+| `web/dist/` | lokální produkční frontendový build (gitignorovaný) |
 | `db/migrations/` | verzované idempotentní databázové migrace |
 | `manual/` | český uživatelský manuál |
 | `cmd/` | Windows a Linux wrappery pro provozní úlohy |
@@ -315,11 +323,38 @@ Kompletní pořadí je v [manual/INDEX.md](manual/INDEX.md).
 # Backendové testy (paralelně nad izolovanými testovacími databázemi)
 .\cmd\test.ps1
 
-# Frontendová typová kontrola a build
-Set-Location web; pnpm type-check; pnpm build
+# Backend s měřením fází a jednotlivých testů; výchozí počet workerů je nejvýše 8
+php api/bin/test-parallel.php --timings=api/test-results/timings.json --log-junit=api/test-results/junit.xml
+
+# Volitelné měření s větším počtem workerů na dimenzované testovací MariaDB
+php api/bin/test-parallel.php --processes=16
+
+# Frontendová typová kontrola, testy a build
+Set-Location web
+npm run type-check
+npm run test:unit
+npm run test:pwa
+npm run build
 ```
 
-Po změně `web/src` commitni také aktualizovaný `dist/`. Po změně veřejného API
+Backendové CI rozděluje aplikační testy do čtyř částí přes `--application --shard=1/4`
+až `--shard=4/4`. Třída včetně všech datových sad zůstává pohromadě, každá se spustí
+právě v jedné části a sériové HTTP testy běží v první. Architektonické a invariantní
+brány zůstávají povinné. Samostatná část nikdy nevystaví potvrzení úspěchu celé sady.
+Volitelné `--rerun-failures` uchová původní JUnit report a výsledek sériového opakování
+uloží zvlášť do `*.rerun.xml`.
+
+Počet workerů násobí také počet tabulek v pracovních kopiích. K nim přibývají
+databáze fixture pro testy klonování. Vyšší paralelismus proto porovnej měřením
+s kapacitou `table_open_cache` a `table_definition_cache` testovací MariaDB.
+Při překročení cache může čekání na otevírání tabulek převážit získaný čas.
+
+Mzdové fixture sdílejí pouze neměnné katalogy specifikací. Pravidla, vyhodnocení,
+databázové spojení a transakce zůstávají oddělené. Frontend používá izolované VM
+workery; testy měnící nativní DOM prototypy nebo pracující s nativními binárními daty
+běží v samostatných thread workerech. Změna poolu musí projít celou sadou.
+
+Po změně `web/src` spusť build; `web/dist/` se necommituje. Po změně veřejného API
 aktualizuj `api/openapi.yaml`. Po změně funkce aktualizuj kapitolu manuálu a obnov
 HTML přes `php tools/generateManualHtml.php`.
 

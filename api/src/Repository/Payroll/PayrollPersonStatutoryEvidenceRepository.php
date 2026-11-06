@@ -9,6 +9,8 @@ use InvalidArgumentException;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
+use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxpayerCreditEntitlement;
 use MyInvoice\Service\Payroll\PayrollApprovedPeriodFreeze;
 use MyInvoice\Service\Payroll\Pension\PayrollPensionAgeTable;
@@ -68,7 +70,7 @@ final class PayrollPersonStatutoryEvidenceRepository
         'income_tax' => [
             'declarations' => [
                 'table' => 'payroll_person_tax_declarations',
-                'columns' => 'id, status, effective_from, effective_to,
+                'columns' => 'id, status, signed_on, effective_from, effective_to,
                             evidence_reference, row_version',
                 'order' => 'effective_from, id',
             ],
@@ -175,7 +177,7 @@ final class PayrollPersonStatutoryEvidenceRepository
             'section' => 'income_tax',
             'collection' => 'declarations',
             'kind' => 'interval',
-            'fields' => ['status', 'evidence_reference'],
+            'fields' => ['status', 'signed_on', 'evidence_reference'],
         ],
         'tax_residences' => [
             'section' => 'income_tax',
@@ -628,6 +630,11 @@ final class PayrollPersonStatutoryEvidenceRepository
                 $employeeId,
                 $plans,
                 $effectiveOn,
+            );
+            $this->assertStudentCreditAgeLimits(
+                $supplierId,
+                $employeeId,
+                $plans['tax_credit_claims'],
             );
             $this->resolveHealthEvidenceDocuments($supplierId, $employeeId, $plans);
 
@@ -1688,6 +1695,67 @@ final class PayrollPersonStatutoryEvidenceRepository
         $statement->execute([$supplierId, $employeeId, $id]);
 
         return (int) $statement->fetchColumn();
+    }
+
+    /**
+     * Věková hranice slevy na studenta (§ 35bc odst. 2 ZDP) podle data narození.
+     *
+     * Validátor evidence vidí jen řádek, ne osobu, a datum narození do snímku
+     * mzdového běhu nepatří. Kontrola proto stojí na zápisové cestě: interval
+     * nároku je interval PODMÍNEK ({@see \MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementClaimMonths}),
+     * takže když se sem nedostane měsíc po dovršení věku, nedostane se ani do
+     * měsíčního výpočtu, ani do ročního zúčtování. Podmínky drží
+     * {@see StudentTaxCredit}.
+     *
+     * @param list<array<string,mixed>> $plan
+     */
+    private function assertStudentCreditAgeLimits(int $supplierId, int $employeeId, array $plan): void
+    {
+        $birthDate = false;
+        foreach ($plan as $row) {
+            $kind = TaxCreditKind::tryFrom((string) ($row['values']['credit_kind'] ?? ''));
+            if ($row['touched'] !== true || $kind === null || !StudentTaxCredit::isStudent($kind)) {
+                continue;
+            }
+            if ($birthDate === false) {
+                $birthDate = $this->birthDate($supplierId, $employeeId);
+            }
+            $problem = StudentTaxCredit::intervalProblem(
+                $kind,
+                (string) $row['effective_from'],
+                $row['effective_to'] === null ? null : (string) $row['effective_to'],
+                $birthDate,
+            );
+            if ($problem !== null) {
+                throw new InvalidArgumentException($problem);
+            }
+        }
+    }
+
+    /**
+     * Datum narození z poslední identity osoby, jinak z karty zaměstnance
+     * (tam je jen jako náhrada chybějícího rodného čísla).
+     */
+    private function birthDate(int $supplierId, int $employeeId): ?string
+    {
+        $statement = $this->db->pdo()->prepare(
+            'SELECT COALESCE(
+                        (SELECT identity.birth_date
+                           FROM payroll_person_identity_history identity
+                          WHERE identity.supplier_id = employee.supplier_id
+                            AND identity.employee_id = employee.id
+                            AND identity.birth_date IS NOT NULL
+                          ORDER BY identity.effective_from DESC, identity.id DESC
+                          LIMIT 1),
+                        employee.birth_date
+                    )
+               FROM payroll_employees employee
+              WHERE employee.supplier_id = ? AND employee.id = ?'
+        );
+        $statement->execute([$supplierId, $employeeId]);
+        $value = $statement->fetchColumn();
+
+        return is_string($value) && $value !== '' ? $value : null;
     }
 
     /**

@@ -33,6 +33,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
 
 $container = Bootstrap::buildApp()->getContainer();
 $pdo = $container->get(Connection::class)->pdo();
@@ -50,6 +51,11 @@ if ($countryId < 1 || $vatRateId < 1) {
     fwrite(STDERR, "Chybí číselníky (countries/vat_rates) — spusť nejdřív migrace.\n");
     exit(2);
 }
+
+$hasAccountingFrameworks = (int) $pdo->query(
+    "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = 'supplier_accounting_frameworks'"
+)->fetchColumn() > 0;
+$accountingFramework = $hasAccountingFrameworks ? $container->get(AccountingFrameworkService::class) : null;
 
 // Cyklická závislost supplier.default_currency_id <-> currencies.supplier_id;
 // stejný postup jako v HTTP setup wizardu (SetupAction).
@@ -84,6 +90,7 @@ try {
         $supplierId = (int) $pdo->lastInsertId();
         $supplierIds[] = $supplierId;
         \MyInvoice\Service\Vat\VatStatusService::seedInitialStatus($pdo, $supplierId, true);
+        $accountingFramework?->initializeCz500Baseline($supplierId);
 
         $defaultCurrencyId = 0;
         foreach ([

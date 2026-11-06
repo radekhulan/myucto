@@ -39,7 +39,7 @@ final class NonDeductibleCostsService
                FROM journal_entry_lines l
                JOIN journal_entries e   ON e.id = l.entry_id
                " . JournalTaxOrigin::join() . "
-               JOIN chart_of_accounts a ON a.id = l.account_id
+               " . \MyInvoice\Repository\AccountDefinitionRepository::journalJoin($supplierId) . "
           LEFT JOIN purchase_invoices pi ON " . JournalTaxOrigin::sourceTypeSql() . " = 'purchase_invoice'
                                          AND pi.id = " . JournalTaxOrigin::sourceIdSql() . "
                                          AND pi.supplier_id = e.supplier_id

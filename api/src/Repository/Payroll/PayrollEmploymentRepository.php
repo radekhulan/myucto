@@ -1533,6 +1533,12 @@ final class PayrollEmploymentRepository
                     terms.work_place, terms.regular_workplace,
                     terms.jmhz_workplace_municipality_code,
                     terms.jmhz_workplace_country_code,
+                    terms.jmhz_workplace_address_point_code,
+                    terms.jmhz_workplace_street,
+                    terms.jmhz_workplace_house_number,
+                    terms.jmhz_workplace_orientation_number,
+                    terms.jmhz_workplace_postal_code,
+                    terms.jmhz_state_prosecutor,
                     terms.jmhz_external_codebook_overlay_key,
                     terms.jmhz_external_codebook_manifest_sha256,
                     terms.jmhz_apz_contribution_status,
@@ -1706,9 +1712,13 @@ final class PayrollEmploymentRepository
                  jmhz_assignment_user_kind, jmhz_assignment_user_ico,
                  jmhz_assignment_user_country_code, jmhz_assignment_user_foreign_id,
                  jmhz_assignment_user_name, jmhz_risk_categorization_code,
-                 health_association_member)
+                 health_association_member,
+                 jmhz_workplace_address_point_code, jmhz_workplace_street,
+                 jmhz_workplace_house_number, jmhz_workplace_orientation_number,
+                 jmhz_workplace_postal_code, jmhz_state_prosecutor)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-                     ?, ?, ?, ?, ?, ?, ?)'
+                     ?, ?, ?, ?, ?, ?, ?,
+                     ?, ?, ?, ?, ?, ?)'
         )->execute([
             $supplierId,
             $employmentId,
@@ -1764,7 +1774,29 @@ final class PayrollEmploymentRepository
             $data['jmhz_assignment_user_name'] ?? null,
             $data['jmhz_risk_categorization_code'] ?? null,
             (int) ($data['health_association_member'] ?? false),
+            ...self::workplaceAddressValues($data),
         ]);
+    }
+
+    /**
+     * Adresa místa výkonu a příznak státního zástupce (JMHZ 2027, migrace 2213)
+     * v pořadí sloupců INSERT i UPDATE.
+     *
+     * @param array<string,mixed> $data
+     * @return list<string|int|null>
+     */
+    private static function workplaceAddressValues(array $data): array
+    {
+        $prosecutor = $data['jmhz_state_prosecutor'] ?? null;
+
+        return [
+            $data['jmhz_workplace_address_point_code'] ?? null,
+            $data['jmhz_workplace_street'] ?? null,
+            $data['jmhz_workplace_house_number'] ?? null,
+            $data['jmhz_workplace_orientation_number'] ?? null,
+            $data['jmhz_workplace_postal_code'] ?? null,
+            $prosecutor === null ? null : (int) (bool) $prosecutor,
+        ];
     }
 
     /**
@@ -1808,6 +1840,9 @@ final class PayrollEmploymentRepository
                  jmhz_assignment_user_country_code = ?, jmhz_assignment_user_foreign_id = ?,
                  jmhz_assignment_user_name = ?, jmhz_risk_categorization_code = ?,
                  health_association_member = ?,
+                 jmhz_workplace_address_point_code = ?, jmhz_workplace_street = ?,
+                 jmhz_workplace_house_number = ?, jmhz_workplace_orientation_number = ?,
+                 jmhz_workplace_postal_code = ?, jmhz_state_prosecutor = ?,
                  row_version = row_version + 1
                WHERE supplier_id = ? AND id = ?'
         )->execute([
@@ -1861,6 +1896,7 @@ final class PayrollEmploymentRepository
             $data['jmhz_assignment_user_name'] ?? null,
             $data['jmhz_risk_categorization_code'] ?? null,
             (int) ($data['health_association_member'] ?? false),
+            ...self::workplaceAddressValues($data),
             $supplierId,
             $termsId,
         ]);
@@ -2549,6 +2585,7 @@ final class PayrollEmploymentRepository
             'jmhz_ozp_employment_support_applies',
             'jmhz_deep_mining_work_applies',
             'health_association_member',
+            'jmhz_state_prosecutor',
         ];
         foreach ($ints as $key) {
             if (array_key_exists($key, $row) && $row[$key] !== null) {

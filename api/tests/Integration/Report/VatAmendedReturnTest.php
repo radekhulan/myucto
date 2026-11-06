@@ -9,6 +9,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Report\DphPriznaniBuilder;
+use MyInvoice\Service\Report\KhEvidenceService;
+use MyInvoice\Service\Report\KhSubmittedXmlReader;
 use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
 use MyInvoice\Service\Report\VatPostFilingChangesService;
@@ -259,6 +261,67 @@ class VatAmendedReturnTest extends TestCase
         }
     }
 
+    /** Fronta KH: rozhoduje podané XML, ne `updated_at`. Úhrada se neprojeví, nový doklad ano. */
+    public function testKhPostFilingComparesSubmittedXml(): void
+    {
+        $service = Bootstrap::buildContainer()->get(KhEvidenceService::class);
+        $cust = $this->client('Odběratel KH fronta', 'CZ90010045');
+        $this->sale('KH-OLD', $cust, '1', $this->d(3, 10), [[100000, 21000, 21]]);
+        $invoiceId = $this->invoiceIds[array_key_last($this->invoiceIds)];
+        $changes = fn (): array => $service->postFilingChanges(
+            $this->supplierId, self::YEAR, 3, 'monthly',
+            $this->kh->build($this->supplierId, self::YEAR, 3, 'monthly', 'radne')['xml'],
+        );
+        $this->assertFalse($changes()['has_filing']);
+
+        $radne = $this->kh->build($this->supplierId, self::YEAR, 3, 'monthly', 'radne');
+        $this->archiveAndSubmit(
+            $this->supplierId, 'dphkh1', self::YEAR, 3, null,
+            $radne['xml'], $radne['summary'], $this->userId, true, 'B',
+        );
+        $this->assertSame([], $changes()['documents']);
+
+        $this->db->pdo()
+            ->prepare("UPDATE invoices SET status = 'paid', updated_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?")
+            ->execute([$invoiceId]);
+        $paid = $changes();
+        $this->assertTrue($paid['snapshot_available']);
+        $this->assertSame([], $paid['documents'], 'úhrada KH nemění');
+
+        $this->sale('KH-NEW', $cust, '1', $this->d(3, 12), [[50000, 10500, 21]]);
+        $added = $changes()['documents'];
+        $this->assertCount(1, $added);
+        $this->assertSame(['A.4', 'only_current', 'KH-NEW'], [$added[0]['section'], $added[0]['status'], $added[0]['doc_number']]);
+        $this->assertNull($added[0]['filed']);
+        $this->assertSame(['base' => 50000.0, 'vat' => 10500.0], $added[0]['current']);
+    }
+
+    /** Rozdíl částky, zmizelý doklad, změna souhrnného oddílu a potvrzení výzvy. */
+    public function testKhChangedDocumentsDetectsEveryKindOfDifference(): void
+    {
+        $xml = static fn (string $rows, string $head = ''): string => '<Pisemnost><DPHKH1><VetaD dokument="KH1" d_poddp="01.10.2026"' . $head . '/>' . $rows . '</DPHKH1></Pisemnost>';
+        $a4 = static fn (string $no, int $base, int $vat): string => '<VetaA4 dic_odb="90010045" c_evid_dd="' . $no . '" dppd="01.03.2026" zakl_dane1="' . $base . '" dan1="' . $vat . '" zakl_dane2="0" dan2="0"/>';
+        $a5 = static fn (int $base, int $vat): string => '<VetaA5 zakl_dane1="' . $base . '" dan1="' . $vat . '" zakl_dane2="0" dan2="0"/>';
+
+        $filed = $xml($a4('A', 1000, 210) . $a4('GONE', 500, 105) . $a5(100, 21));
+        $this->assertSame([], KhEvidenceService::changedDocuments($filed, str_replace('01.10.2026', '31.10.2026', $filed)), 'hlavička rozdíl nedělá');
+
+        $changed = KhEvidenceService::changedDocuments($filed, $xml($a4('A', 1000, 200) . $a5(200, 42)));
+        $this->assertSame([
+            ['A.4', 'amount_diff', 'A'],
+            ['A.4', 'only_submitted', 'GONE'],
+            ['A.5', 'amount_diff', ''],
+        ], array_map(static fn (array $d): array => [$d['section'], $d['status'], $d['doc_number']], $changed));
+        $this->assertSame(['base' => 1000.0, 'vat' => 210.0], $changed[0]['filed']);
+        $this->assertSame(['base' => 1000.0, 'vat' => 200.0], $changed[0]['current']);
+        $this->assertNull($changed[1]['current']);
+        $this->assertTrue($changed[2]['is_aggregate']);
+
+        $this->assertTrue(KhSubmittedXmlReader::isConfirmation($xml('', ' vyzva_odp="P"')));
+        $this->assertFalse(KhSubmittedXmlReader::isConfirmation($xml('', ' vyzva_odp="B"')));
+        $this->assertFalse(KhSubmittedXmlReader::isConfirmation($filed));
+    }
+
     /** (e) Následné (N) KH = FULL (všechny údaje znovu), khdph_forma='N'. */
     public function testNasledneKhIsFullNotDiff(): void
     {
@@ -306,10 +369,17 @@ class VatAmendedReturnTest extends TestCase
         $unchanged = $this->postFiling->changes($this->supplierId, self::YEAR, 6, 'monthly');
         $this->assertSame([], $unchanged['documents'], 'snapshot nesmí označit nezměněný doklad ani ve stejné sekundě');
 
-        // Doklad změněn PO podání — posuneme updated_at za generated_at.
+        // Úhrada ani změna updated_at DPH nemění, doklad do fronty nepatří.
         $invoiceId = $this->invoiceIds[array_key_last($this->invoiceIds)];
         $this->db->pdo()
-            ->prepare('UPDATE invoices SET updated_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?')
+            ->prepare("UPDATE invoices SET status = 'paid', updated_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?")
+            ->execute([$invoiceId]);
+        $paid = $this->postFiling->changes($this->supplierId, self::YEAR, 6, 'monthly');
+        $this->assertSame([], $paid['documents'], 'úhrada ani updated_at nejsou důvodem k dodatečnému přiznání');
+
+        // Změna částky po podání do fronty patří.
+        $this->db->pdo()
+            ->prepare('UPDATE invoices SET total_with_vat = total_with_vat + 100 WHERE id = ?')
             ->execute([$invoiceId]);
 
         $changes = $this->postFiling->changes($this->supplierId, self::YEAR, 6, 'monthly');
@@ -317,6 +387,25 @@ class VatAmendedReturnTest extends TestCase
         $this->assertTrue($changes['has_filing']);
         $ids = array_map(static fn ($d) => $d['invoice_id'], $changes['documents']);
         $this->assertContains($invoiceId, $ids, 'změněný doklad musí být ve frontě');
+    }
+
+    /** Čtení času jinak o hodinu (přechod letního času bez tabulek zón) není změna dokladu. */
+    public function testPostFilingIgnoresShiftedUpdatedAtAndComparesVatLines(): void
+    {
+        $line = ['21|1|21' => ['base' => 1000.0, 'vat' => 210.0]];
+        $row = ['status' => 'paid', 'tax_date' => '2026-09-30', 'total' => '1210.00', 'updated_at' => '2026-10-13 10:00:04'];
+        $filed = ['status' => 'sent', 'tax_date' => '2026-09-30', 'total' => 1210.0, 'updated_at' => '2026-10-13 11:00:04', 'vat_lines' => $line];
+        $legacy = array_diff_key($filed, ['vat_lines' => true]);
+        $check = [VatPostFilingChangesService::class, 'changedAfterFiling'];
+
+        $this->assertFalse($check($row, '2026-10-13 10:21:49', $filed, $line));
+        $this->assertFalse($check($row, '2026-10-13 10:21:49', $legacy, []), 'starší snapshot bez řádků přiznání');
+        $this->assertTrue($check($row, '2026-10-13 10:21:49', $filed, ['21|1|12' => ['base' => 1000.0, 'vat' => 210.0]]), 'jiná sazba při stejné částce');
+        $this->assertTrue($check($row, '2026-10-13 10:21:49', $filed, ['21|1|21' => ['base' => 1000.0, 'vat' => 200.0]]), 'jiná daň');
+        $this->assertTrue($check($row, '2026-10-13 10:21:49', $filed, []), 'doklad z období zmizel');
+        $this->assertTrue($check(['status' => 'cancelled'] + $row, '2026-10-13 10:21:49', $filed, $line), 'storno');
+        $this->assertTrue($check($row, '2026-10-13 09:00:00', null), 'doklad v podání nebyl a přibyl po něm');
+        $this->assertFalse($check($row, '2026-10-13 11:00:00', null), 'doklad v podání nebyl, ale je starší');
     }
 
     /** M42: storno po podání nesmí doklad odstranit z fronty změn. */
@@ -510,7 +599,7 @@ class VatAmendedReturnTest extends TestCase
 
         // Pokladní doklad změněn PO podání.
         $this->db->pdo()
-            ->prepare('UPDATE cash_documents SET updated_at = DATE_ADD(NOW(), INTERVAL 1 DAY) WHERE id = ?')
+            ->prepare('UPDATE cash_documents SET total_amount = total_amount + 100 WHERE id = ?')
             ->execute([$cashId]);
 
         $changes = $this->postFiling->changes($this->supplierId, self::YEAR, 7, 'monthly');

@@ -67,7 +67,7 @@ final class DepreciationEntryRepository
                     override_reason, override_original_amount, override_by, override_at,
                     created_at, updated_at
                FROM depreciation_entries
-              WHERE asset_id = ?
+              WHERE asset_id = ? AND voided_at IS NULL
               ORDER BY kind, fiscal_year'
         );
         $stmt->execute([$assetId]);
@@ -97,7 +97,7 @@ final class DepreciationEntryRepository
                     override_reason, override_original_amount, override_by, override_at,
                     created_at, updated_at
                FROM depreciation_entries
-              WHERE asset_id = ? AND kind = ? AND fiscal_year = ?'
+              WHERE asset_id = ? AND kind = ? AND fiscal_year = ? AND voided_at IS NULL'
         );
         $stmt->execute([$assetId, $kind, $fiscalYear]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -132,6 +132,7 @@ final class DepreciationEntryRepository
                 months_count = VALUES(months_count),
                 detail = VALUES(detail),
                 status = VALUES(status),
+                voided_at = NULL,
                 id = LAST_INSERT_ID(id)'
         )->execute([
             (int) $row['supplier_id'],
@@ -222,6 +223,20 @@ final class DepreciationEntryRepository
         return $min === null || $min === false ? null : (float) $min;
     }
 
+    /**
+     * Zruší účetní řádek, který nelze smazat, protože na něj odkazuje neměnná historie
+     * investičního zdroje. Plán ho přestane vidět a rok se dopočítá znovu; nové
+     * zaúčtování roku řádek přepíše přes {@see upsert()}.
+     */
+    public function void(int $supplierId, int $id): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE depreciation_entries
+                SET amount = 0, full_amount = 0, months_count = NULL, detail = NULL, voided_at = NOW()
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$supplierId, $id]);
+    }
+
     /** Smaže oba druhy řádku daného roku (revert vyřazení R24). */
     public function deleteYear(int $assetId, int $fiscalYear): void
     {
@@ -241,7 +256,7 @@ final class DepreciationEntryRepository
     public function lastConfirmedYear(int $assetId, string $kind): ?int
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT MAX(fiscal_year) FROM depreciation_entries WHERE asset_id = ? AND kind = ?'
+            'SELECT MAX(fiscal_year) FROM depreciation_entries WHERE asset_id = ? AND kind = ? AND voided_at IS NULL'
         );
         $stmt->execute([$assetId, $kind]);
         $max = $stmt->fetchColumn();
@@ -268,7 +283,7 @@ final class DepreciationEntryRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT kind, COUNT(*) AS cnt, SUM(amount) AS amount_sum, SUM(full_amount) AS full_sum
                FROM depreciation_entries
-              WHERE supplier_id = ? AND fiscal_year = ?
+              WHERE supplier_id = ? AND fiscal_year = ? AND voided_at IS NULL
               GROUP BY kind'
         );
         $stmt->execute([$supplierId, $fiscalYear]);

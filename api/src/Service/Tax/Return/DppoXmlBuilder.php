@@ -70,6 +70,7 @@ final class DppoXmlBuilder
         242 => 'kc_ii_242',
         243 => 'kc_ii_243',
         250 => 'kc_ii230_250',
+        251 => 'kc_ii231_251',
         260 => 'kc_ii240_260',
         270 => 'kc_ii260_270',
         290 => 'kc_ii280_290',
@@ -405,6 +406,20 @@ final class DppoXmlBuilder
      */
     public function build(array $supplier, int $year, array $calc, array $meta = [], array $appendix = []): array
     {
+        $native504 = ($meta['accounting_decree'] ?? $supplier['tax_accounting_decree'] ?? '500') === '504';
+        if ($native504) {
+            if (!is_array($meta['nonprofit_calculation'] ?? null)) throw new TaxReturnException('nonprofit_dppo_stored_proof_invalid', 'Nativní XML504 vyžaduje úplný důkaz výpočtu.',422);
+            \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoStoredProof::assertCalculation($calc,$meta['nonprofit_calculation']);
+            (new \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoStatementRows())->build($appendix['balance_sheet']??[],$appendix['income_statement']??[]);
+        } else AccountingDecreeService::assertSupportedDecree((string) ($meta['accounting_decree'] ?? $supplier['tax_accounting_decree'] ?? '500'));
+
+        foreach (['balance_sheet', 'income_statement'] as $key) {
+            $statement = $appendix[$key] ?? [];
+            if (($statement['accounting_framework'] ?? '') === 'cz_504'
+                || str_starts_with((string) ($statement['version_code'] ?? ''), 'vyhl504-')) {
+                if (!$native504) AccountingDecreeService::assertSupportedDecree('504');
+            }
+        }
         $warnings = [];
         [$dom, $root] = EpoEnvelope::create(
             'DPPDP9',
@@ -497,7 +512,13 @@ final class DppoXmlBuilder
         $vetaD->setAttribute('kc_v_4', (string) (-(int) round((float) ($calc['balance_due'] ?? 0))));
 
         $hasAppendix = !empty($appendix['balance_sheet']) && !empty($appendix['income_statement']);
-        if ($hasAppendix) {
+        $nonprofit = ($meta['accounting_decree'] ?? '') === '504';
+        if ($nonprofit) {
+            $vetaD->setAttribute('uc_zav', 'A');
+            $vetaD->setAttribute('audit', !empty($appendix['settings']['statutory_audit']) ? 'A' : 'N');
+            foreach (['uv_vyhl'=>'504','uv_rozsah_rozv'=>'P','uv_rozsah_vzz'=>'P','uv_rozsah'=>'P','uv_mena'=>'CZK','uz_dle_mus'=>'N','uz_rad'=>'T'] as $attribute=>$value) $vetaD->setAttribute($attribute, $value);
+            $vetaD->setAttribute('d_uv', $this->formatDate($appendix['balance_sheet']['period']['ends_on']));
+        } elseif ($hasAppendix) {
             $this->applyAppendixMetaToVetaD(
                 $vetaD,
                 (array) ($appendix['category'] ?? []),
@@ -547,7 +568,8 @@ final class DppoXmlBuilder
             (string) ($meta['zdobd_od'] ?? sprintf('01.01.%04d', $year)),
             $zdobdDo,
         );
-        $vetaD->setAttribute('p_pr_2od', (string) (($vetaE !== null ? 1 : 0) + ($vetaF !== null ? 1 : 0) + ($vetaG !== null ? 1 : 0)));
+        $lossAppendix=$this->buildLossAppendix($dom,$calc,$appendix['loss_appendix']??null);
+        $vetaD->setAttribute('p_pr_2od', (string) (($vetaE !== null ? 1 : 0) + ($vetaF !== null ? 1 : 0) + ($vetaG !== null ? 1 : 0) + ($lossAppendix!==[]?1:0)));
 
         // sam_pr — počet samostatných příloh. VetaA (přehled transakcí se spojenými osobami)
         // NENÍ ani „příloha II. oddílu" (p_pr_2od výše — to jsou tabulky a)-j) VetaE/F/G/…,
@@ -597,6 +619,8 @@ final class DppoXmlBuilder
             $root->appendChild($vetaG);
         }
 
+        foreach($lossAppendix as$element)$root->appendChild($element);
+
         // ── VetaM — příloha č. 1 II. oddílu, tabulka H (rozčlenění slev na dani, ř. 300).
         // Mapování řádků tabulky H (XSD anotace `dppdp9_epo2.xsd` u atributů + Pokyny
         // k tiskopisu 25 5404 MFin 5404 vzor 36, oddíl „K tabulce H"):
@@ -641,7 +665,10 @@ final class DppoXmlBuilder
         // nestavíme) — tedy před VetaUZ, ne za ni. Je NEZÁVISLÁ na appendixu (staví se,
         // i když se příloha účetní závěrky vůbec negeneruje) — $vetaAList je už sestavený
         // výš (sam_pr na VetaD ho potřeboval dřív), sem se jen vkládá na svou sekvenční pozici.
-        if ($hasAppendix) {
+        if ($nonprofit) {
+            (new \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoStatementRows())->append($dom, $root, (new \MyInvoice\Service\Tax\Nonprofit\NonprofitDppoStatementRows())->build($appendix['balance_sheet'], $appendix['income_statement']));
+            foreach ($vetaAList as $vetaA) $root->appendChild($vetaA);
+        } elseif ($hasAppendix) {
             $balanceSheet = (array) $appendix['balance_sheet'];
             $incomeStatement = (array) $appendix['income_statement'];
             // VZZ se počítá JEDNOU (computeVzzThousands) a sdílí se s VetaUD: 'VH' musí
@@ -1543,6 +1570,11 @@ final class DppoXmlBuilder
         // tabulky K. Multi-currency účetnictví zatím nemáme (shodně s VetaD/uv_mena).
         $vetaS->setAttribute('cisobr_mena', 'CZK');
 
+        if (($meta['accounting_decree'] ?? '') === '504') {
+            if (!is_int($meta['net_turnover_annual_kc'] ?? null) || abs($meta['net_turnover_annual_kc']) > 99999999999999) throw new TaxReturnException('nonprofit_dppo_turnover_required', 'Čistý obrat 504 musí pocházet z nativního výpočtu podle § 1d odst. 5 ZoÚ.', 422);
+            $vetaS->setAttribute('kc_dpp_i1', (string) $meta['net_turnover_annual_kc']);
+            return $vetaS;
+        }
         // kc_dpp_i1: jen když je k dispozici VZZ (příloha účetní závěrky).
         $incomeStatement = (array) ($appendix['income_statement'] ?? []);
         if ($incomeStatement !== []) {
@@ -2208,6 +2240,14 @@ final class DppoXmlBuilder
         }
 
         return (float) (TaxConstants::forYear($year)['corporate_tax_rate'] ?? 0.21);
+    }
+
+    private function buildLossAppendix(\DOMDocument $dom,array $calc,mixed $card):array
+    {
+        if($card===null)return[];if(!is_array($card))throw new TaxReturnException('loss_appendix_proof_invalid','Příloha E nemá platný zmrazený podklad.',409);
+        $base=(float)($calc['summary']['base']??0);DppoLossAppendix::verify($card,(float)($calc['summary']['loss_applied']??0),$base<0?round(-$base,2):0.0);if(($card['rows']??[])===[])return[];$elements=[];
+        $projection=DppoLossAppendix::xmlProjection($card);foreach($projection['rows']as$row){$v=$dom->createElement('VetaV');foreach($row as$name=>$value)$v->setAttribute($name,$value);$elements[]=$v;}
+        $total=$dom->createElement('VetaI');foreach($projection['totals']as$name=>$value)$total->setAttribute($name,$value);$elements[]=$total;return$elements;
     }
 
     /** ISO YYYY-MM-DD → dd.mm.rrrr (EPO dateInMultiFormat, shodně se zdobd_od/do); '' když neplatné. */

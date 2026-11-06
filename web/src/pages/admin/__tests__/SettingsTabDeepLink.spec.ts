@@ -17,6 +17,8 @@ const m = vi.hoisted(() => ({
   replace: vi.fn(),
   getSupplier: vi.fn(),
   updateSupplier: vi.fn(),
+  brandingWrite: true,
+  invoiceDefaultsWrite: true,
 }))
 
 vi.mock('vue-router', () => ({
@@ -30,6 +32,7 @@ vi.mock('@/api/settings', () => ({
   settingsApi: {
     getSupplier: m.getSupplier,
     updateSupplier: m.updateSupplier,
+    getModeSwitchPreview: vi.fn().mockResolvedValue({ total: 0 }),
     getVatRegistrationCheck: vi.fn().mockResolvedValue(null),
     searchNaceCodes: vi.fn().mockResolvedValue([]),
   },
@@ -60,7 +63,7 @@ vi.mock('@/stores/auth', () => ({
     hasCommercialFeatures: true,
     license: null,
     canRead: () => true,
-    canWrite: () => true,
+    canWrite: (permission: string) => (permission !== 'settings.branding' || m.brandingWrite) && (permission !== 'settings.invoice_defaults' || m.invoiceDefaultsWrite),
   }),
 }))
 vi.mock('@/components/settings/AutomationPolicyBox.vue', () => ({ default: { template: '<div />' } }))
@@ -91,6 +94,8 @@ async function mountSettings(tab?: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  m.brandingWrite = true
+  m.invoiceDefaultsWrite = true
   m.getSupplier.mockResolvedValue({ ...SUPPLIER })
   m.updateSupplier.mockImplementation(async payload => ({ ...SUPPLIER, ...payload }))
 })
@@ -180,6 +185,149 @@ describe('Nastavení — samostatný ISDOC', () => {
 })
 
 
+describe('Nastavení — podoba výkazu práce', () => {
+  const DEFAULTS = { compact: false, date: true, hours: true, rate: true, amount: true }
+
+  // BEZ OPRAVY PADÁ: každé uložení poslalo výslednou podobu, takže z firmy bez nastavení
+  // (NULL) se stala výslovná hodnota.
+  it('neposílá podobu výkazu, když ji uživatel nezměnil', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, work_report_display_options: DEFAULTS })
+    const wrapper = await mountSettings('documents')
+    try {
+      await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+      await flushPromises()
+      expect(m.updateSupplier).toHaveBeenCalledOnce()
+      expect(m.updateSupplier.mock.calls[0]![0]).not.toHaveProperty('work_report_display_options')
+    } finally {
+      wrapper.unmount()
+    }
+  })
+
+  it('pošle podobu výkazu po změně volby', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, work_report_display_options: DEFAULTS })
+    const wrapper = await mountSettings('documents')
+    try {
+      await wrapper.get('[data-test="work-report-compact"]').setValue(true)
+      await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+      await flushPromises()
+      expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({
+        work_report_display_options: { ...DEFAULTS, compact: true },
+      }))
+    } finally {
+      wrapper.unmount()
+    }
+  })
+})
+
+
+describe('Accounting decree settings', () => {
+  it('shows the derived decree read-only and omits the preserved manual value from save', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, accounting_mode: 'double_entry', tax_accounting_decree: '504', tax_accounting_decree_effective: '500', tax_accounting_decree_is_derived: true })
+    const wrapper = await mountSettings('accounting')
+    expect(wrapper.get('[data-test="derived-accounting-decree"]').text()).toContain('500')
+    expect(wrapper.findAll('select').some(s => s.find('option[value="501"]').exists())).toBe(false)
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledOnce()
+    expect(m.updateSupplier.mock.calls[0]![0]).not.toHaveProperty('tax_accounting_decree')
+    wrapper.unmount()
+  })
+
+  it('allows saving the manual decree in tax evidence', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, tax_accounting_decree: '504', tax_accounting_decree_effective: '504', tax_accounting_decree_is_derived: false })
+    const wrapper = await mountSettings('accounting')
+    expect(wrapper.find('[data-test="derived-accounting-decree"]').exists()).toBe(false)
+    const select = wrapper.findAll('select').find(s => s.find('option[value="501"]').exists())!
+    await select.setValue('501')
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({ tax_accounting_decree: '501' }))
+    wrapper.unmount()
+  })
+
+  it('merges framework decree fields without replacing unrelated unsaved form values', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, accounting_mode: 'double_entry', tax_accounting_decree: '504', tax_accounting_decree_effective: '500' })
+    const wrapper = await mountSettings('accounting')
+    const status = wrapper.findAll('select').find(s => s.find('option[value="liquidation"]').exists())!
+    await status.setValue('liquidation')
+    wrapper.findComponent({ name: 'AccountingFrameworkSettings' }).vm.$emit('updated', { id: 1, accounting_framework: 'cz_504', accounting_framework_history: [], tax_accounting_decree_effective: '504', tax_accounting_decree_is_derived: true })
+    await flushPromises()
+    expect(wrapper.get('[data-test="derived-accounting-decree"]').text()).toContain('504')
+    expect((status.element as HTMLSelectElement).value).toBe('liquidation')
+    wrapper.unmount()
+  })
+})
+
+
+describe('Unsaved accounting mode and decree', () => {
+  it('previews the framework decree on switching to double entry and omits the manual value', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, tax_accounting_decree: '501', tax_accounting_decree_effective: '501', tax_accounting_decree_is_derived: false, accounting_framework: 'cz_500' })
+    const wrapper = await mountSettings('accounting')
+    const mode = wrapper.findAll('select').find(s => s.find('option[value="double_entry"]').exists())!
+    await mode.setValue('double_entry')
+    expect(wrapper.get('[data-test="derived-accounting-decree"]').text()).toContain('500')
+    expect(wrapper.get('[data-test="derived-accounting-decree"]').text()).not.toContain('501')
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledOnce()
+    expect(m.updateSupplier.mock.calls[0]![0]).not.toHaveProperty('tax_accounting_decree')
+    wrapper.unmount()
+  })
+
+  it('restores the manual choice when reversing an unsaved mode switch', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, tax_accounting_decree: '501', tax_accounting_decree_effective: '501', tax_accounting_decree_is_derived: false, accounting_framework: 'cz_504' })
+    const wrapper = await mountSettings('accounting')
+    const mode = wrapper.findAll('select').find(s => s.find('option[value="double_entry"]').exists())!
+    await mode.setValue('double_entry')
+    expect(wrapper.get('[data-test="derived-accounting-decree"]').text()).toContain('504')
+    await mode.setValue('tax_evidence')
+    const manual = wrapper.findAll('select').find(s => s.find('option[value="501"]').exists())!
+    expect((manual.element as HTMLSelectElement).value).toBe('501')
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({ tax_accounting_decree: '501' }))
+    wrapper.unmount()
+  })
+
+  it('uses the framework fallback when an older response omits the effective fields', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, accounting_mode: 'double_entry', tax_accounting_decree: '501' })
+    const wrapper = await mountSettings('accounting')
+    expect(wrapper.get('[data-test="derived-accounting-decree"]').text()).toBe('500 - settings.income_tax_profile.accounting_decree_500')
+    wrapper.unmount()
+  })
+})
+
+
+describe('Effective accounting mode history and decree', () => {
+  it('keeps the manual decree editable before a future switch to double entry', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, accounting_mode: 'double_entry', accounting_framework: 'cz_500', tax_accounting_decree: '501', tax_accounting_decree_effective: '501', tax_accounting_decree_is_derived: false })
+    const wrapper = await mountSettings('accounting')
+    expect(wrapper.find('[data-test="derived-accounting-decree"]').exists()).toBe(false)
+    const manual = wrapper.findAll('select').find(s => s.find('option[value="501"]').exists())!
+    expect((manual.element as HTMLSelectElement).value).toBe('501')
+    expect(wrapper.text()).toContain('settings.income_tax_profile.accounting_decree_hint')
+    await manual.setValue('502')
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({ tax_accounting_decree: '502' }))
+    wrapper.unmount()
+  })
+
+  it('keeps the decree derived before a future switch to tax evidence', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, accounting_mode: 'tax_evidence', accounting_framework: 'cz_500', tax_accounting_decree: '501', tax_accounting_decree_effective: '500', tax_accounting_decree_is_derived: true })
+    const wrapper = await mountSettings('accounting')
+    expect(wrapper.get('[data-test="derived-accounting-decree"]').text()).toContain('500')
+    expect(wrapper.findAll('select').some(s => s.find('option[value="501"]').exists())).toBe(false)
+    expect(wrapper.text()).toContain('settings.income_tax_profile.accounting_decree_derived_hint')
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledOnce()
+    expect(m.updateSupplier.mock.calls[0]![0]).not.toHaveProperty('tax_accounting_decree')
+    wrapper.unmount()
+  })
+})
+
+
 describe('Nastavení — osobní údaje podnikatele', () => {
   it('OSVČ zobrazí titul, jméno a příjmení a uloží volitelný titul', async () => {
     m.getSupplier.mockResolvedValue({ ...SUPPLIER, taxpayer_type: 'fo', person_title: 'Ing.', opr_jmeno: 'Jan', opr_prijmeni: 'Novák' })
@@ -243,5 +391,55 @@ describe('Nastavení — osobní údaje podnikatele', () => {
     } finally {
       wrapper.unmount()
     }
+  })
+})
+
+
+describe('Nastavení — sdílená podoba PDF', () => {
+  it('uloží kompaktní položky společně s formulářem', async () => {
+    const wrapper = await mountSettings('documents')
+    await wrapper.get('[data-test="invoice-pdf-compact-items"]').setValue(true)
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({ invoice_pdf_compact_items: true }))
+    wrapper.unmount()
+  })
+
+  it('po odebrání práva neodešle rozpracované volby PDF', async () => {
+    const wrapper = await mountSettings('documents')
+    await wrapper.get('[data-test="invoice-pdf-compact-items"]').setValue(true)
+    m.brandingWrite = false
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    const payload = m.updateSupplier.mock.calls[0]![0]
+    for (const key of ['invoice_pdf_compact_items', 'invoice_pdf_monochrome', 'invoice_pdf_show_issued_by',
+      'invoice_pdf_show_line_discount', 'invoice_pdf_show_base_qty', 'invoice_pdf_bank_in_footer', 'work_report_display_options']) {
+      expect(payload).not.toHaveProperty(key)
+    }
+    wrapper.unmount()
+  })
+})
+
+
+describe('Nastavení — výchozí hodnoty dokladů', () => {
+  it('uloží výchozí splatnost ze sdíleného formuláře', async () => {
+    m.getSupplier.mockResolvedValue({ ...SUPPLIER, default_payment_due_days: 7, default_payment_due_unit: 'days' })
+    const wrapper = await mountSettings('documents')
+    await wrapper.get('[data-test="invoice-default-due-preset"]').setValue('month')
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    expect(m.updateSupplier).toHaveBeenCalledWith(expect.objectContaining({ default_payment_due_days: 1, default_payment_due_unit: 'month' }))
+    wrapper.unmount()
+  })
+  it('po odebrání práva neodešle žádnou z výchozích hodnot', async () => {
+    const wrapper = await mountSettings('documents')
+    await wrapper.get('[data-test="invoice-default-due-preset"]').setValue('14')
+    m.invoiceDefaultsWrite = false
+    await wrapper.findAll('button').find(b => b.text() === 'settings.save_supplier')!.trigger('click')
+    await flushPromises()
+    const payload = m.updateSupplier.mock.calls[0]![0]
+    for (const key of ['default_payment_due_days', 'default_payment_due_unit', 'default_hourly_rate',
+      'default_note_below_items_enabled', 'default_note_below_items_cs', 'default_note_below_items_en']) expect(payload).not.toHaveProperty(key)
+    wrapper.unmount()
   })
 })

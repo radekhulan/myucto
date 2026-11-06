@@ -50,8 +50,8 @@ describe('navigace datové schránky', () => {
 
   it('v Daních stojí hned za EPO podáním a archívem, i pro firmu bez mezd', () => {
     const payrollStart = appLayout.indexOf('if (payrollEnabled) {')
-    const taxSubmissions = appLayout.indexOf("{ to: '/reports/submissions'")
-    const taxDatabox = appLayout.indexOf(ITEM, taxSubmissions)
+    const taxDatabox = appLayout.indexOf(ITEM)
+    const taxSubmissions = appLayout.lastIndexOf("{ to: '/reports/submissions'", taxDatabox)
     expect(taxSubmissions).toBeGreaterThan(-1)
     expect(taxDatabox).toBeGreaterThan(taxSubmissions)
     // Daňová položka leží mimo blok mezd, takže ji firma bez mezd uvidí.

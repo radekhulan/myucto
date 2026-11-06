@@ -8,6 +8,8 @@ use MyInvoice\Action\Accounting\Reports\DimensionFilterParam;
 use MyInvoice\Http\GuardsAccountingMode;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
@@ -16,13 +18,14 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\InvoiceListDetailsRepository;
 use MyInvoice\Repository\DimensionListSummaryRepository;
 use MyInvoice\Repository\JournalEntryAttachmentRepository;
-use MyInvoice\Repository\JournalEntryDocumentLinkRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\JournalListExtras;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\Accounting\AccountCodeRange;
+use MyInvoice\Service\Accounting\AccountCodeRangeException;
 use MyInvoice\Service\Accounting\AutomationProvenanceService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentRepostService;
@@ -31,6 +34,10 @@ use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Accounting\InternalDocumentException;
+use MyInvoice\Service\Accounting\InternalDocumentService;
+use MyInvoice\Service\Accounting\ManualJournalEntryException;
+use MyInvoice\Service\Accounting\ManualJournalEntryService;
 use MyInvoice\Service\Accounting\OtherItemException;
 use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\PostingOriginService;
@@ -105,7 +112,6 @@ final class JournalAction
         private readonly ReportXlsxExporter $xlsx,
         private readonly JournalHistoryService $history,
         private readonly JournalLinkService $links,
-        private readonly JournalEntryDocumentLinkRepository $documentLinks,
         private readonly JournalEntryAttachmentRepository $attachments,
         private readonly JournalAttachmentStorage $attachmentStorage,
         private readonly JournalIntegrityService $integrity,
@@ -114,6 +120,8 @@ final class JournalAction
         private readonly DimensionListSummaryRepository $dimensionSummaries,
         private readonly JournalListExtras $listExtras,
         private readonly OtherItemService $otherItems,
+        private readonly ManualJournalEntryService $manualEntries,
+        private readonly InternalDocumentService $internalDocuments,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -127,7 +135,11 @@ final class JournalAction
         $perPage = max(1, min(self::MAX_PER_PAGE, $perPage));
         $offset = ($page - 1) * $perPage;
 
-        $filters = $this->parseFilters($q, $supplierId);
+        try {
+            $filters = $this->parseFilters($q, $supplierId);
+        } catch (AccountCodeRangeException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
         $filters['sort_key'] = is_scalar($q['sort_key'] ?? null) ? (string) $q['sort_key'] : '';
         $filters['sort_dir'] = is_scalar($q['sort_dir'] ?? null) ? (string) $q['sort_dir'] : '';
         if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
@@ -153,6 +165,8 @@ final class JournalAction
         $includeDocuments = ($q['include_documents'] ?? null) === '1';
         $notes = $includeNotes ? $this->listExtras->notes($supplierId, $entryIds) : [];
         $documentCounts = $includeDocuments ? $this->listExtras->documentCounts($supplierId, $entryIds) : [];
+        // Odkaz na interní doklad, jehož zaúčtováním nebo stornem zápis je (migrace 2193).
+        $internalDocuments = $this->internalDocuments->forJournalEntries($supplierId, $entryIds);
         $vatBySource = [];
         if ($includeVat) {
             foreach (['invoice', 'purchase_invoice'] as $source) {
@@ -166,6 +180,7 @@ final class JournalAction
         foreach ($result['items'] as &$item) {
             $item['automation'] = $provenance[(int) $item['id']] ?? null;
             $item['has_related'] = isset($related[(int) $item['id']]);
+            $item['internal_document'] = $internalDocuments[(int) $item['id']] ?? null;
             if ($includePosting) {
                 $item['posting_lines'] = $linesByEntry[(int) $item['id']] ?? [];
             }
@@ -209,7 +224,11 @@ final class JournalAction
             return Json::error($response, 'validation_failed', "format musí být 'pdf' nebo 'xlsx'.", 422);
         }
 
-        $filters = $this->parseFilters($request->getQueryParams(), $supplierId);
+        try {
+            $filters = $this->parseFilters($request->getQueryParams(), $supplierId);
+        } catch (AccountCodeRangeException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
         if (!$this->applyDimensionFilter($request, $response, $supplierId, $filters, $err)) return $err;
         try {
             $data = $this->exportService->build($supplierId, $filters);
@@ -259,6 +278,7 @@ final class JournalAction
 
     /**
      * @param array<string,mixed> $q query params (Request::getQueryParams())
+     * @throws AccountCodeRangeException neplatný rozsah účtů (akce vrací 422)
      * @return array{document_no?:string, period_id?:int, date_from?:string, date_to?:string, source_type?:string, source_id?:int, entry_id?:int, entry_ids?:list<int>, posted?:bool, automation?:string, q?:string, account_from?:string, account_to?:string, amount_from?:float, amount_to?:float}
      */
     private function parseFilters(array $q, int $supplierId): array
@@ -293,8 +313,15 @@ final class JournalAction
         if (in_array(($q['reversal'] ?? null), ['reversed', 'reversal', 'any', 'none'], true)) {
             $filters['reversal'] = (string) $q['reversal'];
         }
-        if (!empty($q['account_from'])) $filters['account_from'] = mb_substr(trim((string) $q['account_from']), 0, 20);
-        if (!empty($q['account_to']))   $filters['account_to'] = mb_substr(trim((string) $q['account_to']), 0, 20);
+        // Rozsah účtů je prefixový včetně krajů (AccountCodeRange): 5 až 5 = celá třída 5.
+        $from = $q['account_from'] ?? '';
+        $to = $q['account_to'] ?? '';
+        if (!is_string($from) || !is_string($to)) {
+            throw new AccountCodeRangeException('account_from a account_to musí být jedna hodnota.');
+        }
+        $range = AccountCodeRange::parse($from, $to);
+        if ($range->from !== '') $filters['account_from'] = $range->from;
+        if ($range->to !== '')   $filters['account_to'] = $range->to;
         // Jedno vyhledávací pole přijímá i přesný kód účtu. Překládá se na tentýž
         // rozsah jako explicitní účetní filtr, takže částka i export zůstanou na
         // společné cestě. Explicitní rozsah má přednost a q pak zůstává fulltextem.
@@ -305,8 +332,9 @@ final class JournalAction
                 : null;
             if ($account !== null) {
                 $code = (string) $account['account_code'];
+                // Prefixový rozsah: syntetika 221 až 221 zahrne i své analytiky.
                 $filters['account_from'] = $code;
-                $filters['account_to'] = (bool) $account['is_synthetic'] ? $code . '999999' : $code;
+                $filters['account_to'] = $code;
             } else {
                 $filters['q'] = $query;
             }
@@ -383,6 +411,7 @@ final class JournalAction
         // VČETNĚ popisu dokladu: bez něj by se navázaná faktura v UI tvářila jako
         // smazaná, protože stejný seznam z /links popis nese.
         $entry['links'] = $this->links->documentLinks($supplierId, $id);
+        $entry['internal_document'] = $this->internalDocuments->forJournalEntries($supplierId, [$id])[$id] ?? null;
 
         // ETag = row_version (silný validátor) — klient ho pošle zpět v If-Match (§ CAS).
         return Json::ok($response, $entry)->withHeader('ETag', '"' . $entry['row_version'] . '"');
@@ -399,127 +428,26 @@ final class JournalAction
         if (!$this->isDate($entryDate)) {
             return Json::error($response, 'validation_failed', 'entry_date musí být datum (YYYY-MM-DD).', 422);
         }
-        $rawLines = $body['lines'] ?? null;
-        if (!is_array($rawLines) || $rawLines === []) {
-            return Json::error($response, 'validation_failed', 'lines musí obsahovat alespoň jeden řádek.', 422);
-        }
-
-        $lines = [];
-        foreach ($rawLines as $i => $l) {
-            if (!is_array($l)) {
-                return Json::error($response, 'validation_failed', "Řádek #{$i} má neplatný formát.", 422);
-            }
-            $side = (string) ($l['side'] ?? '');
-            if ($side !== 'debit' && $side !== 'credit') {
-                return Json::error($response, 'validation_failed', "Řádek #{$i}: side musí být 'debit' nebo 'credit'.", 422);
-            }
-            if (array_key_exists('is_red_storno', $l) && !is_bool($l['is_red_storno'])) {
-                return Json::error($response, 'validation_failed', "Řádek #{$i}: is_red_storno musí být boolean.", 422);
-            }
-            $line = [
-                'account_code' => (string) ($l['account_code'] ?? ''),
-                'side'         => $side,
-                'amount'       => (float) ($l['amount'] ?? 0),
-                'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
-            ];
-            if (isset($l['cost_center']) && trim((string) $l['cost_center']) !== '') {
-                $line['cost_center'] = (string) $l['cost_center'];
-            }
-            if (!empty($l['dimensions']) && is_array($l['dimensions'])) {
-                try {
-                    $line['dimensions'] = $this->dimensions->normalize($supplierId, $l['dimensions']);
-                } catch (DimensionException $e) {
-                    return Json::error($response, $e->errorCode, "Řádek #{$i}: " . $e->getMessage(), $e->httpStatus);
-                }
-            }
-            // Rozpad řádku mezi víc hodnot typu: typ => [{value_id, share}], součet 100 %.
-            if (!empty($l['dimension_splits']) && is_array($l['dimension_splits'])) {
-                try {
-                    $splits = $this->dimensions->normalizeSplits($supplierId, $l['dimension_splits']);
-                } catch (DimensionException $e) {
-                    return Json::error($response, $e->errorCode, "Řádek #{$i}: " . $e->getMessage(), $e->httpStatus);
-                }
-                if ($splits !== []) {
-                    $line['dimension_splits'] = $splits;
-                    if (isset($line['dimensions'])) {
-                        $line['dimensions'] = array_diff_key($line['dimensions'], $splits);
-                    }
-                }
-            }
-            $lines[] = $line;
-        }
-
         $meta = array_merge($this->auditMeta($request), [
             'entry_date'  => $entryDate,
             'description' => $this->nullableString($body['description'] ?? null),
             'document_no' => $this->nullableString($body['document_no'] ?? null),
         ]);
 
-        // Volitelné měkké vazby na existující doklady (migrace 1514). Validují se
-        // PŘED zaúčtováním: neplatná vazba nesmí nechat v deníku zápis, o kterém si
-        // uživatel myslí, že doklad nese. Zápis vazeb pak běží ve stejné transakci.
-        $links = [];
-        foreach ((array) ($body['links'] ?? []) as $i => $raw) {
-            if (!is_array($raw)) {
-                return Json::error($response, 'validation_failed', "Vazba #{$i} má neplatný formát.", 422);
-            }
-            $link = JournalDocumentLinkAction::validateLink($raw, $supplierId, $this->documentLinks, $code, $message);
-            if ($link === null) {
-                return Json::error($response, $code, $message, $code === 'not_found' ? 404 : 422);
-            }
-            $links[] = $link;
-        }
-        if (count($links) > JournalEntryDocumentLinkRepository::MAX_LINKS_PER_ENTRY) {
-            return Json::error(
-                $response,
-                'too_many_links',
-                'Zápis může mít nejvýš ' . JournalEntryDocumentLinkRepository::MAX_LINKS_PER_ENTRY . ' vazeb.',
-                422
-            );
+        // Tvar řádků, dimenze i volitelné měkké vazby na doklady (migrace 1514) ověřuje
+        // sdílená služba ručních zápisů, stejnou cestou účtují i interní doklady.
+        try {
+            $lines = $this->manualEntries->normalizeLines($supplierId, $body['lines'] ?? null);
+            $links = $this->manualEntries->normalizeLinks($supplierId, $body['links'] ?? []);
+        } catch (ManualJournalEntryException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
         }
 
-        // Opt-in číselná řada ID pro ruční zápisy (Epic F4, R13) — výdej čísla drží
-        // FOR UPDATE zámek, proto transakce obepíná i postDocument (mezera po rollbacku
-        // nevzniká). Vnější transakci (testy) respektuje stejně jako PostingService.
-        // Řada ID je horký řádek firmy a roku: souběžný zápis ho pod REPEATABLE READ posune
-        // a zámek skončí chybou 1020. Vlastní transakce se proto při odvolání zopakuje celá,
-        // s původním $meta (bez čísla z odvolaného pokusu).
-        $pdo = $this->db->pdo();
-        $foreign = $pdo->inTransaction();
+        // Opt-in číselná řada ID pro ruční zápisy (Epic F4, R13) vydává číslo uvnitř
+        // transakce zápisu; opakování po odvolané transakci řeší služba.
+        $foreign = $this->db->pdo()->inTransaction();
         try {
-            $entryId = TransactionFailure::retrying($pdo, function () use ($pdo, $supplierId, $entryDate, $lines, $meta, $links): int {
-                $ownTx = !$pdo->inTransaction();
-                if ($ownTx) {
-                    $pdo->beginTransaction();
-                }
-                try {
-                    if ($meta['document_no'] === null && !empty($this->settings->get($supplierId)['manual_doc_series'])) {
-                        $period = $this->periods->findForDate($supplierId, $entryDate);
-                        $fiscalYear = (int) ($period['fiscal_year'] ?? substr($entryDate, 0, 4));
-                        $meta['document_no'] = $this->series->next($supplierId, 'manual', $fiscalYear);
-                    }
-                    $entryId = $this->posting->postDocument($supplierId, 'manual', null, $lines, $meta);
-                    foreach ($links as $link) {
-                        $this->documentLinks->add(
-                            $entryId,
-                            $supplierId,
-                            $link['doc_type'],
-                            $link['doc_id'],
-                            $link['note'],
-                            $meta['user_id'] ?? null
-                        );
-                    }
-                    if ($ownTx) {
-                        $pdo->commit();
-                    }
-                    return $entryId;
-                } catch (\Throwable $e) {
-                    if (!TransactionFailure::rollbackIfAborted($pdo, $e) && $ownTx && $pdo->inTransaction()) {
-                        $pdo->rollBack();
-                    }
-                    throw $e;
-                }
-            });
+            $entryId = $this->manualEntries->post($supplierId, $lines, $meta, $links);
         } catch (\Throwable $e) {
             if ($foreign && TransactionFailure::aborted($e)) {
                 throw $e;
@@ -602,7 +530,8 @@ final class JournalAction
             );
         }
 
-        $meta = $this->auditMeta($request);
+        // Hromadné zaúčtování jen zajišťuje zápis; převzatý předpis ve skupině nechá být.
+        $meta = $this->auditMeta($request) + ['posting_group_idempotent' => true];
         $userId = $this->userId($request);
 
         $posted = [];
@@ -759,6 +688,19 @@ final class JournalAction
         $meta = array_merge($this->auditMeta($request), array_filter([
             'description' => $this->nullableString($body['description'] ?? null),
         ], static fn ($v) => $v !== null));
+        if (array_key_exists('expected_posting_entries', $body)) {
+            $expected = $body['expected_posting_entries'];
+            if (!is_array($expected) || !array_is_list($expected) || count($expected) > 5000) {
+                return Json::error($response, 'validation_failed', 'Neplatný seznam zápisů zaúčtování.', 422);
+            }
+            foreach ($expected as $member) {
+                if (!is_array($member) || !is_int($member['id'] ?? null) || $member['id'] <= 0
+                    || !is_int($member['row_version'] ?? null) || $member['row_version'] <= 0) {
+                    return Json::error($response, 'validation_failed', 'Neplatná verze zápisu zaúčtování.', 422);
+                }
+            }
+            $meta['expected_posting_entries'] = $expected;
+        }
 
         // Dimenze z dialogu se ukládají v TÉŽE transakci jako přeúčtování: nový zápis
         // si je při zaúčtování orazítkuje (a řádek nákladu rozdělí podle položek).
@@ -882,8 +824,9 @@ final class JournalAction
 
         try {
             $lines = $sourceType === 'invoice'
-                ? $this->posting->buildFromInvoice($supplierId, $docId)
+                ? $this->posting->buildFromInvoice($supplierId, $docId, ['entry_date' => $docDate])
                 : $this->posting->buildFromPurchaseInvoice($supplierId, $docId, array_filter([
+                    'entry_date' => $docDate,
                     'debit_account_code' => $aiOverride,
                 ], static fn (mixed $value): bool => $value !== null));
         } catch (\Throwable $e) {
@@ -1021,6 +964,8 @@ final class JournalAction
     /** Id už existujícího zápisu dokladu, nebo null. Náhled tím řekne, že je zaúčtováno. */
     private function existingEntryId(int $supplierId, string $sourceType, int $docId): ?int
     {
+        $group = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $docId);
+        if ($group !== []) return (int) $group[0]['id'];
         $stmt = $this->db->pdo()->prepare(
             'SELECT id FROM journal_entries
               WHERE supplier_id = ? AND source_type = ? AND source_id = ? AND reversed_by IS NULL
@@ -1111,8 +1056,9 @@ final class JournalAction
 
         try {
             $lines = $customLines ?? ($sourceType === 'invoice'
-                ? $this->posting->buildFromInvoice($supplierId, $docId)
+                ? $this->posting->buildFromInvoice($supplierId, $docId, ['entry_date' => $entryDate ?? $docDate])
                 : $this->posting->buildFromPurchaseInvoice($supplierId, $docId, array_filter([
+                    'entry_date' => $entryDate ?? $docDate,
                     'debit_account_code' => $this->aiOverrides->debitOverrideForPurchase($supplierId, $docId),
                 ], static fn (mixed $value): bool => $value !== null)));
 
@@ -1122,6 +1068,11 @@ final class JournalAction
                 'document_no' => $this->nullableString($body['document_no'] ?? null),
                 'description' => $this->nullableString($body['description'] ?? null),
             ]);
+            if ($customLines === null) {
+                // Zaúčtování podle návrhu jen zajišťuje zápis. Vlastní řádky z popupu
+                // jsou oprava a převzatou skupinu idempotentně přeskočit nesmí.
+                $meta['posting_group_idempotent'] = true;
+            }
             $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, $meta);
             $dimensionWarnings = $this->posting->dimensionWarnings();
         } catch (\Throwable $e) {
@@ -1251,7 +1202,6 @@ final class JournalAction
             return Json::error($response, 'other_item_use_detail',
                 'Účetní zápis ostatní položky stornujte v jejím detailu, aby se aktualizoval i stav položky.', 409);
         }
-
         $body = (array) ($request->getParsedBody() ?? []);
         $entryDate = $this->nullableString($body['entry_date'] ?? null);
         if ($entryDate !== null && !$this->isDate($entryDate)) {
@@ -1264,26 +1214,23 @@ final class JournalAction
         ], static fn ($v) => $v !== null));
 
         try {
-            $reversalId = $this->posting->reverse($supplierId, $id, $meta);
+            $reversalId = TransactionFailure::retrying($this->db->pdo(), fn (): int =>
+                (new DimensionPeriodGuard($this->db))->transaction(function () use ($request, $supplierId, $id, $meta): int {
+                    (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+                    // Zápis interního dokladu se stornuje v detailu dokladu (kontrola pod zámkem zápisu).
+                    $this->internalDocuments->assertJournalReversible($supplierId, $id);
+                    $owner = (new DocumentPostingGroup($this->db))->owner($supplierId, $id, true);
+                    $reversalId = $this->posting->reverse($supplierId, $id, $meta);
+                    // I poslední ruční člen převzatého předpisu odemyká svůj doklad.
+                    if ($owner !== null) {
+                        $this->unlockSourceAfterReverse($request, $supplierId, $owner['doc_type'],
+                            $owner['doc_id'], $id, $reversalId);
+                    }
+                    return $reversalId;
+                }),
+            );
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
-        }
-
-        // Epic F6 (§4.7, R9): storno zápisu dokladu odemyká booked_at, pokud k source
-        // po reversu neexistuje jiný aktivní posted zápis. Vědomé riziko L2 (klient může
-        // odemčený doklad změnit před re-postem) kryje activity log + FE hint.
-        if ($original !== null
-            && in_array((string) ($original['source_type'] ?? ''), ['invoice', 'purchase_invoice'], true)
-            && $original['source_id'] !== null
-        ) {
-            $this->unlockSourceAfterReverse(
-                $request,
-                $supplierId,
-                (string) $original['source_type'],
-                (int) $original['source_id'],
-                $id,
-                $reversalId,
-            );
         }
 
         return Json::ok($response, $this->journal->find($reversalId, $supplierId), 201);
@@ -1310,6 +1257,11 @@ final class JournalAction
 
         $attachmentRows = [];
         try {
+            (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$id]);
             $stmt = $pdo->prepare(
                 'SELECT je.id, je.period_id, je.entry_date, je.document_no, je.source_type,
                         je.source_id, je.posted_at, je.reversed_by, p.status AS period_status,
@@ -1427,6 +1379,24 @@ final class JournalAction
 
             $statusFrom = null;
             $statusTo = null;
+            // Smazaný zápis zaúčtování vrací interní doklad do konceptu (stejná transakce).
+            if ($sourceType === 'manual' && $sourceId === null) {
+                try {
+                    if ($this->internalDocuments->forEntry($supplierId, $id) !== null
+                        && !$this->requirePermission($request, $response, 'accounting.journal.post', AccessLevel::WRITE, $err)) {
+                        if ($ownTx) $pdo->rollBack();
+                        return $err;
+                    }
+                    if ($this->internalDocuments->prepareEntryDeletion($supplierId, $id, $this->userId($request)) !== null) {
+                        $statusFrom = 'posted';
+                        $statusTo = 'draft';
+                    }
+                } catch (InternalDocumentException $e) {
+                    if ($ownTx) $pdo->rollBack();
+                    return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+                }
+            }
+
             if ($sourceType === 'other_item') {
                 if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::WRITE, $err)
                     || !$this->requirePermission($request, $response, 'accounting.journal.post', AccessLevel::WRITE, $err)) {
@@ -1452,6 +1422,11 @@ final class JournalAction
                 );
             }
 
+            (new \MyInvoice\Repository\AccountingSetupRepository($this->db))->detachReclassificationItemsFromEntries($supplierId, [$id]);
+
+            $postingOwner = (new DocumentPostingGroup($this->db))->owner($supplierId, $id, true);
+            $postingType = $postingOwner['doc_type'] ?? null;
+            $postingId = $postingOwner['doc_id'] ?? null;
             $deleted = $pdo->prepare('DELETE FROM journal_entries WHERE id = ? AND supplier_id = ?');
             $deleted->execute([$id, $supplierId]);
             if ($deleted->rowCount() !== 1) {
@@ -1468,11 +1443,12 @@ final class JournalAction
                 if ($deleteDepreciation->rowCount() < 1) {
                     throw new \RuntimeException('Řádky odpisu se nepodařilo smazat.');
                 }
-            } elseif ($sourceType === 'purchase_invoice') {
+            } elseif ($postingType === 'purchase_invoice' && ($postingId !== null
+                && (new DocumentPostingGroup($this->db))->active($supplierId, $postingType, $postingId, true) === [])) {
                 $doc = $pdo->prepare(
                     'SELECT status FROM purchase_invoices WHERE id = ? AND supplier_id = ? FOR UPDATE'
                 );
-                $doc->execute([$sourceId, $supplierId]);
+                $doc->execute([$postingId, $supplierId]);
                 $status = $doc->fetchColumn();
                 if ($status !== false) {
                     $statusFrom = (string) $status;
@@ -1482,13 +1458,14 @@ final class JournalAction
                             SET booked_at = NULL, booked_by = NULL,
                                 status = CASE WHEN status = 'booked' THEN 'received' ELSE status END
                           WHERE id = ? AND supplier_id = ?"
-                    )->execute([$sourceId, $supplierId]);
+                    )->execute([$postingId, $supplierId]);
                 }
-            } elseif ($sourceType === 'invoice') {
+            } elseif ($postingType === 'invoice' && ($postingId !== null
+                && (new DocumentPostingGroup($this->db))->active($supplierId, $postingType, $postingId, true) === [])) {
                 $pdo->prepare(
                     'UPDATE invoices SET booked_at = NULL, booked_by = NULL
                       WHERE id = ? AND supplier_id = ?'
-                )->execute([$sourceId, $supplierId]);
+                )->execute([$postingId, $supplierId]);
             }
 
             $this->logger->log(
@@ -1536,9 +1513,27 @@ final class JournalAction
             if ($ownTx) {
                 $pdo->commit();
             }
+        } catch (\PDOException $e) {
+            if ($ownTx && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            if (($e->errorInfo[0] ?? null) !== '23000') {
+                throw $e;
+            }
+            return Json::error(
+                $response,
+                'entry_delete_conflict',
+                'Zápis se nepodařilo smazat, protože na něj navazuje jiný záznam v účetnictví '
+                    . '(například mzdová platba, zápočet nebo vyúčtování). Nic se nesmazalo.',
+                409,
+            );
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {
                 $pdo->rollBack();
+            }
+            // Odmítnutí kontrolou vazeb je věcná odpověď, ne chyba serveru.
+            if ($e instanceof PostingException) {
+                return $this->mapPostingError($response, $e);
             }
             throw $e;
         }
@@ -1615,6 +1610,10 @@ final class JournalAction
 
         $attachmentRows = [];
         try {
+            (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$id]);
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$id]);
             $load = $pdo->prepare(
                 'SELECT je.id, je.period_id, je.entry_date, je.document_no, je.description,
                         je.source_type, je.source_id, je.reversed_by, p.status AS period_status,
@@ -1656,6 +1655,10 @@ final class JournalAction
                 $original = $selected;
             }
             $reversalId = (int) $original['reversed_by'];
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$originalId, $reversalId]);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$originalId, $reversalId]);
+            (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertEntriesMutable($supplierId, [$originalId, $reversalId]);
+            (new \MyInvoice\Service\Accounting\JournalSettlementUseGuard($this->db))->assertEntriesFree($supplierId, [$originalId, $reversalId]);
             $load->execute([$reversalId, $supplierId]);
             $reversal = $load->fetch(\PDO::FETCH_ASSOC);
             if ($reversal === false) {
@@ -1699,6 +1702,16 @@ final class JournalAction
                 );
             }
 
+            // Stornovaný interní doklad drží obě strany dvojice; mazáním by ukazoval do prázdna.
+            if ($this->internalDocuments->forEntry($supplierId, (int) $original['id']) !== null) {
+                if ($ownTx) $pdo->rollBack();
+                return Json::error($response, 'internal_document_use_detail',
+                    'Dvojice patří ke stornovanému internímu dokladu a zůstává v deníku jako jeho stopa.', 409);
+            }
+
+            $postingOwner = (new DocumentPostingGroup($this->db))->owner($supplierId, (int) $original['id'], true);
+            $postingType = $postingOwner['doc_type'] ?? null;
+            $postingId = $postingOwner['doc_id'] ?? null;
             $sourceId = $original['source_id'] === null ? null : (int) $original['source_id'];
             $deletedLines = [];
             foreach ([$original, $reversal] as $row) {
@@ -1710,7 +1723,10 @@ final class JournalAction
             // Dvojice se pak smaže, ale doklad zůstává zaúčtovaný: nevrací se do fronty
             // ani se neodemyká.
             $replacementId = null;
-            if ($sourceId !== null) {
+            if ($postingOwner !== null) {
+                $members = (new DocumentPostingGroup($this->db))->active($supplierId, $postingType, $postingId, true);
+                $replacementId = $members === [] ? null : (int) $members[0]['id'];
+            } elseif ($sourceId !== null) {
                 $replacement = $pdo->prepare(
                     'SELECT id FROM journal_entries
                       WHERE supplier_id = ? AND source_type = ? AND source_id = ?
@@ -1733,6 +1749,8 @@ final class JournalAction
                 );
             }
 
+            (new \MyInvoice\Repository\AccountingSetupRepository($this->db))->detachReclassificationItemsFromEntries($supplierId, [(int) $original['id'], $reversalId]);
+
             // Původní zápis PRVNÍ. `journal_entries.reversed_by` je cizí klíč se SET NULL:
             // smazání protizápisu napřed by původní zápis „oživilo" (reversed_by NULL →
             // active_source_id) a vedle náhradního zápisu téhož dokladu by to narazilo
@@ -1747,9 +1765,9 @@ final class JournalAction
 
             $statusFrom = null;
             $statusTo = null;
-            if ($replacementId === null && $sourceId !== null && $sourceType === 'purchase_invoice') {
+            if ($replacementId === null && $postingId !== null && $postingType === 'purchase_invoice') {
                 $doc = $pdo->prepare('SELECT status FROM purchase_invoices WHERE id = ? AND supplier_id = ? FOR UPDATE');
-                $doc->execute([$sourceId, $supplierId]);
+                $doc->execute([$postingId, $supplierId]);
                 $status = $doc->fetchColumn();
                 if ($status !== false) {
                     $statusFrom = (string) $status;
@@ -1759,11 +1777,11 @@ final class JournalAction
                             SET booked_at = NULL, booked_by = NULL,
                                 status = CASE WHEN status = 'booked' THEN 'received' ELSE status END
                           WHERE id = ? AND supplier_id = ?"
-                    )->execute([$sourceId, $supplierId]);
+                    )->execute([$postingId, $supplierId]);
                 }
-            } elseif ($replacementId === null && $sourceId !== null && $sourceType === 'invoice') {
+            } elseif ($replacementId === null && $postingId !== null && $postingType === 'invoice') {
                 $pdo->prepare('UPDATE invoices SET booked_at = NULL, booked_by = NULL WHERE id = ? AND supplier_id = ?')
-                    ->execute([$sourceId, $supplierId]);
+                    ->execute([$postingId, $supplierId]);
             }
 
             $this->logger->log(
@@ -1821,6 +1839,9 @@ final class JournalAction
             );
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
+            if ($e instanceof PostingException) {
+                return $this->mapPostingError($response, $e);
+            }
             throw $e;
         }
 
@@ -1852,14 +1873,7 @@ final class JournalAction
     ): void {
         $pdo = $this->db->pdo();
 
-        $active = $pdo->prepare(
-            'SELECT 1 FROM journal_entries
-              WHERE supplier_id = ? AND source_type = ? AND source_id = ?
-                AND posted_at IS NOT NULL AND reversed_by IS NULL
-              LIMIT 1'
-        );
-        $active->execute([$supplierId, $sourceType, $sourceId]);
-        if ($active->fetchColumn() !== false) {
+        if ((new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $sourceId, true) !== []) {
             return; // jiný aktivní zápis zámek drží dál
         }
 

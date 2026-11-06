@@ -7,6 +7,8 @@ namespace MyInvoice\Tests\Integration\Portfolio;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Portfolio\PortfolioAggregationService;
+use MyInvoice\Tests\Support\IsolatedSupplierTrait;
+use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -18,90 +20,55 @@ use PHPUnit\Framework\TestCase;
  *   - bez membership řádků → BC, vidí vše (accountant/readonly)
  *   - role 'admin'         → vidí vše bez ohledu na vlastní membership řádky
  *
- * Fixtures: vlastní test useři + druhý supplier (existující nebo založený
- * šablonou podle prvního, mirror SupplierMembershipTest). Po sobě uklízí.
+ * Fixtures: vlastní testovací uživatelé a dvě syntetické firmy v transakci,
+ * kterou tearDown vrací.
  */
 #[Group('integration')]
 final class PortfolioMembershipTest extends TestCase
 {
+    use IsolatedSupplierTrait;
     private Connection $db;
     private PortfolioAggregationService $portfolio;
 
     private int $supplierA = 0;
     private int $supplierB = 0;
-    private bool $createdSupplierB = false;
-    private int $currencyB = 0;
+    private array $currencyIds = [];
 
     /** @var list<int> */
     private array $userIds = [];
 
     protected function setUp(): void
     {
-        $rootDir = dirname(__DIR__, 4);
-        if (!is_file($rootDir . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
-        }
-        try {
-            $c = Bootstrap::buildContainer();
-            $this->db = $c->get(Connection::class);
-            $this->portfolio = $c->get(PortfolioAggregationService::class);
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
-        }
-
-        $has = $this->db->pdo()->query("SHOW TABLES LIKE 'roles'")->fetchColumn();
-        if ($has === false) {
-            $this->markTestSkipped('Dynamické role chybí — spusť api/bin/migrate.php.');
-        }
-
-        $this->supplierA = (int) $this->db->pdo()->query('SELECT MIN(id) FROM supplier')->fetchColumn();
-        if ($this->supplierA <= 0) {
-            $this->markTestSkipped('Žádný supplier v DB.');
-        }
-
-        $second = $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id LIMIT 1 OFFSET 1')->fetchColumn();
-        if ($second !== false && $second !== null) {
-            $this->supplierB = (int) $second;
-        } else {
-            $stmt = $this->db->pdo()->prepare(
-                "INSERT INTO supplier (company_name, display_name, street, city, zip, country_id,
-                                       is_vat_payer, email, default_currency_id, default_vat_rate_id,
-                                       default_payment_due_days, default_hourly_rate)
-                 SELECT '__TEST PORTFOLIO supplier B', '__TEST PORTFOLIO supplier B', street, city, zip, country_id,
-                        0, email, default_currency_id, default_vat_rate_id,
-                        default_payment_due_days, default_hourly_rate
-                   FROM supplier WHERE id = ?"
-            );
-            $stmt->execute([$this->supplierA]);
-            $this->supplierB = (int) $this->db->pdo()->lastInsertId();
-            $this->createdSupplierB = true;
-
-            $cur = $this->db->pdo()->prepare(
-                "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
-                 VALUES (?, 'CZK', 'CZK — test', 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 1)"
-            );
-            $cur->execute([$this->supplierB]);
-            $this->currencyB = (int) $this->db->pdo()->lastInsertId();
-        }
+        $container = Bootstrap::buildContainer();
+        $this->db = $container->get(Connection::class);
+        $this->portfolio = $container->get(PortfolioAggregationService::class);
+        $pdo = $this->db->pdo();
+        $sourceId = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
+        self::assertGreaterThan(0, $sourceId);
+        $pdo->beginTransaction();
+        $this->supplierA = $this->fixtureSupplier($sourceId, 'double_entry');
+        $this->supplierB = $this->fixtureSupplier($sourceId, 'tax_evidence');
     }
 
     protected function tearDown(): void
     {
-        if (!isset($this->db)) return;
-        $pdo = $this->db->pdo();
-
-        if ($this->userIds !== []) {
-            $place = implode(',', array_fill(0, count($this->userIds), '?'));
-            $pdo->prepare("DELETE FROM user_suppliers WHERE user_id IN ($place)")->execute($this->userIds);
-            $pdo->prepare("DELETE FROM users WHERE id IN ($place)")->execute($this->userIds);
-        }
-        if ($this->createdSupplierB && $this->supplierB > 0) {
-            if ($this->currencyB > 0) {
-                $pdo->prepare('DELETE FROM currencies WHERE id = ?')->execute([$this->currencyB]);
-            }
-            $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$this->supplierB]);
+        if (isset($this->db) && $this->db->pdo()->inTransaction()) {
+            $this->db->pdo()->rollBack();
         }
         $this->userIds = [];
+    }
+
+    private function fixtureSupplier(int $sourceId, string $mode): int
+    {
+        $pdo = $this->db->pdo();
+        $supplier = $this->createIsolatedSupplier($pdo, $sourceId);
+        $pdo->prepare("UPDATE supplier SET company_name = 'Syntetická firma portfolia', display_name = 'Syntetická firma portfolia', accounting_mode = ? WHERE id = ?")
+            ->execute([$mode, $supplier]);
+        $pdo->prepare("INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default) VALUES (?, 'CZK', 'CZK', 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 1)")
+            ->execute([$supplier]);
+        $this->currencyIds[$supplier] = (int) $pdo->lastInsertId();
+        $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$this->currencyIds[$supplier], $supplier]);
+        return $supplier;
     }
 
     private function mkUser(string $role): int
@@ -155,6 +122,45 @@ final class PortfolioMembershipTest extends TestCase
         self::assertTrue($this->portfolio->userCanAccess($userId, true, $this->supplierB),
             'Globální admin projde i mimo vlastní membership.');
         self::assertFalse($this->portfolio->userCanAccess($userId, true, 0));
+    }
+
+    /**
+     * Token vázaný na firmu A nesmí přes přehled firem ani měsíční kontrolu číst
+     * další firmy svého vlastníka, ať je to člen více firem, nebo globální admin.
+     */
+    public function testBoundTokenSeesOnlyItsCompany(): void
+    {
+        $userId = $this->mkUser('accountant');
+        $this->assign($userId, [$this->supplierA, $this->supplierB]);
+        $now = new \DateTimeImmutable();
+
+        $ids = static fn (array $res): array => array_map(static fn (array $c) => $c['supplier_id'], $res['companies']);
+        self::assertSame([$this->supplierA], $ids($this->portfolio->overview($userId, false, $now, $this->supplierA)));
+        self::assertSame([$this->supplierA], $ids($this->portfolio->overview(0, true, $now, $this->supplierA)));
+        self::assertTrue($this->portfolio->userCanAccess($userId, false, $this->supplierA, $this->supplierA));
+        self::assertFalse($this->portfolio->userCanAccess($userId, false, $this->supplierB, $this->supplierA));
+        self::assertFalse($this->portfolio->userCanAccess($userId, true, $this->supplierB, $this->supplierA));
+
+        // Bez vazby (webová relace) vidí člen dál obě své firmy.
+        $unbound = $ids($this->portfolio->overview($userId, false, $now));
+        self::assertContains($this->supplierA, $unbound);
+        self::assertContains($this->supplierB, $unbound);
+    }
+
+    public function testBoundTokenRequestIsNarrowedInAction(): void
+    {
+        $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\Portfolio\PortfolioAction::class);
+        $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
+            ->createServerRequest('GET', '/api/portfolio/overview')
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin'])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'bearer')
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read', 'supplier_id' => $this->supplierA]);
+
+        $overview = json_decode((string) $action->overview($request, new \Slim\Psr7\Response())->getBody(), true);
+        self::assertSame([$this->supplierA], array_column($overview['companies'], 'supplier_id'));
+
+        $foreign = $action->monthlyCheck($request, new \Slim\Psr7\Response(), ['supplierId' => (string) $this->supplierB]);
+        self::assertSame(404, $foreign->getStatusCode());
     }
 
     public function testUserWithoutMembershipSeesNoCompanies(): void
@@ -219,10 +225,25 @@ final class PortfolioMembershipTest extends TestCase
             'bank' => '/bank?tab=posting',
         ];
 
-        $res = $this->portfolio->overview(0, true, new \DateTimeImmutable());
+        foreach ([$this->supplierA, $this->supplierB] as $supplier) {
+            $this->unbookedFixture($supplier);
+        }
+        $now = new \DateTimeImmutable('2094-06-30');
+        $res = $this->portfolio->overview(0, true, $now, $this->supplierA);
+        $taxEvidence = $this->portfolio->overview(0, true, $now, $this->supplierB);
+        self::assertCount(1, $res['companies']);
+        self::assertCount(1, $taxEvidence['companies']);
+        self::assertSame('double_entry', $res['companies'][0]['accounting_mode']);
+        self::assertSame('tax_evidence', $taxEvidence['companies'][0]['accounting_mode']);
+        $res['companies'] = array_merge($res['companies'], $taxEvidence['companies']);
         self::assertNotSame([], $res['companies'], 'Superadmin musí vidět aspoň jednu firmu.');
+        self::assertSame([$this->supplierA, $this->supplierB], array_column($res['companies'], 'supplier_id'));
 
         foreach ($res['companies'] as $row) {
+            if ($row['supplier_id'] === $this->supplierA) {
+                self::assertSame(array_keys($expectedLinks), array_column($row['unbooked_breakdown'], 'key'));
+                self::assertSame([1, 1, 1], array_column($row['unbooked_breakdown'], 'count'));
+            }
             $sum = 0;
             $seen = [];
             foreach ($row['unbooked_breakdown'] as $part) {
@@ -241,6 +262,27 @@ final class PortfolioMembershipTest extends TestCase
                     'V daňové evidenci se do deníku neúčtuje — rozpad je prázdný.');
             }
         }
+    }
+
+    private function unbookedFixture(int $supplier): void
+    {
+        $pdo = $this->db->pdo();
+        $actor = (int) $pdo->query('SELECT MIN(id) FROM users')->fetchColumn();
+        $country = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        self::assertGreaterThan(0, $actor);
+        self::assertGreaterThan(0, $country);
+        $pdo->prepare("INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id, main_email, is_customer, is_vendor) VALUES (?, 'Syntetická protistrana portfolia', 'Testovací 1', 'Praha', '11000', ?, ?, 'portfolio-party@example.test', 1, 1)")
+            ->execute([$supplier, $country, $this->currencyIds[$supplier]]);
+        $client = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO invoices (supplier_id, varsymbol, invoice_type, client_id, issue_date, tax_date, due_date, currency_id, total_without_vat, total_vat, total_with_vat, status, created_by) VALUES (?, 'SYN-PORTFOLIO-1', 'invoice', ?, '2094-06-15', '2094-06-15', '2094-06-30', ?, 100, 21, 121, 'issued', ?)")
+            ->execute([$supplier, $client, $this->currencyIds[$supplier], $actor]);
+        $pdo->prepare("INSERT INTO purchase_invoices (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, tax_date, due_date, received_at, currency_id, vendor_snapshot, total_without_vat, total_vat, total_with_vat, status, created_by) VALUES (?, ?, 'SYN-PORTFOLIO-1', 'invoice', '2094-06-15', '2094-06-15', '2094-06-30', '2094-06-15', ?, '{}', 100, 21, 121, 'received', ?)")
+            ->execute([$supplier, $client, $this->currencyIds[$supplier], $actor]);
+        $pdo->prepare("INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date) VALUES (?, 'synthetic-portfolio.gpc', ?, '1000000005', '0100', 'CZK', '2094-06-15')")
+            ->execute([$supplier, hash('sha256', 'synthetic-portfolio-' . $supplier)]);
+        $statement = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, source, match_status) VALUES (?, '2094-06-15', 121, 'CZK', 'statement', 'unmatched')")
+            ->execute([$statement]);
     }
 
     private function roleId(string $legacy): int

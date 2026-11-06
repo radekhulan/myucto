@@ -79,6 +79,7 @@ final class PayrollJmhzSubmissionFreezeAction
                 JmhzSubmissionBridgeService::clientErrorCode($exception),
                 $exception->getMessage(),
                 409,
+                $exception->blockers === [] ? [] : ['details' => ['blockers' => $exception->blockers]],
             );
         } catch (\DomainException $exception) {
             return Json::error($response, 'conflict', $exception->getMessage(), 409);

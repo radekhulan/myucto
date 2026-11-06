@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Restriktivní ImageMagick policy pro Docker image MyÚčta (Dockerfile i Dockerfile.alpine).
+
+  Imagick v aplikaci dekóduje jen nahrané dokumenty a loga: JPEG, PNG, GIF, WebP, BMP,
+  TIFF, HEIC/HEIF, PDF (náhledy a obrázky stránek) a SVG (logo). Kód formát vždy vynucuje
+  prefixem podle ověřeného obsahu; tahle policy je druhá vrstva pro případ, že by se
+  k ImageMagicku dostal jiný vstup.
+
+  Časový limit (resource time) tu záměrně NENÍ: u dlouho běžících workerů (php-fpm,
+  Apache prefork) se v některých verzích ImageMagicku měří od startu procesu. Časový
+  limit nastavuje PHP kód před každou operací.
+-->
+<policymap>
+  <!-- Pojistky zdrojů; PHP kód nastavuje pro každou operaci ještě přísnější limity. -->
+  <policy domain="resource" name="memory" value="256MiB"/>
+  <policy domain="resource" name="map" value="512MiB"/>
+  <policy domain="resource" name="width" value="20KP"/>
+  <policy domain="resource" name="height" value="20KP"/>
+  <policy domain="resource" name="area" value="128MP"/>
+  <policy domain="resource" name="disk" value="1GiB"/>
+
+  <!-- Nepřímé čtení souborů přes "@soubor" a čtení z URL. -->
+  <policy domain="path" rights="none" pattern="@*"/>
+  <policy domain="delegate" rights="none" pattern="URL"/>
+  <policy domain="delegate" rights="none" pattern="HTTPS"/>
+  <policy domain="delegate" rights="none" pattern="HTTP"/>
+
+  <!-- Skriptovací a vektorové kodéry ImageMagicku (MVG, MSL), síť, čtení textových
+       a dočasných souborů, zobrazování a PostScript. PDF zůstává povolené. -->
+  <policy domain="coder" rights="none" pattern="MVG"/>
+  <policy domain="coder" rights="none" pattern="MSL"/>
+  <policy domain="coder" rights="none" pattern="URL"/>
+  <policy domain="coder" rights="none" pattern="HTTP"/>
+  <policy domain="coder" rights="none" pattern="HTTPS"/>
+  <policy domain="coder" rights="none" pattern="FTP"/>
+  <policy domain="coder" rights="none" pattern="TEXT"/>
+  <policy domain="coder" rights="none" pattern="TXT"/>
+  <policy domain="coder" rights="none" pattern="LABEL"/>
+  <policy domain="coder" rights="none" pattern="CAPTION"/>
+  <policy domain="coder" rights="none" pattern="PANGO"/>
+  <policy domain="coder" rights="none" pattern="EPHEMERAL"/>
+  <policy domain="coder" rights="none" pattern="SHOW"/>
+  <policy domain="coder" rights="none" pattern="WIN"/>
+  <policy domain="coder" rights="none" pattern="X"/>
+  <policy domain="coder" rights="none" pattern="VID"/>
+  <policy domain="coder" rights="none" pattern="PLT"/>
+  <policy domain="coder" rights="none" pattern="SCREENSHOT"/>
+  <policy domain="coder" rights="none" pattern="PS"/>
+  <policy domain="coder" rights="none" pattern="PS2"/>
+  <policy domain="coder" rights="none" pattern="PS3"/>
+  <policy domain="coder" rights="none" pattern="EPS"/>
+  <policy domain="coder" rights="none" pattern="EPSF"/>
+  <policy domain="coder" rights="none" pattern="EPSI"/>
+  <policy domain="coder" rights="none" pattern="EPI"/>
+  <policy domain="coder" rights="none" pattern="EPT"/>
+  <policy domain="coder" rights="none" pattern="XPS"/>
+  <policy domain="coder" rights="none" pattern="PCL"/>
+</policymap>

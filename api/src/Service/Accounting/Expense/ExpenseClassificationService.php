@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Accounting\Expense;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ExpenseClassificationRuleRepository;
+use MyInvoice\Repository\AccountDefinitionRepository;
 use MyInvoice\Repository\ExpenseKeywordCatalogRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use PDO;
@@ -45,6 +46,8 @@ final class ExpenseClassificationService
         ?int $vendorClientId,
         float $unitPrice,
         int $year,
+        ?string $date = null,
+        bool $currentRead = false,
     ): ?ExpenseKindSuggestion {
         return $this->withTenantAnalytic($supplierId, $this->classifier->classify(
             $description,
@@ -55,7 +58,7 @@ final class ExpenseClassificationService
             $this->rulesForPrice($supplierId, $unitPrice),
             $this->vehicleAccounts($supplierId),
             $this->catalog->active(),
-        ));
+        ), $date, $currentRead);
     }
 
     /** @param list<array<string,mixed>> $rules */
@@ -67,6 +70,8 @@ final class ExpenseClassificationService
         float $unitPrice,
         int $year,
         array $rules,
+        ?string $date = null,
+        bool $currentRead = false,
     ): ?ExpenseKindSuggestion {
         $price = abs($unitPrice);
         $eligible = array_values(array_filter(
@@ -88,7 +93,7 @@ final class ExpenseClassificationService
             $this->vehicleAccounts($supplierId),
             $this->catalog->active(),
             true,
-        ));
+        ), $date, $currentRead);
     }
 
     /**
@@ -105,19 +110,20 @@ final class ExpenseClassificationService
      *
      * Účet, který syntetikou není nebo analytiky nemá, se vrací beze změny.
      */
-    public function analyticForExpenseAccount(int $supplierId, string $code): string
+    public function analyticForExpenseAccount(int $supplierId, string $code, ?string $date = null, bool $currentRead = false): string
     {
         if (preg_match('/^[0-9]{3}$/', $code) !== 1) {
             return $code;
         }
-        $key = $supplierId . '|' . $code;
-        if (isset($this->analyticCache[$key])) {
+        $date = AccountDefinitionRepository::date($date ?? date('Y-m-d'));
+        $key = $supplierId . '|' . $date . '|' . $code;
+        if (!$currentRead && isset($this->analyticCache[$key])) {
             return $this->analyticCache[$key];
         }
         $stmt = $this->db->pdo()->prepare(
             "SELECT MIN(c.account_code)
-               FROM chart_of_accounts p
-               JOIN chart_of_accounts c ON c.supplier_id = p.supplier_id AND c.parent_id = p.id
+               FROM " . AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . " p
+               JOIN " . AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . " c ON c.supplier_id = p.supplier_id AND c.parent_id = p.id
               WHERE p.supplier_id = ? AND p.account_code = ?
                 AND c.is_active = 1
                 AND c.tax_deductibility = 'deductible'
@@ -128,15 +134,16 @@ final class ExpenseClassificationService
         $stmt->execute([$supplierId, $code]);
         $analytic = $stmt->fetchColumn();
 
-        return $this->analyticCache[$key] = $analytic === false ? $code : (string) $analytic;
+        $result = $analytic === false ? $code : (string) $analytic;
+        return $currentRead ? $result : ($this->analyticCache[$key] = $result);
     }
 
-    private function withTenantAnalytic(int $supplierId, ?ExpenseKindSuggestion $s): ?ExpenseKindSuggestion
+    private function withTenantAnalytic(int $supplierId, ?ExpenseKindSuggestion $s, ?string $date = null, bool $currentRead = false): ?ExpenseKindSuggestion
     {
         if ($s === null || $s->accountCode === null) {
             return $s;
         }
-        $account = $this->analyticForExpenseAccount($supplierId, $s->accountCode);
+        $account = $this->analyticForExpenseAccount($supplierId, $s->accountCode, $date, $currentRead);
         if ($account === $s->accountCode) {
             return $s;
         }
@@ -184,11 +191,12 @@ final class ExpenseClassificationService
      *
      * @return array<int,array<string,mixed>> id položky => ExpenseKindSuggestion::toArray()
      */
-    public function suggestForInvoice(int $supplierId, int $purchaseInvoiceId): array
+    public function suggestForInvoice(int $supplierId, int $purchaseInvoiceId, ?string $date = null, bool $currentRead = false): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id, pii.description, pii.unit_price_without_vat, pii.expense_kind,
                     pi.vendor_id, pi.exchange_rate, c.company_name AS vendor_name,
+                    COALESCE(pi.tax_date, pi.issue_date) AS accounting_date,
                     YEAR(COALESCE(pi.tax_date, pi.issue_date)) AS acq_year
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
@@ -213,6 +221,8 @@ final class ExpenseClassificationService
                 $row['vendor_id'] !== null ? (int) $row['vendor_id'] : null,
                 $unitPriceCzk,
                 (int) $row['acq_year'],
+                $date ?? (string) $row['accounting_date'],
+                $currentRead,
             );
             if ($suggestion === null) {
                 continue;

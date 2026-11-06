@@ -149,6 +149,73 @@ final class PayrollRunValidationDetailsTest extends TestCase
     }
 
     /**
+     * Lednový běh nového roku bez sady exekučních srážek (nařízení vlády
+     * o nezabavitelných částkách ještě nevyšlo) hlásil u každé osoby dva
+     * blokující řádky. Jeden tvrdil obecně „není sada pravidel", přestože
+     * Pravidla mezd ukazují rok jako pokrytý, druhý radil ověřit datum výplaty.
+     */
+    public function testMissingEnforcementRulesetIsOneClearRowPerPerson(): void
+    {
+        $this->repository->replaceEnforcementValidations(1, 2, ['people' => [[
+            'employee_id' => 7,
+            'enforcement' => ['result' => ['status' => 'manual_review', 'issues' => [
+                'enforcement_ruleset_not_effective_for_whole_year',
+                'payment_date_outside_ruleset_2026',
+            ]]],
+        ]]]);
+
+        $rows = $this->rows();
+        self::assertCount(1, $rows);
+        self::assertStringContainsString('exekučních srážek', $rows[0]['message']);
+        self::assertStringContainsString('Exekuční srážky', $rows[0]['message']);
+        self::assertStringNotContainsString('Ověřte období a datum výplaty', $rows[0]['message']);
+        self::assertSame('/payroll/rulesets', $rows[0]['remediation_path']);
+    }
+
+    /**
+     * Počáteční roční úhrny se zadávají na kartě hlavního pracovního vztahu
+     * (Počáteční stavy). Proklik do zákonné evidence vedl na sekci, kde nic
+     * takového není a která navíc hlásila „Evidence je úplná".
+     */
+    public function testMissingAnnualAccumulatorLeadsToOpeningBalancesOnEmploymentCard(): void
+    {
+        foreach (['income_tax:annual_accumulator_missing:employee:7', 'social_insurance:annual_accumulator_invalid:employee:7'] as $issue) {
+            $detail = PayrollRunIssueGuidance::describe($issue);
+
+            self::assertSame('/payroll/people?person=7&panel=opening_balances', $detail['remediation_path'], $issue);
+            self::assertStringContainsString('Počáteční stavy', $detail['message'], $issue);
+            self::assertStringNotContainsString('V zákonné evidenci', $detail['message'], $issue);
+        }
+    }
+
+    /**
+     * Karta běhu nabízí hromadné „Doplnit výchozí údaje" jen u nálezů, které
+     * doplnění opravdu vyřeší. Pozná je podle sekce v prokliku; nález, který
+     * výchozí údaje nedoplní (zdravotní pojištění), sekci pro doplnění nenese.
+     */
+    public function testStatutoryEvidenceLinkNamesTheSectionWhichDefaultsCanFill(): void
+    {
+        $expected = [
+            'social_insurance:social_jurisdiction_evidence_missing:employee:7' => 'statutory.social_jurisdictions',
+            'income_tax:tax_residence_evidence_missing:employee:7' => 'statutory.tax_residences',
+            'income_tax:tax_declaration_evidence_missing:employee:7' => 'statutory.tax_declarations',
+            'social_insurance:working_pensioner_discount_evidence_unverified:employee:7' => 'statutory.social_discount_claims',
+        ];
+        foreach ($expected as $issue => $field) {
+            self::assertSame(
+                '/payroll/people?' . http_build_query(['person' => 7, 'panel' => 'statutory_evidence', 'field' => $field]),
+                PayrollRunIssueGuidance::describe($issue)['remediation_path'],
+                $issue,
+            );
+        }
+
+        self::assertSame(
+            '/payroll/people?person=7&panel=statutory_evidence',
+            PayrollRunIssueGuidance::describe('health_insurance:health_coverage_evidence_missing:employee:7')['remediation_path'],
+        );
+    }
+
+    /**
      * Assembler hlásí tentýž problém vztahu v každé ze tří domén. Uložené
      * řádky se lišily jen neuloženým prefixem domény — účetní viděla tři
      * stejné blokátory.

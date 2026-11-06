@@ -13,6 +13,7 @@ import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import MoneyS3Protocol from '@/components/migration/MoneyS3Protocol.vue'
 import MigrationDifferences from '@/components/migration/MigrationDifferences.vue'
+import MigrationNonprofitNotice from '@/components/migration/MigrationNonprofitNotice.vue'
 import { formatBytes } from '@/components/documents/docFormat'
 import { migrationYearLabel } from '@/utils/migrationYear'
 
@@ -350,11 +351,14 @@ watch(kind, () => {
   confirmed.value = false
 })
 // Zkouška nanečisto platí jen pro zvolené rozhodnutí o začátku vedení mezd a volbu skladu.
-watch([startDecision, keepStartConfirmed, stockEnabled, stockChoices, periodFrom, periodTo], () => {
+// Porovnává se obsah voleb: obnovení náhledu po doběhu zkoušky přiřadí volbu skladu znovu
+// jako nový objekt se stejnými hodnotami a to zkoušku zneplatnit nesmí.
+const dryRunOptionsKey = computed(() => JSON.stringify([startDecision.value, keepStartConfirmed.value, stockEnabled.value, stockChoices.value, periodFrom.value, periodTo.value]))
+watch(dryRunOptionsKey, () => {
   dryRunPassed.value = false
   clearDifferences()
   confirmed.value = false
-}, { deep: true })
+})
 
 function fileState(state: string): string {
   const key = `file_state.${state}`
@@ -454,6 +458,8 @@ const actions = computed<ActionItem[]>(() => {
       <h1 class="text-2xl font-semibold">{{ tt('title') }}</h1>
       <p class="mt-1 text-sm text-neutral-500">{{ tt('subtitle') }}</p>
     </div>
+
+    <MigrationNonprofitNotice :notice="upload?.nonprofit_notice" />
 
     <div class="rounded-lg border border-warning-500/30 bg-warning-50 px-4 py-3 text-sm text-warning-700" data-testid="pohoda-support-notice">
       <i18n-t :keypath="te(ownKey('support_notice')) ? ownKey('support_notice') : 'pohoda.support_notice'" tag="p">

@@ -3,6 +3,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
+import PayrollJmhzReturnBar from './PayrollJmhzReturnBar.vue'
 import {
   payrollApi,
   type PayrollEmployment,
@@ -46,6 +47,7 @@ import PayrollPersonPensionRequestsPanel from './PayrollPersonPensionRequestsPan
 import PayrollPersonStatutoryEvidencePanel from './PayrollPersonStatutoryEvidencePanel.vue'
 import PayrollPersonForeignPermitPanel from './PayrollPersonForeignPermitPanel.vue'
 import PersonDataGapBadge from './PersonDataGapBadge.vue'
+import DppAnnualHoursBadge from './DppAnnualHoursBadge.vue'
 import PersonDataGapSummary from './PersonDataGapSummary.vue'
 import { employmentCodeLabel, isValidPersonalNumber, personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import {
@@ -55,11 +57,18 @@ import {
 } from './payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
+import SortableTh from '@/components/ui/SortableTh.vue'
+import ColumnDragHandle from '@/components/ui/ColumnDragHandle.vue'
+import { useColumnDrag } from '@/composables/useColumnDrag'
+import { formatDate } from '@/composables/useFormat'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
+import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import DateInput from '@/components/ui/DateInput.vue'
+import PayrollDeclarationSignBulkDialog from '@/components/payroll/PayrollDeclarationSignBulkDialog.vue'
 import PayrollHealthInsurerBulkDialog from '@/components/payroll/PayrollHealthInsurerBulkDialog.vue'
 import PayrollStatutoryBulkDefaultsDialog from '@/components/payroll/PayrollStatutoryBulkDefaultsDialog.vue'
 import PayrollWorkplaceBulkFillDialog from '@/components/payroll/PayrollWorkplaceBulkFillDialog.vue'
+import PayrollBulkClosureDialog from '@/components/payroll/PayrollBulkClosureDialog.vue'
 import { payrollWorkingPeriod } from './payrollComponentsUi'
 import { providePersonCardSave } from './personCardSave'
 
@@ -120,8 +129,18 @@ const canCreatePerson = computed(() => auth.canWrite('payroll.person.write'))
 const statutoryBulkOpen = ref(false)
 const statutoryBulkEffectiveOn = `${payrollWorkingPeriod()}-01`
 const workplaceBulkOpen = ref(false)
+const bulkClosureOpen = ref(false)
+// Počet vztahů k ukončení na tlačítku; výpadek náhledu tlačítko neschová.
+const bulkClosureCount = ref<number | null>(null)
 // Po importu hlášení JMHZ (nenese pojišťovnu) sem vede proklik `?bulk=health_insurer`.
 const healthInsurerBulkOpen = ref(route.query.bulk === 'health_insurer')
+// Z hromadného doplnění evidence (i na této stránce) vede proklik `?bulk=declaration_signed`.
+const declarationSignBulkOpen = ref(canCreatePerson.value && route.query.bulk === 'declaration_signed')
+watch(() => route.query.bulk, (bulk) => {
+  if (bulk !== 'declaration_signed' || !canCreatePerson.value) return
+  statutoryBulkOpen.value = false
+  declarationSignBulkOpen.value = true
+})
 const canWriteEmployment = computed(() => auth.canWrite('payroll.employment.write'))
 const canQuickEditPerson = computed(() =>
   auth.canWrite('payroll.person.write')
@@ -149,6 +168,7 @@ const filterOptions = computed(() => [
   { value: 'all' as const, label: t('payroll.people.filters.all') },
   { value: 'needs_data' as const, label: t('payroll.people.filters.needs_data') },
   { value: 'blocking_data' as const, label: t('payroll.people.filters.blocking_data') },
+  { value: 'dpp_hours_limit' as const, label: t('payroll.people.filters.dpp_hours_limit') },
 ])
 const relationOptions = computed(() => relationTypes.map(type => ({
   value: type,
@@ -286,14 +306,72 @@ const selectedPerson = computed<PayrollPersonListItem | null>(
 )
 const editing = computed(() => expandedId.value !== null)
 
+/*
+ * Řadí SERVER (stránkuje, takže řazení v prohlížeči by seřadilo jen stránku).
+ * Klíče sloupců jsou zároveň klíče řazení v `PayrollPeopleRepository::LIST_SORTS`.
+ * Bez zvoleného řazení platí příjmení a jméno. Sloupec akcí není v seznamu:
+ * stojí vždy na konci a přesouvat ani skrývat ho nejde.
+ */
 const COLUMNS: ColumnDef[] = [
-  { key: 'person', labelKey: 'payroll.people.columns.person', required: true },
-  { key: 'status', labelKey: 'payroll.people.columns.status' },
-  { key: 'relations', labelKey: 'payroll.people.columns.relations' },
-  { key: 'count', labelKey: 'payroll.people.columns.count' },
-  { key: 'detail', labelKey: 'payroll.people.columns.detail', required: true },
+  { key: 'last_name', labelKey: 'payroll.people.columns.last_name', required: true, sortable: true },
+  { key: 'first_name', labelKey: 'payroll.people.columns.first_name', sortable: true },
+  { key: 'full_name', labelKey: 'payroll.people.columns.full_name', sortable: true, defaultHidden: true },
+  { key: 'personal_number', labelKey: 'payroll.people.columns.personal_number', sortable: true, defaultHidden: true },
+  { key: 'status', labelKey: 'payroll.people.columns.status', sortable: true },
+  { key: 'relations', labelKey: 'payroll.people.columns.relations', sortable: true },
+  { key: 'count', labelKey: 'payroll.people.columns.count', sortable: true },
+  { key: 'start_date', labelKey: 'payroll.people.columns.start_date', sortable: true, defaultHidden: true },
+  { key: 'end_date', labelKey: 'payroll.people.columns.end_date', sortable: true, defaultHidden: true },
+  { key: 'birth_date', labelKey: 'payroll.people.columns.birth_date', sortable: true, defaultHidden: true },
+  { key: 'position', labelKey: 'payroll.people.columns.position', sortable: true, defaultHidden: true },
+  // Kontakty jsou šifrované; sloupce existují jen pro toho, kdo smí citlivé
+  // údaje osoby číst, a server je dešifruje jen tehdy, když jsou zapnuté.
+  { key: 'email', labelKey: 'payroll.people.columns.email', defaultHidden: true, available: () => canReadSensitive.value },
+  { key: 'phone', labelKey: 'payroll.people.columns.phone', defaultHidden: true, available: () => canReadSensitive.value },
 ]
+const canReadSensitive = computed(() => auth.canRead('payroll.person.read_sensitive'))
+const NOT_SORTABLE_COLUMNS = ['email', 'phone']
+const RIGHT_ALIGNED_COLUMNS = ['count']
 const tbl = useTablePrefs('payroll-people', COLUMNS)
+const columnDrag = useColumnDrag(tbl)
+const visibleColumns = computed(() => tbl.orderedColumns.value.filter(column => tbl.isVisible(column.key)))
+/*
+ * Kontakty se dešifrují (a zapisují do auditu) jen se zapnutým sloupcem. Po jeho
+ * zapnutí je stránka musí načíst znovu, vypnutí nic nepotřebuje.
+ */
+const contactsShown = computed(() => tbl.isVisible('email') || tbl.isVisible('phone'))
+watch(contactsShown, (shown) => {
+  if (shown && tbl.ready.value) void load()
+})
+// Uložené řazení podle sloupce, který stránka už nemá, by server odmítl.
+const activeSort = computed(() => {
+  const sort = tbl.sort.value
+  return sort && COLUMNS.some(column => column.key === sort.key && column.sortable) ? sort : null
+})
+
+/*
+ * Osoba bez strukturovaného jména (starší záznam) má jen celé jméno. Do sloupce
+ * Příjmení jde pak celé, aby řádek nezůstal bez odkazu na kartu — server ji
+ * podle něj i řadí.
+ */
+function personLastName(person: PayrollPersonListItem): string {
+  const last = person.last_name?.trim() ?? ''
+  return last !== '' ? last : person.full_name
+}
+
+function personFirstName(person: PayrollPersonListItem): string {
+  return (person.last_name?.trim() ?? '') !== '' ? (person.first_name?.trim() ?? '') : ''
+}
+
+function onSortToggle(key: string) {
+  tbl.toggleSort(key)
+  reloadFromFirstPage()
+}
+
+function clearSort() {
+  tbl.clearSort()
+  reloadFromFirstPage()
+}
 
 /**
  * Hlavička bere přednostně načtený detail — je čerstvější než řádek seznamu.
@@ -432,6 +510,58 @@ async function removePerson() {
     deletingPerson.value = false
   }
 }
+
+// Hromadné úpravy se nedělají každý měsíc, proto jsou v „Další funkce". Skončené
+// dohody k ukončení jsou ale úkol, který čeká, a ten se schovávat nesmí.
+const peopleBulkActions = computed<ActionItem[]>(() => [
+  {
+    key: 'bulk-closure',
+    label: bulkClosureCount.value
+      ? t('payroll.bulk_closure.open_count', { count: bulkClosureCount.value })
+      : t('payroll.bulk_closure.open'),
+    icon: 'archive',
+    tier: bulkClosureCount.value ? 'secondary' : 'overflow',
+    variant: 'warning',
+    show: canWriteEmployment.value,
+    run: () => { bulkClosureOpen.value = true },
+  },
+  {
+    key: 'statutory-bulk',
+    label: t('payroll.people.statutory_bulk_action'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canCreatePerson.value,
+    run: () => { statutoryBulkOpen.value = true },
+  },
+  {
+    key: 'declaration-sign-bulk',
+    label: t('payroll.people.declaration_sign_bulk_action'),
+    icon: 'check',
+    tier: 'overflow',
+    variant: 'success',
+    show: canCreatePerson.value,
+    run: () => { declarationSignBulkOpen.value = true },
+  },
+  {
+    key: 'health-insurer-bulk',
+    label: t('payroll.health_insurer_bulk.open'),
+    icon: 'clipboardCheck',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canQuickEditPerson.value,
+    run: () => { healthInsurerBulkOpen.value = true },
+  },
+  {
+    key: 'workplace-bulk',
+    label: t('payroll.people.workplace_bulk_action'),
+    icon: 'pin',
+    tier: 'overflow',
+    variant: 'warning',
+    show: canWriteEmployment.value,
+    run: () => { workplaceBulkOpen.value = true },
+  },
+])
 
 const personActions = computed<ActionItem[]>(() => [
   {
@@ -710,6 +840,9 @@ async function load() {
       offset: offset.value,
       filter: peopleFilter.value,
       q: searchQuery.value.trim(),
+      sort_key: activeSort.value?.key,
+      sort_dir: activeSort.value?.dir,
+      include_contacts: contactsShown.value || undefined,
     })
     people.value = page.items
     total.value = page.total
@@ -1194,6 +1327,8 @@ const FOCUSABLE_PANELS = [
   'deferred_income',
   // Karta Skončení vztahu (srážky z odstupného podle § 299 odst. 4 o. s. ř.).
   'termination',
+  // Počáteční roční úhrny, na kartě hlavního pracovního vztahu.
+  'opening_balances',
 ] as const
 
 /** Sekce, které umí otevřít `PayrollPersonProfilePanel.focusSection()`. */
@@ -1221,12 +1356,14 @@ async function focusPanel(panel: string) {
   delete query.panel
   delete query.field
   await router.replace({ query })
-  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination'].includes(panel)) {
+  if (['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'opening_balances'].includes(panel)) {
     await nextTick()
     const cards = employmentCards.value
     const target = Number.isInteger(employmentId) && employmentId > 0
       ? cards.find(card => card.employmentId === employmentId)
-      : cards.length === 1 ? cards[0] : undefined
+      : panel === 'opening_balances'
+        ? cards.find(card => card.isPrimary)
+        : cards.length === 1 ? cards[0] : undefined
     await target?.focusSection(panel, field)
     return
   }
@@ -1366,20 +1503,42 @@ watch(() => [route.query.person, route.query.panel, route.query.new, route.query
  */
 const payrollStartPeriod = ref<string | null>(null)
 
+async function loadBulkClosureCount() {
+  if (!canWriteEmployment.value) return
+  try {
+    const preview = await payrollApi.bulkClosurePreview()
+    bulkClosureCount.value = preview.summary.expired + preview.summary.inactive - preview.summary.blocked
+  } catch {
+    bulkClosureCount.value = null
+  }
+}
+
+function onBulkClosureApplied() {
+  void load()
+  void loadBulkClosureCount()
+}
+
 onMounted(async () => {
+  // Začátek vedení mezd rozhoduje, jestli karta vztahu ukáže Počáteční stavy.
+  // Doskok na ně (`panel=opening_balances`) proto musí počkat, až je známý.
+  const startPeriod = payrollApi.capabilities()
+    .then(data => data.state.start_period)
+    .catch(() => null)
+  // Uložené řazení se čte z preferencí, takže první stránka na ně musí počkat.
+  await ensurePrefsLoaded()
   await load()
+  void loadBulkClosureCount()
   await openFromQuery()
+  payrollStartPeriod.value = await startPeriod
   const panel = Array.isArray(route.query.panel) ? route.query.panel[0] : route.query.panel
   if (typeof panel === 'string' && panel !== '') await focusPanel(panel)
   await openFromCreateCommand()
-  payrollStartPeriod.value = await payrollApi.capabilities()
-    .then(data => data.state.start_period)
-    .catch(() => null)
 })
 </script>
 
 <template>
   <div class="space-y-6">
+    <PayrollJmhzReturnBar />
     <!--
       Zakládání zaměstnance schová seznam stejně jako editace osoby.
       Formulář se sice kreslil nad seznamem, ale „Přidat zaměstnance" je
@@ -1606,7 +1765,7 @@ onMounted(async () => {
 
     <section v-if="!editing && !showEmployeeForm" class="rounded-xl border border-neutral-200 bg-surface p-3 shadow-sm sm:p-4">
       <div class="flex min-w-0 flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div class="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_14rem]">
+        <div class="grid min-w-0 flex-1 grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_14rem] lg:min-w-[30rem]" data-test="people-toolbar-filters">
           <label class="min-w-0 text-xs font-medium text-neutral-600">
             {{ t('payroll.people.search') }}
             <div class="relative mt-1">
@@ -1626,40 +1785,7 @@ onMounted(async () => {
             />
           </label>
         </div>
-        <div class="flex flex-wrap gap-2">
-          <button
-            v-if="canCreatePerson"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="statutory-bulk-open"
-            @click="statutoryBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
-            {{ t('payroll.people.statutory_bulk_action') }}
-          </button>
-          <button
-            v-if="canQuickEditPerson"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="health-insurer-bulk-open"
-            @click="healthInsurerBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.clipboardCheck" /></svg>
-            {{ t('payroll.health_insurer_bulk.open') }}
-          </button>
-          <button
-            v-if="canWriteEmployment"
-            type="button"
-            class="whitespace-nowrap"
-            :class="btnOutline('warning')"
-            data-test="workplace-bulk-open"
-            @click="workplaceBulkOpen = true"
-          >
-            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.pin" /></svg>
-            {{ t('payroll.people.workplace_bulk_action') }}
-          </button>
+        <div class="flex min-w-0 flex-wrap gap-2 lg:justify-end">
           <RouterLink
             :to="{ name: 'payroll-quick-inputs' }"
             class="whitespace-nowrap"
@@ -1669,6 +1795,7 @@ onMounted(async () => {
             <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.coin" /></svg>
             {{ t('payroll.people.quick_inputs') }}
           </RouterLink>
+          <ActionBar :actions="peopleBulkActions" :more-label="t('payroll.people.more_functions')" />
         </div>
       </div>
     </section>
@@ -1679,6 +1806,12 @@ onMounted(async () => {
       :employee-ids="null"
       period-editable
       @close="statutoryBulkOpen = false"
+      @applied="load"
+    />
+
+    <PayrollDeclarationSignBulkDialog
+      v-if="declarationSignBulkOpen"
+      @close="declarationSignBulkOpen = false"
       @applied="load"
     />
 
@@ -1695,6 +1828,12 @@ onMounted(async () => {
       :employment-ids="null"
       @close="workplaceBulkOpen = false"
       @applied="load"
+    />
+
+    <PayrollBulkClosureDialog
+      v-if="bulkClosureOpen"
+      @close="bulkClosureOpen = false"
+      @applied="onBulkClosureApplied"
     />
 
     <div v-if="editing && loadingDetailId !== null" class="h-24 animate-pulse rounded-lg bg-neutral-100" />
@@ -1749,6 +1888,11 @@ onMounted(async () => {
                 :counts="selectedSummary.data_gap_counts ?? null"
                 test-id="person-header-data-gap"
                 @open="gap => openDataGap(selectedSummary!.id, gap)"
+              />
+              <DppAnnualHoursBadge
+                v-if="selectedSummary?.dpp_annual_hours"
+                :hours="selectedSummary.dpp_annual_hours"
+                test-id="person-header-dpp-hours"
               />
               <span class="text-neutral-500" data-test="person-header-employments">
                 {{ t('payroll.people.header_employments', { count: selectedEmploymentCount }, selectedEmploymentCount) }}
@@ -2001,18 +2145,45 @@ onMounted(async () => {
       <template v-else>
         <div class="hidden md:block">
           <div class="flex flex-wrap items-center justify-end gap-2 border-b border-neutral-200 px-4 py-2">
-            <ColumnPicker class="hidden md:block" :ctrl="tbl" />
+            <ColumnPicker class="hidden md:block" :ctrl="tbl" reorderable />
             <DensityToggle class="hidden md:block" :ctrl="tbl" />
           </div>
           <div class="overflow-x-auto">
           <table v-column-labels="tbl" class="min-w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead>
               <tr class="text-left text-xs uppercase tracking-wide text-neutral-500">
-                <th v-if="tbl.isVisible('person')" class="px-4 py-3">{{ t('payroll.people.columns.person') }}</th>
-                <th v-if="tbl.isVisible('status')" class="px-4 py-3">{{ t('payroll.people.columns.status') }}</th>
-                <th v-if="tbl.isVisible('relations')" class="px-4 py-3">{{ t('payroll.people.columns.relations') }}</th>
-                <th v-if="tbl.isVisible('count')" class="px-4 py-3 text-right">{{ t('payroll.people.columns.count') }}</th>
-                <th v-if="tbl.isVisible('detail')" class="px-4 py-3"><span class="sr-only">{{ t('payroll.people.columns.detail') }}</span></th>
+                <template v-for="column in visibleColumns" :key="column.key">
+                <th
+                  v-if="NOT_SORTABLE_COLUMNS.includes(column.key)"
+                  scope="col"
+                  class="px-4 py-3 text-left text-xs font-medium uppercase tracking-wide text-neutral-500"
+                  v-bind="columnDrag.headerAttrs(column.key)"
+                ><ColumnDragHandle /> {{ t(column.labelKey) }}</th>
+                <SortableTh
+                  v-else
+                  v-bind="columnDrag.headerAttrs(column.key)"
+                  reorderable
+                  class="px-4 py-3"
+                  :label="t(column.labelKey)"
+                  :sort-key="column.key"
+                  :sort="activeSort"
+                  :align="RIGHT_ALIGNED_COLUMNS.includes(column.key) ? 'right' : 'left'"
+                  :data-test="`people-sort-${column.key}`"
+                  @toggle="onSortToggle"
+                />
+                </template>
+                <th class="px-4 py-3 text-right">
+                  <button
+                    v-if="activeSort"
+                    type="button"
+                    class="inline-flex h-6 w-6 items-center justify-center rounded text-neutral-500 hover:bg-neutral-200 hover:text-neutral-800"
+                    :title="t('common.reset_sort')"
+                    :aria-label="t('common.reset_sort')"
+                    data-test="people-sort-reset"
+                    @click.stop="clearSort"
+                  >×</button>
+                  <span v-else class="sr-only">{{ t('payroll.people.columns.detail') }}</span>
+                </th>
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
@@ -2029,7 +2200,8 @@ onMounted(async () => {
                   a tlačítek.
                 -->
                 <tr class="relative align-top transition-colors hover:bg-neutral-50">
-                  <td v-if="tbl.isVisible('person')" class="px-4 py-3">
+                  <template v-for="column in visibleColumns" :key="column.key">
+                  <td v-if="column.key === 'last_name'" class="px-4 py-3">
                     <RouterLink
                       :to="personLink(person)"
                       class="absolute inset-0 z-0"
@@ -2042,9 +2214,9 @@ onMounted(async () => {
                         :to="personLink(person)"
                         class="font-medium text-neutral-900 hover:underline"
                         :data-test="`person-name-link-${person.id}`"
-                      >{{ person.full_name }}</RouterLink>
+                      >{{ personLastName(person) }}</RouterLink>
                       <span
-                        v-if="personCodeLabel(person) !== ''"
+                        v-if="personCodeLabel(person) !== '' && !tbl.isVisible('personal_number')"
                         class="mt-0.5 block text-xs text-neutral-500"
                         :title="t('payroll.people.person_code')"
                         :data-test="`person-code-${person.id}`"
@@ -2058,7 +2230,20 @@ onMounted(async () => {
                       :data-test="`person-next-step-${person.id}`"
                     >{{ nextStepLabel(person) }}</p>
                   </td>
-                  <td v-if="tbl.isVisible('status')" class="px-4 py-3">
+                  <td v-else-if="column.key === 'first_name'" class="px-4 py-3 text-neutral-900" :data-test="`person-first-name-${person.id}`">{{ personFirstName(person) }}</td>
+                  <td v-else-if="column.key === 'full_name'" class="px-4 py-3 text-neutral-700">{{ person.full_name }}</td>
+                  <td v-else-if="column.key === 'personal_number'" class="px-4 py-3 whitespace-nowrap text-neutral-700">{{ person.employment_refs.map(item => employmentCodeLabel(item.code)).filter(code => code !== '').join(', ') }}</td>
+                  <td v-else-if="column.key === 'start_date'" class="px-4 py-3 whitespace-nowrap text-neutral-700">{{ person.start_date ? formatDate(person.start_date) : '' }}</td>
+                  <td v-else-if="column.key === 'end_date'" class="px-4 py-3 whitespace-nowrap text-neutral-700">{{ person.end_date ? formatDate(person.end_date) : '' }}</td>
+                  <td v-else-if="column.key === 'birth_date'" class="px-4 py-3 whitespace-nowrap text-neutral-700">{{ person.birth_date ? formatDate(person.birth_date) : '' }}</td>
+                  <td v-else-if="column.key === 'position'" class="px-4 py-3 text-neutral-700" :title="person.cz_isco_code ?? undefined">{{ person.position_label ?? person.cz_isco_code ?? '' }}</td>
+                  <td v-else-if="column.key === 'email'" class="relative z-10 px-4 py-3 text-neutral-700">
+                    <a v-if="person.contacts?.email" :href="`mailto:${person.contacts.email}`" class="hover:underline">{{ person.contacts.email }}</a>
+                  </td>
+                  <td v-else-if="column.key === 'phone'" class="relative z-10 px-4 py-3 whitespace-nowrap text-neutral-700">
+                    <a v-if="person.contacts?.phone" :href="`tel:${person.contacts.phone.replace(/\s+/g, '')}`" class="hover:underline">{{ person.contacts.phone }}</a>
+                  </td>
+                  <td v-else-if="column.key === 'status'" class="px-4 py-3">
                     <div class="flex flex-wrap gap-1.5">
                       <span class="rounded-full px-2 py-1 text-xs font-medium" :class="person.is_active ? 'bg-success-50 text-success-600' : 'bg-neutral-100 text-neutral-600'">{{ statusLabel(person.is_active) }}</span>
                       <!--
@@ -2073,10 +2258,17 @@ onMounted(async () => {
                         :test-id="`person-data-gap-${person.id}`"
                         @open="gap => openDataGap(person.id, gap)"
                       />
+                      <DppAnnualHoursBadge
+                        v-if="person.dpp_annual_hours"
+                        class="relative z-10"
+                        :hours="person.dpp_annual_hours"
+                        :test-id="`person-dpp-hours-${person.id}`"
+                      />
                     </div>
                   </td>
-                  <td v-if="tbl.isVisible('relations')" class="px-4 py-3 text-neutral-600">{{ person.relation_types.map(relationLabel).join(', ') }}</td>
-                  <td v-if="tbl.isVisible('count')" class="px-4 py-3 text-right text-neutral-700">{{ person.employment_count }}</td>
+                  <td v-else-if="column.key === 'relations'" class="px-4 py-3 text-neutral-600">{{ person.relation_types.map(relationLabel).join(', ') }}</td>
+                  <td v-else-if="column.key === 'count'" class="px-4 py-3 text-right text-neutral-700">{{ person.employment_count }}</td>
+                  </template>
                   <!--
                     Karta zůstává hlavní akcí; vedle ní jsou tři nejčastější
                     agendy jako ikona a zbytek pod „…". Ikony schválně: popisky
@@ -2085,7 +2277,7 @@ onMounted(async () => {
                     Popisek nese `aria-label` i tooltip, takže o něj nepřijde ani
                     čtečka, ani myš.
                   -->
-                  <td v-if="tbl.isVisible('detail')" class="relative z-10 px-4 py-3">
+                  <td class="relative z-10 px-4 py-3">
                     <div class="flex flex-wrap items-center justify-end gap-2">
                       <button :class="btnOutline(personNextGap(person) !== null ? 'warning' : 'neutral')" :aria-expanded="expandedId === person.id" :data-test="`edit-employee-${person.id}`" @click="toggleDetail(person)">
                         <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
@@ -2134,6 +2326,11 @@ onMounted(async () => {
                   :counts="person.data_gap_counts ?? null"
                   :test-id="`person-data-gap-mobile-${person.id}`"
                   @open="gap => openDataGap(person.id, gap)"
+                />
+                <DppAnnualHoursBadge
+                  v-if="person.dpp_annual_hours"
+                  :hours="person.dpp_annual_hours"
+                  :test-id="`person-dpp-hours-mobile-${person.id}`"
                 />
               </div>
             </div>

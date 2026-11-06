@@ -248,7 +248,8 @@ final class StorageUsageMeter
      * Adresáře záloh aplikace. Bereme OBA konfigurační klíče — historicky
      * `storage.backup_dir`, dnes `cron.backup.output_dir`. Instalace, která
      * má nastavený jen jeden z nich, by při výčtu jediného klíče měla zálohy
-     * započítané do kvóty.
+     * započítané do kvóty. Výchozí konfigurace míří oběma do téhož adresáře,
+     * proto se shodné cesty slučují: {@see measureBackups()} by je sečetl dvakrát.
      *
      * @return list<string>
      */
@@ -258,9 +259,11 @@ final class StorageUsageMeter
         foreach (['cron.backup.output_dir', 'storage.backup_dir'] as $key) {
             $value = $this->config->get($key, '');
             if (is_string($value) && trim($value) !== '') {
-                $dirs[] = self::absolute(trim($value));
+                $dir = self::absolute(trim($value));
+                $dirs[self::normalize($dir)] = $dir;
             }
         }
+        $dirs = array_values($dirs);
 
         // Fallback JEN když není vyplněný ani jeden klíč: default layout je
         // `${data_dir}/storage/backup`. Bez tohohle by se prázdná konfigurace

@@ -15,6 +15,7 @@ use MyInvoice\Service\Payroll\Document\AverageEarningsSnapshotBuilder;
 use MyInvoice\Service\Payroll\Document\EmploymentExitDocumentService;
 use MyInvoice\Service\Payroll\Document\EmploymentExitReadinessException;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\Security\PayrollEnforcementDisclosure;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -88,6 +89,15 @@ final class PayrollEmploymentExitDocumentAction
             ));
         }
 
+        // Podklady srážek z exekučního ledgeru patří agendě srážek, ne mzdovým
+        // dokumentům. Bez práva se vynechají a zápočtový list se ohlásí jako
+        // nedostupný; ostatní výstupní dokumenty zůstávají beze změny.
+        $readiness = PayrollEnforcementDisclosure::redactExitReadiness(
+            $readiness,
+            PayrollEnforcementDisclosure::canSeeEnforcement($request),
+            PayrollEnforcementDisclosure::canSeeInsolvency($request),
+        );
+
         return $this->privateJson($response, [
             'employment_id' => $employmentId,
             'readiness' => $readiness,
@@ -151,6 +161,20 @@ final class PayrollEmploymentExitDocumentAction
                 'validation_failed',
                 'Požadavek na výstupní dokument není platný.',
                 422,
+            ));
+        }
+
+        // Zápočtový list tiskne částky a pořadí pokračujících exekucí
+        // a insolvence. Kdo k nim nemá oprávnění, nesmí ho vystavit, jinak by
+        // se k týmž údajům dostal přes PDF.
+        if ($kind === 'employment-certificate'
+            && !$this->mayIssueEmploymentCertificate($request, $supplierId, $employmentId)
+        ) {
+            return $this->privateResponse(Json::error(
+                $response,
+                PayrollEnforcementDisclosure::DEDUCTION_PERMISSION_REQUIRED,
+                PayrollEnforcementDisclosure::DEDUCTION_PERMISSION_MESSAGE,
+                403,
             ));
         }
 
@@ -222,6 +246,30 @@ final class PayrollEmploymentExitDocumentAction
             $response,
             self::publicDocument($document),
             201,
+        );
+    }
+
+    private function mayIssueEmploymentCertificate(
+        Request $request,
+        int $supplierId,
+        int $employmentId,
+    ): bool {
+        $enforcement = PayrollEnforcementDisclosure::canSeeEnforcement($request);
+        $insolvency = PayrollEnforcementDisclosure::canSeeInsolvency($request);
+        if ($enforcement && $insolvency) {
+            return true;
+        }
+        try {
+            $readiness = $this->documents->readiness($supplierId, $employmentId);
+        } catch (\InvalidArgumentException) {
+            // Neplatný vztah odmítne samo generování svou vlastní chybou.
+            return true;
+        }
+
+        return !PayrollEnforcementDisclosure::hasRestrictedDeductions(
+            $readiness,
+            $enforcement,
+            $insolvency,
         );
     }
 

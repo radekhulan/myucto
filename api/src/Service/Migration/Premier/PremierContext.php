@@ -37,6 +37,14 @@ final class PremierContext
     /** @var array<int,int> FA_IN.INTER => purchase_invoices.id */
     public array $purchaseInvoices = [];
 
+    /**
+     * Úhrady vydaných faktur roku po řádcích deníku v Kč ({@see PremierDocuments::settlement()}),
+     * podle nich vznikají evidované platby ({@see DocumentLinker::recordIssuedPayments()}).
+     *
+     * @var array<int,list<array{inter:int,date:string,amount:float}>> invoices.id => řádky úhrad
+     */
+    public array $issuedPaymentRows = [];
+
     /** @var array<string,array{table:string,id:int}> klíč dokladu deníku ({@see PremierJournal::groups()}) => doklad s DPH mimo faktury */
     public array $vatDocuments = [];
 

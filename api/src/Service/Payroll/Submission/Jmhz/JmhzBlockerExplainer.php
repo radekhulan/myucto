@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Jmhz;
 
+use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+
 final class JmhzBlockerExplainer
 {
     /** Nálezy, u kterých účetní potřebuje vědět, KTERÁ pole hlášení se jich týkají. */
@@ -67,6 +69,10 @@ final class JmhzBlockerExplainer
         'jmhz_interaction_in13_unresolved' => 'Není potvrzen výskyt zvláštní právní skutečnosti zaměstnání.',
         'jmhz_interaction_in28_unresolved' => 'Není potvrzeno uplatnění podpory zaměstnávání osob se zdravotním postižením.',
         'jmhz_interaction_in30_unresolved' => 'Není potvrzeno, zda zaměstnanec vykonával práci v hlubinném hornictví.',
+        'jmhz_ordinary_evidence_ozp_wage_required' => 'U zaměstnance s podporou zaměstnávání OZP chybí datum úhrady mzdy včetně pojistného (10347) a údaj o výplatě v hotovosti (10348).',
+        'jmhz_ordinary_evidence_ozp_deduction_unclassified' => 'U dohody o srážce zaměstnance s podporou zaměstnávání OZP není rozhodnuto, zda je věřitelem zaměstnavatel a jak se srážka vykáže (10350 až 10353).',
+        'jmhz_ordinary_evidence_ozp_employer_not_protected' => 'Podpora zaměstnávání OZP se hlásí jen u zaměstnavatele uznaného na chráněném trhu práce; v registraci zaměstnavatele to uvedeno není.',
+        'jmhz_ozp_wage_primary_mismatch' => 'Podporu zaměstnávání OZP má jen vedlejší pracovní vztah osoby, výdělek OZP ale nese souhrn hlavního vztahu.',
         'jmhz_primary_employment_unresolved' => 'Není určen hlavní pracovněprávní vztah.',
         'jmhz_taxpayer_declaration_unresolved' => 'Není doloženo prohlášení poplatníka.',
         'jmhz_scenario1_advance_tax_missing' => 'Chybí výsledek zálohy na daň.',
@@ -106,6 +112,7 @@ final class JmhzBlockerExplainer
         'jmhz_annual_settlement_request_source_inconsistent' => 'Provedené roční zúčtování nemá souhlasnou uzamčenou žádost a evidenci ročních nároků.',
         'jmhz_annual_settlement_result_incomplete' => 'Výsledek ročního zúčtování nelze převést do celých korun JMHZ.',
         'jmhz_annual_settlement_child_details_unsupported' => 'Roční zúčtování obsahuje zvýhodnění na děti, ale snapshot zatím nenese povinné identifikační údaje JMHZ.',
+        'jmhz_annual_settlement_spouse_details_unsupported' => 'Roční zúčtování uplatňuje slevu na manžela, ale zmrazený podklad nenese úplné údaje manžela a dítěte pro JMHZ.',
         'jmhz_december_collective_agreement_source_missing' => 'Chybí roční údaj o typu kolektivní smlouvy pro prosincové hlášení.',
         'jmhz_december_ownership_form_source_missing' => 'Chybí roční údaj o formě vlastnictví a kontroly pro prosincové hlášení.',
         'jmhz_december_ozp_annual_source_missing' => 'Chybí roční evidence zaměstnávání osob se zdravotním postižením pro prosincové hlášení.',
@@ -234,6 +241,10 @@ final class JmhzBlockerExplainer
         'jmhz_interaction_in13_unresolved' => 'Otevřete Mzdová podání → JMHZ a potvrďte právní skutečnosti.',
         'jmhz_interaction_in28_unresolved' => 'Otevřete Mzdová podání → JMHZ a potvrďte právní skutečnosti.',
         'jmhz_interaction_in30_unresolved' => 'Otevřete Mzdová podání → JMHZ a potvrďte právní skutečnosti.',
+        'jmhz_ordinary_evidence_ozp_wage_required' => 'Otevřete Mzdová podání → JMHZ a u vztahu potvrďte výdělek OZP s datem úhrady mzdy včetně pojistného.',
+        'jmhz_ordinary_evidence_ozp_deduction_unclassified' => 'Otevřete Mzdy → Dohody o srážkách a u dohody uveďte, zda je věřitelem zaměstnavatel a jak se srážka vykáže v JMHZ; pak připravte hlášení znovu.',
+        'jmhz_ordinary_evidence_ozp_employer_not_protected' => 'Otevřete Nastavení mezd → Zaměstnavatel a zkontrolujte uznání na chráněném trhu práce, nebo u vztahu vypněte podporu zaměstnávání OZP.',
+        'jmhz_ozp_wage_primary_mismatch' => 'Otevřete Mzdy → Zaměstnanci a podporu zaměstnávání OZP nastavte u hlavního pracovního vztahu osoby.',
         'jmhz_scenario1_pvpoj_unavailable' => 'Otevřete Mzdy → Mzdové běhy a zkontrolujte výpočet pojistného.',
         'jmhz_scenario1_pvpoj_source_mismatch' => 'Obnovte přehled a zkontrolujte mzdovou účtárnu pracovních vztahů.',
         'jmhz_annual_request_source_missing' => 'Otevřete Mzdy → Roční zúčtování a evidujte výslovně požádáno nebo nepožádáno.',
@@ -274,8 +285,43 @@ final class JmhzBlockerExplainer
             . 'schvalte a hlášení připravte znovu.',
     ];
 
-    /** @param list<JmhzScenario1Blocker> $blockers */
-    public static function describe(array $blockers): string
+    /** Kolik jmen se u jednoho nálezu vypíše, než zbytek nahradí „a další N". */
+    private const MAX_NAMED = 10;
+
+    /**
+     * Totéž co {@see describe()}, jen s konkrétními jmény dotčených osob
+     * a vztahů. Hláška „Dotčeno: 1 zaměstnanec" bez jména posílala účetní
+     * procházet ručně stovky brigádníků, aby našla toho jednoho.
+     *
+     * @param list<JmhzScenario1Blocker> $blockers
+     */
+    public static function describeNamed(
+        array $blockers,
+        PayrollPeopleRepository $people,
+        int $supplierId,
+    ): string {
+        $ids = ['employment' => [], 'person' => []];
+        foreach ($blockers as $blocker) {
+            if ($blocker->entityId === null) {
+                continue;
+            }
+            $type = $blocker->entityType === 'employee' ? 'person' : $blocker->entityType;
+            if (isset($ids[$type])) {
+                $ids[$type][] = $blocker->entityId;
+            }
+        }
+
+        return self::describe($blockers, [
+            'employment' => $people->employmentLabels($supplierId, $ids['employment']),
+            'person' => $people->personLabels($supplierId, $ids['person']),
+        ]);
+    }
+
+    /**
+     * @param list<JmhzScenario1Blocker> $blockers
+     * @param array<string,array<int,string>> $labels popisky podle druhu entity a id
+     */
+    public static function describe(array $blockers, array $labels = []): string
     {
         if ($blockers === []) {
             return 'Důvod blokace nebyl uveden. Obnovte test JMHZ a zkuste jej znovu.';
@@ -308,7 +354,7 @@ final class JmhzBlockerExplainer
                 : '';
             $descriptions[] = $reason . ' '
                 . $fields
-                . self::affected($group['entities'])
+                . self::affected($group['entities'], $labels)
                 . ' ' . $action;
         }
 
@@ -361,12 +407,29 @@ final class JmhzBlockerExplainer
         };
     }
 
-    /** @param array<string,array<string,true>> $entitiesByType */
-    private static function affected(array $entitiesByType): string
+    /**
+     * @param array<string,array<string,true>> $entitiesByType
+     * @param array<string,array<int,string>> $labels
+     */
+    private static function affected(array $entitiesByType, array $labels = []): string
     {
         $parts = [];
         foreach ($entitiesByType as $entityType => $entities) {
-            $parts[] = self::counted((string) $entityType, count($entities));
+            $type = $entityType === 'employee' ? 'person' : (string) $entityType;
+            $names = [];
+            foreach (array_keys($entities) as $key) {
+                $name = ctype_digit((string) $key) ? ($labels[$type][(int) $key] ?? null) : null;
+                if ($name !== null && $name !== '') {
+                    $names[] = $name;
+                }
+            }
+            $named = '';
+            if ($names !== []) {
+                $rest = count($names) - self::MAX_NAMED;
+                $named = ' (' . implode(', ', array_slice($names, 0, self::MAX_NAMED))
+                    . ($rest > 0 ? " a další {$rest}" : '') . ')';
+            }
+            $parts[] = self::counted((string) $entityType, count($entities)) . $named;
         }
 
         return 'Dotčeno: ' . implode(', ', $parts) . '.';

@@ -16,6 +16,7 @@ import { downloadApiFile } from '@/utils/downloadFile'
 import DateInput from '@/components/ui/DateInput.vue'
 import PendingApprovalVatNotice from '@/components/reports/PendingApprovalVatNotice.vue'
 import VatBookSectionActions from '@/components/reports/VatBookSectionActions.vue'
+import DphCrossCheckDocumentLink from '@/components/reports/DphCrossCheckDocumentLink.vue'
 
 const { t, locale } = useI18n()
 const router = useRouter()
@@ -510,7 +511,7 @@ onMounted(() => { void initialize() })
           </div>
           <ul v-if="f.documents.length > 0" class="mt-1 list-disc list-inside">
             <li v-for="d in pagedCrossCheckDocuments(f)" :key="d.invoice_id + d.source">
-              {{ d.doc_number ?? ('#' + d.invoice_id) }} - {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
+              <DphCrossCheckDocumentLink :document="d" /> - {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
             </li>
           </ul>
           <PaginationBar embedded :page="crossCheckPage(f)" :per-page="documentPageSize" :total="f.documents.length" @update:page="setCrossCheckPage(f, $event)" />
@@ -524,7 +525,7 @@ onMounted(() => { void initialize() })
             <div class="mt-0.5">{{ f.note }}</div>
             <ul class="mt-1 list-disc list-inside">
               <li v-for="d in pagedCrossCheckDocuments(f)" :key="d.invoice_id + d.source">
-                {{ d.doc_number ?? ('#' + d.invoice_id) }} - {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
+                <DphCrossCheckDocumentLink :document="d" /> - {{ formatCrossAmount(d.declared) }} vs {{ formatCrossAmount(d.counter) }}<template v-if="d.reason"> — <span :title="d.reason">{{ reasonText(d) }}</span></template>
               </li>
             </ul>
             <PaginationBar embedded :page="crossCheckPage(f)" :per-page="documentPageSize" :total="f.documents.length" @update:page="setCrossCheckPage(f, $event)" />
@@ -534,7 +535,7 @@ onMounted(() => { void initialize() })
             <div class="mt-0.5">{{ findingNote(f) }}</div>
             <ul v-if="f.documents.length > 0" class="mt-1 list-disc list-inside">
               <li v-for="d in pagedCrossCheckDocuments(f)" :key="d.invoice_id + d.source">
-                {{ d.doc_number ?? ('#' + d.invoice_id) }}
+                <DphCrossCheckDocumentLink :document="d" />
               </li>
             </ul>
             <PaginationBar embedded :page="crossCheckPage(f)" :per-page="documentPageSize" :total="f.documents.length" @update:page="setCrossCheckPage(f, $event)" />

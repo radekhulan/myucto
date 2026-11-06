@@ -43,6 +43,13 @@ rekonciliace](49_Archiv_podani_a_rekonciliace.md).
 > [!WARNING]
 > Výpočty jsou pomůckou pro poplatníka a účetní. Sazby, minima a limity se každý rok mění. Před podáním hodnoty ověřte a případně konzultujte s daňovým poradcem. Vygenerované XML se ověřuje proti oficiálnímu XSD schématu finanční správy a archivuje.
 
+DPPO pro účetní rámec 504 vychází z potvrzeného právního profilu a daňového
+posouzení konkrétního účetního období. Aplikace samostatně ukazuje dostupnost
+výpočtu, finalizace, XML a podání. Období začínající v roce 2026 lze v rozsahu
+ověřených pravidel vypočítat, dostupný formulář DPPDP9 05.01.01 však jeho
+finalizaci a podání neumožňuje. Historická období s rámcem 500 zůstávají
+dostupná i po změně současného rámce firmy. Rozhoduje rámec příslušného období.
+
 ## 43.3 Krok za krokem: sestavení a podání přiznání
 
 1. Otevřete `Daně → Daň z příjmů`.
@@ -267,12 +274,25 @@ U ř. 20, 30, 109 až 112 a 140 se text položky přenese i do zvláštní pří
 #### Daňové ztráty (§ 34)
 
 Na kartě **Úpravy a odpočty** je přehled **Daňové ztráty (§ 34)**: každá ztráta z minulých let
-(rok vzniku, stanovená výše, kolik už bylo uplatněno, zbývající zůstatek a **rok expirace** =
+(rok vzniku, evidovaná výše, kolik už bylo uplatněno, zbývající zůstatek a **rok expirace** =
 rok vzniku + 5). Ztráta vzniká **automaticky** při finalizaci přiznání se záporným základem
 (FO i PO) a v následujících **5 obdobích** ji lze uplatnit. Systém nabídne **návrh uplatnění
 (FIFO** - od nejstarší ztráty) tlačítkem **Uplatnit návrh**; uplatnění se eviduje k roku
 uplatnění (při vrácení přiznání do rozpracovaného stavu se automaticky uvolní). Poplatník
 uplatňující ztrátu přikládá k přiznání **samostatnou přílohu podle § 34 odst. 1**.
+
+Finalizace ověřuje, že lze celý vypočtený odpočet přiřadit k dostupným evidovaným
+ztrátám. Pokud evidence nestačí nebo nelze ověřit vlastníka dosavadního uplatnění,
+přiznání zůstane rozpracované a archiv ani evidence ztrát se nezmění. Opravte výši
+odpočtu nebo doplňte průkazné podklady. Uvolňuje se jen uplatnění nahrazovaného
+účinného přiznání; práce s nižší variantou nemění uplatnění vyšší finální varianty.
+
+Přesná alokace u DPPO podporuje doložený řetězec kalendářních zdaňovacích období.
+Pokud podklady obsahují hospodářské, zkrácené nebo neúplně doložené období, nelze
+přiznání s odpočtem ztráty finalizovat. Přiznání bez odpočtu ztráty tato kontrola
+neblokuje. Počáteční ztrátu přebíranou pouze rokem zadávejte touto cestou jen pro
+kalendářní zdaňovací období. U DPFO není pro kalendářní období vyžadováno založení
+podvojného účetnictví.
 
 ### 43.11.4 Náhled přiznání
 
@@ -486,7 +506,7 @@ v `Nastavení → Daně a účetnictví`, část **Přiznání k dani z příjm�
 | Pole | K čemu je |
 |---|---|
 | Typ poplatníka (§ 17 ZDP) | Kód z tiskopisu DPPO. Aplikace umí sestavit přiznání jen pro typ **1 (ostatní)**. Dokud typ nepotvrdíte, staví se přiznání jako pro typ 1. |
-| Účetní vyhláška závěrky | Podle které vyhlášky sestavujete rozvahu a výsledovku. Aplikace umí jen **500/2002 Sb.** pro podnikatele. |
+| Účetní vyhláška závěrky | V podvojném účetnictví se odvozuje z účinného účetního rámce, v daňové evidenci se zadává ručně. DPPO aplikace zpracuje jen pro vyhlášku **500/2002 Sb.**. |
 | Stav poplatníka + rozhodný den | Běžný / v likvidaci / v insolvenci / po fúzi nebo přeměně. |
 | Veřejně prospěšný poplatník (§ 17a) | Spolek, nadace, ústav, církev, veřejná vysoká škola. |
 | Investiční pobídka (§ 35a/§ 35b) | Nositel příslibu investiční pobídky. |
@@ -746,7 +766,14 @@ odlišný od sražené daně. Přečtěte si je před odesláním.
 
 Formulář zatím neumí víc odvodů sražené daně v jednom oznámení, byť je tiskopis
 připouští, a nepracuje s řádky 27a a 27b (příjem navýšený o povinné pojistné).
-Nevytváří textovou přílohu ani zástupce; takový případ dokončete v EPO.
+Nevytváří textovou přílohu; takový případ dokončete v EPO.
+
+**Zástupce.** Je-li ke dni vytvoření XML v evidenci zastoupení platný zástupce
+(`Nastavení → Daně a účetnictví`, část **Zastoupení a podepisující osoba**), vyplní se
+jako podepisující osoba do obou písemností, stejně jako u přiznání DPH a daně z příjmů.
+Oznámení ani hlášení nemají pole "podává daňový poradce", uvede se jen zástupce
+a jeho kód. Lhůtu prodlužují jen kódy 4b a 4c; u ostatních kódů, například obecného
+zmocněnce 4a, aplikace uloží k podání varování.
 
 ### 43.11.19 Rozsah a co aplikace vědomě nepodporuje
 
@@ -776,8 +803,7 @@ ještě před podáním.
 <!-- cols: 34 66 -->
 | Případ | Jak se projeví |
 |---|---|
-| Investiční fond, investiční nebo penzijní společnost, banka, pojišťovna | Přiznání se nevydá. Mají vlastní typ poplatníka a účtují podle vyhlášky 501/502/503, kdežto aplikace umí jen vyhlášku 500. |
-| Veřejně prospěšný poplatník (§ 17a) | Přiznání se nevydá. Jiné dělení činností, jiný základ daně a vyhláška 504. |
+| Investiční fond, investiční nebo penzijní společnost, banka, pojišťovna | Přiznání se nevydá. Zvláštní režimy a vyhlášky 501/502/503 nejsou podporované. |
 | Daňový nerezident, stálá provozovna | Přiznání se nevydá při typu poplatníka 2. Sídlo mimo ČR samo o sobě nerezidenta nedělá (rozhoduje místo vedení podle § 17 odst. 3 ZDP), proto je samotné zahraniční sídlo jen upozorněním. |
 | Likvidace, insolvence, fúze nebo přeměna | Přiznání se nevydá. Mění typ přiznání i zdaňovací období; hláška vám řekne, který typ přiznání úřad čeká. |
 | Investiční pobídky (§ 35a/§ 35b) | Přiznání se nevydá. Podmínky se sledují roky zpětně mimo účetnictví. |
@@ -788,6 +814,121 @@ ještě před podáním.
 | Zahraniční příjmy se zápočtem (§ 38f, Příloha č. 3) - OSVČ | Přiznání se nevydá. Evidence příjmů a daní po státech se nevede. Samostatný základ daně podle § 16a bez zapnutého příznaku vyvolá aspoň upozornění. |
 | Fotovoltaika (§ 30b) a účetní odpisy majetku mimo zákonnou definici (§ 24 odst. 2 písm. v) | Upozornění u výroby elektřiny. Evidence majetku ty režimy nerozlišuje, příslušné řádky tabulky B zůstanou prázdné - doplňte je v EPO. |
 | Zvláštní příloha k ř. 62, Příloha A k ř. 40 | Slovní popis, ne dopočet. Aplikace na ně upozorňuje, text napíšete v EPO. |
+
+### 43.11.20 Právní profil organizace v režimu 504
+
+V nabídce Účetnictví otevřete **DPPO neziskové organizace** a vyberte účetní období.
+Právní profil obsahuje výslovně zvolené postavení poplatníka, druh organizace a doložené
+rozhodné skutečnosti. Oprávněný uživatel jej může potvrdit; předchozí potvrzení zůstávají
+v historii. Změna podkladů vyžaduje nové potvrzení profilu a příslušného daňového posouzení.
+
+Výpočet vyžaduje podvojné účetnictví a rámec 504 v celém skutečném období,
+potvrzený právní profil a aktuální potvrzené daňové posouzení. Podporovaný
+interval musí celý ležet uvnitř pravidel pro roky 2024 až 2026. Snížení
+základu a související úsporu upravujte podle doloženého právního titulu;
+uložení změny vyžaduje oprávnění k zápisu výkazů.
+
+Obrazovka rozlišuje **Výpočet**, **Finalizaci**, **Export XML** a **Podání**.
+U nedostupné operace ukáže konkrétní důvod a připnutou verzi formuláře.
+Nedostupnost formuláře nebrání samostatně podporovanému výpočtu. Převzetí
+výpočtu neautorizuje podání. Finalizace vytváří neměnný důkaz podkladů,
+daňových ztrát, výkazů a XML. Export a odeslání znovu kontrolují příslušné
+podmínky; před odesláním musí odpovídat také aktuální finální podklady.
+
+Načtení obrazovky podklady DPPO nesestavuje. Připravenost výpočtu ověříte
+tlačítkem **Ověřit připravenost výpočtu**; teprve potom obrazovka ukáže zjištění
+a nabídne převzetí do přiznání.
+
+Finalizace, export XML a podání DPPO 504 jsou dostupné až po **akceptaci výpočtu**.
+Akceptaci zapíná pouze správce firmy v sekci **Akceptace výpočtu DPPO 504**:
+výslovně potvrdí, že výpočet ověřil, a uvede odkaz na provedené ověření (například
+protokol porovnání s nezávislým výpočtem). Výchozí stav je vypnutý. Akceptace platí
+pro konkrétní verzi pravidel a formuláře; po jejich změně je potřeba ji potvrdit znovu.
+Správce ji může kdykoli odvolat, záznamy akceptací zůstávají v historii.
+
+Příloha daňových ztrát používá doložená kalendářní období, přesné částky
+v celých Kč a stejný plán uplatnění jako evidence ztrát. Respektuje také
+podporované zpětné uplatnění a jeho limity. Historický záznam ztráty
+bez průkazného období nelze automaticky použít v této příloze. Hospodářský
+rok nebo zkrácené období s přílohou ztrát vyžaduje samostatné zpracování.
+
+Přehled daňových úspor zobrazuje doložené uložené záznamy podle oprávnění uživatele.
+Právní profily a interní podklady úspor jsou přístupné pouze v přihlášeném webovém rozhraní.
+
+#### Použití daňové úspory v následujícím období
+
+Daňová úspora vznikne finalizací přiznání, které uplatní snížení základu daně podle
+§ 20 odst. 7. Úsporu použijete v bezprostředně následujícím účetním období v sekci
+**Použití daňové úspory podle § 20** na stejné obrazovce:
+
+1. Zvolte zdrojovou úsporu. Obrazovka ukáže její výši a zbývající částku.
+2. Vyberte zaúčtovaný náklad následujícího období. Nabídka obsahuje jen náklady, které
+   aktuální potvrzené daňové posouzení tohoto období vede jako způsobilé. Posouzení
+   může být v obou formátech, nabídku i dostupnou částku ověřuje server.
+3. Zadejte použitou částku a doložený účel a stiskněte **Zkontrolovat použití úspory**.
+4. V kontrole před potvrzením zaškrtněte, že jste uvedené skutečnosti ověřili, a použití
+   potvrďte.
+
+Použití lze později zrušit stejným postupem přes **Zkontrolovat zrušení použití**
+s uvedením důvodu; původní záznam zůstává v historii. Dokud použití trvá, náklad, na
+který navazuje, nelze změnit ani stornovat.
+
+DPPO následujícího období převezme evidenci použití automaticky. Je-li úspora použita
+celá, k základu daně se nic nepřičítá. Nepoužitou část aplikace přičte k základu daně
+v poměru nepoužité úspory k celé úspoře: například při snížení 100 000 Kč, úspoře
+21 000 Kč a použití 10 500 Kč přičte 50 000 Kč.
+
+Pracovní plocha pro posouzení neziskové organizace načítá podklady po stránkách. Nejprve
+zobrazí pouze souhrn zdrojů a potvrzenou historii. Koncept otevřete výslovně po volbě
+právního profilu a jeho důkazu; teprve potom procházíte účetní řádky, rozhodnutí,
+činnosti a vazby použitých prostředků. Další stránka se načte jen po stisknutí tlačítka,
+takže ani dlouhé účetní období nestahuje celý rok do prohlížeče.
+
+Každé uložení posune revizi konceptu. Staré stránkovací odkazy a starý náhled tím
+pozbudou platnost. Náhled slouží ke kontrole rozhodnutí, výsledku, pokrytí a doloženého
+použití prostředků. Potvrzení výsledek náhledu slepě nepřebírá: znovu načte aktuální
+účetní podklady, ověří poslední potvrzené posouzení a až poté vytvoří neměnný záznam.
+Pokud po odeslání není kvůli přerušení spojení zřejmý výsledek, obrazovka nabídne
+opakování přesně stejného požadavku bez vzniku dvojí revize.
+
+Rozpracovaný koncept se při dalším otevření obrazovky načte automaticky. Každý
+uživatel má pro účetní období nejvýše jeden vlastní koncept.
+
+Potvrzenou historii lze opět procházet po stránkách. Pokud mezitím vznikne nová
+revize, obrazovka historii načte znovu od začátku. U každé revize otevřete její
+neměnné zdroje a výsledkové části, stáhnete souhrn v PDF nebo XLSX, případně úplný
+proudový NDJSON export. Souhrn obsahuje přechod od účetního výsledku k výsledku
+posouzení; úplné podklady jsou jen v NDJSON exportu.
+
+Aktuální potvrzené posouzení může oprávněný uživatel **odvolat**. Uvede důvod
+a potvrdí zaškrtnutím u tlačítka. Odvolání vytvoří novou revizi a původní potvrzení
+zůstane v historii. Odvolat nelze posouzení, na jehož zdroje financování navazuje
+potvrzené čerpání v pozdějším období.
+
+Revize uložená ve starším formátu je označena **Starší formát, vyžaduje převod**.
+Oprávněný uživatel ji převede tlačítkem **Převést do nového formátu**. Převod
+zachová číslo revize i původní uložená data, výsledek znovu přepočítá a uloží jen
+tehdy, když se s původním výsledkem shoduje. Samotné zobrazení žádný převod ani jiný
+zápis nespouští.
+
+DPPO 504 přebírá aktuální potvrzenou revizi v obou formátech. Pokud se po potvrzení
+změnily účetní podklady období, výpočet DPPO posouzení odmítne a je potřeba je potvrdit znovu.
+Výpočet, finalizace i XML DPPO navazujícího období a kontrola posouzení v roční uzávěrce
+fungují i tehdy, když jsou předchozí období posouzená v novém formátu. Starším
+formátem ale navazující období posoudit nelze: aplikace takové posouzení odmítne
+a vyzve k potvrzení v novém formátu.
+
+U SVJ jsou doložené příspěvky vlastníků na správu domu a pozemku a úhrady služeb
+vedeny odděleně jako příjmy mimo předmět daně. Toto zařazení nelze změnit ani ručním
+posouzením historického období. Původ příspěvků musí navazovat na skutečný předpis
+nebo na úplné převzetí záloh s doloženým účelem, vlastníky a účetní návazností.
+Samotný zůstatek účtu dlouhodobých záloh není daňovým podkladem.
+
+Celý doložený náklad správy je daňově neuznatelný, i když byla čerpána pouze část záloh
+nebo bylo čerpání stornováno. Náklad související také s vlastním zdanitelným příjmem SVJ
+musí být předem průkazně rozdělen na samostatné účelové řádky. Nejasné rozdělení aplikace
+odmítne; zbývající částku nelze určit podle výše nevyčerpaných záloh. Úroky z bankovního
+účtu, přijaté sankce a příjmy vlastníků ze společných částí se posuzují samostatně.
 
 ## 43.12 Související kapitoly
 

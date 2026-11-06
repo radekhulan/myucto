@@ -9,6 +9,9 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImporter;
 use MyInvoice\Service\Migration\StereoNx\StereoNxImportMap;
 use MyInvoice\Service\Migration\StereoNx\StereoNxSourcePlan;
+use MyInvoice\Service\Migration\StereoNx\StereoNxAccountingDocuments;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Report\VatLedgerService;
 use MyInvoice\Tests\Fixtures\StereoNx\SyntheticStereoNxTables;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -251,6 +254,92 @@ final class StereoNxAccountingDocumentsWriteTest extends TestCase
         $this->importer->writeAccountingDocuments($plan, $this->supplierId, $this->userId);
     }
 
+    public function testMissingIssuedItemsAreReconstructedFromRevenuePostingsWithoutChangingVatOrSourceIdentity(): void
+    {
+        $tables = SyntheticStereoNxTables::tables();
+        $tables['Svfp'] = [];
+        $tables['SPFH'] = $tables['Spfp'] = [];
+        $source = StereoNxSourcePlan::fromTables($tables, SyntheticStereoNxTables::identity(), true, true);
+        $source['source_company_index'] = 1;
+        self::assertSame('vat_recap', $source['issued'][0]['origin']);
+        self::assertCount(1, $source['issued'][0]['items']);
+        $journal = ['accounting_plan' => ['entries' => []], 'account_mapping' => ['accounts' => []]];
+        foreach ([['602', 6000], ['604', 4000], ['343.200', 2100]] as $index => [$account, $amount]) {
+            $journal['accounting_plan']['entries'][] = [
+                'source_key' => json_encode(['VF', 'VF', '1', '1', (string) $index], JSON_THROW_ON_ERROR),
+                'date' => '2025-03-15', 'debit' => '311', 'credit' => $account,
+                'target_debit' => '311', 'target_credit' => $account,
+                'amount_cents' => $amount, 'is_opening' => false, 'is_red_storno' => false,
+            ];
+        }
+        $mapped = StereoNxAccountingDocuments::withAccountMapping([
+            'records' => ['issued' => $source['issued'], 'purchases' => []], 'warnings' => [],
+        ], $journal);
+        self::assertSame($source['issued'][0]['items'], $mapped['records']['issued'][0]['items']);
+        self::assertCount(2, $mapped['records']['issued'][0]['target_items'] ?? [],
+            'Jedinou souhrnnou položku musí nahradit doložené výnosové řádky 602 a 604.');
+        self::assertContains('document_items_reconstructed', array_column($mapped['warnings'], 'code'));
+        self::assertNotContains('document_item_account_ambiguous', array_column($mapped['warnings'], 'code'));
+        $sourceHash = new \ReflectionMethod(StereoNxImporter::class, 'sourceHash');
+        self::assertSame($sourceHash->invoke(null, $source['issued'][0]),
+            $sourceHash->invoke(null, $mapped['records']['issued'][0]));
+        $mappedSource = [...$source, 'issued' => $mapped['records']['issued']];
+        $this->importer->writeAccountingPartners($source['clients'], $source['identity'], 1, $this->supplierId);
+        $first = $this->importer->writeAccountingDocuments($mappedSource, $this->supplierId, $this->userId);
+        self::assertSame(1, $first['counts']['issued']);
+        $pdo = $this->db->pdo();
+        $invoice = $pdo->prepare('SELECT id, status, total_without_vat, total_vat, total_with_vat
+            FROM invoices WHERE supplier_id=?');
+        $invoice->execute([$this->supplierId]);
+        $invoice = $invoice->fetch(\PDO::FETCH_ASSOC);
+        $invoiceId = (int) $invoice['id'];
+        self::assertSame('draft', $invoice['status'], 'Účetní rekonstrukce nenahrazuje kontrolu původních obchodních položek.');
+        self::assertSame(['100.00', '21.00', '121.00'],
+            [$invoice['total_without_vat'], $invoice['total_vat'], $invoice['total_with_vat']]);
+        $items = $pdo->prepare('SELECT revenue_account_code, total_without_vat, total_vat, total_with_vat
+            FROM invoice_items WHERE invoice_id=? ORDER BY revenue_account_code');
+        $items->execute([$invoiceId]);
+        self::assertSame([
+            ['revenue_account_code' => '602', 'total_without_vat' => '60.00', 'total_vat' => '12.60', 'total_with_vat' => '72.60'],
+            ['revenue_account_code' => '604', 'total_without_vat' => '40.00', 'total_vat' => '8.40', 'total_with_vat' => '48.40'],
+        ], $items->fetchAll(\PDO::FETCH_ASSOC));
+        $storedHash = $pdo->prepare("SELECT source_hash FROM stereo_nx_import_map
+            WHERE supplier_id=? AND kind='issued' AND source_key=?");
+        $storedHash->execute([$this->supplierId, $source['issued'][0]['source_key']]);
+        self::assertSame($sourceHash->invoke(null, $source['issued'][0]), $storedHash->fetchColumn());
+
+        foreach ([$mappedSource, $source] as $repeatSource) {
+            $repeat = $this->importer->writeAccountingDocuments($repeatSource, $this->supplierId, $this->userId);
+            self::assertSame(0, $repeat['counts']['issued']);
+        }
+        self::assertSame(1, $this->scalar('SELECT COUNT(*) FROM invoices WHERE supplier_id=?'));
+        self::assertSame(2, $this->scalar('SELECT COUNT(*) FROM invoice_items ii
+            JOIN invoices i ON i.id=ii.invoice_id WHERE i.supplier_id=?'));
+        self::assertSame(0, $this->scalar('SELECT COUNT(*) FROM journal_entries WHERE supplier_id=?'));
+
+        // Rekonstrukce účtů není schválením chybějících obchodních položek; kontrolu
+        // syntetického konceptu tu provede uživatel před nativním zaúčtováním.
+        $pdo->prepare("UPDATE invoices SET status='sent' WHERE id=? AND supplier_id=?")
+            ->execute([$invoiceId, $this->supplierId]);
+        $this->setVatPayerAt($pdo, $this->supplierId, '1900-01-01', true);
+        $ledger = $this->vatLedger->documentRows($this->supplierId, 'sale', $invoiceId, '2025-03-01', '2025-03-31');
+        self::assertNotEmpty($ledger);
+        self::assertSame(100.0, array_sum(array_column($ledger, 'base_czk')));
+        self::assertSame(21.0, array_sum(array_column($ledger, 'vat_czk')));
+        $container = Bootstrap::buildApp()->getContainer();
+        $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $posting = $container->get(PostingService::class);
+        $native = $posting->buildFromInvoice($this->supplierId, $invoiceId);
+        self::assertSame(['602' => 60.0, '604' => 40.0], $this->revenueAmounts($native));
+        $pdo->prepare("UPDATE invoice_items SET unit_price_without_vat=total_without_vat*2,
+            total_without_vat=total_without_vat*2, total_vat=total_vat*2, total_with_vat=total_with_vat*2
+            WHERE invoice_id=?")->execute([$invoiceId]);
+        $pdo->prepare("UPDATE invoices SET total_without_vat=200, total_vat=42, total_with_vat=242,
+            tax_date='2025-03-16' WHERE id=? AND supplier_id=?")->execute([$invoiceId, $this->supplierId]);
+        self::assertSame(['602' => 120.0, '604' => 80.0],
+            $this->revenueAmounts($posting->buildFromInvoice($this->supplierId, $invoiceId)));
+    }
+
     public function testMissingDocumentCurrencyGivesActionableConfigurationError(): void
     {
         $tables = SyntheticStereoNxTables::tables();
@@ -304,5 +393,19 @@ final class StereoNxAccountingDocumentsWriteTest extends TestCase
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$this->supplierId]);
         return (int) $stmt->fetchColumn();
+    }
+
+    /** @param list<array<string,mixed>> $lines @return array<string,float> */
+    private function revenueAmounts(array $lines): array
+    {
+        $amounts = [];
+        foreach ($lines as $line) {
+            if (in_array($line['account_code'], ['602', '604'], true)) {
+                self::assertSame('credit', $line['side']);
+                $amounts[$line['account_code']] = ($amounts[$line['account_code']] ?? 0.0) + (float) $line['amount'];
+            }
+        }
+        ksort($amounts);
+        return $amounts;
     }
 }

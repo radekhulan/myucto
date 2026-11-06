@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Absence\AutomaticLeaveEntitlementService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -29,7 +28,7 @@ final class AutomaticLeaveEntitlementPredecessorTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         foreach (['payroll_absences', 'payroll_leave_ledger', 'payroll_module_state', 'payroll_time_months'] as $table) {
             if (!$this->db->hasTable($table)) {

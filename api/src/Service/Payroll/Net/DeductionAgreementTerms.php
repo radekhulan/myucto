@@ -54,6 +54,40 @@ final readonly class DeductionAgreementTerms
     public const LEGAL_BASES = ['agreement', 'zp_147_1_c', 'zp_147_1_d', 'zp_147_1_e'];
 
     /**
+     * Atributy měsíčního hlášení JMHZ pro srážky ve prospěch zaměstnavatele
+     * u zaměstnance s podporou zaměstnávání OZP (IN28, IN24). Pokyny MPSV k MH
+     * 1.4.14, kap. 2.4.15:
+     *
+     *  - `10350` srážky k uspokojení plnění zaměstnavatele podle OZ (dohoda
+     *    podle § 2045 OZ; příklad zaměstnanecká zápůjčka, splátky zálohy nad
+     *    nárok; nikdy výkon rozhodnutí);
+     *  - `10351` srážky k uhrazení škody (§ 250 a násl. ZP, jen dohodou);
+     *  - `10352` srážky na závodní stravování podle § 236 ZP (ne stravenkový
+     *    paušál);
+     *  - `10353` srážky k uspokojení jiného závazku vůči zaměstnavateli podle
+     *    § 146 písm. b) ZP (benefity, „splátka půjčky").
+     *
+     * Zápůjčka stojí v pokynech u 10350 i u 10353, takže zařazení se z titulu
+     * srážky neodvozuje, ukládá ho účetní u dohody ({@see self::defaultJmhzTarget()}
+     * je jen návrh do formuláře).
+     */
+    public const JMHZ_TARGETS = ['10350', '10351', '10352', '10353'];
+
+    /**
+     * Návrh zařazení podle titulu srážky; rozhoduje uložená hodnota.
+     */
+    public static function defaultJmhzTarget(string $deductionKind): ?string
+    {
+        return match ($deductionKind) {
+            'advance' => '10350',
+            'damage' => '10351',
+            'meal' => '10352',
+            'contribution', 'other' => '10353',
+            default => null,
+        };
+    }
+
+    /**
      * Pořadí titulu při shodném dni zahájení / doručení: výčet § 147 odst. 1
      * ZP, dohoda nakonec.
      */
@@ -141,6 +175,18 @@ final readonly class DeductionAgreementTerms
          * dohody ponechá uloženou hodnotu.
          */
         public ?int $takenOverWithheldMinor = null,
+        /**
+         * Je věřitelem srážky zaměstnavatel (JMHZ 10349)? `null` = nerozhodnuto.
+         * Srážka ze zákona (§ 147 odst. 1 ZP) ho nemá: do 10350 až 10353 nepatří.
+         */
+        public ?bool $creditorIsEmployer = null,
+        /** Atribut JMHZ srážky ve prospěch zaměstnavatele (10350 až 10353). */
+        public ?string $jmhzTarget = null,
+        /**
+         * Nesl požadavek zařazení pro JMHZ? Bez něj úprava dohody ponechá
+         * uložené hodnoty (starší klienti a importy je neposílají).
+         */
+        public bool $jmhzClassificationProvided = false,
     ) {}
 
     /**
@@ -242,6 +288,11 @@ final readonly class DeductionAgreementTerms
                 );
             }
         }
+        [$creditorIsEmployer, $jmhzTarget, $classificationProvided] = self::jmhzClassification(
+            $body,
+            $legalBasis,
+            $current,
+        );
 
         return new self(
             $reference,
@@ -259,7 +310,70 @@ final readonly class DeductionAgreementTerms
             $deliveredOn,
             $legalBasis,
             $takenOver,
+            $creditorIsEmployer,
+            $jmhzTarget,
+            $classificationProvided,
         );
+    }
+
+    /**
+     * Věřitel a zařazení srážky pro JMHZ (10349 až 10353).
+     *
+     * Srážka ze zákona podle § 147 odst. 1 písm. c) až e) ZP se do 10350 až
+     * 10353 nehlásí: datový slovník 1.4.1.6 vede 10353 jako srážky „podle § 146
+     * písm. b) zákoníku práce", tedy na základě dohody o srážkách, a 10350 až
+     * 10352 popisují pokyny MPSV k MH 1.4.14 (kap. 2.4.15) jako dohodu podle OZ,
+     * náhradu škody dohodou a stravování podle § 236 ZP. Zákonné srážky jsou
+     * § 146 písm. a), pokyny je u 10349 uvádějí jen jako výčet druhů srážek.
+     *
+     * @param array<string,mixed> $body
+     * @return array{?bool,?string,bool}
+     */
+    private static function jmhzClassification(array $body, string $legalBasis, ?self $current): array
+    {
+        $provided = array_key_exists('creditor_is_employer', $body)
+            || array_key_exists('jmhz_target', $body);
+        if (!$provided) {
+            if (self::isStatutory($legalBasis)) {
+                return [null, null, true];
+            }
+
+            return [$current?->creditorIsEmployer, $current?->jmhzTarget, false];
+        }
+        $creditor = $body['creditor_is_employer'] ?? null;
+        if ($creditor !== null && !is_bool($creditor)) {
+            throw new \InvalidArgumentException(self::label('creditor_is_employer') . ' musí být Ano, nebo Ne.');
+        }
+        $target = $body['jmhz_target'] ?? null;
+        if ($target === '') {
+            $target = null;
+        }
+        if ($target !== null && (!is_string($target) || !in_array($target, self::JMHZ_TARGETS, true))) {
+            throw new \InvalidArgumentException(self::label('jmhz_target') . ' musí být 10350, 10351, 10352, nebo 10353.');
+        }
+        if (self::isStatutory($legalBasis)) {
+            if ($creditor !== null || $target !== null) {
+                throw new \InvalidArgumentException(
+                    'Srážka ze zákona (§ 147 odst. 1 zákoníku práce) se v JMHZ mezi srážky'
+                    . ' ve prospěch zaměstnavatele (10350 až 10353) nehlásí, věřitele ani'
+                    . ' zařazení u ní nevyplňujte.',
+                );
+            }
+
+            return [null, null, true];
+        }
+        if ($creditor === true && $target === null) {
+            throw new \InvalidArgumentException(
+                'U srážky ve prospěch zaměstnavatele vyberte, jak se vykáže v JMHZ (10350 až 10353).',
+            );
+        }
+        if ($creditor !== true && $target !== null) {
+            throw new \InvalidArgumentException(
+                'Zařazení pro JMHZ (10350 až 10353) patří jen ke srážce ve prospěch zaměstnavatele.',
+            );
+        }
+
+        return [$creditor, $target, true];
     }
 
     public static function percentageAmount(int $baseMinorUnits, int $basisPoints): int
@@ -296,6 +410,8 @@ final readonly class DeductionAgreementTerms
         'valid_to' => 'Účinnost do',
         'delivered_on' => 'Doručeno plátci mzdy / zahájení srážek',
         'legal_basis' => 'Právní titul srážky',
+        'creditor_is_employer' => 'Věřitelem je zaměstnavatel',
+        'jmhz_target' => 'Vykázat v JMHZ jako',
         'recipient_reference' => 'Příjemce',
         'note' => 'Poznámka',
     ];

@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Premier;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PremierImportRepository;
+use MyInvoice\Service\Migration\Shared\PartnerCountry;
 use MyInvoice\Service\Migration\Shared\PartnerIdentityMatcher;
 use PDO;
 
@@ -167,10 +168,9 @@ final class PartnerImporter
         if (preg_match('/^[A-Z]{2}$/', $cardIso) === 1) {
             return $cardIso;
         }
-        $vat = PartnerIdentityMatcher::vatId($dic);
-        if ($vat !== '') {
-            $prefix = substr($vat, 0, 2);
-            return $prefix === 'EL' ? 'GR' : $prefix;
+        $fromVat = PartnerCountry::fromVatId(PartnerIdentityMatcher::vatId($dic));
+        if ($fromVat !== null) {
+            return $fromVat;
         }
         $name = mb_strtolower(trim($name));
         if ($name === '') {

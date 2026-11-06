@@ -134,6 +134,24 @@ final class AiCredentialsBulkApplierTest extends TestCase
         self::assertSame('anthropic', $this->column($this->free, 'ai_provider'));
     }
 
+    /** ID workspace patří ke klíči: jde do cílových firem s ním a starší hodnota cíle nepřežije. */
+    public function testWorkspaceIdTravelsWithTheKey(): void
+    {
+        $this->anthropic->updateWorkspaceId($this->source, 'wrkspc_01Synthetic');
+        $this->anthropic->updateWorkspaceId($this->configured, 'wrkspc_01Stale');
+        self::assertSame('different', $this->applier->uniformConfiguration([$this->source, $this->configured])['status']);
+
+        $this->applier->apply($this->request(), $this->source, 'anthropic', false);
+
+        self::assertSame('wrkspc_01Synthetic', $this->anthropic->getCredentials($this->free)['workspace_id'] ?? null);
+        self::assertSame('wrkspc_01Synthetic', $this->anthropic->getCredentials($this->configured)['workspace_id'] ?? null);
+        self::assertSame('same', $this->applier->uniformConfiguration([$this->source, $this->free, $this->configured])['status']);
+
+        $this->anthropic->updateWorkspaceId($this->source, '');
+        $this->applier->apply($this->request(), $this->source, 'anthropic', false);
+        self::assertNull($this->column($this->configured, 'anthropic_workspace_id'));
+    }
+
     public function testLockedCustomDomainCannotFanOutEvenForSuperadmin(): void
     {
         $domain = new TenantDomainContext(TenantDomainContext::CUSTOM, 'synthetic.example.invalid', 'https://synthetic.example.invalid', 1, $this->source, 'all', 'active');

@@ -24,6 +24,11 @@ final class OperationalSettingsAccess
         return RequestAuthorization::allows($request, 'settings.branding', AccessLevel::WRITE);
     }
 
+    public static function invoiceDefaults(Request $request): bool
+    {
+        return RequestAuthorization::allows($request, 'settings.invoice_defaults', AccessLevel::WRITE);
+    }
+
     public static function paymentQr(Request $request): bool
     {
         return RequestAuthorization::allows($request, 'settings.payment_qr', AccessLevel::WRITE);

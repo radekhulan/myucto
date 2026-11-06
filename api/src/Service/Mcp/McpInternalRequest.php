@@ -74,7 +74,8 @@ final class McpInternalRequest
             $request = $request->withParsedBody($fields)->withUploadedFiles($files);
         }
 
-        return $request->withAttribute('mcp.internal', true);
+        return $request->withAttribute('mcp.internal', true)
+            ->withAttribute('mcp.resource', is_string($input['mcpResource'] ?? null) ? $input['mcpResource'] : null);
     }
 
     /**

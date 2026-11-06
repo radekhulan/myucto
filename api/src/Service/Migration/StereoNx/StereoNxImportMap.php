@@ -23,6 +23,17 @@ final class StereoNxImportMap
         return $row === false ? null : ['target_id' => (int) $row['target_id'], 'source_hash' => (string) $row['source_hash']];
     }
 
+    /** @return array<string,string> Původní účty daného převodu → skutečné cílové kódy. */
+    public function accountCodes(int $supplierId, string $ico, int $companyIndex): array
+    {
+        $stmt = $this->db->pdo()->prepare("SELECT m.source_key, a.account_code
+            FROM stereo_nx_import_map m
+            JOIN chart_of_accounts a ON a.supplier_id = m.supplier_id AND a.id = m.target_id
+            WHERE m.supplier_id = ? AND m.source_ico = ? AND m.source_company_index = ? AND m.kind = 'accounting_account'");
+        $stmt->execute([$supplierId, $ico, $companyIndex]);
+        return $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+    }
+
     public function put(int $supplierId, string $ico, int $companyIndex, string $kind, string $sourceKey, string $hash, int $targetId): void
     {
         self::validateKey($kind, $sourceKey);

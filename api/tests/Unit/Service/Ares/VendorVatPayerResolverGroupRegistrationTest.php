@@ -76,6 +76,7 @@ final class VendorVatPayerResolverGroupRegistrationTest extends TestCase
         $config = $this->baseConfig();
 
         $aresConn = $this->connectionWithCachedRow($config, [
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
             'found' => true,
             'data'  => [
                 'company_name' => 'Test Group Member s.r.o.',
@@ -118,6 +119,7 @@ final class VendorVatPayerResolverGroupRegistrationTest extends TestCase
         $config = $this->baseConfig();
 
         $aresConn = $this->connectionWithCachedRow($config, [
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
             'found' => true,
             'data'  => [
                 'company_name' => 'Test Real Nonpayer s.r.o.',
@@ -149,6 +151,7 @@ final class VendorVatPayerResolverGroupRegistrationTest extends TestCase
         $config = $this->baseConfig();
 
         $aresConn = $this->connectionWithCachedRow($config, [
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
             'found' => true,
             'data'  => [
                 'company_name' => 'Test Active Payer s.r.o.',
@@ -182,6 +185,7 @@ final class VendorVatPayerResolverGroupRegistrationTest extends TestCase
         $config = $this->baseConfig();
 
         $aresConn = $this->connectionWithCachedRow($config, [
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
             'found' => true,
             'data'  => [
                 'company_name' => 'Test Group Member s.r.o.',
@@ -221,6 +225,7 @@ final class VendorVatPayerResolverGroupRegistrationTest extends TestCase
         $config = $this->baseConfig();
 
         $aresConn = $this->connectionWithCachedRow($config, [
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
             'found' => true,
             'data'  => [
                 'company_name' => 'Test Real Nonpayer s.r.o.',
@@ -251,6 +256,7 @@ final class VendorVatPayerResolverGroupRegistrationTest extends TestCase
         $config = $this->baseConfig(); // crpdph.endpoint = '' → CRPDPH vrátí source='error'
 
         $aresConn = $this->connectionWithCachedRow($config, [
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
             'found' => true,
             'data'  => [
                 'company_name' => 'Test Group Member s.r.o.',

@@ -26,12 +26,14 @@ use MyInvoice\Service\Payroll\PayrollPersonStatutoryEvidenceValidator;
  *
  * - `early_pension_from` je začátek předčasného starobního důchodu, který
  *   s intervalem sdílí aspoň den,
- * - `full_pension_paid_from` je první CELÝ měsíc starobního důchodu (druh 1 bez
- *   příznaku předčasnosti), který s intervalem sdílí aspoň den. Důchod přiznaný
- *   uprostřed měsíce se počítá až od následujícího měsíce: v měsíci přiznání
- *   pojištěnec první dny důchod nepobírá, a vynechat třídu ELDP někomu, kdo
- *   důchod nepobírá, by znamenalo ztrátu doby pojištění. Opačný omyl (ELDP
- *   u důchodce) metodika nepovažuje za chybu.
+ * - `full_pension_paid_from` je měsíc, od něhož náleží výplata starobního
+ *   důchodu (druh 1 bez příznaku předčasnosti), který s intervalem sdílí aspoň
+ *   den; u důchodu přiznaného uprostřed měsíce je to měsíc přiznání. List se
+ *   vede „do měsíce, od něhož pojištěnci náleží výplata starobního důchodu
+ *   v plné výši" (Všeobecné zásady ELDP, Hlavní zásady; Metodická pomůcka
+ *   ELDP, příklad 8a) a tento měsíc ještě nese, takže doba pojištění před
+ *   přiznáním se neztratí. Sleva na pojistném (§ 7d zákona č. 589/1992 Sb.)
+ *   začíná až prvním celým měsícem výplaty, tedy měsícem, který list už nevede.
  *
  * Invalidní a cizí důchody (2, 8, A, B, C) kód D nezakládají; evidují se kvůli
  * registraci a dávkám nemocenského pojištění.
@@ -166,7 +168,7 @@ final class PayrollPensionStatus
                 $early = $early === null ? $pension['effective_from'] : min($early, $pension['effective_from']);
                 continue;
             }
-            $month = self::firstWholeMonth($pension['effective_from']);
+            $month = substr($pension['effective_from'], 0, 7);
             $full = $full === null ? $month : min($full, $month);
         }
 
@@ -175,6 +177,42 @@ final class PayrollPensionStatus
             'early_pension_from' => $early,
             'full_pension_paid_from' => $full,
         ];
+    }
+
+    /**
+     * Vede se za měsíc ještě údaje ELDP, nebo už je osoba poživatelem
+     * starobního důchodu v plné výši, za kterého se nevedou?
+     *
+     * ELDP se vyplňuje „pouze do měsíce, od něhož náleží výplata starobního
+     * důchodu v plné výši" včetně tohoto měsíce (Metodická pomůcka ELDP,
+     * příklad 8a; odpověď MPSV/ČSSZ v diskusi JMHZ #363 ze 16. 4. 2026).
+     * Platí to stejně pro důchod přiznaný od prvního dne měsíce jako uprostřed
+     * měsíce: první měsíc bez ELDP je až následující. Jediné pravidlo pro
+     * roční evidenční list, měsíční hlášení JMHZ i odečtené doby.
+     *
+     * @param ?string $fullPensionPaidFrom měsíc RRRR-MM (`full_pension_paid_from`)
+     * @param string $periodStart libovolný den vykazovaného měsíce RRRR-MM-DD
+     */
+    public static function eldpKeptInMonth(?string $fullPensionPaidFrom, string $periodStart): bool
+    {
+        return $fullPensionPaidFrom === null || substr($periodStart, 0, 7) <= $fullPensionPaidFrom;
+    }
+
+    /**
+     * První den prvního měsíce, za který se ELDP kvůli starobnímu důchodu
+     * v plné výši už nevede ({@see eldpKeptInMonth()}); `null` bez důchodu.
+     *
+     * @param ?string $fullPensionPaidFrom měsíc RRRR-MM
+     */
+    public static function eldpNotKeptFrom(?string $fullPensionPaidFrom): ?string
+    {
+        if ($fullPensionPaidFrom === null) {
+            return null;
+        }
+
+        return (new DateTimeImmutable($fullPensionPaidFrom . '-01'))
+            ->modify('first day of next month')
+            ->format('Y-m-d');
     }
 
     /** @param array{age:?array<string,mixed>,pensions:list<array<string,mixed>>} $evidence */
@@ -204,16 +242,6 @@ final class PayrollPensionStatus
         }
 
         return $mismatched;
-    }
-
-    /** `RRRR-MM` prvního celého měsíce od daného dne. */
-    private static function firstWholeMonth(string $date): string
-    {
-        $day = new DateTimeImmutable($date);
-
-        return $day->format('d') === '01'
-            ? $day->format('Y-m')
-            : $day->modify('first day of next month')->format('Y-m');
     }
 
     private static function assertReference(mixed $value): void

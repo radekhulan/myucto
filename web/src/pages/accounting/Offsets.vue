@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   accountingApi,
@@ -14,9 +14,12 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
+import { useRoute } from 'vue-router'
+import { parseOffsetDocs, parsePartnerId } from '@/components/accounting/offsetLink'
 
 const { t } = useI18n()
 const toast = useToast()
+const route = useRoute()
 
 const agreements = ref<OffsetAgreement[]>([])
 const partners = ref<OffsetPartner[]>([])
@@ -158,7 +161,43 @@ function statusClass(s: string) {
   return 'text-warning-600'
 }
 
-onMounted(loadList)
+/**
+ * Předvyplnění z odkazu (saldokonto, dialog Vyrovnat, detail faktury):
+ * `?partner_id=&docs=invoice:123:1000,purchase_invoice:456`. Po načtení otevřených
+ * položek partnera označí uvedené doklady a nastaví částky (nejvýš zbytek dokladu,
+ * bez částky celý zbytek); zbytek výběru doplní uživatel.
+ */
+async function applyPrefill() {
+  const partnerId = parsePartnerId(route.query.partner_id)
+  if (partnerId === null) return
+  await startBuild()
+  form.partner_id = partnerId
+  await onPartnerChange()
+  if (!open.value) return
+  if (!partners.value.some(p => p.partner_id === partnerId)) {
+    partners.value = [...partners.value, { partner_id: partnerId, partner_name: open.value.partner_name }]
+  }
+  const items = [...open.value.receivables, ...open.value.payables]
+  let missing = 0
+  for (const doc of parseOffsetDocs(route.query.docs)) {
+    const it = items.find(i => i.doc_type === doc.doc_type && i.doc_id === doc.doc_id)
+    if (!it) {
+      missing++
+      continue
+    }
+    sel[key(it)] = { selected: true, amount: doc.amount === null ? it.remaining : Math.min(doc.amount, it.remaining) }
+  }
+  if (missing > 0) toast.error(t('accounting.offsets.prefill_missing', { count: missing }))
+}
+
+onMounted(async () => {
+  await loadList()
+  await applyPrefill()
+})
+// Nový odkaz na už otevřenou stránku (jiný doklad) předvyplní výběr znovu.
+watch(() => [route.query.partner_id, route.query.docs], () => {
+  if (route.name === 'accounting-offsets') void applyPrefill()
+})
 </script>
 
 <template>

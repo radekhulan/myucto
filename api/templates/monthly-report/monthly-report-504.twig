@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Měsíční přehled</title>
+<style>
+    /* mPDF kvirky: single class names, žádné nested selectory, padding v <td> ne v <div> */
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-title { font-size: 16pt; font-weight: bold; }
+    .header-meta { font-size: 8.5pt; color: #555; margin-top: 1mm; }
+    .entity-info { text-align: right; font-size: 9pt; }
+    .section-title { font-size: 11pt; font-weight: bold; margin: 5mm 0 2mm; border-bottom: 0.5pt solid #999; padding-bottom: 1mm; }
+    table.statement { width: 100%; border-collapse: collapse; margin-top: 1mm; margin-bottom: 3mm; }
+    table.statement thead th {
+        font-size: 7pt; font-weight: normal; color: #555; text-align: right;
+        padding: 1mm 1.5mm; border-bottom: 0.3pt solid #ccc; vertical-align: bottom;
+    }
+    table.statement thead th.thl { text-align: left; }
+    table.statement tbody td { padding: 0.8mm 1.5mm; font-size: 8pt; border-bottom: 0.2pt solid #eee; vertical-align: top; }
+    table.statement tbody tr.row-strong td { font-weight: bold; border-bottom: 0.3pt solid #ccc; }
+    .num { text-align: right; font-family: geistmono, montserrat, monospace; white-space: nowrap; }
+    .checks { font-size: 8pt; margin-top: 1mm; }
+    .checks div { margin-top: 0.5mm; }
+    .kpi-table { width: 100%; border-collapse: collapse; margin-top: 1mm; margin-bottom: 3mm; }
+    .kpi-table td { width: 33%; vertical-align: top; padding: 2mm; background: #F7F5FC; border-radius: 2mm; }
+    .kpi-label { font-size: 7.5pt; color: #7A748C; text-transform: uppercase; letter-spacing: 0.3pt; }
+    .kpi-value { font-size: 13pt; font-weight: bold; font-family: geistmono, montserrat, monospace; margin-top: 1mm; }
+    .kpi-sub { font-size: 7.5pt; color: #555; margin-top: 0.5mm; }
+    .empty-hint { font-size: 8pt; color: #888; font-style: italic; padding: 2mm 0; }
+    .comment-box { background: #FDF6E9; border-left: 2pt solid #E8A547; padding: 3mm; font-size: 8.5pt; margin-top: 3mm; }
+    .disclaimer { text-align: center; font-size: 7.5pt; color: #888; margin-top: 8mm; font-style: italic; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:55%;">
+            <div class="header-title">Měsíční přehled</div>
+            <div class="header-meta">{{ period.month|cz_month }} {{ period.year }} · ke dni {{ period.as_of|cz_date }}</div>
+            <div class="header-meta">Vygenerováno {{ generated_at }}</div>
+        </td>
+        <td style="width:45%;" class="entity-info">
+            <strong>{{ entity.name }}</strong><br>
+            {% if entity.ico %}IČO: {{ entity.ico }}<br>{% endif %}
+            {{ entity.address }}
+        </td>
+    </tr>
+</table>
+
+<p>Vyhláška č. 504/2002 Sb. - průběžný účetní přehled v Kč.</p>
+<p>Účetní období {{ income_statement_ytd.period.starts_on|cz_date }} - {{ income_statement_ytd.period.ends_on|cz_date }}.</p>
+{% for section in [{title: 'Výsledovka za měsíc', rows: income_statement_month}, {title: 'Výsledovka od začátku účetního období', rows: income_statement_ytd.rows}] %}
+<div class="section-title">{{ section.title }}</div>
+<table class="statement">
+<thead><tr><th class="thl">Položka</th><th>Hlavní činnost</th><th>Hospodářská činnost</th><th>Celkem</th></tr></thead>
+<tbody>{% for row in section.rows %}<tr>
+<td>{{ row.display_code }} {{ row.label }}</td>
+<td class="num">{{ row.main|cz_money }}</td><td class="num">{{ row.economic|cz_money }}</td><td class="num">{{ row.total|cz_money }}</td>
+</tr>{% if row.components is defined %}{% for component in row.components %}<tr><td>{{ component.label }}</td><td class="num">{{ component.main|cz_money }}</td><td class="num">{{ component.economic|cz_money }}</td><td class="num">{{ component.total|cz_money }}</td></tr>{% endfor %}{% endif %}{% endfor %}</tbody>
+</table>
+{% endfor %}
+{% if income_statement_ytd.deferred_tax_method is defined %}
+{% set method = income_statement_ytd.deferred_tax_method %}<p>{{ method.disclosure }}<br>Rozhodnutí: {{ method.reference }}<br>Věrný obraz: {{ method.faithful_image_reason }}<br>Důvod vlastní metody: {{ method.standard_departure_reason }}<br>Důvod vykázání: {{ method.presentation_reason }}</p>
+{% endif %}
+<div class="checks">Výsledek hospodaření od začátku účetního období: <strong>{{ income_statement_ytd.checks.profit_current|cz_money }} Kč</strong></div>
+<pagebreak>
+<div class="section-title">Průběžné zůstatky rozvahových účtů k {{ period.as_of|cz_date }}</div>
+<p>Pracovní přehled, nikoli závěrkový formulář. Kreditní zůstatky jsou záporné.</p>
+{% if balance_sheet.checks.unresolved_pending_result != 0 %}<p>Výsledek ve schvalovacím řízení není vypořádán: <strong>{{ balance_sheet.checks.unresolved_pending_result|cz_money }} Kč</strong>.</p>{% endif %}
+<table class="statement"><thead><tr><th class="thl">Účet</th><th class="thl">Název</th><th>Počáteční zůstatek MD</th><th>Konečný zůstatek MD</th></tr></thead>
+<tbody>{% for row in balance_sheet.balances %}<tr><td>{{ row.code }}</td><td>{{ row.name }}</td><td class="num">{{ row.opening_debit_balance|cz_money }}</td><td class="num">{{ row.closing_debit_balance|cz_money }}</td></tr>{% endfor %}</tbody></table>
+<p>Rozdíl odsouhlasení rozvahových zůstatků a výsledku hospodaření: <strong>{{ balance_sheet.checks.reconciliation_difference|cz_money }} Kč</strong>.</p>
+<pagebreak>
+
+<div class="section-title">Top pohledávky po splatnosti (311)</div>
+{% if receivables_overdue|length %}
+<table class="statement">
+    <thead><tr><th class="thl">Partner</th><th class="thl">Doklad</th><th>Splatnost</th><th>Dní po splatnosti</th><th>Zbývá uhradit</th></tr></thead>
+    <tbody>
+        {% for it in receivables_overdue %}
+            <tr>
+                <td>{{ it.partner_name }}</td>
+                <td>{{ it.doc_no }}</td>
+                <td class="num">{{ it.due_date|cz_date }}</td>
+                <td class="num">{{ it.days_overdue }}</td>
+                <td class="num">{{ it.remaining_czk|cz_money }} Kč</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}<div class="empty-hint">Žádné pohledávky po splatnosti.</div>{% endif %}
+
+<div class="section-title">Top závazky po splatnosti (321)</div>
+{% if payables_overdue|length %}
+<table class="statement">
+    <thead><tr><th class="thl">Partner</th><th class="thl">Doklad</th><th>Splatnost</th><th>Dní po splatnosti</th><th>Zbývá uhradit</th></tr></thead>
+    <tbody>
+        {% for it in payables_overdue %}
+            <tr>
+                <td>{{ it.partner_name }}</td>
+                <td>{{ it.doc_no }}</td>
+                <td class="num">{{ it.due_date|cz_date }}</td>
+                <td class="num">{{ it.days_overdue }}</td>
+                <td class="num">{{ it.remaining_czk|cz_money }} Kč</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}<div class="empty-hint">Žádné závazky po splatnosti.</div>{% endif %}
+
+<pagebreak>
+
+<div class="section-title">DPH a nadcházející termíny</div>
+<table class="kpi-table">
+    <tr>
+        {% if vat %}
+        <td>
+            <div class="kpi-label">{% if vat.is_excess_deduction %}Nadměrný odpočet{% else %}DPH k úhradě{% endif %}</div>
+            <div class="kpi-value">{{ vat.tax_due|cz_money }} Kč</div>
+            <div class="kpi-sub">Termín podání: {{ vat.submission_deadline|cz_date }}</div>
+        </td>
+        {% else %}
+        <td><div class="kpi-label">DPH</div><div class="kpi-sub">Firma není plátcem DPH.</div></td>
+        {% endif %}
+    </tr>
+</table>
+
+{% if upcoming_deadlines|length %}
+<table class="statement">
+    <thead><tr><th class="thl">Typ</th><th>Termín</th><th>Částka</th><th class="thl">Stav</th></tr></thead>
+    <tbody>
+        {% for d in upcoming_deadlines %}
+            <tr class="{{ d.is_overdue ? 'row-strong' : '' }}">
+                <td>{{ d.advance_kind }}</td>
+                <td class="num">{{ d.due_date|cz_date }}</td>
+                <td class="num">{{ d.amount|cz_money }} Kč</td>
+                <td>{% if d.is_overdue %}po splatnosti{% else %}{{ d.status }}{% endif %}</td>
+            </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}<div class="empty-hint">Žádné nadcházející daňové termíny.</div>{% endif %}
+
+{% if comment %}
+<div class="section-title">Komentář účetní</div>
+<div class="comment-box">
+    {% for line in comment|split('\n') %}{{ line }}{% if not loop.last %}<br>{% endif %}{% endfor %}
+</div>
+{% endif %}
+
+<div class="disclaimer">Vygenerováno aplikací MyÚčto.cz - manažerský přehled pro informaci, nejde o účetní závěrku ani daňový doklad.</div>
+
+</body>
+</html>

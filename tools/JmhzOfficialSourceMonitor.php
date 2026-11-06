@@ -23,6 +23,7 @@ final class JmhzOfficialSourceMonitor
 
     private const MAX_INDEX_BYTES = 2 * 1024 * 1024;
     private const MAX_DOCUMENT_BYTES = 32 * 1024 * 1024;
+    private const MAX_SITE_PAGES = 200;
 
     private const NEWS_KEY_PREFIX_CHARS = 40;
     private const ADF_INLINE_TYPES = ['text', 'hardBreak', 'mention', 'emoji', 'inlineCard', 'mediaInline', 'date', 'status', 'placeholder'];
@@ -106,7 +107,7 @@ final class JmhzOfficialSourceMonitor
             $hosts = $source['document_hosts'] ?? null;
             $prefixes = $source['document_path_prefixes'] ?? null;
             $extensions = $source['document_extensions'] ?? null;
-            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'document_links', 'mpsv_api', 'mpsv_api_pages', 'article_list', 'epo_structures'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
+            if (!is_string($label) || $label === '' || !is_string($indexUrl) || !in_array($indexFormat, ['html', 'document_links', 'site_pages', 'mpsv_api', 'mpsv_api_pages', 'article_list', 'epo_structures'], true) || !is_array($hosts) || !is_array($prefixes) || !is_array($extensions)) {
                 throw new RuntimeException("Monitor oficiálních zdrojů JMHZ má neplatný zdroj {$id}.");
             }
             $this->assertHttpsUrl($indexUrl, []);
@@ -216,6 +217,8 @@ final class JmhzOfficialSourceMonitor
             $documents = $this->extractEpoStructures($index, $source);
         } elseif ($source['index_format'] === 'document_links') {
             $documents = $this->extractDocumentLinks($index, $source);
+        } elseif ($source['index_format'] === 'site_pages') {
+            $documents = $this->extractSitePages($index, $source);
         } else {
             $documents = $this->extractDocuments($index, $source);
         }
@@ -432,6 +435,68 @@ final class JmhzOfficialSourceMonitor
         }
         if ($documents === []) {
             throw new RuntimeException("Index {$source['index_url']} neobsahuje žádný rozpoznatelný oficiální dokument.");
+        }
+        ksort($documents, SORT_STRING);
+
+        return array_values($documents);
+    }
+
+    /**
+     * Statický vícestránkový přehled (např. `/jmhz/2027/`): index odkazuje
+     * relativně na stránky pod stejným prefixem. Klíčem je cesta stránky pod
+     * prefixem, ne text odkazu, protože stejné názvy kapitol se opakují
+     * (Mzda, Meta atributy) a odkazy s fragmentem míří na tutéž stránku.
+     * Obsah každé stránky se stahuje a hlídá otiskem, takže se ohlásí i tichá
+     * úprava karty změnového požadavku.
+     *
+     * @param array{label:string,index_url:string,index_format:string,document_hosts:list<string>,document_path_prefixes:list<string>,document_extensions:list<string>} $source
+     * @return list<array{key:string,title:string,version:?string,url:string}>
+     */
+    private function extractSitePages(string $html, array $source): array
+    {
+        $indexUrl = $this->canonicalUrl($source['index_url']);
+        $documents = [
+            'index' => [
+                'key' => 'index',
+                'title' => 'Přehled změn (index)',
+                'version' => null,
+                'url' => $indexUrl,
+            ],
+        ];
+        foreach ($this->indexLinks($html, $source) as [$url, $title]) {
+            if ($url === '' || !$this->isOfficialDocumentUrl($url, $source)) {
+                continue;
+            }
+            $url = $this->canonicalUrl($url);
+            $path = (string) parse_url($url, PHP_URL_PATH);
+            $key = null;
+            foreach ($source['document_path_prefixes'] as $prefix) {
+                if (str_starts_with($path, $prefix)) {
+                    $key = rawurldecode(substr($path, strlen($prefix)));
+                    break;
+                }
+            }
+            // `…/index.html` je týž index jako `…/`: portál ho od 11/2026
+            // přesměrovává (HTTP 301) a hlídač přesměrování nenásleduje, takže
+            // celý běh padal na odkazu „Úvod" v navigaci stránky.
+            if ($key === null || $key === '' || $key === 'index.html' || $url === $indexUrl) {
+                continue;
+            }
+            if (count($documents) >= self::MAX_SITE_PAGES) {
+                throw new RuntimeException("Index {$source['index_url']} odkazuje na víc než " . self::MAX_SITE_PAGES . ' stránek.');
+            }
+            if (isset($documents[$key])) {
+                continue;
+            }
+            $documents[$key] = [
+                'key' => $key,
+                'title' => $this->shorten($title === '' ? $key : $title),
+                'version' => null,
+                'url' => $url,
+            ];
+        }
+        if (count($documents) < 2) {
+            throw new RuntimeException("Index {$source['index_url']} neobsahuje žádnou podstránku.");
         }
         ksort($documents, SORT_STRING);
 
@@ -1181,7 +1246,14 @@ final class JmhzOfficialSourceMonitor
         }
     }
 
-    private function fetchHttps(string $url, int $maxBytes): string
+    /**
+     * Přesměrování se následuje jen v rámci téhož hostitele a nejvýš třikrát.
+     * Portál MPSV od 11/2026 přesměrovává stránky `…/x.html` na `…/x` a index
+     * `…/index.html` na `…/`; cizí hostitel by znamenal jiný než oficiální zdroj.
+     */
+    private const MAX_REDIRECTS = 3;
+
+    private function fetchHttps(string $url, int $maxBytes, int $redirects = 0): string
     {
         $this->assertHttpsUrl($url, []);
         $context = stream_context_create(['http' => ['method' => 'GET', 'follow_location' => 0, 'timeout' => 20, 'ignore_errors' => true]]);
@@ -1193,6 +1265,18 @@ final class JmhzOfficialSourceMonitor
             $meta = stream_get_meta_data($stream);
             $headers = $meta['wrapper_data'] ?? [];
             $status = is_array($headers) && isset($headers[0]) && preg_match('/\s(\d{3})\s/', (string) $headers[0], $matches) === 1 ? (int) $matches[1] : 0;
+            if (in_array($status, [301, 302, 307, 308], true) && $redirects < self::MAX_REDIRECTS) {
+                $location = '';
+                foreach (is_array($headers) ? $headers : [] as $header) {
+                    if (preg_match('/\ALocation:\s*(\S+)/i', (string) $header, $found) === 1) {
+                        $location = $found[1];
+                    }
+                }
+                $target = $location === '' ? '' : $this->resolveUrl($url, $location);
+                if ($target !== '' && $this->host($target) === $this->host($url)) {
+                    return $this->fetchHttps($target, $maxBytes, $redirects + 1);
+                }
+            }
             if ($status !== 200) {
                 throw new RuntimeException("Oficiální zdroj {$url} vrátil HTTP {$status}.");
             }
@@ -1225,11 +1309,50 @@ final class JmhzOfficialSourceMonitor
         if (!is_array($parts) || !isset($parts['scheme'], $parts['host'])) {
             throw new RuntimeException("Nelze vyřešit URL indexu {$base}.");
         }
-        if (str_starts_with($href, '/')) {
-            return $this->canonicalUrl($parts['scheme'] . '://' . $parts['host'] . $href);
+        // Fragment ani dotaz neurčují dokument; odkaz jen na fragment ukazuje
+        // na samotnou stránku indexu a žádný další dokument neznamená.
+        $hrefPath = (string) preg_replace('/[?#].*\z/sD', '', $href);
+        if ($hrefPath === '') {
+            return '';
         }
-        $path = dirname((string) ($parts['path'] ?? '/'));
-        return $this->canonicalUrl($parts['scheme'] . '://' . $parts['host'] . rtrim($path, '/') . '/' . $href);
+        if (str_starts_with($hrefPath, '/')) {
+            return $this->canonicalUrl($parts['scheme'] . '://' . $parts['host'] . $this->removeDotSegments($hrefPath));
+        }
+        // RFC 3986 5.2.3: relativní odkaz se skládá s ADRESÁŘEM základní cesty.
+        // Cesta končící lomítkem (`/jmhz/2027/`) už adresář je; `dirname()` z ní
+        // ukrojil poslední adresář a odkazy `mh/…` mířily vedle indexu.
+        $basePath = (string) ($parts['path'] ?? '/');
+        $directory = str_ends_with($basePath, '/') ? $basePath : substr($basePath, 0, (int) strrpos($basePath, '/') + 1);
+        if ($directory === '') {
+            $directory = '/';
+        }
+
+        return $this->canonicalUrl(
+            $parts['scheme'] . '://' . $parts['host'] . $this->removeDotSegments($directory . $hrefPath),
+        );
+    }
+
+    /** Odstraní segmenty `.` a `..` (i zakódované), aby cesta nemohla opustit prefix dokumentů. */
+    private function removeDotSegments(string $path): string
+    {
+        $segments = explode('/', $path);
+        $last = count($segments) - 1;
+        $output = [];
+        foreach ($segments as $index => $segment) {
+            $decoded = rawurldecode($segment);
+            if ($decoded === '.' || $decoded === '..') {
+                if ($decoded === '..' && count($output) > 1) {
+                    array_pop($output);
+                }
+                if ($index === $last) {
+                    $output[] = '';
+                }
+                continue;
+            }
+            $output[] = $segment;
+        }
+
+        return implode('/', $output);
     }
 
     private function canonicalUrl(string $url): string

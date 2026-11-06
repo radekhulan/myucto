@@ -86,7 +86,7 @@ final class OpeningStockImportProfile
         return $values;
     }
 
-    private static function decimal(string $value, int $integerDigits, int $scale, bool $allowZero, string $error): string
+    public static function decimal(string $value, int $integerDigits, int $scale, bool $allowZero, string $error): string
     {
         $value = LocaleNumber::parse($value) ?? $value;
         if (!preg_match('/^(?:0|[1-9][0-9]*)(?:[.,]([0-9]+))?$/D', $value)) {

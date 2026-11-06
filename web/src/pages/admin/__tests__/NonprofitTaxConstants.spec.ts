@@ -1,0 +1,22 @@
+import { mount, flushPromises } from '@vue/test-utils'
+import { createI18n } from 'vue-i18n'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import Codebooks from '@/pages/admin/Codebooks.vue'
+import cs from '@/i18n/cs.json'
+
+const api = vi.hoisted(() => ({ list: vi.fn(), save: vi.fn(), reset: vi.fn() }))
+vi.mock('@/api/taxConstants', () => ({ taxConstantsApi: api }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ isSuperadmin: true, isDemo: false, canWrite: () => true }) }))
+vi.mock('vue-router', () => ({ useRoute: () => ({ query: {} }) }))
+vi.mock('@/composables/useHotkey', () => ({ useHotkey: () => {} }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn() }) }))
+const data = (year: number, minimum: number) => ({ year, nonprofit_reduction_rate: 0.3, nonprofit_reduction_min: minimum, nonprofit_reduction_max: 1000000, nonprofit_reduction_university_min: 1000000, nonprofit_reduction_university_max: 3000000, tax_loss_carry_years: 5, tax_loss_carryback_years: 2, tax_loss_carryback_limit: 30000000, entity_category_thresholds: { micro: {assets_net:1,net_turnover:2,employees:3}, small: {assets_net:4,net_turnover:5,employees:6}, medium: {assets_net:7,net_turnover:8,employees:9} }, filing_deadlines: {}, child_credits: [1,2,3], pausal_monthly: [{ from: `${year}-01-01`, band1: 1, band2: 2, band3: 3 }], pausal_annual: { band1: 12, band2: 24, band3: 36 } })
+let records: Array<{year:number;is_override:boolean;data:ReturnType<typeof data>}>
+const copy = <T,>(value: T): T => JSON.parse(JSON.stringify(value))
+beforeEach(() => { vi.clearAllMocks(); records = [{ year: 2026, is_override: false, data: data(2026,300000) }, { year: 2025, is_override: false, data: data(2025,350000) }]; api.list.mockImplementation(async () => copy(records)); api.save.mockImplementation(async (year:number, body:ReturnType<typeof data>) => { const saved = { year, is_override: true, data: copy(body) }; records[records.findIndex(r=>r.year===year)] = saved; return saved }) })
+async function page() { const wrapper = mount(Codebooks, { props: { taxConstantsOnly: true }, global: { plugins: [createI18n({ legacy: false, locale: 'cs', messages: { cs } })] } }); await flushPromises(); return wrapper }
+function button(wrapper: Awaited<ReturnType<typeof page>>, text: string) { const result = wrapper.findAll('button').find(b=>b.text()===text); expect(result, text).toBeDefined(); return result! }
+describe('annual nonprofit constants', () => {
+ it('shows the nonprofit tab and persists edited values for the selected year', async () => { const wrapper = await page(); await button(wrapper,'Neziskovky').trigger('click'); expect(wrapper.findAll('[data-tax-key]')).toHaveLength(5); expect(wrapper.text()).toContain('0,30 znamená 30 %'); await wrapper.get('select').setValue('2025'); expect((wrapper.get('[data-tax-key="nonprofit_reduction_min"]').element as HTMLInputElement).value).toBe('350000'); await wrapper.get('[data-tax-key="nonprofit_reduction_min"]').setValue('450000'); await wrapper.get('[data-tax-key="nonprofit_reduction_rate"]').setValue('0.25'); await button(wrapper,'Uložit').trigger('click'); await flushPromises(); expect(api.save).toHaveBeenCalledWith(2025,expect.objectContaining({year:2025,nonprofit_reduction_min:450000,nonprofit_reduction_rate:0.25})); await wrapper.get('select').setValue('2026'); expect((wrapper.get('[data-tax-key="nonprofit_reduction_min"]').element as HTMLInputElement).value).toBe('300000'); await wrapper.get('select').setValue('2025'); expect((wrapper.get('[data-tax-key="nonprofit_reduction_min"]').element as HTMLInputElement).value).toBe('450000'); wrapper.unmount(); const reloaded=await page(); await button(reloaded,'Neziskovky').trigger('click'); await reloaded.get('select').setValue('2025'); expect((reloaded.get('[data-tax-key="nonprofit_reduction_rate"]').element as HTMLInputElement).value).toBe('0.25') })
+ it('exposes existing carryback constants once in reporting instead of duplicate nonprofit fields', async () => { const wrapper=await page(); await button(wrapper,'Výkaznictví a termíny').trigger('click'); expect(wrapper.findAll('[data-tax-key="tax_loss_carryback_years"]')).toHaveLength(1); expect(wrapper.findAll('[data-tax-key="tax_loss_carryback_limit"]')).toHaveLength(1); await button(wrapper,'Neziskovky').trigger('click'); expect(wrapper.find('[data-tax-key="tax_loss_carryback_limit"]').exists()).toBe(false) })
+})

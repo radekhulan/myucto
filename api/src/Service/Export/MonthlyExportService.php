@@ -476,6 +476,7 @@ final class MonthlyExportService
                    AND effective_tax_date >= ?
                    AND effective_tax_date <  ?
                    AND status IN ('issued','sent','reminded','paid')
+                   AND invoice_type NOT IN ('rent_calendar','advance_calendar')
               ORDER BY effective_tax_date, id";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$sid, $period->dateFrom, $period->dateToExclusive]);

@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { portalApi, type PortalSummary, type PortalKpiPeriod, type PortalKpiRow, type PortalAgingRow } from '@/api/portal'
+import { portalApi, type PortalSummary, type PortalKpiPeriod, type PortalKpiRow, type PortalAgingRow, type PortalVatStatus } from '@/api/portal'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { formatMoney, formatDate, formatMonth } from '@/composables/useFormat'
 import PortalMonthlyChart from '@/components/charts/PortalMonthlyChart.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
@@ -17,13 +18,14 @@ const loading = ref(true)
 const noCompany = ref(false)
 const error = ref('')
 
-async function load() {
-  loading.value = true
+async function load(quiet = false) {
+  if (!quiet) loading.value = true
   error.value = ''
   noCompany.value = false
   try {
     data.value = await portalApi.summary()
   } catch (e: any) {
+    if (quiet) throw e
     data.value = null
     // 403 = klient bez membershipu (fail-closed) → empty state bez retry spamu.
     if (e?.response?.status === 403) {
@@ -39,6 +41,7 @@ async function load() {
 onMounted(load)
 // Multi-firma: přepnutí ve switcheru přenačte portál.
 watch(() => supplierStore.currentSupplierId, () => { void load() })
+useWindowRefresh(() => load(true), () => !loading.value)
 
 const KPI_PERIODS: PortalKpiPeriod[] = ['current_month', 'last_month', 'ytd', 'prev_year_ytd', 'last_12m']
 
@@ -96,6 +99,13 @@ function agingRows(rows: PortalAgingRow[]) {
 
 // ── DPH + termíny ─────────────────────────────────────────────────────
 const vatDeadlines = computed(() => data.value?.vat.deadlines ?? [])
+
+function vatPeriodLabel(status: PortalVatStatus): string {
+  if (status.period_type === 'quarterly' && status.quarter !== null) {
+    return t('crm.tax_calendar.period_quarter', { quarter: status.quarter, year: status.period.slice(0, 4) })
+  }
+  return status.period
+}
 </script>
 
 <template>
@@ -248,7 +258,7 @@ const vatDeadlines = computed(() => data.value?.vat.deadlines ?? [])
             <dl v-else class="space-y-1 text-sm">
               <div class="flex justify-between gap-2">
                 <dt class="text-neutral-500">{{ t('portal.vat_period') }}</dt>
-                <dd class="font-mono">{{ data.vat.status.period }}</dd>
+                <dd class="font-mono">{{ vatPeriodLabel(data.vat.status) }}</dd>
               </div>
               <div class="flex justify-between gap-2">
                 <dt class="text-neutral-500">{{ t('reports.dph.vat_output') }}</dt>

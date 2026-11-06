@@ -72,6 +72,23 @@ PHP);
         self::assertFalse($cfg->get('redis.enabled'));
     }
 
+    public function testSmtpEnvironmentOwnershipMatchesEffectiveOverrides(): void
+    {
+        foreach (['HOST', 'PORT', 'ENCRYPTION', 'AUTH', 'USER', 'PASS', 'FROM_EMAIL', 'FROM_NAME'] as $key) {
+            $this->unsetEnv('MYINVOICE_SMTP_' . $key);
+        }
+        self::assertFalse(Config::hasEnvironmentOverride('smtp'));
+        $this->setEnv('MYINVOICE_SMTP_HOST', '');
+        $this->setEnv('MYINVOICE_SMTP_USER', '${SMTP_USER}');
+        self::assertFalse(Config::hasEnvironmentOverride('smtp'));
+        $this->setEnv('MYINVOICE_SMTP_AUTH', '0');
+        self::assertTrue(Config::hasEnvironmentOverride('smtp'));
+        $this->unsetEnv('MYINVOICE_SMTP_AUTH');
+        $this->setEnv('MYINVOICE_SMTP_HOST', 'relay.example.test');
+        self::assertTrue(Config::hasEnvironmentOverride('smtp'));
+        self::assertSame('relay.example.test', Config::load($this->tmpDir)->get('smtp.host'));
+    }
+
     public function testValidEnvironmentOverridesStillApply(): void
     {
         $this->setEnv('MYSQL_HOST', 'db.internal');

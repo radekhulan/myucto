@@ -127,6 +127,8 @@ export interface BankTransaction {
   /** Seznam vystavených faktur uhrazených touto transakcí (sloučená úhrada → víc než 1). */
   matched_invoices?: MatchedInvoice[]
   matched_purchase_invoices?: MatchedPurchaseInvoice[]
+  /** Ostatní pohledávky a závazky, kterým je pohyb přiřazen (match_status zůstává unmatched). */
+  matched_other_items?: MatchedOtherItem[]
   ignore_origin?: string | null
   ignore_note?: string | null
   /** Avízo, jehož pohyb převzal oficiální výpis (jen detail výpisu). */
@@ -142,6 +144,8 @@ export interface BankTransaction {
   period_closed?: boolean
   /** Dimenze pohybu (typ → hodnota); jen u firmy se zapnutými dimenzemi. */
   dimensions?: import('./dimensions').DimensionMap
+  /** Typy z `dimensions`, které pohybu zapsalo pravidlo účtování (ostatní jsou zadané ručně). */
+  rule_dimension_types?: number[]
   /** Stav zaúčtování transakce (Epic AUTOMATIZACE) — jen u double_entry firmy, jinak null. */
   posting?: {
     status: 'posted' | 'suggested' | null
@@ -186,6 +190,14 @@ export interface MatchedInvoice {
   client_name: string | null
 }
 
+export interface MatchedOtherItem {
+  other_item_id: number
+  document_no: string | null
+  side: 'receivable' | 'payable'
+  partner_name: string | null
+  amount: number
+}
+
 export interface MatchedPurchaseInvoice {
   purchase_invoice_id: number
   ref: string | null
@@ -196,8 +208,15 @@ export interface MatchedPurchaseInvoice {
 
 /** Kandidát na spárování dle částky + data (±14 dní, fallback ±90 dní) — vystavená i přijatá faktura. */
 export interface MatchCandidate {
-  type: 'invoice' | 'purchase_invoice'
+  /** `other_item` = ostatní pohledávka/závazek (kandidáti z /accounting/other-items/bank-candidates). */
+  type: 'invoice' | 'purchase_invoice' | 'other_item'
   id: number
+  /** Jen u `other_item`: strana položky. */
+  side?: 'receivable' | 'payable'
+  /** Jen u `other_item`: síla shody 0 až 100, důvody a splátka, jejíž zbytek odpovídá platbě. */
+  match_score?: number
+  match_reasons?: Array<'variable_symbol' | 'counterparty_account' | 'installment_amount' | 'installment_due' | 'remaining_amount'>
+  installment?: { id: number; position: number; due_on: string; remaining_amount: number } | null
   ref: string | null
   amount: number
   currency: string
@@ -321,15 +340,20 @@ export interface BankTransactionsParams {
  *   jsou přesná čísla ze StatementImporter.
  * - `processing_failed`: výpis je uložený, ale párování a zaúčtování pohybů selhalo
  *   (`error` = text chyby). Dokončí ho „Znovu spárovat".
+ * - `imported_balances_rebased`: první výpis banky na účtu dorovnal stavy výpisů převzatých
+ *   z jiného programu (`shift`, `statements`, `opening` = vypočtený počáteční stav).
  * FE si hlášku skládá z i18n — `message` je jen český text pro activity_log.
  */
 export interface ImportWarning {
-  code: 'transactions_skipped_as_duplicate' | 'processing_failed'
+  code: 'transactions_skipped_as_duplicate' | 'processing_failed' | 'imported_balances_rebased'
   message?: string
   error?: string
   parsed?: number
   inserted?: number
   skipped?: number
+  shift?: number
+  statements?: number
+  opening?: number
 }
 
 export interface IgnoreNoticeCandidate {

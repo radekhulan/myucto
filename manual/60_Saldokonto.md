@@ -57,6 +57,58 @@ Aplikace si volbu i hranice zapamatuje a nabídne je i příště.
 
 Nenulový rozdíl může ukazovat na ruční zápis bez vazby na doklad, chybějící či špatně datovanou úhradu, storno, kurzový pohyb nebo nezúčtovanou zálohu.
 
+### Vyrovnání položky zápisem v deníku
+
+Doklad zůstává otevřený, přestože ho hlavní kniha má vyrovnaný interním dokladem: zápočet přes 395, interní doklad vyrovnávající víc faktur, odpis. Typicky po převodu z jiného programu. Zápis v deníku už existuje, jen ho přiřadíte dokladům:
+
+1. U otevřené položky klikněte na **Vyrovnat**. Víc položek jednoho partnera na jednom účtu označte zaškrtávátky a klikněte na **Vyrovnat označené**.
+2. Na kartě **Spárovat se zápisem v deníku** jsou volné ruční zápisy na stejném účtu (včetně analytik) do rozvahového dne. Nahoře jsou zápisy se stejnou částkou, s číslem dokladu v textu a se stejným partnerem. Jistá shoda je předvyplněná.
+3. U jednoho dokladu můžete vybrat víc zápisů a upravit částky. U víc dokladů vyberete jeden zápis a jeho částku rozdělíte mezi doklady.
+4. Klikněte na **Vyrovnat**. Doklad je vyrovnaný ke dni zápisu a **Rozdíl** klesne o přiřazenou částku. Hlavní kniha ani předvaha se nemění.
+
+Na kartě **Zápočet / odpis** založíte zápočet dokladu proti zvolenému účtu, který zápis v deníku teprve vytvoří (viz [Zápočty](67_Zapocty.md)), nebo tlačítkem **Vzájemný zápočet s partnerem** otevřete stránku Zápočty předvyplněnou partnerem a dokladem. Přiřazení zrušíte v dialogu **Vyrovnat** u seznamu **Už přiřazené zápisy**.
+
+### Vzájemný zápočet z výběru
+
+Když partner na pohledávkové straně (311, 315) i závazkové straně (321, 325) má otevřené faktury v Kč, označte v pohledu **Podle dokladů** zaškrtávátky jeho pohledávky i závazky a klikněte na **Vzájemný zápočet**. Otevře se stránka [Zápočty](67_Zapocty.md#673-krok-za-krokem-sestavit-a-potvrdit-zapocet) s vybraným partnerem a doklady. Částky jsou vyrovnané na menší ze stran: větší strana se rozdělí mezi doklady v pořadí výběru, každému nejvýš jeho zbytek. Tlačítko se zobrazí jen s oprávněním k vytváření zápočtů.
+
+### Vyrovnání zálohy konečnou fakturou
+
+Záloha na **314** nebo **324** zůstává otevřená, přestože ji konečná faktura v hlavní knize odečetla: vyúčtování energií odečítá víc měsíčních záloh najednou, nájem čerpá kauci po částech, nebo faktura nemá zálohu navázanou. Zálohu nevyrovnává zápis v deníku, ale konečná faktura, takže ji přiřadíte faktuře:
+
+1. U otevřené zálohy klikněte na **Vyrovnat**. Víc záloh jednoho partnera na jednom účtu označte zaškrtávátky a klikněte na **Vyrovnat označené**.
+2. Dialog nabídne konečné faktury téhož partnera zaúčtované do rozvahového dne, které mají na zálohovém účtu odpočet zálohy (přijatá faktura na straně Dal 314, vydaná na straně MD 324, včetně analytik). Sloupec **Nepřiřazeno** ukazuje část odpočtu, kterou ještě nečerpá jiná záloha. Nahoře jsou faktury s odpočtem rovným zbytku zálohy, s číslem zálohy v textu faktury a vystavené po záloze. Jediná shoda částky je předvyplněná.
+3. U jedné zálohy můžete vybrat víc faktur a upravit částky. U víc záloh vyberete jednu fakturu a její odpočet rozdělíte mezi zálohy.
+4. Klikněte na **Vyrovnat čerpáním**. Záloha je vyrovnaná ode dne zaúčtování faktury a **Rozdíl** klesne o čerpanou částku. Hlavní kniha ani předvaha se nemění.
+
+Čerpání zadané v saldokontu zrušíte v dialogu **Vyrovnat** u seznamu **Čerpání zálohy**. Čerpání převzaté z převodu z jiného programu je označené **z převodu** a v saldokontu se neruší. Faktura navázaná na zálohu přímo na dokladu (vyúčtovací faktura k zálohové faktuře, konečná faktura z proformy) přiřazuje svůj odpočet té záloze do výše její částky; jiné záloze se nabídne jen přebytek odpočtu nad ní.
+
+Záloha čerpaná v saldokontu se už nedá propojit s fakturou na dokladu (ani vystavit konečnou fakturu z proformy) a faktura, která zálohu čerpá, se nedá propojit s další zálohou: vazba by čerpání zdvojila. Zbytek takové zálohy vyrovnejte v saldokontu. Mimo saldokonto se čerpaná záloha chová jako vyúčtovaná (nepočítá se do pohledávek ani nákladů).
+
+Když se konečná faktura po čerpání přeúčtuje s menším odpočtem zálohy (nebo převod zapsal čerpání nad rámec zápisu), ukáže blok účtu varování s fakturou a přečerpanou částkou. Čerpání pak upravte v dialogu **Vyrovnat**, nebo opravte zaúčtování faktury.
+
+### Položka ze zůstatku bez dokladu
+
+Zůstatek účtu bez dokladu (přijatá nebo poskytnutá záloha, přeplatek zaúčtovaný interním dokladem) převedete na ostatní pohledávku nebo závazek:
+
+1. U účtu s nenulovým **Rozdílem** klikněte na **Založit položku ze zůstatku**.
+2. Vyberte zápis, ze kterého zůstatek vznikl. Hledat můžete podle textu nebo čísla zápisu.
+3. Upravte popis, částku, splatnost a případně partnera a klikněte na **Založit položku**.
+
+Vznikne potvrzená [ostatní pohledávka nebo závazek](52_Ucetni_denik.md#521414-ostatni-pohledavky-a-zavazky) s číslem z řady. Zápis na straně MD založí pohledávku, zápis na straně Dal závazek. Položka se znovu neúčtuje, předpis zůstává v původním zápisu, takže saldokonto položku vidí a zůstatek hlavní knihy nezdvojí. Omyl napravíte stornem položky: protizápis nevznikne, položka zmizí ze saldokonta ode dne storna a ten den musí ležet v otevřeném účetním období.
+
+### Návrh párování
+
+Tlačítko **Navrhnout párování** projde otevřené doklady k rozvahovému dni a nabídne jen jisté shody: číslo dokladu je v textu zápisu (nebo je zápis na doklad navázaný) a volná částka zápisu se rovná zbytku dokladu, případně zápis jmenuje víc dokladů jednoho partnera přesně za jejich součet. Bez čísla dokladu se navrhne jen jistý partner (vazba zápisu nebo jeho název v textu) s jediným dokladem této částky. Zápis i doklad jsou nejvýš v jednom návrhu. Označené návrhy potvrdíte tlačítkem **Potvrdit označené**; návrh, který mezitím přestal platit (doklad uhrazený), zůstane v seznamu s důvodem.
+
+Na účtech 314 a 324 návrh páruje zálohy s konečnými fakturami téhož partnera: číslo zálohy je v popisu řádku nebo v textu zápisu faktury, nepřiřazený odpočet právě jedné faktury se rovná zbytku zálohy, nebo u pravidelných záloh stejné výše leží mezi zálohou a další zálohou partnera jediná faktura a její odpočet se rovná zbytku zálohy. Faktura, kterou by návrhy přečerpaly, se nenavrhne.
+
+> [!NOTE]
+> Čerpání zálohy se vejde do zbytku zálohy i do nepřiřazeného odpočtu faktury. Zálohu v cizí měně čerpáním v saldokontu nevyrovnáte. Faktura zaúčtovaná v uzavřeném období čerpá zálohu jen po potvrzení správce; čerpání změní saldokonto ode dne zaúčtování faktury, hlavní kniha zůstane beze změny.
+
+> [!NOTE]
+> Přiřadit lze jen ruční (interní) zápis v Kč na účtech 311, 321, 315 a 325, ne zaúčtování dokladu, storno ani zápis, který doklad vyrovnává už vazbou na doklad. Doklad v cizí měně vyrovnejte kurzovým zápisem nebo zápočtem. Zápis v uzavřeném období přiřadí jen správce po potvrzení; přiřazení změní saldokonto k jeho konci, hlavní kniha zůstane beze změny. Kontrola uzávěrky počítá přiřazení stejně jako saldokonto. Zápis s přiřazením nejde smazat a přeúčtování nesmí přiřazený řádek změnit (účet, stranu, pořadí) ani snížit pod přiřazenou částku; nejdřív přiřazení zrušte. Zápis se zápočtem převzatým z jiného programu se nepřiřazuje, zápočet už saldokonto počítá.
+
 ## 60.5 Když něco nejde
 
 <!-- cols: 30 34 36 -->
@@ -125,7 +177,10 @@ se konfrontují v zaúčtované Kč hodnotě; obrazovka současně ukáže půvo
 
 Ostatní pohledávky a závazky se do sestavy dostanou až po zaúčtování. Sestava
 bere jejich skutečný zápis na účtu a při částečné úhradě odečte jen platby,
-které jsou k rozvahovému dni zaúčtované na stejný saldokontní účet. Storno a
+které jsou k rozvahovému dni zaúčtované na stejný saldokontní účet. Úhradu,
+kterou převod z jiného programu převzal jako uhrazenou mimo banku a pokladnu
+(například zápočtem nebo interním dokladem), odečte stejně jako detail položky,
+a to k jakémukoli dni, protože datum nenese. Storno a
 přeúčtování se projeví od dne příslušného účetního zápisu. Koncepty a
 potvrzené položky v daňové evidenci sem nepatří.
 
@@ -139,7 +194,10 @@ zaúčtovanou platbu a její následné čerpání:
   také pro samostatný daňový doklad k platbě použitý jako záloha při nákupu bez
   samostatné zálohové faktury,
 - na **324** je přijatá platba vydané proformy snížena o daňový doklad k
-  přijaté platbě a o vyúčtovací fakturu.
+  přijaté platbě a o vyúčtovací fakturu,
+- na obou účtech snižuje zálohu i čerpání konečnou fakturou zadané v saldokontu
+  nebo převzaté z převodu (jedna faktura může čerpat víc záloh a jedna záloha
+  víc faktur), a to ode dne zaúčtování faktury.
 
 Plně zúčtovaná záloha proto zmizí z otevřených položek, její historické
 účetní pohyby však zůstanou v deníku.

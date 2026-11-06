@@ -21,7 +21,8 @@ use MyInvoice\Repository\StockPriceLevelRepository;
  *   2. výchozí hodnota hladiny, když je nenulová.
  * Kladné `discount_pct` je sleva, záporné přirážka (−45 = 145 % standardní ceny).
  * Pevná cena v jiné měně se nepoužije. Sleva i přirážka se počítá ze standardní ceny
- * na haléře stejně jako u zákaznické ceny; bez standardní ceny hladina nic neurčí.
+ * stejně jako u zákaznické ceny (na haléře, šest míst jen u levné položky, kterou by
+ * haléře zkreslily); bez standardní ceny hladina nic neurčí.
  */
 final class PriceLevelResolver
 {

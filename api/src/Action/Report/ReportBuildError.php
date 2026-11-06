@@ -26,6 +26,6 @@ final class ReportBuildError
         if ($e instanceof PostingException) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
         }
-        return Json::error($response, 'build_failed', $e->getMessage(), 500);
+        return Json::internalError($response, 'build_failed', $e->getMessage(), 500);
     }
 }

@@ -125,14 +125,19 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         self::assertSame([], $failed343);
     }
 
-    public function testStatutoryBranchKeepsZeroDanBonusWithDeclaration(): void
+    /**
+     * Nulový bonus se nevykazuje ani s prohlášením: PAMICA ho v hlášeních,
+     * která ČSSZ přijala, vynechává a přítomný element ČSSZ bere za vyplněný.
+     */
+    public function testStatutoryBranchOmitsZeroDanBonusWithDeclaration(): void
     {
         $result = (new JmhzScenario1XmlValidator())->dryRun(
             $this->resolutionFor($this->statutoryPayload(declarationSigned: true)),
             $this->envelope(),
         );
 
-        self::assertStringContainsString('<form:danBonus>0</form:danBonus>', $result['xml']);
+        self::assertStringContainsString('<form:prohlaseniPoplatnika>true</form:prohlaseniPoplatnika>', $result['xml']);
+        self::assertStringNotContainsString('<form:danBonus>', $result['xml']);
     }
 
     /**
@@ -354,8 +359,9 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
 
     /**
      * Umělá varianta podlimitní DPP, která resolverem projde: XML musí projít
-     * XSD a nesmí nést pojistné SP ani vyměřovací základ, jen
-     * `prijemNepojistenaCinnost` a bezkódovou ELDP sekci s nulou dnů.
+     * XSD a nesmí nést vyměřovací základ, jen `prijemNepojistenaCinnost`
+     * a bezkódovou ELDP sekci s nulou dnů. Pojistné SP (10370, 10481) je
+     * povinné na každém formuláři s blokem pojištění, bez účasti jako nula.
      */
     public function testSubLimitDppSerializesWithoutSocialInsuranceAndValidatesAgainstXsd(): void
     {
@@ -369,12 +375,25 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         self::assertStringNotContainsString('<form:castkaOdvodPojistneho>', $xml);
         self::assertStringContainsString('<form:prijemNepojistenaCinnost>8000</form:prijemNepojistenaCinnost>', $xml);
         self::assertStringNotContainsString('<form:vymerovaciZakladParagraf5>', $xml);
-        self::assertStringNotContainsString('<form:pojisteniZamestnanec>', $xml);
-        self::assertStringNotContainsString('<form:pojisteniZamestnavatel>', $xml);
+        self::assertStringContainsString(
+            '<form:pojisteniZamestnanec><form:socialniPojisteni>0</form:socialniPojisteni></form:pojisteniZamestnanec>'
+                . '<form:pojisteniZamestnavatel><form:socialniPojisteni>0</form:socialniPojisteni></form:pojisteniZamestnavatel>',
+            $xml,
+        );
         self::assertStringContainsString('<form:eldp><form:pocetDnu>0</form:pocetDnu></form:eldp>', $xml);
         self::assertStringContainsString('<form:zdravPojZamestnanec><form:zdravotniPojisteni>0</form:zdravotniPojisteni>', $xml);
         // Bez účasti na ZP (DPP < 12 000) je zdravotní pojistné nula — a je VYPLNĚNÉ, protože XSD element vyžaduje.
         self::assertStringContainsString('<form:dnyEvidencniStav>0</form:dnyEvidencniStav>', $xml);
+
+        $report = JmhzControlValidatorFactory::create()
+            ->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));
+        $failed = array_values(array_filter(
+            $report->findings,
+            static fn (JmhzControlFinding $finding): bool =>
+                in_array($finding->controlId, [12, 118, 315], true)
+                && $finding->outcome === JmhzControlOutcome::Failed,
+        ));
+        self::assertSame([], $failed);
     }
 
     /**
@@ -728,7 +747,8 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
      * systému 12 z 24 lidí). Formulář vzniká za každý vztah, souhrnná data
      * zaměstnance nese jen primární (kontrola 248) a sčítají oba vztahy.
      * 10535 je zdanitelný příjem vztahu a jejich součet je základ zálohy
-     * v souhrnu. Pojistné nese jen účastný vztah (kontrola 12).
+     * v souhrnu. Pojistné nese účastný vztah, formulář dohody bez účasti
+     * vykazuje 10370 a 10481 jako nulu (povinný údaj, kontrola 12 sedí).
      */
     public function testConcurrentEmploymentsProduceOneFormPerRelationship(): void
     {
@@ -748,7 +768,13 @@ final class JmhzAuditRelationshipMatrixTest extends TestCase
         self::assertSame(1, substr_count($xml, '<form:zakladDane>9000</form:zakladDane>'));
         self::assertSame(1, substr_count($xml, '<form:zakladDane>1000</form:zakladDane>'));
         self::assertSame(1, substr_count($xml, '<form:zakladDane>8000</form:zakladDane>'));
-        self::assertSame(1, substr_count($xml, '<form:pojisteniZamestnanec>'));
+        $compact = preg_replace('/>\s+</', '><', $xml) ?? '';
+        self::assertSame(2, substr_count($compact, '<form:pojisteniZamestnanec>'));
+        self::assertSame(1, substr_count(
+            $compact,
+            '<form:pojisteniZamestnanec><form:socialniPojisteni>0</form:socialniPojisteni></form:pojisteniZamestnanec>'
+                . '<form:pojisteniZamestnavatel><form:socialniPojisteni>0</form:socialniPojisteni></form:pojisteniZamestnavatel>',
+        ));
 
         $report = JmhzControlValidatorFactory::create()
             ->validate($xml, new JmhzControlContext('2026-08-05', schemaValidated: true));

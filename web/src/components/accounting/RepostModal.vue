@@ -20,7 +20,7 @@ import { journalAmount } from '@/utils/journalAmount'
 import { ref, computed, watch, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
-  accountingApi, postingErrorI18nKey,
+  accountingApi, postingErrorMessage,
   type ChartAccount, type JournalPostingSource, type RepostPlan,
 } from '@/api/accounting'
 import {
@@ -175,17 +175,13 @@ async function load(): Promise<void> {
     plan.value = p
     accounts.value = acc
     description.value = p.description ?? ''
-    // Předvyplní se PŮVODNÍ kontace, ne nový návrh ze systému: opravuje se to,
-    // co v deníku opravdu je, a účetní musí vidět, co mění.
-    lines.value = p.lines.map(l => ({
-      account_code: l.account_code ?? '',
-      side: l.side,
-      amount: l.amount,
-      is_red_storno: l.is_red_storno,
-    }))
+    // Předvyplní se stávající zaúčtování. Předpis z aktuálního dokladu (u skupiny)
+    // se jen nabídne: převzatý doklad může mít kontace, které návrh z dokladu nezná
+    // (pokladna místo 311, analytiky zdroje), a potvrzení beze změn je nesmí přepsat.
+    lines.value = editableLines(p.lines)
     applyProposal()
   } catch (e: any) {
-    error.value = t(postingErrorI18nKey(e?.response?.data?.error?.code))
+    error.value = postingErrorMessage(t, e)
   } finally {
     loading.value = false
   }
@@ -199,6 +195,37 @@ watch(() => [props.open, props.docId], ([open]) => {
 }, { immediate: true })
 
 const proposalApplied = ref(false)
+
+function editableLines(source: Array<{ account_code: string | null; side: 'debit' | 'credit'; amount: number | string | null; is_red_storno?: boolean }>) {
+  return source.map(l => ({
+    account_code: l.account_code ?? '',
+    side: l.side,
+    amount: l.amount === null ? null : Number(l.amount),
+    is_red_storno: l.is_red_storno,
+  }))
+}
+
+const suggestionDiffers = computed(() => {
+  const suggested = plan.value?.suggested_lines
+  return !!suggested && suggested.length > 0 && linesKeyOf(suggested) !== linesKeyOf(plan.value?.lines ?? [])
+})
+
+const usingSuggestion = computed(() => {
+  const suggested = plan.value?.suggested_lines
+  return !!suggested && linesKeyOf(lines.value) === linesKeyOf(suggested)
+})
+
+function useSuggestedLines(): void {
+  if (plan.value?.suggested_lines) lines.value = editableLines(plan.value.suggested_lines)
+}
+
+function useCurrentLines(): void {
+  if (plan.value) lines.value = editableLines(plan.value.lines)
+}
+
+function linesKeyOf(ls: Array<{ account_code: string | null; side: string; amount: number | string | null; is_red_storno?: boolean }>): string {
+  return ls.map(l => `${l.side}|${(l.account_code ?? '').trim()}|${Math.round(Number(l.amount ?? 0) * 100)}|${l.is_red_storno ? 1 : 0}`).sort().join(';')
+}
 
 function applyProposal(): void {
   proposalApplied.value = false
@@ -304,6 +331,7 @@ async function submit(): Promise<void> {
       })),
       description: description.value.trim() || null,
       confirm_date_shift: confirmShift.value,
+      ...(plan.value?.posting_entries ? { expected_posting_entries: plan.value.posting_entries.map(({ id, row_version }) => ({ id, row_version })) } : {}),
       ...(dimsShown.value && dimsDirty.value ? { dimensions: { header: compactDimensions(dimHeader.value) } } : {}),
     })
     emit('reposted')
@@ -312,7 +340,7 @@ async function submit(): Promise<void> {
     const code = e?.response?.data?.error?.code
     error.value = code === 'split_in_locked_period' || code === 'invalid_dimension'
       ? (e?.response?.data?.error?.message || t('common.error'))
-      : t(postingErrorI18nKey(code))
+      : postingErrorMessage(t, e)
   } finally {
     saving.value = false
   }
@@ -333,6 +361,27 @@ async function submit(): Promise<void> {
       </div>
 
       <template v-if="plan && effectivePlan && !loading">
+        <div v-if="plan.reason_code === 'posting_group' || (plan.posting_entries?.length ?? 0) > 1"
+          class="px-3 py-2 rounded-md border border-warning-500/30 bg-warning-50 text-warning-700 text-sm"
+          data-test="repost-posting-group">
+          <p>{{ t('accounting.repost.posting_group', { count: plan.posting_entries?.length ?? 0 }) }}</p>
+          <ul class="mt-1 list-disc list-inside font-mono">
+            <li v-for="entry in plan.posting_entries" :key="entry.id">#{{ entry.id }} · {{ formatDate(entry.entry_date) }}</li>
+          </ul>
+        </div>
+        <div v-if="suggestionDiffers"
+          class="px-3 py-2 rounded-md border border-primary-200 bg-primary-50 text-primary-700 text-sm flex flex-wrap items-center gap-2"
+          data-test="repost-suggestion">
+          <p class="flex-1 min-w-[12rem]">{{ t(usingSuggestion ? 'accounting.repost.suggestion_used' : 'accounting.repost.suggestion_available') }}</p>
+          <button v-if="!usingSuggestion" type="button" :class="btnOutline('primary')" class="whitespace-nowrap"
+            data-test="repost-use-suggested" @click="useSuggestedLines">
+            {{ t('accounting.repost.use_suggested') }}
+          </button>
+          <button v-else type="button" :class="btnOutline('neutral')" class="whitespace-nowrap"
+            data-test="repost-use-current" @click="useCurrentLines">
+            {{ t('accounting.repost.use_current') }}
+          </button>
+        </div>
         <!-- Co se stane. Bez téhle věty by uživatel nepoznal rozdíl mezi „přepíše se"
              a „vznikne protizápis" — a přitom je to ten rozdíl, který zůstane v deníku.
              V zamčeném datu o tom rozhodují upravené řádky (server, linesPlan). -->

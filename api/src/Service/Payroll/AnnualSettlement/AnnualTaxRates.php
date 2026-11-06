@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\AnnualSettlement;
 
 use MyInvoice\Service\Payroll\IncomeTax\ChildCreditRateKey;
 use MyInvoice\Service\Payroll\IncomeTax\EmploymentIncomeTaxPolicy2026;
+use MyInvoice\Service\Payroll\IncomeTax\StudentTaxCredit;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion;
 
@@ -84,25 +85,32 @@ final readonly class AnnualTaxRates
         /**
          * § 35bb odst. 1 věta první: roční sleva na manžela.
          *
-         * ⚠ DO VÝPOČTU NEVSTUPUJE. Modul slevu na manžela neuplatňuje —
-         * chybí evidence podmínek (společně hospodařící domácnost, vyživované
-         * dítě do 3 let podle § 35bb odst. 2 písm. a), doložení podle § 38l),
-         * takže {@see AnnualSettlementAnnualClaims::PresentUnsupported}
-         * zúčtování zastaví. Číslo se drží jen proto, aby ho účetní viděla
-         * v administraci a aby se roční a měsíční ruleset nemohly rozejít
-         * nepozorovaně; ve stopě výpočtu je označené jako NEUPLATNĚNÉ —
-         * viz {@see toArray()}.
+         * Do výpočtu vstupuje jen přes evidovaný nárok
+         * ({@see AnnualSpouseCreditClaim}), jehož podmínky § 35bb odst. 2
+         * a doložení podle § 38l posoudí zúčtování. Bez nároku se nepoužije.
          */
         public int $spouseCreditMinorUnits,
-        /** § 35bb odst. 1 věta druhá: násobek u manžela s nárokem na průkaz ZTP/P. Do výpočtu nevstupuje. */
+        /** § 35bb odst. 1 věta druhá: násobek u manžela s nárokem na průkaz ZTP/P. */
         public int $spouseCreditZtpPMultiplier,
-        /** § 35bb odst. 2 písm. b): nejvyšší vlastní příjem manžela; nerovnost NEOSTRÁ. Do výpočtu nevstupuje. */
+        /** § 35bb odst. 2 písm. b): nejvyšší vlastní příjem manžela; nerovnost NEOSTRÁ. */
         public int $spouseIncomeLimitMinorUnits,
         /** @var array<string,int> roční částka slevy podle TaxCreditKind->value */
         public array $annualCreditMinorUnits,
         /** @var array<int,int> roční daňové zvýhodnění podle pořadí dítěte (1, 2, 3+) */
         public array $annualChildCreditMinorUnits,
+        /**
+         * § 21g odst. 1: měsíční minimální mzda účinná k 1. dni zdaňovacího
+         * období — strop slevy za umístění dítěte (§ 35bd odst. 1). `null`, když
+         * ruleset klíč {@see MINIMUM_WAGE_KEY} nenese (roky před 2027).
+         */
+        public ?int $minimumWageMinorUnits = null,
     ) {}
+
+    /** Klíč minimální mzdy v rulesetu daně z příjmů (od rulesetu 2027). */
+    public const MINIMUM_WAGE_KEY = 'minimum_wage.monthly';
+
+    /** § 35c odst. 4: roční práh bonusu je šestinásobek minimální mzdy. */
+    private const BONUS_MINIMUM_WAGE_MULTIPLE = 6;
 
     public static function forRuleset(PayrollRulesetVersion $ruleset): self
     {
@@ -149,6 +157,15 @@ final readonly class AnnualTaxRates
         ) {
             $credits[$kind] = $policy->money($key) * self::MONTHS_IN_YEAR;
         }
+        // Sleva na studenta (§ 35ba odst. 1 písm. f), od 1. 1. 2027). Ročník,
+        // který ji nemá, ji do ročních částek nepřidá vůbec — stopa zúčtování
+        // za rok 2026 tak zůstává bajtově stejná a nárok na ni zastaví
+        // {@see supportsCredit()} v AnnualTaxSettlementService.
+        if ($policy->definesMoney(StudentTaxCredit::RULESET_KEY)) {
+            $student = $policy->money(StudentTaxCredit::RULESET_KEY) * self::MONTHS_IN_YEAR;
+            $credits[TaxCreditKind::Student->value] = $student;
+            $credits[TaxCreditKind::StudentDoctoral->value] = $student;
+        }
         ksort($credits);
 
         $children = [];
@@ -172,7 +189,31 @@ final readonly class AnnualTaxRates
             self::money($ruleset, 'spouse.income_limit'),
             $credits,
             $children,
+            self::minimumWage($ruleset, $yearlyBonusIncome),
         );
+    }
+
+    /**
+     * Minimální mzda pro slevu za umístění dítěte, je-li v rulesetu.
+     *
+     * Třetí brána: minimální mzdu nese ruleset ještě jednou, nepřímo, jako
+     * roční práh bonusu (§ 35c odst. 4 — šestinásobek). Rozejdou-li se, není
+     * jasné, které číslo platí, a zúčtování se zastaví.
+     */
+    private static function minimumWage(PayrollRulesetVersion $ruleset, int $yearlyBonusIncome): ?int
+    {
+        if (!isset($ruleset->parameters[self::MINIMUM_WAGE_KEY])) {
+            return null;
+        }
+        $minimumWage = self::money($ruleset, self::MINIMUM_WAGE_KEY);
+        if ($minimumWage * self::BONUS_MINIMUM_WAGE_MULTIPLE !== $yearlyBonusIncome) {
+            throw new AnnualSettlementUnavailableException(
+                'Ruleset daně z příjmů má minimální mzdu, jejíž šestinásobek neodpovídá '
+                . 'ročnímu prahu daňového bonusu (bonus.minimum_income.yearly).',
+            );
+        }
+
+        return $minimumWage;
     }
 
     /**
@@ -205,12 +246,18 @@ final readonly class AnnualTaxRates
         return $value->value;
     }
 
+    /** Zná ročník sazeb roční částku téhle slevy? */
+    public function supportsCredit(TaxCreditKind $kind): bool
+    {
+        return isset($this->annualCreditMinorUnits[$kind->value]);
+    }
+
     /**
      * Roční sleva podle § 35ba za `$months` měsíců.
      *
      * § 35ba odst. 3 dává dvanáctinovou úpravu VÝSLOVNĚ jen slevám podle
-     * odst. 1 písm. b) až e). Základní sleva na poplatníka (písm. a) v tom výčtu
-     * NENÍ — náleží za celé zdaňovací období v plné výši i tomu, kdo pracoval
+     * odst. 1 písm. b) až e), od 1. 1. 2027 b) až f) (sleva na studenta).
+     * Základní sleva na poplatníka (písm. a) v tom výčtu NENÍ — náleží za celé zdaňovací období v plné výši i tomu, kdo pracoval
      * jediný měsíc. Krátit ji podle měsíců by byla častá a drahá chyba, proto to
      * tady stojí jako podmínka, ne jako poznámka.
      */
@@ -269,10 +316,10 @@ final readonly class AnnualTaxRates
             'bonus_minimum_amount_minor_units' => $this->bonusMinimumAmountMinorUnits,
             'payout_threshold_minor_units' => $this->payoutThresholdMinorUnits,
             // Sleva na manžela se ve stopě drží POD VLASTNÍM KLÍČEM s příznakem
-            // `applied = false`. Ploché klíče vedle sazeb, které se skutečně
-            // počítají, dělaly ze snapshotu tvrzení „sleva byla posouzena" —
-            // a to modul nedělá. Vstupní podmínky (§ 35bb odst. 2, § 38l)
-            // nemá v evidenci a zúčtování na nich fail-closed padá.
+            // `applied = false`: sazba sama nic neuplatňuje. Uplatněná sleva
+            // je ve stopě výsledku pod `credits.spouse`, a to jen u zúčtování
+            // s evidovaným a doloženým nárokem. Klíč se nemění, aby zůstal
+            // stejný otisk stopy u zúčtování bez slevy na manžela.
             'spouse_credit' => [
                 'applied' => false,
                 'reason' => 'eligibility_manual_review',
@@ -288,6 +335,10 @@ final readonly class AnnualTaxRates
             'derivation' => 'monthly-times-twelve',
             'derivation_basis' => 'zdp-35d-2',
             'annual_keys_source' => 'ruleset',
+            // Jen u rulesetu s minimální mzdou — stopa starších let zůstává bajtově stejná.
+            ...($this->minimumWageMinorUnits === null
+                ? []
+                : ['minimum_wage_minor_units' => $this->minimumWageMinorUnits]),
         ];
     }
 }

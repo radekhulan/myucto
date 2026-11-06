@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Registration;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportLookup;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportService;
@@ -44,7 +43,7 @@ final class RegistrationImportNormativeTest extends TestCase
         if (!is_file(dirname(__DIR__, 6) . '/cfg.php')) {
             self::markTestSkipped('cfg.php neexistuje - test vyžaduje DB.');
         }
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $this->container->get(Connection::class);
         $this->imports = $this->container->get(RegistrationImportService::class);
         $this->lookup = $this->container->get(RegistrationImportLookup::class);

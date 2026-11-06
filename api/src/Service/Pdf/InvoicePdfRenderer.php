@@ -15,6 +15,7 @@ use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Branding\AccentColor;
 use MyInvoice\Service\Export\IsdocExporter;
+use MyInvoice\Service\Invoice\InvoiceCalendar;
 use MyInvoice\Service\Invoice\SimplifiedDocumentPolicy;
 use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Invoice\RefundDocument;
@@ -78,6 +79,10 @@ final class InvoicePdfRenderer
         if ($invoice === null) {
             throw new \RuntimeException("Faktura #{$invoiceId} nenalezena");
         }
+        // Interní doklad splátky odběratel nedostává, daňovým dokladem je kalendář (§ 31, § 31a).
+        if (!empty($invoice['calendar_id'])) {
+            return $this->render((int) $invoice['calendar_id'], $forceRegenerate, $userId);
+        }
 
         $cachedPath = $this->cachePath($invoice);
         $supplierData = $this->getSupplierData((int) ($invoice['supplier_id'] ?? 0));
@@ -92,6 +97,7 @@ final class InvoicePdfRenderer
             @filemtime(Bootstrap::rootDir() . '/styles/invoice.css') ?: 0,
             @filemtime(Bootstrap::rootDir() . '/' . PdfBranding::MONOCHROME_CSS) ?: 0,
             @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/invoice.twig') ?: 0,
+            @filemtime(Bootstrap::rootDir() . '/api/templates/invoice/work_report_items.twig') ?: 0,
             @filemtime(__DIR__ . '/TimeBillingPdfPresenter.php') ?: 0,
             @filemtime(__FILE__) ?: 0,
         );
@@ -159,7 +165,7 @@ final class InvoicePdfRenderer
 
         $rendered = $this->renderHtmlAndCss($invoice, $isdocXml !== null);
 
-        $mpdf = $this->newMpdf($tmpDir);
+        $mpdf = $this->newMpdf($tmpDir, $this->bankInFooter($invoice));
         // PDF metadata — bez Title/Author, aby Chrome viewer nezobrazoval text nad PDF.
         $mpdf->SetTitle('');
         $mpdf->SetAuthor('');
@@ -239,7 +245,7 @@ final class InvoicePdfRenderer
         }
 
         $rendered = $this->renderHtmlAndCss($invoice, false, false);
-        $mpdf = $this->newMpdf($tmpDir);
+        $mpdf = $this->newMpdf($tmpDir, $this->bankInFooter($invoice));
         $mpdf->SetTitle('');
         $mpdf->SetAuthor('');
         $mpdf->SetCreator('MyInvoice.cz');
@@ -323,7 +329,7 @@ final class InvoicePdfRenderer
         // Platební kalendář QR kód nedostane. Žádná jedna platba se na něm nekoná —
         // rozpis jich má dvanáct — takže QR na celkovou částku by vyzýval k úhradě
         // celého roku najednou, přesně proti tomu, co doklad sjednává.
-        $isPaymentCalendar = ($invoice['invoice_type'] ?? '') === 'payment_calendar';
+        $isPaymentCalendar = InvoiceCalendar::hasSchedule($invoice['invoice_type'] ?? null);
         if ($hasAmount && $bankData !== null && (!$isCzk || $hasVs) && !$isPaid && $isBankTransfer && !$isPaymentCalendar) {
             $qrSettings = $this->paymentQrSettings->find((int) ($invoice['supplier_id'] ?? 0));
             $qrUri = $this->qr->generate(
@@ -389,7 +395,7 @@ final class InvoicePdfRenderer
             $lineDiscountColumns = true;
         }
         $workReport = $includeWorkReport
-            ? $this->workReports->findByInvoice((int) $invoice['id'])
+            ? $this->workReports->findByInvoice((int) $invoice['id'], (int) ($invoice['supplier_id'] ?? 0))
             : null;
         if ($workReport !== null) {
             $workReport = TimeBillingPdfPresenter::workReport($workReport);
@@ -440,7 +446,7 @@ final class InvoicePdfRenderer
             // z platebního kalendáře daňový doklad; bez něj se doklad tiskl jako běžná
             // faktura s jediným datem splatnosti, tedy bez toho jediného, kvůli čemu
             // vzniká. U ostatních typů dokladu zůstává prázdný.
-            'payment_schedule'  => ($invoice['invoice_type'] ?? '') === 'payment_calendar'
+            'payment_schedule'  => InvoiceCalendar::hasSchedule($invoice['invoice_type'] ?? null)
                 ? $this->paymentSchedule->forInvoice((int) $invoice['supplier_id'], (int) $invoice['id'])
                 : [],
             // Sloupce „Cena/j před slevou | Sleva | Cena/j po slevě" (migrace 2035).
@@ -572,7 +578,12 @@ final class InvoicePdfRenderer
         return OssInvoiceClause::build($items, $names);
     }
 
-    private function newMpdf(string $tmpDir): Mpdf
+    /**
+     * @param bool $bankInFooter bankovní spojení v patičce (migrace 2198): dlouhý název banky
+     *        nebo zahraniční IBAN patičku zalomí, spodní okraj proto roste s její výškou
+     *        (`stretch` = nejméně 18 mm). Bez volby zůstává pevný okraj.
+     */
+    private function newMpdf(string $tmpDir, bool $bankInFooter = false): Mpdf
     {
         return new Mpdf([
             'mode'              => 'utf-8',
@@ -583,8 +594,15 @@ final class InvoicePdfRenderer
             'margin_right'      => 12,
             'tempDir'           => $tmpDir,
             'autoPageBreak'     => true,
+            ...($bankInFooter ? ['setAutoBottomMargin' => 'stretch'] : []),
             ...MpdfFontConfig::options(),
         ]);
+    }
+
+    /** Volba firmy `invoice_pdf_bank_in_footer` (migrace 2198), čtená stejně jako šablonou. */
+    private function bankInFooter(array $invoice): bool
+    {
+        return !empty($this->resolveSupplier($invoice)['invoice_pdf_bank_in_footer']);
     }
 
     /**
@@ -648,7 +666,7 @@ final class InvoicePdfRenderer
                 AND c.code = "CZK"
                 AND i.status <> "paid"
                 AND i.payment_method = "bank_transfer"
-                AND i.invoice_type <> "payment_calendar"
+                AND i.invoice_type NOT IN ("payment_calendar", "rent_calendar", "advance_calendar")
                 AND i.varsymbol IS NOT NULL AND i.varsymbol <> ""
                 AND (i.pdf_path IS NOT NULL OR i.pdf_generated_at IS NOT NULL)'
         );
@@ -795,7 +813,13 @@ final class InvoicePdfRenderer
         if (empty($row)) return null;
         $hasCzk = !empty($row['account_number']) && !empty($row['bank_code']);
         $hasIban = !empty($row['iban']);
-        return ($hasCzk || $hasIban) ? $row : null;
+        if (!$hasCzk && !$hasIban) return null;
+        // Zahraniční kód banky (sort code) se netiskne jako „číslo / kód": má vlastní řádek.
+        $row['foreign_bank_code'] = \MyInvoice\Service\Bank\CurrencyBankAccountFields::foreignBankCode(
+            isset($row['bank_code']) ? (string) $row['bank_code'] : null,
+            isset($row['iban']) ? (string) $row['iban'] : null,
+        );
+        return $row;
     }
 
     /**
@@ -976,6 +1000,8 @@ final class InvoicePdfRenderer
                 // na předem stanovené období. Bez vlastního popisku se tiskl jako „Faktura"
                 // a příjemce z něj nepoznal, o jaký doklad jde.
                 'payment_calendar' => $isVatPayer ? 'Platební kalendář — daňový doklad' : 'Platební kalendář',
+                'rent_calendar' => $isVatPayer ? 'Splátkový kalendář — daňový doklad' : 'Splátkový kalendář',
+                'advance_calendar' => $isVatPayer ? 'Platební kalendář — daňový doklad' : 'Platební kalendář',
             ],
             'en' => [
                 'invoice'      => $isVatPayer ? 'Invoice — Tax document' : 'Invoice',
@@ -984,6 +1010,8 @@ final class InvoicePdfRenderer
                 'cancellation' => 'Cancellation (internal)',
                 'tax_document' => 'Tax document for payment received',
                 'payment_calendar' => $isVatPayer ? 'Payment calendar — Tax document' : 'Payment calendar',
+                'rent_calendar' => $isVatPayer ? 'Rent instalment calendar — Tax document' : 'Rent instalment calendar',
+                'advance_calendar' => $isVatPayer ? 'Payment calendar — Tax document' : 'Payment calendar',
             ],
         ];
         // § 30 ZDPH: zjednodušený daňový doklad se jako takový označí, jinak by příjemce
@@ -1002,7 +1030,8 @@ final class InvoicePdfRenderer
             'credit_note'  => 'Dobropis',
             'cancellation' => 'Storno',
             'tax_document' => 'Daňový doklad k platbě',
-            'payment_calendar' => 'Platební kalendář',
+            'payment_calendar', 'advance_calendar' => 'Platební kalendář',
+            'rent_calendar' => 'Splátkový kalendář',
             default        => !empty($invoice['is_simplified']) ? 'Zjednodušený daňový doklad' : 'Faktura',
         };
         return "$t $vs";
@@ -1241,7 +1270,8 @@ final class InvoicePdfRenderer
             'credit_note'  => 'Dobropis',
             'cancellation' => 'Storno',
             'tax_document' => 'DanovyDoklad',
-            'payment_calendar' => 'PlatebniKalendar',
+            'payment_calendar', 'advance_calendar' => 'PlatebniKalendar',
+            'rent_calendar' => 'SplatkovyKalendar',
             default        => 'Faktura',
         };
         return "$dir/$type-$vs.pdf";

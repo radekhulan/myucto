@@ -23,6 +23,7 @@ use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\PurchaseInvoice\Approval\PurchaseApprovalException;
 use MyInvoice\Service\PurchaseInvoice\Approval\PurchaseInvoiceApprovalService;
 use MyInvoice\Service\PurchaseInvoice\PurchaseInvoiceReceiver;
+use MyInvoice\Support\Sql\PayablePredicate;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -152,6 +153,16 @@ final class TransitionPurchaseInvoiceStatusAction
                 'missing_tax_date',
                 'Doklad nemá vyplněné DUZP (datum uskutečnění zdanitelného plnění) — bez něj nelze fakturu zaúčtovat.',
                 422,
+            );
+        }
+
+        // DDKP (§ 28 ZDPH) se neplatí: úhrada patří na zálohovou fakturu, ze které vznikl.
+        if ($target === 'paid' && (string) ($existing['document_kind'] ?? '') === PayablePredicate::NON_PAYABLE_DOCUMENT_KIND) {
+            return Json::error(
+                $response,
+                'tax_document_not_payable',
+                'Daňový doklad k platbě se neuhrazuje. Úhradu evidujte na zálohové faktuře.',
+                409,
             );
         }
 

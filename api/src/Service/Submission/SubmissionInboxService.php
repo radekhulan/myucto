@@ -480,6 +480,11 @@ final readonly class SubmissionInboxService
         ];
     }
 
+    public function markAllRead(int $supplierId, string $environment, SubmissionInboxListQuery $query, ?int $userId): int
+    {
+        return $this->inbox->markAllRead($supplierId, $environment, $query, $userId);
+    }
+
     public function markRead(int $supplierId, int $messageId, bool $read, ?int $userId): bool
     {
         return $this->inbox->markRead($supplierId, $messageId, $read, $userId);
@@ -628,17 +633,14 @@ final readonly class SubmissionInboxService
             $actorUserId,
         );
 
-        $ingested = $this->documents->ingestZfoBytes(
-            $bytes,
-            $context->supplierId,
-            $folderId,
-            'datova-zprava-' . $header->externalMessageId . '.zfo',
-            $actorUserId,
-        );
-
         $verdict = $this->classifier->classify($context->supplierId, $context->environment, $header, $boxKinds);
 
-        $message = $this->inbox->record([
+        // Záznam zprávy se zakládá PŘED uložením do Dokumentů. Dřív vznikal až
+        // po něm, takže fatal během ingestu (vyčerpaná paměť, timeout; není to
+        // \Throwable) zprávu nezaznamenal a každé další stažení ji zkoušelo a
+        // padalo znovu. Teď po fatalu zpráva zůstane založená bez dokumentu
+        // a schránka jde dál; obyčejná výjimka záznam zruší, aby se zkusila znovu.
+        $message = $this->inbox->claim([
             'supplier_id' => $context->supplierId,
             'environment' => $context->environment,
             'channel' => $channelCode,
@@ -649,11 +651,33 @@ final readonly class SubmissionInboxService
             'sender_ident' => $header->senderIdent,
             'classification' => $verdict['classification'],
             'matched_outbox_id' => $verdict['matched_outbox_id'],
-            'document_id' => $ingested['container_id'] > 0 ? $ingested['container_id'] : null,
+            'document_id' => null,
             'delivered_at' => $header->deliveredAt?->format('Y-m-d H:i:s'),
             'accepted_at' => $header->acceptedAt?->format('Y-m-d H:i:s'),
             'raw_sha256' => hash('sha256', $bytes),
         ]);
+        if ($message === null) {
+            // Zprávu mezitím založilo souběžné stažení a zpracuje ji samo.
+            return $verdict;
+        }
+
+        try {
+            $ingested = $this->documents->ingestZfoBytes(
+                $bytes,
+                $context->supplierId,
+                $folderId,
+                'datova-zprava-' . $header->externalMessageId . '.zfo',
+                $actorUserId,
+            );
+        } catch (\Throwable $e) {
+            $this->inbox->releaseClaim($context->supplierId, (int) $message['id']);
+            throw $e;
+        }
+        $message = $this->inbox->attachDocument(
+            $context->supplierId,
+            (int) $message['id'],
+            $ingested['container_id'] > 0 ? $ingested['container_id'] : null,
+        ) ?? $message;
 
         // Rozhodný den doručení se určuje hned při uložení. Kdyby se počítal až
         // při čtení, měnil by se podle toho, kdy se kdo podívá — a od něj běží

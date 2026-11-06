@@ -16,15 +16,21 @@ use MyInvoice\Service\Accounting\Bank\BankDocumentNumber;
 use MyInvoice\Service\Accounting\Dimension\DimensionAccountRouter;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy;
 use MyInvoice\Service\Accounting\Expense\ExpenseClassificationService;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
 use MyInvoice\Service\Accounting\Expense\PurchaseDiscountAllocation;
 use MyInvoice\Service\Accounting\Product\IssuedDiscountAllocation;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
+use MyInvoice\Service\Accounting\Revenue\RevenueRuleMatcher;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
+use MyInvoice\Service\Invoice\MultiPurposeVoucher;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
+use MyInvoice\Service\Property\Charges\Issuance\IssuancePostingBatchContext;
 use MyInvoice\Service\Report\VatLedgerService;
+use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
 
 /**
@@ -124,6 +130,18 @@ final class PostingService
     /** @var array<int, array<string,string>> per-request cache supplier_id => [syntetika => jediná analytika]. */
     private array $singleAnalyticCache = [];
 
+    /**
+     * Mapa přesměru čtená aktuálním čtením (`FOR UPDATE`) v probíhající transakci.
+     * Zámky drží řádky osnovy a historie definic až do konce transakce, takže je jiná
+     * transakce nezmění. Změnu vlastní transakcí i konec transakce pozná čítač
+     * {@see \MyInvoice\Infrastructure\Database\LoggingPdo::tableWriteCount()}.
+     *
+     * @var array{key:string, writes:string, map:array<string,string>}|null
+     */
+    private ?array $currentAnalyticMemo = null;
+
+    private const SINGLE_ANALYTIC_TABLES = ['chart_of_accounts', 'accounting_account_definition_history', 'accounting_supplier_settings'];
+
     /** @var array<string,string> per-request cache "supplierId|code" => výsledný nedaňový účet. */
     private array $nonDeductibleAccountCache = [];
 
@@ -139,6 +157,7 @@ final class PostingService
     private ?DimensionStamper $dimensionStamper = null;
 
     private ?ProductPostingDefaults $productDefaults = null;
+    private ?RevenueRuleMatcher $revenueRules = null;
 
     private ?BankDocumentNumber $bankDocumentNumber = null;
 
@@ -210,20 +229,20 @@ final class PostingService
     }
 
     /** @return list<array<string,mixed>> */
-    public function prepareDocumentLines(int $supplierId, string $sourceType, ?int $sourceId, array $lines, string $entryDate): array
+    public function prepareDocumentLines(int $supplierId, string $sourceType, ?int $sourceId, array $lines, string $entryDate, bool $currentRead = false): array
     {
         // 1) překlad CODE → account_id (v rámci osnovy firmy) + kontrola vyváženosti.
         //    Vyváženost se ověřuje na RESOLVED řádcích (částky zaokr. na 2 des. místa),
         //    tj. přesně na tom, co se uloží — ne na surovém vstupu.
-        $codeMap = $this->accounts->codeToIdMap($supplierId);
-        $resolved = $this->resolveLines($supplierId, $lines, $codeMap, $sourceType);
+        $codeMap = $this->accounts->codeToIdMap($supplierId, $entryDate, $currentRead);
+        $resolved = $this->resolveLines($supplierId, $lines, $codeMap, $sourceType, $entryDate, $currentRead);
         $resolved = $this->stampProjectDimension($supplierId, $sourceType, $sourceId, $resolved);
         $resolved = $this->dimensionStamper()->stamp(
             $supplierId,
             $sourceType,
             $sourceId,
             $resolved,
-            $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
+            $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap, $entryDate, $currentRead),
             $entryDate,
         );
         // Účtotvorná dimenze (migrace 1952): hodnota dimenze přepíše výsledkovou syntetiku
@@ -231,14 +250,14 @@ final class PostingService
         // a rozpadech dokladu — rozhoduje výsledná dimenze řádku, ať ji dal doklad, položka,
         // produkt, pravidlo nebo volající (mzdy, ruční zápis). Bez mapy beze změny.
         $routed = (new DimensionAccountRouter($this->db))
-            ->apply($supplierId, $resolved, $entryDate, $this->singleAnalyticMap($supplierId));
+            ->apply($supplierId, $resolved, $entryDate, $this->singleAnalyticMap($supplierId, $entryDate, $currentRead), $currentRead);
         if ($routed !== $resolved) {
             $resolved = $this->dimensionStamper()->linkColumns($supplierId, $routed);
         }
         // Pravidla dimenzí podle účtu (Firma → Dimenze → Pravidla): povinná dimenze
         // s vynucením `error` zápis odmítne, `warning` se vrátí přes dimensionWarnings().
         $this->dimensionWarnings = [];
-        $this->dimensionWarnings = $this->dimensionStamper()->rules()->check($supplierId, $sourceType, $resolved, $entryDate);
+
         self::assertBalanced($resolved); // v haléřích; UnbalancedEntryException při nerovnosti
 
         return $resolved;
@@ -267,11 +286,103 @@ final class PostingService
         );
     }
 
+    public function preflightPropertyIssuanceBatch(int $supplierId, array $documents): IssuancePostingBatchContext
+    {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction() || $documents === []) {
+            throw new \LogicException('Property issuance batch preflight requires an owning transaction.');
+        }
+        $periodStatuses = (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+        (new SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+        (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockContext($supplierId);
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->acquire($supplierId);
+        $lockedUntil = $this->lockedUntilForUpdate($supplierId);
+        $dates = [];
+        $ids = [];
+        foreach ($documents as $document) {
+            $sourceId = (int) ($document['source_id'] ?? 0);
+            $lines = $document['lines'] ?? null;
+            $meta = $document['meta'] ?? null;
+            $entryDate = is_array($meta) ? (string) ($meta['entry_date'] ?? '') : '';
+            if ($sourceId < 1 || !is_array($lines) || $lines === [] || !is_array($meta) || $entryDate === '' || isset($ids[$sourceId])) {
+                throw new \LogicException('Invalid property issuance batch document.');
+            }
+            if ($lockedUntil !== null && $entryDate <= $lockedUntil) {
+                throw new PostingException('date_locked', 'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
+                    . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. Zámek posuň v nastavení účetnictví (jen admin).');
+            }
+            $dates[$entryDate] = true;
+            $ids[$sourceId] = true;
+        }
+        $sourceIds = array_keys($ids);
+        sort($sourceIds, SORT_NUMERIC);
+        foreach (array_chunk($sourceIds, 500) as $chunk) {
+            $marks = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $pdo->prepare("SELECT source_id FROM journal_entries WHERE supplier_id=? AND source_type='unit_charge' AND source_id IN ({$marks}) AND posted_at IS NOT NULL AND reversed_by IS NULL ORDER BY source_id FOR UPDATE");
+            $stmt->execute([$supplierId, ...$chunk]);
+            if ($stmt->fetchColumn() !== false) throw new \LogicException('Property issuance batch source already has an active journal entry.');
+        }
+        $periods = [];
+        foreach (array_keys($dates) as $entryDate) {
+            $period = $this->periods->findForDateForUpdate($supplierId, $entryDate);
+            if ($period === null) {
+                $this->provisioner()->ensureOpenPeriodForDate($supplierId, $entryDate, AccountingPeriodProvisioner::REASON_POSTING, null);
+                $period = $this->periods->findForDateForUpdate($supplierId, $entryDate);
+            }
+            if ($period === null) throw self::noPeriodException($entryDate, 'Pro datum ' . $entryDate . ' neexistuje účetní období.');
+            if ($period['status'] !== 'open') {
+                throw new PostingException('period_not_open', 'Účetní období ' . $period['fiscal_year'] . ' je ve stavu "' . $period['status'] . '" — do uzavřeného období nelze účtovat (§35 ZoÚ).');
+            }
+            $periodStatuses[(int) $period['id']] = (string) $period['status'];
+            $periods[$entryDate] = $period;
+        }
+        $prepared = [];
+        foreach ($documents as $document) {
+            $sourceId = (int) $document['source_id'];
+            $meta = $document['meta'];
+            $entryDate = (string) $meta['entry_date'];
+            $resolved = $this->prepareDocumentLines($supplierId, 'unit_charge', $sourceId, $document['lines'], $entryDate, true);
+            $prepared[] = [
+                'source_id' => $sourceId,
+                'entry_date' => $entryDate,
+                'period' => $periods[$entryDate],
+                'request_hash' => IssuancePostingBatchContext::requestHash($supplierId, $sourceId, $document['lines'], $meta),
+                'resolved_hash' => \MyInvoice\Service\Property\PropertyInput::hash($resolved),
+                'resolved_lines' => $resolved,
+                'header' => [
+                    'period_id' => (int) $periods[$entryDate]['id'],
+                    'document_date' => $meta['document_date'] ?? null,
+                    'document_no' => $meta['document_no'] ?? null,
+                    'description' => $meta['description'] ?? null,
+                    'posted_by' => $meta['posted_by'] ?? null,
+                ],
+            ];
+        }
+        foreach (array_keys($dates) as $entryDate) {
+            $lines = [];
+            foreach ($prepared as $document) if ($document['entry_date'] === $entryDate) array_push($lines, ...$document['resolved_lines']);
+            (new SystemDimensionWritePolicy($this->db))->assertJournal([
+                'supplier_id' => $supplierId,
+                'period_id' => (int) $periods[$entryDate]['id'],
+                'entry_date' => $entryDate,
+                'source_type' => 'unit_charge',
+                'source_id' => null,
+                'posted_at' => date('Y-m-d H:i:s'),
+            ], $lines);
+        }
+        return IssuancePostingBatchContext::begin($this->db, $supplierId, $periodStatuses, $lockedUntil, $prepared);
+    }
+
+    public function postPropertyIssuanceBatchDocument(IssuancePostingBatchContext $context, int $supplierId, int $sourceId, array $lines, array $meta): int
+    {
+        return $this->postDocumentOnce($supplierId, 'unit_charge', $sourceId, $lines, $meta, $context);
+    }
+
     /**
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float|int|string, cost_center?:?string}> $lines
      * @param array<string,mixed> $meta
      */
-    private function postDocumentOnce(int $supplierId, string $sourceType, ?int $sourceId, array $lines, array $meta): int
+    private function postDocumentOnce(int $supplierId, string $sourceType, ?int $sourceId, array $lines, array $meta, ?IssuancePostingBatchContext $batchContext = null): int
     {
         if ($lines === []) {
             throw new PostingException('empty_entry', 'Účetní zápis nemá žádné řádky.');
@@ -284,7 +395,6 @@ final class PostingService
             $this->assertPayrollPostingContext($supplierId, $sourceId);
         }
 
-        $resolved = $this->prepareDocumentLines($supplierId, $sourceType, $sourceId, $lines, $entryDate);
 
         // R7 (Epic F4): flag allow_closing_period smí nastavit VÝHRADNĚ ClosingService —
         // závěrkové zápisy k ends_on se účtují do období ve stavu 'closing' (nikdy closed/approved).
@@ -309,11 +419,49 @@ final class PostingService
             $pdo->beginTransaction();
         }
         try {
-            $periodStatuses = (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+            $batchDocument = $batchContext?->claim($this->db, $supplierId, (int) $sourceId, $lines, $meta);
+            if ($batchContext === null) {
+                $periodStatuses = (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+                (new SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+                (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockContext($supplierId);
+                (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->acquire($supplierId);
+            } else {
+                $periodStatuses = $batchContext->periodStatuses($this->db);
+            }
+            if ($sourceId !== null && $sourceType === 'invoice') {
+                // Fakturu krytou ostatní pohledávkou (migrace 2246) účtuje zápis pohledávky.
+                // Čte se až pod zámkem období, který drží i navázání faktury.
+                $covered = $pdo->prepare('SELECT other_item_id FROM invoices WHERE id = ? AND supplier_id = ? LOCK IN SHARE MODE');
+                $covered->execute([$sourceId, $supplierId]);
+                $coveringItem = $covered->fetchColumn();
+                if ($coveringItem !== false && $coveringItem !== null) {
+                    throw self::coveredByOtherItemException($sourceId);
+                }
+            }
+            if ($sourceId !== null && in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
+                $group = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $sourceId, true);
+                // Zaúčtovat již převzatý doklad je idempotentní jen pro cesty, které
+                // pouze zajišťují zaúčtování a výslovně o to požádají. Přepis patří do
+                // výslovného přeúčtování, které nejprve vyřeší CELOU skupinu.
+                if (DocumentPostingGroup::hasOwnedEntries($group) && empty($meta['explicit_repost'])
+                    && !empty($meta['posting_group_idempotent'])) {
+                    $this->dimensionWarnings = [];
+                    if ($ownTx) $pdo->commit();
+                    return (int) $group[0]['id'];
+                }
+                // Jediný přímý zápis dokladu se přepíše na místě jako před zavedením
+                // skupin a vazba vlastnictví na něm zůstane. Rozdělený předpis nebo
+                // ruční člen bez zdroje by přepis zdvojil, proto volající dostane chybu.
+                if (DocumentPostingGroup::hasOwnedEntries($group) && !(empty($meta['explicit_repost'])
+                    && DocumentPostingGroup::isSingleDirectEntry($group, $sourceType, $sourceId))) {
+                    throw new PostingException('posting_group_requires_repost',
+                        'Doklad má převzaté zaúčtování. Přeúčtujte celou skupinu z detailu dokladu.', 409);
+                }
+            }
             if ($sourceType === 'bank' && $sourceId !== null) {
                 (new PayrollBankEvidenceGuard($this->db))->assertAvailableForBankPosting($sourceId);
             }
-            $period = $this->periods->findForDateForUpdate($supplierId, $entryDate);
+            $period = $batchDocument['period'] ?? $this->periods->findForDateForUpdate($supplierId, $entryDate);
             if ($period === null) {
                 // Chybějící období (zapomenutý přelom roku, naimportovaná historie) se
                 // založí otevřené — jediné pravidlo pro to má
@@ -351,25 +499,28 @@ final class PostingService
             // podané DPH a to se tím nemění. Flag `tax_neutral_rewrite` nastavuje výhradně
             // DocumentRepostService a sám nic nepovolí — podmínky se ověřují znovu níž,
             // pod zámkem řádku zápisu (assertTaxNeutralRewrite).
-            $lockedUntil = $this->lockedUntilForUpdate($supplierId);
+            $lockedUntil = $batchContext?->lockedUntil($this->db) ?? $this->lockedUntilForUpdate($supplierId);
             $dateLocked = $lockedUntil !== null && $entryDate <= $lockedUntil;
             $taxNeutralRewrite = $dateLocked && !empty($meta['tax_neutral_rewrite']);
-            if ($dateLocked && !$taxNeutralRewrite) {
-                throw new PostingException(
-                    'date_locked',
-                    'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
-                        . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
-                        . 'Zámek posuň v nastavení účetnictví (jen admin).',
-                );
+            // Druhá výjimka: zápis kroku uzávěrky. DPH za prosinec bývá podané dřív, než se
+            // uzavírá rok, a zámek k 31. 12. by pak zastavil každý závěrkový zápis. DPH se počítá
+            // z dokladů, ne z deníku, takže ho tyto zápisy nemění. Flag nastavuje jen ClosingService.
+            $closingStepInLock = $dateLocked && $allowClosing;
+            if ($dateLocked && !$taxNeutralRewrite && !$closingStepInLock) {
+                throw self::dateLockedException($entryDate, (string) $lockedUntil);
             }
+
+            $resolved = $batchDocument['resolved_lines'] ?? $this->prepareDocumentLines($supplierId, $sourceType, $sourceId, $lines, $entryDate, true);
 
             // Přeúčtování ručními řádky přebírá aktuální stopu i ze stornovaného zdroje.
             // Čtení patří až za zámky období a nastavení, stejně jako ostatní čtení deníku.
             if (!empty($meta['inherit_line_trace_from'])) {
+                $traceIds = array_map('intval', (array) $meta['inherit_line_trace_from']);
                 $resolved = $this->inheritLineTrace(
                     $supplierId,
-                    $this->journal->linesForEntry((int) $meta['inherit_line_trace_from'], $supplierId, true),
+                    (new DocumentPostingGroup($this->db))->lines($supplierId, $traceIds, true),
                     $resolved,
+                    $entryDate,
                 );
             }
 
@@ -405,6 +556,7 @@ final class PostingService
                 'posted_at'     => $posted ? ($meta['posted_at'] ?? date('Y-m-d H:i:s')) : null,
                 'posted_by'     => $postedBy,
             ];
+            if ($batchContext !== null) $header['issuance_posting_batch_context'] = $batchContext;
 
             // Idempotence se ptá na AKTIVNÍ zápis dokladu (migrace 1752). Stornovaný
             // zápis se úmyslně NEBERE: §35 ZoÚ opravuje po stornu novým zápisem, ne
@@ -418,6 +570,7 @@ final class PostingService
                 : null;
 
             if ($existing !== null) {
+                if ($batchContext !== null) throw new \LogicException('Property issuance batch source changed after preflight.');
                 if ($sourceType === 'payroll') {
                     throw new PostingException(
                         'payroll_rewrite_forbidden',
@@ -430,7 +583,7 @@ final class PostingService
                 $existing['lines'] = $this->journal->linesForEntry((int) $existing['id'], $supplierId, true);
                 if ($taxNeutralRewrite) {
                     $this->assertTaxNeutralRewrite($supplierId, $existing, $entryDate, $resolved);
-                    $resolved = $this->inheritLineTrace($supplierId, $existing['lines'], $resolved);
+                    $resolved = $this->inheritLineTrace($supplierId, $existing['lines'], $resolved, $entryDate);
                 }
                 $entryId = $this->rewriteExisting(
                     $supplierId,
@@ -441,7 +594,7 @@ final class PostingService
                     $lockedUntil,
                     $allowClosing,
                     isset($meta['expected_row_version']) ? (int) $meta['expected_row_version'] : null,
-                    $taxNeutralRewrite,
+                    $taxNeutralRewrite || $closingStepInLock,
                 );
                 $auditPayload = [
                     'source_type' => $sourceType,
@@ -459,6 +612,7 @@ final class PostingService
                             . ' a doklad nemá zápis, který by se dal přepsat — nový zápis do zamčeného data nelze.',
                     );
                 }
+                $this->dimensionWarnings = $this->dimensionStamper()->rules()->check($supplierId, $sourceType, $resolved, $entryDate);
                 try {
                     $entryId = $this->journal->insert($header, $resolved);
                 } catch (\PDOException $e) {
@@ -511,6 +665,8 @@ final class PostingService
                 $meta['user_agent'] ?? null,
                 $supplierId,
             );
+
+            if ($batchContext !== null) $batchContext->complete($this->db, (int) $sourceId);
 
             if ($ownTx) {
                 $pdo->commit();
@@ -579,6 +735,9 @@ final class PostingService
         }
         try {
             $periodStatuses = (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+            (new SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims($supplierId);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->acquire($supplierId);
             $lockedUntil = $this->lockedUntilForUpdate($supplierId);
             $entry = $this->journal->findActiveBySourceForUpdate($supplierId, $sourceType, $sourceId);
             if ($entry === null || ($entry['posted_at'] ?? null) === null) {
@@ -597,7 +756,7 @@ final class PostingService
             }
 
             $existing = [];
-            foreach ($this->journal->linesForEntry($entryId, $supplierId) as $line) {
+            foreach ($this->journal->linesForEntry($entryId, $supplierId, true) as $line) {
                 $existing[(int) $line['id']] = $line;
             }
             $removedCents = 0;
@@ -609,8 +768,8 @@ final class PostingService
                 $removedCents += JournalLineAmount::signedCents($line) * ($line['side'] === 'debit' ? 1 : -1);
             }
 
-            $codeMap = $this->accounts->codeToIdMap($supplierId);
-            $resolved = $addLines === [] ? [] : $this->resolveLines($supplierId, $addLines, $codeMap, $sourceType);
+            $codeMap = $this->accounts->codeToIdMap($supplierId, $entryDate, true);
+            $resolved = $addLines === [] ? [] : $this->resolveLines($supplierId, $addLines, $codeMap, $sourceType, $entryDate, true);
             if ($resolved !== []) {
                 $resolved = $this->stampProjectDimension($supplierId, $sourceType, $sourceId, $resolved);
                 $resolved = $this->dimensionStamper()->stamp(
@@ -618,7 +777,7 @@ final class PostingService
                     $sourceType,
                     $sourceId,
                     $resolved,
-                    $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
+                    $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap, $entryDate, true),
                     $entryDate,
                 );
                 // Pravidla dimenzí podle účtu stejně jako postDocument: vynucená dimenze
@@ -682,6 +841,26 @@ final class PostingService
         );
     }
 
+    /**
+     * Storno celého předpisu dokladu. Bez entry_date se každý člen ruší ke svému
+     * původnímu datu; úhrady ani informativní vazby se do skupiny nenačítají.
+     * @return array<int,int> id původního zápisu => id protizápisu
+     */
+    public function reverseDocument(int $supplierId, string $docType, int $docId, array $meta = []): array
+    {
+        return TransactionFailure::retrying($this->db->pdo(), fn (): array =>
+            (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $docType, $docId, $meta): array {
+                (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+                $entries = (new DocumentPostingGroup($this->db))->active($supplierId, $docType, $docId, true);
+                $result = [];
+                foreach ($entries as $entry) {
+                    $result[(int) $entry['id']] = $this->reverseOnce($supplierId, (int) $entry['id'], $meta);
+                }
+                return $result;
+            }),
+        );
+    }
+
     /** @param array{entry_date?:string, description?:?string, posted_by?:?int, user_id?:?int, ip?:?string, user_agent?:?string} $meta */
     private function reverseOnce(int $supplierId, int $entryId, array $meta): int
     {
@@ -691,7 +870,9 @@ final class PostingService
             $pdo->beginTransaction();
         }
         try {
-        (new DimensionPeriodGuard($this->db))->lockPeriods($supplierId);
+        (new SystemDimensionWritePolicy($this->db))->lockContext($supplierId);
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims($supplierId);
+        (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertEntriesMutable($supplierId, [$entryId]);
         $lockedUntil = $this->lockedUntilForUpdate($supplierId);
         $periodForDate = function (string $date) use ($supplierId, $meta): ?array {
             $period = $this->periods->findForDateForUpdate($supplierId, $date);
@@ -706,6 +887,7 @@ final class PostingService
             }
             return $period;
         };
+        (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingEntriesMutable($supplierId, [$entryId]);
         $original = $this->journal->findForUpdate($entryId, $supplierId);
         if ($original === null) {
             throw new PostingException('entry_not_found', 'Účetní zápis #' . $entryId . ' neexistuje.', 404);
@@ -748,7 +930,8 @@ final class PostingService
         }
         $periodOpen = in_array($period['status'], $allowedStatuses, true);
 
-        if ($periodOpen && $lockedUntil !== null && $reversalDate <= $lockedUntil) {
+        // Storno závěrkového zápisu smí do zamčeného data ze stejného důvodu jako zápis sám.
+        if ($periodOpen && $lockedUntil !== null && $reversalDate <= $lockedUntil && empty($meta['allow_closing_period'])) {
             if ($explicitDate !== null) {
                 throw new PostingException(
                     'date_locked',
@@ -793,6 +976,8 @@ final class PostingService
         $origLineIds = array_map(static fn (array $l): int => (int) ($l['id'] ?? 0), $origLines);
         $origDims = $assignments->lineDimensions($supplierId, $origLineIds, true);
         $origSplits = $assignments->lineSplits($supplierId, $origLineIds, true);
+        $origOrigins = $assignments->lineOrigins($supplierId, $origLineIds, true);
+        $origSplitOrigins = $assignments->lineSplitOrigins($supplierId, $origLineIds, true);
         $mirror = [];
         foreach ($origLines as $line) {
             $reversalLine = JournalLineAmount::reversal($line);
@@ -810,6 +995,8 @@ final class PostingService
                 'project_id'     => isset($line['project_id']) ? (int) $line['project_id'] : null,
                 'dimensions'     => $origDims[(int) ($line['id'] ?? 0)] ?? [],
                 'dimension_splits' => $origSplits[(int) ($line['id'] ?? 0)] ?? [],
+                'dimension_origins' => $origOrigins[(int) ($line['id'] ?? 0)] ?? [],
+                'dimension_split_origins' => $origSplitOrigins[(int) ($line['id'] ?? 0)] ?? [],
             ];
         }
 
@@ -830,13 +1017,7 @@ final class PostingService
             'posted_by'     => $meta['posted_by'] ?? null,
         ];
 
-            $reversalId = $this->journal->insert($header, $mirror);
-            // Atomická pojistka proti dvojímu stornu (audit F-1): podmíněný UPDATE
-            // reversed_by IS NULL. Když mezitím stornoval někdo jiný, vrátí false →
-            // rollback celé transakce (i právě vloženého zrcadla).
-            if (!$this->journal->setReversedBy($entryId, $supplierId, $reversalId)) {
-                throw new PostingException('already_reversed', 'Zápis #' . $entryId . ' byl mezitím stornován.');
-            }
+            $reversalId = $this->journal->insertReversal($header, $mirror, $entryId);
             if (in_array((string) $original['source_type'], ['bank', 'cash'], true)
                 && $original['source_id'] !== null) {
                 $column = $original['source_type'] === 'bank' ? 'bank_transaction_id' : 'cash_document_id';
@@ -845,6 +1026,10 @@ final class PostingService
                       WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL"
                 );
                 $released->execute([$reversalDate, $supplierId, (int) $original['source_id']]);
+                if ($released->rowCount() > 0) {
+                    InvoiceOtherItemPayments::syncForItems($pdo, $supplierId,
+                        InvoiceOtherItemPayments::itemsOfPayment($pdo, $supplierId, $column, (int) $original['source_id']));
+                }
             }
 
             $this->activity->log(
@@ -914,6 +1099,20 @@ final class PostingService
                 'Mzdový předpis vyžaduje připravenou dávku schválené revize.',
             );
         }
+    }
+
+    private function currentDimensionLines(int $supplierId, array $lines): array
+    {
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $lineIds = array_column($lines, 'id');
+        $dimensions = $assignments->lineDimensions($supplierId, $lineIds, true);
+        $splits = $assignments->lineSplits($supplierId, $lineIds, true);
+        foreach ($lines as $i => $line) {
+            $lineId = (int) $line['id'];
+            $lines[$i]['dimensions'] = $dimensions[$lineId] ?? [];
+            $lines[$i]['dimension_splits'] = $splits[$lineId] ?? [];
+        }
+        return $lines;
     }
 
     /**
@@ -986,6 +1185,14 @@ final class PostingService
             );
         }
 
+        $this->dimensionWarnings = $this->dimensionStamper()->rules()->check(
+            $supplierId,
+            (string) $header['source_type'],
+            $resolved,
+            (string) $header['entry_date'],
+            SystemDimensionWritePolicy::canRetainEntryAssignments($header, $existing)
+                ? $this->currentDimensionLines($supplierId, $existing['lines']) : [],
+        );
         $this->journal->replace($entryId, $header, $resolved);
         return $entryId;
     }
@@ -1008,7 +1215,7 @@ final class PostingService
             $violation = TaxNeutralReclassification::violation(
                 $existing['lines'] ?? [],
                 $resolved,
-                $this->accounts->idToAccountMap($supplierId),
+                $this->accounts->idToAccountMap($supplierId, $entryDate, true),
                 $this->incomeTaxFiledForYear($supplierId, (int) substr($entryDate, 0, 4)),
             );
             $reason = $violation === null ? null : TaxNeutralReclassification::describe($violation);
@@ -1050,22 +1257,33 @@ final class PostingService
      * Nejdřív řádky beze změny (týž účet, strana i částka) převezmou stopu doslova. Pak
      * saldokontní řádek (31x/32x), jehož částka se změnila: když na tomtéž účtu a straně
      * zůstal právě jeden původní řádek se stopou, cizí částka se přepočte poměrem nové
-     * a původní korunové částky (kurz zůstává). Víc kandidátů = nejednoznačné, řádek
-     * zůstane bez stopy a přecenění ho uvidí jako korunový — stejně jako dosud.
+     * a původní korunové částky (kurz zůstává). Saldokonto rozdělené do více zápisů
+     * převzaté skupiny lze sloučit,
+     * pokud všechny části nesou tutéž měnu a kurz a jejich součet přesně odpovídá
+     * jedinému novému řádku. Jinak víc kandidátů zůstává nejednoznačných.
      *
      * @param list<array<string,mixed>> $existingLines
      * @param list<array<string,mixed>> $resolved
      * @return list<array<string,mixed>>
      */
-    private function inheritLineTrace(int $supplierId, array $existingLines, array $resolved): array
+    private function inheritLineTrace(int $supplierId, array $existingLines, array $resolved, string $entryDate): array
     {
         [$resolved, $pool, $matched] = self::carryOverExactTrace($existingLines, $resolved);
-        $pool = array_values(array_filter($pool, static fn (array $l): bool => ($l['currency_code'] ?? null) !== null
-            && ($l['amount_foreign'] ?? null) !== null && self::cents($l['amount']) !== 0));
+        // Slučování částí platí jen pro předpis rozdělený do více zápisů (převzatá
+        // skupina). Jediný zápis si drží původní pravidlo: kandidát je jen řádek
+        // se stopou a nenulovou částkou a musí být právě jeden.
+        $multiEntry = count(array_unique(array_map(
+            static fn (array $l): int => (int) ($l['entry_id'] ?? 0),
+            $existingLines,
+        ))) > 1;
+        if (!$multiEntry) {
+            $pool = array_values(array_filter($pool, static fn (array $l): bool => ($l['currency_code'] ?? null) !== null
+                && ($l['amount_foreign'] ?? null) !== null && self::cents($l['amount']) !== 0));
+        }
         if ($pool === []) {
             return $resolved;
         }
-        $accounts = $this->accounts->idToAccountMap($supplierId);
+        $accounts = $this->accounts->idToAccountMap($supplierId, $entryDate, true);
         foreach ($resolved as $i => $line) {
             if (isset($matched[$i]) || ($line['currency_code'] ?? null) !== null) {
                 continue;
@@ -1080,10 +1298,34 @@ final class PostingService
                     && (string) $old['side'] === (string) $line['side']
                     && (bool) ($old['is_red_storno'] ?? false) === (bool) ($line['is_red_storno'] ?? false),
             );
-            if (count($candidates) !== 1) {
+            if ($candidates === [] || count(array_filter($candidates, static fn (array $old): bool =>
+                ($old['currency_code'] ?? null) === null || ($old['amount_foreign'] ?? null) === null
+                    || self::cents($old['amount']) === 0)) > 0) {
                 continue;
             }
             $old = array_values($candidates)[0];
+            if (count($candidates) > 1 && !$multiEntry) {
+                continue;
+            }
+            if (count($candidates) > 1) {
+                // Import může mít závazek zvlášť pro základ a DPH. Stopu lze převzít
+                // pouze za celou stejnorodou částku, nikdy odhadovat mezi více řádky.
+                $targets = array_filter($resolved, static fn (array $target): bool =>
+                    (int) $target['account_id'] === (int) $line['account_id']
+                    && (string) $target['side'] === (string) $line['side']
+                    && (bool) ($target['is_red_storno'] ?? false) === (bool) ($line['is_red_storno'] ?? false));
+                $compatible = array_filter($candidates, static fn (array $candidate): bool =>
+                    $candidate['currency_code'] === $old['currency_code']
+                    && ($candidate['fx_rate'] === null) === ($old['fx_rate'] === null)
+                    && (float) $candidate['fx_rate'] === (float) $old['fx_rate']);
+                $amountCents = array_sum(array_map(static fn (array $candidate): int => self::cents($candidate['amount']), $candidates));
+                if (count($targets) !== 1 || count($compatible) !== count($candidates)
+                    || $amountCents !== self::cents($line['amount'])) {
+                    continue;
+                }
+                $old['amount'] = $amountCents / 100;
+                $old['amount_foreign'] = array_sum(array_column($candidates, 'amount_foreign'));
+            }
             $resolved[$i]['currency_code'] = $old['currency_code'];
             $resolved[$i]['fx_rate'] = $old['fx_rate'] ?? null;
             $resolved[$i]['amount_foreign'] = round(
@@ -1177,6 +1419,9 @@ final class PostingService
                 'Vydaný doklad #' . $invoiceId . ' typu "' . $invoiceType . '" se do deníku neúčtuje.',
             );
         }
+        if (($inv['other_item_id'] ?? null) !== null) {
+            throw self::coveredByOtherItemException($invoiceId);
+        }
 
         // DDKP (daňový doklad k přijaté platbě, §28/2/d ZDPH) NENÍ běžná faktura:
         // zákazník už zaplatil zálohu (zaúčtováno 221/324), doklad jen přiznává DPH ze
@@ -1200,6 +1445,8 @@ final class PostingService
             (string) $inv['issue_date'],
         );
 
+        $entryDate = self::documentPostingDate($inv, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null);
+        $currentRead = (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction());
         $rate    = $this->fxRate($inv);
         $totalCzk = round((float) $inv['total_with_vat'] * $rate, 2);
 
@@ -1209,6 +1456,9 @@ final class PostingService
         // obsahuje) neseděla na základ+daň a doklad končil na 'totals_mismatch',
         // resp. u čistě OSS dokladu rovnou na 'document_not_postable'.
         [$ossNet, $ossVat] = $this->ossItemTotals($invoiceId, $rate);
+        // Víceúčelový poukaz evidence DPH vyřazuje stejně jako OSS, doklad se o něj doplní
+        // zvlášť; rozpad výnosu ho pošle na přijaté zálohy.
+        $voucherNet = $this->voucherItemNet($supplierId, $invoiceId, $rate);
 
         // Vyúčtování zálohy s daňovými doklady k platbě (§ 37a): odpočtové řádky snížily
         // základ vyúčtování o základ DDKP, jenže DDKP účtoval jen daň (324/343), výnos
@@ -1220,7 +1470,7 @@ final class PostingService
         $net = round($net + $deduction['base'], 2);
         $totalCzk = round($totalCzk + $deduction['base'], 2);
 
-        if ($net + $vat + $ossNet + $ossVat === 0.0) {
+        if ($net + $vat + $ossNet + $ossVat + $voucherNet === 0.0) {
             throw new PostingException('document_not_postable', 'Faktura #' . $invoiceId . ' nemá DPH řádky k zaúčtování (proforma/storno?).');
         }
 
@@ -1248,7 +1498,7 @@ final class PostingService
         // karty majetku spadl zápornou vahou na 602 a výnos z prodeje majetku by se rozjel.
         $weights = isset($opts['rule_key'])
             ? null
-            : $this->revenueWeights($supplierId, $invoiceId, $rate, $revenue, $deduction['item_ids']);
+            : $this->revenueWeights($supplierId, $invoiceId, $rate, $revenue, $entryDate, $currentRead, $deduction['item_ids']);
 
         // Normálně 311 MD / 6xx+343 D; dobropis obrací obě strany (§ vratka výnosu i DPH).
         $receivableSide = $isCreditNote ? 'credit' : 'debit';
@@ -1270,7 +1520,7 @@ final class PostingService
         // Výnos je výnos bez ohledu na to, kterému státu patří daň — OSS základ jde na
         // TÝŽ výnosový účet (a do téhož rozpadu; revenueWeights počítá váhy ze VŠECH
         // položek dokladu, tedy i z těch OSS, takže by rozpad jinak nesouhlasil).
-        $this->appendSplit($lines, $weights, $revenue, $otherSide, $net + $ossNet, $cc);
+        $this->appendSplit($lines, $weights, $revenue, self::sideBySign($net + $ossNet + $voucherNet, $otherSide, $isCreditNote), $net + $ossNet + $voucherNet, $cc);
         if ($vat !== 0.0) {
             $lines[] = $this->line($this->outputVatAccount($supplierId), $vatSide($vat), abs($vat), $cc);
         }
@@ -1281,7 +1531,7 @@ final class PostingService
             $ossAccount = $this->ruleCode($supplierId, 'oss.output.vat', 'credit', self::OSS_OUTPUT_VAT_ACCOUNT);
             $lines[] = $this->line($ossAccount, $vatSide($ossVat), abs($ossVat), $cc);
         }
-        $this->appendRounding($lines, $totalCzk, $net + $vat + $ossNet + $ossVat, $cc, $isCreditNote);
+        $this->appendRounding($lines, $totalCzk, $net + $vat + $ossNet + $ossVat + $voucherNet, $cc, $isCreditNote);
 
         // Vyúčtovací faktura z proformy (parent_invoice_id → proforma): DOPLŇ zúčtování
         // skutečně přijaté zálohy 324 MD / 311 D (self-balanced pár — nemění vyváženost
@@ -1418,6 +1668,12 @@ final class PostingService
         throw new PostingException('invalid_advance_direction', 'Neplatný směr zálohové platby: ' . $direction . '.');
     }
 
+    public static function documentPostingDate(array $document, ?string $entryDate = null): string
+    {
+        return \MyInvoice\Repository\AccountDefinitionRepository::date($entryDate ?? (string) ($document['tax_date'] ?? $document['issue_date'] ?? ''));
+    }
+
+
     /**
      * Sestaví řádky pro přijatou fakturu: 5xx|042 (náklad/majetek) + 343 (odpočet) / 321.
      * U tuzemského reverse-charge (§92) se DPH samovyměří: 343 MD (odpočet) i 343 D
@@ -1444,6 +1700,29 @@ final class PostingService
      * @param array{rule_key?:string, cost_center?:?string} $opts
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}>
      */
+    /**
+     * Nárok na odpočet, se kterým se přijatá faktura účtuje. Odběratel, který k datu
+     * plnění není plátce (ani identifikovaná osoba nemá u tuzemského plnění nárok),
+     * odpočet neuplatní: daň je součástí nákladu, i když doklad nese výchozí `full`
+     * (issue #246, 343 u neplátce). Přenesení daňové povinnosti se řídí dál uloženým
+     * nárokem, samovyměření se neplátce týká jen výjimečně a má vlastní pravidla.
+     *
+     * @param array<string,mixed> $pi
+     */
+    private function effectivePurchaseVatDeduction(int $supplierId, array $pi): string
+    {
+        $stored = (string) ($pi['vat_deduction'] ?? 'full');
+        if ($stored === 'none' || (bool) ($pi['reverse_charge'] ?? false)) {
+            return $stored;
+        }
+        $date = (string) ($pi['tax_date'] ?? $pi['issue_date'] ?? '');
+        if ($date === '') {
+            return $stored;
+        }
+
+        return VatStatusService::payerAt($this->db->pdo(), $supplierId, $date) ? $stored : 'none';
+    }
+
     public function buildFromPurchaseInvoice(int $supplierId, int $purchaseInvoiceId, array $opts = []): array
     {
         unset($this->itemAccountTrace['purchase_invoice|' . $purchaseInvoiceId]);
@@ -1471,8 +1750,12 @@ final class PostingService
         if ((string) ($pi['document_kind'] ?? '') === 'tax_document') {
             return $this->buildPurchaseAdvanceVatDocumentLines($supplierId, $purchaseInvoiceId, $pi, $opts);
         }
+        $entryDate = self::documentPostingDate($pi, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null);
+        $currentRead = (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction());
+        $opts['entry_date'] = $entryDate;
+        $opts['current_read'] = $currentRead;
         $debitOverride = array_key_exists('debit_account_code', $opts)
-            ? $this->validatePurchaseDebitOverride($supplierId, (string) $opts['debit_account_code'])
+            ? $this->validatePurchaseDebitOverride($supplierId, (string) $opts['debit_account_code'], $entryDate, $currentRead)
             : null;
 
         $rate         = $this->fxRate($pi);
@@ -1480,40 +1763,20 @@ final class PostingService
         $isRc         = (bool) $pi['reverse_charge'];
         $isFixedAsset = (bool) ($pi['is_fixed_asset'] ?? false);
         $taxDeductible = (bool) ($pi['tax_deductible'] ?? true);
-        $vatDeduction = (string) ($pi['vat_deduction'] ?? 'full');
+        $vatDeduction = $this->effectivePurchaseVatDeduction($supplierId, $pi);
         $isCreditNote = ((string) ($pi['document_kind'] ?? 'invoice') === 'credit_note') || $totalCzk < 0.0;
 
-        $allocations = $this->purchaseVatAllocations($supplierId, $purchaseInvoiceId);
+        // Rozúčtování nároku podle druhu plnění má smysl jen u plátce; neplátci jde
+        // celá daň do nákladu bez ohledu na uložené rozúčtování.
+        $allocations = $vatDeduction === 'none' && (string) ($pi['vat_deduction'] ?? 'full') !== 'none'
+            ? []
+            : $this->purchaseVatAllocations($supplierId, $purchaseInvoiceId);
         if ($allocations !== []) {
             return $this->buildAllocatedPurchaseInvoiceLines($supplierId, $pi, $allocations, $opts);
         }
 
-        // Krácený nárok § 76 u samovyměření se účtuje jako plný: obě nohy 343 v plné výši,
-        // krácení koeficientem jde až souhrnně přes přiznání (ř. 43k/52), stejně jako u ř. 40k.
-        if (!in_array($vatDeduction, ['full', 'reduced'], true) && $isRc) {
-            throw new PostingException(
-                'rc_partial_deduction_unsupported',
-                'Přijatá faktura #' . $purchaseInvoiceId . ' kombinuje tuzemské samovyměření DPH (reverse charge) '
-                    . 's omezeným nárokem na odpočet (' . $vatDeduction . ') — tuto kombinaci systém zatím '
-                    . 'nezaúčtuje automaticky, zaúčtuj ji ručním zápisem.',
-            );
-        }
-
         if ($vatDeduction === 'full' || $isRc) {
-            // received_at do okna jen u ruční PF (received_at_source='manual'), kde ho
-            // VatLedgerService zohledňuje v období odpočtu (§ 73/1/a) — jinak by scanner
-            // minul řádek zařazený do pozdějšího roku (přelom roku, audit C6').
-            $receivedAt = ((string) ($pi['received_at_source'] ?? '') === 'manual')
-                ? ($pi['received_at'] !== null ? (string) $pi['received_at'] : null)
-                : null;
-            [$net, $vat, $selfAssessedVat] = $this->ledgerTotals(
-                $supplierId,
-                'purchase',
-                $purchaseInvoiceId,
-                (string) ($pi['tax_date'] ?? $pi['issue_date']),
-                (string) $pi['issue_date'],
-                $receivedAt,
-            );
+            [$net, $vat, $selfAssessedVat] = $this->purchaseLedgerTotals($supplierId, $purchaseInvoiceId, $pi, $rate, $vatDeduction);
         } else {
             [$net, $vat] = $this->purchaseItemTotals($purchaseInvoiceId, $rate);
             $selfAssessedVat = 0.0;
@@ -1526,9 +1789,9 @@ final class PostingService
         $rule = $this->rules->resolve($supplierId, $opts['rule_key'] ?? $defaultKey);
         $expense = $debitOverride ?? ($rule['debit_account_code'] ?? ($isFixedAsset ? '042' : '518'));
         if (!$taxDeductible) {
-            $expense = $this->nonDeductibleExpenseAccount($supplierId, $expense);
+            $expense = $this->nonDeductibleExpenseAccount($supplierId, $expense, $entryDate, $currentRead);
         }
-        $payable = $rule['credit_account_code'] ?? '321';
+        $payable = $this->purchasePayable($supplierId, $pi, $rule, $defaultKey);
         $cc = $opts['cost_center'] ?? null;
 
         $pct = max(0.0, min(100.0, (float) ($pi['vat_deduction_percent'] ?? 100))) / 100.0;
@@ -1548,6 +1811,8 @@ final class PostingService
                 $pct,
                 $expense,
                 $taxDeductible,
+                $entryDate,
+                $currentRead,
                 (array) ($opts['item_classification_overrides'] ?? []),
                 $isFixedAsset,
             );
@@ -1562,39 +1827,46 @@ final class PostingService
             // Vendor fakturuje bez DPH → závazek = základ; daň se samovyměří na 343 (obě strany).
             // Smíšený doklad nese vedle řádků § 92a i tuzemský řádek s daní dodavatele: ta je
             // běžným odpočtem a je součástí závazku, samovyměřuje se jen daň RC řádků.
-            $supplierVat = round($vat - $selfAssessedVat, 2);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
+            //
+            // Povinnost přiznat daň (§ 108) na nároku nezávisí (§ 72/4): výstup je vždy v plné
+            // výši. Odpočet se řídí nárokem — bez nároku nic, poměrný § 75 procentem, krácený
+            // § 76 v plné výši (krácení koeficientem jde souhrnně přes přiznání, ř. 43k/52).
+            // Neodpočitatelná část daně je nákladem stejně jako u tuzemského dokladu bez nároku.
+            [$supplierVat, $deductibleSelfAssessed, $deductibleSupplierVat, $nonDeductibleVat] = self::reverseChargeVatSplit($vat, $selfAssessedVat, $vatDeduction, $pct);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign(round($net + $nonDeductibleVat, 2), $expenseSide, $isCreditNote), round($net + $nonDeductibleVat, 2), $cc);
             if ($selfAssessedVat !== 0.0) {
-                // Samovyměření: obě nohy jsou tatáž částka, ale patří na RŮZNÉ analytiky —
-                // odpočet na vstup, přiznaná daň na výstup. Na plochém 343 se okamžitě
-                // vynetovaly a v zúčtování období po nich nezůstala stopa.
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($selfAssessedVat), $cc);  // nárok na odpočet
-                $lines[] = $this->line($this->outputVatAccount($supplierId), $payableSide, abs($selfAssessedVat), $cc); // povinnost přiznat daň
+                // Samovyměření: obě nohy patří na RŮZNÉ analytiky — odpočet na vstup, přiznaná
+                // daň na výstup. Na plochém 343 se okamžitě vynetovaly a v zúčtování období
+                // po nich nezůstala stopa.
+                if ($deductibleSelfAssessed !== 0.0) {
+                    $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSelfAssessed, $expenseSide, $isCreditNote), abs($deductibleSelfAssessed), $cc);  // nárok na odpočet
+                }
+                $lines[] = $this->line($this->outputVatAccount($supplierId), self::sideBySign($selfAssessedVat, $payableSide, $isCreditNote), abs($selfAssessedVat), $cc); // povinnost přiznat daň
             }
-            if ($supplierVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($supplierVat), $cc);
+            if ($deductibleSupplierVat !== 0.0) {
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSupplierVat, $expenseSide, $isCreditNote), abs($deductibleSupplierVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $supplierVat, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'none') {
             $expenseAmount = round($net + $vat, 2);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($expenseAmount, $expenseSide, $isCreditNote), $expenseAmount, $cc);
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'proportional') {
             $deductibleVat    = round($vat * $pct, 2);
             $nonDeductibleVat = round($vat - $deductibleVat, 2);
             $expenseAmount    = round($net + $nonDeductibleVat, 2);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($expenseAmount, $expenseSide, $isCreditNote), $expenseAmount, $cc);
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($deductibleVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleVat, $expenseSide, $isCreditNote), abs($deductibleVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount + $deductibleVat, $cc, $totalOnCredit);
         } else {
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($net, $expenseSide, $isCreditNote), $net, $cc);
             if ($vat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($vat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($vat, $expenseSide, $isCreditNote), abs($vat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $vat, $cc, $totalOnCredit);
@@ -1697,10 +1969,12 @@ final class PostingService
         float $pct,
         string $defaultAccount,
         bool $taxDeductible,
+        string $entryDate,
+        bool $currentRead,
         array $itemOverrides = [],
         bool $isFixedAsset = false,
     ): ?array {
-        $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId);
+        $suggestions = $this->expenseClassification->suggestForInvoice($supplierId, $purchaseInvoiceId, $entryDate, $currentRead);
         $stmt = $this->db->pdo()->prepare(
             'SELECT id, description, vat_rate_snapshot, expense_kind, expense_account_code,
                     expense_classification_source, total_without_vat, total_vat, stock_item_id, is_fixed_asset
@@ -1727,6 +2001,8 @@ final class PostingService
             PurchaseDiscountAllocation::withReturns($this->db->pdo(), $supplierId, $purchaseInvoiceId, $items),
         );
 
+        $serviceAccounts = $isFixedAsset ? [] : $this->serviceCostAccounts($supplierId, $purchaseInvoiceId, $entryDate);
+
         $anyClassified = false;
         $weights = [];
         $itemAccounts = [];
@@ -1745,6 +2021,12 @@ final class PostingService
                 $approvedAccount = trim((string) ($approved['expense_account_code'] ?? ''));
                 $override = $approvedAccount === '' ? null : $approvedAccount;
             }
+            // Služba SVJ v rozvahovém profilu jde na 315.2xx bez ohledu na druh výdaje i návrh
+            // klasifikátoru; přebije ji jen účet, který účetní zadala na položce sama.
+            $serviceAccount = $override === null ? ($serviceAccounts[(int) $row['id']] ?? null) : null;
+            if ($serviceAccount !== null) {
+                $override = $serviceAccount;
+            }
 
             // Náhled i samotné zaúčtování musí použít jistý návrh stejně jako auto-post,
             // ale bez zápisu do dokladu. Ruční volba účetní (účet i samotný druh) má vždy
@@ -1755,7 +2037,7 @@ final class PostingService
                 $override,
                 $row['expense_classification_source'] !== null ? (string) $row['expense_classification_source'] : null,
             );
-            if ($approved === null && !$manual && $suggestion !== null && !empty($suggestion['auto'])) {
+            if ($approved === null && $serviceAccount === null && !$manual && $suggestion !== null && !empty($suggestion['auto'])) {
                 $kindValue = (string) $suggestion['expense_kind'];
                 $suggestedAccount = trim((string) ($suggestion['expense_account_code'] ?? ''));
                 $override = $suggestedAccount === '' ? null : $suggestedAccount;
@@ -1771,26 +2053,23 @@ final class PostingService
                 $anyClassified = true;   // adresný účet (i z produktu) je klasifikace sám o sobě
             }
             $account = match (true) {
-                $override !== null => $this->validatePurchaseDebitOverride($supplierId, $override),
+                $override !== null => $this->validatePurchaseDebitOverride($supplierId, $override, $entryDate, $currentRead),
                 $kind !== null => $this->accountForExpenseKind($supplierId, $kind),
                 $productAccount !== null => $this->validatePurchaseDebitOverride(
                     $supplierId,
-                    $this->validateItemAccount($supplierId, $productAccount, ProductPostingDefaults::KIND_EXPENSE),
+                    $this->validateItemAccount($supplierId, $productAccount, ProductPostingDefaults::KIND_EXPENSE, $entryDate, $currentRead),
+                    $entryDate,
+                    $currentRead,
                 ),
                 default => $defaultAccount,
             };
-            if (!$taxDeductible) {
-                $account = $this->nonDeductibleExpenseAccount($supplierId, $account);
+            if (!$taxDeductible && $serviceAccount === null) {
+                $account = $this->nonDeductibleExpenseAccount($supplierId, $account, $entryDate, $currentRead);
             }
 
             $net = round((float) $row['total_without_vat'] * $rate, 2);
             $vat = round((float) $row['total_vat'] * $rate, 2);
-            $w = match (true) {
-                $isRc => $net,
-                $vatDeduction === 'none' => round($net + $vat, 2),
-                $vatDeduction === 'proportional' => round($net + round($vat * (1.0 - $pct), 2), 2),
-                default => $net,
-            };
+            $w = $isRc ? $net : self::purchaseItemCost($net, $vat, $vatDeduction, $pct);
             $itemAccounts[(int) $row['id']] = $account;
             $itemWeights[(int) $row['id']] = $w;
         }
@@ -1832,6 +2111,20 @@ final class PostingService
     }
 
     /** Účet pro druh výdaje — z `posting_rules` (tenant si ho může přesměrovat), ne natvrdo. */
+    /** @return array<int,string> id položky => účet 315.2xx služby SVJ v rozvahovém profilu */
+    private function serviceCostAccounts(int $supplierId, int $purchaseInvoiceId, string $entryDate): array
+    {
+        $policy = new \MyInvoice\Service\Property\Services\ServiceCostAccountPolicy($this->db);
+        if (!$policy->appliesTo($supplierId, $entryDate)) {
+            return [];
+        }
+        $dims = [];
+        foreach ($this->dimensionStamper()->itemDimensions($supplierId, 'purchase_invoice', $purchaseInvoiceId) as $itemId => $line) {
+            $dims[(int) $itemId] = (array) ($line['dimensions'] ?? []);
+        }
+        return $policy->forItems($supplierId, $entryDate, $dims);
+    }
+
     private function accountForExpenseKind(int $supplierId, ExpenseKind $kind): string
     {
         $rule = $this->rules->resolve($supplierId, $kind->ruleKey());
@@ -1860,7 +2153,7 @@ final class PostingService
      * @param list<int> $excludeItemIds odpočtové řádky § 37a (viz {@see advanceDeduction})
      * @return array<string,float>|null
      */
-    private function revenueWeights(int $supplierId, int $invoiceId, float $rate, string $defaultAccount, array $excludeItemIds = []): ?array
+    private function revenueWeights(int $supplierId, int $invoiceId, float $rate, string $defaultAccount, string $entryDate, bool $currentRead, array $excludeItemIds = []): ?array
     {
         $items = $this->issuedItemRows($supplierId, $invoiceId);
         if ($items === []) {
@@ -1871,7 +2164,7 @@ final class PostingService
             $items,
             static fn (array $row): bool => !in_array((int) $row['id'], $excludeItemIds, true),
         ));
-        [$itemAccounts, $weights, $anyClassified] = $this->issuedItemAccountsAndWeights($supplierId, $items, $rate, $defaultAccount);
+        [$itemAccounts, $weights, $anyClassified] = $this->issuedItemAccountsAndWeights($supplierId, $items, $rate, $defaultAccount, $entryDate, $currentRead);
         foreach ($itemAccounts as $itemId => $account) {
             $this->itemAccountTrace['invoice|' . $invoiceId][$itemId] = $account;
         }
@@ -1899,15 +2192,15 @@ final class PostingService
      * @param list<array<string,mixed>> $items z {@see issuedItemRows()}
      * @return array{0:array<int,string>, 1:array<string,float>, 2:bool} položka => účet, účet => váha, je něco klasifikované
      */
-    private function issuedItemAccountsAndWeights(int $supplierId, array $items, float $rate, string $defaultAccount): array
+    private function issuedItemAccountsAndWeights(int $supplierId, array $items, float $rate, string $defaultAccount, string $entryDate, bool $currentRead): array
     {
         $anyClassified = false;
         $itemAccounts = [];
         $itemWeights = [];
         foreach ($items as $row) {
             $anyClassified = $anyClassified || $row['asset_id'] !== null || $row['small_asset_id'] !== null
-                || $row['item_revenue_account'] !== null;
-            $itemAccounts[(int) $row['id']] = $this->issuedItemRevenueAccount($supplierId, $row, $defaultAccount);
+                || $row['item_revenue_account'] !== null || self::isVoucherAdvanceItem($row);
+            $itemAccounts[(int) $row['id']] = $this->issuedItemRevenueAccount($supplierId, $row, $defaultAccount, $entryDate, $currentRead);
             $itemWeights[(int) $row['id']] = round((float) $row['total_without_vat'] * $rate, 2);
         }
         $discounts = IssuedDiscountAllocation::allocate(array_values(array_filter(
@@ -1950,7 +2243,7 @@ final class PostingService
      *
      * @param array{asset_id:mixed,small_asset_id:mixed,item_revenue_account:?string} $item
      */
-    private function issuedItemRevenueAccount(int $supplierId, array $item, string $defaultAccount): string
+    private function issuedItemRevenueAccount(int $supplierId, array $item, string $defaultAccount, string $entryDate, bool $currentRead): string
     {
         if ($item['asset_id'] !== null) {
             return $this->ruleCode($supplierId, 'asset.sale.revenue', 'credit', '641');
@@ -1958,37 +2251,71 @@ final class PostingService
         if ($item['small_asset_id'] !== null) {
             return $this->ruleCode($supplierId, 'small_asset.sale.revenue', 'credit', '642');
         }
+        if (self::isVoucherAdvanceItem($item)) {
+            return $this->voucherAdvanceAccount($supplierId);
+        }
         if ($item['item_revenue_account'] !== null) {
-            return $this->validateItemAccount($supplierId, (string) $item['item_revenue_account'], ProductPostingDefaults::KIND_REVENUE);
+            if (in_array($item['item_revenue_source'] ?? null, ['item', 'rule'], true)) {
+                try {
+                    return (string) $this->productDefaults()->validateIssuedItemAccount($supplierId, (string) $item['item_revenue_account'], $entryDate, $currentRead);
+                } catch (\InvalidArgumentException $e) {
+                    throw new PostingException('invalid_item_account', $e->getMessage(), 422);
+                }
+            }
+            return $this->validateItemAccount($supplierId, (string) $item['item_revenue_account'], ProductPostingDefaults::KIND_REVENUE, $entryDate, $currentRead);
         }
         return $defaultAccount;
     }
 
     /**
-     * Položky vydané faktury s výnosovým účtem z položky, jinak z produktu a jeho
-     * kategorie (`item_revenue_account`, NULL = předkontace dokladu).
+     * Položky vydané faktury s účtem z položky, jinak z produktu a jeho kategorie, jinak
+     * z pravidel výnosů (`item_revenue_account`, NULL = předkontace dokladu).
+     *
+     * Pravidla výnosů ({@see RevenueRuleMatcher}) jdou až za produktem: karta je konkrétní
+     * nastavení, pravidlo podle sazby nebo textu obecné. Importovaná položka bez karty
+     * dostane účet z pravidla už při importu a nese ho jako účet položky; tady pravidla
+     * doplní položky, které účet nemají (doklady starší než pravidlo, ruční doklady).
+     * Slevový, textový řádek ani prodej majetku pravidlo nebere.
      *
      * @return list<array<string,mixed>>
      */
     private function issuedItemRows(int $supplierId, int $invoiceId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, small_asset_id, asset_id, total_without_vat, revenue_account_code, stock_item_id,
-                    item_kind, vat_rate_id, vat_classification_code
-               FROM invoice_items
-              WHERE invoice_id = ?'
+            'SELECT ii.id, ii.small_asset_id, ii.asset_id, ii.total_without_vat, ii.revenue_account_code, ii.stock_item_id,
+                    ii.item_kind, ii.vat_rate_id, ii.vat_classification_code, ii.description, ii.seller_item_code,
+                    ii.vat_rate_snapshot, ii.total_vat, si.eet_item_kind
+               FROM invoice_items ii
+          LEFT JOIN stock_items si ON si.id = ii.stock_item_id AND si.supplier_id = ?
+              WHERE ii.invoice_id = ?'
         );
-        $stmt->execute([$invoiceId]);
+        $stmt->execute([$supplierId, $invoiceId]);
         $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $products = $this->productDefaults()->accountsFor(
             $supplierId,
             array_map(static fn (array $r): int => (int) ($r['stock_item_id'] ?? 0), $items),
         );
+        $unresolved = [];
         foreach ($items as $i => $row) {
-            $items[$i]['item_revenue_account'] = ProductPostingDefaults::code($row['revenue_account_code'] ?? null)
-                ?? ($products[(int) ($row['stock_item_id'] ?? 0)]['revenue']['code'] ?? null);
+            $own = ProductPostingDefaults::code($row['revenue_account_code'] ?? null);
+            $product = $products[(int) ($row['stock_item_id'] ?? 0)]['revenue']['code'] ?? null;
+            $items[$i]['item_revenue_account'] = $own ?? $product;
+            $items[$i]['item_revenue_source'] = $own !== null ? 'item' : ($product !== null ? 'product' : null);
+            if ($own === null && $product === null && ($row['item_kind'] ?? 'standard') === 'standard'
+                && $row['asset_id'] === null && $row['small_asset_id'] === null && !self::isVoucherAdvanceItem($row)) {
+                $unresolved[$i] = $row;
+            }
+        }
+        foreach ($this->revenueRules()->match($supplierId, $unresolved) as $i => $hit) {
+            $items[$i]['item_revenue_account'] = $hit['account'];
+            $items[$i]['item_revenue_source'] = 'rule';
         }
         return $items;
+    }
+
+    private function revenueRules(): RevenueRuleMatcher
+    {
+        return $this->revenueRules ??= new RevenueRuleMatcher($this->db);
     }
 
     /**
@@ -1998,10 +2325,10 @@ final class PostingService
      *
      * @param ProductPostingDefaults::KIND_* $kind
      */
-    private function validateItemAccount(int $supplierId, string $code, string $kind): string
+    private function validateItemAccount(int $supplierId, string $code, string $kind, ?string $entryDate = null, bool $currentRead = false): string
     {
         try {
-            return (string) $this->productDefaults()->validateAccount($supplierId, $code, $kind);
+            return (string) $this->productDefaults()->validateAccount($supplierId, $code, $kind, $entryDate, $currentRead);
         } catch (\InvalidArgumentException $e) {
             throw new PostingException('invalid_item_account', $e->getMessage(), 422);
         }
@@ -2019,16 +2346,17 @@ final class PostingService
      *
      * @return array{rate:float, accounts:array<int,string>}
      */
-    public function issuedItemRevenueAccounts(int $supplierId, int $invoiceId): array
+    public function issuedItemRevenueAccounts(int $supplierId, int $invoiceId, ?string $entryDate = null, bool $currentRead = false): array
     {
         $inv = $this->fetchDocHeader('invoices', $supplierId, $invoiceId);
         if ($inv === null) {
             throw new PostingException('entry_not_found', 'Vydaná faktura #' . $invoiceId . ' neexistuje.', 404);
         }
+        $entryDate = self::documentPostingDate($inv, $entryDate ?? $this->sourcePostingDate($supplierId, 'invoice', $invoiceId, $currentRead));
         $rule = $this->rules->resolve($supplierId, self::issuedHeaderRuleKey($inv));
         $default = (string) ($rule['credit_account_code'] ?? '602');
         $rate = $this->fxRate($inv);
-        [$accounts] = $this->issuedItemAccountsAndWeights($supplierId, $this->issuedItemRows($supplierId, $invoiceId), $rate, $default);
+        [$accounts] = $this->issuedItemAccountsAndWeights($supplierId, $this->issuedItemRows($supplierId, $invoiceId), $rate, $default, $entryDate, $currentRead);
         return ['rate' => $rate, 'accounts' => $accounts];
     }
 
@@ -2041,18 +2369,19 @@ final class PostingService
      *
      * @return array<int,string> id položky => kód účtu
      */
-    public function purchaseItemExpenseAccounts(int $supplierId, int $purchaseInvoiceId): array
+    public function purchaseItemExpenseAccounts(int $supplierId, int $purchaseInvoiceId, ?string $entryDate = null, bool $currentRead = false): array
     {
         $pi = $this->fetchDocHeader('purchase_invoices', $supplierId, $purchaseInvoiceId);
         if ($pi === null) {
             throw new PostingException('entry_not_found', 'Přijatá faktura #' . $purchaseInvoiceId . ' neexistuje.', 404);
         }
+        $entryDate = self::documentPostingDate($pi, $entryDate ?? $this->sourcePostingDate($supplierId, 'purchase_invoice', $purchaseInvoiceId, $currentRead));
         $isFixedAsset = (bool) ($pi['is_fixed_asset'] ?? false);
         $taxDeductible = (bool) ($pi['tax_deductible'] ?? true);
         $rule = $this->rules->resolve($supplierId, $isFixedAsset ? self::DEFAULT_RECEIVED_ASSET_RULE_KEY : self::DEFAULT_RECEIVED_RULE_KEY);
         $expense = $rule['debit_account_code'] ?? ($isFixedAsset ? '042' : '518');
         if (!$taxDeductible) {
-            $expense = $this->nonDeductibleExpenseAccount($supplierId, $expense);
+            $expense = $this->nonDeductibleExpenseAccount($supplierId, $expense, $entryDate, $currentRead);
         }
         $key = 'purchase_invoice|' . $purchaseInvoiceId;
         unset($this->itemAccountTrace[$key]);
@@ -2061,16 +2390,187 @@ final class PostingService
             $purchaseInvoiceId,
             $this->fxRate($pi),
             (bool) $pi['reverse_charge'],
-            (string) ($pi['vat_deduction'] ?? 'full'),
+            $this->effectivePurchaseVatDeduction($supplierId, $pi),
             max(0.0, min(100.0, (float) ($pi['vat_deduction_percent'] ?? 100))) / 100.0,
             $expense,
             $taxDeductible,
+            $entryDate,
+            $currentRead,
             [],
             $isFixedAsset,
         );
         $accounts = $this->itemAccountTrace[$key] ?? [];
         unset($this->itemAccountTrace[$key]);
         return $accounts;
+    }
+
+    /**
+     * Účetní náklad položek přijaté faktury v Kč: základ a neodpočitatelná část daně, stejným
+     * pravidlem jako zápis dokladu ({@see buildFromPurchaseInvoice}). Historický status plátce
+     * čte {@see effectivePurchaseVatDeduction}, kurz je kurz dokladu. Daň z účetních alokací
+     * a ze samovyměření se k položkám neváže, proto se rozdělí poměrem: alokace podle daně
+     * položek, samovyměření podle základu jako rozpad nákladu v zápisu dokladu.
+     *
+     * SSOT pro časové rozlišení nákladů (381), které musí odložit tutéž hodnotu, kterou doklad
+     * zaúčtoval. Haléřové dorovnání dokladu se do nákladu položky nepočítá.
+     *
+     * @return array<int,float> id položky => náklad v Kč
+     */
+    public function purchaseItemCostsCzk(int $supplierId, int $purchaseInvoiceId): array
+    {
+        $pi = $this->fetchDocHeader('purchase_invoices', $supplierId, $purchaseInvoiceId);
+        if ($pi === null) {
+            throw new PostingException('entry_not_found', 'Přijatá faktura #' . $purchaseInvoiceId . ' neexistuje.', 404);
+        }
+        $rate = $this->fxRate($pi);
+        $vatDeduction = $this->effectivePurchaseVatDeduction($supplierId, $pi);
+        $pct = max(0.0, min(100.0, (float) ($pi['vat_deduction_percent'] ?? 100))) / 100.0;
+
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT id, total_without_vat, total_vat FROM purchase_invoice_items WHERE purchase_invoice_id = ?'
+        );
+        $stmt->execute([$purchaseInvoiceId]);
+        $nets = [];
+        $vats = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $nets[(int) $row['id']] = round((float) $row['total_without_vat'] * $rate, 2);
+            $vats[(int) $row['id']] = round((float) $row['total_vat'] * $rate, 2);
+        }
+        if ($nets === []) {
+            return [];
+        }
+
+        if ((bool) ($pi['reverse_charge'] ?? false)) {
+            if (!in_array($vatDeduction, ['none', 'proportional'], true)) {
+                return $nets;
+            }
+            [, $vat, $selfAssessedVat] = $this->purchaseLedgerTotals($supplierId, $purchaseInvoiceId, $pi, $rate, $vatDeduction);
+            [, , , $nonDeductibleVat] = self::reverseChargeVatSplit($vat, $selfAssessedVat, $vatDeduction, $pct);
+            return $this->addDistributedVat($nets, $nonDeductibleVat, $nets);
+        }
+
+        // Stejná podmínka jako v zápisu: neplátci jde celá daň do nákladu bez ohledu na alokace.
+        $allocations = $vatDeduction === 'none' && (string) ($pi['vat_deduction'] ?? 'full') !== 'none'
+            ? []
+            : $this->purchaseVatAllocations($supplierId, $purchaseInvoiceId);
+        if ($allocations !== []) {
+            $nonDeductibleVat = 0.0;
+            foreach ($allocations as $allocation) {
+                $vat = round((float) $allocation['vat_amount'] * $rate, 2);
+                $nonDeductibleVat = round($nonDeductibleVat + $vat - self::allocationDeductibleVat($allocation, $vat), 2);
+            }
+            return $this->addDistributedVat($nets, $nonDeductibleVat, abs(array_sum($vats)) < 0.005 ? $nets : $vats);
+        }
+
+        $costs = [];
+        foreach ($nets as $itemId => $net) {
+            $costs[$itemId] = self::purchaseItemCost($net, $vats[$itemId], $vatDeduction, $pct);
+        }
+        return $costs;
+    }
+
+    /**
+     * @param array<int,float> $nets
+     * @param array<int,float> $weights
+     * @return array<int,float>
+     */
+    private function addDistributedVat(array $nets, float $vat, array $weights): array
+    {
+        if (self::cents($vat) === 0) {
+            return $nets;
+        }
+        foreach ($this->distribute($vat, $weights) as $itemId => $part) {
+            $nets[$itemId] = round($nets[$itemId] + $part, 2);
+        }
+        return $nets;
+    }
+
+    /** Náklad položky bez samovyměření a účetních alokací: základ + neodpočitatelná část daně. */
+    private static function purchaseItemCost(float $net, float $vat, string $vatDeduction, float $pct): float
+    {
+        return match ($vatDeduction) {
+            'none' => round($net + $vat, 2),
+            'proportional' => round($net + round($vat * (1.0 - $pct), 2), 2),
+            default => $net,
+        };
+    }
+
+    /**
+     * Základ, daň a samovyměřená daň dokladu pro větev plného nároku a přenesení povinnosti.
+     *
+     * @param array<string,mixed> $pi
+     * @return array{0:float,1:float,2:float}
+     */
+    private function purchaseLedgerTotals(int $supplierId, int $purchaseInvoiceId, array $pi, float $rate, string $vatDeduction): array
+    {
+        // received_at do okna jen u ruční PF (received_at_source='manual'), kde ho
+        // VatLedgerService zohledňuje v období odpočtu (§ 73/1/a) — jinak by scanner
+        // minul řádek zařazený do pozdějšího roku (přelom roku, audit C6').
+        $receivedAt = ((string) ($pi['received_at_source'] ?? '') === 'manual')
+            ? ($pi['received_at'] !== null ? (string) $pi['received_at'] : null)
+            : null;
+        [$net, $vat, $selfAssessedVat] = $this->ledgerTotals(
+            $supplierId,
+            'purchase',
+            $purchaseInvoiceId,
+            (string) ($pi['tax_date'] ?? $pi['issue_date']),
+            (string) $pi['issue_date'],
+            $receivedAt,
+        );
+        // Kniha DPH tuzemské řádky bez nároku vyřadí a u § 75 je zkrátí, samovyměření
+        // ale nechá celé. Pro zápis je proto doklad z položek a z knihy jen samovyměřená daň.
+        if ((bool) $pi['reverse_charge'] && in_array($vatDeduction, ['none', 'proportional'], true)) {
+            [$net, $itemVat] = $this->purchaseItemTotals($purchaseInvoiceId, $rate);
+            $vat = round($itemVat + $selfAssessedVat, 2);
+        }
+        return [$net, $vat, $selfAssessedVat];
+    }
+
+    /**
+     * Rozdělení daně dokladu s přenesením povinnosti podle nároku.
+     *
+     * @return array{0:float,1:float,2:float,3:float} daň dodavatele, odpočet ze samovyměření, odpočet z daně dodavatele, neodpočitatelná daň
+     */
+    private static function reverseChargeVatSplit(float $vat, float $selfAssessedVat, string $vatDeduction, float $pct): array
+    {
+        $supplierVat = round($vat - $selfAssessedVat, 2);
+        $deductibleShare = match ($vatDeduction) {
+            'none' => 0.0,
+            'proportional' => $pct,
+            default => 1.0,
+        };
+        $deductibleSelfAssessed = round($selfAssessedVat * $deductibleShare, 2);
+        $deductibleSupplierVat = round($supplierVat * $deductibleShare, 2);
+        $nonDeductibleVat = round($selfAssessedVat - $deductibleSelfAssessed + $supplierVat - $deductibleSupplierVat, 2);
+        return [$supplierVat, $deductibleSelfAssessed, $deductibleSupplierVat, $nonDeductibleVat];
+    }
+
+    /** @param array<string,mixed> $allocation */
+    private static function allocationDeductibleVat(array $allocation, float $vat): float
+    {
+        return match ((string) $allocation['vat_deduction']) {
+            'none' => 0.0,
+            'proportional' => round($vat * max(0.0, min(100.0, (float) $allocation['vat_deduction_percent'])) / 100, 2),
+            default => $vat,
+        };
+    }
+
+    /**
+     * Strana řádku podle znaménka jeho částky vůči směru dokladu (#326). Směr dokladu
+     * určuje znaménko celkové částky; řádek s opačným znaménkem (záporný základ u kladné
+     * faktury, třeba vrácené zálohované obaly 0 % převáží zboží 21 %) patří na opačnou
+     * stranu. Slepé abs() by ho zapsalo na normální stranu a zápis by se rozvážil
+     * o dvojnásobek částky. Při shodném znaménku vrací `$normalSide` beze změny.
+     *
+     * @param 'debit'|'credit' $normalSide
+     * @return 'debit'|'credit'
+     */
+    private static function sideBySign(float $amount, string $normalSide, bool $isCreditNote): string
+    {
+        if (self::cents($amount) === 0 || ($amount < 0.0) === $isCreditNote) {
+            return $normalSide;
+        }
+        return $normalSide === 'debit' ? 'credit' : 'debit';
     }
 
     /**
@@ -2155,18 +2655,20 @@ final class PostingService
         return array_map(static fn(int $c): float => $c / 100, $out);
     }
 
-    private function validatePurchaseDebitOverride(int $supplierId, string $code): string
+    private function validatePurchaseDebitOverride(int $supplierId, string $code, string $entryDate, bool $currentRead): string
     {
         $code = trim($code);
-        if ($code === '' || preg_match('/^(?:311|321|314|324|325|33|34|221|211)/', $code) === 1) {
+        if ($code === '' || SettlementAccounts::isSettlement($code)) {
             throw new PostingException('invalid_override', 'Navržený účet nelze použít pro náklad přijaté faktury.', 422);
         }
-        $account = $this->accounts->findByCode($supplierId, $code);
-        if ($account === null || !($account['is_active'] ?? false)) {
+        $query = $this->db->pdo()->prepare('SELECT * FROM ' . \MyInvoice\Repository\AccountDefinitionRepository::relation($entryDate, $supplierId, $currentRead) . ' a WHERE supplier_id=? AND account_code=?');
+        $query->execute([$supplierId, $code]);
+        $account = $query->fetch(PDO::FETCH_ASSOC);
+        if ($account === false || !($account['is_active'] ?? false)) {
             throw new PostingException('invalid_override', 'Navržený účet není aktivní v účtové osnově firmy.', 422);
         }
         // Syntetika s analytikami se na náklad nepoužívá (klasifikátor zná jen „511").
-        return $this->expenseClassification->analyticForExpenseAccount($supplierId, $code);
+        return $this->expenseClassification->analyticForExpenseAccount($supplierId, $code, $entryDate, $currentRead);
     }
 
     /**
@@ -2175,39 +2677,39 @@ final class PostingService
      * Chybějící nebo uživatelem jinak klasifikovaná .990 analytika znamená bezpečný
      * fallback na původní účet; hlavička dokladu stále zajistí přičtení v DPFO/DPPO.
      */
-    private function nonDeductibleExpenseAccount(int $supplierId, string $accountCode): string
+    private function nonDeductibleExpenseAccount(int $supplierId, string $accountCode, string $entryDate, bool $currentRead): string
     {
-        $cacheKey = $supplierId . '|' . $accountCode;
-        if (isset($this->nonDeductibleAccountCache[$cacheKey])) {
+        $cacheKey = $supplierId . '|' . $entryDate . '|' . $accountCode;
+        if (!$currentRead && isset($this->nonDeductibleAccountCache[$cacheKey])) {
             return $this->nonDeductibleAccountCache[$cacheKey];
         }
 
         $candidate = ChartOfAccountsTemplate::nonDeductibleAnalyticFor($accountCode);
         if ($candidate === null || $candidate === $accountCode) {
-            return $this->nonDeductibleAccountCache[$cacheKey] = $accountCode;
+            return $currentRead ? $accountCode : ($this->nonDeductibleAccountCache[$cacheKey] = $accountCode);
         }
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT source.tax_deductibility AS source_tax_deductibility,
+            "SELECT source.tax_deductibility AS source_tax_deductibility,
                     target.account_code AS target_account_code
-               FROM chart_of_accounts source
-          LEFT JOIN chart_of_accounts target
+               FROM " . \MyInvoice\Repository\AccountDefinitionRepository::relation($entryDate, $supplierId, $currentRead) . " source
+          LEFT JOIN " . \MyInvoice\Repository\AccountDefinitionRepository::relation($entryDate, $supplierId, $currentRead) . " target
                  ON target.supplier_id = source.supplier_id
                 AND target.account_code = ?
-                AND target.account_type = "expense"
-                AND target.tax_deductibility = "non_deductible"
+                AND target.account_type = 'expense'
+                AND target.tax_deductibility = 'non_deductible'
                 AND target.is_active = 1
               WHERE source.supplier_id = ? AND source.account_code = ? AND source.is_active = 1
-              LIMIT 1'
+              LIMIT 1"
         );
         $stmt->execute([$candidate, $supplierId, $accountCode]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false || (string) $row['source_tax_deductibility'] === 'non_deductible') {
-            return $this->nonDeductibleAccountCache[$cacheKey] = $accountCode;
+            return $currentRead ? $accountCode : ($this->nonDeductibleAccountCache[$cacheKey] = $accountCode);
         }
 
         $target = $row['target_account_code'] !== null ? (string) $row['target_account_code'] : $accountCode;
-        return $this->nonDeductibleAccountCache[$cacheKey] = $target;
+        return $currentRead ? $target : ($this->nonDeductibleAccountCache[$cacheKey] = $target);
     }
 
     /**
@@ -2218,6 +2720,8 @@ final class PostingService
      */
     private function buildAllocatedPurchaseInvoiceLines(int $supplierId, array $pi, array $allocations, array $opts): array
     {
+        $entryDate = self::documentPostingDate($pi, isset($opts['entry_date']) ? (string) $opts['entry_date'] : null);
+        $currentRead = (bool) ($opts['current_read'] ?? $this->db->pdo()->inTransaction());
         if ((bool) ($pi['reverse_charge'] ?? false)) {
             throw new PostingException(
                 'rc_partial_deduction_unsupported',
@@ -2236,33 +2740,52 @@ final class PostingService
         foreach ($allocations as $allocation) {
             $base = round((float) $allocation['base_amount'] * $rate, 2);
             $vat = round((float) $allocation['vat_amount'] * $rate, 2);
-            $deduction = (string) $allocation['vat_deduction'];
-            $deductibleVat = match ($deduction) {
-                'none' => 0.0,
-                'proportional' => round($vat * max(0.0, min(100.0, (float) $allocation['vat_deduction_percent'])) / 100, 2),
-                default => $vat,
-            };
+            $deductibleVat = self::allocationDeductibleVat($allocation, $vat);
             $accountAmount = round($base + ($vat - $deductibleVat), 2);
             if ($accountAmount !== 0.0) {
                 $accountCode = (string) $allocation['account_code'];
                 if (!(bool) ($pi['tax_deductible'] ?? true)
                     || (string) ($allocation['tax_treatment'] ?? '') === 'non_deductible') {
-                    $accountCode = $this->nonDeductibleExpenseAccount($supplierId, $accountCode);
+                    $accountCode = $this->nonDeductibleExpenseAccount($supplierId, $accountCode, $entryDate, $currentRead);
                 }
-                $lines[] = $this->line($accountCode, $debitSide, abs($accountAmount), $cc);
+                $lines[] = $this->line($accountCode, self::sideBySign($accountAmount, $debitSide, $isCreditNote), abs($accountAmount), $cc);
             }
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $debitSide, abs($deductibleVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleVat, $debitSide, $isCreditNote), abs($deductibleVat), $cc);
             }
             $allocatedCzk = round($allocatedCzk + $accountAmount + $deductibleVat, 2);
         }
 
-        $rule = $this->rules->resolve($supplierId, 'invoice.services.received');
-        $payable = $rule['credit_account_code'] ?? '321';
+        $rule = $this->rules->resolve($supplierId, self::DEFAULT_RECEIVED_RULE_KEY);
+        $payable = $this->purchasePayable($supplierId, $pi, $rule, self::DEFAULT_RECEIVED_RULE_KEY);
         $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
         $this->appendRounding($lines, $totalCzk, $allocatedCzk, $cc, !$isCreditNote);
         $this->appendAdvanceSettlementPurchase($supplierId, $pi, $lines);
         return $lines;
+    }
+
+    /**
+     * Závazek přijatého dokladu: účet z předkontace, u účtenky případně účet z nastavení
+     * firmy ({@see PurchasePayableAccount::forPosting}). Výchozí závazek se bere
+     * z výchozí předkontace téhož druhu dokladu, takže ruční předkontace s jiným
+     * závazkem zůstává beze změny.
+     *
+     * @param array<string,mixed> $pi
+     * @param array<string,mixed>|null $rule
+     */
+    private function purchasePayable(int $supplierId, array $pi, ?array $rule, string $defaultKey): string
+    {
+        $rulePayable = (string) ($rule['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE);
+        if ((string) ($pi['document_kind'] ?? '') !== 'receipt') {
+            return $rulePayable;
+        }
+        $default = $this->rules->resolve($supplierId, $defaultKey);
+        return (new PurchasePayableAccount($this->db))->forPosting(
+            $supplierId,
+            $pi,
+            $rulePayable,
+            (string) ($default['credit_account_code'] ?? PurchasePayableAccount::DEFAULT_PAYABLE),
+        );
     }
 
     /** @return list<array<string,mixed>> */
@@ -2302,7 +2825,7 @@ final class PostingService
      * @param array<string,mixed> $inv hlavička vyúčtovací faktury (z fetchDocHeader)
      * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
      * @param float $receivable předpis na 311 v tomhle zápisu (strop zúčtování)
-     * @param array{active:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>} $deduction
+     * @param array{active:bool, partial:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>} $deduction
      */
     private function appendAdvanceSettlementSale(int $supplierId, array $inv, array &$lines, float $receivable, array $deduction): void
     {
@@ -2316,6 +2839,11 @@ final class PostingService
         $parent = $this->fetchDocHeader('invoices', $supplierId, $parentId);
         if ($parent === null || (string) ($parent['invoice_type'] ?? '') !== 'proforma') {
             return; // parent není proforma → nejde o zálohový cyklus
+        }
+
+        if ($deduction['partial']) {
+            $this->appendPartialAdvanceSettlementSale($supplierId, (int) $inv['id'], $parentId, $parent, $lines, $receivable, $deduction);
+            return;
         }
 
         if ($this->activeFinalInvoiceCount($supplierId, $parentId) > 1) {
@@ -2360,6 +2888,80 @@ final class PostingService
         }
         $lines[] = $this->line($draw, 'debit', $received, null);
         $lines[] = $this->line($recv, 'credit', $received, null);
+    }
+
+    /**
+     * Zúčtování zálohy čerpané postupně víc fakturami ({@see advanceDeduction} s `partial`).
+     * Každá faktura zúčtuje 324 MD / 311 D jen základ, který sama odečetla — ten
+     * {@see buildFromInvoice} vrátil do předpisu 311 i výnosu. Daň zálohy z 324 odčerpal
+     * už DDKP, takže součet zúčtování všech faktur s daní DDKP vyrovná celou přijatou zálohu.
+     *
+     * Strop je zaúčtovaná úhrada zálohy po odečtu daně DDKP a základu, který zúčtovaly
+     * ostatní faktury téže proformy; co nad něj zbývá, je nezaúčtovaná úhrada a zúčtování
+     * nejde určit (hlasitě, stejně jako u celého vyúčtování).
+     *
+     * @param array<string,mixed> $parent hlavička proformy
+     * @param list<array{account_code:string, side:'debit'|'credit', amount:float, cost_center?:?string}> $lines
+     * @param array{active:bool, partial:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>} $deduction
+     */
+    private function appendPartialAdvanceSettlementSale(
+        int $supplierId,
+        int $invoiceId,
+        int $parentId,
+        array $parent,
+        array &$lines,
+        float $receivable,
+        array $deduction,
+    ): void {
+        $received = $this->postedAdvanceReceived($supplierId, $parentId);
+        if (self::cents($received) > 0 && (string) ($parent['currency_code'] ?? 'CZK') !== 'CZK') {
+            $received = round($received * $this->fxRate($parent), 2);
+        }
+        $available = round($received - $deduction['drawn_vat'] - $this->otherFinalsDrawnBase($supplierId, $parentId, $invoiceId), 2);
+        if ($deduction['base'] > $available + self::ADVANCE_DEDUCTION_TOLERANCE_CZK) {
+            throw new PostingException(
+                'advance_settlement_ambiguous',
+                sprintf(
+                    'Proforma #%d: faktura čerpá ze zálohy základ %.2f Kč, ale zaúčtovaná úhrada zálohy po odečtu '
+                        . 'daně daňových dokladů a čerpání ostatních faktur pokrývá jen %.2f Kč — zaúčtuj úhradu '
+                        . 'zálohy (banka/pokladna) nebo zúčtování ručně.',
+                    $parentId,
+                    $deduction['base'],
+                    max(0.0, $available),
+                ),
+            );
+        }
+        $amount = min($deduction['base'], $receivable);
+        if (self::cents($amount) <= 0) {
+            return;
+        }
+        ['debit' => $draw, 'credit' => $recv] = $this->advanceSettlementAccounts($supplierId, 'sale');
+        if ($draw === $recv) {
+            return;
+        }
+        $lines[] = $this->line($draw, 'debit', $amount, null);
+        $lines[] = $this->line($recv, 'credit', $amount, null);
+    }
+
+    /** Základ odečtený ze zálohy ostatními nestornovanými fakturami proformy (v Kč). */
+    private function otherFinalsDrawnBase(int $supplierId, int $proformaId, int $invoiceId): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT f.id, f.exchange_rate, -SUM(ii.total_without_vat) AS base
+               FROM invoices f
+               JOIN invoice_items ii ON ii.invoice_id = f.id
+              WHERE f.supplier_id = ? AND f.parent_invoice_id = ? AND f.invoice_type = 'invoice'
+                AND f.status NOT IN ('draft', 'cancelled') AND f.id <> ?
+                AND ii.total_with_vat < 0 AND COALESCE(ii.item_kind, 'standard') <> 'discount'
+              GROUP BY f.id, f.exchange_rate"
+        );
+        $stmt->execute([$supplierId, $proformaId, $invoiceId]);
+        $sum = 0.0;
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $rate = (float) ($row['exchange_rate'] ?? 0) > 0 ? (float) $row['exchange_rate'] : 1.0;
+            $sum += round((float) $row['base'] * $rate, 2);
+        }
+        return round($sum, 2);
     }
 
     /**
@@ -2464,6 +3066,37 @@ final class PostingService
     }
 
     /**
+     * Účet přijatých záloh na víceúčelové poukazy a kredit (§ 37c ZDPH): na něj jde prodej
+     * poukazu z položky vydané faktury ({@see MultiPurposeVoucher::isUntaxedLine()}) a z něj se poukaz
+     * čerpá zápočtem při uplatnění ({@see InvoiceSettlementService::settleVoucherRedemption()}).
+     * Vlastní analytika přijatých záloh „Prodané poukazy a kredit" ({@see VoucherLiabilityAccount}),
+     * chybějící se dohraje do osnovy.
+     */
+    public function voucherAdvanceAccount(int $supplierId): string
+    {
+        return (new VoucherLiabilityAccount($this->db, $this->rules, $this->accounts))->ensure($supplierId);
+    }
+
+    /**
+     * Jde řádek vydané faktury na přijaté zálohy jako prodej víceúčelového poukazu?
+     *
+     * Definice je ve SSOT {@see MultiPurposeVoucher::isUntaxedLine()}. Prodej majetku má
+     * přednost (účet z karty majetku), proto ho tahle podmínka vyřazuje dřív. Řádek
+     * s daní (chybná data z doby před validací sazby) zůstává výnosem, jinak by se daň
+     * z téhož plnění vybrala podruhé při uplatnění.
+     *
+     * Výjimka ze zákazu saldokontních účtů na položce ({@see SettlementAccounts}) platí jen
+     * pro tento druh řádku, ne pro účet 324 obecně.
+     *
+     * @param array<string,mixed> $row řádek z {@see issuedItemRows()}
+     */
+    private static function isVoucherAdvanceItem(array $row): bool
+    {
+        return $row['asset_id'] === null && $row['small_asset_id'] === null
+            && MultiPurposeVoucher::isUntaxedLine($row);
+    }
+
+    /**
      * Skutečně přijatá záloha k proformě = součet ALOKOVANÝCH částek plateb navázaných na
      * proformu (invoice_payments.amount z banky + cash_documents.total_amount z pokladny),
      * ale JEN z těch, jejichž úhradový zápis v deníku je ŽIVÝ (source bank/cash, reversed_by
@@ -2512,6 +3145,37 @@ final class PostingService
             $this->lockedUntilCache[$supplierId] = ($v === false || $v === null) ? null : (string) $v;
         }
         return $this->lockedUntilCache[$supplierId];
+    }
+
+    /**
+     * Zámek k datu bez cache — pro kontrolu nanečisto, která má narazit na tentýž
+     * zámek jako ostrý zápis ({@see postDocument}), aniž by cokoli zamykala.
+     */
+    public function currentLockedUntil(int $supplierId): ?string
+    {
+        unset($this->lockedUntilCache[$supplierId]);
+        return $this->lockedUntil($supplierId);
+    }
+
+    /** Faktura navázaná na ostatní pohledávku vlastní zápis nemá, účtuje ji zápis pohledávky. */
+    public static function coveredByOtherItemException(int $invoiceId): PostingException
+    {
+        return new PostingException(
+            'invoice_covered_by_other_item',
+            'Vydaná faktura #' . $invoiceId . ' je navázaná na ostatní pohledávku, která ji zaúčtovala. Vlastní zápis faktura nemá.',
+            409,
+        );
+    }
+
+    /** Odmítnutí zápisu do zamčeného data; text sdílí ostrý zápis i kontrola nanečisto. */
+    public static function dateLockedException(string $entryDate, string $lockedUntil): PostingException
+    {
+        return new PostingException(
+            'date_locked',
+            'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
+                . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
+                . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (jen admin).',
+        );
     }
 
     private function lockedUntilForUpdate(int $supplierId): ?string
@@ -2565,11 +3229,11 @@ final class PostingService
      *     OSS se daňový doklad k záloze nevydává).
      *
      * @param array<string,mixed> $inv hlavička vyúčtovací faktury
-     * @return array{active:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>}
+     * @return array{active:bool, partial:bool, base:float, foreign_base:float, drawn_vat:float, item_ids:list<int>}
      */
     private function advanceDeduction(int $supplierId, int $invoiceId, array $inv, float $rate): array
     {
-        $none = ['active' => false, 'base' => 0.0, 'foreign_base' => 0.0, 'drawn_vat' => 0.0, 'item_ids' => []];
+        $none = ['active' => false, 'partial' => false, 'base' => 0.0, 'foreign_base' => 0.0, 'drawn_vat' => 0.0, 'item_ids' => []];
         if ((string) ($inv['invoice_type'] ?? 'invoice') !== 'invoice') {
             return $none;
         }
@@ -2583,11 +3247,8 @@ final class PostingService
         }
 
         $stmt = $this->db->pdo()->prepare(
-            "SELECT td.id, td.varsymbol, td.tax_date, td.issue_date,
-                    EXISTS (SELECT 1 FROM journal_entries je
-                             WHERE je.supplier_id = td.supplier_id AND je.source_type = 'invoice'
-                               AND je.source_id = td.id AND je.reversed_by IS NULL
-                               AND je.posted_at IS NOT NULL) AS posted
+            "SELECT td.id, td.varsymbol, td.tax_date, td.issue_date, "
+                    . DocumentPostingGroup::activePostingExistsSql("'invoice'", 'td.id', 'td.supplier_id') . " AS posted
                FROM invoices td
               WHERE td.supplier_id = ? AND td.invoice_type = 'tax_document'
                 AND td.status NOT IN ('draft', 'cancelled')
@@ -2656,28 +3317,66 @@ final class PostingService
             $gross += round(-((float) $row['total_without_vat'] + (float) $row['total_vat']) * $rate, 2);
         }
 
+        // Celé vyúčtování jedinou fakturou odečítá přesně DDKP. Jinak jde o postupné čerpání
+        // zálohy víc fakturami (AdvancePartialDrawdown): každá nese kladný odpočet a všechny
+        // dohromady nesmí odečíst víc, než DDKP přiznaly. Faktura bez odpočtu (smazaný
+        // v konceptu, ručně navázaná) zůstává nejednoznačná v obou případech.
+        $partial = false;
         if (abs($gross - $ddkpGross) > self::ADVANCE_DEDUCTION_TOLERANCE_CZK) {
-            throw new PostingException(
-                'advance_settlement_ambiguous',
-                sprintf(
-                    'Vyúčtovací faktura #%d odečítá zálohu %.2f Kč, ale daňové doklady k platbě proformy #%d '
-                        . 'přiznaly %.2f Kč. Odpočtové řádky (§ 37a) musí odpovídat vystaveným daňovým dokladům — '
-                        . 'jinak nejde určit výnos ani zúčtování zálohy. Oprav odpočtové řádky, nebo zaúčtuj ručně.',
-                    $invoiceId,
-                    $gross,
-                    $parentId,
-                    $ddkpGross,
-                ),
-            );
+            $drawnTotal = $this->advanceDrawnGross($supplierId, $parentId, $invoiceId, $gross, $rate);
+            // Odečet úhrad bez DDKP v hlavičce (advance_paid_amount) patří jen k celému
+            // vyúčtování — při postupném čerpání by zúčtování nešlo rozdělit mezi faktury.
+            $paidOff = $this->db->pdo()->prepare('SELECT advance_paid_amount FROM invoices WHERE id = ? AND supplier_id = ?');
+            $paidOff->execute([$invoiceId, $supplierId]);
+            $partial = self::cents($gross) > 0
+                && self::cents((float) $paidOff->fetchColumn()) === 0
+                && $drawnTotal <= $ddkpGross + self::ADVANCE_DEDUCTION_TOLERANCE_CZK;
+            if (!$partial) {
+                throw new PostingException(
+                    'advance_settlement_ambiguous',
+                    sprintf(
+                        'Vyúčtovací faktura #%d odečítá zálohu %.2f Kč, ale daňové doklady k platbě proformy #%d '
+                            . 'přiznaly %.2f Kč (všechny vyúčtovací faktury proformy odečítají %.2f Kč). '
+                            . 'Odpočtové řádky (§ 37a) musí odpovídat vystaveným daňovým dokladům, nebo při postupném '
+                            . 'čerpání zálohy nesmí dohromady přesáhnout jejich částku — jinak nejde určit výnos ani '
+                            . 'zúčtování zálohy. Oprav odpočtové řádky, nebo zaúčtuj ručně.',
+                        $invoiceId,
+                        $gross,
+                        $parentId,
+                        $ddkpGross,
+                        $drawnTotal,
+                    ),
+                );
+            }
         }
 
         return [
             'active'       => true,
+            'partial'      => $partial,
             'base'         => round($base, 2),
             'foreign_base' => round($foreignBase, 2),
             'drawn_vat'    => round($drawnVat, 2),
             'item_ids'     => $ids,
         ];
+    }
+
+    /**
+     * Σ odpočtu zálohy (s DPH, v Kč) na všech nestornovaných vyúčtovacích fakturách proformy.
+     * Odpočet vyúčtovávané faktury se bere z jejích řádků už spočítaný (`$ownGross`), ostatní
+     * faktury kurzem dokladu vyúčtovávané faktury — postupné čerpání je jen ve stejné měně.
+     */
+    private function advanceDrawnGross(int $supplierId, int $proformaId, int $invoiceId, float $ownGross, float $rate): float
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT -COALESCE(SUM(ii.total_with_vat), 0)
+               FROM invoices f
+               JOIN invoice_items ii ON ii.invoice_id = f.id
+              WHERE f.supplier_id = ? AND f.parent_invoice_id = ? AND f.invoice_type = 'invoice'
+                AND f.status <> 'cancelled' AND f.id <> ?
+                AND ii.total_with_vat < 0 AND COALESCE(ii.item_kind, 'standard') <> 'discount'"
+        );
+        $stmt->execute([$supplierId, $proformaId, $invoiceId]);
+        return round($ownGross + round((float) $stmt->fetchColumn() * $rate, 2), 2);
     }
 
     private function activeFinalInvoiceCount(int $supplierId, int $proformaId): int
@@ -2780,9 +3479,9 @@ final class PostingService
      * v účetnictví nepřijatelný, a druhá kopie pravidla přesměru by se s originálem
      * rozešla — proto se sem pouští TÁŽ mapa, jakou používá zaúčtování.
      */
-    public function redirectedAccountCode(int $supplierId, string $code): string
+    public function redirectedAccountCode(int $supplierId, string $code, ?string $date = null, bool $currentRead = false): string
     {
-        return $this->singleAnalyticMap($supplierId)[$code] ?? $code;
+        return $this->singleAnalyticMap($supplierId, $date, $currentRead)[$code] ?? $code;
     }
 
     /**
@@ -2804,17 +3503,17 @@ final class PostingService
         if ($context === null || $lines === []) {
             return [];
         }
-        $codeMap = $this->accounts->codeToIdMap($supplierId);
-        $resolved = $this->resolveLines($supplierId, $lines, $codeMap, $sourceType);
+        $codeMap = $this->accounts->codeToIdMap($supplierId, $entryDate);
+        $resolved = $this->resolveLines($supplierId, $lines, $codeMap, $sourceType, $entryDate);
         $resolved = $this->dimensionStamper()->stamp(
             $supplierId,
             $sourceType,
             $sourceId,
             $resolved,
-            $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap),
+            $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap, $entryDate, false),
             $entryDate,
         );
-        $single = $this->singleAnalyticMap($supplierId);
+        $single = $this->singleAnalyticMap($supplierId, $entryDate);
         $out = [];
         foreach ($resolved as $line) {
             $routed = $router->apply($supplierId, [$line], $entryDate, $single);
@@ -2847,9 +3546,9 @@ final class PostingService
      *
      * @return array<string,string>
      */
-    public function singleAnalyticRedirects(int $supplierId): array
+    public function singleAnalyticRedirects(int $supplierId, ?string $date = null, bool $currentRead = false): array
     {
-        return $this->singleAnalyticMap($supplierId);
+        return $this->singleAnalyticMap($supplierId, $date, $currentRead);
     }
 
     /**
@@ -2878,19 +3577,30 @@ final class PostingService
      *
      * @return array<string,string> kód syntetiky → kód analytiky (prázdné = neměň nic)
      */
-    private function singleAnalyticMap(int $supplierId): array
+    private function singleAnalyticMap(int $supplierId, ?string $date = null, bool $currentRead = false): array
     {
-        if (isset($this->singleAnalyticCache[$supplierId])) {
-            return $this->singleAnalyticCache[$supplierId];
+        $date ??= date('Y-m-d');
+        $cacheKey = $supplierId . '|' . $date;
+        if (!$currentRead && isset($this->singleAnalyticCache[$cacheKey])) {
+            return $this->singleAnalyticCache[$cacheKey];
+        }
+        $pdo = $this->db->pdo();
+        $writes = null;
+        if ($currentRead && $pdo instanceof \MyInvoice\Infrastructure\Database\LoggingPdo && $pdo->statementsTracked() && $pdo->inTransaction()) {
+            $writes = implode('|', array_map($pdo->tableWriteCount(...), self::SINGLE_ANALYTIC_TABLES));
+            $memo = $this->currentAnalyticMemo;            if ($memo !== null && $memo['key'] === $cacheKey && $memo['writes'] === $writes) {
+                return $memo['map'];
+            }
         }
         if (!$this->singleAnalyticRedirectEnabled($supplierId)) {
-            return $this->singleAnalyticCache[$supplierId] = [];
+            if (!$currentRead) return $this->singleAnalyticCache[$cacheKey] = [];
+            return $this->rememberCurrentAnalyticMap($cacheKey, $writes, []);
         }
         $excluded = implode(', ', array_fill(0, count(self::CONTEXT_DRIVEN_SYNTHETICS), '?'));
-        $stmt = $this->db->pdo()->prepare(
+        $stmt = $this->db->pdo()->prepare(\MyInvoice\Infrastructure\Database\SubqueryCache::OFF .
             "SELECT p.account_code AS synthetic, MIN(c.account_code) AS analytic
-               FROM chart_of_accounts p
-               JOIN chart_of_accounts c
+               FROM " . \MyInvoice\Repository\AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . " p
+               JOIN " . \MyInvoice\Repository\AccountDefinitionRepository::relation($date, $supplierId, $currentRead) . " c
                  ON c.supplier_id = p.supplier_id AND c.parent_id = p.id AND c.is_active = 1
               WHERE p.supplier_id = ?
                 AND p.is_active = 1
@@ -2908,7 +3618,17 @@ final class PostingService
             $map[(string) $row['synthetic']] = (string) $row['analytic'];
         }
 
-        return $this->singleAnalyticCache[$supplierId] = $map;
+        return $currentRead ? $this->rememberCurrentAnalyticMap($cacheKey, $writes, $map) : ($this->singleAnalyticCache[$cacheKey] = $map);
+    }
+
+    /**
+     * @param array<string,string> $map
+     * @return array<string,string>
+     */
+    private function rememberCurrentAnalyticMap(string $cacheKey, ?string $writes, array $map): array
+    {
+        $this->currentAnalyticMemo = $writes === null ? null : ['key' => $cacheKey, 'writes' => $writes, 'map' => $map];
+        return $map;
     }
 
     /**
@@ -2922,7 +3642,10 @@ final class PostingService
      *  - záchranná analytika neevidovaných karet (378/261/395 .199),
      *  - analytika úvěrového účtu kreditní karty (231.101 …): holé 231 z jiného zápisu
      *    (bankovní úvěr) by jinak skončilo na dluhu kreditky,
-     *  - analytika mezičlenu úvěrového účtu kreditní karty (378.1xx, stejná řada jako karty).
+     *  - analytika mezičlenu úvěrového účtu kreditní karty (378.1xx, stejná řada jako karty),
+     *  - analytika prodaných poukazů a kreditu (324.900, {@see VoucherLiabilityAccount}):
+     *    přesměr by na ni poslal zálohy z proforem a zůstatek by přestal říkat, kolik
+     *    poukazů zbývá vyčerpat.
      */
     public static function dedicatedAnalyticSql(string $child, string $parent): string
     {
@@ -2941,7 +3664,8 @@ final class PostingService
                     SELECT 1 FROM credit_card_accounts cca
                      WHERE cca.supplier_id = {$child}.supplier_id AND cca.analytic_suffix IS NOT NULL
                        AND {$child}.account_code = CONCAT('231.', cca.analytic_suffix)
-                ))";
+                )
+                OR " . VoucherLiabilityAccount::dedicatedAnalyticSql($child, $parent) . ")";
     }
 
     /**
@@ -3037,6 +3761,8 @@ final class PostingService
         $guard = new DimensionPeriodGuard($this->db);
         return $guard->transaction(function () use ($guard, $supplierId, $sourceType, $sourceId, $projectId): int {
             $projectId = $projectId !== null && $projectId > 0 ? $projectId : null;
+            (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->lockClaims($supplierId);
+            (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->acquire($supplierId);
             $entries = $guard->lockSources($supplierId, [[$sourceType, $sourceId]]);
             $find = $this->db->pdo()->prepare(
                 'SELECT id, project_id FROM journal_entry_lines WHERE supplier_id = ? AND entry_id = ? FOR UPDATE'
@@ -3051,6 +3777,9 @@ final class PostingService
                         continue;
                     }
                     $guard->assertMutable($entry);
+                    (new \MyInvoice\Service\Property\Charges\Issuance\IssuanceUseGuard($this->db))->assertPostingLinesMutable($supplierId, [(int) $line['id']]);
+                    (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->assertLinesMutable($supplierId, [(int) $line['id']]);
+                    (new \MyInvoice\Service\Accounting\Allocation\JointAllocationUseGuard($this->db))->assertLinesMutable($supplierId, [(int) $line['id']]);
                     $update->execute([$projectId, $supplierId, (int) $line['id']]);
                     $changed += $update->rowCount();
                 }
@@ -3082,6 +3811,18 @@ final class PostingService
             $this->singleAnalyticMap($supplierId),
         );
     }
+
+    public function sourcePostingDate(int $supplierId, string $sourceType, int $sourceId, bool $currentRead = false): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MAX(e.entry_date) AS entry_date FROM journal_entries e
+              WHERE e.supplier_id = ? AND e.source_type = ? AND e.source_id = ? AND e.reversed_by IS NULL AND e.posted_at IS NOT NULL' . ($currentRead ? ' FOR UPDATE' : '')
+        );
+        $stmt->execute([$supplierId, $sourceType, $sourceId]);
+        $date = $stmt->fetchColumn();
+        return $date === false || $date === null ? null : (string) $date;
+    }
+
 
     /**
      * Účty položek dokladu po účtotvorné dimenzi: kód účtu položky (z builderu, např.
@@ -3115,19 +3856,14 @@ final class PostingService
         if ($mapTargets === []) {
             return $identity;
         }
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT MAX(e.entry_date) AS entry_date FROM journal_entries e
-              WHERE e.supplier_id = ? AND e.source_type = ? AND e.source_id = ? AND e.reversed_by IS NULL AND e.posted_at IS NOT NULL'
-        );
-        $stmt->execute([$supplierId, $sourceType, $sourceId]);
-        $entryDate = $stmt->fetchColumn();
-        if ($entryDate === false || $entryDate === null) {
+        $entryDate = $this->sourcePostingDate($supplierId, $sourceType, $sourceId);
+        if ($entryDate === null) {
             return $identity;
         }
         $posted = $this->postedAccountAmounts($supplierId, $sourceType, $sourceId);
-        $accounts = $mapRepo->accounts($supplierId);
-        $codeMap = $this->accounts->codeToIdMap($supplierId);
-        $single = $this->singleAnalyticMap($supplierId);
+        $accounts = $mapRepo->accounts($supplierId, $entryDate);
+        $codeMap = $this->accounts->codeToIdMap($supplierId, $entryDate);
+        $single = $this->singleAnalyticMap($supplierId, $entryDate);
         $origins = [];
         foreach ($single as $synthetic => $analytic) {
             if (isset($codeMap[$synthetic], $codeMap[$analytic])) {
@@ -3259,7 +3995,7 @@ final class PostingService
      * @param array<string, array{id:int, is_active:bool, account_type:string}> $codeMap
      * @return array<int,int>|null
      */
-    private function itemAccountIds(int $supplierId, string $sourceType, ?int $sourceId, array $codeMap): ?array
+    private function itemAccountIds(int $supplierId, string $sourceType, ?int $sourceId, array $codeMap, string $entryDate, bool $currentRead = false): ?array
     {
         $trace = $sourceId !== null ? ($this->itemAccountTrace[$sourceType . '|' . $sourceId] ?? null) : null;
         if ($trace === null) {
@@ -3267,7 +4003,7 @@ final class PostingService
         }
         $out = [];
         foreach ($trace as $itemId => $code) {
-            $code = $this->redirectedAccountCode($supplierId, (string) $code);
+            $code = $this->redirectedAccountCode($supplierId, (string) $code, $entryDate, $currentRead);
             if (isset($codeMap[$code])) {
                 $out[(int) $itemId] = (int) $codeMap[$code]['id'];
             }
@@ -3334,12 +4070,12 @@ final class PostingService
      * @param 'invoice'|'purchase_invoice'|'bank'|'cash'|'asset'|'manual'|'closing'|'opening'|'payroll'|'vat_clearing' $sourceType
      * @return list<array{account_id:int, side:'debit'|'credit', amount:string, cost_center:?string}>
      */
-    private function resolveLines(int $supplierId, array $lines, array $codeMap, string $sourceType): array
+    private function resolveLines(int $supplierId, array $lines, array $codeMap, string $sourceType, string $entryDate, bool $currentRead = false): array
     {
         $out = [];
         $sawOffbalance = false;
         $sawOnBalance = false;
-        $singleAnalytics = $this->singleAnalyticMap($supplierId);
+        $singleAnalytics = $this->singleAnalyticMap($supplierId, $entryDate, $currentRead);
         foreach ($lines as $i => $line) {
             $code = (string) $line['account_code'];
             // Syntetika s JEDINOU analytikou → účtuj na tu analytiku (viz singleAnalyticMap()).
@@ -3409,6 +4145,9 @@ final class PostingService
             // Rozpad řádku mezi víc hodnot typu (typ => hodnota => podíl), zvalidovaný volajícím.
             if (!empty($line['dimension_splits']) && is_array($line['dimension_splits'])) {
                 $resolvedLine['dimension_splits'] = $line['dimension_splits'];
+            }
+            foreach (['dimension_origins', 'dimension_split_origins'] as $field) {
+                if (isset($line[$field]) && is_array($line[$field])) $resolvedLine[$field] = $line[$field];
             }
             // cizoměnová stopa (jen saldokontní řádky cizoměnových dokladů)
             if (isset($line['currency_code'])) {
@@ -3545,6 +4284,31 @@ final class PostingService
     }
 
     /**
+     * Základ řádků víceúčelových poukazů v CZK ({@see MultiPurposeVoucher::isUntaxedLine()}).
+     * Evidence DPH je vyřazuje (převod poukazu není plněním), zápis ale potřebuje doklad
+     * CELÝ: poukaz jde rozpadem výnosu na přijaté zálohy ({@see voucherAdvanceAccount()}).
+     * Zrcadlo {@see ossItemTotals()}, zaokrouhlení per řádek ze stejného důvodu.
+     */
+    private function voucherItemNet(int $supplierId, int $invoiceId, float $rate): float
+    {
+        if (!$this->db->hasColumn('stock_items', 'eet_item_kind')) {
+            return 0.0;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ii.total_without_vat
+               FROM invoice_items ii
+               ' . MultiPurposeVoucher::stockJoinSql('ii', 'si', '?') . '
+              WHERE ii.invoice_id = ? AND ' . MultiPurposeVoucher::untaxedLineSql('ii', 'si')
+        );
+        $stmt->execute([$supplierId, $invoiceId]);
+        $net = 0.0;
+        foreach ($stmt->fetchAll(PDO::FETCH_COLUMN) as $base) {
+            $net += round((float) $base * $rate, 2);
+        }
+        return round($net, 2);
+    }
+
+    /**
      * @return array<string,mixed>|null
      */
     private function fetchDocHeader(string $table, int $supplierId, int $id): ?array
@@ -3564,7 +4328,8 @@ final class PostingService
                     " . ($isPurchase ? 'd.vat_deduction, d.vat_deduction_percent' : "'full' AS vat_deduction, 100 AS vat_deduction_percent") . ",
                     " . ($isPurchase ? 'd.tax_deductible' : '1 AS tax_deductible') . ",
                     " . ($isPurchase ? 'd.received_at, d.received_at_source' : 'NULL AS received_at, NULL AS received_at_source') . ",
-                    " . ($isPurchase ? 'NULL AS revenue_rule_key' : 'd.revenue_rule_key') . "
+                    " . ($isPurchase ? 'NULL AS revenue_rule_key' : 'd.revenue_rule_key') . ",
+                    " . ($isPurchase ? 'NULL AS other_item_id' : 'd.other_item_id') . "
                FROM {$table} d
                LEFT JOIN currencies cur ON cur.id = d.currency_id
               WHERE d.id = ? AND d.supplier_id = ?"

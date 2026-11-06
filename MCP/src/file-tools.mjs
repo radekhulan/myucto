@@ -15,6 +15,7 @@
  * v PHP, jinak by soubor zastavil most (hlídá test).
  */
 
+import { NOT_IN_CLIENT_CATALOG } from './api-contracts.mjs';
 import {
   contentTypeForFilename, extensionOf, normalizeContentType, sanitizeFilename,
 } from './client.mjs';
@@ -122,9 +123,11 @@ export function fileInput(a, allowed, label) {
 
 const kb = (bytes) => (Number.isFinite(Number(bytes)) ? `${Math.round(Number(bytes) / 1024)} kB` : '? kB');
 
-function download(name, title, description, properties, required, path, { query, uri, meta }) {
+function download(name, title, description, properties, required, path, { query, uri, meta, api = false }) {
   return {
     name,
+    api,
+    ...(api === false ? { apiReason: NOT_IN_CLIENT_CATALOG } : {}),
     title,
     description: `${description} ${SIZE_NOTE}`,
     inputSchema: schema({ ...properties, format: FORMAT }, required),
@@ -145,17 +148,20 @@ export const FILE_TOOLS = [
     'PDF vydané faktury tak, jak ho dostane odběratel. Když PDF ještě nebylo vytvořené, aplikace ho vyrenderuje.',
     { id: id('ID vydané faktury.') }, ['id'],
     (a) => `/invoices/${seg(a.id)}/pdf`,
-    { query: () => ({ download: 1 }), uri: (a) => `myucto://invoices/${a.id}/pdf`, meta: (a) => ({ invoice_id: a.id }) },
+    { api: [['GET', '/api/invoices/{id}/pdf']], query: () => ({ download: 1 }), uri: (a) => `myucto://invoices/${a.id}/pdf`, meta: (a) => ({ invoice_id: a.id }) },
   ),
   download(
     'download_invoice_isdoc', 'Stáhnout ISDOC vydané faktury',
     'Strukturovaná faktura ve formátu ISDOC (XML). Jen u vystavené faktury, ne u konceptu ani stornované.',
     { id: id('ID vydané faktury.') }, ['id'],
     (a) => `/invoices/${seg(a.id)}/isdoc`,
-    { uri: (a) => `myucto://invoices/${a.id}/isdoc`, meta: (a) => ({ invoice_id: a.id }) },
+    { api: [['GET', '/api/invoices/{id}/isdoc']], uri: (a) => `myucto://invoices/${a.id}/isdoc`, meta: (a) => ({ invoice_id: a.id }) },
   ),
   {
     name: 'list_invoice_attachments',
+    api: [
+      ['GET', '/api/invoices/{id}/attachments'],
+    ],
     title: 'Přílohy vydané faktury',
     description: 'Seznam souborů přiložených k vydané faktuře (id, název, velikost, typ). Obsah nevrací.',
     inputSchema: schema({ id: id('ID vydané faktury.') }, ['id']),
@@ -168,6 +174,7 @@ export const FILE_TOOLS = [
     { id: id('ID vydané faktury.'), attachment_id: id('ID přílohy.') }, ['id', 'attachment_id'],
     (a) => `/invoices/${seg(a.id)}/attachments/${seg(a.attachment_id)}`,
     {
+      api: [['GET', '/api/invoices/{id}/attachments/{item_id}']],
       query: () => ({ download: 1 }),
       uri: (a) => `myucto://invoices/${a.id}/attachments/${a.attachment_id}`,
       meta: (a) => ({ invoice_id: a.id, attachment_id: a.attachment_id }),
@@ -175,6 +182,9 @@ export const FILE_TOOLS = [
   ),
   {
     name: 'upload_invoice_attachment',
+    api: [
+      ['POST', '/api/invoices/{id}/attachments'],
+    ],
     title: 'Přiložit soubor k vydané faktuře',
     description:
       'Nahraje přílohu k vydané faktuře (posílá se odběrateli spolu s PDF). Povolené typy: '
@@ -192,6 +202,8 @@ export const FILE_TOOLS = [
   },
   {
     name: 'delete_invoice_attachment',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat přílohu vydané faktury',
     description:
       'Smaže přílohu vydané faktury včetně souboru. Bez `confirm: true` jen vypíše, '
@@ -226,10 +238,14 @@ export const FILE_TOOLS = [
     'Originál dokladu od dodavatele, archivovaný u přijaté faktury. Když doklad PDF nemá, vrátí chybu `no_pdf`.',
     { id: id('ID přijaté faktury.') }, ['id'],
     (a) => `/purchase-invoices/${seg(a.id)}/pdf`,
-    { uri: (a) => `myucto://purchase-invoices/${a.id}/pdf`, meta: (a) => ({ purchase_invoice_id: a.id }) },
+    { api: [['GET', '/api/purchase-invoices/{id}/pdf']], uri: (a) => `myucto://purchase-invoices/${a.id}/pdf`, meta: (a) => ({ purchase_invoice_id: a.id }) },
   ),
   {
     name: 'upload_purchase_invoice_pdf',
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/pdf'],
+    ],
     title: 'Nahrát PDF k přijaté faktuře',
     description:
       'Archivuje originál dokladu (PDF) u přijaté faktury. Fotku .jpg nebo .png aplikace '
@@ -254,6 +270,8 @@ export const FILE_TOOLS = [
   },
   {
     name: 'delete_purchase_invoice_pdf',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Smazat PDF přijaté faktury',
     description:
       'Odebere archivovaný originál dokladu od přijaté faktury. Samotná faktura zůstane. '
@@ -274,6 +292,9 @@ export const FILE_TOOLS = [
   },
   {
     name: 'import_purchase_invoice_file',
+    api: [
+      ['POST', '/api/purchase-invoices/import-structured'],
+    ],
     title: 'Založit přijatou fakturu ze souboru',
     description:
       'Založí přijatou fakturu ze strukturovaného souboru: ISDOC (.isdoc), balíčku ISDOCX '
@@ -296,6 +317,8 @@ export const FILE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'upload_document',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nahrát soubor do Dokumentů',
     description:
       'Uloží soubor do sekce Dokumenty (volitelně do složky), doplní název, popis a tagy '
@@ -366,6 +389,8 @@ export const FILE_TOOLS = [
   // ──────────────────────────────────────────────────────────────────────────
   {
     name: 'upload_product_media',
+    api: false,
+    apiReason: NOT_IN_CLIENT_CATALOG,
     title: 'Nahrát obrázek ke zboží',
     description:
       'Přidá obrázek (.jpg, .png, .webp, .gif) nebo PDF přílohu ke kartě zboží. Popisky, pořadí '

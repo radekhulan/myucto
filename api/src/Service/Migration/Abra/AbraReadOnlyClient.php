@@ -131,7 +131,7 @@ class AbraReadOnlyClient
             if ($n > $pageSize || $start + $n > 2000000) throw new AbraException('data_limit', 'Převod překročil povolený rozsah dat.');
             if ($this->pageObserver !== null) ($this->pageObserver)($evidence, $query, $start, $payload);
             if ($this->pageCache !== null) $this->pageCache->save($evidence, $query, $start, $payload);
-            if (in_array($evidence, ['faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek'], true)) {
+            if (in_array($evidence, AbraSource::DOCUMENT_EVIDENCES, true)) {
                 $rows = array_map(AbraSource::compactDocument(...), $rows);
             } elseif (in_array($evidence, ['banka', 'pokladni-pohyb'], true)) {
                 $rows = array_map(AbraSource::compactPaymentDocument(...), $rows);
@@ -164,7 +164,7 @@ class AbraReadOnlyClient
     private function cacheMetadataFields(string $evidence): ?string
     {
         return match ($evidence) {
-            'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'banka', 'pokladni-pohyb', 'cenik', 'sklad',
+            'faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'pohledavka', 'banka', 'pokladni-pohyb', 'cenik', 'sklad',
                 'skladova-karta', 'skladovy-pohyb' => 'custom:id,lastUpdate',
             'ucetni-denik' => 'custom:idUcetniDenik,lastUpdate,datUcto,sumTuz,mdUcet,dalUcet',
             'pohyb-na-uctech' => 'custom:idUcetniDenik,lastUpdate,datUcto,ucet,sumTuzMd,sumTuzDal',

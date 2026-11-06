@@ -216,6 +216,43 @@ final class PayrollRegistrationChangeDeltaPlannerTest extends TestCase
         self::assertSame('SYN-12345', $plan['changes']['proof_identity']['number']);
     }
 
+    /** Kontrola 5 (EDV 1.4.0.7): úřad práce 10107 jen u povolení k zaměstnání. */
+    public function testLabourOfficeTravelsOnlyWithEmploymentPermit(): void
+    {
+        $permit = static fn (string $type, ?string $office, string $to): array => [
+            'free_access' => false,
+            'free_access_reason_code' => null,
+            'permit_type_code' => $type,
+            'issuing_labour_office_code' => $office,
+            'permit_identifier' => 'SYN-0001',
+            'permit_from' => '2026-01-01',
+            'permit_to' => $to,
+        ];
+        $base = $this->profile();
+        $base['foreign_worker'] = $permit('2', 'HMP', '2026-12-31');
+        $extended = $base;
+        $extended['foreign_worker'] = $permit('2', 'HMP', '2027-12-31');
+        $extended['foreign_worker']['permit_identifier'] = 'SYN-0002';
+
+        $plan = $this->plan($base, $extended);
+        self::assertSame([], $plan['unsupported']);
+        self::assertArrayNotHasKey('issuing_labour_office_code', $plan['changes']['foreign_worker']);
+
+        $employment = $extended;
+        $employment['foreign_worker'] = $permit('1', 'HMP', '2027-12-31');
+        $employment['foreign_worker']['permit_identifier'] = 'SYN-0002';
+        $plan = $this->plan($base, $employment);
+        self::assertSame('HMP', $plan['changes']['foreign_worker']['issuing_labour_office_code']);
+
+        $employment['foreign_worker']['issuing_labour_office_code'] = null;
+        $plan = $this->plan($base, $employment);
+        self::assertArrayNotHasKey('foreign_worker', $plan['changes']);
+        self::assertSame(
+            'registration_change_foreign_permit_incomplete',
+            $plan['unsupported'][0]['reason_code'],
+        );
+    }
+
     public function testForeignLegislationCountryChangeNeedsRunningLegislation(): void
     {
         $running = $this->profile();

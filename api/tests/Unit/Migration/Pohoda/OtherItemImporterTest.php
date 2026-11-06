@@ -10,18 +10,31 @@ use PHPUnit\Framework\TestCase;
 
 final class OtherItemImporterTest extends TestCase
 {
-    public function testOnlyOpenNonVatItemWithoutLiquidationIsCandidate(): void
+    public function testOpenPartlyPaidAndSettledNonVatItemsAreCandidates(): void
     {
         $vat = $this->vat();
         $record = $this->record();
         self::assertSame(1200.0, OtherItemImporter::candidate($record, 'receivable', $vat)['amount']);
-        self::assertSame(1200.0, OtherItemImporter::candidate($record, 'commitment', $vat)['amount']);
+        self::assertSame(1200.0, OtherItemImporter::candidate($record, 'commitment', $vat)['remaining']);
 
         $record['invoiceHeader']['liquidation']['amountHome'] = '800.00';
-        self::assertNull(OtherItemImporter::candidate($record, 'receivable', $vat));
-        $record['invoiceHeader']['liquidation']['amountHome'] = '1200.00';
         $record['liquidations']['liquidation'] = ['id' => '1'];
+        self::assertSame(800.0, OtherItemImporter::candidate($record, 'receivable', $vat)['remaining']);
+        unset($record['invoiceHeader']['liquidation']);
+        self::assertSame(0.0, OtherItemImporter::candidate($record, 'receivable', $vat)['remaining']);
+        $record['invoiceHeader']['liquidation']['amountHome'] = '1300.00';
         self::assertNull(OtherItemImporter::candidate($record, 'receivable', $vat));
+        $record['invoiceHeader']['liquidation']['amountHome'] = '-1';
+        self::assertNull(OtherItemImporter::candidate($record, 'receivable', $vat));
+    }
+
+    public function testVariableSymbolKeepsOnlyDigits(): void
+    {
+        $record = $this->record();
+        $record['invoiceHeader']['symVar'] = '2025001';
+        self::assertSame('2025001', OtherItemImporter::candidate($record, 'receivable', $this->vat())['symbol']);
+        $record['invoiceHeader']['symVar'] = 'OP/25';
+        self::assertNull(OtherItemImporter::candidate($record, 'receivable', $this->vat())['symbol']);
     }
 
     public function testVatAndForeignCurrencyNeverEnterOtherItems(): void
@@ -44,26 +57,57 @@ final class OtherItemImporterTest extends TestCase
         self::assertNull(OtherItemImporter::candidate($record, 'receivable', $vat));
     }
 
-    public function testOnlyExactTwoLinePostingOutsidePayrollAndTaxAccountsIsAccepted(): void
+    public function testPostingTakesOneBalanceAccountAgainstMergedCounterAccounts(): void
     {
         $receivable = [
-            ['side' => 'debit', 'amount' => '1200.00', 'account_code' => '315.000'],
-            ['side' => 'credit', 'amount' => '1200.00', 'account_code' => '602.000'],
+            ['side' => 'debit', 'amount' => '1200.00', 'account_code' => '315.000', 'account_type' => 'asset'],
+            ['side' => 'credit', 'amount' => '1200.00', 'account_code' => '602.000', 'account_type' => 'revenue'],
         ];
-        self::assertSame(['account' => '315.000', 'counter' => '602.000'],
+        self::assertSame(['account' => '315.000', 'lines' => [['account_code' => '602.000', 'amount' => 1200.0]]],
             OtherItemImporter::postingLines($receivable, 'receivable', 1200.0));
         $payable = [
-            ['side' => 'debit', 'amount' => '1200.00', 'account_code' => '518.000'],
-            ['side' => 'credit', 'amount' => '1200.00', 'account_code' => '325.000'],
+            ['side' => 'debit', 'amount' => '700.00', 'account_code' => '513.000', 'account_type' => 'expense'],
+            ['side' => 'credit', 'amount' => '700.00', 'account_code' => '379.000', 'account_type' => 'liability'],
+            ['side' => 'debit', 'amount' => '300.00', 'account_code' => '527.000', 'account_type' => 'expense'],
+            ['side' => 'credit', 'amount' => '300.00', 'account_code' => '379.000', 'account_type' => 'liability'],
+            ['side' => 'debit', 'amount' => '200.00', 'account_code' => '513.000', 'account_type' => 'expense'],
+            ['side' => 'credit', 'amount' => '200.00', 'account_code' => '379.000', 'account_type' => 'liability'],
         ];
-        self::assertSame(['account' => '325.000', 'counter' => '518.000'],
-            OtherItemImporter::postingLines($payable, 'commitment', 1200.0));
-        $receivable[1]['account_code'] = '331.000';
+        self::assertSame(['account' => '379.000', 'lines' => [
+            ['account_code' => '513.000', 'amount' => 900.0],
+            ['account_code' => '527.000', 'amount' => 300.0],
+        ]], OtherItemImporter::postingLines($payable, 'commitment', 1200.0));
+        self::assertNull(OtherItemImporter::postingLines($payable, 'commitment', 1199.0));
+
+        // Saldokontní strana na dvou účtech, na nerozvahovém účtu nebo s protiúčtem 315/325.
+        $twoBalances = $receivable;
+        $twoBalances[] = ['side' => 'debit', 'amount' => '100.00', 'account_code' => '378.000', 'account_type' => 'asset'];
+        $twoBalances[] = ['side' => 'credit', 'amount' => '100.00', 'account_code' => '602.000', 'account_type' => 'revenue'];
+        self::assertNull(OtherItemImporter::postingLines($twoBalances, 'receivable', 1300.0));
+        $receivable[0]['account_type'] = 'expense';
         self::assertNull(OtherItemImporter::postingLines($receivable, 'receivable', 1200.0));
-        $receivable[1]['account_code'] = '602.000';
-        self::assertNull(OtherItemImporter::postingLines($receivable, 'receivable', 1199.0));
-        $receivable[] = ['side' => 'credit', 'amount' => '252.00', 'account_code' => '343.000'];
+        $receivable[0]['account_type'] = 'asset';
+        $receivable[1]['account_code'] = '325.000';
         self::assertNull(OtherItemImporter::postingLines($receivable, 'receivable', 1200.0));
+    }
+
+    /** Doplatek daně vede POHODA na stejném účtu i předkontaci jako zálohy; rozhoduje text. */
+    public function testOnlyAdvanceTextOnIncomeTaxAccountIsATaxAdvance(): void
+    {
+        self::assertTrue(OtherItemImporter::isTaxAdvance('341.000', 'Daň z příjmů (záloha) 3/4'));
+        self::assertTrue(OtherItemImporter::isTaxAdvance('341', 'Zaloha DPPO'));
+        self::assertFalse(OtherItemImporter::isTaxAdvance('341.000', 'Odvod daně z příjmů PO/2025 - doplatek'));
+        self::assertFalse(OtherItemImporter::isTaxAdvance('342.000', 'Záloha na daň ze mzdy'));
+    }
+
+    public function testPayrollAndTaxAccountsBelongToTheirModules(): void
+    {
+        foreach (['331.000', '336', '341.001', '342.000', '343.100'] as $account) {
+            self::assertTrue(OtherItemImporter::moduleOwned($account), $account);
+        }
+        foreach (['315.000', '325', '364.000', '379.000'] as $account) {
+            self::assertFalse(OtherItemImporter::moduleOwned($account), $account);
+        }
     }
 
     private function vat(): PohodaVat

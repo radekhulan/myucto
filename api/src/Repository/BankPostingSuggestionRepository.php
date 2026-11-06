@@ -859,7 +859,8 @@ final class BankPostingSuggestionRepository
         }
 
         $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($pdo, $supplierId, $txIds);
-        $items = array_map(static function (array $row) use ($matchedByTx, $matchedPurchasesByTx): array {
+        $matchedOtherItemsByTx = \MyInvoice\Service\Bank\OtherItemPaymentMatchReader::byTransactions($pdo, $supplierId, $txIds);
+        $items = array_map(static function (array $row) use ($matchedByTx, $matchedPurchasesByTx, $matchedOtherItemsByTx): array {
             return [
                 'id' => (int) $row['id'],
                 'source' => (string) $row['transaction_source'],
@@ -884,6 +885,7 @@ final class BankPostingSuggestionRepository
                 'matched_vendor_name' => $row['matched_vendor_name'] === null ? null : (string) $row['matched_vendor_name'],
                 'matched_invoices' => $matchedByTx[(int) $row['id']] ?? [],
                 'matched_purchase_invoices' => $matchedPurchasesByTx[(int) $row['id']] ?? [],
+                'matched_other_items' => $matchedOtherItemsByTx[(int) $row['id']] ?? [],
                 'match_status' => (string) $row['match_status'],
                 'ignore_note' => $row['ignore_note'] === null ? null : (string) $row['ignore_note'],
                 'ignore_origin' => $row['ignore_origin'] === null ? null : (string) $row['ignore_origin'],

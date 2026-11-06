@@ -89,6 +89,8 @@ const claimForm = reactive({
   other_caregiver_given_name: '',
   other_caregiver_family_name: '',
   other_caregiver_birth_date: '',
+  other_caregiver_birth_number: '',
+  other_caregiver_birth_number_masked: '',
   ztp_p: false,
   effective_from: '',
   effective_to: '',
@@ -242,6 +244,8 @@ function openClaimEditor(dependant: PayrollDependant, claim: PayrollDependantCla
   claimForm.other_caregiver_given_name = claim?.other_caregiver_given_name ?? ''
   claimForm.other_caregiver_family_name = claim?.other_caregiver_family_name ?? ''
   claimForm.other_caregiver_birth_date = claim?.other_caregiver_birth_date ?? ''
+  claimForm.other_caregiver_birth_number = ''
+  claimForm.other_caregiver_birth_number_masked = claim?.other_caregiver_birth_number_masked ?? ''
   claimForm.ztp_p = claim?.ztp_p ?? dependant.ztp_p
   claimForm.effective_from = claim?.effective_from ?? earliestClaimFrom(dependant, claimForm.claim_reason)
   claimForm.effective_to = claim?.effective_to ?? latestClaimTo(dependant) ?? ''
@@ -400,6 +404,9 @@ function claimPayload(): PayrollDependantClaimPayload {
       : null,
     other_caregiver_birth_date: claimForm.other_household_caregiver_status === 'present'
       ? claimForm.other_caregiver_birth_date || null
+      : null,
+    other_caregiver_birth_number: claimForm.other_household_caregiver_status === 'present'
+      ? claimForm.other_caregiver_birth_number.trim() || null
       : null,
     // U dítěte „N" se dvojnásobek neuplatňuje; ZTP/P se jen převezme z karty
     // dítěte, protože ho měsíční hlášení u každého dítěte uvádí (10439).
@@ -924,6 +931,16 @@ function creditLabel(claim: PayrollDependantClaim): string {
           <label :class="labelClass">
             {{ t('payroll.people.dependants.form.other_caregiver_birth_date') }}<RequiredMark />
             <DateInput v-model="claimForm.other_caregiver_birth_date" required :class="inputClass" data-test="claim-caregiver-birth-date" />
+          </label>
+          <label :class="labelClass">
+            {{ t('payroll.people.dependants.form.other_caregiver_birth_number') }}
+            <input
+              v-model="claimForm.other_caregiver_birth_number"
+              :class="inputClass"
+              :placeholder="claimForm.other_caregiver_birth_number_masked || t('payroll.people.dependants.form.birth_number_placeholder')"
+              data-test="claim-caregiver-birth-number"
+            >
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.dependants.form.other_caregiver_birth_number_hint') }}</span>
           </label>
         </template>
         <p class="text-xs text-neutral-500 sm:col-span-2 lg:col-span-3">

@@ -72,8 +72,16 @@ run_step() {
     fi
 }
 
-if [ "$FULL" -eq 0 ] && "$PHP_BIN" "$API_DIR/bin/test-parallel.php" --green-check; then
-    echo '=== Testy — přeskočeno, plná sada prošla nad stejným kódem'
+AUDIT_CHECK=1
+if [ "$FULL" -eq 0 ]; then
+    "$PHP_BIN" "$API_DIR/bin/test-parallel.php" --audit-check
+    AUDIT_CHECK=$?
+fi
+if [ "$FULL" -eq 0 ] && [ "$AUDIT_CHECK" -eq 0 ]; then
+    echo '=== Testy — přeskočeno, plná sada nad stejným kódem nemá pád v jádru'
+elif [ "$FULL" -eq 0 ] && [ "$AUDIT_CHECK" -eq 2 ]; then
+    FAILED+=("Testy účetního a daňového jádra (AuditCore) — padly v plné sadě nad stejným kódem")
+    echo '=== Testy — SELHALO v plné sadě nad stejným kódem (viz seznam výše), znovu se nespouští'
 elif [ "$FULL" -eq 1 ]; then
     run_step 'Plná testovací sada' \
         "$PHP_BIN" "$API_DIR/bin/test-parallel.php" --rerun-failures

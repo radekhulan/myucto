@@ -132,7 +132,13 @@ final readonly class JmhzEmployerAnnualEvidenceService
         int $supplierId,
         string $periodStart,
     ): ?array {
-        if (preg_match('/^(\d{4})-12-01$/D', $periodStart, $match) !== 1) {
+        // Do 12/2026 se roční údaje vykazují jen v prosinci. Od verze 2027
+        // nese souhrn typy kolektivních smluv (10214) každý měsíc, takže se
+        // evidence roku zmrazí do přípravy v každém měsíci.
+        if (preg_match('/^(\d{4})-(\d{2})-01$/D', $periodStart, $match) !== 1
+            || ($match[2] !== '12'
+                && JmhzSpecVersion::forPeriodStart($periodStart) === JmhzSpecVersion::V2026)
+        ) {
             return null;
         }
         $evidence = $this->repository->latest($supplierId, (int) $match[1], true);

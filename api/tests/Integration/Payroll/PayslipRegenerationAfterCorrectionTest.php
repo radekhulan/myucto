@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Document\PayslipDocumentData;
@@ -43,7 +42,7 @@ final class PayslipRegenerationAfterCorrectionTest extends TestCase
         $this->dataDir = sys_get_temp_dir()
             . '/myucto-payslip-regeneration-' . bin2hex(random_bytes(6));
         putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->payslips = $container->get(ApprovedRevisionPayslipBatchService::class);
         $pdo = $this->db->pdo();

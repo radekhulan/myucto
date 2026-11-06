@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -58,7 +57,7 @@ final class PayrollKeyRotationServiceTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             self::markTestSkipped('cfg.php neexistuje - test vyžaduje DB.');
         }
-        $this->db = Bootstrap::buildContainer()->get(Connection::class);
+        $this->db = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         foreach ([
             'payroll_dependants',
             'payroll_person_accounts',
@@ -497,7 +496,7 @@ final class PayrollKeyRotationServiceTest extends TestCase
     {
         // Aktuálním klíčem je klíč instalace, ať data sdílené testovací DB
         // zůstanou známá a cizí je jen klíč, se kterým test počítá.
-        $installed = (string) Bootstrap::buildContainer()->get(Config::class)->get('app.secret_encryption_key', '');
+        $installed = (string) \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Config::class)->get('app.secret_encryption_key', '');
         if ($installed === '') {
             self::markTestSkipped('Instalace nemá šifrovací klíč.');
         }
@@ -505,7 +504,7 @@ final class PayrollKeyRotationServiceTest extends TestCase
         $clock->method('now')->willReturn($now);
 
         return new PayrollArchiveDiagnostics(
-            Bootstrap::buildContainer()->get(PayrollArchiveReencryptionService::class),
+            \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollArchiveReencryptionService::class),
             $this->service($this->encryption($installed, $previous)),
             $this->config($installed, $previous),
             $this->db,

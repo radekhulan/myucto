@@ -12,28 +12,15 @@ require dirname(__DIR__) . '/api/vendor/autoload.php';
 
 final class JmhzScenarioRequirementPackageBuilder
 {
-    private const SOURCE_SHA256 =
-        'cc282115d58a3744348b500a2dcc6eec4a5899b12753ec756f01fe261fd7ff37';
-    private const SPEC_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1';
-    private const SPEC_MANIFEST_SHA256 =
-        'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d';
     private const SCENARIO_SHEETS = [
         '1 až 9 s příznakem', 'M', 'K,N,O,P,Q,R,S', '1 až 9 výkon trestu',
         '11,13,14', '12', '10', 'Odložený příjem',
     ];
-    private const INTERACTION_KEYS = [
-        'M01', 'M01,M02', 'M01,M02,M03', 'M12', 'IN01', 'IN02', 'IN03', 'IN04', 'IN05',
-        'IN06', 'IN07', 'IN08', 'IN09', 'IN10', 'IN11', 'IN12', 'IN13', 'IN14', 'IN15',
-        'IN16', 'IN19', 'IN20', 'IN21', 'IN22', 'IN23', 'IN24', 'IN25', 'IN28', 'IN29',
-        'IN30', 'IN31', 'IN32', 'IN33', 'IN34', 'IN35', 'IN36', 'IN37',
-    ];
-    private const INTERACTION_MATRIX_SHEETS = [
-        'IN01', 'IN02', 'IN03', 'IN04', 'IN05', 'IN06', 'IN07', 'IN08', 'IN09', 'IN10',
-        'IN11', 'IN12', 'IN13', 'IN15', 'IN16', 'IN19', 'IN20', 'IN21', 'IN22', 'IN23',
-        'IN24', 'IN25', 'IN28', 'IN29', 'IN30', 'IN31', 'IN32', 'IN33', 'IN34', 'IN35',
-        'IN36', 'IN37', 'M01', 'M01,M02', 'M01,M02,M03', 'M12',
-    ];
+    /** @var list<string> buňky povinnosti, které oficiální sešit nechal prázdné */
+    private array $blankRequirementCells = [];
+
+    /** @param array<string,mixed> $profile profil z `tools/jmhz-spec-package-profiles.php` */
+    public function __construct(private readonly array $profile) {}
 
     public function build(string $sourcePath, string $outputDirectory): void
     {
@@ -60,7 +47,7 @@ final class JmhzScenarioRequirementPackageBuilder
                 'foundation',
             );
         }
-        foreach (self::INTERACTION_MATRIX_SHEETS as $sheetName) {
+        foreach ($this->profile['interaction_matrix_sheets'] as $sheetName) {
             $matrices[] = $this->interactionMatrix(
                 $this->sheet($workbook, $sheetName),
                 'interaction',
@@ -97,13 +84,13 @@ final class JmhzScenarioRequirementPackageBuilder
         ));
         $payload = [
             'schema_version' => 'jmhz-scenario-requirement-source-catalog.v1',
-            'catalog_key' => 'jmhz-scenario-requirements-1.4.0.2-source-v1',
-            'version' => '1.4.0.2',
-            'spec_package_key' => self::SPEC_PACKAGE_KEY,
-            'spec_manifest_sha256' => self::SPEC_MANIFEST_SHA256,
+            'catalog_key' => $this->profile['scenario_catalog_key'],
+            'version' => $this->profile['scenario_catalog_version'],
+            'spec_package_key' => $this->profile['package_key'],
+            'spec_manifest_sha256' => $this->profile['manifest_sha256'],
             'source' => [
                 'filename' => basename($sourcePath),
-                'sha256' => self::SOURCE_SHA256,
+                'sha256' => $this->profile['scenario_sha256'],
                 'sheets' => array_map(
                     static fn (Worksheet $sheet): string => $sheet->getTitle(),
                     iterator_to_array($workbook->getWorksheetIterator()),
@@ -126,6 +113,9 @@ final class JmhzScenarioRequirementPackageBuilder
                 'required_requirements' => $requirementKinds['required'] ?? 0,
                 'optional_requirements' => $requirementKinds['optional'] ?? 0,
                 'conditional_requirements' => $requirementKinds['conditional'] ?? 0,
+                ...(($this->profile['allow_blank_requirement'] ?? false)
+                    ? ['unspecified_requirements' => $requirementKinds['unspecified'] ?? 0]
+                    : []),
                 'add_effects' => $effectKinds['add'] ?? 0,
                 'remove_effects' => $effectKinds['remove'] ?? 0,
                 'master_attributes' => count($masterAttributeAxis),
@@ -158,7 +148,7 @@ final class JmhzScenarioRequirementPackageBuilder
             throw new RuntimeException("Nelze vytvořit adresář {$outputDirectory}.");
         }
         $targetSource = $outputDirectory . DIRECTORY_SEPARATOR . basename($sourcePath);
-        if (!copy($sourcePath, $targetSource) || hash_file('sha256', $targetSource) !== self::SOURCE_SHA256) {
+        if (!copy($sourcePath, $targetSource) || hash_file('sha256', $targetSource) !== $this->profile['scenario_sha256']) {
             throw new RuntimeException('Exact-byte kopie zdrojového sešitu selhala.');
         }
         $json = json_encode(
@@ -218,10 +208,11 @@ final class JmhzScenarioRequirementPackageBuilder
     {
         $result = [];
         $refs = [];
-        for ($row = 4; $row <= 40; ++$row) {
+        $expectedKeys = $this->profile['interaction_keys'];
+        for ($row = 4; $row <= 3 + count($expectedKeys); ++$row) {
             $rawId = $this->requiredRawText($sheet->getCell("A{$row}"));
             $key = preg_replace('/\s+/', '', $rawId) ?? $rawId;
-            if ($key !== self::INTERACTION_KEYS[$row - 4]) {
+            if ($key !== $expectedKeys[$row - 4]) {
                 throw new RuntimeException("Neočekávaný klíč interakce Interakce!A{$row}.");
             }
             $condition = $this->requiredRawText($sheet->getCell("B{$row}"));
@@ -361,11 +352,18 @@ final class JmhzScenarioRequirementPackageBuilder
         if (preg_match('/^\d{5}$/', $attributeId) !== 1) {
             throw new RuntimeException("Neplatné ID atributu {$sheet->getTitle()}!A{$row}.");
         }
-        $requirementRaw = $this->requiredText($sheet->getCell("{$requirementColumn}{$row}"));
+        $requirementCell = $sheet->getCell("{$requirementColumn}{$row}");
+        $requirementRaw = ($this->profile['allow_blank_requirement'] ?? false)
+            ? $this->text($requirementCell)
+            : $this->requiredText($requirementCell);
+        if ($requirementRaw === null) {
+            $this->blankRequirementCells[] = "{$sheet->getTitle()}!{$requirementColumn}{$row}";
+        }
         $requirementKind = match ($requirementRaw) {
             'P' => 'required',
             'N' => 'optional',
             'NSP' => 'conditional',
+            null => 'unspecified',
             default => throw new RuntimeException(
                 "Neznámá povinnost {$sheet->getTitle()}!{$requirementColumn}{$row}.",
             ),
@@ -436,12 +434,31 @@ final class JmhzScenarioRequirementPackageBuilder
         return $record;
     }
 
+    /**
+     * Sloupce osy MASTER od T dál a jejich druh (reconciliation nebo derived_binary).
+     * Rozsahy dává profil, protože sešit 1.5 za odvozenými sloupci přidává další
+     * rekonciliační sloupce interakcí IN38 až IN43.
+     *
+     * @return array<string,string> písmeno sloupce => druh
+     */
+    private function masterAxisColumns(): array
+    {
+        $result = [];
+        foreach ($this->profile['master_axes'] as [$from, $to, $kind]) {
+            for ($column = Coordinate::columnIndexFromString($from); $column <= Coordinate::columnIndexFromString($to); ++$column) {
+                $result[Coordinate::stringFromColumnIndex($column)] = $kind;
+            }
+        }
+
+        return $result;
+    }
+
     /** @return list<array<string, mixed>> */
     private function masterAttributeAxis(Worksheet $sheet): array
     {
         $result = [];
         $seen = [];
-        for ($row = 2; $row <= 443; ++$row) {
+        for ($row = 2; $row <= $this->profile['master_dimensions']['rows']; ++$row) {
             $attributeId = $this->requiredText($sheet->getCell("A{$row}"));
             if (preg_match('/^\d{5}$/', $attributeId) !== 1 || isset($seen[$attributeId])) {
                 throw new RuntimeException("Neplatná MASTER osa na řádku {$row}.");
@@ -473,11 +490,7 @@ final class JmhzScenarioRequirementPackageBuilder
     {
         $result = [];
         $axisByAttribute = array_column($masterAttributeAxis, null, 'source_row');
-        for ($column = Coordinate::columnIndexFromString('T'); $column <= Coordinate::columnIndexFromString('CY'); ++$column) {
-            $letter = Coordinate::stringFromColumnIndex($column);
-            $kind = $column <= Coordinate::columnIndexFromString('BJ')
-                ? 'reconciliation'
-                : 'derived_binary';
+        foreach ($this->masterAxisColumns() as $letter => $kind) {
             $labelRaw = $this->requiredRawText($sheet->getCell("{$letter}1"));
             $values = [];
             $members = [];
@@ -490,7 +503,7 @@ final class JmhzScenarioRequirementPackageBuilder
             $dictionaryFormulaCount = 0;
             $masterMatchCount = 0;
             $masterMismatchCount = 0;
-            for ($row = 2; $row <= 443; ++$row) {
+            for ($row = 2; $row <= $this->profile['master_dimensions']['rows']; ++$row) {
                 $cell = $sheet->getCell("{$letter}{$row}");
                 $formulaCell = $formulaSheet->getCell("{$letter}{$row}");
                 if ($kind === 'reconciliation') {
@@ -654,8 +667,10 @@ final class JmhzScenarioRequirementPackageBuilder
         $master = $this->sheet($workbook, 'MASTER');
         $masterRowByAttribute = array_column($axis, 'source_row', 'attribute_id');
         $derivedByLabel = [];
-        for ($column = Coordinate::columnIndexFromString('BK'); $column <= Coordinate::columnIndexFromString('CY'); ++$column) {
-            $letter = Coordinate::stringFromColumnIndex($column);
+        foreach ($this->masterAxisColumns() as $letter => $kind) {
+            if ($kind !== 'derived_binary') {
+                continue;
+            }
             $label = $this->requiredRawText($master->getCell("{$letter}1"));
             if (isset($derivedByLabel[$label])) {
                 throw new RuntimeException("Duplicitní odvozená hlavička MASTER {$label}.");
@@ -713,25 +728,38 @@ final class JmhzScenarioRequirementPackageBuilder
     /** @return list<array<string, mixed>> */
     private function anomalies(\PhpOffice\PhpSpreadsheet\Spreadsheet $workbook): array
     {
+        $layout = $this->profile['anomaly_layout'];
         $scenario = $this->sheet($workbook, 'Datové scénáře');
         $master = $this->sheet($workbook, 'MASTER');
         $dictionary = $this->sheet($workbook, 'SLOVNÍK');
-        $sheet12 = $this->sheet($workbook, '12');
         $in37 = $this->sheet($workbook, 'IN37');
-        $expected = [
-            ['kind' => 'duplicated_activity_selector_tokens', 'source_cells' => ['Datové scénáře!A9'], 'raw_details' => ['value' => $this->requiredText($scenario->getCell('A9'))]],
-            ['kind' => 'rich_text_business_description', 'source_cells' => ['Datové scénáře!D13'], 'raw_details' => ['plain_text_sha256' => hash('sha256', $this->requiredText($scenario->getCell('D13')))]],
-            ['kind' => 'shifted_interaction_columns', 'source_cells' => ['IN03!G1', 'IN03!H1', 'IN03!I1', 'IN03!J1', 'IN03!K1', 'IN03!L1'], 'raw_details' => ['headers' => array_map(fn (string $cell): ?string => $this->text($this->sheet($workbook, 'IN03')->getCell($cell)), ['G1', 'H1', 'I1', 'J1', 'K1', 'L1'])]],
-            ['kind' => 'interaction_without_matrix', 'source_cells' => ['Interakce!A21'], 'raw_details' => ['interaction_key' => 'IN14']],
-            ['kind' => 'empty_interaction_matrix', 'source_cells' => ['IN37!A1:J1'], 'raw_details' => ['interaction_key' => 'IN37', 'row_count' => 0]],
-            ['kind' => 'derived_header_trailing_digit', 'source_cells' => ['MASTER!CK1', 'MASTER!CM1'], 'raw_details' => ['values' => [$this->requiredText($master->getCell('CK1')), $this->requiredText($master->getCell('CM1'))]]],
-            ['kind' => 'leading_whitespace_header', 'source_cells' => ['MASTER!CY1', 'SLOVNÍK!CY1', 'IN37!J1'], 'raw_details' => ['master' => $this->rawLexeme($master->getCell('CY1')), 'dictionary' => $this->rawLexeme($dictionary->getCell('CY1')), 'interaction_matrix_header' => $this->rawLexeme($in37->getCell('J1'))]],
-            ['kind' => 'generated_empty_column_header', 'source_cells' => ['12!N4'], 'raw_details' => ['raw_value' => $this->rawLexeme($sheet12->getCell('N4'))]],
-            ['kind' => 'pvpoj_header_drift', 'source_cells' => ['SLOVNÍK!G1', 'MASTER!G1'], 'raw_details' => ['dictionary' => $this->requiredText($dictionary->getCell('G1')), 'master' => $this->requiredText($master->getCell('G1'))]],
-            ['kind' => 'manually_materialized_reconciliation_cells', 'source_cells' => ['SLOVNÍK!AV49', 'SLOVNÍK!AV50', 'SLOVNÍK!AV51'], 'raw_details' => ['values' => array_map(fn (string $cell): ?string => $this->rawLexeme($dictionary->getCell($cell)), ['AV49', 'AV50', 'AV51'])]],
-            ['kind' => 'formula_holes', 'source_cells' => ['SLOVNÍK!BI49', 'SLOVNÍK!BI50', 'SLOVNÍK!BI51'], 'raw_details' => ['values' => array_map(fn (string $cell): ?string => $this->rawLexeme($dictionary->getCell($cell)), ['BI49', 'BI50', 'BI51'])]],
-        ];
-        $this->assertAnomalyValues($expected, $scenario, $master, $dictionary);
+        $whitespace = $layout['whitespace_column'];
+        $materialized = array_map(static fn (int $row): string => 'AV' . $row, $layout['materialized_rows']);
+        $holes = array_map(static fn (int $row): string => 'BI' . $row, $layout['materialized_rows']);
+        $trailing = array_column($layout['trailing_digit_headers'], 0);
+        $expected = [];
+        $expected[] = ['kind' => 'duplicated_activity_selector_tokens', 'source_cells' => ['Datové scénáře!A9'], 'raw_details' => ['value' => $this->requiredText($scenario->getCell('A9'))]];
+        $expected[] = ['kind' => 'rich_text_business_description', 'source_cells' => ['Datové scénáře!D13'], 'raw_details' => ['plain_text_sha256' => hash('sha256', $this->requiredText($scenario->getCell('D13')))]];
+        if ($layout['shifted_interaction_columns']) {
+            $expected[] = ['kind' => 'shifted_interaction_columns', 'source_cells' => ['IN03!G1', 'IN03!H1', 'IN03!I1', 'IN03!J1', 'IN03!K1', 'IN03!L1'], 'raw_details' => ['headers' => array_map(fn (string $cell): ?string => $this->text($this->sheet($workbook, 'IN03')->getCell($cell)), ['G1', 'H1', 'I1', 'J1', 'K1', 'L1'])]];
+        }
+        $expected[] = ['kind' => 'interaction_without_matrix', 'source_cells' => ['Interakce!A21'], 'raw_details' => ['interaction_key' => 'IN14']];
+        if ($layout['empty_interaction_matrix']) {
+            $expected[] = ['kind' => 'empty_interaction_matrix', 'source_cells' => ['IN37!A1:J1'], 'raw_details' => ['interaction_key' => 'IN37', 'row_count' => 0]];
+        }
+        $expected[] = ['kind' => 'derived_header_trailing_digit', 'source_cells' => array_map(static fn (string $column): string => "MASTER!{$column}1", $trailing), 'raw_details' => ['values' => array_map(fn (string $column): string => $this->requiredText($master->getCell($column . '1')), $trailing)]];
+        $expected[] = ['kind' => 'leading_whitespace_header', 'source_cells' => ["MASTER!{$whitespace}1", "SLOVNÍK!{$whitespace}1", 'IN37!J1'], 'raw_details' => ['master' => $this->rawLexeme($master->getCell($whitespace . '1')), 'dictionary' => $this->rawLexeme($dictionary->getCell($whitespace . '1')), 'interaction_matrix_header' => $this->rawLexeme($in37->getCell('J1'))]];
+        if ($layout['generated_empty_column_header']) {
+            $sheet12 = $this->sheet($workbook, '12');
+            $expected[] = ['kind' => 'generated_empty_column_header', 'source_cells' => ['12!N4'], 'raw_details' => ['raw_value' => $this->rawLexeme($sheet12->getCell('N4'))]];
+        }
+        $expected[] = ['kind' => 'pvpoj_header_drift', 'source_cells' => ['SLOVNÍK!G1', 'MASTER!G1'], 'raw_details' => ['dictionary' => $this->requiredText($dictionary->getCell('G1')), 'master' => $this->requiredText($master->getCell('G1'))]];
+        $expected[] = ['kind' => 'manually_materialized_reconciliation_cells', 'source_cells' => array_map(static fn (string $cell): string => "SLOVNÍK!{$cell}", $materialized), 'raw_details' => ['values' => array_map(fn (string $cell): ?string => $this->rawLexeme($dictionary->getCell($cell)), $materialized)]];
+        $expected[] = ['kind' => 'formula_holes', 'source_cells' => array_map(static fn (string $cell): string => "SLOVNÍK!{$cell}", $holes), 'raw_details' => ['values' => array_map(fn (string $cell): ?string => $this->rawLexeme($dictionary->getCell($cell)), $holes)]];
+        if ($this->blankRequirementCells !== []) {
+            $expected[] = ['kind' => 'blank_requirement_cells', 'source_cells' => $this->blankRequirementCells, 'raw_details' => ['count' => count($this->blankRequirementCells)]];
+        }
+        $this->assertAnomalyValues($scenario, $master, $dictionary);
         foreach ($expected as &$anomaly) {
             $anomaly['row_hash'] = $this->hash($anomaly);
         }
@@ -740,24 +768,25 @@ final class JmhzScenarioRequirementPackageBuilder
         return $expected;
     }
 
-    /** @param list<array<string, mixed>> $anomalies */
-    private function assertAnomalyValues(array $anomalies, Worksheet $scenario, Worksheet $master, Worksheet $dictionary): void
+    private function assertAnomalyValues(Worksheet $scenario, Worksheet $master, Worksheet $dictionary): void
     {
+        $layout = $this->profile['anomaly_layout'];
         if ($this->requiredText($scenario->getCell('A9')) !== '1 až 9 s příznakem 10502 = "žádné";  15; 16; 15; 16; A až J; T až ZC') {
             throw new RuntimeException('Změnila se známá anomálie selektoru scénáře 1.');
         }
         if (!$scenario->getCell('D13')->getValue() instanceof RichText) {
             throw new RuntimeException('Datové scénáře!D13 již není RichText.');
         }
-        if ($this->requiredText($master->getCell('CK1')) !== 'IN35(-)/IN04(+) 1 až 9 s příznakem 10502 = výkon trestu odnětí svobody2'
-            || $this->requiredText($master->getCell('CM1')) !== 'IN35(-)/CORE DATA(+) 1 až 9 s příznakem 10502 = výkon trestu odnětí svobody2'
-        ) {
-            throw new RuntimeException('Změnila se známá anomálie hlaviček CK/CM.');
+        foreach ($layout['trailing_digit_headers'] as [$column, $header]) {
+            if ($this->requiredText($master->getCell($column . '1')) !== $header) {
+                throw new RuntimeException("Změnila se známá anomálie hlavičky {$column}.");
+            }
         }
-        if ($this->rawLexeme($master->getCell('CY1')) !== ' IN37(-)'
-            || $this->rawLexeme($dictionary->getCell('CY1')) !== ' IN37(-)'
+        $whitespace = $layout['whitespace_column'];
+        if ($this->rawLexeme($master->getCell($whitespace . '1')) !== ' IN37(-)'
+            || $this->rawLexeme($dictionary->getCell($whitespace . '1')) !== ' IN37(-)'
         ) {
-            throw new RuntimeException('Změnila se známá anomálie hlavičky CY.');
+            throw new RuntimeException("Změnila se známá anomálie hlavičky {$whitespace}.");
         }
         if ($this->requiredText($dictionary->getCell('G1')) !== 'PVPOJ2'
             || $this->requiredText($master->getCell('G1')) !== 'PVPOJ'
@@ -768,17 +797,17 @@ final class JmhzScenarioRequirementPackageBuilder
         if (!$workbook instanceof \PhpOffice\PhpSpreadsheet\Spreadsheet) {
             throw new RuntimeException('List scénářů není součástí sešitu.');
         }
-        if ($this->requiredText($this->sheet($workbook, '12')->getCell('N4')) !== 'Column1') {
+        if ($layout['generated_empty_column_header']
+            && $this->requiredText($this->sheet($workbook, '12')->getCell('N4')) !== 'Column1'
+        ) {
             throw new RuntimeException('Změnila se známá anomálie 12!N4.');
         }
-        foreach (['AV49', 'AV50', 'AV51'] as $cell) {
-            if ($this->formula($dictionary->getCell($cell)) !== null) {
-                throw new RuntimeException("{$cell} již není ručně materializovaná hodnota.");
+        foreach ($layout['materialized_rows'] as $row) {
+            if ($this->formula($dictionary->getCell('AV' . $row)) !== null) {
+                throw new RuntimeException("AV{$row} již není ručně materializovaná hodnota.");
             }
-        }
-        foreach (['BI49', 'BI50', 'BI51'] as $cell) {
-            if ($dictionary->getCell($cell)->getValue() !== null) {
-                throw new RuntimeException("{$cell} již není formula hole.");
+            if ($dictionary->getCell('BI' . $row)->getValue() !== null) {
+                throw new RuntimeException("BI{$row} již není formula hole.");
             }
         }
     }
@@ -786,17 +815,7 @@ final class JmhzScenarioRequirementPackageBuilder
     /** @param array<string, int> $counts */
     private function assertCounts(array $counts): void
     {
-        $expected = [
-            'scenarios' => 8, 'interactions' => 37, 'interaction_attribute_refs' => 22,
-            'unique_interaction_attributes' => 19, 'matrices' => 48, 'part_matrices' => 2,
-            'scenario_matrices' => 8, 'foundation_matrices' => 2, 'interaction_matrices' => 36,
-            'requirements' => 1181, 'required_requirements' => 595, 'optional_requirements' => 350,
-            'conditional_requirements' => 236, 'add_effects' => 147, 'remove_effects' => 28,
-            'master_attributes' => 442, 'reconciliation_axes' => 43,
-            'reconciliation_nonempty_cells' => 250, 'derived_axes' => 41,
-            'derived_one_cells' => 159, 'derived_zero_cells' => 17963,
-            'derived_blank_cells' => 0, 'derived_zero_axes' => 15,
-        ];
+        $expected = $this->profile['scenario_expected_counts'];
         foreach ($expected as $key => $value) {
             if (($counts[$key] ?? null) !== $value) {
                 throw new RuntimeException("Počet {$key} je {$counts[$key]}, očekáváno {$value}.");
@@ -806,19 +825,24 @@ final class JmhzScenarioRequirementPackageBuilder
 
     private function assertWorkbookContract(\PhpOffice\PhpSpreadsheet\Spreadsheet $workbook): void
     {
-        if ($this->requiredText($this->sheet($workbook, 'Verze')->getCell('A3')) !== '1.4.0.2') {
-            throw new RuntimeException('Zdrojový sešit nemá očekávanou verzi 1.4.0.2.');
+        $version = $this->sheet($workbook, 'Verze');
+        $expectedVersion = (string) $this->profile['scenario_workbook_version'];
+        $versionCell = (string) ($this->profile['scenario_workbook_version_cell'] ?? 'A3');
+        if ($this->requiredText($version->getCell($versionCell)) !== $expectedVersion) {
+            throw new RuntimeException("Zdrojový sešit nemá očekávanou verzi {$expectedVersion}.");
         }
-        if ($this->sheet($workbook, 'MASTER')->getHighestDataRow() !== 443
-            || $this->sheet($workbook, 'MASTER')->getHighestDataColumn() !== 'CY'
+        $rows = $this->profile['master_dimensions']['rows'];
+        $column = $this->profile['master_dimensions']['column'];
+        if ($this->sheet($workbook, 'MASTER')->getHighestDataRow() !== $rows
+            || $this->sheet($workbook, 'MASTER')->getHighestDataColumn() !== $column
         ) {
-            throw new RuntimeException('MASTER nemá očekávané rozměry A1:CY443.');
+            throw new RuntimeException("MASTER nemá očekávané rozměry A1:{$column}{$rows}.");
         }
     }
 
     private function assertSource(string $path): void
     {
-        if (!is_file($path) || hash_file('sha256', $path) !== self::SOURCE_SHA256) {
+        if (!is_file($path) || hash_file('sha256', $path) !== $this->profile['scenario_sha256']) {
             throw new RuntimeException('Datové scénáře JMHZ nemají očekávaný SHA-256.');
         }
     }
@@ -936,10 +960,19 @@ if (PHP_SAPI !== 'cli') {
     throw new RuntimeException('Builder scénářů JMHZ je určen pouze pro CLI.');
 }
 $arguments = $_SERVER['argv'] ?? [];
-if (count($arguments) !== 3) {
-    fwrite(STDERR, "Použití: php tools/JmhzScenarioRequirementPackageBuilder.php <scénáře.xlsx> <výstupní-adresář>\n");
+$profileKey = '2026';
+foreach ($arguments as $index => $argument) {
+    if (is_string($argument) && str_starts_with($argument, '--profile=')) {
+        $profileKey = substr($argument, strlen('--profile='));
+        unset($arguments[$index]);
+    }
+}
+$arguments = array_values($arguments);
+$profiles = require __DIR__ . '/jmhz-spec-package-profiles.php';
+if (count($arguments) !== 3 || !isset($profiles[$profileKey])) {
+    fwrite(STDERR, "Použití: php tools/JmhzScenarioRequirementPackageBuilder.php <scénáře.xlsx> <výstupní-adresář> [--profile=2026|2027]\n");
     exit(2);
 }
 
-(new JmhzScenarioRequirementPackageBuilder())->build($arguments[1], $arguments[2]);
+(new JmhzScenarioRequirementPackageBuilder($profiles[$profileKey]))->build($arguments[1], $arguments[2]);
 fwrite(STDOUT, "Katalog scénářů a povinností JMHZ byl vytvořen.\n");

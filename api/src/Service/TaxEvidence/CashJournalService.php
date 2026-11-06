@@ -68,6 +68,7 @@ final class CashJournalService
 
         $opening = $this->repo->openingBalance($supplierId, $from, $isVatPayer);
         $raw = $this->repo->movements($supplierId, $from, $to, $isVatPayer); // vše v rozsahu (totály se počítají nad celkem)
+        $batch = $this->batch($supplierId, $raw);
 
         $totals = [
             'prijem_danovy'     => 0.0,
@@ -85,11 +86,13 @@ final class CashJournalService
             'partial_payment_income'      => 0.0, // inkaso z faktur, které ještě nejsou status='paid'
             'cash_sale_income'            => 0.0, // hotovostní prodej bez faktury (cash purpose='sale')
             'virtual_leg_income'          => 0.0, // noha C (manual/mark_paid/legacy) — timing vůči YEAR(paid_at)
+            'offset_correction_income'    => 0.0, // noha O — oprava dřívějších úhrad ke dni zápočtu dobropisu
         ];
 
         $rows = [];
         $instrumentMoves = [];
         $warnings = $rateWarnings;
+        $missingFxWarnings = [];
         $bucketKeyMap = [
             'income_taxable'   => 'prijem_danovy',
             'income_exempt'    => 'prijem_osvobozeny',
@@ -102,7 +105,13 @@ final class CashJournalService
 
         foreach ($raw as $r) {
             $movementVatPayer = $this->isVatPayerAt($supplierId, (string) $r['movement_date']);
-            $c = $this->classify($r, $movementVatPayer, $taxConstants, $supplierId, $year);
+            $c = $this->classify($r, $movementVatPayer, $taxConstants, $supplierId, $year, $batch);
+            foreach ($c['fx_missing_movements'] ?? [] as $missing) {
+                $missingFxWarnings[$missing['source_type'] . ':' . $missing['source_id']] = $this->missingFxWarning($missing);
+            }
+            if ($r['source_type'] === 'credit_note_offset' && $c['alloc'] === []) {
+                continue; // zápočet nic nepřerozdělil
+            }
 
             foreach ($c['alloc'] as $bucket => $amt) {
                 if (isset($bucketKeyMap[$bucket])) {
@@ -170,29 +179,14 @@ final class CashJournalService
             // Dřív kvůli takovému dokladu spadlo sestavení celého deníku na 500; teď
             // projde s nulou a účetní dostane adresné blokující varování.
             if (($r['fx_rate_missing'] ?? false) === true) {
-                $doc = trim((string) $r['doc_no']);
-                $partner = trim((string) $r['partner']);
-                $warnings[] = [
-                    'type'        => 'fx_rate_missing',
-                    'source_type' => (string) $r['source_type'],
-                    'source_id'   => (int) $r['source_id'],
-                    'date'        => (string) $r['movement_date'],
-                    'direction'   => (string) $r['direction'],
-                    'amount'      => 0.0,
-                    'blocking'    => true,
-                    'message'     => sprintf(
-                        'Cizoměnový pohyb %s ze dne %s%s se nepodařilo ocenit — pro jeho měnu '
-                            . 'není znám žádný kurz. Zadejte kurz přímo na dokladu, jinak pohyb '
-                            . 'nevstupuje do daňového základu.',
-                        $doc !== '' ? '„' . $doc . '"' : '#' . (int) $r['source_id'],
-                        (string) $r['movement_date'],
-                        $partner !== '' ? ' (' . $partner . ')' : '',
-                    ),
-                ];
+                $missingFxWarnings[$r['source_type'] . ':' . $r['source_id']] = $this->missingFxWarning($r);
             }
 
             // R5: sub-agregace pro vysvětlení variance (jen daňový příjem)
             $taxableIncome = $c['alloc']['income_taxable'] ?? 0.0;
+            if ($r['source_type'] === 'credit_note_offset') {
+                $variance['offset_correction_income'] = round($variance['offset_correction_income'] + $taxableIncome, 2);
+            }
             if ($taxableIncome > 0) {
                 if (($r['inv_status'] ?? null) !== null && $r['inv_status'] !== 'paid') {
                     $variance['partial_payment_income'] = round($variance['partial_payment_income'] + $taxableIncome, 2);
@@ -224,7 +218,7 @@ final class CashJournalService
                 'vat'                 => $c['vat'],
                 'unclassified'        => $c['unclassified'],
                 'blocking'            => $c['blocking'],
-                'fx_rate_missing'     => ($r['fx_rate_missing'] ?? false) === true,
+                'fx_rate_missing'     => ($r['fx_rate_missing'] ?? false) === true || ($c['fx_rate_missing'] ?? false) === true,
                 'instrument'          => (string) ($r['instrument'] ?? 'virtual'),
                 'gopay_clearing_id'   => $r['gopay_clearing_id'] ?? null,
             ];
@@ -265,7 +259,30 @@ final class CashJournalService
             'rows'            => $rows,
             'totals'          => $totals,
             'checks'          => $this->reconciliation($supplierId, $year, $isVatPayer, $totals, $variance),
-            'warnings'        => $warnings,
+            'warnings'        => array_merge($warnings, array_values($missingFxWarnings)),
+        ];
+    }
+
+    private function missingFxWarning(array $r): array
+    {
+        $doc = trim((string) $r['doc_no']);
+        $partner = trim((string) $r['partner']);
+        return [
+            'type'        => 'fx_rate_missing',
+            'source_type' => (string) $r['source_type'],
+            'source_id'   => (int) $r['source_id'],
+            'date'        => (string) $r['movement_date'],
+            'direction'   => (string) $r['direction'],
+            'amount'      => 0.0,
+            'blocking'    => true,
+            'message'     => sprintf(
+                'Cizoměnový pohyb %s ze dne %s%s se nepodařilo ocenit - pro jeho měnu '
+                    . 'není znám žádný kurz. Zadejte kurz přímo na dokladu, jinak pohyb '
+                    . 'nevstupuje do daňového základu.',
+                $doc !== '' ? '„' . $doc . '"' : '#' . (int) $r['source_id'],
+                (string) $r['movement_date'],
+                $partner !== '' ? ' (' . $partner . ')' : '',
+            ),
         ];
     }
 
@@ -389,13 +406,16 @@ final class CashJournalService
         $taxConstants = $this->constants->forYear($year);
         $monthly = array_fill(1, 12, 0.0);
 
-        foreach ($this->repo->movements($supplierId, $from, $to, $isVatPayer) as $row) {
+        $raw = $this->repo->movements($supplierId, $from, $to, $isVatPayer);
+        $batch = $this->batch($supplierId, $raw);
+        foreach ($raw as $row) {
             $classified = $this->classify(
                 $row,
                 $this->isVatPayerAt($supplierId, (string) $row['movement_date']),
                 $taxConstants,
                 $supplierId,
                 $year,
+                $batch,
             );
             $income = (float) ($classified['alloc']['income_taxable'] ?? 0);
             if ($income == 0.0) {
@@ -423,17 +443,69 @@ final class CashJournalService
         $isVatPayer = $this->isVatPayerAt($supplierId, $to);
         $taxConstants = $this->constants->forYear($year);
         $out = [];
-        foreach ($this->repo->movements($supplierId, $from, $to, $isVatPayer) as $row) {
+        $raw = $this->repo->movements($supplierId, $from, $to, $isVatPayer);
+        $batch = $this->batch($supplierId, $raw);
+        foreach ($raw as $row) {
             $classified = $this->classify(
                 $row,
                 $this->isVatPayerAt($supplierId, (string) $row['movement_date']),
                 $taxConstants,
                 $supplierId,
                 $year,
+                $batch,
             );
+            if ($row['source_type'] === 'credit_note_offset' && $classified['alloc'] === []) {
+                continue;
+            }
+            if (($classified['fx_rate_missing'] ?? false) === true) $row['fx_rate_missing'] = true;
             $out[] = ['row' => $row, 'alloc' => $classified['alloc']];
         }
         return $out;
+    }
+
+    /**
+     * Podklady sdílené řádky jednoho sestavení deníku, načtené dávkou místo dotazu pro každý
+     * řádek: zápočty přijatých faktur (kalkulačka je filtruje k datu úhrady) a podklady
+     * opravných řádků zápočtů. Platí jen pro tohle sestavení, nikde se nedrží.
+     *
+     * @param list<array<string,mixed>> $raw
+     * @return array{purchase_offsets: array<int, list<array<string,mixed>>>, corrections: array<int, array<string,mixed>>}
+     */
+    private function batch(int $supplierId, array $raw): array
+    {
+        $corrections = [];
+        $invoiceIds = [];
+        $bankIds = [];
+        $legacyCashIds = [];
+        $years = [];
+        foreach ($raw as $r) {
+            if ($r['source_type'] === 'credit_note_offset') {
+                $corrections[] = (int) $r['source_id'];
+            }
+            if (($r['purchase_invoice_id'] ?? null) !== null) $invoiceIds[(int) $r['purchase_invoice_id']] = true;
+            if ($r['source_type'] === 'bank' && ($r['bank_class'] ?? '') === 'expense') $bankIds[] = (int) $r['source_id'];
+            if ($r['source_type'] === 'cash' && ($r['cash_purpose'] ?? '') === 'invoice_payment'
+                && ($r['invoice_id'] ?? null) !== null && ($r['inv_overpaid'] ?? null) === null) $legacyCashIds[] = (int) $r['source_id'];
+            if (isset($r['movement_date'])) $years[(int) substr((string) $r['movement_date'], 0, 4)] = true;
+        }
+        $corrections = $this->repo->creditNoteOffsetCorrections($supplierId, $corrections);
+        foreach ($corrections as $correction) {
+            if ($correction['doc_type'] !== 'purchase_invoice') continue;
+            $invoiceIds[$correction['invoice_id']] = true;
+            foreach ($correction['payments'] as $payment) $years[(int) substr($payment['date'], 0, 4)] = true;
+        }
+        foreach ($this->taxExpenses->bankPurchaseInvoiceIds($supplierId, $bankIds) as $id) $invoiceIds[$id] = true;
+        $offsets = $this->taxExpenses->purchaseOffsets($supplierId, array_keys($invoiceIds));
+        foreach ($offsets as $notes) foreach ($notes as $note) $invoiceIds[(int) $note['id']] = true;
+        $limits = [];
+        foreach (array_keys($years) as $year) $limits[$year] = (float) ($this->constants->forYear($year)['fixed_asset_limit'] ?? 80000);
+        return [
+            'purchase_offsets' => $offsets,
+            'corrections' => $corrections,
+            'purchase_inputs' => $this->taxExpenses->purchaseInputs($supplierId, array_keys($invoiceIds), array_keys($years)),
+            'fixed_asset_limits' => $limits,
+            'legacy_cash_overpayments' => $this->repo->legacyCashOverpayments($supplierId, $legacyCashIds),
+        ];
     }
 
     // ── klasifikátor §5 ──────────────────────────────────────────────────────
@@ -444,6 +516,8 @@ final class CashJournalService
      *  (pro zobrazení), unclassified/blocking: R10.
      *
      * @param array<string,mixed> $r
+     * @param array{purchase_offsets?: array<int, list<array<string,mixed>>>, corrections?: array<int, array<string,mixed>>} $batch
+     *        podklady načtené dávkou ({@see batch()}); bez nich se dotazuje pro každý řádek
      * @return array{alloc:array<string,float>, bucket:string, base:float, vat:float, unclassified:bool, blocking:bool}
      */
     private function classify(
@@ -452,8 +526,12 @@ final class CashJournalService
         array $taxConstants,
         int $supplierId,
         int $year,
+        array $batch = [],
     ): array
     {
+        if ($r['source_type'] === 'cash' && isset($batch['legacy_cash_overpayments'][(int) $r['source_id']])) {
+            $r['inv_overpaid'] = $batch['legacy_cash_overpayments'][(int) $r['source_id']];
+        }
         $amount    = (float) $r['amount'];
         $direction = (string) $r['direction'];
         $source    = (string) $r['source_type'];
@@ -468,6 +546,9 @@ final class CashJournalService
         }
         if ($source === 'gopay') {
             return $this->goPayAlloc($amount, $direction, $r, $isVatPayer);
+        }
+        if ($source === 'credit_note_offset') {
+            return $this->offsetCorrectionAlloc($r, $supplierId, $batch);
         }
 
         // 0) Ruční override (1027) — nejvyšší priorita; celý pohyb do daného kbelíku.
@@ -487,7 +568,7 @@ final class CashJournalService
                 case 'invoice_payment':
                     return $this->incomeAlloc($amount, $direction, $r, $isVatPayer);
                 case 'purchase_payment':
-                    return $this->expenseAlloc($amount, $direction, $r, $isVatPayer, $taxConstants, $supplierId, $year);
+                    return $this->expenseAlloc($amount, $direction, $r, $isVatPayer, $taxConstants, $supplierId, $year, $batch);
                 case 'transfer':
                     return $this->wholeToBucket('transfer', $amount, $direction);
                 default: // 'other' — uživatelem zvolený nestandardní účel → nedaňový
@@ -512,6 +593,8 @@ final class CashJournalService
                 $isVatPayer,
                 $year,
                 (float) ($taxConstants['fixed_asset_limit'] ?? 80000),
+                $batch['purchase_offsets'] ?? null,
+                $batch['purchase_inputs'] ?? null,
             );
             return $this->bankExpenseAlloc($fit['portion'], $direction, round($base * $fit['ratio'], 2)) + $fit;
         }
@@ -524,7 +607,7 @@ final class CashJournalService
 
         // 3) Vazba na přijatou fakturu → výdaj (R8 filtry).
         if ($r['purchase_invoice_id'] !== null) {
-            return $this->expenseAlloc($amount, $direction, $r, $isVatPayer, $taxConstants, $supplierId, $year);
+            return $this->expenseAlloc($amount, $direction, $r, $isVatPayer, $taxConstants, $supplierId, $year, $batch);
         }
 
         // 4) Banka bez vazby → bankovní poplatek (heuristika) nebo NEZAŘAZENO (R10).
@@ -594,6 +677,134 @@ final class CashJournalService
     }
 
     /**
+     * Opravný řádek zápočtu dobropisu (noha O). Úhrada se dělí jen podle zápočtů známých
+     * v den úhrady, takže pozdější zápočet dřívější úhrady nepřerozdělí a uzavřený rok
+     * zůstane, jak byl. Rozdíl, který zápočet do těch úhrad vnáší, nese tenhle řádek ke dni
+     * zápočtu: každá dřívější úhrada se rozdělí týmiž funkcemi jako její vlastní řádek,
+     * jednou se zápočty do tohoto zápočtu včetně a jednou bez něj. Rozdíl jde do daňového
+     * (u osvobozené faktury osvobozeného) příjmu, resp. daňového výdaje, a s opačným
+     * znaménkem do DPH. Peníze netečou, částka řádku je 0. Bez rozdílu (neplátce, dobropis
+     * se stejným složením jako faktura) vrací prázdnou alokaci a řádek se v deníku vynechá.
+     *
+     * Součet řádků úhrad a oprav za všechny roky tak dá rozdělení podle faktury minus
+     * dobropis, stejně jako by se úhrady přerozdělily zpětně.
+     *
+     * @param array<string,mixed> $r
+     * @param array<string,mixed> $batch podklady načtené dávkou ({@see batch()})
+     * @return array{alloc:array<string,float>, bucket:string, base:float, vat:float, unclassified:bool, blocking:bool}
+     */
+    private function offsetCorrectionAlloc(array $r, int $supplierId, array $batch): array
+    {
+        $basis = isset($batch['corrections'])
+            ? ($batch['corrections'][(int) $r['source_id']] ?? null)
+            : $this->repo->creditNoteOffsetCorrection($supplierId, (int) $r['source_id']);
+        $offsets = isset($batch['purchase_offsets'], $basis['invoice_id'])
+            ? ($batch['purchase_offsets'][$basis['invoice_id']] ?? [])
+            : null;
+        $issued = ($basis['doc_type'] ?? '') === 'invoice';
+        $delta = 0.0;
+        $overrideAlloc = [];
+        $overrideBase = 0.0;
+        $overrideVat = 0.0;
+        $missingFx = [];
+        foreach ($basis['payments'] ?? [] as $p) {
+            $context = $p['override_context'] ?? null;
+            $missing = ($p['override_bucket'] ?? '') !== '' && $context !== null
+                ? (($context['before']['fx_rate_missing'] ?? false) ? $context['before'] : null)
+                : ($p['fx_missing_movement'] ?? null);
+            if ($missing !== null) {
+                $missingFx[] = $missing;
+                continue;
+            }
+            $isVatPayer = $p['is_vat_payer'];
+            $shares = [];
+            foreach (['before', 'after'] as $phase) {
+                $coverage = $p['coverage'];
+                if ($phase === 'before' && array_key_exists('raw', $coverage ?? [])
+                    && ($p['kind'] !== 'legacy_cash' || $basis['previous_offset_on'] === null)
+                    && ($basis['previous_offset_on'] === null || $p['date'] >= $basis['previous_offset_on'])) {
+                    $coverage = $coverage['raw'];
+                }
+                $shares[$phase] = ($coverage['comparable'] ?? false)
+                    ? PaymentCoverage::overpaidShare($coverage['prior'], $coverage['amount'], $basis['coverage_' . $phase]) : 0.0;
+            }
+            if (($p['override_bucket'] ?? '') !== '') {
+                if ($context === null && ($p['exchange_rate'] === null || $p['exchange_rate'] <= 0)) {
+                    throw new \RuntimeException('Pro cizoměnovou bankovní úhradu chybí kurz ke dni pohybu.');
+                }
+                $amount = $context !== null ? (float) $context['before']['amount'] : round($p['amount'] * $p['exchange_rate'], 2);
+                $allocations = [];
+                foreach (['before', 'after'] as $phase) {
+                    $payment = $context[$phase] ?? ($issued
+                        ? ['invoice_id' => $basis['invoice_id'], 'inv_vat' => $basis['vat_' . $phase],
+                           'inv_with_vat' => $basis['gross_' . $phase], 'inv_overpaid' => $amount * $shares[$phase]]
+                        : ['purchase_invoice_id' => $basis['invoice_id'], 'pi_vat' => $basis['vat_' . $phase],
+                           'pi_with_vat' => $basis['gross_' . $phase]]);
+                    if ($context !== null && $p['kind'] === 'legacy_bank') $payment['inv_overpaid'] = $amount * $shares[$phase];
+                    // Ruční klasifikace má vlastní prioritu i nad osvobozením, majetkem a odpočtem.
+                    $allocations[$phase] = $this->wholeToBucket($p['override_bucket'], $amount, $p['direction'], $payment,
+                        $context !== null ? (bool) $payment['override_is_vat_payer'] : $isVatPayer);
+                }
+                foreach ($allocations['after']['alloc'] as $bucket => $value) {
+                    $overrideAlloc[$bucket] = ($overrideAlloc[$bucket] ?? 0.0) + $value - ($allocations['before']['alloc'][$bucket] ?? 0.0);
+                }
+                $overrideBase += $allocations['after']['base'] - $allocations['before']['base'];
+                $overrideVat += $allocations['after']['vat'] - $allocations['before']['vat'];
+                continue;
+            }
+            if ($issued) {
+                $sign = $p['direction'] === 'in' ? 1.0 : -1.0;
+                $bases = [];
+                foreach (['before', 'after'] as $phase) {
+                    // C1 odečítá dvě zaokrouhlené korunové částky; legacy banka zaokrouhluje
+                    // podíl z celé korunové banky. Moderní agregace dělí platbu před převodem.
+                    if ($p['kind'] === 'manual' && $p['native_rate'] !== null) {
+                        $covered = round($p['coverage']['amount'] * (1 - $shares[$phase]), 2);
+                        $overpaid = round($p['amount'] - round($covered * $p['native_rate'], 2), 2);
+                    } elseif ($p['kind'] === 'legacy_bank') {
+                        $overpaid = round($p['amount'] * $shares[$phase], 2);
+                    } else {
+                        $bases[$phase] = $this->prorateBase($p['amount'], $basis['vat_' . $phase], $basis['gross_' . $phase], $isVatPayer, $p['amount'] * $shares[$phase]);
+                        continue;
+                    }
+                    $bases[$phase] = $this->invoiceIncomeBase($p['amount'], [
+                        'inv_vat' => $basis['vat_' . $phase], 'inv_with_vat' => $basis['gross_' . $phase], 'inv_overpaid' => $overpaid,
+                    ], $isVatPayer);
+                }
+                $delta += $sign * ($bases['after'] - $bases['before']);
+                continue;
+            }
+            $sign = $p['direction'] === 'out' ? 1.0 : -1.0;
+            $year = (int) substr($p['date'], 0, 4);
+            $limit = $batch['fixed_asset_limits'][$year] ?? (float) ($this->constants->forYear($year)['fixed_asset_limit'] ?? 80000);
+            if ($p['exchange_rate'] === null || $p['exchange_rate'] <= 0) {
+                throw new \RuntimeException('Pro cizoměnovou bankovní úhradu chybí kurz ke dni pohybu.');
+            }
+            $amount = round($p['amount'] * $p['exchange_rate'], 2);
+            $taxable = fn (int $throughOffsetId, string $phase): float => $this->taxExpenses->forPurchaseInvoice(
+                $supplierId, $basis['invoice_id'], $amount,
+                $isVatPayer, $year, $limit, ['overpaid_share' => $shares[$phase]], $basis['offset_on'], $throughOffsetId, $offsets,
+                $batch['purchase_inputs'] ?? null,
+            );
+            $delta += $sign * ($taxable($basis['offset_id'], 'after') - $taxable($basis['offset_id'] - 1, 'before'));
+        }
+
+        $delta = round($delta, 2);
+        $exempt = $issued && (int) ($r['inv_exempt'] ?? 0) === 1;
+        $bucket = $issued ? ($exempt ? 'income_exempt' : 'income_taxable') : 'expense_taxable';
+        $nontax = $issued ? 'income_nontax' : 'expense_nontax';
+        $alloc = $overrideAlloc;
+        $alloc[$bucket] = ($alloc[$bucket] ?? 0.0) + $delta;
+        $alloc[$nontax] = ($alloc[$nontax] ?? 0.0) - $delta;
+        $alloc = array_filter(array_map(static fn (float $value): float => round($value, 2), $alloc), static fn (float $value): bool => $value != 0.0);
+        if ($alloc !== []) $bucket = array_key_first($alloc);
+        return ['alloc' => $alloc, 'bucket' => $bucket,
+                'base' => round(($exempt ? 0.0 : $delta) + $overrideBase, 2), 'vat' => round(-$delta + $overrideVat, 2),
+                'unclassified' => false, 'blocking' => $missingFx !== [],
+                'fx_rate_missing' => $missingFx !== [], 'fx_missing_movements' => $missingFx];
+    }
+
+    /**
      * Příjem z vydané faktury: R9 (osvobozeno → income_exempt), jinak daňový základ s
      * R7 proratou; znaménko dle směru (out = dobropis/vratka snižuje příjem, R11).
      *
@@ -609,7 +820,7 @@ final class CashJournalService
             // níž — DPH z osvobozené faktury je průběžná položka státu, ne příjem poplatníka.
             // Bez toho by „z toho vyloučeno" bylo brutto, kdežto TaxProfileRepository
             // ::annualExemptIncome() vedle toho hlásí netto.
-            $exemptBase = $this->prorateBase($amount, $r['inv_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
+            $exemptBase = $this->invoiceIncomeBase($amount, $r, $isVatPayer);
             $exemptVat  = round($amount - $exemptBase, 2);
             $alloc = ['income_exempt' => round($sign * $exemptBase, 2)];
             if ($exemptVat != 0.0) {
@@ -627,7 +838,7 @@ final class CashJournalService
             ];
         }
 
-        $base = $this->prorateBase($amount, $r['inv_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
+        $base = $this->invoiceIncomeBase($amount, $r, $isVatPayer);
         $vat  = round($amount - $base, 2);
         $alloc = ['income_taxable' => round($sign * $base, 2)];
         if ($vat != 0.0) {
@@ -652,6 +863,7 @@ final class CashJournalService
      * výdaj ZVÝŠILA místo snížila — chyba 2× částka v základu DPFO § 7.
      *
      * @param array<string,mixed> $r
+     * @param array<string,mixed> $batch podklady načtené dávkou ({@see batch()})
      * @return array{alloc:array<string,float>, bucket:string, base:float, vat:float, unclassified:bool, blocking:bool}
      */
     private function expenseAlloc(
@@ -662,6 +874,7 @@ final class CashJournalService
         array $taxConstants,
         int $supplierId,
         int $year,
+        array $batch = [],
     ): array
     {
         // Výdaj je 'out'; opačný směr = vratka, tedy záporný výdaj.
@@ -673,6 +886,13 @@ final class CashJournalService
             $isVatPayer,
             $year,
             (float) ($taxConstants['fixed_asset_limit'] ?? 80000),
+            // #247: konkrétní úhrada, podle které kalkulátor pozná přeplatek faktury.
+            // Ručně zaplacená faktura (noha C2) platí amount_to_pay, které brutto nepřesáhne.
+            $r['source_type'] === 'cash' ? ['type' => 'cash', 'id' => (int) $r['source_id']] : null,
+            (string) $r['movement_date'],
+            null,
+            isset($batch['purchase_offsets']) ? ($batch['purchase_offsets'][(int) $r['purchase_invoice_id']] ?? []) : null,
+            $batch['purchase_inputs'] ?? null,
         );
         $vat  = round($sign * ($amount - $base), 2);
         $base = round($sign * $base, 2);
@@ -856,6 +1076,29 @@ final class CashJournalService
     }
 
     /**
+     * #247: základ příjmu z úhrady vydané faktury. Poměrem DPH faktury se dělí jen část,
+     * která fakturu hradí; přeplatek nad dosud neuhrazené brutto (`inv_overpaid`, v CZK se
+     * znaménkem částky řádku, spočítá CashJournalRepository::ipCoverageSql) DPH nenese
+     * a celý zůstává v základu. Řádek, který konkrétní úhradu nezná (vratka k dobropisu
+     * bez vazby, GoPay vratka), nemá `inv_overpaid` a dělí se poměrem celý jako dosud.
+     *
+     * @param array<string,mixed> $r
+     */
+    private function invoiceIncomeBase(float $amount, array $r, bool $isVatPayer): float
+    {
+        $overpaid = $r['inv_overpaid'] ?? null;
+        if ($overpaid === null || (float) $overpaid == 0.0) {
+            return $this->prorateBase($amount, $r['inv_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
+        }
+        $overpaid = (float) $overpaid;
+        $covered = round($amount - $overpaid, 2);
+        return round(
+            $this->prorateBase($covered, $r['inv_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer) + $overpaid,
+            2,
+        );
+    }
+
+    /**
      * R7: z uhrazeného brutto se vyloučí pouze evidovaná DPH; zaokrouhlení patří do základu.
      *
      * Poměr DPH platí i pro dobropis: ten má DPH i brutto záporné, poměr je tedy stejný
@@ -863,7 +1106,7 @@ final class CashJournalService
      * takže vratka plátce snížila daňový příjem i o DPH. Stejné pravidlo drží agregace
      * bankovní nohy (CashJournalRepository, binc.czk_base a czk_exempt).
      */
-    private function prorateBase(float $amount, mixed $vat, mixed $with, bool $isVatPayer): float
+    private function prorateBase(float $amount, mixed $vat, mixed $with, bool $isVatPayer, float $overpaid = 0.0): float
     {
         if (!$isVatPayer || $vat === null || $with === null) {
             return round($amount, 2);
@@ -872,7 +1115,7 @@ final class CashJournalService
         if ($w == 0.0) {
             return round($amount, 2);
         }
-        return round($amount * (1 - min(1.0, max(0.0, (float) $vat / $w))), 2);
+        return round(($amount - $overpaid) * (1 - min(1.0, max(0.0, (float) $vat / $w))) + $overpaid, 2);
     }
 
     /**
@@ -894,7 +1137,7 @@ final class CashJournalService
         // R7 proratu. Je to přijatelné pro pohyby BEZ faktury (nezná se DPH rozpad); u pohybu
         // s vazbou by měl uživatel spíš opravit klasifikaci dokladu než override.
         if ($bucket === 'income_taxable' && ($r['invoice_id'] ?? null) !== null) {
-            $base = $this->prorateBase($amount, $r['inv_vat'] ?? null, $r['inv_with_vat'] ?? null, $isVatPayer);
+            $base = $this->invoiceIncomeBase($amount, $r, $isVatPayer);
             return $this->single($bucket, $base, $bucket, $base, round($amount - $base, 2));
         }
         if ($bucket === 'expense_taxable' && ($r['purchase_invoice_id'] ?? null) !== null) {
@@ -1002,7 +1245,8 @@ final class CashJournalService
         $explained = round(
             $variance['partial_payment_income']
             + $variance['cash_sale_income']
-            + $variance['virtual_leg_income'],
+            + $variance['virtual_leg_income']
+            + $variance['offset_correction_income'],
             2
         );
 
@@ -1014,6 +1258,7 @@ final class CashJournalService
                 'partial_payments'          => $variance['partial_payment_income'],
                 'cash_sales_without_invoice' => $variance['cash_sale_income'],
                 'virtual_leg'               => $variance['virtual_leg_income'],
+                'credit_note_offsets'       => $variance['offset_correction_income'],
             ],
             'explained_total'     => $explained,
             'residual'            => round($diff - $explained, 2),

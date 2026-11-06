@@ -13,7 +13,7 @@ use Psr\Log\LoggerInterface;
  * mít ve formuláři:
  *
  *  - z ARES (podle IČ): číslo popisné/orientační, jednoznačná CZ-NACE,
- *    spisová značka (OR), typ poplatníka,
+ *    spisová značka (OR), právní forma, typ poplatníka,
  *  - z registru plátců DPH (podle DIČ): kód finančního úřadu (`cisloFu`
  *    = EPO c_ufo, systém 451–465; NE kód územního pracoviště z ARES `financniUrad`!).
  *
@@ -27,7 +27,7 @@ final class SupplierRegistryEnricher
     /** Sloupce, které smíme doplnit (whitelist — názvy jdou přímo do SQL). */
     private const COLUMNS = [
         'street_number_pop', 'street_number_orient', 'cz_nace_code',
-        'commercial_register', 'taxpayer_type', 'financial_office_code',
+        'commercial_register', 'legal_form', 'taxpayer_type', 'financial_office_code',
     ];
 
     public function __construct(
@@ -53,6 +53,10 @@ final class SupplierRegistryEnricher
                 $this->put($fields, 'street_number_orient', $d['street_number_orient'] ?? '');
                 $this->put($fields, 'cz_nace_code', $d['cz_nace_code'] ?? '');
                 $this->put($fields, 'commercial_register', $d['commercial_register'] ?? '');
+                $legalForm = trim((string) ($d['legal_form'] ?? ''));
+                if (preg_match('/^\d{3}$/D', $legalForm) === 1) {
+                    $this->put($fields, 'legal_form', $legalForm);
+                }
                 if (in_array($d['taxpayer_type'] ?? '', ['fo', 'po'], true)) {
                     $this->put($fields, 'taxpayer_type', (string) $d['taxpayer_type']);
                 }

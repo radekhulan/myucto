@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\ManufacturerRepository;
 use MyInvoice\Repository\StockItemRepository;
 use MyInvoice\Service\Accounting\Codebooks\AbstractCodebookImportService;
+use MyInvoice\Service\Invoice\UnitPricePrecision;
 
 /**
  * Import zboží (goods) z XLSX/CSV (Epic ESHOP F3). Identita řádku = sku per
@@ -224,9 +225,9 @@ final class ProductImportService extends AbstractCodebookImportService
             if ($has('price') && $price !== null) {
                 $newPrice = $price;
                 $rule = $this->prices->findByCurrency($supplierId, (int) $existing['id'], 'CZK');
-                if ((string) ($base['sale_price_without_vat'] ?? '') !== (string) ($newPrice ?? '')
+                if (!self::samePrice($base['sale_price_without_vat'] ?? null, $newPrice)
                     || $rule === null || $rule['price_mode'] !== 'fixed'
-                    || $rule['fixed_price'] !== $newPrice || $rule['rounding'] !== 'none'
+                    || !self::samePrice($rule['fixed_price'], $newPrice) || $rule['rounding'] !== 'none'
                     || $rule['is_manual_override']) {
                     $changes['price'] = ['from' => $base['sale_price_without_vat'], 'to' => $newPrice];
                     $base['sale_price_without_vat'] = $newPrice;
@@ -271,9 +272,9 @@ final class ProductImportService extends AbstractCodebookImportService
         if ($s === null) {
             return null;
         }
-        // Nezáporná cena; integer část ≤ 10 číslic (DECIMAL(12,2)) — mimo rozsah
-        // by jinak skončilo PDO exception → 500.
-        if (!preg_match('/^\d+(\.\d+)?$/', $s)) {
+        // Nezáporná cena; integer část ≤ 10 číslic a nejvýš šest desetinných míst
+        // (DECIMAL(16,6)) — mimo rozsah by jinak skončilo PDO exception → 500.
+        if (!preg_match('/^\d+(\.\d+)?$/', $s) || !UnitPricePrecision::isWithinPrecision($s)) {
             return null;
         }
         if (strlen(explode('.', $s, 2)[0]) > 10) {
@@ -281,6 +282,14 @@ final class ProductImportService extends AbstractCodebookImportService
         }
         $rounded = \MyInvoice\Service\Eshop\Pricing\PriceRounding::apply($s, 'none');
         return strlen(explode('.', $rounded, 2)[0]) > 10 ? null : $rounded;
+    }
+
+    private static function samePrice(mixed $stored, ?string $new): bool
+    {
+        if ($stored === null || $stored === '' || $new === null) {
+            return ($stored === null || $stored === '') && $new === null;
+        }
+        return bccomp((string) $stored, $new, UnitPricePrecision::DECIMALS) === 0;
     }
 
     private function writePrice(int $supplierId, int $itemId, ?string $price): void

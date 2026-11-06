@@ -108,6 +108,35 @@ final class PaymentTaxDocumentCreator
     }
 
     /**
+     * Klasifikace, kterou řádek daňového dokladu k platbě přebírá z proformy.
+     *
+     * Zdaněný řádek ji přebírá vždy. Nulový jen ve zvláštním režimu (26c: metodika GFŘ
+     * uvádí zálohu sníženou o přirážku na ř. 26). Ostatní nulové kódy záměrně ne: záloha
+     * na vývoz nebo osvobozené plnění povinnost přiznat nezakládá, kód by ji poslal
+     * na ř. 22 nebo ř. 50 už k datu platby.
+     *
+     * @param array<string,mixed> $item položka proformy
+     */
+    private function advanceClassificationCode(array $item, int $supplierId): ?string
+    {
+        $code = trim((string) ($item['vat_classification_code'] ?? ''));
+        if ($code === '') {
+            return null;
+        }
+        if ((float) $item['vat_rate_snapshot'] > 0.0) {
+            return $code;
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT kh_regime_code FROM vat_classifications
+              WHERE code = ? AND (supplier_id = ? OR supplier_id IS NULL)
+              ORDER BY supplier_id IS NULL
+              LIMIT 1'
+        );
+        $stmt->execute([$code, $supplierId]);
+        return in_array((string) $stmt->fetchColumn(), ['1', '2'], true) ? $code : null;
+    }
+
+    /**
      * Vytvoří (nebo vrátí existující) draft daňového dokladu k platbě.
      *
      * @param int $paymentId  invoice_payments.id — platba zálohové faktury
@@ -193,17 +222,23 @@ final class PaymentTaxDocumentCreator
         // se zemí CZ, takže OSS řádek do PL a tuzemský řádek můžou mít totéž procento
         // i totéž `vat_rate_id`. Sloučené do jednoho kbelíku by dostaly JEDEN OSS profil
         // a polovina úplaty by se přiznala ve špatné zemi.
+        //
+        // A také per KLASIFIKACE: 1c a 1 mají stejnou sazbu, ale jiný režim KH, a zbytek ceny
+        // cestovní služby (26c) patří na ř. 26. Bez kódu by přirážka ze zálohy spadla mezi
+        // běžná plnění a zbytek ceny by z přiznání vypadl.
         $buckets = [];
         foreach ($proforma['items'] as $item) {
+            $code = $this->advanceClassificationCode($item, (int) $proforma['supplier_id']);
             $key = number_format((float) $item['vat_rate_snapshot'], 2, '.', '')
-                . '#' . $this->ossCarry->fingerprint($item);
+                . '#' . $this->ossCarry->fingerprint($item)
+                . '#' . ($code ?? '');
             if (!isset($buckets[$key])) {
                 $buckets[$key] = [
                     'rate'        => (float) $item['vat_rate_snapshot'],
                     'vat_rate_id' => (int) $item['vat_rate_id'],
                     'gross'       => 0.0,
                     // Zdrojová položka putuje alokátorem až k zápisu — viz jeho docblock.
-                    'carry'       => $item,
+                    'carry'       => array_replace($item, ['vat_classification_code' => $code]),
                 ];
             }
             $buckets[$key]['gross'] += (float) $item['total_with_vat'];
@@ -278,9 +313,9 @@ final class PaymentTaxDocumentCreator
                 'INSERT INTO invoice_items
                    (invoice_id, description, quantity, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
-                    total_without_vat, total_vat, total_with_vat, order_index, item_kind'
+                    total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, 1, "", ?, ?, ?, 0, 0, 0, ?, "standard"'
+                . ') VALUES (?, ?, 1, "", ?, ?, ?, 0, 0, 0, ?, "standard", ?'
                 . $this->ossCarry->placeholders()
                 . ')'
             );
@@ -302,6 +337,7 @@ final class PaymentTaxDocumentCreator
                     $line['vat_rate_id'],
                     $line['rate'],
                     $i,
+                    $line['carry']['vat_classification_code'] ?? null,
                     // Místo plnění z proformy — přijetím úplaty se nemění (viz docblock třídy).
                     ...$this->ossCarry->values($line['carry']),
                 ]);
@@ -337,6 +373,19 @@ final class PaymentTaxDocumentCreator
                 );
             } else {
                 $this->repo->setExchangeRate($taxDocId, null, null);
+            }
+
+            // Platební kalendář je sám daňovým dokladem (§ 31a), odběratel jiný nedostane.
+            // Doklad k úhradě splátky proto nečeká na vystavení a číslo z řady nespotřebuje.
+            if (!empty($proforma['calendar_id'])) {
+                $pdo->prepare(
+                    "UPDATE invoices td
+                       JOIN invoices pf ON pf.id = ?
+                        SET td.status = 'paid', td.paid_at = ?, td.varsymbol = ?, td.calendar_id = pf.calendar_id,
+                            td.client_snapshot = pf.client_snapshot, td.supplier_snapshot = pf.supplier_snapshot,
+                            td.bank_snapshot = pf.bank_snapshot
+                      WHERE td.id = ?"
+                )->execute([(int) $proforma['id'], (string) $payment['paid_on'], 'KP-' . $paymentId, $taxDocId]);
             }
 
             if ($ownsTransaction) {

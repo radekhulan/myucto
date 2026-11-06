@@ -21,6 +21,26 @@ final class FakturoidSourceDocumentTest extends TestCase
         self::assertFalse(FakturoidSourceDocument::pricesIncludeVat(['vat_price_mode' => null, 'lines' => [['unit_price' => 100, 'vat_rate' => 21]]]));
     }
 
+    public function testTaxDeductible(): void
+    {
+        self::assertFalse(FakturoidSourceDocument::taxDeductible(['tax_deductible' => false]));
+        self::assertFalse(FakturoidSourceDocument::taxDeductible(['tax_deductible' => 'false']));
+        self::assertTrue(FakturoidSourceDocument::taxDeductible(['tax_deductible' => true]));
+        self::assertTrue(FakturoidSourceDocument::taxDeductible([]));
+        self::assertTrue(FakturoidSourceDocument::taxDeductible(['tax_deductible' => null]));
+    }
+
+    public function testProportionalVatDeduction(): void
+    {
+        self::assertSame(['vat_deduction' => 'proportional', 'vat_deduction_percent' => 80.0], FakturoidSourceDocument::vatDeduction(['proportional_vat_deduction' => 80]));
+        self::assertSame(['vat_deduction' => 'proportional', 'vat_deduction_percent' => 45.5], FakturoidSourceDocument::vatDeduction(['proportional_vat_deduction' => '45.5']));
+        self::assertSame(['vat_deduction' => 'none', 'vat_deduction_percent' => 0.0], FakturoidSourceDocument::vatDeduction(['proportional_vat_deduction' => 0]));
+        self::assertNull(FakturoidSourceDocument::vatDeduction(['proportional_vat_deduction' => 100]));
+        self::assertNull(FakturoidSourceDocument::vatDeduction(['proportional_vat_deduction' => null]));
+        self::assertNull(FakturoidSourceDocument::vatDeduction(['proportional_vat_deduction' => -5]));
+        self::assertNull(FakturoidSourceDocument::vatDeduction([]));
+    }
+
     public function testEmptySummaryHasNoDifferences(): void
     {
         self::assertSame([], FakturoidSourceDocument::differences([['rate' => 0.0, 'base' => 100.0, 'vat' => 0.0]], []));

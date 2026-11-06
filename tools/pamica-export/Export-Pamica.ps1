@@ -42,6 +42,10 @@
 .PARAMETER Vystup
     Složka, kam se zapíše ZIP a souhrn. Bez zadání složka vedle skriptu.
 
+.PARAMETER Heslo
+    Heslo databáze, je-li datový soubor jím chráněný. Bez zadání se na něj skript
+    zeptá, když ho datový soubor vyžaduje.
+
 .EXAMPLE
     .\Export-Pamica.ps1
 
@@ -53,7 +57,8 @@ param(
     [string]$Mdb,
     [string[]]$Rok,
     [string]$Ico,
-    [string]$Vystup
+    [string]$Vystup,
+    [string]$Heslo
 )
 
 $ErrorActionPreference = 'Stop'
@@ -311,16 +316,85 @@ function Find-PamicaMdb {
     return @($found | Sort-Object -Unique)
 }
 
-function Open-PamicaSource([string]$Mdb) {
-    if (-not (Test-Path -LiteralPath $Mdb)) { throw "Datový soubor $Mdb neexistuje." }
-    foreach ($p in 'Microsoft.ACE.OLEDB.16.0', 'Microsoft.ACE.OLEDB.12.0', 'Microsoft.Jet.OLEDB.4.0') {
+<#
+    Otevře datový soubor Accessu (.mdb) jen pro čtení, ovladače zkouší od nejnovějšího.
+    Vrací Connection, nebo při neúspěchu Failure s důvodem a Detail s hláškami ovladačů:
+      Driver    žádný ovladač Accessu v této bitovosti PowerShellu není registrovaný
+      Password  soubor je chráněný heslem databáze (heslo chybí, nebo nesouhlasí)
+      Locked    soubor drží výhradně jiný program, nebo chybí právo ke čtení
+      Format    soubor není databáze Accessu, nebo ji ovladač nezná
+      Other     jiná chyba
+    Shodné s Export-PohodaMdb.ps1 a Export-PohodaMdbAccounting.ps1 - při změně upravte všechny tři.
+#>
+function Open-MdbConnection([string]$Path, [string]$Heslo) {
+    $details = New-Object System.Collections.Generic.List[string]
+    $failure = $null
+    foreach ($provider in 'Microsoft.ACE.OLEDB.16.0', 'Microsoft.ACE.OLEDB.12.0', 'Microsoft.Jet.OLEDB.4.0') {
+        $connection = $null
         try {
-            $c = New-Object System.Data.OleDb.OleDbConnection "Provider=$p;Data Source=$Mdb;Mode=Read;Persist Security Info=False"
-            $c.Open()
-            return $c
-        } catch { }
+            $builder = New-Object System.Data.OleDb.OleDbConnectionStringBuilder
+            $builder.Provider = $provider
+            $builder['Data Source'] = $Path
+            $builder['Mode'] = 'Read'
+            $builder['Persist Security Info'] = $false
+            if ($Heslo) { $builder['Jet OLEDB:Database Password'] = $Heslo }
+            $connection = New-Object System.Data.OleDb.OleDbConnection ([string]$builder.ConnectionString)
+            $connection.Open()
+            return [pscustomobject]@{ Connection = $connection; Failure = $null; Detail = '' }
+        } catch {
+            if ($connection) { $connection.Dispose() }
+            $e = $_.Exception
+            while ($e.InnerException) { $e = $e.InnerException }
+            $message = $e.Message.Trim()
+            $details.Add("${provider}: $message")
+            # Neregistrovaný ovladač o souboru nic neříká; důvod dá první ovladač, který soubor otevřít zkusil.
+            $kind = Get-MdbFailureKind $message.Replace($Path, '')
+            if ($kind -ne 'Driver' -and $null -eq $failure) { $failure = $kind }
+        }
     }
-    return $null
+    if ($null -eq $failure) { $failure = 'Driver' }
+    return [pscustomobject]@{ Connection = $null; Failure = $failure; Detail = ($details -join [Environment]::NewLine) }
+}
+
+function Get-MdbFailureKind([string]$Message) {
+    if ($Message -match 'not registered|není registrov|nicht registriert') { return 'Driver' }
+    if ($Message -match 'password|heslo|Kennwort') { return 'Password' }
+    if ($Message -match 'exclusive|already in use|already opened|locked|could not use|výhradn|uzamčen|používá jiný') { return 'Locked' }
+    if ($Message -match 'Unrecognized database format|Neznámý formát|nerozpozn|formát databáze') { return 'Format' }
+    return 'Other'
+}
+
+<# Věta pro uživatele, proč se datový soubor neotevřel, včetně hlášek ovladačů. #>
+function Get-MdbFailureMessage($Result, [string]$Program, [bool]$HesloZadano) {
+    $text = switch ($Result.Failure) {
+        'Driver' { 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine.' }
+        'Password' {
+            if ($HesloZadano) { 'Datový soubor nejde otevřít: heslo databáze nesouhlasí.' }
+            else { 'Datový soubor je chráněný heslem databáze. Zadejte ho parametrem -Heslo.' }
+        }
+        'Locked' { "Datový soubor nejde otevřít, drží ho jiný program. Zavřete $Program na všech počítačích, které s datovým souborem pracují, a export spusťte znovu." }
+        'Format' { 'Soubor není datový soubor Accessu (.mdb), nebo ho nainstalovaný ovladač nezná.' }
+        default { 'Datový soubor nejde otevřít.' }
+    }
+    return $text + [Environment]::NewLine + 'Hlášení ovladačů:' + [Environment]::NewLine + $Result.Detail
+}
+
+<# Heslo databáze z konzole; v neinteraktivním běhu (bez konzole) vrátí $null. #>
+function Read-MdbPassword {
+    try {
+        $secure = Read-Host 'Datový soubor je chráněný heslem databáze. Zadejte heslo' -AsSecureString
+    } catch { return $null }
+    if ($null -eq $secure -or $secure.Length -eq 0) { return $null }
+    $bstr = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($secure)
+    try { return [Runtime.InteropServices.Marshal]::PtrToStringBSTR($bstr) }
+    finally { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($bstr) }
+}
+
+function Open-PamicaSource([string]$Mdb, [string]$Heslo) {
+    if (-not (Test-Path -LiteralPath $Mdb)) { throw "Datový soubor $Mdb neexistuje." }
+    $result = Open-MdbConnection $Mdb $Heslo
+    $script:PamicaOpenFailure = $result
+    return $result.Connection
 }
 
 <#
@@ -633,24 +707,30 @@ if (-not $Vystup) { $Vystup = $PSScriptRoot }
 New-Item -ItemType Directory -Force $Vystup | Out-Null
 $Vystup = (Resolve-Path -LiteralPath $Vystup).Path
 
-$probe = Open-PamicaSource $Mdb
-if ($null -eq $probe -and [Environment]::Is64BitProcess) {
+if (-not $Heslo -and $env:MYUCTO_MDB_HESLO) { $Heslo = $env:MYUCTO_MDB_HESLO }
+$probe = Open-PamicaSource $Mdb $Heslo
+if ($null -eq $probe -and $PamicaOpenFailure.Failure -eq 'Password' -and -not $Heslo) {
+    $Heslo = Read-MdbPassword
+    if ($Heslo) { $probe = Open-PamicaSource $Mdb $Heslo }
+}
+if ($null -eq $probe -and $PamicaOpenFailure.Failure -eq 'Driver' -and [Environment]::Is64BitProcess) {
     # Ovladač Accessu bývá jen 32bitový (instaluje ho 32bitová PAMICA) - zkusíme 32bitový PowerShell.
+    # Jen když ovladač opravdu chybí; heslo nebo zamčený soubor 32 bitů nevyřeší.
     $ps32 = Join-Path $env:WINDIR 'SysWOW64\WindowsPowerShell\v1.0\powershell.exe'
-    if (-not (Test-Path -LiteralPath $ps32)) {
-        Write-Host 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine.' -ForegroundColor Red
-        exit 1
+    if (Test-Path -LiteralPath $ps32) {
+        Write-Host 'Ovladač pro .mdb v 64bitovém PowerShellu chybí, spouštím 32bitový...'
+        $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
+        $args32 = "-Mdb {0} -Vystup {1}" -f (& $q $Mdb), (& $q $Vystup)
+        if ($Rok) { $args32 += ' -Rok ' + (($Rok | ForEach-Object { [string]$_ }) -join ',') }
+        if ($Ico) { $args32 += ' -Ico ' + (& $q $Ico) }
+        # Heslo jde do 32bitového procesu proměnnou prostředí, ne na příkazové řádce.
+        if ($Heslo) { $env:MYUCTO_MDB_HESLO = $Heslo }
+        & $ps32 -NoProfile -ExecutionPolicy Bypass -Command ("& {0} {1}" -f (& $q $PSCommandPath), $args32)
+        exit $LASTEXITCODE
     }
-    Write-Host 'Ovladač pro .mdb v 64bitovém PowerShellu chybí, spouštím 32bitový...'
-    $q = { param($s) "'" + ($s -replace "'", "''") + "'" }
-    $args32 = "-Mdb {0} -Vystup {1}" -f (& $q $Mdb), (& $q $Vystup)
-    if ($Rok) { $args32 += ' -Rok ' + (($Rok | ForEach-Object { [string]$_ }) -join ',') }
-    if ($Ico) { $args32 += ' -Ico ' + (& $q $Ico) }
-    & $ps32 -NoProfile -ExecutionPolicy Bypass -Command ("& {0} {1}" -f (& $q $PSCommandPath), $args32)
-    exit $LASTEXITCODE
 }
 if ($null -eq $probe) {
-    Write-Host 'Datový soubor nejde otevřít: chybí ovladač Microsoft Access Database Engine.' -ForegroundColor Red
+    Write-Host (Get-MdbFailureMessage $PamicaOpenFailure 'PAMICU' ([bool]$Heslo)) -ForegroundColor Red
     exit 1
 }
 $conn = $probe

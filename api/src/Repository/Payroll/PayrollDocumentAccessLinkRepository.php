@@ -468,20 +468,34 @@ final class PayrollDocumentAccessLinkRepository
         )->execute([$supplierId, $codeId]);
     }
 
-    public function bumpCodeAttempts(int $supplierId, int $codeId): int
+    /**
+     * Atomicky spotřebuje jeden pokus ještě před porovnáním kódu. True jen tehdy,
+     * když tento požadavek pokus opravdu získal: souběžné hádání tak strop
+     * politiky nepřekročí ani o jeden pokus, protože porovnání proběhne jen
+     * s vlastním, už započteným pokusem.
+     */
+    public function reserveCodeAttempt(int $supplierId, int $codeId, int $maxAttempts): bool
     {
-        $pdo = $this->db->pdo();
-        $pdo->prepare(
+        $stmt = $this->db->pdo()->prepare(
             'UPDATE payroll_document_access_codes
                 SET attempts = attempts + 1
-              WHERE supplier_id = ? AND id = ? AND attempts < 20',
-        )->execute([$supplierId, $codeId]);
-        $stmt = $pdo->prepare(
-            'SELECT attempts FROM payroll_document_access_codes
-              WHERE supplier_id = ? AND id = ?',
+              WHERE supplier_id = ? AND id = ? AND used_at IS NULL
+                AND expires_at > UTC_TIMESTAMP() AND attempts < ?',
+        );
+        $stmt->execute([$supplierId, $codeId, $maxAttempts]);
+        return $stmt->rowCount() === 1;
+    }
+
+    /** Spálí kód, jen pokud ho mezitím nespotřeboval souběžný požadavek. */
+    public function consumeCode(int $supplierId, int $codeId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'UPDATE payroll_document_access_codes
+                SET used_at = UTC_TIMESTAMP()
+              WHERE supplier_id = ? AND id = ? AND used_at IS NULL',
         );
         $stmt->execute([$supplierId, $codeId]);
-        return (int) $stmt->fetchColumn();
+        return $stmt->rowCount() === 1;
     }
 
     // ---- relace -----------------------------------------------------------

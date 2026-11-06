@@ -26,7 +26,7 @@ Kapitolu otevřete, když:
 2. **Oprávnění.** Kontrolu spouští, zařazuje rozdíly a uzavírá uživatel s právem zápisu do účetnictví. Prohlížet ji může každý, kdo vidí účetnictví. Kontrola do účetnictví nic nezapisuje, ukládá jen protokol do historie cyklů.
 3. **Převedená data v MyÚčtu.** Měsíc, který kontrolujete, musí být v MyÚčtu zaúčtovaný.
 4. **Výstupy starého programu.** Připravte aspoň jeden výstup (obratovou předvahu, počty dokladů, saldokonto a další, viz [§ 111.6.1](#11161-co-se-porovnava)). Kritérium, ke kterému výstup nenahrajete, se nekontroluje a v protokolu není. Formát souborů popisuje [§ 111.6.3](#11163-format-vystupu).
-5. **Volitelně záloha agendy Money S3.** Pokud jste ji nahráli v průvodci přechodu z Money S3, můžete ji vybrat místo souborů ([Přechod z Money S3](103_Prechod_z_Money_S3.md)).
+5. **Volitelně záloha agendy Money S3.** Pokud jste ji nahráli v průvodci přechodu z Money S3, můžete ji vybrat místo souborů ([Přechod z Money S3](106_Prechod_z_Money_S3.md)).
 
 ## 111.3 Krok za krokem: kontrola měsíce
 
@@ -98,7 +98,7 @@ k poslednímu dni vybraného měsíce.
 
 Kritérium, ke kterému nenahrajete výstup, se nekontroluje a v protokolu není.
 Kritéria K2 až K4 (vyrovnanost, úplnost mapování, doklady proti deníku) kontroluje
-převod sám při každém běhu, viz [Přechod z Money S3](103_Prechod_z_Money_S3.md).
+převod sám při každém běhu, viz [Přechod z Money S3](106_Prechod_z_Money_S3.md).
 
 Přiznání k DPH a kontrolní hlášení MyÚčto sestaví stejně jako při podání
 a porovná s XML starého programu po atributech. Pořadí řádků kontrolního hlášení
@@ -151,7 +151,7 @@ Sloupce se hledají podle názvu bez ohledu na diakritiku a velikost písmen:
 
 ## 111.7 Související kapitoly
 
-- [Přechod z Money S3](103_Prechod_z_Money_S3.md)
+- [Přechod z Money S3](106_Prechod_z_Money_S3.md)
 - [Přechod z POHODY](107_Prechod_z_POHODY.md)
 - [Přechod z PREMIER](109_Prechod_z_PREMIER.md)
 - [Obratová předvaha](56_Obratova_predvaha.md)

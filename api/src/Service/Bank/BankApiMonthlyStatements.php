@@ -30,6 +30,13 @@ final class BankApiMonthlyStatements
     /** Výpis, který je stavebním kamenem měsíčního výpisu. */
     private const PROJECTABLE = '(' . self::FEED_SOURCES . ' OR ' . self::DAILY_PDF . ')';
 
+    /**
+     * Část SET při odpojení PDF: zůstatky měsíce z feedu dokládalo jen ono. Výpis s vlastním
+     * souborem (GPC, stažený výpis banky) má zůstatky ze souboru a ty zůstávají.
+     */
+    public const DROP_PDF_BALANCES = "prev_balance = CASE WHEN source = 'bank_api' AND file_content IS NULL THEN NULL ELSE prev_balance END,
+                curr_balance = CASE WHEN source = 'bank_api' AND file_content IS NULL THEN NULL ELSE curr_balance END";
+
     public function __construct(private readonly PDO $pdo) {}
 
     public function pendingBackfillAccounts(): array
@@ -250,7 +257,13 @@ final class BankApiMonthlyStatements
         }
         $month = substr((string) $this->pdo->query('SELECT month_start FROM bank_api_months WHERE statement_id = ' . $monthId)->fetchColumn(), 0, 7);
         if ($this->useDailyDocuments($monthId, $supplierId, $month)) return;
-        $this->pdo->prepare("UPDATE bank_statements SET source = 'bank_api', file_name = ?, file_content = NULL, statement_number = NULL, prev_balance = NULL, curr_balance = NULL WHERE id = ?")
+        // Zůstatky z přiloženého PDF přežijí přepočet z nočního stažení feedu, jiné ne.
+        // MariaDB vyhodnocuje SET zleva, proto se source přepisuje až za nimi.
+        $this->pdo->prepare("UPDATE bank_statements SET
+                prev_balance = CASE WHEN source = 'bank_api' AND OCTET_LENGTH(pdf_content) > 0 THEN prev_balance END,
+                curr_balance = CASE WHEN source = 'bank_api' AND OCTET_LENGTH(pdf_content) > 0 THEN curr_balance END,
+                source = 'bank_api', file_name = ?, file_content = NULL, statement_number = NULL
+              WHERE id = ?")
             ->execute(['API-' . $month, $monthId]);
     }
 
@@ -311,7 +324,7 @@ final class BankApiMonthlyStatements
         $copied->execute([$monthId, $monthHash]);
         if ($copied->fetchColumn() === false) return;
         $this->pdo->prepare('UPDATE bank_statements
-                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL
+                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL, ' . self::DROP_PDF_BALANCES . '
               WHERE id = ? AND supplier_id = ?')
             ->execute([$monthId, $supplierId]);
     }

@@ -67,7 +67,7 @@ Kapitolu otevřete, když:
    Pod výběrem druhu se u některých druhů zobrazí vysvětlení, co se
    s nepřítomností stane.
 4. U druhu s náhradou mzdy vyberte **Schválený průměr za hodinu**. Chybí-li,
-   klikněte na **Přejít na Průměry** a průměr nejdřív založte
+   klikněte na **Přejít na Průměrný výdělek** a průměr nejdřív založte
    ([§ 76.4](#764-krok-za-krokem-prumerny-vydelek-pro-nahrady)).
 5. Začíná nebo končí nepřítomnost částí směny, vyplňte **Čerpání první den
    (hodiny)** nebo **Čerpání poslední den (hodiny)**.
@@ -120,6 +120,18 @@ v [§ 76.11.1](#76111-prumerny-a-pravdepodobny-vydelek).
 
 **Jak poznáte, že je hotovo:** Průměr má stav **Schválený snapshot** a ve
 formuláři nové absence se nabízí v poli **Schválený průměr za hodinu**.
+
+**Kdy průměr založit:** před zahájením mzdového běhu za měsíc, ve kterém se
+podává měsíční hlášení. Schválený průměr se zmrazí s ostatními vstupy běhu
+(pole 10345 hlášení); schválený až po výpočtu revize hlášení nevidí a oprava
+stojí opravnou revizi. Kontrola před během proto upozorní **Chybí průměr pro
+JMHZ** se jmény zaměstnanců a odkazem na hromadné vypočtení průměrů. Upozornění
+běh nezastavuje.
+
+Průměr jde založit jen na čtvrtletí, ve kterém pracovní vztah trval. Vztah,
+který začíná po konci čtvrtletí nebo skončil před jeho začátkem, aplikace
+odmítne a hromadné založení ho přeskočí. Průměr tak nevznikne omylem na jiném
+vztahu téže osoby.
 
 ## 76.5 Krok za krokem: dovolená
 
@@ -248,7 +260,7 @@ listu se doba vykáže jako vyloučená doba.
 | Co vidíte | Proč | Co udělat |
 |---|---|---|
 | *„Novou nepřítomnost lze založit až po výběru konkrétního zaměstnance“* | Nahoře je vybráno **Všichni zaměstnanci** | Vyberte **Zaměstnanec** a **Pracovní vztah**. |
-| *„Pro tento vztah není spočítaný žádný průměrný výdělek.“* | Chybí průměr za čtvrtletí | Klikněte na **Přejít na Průměry** a založte ho ([§ 76.4](#764-krok-za-krokem-prumerny-vydelek-pro-nahrady)). |
+| *„Pro tento vztah není spočítaný žádný průměrný výdělek.“* | Chybí průměr za čtvrtletí | Klikněte na **Přejít na Průměrný výdělek** a založte ho ([§ 76.4](#764-krok-za-krokem-prumerny-vydelek-pro-nahrady)). |
 | *„Průměrný výdělek … čeká na schválení.“* | Průměr je založený, ale neschválený | Na záložce **Průměrný výdělek** klikněte na **Schválit**. |
 | Návrh průměru: *„Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek“* | Nový vztah bez podkladů | Na kartě vztahu klikněte na **Zadat pravděpodobný výdělek (§ 355 ZP)**. |
 | Návrh průměru nevznikl, chybí běh za měsíc | V rozhodném období je měsíc bez mzdového běhu, i když vztah trval | Doplňte evidenci (mzdový běh za ten měsíc). |

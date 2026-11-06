@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\System;
 
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\Auth\PepperPolicy;
 
 /**
  * Výřez konfigurace pro diagnostický balíček — striktně ALLOWLISTEM.
@@ -188,7 +189,7 @@ final class DiagnosticsConfigAllowlist
         }
         // „CHANGE-ME" ze vzorové konfigurace je nález, ne tajemství — hlásit ho
         // je užitečnější než ho skrýt.
-        return $string === 'CHANGE-ME' ? '<default:CHANGE-ME>' : '<set>';
+        return PepperPolicy::isPlaceholder($string) ? '<default:CHANGE-ME>' : '<set>';
     }
 
     /**

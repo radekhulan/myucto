@@ -10,6 +10,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import OdometerSourceModal from './OdometerSourceModal.vue'
 
 const { t } = useI18n()
 const toast = useToast()
@@ -24,6 +25,8 @@ const fuelTypes: FuelType[] = ['diesel', 'petrol', 'lpg', 'cng', 'electric', 'hy
 const usageModes: CarUsageMode[] = ['business', 'mixed', 'private']
 
 const open = ref(false)
+/** Auto, u kterého je otevřený dialog automatického stavu tachometru. */
+const odometerSourceCar = ref<Car | null>(null)
 const saving = ref(false)
 const draft = reactive<CarPayload & { id: number }>({
   id: 0, registration: '', name: '', brand: '', model: '', vin: '',
@@ -116,6 +119,13 @@ async function removeCar(c: Car) {
   }
 }
 
+function odometerSourceBadge(c: Car): { label: string; cls: string } | null {
+  if (c.odometer_source_status === 'active') return { label: t('logbook.odosrc_badge_active'), cls: 'bg-success-50 text-success-700' }
+  if (c.odometer_source_status === 'error') return { label: t('logbook.odosrc_badge_error'), cls: 'bg-danger-50 text-danger-700' }
+  if (c.odometer_source_status === 'warning') return { label: t('logbook.odosrc_badge_warning'), cls: 'bg-warning-50 text-warning-700' }
+  return null
+}
+
 function fuelLabel(f: FuelType | null): string {
   return f ? t(`logbook.fuel_types.${f}`) : '—'
 }
@@ -157,7 +167,7 @@ function usageLabel(c: Car): string {
               <th class="px-3 py-2 text-left font-medium">{{ t('logbook_fuel.usage_mode') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('logbook.odometer_start') }}</th>
               <th class="px-3 py-2 text-right font-medium">{{ t('logbook.tab_trips') }}</th>
-              <th class="px-3 py-2 w-28"></th>
+              <th class="px-3 py-2 w-40"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -165,6 +175,7 @@ function usageLabel(c: Car): string {
               <td class="px-3 py-2 font-mono font-medium">
                 {{ c.registration }}
                 <span v-if="c.is_default" class="ml-1.5 text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700">{{ t('logbook.default_short') }}</span>
+                <span v-if="odometerSourceBadge(c)" class="ml-1.5 text-xs px-1.5 py-0.5 rounded font-sans" :class="odometerSourceBadge(c)!.cls">{{ odometerSourceBadge(c)!.label }}</span>
               </td>
               <td class="px-3 py-2">{{ [c.brand, c.model].filter(Boolean).join(' ') || c.name || '—' }}</td>
               <td class="px-3 py-2">{{ fuelLabel(c.fuel_type) }}</td>
@@ -173,6 +184,7 @@ function usageLabel(c: Car): string {
               <td class="px-3 py-2 text-right font-mono">{{ c.odometer_start != null ? c.odometer_start.toLocaleString('cs-CZ') : '—' }}</td>
               <td class="px-3 py-2 text-right font-mono">{{ c.trips_count ?? 0 }}</td>
               <td class="px-3 py-2 text-right text-xs whitespace-nowrap">
+                <button v-if="!c.is_archived" @click="odometerSourceCar = c" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">{{ t('logbook.odosrc_short') }}</button>
                 <template v-if="auth.canWrite('logbook.write') || auth.canWrite('logbook.delete')">
                   <button v-if="auth.canWrite('logbook.write')" @click="editCar(c)" class="cursor-pointer text-primary-600 hover:text-primary-700 mr-3">{{ t('common.edit') }}</button>
                   <button v-if="auth.canWrite('logbook.delete')" @click="removeCar(c)" :disabled="carInUse(c)" :title="carInUse(c) ? t('logbook.car_delete_blocked') : ''" class="cursor-pointer text-danger-500 hover:text-danger-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-danger-500">{{ t('common.delete') }}</button>
@@ -190,6 +202,7 @@ function usageLabel(c: Car): string {
             <div class="font-mono font-medium text-neutral-900 flex items-center gap-1.5 truncate">
               {{ c.registration }}
               <span v-if="c.is_default" class="text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 shrink-0">{{ t('logbook.default_short') }}</span>
+              <span v-if="odometerSourceBadge(c)" class="text-xs px-1.5 py-0.5 rounded shrink-0 font-sans" :class="odometerSourceBadge(c)!.cls">{{ odometerSourceBadge(c)!.label }}</span>
             </div>
             <span class="text-xs text-neutral-500 shrink-0">{{ fuelLabel(c.fuel_type) }}</span>
           </div>
@@ -201,13 +214,16 @@ function usageLabel(c: Car): string {
             <span class="font-mono">{{ t('logbook.odometer_start') }}: {{ c.odometer_start != null ? c.odometer_start.toLocaleString('cs-CZ') : '—' }}</span>
             <span>{{ t('logbook.tab_trips') }}: {{ c.trips_count ?? 0 }}</span>
           </div>
-          <div v-if="auth.canWrite('logbook.write') || auth.canWrite('logbook.delete')" class="flex gap-4 mt-2 text-xs">
+          <div class="flex gap-4 mt-2 text-xs">
+            <button v-if="!c.is_archived" @click="odometerSourceCar = c" class="cursor-pointer text-primary-600 hover:text-primary-700">{{ t('logbook.odosrc_short') }}</button>
             <button v-if="auth.canWrite('logbook.write')" @click="editCar(c)" class="cursor-pointer text-primary-600 hover:text-primary-700">{{ t('common.edit') }}</button>
             <button v-if="auth.canWrite('logbook.delete')" @click="removeCar(c)" :disabled="carInUse(c)" :title="carInUse(c) ? t('logbook.car_delete_blocked') : ''" class="cursor-pointer ml-auto text-danger-500 hover:text-danger-600 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:text-danger-500">{{ t('common.delete') }}</button>
           </div>
         </div>
       </div>
     </template>
+
+    <OdometerSourceModal v-if="odometerSourceCar" :car="odometerSourceCar" @close="odometerSourceCar = null" @changed="load" />
 
     <!-- Modal -->
     <div v-if="open" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">

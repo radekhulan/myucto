@@ -1381,7 +1381,9 @@ final class JmhzScenario1XmlSerializer
                 break;
             }
         }
-        $skipAdvance = $withholding !== null && $advanceIsEmpty;
+        // Měsíc bez zdanitelného příjmu (rodičovská, nemoc po celý měsíc)
+        // zálohu také nemá; PAMICA ji v přijatých hlášeních neuvádí.
+        $skipAdvance = $advanceIsEmpty;
         $tax = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:zalohaNaDan');
         foreach ($skipAdvance ? [] : [
             'form:zakladDane' => ['base', '10297'],
@@ -1420,6 +1422,12 @@ final class JmhzScenario1XmlSerializer
                     );
                 }
 
+                continue;
+            }
+            // Nulový bonus se nepíše ani u zaměstnance s prohlášením: XSD ho
+            // má `minOccurs="0"`, PAMICA ho v přijatých hlášeních vynechává
+            // a ČSSZ bere za vyplněný už samotný element (třída chyb 40244).
+            if ($element === 'form:danBonus' && $this->int($advance[$key] ?? null, $attributeId) === 0) {
                 continue;
             }
             $this->text(
@@ -1619,6 +1627,9 @@ final class JmhzScenario1XmlSerializer
                         ? 'true'
                         : 'false',
                 );
+                if (($result['spouse_credit_claimed'] ?? null) === true) {
+                    $this->annualSpouseCredit($dom, $resultNode, $result);
+                }
                 $this->text(
                     $dom,
                     $resultNode,
@@ -1654,7 +1665,11 @@ final class JmhzScenario1XmlSerializer
                     ? 'true'
                     : 'false',
             );
+            JmhzOzpWageXmlWriter::append($dom, $net, $summary, $form);
             $node->appendChild($net);
+        } else {
+            // Formulář bez čisté mzdy výdělek OZP vést nemůže; writer to zastaví.
+            JmhzOzpWageXmlWriter::append($dom, $node, $summary, $form);
         }
 
         $healthAmounts = match ($form) {
@@ -1748,6 +1763,68 @@ final class JmhzScenario1XmlSerializer
     }
 
     /** @param array<string,mixed> $result */
+    /**
+     * Blok slevaNaPartnera (IN19): manžel, dítě do 3 let, průkaz ZTP/P
+     * a počty měsíců slevy (10421 až 10426, 10430, 10539 až 10542).
+     *
+     * @param array<string,mixed> $result
+     */
+    private function annualSpouseCredit(
+        DOMDocument $dom,
+        DOMElement $resultNode,
+        array $result,
+    ): void {
+        $details = $this->object($result['spouse_credit_details'] ?? null);
+        $children = $this->rows($details['children'] ?? null);
+        if ($details === [] || $children === []) {
+            $this->unresolved('10421');
+        }
+        $block = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:slevaNaPartnera');
+        $partner = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:partner');
+        $partner->appendChild($this->annualPerson(
+            $dom,
+            $this->object($details['partner'] ?? null),
+            'form:partnerUdaje',
+            ['10421', '10422', '10423', '10424'],
+        ));
+        $childList = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:deti');
+        foreach ($children as $child) {
+            $childList->appendChild($this->annualPerson(
+                $dom,
+                $child,
+                'form:dite',
+                ['10539', '10540', '10541', '10542'],
+            ));
+        }
+        $partner->appendChild($childList);
+        $ztpP = $this->bool($details['ztp_p'] ?? null, '10425');
+        $this->text(
+            $dom,
+            $partner,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:prukazZtpp',
+            $ztpP ? 'true' : 'false',
+        );
+        $this->text(
+            $dom,
+            $partner,
+            JmhzSchemaCatalog::NS_FORM,
+            'form:slevaPocetMesicu',
+            (string) $this->int($details['months'] ?? null, '10426'),
+        );
+        if ($ztpP) {
+            $this->text(
+                $dom,
+                $partner,
+                JmhzSchemaCatalog::NS_FORM,
+                'form:slevaPocetMesicuZtpp',
+                (string) $this->int($details['ztp_p_months'] ?? null, '10430'),
+            );
+        }
+        $block->appendChild($partner);
+        $resultNode->appendChild($block);
+    }
+
     private function annualChildCredit(
         DOMDocument $dom,
         DOMElement $resultNode,
@@ -2122,16 +2199,33 @@ final class JmhzScenario1XmlSerializer
         // (JmhzScenario1DocumentResolver::socialContributionEmployment()).
         // Dokument bez příznaku vznikl v době, kdy měla osoba vždy jen jeden
         // formulář.
+        //
+        // 10370 a 10481 jsou povinné na KAŽDÉM formuláři s blokem pojištění:
+        // matice datových scénářů 1.4.0.2 je vede jako „P" bez podmínky ve
+        // všech listech (1 až 9, M, K/N–S, odložený příjem), Pokyny MH 1.4.14
+        // (kap. 3.6.7 a 3.6.8) jako „Povinný údaj" a chybějící povinný údaj
+        // odmítá kontrola 341 v prevalidaci ePortálu. Formulář bez účasti na pojištění (DPP nebo
+        // DPČ pod hranicí, vztah v souběhu, který pojistné osoby nenese) je
+        // proto vykazuje nulou, stejně jako ukázka MPSV „Jedna DPP do 11499".
+        // Kontroly 118 a 315 berou chybějící 10477 jako nulu, nula pojistného
+        // jim tedy odpovídá, a součet kontroly 12 se nezmění.
+        //
+        // Vzor ShopNow (příklad Přikryl v Pokynech 1.4.14, str. 121-129, PPV3
+        // DPP bez účasti) oba prvky vynechává. Aplikace se jím neřídí:
+        // normativní je matice scénářů a Pokyny („Povinný údaj"); DIS i cJMHZ
+        // přijmou obě varianty, nula tedy nic neriskuje.
         $reportsSocial = ($employment['reports_social_contributions'] ?? true) === true;
         $ownContributions = $this->object($employment['social_contributions'] ?? null);
         foreach ([
             'form:pojisteniZamestnanec' => ['employee_social_czk', '10370'],
             'form:pojisteniZamestnavatel' => ['employer_social_czk', '10481'],
         ] as $element => [$key, $attributeId]) {
-            $value = $ownContributions !== []
-                ? ($ownContributions[$key] ?? null)
-                : ($summary[$key] ?? null);
-            if (!$reportsSocial || !is_int($value) || $amount === null) {
+            $value = match (true) {
+                $ownContributions !== [] => $ownContributions[$key] ?? null,
+                $reportsSocial => $summary[$key] ?? null,
+                default => 0,
+            };
+            if (!is_int($value)) {
                 continue;
             }
             $wrapper = $this->node($dom, JmhzSchemaCatalog::NS_FORM, $element);
@@ -2304,10 +2398,92 @@ final class JmhzScenario1XmlSerializer
             } else {
                 $this->appendEldpExcludedDays($dom, $entry, $section, $code);
             }
+            // Pořadí XSD (`eldpType`, `eldpVezenType`): vylouceneDny, pak odecitaneDny.
+            $this->appendEldpDeductedDays($dom, $entry, $section, $code, $prisoner);
             $list->appendChild($entry);
         }
 
         return $list;
+    }
+
+    /**
+     * Odečítané doby ELDP sekce (`odecitaneDny`, 10375 a 10462–10469,
+     * interakce IN04).
+     *
+     * Nese je jen sekce s kódem D, které builder odvodil nenulový úhrn
+     * (`deducted_days_total`); `null` znamená NEUVEDENO a element se nezapíše
+     * (Pravidla podání kap. 4: při nule se atributy nezobrazují, kontrola 328).
+     * Zapisuje se úhrn 10375 a nenulové složky v pořadí XSD. Součet složek se
+     * musí rovnat úhrnu (Pravidla podání kap. 4) a při kladném úhrnu musí být
+     * aspoň jedna složka (Pokyny MH k 10462–10469); obojí se ověří dřív, než
+     * se cokoliv zapíše. Formulář vězně (`odecitaneDnyVezenType`) vede jen
+     * pracovní neschopnost a mateřství; jiná nenulová složka by se tiše
+     * ztratila, proto je to vada jako u vyloučených dob vězně.
+     *
+     * @param array<string,mixed> $section
+     */
+    private function appendEldpDeductedDays(
+        DOMDocument $dom,
+        DOMElement $entry,
+        array $section,
+        mixed $code,
+        bool $prisoner,
+    ): void {
+        $total = $section['deducted_days_total'] ?? null;
+        if ($total === null) {
+            return;
+        }
+        $total = $this->int($total, '10375');
+        if ($total === 0) {
+            return;
+        }
+        if (!is_string($code) || strlen($code) < 2 || $code[strlen($code) - 2] !== 'D') {
+            $this->invalid(
+                'jmhz_xml_eldp_deducted_days_without_code',
+                'Odečítané doby patří jen do ELDP sekce s kódem D (po dovršení důchodového věku).',
+            );
+        }
+        $attributes = [
+            'pracovniNeschopnost' => '10462',
+            'materstvi' => '10463',
+            'osetrovaniSNarokem' => '10464',
+            'osetrovaniBezNaroku' => '10465',
+            'otcovska' => '10466',
+            'neplaceneVolno' => '10468',
+            'neomluveneAbsence' => '10469',
+        ];
+        $components = $section['deducted_days'] ?? null;
+        if (!is_array($components) || array_is_list($components)
+            || array_diff_key($components, $attributes) !== []
+        ) {
+            $this->unresolved('10375');
+        }
+        $values = [];
+        foreach ($attributes as $key => $attributeId) {
+            $value = $this->int($components[$key] ?? 0, $attributeId);
+            if ($value === 0) {
+                continue;
+            }
+            if ($prisoner && !in_array($key, ['pracovniNeschopnost', 'materstvi'], true)) {
+                $this->invalid(
+                    'jmhz_xml_prisoner_deducted_days_unsupported',
+                    "Formulář vězně nemá kam zapsat odečítané doby atributu {$attributeId}.",
+                );
+            }
+            $values[$key] = $value;
+        }
+        if ($values === [] || array_sum($values) !== $total) {
+            $this->invalid(
+                'jmhz_xml_eldp_deducted_days_sum_mismatch',
+                'Úhrn odečítaných dob (10375) neodpovídá součtu složek 10462–10469.',
+            );
+        }
+        $block = $this->node($dom, JmhzSchemaCatalog::NS_FORM, 'form:odecitaneDny');
+        $this->text($dom, $block, JmhzSchemaCatalog::NS_FORM, 'form:odecitaneDobyCelkem', (string) $total);
+        foreach ($values as $key => $value) {
+            $this->text($dom, $block, JmhzSchemaCatalog::NS_FORM, 'form:' . $key, (string) $value);
+        }
+        $entry->appendChild($block);
     }
 
     /**
@@ -3253,10 +3429,8 @@ final class JmhzScenario1XmlSerializer
      * Blok se pro něj nezapíše (element je v XSD nepovinný), místo aby se
      * doplnila nula, kterou zdroj netvrdí.
      *
-     * Odečítané doby (10375, 10462–10469) se nezapisují vůbec: měsíc s kódem
-     * D a nenulovými odečtenými dobami ELDP řez zastaví
-     * (`jmhz_eldp_deducted_days_unsupported`), takže sem dojde jen sekce, která
-     * žádné nemá, a builder je nechává neuvedené.
+     * Odečítané doby (10375, 10462–10469) zapisuje samostatně
+     * {@see appendEldpDeductedDays()}.
      *
      * @param array<string,mixed> $section
      */

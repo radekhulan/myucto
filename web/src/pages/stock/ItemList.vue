@@ -10,7 +10,7 @@ import { eshopApi, type Manufacturer, type Category, type Tag, type Attribute, t
 import { clientsApi, type Client } from '@/api/clients'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { formatMoney } from '@/composables/useFormat'
+import { formatMoney, formatUnitPrice } from '@/composables/useFormat'
 import { useRowLink } from '@/composables/useRowLink'
 import FilterBar, { type FilterChip } from '@/components/ui/FilterBar.vue'
 import SavedFiltersMenu from '@/components/ui/SavedFiltersMenu.vue'
@@ -444,6 +444,7 @@ const TYPE_BADGE: Record<StockItemType, string> = {
   material: 'bg-neutral-100 text-neutral-600',
   goods: 'bg-primary-50 text-primary-700',
   product: 'bg-success-50 text-success-600',
+  service: 'bg-warning-50 text-warning-700',
 }
 
 function openDetail(i: StockItem, e?: MouseEvent) {
@@ -605,6 +606,7 @@ onBeforeUnmount(() => {
         <option value="material">{{ t('stock.item_type.material') }}</option>
         <option value="goods">{{ t('stock.item_type.goods') }}</option>
         <option value="product">{{ t('stock.item_type.product') }}</option>
+        <option value="service">{{ t('stock.item_type.service') }}</option>
       </select>
       <select v-model="filters.warehouse_id" @change="applyFilters" class="h-9 px-3 border border-neutral-300 rounded-md text-sm bg-surface"
         :title="t('stock.documents.filter_warehouse')">
@@ -747,10 +749,10 @@ onBeforeUnmount(() => {
               <!-- Platná cena = effective_price (akční cena nad cenotvorbou); původní hladina se ukáže přeškrtnutá. -->
               <td v-if="tbl.isVisible('sale_price')" class="px-3 py-2 text-right font-mono whitespace-nowrap">
                 <template v-if="i.promo_price != null">
-                  <span class="line-through text-neutral-400 mr-1">{{ i.sale_price_without_vat != null ? formatMoney(Number(i.sale_price_without_vat)) : '—' }}</span>
-                  <span class="text-success-600 font-semibold" :title="i.promo_label ?? t('eshop.promo.title')">{{ formatMoney(Number(i.promo_price)) }}</span>
+                  <span class="line-through text-neutral-400 mr-1">{{ i.sale_price_without_vat != null ? formatUnitPrice(Number(i.sale_price_without_vat)) : '—' }}</span>
+                  <span class="text-success-600 font-semibold" :title="i.promo_label ?? t('eshop.promo.title')">{{ formatUnitPrice(Number(i.promo_price)) }}</span>
                 </template>
-                <template v-else>{{ i.effective_price != null ? formatMoney(Number(i.effective_price)) : (i.sale_price_without_vat != null ? formatMoney(Number(i.sale_price_without_vat)) : '—') }}</template>
+                <template v-else>{{ i.effective_price != null ? formatUnitPrice(Number(i.effective_price)) : (i.sale_price_without_vat != null ? formatUnitPrice(Number(i.sale_price_without_vat)) : '—') }}</template>
               </td>
               <td v-if="tbl.isVisible('min_qty')" class="px-3 py-2 text-right font-mono whitespace-nowrap">{{ i.min_qty ?? '—' }}</td>
               <td v-if="tbl.isVisible('attribute')" data-test="display-attribute-value" class="px-3 py-2">{{ displayAttributeText(i) }}</td>

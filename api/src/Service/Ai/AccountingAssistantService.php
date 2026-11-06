@@ -9,6 +9,8 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\DocumentFolderRepository;
 use MyInvoice\Repository\DocumentRepository;
 use MyInvoice\Repository\DocumentViewerContext;
+use MyInvoice\Service\Accounting\InternalDocumentService;
+use MyInvoice\Service\Accounting\OtherItemKindService;
 use MyInvoice\Service\Document\DocumentStorage;
 use MyInvoice\Service\Document\DocumentTextExtractor;
 use MyInvoice\Service\Vat\VatStatusService;
@@ -20,7 +22,10 @@ use PDO;
  * Všechny tři cesty sdílejí přípravu příloh, kontext firmy, volání poskytovatele
  * ({@see AiProviderHttpClient::completeJson()}) a serverovou kontrolu návrhů zápisů
  * ({@see AiJournalEntryNormalizer}). Nic se tu nezaúčtuje — návrh zaúčtuje až uživatel
- * přes běžné `POST /api/accounting/journal`.
+ * přes běžné `POST /api/accounting/journal`. Stejně tak návrh ostatní pohledávky či
+ * závazku ({@see AiOtherItemNormalizer}) a interního dokladu
+ * ({@see AiInternalDocumentNormalizer}, {@see AiInternalDocumentValidator}) založí až
+ * uživatel běžnými endpointy těch agend.
  */
 final class AccountingAssistantService
 {
@@ -64,6 +69,8 @@ final class AccountingAssistantService
         private readonly DocumentTextExtractor $extractor,
         private readonly ChartOfAccountsRepository $chart,
         private readonly VatStatusService $vat,
+        private readonly AiInternalDocumentValidator $internalDocuments,
+        private readonly OtherItemKindService $otherItemKinds,
     ) {}
 
     /** @return array{available:bool, reason:?string, provider:?string, model:?string, supports_files:bool, models:list<string>} */
@@ -78,6 +85,9 @@ final class AccountingAssistantService
      * @param list<mixed>                          $history   [{role, content}]
      * @param list<array{name:string, bytes:string}> $files    nahrané soubory
      * @param list<mixed>                          $documentIds
+     * @param bool $allowInternalDocuments uživatel smí zakládat interní doklady
+     *        ({@see \MyInvoice\Security\RequestAuthorization::canCreateInternalDocument()});
+     *        bez práva model interní doklady nenavrhuje a server je zahodí
      * @return array<string,mixed>
      */
     public function ask(
@@ -89,6 +99,7 @@ final class AccountingAssistantService
         array $documentIds,
         bool $includeChart,
         ?string $modelOverride = null,
+        bool $allowInternalDocuments = false,
     ): array {
         $question = trim($question);
         if ($question === '' || mb_strlen($question) > self::MAX_QUESTION_CHARS) {
@@ -133,15 +144,21 @@ final class AccountingAssistantService
         $firm = $this->firmContext($supplierId);
         $chartNames = $this->chartNames($supplierId);
         $folderPaths = $files !== [] ? $this->folderPaths($supplierId) : [];
+        // Interní doklady jsou agenda podvojného účetnictví a zakládá je jen role s právem
+        // zápisu deníku; jinak je model nenavrhuje a případný návrh server zahodí.
+        $internalAllowed = $allowInternalDocuments && $firm['double_entry'];
+        $dimensionChoices = $internalAllowed ? $this->internalDocuments->dimensionChoices($supplierId) : [];
 
         $user = $this->contextBlock($firm)
             . ($includeChart ? $this->chartBlock($supplierId) : '')
+            . ($dimensionChoices !== [] ? $this->dimensionsBlock($dimensionChoices) : '')
             . ($folderPaths !== [] ? $this->foldersBlock($folderPaths) : '')
             . $this->attachmentsBlock($attachments)
             . $this->historyBlock($history)
             . "## Dotaz\n" . $question . "\n";
 
-        $result = $this->complete($supplierId, $this->systemPrompt('assistant'), $user, $this->askSchema(), 8000, $binary, $modelOverride);
+        $system = $this->systemPrompt('assistant', $internalAllowed);
+        $result = $this->complete($supplierId, $system, $user, $this->askSchema(), 8000, $binary, $modelOverride);
         $data = $result['data'];
 
         $entries = AiJournalEntryNormalizer::normalize($data['journal_entries'] ?? [], $chartNames, $firm['today']);
@@ -155,11 +172,17 @@ final class AccountingAssistantService
         }
 
         $otherItems = $this->normalizeOtherItems($supplierId, $data['other_items'] ?? [], $firm['today']);
-        $warnings = array_merge($warnings, $this->syntheticAccountWarnings($supplierId, $entries, $otherItems));
+        $internalDocuments = $internalAllowed
+            ? $this->internalDocuments->validate($supplierId, AiInternalDocumentNormalizer::normalize(
+                $data['internal_documents'] ?? [], $this->chartNames($supplierId), $firm['today'],
+                $this->partnersByIco($supplierId, $data['internal_documents'] ?? [])))
+            : [];
+        $warnings = array_merge($warnings, $this->syntheticAccountWarnings($supplierId, $entries, $otherItems, $internalDocuments));
 
         return [
             'answer' => $answer,
             'other_items' => $otherItems,
+            'internal_documents' => $internalDocuments,
             'journal_entries' => $entries,
             'document_suggestions' => $this->documentSuggestions($data['document_suggestions'] ?? [], count($files), $ids, $folderPaths),
             'warnings' => array_values(array_merge($warnings, $this->stringList($data['warnings'] ?? []))),
@@ -476,12 +499,13 @@ final class AccountingAssistantService
     /**
      * @param list<array<string,mixed>> $entries
      * @param list<array<string,mixed>> $otherItems
+     * @param list<array<string,mixed>> $internalDocuments
      * @return list<string>
      */
-    private function syntheticAccountWarnings(int $supplierId, array $entries, array $otherItems): array
+    private function syntheticAccountWarnings(int $supplierId, array $entries, array $otherItems, array $internalDocuments = []): array
     {
         $used = [];
-        foreach ($entries as $e) {
+        foreach ([...$entries, ...$internalDocuments] as $e) {
             foreach ($e['lines'] as $l) {
                 $used[] = (string) $l['account_code'];
             }
@@ -526,6 +550,18 @@ final class AccountingAssistantService
         }
         asort($paths, SORT_NATURAL | SORT_FLAG_CASE);
         return array_slice($paths, 0, self::MAX_FOLDERS, true);
+    }
+
+    /** @param array<int,string> $choices id hodnoty => popisek */
+    private function dimensionsBlock(array $choices): string
+    {
+        $lines = [];
+        foreach ($choices as $id => $label) {
+            $lines[] = $id . ' – ' . $label;
+        }
+        return "## Dimenze firmy (id hodnoty – typ: hodnota)\n"
+            . "Na řádek interního dokladu dej do `dimension_value_ids` id hodnot jen tehdy, když z dotazu jasně plyne, kam náklad či výnos patří; nejvýše jednu hodnotu za typ.\n"
+            . implode("\n", $lines) . "\n\n";
     }
 
     /** @param array<int,string> $paths */
@@ -578,7 +614,7 @@ final class AccountingAssistantService
         return $out;
     }
 
-    private function systemPrompt(string $mode): string
+    private function systemPrompt(string $mode, bool $internalDocuments = false): string
     {
         $base = "Jsi zkušený český účetní a daňový poradce. Znáš zákon č. 563/1991 Sb. o účetnictví, vyhlášku č. 500/2002 Sb., "
             . "České účetní standardy pro podnikatele, zákon č. 235/2004 Sb. o DPH a zákon č. 586/1992 Sb. o daních z příjmů.\n"
@@ -593,7 +629,10 @@ final class AccountingAssistantService
             . "entry_date ve formátu YYYY-MM-DD; document_no prázdný řetězec, pokud není známé; note prázdný řetězec, pokud není potřeba.\n"
             . "- Používej účty z přiloženého účtového rozvrhu firmy, a to co nejpodrobnější analytiky; když rozvrh přiložený není, použij českou směrnou účtovou osnovu (syntetické účty) a upozorni, že analytiky si má uživatel doplnit podle svého rozvrhu.\n";
         $app = "- Když radíš postup v aplikaci MyÚčto, odkazuj jen na tyto části menu:\n"
-            . "  - Účetnictví → Účetní deník → Nový zápis: interní doklad s libovolnými řádky MD/D. Tvůj návrh v `journal_entries` uživatel zaúčtuje jedním tlačítkem nebo otevře k úpravě.\n"
+            . "  - Účetnictví → Účetní deník → Nový zápis: ruční zápis s libovolnými řádky MD/D. Tvůj návrh v `journal_entries` uživatel zaúčtuje jedním tlačítkem nebo otevře k úpravě.\n"
+            . ($internalDocuments
+                ? "  - Účetnictví → Interní doklady: číslovaný interní doklad (řada ID) s řádky MD/D; tvůj návrh v `internal_documents` uživatel uloží jako koncept nebo rovnou zaúčtuje.\n"
+                : '')
             . "  - Účetnictví → Ostatní pohledávky a závazky: pohledávky a závazky mimo faktury (např. pohledávka za upsaný základní kapitál vůči společníkovi, půjčky, nájem, jistiny, pojištění, poplatky). "
             . "Položka má protistranu, částku, splatnost, účet a protiúčet, po zaúčtování sleduje úhrady (párování s bankou a pokladnou), umí splátkový kalendář a opakování. "
             . "Pro pohledávku, u které se bude sledovat splacení, ji doporuč přednostně před holým zápisem v deníku.\n"
@@ -610,8 +649,20 @@ final class AccountingAssistantService
             . "Má-li dokument splátkový kalendář, vyplň `installments` (vzestupné termíny, součet přesně = amount); jinak prázdné pole. "
             . "account_code = účet pohledávky či závazku, counter_account_code = protiúčet (u daňové evidence prázdné řetězce). "
             . "Prázdné řetězce pro neznámé partner_name, partner_ico, variable_symbol, note. title = krátký popis položky.\n";
+        $internal = $internalDocuments
+            ? "- `internal_documents`: vnitřní účetní operace bez vnějšího dokladu navrhuj jako interní doklad (Účetnictví → Interní doklady): "
+                . "přeúčtování mezi účty (reclassification), odpisy a odpis pohledávky (write_off), dohadné položky a časové rozlišení (accrual), "
+                . "kurzové rozdíly (fx_difference), zápočet pohledávky se závazkem (offset), oprava dřívějšího zápisu (correction), jinak other. "
+                . "Doklad má title (krátký popis), entry_date = datum účetního případu, document_date = datum vystavení (obvykle stejné), "
+                . "řádky lines s account_code, side (debit = MD, credit = D), amount v CZK a dimension_value_ids (id ze seznamu dimenzí, jinak prázdné pole). "
+                . "Součet MD musí přesně odpovídat součtu D. U zápočtu vyplň partner_name a partner_ico, jinak prázdné řetězce; note prázdný řetězec, pokud není potřeba. "
+                . "Navrhuj jen s konkrétními částkami a daty z dotazu; když chybí, v `answer` se zeptej a `internal_documents` nech prázdné. "
+                . "Stejnou operaci nevracej zároveň v `journal_entries`; `journal_entries` použij jen tehdy, když uživatel výslovně chce zápis přímo v deníku bez interního dokladu. "
+                . "Půjčky, nájem, kauce, splátky a jiné pohledávky či závazky, u kterých se sleduje úhrada, patří do `other_items`, ne do interního dokladu. "
+                . "Když z dotazu nejde poznat, zda jde o interní doklad, nebo o ostatní pohledávku či závazek, zeptej se v `answer` a nenavrhuj nic.\n"
+            : "- `internal_documents` vždy prázdné pole.\n";
         return match ($mode) {
-            'assistant' => $base . $entries . $otherItems . $app
+            'assistant' => $base . $entries . $otherItems . $internal . $app
                 . "- `document_suggestions`: jen pro přiložené SOUBORY (attachment_kind \"file\", attachment_index = číslo souboru) navrhni složku v Dokumentech. "
                 . "folder_id vybírej výhradně ze seznamu složek (id); pokud žádná nesedí, folder_id = 0 a do new_folder_name napiš název nové složky. "
                 . "Pro dokumenty už uložené v Dokumentech návrh nevracej. document_id = 0, title = navržený název dokumentu nebo prázdný řetězec.\n"
@@ -690,10 +741,55 @@ final class AccountingAssistantService
         ];
     }
 
+    /** @return array<string,mixed> */
+    private function internalDocumentsSchema(): array
+    {
+        return [
+            'type' => 'array',
+            'items' => [
+                'type' => 'object', 'additionalProperties' => false,
+                'required' => ['kind', 'title', 'entry_date', 'document_date', 'partner_name', 'partner_ico', 'note', 'lines'],
+                'properties' => [
+                    'kind' => ['type' => 'string', 'enum' => InternalDocumentService::KINDS],
+                    'title' => ['type' => 'string'],
+                    'entry_date' => ['type' => 'string'],
+                    'document_date' => ['type' => 'string'],
+                    'partner_name' => ['type' => 'string'],
+                    'partner_ico' => ['type' => 'string'],
+                    'note' => ['type' => 'string'],
+                    'lines' => [
+                        'type' => 'array',
+                        'items' => [
+                            'type' => 'object', 'additionalProperties' => false,
+                            'required' => ['account_code', 'side', 'amount', 'dimension_value_ids'],
+                            'properties' => [
+                                'account_code' => ['type' => 'string'],
+                                'side' => ['type' => 'string', 'enum' => ['debit', 'credit']],
+                                'amount' => ['type' => 'number'],
+                                'dimension_value_ids' => ['type' => 'array', 'items' => ['type' => 'integer']],
+                            ],
+                        ],
+                    ],
+                ],
+            ],
+        ];
+    }
+
     /**
      * @return list<array<string,mixed>>
      */
     private function normalizeOtherItems(int $supplierId, mixed $raw, string $today): array
+    {
+        return AiOtherItemNormalizer::normalize($raw, $this->chartNames($supplierId), $today,
+            $this->partnersByIco($supplierId, $raw), $this->otherItemKinds->hiddenBuiltinKinds($supplierId));
+    }
+
+    /**
+     * Klienti firmy podle IČO z návrhů modelu (jedním dotazem).
+     *
+     * @return array<string,array{id:int,name:string}>
+     */
+    private function partnersByIco(int $supplierId, mixed $raw): array
     {
         $icos = [];
         foreach (is_array($raw) ? $raw : [] as $item) {
@@ -711,7 +807,7 @@ final class AccountingAssistantService
                 $partners[(string) $c['ic']] ??= ['id' => (int) $c['id'], 'name' => (string) $c['company_name']];
             }
         }
-        return AiOtherItemNormalizer::normalize($raw, $this->chartNames($supplierId), $today, $partners);
+        return $partners;
     }
 
     /** @return array<string,mixed> */
@@ -719,10 +815,11 @@ final class AccountingAssistantService
     {
         return [
             'type' => 'object', 'additionalProperties' => false,
-            'required' => ['answer', 'other_items', 'journal_entries', 'document_suggestions', 'warnings'],
+            'required' => ['answer', 'other_items', 'internal_documents', 'journal_entries', 'document_suggestions', 'warnings'],
             'properties' => [
                 'answer' => ['type' => 'string'],
                 'other_items' => $this->otherItemsSchema(),
+                'internal_documents' => $this->internalDocumentsSchema(),
                 'journal_entries' => $this->entriesSchema(),
                 'document_suggestions' => [
                     'type' => 'array',

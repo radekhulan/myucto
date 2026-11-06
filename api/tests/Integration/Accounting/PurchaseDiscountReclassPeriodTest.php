@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting;
 
 use MyInvoice\Service\Accounting\Expense\PurchaseDiscountReclass;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Tests\Integration\Accounting\Bank\BankPostingTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\Attributes\Group;
@@ -58,6 +59,45 @@ final class PurchaseDiscountReclassPeriodTest extends BankPostingTestCase
         self::assertSame('EUR', $line['currency_code']);
         self::assertSame('36.00', $line['amount_foreign']);
         self::assertSame('900.00', $line['amount']);
+    }
+
+    public static function ownedPostingVariants(): iterable
+    {
+        yield 'stornovaný přímý člen' => [false, true];
+        yield 'jen vlastněné zápisy bez přímého zdroje' => [true, true];
+        yield 'nepřevzatá skupina vyžaduje vědomé přeúčtování' => [false, false];
+    }
+
+    #[DataProvider('ownedPostingVariants')]
+    public function testReclassReportsTakenOverOwnedPosting(bool $manualOnly, bool $takenOver): void
+    {
+        [$purchaseId, $base] = $this->repostedPurchase();
+        $owned = $this->posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '343', 'side' => 'debit', 'amount' => 189],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 189],
+        ], ['entry_date' => self::YEAR . '-06-10']);
+        (new DocumentPostingGroup($this->db))->attach($this->supplierId, 'purchase_invoice', $purchaseId, [$base, $owned]);
+        $this->posting->reverse($this->supplierId, $base);
+        if ($takenOver) {
+            $this->db->pdo()->prepare("INSERT INTO money_s3_import_map (supplier_id, kind, money_key, target_id)
+                VALUES (?, 'journal_entry', 'synth|DISCOUNT-OWNED', ?)")->execute([$this->supplierId, $owned]);
+        }
+        $expected = $takenOver ? 'taken_over' : 'posting_group_requires_repost';
+        if ($manualOnly) {
+            $this->db->pdo()->prepare("UPDATE journal_entries SET source_id = NULL
+                WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND source_id = ?")
+                ->execute([$this->supplierId, $purchaseId]);
+        }
+        $before = $this->trace($owned);
+        $service = $this->container->get(PurchaseDiscountReclass::class);
+        $candidates = array_column($service->candidates($this->supplierId), null, 'purchase_invoice_id');
+        self::assertArrayHasKey($purchaseId, $candidates, 'Živý vlastněný předpis patří do náhledu i bez přímého zdroje.');
+        self::assertSame($expected, $candidates[$purchaseId]['state']);
+        $result = $service->run($this->supplierId, $purchaseId, true, $this->userId);
+        self::assertSame($expected, $result['state']);
+        self::assertSame($owned, $result['entry_id']);
+        self::assertFalse($result['applied']);
+        self::assertSame($before, $this->trace($owned));
     }
 
     private function repostedPurchase(): array

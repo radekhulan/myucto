@@ -108,6 +108,22 @@ final class GroupDashboardCompanyReaderTest extends TestCase
             $this->read(['accounting'], 'overview')['accounting']);
     }
 
+    public function testAccounting504UsesManagementRowsWithoutLosingActivities(): void
+    {
+        $this->periods->method('findForDate')->willReturn(['id' => 8, 'starts_on' => '2026-04-01']);
+        $this->statements->method('accountView')->willReturn([
+            'accounting_framework' => 'cz_504', 'as_of' => date('Y-m-d'), 'profit_loss' => [
+                ['row_code' => 'UT.39', 'main' => 80.0, 'economic' => 20.0, 'total' => 100.0],
+                ['row_code' => 'UT.61', 'main' => 120.0, 'economic' => 50.0, 'total' => 170.0],
+                ['row_code' => 'UT.63', 'main' => 40.0, 'economic' => 30.0, 'total' => 70.0],
+            ],
+        ]);
+        $row = $this->read(['accounting'], 'overview');
+        self::assertSame([], $row['issues']);
+        self::assertSame(['currency' => 'CZK', 'from' => '2026-04-01', 'to' => date('Y-m-d'),
+            'revenue' => 170.0, 'costs' => 100.0, 'profit' => 70.0], $row['accounting']);
+    }
+
     public function testTrendsAndRisksUseRequestedWindowAndReturnOnlyAggregateFields(): void
     {
         $this->crm->expects(self::exactly(2))->method('documentRange')->with(7, '2026-08-15', '2026-09-01')

@@ -72,6 +72,7 @@ final class ResetKeepUsersSupplierClassificationTest extends TestCase
             ['supplier_vat_status_history', 'historie plátcovství DPH (VatStatusService)'],
             ['supplier_tax_representation_history', 'zastoupení u správce daně v čase'],
             ['supplier_accounting_modes', 'režim účetnictví v čase'],
+            ['supplier_accounting_frameworks', 'účetní rámec v čase'],
             ['accounting_periods', 'účetní období'],
             ['payroll_module_state', 'stav mzdového modulu a začátek zpracování'],
             ['payroll_employer_settings', 'nastavení zaměstnavatele'],
@@ -83,6 +84,10 @@ final class ResetKeepUsersSupplierClassificationTest extends TestCase
             ['chart_of_accounts', 'účtová osnova'],
             ['posting_rules', 'předkontace včetně per-tenant override'],
             ['webauthn_credentials', 'passkeys zachovaného účtu'],
+            ['user_technical_access', 'technický rozsah zachovaného účtu'],
+            ['user_technical_suppliers', 'technické přiřazení firem zachovaného účtu'],
+            ['instance_smtp_targets', 'schválené cíle provozní pošty instance'],
+            ['instance_smtp_settings', 'aktivní provozní poštovní transport instance'],
             ['client_ai_extraction_usage', 'již vyčerpaný měsíční limit klientského vytěžování'],
         ];
     }

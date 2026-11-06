@@ -106,6 +106,7 @@ final class LoginSessionIssuerTest extends TestCase
             new SessionLockPolicy($config),
             $this->roleProfileStub(),
             $this->createMock(\MyInvoice\Service\Auth\MfaStepUpService::class),
+            $this->createStub(\MyInvoice\Service\License\LicenseConsistency::class),
         );
         $response = $issuer->issue(
             (new ResponseFactory())->createResponse(),
@@ -188,6 +189,7 @@ final class LoginSessionIssuerTest extends TestCase
             $this->createMock(BruteForceGuard::class), $this->createMock(ActivityLogger::class),
             $this->createMock(TrustedDeviceService::class), $config, $clock, $credentials,
             new MfaPolicyService($config), $offers, new SessionLockPolicy($config), $this->roleProfileStub(), $stepUp,
+            $this->createStub(\MyInvoice\Service\License\LicenseConsistency::class),
         );
         $response = $issuer->issuePrepared(
             (new ResponseFactory())->createResponse(),
@@ -199,6 +201,47 @@ final class LoginSessionIssuerTest extends TestCase
         $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
         self::assertSame($expected ? 'grant' : null, $body['totp_enrollment_token']);
         self::assertSame('no-store', $response->getHeaderLine('Cache-Control'));
+    }
+
+    /**
+     * Nesoulad licence (cizí ověřovací klíč) přihlášení nezastaví: session
+     * vznikne, kontrola jen vrátí důvod a zaloguje ho.
+     */
+    public function testLicenseMismatchNeverBlocksLogin(): void
+    {
+        $config = new Config([]);
+        $clock = $this->createMock(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-09-14 08:00:00 UTC'));
+        $forged = base64_encode(sodium_crypto_sign_publickey(sodium_crypto_sign_keypair()));
+        $licenseDb = $this->createMock(Connection::class);
+        $licenseDb->method('pdo')->willThrowException(new \RuntimeException('DB nedostupná'));
+        $consistency = new \MyInvoice\Service\License\LicenseConsistency(
+            $licenseDb,
+            $config,
+            \MyInvoice\Infrastructure\Cache\EntityCache::disabled(),
+            new \Psr\Log\NullLogger(),
+            ['forged' => $forged],
+        );
+        self::assertSame(\MyInvoice\Service\License\LicenseConsistency::REASON_KEYSET, $consistency->keysetProblem());
+
+        $issuer = new LoginSessionIssuer(
+            $this->createMock(Connection::class), $this->createMock(SessionManager::class),
+            $this->createMock(BruteForceGuard::class), $this->createMock(ActivityLogger::class),
+            $this->createMock(TrustedDeviceService::class), $config, $clock,
+            $this->createMock(PasskeyCredentialRepository::class),
+            new MfaPolicyService($config), $this->offersStub(), new SessionLockPolicy($config),
+            $this->roleProfileStub(), $this->createMock(\MyInvoice\Service\Auth\MfaStepUpService::class),
+            $consistency,
+        );
+        $response = $issuer->issuePrepared(
+            (new ResponseFactory())->createResponse(),
+            ['id' => 17, 'email' => 'synthetic@example.test', 'totp_enabled' => 0],
+            '127.0.0.1', 'PHPUnit', SessionAuthContext::basic('password'),
+            ['token' => 'session', 'csrf_token' => 'csrf', 'expires_at' => 2000000000],
+        );
+
+        self::assertSame(200, $response->getStatusCode());
+        self::assertStringContainsString('=session;', $response->getHeaderLine('Set-Cookie'));
     }
 
     private function offersStub(): MfaOfferService

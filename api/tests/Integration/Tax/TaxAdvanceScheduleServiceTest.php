@@ -109,6 +109,22 @@ final class TaxAdvanceScheduleServiceTest extends TestCase
         self::assertSame(['2101-06-15', '2101-12-15'], array_map(fn ($r) => $r['due_date'], $rows));
     }
 
+    /**
+     * 15. 6. 2025 je neděle: lhůta zálohy § 38a končí podle § 33 odst. 4 daňového řádu
+     * v pondělí 16. 6. Stejně pro predikci z přiznání i pro rozhodnutí finančního úřadu.
+     */
+    public function testPoAdvanceDueOnWeekendMovesToNextWorkingDay(): void
+    {
+        $result = ['next_advances' => ['regime' => 'semiannual', 'count' => 2, 'amount' => 14300.0, 'total' => 28600.0]];
+        $this->service->generateFromReturn($this->supplierId, 2024, 'po', null, $result);
+        self::assertSame(['2025-06-16', '2025-12-15'], array_map(fn ($r) => $r['due_date'], $this->repo->listForYear($this->supplierId, 2025, 'po')));
+
+        $this->overrides->upsert($this->supplierId, 'po', 'tax', 2025, '2025-01-01', 20000.0, 'quarterly', null, 'fu_decision');
+        $this->service->generateFromReturn($this->supplierId, 2024, 'po', null, []);
+        self::assertSame(['2025-03-17', '2025-06-16', '2025-09-15', '2025-12-15'],
+            array_map(fn ($r) => $r['due_date'], $this->repo->listForYear($this->supplierId, 2025, 'po')));
+    }
+
     public function testPoExtendedFilingDeadlineMovesAdvancePeriod(): void
     {
         $quarterly = ['next_advances' => [

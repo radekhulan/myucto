@@ -252,7 +252,7 @@ final class ImportIssuedInvoiceAction
         try {
             $snapshots = $this->snapshots->build($doc['client_id'], $currency['id'], $supplierId, null, $taxDate);
         } catch (\RuntimeException $e) {
-            return Json::error($response, 'snapshot_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'snapshot_failed', $e->getMessage(), 500);
         }
 
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);

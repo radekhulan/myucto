@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\JmhzEmployerAnnualEvidenceConflictException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzEmployerAnnualEvidenceService;
@@ -20,7 +19,7 @@ final class JmhzEmployerAnnualEvidenceServiceTest extends TestCase
 
     public function testYearWithoutCompletePayrollRulesetsIsRejected(): void
     {
-        $service = Bootstrap::buildContainer()
+        $service = \MyInvoice\Tests\Support\PayrollTestContainer::build()
             ->get(JmhzEmployerAnnualEvidenceService::class);
 
         $this->expectException(\InvalidArgumentException::class);
@@ -30,7 +29,7 @@ final class JmhzEmployerAnnualEvidenceServiceTest extends TestCase
 
     public function testRevisionsArePinnedIdempotentAndTenantScoped(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $service = $container->get(JmhzEmployerAnnualEvidenceService::class);
         self::assertInstanceOf(Connection::class, $db);

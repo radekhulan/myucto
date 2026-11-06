@@ -29,7 +29,10 @@ final class WebAuthnBodyLimitMiddleware implements MiddlewareInterface
     {
         // Normalizovaná cesta (jedno rawurldecode jako router) — jinak stačil jeden
         // `%XX` a limit velikosti těla se na ceremonii vůbec neuplatnil.
-        if (!in_array(RequestPath::normalize($request->getUri()->getPath()), self::VERIFY_PATHS, true)) {
+        $path = RequestPath::normalize($request->getUri()->getPath());
+        if (!in_array($path, self::VERIFY_PATHS, true)
+            && preg_match('#^/api/auth/webauthn/credentials/[0-9]+/test/verify$#D', $path) !== 1
+        ) {
             return $handler->handle($request);
         }
 

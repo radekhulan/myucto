@@ -57,6 +57,7 @@ final class IncomeTaxRedStornoAggregationTest extends TestCase
         )');
 
         $config = $this->createStub(\MyInvoice\Infrastructure\Config\Config::class);
+        \MyInvoice\Tests\Support\AccountDefinitionSqliteFixture::install($this->pdo);
         $this->db = new Connection($config);
         (new ReflectionClass($this->db))->getProperty('pdo')->setValue($this->db, $this->pdo);
         $this->nonDeductibleCosts = new NonDeductibleCostsService($this->db);
@@ -64,7 +65,7 @@ final class IncomeTaxRedStornoAggregationTest extends TestCase
 
     public function testRedStornoReducesProfitAndNonDeductibleCostsInDppoAndDpfo(): void
     {
-        $this->pdo->exec("INSERT INTO chart_of_accounts VALUES
+        $this->pdo->exec("INSERT INTO chart_of_accounts (id, account_code, account_type, tax_deductibility, name) VALUES
             (1,'518','expense','non_deductible','Ostatní služby'),
             (2,'602','revenue','deductible','Tržby')");
 

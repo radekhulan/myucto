@@ -22,6 +22,8 @@ final readonly class PayslipSupplement
         'disability-basic' => 'Sleva na invaliditu',
         'disability-extended' => 'Sleva na invaliditu',
         'ztp-p' => 'Sleva na držitele ZTP/P',
+        'student' => 'Sleva na studenta',
+        'student-doctoral' => 'Sleva na studenta',
     ];
 
     /**

@@ -14,6 +14,7 @@ use MyInvoice\Service\License\TaxSubmissionAccess;
 use MyInvoice\Repository\TaxSubmissionEpoRepository;
 use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\ClientTaxSubmissionPolicy;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Payroll\TaxStatement\TaxStatementService;
@@ -53,7 +54,7 @@ final class TaxSubmissionAction
 
     public function list(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+        if (!RequestAuthorization::canReadTaxSubmissions($request)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -108,8 +109,18 @@ final class TaxSubmissionAction
             // Mzdová vyúčtování mají vlastní záložku pod Mzdami; bez `scope`
             // zůstává společný archiv beze změny.
             'scope_form_codes' => $scope === 'payroll' ? TaxStatementService::FORMS : null,
-            'excluded_form_codes' => $scope === 'tax' ? TaxStatementService::FORMS : null,
+            // Mzdová vyúčtování nesou mzdové údaje (u firmy s jedním zaměstnancem
+            // přímo jeho), takže je obecné `reports` bez `payroll.reports` nevidí.
+            'excluded_form_codes' => $scope === 'tax' || !self::canSeePayrollForms($request)
+                ? TaxStatementService::FORMS
+                : null,
         ];
+
+        if (RequestAuthorization::isClientType($request)) {
+            $filters['allowed_form_codes'] = $filters['allowed_form_codes'] === null
+                ? ClientTaxSubmissionPolicy::FORM_CODES
+                : array_values(array_intersect($filters['allowed_form_codes'], ClientTaxSubmissionPolicy::FORM_CODES));
+        }
 
         // Obohacení běží až nad stránkou, ne nad celým archivem.
         $rows = $this->epo->enrich($this->repo->list($supplierId, $filters, $limit, $offset), $supplierId);
@@ -134,6 +145,23 @@ final class TaxSubmissionAction
      * Cesta o typu výkazu nic neví, takže licenční middleware to rozhodnout
      * nemůže; archiv je společný pro bezplatné i placené výkazy.
      */
+    private static function canSeePayrollForms(Request $request): bool
+    {
+        return RequestAuthorization::allows($request, 'payroll.reports', AccessLevel::READ);
+    }
+
+    /**
+     * Mzdové vyúčtování bez `payroll.reports` se tváří jako neexistující,
+     * stejně jako v seznamu, ze kterého je vynechané.
+     *
+     * @param array<string,mixed> $row
+     */
+    private static function hiddenPayrollForm(array $row, Request $request): bool
+    {
+        return in_array(strtolower((string) ($row['form_code'] ?? '')), TaxStatementService::FORMS, true)
+            && !self::canSeePayrollForms($request);
+    }
+
     private function deniedByLicense(array $row, Response $response): ?Response
     {
         if (TaxSubmissionAccess::isFreeForm($row['form_code'] ?? null) || $this->commercial->isAvailable()) {
@@ -149,39 +177,58 @@ final class TaxSubmissionAction
 
     public function detail(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+        if (!RequestAuthorization::canReadTaxSubmissions($request)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
         $row = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
-        if ($row === null) return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        if ($row === null || self::hiddenPayrollForm($row, $request)) {
+            return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        }
+        if (!RequestAuthorization::canAccessTaxSubmission($request, $row)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
         if (($denied = $this->deniedByLicense($row, $response)) !== null) return $denied;
         $row = $this->epo->enrich([$row], $supplierId)[0];
+        // Celé XML je totéž, co stažení, které vyžaduje `reports.export`.
+        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
+            unset($row['xml_content']);
+        }
         return Json::ok($response, $row);
     }
 
     /** Platební údaje k přiznání k DPH: účet FÚ, VS, částka, splatnost a QR. */
     public function payment(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+        if (!RequestAuthorization::canReadTaxSubmissions($request)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
         $row = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
-        if ($row === null) return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        if ($row === null || self::hiddenPayrollForm($row, $request)) {
+            return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        }
+        if (!RequestAuthorization::canAccessTaxSubmission($request, $row)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
         if (($denied = $this->deniedByLicense($row, $response)) !== null) return $denied;
         return Json::ok($response, $this->vatPayment->forSubmission($row, $this->db->pdo()));
     }
 
     public function downloadXml(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::READ)) {
+        if (!RequestAuthorization::canExportTaxSubmission($request)) {
             return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
         $row = $this->repo->find((int) ($args['id'] ?? 0), $supplierId);
-        if ($row === null) return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        if ($row === null || self::hiddenPayrollForm($row, $request)) {
+            return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        }
 
+        if (!RequestAuthorization::canAccessTaxSubmission($request, $row)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
+        }
         if (($denied = $this->deniedByLicense($row, $response)) !== null) return $denied;
 
         $filename = TaxSubmissionFilename::forSnapshot($row, 'archive.xml');
@@ -211,6 +258,9 @@ final class TaxSubmissionAction
         $existing = $this->repo->find($id, $supplierId);
         if ($existing === null) {
             return Json::error($response, 'not_found', 'Záznam nenalezen.', 404);
+        }
+        if (!RequestAuthorization::canAccessTaxSubmission($request, $existing)) {
+            return Json::error($response, 'forbidden', 'Nemáš oprávnění.', 403);
         }
         // Neplatné (XSD failed) přiznání nelze doložit jako podané — na EPO by neprošlo.
         if (($existing['validation_status'] ?? null) === 'failed') {
@@ -336,7 +386,7 @@ final class TaxSubmissionAction
 
     public function delete(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports.export', AccessLevel::WRITE)) {
+        if (!RequestAuthorization::canDeleteTaxSubmission($request)) {
             return Json::error($response, 'forbidden', 'Pouze admin.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);

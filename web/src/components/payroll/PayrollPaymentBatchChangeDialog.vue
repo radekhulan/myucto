@@ -144,6 +144,7 @@ async function submit(): Promise<void> {
             : 'payroll.payments.batch_change.handover_downloaded') }}
         </p>
         <p class="mt-1">{{ t('payroll.payments.batch_change.handover_body') }}</p>
+        <p v-if="handover === 'submitted'" class="mt-1" data-test="batch-change-csas">{{ t('payroll.payments.batch_change.handover_csas') }}</p>
         <label class="mt-2 flex cursor-pointer items-start gap-2">
           <input
             v-model="bankCancellationConfirmed"

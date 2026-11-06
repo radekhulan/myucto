@@ -6,9 +6,15 @@ namespace MyInvoice\Action\Tax;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\TaxProfileRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\PermissionDenied;
+use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Tax\TaxFamilyIdentifierService;
 use MyInvoice\Service\Tax\TaxOptimizer;
 use MyInvoice\Service\TaxEvidence\CashJournalService;
 use MyInvoice\Service\Vat\VatStatusService;
@@ -20,6 +26,7 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  *  GET /api/tax/analysis?year=YYYY  → příjmy + srovnání režimů (retrospektiva)
  *                                     nebo projekce + limity (běžící rok)
  *  PUT /api/tax/profile             → uloží daňový profil pro rok
+ *  POST /api/tax/profile/family-reveal → auditované odhalení rodných čísel rodiny
  */
 final class TaxAction
 {
@@ -30,6 +37,8 @@ final class TaxAction
         private readonly TaxConstantsRepository $constants,
         private readonly CashJournalService $cashJournal,
         private readonly VatStatusService $vatStatus,
+        private readonly TaxFamilyIdentifierService $familyIdentifiers,
+        private readonly IpMatcher $ipMatcher,
     ) {}
 
     /** GET /api/tax/analysis */
@@ -77,7 +86,11 @@ final class TaxAction
         $c = $this->constants->forYear($year);
         $payload = [
             'year'            => $year,
-            'profile'         => $publicProfile,
+            // Profil nese rodná čísla jen maskovaná; API token a MCP z rodiny dostanou
+            // jen to, z čeho se počítá sleva a zvýhodnění (H28).
+            'profile'         => RequestAuthorization::isSessionAuth($request)
+                ? $publicProfile
+                : TaxFamilyIdentifierService::bearerProfile($publicProfile),
             'is_vat_payer'    => $isVat,
             'supplier_band'   => $flags['flat_tax_band'],
             'constants'       => $c,
@@ -164,8 +177,65 @@ final class TaxAction
             return Json::error($response, 'tax_invalid_year', 'Neplatný rok.', 422);
         }
 
-        $saved = $this->profiles->upsert($sid, $year, $body);
+        try {
+            $saved = $this->profiles->upsert($sid, $year, $body);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        }
         return Json::ok($response, ['profile' => $saved]);
+    }
+
+    /**
+     * POST /api/tax/profile/family-reveal — otevřená rodná čísla dětí a manžela
+     * nebo manželky z daňového profilu roku. Jen přihlášená relace s právem zápisu
+     * do daní (kdo profil vyplňuje), s textovým důvodem a zápisem do auditu (H28).
+     */
+    public function revealFamily(Request $request, Response $response): Response
+    {
+        if (!RequestAuthorization::isSessionAuth($request)) {
+            return Json::sessionRequired($response);
+        }
+        if (!RequestAuthorization::allows($request, TaxFamilyIdentifierService::PERMISSION, AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        }
+        $sid = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
+        if ($sid <= 0) {
+            return Json::error($response, 'no_supplier', 'Žádný supplier scope.', 400);
+        }
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $actor = (int) ($user['id'] ?? 0);
+        if ($actor <= 0) {
+            return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
+        }
+        $body = $request->getParsedBody();
+        $body = is_array($body) ? $body : [];
+        $currentYear = (int) date('Y');
+        $year = (int) ($body['year'] ?? 0);
+        if ($year < 2018 || $year > $currentYear + 1) {
+            return Json::error($response, 'tax_invalid_year', 'Neplatný rok.', 422);
+        }
+
+        try {
+            $revealed = $this->familyIdentifiers->revealOnRequest(
+                $sid,
+                $year,
+                $actor,
+                RequestAuthorization::effectiveRole($request),
+                is_string($body['reason'] ?? null) ? $body['reason'] : '',
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (PermissionDenied) {
+            return Json::error($response, 'forbidden', 'Pro tuto akci nemáš oprávnění.', 403);
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+        } catch (\DomainException $e) {
+            return Json::error($response, 'conflict', $e->getMessage(), 409);
+        }
+
+        return Json::ok($response, ['reveal' => $revealed])
+            ->withHeader('Cache-Control', 'private, no-store')
+            ->withHeader('Pragma', 'no-cache');
     }
 
     /**

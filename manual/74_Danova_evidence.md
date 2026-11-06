@@ -311,7 +311,8 @@ Druhou výjimkou je bankovní pohyb, který je **celý** přiřazený v `Daňov�
 **přijaté půjčky**, k vrácení **kauce k vrácení** nebo k vrácené **vratné kauci**. Takové peníze nejsou příjmem ani výdajem, takže
 se zařadí jako nedaňový příjem nebo výdaj. Příchozí platba k **poskytnuté půjčce nebo splátce** zůstává nezařazená, protože splátka
 prodeje je daňovým příjmem. Stejně tak pohyb přiřazený jen zčásti (splátka i s úrokem) nebo k jinému druhu (nájem, pojištění,
-poplatek, náhrada): o zařazení rozhodnete sami.
+poplatek, náhrada, vlastní druh firmy): o zařazení rozhodnete sami. Půjčky a kauce proto veďte pod vestavěným druhem; vlastní řadu
+mu můžete dát v nastavení druhů ([§ 52.14.14.11](52_Ucetni_denik.md#52141411-druhy-a-ciselne-rady)).
 
 Nesoulad mezi bankovním pohybem a spárovanými doklady deník hlásí samostatně:
 

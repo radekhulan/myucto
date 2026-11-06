@@ -24,8 +24,8 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Body PUT (aspoň jedna položka + volitelný scope):
  *   { "prefix": "26HP", "number_format": "{PREFIX}{CCCCC}", "next_number": 11, "register_id": 0 }
  *
- * `register_id` > 0 míří na vlastní řadu té pokladny (L-3), 0 / vynechané na společnou
- * řadu firmy.
+ * `register_id` > 0 míří na vlastní řadu pokladny (L-3, u cash_in / cash_out) nebo druhu
+ * ostatní položky (u other_receivable / other_payable), 0 / vynechané na společnou řadu firmy.
  *
  * Daňová evidence vidí a edituje jen řady, které umí vydat (pokladní, skladové,
  * objednávkové); deníkové řady ({@see DocumentSeriesService::DOUBLE_ENTRY_ONLY_SERIES})
@@ -93,16 +93,21 @@ final class DocumentSeriesAction
             }
             $registerId = (int) $body['register_id'];
         }
-        if ($registerId > 0 && !in_array($code, ['cash_in', 'cash_out'], true)) {
+        $isCash = in_array($code, ['cash_in', 'cash_out'], true);
+        if ($registerId > 0 && !$isCash && !in_array($code, ['other_receivable', 'other_payable'], true)) {
             return Json::error($response, 'validation_failed',
-                'Vlastní řadu má jen pokladna — register_id lze zadat u cash_in / cash_out.', 422);
+                'Vlastní řadu má jen pokladna nebo druh ostatní položky — register_id lze zadat u cash_in / cash_out / other_receivable / other_payable.', 422);
         }
         // `accounting_document_series.register_id` nemá FK (0 = společná řada firmy),
         // takže bez téhle kontroly vznikne osiřelý řádek řady na neexistující (nebo
-        // cizí) pokladnu — v Nástrojích pak svítí řada, kterou nikdo nikdy nevydá.
-        if ($registerId > 0 && !$this->registerExists($supplierId, $registerId)) {
+        // cizí) pokladnu či druh — v Nástrojích pak svítí řada, kterou nikdo nikdy nevydá.
+        if ($registerId > 0 && $isCash && !$this->registerExists($supplierId, $registerId)) {
             return Json::error($response, 'validation_failed',
                 'Pokladna register_id=' . $registerId . ' u této firmy neexistuje.', 422);
+        }
+        if ($registerId > 0 && !$isCash && !$this->kindSeriesExists($supplierId, $registerId, $code)) {
+            return Json::error($response, 'validation_failed',
+                'Druh s vlastní řadou register_id=' . $registerId . ' u této firmy pro tuto řadu neexistuje.', 422);
         }
 
         if (array_key_exists('next_number', $body) && trim((string) $body['next_number']) !== '') {
@@ -142,6 +147,23 @@ final class DocumentSeriesAction
     {
         $stmt = $this->db->pdo()->prepare('SELECT EXISTS (SELECT 1 FROM cash_registers WHERE id = ? AND supplier_id = ?)');
         $stmt->execute([$registerId, $supplierId]);
+        return (bool) $stmt->fetchColumn();
+    }
+
+    /**
+     * Druh ostatní položky (vestavěný i vlastní) strany řady, který vlastní řadu má: zapnutou,
+     * nebo vypnutou, ale už založenou — její prefix a čítač jde upravit i před opětovným
+     * zapnutím. Druhu, který vlastní řadu nikdy neměl, se tudy nezakládá.
+     */
+    private function kindSeriesExists(int $supplierId, int $kindId, string $code): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT EXISTS (SELECT 1 FROM other_item_kinds k
+                             WHERE k.id = ? AND k.supplier_id = ? AND k.side = ?
+                               AND (k.own_series = 1 OR EXISTS (SELECT 1 FROM accounting_document_series s
+                                     WHERE s.supplier_id = k.supplier_id AND s.series_code = ? AND s.register_id = k.id)))'
+        );
+        $stmt->execute([$kindId, $supplierId, $code === 'other_receivable' ? 'receivable' : 'payable', $code]);
         return (bool) $stmt->fetchColumn();
     }
 

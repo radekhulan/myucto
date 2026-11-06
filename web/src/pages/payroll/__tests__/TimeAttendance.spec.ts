@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { config, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { formatPeriod } from '@/composables/useFormat'
 
 const m = vi.hoisted(() => ({
@@ -20,6 +20,9 @@ const m = vi.hoisted(() => ({
   toastError: vi.fn(),
   revealField: vi.fn(),
 }))
+
+// Průvodce měsícem a akce řádků vedou odkazy do jiných agend.
+config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
 
 vi.mock('@/utils/revealField', () => ({ revealField: m.revealField }))
 
@@ -763,6 +766,23 @@ describe('TimeAttendance', () => {
     expect(wrapper.get('[data-test="work-summary-guidance"] a').attributes('href'))
       .toBe('/payroll/people?employment=12&panel=employment_terms&field=weekly_hours')
     expect(wrapper.get('[data-test="work-summary-guidance"]').text()).toContain('payroll.remediation.work.steps.terms')
+  })
+
+  // Chybějící kalendář vztahu server hlásí za každý den; v září to bylo
+  // 30 stejných odstavců s tlačítkem pod sebou.
+  it('tentýž problém pracovního souhrnu za více dní ukáže jen jednou', async () => {
+    const item = row(12, 'Syntetická osoba')
+    item.jmhz_work_summary.preview.issues = [1, 2, 3].map(day => ({
+      code: 'calendar_day_not_uniquely_covered',
+      message: `Den 2026-09-0${day} nemá pracovní kalendář.`,
+    })) as never[]
+    m.timeMonth.mockResolvedValue({ items: [item] })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'payroll.time.approve')!.trigger('click')
+
+    expect(wrapper.findAll('[data-test="work-summary-guidance"]')).toHaveLength(1)
+    expect(wrapper.text()).toContain('Den 2026-09-03 nemá pracovní kalendář.')
   })
 
   it('na mobilu zvýrazní viditelnou akci docházky místo skryté mřížky', async () => {
@@ -1735,6 +1755,32 @@ describe('TimeAttendance — měsíční mřížka', () => {
     expect(panel.exists()).toBe(true)
     expect(panel.text()).toContain('payroll.time.approve_errors.holiday_arrangement_missing')
     expect(wrapper.find('[data-test="approve-error-link"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  /**
+   * Svátek v jinak pracovní den je neodpracovaná hodina, která se do fondu
+   * počítá (10268 + 10275 = 10260). Hromadné schválení dřív porovnávalo jen
+   * odpracovanou dobu s fondem a u měsíce se svátkem varovalo, že práce fond
+   * nepokrývá.
+   */
+  it('hromadné schválení nevaruje pod fondem, když chybějící hodiny pokryje svátek', async () => {
+    const page = gridPage(['Osoba A', 'Osoba B'])
+    const [holidayMonth, shortMonth] = page.items as any[]
+    holidayMonth.summary = { ...holidayMonth.summary, fund_minutes: 10_080 }
+    holidayMonth.jmhz_work_summary.preview.holiday_millihours = 8_000
+    shortMonth.summary = { ...shortMonth.summary, fund_minutes: 10_080 }
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await flushPromises()
+
+    const warning = wrapper.get('[data-test="bulk-approve-under-fund"]')
+    expect(warning.text()).not.toContain('Osoba A')
+    expect(warning.text()).toContain('Osoba B')
     wrapper.unmount()
   })
 

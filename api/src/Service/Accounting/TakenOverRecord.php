@@ -114,6 +114,12 @@ final class TakenOverRecord
         return self::existsSql(self::JOURNAL_ENTRY, $alias . '.supplier_id', $alias . '.id');
     }
 
+    /** Klíč vlastního zaúčtování pro smír s evidencí; nespoléhá na měkké vazby. */
+    public static function journalDocumentKeySql(string $alias): string
+    {
+        return DocumentPostingGroup::documentKeySql($alias);
+    }
+
     /**
      * Doklad (`invoices` resp. `purchase_invoices` pod aliasem `$alias`) je převzatý.
      *
@@ -169,7 +175,15 @@ final class TakenOverRecord
                 AND ' . self::journalEntrySql('je') . ' LIMIT 1'
         );
         $stmt->execute([$supplierId, $docType, $documentId]);
-        return $stmt->fetchColumn() !== false;
+        if ($stmt->fetchColumn() !== false) {
+            return true;
+        }
+        foreach ((new DocumentPostingGroup($this->db))->active($supplierId, $docType, $documentId) as $entry) {
+            if ((bool) $entry['grouped'] && $this->isJournalEntry($supplierId, (int) $entry['id'])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** Účetní období založil převod z jiného programu a eviduje ho ve své mapě. */

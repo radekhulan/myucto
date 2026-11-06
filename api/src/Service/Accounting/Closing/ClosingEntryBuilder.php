@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Closing;
 
+use MyInvoice\Service\Accounting\AccountingRoleProfile;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+
 /**
  * ClosingEntryBuilder — ČISTÁ třída bez DB (Epic F4, R8): ze zůstatků účtů
  * sestaví řádky uzavíracího a otevíracího zápisu (ČÚS 002).
@@ -42,8 +45,9 @@ final class ClosingEntryBuilder
      * @param list<array{account_id:int, account_code:string, name:string, bal:float}> $bsBalances
      * @return array{lines: list<array{account_code:string, side:'debit'|'credit', amount:float}>, profit: float}
      */
-    public function closingLines(array $plBalances, array $bsBalances): array
+    public function closingLines(array $plBalances, array $bsBalances, ?AccountingRoleProfile $profile = null): array
     {
+        $profile ??= new AccountingRoleProfile();
         $lines = [];
         $profitCents = 0;
 
@@ -55,24 +59,30 @@ final class ClosingEntryBuilder
                 continue;
             }
             $amount = abs($cents) / 100;
+            $metadata = $profile->framework === AccountingFrameworkService::CZ_504 ? $row : [];
             $code = (string) $row['account_code'];
             if ($cents > 0) {
-                $lines[] = self::line(self::ACCOUNT_PROFIT_LOSS, 'debit', $amount);
-                $lines[] = self::line($code, 'credit', $amount);
+                $lines[] = self::line($profile->account('result.current'), 'debit', $amount, $metadata);
+                $lines[] = self::line($code, 'credit', $amount, $metadata);
             } else {
-                $lines[] = self::line($code, 'debit', $amount);
-                $lines[] = self::line(self::ACCOUNT_PROFIT_LOSS, 'credit', $amount);
+                $lines[] = self::line($code, 'debit', $amount, $metadata);
+                $lines[] = self::line($profile->account('result.current'), 'credit', $amount, $metadata);
             }
             $profitCents += -$cents;
         }
 
-        // (b) VH — zůstatek 710 po (a): zisk MD 710 / D 702; ztráta MD 702 / D 710.
-        if ($profitCents > 0) {
-            $lines[] = self::line(self::ACCOUNT_PROFIT_LOSS, 'debit', $profitCents / 100);
-            $lines[] = self::line(self::ACCOUNT_CLOSING, 'credit', $profitCents / 100);
-        } elseif ($profitCents < 0) {
-            $lines[] = self::line(self::ACCOUNT_CLOSING, 'debit', -$profitCents / 100);
-            $lines[] = self::line(self::ACCOUNT_PROFIT_LOSS, 'credit', -$profitCents / 100);
+        $resultBalances = $profile->framework === AccountingFrameworkService::CZ_504
+            ? self::resultBalances($plBalances)
+            : [['bal' => $profitCents / 100]];
+        foreach ($resultBalances as $result) {
+            $cents = self::cents((float) $result['bal']);
+            if ($cents > 0) {
+                $lines[] = self::line($profile->account('result.current'), 'debit', $cents / 100, $result);
+                $lines[] = self::line($profile->account('closing.final_balance'), 'credit', $cents / 100, $result);
+            } elseif ($cents < 0) {
+                $lines[] = self::line($profile->account('closing.final_balance'), 'debit', -$cents / 100, $result);
+                $lines[] = self::line($profile->account('result.current'), 'credit', -$cents / 100, $result);
+            }
         }
 
         // (c) rozvahové páry: debetní zůstatek → MD 702 / D účet; kreditní → MD účet / D 702.
@@ -83,16 +93,17 @@ final class ClosingEntryBuilder
             }
             $amount = abs($cents) / 100;
             $code = (string) $row['account_code'];
+            if ($profile->framework !== AccountingFrameworkService::CZ_504) unset($row['currency_code'], $row['amount_foreign'], $row['fx_rate']);
             if ($cents > 0) {
-                $lines[] = self::line(self::ACCOUNT_CLOSING, 'debit', $amount, $row);
+                $lines[] = self::line($profile->account('closing.final_balance'), 'debit', $amount, $row);
                 $lines[] = self::line($code, 'credit', $amount, $row);
             } else {
                 $lines[] = self::line($code, 'debit', $amount, $row);
-                $lines[] = self::line(self::ACCOUNT_CLOSING, 'credit', $amount, $row);
+                $lines[] = self::line($profile->account('closing.final_balance'), 'credit', $amount, $row);
             }
         }
 
-        $this->assertZeroBalance($lines, self::ACCOUNT_CLOSING, 'closing_unbalanced_702');
+        $this->assertZeroBalance($lines, $profile->account('closing.final_balance'), 'closing_unbalanced_702');
 
         return ['lines' => $lines, 'profit' => $profitCents / 100.0];
     }
@@ -105,8 +116,9 @@ final class ClosingEntryBuilder
      * @param list<array{account_id:int, account_code:string, name:string, bal:float}> $bsBalances
      * @return list<array{account_code:string, side:'debit'|'credit', amount:float}>
      */
-    public function openingLines(array $bsBalances, float $profit): array
+    public function openingLines(array $bsBalances, float $profit, ?AccountingRoleProfile $profile = null, ?array $resultBalances = null): array
     {
+        $profile ??= new AccountingRoleProfile();
         $lines = [];
 
         foreach ($this->sorted($bsBalances) as $row) {
@@ -115,28 +127,44 @@ final class ClosingEntryBuilder
                 continue;
             }
             $amount = abs($cents) / 100;
-            $code = (string) $row['account_code'];
+            $code = $profile->openingAccount((string) $row['account_code']);
+            if ($profile->framework !== AccountingFrameworkService::CZ_504) unset($row['currency_code'], $row['amount_foreign'], $row['fx_rate']);
             if ($cents > 0) {
                 $lines[] = self::line($code, 'debit', $amount, $row);
-                $lines[] = self::line(self::ACCOUNT_OPENING, 'credit', $amount, $row);
+                $lines[] = self::line($profile->account('closing.opening_balance'), 'credit', $amount, $row);
             } else {
-                $lines[] = self::line(self::ACCOUNT_OPENING, 'debit', $amount, $row);
+                $lines[] = self::line($profile->account('closing.opening_balance'), 'debit', $amount, $row);
                 $lines[] = self::line($code, 'credit', $amount, $row);
             }
         }
 
-        $profitCents = self::cents($profit);
-        if ($profitCents > 0) {
-            $lines[] = self::line(self::ACCOUNT_OPENING, 'debit', $profitCents / 100);
-            $lines[] = self::line(self::ACCOUNT_RETAINED_RESULT, 'credit', $profitCents / 100);
-        } elseif ($profitCents < 0) {
-            $lines[] = self::line(self::ACCOUNT_RETAINED_RESULT, 'debit', -$profitCents / 100);
-            $lines[] = self::line(self::ACCOUNT_OPENING, 'credit', -$profitCents / 100);
+        $resultBalances = $profile->framework === AccountingFrameworkService::CZ_504 && $resultBalances !== null
+            ? $resultBalances : [['bal' => $profit]];
+        $resultCents = 0;
+        foreach ($resultBalances as $result) {
+            $cents = self::cents((float) $result['bal']);
+            $resultCents += $cents;
+            if ($cents > 0) {
+                $lines[] = self::line($profile->account('closing.opening_balance'), 'debit', $cents / 100, $result);
+                $lines[] = self::line($profile->account('result.pending_approval'), 'credit', $cents / 100, $result);
+            } elseif ($cents < 0) {
+                $lines[] = self::line($profile->account('result.pending_approval'), 'debit', -$cents / 100, $result);
+                $lines[] = self::line($profile->account('closing.opening_balance'), 'credit', -$cents / 100, $result);
+            }
+        }
+        if ($resultCents !== self::cents($profit)) {
+            throw new ClosingException('opening_result_mismatch', 'Výsledek hospodaření nesouhlasí s převáděnými výsledkovými zůstatky.', 422);
         }
 
-        $this->assertZeroBalance($lines, self::ACCOUNT_OPENING, 'opening_unbalanced_701');
+        $this->assertZeroBalance($lines, $profile->account('closing.opening_balance'), 'opening_unbalanced_701');
 
         return $lines;
+    }
+
+    public static function resultBalances(array $plBalances): array
+    {
+        return array_map(static fn (array $row): array => ['bal' => -(float) $row['bal']]
+            + array_intersect_key($row, ['dimensions' => true, 'dimension_splits' => true, 'cost_center' => true, 'project_id' => true]), $plBalances);
     }
 
     /**
@@ -185,8 +213,10 @@ final class ClosingEntryBuilder
     private static function line(string $code, string $side, float $amount, array $balance = []): array
     {
         /** @var array{account_code:string, side:'debit'|'credit', amount:float} */
+        $currency = ($balance['account_code'] ?? null) === $code
+            ? array_intersect_key($balance, ['currency_code' => true, 'amount_foreign' => true, 'fx_rate' => true]) : [];
         return ['account_code' => $code, 'side' => $side, 'amount' => round($amount, 2)]
-            + array_intersect_key($balance, ['dimensions' => true, 'dimension_splits' => true, 'cost_center' => true, 'project_id' => true]);
+            + array_intersect_key($balance, ['dimensions' => true, 'dimension_splits' => true, 'cost_center' => true, 'project_id' => true]) + $currency;
     }
 
     /** Peníze → haléře (int); vstup je zaokrouhlený DECIMAL(x,2) ↔ float. */

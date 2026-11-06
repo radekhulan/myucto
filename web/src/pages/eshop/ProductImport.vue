@@ -17,6 +17,7 @@ import CatalogJobProgress from '@/components/stock/CatalogJobProgress.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
+import { unitPriceText } from '@/utils/unitPrice'
 
 type Stage = 'source' | 'mapping' | 'preview'
 type RequestKind = 'upload' | 'sample' | 'profiles' | 'profileSave' | 'preview' | 'apply' | 'resume' | 'job' | 'report' | 'cancel' | 'retry'
@@ -815,7 +816,7 @@ function displayFieldValue(field: string, value: unknown): string {
     const price = entry as Record<string, unknown>
     const currency = typeof price.currency_code === 'string' ? price.currency_code : ''
     const amount = price.computed_price ?? price.fixed_price
-    return amount == null ? currency : `${currency}: ${String(amount)}`
+    return amount == null ? currency : `${currency}: ${String(unitPriceText(amount))}`
   }).filter(Boolean).join(', ')
 }
 

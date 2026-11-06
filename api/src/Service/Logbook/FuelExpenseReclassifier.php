@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Logbook;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\DocumentAutoPoster;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\Expense\ExpenseAutoClassifier;
 use MyInvoice\Service\Accounting\OperationType;
 use PDO;
@@ -96,6 +97,7 @@ final class FuelExpenseReclassifier
               LIMIT 1"
         );
         $stmt->execute([$supplierId, $purchaseInvoiceId]);
-        return $stmt->fetch(PDO::FETCH_NUM) !== false;
+        return $stmt->fetch(PDO::FETCH_NUM) !== false
+            || (new DocumentPostingGroup($this->db))->hasActive($supplierId, 'purchase_invoice', $purchaseInvoiceId);
     }
 }

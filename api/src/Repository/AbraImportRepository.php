@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Service\Migration\Abra\AbraException;
+use MyInvoice\Service\Migration\Abra\AbraSource;
 
 final class AbraImportRepository extends AbstractMigrationImportRepository
 {
@@ -78,11 +79,12 @@ final class AbraImportRepository extends AbstractMigrationImportRepository
     public function importedEndpointKeys(int $supplierId): array
     {
         $stmt = $this->db->pdo()->prepare("SELECT kind, abra_key FROM abra_flexi_import_map
-            WHERE supplier_id = ? AND kind IN ('faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'banka', 'pokladni-pohyb')");
+            WHERE supplier_id = ? AND kind IN ('faktura-vydana', 'faktura-prijata', 'prodejka', 'zavazek', 'banka', 'pokladni-pohyb',
+                'ostatni-zavazek', 'ostatni-pohledavka')");
         $stmt->execute([$supplierId]);
         $keys = [];
         while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-            $keys[$row['kind'] . '|' . $row['abra_key']] = true;
+            $keys[AbraSource::evidenceOfMapKind((string) $row['kind']) . '|' . $row['abra_key']] = true;
         }
         return $keys;
     }

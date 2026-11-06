@@ -64,6 +64,7 @@ use MyInvoice\Action\Admin\SupplierSearchAction;
 use MyInvoice\Action\Settings\EmailBrandingAction;
 use MyInvoice\Action\Settings\BrandingProfilesAction;
 use MyInvoice\Action\Settings\ClientBrandingSettingsAction;
+use MyInvoice\Action\Settings\ClientInvoiceDefaultsSettingsAction;
 use MyInvoice\Action\Settings\ClientPaymentQrSettingsAction;
 use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\SupplierEmailTemplateAction;
@@ -82,6 +83,7 @@ use MyInvoice\Action\Payroll\PayrollActivationAction;
 use MyInvoice\Action\Payroll\PayrollAccountOptionsAction;
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
 use MyInvoice\Action\Payroll\PayrollBenefitBasketOverviewAction;
+use MyInvoice\Action\Payroll\PayrollFoodServiceTipAction;
 use MyInvoice\Action\Payroll\PayrollCapabilitiesAction;
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
@@ -127,6 +129,7 @@ use MyInvoice\Action\Payroll\PayrollInstitutionAccountsAction;
 use MyInvoice\Action\Payroll\PayrollInsuranceBreakdownAction;
 use MyInvoice\Action\Payroll\PayrollJmhzCorrectionAction;
 use MyInvoice\Action\Payroll\PayrollJmhzDeferralAction;
+use MyInvoice\Action\Payroll\PayrollJmhzPost20Action;
 use MyInvoice\Action\Payroll\PayrollJmhzIdentityAction;
 use MyInvoice\Action\Payroll\PayrollJmhzProtocolImportAction;
 use MyInvoice\Action\Payroll\PayrollJmhzExternalSubmissionAction;
@@ -382,6 +385,13 @@ final class Routes
 {
     public static function register(App $app): void
     {
+        \MyInvoice\Routes\ServiceLifecycleRoutes::register($app);
+        \MyInvoice\Routes\FundingRoutes::register($app);
+        \MyInvoice\Routes\PropertyAccountingCatalogRoutes::register($app);
+        \MyInvoice\Routes\SecuritiesDebt504Routes::register($app);
+        \MyInvoice\Routes\FrameworkConversionRoutes::register($app);
+        \MyInvoice\Routes\EetSettingsRoutes::register($app);
+        \MyInvoice\Routes\EetPaymentRoutes::register($app);
         $app->get('/api/health',  HealthAction::class);
         $app->get('/api/version', VersionAction::class);
 
@@ -471,6 +481,8 @@ final class Routes
             $g->post  ('/webauthn/step-up/verify',            [PasskeyAction::class, 'stepUpVerify']);
             $g->patch ('/webauthn/credentials/{id:[0-9]+}',   [PasskeyAction::class, 'rename']);
             $g->delete('/webauthn/credentials/{id:[0-9]+}',   [PasskeyAction::class, 'revoke']);
+            $g->post  ('/webauthn/credentials/{id:[0-9]+}/test/options', [PasskeyAction::class, 'testOptions']);
+            $g->post  ('/webauthn/credentials/{id:[0-9]+}/test/verify',  [PasskeyAction::class, 'testVerify']);
             $g->post  ('/mfa/step-up/totp',                   [MfaStepUpAction::class, 'totp']);
             $g->post  ('/mfa/step-up/recovery',               [MfaStepUpAction::class, 'recovery']);
             $g->get   ('/mfa/recovery-codes',                 [\MyInvoice\Action\Auth\MfaRecoveryCodeAction::class, 'status']);
@@ -498,6 +510,8 @@ final class Routes
             $g->get   ('/tokens/{id:[0-9]+}/ips',                  [\MyInvoice\Action\Auth\Tokens\TokenIpRuleAction::class, 'list']);
             $g->post  ('/tokens/{id:[0-9]+}/ips',                  [\MyInvoice\Action\Auth\Tokens\TokenIpRuleAction::class, 'create']);
             $g->delete('/tokens/{id:[0-9]+}/ips/{ipId:[0-9]+}',    [\MyInvoice\Action\Auth\Tokens\TokenIpRuleAction::class, 'delete']);
+            // Úhrady z tokenu bez kontextu EET eviduje externí systém (e-shop)
+            $g->put   ('/tokens/{id:[0-9]+}/eet-external',         \MyInvoice\Action\Auth\Tokens\TokenEetExternalAction::class);
             // Log volání veřejného API vlastními tokeny (MCP server i přímá integrace)
             $g->get   ('/api-log',                 \MyInvoice\Action\Auth\Tokens\ApiRequestLogAction::class);
         });
@@ -662,6 +676,8 @@ final class Routes
         // Invoices (M3 — draft + editor + sumace; vystavení/odeslání/PDF přijde v M4)
         $app->get    ('/api/invoices',              ListInvoicesAction::class);
         $app->get    ('/api/invoices/export.pdf',   ExportSelectedPdfAction::class);
+        // Kniha vystavených faktur (PDF/XLSX) nad filtrem seznamu.
+        $app->get    ('/api/invoices/book',         [\MyInvoice\Action\Invoice\InvoiceBookAction::class, 'issued']);
         // Veřejný alias admin exportu (bearer allowlist pokrývá /api/invoices/*):
         // ?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv & month=YYYY-MM nebo period=quarterly&year&quarter
         $app->get    ('/api/invoices/export',       ExportAction::class);
@@ -695,6 +711,7 @@ final class Routes
         $app->post   ('/api/invoices/{id:[0-9]+}/payments', CreatePaymentAction::class);
         $app->delete ('/api/invoices/{id:[0-9]+}/payments/{paymentId:[0-9]+}', DeletePaymentAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/payments/{paymentId:[0-9]+}/tax-document', CreatePaymentTaxDocumentAction::class);
+        $app->post   ('/api/invoices/{id:[0-9]+}/convert-to-tax-document', \MyInvoice\Action\Invoice\ConvertFinalDraftToTaxDocumentAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/cancel',    CancelInvoiceAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/uncancel',  \MyInvoice\Action\Invoice\UncancelInvoiceAction::class);
         // Ruční book/unbook (Epic F6, §4.6) — zámek pro roli client u tax_evidence firem.
@@ -724,6 +741,14 @@ final class Routes
         $app->get    ('/api/invoices/{id:[0-9]+}/final-candidates',   FinalCandidatesAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/link-advance',       LinkInvoiceAdvanceAction::class);
         $app->delete ('/api/invoices/{id:[0-9]+}/link-advance',       UnlinkInvoiceAdvanceAction::class);
+        // Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou)
+        $app->get    ('/api/invoices/{id:[0-9]+}/other-item-candidates', [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'candidates']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/other-item-link',       [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'link']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/other-item-link',       [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'unlink']);
+        // Postupné čerpání zálohy konceptem faktury (milníky smlouvy o dílo)
+        $app->get    ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'candidates']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'apply']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'remove']);
         $app->post   ('/api/invoices/bulk-reissue',          BulkReissueAction::class);
         $app->post   ('/api/invoices/bulk-reminder',         BulkSendRemindersAction::class);
         // Hromadné nastavení OSS nad výběrem dokladů (OSS-7). Náhled je povinný, proto
@@ -755,7 +780,9 @@ final class Routes
 
         $app->post   ('/api/purchase-invoices/scan-inbox',                ScanInboxAction::class);
         $app->post   ('/api/purchase-invoices/import-structured',         ImportStructuredPurchaseInvoiceAction::class);
+        $app->post   ('/api/purchase-invoices/import-ai',                 AiExtractPdfAction::class);
         $app->get    ('/api/purchase-invoices/export',                     ExportPurchaseInvoicesAction::class);
+        $app->get    ('/api/purchase-invoices/book',                       [\MyInvoice\Action\Invoice\InvoiceBookAction::class, 'received']);
         $app->get    ('/api/purchase-invoices/import-batches',             PurchaseInvoiceImportBatchesAction::class);
         // Přečíslování měsíce podle data vystavení (náhled + provedení).
         $app->get    ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'preview']);
@@ -780,6 +807,8 @@ final class Routes
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/project',         SetPurchaseInvoiceProjectAction::class);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/dismiss-extraction-warning', DismissExtractionWarningAction::class);
         $app->put    ('/api/purchase-invoices/{id:[0-9]+}/expense-kinds',   SetPurchaseInvoiceExpenseKindsAction::class);
+        // Oprava DPH zařazení (nárok, klasifikace, rozpis) i u zaúčtovaného dokladu, bez storna.
+        $app->post   ('/api/purchase-invoices/{id:[0-9]+}/vat-treatment',   \MyInvoice\Action\PurchaseInvoice\ChangePurchaseInvoiceVatTreatmentAction::class);
         // Kontrola dokladu proti vytěžení přílohy (odznak v detailu) a potvrzení „v pořádku"
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/attachment-check',             [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'showPurchaseInvoice']);
         $app->post   ('/api/purchase-invoices/{id:[0-9]+}/attachment-check/acknowledge', [\MyInvoice\Action\Document\AttachmentCheckAction::class, 'acknowledgePurchaseInvoice']);
@@ -825,6 +854,9 @@ final class Routes
         $app->get    ('/api/purchase-invoices/payment-orders/{id:[0-9]+}/download', [PaymentOrderAction::class, 'download']);
         $app->get    ('/api/purchase-invoices/payment-orders/{orderId:[0-9]+}/submission', [BankPaymentOrderSubmissionAction::class, 'get']);
         $app->post   ('/api/purchase-invoices/payment-orders/{orderId:[0-9]+}/submit', [BankPaymentOrderSubmissionAction::class, 'post']);
+        $app->post   ('/api/purchase-invoices/payment-orders/{orderId:[0-9]+}/submission/sign', [BankPaymentOrderSubmissionAction::class, 'sign']);
+        $app->post   ('/api/purchase-invoices/payment-orders/{orderId:[0-9]+}/submission/refresh', [BankPaymentOrderSubmissionAction::class, 'refresh']);
+        $app->get    ('/api/purchase-invoices/payment-orders/{orderId:[0-9]+}/submission/items', [BankPaymentOrderSubmissionAction::class, 'items']);
         $app->get    ('/api/purchase-invoices/payment-orders/{id:[0-9]+}',          [PaymentOrderAction::class, 'show']);
         $app->delete ('/api/purchase-invoices/payment-orders/{id:[0-9]+}',          [PaymentOrderAction::class, 'delete']);
         $app->post   ('/api/purchase-invoices/payment-orders/{id:[0-9]+}/archive',  [PaymentOrderAction::class, 'archive']);
@@ -842,6 +874,11 @@ final class Routes
         $app->post   ('/api/recurring/{id:[0-9]+}/reschedule', [RecurringTemplateAction::class, 'reschedule']);
 
         // Work reports — výkaz víceprací (M5)
+        $app->map(['GET', 'POST'], '/api/work-report-billing-templates', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
+        $app->map(['PUT', 'DELETE'], '/api/work-report-billing-templates/{id:[0-9]+}', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
+        $app->post('/api/work-report-billing-preview', [\MyInvoice\Action\WorkReport\BillingAction::class, 'previewUnsaved']);
+        $app->get('/api/invoices/{id:[0-9]+}/work-report/billing-preview', [\MyInvoice\Action\WorkReport\BillingAction::class, 'preview']);
+        $app->post('/api/invoices/{id:[0-9]+}/work-report/billing-transfer', [\MyInvoice\Action\WorkReport\BillingAction::class, 'transfer']);
         $app->get    ('/api/invoices/{id:[0-9]+}/work-report', GetWorkReportAction::class);
         $app->put    ('/api/invoices/{id:[0-9]+}/work-report', SaveWorkReportAction::class);
         $app->put    ('/api/invoices/{id:[0-9]+}/work-report/materials', SaveWorkReportMaterialsAction::class);
@@ -855,6 +892,13 @@ final class Routes
         // Web faktura — správa trvalého veřejného odkazu (authenticated)
         $app->post   ('/api/invoices/{id:[0-9]+}/public-link',            [PublicLinkAction::class, 'ensure']);
         $app->post   ('/api/invoices/{id:[0-9]+}/public-link/regenerate', [PublicLinkAction::class, 'regenerate']);
+
+        // Veřejná účtenka zákazníka /r/{token} — vytvoření a odvolání odkazu (authenticated)
+        $app->post   ('/api/invoices/{id:[0-9]+}/receipt-link',           [\MyInvoice\Action\Invoice\ReceiptLinkAction::class, 'create']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/receipt-link',           [\MyInvoice\Action\Invoice\ReceiptLinkAction::class, 'revoke']);
+
+        // Rychlá účtenka z mobilní aplikace: doklad + úhrada + pokladna + EET v jedné transakci
+        $app->post   ('/api/mobile/receipts',                             \MyInvoice\Action\Mobile\QuickReceiptAction::class);
 
         // Public schvalovací endpointy (bez auth, jen token)
         $app->get    ('/api/public/approval/{token:[a-f0-9]{32,128}}',          PublicApprovalGetAction::class);
@@ -881,6 +925,10 @@ final class Routes
         $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}/pdf', PublicInvoicePdfAction::class);
         $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}/isdoc', PublicInvoiceIsdocAction::class);
         $app->get    ('/api/public/invoice/{token:[a-f0-9]{32,128}}/attachment/{attId:[0-9]+}', PublicInvoiceAttachmentAction::class);
+
+        // Veřejná účtenka zákazníka (bez auth, jen token s omezenou platností)
+        $app->get    ('/api/public/receipt/{token:[a-f0-9]{64}}',     [\MyInvoice\Action\Invoice\PublicReceiptAction::class, 'show']);
+        $app->get    ('/api/public/receipt/{token:[a-f0-9]{64}}/pdf', [\MyInvoice\Action\Invoice\PublicReceiptAction::class, 'pdf']);
 
         // Public náhled na výkaz práce (bez auth; token + e-mailová autorizace kódem)
         $app->get    ('/api/public/work-report/{token:[a-f0-9]{32,128}}',              PublicWorkReportGetAction::class);
@@ -1021,6 +1069,15 @@ final class Routes
                 '/benefit-baskets',
                 [PayrollBenefitBasketOverviewAction::class, 'list'],
             );
+            // Spropitné ze stravovacích služeb (§ 6 odst. 9 písm. g) ZDP, od 2027).
+            $g->get(
+                '/food-service-tips/{period:[0-9]{4}-[0-9]{2}}',
+                [PayrollFoodServiceTipAction::class, 'show'],
+            );
+            $g->put(
+                '/food-service-tips/{period:[0-9]{4}-[0-9]{2}}',
+                [PayrollFoodServiceTipAction::class, 'save'],
+            );
             $g->get('/inputs', [PayrollInputsAction::class, 'list']);
             // Export celého filtru výpisu; parametry filtru jsou tytéž jako u `/inputs`.
             $g->get('/inputs/export.{format:xlsx|pdf}', [PayrollInputsExportAction::class, 'export']);
@@ -1077,6 +1134,7 @@ final class Routes
             $g->get('/imports/attendance/profiles/{id:[0-9]+}/export', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'exportProfile']);
             $g->post('/imports/attendance/profiles/import', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'importProfile']);
             $g->post('/imports/attendance/profiles/sample', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'restoreSampleProfile']);
+            $g->get('/imports/attendance/template', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'template']);
             // Dodatečné hromadné schválení pracovních měsíců z použité dávky docházky.
             $g->post('/time/imports/attendance/{id:[0-9]+}/apply', [\MyInvoice\Action\Payroll\PayrollAttendanceImportAction::class, 'approveTimeMonths']);
             $g->get('/payments/liabilities', [PayrollPaymentAction::class, 'listLiabilities']);
@@ -1084,6 +1142,9 @@ final class Routes
             $g->get('/payments/batches', [PayrollPaymentAction::class, 'listBatches']);
             $g->get('/payments/batches/{batchId:[0-9]+}/bank-submission', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'get']);
             $g->post('/payments/batches/{batchId:[0-9]+}/bank-submission', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'post']);
+            $g->post('/payments/batches/{batchId:[0-9]+}/bank-submission/sign', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'sign']);
+            $g->post('/payments/batches/{batchId:[0-9]+}/bank-submission/refresh', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'refresh']);
+            $g->get('/payments/batches/{batchId:[0-9]+}/bank-submission/items', [\MyInvoice\Action\Payroll\PayrollBankSubmissionAction::class, 'items']);
             $g->post('/payments/batches', [PayrollPaymentAction::class, 'createBatch']);
             // Zahození dávky (i stažené / předané bance, po potvrzení zrušení
             // v bankovnictví) a náhradní dávka s jiným datem úhrady.
@@ -1210,6 +1271,10 @@ final class Routes
             $g->get(
                 '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}',
                 [PayrollTakeoverWageAction::class, 'manualForm'],
+            );
+            $g->get(
+                '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}/filed-forms',
+                [PayrollTakeoverWageAction::class, 'manualFiledForms'],
             );
             $g->put(
                 '/takeover-wages/{year:[0-9]{4}}/manual/{employeeId:[0-9]+}',
@@ -1380,6 +1445,10 @@ final class Routes
                 [PayrollAnnualSettlementAction::class, 'preview'],
             );
             $g->put(
+                '/annual-settlements/{year:[0-9]{4}}/requests/bulk',
+                [PayrollAnnualSettlementAction::class, 'saveRequestsBulk'],
+            );
+            $g->put(
                 '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/request',
                 [PayrollAnnualSettlementAction::class, 'saveRequest'],
             );
@@ -1389,6 +1458,12 @@ final class Routes
             $g->put(
                 '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/certificates',
                 [PayrollAnnualSettlementAction::class, 'saveCertificates'],
+            );
+            // Ročně uplatňované položky (§ 38h odst. 6): nezdanitelné části, sleva
+            // za exekuci a sleva na manžela. Celá sada za rok jedním PUT.
+            $g->put(
+                '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/annual-claims',
+                [PayrollAnnualSettlementAction::class, 'saveAnnualClaims'],
             );
             $g->post(
                 '/annual-settlements/{year:[0-9]{4}}/people/{employeeId:[0-9]+}/settle',
@@ -1618,6 +1693,15 @@ final class Routes
                 '/statutory-evidence/health-insurer-bulk/apply',
                 [\MyInvoice\Action\Payroll\PayrollHealthInsurerBulkAction::class, 'apply'],
             );
+            // Hromadný zápis podepsaných prohlášení poplatníka.
+            $g->post(
+                '/statutory-evidence/declaration-signed-bulk/preview',
+                [\MyInvoice\Action\Payroll\PayrollTaxDeclarationBulkSignAction::class, 'preview'],
+            );
+            $g->post(
+                '/statutory-evidence/declaration-signed-bulk/apply',
+                [\MyInvoice\Action\Payroll\PayrollTaxDeclarationBulkSignAction::class, 'apply'],
+            );
             // Hromadné doplnění místa výkonu práce (obec a stát pro JMHZ).
             $g->post(
                 '/employments/workplace-bulk/preview',
@@ -1626,6 +1710,15 @@ final class Routes
             $g->post(
                 '/employments/workplace-bulk/apply',
                 [\MyInvoice\Action\Payroll\PayrollEmploymentWorkplaceBulkFillAction::class, 'apply'],
+            );
+            // Hromadné ukončení skončených dohod a archivace dávno ukončených vztahů.
+            $g->post(
+                '/employments/bulk-closure/preview',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentBulkClosureAction::class, 'preview'],
+            );
+            $g->post(
+                '/employments/bulk-closure/apply',
+                [\MyInvoice\Action\Payroll\PayrollEmploymentBulkClosureAction::class, 'apply'],
             );
             $g->get(
                 '/people/{id:[0-9]+}/foreign-permits',
@@ -2205,6 +2298,18 @@ final class Routes
                 [PayrollJmhzCorrectionAction::class, 'freezeContentCorrection'],
             );
             $g->get(
+                '/submissions/jmhz-post20/{employmentId:[0-9]+}',
+                PayrollJmhzPost20Action::class,
+            );
+            $g->get(
+                '/submissions/{submissionId:[0-9]+}/jmhz-zero-amendment',
+                [PayrollJmhzCorrectionAction::class, 'zeroAmendmentCandidates'],
+            );
+            $g->post(
+                '/submissions/{submissionId:[0-9]+}/jmhz-zero-amendment',
+                [PayrollJmhzCorrectionAction::class, 'freezeZeroAmendment'],
+            );
+            $g->get(
                 '/submissions/jmhz-protocol-import',
                 [PayrollJmhzProtocolImportAction::class, 'history'],
             );
@@ -2467,10 +2572,132 @@ final class Routes
             $g->delete('/retention/policies/{category:[a-z_]+}', [PayrollRetentionAction::class, 'deletePolicy']);
         });
 
+        $app->group('/api/property', function ($g) {
+            $g->get('/service-settlements', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'list']);
+            $g->get('/service-settlements/catalog/{collection:s3|opening|costs}', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'catalog']);
+            $g->get('/service-settlements/{id:[0-9]+}', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'detail']);
+            $g->get('/service-settlements/{id:[0-9]+}/dossier', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'dossier']);
+            $g->post('/service-settlements/{id:[0-9]+}/dossier-events', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'appendDossierEvent']);
+            $g->get('/service-settlements/{id:[0-9]+}/deadlines', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'deadlines']);
+            $g->post('/service-settlements/{id:[0-9]+}/objections', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'recordObjection']);
+            $g->post('/service-settlements/objections/{id:[0-9]+}/resolve', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'resolveObjection']);
+            $g->get('/service-settlements/{id:[0-9]+}/disposition', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'disposition']);
+            $g->get('/service-settlements/{id:[0-9]+}/current', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'current']);
+            $g->post('/service-settlements/prepare', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'prepare']);
+            $g->post('/service-settlements', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'save']);
+            $g->post('/service-settlements/{id:[0-9]+}/preview', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'preview']);
+            $g->post('/service-settlements/{id:[0-9]+}/apply', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'apply']);
+            $g->post('/service-settlements/applications/{id:[0-9]+}/reverse', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'reverse']);
+            $g->get('/catalog/service-settlements', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'publicList']);
+            $g->get('/catalog/service-settlements/{id:[0-9]+}', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'publicDetail']);
+            $g->get('/catalog/service-settlements/{id:[0-9]+}/current', [\MyInvoice\Action\Property\Services\Settlement\SettlementAction::class, 'publicCurrent']);
+            $g->get('/openings', [\MyInvoice\Action\Property\Opening\OpeningAction::class, 'list']);
+            $g->post('/openings/preview', [\MyInvoice\Action\Property\Opening\OpeningAction::class, 'preview']);
+            $g->post('/openings/confirm', [\MyInvoice\Action\Property\Opening\OpeningAction::class, 'confirm']);
+            $g->post('/openings/revise', [\MyInvoice\Action\Property\Opening\OpeningAction::class, 'revise']);
+            $g->get('/catalog/openings', [\MyInvoice\Action\Property\Opening\OpeningAction::class, 'catalog']);
+            $g->get('/catalog/payments/saldo', \MyInvoice\Action\Property\Receivables\PropertySaldoPublicAction::class);
+            $g->get('/catalog/payments/card', [\MyInvoice\Action\Property\Payments\PaymentPublicAction::class, 'card']);
+            $g->get('/catalog/payments/operations', [\MyInvoice\Action\Property\Payments\PaymentPublicAction::class, 'operations']);
+            $g->get('/catalog/payments/history', [\MyInvoice\Action\Property\Payments\PaymentPublicAction::class, 'history']);
+            $g->get('/catalog/payments/reconciliation', [\MyInvoice\Action\Property\Payments\PaymentPublicAction::class, 'reconciliation']);
+            $g->get('/catalog/payments/reconciliation/parties', [\MyInvoice\Action\Property\Payments\PaymentPublicAction::class, 'partyReconciliation']);
+            $g->get('/payments/{collection:debts|charges|credits|reservations|operations|corrections}', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'page']);
+            $g->get('/payments/{collection:debts|charges|credits|reservations|operations|corrections}/{id:[0-9]+}', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'detail']);
+            $g->get('/payments/parties', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'parties']);
+            $g->get('/payments/correction-options', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'correctionOptions']);
+            $g->get('/receivables/context', [\MyInvoice\Action\Property\Receivables\ReceivableWorkflowAction::class, 'context']);
+            $g->get('/receivables/certificates/{id:[0-9]+}', [\MyInvoice\Action\Property\Receivables\ReceivableWorkflowAction::class, 'certificate']);
+            $g->post('/receivables/transfers/preview', [\MyInvoice\Action\Property\Receivables\ReceivableWorkflowAction::class, 'transferPreview']);
+            $g->post('/receivables/transfers/confirm', [\MyInvoice\Action\Property\Receivables\ReceivableWorkflowAction::class, 'transferConfirm']);
+            $g->post('/receivables/certificates/preview', [\MyInvoice\Action\Property\Receivables\ReceivableWorkflowAction::class, 'certificatePreview']);
+            $g->post('/receivables/certificates/issue', [\MyInvoice\Action\Property\Receivables\ReceivableWorkflowAction::class, 'certificateIssue']);
+            $g->get('/payments/card', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'card']);
+            $g->get('/payments/bank-accounts', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'bankAccounts']);
+            $g->get('/payments/accessory-candidates', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'accessoryCandidates']);
+            $g->post('/payments/debts/{id:[0-9]+}/accessories', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'bindAccessory']);
+            $g->get('/payments/reservations/{id:[0-9]+}/abo-export', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'exportMetadata']);
+            $g->post('/payments/reservations/abo/{id:[0-9]+}/download', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'exportDownload']);
+            $g->post('/payments/reservations/abo/preview', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'exportPreview']);
+            $g->post('/payments/reservations/abo/confirm', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'exportConfirm']);
+            $g->post('/payments/reservations/{id:[0-9]+}/cancel-submission', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'cancelExport']);
+            $g->post('/payments/reservations/{id:[0-9]+}/release-unexecuted', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'releaseUnexecuted']);
+            $g->post('/payments/debts/register', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'registerDebt']);
+            $g->post('/payments/credits/{id:[0-9]+}/reserve', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'reserve']);
+            $g->post('/payments/reservations/{id:[0-9]+}/cancel', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'cancelReservation']);
+            $g->post('/payments/setoffs/preview', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'setoffPreview']);
+            $g->post('/payments/setoffs/confirm', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'setoffConfirm']);
+            $g->post('/payments/corrections/preview', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'correctionPreview']);
+            $g->post('/payments/corrections/confirm', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'correctionConfirm']);
+            $g->post('/payments/operations/{id:[0-9]+}/reverse', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'reverse']);
+            $g->post('/payments/corrections/{id:[0-9]+}/reverse', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'correctionReverse']);
+            $g->get('/payments/source', [\MyInvoice\Action\Property\Payments\PaymentWorkflowAction::class, 'source']);
+            $g->post('/payments/source-revisions/preview', [\MyInvoice\Action\Property\Payments\PaymentWorkflowAction::class, 'revisionPreview']);
+            $g->post('/payments/source-revisions/confirm', [\MyInvoice\Action\Property\Payments\PaymentWorkflowAction::class, 'revisionConfirm']);
+            $g->get('/payments/context', [\MyInvoice\Action\Property\Payments\PaymentWorkflowAction::class, 'context']);
+            $g->get('/payments/candidates', [\MyInvoice\Action\Property\Payments\PaymentOperationsAction::class, 'candidates']);
+            $g->get('/payments/history', [\MyInvoice\Action\Property\Payments\PaymentWorkflowAction::class, 'history']);
+            $g->post('/payments/preview', [\MyInvoice\Action\Property\Payments\PaymentWorkflowAction::class, 'preview']);
+            $g->post('/payments/confirm', [\MyInvoice\Action\Property\Payments\PaymentWorkflowAction::class, 'confirm']);
+            $g->get('/payments/bank-proposals', [\MyInvoice\Action\Property\Payments\PaymentBankProposalAction::class, 'queue']);
+            $g->get('/payments/bank-proposals/{id:[0-9]+}', [\MyInvoice\Action\Property\Payments\PaymentBankProposalAction::class, 'detail']);
+            $g->post('/payments/bank-proposals/{id:[0-9]+}/plan', [\MyInvoice\Action\Property\Payments\PaymentBankProposalAction::class, 'plan']);
+            $g->get('/payments/bank-links', [\MyInvoice\Action\Property\Payments\PaymentBankProposalAction::class, 'links']);
+
+            $g->get('/charges/issues', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'list']);
+            $g->get('/charges/issues/context', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'context']);
+            $g->get('/charges/issues/batches/{id:[0-9]+}', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'batch']);
+            $g->get('/charges/issues/{id:[0-9]+}', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'detail']);
+            $g->post('/charges/issues/preview', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'preview']);
+            $g->post('/charges/issues', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'issue']);
+            $g->post('/charges/issues/batches/{id:[0-9]+}/post', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'post']);
+            $g->post('/charges/issues/{id:[0-9]+}/reverse', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'reverse']);
+            $g->post('/charges/issues/{id:[0-9]+}/evidence', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'recordEvidence']);
+            $g->get('/catalog/charges/components', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'catalogComponents']);
+            $g->get('/catalog/charges/issues', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'catalogList']);
+            $g->get('/catalog/charges/issues/{id:[0-9]+}', [\MyInvoice\Action\Property\Charges\Issuance\IssuanceAction::class, 'catalogDetail']);
+            $g->get('/catalog/charges/versions', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'catalogVersions']);
+            $g->get('/catalog/charges/versions/{id:[0-9]+}', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'catalogDetail']);
+            $g->get('/charges/components', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'components']);
+            $g->post('/charges/components', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'createComponent']);
+            $g->get('/charges/context', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'context']);
+            $g->get('/charges/versions', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'versions']);
+            $g->get('/charges/versions/{id:[0-9]+}', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'detail']);
+            $g->post('/charges/preview', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'preview']);
+            $g->post('/charges/versions', [\MyInvoice\Action\Property\Charges\ChargeAction::class, 'saveVersion']);
+            $g->get('/catalog/profile', [\MyInvoice\Action\Property\PropertyAction::class, 'catalogProfile']);
+            $g->get('/catalog/summary', [\MyInvoice\Action\Property\PropertyAction::class, 'summary']);
+            $g->get('/catalog/unit-legal-roles', [\MyInvoice\Action\Property\Catalog\PropertyLegalRoleCatalogAction::class, 'list']);
+            $g->get('/catalog/unit-legal-roles/{unit_id:[0-9]+}', [\MyInvoice\Action\Property\Catalog\PropertyLegalRoleCatalogAction::class, 'detail']);
+            $g->get('/catalog/{kind:houses|units|services}', [\MyInvoice\Action\Property\PropertyAction::class, 'catalogList']);
+            $g->get('/profile', [\MyInvoice\Action\Property\PropertyAction::class, 'profile']);
+            $g->post('/profile', [\MyInvoice\Action\Property\PropertyAction::class, 'saveProfile']);
+            $g->get('/summary', [\MyInvoice\Action\Property\PropertyAction::class, 'summary']);
+            $g->get('/export', [\MyInvoice\Action\Property\PropertyAction::class, 'export']);
+            $g->post('/import/preview', [\MyInvoice\Action\Property\PropertyAction::class, 'importPreview']);
+            $g->post('/import/apply', [\MyInvoice\Action\Property\PropertyAction::class, 'importApply']);
+            $g->get('/{kind:houses|units|services}', [\MyInvoice\Action\Property\PropertyAction::class, 'list']);
+            $g->post('/{kind:houses|units|services}', [\MyInvoice\Action\Property\PropertyAction::class, 'create']);
+            $g->get('/objects/{id:[0-9]+}', [\MyInvoice\Action\Property\PropertyAction::class, 'detail']);
+            $g->post('/objects/{id:[0-9]+}/revisions', [\MyInvoice\Action\Property\PropertyAction::class, 'revise']);
+            $g->post('/objects/{id:[0-9]+}/revisions/{revisionId:[0-9]+}/confirm', [\MyInvoice\Action\Property\PropertyAction::class, 'confirm']);
+        });
+
         // Podvojné účetnictví (Epic F1) — účtová osnova, období, deník, kontace.
         // Vše tenant-scoped (ATTR_CURRENT_ID). Zápisy = účetní|admin, GET = readonly+;
         // změna stavu období = admin (PermissionMiddleware + guard v Action).
         $app->group('/api/accounting', function ($g) {
+            $g->get('/catalog/nonprofit-membership/roles', [\MyInvoice\Action\Nonprofit\Catalog\MembershipResourceCatalogAction::class, 'roles']);
+            $g->get('/catalog/nonprofit-membership/roles/{member_id:[0-9]+}', [\MyInvoice\Action\Nonprofit\Catalog\MembershipResourceCatalogAction::class, 'roles']);
+            $g->get('/catalog/nonprofit-membership/receivables', [\MyInvoice\Action\Nonprofit\Catalog\MembershipResourceCatalogAction::class, 'receivables']);
+            $g->get('/catalog/nonprofit-membership/receivables/{claim_id:[0-9]+}', [\MyInvoice\Action\Nonprofit\Catalog\MembershipResourceCatalogAction::class, 'receivables']);
+            $g->get('/catalog/context', [\MyInvoice\Action\Accounting\Catalog\AccountingContextAction::class, 'get']);
+            $g->get('/catalog/nonprofit-funding', [\MyInvoice\Action\Nonprofit\Catalog\NonprofitResourceCatalogAction::class, 'funding']);
+            $g->get('/catalog/nonprofit-funding/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\Catalog\NonprofitResourceCatalogAction::class, 'funding']);
+            $g->get('/catalog/nonprofit-funding/{id:[0-9]+}/evidence', [\MyInvoice\Action\Nonprofit\Catalog\NonprofitResourceCatalogAction::class, 'fundingEvidence']);
+            $g->get('/catalog/nonprofit-capital', [\MyInvoice\Action\Nonprofit\Catalog\NonprofitResourceCatalogAction::class, 'capital']);
+            $g->get('/catalog/nonprofit-capital/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\Catalog\NonprofitResourceCatalogAction::class, 'capital']);
+            $g->get('/catalog/nonprofit-capital/{id:[0-9]+}/events', [\MyInvoice\Action\Nonprofit\Catalog\NonprofitResourceCatalogAction::class, 'events']);
             // AI asistent účetní — odpověď a návrhy zápisů, nic se tu nezaúčtuje
             $g->get   ('/ai-assistant/status', [\MyInvoice\Action\Accounting\AiAssistantAction::class, 'status']);
             $g->post  ('/ai-assistant/ask',    [\MyInvoice\Action\Accounting\AiAssistantAction::class, 'ask']);
@@ -2490,6 +2717,7 @@ final class Routes
             $g->get   ('/periods',                    [AccountingPeriodAction::class, 'list']);
             $g->post  ('/periods',                    [AccountingPeriodAction::class, 'create']);
             $g->post  ('/periods/{id:[0-9]+}/status', [AccountingPeriodAction::class, 'status']);
+            $g->patch ('/periods/{id:[0-9]+}',        [AccountingPeriodAction::class, 'updateStart']);
             // Deník — specifické cesty PŘED generickým /journal/{id}
             $g->get   ('/journal',                            [JournalAction::class, 'list']);
             $g->post  ('/journal',                            [JournalAction::class, 'create']);
@@ -2638,6 +2866,12 @@ final class Routes
             $g->put   ('/expense-rules/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\ExpenseClassificationRuleAction::class, 'update']);
             $g->delete('/expense-rules/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\ExpenseClassificationRuleAction::class, 'delete']);
             $g->get   ('/purchase-invoices/{id:[0-9]+}/expense-suggestions', [\MyInvoice\Action\Accounting\ExpenseClassificationRuleAction::class, 'suggestions']);
+            // Pravidla výnosů (2217): účet položky vydané faktury podle kódu, textu nebo sazby.
+            $g->get   ('/revenue-rules',                            [\MyInvoice\Action\Accounting\RevenueClassificationRuleAction::class, 'list']);
+            $g->get   ('/revenue-rules/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\RevenueClassificationRuleAction::class, 'get']);
+            $g->post  ('/revenue-rules',                            [\MyInvoice\Action\Accounting\RevenueClassificationRuleAction::class, 'create']);
+            $g->put   ('/revenue-rules/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\RevenueClassificationRuleAction::class, 'update']);
+            $g->delete('/revenue-rules/{id:[0-9]+}',                [\MyInvoice\Action\Accounting\RevenueClassificationRuleAction::class, 'delete']);
             // Karty evidence drobného majetku (§DM krok 3) — §28/5 ZoÚ a ČÚS 013 chtějí
             // evidenci majetku účtovaného rovnou do spotřeby. Karta NIC neúčtuje; náklad
             // na 501 vzniká už zaúčtováním dokladu podle expense_kind (1092).
@@ -2659,6 +2893,8 @@ final class Routes
             $g->get('/reports/trial-balance/export',              [TrialBalanceAction::class, 'export']);
             $g->get('/reports/account-statement/{accountId:[0-9]+}',        [AccountStatementAction::class, 'get']);
             $g->get('/reports/account-statement/{accountId:[0-9]+}/export', [AccountStatementAction::class, 'export']);
+            $g->get('/reports/open-items-list',                   [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'listing']);
+            $g->get('/reports/open-items-list/export',            [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'exportListing']);
             // Otevřené položky a párování řádků deníku (okruhy) na libovolném účtu.
             $g->post  ('/open-items/pairings/delete',                         [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'delete']);
             $g->get   ('/open-items/pairings/{id:[0-9]+}',                    [\MyInvoice\Action\Accounting\Reports\OpenItemsAction::class, 'pairing']);
@@ -2691,6 +2927,16 @@ final class Routes
             $g->post  ('/reports/statement-overrides/suggestions', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'suggestFromUpload']);
             $g->put   ('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'update']);
             $g->delete('/reports/statement-overrides/{id:[0-9]+}', [\MyInvoice\Action\Accounting\Reports\StatementOverrideAction::class, 'delete']);
+            $g->get('/joint-allocations/keys',                    [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'keys']);
+            $g->post('/joint-allocations/keys',                   [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'createKey']);
+            $g->post('/joint-allocations/keys/{id:[0-9]+}/versions', [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'createVersion']);
+            $g->get('/joint-allocations/candidates',              [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'candidates']);
+            $g->get('/joint-allocations/revenue-proposal',        [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'revenueProposal']);
+            $g->post('/joint-allocations/preview',                [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'preview']);
+            $g->post('/joint-allocations/apply',                  [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'apply']);
+            $g->get('/joint-allocations/batches',                 [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'batches']);
+            $g->get('/joint-allocations/batches/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'detail']);
+            $g->post('/joint-allocations/batches/{id:[0-9]+}/cancel', [\MyInvoice\Action\Accounting\JointAllocationAction::class, 'cancel']);
             $g->get('/reports/dimension-profit',                  \MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class);
             $g->get('/reports/dimension-analytics',               [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'analytics']);
             $g->get('/reports/dimension-analytics/export',        [\MyInvoice\Action\Accounting\Reports\DimensionProfitAction::class, 'exportAnalytics']);
@@ -2699,6 +2945,16 @@ final class Routes
             $g->get('/reports/dimension-cash-flow/export',        [\MyInvoice\Action\Accounting\Reports\DimensionCashFlowAction::class, 'export']);
             $g->get('/reports/saldo',                             [SaldoAction::class, 'get']);
             $g->get('/reports/saldo/export',                      [SaldoAction::class, 'export']);
+            // Vyrovnání položky saldokonta zápisem v deníku (rozpad řádku na doklady).
+            $g->get   ('/saldo-settlements/candidates',          [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'candidates']);
+            $g->get   ('/saldo-settlements/residual-lines',      [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'residualLines']);
+            $g->get   ('/saldo-settlements/suggestions',         [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'suggestions']);
+            $g->post  ('/saldo-settlements',                     [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'create']);
+            $g->post  ('/saldo-settlements/other-item',          [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'createOtherItem']);
+            $g->delete('/saldo-settlements/{id:[0-9]+}',         [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'delete']);
+            $g->get   ('/saldo-settlements/advance-candidates',  [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'advanceCandidates']);
+            $g->post  ('/saldo-settlements/advance-deductions',  [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'createAdvanceDeductions']);
+            $g->delete('/saldo-settlements/advance-deductions/{doc_type:invoice|purchase_invoice}/{id:[0-9]+}', [\MyInvoice\Action\Accounting\JournalSettlementAction::class, 'deleteAdvanceDeduction']);
             // Kontrola souběhu se starým účetním programem (měsíční rekonciliace K1, K5–K13).
             $g->get   ('/parallel-run/sources',                            [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'sources']);
             $g->get   ('/parallel-run/backups',                            [\MyInvoice\Action\Accounting\ParallelRunAction::class, 'backups']);
@@ -2717,6 +2973,7 @@ final class Routes
             // k rozvahovému dni + doložení + prostor pro podpis (REAL_data_followup_UX.md T2).
             $g->get('/reports/balance-inventory',                 [BalanceInventoryAction::class, 'get']);
             $g->get('/reports/balance-inventory/export',          [BalanceInventoryAction::class, 'export']);
+            $g->get('/reports/balance-inventory/account/{accountId:[0-9]+}', [BalanceInventoryAction::class, 'account']);
             // § 18 odst. 2 ZoÚ — přehled o peněžních tocích a o změnách vlastního kapitálu.
             // U velké a střední ÚJ (a u každé s povinným auditem) jsou povinnou součástí
             // závěrky stejně jako rozvaha a výsledovka.
@@ -2808,6 +3065,8 @@ final class Routes
             $g->delete('/assets/{id:[0-9]+}/improvements/{impId:[0-9]+}', [AssetLifecycleAction::class, 'deleteImprovement']);
             $g->post  ('/assets/{id:[0-9]+}/dispose',               [AssetLifecycleAction::class, 'dispose']);
             $g->post  ('/assets/{id:[0-9]+}/dispose/revert',        [AssetLifecycleAction::class, 'revertDisposal']);
+            $g->post('/assets/{id:[0-9]+}/depreciation/revision/preview', [DepreciationAction::class, 'previewRevision']);
+            $g->post('/assets/{id:[0-9]+}/depreciation/revision', [DepreciationAction::class, 'revise']);
             $g->post  ('/assets/{id:[0-9]+}/depreciation/pause',    [DepreciationAction::class, 'pause']);
             $g->delete('/assets/{id:[0-9]+}/depreciation/pause/{year:[0-9]+}', [DepreciationAction::class, 'unpause']);
             $g->post  ('/assets/{id:[0-9]+}/depreciation/tax-override', [DepreciationAction::class, 'overrideTax']);
@@ -2816,6 +3075,60 @@ final class Routes
             // celá rodina closing/close/open-next/revert běží na právu accounting.periods.close
             // (RoutePermissionMap + Action requireClose), /status na accounting.periods.manage.
             $g->get   ('/periods/{id:[0-9]+}/closing',                          [ClosingAction::class, 'state']);
+            $g->get('/nonprofit-capital', [\MyInvoice\Action\Nonprofit\CapitalAction::class, 'read']);
+            $g->get('/periods/{id:[0-9]+}/nonprofit-capital/choices', [\MyInvoice\Action\Nonprofit\CapitalAction::class, 'choices']);
+            $g->post('/nonprofit-capital/preview', [\MyInvoice\Action\Nonprofit\CapitalAction::class, 'preview']);
+            $g->post('/nonprofit-capital/confirm', [\MyInvoice\Action\Nonprofit\CapitalAction::class, 'confirm']);
+            $g->get('/nonprofit-funding', [\MyInvoice\Action\Nonprofit\FundingAction::class, 'read']);
+            $g->get('/periods/{id:[0-9]+}/nonprofit-funding/choices', [\MyInvoice\Action\Nonprofit\FundingAction::class, 'choices']);
+            $g->post('/periods/{id:[0-9]+}/nonprofit-funding/preview', [\MyInvoice\Action\Nonprofit\FundingAction::class, 'preview']);
+            $g->post('/periods/{id:[0-9]+}/nonprofit-funding/confirm', [\MyInvoice\Action\Nonprofit\FundingAction::class, 'confirm']);
+            $g->get('/periods/{id:[0-9]+}/nonprofit-legal-profile', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'profile']);
+            $g->post('/periods/{id:[0-9]+}/nonprofit-legal-profile/confirm', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'confirmProfile']);
+            $g->post('/periods/{id:[0-9]+}/nonprofit-legal-profile/readiness', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'readiness']);
+            $g->get('/nonprofit-dppo/acceptance', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'acceptance']);
+            $g->post('/nonprofit-dppo/acceptance/{operation:accept|revoke}', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'changeAcceptance']);
+            $g->get('/nonprofit-membership/members', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'members']);
+            $g->get('/nonprofit-membership/members/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'member']);
+            $g->get('/nonprofit-membership/claims/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'claim']);
+            $g->get('/periods/{id:[0-9]+}/nonprofit-membership/reconciliation', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'reconciliation']);
+            $g->post('/nonprofit-membership/members', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'createMember']);
+            $g->post('/nonprofit-membership/members/{id:[0-9]+}/revisions', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'appendRevision']);
+            $g->post('/nonprofit-membership/charges/preview', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'preview']);
+            $g->post('/nonprofit-membership/charges/confirm', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'confirm']);
+            $g->get('/nonprofit-tax-savings', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'savings']);
+            $g->post('/nonprofit-tax-savings/sources/{id:[0-9]+}/preview', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'previewUse']);
+            $g->post('/nonprofit-tax-savings/sources/{id:[0-9]+}/confirm', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'confirmUse']);
+            $g->post('/nonprofit-tax-savings/sources/{id:[0-9]+}/events/{event:[0-9]+}/reverse-preview', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'previewReverse']);
+            $g->post('/nonprofit-tax-savings/sources/{id:[0-9]+}/events/{event:[0-9]+}/reverse-confirm', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'confirmReverse']);
+            $g->get('/periods/{id:[0-9]+}/nonprofit-tax', [\MyInvoice\Action\Accounting\Closing\NonprofitTaxAssessmentAction::class, 'read']);
+            $g->get('/periods/{id:[0-9]+}/nonprofit-tax/history', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'history']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/source', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'source']);
+            $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/draft', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'open']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/draft', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'currentDraft']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'getDraft']);
+            $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/reset', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'reset']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/source', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'draftSource']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/{collection:decisions|activities|funding-pools|funding-links}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'collection']);
+            $g->patch('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/{collection:decisions|activities|funding-pools|funding-links}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'patch']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/funding-pools/{poolKind:revenue|expense}/{anchor}/members', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'members']);
+            $g->patch('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/funding-pools/{poolKind:revenue|expense}/{anchor}/members', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'patchMembers']);
+            $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/preview', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'preview']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/previews/{token:[a-f0-9]{64}}/{kind:decision|result|coverage|usage|funding_reference|funding_history}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'previewPage']);
+            $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/confirm', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'confirm']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/summary', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'periodSummary']);
+            $g->get('/periods/{periodId:[0-9]+}/nonprofit-tax/drafts/{draftId:[0-9]+}/source-summary', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'draftSourceSummary']);
+            $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/assessments/{assessmentId:[0-9]+}/withdraw', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'withdraw']);
+            $g->post('/periods/{periodId:[0-9]+}/nonprofit-tax/assessments/{assessmentId:[0-9]+}/convert', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'convertLegacy']);
+            $g->post('/periods/{id:[0-9]+}/nonprofit-tax/preview', [\MyInvoice\Action\Accounting\Closing\NonprofitTaxAssessmentAction::class, 'preview']);
+            $g->post('/periods/{id:[0-9]+}/nonprofit-tax/confirm', [\MyInvoice\Action\Accounting\Closing\NonprofitTaxAssessmentAction::class, 'confirm']);
+            $g->post('/periods/{id:[0-9]+}/nonprofit-tax/withdraw', [\MyInvoice\Action\Accounting\Closing\NonprofitTaxAssessmentAction::class, 'withdraw']);
+            $g->get('/nonprofit-tax-assessments/{assessmentId:[0-9]+}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'summary']);
+            $g->get('/nonprofit-tax-assessments/{assessmentId:[0-9]+}/{kind:source|decision|result|coverage|usage}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'frozenPage']);
+            $g->get('/nonprofit-tax-assessments/{assessmentId:[0-9]+}/export', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'export']);
+            $g->get('/nonprofit-tax-assessments/{assessmentId:[0-9]+}/summary.{format:pdf|xlsx}', [\MyInvoice\Action\Accounting\Closing\J6NonprofitTaxAction::class, 'document']);
+            $g->get('/nonprofit-tax-assessments/{assessmentId:[0-9]+}/export.pdf', [\MyInvoice\Action\Accounting\Closing\NonprofitTaxAssessmentAction::class, 'exportPdf']);
+            $g->get('/nonprofit-tax-assessments/{assessmentId:[0-9]+}/export.xlsx', [\MyInvoice\Action\Accounting\Closing\NonprofitTaxAssessmentAction::class, 'exportXlsx']);
             $g->get   ('/periods/{id:[0-9]+}/monthly-check',                    [ClosingAction::class, 'monthlyCheck']);
             // CSV export nálezů jedné kontroly — BEZ stropu (náhled je capnutý na 50).
             // Sdílí ho uzávěrkový průvodce i měsíční kontrola, protože obě stavějí
@@ -2826,11 +3139,18 @@ final class Routes
             $g->post  ('/periods/{id:[0-9]+}/closing/start',                    [ClosingAction::class, 'start']);
             $g->post  ('/periods/{id:[0-9]+}/closing/abort',                    [ClosingAction::class, 'abort']);
             $g->get   ('/periods/{id:[0-9]+}/closing/fx-preview',               [ClosingAction::class, 'fxPreview']);
+            $g->post  ('/periods/{id:[0-9]+}/closing/fx-preview',               [ClosingAction::class, 'fxCasePreview']);
             $g->get   ('/periods/{id:[0-9]+}/closing/provisions-preview',       [ClosingAction::class, 'provisionsPreview']);
+            $g->get('/periods/{id:[0-9]+}/closing/asset-reserve/workspace', [ClosingAction::class, 'assetReserveWorkspace']);
+            $g->get('/periods/{id:[0-9]+}/closing/legal-provisions/workspace', [ClosingAction::class, 'legalProvisionsWorkspace']);
+            $g->post('/periods/{id:[0-9]+}/closing/asset-reserve/preview', [ClosingAction::class, 'assetReservePreview']);
+            $g->post('/periods/{id:[0-9]+}/closing/asset-reserve/correction-preview', [ClosingAction::class, 'assetReserveCorrectionPreview']);
+            $g->post('/periods/{id:[0-9]+}/closing/asset-reserve/correct', [ClosingAction::class, 'assetReserveCorrect']);
             $g->get   ('/periods/{id:[0-9]+}/closing/estimates-suggest',        [ClosingAction::class, 'estimatesSuggest']);
             $g->get   ('/periods/{id:[0-9]+}/closing/income-tax-preview',       [ClosingAction::class, 'incomeTaxPreview']);
             // ČÚS 003 — odložená daň (přechodné rozdíly, 592/481).
             $g->get   ('/periods/{id:[0-9]+}/closing/deferred-tax-preview',     [ClosingAction::class, 'deferredTaxPreview']);
+            $g->post  ('/periods/{id:[0-9]+}/closing/deferred-tax-504-preview', [ClosingAction::class, 'deferredTax504Preview']);
             $g->get   ('/periods/{id:[0-9]+}/closing/small-asset-accrual-preview', [ClosingAction::class, 'smallAssetAccrualPreview']);
             $g->get   ('/periods/{id:[0-9]+}/closing/prepaid-expense-accrual-preview', [ClosingAction::class, 'prepaidExpenseAccrualPreview']);
             $g->get   ('/periods/{id:[0-9]+}/closing/deferred-revenue-accrual-preview', [ClosingAction::class, 'deferredRevenueAccrualPreview']);
@@ -2869,7 +3189,18 @@ final class Routes
             $g->get   ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'list']);
             $g->get   ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'list']);
             $g->post  ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'create']);
-            $g->get   ('/other-items/schedules',               [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'list']);
+            $g->get   ('/other-items/bank-candidates',         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'bankMatchCandidates']);
+            $g->get   ('/other-items/settings',                [\MyInvoice\Action\Accounting\OtherItemSettingsAction::class, 'get']);
+            $g->put   ('/other-items/settings',                [\MyInvoice\Action\Accounting\OtherItemSettingsAction::class, 'update']);
+            $g->get   ('/other-items/kinds',                   [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'list']);
+            $g->post  ('/other-items/kinds',                   [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'create']);
+            $g->put   ('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'update']);
+            $g->put   ('/other-items/kinds/builtin/{side:receivable|payable}/{code:[a-z]+}', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'updateBuiltin']);
+            $g->delete('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'delete']);
+            $g->get   ('/other-items/kinds/{id:[0-9]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'postingProfiles']);
+            $g->put   ('/other-items/kinds/{id:[0-9]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'savePostingProfiles']);
+            $g->put   ('/other-items/kinds/builtin/{side:receivable|payable}/{code:[a-z]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'saveBuiltinPostingProfiles']);
+            $g->get   ('/other-items/schedules',              [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'list']);
             $g->get   ('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'get']);
             $g->delete('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'delete']);
             $g->post  ('/other-items/schedules/{id:[0-9]+}/generate', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'generate']);
@@ -2877,16 +3208,30 @@ final class Routes
             $g->post  ('/other-items/{item_id:[0-9]+}/schedule', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'create']);
             $g->get   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'installments']);
             $g->put   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'setInstallments']);
+            $g->post  ('/other-items/{item_id:[0-9]+}/installments/plan', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'planInstallments']);
             $g->get   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'get']);
             $g->put   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'update']);
             $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);
+            $g->put   ('/other-items/{id:[0-9]+}/counterparty-account', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateCounterpartyAccount']);
             $g->post  ('/other-items/{id:[0-9]+}/post',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'post']);
             $g->post  ('/other-items/{id:[0-9]+}/reverse',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'reverse']);
             $g->post  ('/other-items/{id:[0-9]+}/repost',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'repost']);
+            $g->put   ('/other-items/{id:[0-9]+}/posting-overrides', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'setPostingOverrides']);
             $g->get   ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocations']);
             $g->get   ('/other-items/{id:[0-9]+}/payment-candidates', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'paymentCandidates']);
             $g->post  ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocate']);
+            $g->post  ('/other-items/{id:[0-9]+}/match-bank-transaction', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'matchBankTransaction']);
             $g->delete('/other-items/{id:[0-9]+}/allocations/{allocation_id:[0-9]+}', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'unallocate']);
+            // Interní doklady (migrace 2193). Specifické cesty PŘED generickým /internal-documents/{id}.
+            $g->get   ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'list']);
+            $g->post  ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'create']);
+            $g->get   ('/internal-documents/export',                [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'export']);
+            $g->post  ('/internal-documents/from-entry/{id:[0-9]+}', [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'fromEntry']);
+            $g->get   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'get']);
+            $g->put   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'update']);
+            $g->delete('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'delete']);
+            $g->post  ('/internal-documents/{id:[0-9]+}/post',      [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'post']);
+            $g->post  ('/internal-documents/{id:[0-9]+}/reverse',   [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'reverse']);
             $g->post  ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'create']);
             $g->get   ('/cash-documents/unpaid',               [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'unpaid']);
             $g->get   ('/cash-documents/rule-presets',         [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'rulePresets']);
@@ -2901,6 +3246,8 @@ final class Routes
             // Automatizace (mini-epic) — pravidla účtování + fronta návrhů.
             $g->get   ('/bank-accounts',                              [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'list']);
             $g->patch ('/bank-accounts/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'update']);
+            $g->get   ('/bank-accounts/{id:[0-9]+}/dimensions',       [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getBankAccount']);
+            $g->put   ('/bank-accounts/{id:[0-9]+}/dimensions',       [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'saveBankAccount']);
             $g->get   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'settings']);
             $g->put   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'saveSettings']);
             $g->get   ('/gopay/pending',                              [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'pending']);
@@ -2949,6 +3296,22 @@ final class Routes
         $app->get ('/api/dashboard/purchase-summary', PurchaseSummaryAction::class);
 
         // Admin (M6)
+        // Technická správa má vlastní úzké akce; neotevírá obecnou administraci.
+        $app->get('/api/instance-admin/status', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'status']);
+        $app->get('/api/instance-admin/suppliers', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'suppliers']);
+        $app->get('/api/instance-admin/suppliers/{id:[0-9]+}/status', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'supplierStatus']);
+        $app->get('/api/instance-admin/smtp', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'smtp']);
+        $app->put('/api/instance-admin/smtp', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'saveSmtp']);
+        $app->post('/api/instance-admin/smtp/test', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'testSmtp']);
+        $app->get('/api/instance-admin/suppliers/{id:[0-9]+}/smtp', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'supplierSmtp']);
+        $app->post('/api/instance-admin/suppliers/{id:[0-9]+}/smtp/test', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'testSmtp']);
+        $app->get('/api/instance-admin/audit', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'audit']);
+        $app->get('/api/admin/instance-smtp/targets', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'targets']);
+        $app->post('/api/admin/instance-smtp/targets', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'createTarget']);
+        $app->delete('/api/admin/instance-smtp/targets/{id:[0-9]+}', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'deleteTarget']);
+        $app->delete('/api/admin/instance-smtp/override', [\MyInvoice\Action\InstanceAdmin\InstanceAdminAction::class, 'resetSmtpOverride']);
+        $app->get('/api/admin/users/{id:[0-9]+}/technical-suppliers', [\MyInvoice\Action\Admin\TechnicalSupplierAccessAction::class, 'get']);
+        $app->put('/api/admin/users/{id:[0-9]+}/technical-suppliers', [\MyInvoice\Action\Admin\TechnicalSupplierAccessAction::class, 'put']);
         $app->get    ('/api/admin/activity-log',    ListActivityLogAction::class);
         $app->get    ('/api/admin/sent-emails',     ListSentEmailsAction::class);
         $app->get    ('/api/admin/smtp-log-analysis', \MyInvoice\Action\Admin\SmtpLogAnalysisAction::class);
@@ -3026,8 +3389,11 @@ final class Routes
         $app->get    ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'show']);
         $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/preview', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'preview']);
         $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/company-profile', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'fillCompanyProfile']);
+        $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/account-mapping', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'accountMapping']);
+        $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/partner-countries', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'partnerCountries']);
         $app->post   ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/run', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'run']);
         $app->get    ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/runs/{id:[0-9]+}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'result']);
+        $app->get    ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}/runs/{id:[0-9]+}/pdf', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'resultPdf']);
         $app->delete ('/api/admin/imports/stereo-nx/uploads/{token:[a-f0-9]{32}}', [\MyInvoice\Action\Admin\Import\StereoNxMigrationAction::class, 'delete']);
 
         $app->get    ('/api/admin/imports/abra-flexi/connection', [\MyInvoice\Action\Admin\Import\AbraMigrationAction::class, 'status']);
@@ -3305,6 +3671,9 @@ final class Routes
         $app->get    ('/api/admin/imports/{id:[0-9]+}/report',  \MyInvoice\Action\Admin\Import\ImportJobReportAction::class);
         $app->post   ('/api/admin/imports/{id:[0-9]+}/cancel',  CancelImportJobAction::class);
         $app->delete ('/api/admin/imports/{id:[0-9]+}',         \MyInvoice\Action\Admin\Import\DeleteImportJobAction::class);
+        $app->get('/api/admin/user-sessions', [\MyInvoice\Action\Admin\UserSessionAction::class, 'list']);
+        $app->post('/api/admin/user-sessions/terminate', [\MyInvoice\Action\Admin\UserSessionAction::class, 'terminateSelected']);
+        $app->delete('/api/admin/user-sessions/{id}', [\MyInvoice\Action\Admin\UserSessionAction::class, 'terminate']);
         $app->get    ('/api/admin/users',           [UserAdminAction::class, 'list']);
         $app->post   ('/api/admin/users',           [UserAdminAction::class, 'create']);
         $app->put    ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'update']);
@@ -3333,6 +3702,7 @@ final class Routes
         // Multi-supplier (M7)
         $app->get    ('/api/suppliers',                     [SettingsAction::class, 'listSuppliers']);
         $app->get    ('/api/suppliers/directory',           [SettingsAction::class, 'supplierDirectory']);
+        $app->get    ('/api/suppliers/carry-over',          \MyInvoice\Action\Settings\SupplierCarryOverAction::class);
         $app->post   ('/api/suppliers',                     [SettingsAction::class, 'createSupplier']);
         $app->get    ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'getSupplierById']);
         $app->put    ('/api/suppliers/{id:[0-9]+}',         [SettingsAction::class, 'updateSupplierById']);
@@ -3340,6 +3710,7 @@ final class Routes
 
         // Settings (M6) — aktuální supplier (z X-Supplier-Id)
         $app->get ('/api/settings/supplier',                [SettingsAction::class, 'getSupplier']);
+        $app->get ('/api/settings/tax-offices',             [\MyInvoice\Action\Settings\TaxOfficeCatalogAction::class, 'list']);
         $app->get    ('/api/settings/domains',                         [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'list']);
         $app->post   ('/api/settings/domains',                         [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'create']);
         $app->put    ('/api/settings/domains/{id:[0-9]+}',              [\MyInvoice\Action\Settings\SupplierDomainAction::class, 'update']);
@@ -3375,6 +3746,8 @@ final class Routes
         $app->get ('/api/settings/accounting-activation/jobs', [AccountingActivationAction::class, 'jobs']);
         $app->get ('/api/settings/accounting-activation/jobs/{id:[0-9]+}', [AccountingActivationAction::class, 'job']);
         $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/cancel', [AccountingActivationAction::class, 'cancel']);
+        $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/force-complete', [AccountingActivationAction::class, 'forceComplete']);
+        $app->get ('/api/settings/supplier/invoice-counter', [SupplierInvoiceCounterAction::class, 'peek']);
         $app->put ('/api/settings/supplier/invoice-counter', SupplierInvoiceCounterAction::class);
         $app->get('/api/settings/email-templates', [SupplierEmailTemplateAction::class, 'list']);
         $app->get('/api/settings/email-templates/{code:[a-z_]+}/{locale:cs|en}', [SupplierEmailTemplateAction::class, 'get']);
@@ -3424,6 +3797,8 @@ final class Routes
         $app->post   ('/api/settings/client/email-profiles/{id:[0-9]+}/folders', [EmailProfilesAction::class, 'browseImapFolders']);
         $app->put    ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'update']);
         $app->delete ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'delete']);
+        $app->get    ('/api/settings/client/invoice-defaults', [ClientInvoiceDefaultsSettingsAction::class, 'get']);
+        $app->put    ('/api/settings/client/invoice-defaults', [ClientInvoiceDefaultsSettingsAction::class, 'update']);
         $app->get    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'get']);
         $app->put    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'update']);
         $app->get    ('/api/settings/client/payment-qr', [ClientPaymentQrSettingsAction::class, 'get']);
@@ -3502,6 +3877,12 @@ final class Routes
         // přihlášení k ISDS není vázané na jedno konkrétní podání.
         $app->post   ('/api/submissions/outbox/mobile-key/start-batch',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyStartBatch']);
         $app->post   ('/api/submissions/outbox/mobile-key/confirm-batch', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'mobileKeyConfirmBatch']);
+        // Dávka ostatními způsoby přihlášení: jedno zadání údajů (heslo, SMS
+        // kód, potvrzení certifikátu) pro všechna vybraná podání.
+        $app->post   ('/api/submissions/outbox/password-send-batch',    [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'passwordSendBatch']);
+        $app->post   ('/api/submissions/outbox/certificate-send-batch', [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'certificateSendBatch']);
+        $app->post   ('/api/submissions/outbox/sms/start-batch',        [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'smsStartBatch']);
+        $app->post   ('/api/submissions/outbox/sms/complete-batch',     [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'smsCompleteBatch']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/resolve',  [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'resolve']);
         $app->post   ('/api/submissions/outbox/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Submission\SubmissionOutboxAction::class, 'cancel']);
         // Trvalé smazání ZRUŠENÉ zprávy, která nikdy neopustila aplikaci.
@@ -3561,6 +3942,7 @@ final class Routes
         $app->delete ('/api/submissions/inbox/{id:[0-9]+}/local-content', [\MyInvoice\Action\Submission\SubmissionInboxAction::class, 'purgeLocalContent']);
         // Kategorie zpráv, pravidla zařazení, ruční přeřazení a stav přečtení.
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/category', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'assign']);
+        $app->post   ('/api/submissions/inbox/read-all', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'markAllRead']);
         $app->post   ('/api/submissions/inbox/{id:[0-9]+}/read', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'markRead']);
         $app->get    ('/api/submissions/inbox/categories', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'overview']);
         $app->post   ('/api/submissions/inbox/categories', [\MyInvoice\Action\Submission\SubmissionInboxCategoryAction::class, 'createCategory']);
@@ -3594,8 +3976,10 @@ final class Routes
         $app->post   ('/api/settings/currencies',                     [SettingsAction::class, 'createCurrency']);
         $app->put    ('/api/settings/currencies/{id:[0-9]+}',         [SettingsAction::class, 'updateCurrency']);
         $app->delete ('/api/settings/currencies/{id:[0-9]+}',         [SettingsAction::class, 'deleteCurrency']);
+        // Společný návrat z OAuth přihlášení k externím službám (OAuthClientFlow).
+        $app->get    ('/api/oauth/callback', \MyInvoice\Action\OAuth\OAuthCallbackAction::class);
         $app->get    ('/api/settings/bank-connections', [BankConnectionAction::class, 'list']);
-        $app->get    ('/api/settings/bank-connections/{currencyId:[0-9]+}/kb-plus/onboarding', [KbPlusOnboardingAction::class, 'status']);
+        $app->get    ('/api/settings/bank-connections/{currencyId:[0-9]+}/kb-plus/onboarding',[KbPlusOnboardingAction::class, 'status']);
         $app->get    ('/api/settings/bank-connections/{currencyId:[0-9]+}/csas/onboarding', [\MyInvoice\Action\Settings\CsasOnboardingAction::class, 'status']);
         $app->post   ('/api/settings/bank-connections/{currencyId:[0-9]+}/csas/onboarding', [\MyInvoice\Action\Settings\CsasOnboardingAction::class, 'start']);
         $app->get    ('/api/settings/bank-connections/csas/oauth/callback', [\MyInvoice\Action\Settings\CsasOnboardingAction::class, 'callback']);
@@ -3651,6 +4035,7 @@ final class Routes
         // Tax optimizer — daňový optimalizátor (srovnání režimů + predikce limitů)
         $app->get ('/api/tax/analysis',  [\MyInvoice\Action\Tax\TaxAction::class, 'analysis']);
         $app->put ('/api/tax/profile',   [\MyInvoice\Action\Tax\TaxAction::class, 'updateProfile']);
+        $app->post('/api/tax/profile/family-reveal', [\MyInvoice\Action\Tax\TaxAction::class, 'revealFamily']);
 
         // Písemnosti k příjmům daňových nerezidentů — oznámení o příjmech
         // plynoucích do zahraničí (DPSHL1, § 38da) a hlášení o srážce zajištění
@@ -3779,6 +4164,14 @@ final class Routes
         $app->get   ('/api/logbook/cars/{id:[0-9]+}',     [\MyInvoice\Action\Logbook\CarsAction::class, 'get']);
         $app->put   ('/api/logbook/cars/{id:[0-9]+}',     [\MyInvoice\Action\Logbook\CarsAction::class, 'update']);
         $app->delete('/api/logbook/cars/{id:[0-9]+}',     [\MyInvoice\Action\Logbook\CarsAction::class, 'delete']);
+        $app->get   ('/api/logbook/odometer-sources',                                  [\MyInvoice\Action\Logbook\OdometerSourceAction::class, 'catalog']);
+        $app->get   ('/api/logbook/cars/{id:[0-9]+}/odometer-source',                  [\MyInvoice\Action\Logbook\OdometerSourceAction::class, 'status']);
+        $app->post  ('/api/logbook/cars/{id:[0-9]+}/odometer-source/connect',          [\MyInvoice\Action\Logbook\OdometerSourceAction::class, 'connect']);
+        $app->post  ('/api/logbook/cars/{id:[0-9]+}/odometer-source/connect/continue', [\MyInvoice\Action\Logbook\OdometerSourceAction::class, 'continue']);
+        $app->post  ('/api/logbook/cars/{id:[0-9]+}/odometer-source/attach',           [\MyInvoice\Action\Logbook\OdometerSourceAction::class, 'attach']);
+        $app->post  ('/api/logbook/cars/{id:[0-9]+}/odometer-source/vehicle',          [\MyInvoice\Action\Logbook\OdometerSourceAction::class, 'selectVehicle']);
+        $app->post  ('/api/logbook/cars/{id:[0-9]+}/odometer-source/sync',             [\MyInvoice\Action\Logbook\OdometerSourceAction::class, 'sync']);
+        $app->delete('/api/logbook/cars/{id:[0-9]+}/odometer-source',                  [\MyInvoice\Action\Logbook\OdometerSourceAction::class, 'disconnect']);
 
         // Platební karty firmy + platby kartou bez dokladu. Specifické cesty PŘED /{id}.
         $app->get   ('/api/payment-cards',                                          [\MyInvoice\Action\Bank\PaymentCardAction::class, 'list']);
@@ -3870,6 +4263,11 @@ final class Routes
         $app->post  ('/api/user/filters',                     [\MyInvoice\Action\UserSettings\SavedFilterAction::class, 'create']);
         $app->put   ('/api/user/filters/{id:[0-9]+}',         [\MyInvoice\Action\UserSettings\SavedFilterAction::class, 'update']);
         $app->delete('/api/user/filters/{id:[0-9]+}',         [\MyInvoice\Action\UserSettings\SavedFilterAction::class, 'delete']);
+
+        $app->get   ('/api/user/favorites',                   [\MyInvoice\Action\UserSettings\FavoriteAction::class, 'list']);
+        $app->post  ('/api/user/favorites',                   [\MyInvoice\Action\UserSettings\FavoriteAction::class, 'create']);
+        $app->put   ('/api/user/favorites/{id:[0-9]+}',       [\MyInvoice\Action\UserSettings\FavoriteAction::class, 'update']);
+        $app->delete('/api/user/favorites/{id:[0-9]+}',       [\MyInvoice\Action\UserSettings\FavoriteAction::class, 'delete']);
 
         $app->get   ('/api/user/preferences',                 [\MyInvoice\Action\UserSettings\UserPreferenceAction::class, 'list']);
         $app->put   ('/api/user/preferences/{key:[a-z0-9_.-]+}', [\MyInvoice\Action\UserSettings\UserPreferenceAction::class, 'put']);
@@ -4011,6 +4409,17 @@ final class Routes
             $g->get   ('/opening-import/jobs/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'get']);
             $g->get   ('/opening-import/jobs/{id:[0-9]+}/items', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'items']);
             $g->post  ('/opening-import/jobs/{id:[0-9]+}/{operation:retry|cancel}', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'change']);
+
+            $g->get   ('/history-import',               [\MyInvoice\Action\Stock\StockHistoryImportAction::class, 'status']);
+            $g->post  ('/history-import/sources',       [\MyInvoice\Action\Stock\StockHistoryImportAction::class, 'upload']);
+            $g->get   ('/history-import/sources/{id:[0-9]+}/sample', [\MyInvoice\Action\Stock\StockHistoryImportAction::class, 'sample']);
+            $g->post  ('/history-import/preview',       [\MyInvoice\Action\Stock\StockHistoryImportAction::class, 'preview']);
+            $g->post  ('/history-import/{id:[0-9]+}/apply', [\MyInvoice\Action\Stock\StockHistoryImportAction::class, 'apply']);
+            $g->post  ('/history-import/{id:[0-9]+}/rollback', [\MyInvoice\Action\Stock\StockHistoryImportAction::class, 'rollback']);
+            $g->get   ('/history-import/jobs/{id:[0-9]+}', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'get']);
+            $g->get   ('/history-import/jobs/{id:[0-9]+}/items', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'items']);
+            $g->get   ('/history-import/jobs/{id:[0-9]+}/end-state', [\MyInvoice\Action\Stock\StockHistoryImportAction::class, 'endState']);
+            $g->post  ('/history-import/jobs/{id:[0-9]+}/{operation:retry|cancel}', [\MyInvoice\Action\Eshop\CatalogJobAction::class, 'change']);
 
             $g->get   ('/fulfillment/tasks',                                      [\MyInvoice\Action\Stock\FulfillmentAction::class, 'list']);
             $g->post  ('/fulfillment/tasks',                                      [\MyInvoice\Action\Stock\FulfillmentAction::class, 'create']);
@@ -4250,10 +4659,10 @@ final class Routes
             $g->get('/cash-journal',                 [\MyInvoice\Action\TaxEvidence\CashJournalAction::class, 'get']);
             $g->get('/cash-journal/export',          [\MyInvoice\Action\TaxEvidence\CashJournalAction::class, 'export']);
             // Poznámky k pohybům peněžního deníku (migrace 1993); přílohy přes document_links.
-            $g->get   ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay}/{id:[0-9]+}',                     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'list']);
-            $g->post  ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay}/{id:[0-9]+}',                     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'create']);
-            $g->patch ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay}/{id:[0-9]+}/{noteId:[0-9]+}',     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'update']);
-            $g->delete('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay}/{id:[0-9]+}/{noteId:[0-9]+}',     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'delete']);
+            $g->get   ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay|credit_note_offset}/{id:[0-9]+}',                     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'list']);
+            $g->post  ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay|credit_note_offset}/{id:[0-9]+}',                     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'create']);
+            $g->patch ('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay|credit_note_offset}/{id:[0-9]+}/{noteId:[0-9]+}',     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'update']);
+            $g->delete('/cash-journal/notes/{source:cash|bank|invoice_payment|purchase_invoice|gopay|credit_note_offset}/{id:[0-9]+}/{noteId:[0-9]+}',     [\MyInvoice\Action\TaxEvidence\CashJournalNoteAction::class, 'delete']);
             $g->get('/closing/{year:[0-9]+}',        [\MyInvoice\Action\TaxEvidence\AnnualClosingAction::class, 'get']);
             $g->put('/closing/{year:[0-9]+}',        [\MyInvoice\Action\TaxEvidence\AnnualClosingAction::class, 'save']);
             $g->post('/closing/{year:[0-9]+}/finalize', [\MyInvoice\Action\TaxEvidence\AnnualClosingAction::class, 'finalize']);

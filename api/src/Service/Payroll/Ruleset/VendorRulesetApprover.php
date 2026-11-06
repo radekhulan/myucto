@@ -77,6 +77,13 @@ final class VendorRulesetApprover
      */
     public const APPROVED_ON_2025 = '2026-08-28';
 
+    /**
+     * Datum podpisu ročníku 2027. Vlastní konstanta ze stejného důvodu jako
+     * {@see APPROVED_ON_2025}: zdroje pro rok 2027 se stahovaly až po
+     * {@see APPROVED_ON}.
+     */
+    public const APPROVED_ON_2027 = '2026-10-28';
+
     private static ?string $configured = null;
 
     /**

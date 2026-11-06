@@ -79,8 +79,13 @@ final class PohodaPayrollPeople
     /** Ošetřovné osamělého pracovníka (číselník PAMICA „Ošetřovné - osamělý pracovník"). */
     private const LONE_CARER_ABSENCES = ['N06', 'H06'];
 
-    /** Čísla složek hodinové a úkolové mzdy: takový vztah měsíční mzdu nepobírá. */
-    private const HOURLY_WAGE_CODES = ['C01', 'C02', 'C08', 'U01', 'U02', 'U03', 'U04', 'U05'];
+    /**
+     * Čísla složek hodinové a úkolové mzdy: takový vztah měsíční mzdu nepobírá. Patří sem
+     * i dohoda v hodinové sazbě (D02, D04): `KcZaklM` nese součin hodin a sazby za měsíc,
+     * a kdyby se z něj stala sjednaná měsíční mzda, MyÚčto by ji opakovalo a při skončení
+     * v průběhu měsíce krátilo podle kalendáře, který dohoda nemá.
+     */
+    private const HOURLY_WAGE_CODES = ['C01', 'C02', 'C08', 'D02', 'D04', 'U01', 'U02', 'U03', 'U04', 'U05'];
 
     /**
      * Základní měsíční mzda. `M09` je táž mzda při zkráceném úvazku, ne plnění navíc:
@@ -214,6 +219,9 @@ final class PohodaPayrollPeople
                 // Stanovená denní doba zaměstnavatele v měsíci (`DUvazek`, pětidenní týden);
                 // z ní a týdenního úvazku vychází podíl úvazku toho měsíce.
                 'stated_daily' => PohodaXml::num($mz, 'DUvazek'),
+                // Příspěvek zaměstnavatele na penzijní a životní produkty (`KcPripoj`). PAMICA
+                // ho vede ve mzdě, ne jako položku; měsíce MyÚčta z něj dostanou předpis.
+                'pension' => PohodaXml::num($mz, 'KcPripoj'),
             ];
             $person = PohodaXml::text($mz, 'RefZAM');
             $payslipPerson[PohodaXml::text($mz, 'ID')] = $person;
@@ -315,7 +323,7 @@ final class PohodaPayrollPeople
                     continue;
                 }
                 $catalog = $byId['sMZneprit'][PohodaXml::text($row, 'RefSlozka')] ?? [];
-                $number = PohodaXml::text($catalog, 'Cislo');
+                $number = PohodaPayrollCatalog::effectiveAbsenceNumber($catalog, $row);
                 $childbirth = self::realDate(PohodaXml::date($row, 'DatPorod'));
                 $type = self::absenceType($number, $childbirth);
                 if ($type === null) {
@@ -337,6 +345,12 @@ final class PohodaPayrollPeople
                     'to' => $dates['to'],
                     'childbirth' => $childbirth,
                     'hours' => PohodaXml::num($row, 'HodPrac'),
+                    // Hodiny prvního a posledního dne (`Hodnota1`, `Hodnota2`): neomluvená
+                    // absence nebo neplacené volno na část směny. Platí jen pro neoříznutý den.
+                    'first_day_hours' => $dates['from'] === self::realDate(PohodaXml::date($row, 'DatZac'))
+                        ? PohodaXml::num($row, 'Hodnota1') : null,
+                    'last_day_hours' => $dates['to'] === self::realDate(PohodaXml::date($row, 'DatKon')) && $dates['from'] !== $dates['to']
+                        ? PohodaXml::num($row, 'Hodnota2') : null,
                     'payslip_month' => $payslip['month'],
                     // Osamělý zaměstnanec má podpůrčí dobu ošetřovného 16 dnů místo 9
                     // (§ 40 odst. 1 písm. b) zák. č. 187/2006 Sb.); ELDP z ní odvozuje vyloučené dny.
@@ -352,6 +366,11 @@ final class PohodaPayrollPeople
             // Sběrný kód (O01) nese víc různých plnění, rozlišuje je až název položky číselníku.
             $catalog = $byId['sMZslozky'][PohodaXml::text($item, 'RefSlozka')] ?? [];
             $code = strtoupper(trim(PohodaXml::text($catalog, 'Cislo')));
+            if (isset($relationMonths[$payslip['relation']][$payslip['month']])) {
+                // Měsíc s jakýmkoli zúčtovaným plněním; jen v takovém měsíci chybějící
+                // základní mzda znamená, že měsíční mzda skončila ({@see self::monthlyWages()}).
+                $relationMonths[$payslip['relation']][$payslip['month']]['paid'] = true;
+            }
             if (in_array($code, self::HOURLY_WAGE_CODES, true)) {
                 $hourlyWage[$payslip['relation']] = true;
                 if (isset($relationMonths[$payslip['relation']][$payslip['month']])) {
@@ -448,6 +467,7 @@ final class PohodaPayrollPeople
                 'transfer_start' => (string) $transferStart,
                 'social_participation' => $socialParticipation[$relationId] ?? false,
                 'monthly_wages' => self::monthlyWages($relationMonths[$relationId] ?? [], $year, $start, $end),
+                'pension_contribution' => self::pensionContribution($relationMonths[$relationId] ?? [], $year),
                 'hourly_wage' => $hourlyWage[$relationId] ?? false,
                 'hourly_wage_from' => self::hourlyWageFrom($relationMonths[$relationId] ?? [], $year),
                 // Týdenní úvazek po měsících mezd (`MZ.TUvazek`); u dohody o provedení práce žádný.
@@ -661,6 +681,36 @@ final class PohodaPayrollPeople
     }
 
     /**
+     * Příspěvek zaměstnavatele na penzijní a životní produkty, který vztah dostává
+     * v posledním zpracovaném měsíci roku: částka a první měsíc souvislé řady téže
+     * částky. Měsíc bez příspěvku nebo s jinou částkou řadu přeruší; vztah, který
+     * v posledním měsíci příspěvek nemá, nedostane nic (příspěvek skončil).
+     *
+     * @param array<int,array<string,mixed>> $months měsíc => údaje mzdy vztahu
+     * @return array{from:string,amount:float}|null
+     */
+    private static function pensionContribution(array $months, int $year): ?array
+    {
+        krsort($months);
+        $amount = null;
+        $from = null;
+        foreach ($months as $month => $data) {
+            $value = round((float) ($data['pension'] ?? 0), 2);
+            if ($amount === null) {
+                if ($value <= 0) {
+                    return null;
+                }
+                $amount = $value;
+            } elseif (abs($value - $amount) >= 0.005) {
+                break;
+            }
+            $from = sprintf('%04d-%02d', $year, (int) $month);
+        }
+
+        return $amount === null || $from === null ? null : ['from' => $from, 'amount' => $amount];
+    }
+
+    /**
      * První měsíc s hodinovou nebo úkolovou mzdou, když mu v roce předchází měsíc s měsíční
      * mzdou (změna formy odměňování). Vztah hodinový od prvního převáděného měsíce vrací null.
      *
@@ -780,6 +830,7 @@ final class PohodaPayrollPeople
             $monthEnd = (new \DateTimeImmutable(sprintf('%04d-%02d-01', $year, $month)))->modify('last day of this month')->format('Y-m-d');
             if ((string) $row['to'] > $monthEnd && isset($resumed[$row['type'] . '|' . $row['to'] . '|' . ($month + 1)])) {
                 $row['to'] = $monthEnd;
+                $row['last_day_hours'] = null;
             }
             $out[] = $row;
         }
@@ -1152,15 +1203,51 @@ final class PohodaPayrollPeople
      * Bez sazby se bere `KcZaklM` jen z měsíce odpracovaného celý; vztah bez takového
      * měsíce dostane nejvyšší hodnotu roku, aby mzda nechyběla úplně.
      *
+     * Když vztah na konci roku dostává zúčtované plnění mimo hrubou mzdu, ale už ne základní
+     * mzdu (jednatel přešel z mzdy `M01` na odměnu za výkon funkce `O01`), končí řada verzí nulovou částkou
+     * od prvního takového měsíce. Zapisovač podle ní ukončí předpis měsíční mzdy, jinak by se
+     * v měsících MyÚčta platila mzda i odměna. Měsíc bez jakéhokoli plnění (rodičovská, celý
+     * měsíc nemoc) o skončení mzdy nic neříká a přeskočí se.
+     *
      * @param array<int,array<string,float|bool>> $months
      * @return list<array{from:string,amount:float,prorated:bool}>
      */
     private static function monthlyWages(array $months, int $year, ?string $start, ?string $end): array
     {
         ksort($months);
+        // Měsíce s hodinovou nebo úkolovou mzdou (i dohoda v hodinové sazbě) sjednanou měsíční
+        // mzdu nemají: `KcZaklM` je v nich hodiny × sazba a z každého měsíce by vznikla nová
+        // verze podmínek s jinou „měsíční mzdou".
+        $months = array_filter($months, static fn (array $data): bool => ($data['hourly'] ?? false) !== true);
         if ($months === []) {
             return [];
         }
+        $runs = self::wageRuns($months, $year, $start, $end);
+        $endedFrom = null;
+        foreach (array_reverse($months, true) as $month => $data) {
+            $base = (float) ($data['rate'] ?? 0) > 0 || (float) ($data['wage'] ?? 0) > 0;
+            if ($base) {
+                break;
+            }
+            // Plnění bez hrubé mzdy (`KcHrubaM`): odměna jednatele. Měsíc s hrubou mzdou bez
+            // základní (celý měsíc dovolená a k tomu prémie) skončení mzdy nedokládá.
+            if (($data['paid'] ?? false) === true && (float) ($data['gross'] ?? 0) <= 0) {
+                $endedFrom = sprintf('%04d-%02d-01', $year, (int) $month);
+            }
+        }
+        if ($endedFrom !== null && ($runs === [] || $runs[array_key_last($runs)]['from'] < $endedFrom)) {
+            $runs[] = ['from' => $endedFrom, 'amount' => 0.0, 'prorated' => false];
+        }
+
+        return $runs;
+    }
+
+    /**
+     * @param array<int,array<string,float|bool>> $months
+     * @return list<array{from:string,amount:float,prorated:bool}>
+     */
+    private static function wageRuns(array $months, int $year, ?string $start, ?string $end): array
+    {
         // První verze platí od prvního převáděného měsíce vztahu, ne až od měsíce, ve kterém
         // byla poprvé odpracovaná celá. Jinak by měsíce před ní zůstaly bez sjednané mzdy.
         $first = sprintf('%04d-%02d-01', $year, (int) array_key_first($months));

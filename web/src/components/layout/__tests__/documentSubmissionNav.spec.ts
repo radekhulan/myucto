@@ -6,6 +6,7 @@ import { resolve } from 'node:path'
 import ts from 'typescript'
 import { canUsePurchaseAiExtraction } from '@/security/purchaseAiExtraction'
 import { OPERATIONAL_SETTINGS_KEYS } from '@/security/permissions'
+import { hasFrameworkScope } from '@/security/frameworkScope'
 
 type NavSection = { key: string; items: { to: string; label: string }[] }
 type Role = 'superadmin' | 'admin' | 'accountant' | 'client'
@@ -17,7 +18,7 @@ const profiles = {
   client: { isSuperadmin: false, isClientRole: true, isCompanyAdminRole: false, isAccountantRole: false },
 }
 
-const layout = readFileSync(resolve(process.cwd(), 'src/components/layout/AppLayout.vue'), 'utf8')
+const layout = readFileSync(resolve(__dirname, '../AppLayout.vue'), 'utf8')
 const source = ts.createSourceFile('AppLayout.ts', layout.slice(layout.indexOf('>') + 1, layout.indexOf('</script>')), ts.ScriptTarget.Latest, true)
 const required = new Set(['navSections', 'accountantFirst', 'navPermission', 'filterNavigation', 'canExtractPurchase'])
 const declarations = source.statements.filter(statement => {
@@ -30,20 +31,20 @@ const navigationCode = ts.transpileModule(declarations.map(declaration => declar
   compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.None },
 }).outputText
 
-function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}) {
+function renderNavigation(role: Role, permissionOverrides: Record<string, boolean> = {}, options: { stockEnabled?: boolean; writeOverrides?: Record<string, boolean>; demo?: boolean } = {}) {
   const profile = profiles[role]
-  const can = (permission: string) => profile.isSuperadmin
-    || (permissionOverrides[permission] ?? (permission === 'documents.submit' ? profile.isClientRole : true))
+  const can = (permission: string, access = 'read') => profile.isSuperadmin
+    || (access === 'write' && options.writeOverrides?.[permission] !== undefined ? options.writeOverrides[permission]! : permissionOverrides[permission] ?? (permission === 'documents.submit' ? profile.isClientRole : true))
   const auth = {
     ...profile,
     isAdminPlusRole: false, hasCommercialFeatures: true, hasPayrollFeatures: true,
-    isManagedInstallation: false, isDemo: false, can, canRead: can, canWrite: can,
+    isManagedInstallation: false, isDemo: options.demo === true, can, canRead: can, canWrite: (permission: string) => can(permission, 'write'),
   }
   const evaluate = new Function('computed', 'auth', 'supplierStore', 'clientExperience', 't', 'ICONS',
-    'approvalCount', 'accountantSigningProfilesEnabled', 'hostingAttention', 'automationStore', 'canUsePurchaseAiExtraction', 'OPERATIONAL_SETTINGS_KEYS', `${navigationCode}\nreturn navSections;`)
-  const sections = evaluate(computed, auth, { currentSupplier: { accounting_mode: 'double_entry', accounting_enabled: true } },
+    'approvalCount', 'accountantSigningProfilesEnabled', 'hostingAttention', 'automationStore', 'canUsePurchaseAiExtraction', 'OPERATIONAL_SETTINGS_KEYS', 'hasFrameworkScope', `${navigationCode}\nreturn navSections;`)
+  const sections = evaluate(computed, auth, { currentSupplier: { accounting_mode: 'double_entry', accounting_enabled: true, stock_enabled: options.stockEnabled } },
     ref(auth.isClientRole), (key: string) => key, new Proxy({}, { get: (_, key) => String(key) }),
-    { pending: ref(0) }, ref(false), ref(null), { actionable: 0 }, canUsePurchaseAiExtraction, OPERATIONAL_SETTINGS_KEYS) as ComputedRef<NavSection[]>
+    { pending: ref(0) }, ref(false), ref(null), { actionable: 0 }, canUsePurchaseAiExtraction, OPERATIONAL_SETTINGS_KEYS, hasFrameworkScope) as ComputedRef<NavSection[]>
   return mount(defineComponent({
     setup: () => () => h('nav', sections.value.map(section => h('section', { 'data-section': section.key },
       section.items.map(item => h('a', { href: item.to }, item.label))))),
@@ -87,6 +88,8 @@ describe('AppLayout company settings navigation', () => {
     expect(renderNavigation('accountant', base).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.branding': true }).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.payment_qr': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('accountant', { ...base, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('accountant', { ...base, 'settings.company.write': true, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(false)
     expect(renderNavigation('accountant', { ...base, 'settings.email_templates': true }).find(portal).exists()).toBe(true)
   })
 
@@ -94,6 +97,7 @@ describe('AppLayout company settings navigation', () => {
     const none = Object.fromEntries(OPERATIONAL_SETTINGS_KEYS.map(key => [key, false]))
     expect(renderNavigation('client', none).find(portal).exists()).toBe(false)
     expect(renderNavigation('client', { ...none, 'settings.branding': true }).find(portal).exists()).toBe(true)
+    expect(renderNavigation('client', { ...none, 'settings.invoice_defaults': true }).find(portal).exists()).toBe(true)
   })
 })
 
@@ -104,5 +108,50 @@ describe('AppLayout price list navigation', () => {
       expect(wrapper.find('a[href="/admin/price-list"]').exists()).toBe(allowed)
       wrapper.unmount()
     }
+  })
+})
+
+describe('AppLayout client tax submissions', () => {
+  it('shows prepared submissions only with the dedicated permission and keeps internal reports hidden', () => {
+    const allowed = renderNavigation('client', { 'reports.submissions': true, reports: false })
+    expect(allowed.find('a[href="/reports/submissions"]').exists()).toBe(true)
+    expect(allowed.find('a[href="/reports/vat-return"]').exists()).toBe(false)
+    expect(allowed.find('a[href="/admin/databox"]').exists()).toBe(false)
+    expect(allowed.find('a[href="/admin/electronic-signatures"]').exists()).toBe(false)
+    expect(renderNavigation('client', { 'reports.submissions': false, reports: true })
+      .find('a[href="/reports/submissions"]').exists()).toBe(false)
+  })
+})
+
+
+describe('AppLayout a položka menu pro účtování výkazů', () => {
+  it.each<Role>(['superadmin', 'admin', 'accountant', 'client'])('%s bez skladu nemá šablony v menu (otevírají se z Ceníku)', role => {
+    const wrapper = renderNavigation(role, { price_list: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it.each<Role>(['superadmin', 'admin', 'accountant', 'client'])('%s se skladem má šablony v menu místo Ceníku', role => {
+    const wrapper = renderNavigation(role, { price_list: true }, { stockEnabled: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/admin/price-list"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('bez práva na Ceník šablony v menu nejsou ani se skladem', () => {
+    const wrapper = renderNavigation('accountant', { price_list: false }, { stockEnabled: true })
+    expect(wrapper.find('a[href="/admin/work-report-billing-templates"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('AppLayout na ukázkové instanci', () => {
+  it('superadmin v demu nemá v menu Uživatele (ani Aktivní relace), mimo demo ano', () => {
+    const demo = renderNavigation('superadmin', {}, { demo: true })
+    expect(demo.find('a[href="/admin/users"]').exists()).toBe(false)
+    demo.unmount()
+    const regular = renderNavigation('superadmin')
+    expect(regular.find('a[href="/admin/users"]').exists()).toBe(true)
+    regular.unmount()
   })
 })

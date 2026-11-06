@@ -309,6 +309,7 @@ const credForm = reactive({
   api_key: '', default_model: '', clear_api_key: false,
   endpoint: '', deployment: '', api_version: '',   // azure_openai
   base_url: '',                                     // openai
+  workspace_id: '',                                 // anthropic
 })
 const credShowKey = ref(false)
 // Ladění extrakce (per tenant, ne per provider) — poznámky do promptu + rychle/přesně.
@@ -350,6 +351,7 @@ function syncCredForm() {
   credForm.deployment = inf?.deployment ?? ''
   credForm.api_version = inf?.api_version ?? ''
   credForm.base_url = inf?.base_url ?? ''
+  credForm.workspace_id = inf?.workspace_id ?? ''
   credTestMsg.value = null
 }
 
@@ -526,6 +528,7 @@ async function saveAiCredentials() {
       payload.api_version = credForm.api_version
     }
     if (aiProvider.value === 'openai' || aiProvider.value === 'ollama') payload.base_url = credForm.base_url
+    if (aiProvider.value === 'anthropic') payload.workspace_id = credForm.workspace_id.trim()
     if (aiProvider.value === 'ollama' && credForm.clear_api_key) payload.clear_api_key = true
     if (bulkApply.value) {
       payload.apply_to_all_companies = true
@@ -1230,6 +1233,15 @@ onMounted(() => {
                 </div>
               </div>
             </template>
+
+            <!-- Anthropic: volitelné ID workspace pro klíč bez přiřazeného workspace -->
+            <div v-if="aiProvider === 'anthropic'">
+              <label class="block text-sm text-neutral-700 mb-1">{{ t('aiGateway.anthropic_workspace_id') }}</label>
+              <input v-model="credForm.workspace_id" type="text" maxlength="128"
+                     class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm font-mono"
+                     placeholder="wrkspc_…" />
+              <p class="text-xs text-neutral-500 mt-1">{{ t('aiGateway.anthropic_workspace_id_hint') }}</p>
+            </div>
 
             <!-- OpenAI: volitelný EU base_url -->
             <div v-if="aiProvider === 'openai'">

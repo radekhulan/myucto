@@ -625,6 +625,13 @@ final class Pseudonymizer
         return $this->unique('host', $key, fn (int $attempt): string => 'h' . self::alnumFrom($this->hmac('host', $key, $attempt), 8));
     }
 
+    public function costCenter(string $value): string
+    {
+        if ($value === '' || preg_match('/^MZ-(?:EX|SR)-(?:[0-9]+|[0-9A-F]{16})$/Di', $value) === 1 || $this->isIssuedPseudonym('cost_center', $value)) return $value;
+        $key = mb_strtoupper(trim($value), 'UTF-8');
+        return $this->unique('cost_center', $key, fn (int $attempt): string => 'CC' . strtoupper(bin2hex(substr($this->hmac('cost_center', $key, $attempt), 0, 24))));
+    }
+
     public function login(string $value): string
     {
         $trimmed = trim($value);

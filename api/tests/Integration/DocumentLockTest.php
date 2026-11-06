@@ -123,6 +123,11 @@ final class DocumentLockTest extends TestCase
             $pdo->prepare('DELETE df FROM document_files df JOIN documents d ON d.id = df.document_id WHERE d.supplier_id = ?')
                 ->execute([$sid]);
             $pdo->prepare('DELETE FROM documents WHERE supplier_id = ?')->execute([$sid]);
+            $pdo->prepare('DELETE poi FROM payment_order_items poi JOIN payment_orders po ON po.id = poi.payment_order_id WHERE po.supplier_id = ?')->execute([$sid]);
+            foreach (['journal_settlement_allocations', 'cash_documents', 'cash_registers', 'invoice_settlements',
+                      'offset_agreement_items', 'offset_agreements', 'credit_note_offsets', 'payment_matches', 'bank_statements', 'payment_orders'] as $table) {
+                $pdo->prepare("DELETE FROM $table WHERE supplier_id = ?")->execute([$sid]);
+            }
             $pdo->prepare('DELETE FROM journal_entry_lines WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM journal_entries WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM accounting_periods WHERE supplier_id = ?')->execute([$sid]);
@@ -135,6 +140,8 @@ final class DocumentLockTest extends TestCase
             $pdo->prepare('DELETE FROM clients WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM currencies WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM user_suppliers WHERE supplier_id = ?')->execute([$sid]);
+            // Vystavení (schválení výkazu) založí počítadlo číselné řady.
+            $pdo->prepare('DELETE FROM invoice_counters WHERE supplier_id = ?')->execute([$sid]);
             $pdo->prepare('DELETE FROM supplier WHERE id = ?')->execute([$sid]);
         }
         if ($this->userIds !== []) {
@@ -161,6 +168,360 @@ final class DocumentLockTest extends TestCase
     }
 
     // ---------------------------------------------------------------- tests
+
+    public static function draftDeletionPeriods(): iterable
+    {
+        foreach (['invoice', 'purchase_invoice'] as $type) {
+            foreach (['closed', 'closing', 'approved', 'date_locked'] as $period) {
+                foreach (['client', 'accountant', 'admin'] as $role) {
+                    yield "$type/$period/$role" => [$type, $period, $role];
+                }
+            }
+        }
+    }
+
+    public static function draftDeletionDocumentTypes(): iterable
+    {
+        yield 'issued' => ['invoice'];
+        yield 'purchase' => ['purchase_invoice'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('draftDeletionDocumentTypes')]
+    public function testExplicitForceKeepsSessionOnlyGuardEvenForUnaccountedDraft(string $type): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $this->mkPeriod($sid, 2024, 'closed');
+        $id = $type === 'invoice' ? $this->mkInvoice($sid, 'draft', '2024-05-10') : $this->mkPurchaseInvoice($sid, 'draft', '2024-05-10');
+        $path = $type === 'invoice' ? '/api/invoices/' : '/api/purchase-invoices/';
+        $res = $this->request('DELETE', $path . $id . '?force=1', $this->mkUserWithToken('admin', $sid), $sid);
+        self::assertSame(403, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('token_write_forbidden', $this->errorCode($res));
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('draftDeletionPeriods')]
+    public function testUnaccountedDraftDeletionIgnoresPeriodOnlyLock(string $type, string $period, string $role): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $this->mkPeriod($sid, 2024, $period === 'date_locked' ? 'open' : $period);
+        if ($period === 'date_locked') {
+            $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)')
+                ->execute([$sid, '2024-12-31']);
+        }
+        $id = $type === 'invoice'
+            ? $this->mkInvoice($sid, 'draft', '2024-06-15')
+            : $this->mkPurchaseInvoice($sid, 'draft', '2024-06-15');
+        $token = $this->mkUserWithToken($role, $sid);
+        $path = $type === 'invoice' ? '/api/invoices/' : '/api/purchase-invoices/';
+        $table = $type === 'invoice' ? 'invoices' : 'purchase_invoices';
+
+        $res = $this->request('DELETE', $path . $id, $token, $sid);
+
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertFalse($this->db->pdo()->query("SELECT id FROM $table WHERE id = $id")->fetchColumn());
+        self::assertSame(0, (int) $this->db->pdo()->query("SELECT COUNT(*) FROM journal_entries WHERE supplier_id = $sid")->fetchColumn());
+        self::assertSame(0, (int) $this->db->pdo()->query("SELECT COUNT(*) FROM activity_log WHERE supplier_id = $sid AND action = 'document_lock.force_override'")->fetchColumn());
+    }
+
+    public static function accountedDraftDeletions(): iterable
+    {
+        foreach (['invoice', 'purchase_invoice'] as $type) {
+            foreach (['closed', 'closing', 'date_locked'] as $period) {
+                foreach (['booked', 'posted'] as $state) {
+                    yield "$type/$period/$state" => [$type, $period, $state];
+                }
+            }
+        }
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('accountedDraftDeletions')]
+    public function testAccountedDraftDeletionRemainsLocked(string $type, string $period, string $state): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $periodId = $this->mkPeriod($sid, 2024, $period === 'date_locked' ? 'open' : $period);
+        if ($period === 'date_locked') {
+            $this->db->pdo()->prepare('INSERT INTO accounting_supplier_settings (supplier_id, locked_until) VALUES (?, ?)')
+                ->execute([$sid, '2024-12-31']);
+        }
+        $id = $type === 'invoice'
+            ? $this->mkInvoice($sid, 'draft', '2024-06-15')
+            : $this->mkPurchaseInvoice($sid, 'draft', '2024-06-15');
+        $table = $type === 'invoice' ? 'invoices' : 'purchase_invoices';
+        $path = $type === 'invoice' ? '/api/invoices/' : '/api/purchase-invoices/';
+        if ($state === 'booked') {
+            $this->db->pdo()->exec("UPDATE $table SET booked_at = NOW() WHERE id = $id");
+        } else {
+            $this->mkPostedEntry($sid, $type, $id, $periodId, '2024-06-15');
+        }
+        $res = $this->request('DELETE', $path . $id, $this->mkUserWithToken('client', $sid), $sid);
+        self::assertSame(403, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('document_locked', $this->errorCode($res));
+        self::assertSame($id, (int) $this->db->pdo()->query("SELECT id FROM $table WHERE id = $id")->fetchColumn());
+    }
+
+    public function testDraftDeletionPreservesTenantScope(): void
+    {
+        $owner = $this->mkSupplier('double_entry');
+        $foreign = $this->mkSupplier('double_entry');
+        $this->mkPeriod($owner, 2024, 'closed');
+        $token = $this->mkUserWithToken('accountant', $foreign);
+        foreach (['invoice', 'purchase_invoice'] as $type) {
+            $id = $type === 'invoice'
+                ? $this->mkInvoice($owner, 'draft', '2024-06-15')
+                : $this->mkPurchaseInvoice($owner, 'draft', '2024-06-15');
+            $path = $type === 'invoice' ? '/api/invoices/' : '/api/purchase-invoices/';
+            $res = $this->request('DELETE', $path . $id, $token, $foreign);
+            self::assertSame(404, $res->getStatusCode(), (string) $res->getBody());
+        }
+    }
+
+    public function testDraftDeletionStillChecksActualJournalInsideTransaction(): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $periodId = $this->mkPeriod($sid, 2024, 'closed');
+        $accountant = $this->mkUserWithToken('accountant', $sid);
+        foreach (['invoice', 'purchase_invoice'] as $type) {
+            $this->resetApp();
+            $id = $type === 'invoice'
+                ? $this->mkInvoice($sid, 'draft', '2024-06-15')
+                : $this->mkPurchaseInvoice($sid, 'draft', '2024-06-15');
+            $table = $type === 'invoice' ? 'invoices' : 'purchase_invoices';
+            $path = $type === 'invoice' ? '/api/invoices/' : '/api/purchase-invoices/';
+            $doc = $this->db->pdo()->query("SELECT * FROM $table WHERE id = $id")->fetch(\PDO::FETCH_ASSOC);
+            $locks = $this->app()->getContainer()->get(\MyInvoice\Service\Accounting\DocumentLockService::class);
+            $type === 'invoice' ? $locks->forInvoice($doc) : $locks->forPurchaseInvoice($doc);
+            $entryId = $this->mkPostedEntry($sid, $type, $id, $periodId, '2024-06-15', true);
+
+            $res = $this->request('DELETE', $path . $id, $accountant, $sid);
+
+            self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+            self::assertSame('period_closed', $this->errorCode($res));
+            self::assertSame($id, (int) $this->db->pdo()->query("SELECT id FROM $table WHERE id = $id")->fetchColumn());
+            self::assertNull($this->db->pdo()->query("SELECT reversed_by FROM journal_entries WHERE id = $entryId")->fetchColumn());
+            $this->db->pdo()->prepare('DELETE FROM journal_entry_lines WHERE entry_id = ?')->execute([$entryId]);
+            $this->db->pdo()->prepare('DELETE FROM journal_entries WHERE id = ?')->execute([$entryId]);
+            $this->db->pdo()->prepare('DELETE FROM chart_of_accounts WHERE supplier_id = ?')->execute([$sid]);
+        }
+    }
+
+    public function testNativeDraftProformaWithPostedBankPaymentKeepsClosedPeriodLock(): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $period = $this->mkPeriod($sid, 2024, 'open');
+        (new \MyInvoice\Service\Accounting\ChartOfAccountsSeeder($this->db))->seedForSupplier($sid);
+        $session = $this->mkSessionUser('accountant', $sid);
+        $body = $this->invoiceBody($sid, '2024-05-10');
+        $body['invoice_type'] = 'proforma';
+        $body['varsymbol'] = '2024000123';
+        $rate = (int) $this->db->pdo()->query('SELECT id FROM vat_rates WHERE rate_percent = 0 AND is_reverse_charge = 0 LIMIT 1')->fetchColumn();
+        $body['items'] = [['description' => 'Syntetická záloha', 'quantity' => 1, 'unit' => 'ks', 'unit_price_without_vat' => 100, 'vat_rate_id' => $rate]];
+        $created = $this->sessionRequest('POST', '/api/invoices', $session, $sid, $body);
+        self::assertSame(201, $created->getStatusCode(), (string) $created->getBody());
+        $id = (int) $this->json($created)['id'];
+        $tx = $this->mkBankTransaction($sid, 100);
+        $this->db->pdo()->prepare("INSERT INTO auto_posting_policy (supplier_id, operation_type, level, updated_by) VALUES (?, 'bank.payment.matched', 'auto', ?)")
+            ->execute([$sid, $this->ownerIds[$sid]]);
+        $this->resetApp();
+        $matched = $this->sessionRequest('POST', "/api/bank-transactions/$tx/match", $session, $sid, ['invoice_id' => $id]);
+        self::assertSame(200, $matched->getStatusCode(), (string) $matched->getBody());
+        $pdo = $this->db->pdo();
+        $snapshot = static fn (): array => [
+            $pdo->query("SELECT status, booked_at, paid_total FROM invoices WHERE id = $id")->fetch(\PDO::FETCH_ASSOC),
+            $pdo->query("SELECT matched_invoice_id, match_status FROM bank_transactions WHERE id = $tx")->fetch(\PDO::FETCH_ASSOC),
+            $pdo->query("SELECT matched_count FROM bank_statements WHERE id = (SELECT statement_id FROM bank_transactions WHERE id = $tx)")->fetchColumn(),
+            $pdo->query("SELECT id, posted_at, reversed_by FROM journal_entries WHERE supplier_id = $sid AND source_type = 'bank' AND source_id = $tx")->fetchAll(\PDO::FETCH_ASSOC),
+        ];
+        $before = $snapshot();
+        self::assertSame('draft', $before[0]['status']);
+        self::assertNull($before[0]['booked_at']);
+        self::assertSame(0.0, (float) $before[0]['paid_total']);
+        self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM invoice_payments WHERE invoice_id = $id")->fetchColumn());
+        self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM payment_matches WHERE bank_transaction_id = $tx")->fetchColumn());
+        self::assertCount(1, $before[3]);
+        self::assertNotNull($before[3][0]['posted_at']);
+        $pdo->prepare("UPDATE accounting_periods SET status = 'closed' WHERE id = ?")->execute([$period]);
+        $this->resetApp();
+
+        $res = $this->sessionRequest('DELETE', "/api/invoices/$id", $session, $sid);
+
+        self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('period_closed', $this->errorCode($res));
+        self::assertSame($before, $snapshot());
+    }
+
+    public static function draftFinancialLinks(): iterable
+    {
+        foreach (['invoice', 'purchase_invoice'] as $type) {
+            foreach (['bank_match', 'cash', 'settlement', 'offset', 'credit_note', 'credit_note_self', 'advance_final', 'advance_used', 'journal_allocation', 'payment_order'] as $link) {
+                yield "$type/$link" => [$type, $link];
+            }
+        }
+        yield 'invoice/recorded payment' => ['invoice', 'recorded_payment'];
+        yield 'invoice/tax document payment' => ['invoice', 'tax_document_payment'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('draftFinancialLinks')]
+    public function testDraftWithFinancialLinkKeepsOriginalPeriodLock(string $type, string $link): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $period = $this->mkPeriod($sid, 2024, 'closed');
+        $id = $type === 'invoice' ? $this->mkInvoice($sid, 'draft', '2024-05-10') : $this->mkPurchaseInvoice($sid, 'draft', '2024-05-10');
+        $traceTable = $this->mkFinancialLink($sid, $type, $id, $link, $period);
+        $pdo = $this->db->pdo();
+        $before = $pdo->query("SELECT * FROM $traceTable WHERE supplier_id = $sid ORDER BY id")->fetchAll(\PDO::FETCH_ASSOC);
+        self::assertNotEmpty($before);
+        if ($link === 'bank_match') {
+            $net = $pdo->query("SELECT SUM(CASE WHEN bt.amount < 0 THEN -pm.amount ELSE pm.amount END) FROM payment_matches pm JOIN bank_transactions bt ON bt.id = pm.bank_transaction_id WHERE pm.supplier_id = $sid")->fetchColumn();
+            self::assertSame(0.0, (float) $net);
+        }
+        $table = $type === 'invoice' ? 'invoices' : 'purchase_invoices';
+        $path = $type === 'invoice' ? '/api/invoices/' : '/api/purchase-invoices/';
+        $res = $this->request('DELETE', $path . $id, $this->mkUserWithToken('accountant', $sid), $sid);
+        self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('period_closed', $this->errorCode($res));
+        self::assertSame($id, (int) $pdo->query("SELECT id FROM $table WHERE id = $id")->fetchColumn());
+        self::assertSame($before, $pdo->query("SELECT * FROM $traceTable WHERE supplier_id = $sid ORDER BY id")->fetchAll(\PDO::FETCH_ASSOC));
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('cascadeDraftStates')]
+    public function testDraftDeletionPreservesCascadeChildHistory(string $state): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $period = $this->mkPeriod($sid, 2024, 'closed');
+        $parent = $this->mkInvoice($sid, 'draft', '2024-05-10');
+        $child = $this->mkInvoice($sid, $state === 'issued' ? 'issued' : 'draft', '2024-05-10');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id = ?')->execute([$parent, $child]);
+        if ($state === 'booked') {
+            $pdo->prepare('UPDATE invoices SET booked_at = NOW() WHERE id = ?')->execute([$child]);
+        } elseif ($state === 'posted') {
+            $this->mkPostedEntry($sid, 'invoice', $child, $period, '2024-05-10');
+        } elseif ($state === 'payment') {
+            $this->mkFinancialLink($sid, 'invoice', $child, 'recorded_payment', $period);
+        }
+        $res = $this->request('DELETE', "/api/invoices/$parent", $this->mkUserWithToken('accountant', $sid), $sid);
+        self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('period_closed', $this->errorCode($res));
+        self::assertSame(2, (int) $pdo->query("SELECT COUNT(*) FROM invoices WHERE id IN ($parent, $child)")->fetchColumn());
+    }
+
+    public static function cascadeDraftStates(): iterable
+    {
+        foreach (['issued', 'booked', 'posted', 'payment'] as $state) yield $state => [$state];
+    }
+
+    public static function deletionBoundaryChanges(): iterable
+    {
+        foreach (['invoice', 'purchase_invoice'] as $type) {
+            foreach (['payment', 'booked', 'posted_open', 'status', 'date'] as $change) yield "$type/$change" => [$type, $change];
+        }
+        yield 'invoice/new child' => ['invoice', 'child'];
+    }
+
+    public function testCleanRecursiveDraftGroupCanBeDeletedInClosedPeriod(): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $this->mkPeriod($sid, 2024, 'closed');
+        $parent = $this->mkInvoice($sid, 'draft', '2024-05-10');
+        $child = $this->mkInvoice($sid, 'draft', '2024-05-10');
+        $grandchild = $this->mkInvoice($sid, 'draft', '2024-05-10');
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id = ?')->execute([$parent, $child]);
+        $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id = ?')->execute([$child, $grandchild]);
+        $res = $this->request('DELETE', "/api/invoices/$parent", $this->mkUserWithToken('accountant', $sid), $sid);
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame(2, $this->json($res)['cascade_deleted']);
+        self::assertSame(0, (int) $this->db->pdo()->query("SELECT COUNT(*) FROM invoices WHERE id IN ($parent, $child, $grandchild)")->fetchColumn());
+    }
+
+    public function testFinancialLinkLookupIsTenantScopedAndBatchesLargeIdSets(): void
+    {
+        $owner = $this->mkSupplier('double_entry');
+        $foreign = $this->mkSupplier('double_entry');
+        $period = $this->mkPeriod($foreign, 2024, 'closed');
+        $id = $this->mkInvoice($foreign, 'draft', '2024-05-10');
+        $this->mkFinancialLink($foreign, 'invoice', $id, 'cash', $period);
+        $links = new \MyInvoice\Service\Accounting\DocumentPaymentLinks($this->db);
+        self::assertTrue($links->existsForDocuments($foreign, 'invoice', [$id]));
+        self::assertFalse($links->existsForDocuments($owner, 'invoice', [$id]));
+        $before = (int) $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch(\PDO::FETCH_NUM)[1];
+        self::assertFalse($links->existsForDocuments($owner, 'invoice', range(1, 65000)));
+        $after = (int) $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch(\PDO::FETCH_NUM)[1];
+        self::assertLessThan(300, $after - $before);
+    }
+
+    public function testDeletionBoundaryDoesNotTrustAnOlderRepeatableReadSnapshot(): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $this->mkPeriod($sid, 2024, 'closed');
+        $id = $this->mkPurchaseInvoice($sid, 'draft', '2024-05-10');
+        $tx = $this->mkBankTransaction($sid, -100);
+        $pdo = $this->db->pdo();
+        $document = $pdo->query("SELECT * FROM purchase_invoices WHERE id = $id")->fetch(\PDO::FETCH_ASSOC);
+        $other = new \PDO('mysql:host=' . $this->config->get('db.host') . ';port=' . $this->config->get('db.port') . ';dbname=' . $this->config->get('db.name') . ';charset=utf8mb4',
+            (string) $this->config->get('db.user'), (string) $this->config->get('db.pass'), [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+        $other->exec("SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION'");
+        self::assertSame('REPEATABLE-READ', $pdo->query('SELECT @@tx_isolation')->fetchColumn());
+        $pdo->beginTransaction();
+        try {
+            self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM payment_matches WHERE supplier_id = $sid")->fetchColumn());
+            $other->prepare("INSERT INTO payment_matches (supplier_id, bank_transaction_id, purchase_invoice_id, amount, match_type) VALUES (?, ?, ?, 100, 'manual')")->execute([$sid, $tx, $id]);
+            self::assertSame(0, (int) $pdo->query("SELECT COUNT(*) FROM payment_matches WHERE supplier_id = $sid")->fetchColumn());
+            $boundary = new \MyInvoice\Service\Accounting\DocumentDeletionBoundary($this->db,
+                new \MyInvoice\Service\Accounting\DocumentPaymentLinks($this->db), new \MyInvoice\Repository\PurchaseInvoiceSubmissionRepository($this->db));
+            try {
+                self::assertTrue($boundary->changed($sid, 'purchase_invoice', [$document], false));
+            } catch (\PDOException $e) {
+                self::assertSame(1020, (int) ($e->errorInfo[1] ?? 0));
+            }
+        } finally {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+        }
+        self::assertSame(1, (int) $pdo->query("SELECT COUNT(*) FROM payment_matches WHERE supplier_id = $sid")->fetchColumn());
+        self::assertSame($id, (int) $pdo->query("SELECT id FROM purchase_invoices WHERE id = $id")->fetchColumn());
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('deletionBoundaryChanges')]
+    public function testDraftDeletionRechecksChangesAfterPreliminaryLookup(string $type, string $change): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $period = $this->mkPeriod($sid, 2024, 'closed');
+        $open = $this->mkPeriod($sid, 2026, 'open');
+        $id = $type === 'invoice' ? $this->mkInvoice($sid, 'draft', '2024-05-10') : $this->mkPurchaseInvoice($sid, 'draft', '2024-05-10');
+        $token = $this->mkUserWithToken('accountant', $sid);
+        $container = $this->app()->getContainer();
+        $real = new \MyInvoice\Service\Accounting\DocumentPaymentLinks($container->get(Connection::class));
+        $links = $this->createStub(\MyInvoice\Service\Accounting\DocumentPaymentLinks::class);
+        $injected = false;
+        $table = $type === 'invoice' ? 'invoices' : 'purchase_invoices';
+        $links->method('existsForDocuments')->willReturnCallback(function (int $supplierId, string $sourceType, array $ids, bool $currentRead = false) use ($real, &$injected, $sid, $type, $change, $id, $period, $open, $table): bool {
+            $result = $real->existsForDocuments($supplierId, $sourceType, $ids, $currentRead);
+            if (!$currentRead && !$injected) {
+                self::assertFalse($result);
+                $injected = true;
+                if ($change === 'payment') $this->mkFinancialLink($sid, $type, $id, 'bank_match', $period);
+                elseif ($change === 'booked') $this->db->pdo()->exec("UPDATE $table SET booked_at = NOW() WHERE id = $id");
+                elseif ($change === 'posted_open') $this->mkPostedEntry($sid, $type, $id, $open, '2026-05-10', true);
+                elseif ($change === 'status') {
+                    $status = $type === 'invoice' ? 'issued' : 'received';
+                    $this->db->pdo()->prepare("UPDATE $table SET status = ? WHERE id = ?")->execute([$status, $id]);
+                } elseif ($change === 'date') $this->db->pdo()->exec("UPDATE $table SET issue_date = '2026-05-10', tax_date = '2026-05-10' WHERE id = $id");
+                elseif ($change === 'child') {
+                    $child = $this->mkInvoice($sid, 'issued', '2024-05-10');
+                    $this->db->pdo()->prepare('UPDATE invoices SET parent_invoice_id = ? WHERE id = ?')->execute([$id, $child]);
+                }
+            }
+            return $result;
+        });
+        $container->set(\MyInvoice\Service\Accounting\DocumentPaymentLinks::class, $links);
+        $path = $type === 'invoice' ? '/api/invoices/' : '/api/purchase-invoices/';
+
+        $res = $this->request('DELETE', $path . $id, $token, $sid);
+
+        self::assertTrue($injected);
+        self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('period_closed', $this->errorCode($res));
+        self::assertSame($id, (int) $this->db->pdo()->query("SELECT id FROM $table WHERE id = $id")->fetchColumn());
+        self::assertSame(0, (int) $this->db->pdo()->query("SELECT COUNT(*) FROM journal_entries WHERE supplier_id = $sid AND reversed_by IS NOT NULL")->fetchColumn());
+    }
 
     /** Scénář 1: aktivní posted zápis zamyká klienta; účetní v otevřeném období pracuje. */
     public function testPostedEntryLocksClientOnly(): void
@@ -296,11 +657,25 @@ final class DocumentLockTest extends TestCase
         self::assertSame('received', $this->json($res)['status'] ?? null);
     }
 
-    /** Výsledek klientského podání smí měnit účetní, ale klient už ne. */
-    public function testAccountantManagedPurchaseInvoiceIsLockedOnlyForClient(): void
+    public static function managedDraftDeletionPeriods(): iterable
     {
-        $sid = $this->mkSupplier('tax_evidence');
-        $invoiceId = $this->mkPurchaseInvoice($sid, 'draft');
+        yield 'tax evidence/accountant' => ['tax_evidence', 'open', 'accountant'];
+        foreach (['closed', 'approved'] as $period) {
+            foreach (['accountant', 'admin'] as $role) {
+                yield "$period/$role" => ['double_entry', $period, $role];
+            }
+        }
+    }
+
+    /** Výsledek klientského podání smí spravovat účetní, ale klient už ne. */
+    #[\PHPUnit\Framework\Attributes\DataProvider('managedDraftDeletionPeriods')]
+    public function testAccountantManagedPurchaseInvoiceIsLockedOnlyForClient(string $mode, string $period, string $role): void
+    {
+        $sid = $this->mkSupplier($mode);
+        if ($mode === 'double_entry') {
+            $this->mkPeriod($sid, 2024, $period);
+        }
+        $invoiceId = $this->mkPurchaseInvoice($sid, 'draft', '2024-06-15');
         $pdo = $this->db->pdo();
         $sha = hash('sha256', 'synthetic-accountant-managed-' . $sid . '-' . $invoiceId);
         $pdo->prepare(
@@ -328,7 +703,7 @@ final class DocumentLockTest extends TestCase
         $submissionId = (int) $pdo->lastInsertId();
 
         $client = $this->mkUserWithToken('client', $sid);
-        $accountant = $this->mkUserWithToken('accountant', $sid);
+        $accountant = $this->mkUserWithToken($role, $sid);
 
         $detail = $this->request('GET', "/api/purchase-invoices/$invoiceId", $client, $sid);
         self::assertSame(200, $detail->getStatusCode(), (string) $detail->getBody());
@@ -345,6 +720,10 @@ final class DocumentLockTest extends TestCase
         self::assertSame(403, $clientEdit->getStatusCode(), (string) $clientEdit->getBody());
         self::assertSame('document_locked', $this->errorCode($clientEdit));
 
+        $clientDelete = $this->request('DELETE', "/api/purchase-invoices/$invoiceId", $client, $sid);
+        self::assertSame(403, $clientDelete->getStatusCode(), (string) $clientDelete->getBody());
+        self::assertSame('document_locked', $this->errorCode($clientDelete));
+
         $staffEdit = $this->request(
             'PUT',
             "/api/purchase-invoices/$invoiceId/items",
@@ -352,7 +731,10 @@ final class DocumentLockTest extends TestCase
             $sid,
             ['items' => []],
         );
-        self::assertSame(200, $staffEdit->getStatusCode(), (string) $staffEdit->getBody());
+        self::assertSame($period === 'open' ? 200 : 409, $staffEdit->getStatusCode(), (string) $staffEdit->getBody());
+        if ($period !== 'open') {
+            self::assertSame('period_closed', $this->errorCode($staffEdit));
+        }
 
         $staffDelete = $this->request(
             'DELETE',
@@ -749,6 +1131,94 @@ final class DocumentLockTest extends TestCase
         self::assertSame(200, $res->getStatusCode(), 'admin force přesun projde: ' . (string) $res->getBody());
     }
 
+    /**
+     * Schválení výkazu koncept rovnou vystaví, proto musí respektovat týž zámek období
+     * jako ruční vystavení: klient 403, účetní 409, správce jen s ?force=1 z relace.
+     * Odmítnutí nesmí zanechat zapsané schválení. V otevřeném období schválení
+     * vystaví fakturu jako dřív. Schválení zákazníkem přes veřejný odkaz se zapíše,
+     * koncept v uzavřeném období ale nevystaví.
+     */
+    public function testApprovalIssueRespectsClosedPeriod(): void
+    {
+        $sid = $this->mkSupplier('double_entry');
+        $this->mkPeriod($sid, 2024, 'closed');
+        $this->mkPeriod($sid, 2026, 'open');
+        // Bez e-mailu odběratele se vystavená faktura nikam neodesílá.
+        $this->db->pdo()->prepare('UPDATE clients SET main_email = NULL WHERE id = ?')->execute([$this->clientIds[$sid]]);
+
+        $client = $this->mkUserWithToken('client', $sid);
+        $accountant = $this->mkUserWithToken('accountant', $sid);
+        $adminSession = $this->mkSessionUser('admin', $sid);
+        $approve = ['status' => 'approved'];
+        $state = function (int $id): array {
+            $stmt = $this->db->pdo()->prepare('SELECT status, approval_status, varsymbol FROM invoices WHERE id = ?');
+            $stmt->execute([$id]);
+            return $stmt->fetch(\PDO::FETCH_ASSOC);
+        };
+
+        $mkDraft = function (string $date) use ($sid): int {
+            $id = $this->mkInvoice($sid, 'draft', $date);
+            $this->addInvoiceItem($sid, $id);
+            $this->db->pdo()->prepare(
+                'UPDATE invoices SET total_without_vat = 100, total_vat = 21, total_with_vat = 121 WHERE id = ?'
+            )->execute([$id]);
+            return $id;
+        };
+
+        $draft2024 = $mkDraft('2024-06-15');
+        $res = $this->request('PUT', "/api/invoices/$draft2024/approval-status", $client, $sid, $approve);
+        self::assertSame(403, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('document_locked', $this->errorCode($res));
+        $res = $this->request('PUT', "/api/invoices/$draft2024/approval-status", $accountant, $sid, $approve);
+        self::assertSame(409, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('period_closed', $this->errorCode($res));
+        self::assertSame('draft', $state($draft2024)['status']);
+        self::assertNotSame('approved', $state($draft2024)['approval_status'], 'odmítnutí nesmí zapsat schválení');
+        self::assertNull($state($draft2024)['varsymbol'], 'odmítnutí nesmí přidělit číslo');
+
+        $res = $this->sessionRequest('PUT', "/api/invoices/$draft2024/approval-status?force=1", $adminSession, $sid, $approve);
+        self::assertSame(200, $res->getStatusCode(), 'správce s force schválí: ' . (string) $res->getBody());
+        self::assertSame('issued', $state($draft2024)['status'], (string) $res->getBody());
+
+        $draft2026 = $mkDraft('2026-05-15');
+
+        $res = $this->request('PUT', "/api/invoices/$draft2026/approval-status", $accountant, $sid, $approve);
+        self::assertSame(200, $res->getStatusCode(), 'otevřené období: ' . (string) $res->getBody());
+        self::assertSame('issued', $state($draft2026)['status'], (string) $res->getBody());
+
+        // Veřejný odkaz zákazníka: schválení se zapíše, koncept v uzavřeném období zůstane.
+        $public2024 = $mkDraft('2024-07-15');
+
+        $token = bin2hex(random_bytes(24));
+        $this->db->pdo()->prepare(
+            "UPDATE invoices SET approval_status = 'requested', approval_token = ?,
+                    approval_token_expires_at = DATE_ADD(NOW(), INTERVAL 7 DAY) WHERE id = ?"
+        )->execute([$token, $public2024]);
+        $container = \MyInvoice\Bootstrap::buildContainer();
+        $captcha = $this->createStub(\MyInvoice\Service\Captcha\TurnstileVerifier::class);
+        $captcha->method('verify')->willReturn(true);
+        $tenantGuard = $this->createStub(\MyInvoice\Service\Tenant\PublicTenantGuard::class);
+        $tenantGuard->method('allows')->willReturn(true);
+        $autoIssue = $this->createMock(\MyInvoice\Service\Invoice\AutoIssueAndSendService::class);
+        $autoIssue->expects(self::never())->method('run');
+        $decide = new \MyInvoice\Action\Approval\PublicApprovalDecideAction(
+            $container->get(\MyInvoice\Repository\InvoiceRepository::class),
+            $captcha,
+            $container->get(\MyInvoice\Service\ActivityLogger::class),
+            new \MyInvoice\Service\IpMatcher(),
+            $autoIssue,
+            $tenantGuard,
+            $container->get(\MyInvoice\Service\Accounting\DocumentLockService::class),
+        );
+        $req = (new ServerRequestFactory())
+            ->createServerRequest('POST', "/api/public/approval/$token/decide", ['REMOTE_ADDR' => '127.0.0.1'])
+            ->withParsedBody(['decision' => 'approve', 'decided_by_email' => 'zakaznik@example.com']);
+        $res = $decide($req, new \Slim\Psr7\Response(), ['token' => $token]);
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame('draft', $state($public2024)['status']);
+        self::assertSame('approved', $state($public2024)['approval_status']);
+    }
+
     /** Scénář 6: reverse zápisu odemkne doklad (booked_at NULL + audit R9), client PUT zase 200. */
     public function testReverseUnlocksDocument(): void
     {
@@ -977,6 +1447,78 @@ final class DocumentLockTest extends TestCase
     }
 
     // ------------------------------------------------------------- fixtures
+
+    private function mkBankTransaction(int $sid, float $amount): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("UPDATE currencies SET account_number = '1000000005', bank_code = '0100' WHERE id = ?")->execute([$this->currencyIds[$sid]]);
+        $pdo->prepare("INSERT INTO bank_statements (supplier_id, file_name, file_hash, account_number, bank_code, currency, statement_date) VALUES (?, 'SYN-DRAFT.gpc', ?, '1000000005', '0100', 'CZK', '2024-05-10')")
+            ->execute([$sid, hash('sha256', random_bytes(16))]);
+        $stmt = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, match_status) VALUES (?, '2024-05-10', ?, 'CZK', 'unmatched')")->execute([$stmt, $amount]);
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function mkFinancialLink(int $sid, string $type, int $id, string $link, int $period): string
+    {
+        $pdo = $this->db->pdo();
+        $column = $type === 'invoice' ? 'invoice_id' : 'purchase_invoice_id';
+        if ($link === 'payment_order') {
+            $pdo->prepare("INSERT INTO payment_orders (supplier_id, payment_date, total_amount, item_count) VALUES (?, '2024-05-10', 100, 1)")->execute([$sid]);
+            $order = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO payment_order_items (payment_order_id, $column, amount) VALUES (?, ?, 100)")->execute([$order, $id]);
+            return 'payment_orders';
+        }
+        if ($link === 'bank_match') {
+            foreach ([100, -100] as $amount) {
+                $tx = $this->mkBankTransaction($sid, $amount);
+                $pdo->prepare("INSERT INTO payment_matches (supplier_id, bank_transaction_id, $column, amount, match_type) VALUES (?, ?, ?, 100, 'manual')")->execute([$sid, $tx, $id]);
+            }
+            return 'payment_matches';
+        }
+        if ($link === 'recorded_payment' || $link === 'tax_document_payment') {
+            $paymentInvoice = $link === 'tax_document_payment' ? $this->mkInvoice($sid, 'draft', '2024-05-10') : $id;
+            $pdo->prepare("INSERT INTO invoice_payments (supplier_id, invoice_id, paid_on, amount, currency, tax_document_invoice_id) VALUES (?, ?, '2024-05-10', 100, 'CZK', ?)")
+                ->execute([$sid, $paymentInvoice, $link === 'tax_document_payment' ? $id : null]);
+            return 'invoice_payments';
+        }
+        if ($link === 'cash') {
+            $pdo->prepare("INSERT INTO cash_registers (supplier_id, name) VALUES (?, 'Syntetická pokladna')")->execute([$sid]);
+            $register = (int) $pdo->lastInsertId();
+            $pdo->prepare("INSERT INTO cash_documents (supplier_id, register_id, doc_type, purpose, issue_date, description, total_amount, $column) VALUES (?, ?, 'in', ?, '2024-05-10', 'Syntetická vazba', 100, ?)")
+                ->execute([$sid, $register, $type === 'invoice' ? 'invoice_payment' : 'purchase_payment', $id]);
+            return 'cash_documents';
+        }
+        if ($link === 'offset') {
+            $pdo->prepare("INSERT INTO offset_agreements (supplier_id, partner_id, agreement_date, document_no) VALUES (?, ?, '2024-05-10', 'SYN-OFFSET')")->execute([$sid, $this->clientIds[$sid]]);
+            $agreement = (int) $pdo->lastInsertId();
+            $pdo->prepare('INSERT INTO offset_agreement_items (supplier_id, agreement_id, doc_type, doc_id, amount) VALUES (?, ?, ?, ?, 100)')->execute([$sid, $agreement, $type, $id]);
+            return 'offset_agreement_items';
+        }
+        if (in_array($link, ['credit_note', 'credit_note_self', 'advance_final', 'advance_used'], true)) {
+            $other = $type === 'invoice' ? $this->mkInvoice($sid, 'draft', '2024-05-10') : $this->mkPurchaseInvoice($sid, 'draft', '2024-05-10');
+            if ($link === 'credit_note' || $link === 'credit_note_self') {
+                $pdo->prepare("INSERT INTO credit_note_offsets (supplier_id, doc_type, invoice_id, credit_note_id, amount, offset_on) VALUES (?, ?, ?, ?, 100, '2024-05-10')")
+                    ->execute([$sid, $type, $link === 'credit_note' ? $id : $other, $link === 'credit_note_self' ? $id : $other]);
+                return 'credit_note_offsets';
+            }
+            $table = $type === 'invoice' ? 'invoice_advance_deductions' : 'purchase_advance_deductions';
+            $pdo->prepare("INSERT INTO $table (supplier_id, final_invoice_id, advance_invoice_id, amount) VALUES (?, ?, ?, 100)")
+                ->execute([$sid, $link === 'advance_final' ? $id : $other, $link === 'advance_used' ? $id : $other]);
+            return $table;
+        }
+        if ($link === 'journal_allocation') {
+            $entry = $this->mkPostedEntry($sid, 'manual', 0, $period, '2024-05-10', true);
+            $account = (int) $pdo->query("SELECT id FROM chart_of_accounts WHERE supplier_id = $sid AND account_code = '311000'")->fetchColumn();
+            $pdo->prepare("INSERT INTO journal_settlement_allocations (supplier_id, entry_id, line_no, account_id, side, doc_type, doc_id, amount) VALUES (?, ?, 0, ?, 'debit', ?, ?, 100)")->execute([$sid, $entry, $account, $type, $id]);
+            return 'journal_settlement_allocations';
+        }
+        $pdo->prepare("INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type) VALUES (?, '311000', 'Syntetický účet', 'asset')")->execute([$sid]);
+        $account = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO invoice_settlements (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status) VALUES (?, ?, ?, '2024-05-10', 100, ?, 'cancelled')")
+            ->execute([$sid, $type, $id, $account]);
+        return 'invoice_settlements';
+    }
 
     private function mkSupplier(string $accountingMode): int
     {

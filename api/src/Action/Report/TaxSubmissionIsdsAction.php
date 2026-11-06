@@ -53,15 +53,20 @@ final class TaxSubmissionIsdsAction
 
     public function routes(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports', AccessLevel::READ)) {
+        if (!RequestAuthorization::canReadTaxSubmissions($request)) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
-        return Json::ok($response, $this->routing->routes(SupplierGuard::currentId($request)));
+        $routes = $this->routing->routes(SupplierGuard::currentId($request));
+        if (RequestAuthorization::isClientType($request)) {
+            unset($routes['groups']['income']);
+            $routes['recipients'] = [];
+        }
+        return Json::ok($response, $routes);
     }
 
     public function saveRoutes(Request $request, Response $response): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports.submit', AccessLevel::WRITE)) {
+        if (!RequestAuthorization::canManageTaxSubmissions($request)) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
@@ -87,7 +92,7 @@ final class TaxSubmissionIsdsAction
         }
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if (($denied = $this->deniedSubmission($supplierId, $id, $response)) !== null) {
+        if (($denied = $this->deniedSubmission($request, $supplierId, $id, $response)) !== null) {
             return $denied;
         }
 
@@ -124,7 +129,7 @@ final class TaxSubmissionIsdsAction
         }
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if (($denied = $this->deniedSubmission($supplierId, $id, $response)) !== null) {
+        if (($denied = $this->deniedSubmission($request, $supplierId, $id, $response)) !== null) {
             return $denied;
         }
         $dispatch = $this->epo->activeIsdsDispatch($id, $supplierId);
@@ -166,7 +171,7 @@ final class TaxSubmissionIsdsAction
         $supplierId = SupplierGuard::currentId($request);
         $userId = $this->userId($request);
         $id = (int) ($args['id'] ?? 0);
-        if (($denied = $this->deniedSubmission($supplierId, $id, $response)) !== null) {
+        if (($denied = $this->deniedSubmission($request, $supplierId, $id, $response)) !== null) {
             return $denied;
         }
         $dispatch = $this->epo->activeIsdsDispatch($id, $supplierId);
@@ -215,12 +220,12 @@ final class TaxSubmissionIsdsAction
      */
     public function inboxCandidates(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports.submit', AccessLevel::WRITE)) {
+        if (!RequestAuthorization::canManageTaxSubmissionEvidence($request)) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
         $id = (int) ($args['id'] ?? 0);
-        if (($denied = $this->deniedSubmission($supplierId, $id, $response)) !== null) {
+        if (($denied = $this->deniedSubmission($request, $supplierId, $id, $response)) !== null) {
             return $denied;
         }
         $dispatch = $this->epo->activeIsdsDispatch($id, $supplierId);
@@ -251,14 +256,14 @@ final class TaxSubmissionIsdsAction
      */
     public function linkInbox(Request $request, Response $response, array $args): Response
     {
-        if (!RequestAuthorization::allows($request, 'reports.submit', AccessLevel::WRITE)) {
+        if (!RequestAuthorization::canManageTaxSubmissionEvidence($request)) {
             return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         $supplierId = SupplierGuard::currentId($request);
         $userId = $this->userId($request);
         $id = (int) ($args['id'] ?? 0);
         $messageId = (int) ($args['messageId'] ?? 0);
-        if (($denied = $this->deniedSubmission($supplierId, $id, $response)) !== null) {
+        if (($denied = $this->deniedSubmission($request, $supplierId, $id, $response)) !== null) {
             return $denied;
         }
         $message = $this->inbox->findById($supplierId, $messageId);
@@ -324,11 +329,14 @@ final class TaxSubmissionIsdsAction
         return Json::ok($response, $row !== null ? $this->epo->enrich([$row], $supplierId)[0] : null);
     }
 
-    private function deniedSubmission(int $supplierId, int $id, Response $response): ?Response
+    private function deniedSubmission(Request $request, int $supplierId, int $id, Response $response): ?Response
     {
         $row = $this->submissions->find($id, $supplierId);
         if ($row === null) {
             return Json::error($response, 'not_found', 'Podání nebylo nalezeno.', 404);
+        }
+        if (!RequestAuthorization::canAccessTaxSubmission($request, $row)) {
+            return Json::error($response, 'forbidden', 'Nemáte oprávnění.', 403);
         }
         if (!TaxSubmissionAccess::isFreeForm($row['form_code'] ?? null) && !$this->commercial->isAvailable()) {
             return Json::error(

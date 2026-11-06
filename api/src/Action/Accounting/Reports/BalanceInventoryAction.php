@@ -24,6 +24,7 @@ use Psr\Log\LoggerInterface;
  *
  *   GET /api/accounting/reports/balance-inventory        — data sestavy (?period_id=)
  *   GET /api/accounting/reports/balance-inventory/export — PDF / XLSX (?period_id=&format=pdf|xlsx)
+ *   GET /api/accounting/reports/balance-inventory/account/{accountId}: inventura jednoho účtu (?as_of=)
  *
  * Vždy k celému období (rozvahový den = ends_on) — na rozdíl od F2 sestav se tu nedává
  * volitelný from/to rozsah, protože inventarizace je vázaná na konec účetního období.
@@ -63,6 +64,26 @@ final class BalanceInventoryAction
         return Json::ok($response, $data);
     }
 
+    public function account(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->requireDoubleEntry($this->db, $supplierId, $response, $err)) return $err;
+        $asOf = trim((string) ($request->getQueryParams()['as_of'] ?? ''));
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $asOf);
+        if ($parsed === false || $parsed->format('Y-m-d') !== $asOf) {
+            return Json::error($response, 'validation_failed', 'as_of je povinný a musí být datum (YYYY-MM-DD).', 422);
+        }
+
+        try {
+            return Json::ok($response, $this->inventory->accountInventory($supplierId, (int) ($args['accountId'] ?? 0), $asOf));
+        } catch (ReportException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        } catch (\Throwable $e) {
+            $this->log->error('Inventuru účtu se nepodařilo sestavit: ' . $e->getMessage(), ['exception' => $e]);
+            return Json::error($response, 'build_failed', 'Sestavu se nepodařilo vytvořit.', 500);
+        }
+    }
+
     public function export(Request $request, Response $response): Response
     {
         $supplierId = $this->currentSupplierId($request);
@@ -76,7 +97,9 @@ final class BalanceInventoryAction
         }
 
         try {
-            $data = $this->inventory->build($supplierId, $periodId);
+            // Export je vyplněný protokol: uložený skutečný stav, rozdíl, poznámka a podpisy.
+            // Nenapočítané účty zůstanou prázdné k ručnímu doplnění.
+            $data = $this->inventory->buildWithSaved($supplierId, $periodId);
             $out = $format === 'pdf'
                 ? [
                     'bytes'    => $this->pdf->render($data),

@@ -11,6 +11,7 @@ use MyInvoice\Repository\PurchaseInvoiceRepository;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\Accounting\RetentionGuard;
 use MyInvoice\Service\Accounting\RetentionViolationException;
+use MyInvoice\Service\Eet\EetHistoryGuard;
 use MyInvoice\Service\Pdf\PdfArchiveService;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use PDO;
@@ -190,6 +191,9 @@ final class ImportBatchEraser
         }
         if ($this->hasPayments((int) $row['id'])) {
             return 'doklad má evidovanou úhradu';
+        }
+        if ((new EetHistoryGuard($this->db))->invoiceConflict($supplierId, [(int) $row['id']]) !== null) {
+            return 'doklad má evidenci tržeb (EET)';
         }
         if ((string) $row['status'] !== 'draft') {
             $year = (int) (new \DateTimeImmutable((string) ($row['tax_date'] ?: $row['issue_date'])))->format('Y');

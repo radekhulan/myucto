@@ -10,9 +10,11 @@
  * stáhne a k incidentu ho na portálu podpory přiloží sám. Logy jsou proto
  * vědomý opt-in s náhledem obsahu, ne výchozí volba.
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, onActivated, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
+import { useSupplierStore } from '@/stores/supplier'
+import { journalEntryLink, journalSourceLink } from '@/utils/journalSourceLink'
 import {
   diagnosticsApi,
   type BundleOptions,
@@ -27,11 +29,13 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+const suppliers = useSupplierStore()
 
 const isAdmin = computed(() => auth.isSuperadmin)
 
 const report = ref<DiagnosticsReport | null>(null)
 const loading = ref(false)
+let loadSequence = 0
 const errorMsg = ref<string | null>(null)
 
 const options = ref<Required<BundleOptions>>({
@@ -64,16 +68,18 @@ const logPage = ref(1)
 const DAY_CHOICES = [1, 3, 7, 14]
 const LEVEL_CHOICES = ['INFO', 'NOTICE', 'WARNING', 'ERROR']
 
-async function load() {
+async function load(postingAfter = 0) {
   if (!isAdmin.value) return
+  const sequence = ++loadSequence
   loading.value = true
   errorMsg.value = null
   try {
-    report.value = await diagnosticsApi.report()
+    const next = await diagnosticsApi.report(undefined, postingAfter)
+    if (sequence === loadSequence) report.value = next
   } catch (e) {
-    errorMsg.value = (e as Error)?.message ?? t('diagnostics.load_failed')
+    if (sequence === loadSequence) errorMsg.value = (e as Error)?.message ?? t('diagnostics.load_failed')
   } finally {
-    loading.value = false
+    if (sequence === loadSequence) loading.value = false
   }
 }
 
@@ -143,6 +149,17 @@ onMounted(async () => {
   await loadPreview()
 })
 
+let activatedBefore = false
+onActivated(() => {
+  if (activatedBefore) void load()
+  activatedBefore = true
+})
+
+watch(() => suppliers.currentSupplierId, () => {
+  report.value = null
+  void load()
+})
+
 // ── Zobrazení ──────────────────────────────────────────────────────────────
 
 const verdictClass = computed(() => {
@@ -176,9 +193,20 @@ const canBuild = computed(() => {
 
 <template>
   <div class="max-w-4xl mx-auto">
-    <header class="mb-6">
-      <h1 class="text-2xl font-semibold text-neutral-900">{{ t('diagnostics.title') }}</h1>
-      <p class="text-sm text-neutral-500 mt-0.5">{{ t('diagnostics.subtitle') }}</p>
+    <header class="mb-6 flex flex-wrap items-start justify-between gap-3">
+      <div>
+        <h1 class="text-2xl font-semibold text-neutral-900">{{ t('diagnostics.title') }}</h1>
+        <p class="text-sm text-neutral-500 mt-0.5">{{ t('diagnostics.subtitle') }}</p>
+      </div>
+      <RouterLink
+        v-if="isAdmin && !auth.isManagedInstallation"
+        to="/admin/instance"
+        :class="[btnOutline('neutral'), 'whitespace-nowrap']"
+        data-testid="diagnostics-instance-admin"
+      >
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+        {{ t('instance_admin.title') }}
+      </RouterLink>
     </header>
 
     <div
@@ -206,7 +234,7 @@ const canBuild = computed(() => {
               }}
             </p>
           </div>
-          <button type="button" :disabled="loading" :class="btnOutline('neutral')" @click="load">
+          <button type="button" :disabled="loading" :class="btnOutline('neutral')" @click="load()">
             <svg
               class="w-4 h-4"
               :class="{ 'animate-spin': loading }"
@@ -223,7 +251,51 @@ const canBuild = computed(() => {
       </section>
 
       <!-- Náprava šifrování mzdového archivu: jen když kontrola něco našla. -->
-      <PayrollArchiveEncryptionPanel v-if="report" :checks="report.checks" @changed="load" />
+      <PayrollArchiveEncryptionPanel v-if="report" :checks="report.checks" @changed="load()" />
+
+      <section v-if="report?.imported_posting_ambiguities" class="rounded-lg border border-neutral-200 bg-surface p-5">
+        <h2 class="text-lg font-semibold text-neutral-900">{{ t('diagnostics.imported_postings.title') }}</h2>
+        <p class="mt-1 text-sm text-neutral-600">{{ t('diagnostics.imported_postings.scope') }}</p>
+        <p v-if="!report.imported_posting_ambiguities.available" class="mt-3 text-sm text-warning-800">
+          {{ t('diagnostics.imported_postings.unavailable') }}
+        </p>
+        <p v-else-if="!report.imported_posting_ambiguities.total" class="mt-3 text-sm text-success-700">
+          {{ t('diagnostics.imported_postings.empty') }}
+        </p>
+        <template v-else>
+          <p class="mt-3 text-sm text-warning-800">{{ t('diagnostics.imported_postings.summary', { count: report.imported_posting_ambiguities.total }) }}</p>
+          <p class="mt-1 text-sm text-neutral-600">{{ t('diagnostics.imported_postings.guidance') }}</p>
+          <div class="mt-4 space-y-3">
+            <article v-for="entry in report.imported_posting_ambiguities.entries" :key="entry.entry_id" class="rounded-md border border-warning-200 p-3">
+              <div class="flex flex-wrap items-center gap-2">
+                <RouterLink :to="journalEntryLink(entry.entry_id)" :class="btnOutline('neutral')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.search" /></svg>
+                  {{ t('diagnostics.imported_postings.entry', { id: entry.entry_id }) }}
+                </RouterLink>
+                <span class="text-sm text-neutral-600">{{ entry.entry_date }} · {{ entry.description }}</span>
+              </div>
+              <p class="mt-2 text-xs text-neutral-600">{{ t('diagnostics.imported_postings.owners', { count: entry.owner_count }) }}</p>
+              <div class="mt-2 flex flex-wrap gap-2">
+                <RouterLink v-for="doc in entry.candidates" :key="`${doc.doc_type}:${doc.doc_id}`" :to="journalSourceLink({ source_type: doc.doc_type, source_id: doc.doc_id })!" :class="btnOutline('neutral')">
+                  <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.doc" /></svg>
+                  {{ t(`diagnostics.imported_postings.${doc.doc_type}`) }} {{ doc.document_number || `#${doc.doc_id}` }}
+                </RouterLink>
+              </div>
+              <p v-if="entry.owner_count > entry.candidates.length" class="mt-2 text-xs text-neutral-500">{{ t('diagnostics.imported_postings.candidate_limit', { count: report.imported_posting_ambiguities.candidate_limit }) }}</p>
+            </article>
+          </div>
+          <div class="mt-4 flex flex-wrap gap-2">
+            <button type="button" :class="btnOutline('neutral')" :disabled="loading" @click="load()">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.cycle" /></svg>
+              {{ t('diagnostics.imported_postings.first') }}
+            </button>
+            <button v-if="report.imported_posting_ambiguities.next_after !== null" type="button" :class="btnOutline('neutral')" :disabled="loading" @click="load(report.imported_posting_ambiguities.next_after)">
+              {{ t('diagnostics.imported_postings.next') }}
+              <svg class="w-4 h-4 -rotate-90" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chevron" /></svg>
+            </button>
+          </div>
+        </template>
+      </section>
 
       <!-- Kontroly -->
       <section v-if="report" class="rounded-lg border border-neutral-200 bg-surface p-5">

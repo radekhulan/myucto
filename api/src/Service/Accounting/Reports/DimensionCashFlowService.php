@@ -124,7 +124,7 @@ final class DimensionCashFlowService
      */
     private function balances(int $supplierId, string $from, string $to, ?DimensionFilter $filter): array
     {
-        [$linesSql, $linesParams] = $filter !== null ? $filter->lineSource($supplierId, 'l') : ['journal_entry_lines l', []];
+        [$linesSql, $linesParams] = $filter !== null ? $filter->lineSource($supplierId, 'l', $from, $to) : ['journal_entry_lines l', []];
         $stmt = $this->db->pdo()->prepare(
             'WITH RECURSIVE ' . JournalTaxOrigin::cte($supplierId) . "
             SELECT a.account_code AS leaf_code,

@@ -58,7 +58,7 @@ final class SampleDimensionPurger
             if (!isset($roots['dimension_values'][(int) $row['dimension_value_id']])) self::blocked('dimension_defaults');
             if (!isset($owned['project'][(int) ($row['project_id'] ?? 0)])) self::blocked('dimension_defaults.project_id');
         }
-        $references = $this->rows('SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE CONSTRAINT_SCHEMA=DATABASE() AND REFERENCED_COLUMN_NAME="id" AND REFERENCED_TABLE_NAME IN ("dimension_values", "dimension_types", "cost_centers")', []);
+        $references = $this->rows('SELECT TABLE_NAME, COLUMN_NAME, REFERENCED_TABLE_NAME FROM information_schema.KEY_COLUMN_USAGE WHERE TABLE_SCHEMA=DATABASE() AND REFERENCED_COLUMN_NAME="id" AND REFERENCED_TABLE_NAME IN ("dimension_values", "dimension_types", "cost_centers")', []);
         foreach ($references as $ref) {
             $parent = $ref['REFERENCED_TABLE_NAME'];
             $ids = array_keys($roots[$parent]);

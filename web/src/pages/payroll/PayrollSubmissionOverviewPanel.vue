@@ -31,7 +31,7 @@ import EnvironmentSwitch from '@/components/ui/EnvironmentSwitch.vue'
 import { useSubmissionEnvironment } from '@/composables/useSubmissionEnvironment'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import IsdsSendMethods from '@/components/submission/IsdsSendMethods.vue'
-import MobileKeyBatchSendButton from '@/components/submission/MobileKeyBatchSendButton.vue'
+import IsdsBatchSendMethods from '@/components/submission/IsdsBatchSendMethods.vue'
 import PayrollJmhzOrdinaryEvidencePanel from './PayrollJmhzOrdinaryEvidencePanel.vue'
 import PayrollJmhzXmlDryRunPanel from './PayrollJmhzXmlDryRunPanel.vue'
 import PayrollJmhzDispatchPanel from './PayrollJmhzDispatchPanel.vue'
@@ -45,6 +45,7 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { usePayrollLabels } from '@/composables/usePayrollLabels'
 import ProductionSendConfirmDialog from '@/components/payroll/ProductionSendConfirmDialog.vue'
 import { useProductionSendConfirm } from '@/composables/useProductionSendConfirm'
+import { useWindowRefresh } from '@/composables/useWindowRefresh'
 import { healthPaymentStatus, localToday } from './healthPaymentStatus'
 
 /*
@@ -128,14 +129,15 @@ const sendingHealthKey = ref<string | null>(null)
 const healthQueuedByKey = ref<Record<string, HealthIsdsEnqueueResult>>({})
 const healthMobileKeySentKey = ref<string | null>(null)
 /**
- * Hromadné odeslání: transportní kanál je vlastnost FIRMY, ne jednotlivého
- * podání, takže se u vybraných karet chová stejně — buď u všech projde brána,
- * nebo u všech Mobilní klíč, nebo u všech zůstane ruční cesta.
+ * Hromadné odeslání: vybrané přehledy se zařadí do fronty datové schránky
+ * a odešlou jedním přihlášením zvoleným způsobem (`IsdsBatchSendMethods`) —
+ * stejný výběr jako u jedné karty, jen brána schvaluje každý koncept zvlášť.
  */
 const selectedHealthKeys = ref<Set<string>>(new Set())
 const healthBatchBusy = ref(false)
 const healthBatchError = ref('')
 const healthBatchQueuedIds = ref<number[]>([])
+const healthBatchTransport = ref<HealthIsdsEnqueueResult['transport'] | null>(null)
 const healthBatchSentResults = ref<MobileKeyBatchItemResult[] | null>(null)
 const downloadingJmhzKey = ref<string | null>(null)
 const jmhzError = ref('')
@@ -654,9 +656,8 @@ function toggleHealthSelection(overview: PayrollHealthPaymentOverview) {
 }
 
 /**
- * Zařadí do fronty všechny vybrané přehledy a podle SPOLEČNÉHO kanálu (viz
- * komentář u `selectedHealthKeys`) buď rovnou otevře bránu, nebo nabídne
- * dávkové odeslání Mobilním klíčem, nebo pošle na ruční frontu.
+ * Zařadí do fronty všechny vybrané přehledy a nabídne jejich odeslání jedním
+ * přihlášením (viz komentář u `selectedHealthKeys`).
  */
 async function sendSelectedHealthViaDataBox() {
   const selected = healthOverviews.value.filter(overview =>
@@ -671,6 +672,7 @@ async function sendSelectedHealthViaDataBox() {
   healthBatchError.value = ''
   healthError.value = ''
   healthBatchQueuedIds.value = []
+  healthBatchTransport.value = null
   healthBatchSentResults.value = null
   healthBatchBusy.value = true
   try {
@@ -686,17 +688,8 @@ async function sendSelectedHealthViaDataBox() {
     if (queued.length === 0) {
       throw new Error('health_batch_nothing_ready')
     }
-    const first = queued[0]!
-    if (first.transport.automatic) {
-      const gateway = await dataBoxApi.gatewayStartPayroll(first.outbox_id)
-      navigateFullPage(gateway.redirect_url)
-      return
-    }
-    if (first.transport.channel === 'mobile_key') {
-      healthBatchQueuedIds.value = queued.map(item => item.outbox_id)
-      return
-    }
-    navigateFullPage(first.outbox_url)
+    healthBatchTransport.value = queued[0]!.transport
+    healthBatchQueuedIds.value = queued.map(item => item.outbox_id)
   } catch (exception) {
     healthBatchError.value = apiErrorMessage(
       exception,
@@ -765,6 +758,11 @@ watch([environment, period, () => props.mode], () => {
   void load()
 })
 onMounted(load)
+// Po odeslání v jiném okně (datová schránka, fronta) se obsah jen zašedne
+// a přepíše; rozbalený detail ani rozdělaná akce se nezavírají.
+useWindowRefresh(load, () => !loading.value && expandedId.value === null && settlingId.value === null
+  && sendingHealthKey.value === null && !healthBatchBusy.value && externalFilingItem.value === null
+  && healthBatchTransport.value === null)
 </script>
 
 <template>
@@ -874,12 +872,15 @@ onMounted(load)
           </span>
           <button
             type="button"
-            :class="btnFilledSm('primary')"
+            :class="[btnFilledSm('primary'), 'whitespace-nowrap']"
             :disabled="selectedHealthKeys.size === 0 || healthBatchBusy"
             data-test="health-batch-send"
             @click="sendSelectedHealthViaDataBox"
           >
-            {{ t('payroll.submissions.overview.mobile_key_batch.action', { count: selectedHealthKeys.size }) }}
+            <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+              <path :d="ICONS.send" />
+            </svg>
+            {{ t('payroll.submissions.overview.mobile_key_batch.send_isds', { count: selectedHealthKeys.size }) }}
           </button>
         </div>
         <p
@@ -893,11 +894,14 @@ onMounted(load)
         <div
           v-if="healthBatchQueuedIds.length"
           class="m-4 rounded-lg border border-primary-200 bg-primary-50/40 p-3"
-          data-test="health-batch-mobile-key"
+          data-test="health-batch-databox"
         >
-          <MobileKeyBatchSendButton
+          <IsdsBatchSendMethods
+            :key="healthBatchQueuedIds.join(',')"
             :outbox-ids="healthBatchQueuedIds"
             environment="production"
+            :transport="healthBatchTransport"
+            :gateway-start="dataBoxApi.gatewayStartPayroll"
             @sent="healthBatchSent"
           />
         </div>

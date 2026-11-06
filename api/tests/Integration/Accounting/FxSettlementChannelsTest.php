@@ -746,6 +746,7 @@ final class FxSettlementChannelsTest extends TestCase
         $service = new \MyInvoice\Service\Accounting\Closing\FxRevaluationService(
             $repo, $c->get(\MyInvoice\Service\Currency\CnbExchangeRateClient::class),
             $c->get(\MyInvoice\Repository\PostingRuleRepository::class), $c->get(\MyInvoice\Repository\ChartOfAccountsRepository::class),
+            $c->get(\MyInvoice\Service\Accounting\AccountRoleResolver::class),
         );
         $preview = $service->preview($this->sid, ['id' => $this->pid, 'ends_on' => '2098-12-31']);
         self::assertSame(1000.0, $preview['saldo']['detail'][0]['remaining_foreign']);

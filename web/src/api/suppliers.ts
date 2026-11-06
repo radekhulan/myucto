@@ -95,15 +95,51 @@ export interface SupplierCreatePayload {
     iban?: string
     bic?: string
   }
+  carry_over?: SupplierCarryOverRequest
+}
+
+/** Co lze při zakládání firmy převzít ze stávajících firem (BE `SupplierCarryOver`). Bez tajemství. */
+export interface SupplierCarryOverPreview {
+  ai: {
+    available: boolean
+    reason: 'different' | 'not_available' | null
+    provider: string | null
+    companies_count: number
+    companies: string[]
+  }
+  certificates: Array<{
+    id: number
+    label: string
+    subject: string
+    valid_to: string
+    companies_count: number
+  }>
+}
+
+export interface SupplierCarryOverRequest {
+  ai: boolean
+  certificate_ids: number[]
+  /** Ověření jako při sdílení certifikátu v trezoru; nutné jen s certifikátem. */
+  step_up?: { password?: string; totp_code?: string; step_up_token?: string }
+}
+
+export type SupplierCarryOverError =
+  | 'not_available' | 'different' | 'forbidden' | 'eu_residency' | 'not_owned' | 'not_shared_everywhere' | 'failed'
+
+export interface SupplierCarryOverResult {
+  ai?: { ok: boolean; provider?: string; error?: SupplierCarryOverError }
+  certificates: Array<{ id: number; ok: boolean; error?: SupplierCarryOverError }>
 }
 
 export const suppliersApi = {
   list: () => api.get<SupplierListItem[]>('/suppliers').then(r => r.data),
   directory: (params: SupplierDirectoryParams) =>
     api.get<SupplierDirectoryItem[]>('/suppliers/directory', { params }).then(r => r.data),
+  carryOverPreview: () =>
+    api.get<SupplierCarryOverPreview>('/suppliers/carry-over').then(r => r.data),
   get: (id: number) => api.get<Supplier>(`/suppliers/${id}`).then(r => r.data),
   create: (payload: SupplierCreatePayload) =>
-    api.post<{ id: number }>('/suppliers', payload).then(r => r.data),
+    api.post<{ id: number; carry_over_result?: SupplierCarryOverResult }>('/suppliers', payload).then(r => r.data),
   update: (id: number, payload: Partial<Supplier>) =>
     api.put<Supplier>(`/suppliers/${id}`, payload).then(r => r.data),
   delete: (id: number) =>

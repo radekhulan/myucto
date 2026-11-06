@@ -23,6 +23,7 @@ use MyInvoice\Service\Tax\Return\TaxReturnService;
 use MyInvoice\Service\Tax\VatPaymentInstruction;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Support\Sql\PayablePredicate;
+use MyInvoice\Support\Sql\AdvanceSettledSql;
 
 /**
  * CRM dashboard aggregation queries.
@@ -164,8 +165,7 @@ final class CrmAggregationService
     {
         return " AND NOT (COALESCE(pi.document_kind, '') = 'advance'"
              . " AND (pi.status <> 'paid'"
-             . " OR EXISTS (SELECT 1 FROM purchase_invoices adv_s"
-             . " WHERE adv_s.advance_purchase_invoice_id = pi.id)))"
+             . ' OR ' . AdvanceSettledSql::purchase('pi') . '))'
              // DDKP (daňový doklad k platbě) není náklad — jen odpočet DPH ze zálohy (343/314);
              // náklad vzniká až u vyúčtovací faktury. Bezpodmínečně ven z nákladů dodavatele.
              . " AND COALESCE(pi.document_kind, '') <> 'tax_document'";
@@ -340,8 +340,7 @@ final class CrmAggregationService
         // Záměrně `!= 'proforma'` (ne IN-list), aby se nezahodily případné jiné typy
         // (cancellation apod.), které sem padaly i dosud. Kombinuj se status filtrem.
         return "(i.invoice_type != 'proforma'"
-             . " OR NOT EXISTS (SELECT 1 FROM invoices ch"
-             . " WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))";
+             . ' OR NOT ' . AdvanceSettledSql::proforma('i') . ')';
     }
 
     /**
@@ -482,8 +481,7 @@ final class CrmAggregationService
                 AND " . self::REV_DATE . " >= ? AND " . self::REV_DATE . " < ?
                 AND i.invoice_type = 'proforma'
                 AND i.status IN ('issued', 'sent', 'reminded')
-                AND NOT EXISTS (SELECT 1 FROM invoices ch
-                                 WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice')
+                AND NOT " . AdvanceSettledSql::proforma('i') . "
            GROUP BY cur.code"
         );
         $prof->execute([$supplierId, $from, $toExcl]);
@@ -606,7 +604,7 @@ final class CrmAggregationService
              WHERE i.supplier_id = ?
                AND i.issue_date >= ?
                AND i.status NOT IN ('draft', 'cancelled')
-               AND i.invoice_type != 'proforma'
+               AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
           GROUP BY i.client_id, c.company_name
           ORDER BY revenue_czk DESC
              LIMIT " . (int) $limit;
@@ -792,7 +790,7 @@ final class CrmAggregationService
              WHERE i.supplier_id = ?
                AND i.status IN ('issued', 'sent', 'reminded')
                AND " . $this->receivableDocTypeSql() . "
-               AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)" . self::relatedPartyExclude('i', 'client_id', $excludeRelated) . "
+               AND (i.invoice_type NOT IN ('rent_calendar','advance_calendar') AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0))" . self::relatedPartyExclude('i', 'client_id', $excludeRelated) . "
           GROUP BY bucket, currency
           ORDER BY currency, FIELD(bucket, 'not_due', 'overdue_30', 'overdue_60', 'overdue_90', 'overdue_90_plus')
         ";
@@ -862,7 +860,7 @@ final class CrmAggregationService
               WHERE i.supplier_id = ?
                 AND i.status IN ('issued', 'sent', 'reminded')
                 AND " . $this->receivableDocTypeSql() . "
-                AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)
+                AND (i.invoice_type NOT IN ('rent_calendar','advance_calendar') AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0))
                 AND i.due_date < ?
            ORDER BY i.due_date, i.id"
         );
@@ -932,7 +930,7 @@ final class CrmAggregationService
                 AND status = 'paid'
                 AND paid_at IS NOT NULL
                 AND issue_date >= ?
-                AND invoice_type != 'proforma'"
+                AND invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')"
         );
         $stmt->execute([$supplierId, $start]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
@@ -959,7 +957,7 @@ final class CrmAggregationService
               AND status = 'paid'
               AND paid_at IS NOT NULL
               AND issue_date >= ?
-              AND invoice_type != 'proforma'"
+              AND invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')"
         );
         $stmt->execute([$supplierId, $start]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
@@ -1148,7 +1146,7 @@ final class CrmAggregationService
              WHERE i.supplier_id = ?
                AND i.issue_date >= ?
                AND i.status NOT IN ('draft', 'cancelled')
-               AND i.invoice_type != 'proforma'  -- proformy vynechat (nejsou daňový doklad)
+               AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')  -- proformy vynechat (nejsou daňový doklad)
           GROUP BY i.revenue_category_id, rc.code, rc.label
           ORDER BY total DESC
         ";
@@ -1188,7 +1186,7 @@ final class CrmAggregationService
                JOIN invoices i ON i.client_id = c.id AND i.status NOT IN ('draft', 'cancelled')
           LEFT JOIN currencies cur ON cur.id = i.currency_id
               WHERE c.supplier_id = ?
-                AND i.invoice_type != 'proforma'
+                AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
                 AND c.is_customer = 1
            GROUP BY c.id, c.company_name
              HAVING DATEDIFF(?, MAX(i.issue_date)) > ?
@@ -1290,6 +1288,33 @@ final class CrmAggregationService
                     $bankCount === 1 ? 'platba' : ($bankCount < 5 ? 'platby' : 'plateb')),
                 'link'     => '/bank',
                 'count'    => $bankCount,
+            ];
+        }
+
+        // 1b. Avíza, která se nepodařilo rozparsovat. Pohyb se do evidence vůbec
+        // nedostal, takže nechybí jen v párování — nevidí ho ani kontrola „platba bez
+        // dokladu" a v součtu výpisu po něm nezůstane stopa. Dosud se o tom uživatel
+        // dozvěděl jen z červeného řádku v seznamu avíz, kam se ale nedívá, dokud něco
+        // nehledá. Typická příčina je šablona banky, kterou parser nezná (chybějící
+        // variabilní symbol, jiný formát datumu), takže to samo nezmizí.
+        // Seznam avíz je záložka jen pro správu bankovních účtů, ostatním by odkaz nic neukázal.
+        // Odložení „historická" se váže na konkrétní zprávy (snímek v snapshotCurrentIds),
+        // nově propadlé avízo se tak objeví i poté, co uživatel ty starší odklidil.
+        $noticeIds = $canManageBankConnections ? $this->filterByDismissal(
+            $this->unprocessedBankNoticeIds($supplierId, $today), $dismissals, 'bank_notice_unprocessed',
+        ) : [];
+        $noticeCount = count($noticeIds);
+        if ($noticeCount > 0) {
+            $items[] = [
+                'type'      => 'bank_notice_unprocessed',
+                'severity'  => 'high',
+                'title'     => '',
+                'title_key' => 'crm.action_items.bank_notice_unprocessed_title',
+                'hint'      => '',
+                // Hint se v widgetu překládá bez parametrů, počet ukazuje `count`.
+                'hint_key'  => 'crm.action_items.bank_notice_unprocessed',
+                'link'      => '/bank?tab=email',
+                'count'     => $noticeCount,
             ];
         }
 
@@ -1800,6 +1825,9 @@ final class CrmAggregationService
             'items' => $items,
             'total' => count($items),
             'dismissed_count' => count($dismissals),
+            // Klientské položky (např. instalace na plochu) server nevytváří, jejich odložení
+            // si ale drží tady; klient podle tohoto seznamu pozná, že je nemá nabízet.
+            'dismissed_types' => array_keys($dismissals),
         ];
     }
 
@@ -3039,7 +3067,7 @@ final class CrmAggregationService
         $validTypes = ['overdue_invoices', 'bank_unmatched', 'recurring_due', 'overdue_payables',
             'purchase_drafts', 'unbooked_documents', 'journal_integrity', 'tax_deadline', 'kh_deadline',
             'shv_deadline', 'churn_risk', 'dppo_balance_due', 'tax_advance_due',
-            'purchase_approvals_pending', 'purchase_approvals_rejected'];
+            'purchase_approvals_pending', 'purchase_approvals_rejected', 'bank_notice_unprocessed', 'pwa_install'];
         $validModes = ['day', 'week', 'forever', 'historical'];
         if (!in_array($itemType, $validTypes, true)) {
             throw new \InvalidArgumentException("Invalid item_type: {$itemType}");
@@ -3135,9 +3163,8 @@ final class CrmAggregationService
                         AND i.status IN ('issued','sent','reminded')
                         AND i.due_date {$overdueOperator} CURDATE()
                         AND (i.invoice_type != 'proforma'
-                             OR NOT EXISTS (SELECT 1 FROM invoices ch
-                                             WHERE ch.parent_invoice_id = i.id AND ch.invoice_type = 'invoice'))
-                        AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0)"
+                             OR NOT " . AdvanceSettledSql::proforma('i') . ")
+                        AND (i.invoice_type NOT IN ('rent_calendar','advance_calendar') AND (i.invoice_type NOT IN ('invoice','proforma','tax_document') OR i.amount_to_pay - i.paid_total > 0))"
                 );
                 $stmt->execute([$supplierId]);
                 break;
@@ -3205,6 +3232,8 @@ final class CrmAggregationService
                 );
                 $stmt->execute([$supplierId, $today]);
                 break;
+            case 'bank_notice_unprocessed':
+                return $this->unprocessedBankNoticeIds($supplierId, $today);
             case 'tax_deadline':
             case 'kh_deadline':
             case 'shv_deadline':
@@ -3212,6 +3241,25 @@ final class CrmAggregationService
             default:
                 return [];
         }
+        return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * Avíza za posledních 180 dnů, která parser nepřečetl (`parse_failed`). Starší
+     * zprávu, kterou nikdo půl roku neřešil, už položka nenabízí.
+     *
+     * @return list<int>
+     */
+    private function unprocessedBankNoticeIds(int $supplierId, string $today): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id FROM bank_email_processed_messages
+              WHERE supplier_id = ?
+                AND status = 'parse_failed'
+                AND message_date >= DATE_SUB(?, INTERVAL 180 DAY)
+              ORDER BY id DESC"
+        );
+        $stmt->execute([$supplierId, $today]);
         return array_map('intval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
     }
 
@@ -3224,7 +3272,7 @@ final class CrmAggregationService
      *   total_in: float, total_out: float, total_net: float
      * }
      */
-    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK'): array
+    public function cashFlowForecast(int $supplierId, int $weeksAhead = 4, string $currency = 'CZK', bool $includeDrafts = false): array
     {
         $pdo = $this->db->pdo();
         $today = new \DateTimeImmutable('today');
@@ -3283,7 +3331,7 @@ final class CrmAggregationService
           LEFT JOIN currencies c ON c.id = i.currency_id
               WHERE i.supplier_id = ?
                 AND i.status IN ('issued', 'sent', 'reminded')
-                AND i.invoice_type != 'proforma'
+                AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
                 AND (i.invoice_type NOT IN ('invoice','tax_document') OR i.amount_to_pay - i.paid_total > 0)
                 AND i.due_date BETWEEN ? AND ?
                 AND COALESCE(c.code, 'CZK') = ?
@@ -3294,6 +3342,35 @@ final class CrmAggregationService
         foreach ($inStmt->fetchAll(\PDO::FETCH_ASSOC) as $r) {
             if ($r['bucket'] === null) continue;
             $inByBucket[(int) $r['bucket']] = (float) $r['amt'];
+        }
+
+        $draftByBucket = [];
+        $unscheduledDraftCount = 0;
+        if ($includeDrafts) {
+            // Pouze uložené částky konceptů; ruční přenos z výkazů se zde neopakuje.
+            $draftStmt = $pdo->prepare(
+                "SELECT CASE{$buildCase('i')} END AS bucket,
+                        SUM(i.amount_to_pay - i.paid_total) AS amt
+                   FROM invoices i
+              LEFT JOIN currencies c ON c.id = i.currency_id
+                  WHERE i.supplier_id = ? AND " . DraftCashFlow::eligibleSql() . "
+                    AND i.due_date BETWEEN ? AND ?
+                    AND COALESCE(c.code, 'CZK') = ?
+               GROUP BY bucket"
+            );
+            $draftStmt->execute([...$caseParams, $supplierId, $globalStart, $globalEnd, $currency]);
+            foreach ($draftStmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                if ($row['bucket'] !== null) $draftByBucket[(int) $row['bucket']] = (float) $row['amt'];
+            }
+            $unscheduled = $pdo->prepare(
+                "SELECT COUNT(*) FROM invoices i
+              LEFT JOIN currencies c ON c.id = i.currency_id
+                  WHERE i.supplier_id = ? AND " . DraftCashFlow::eligibleSql() . "
+                    AND (i.due_date IS NULL OR i.due_date < ?)
+                    AND COALESCE(c.code, 'CZK') = ?"
+            );
+            $unscheduled->execute([$supplierId, $globalStart, $currency]);
+            $unscheduledDraftCount = (int) $unscheduled->fetchColumn();
         }
 
         // Out: nezaplacené přijaté faktury s due_date v okně.
@@ -3347,13 +3424,22 @@ final class CrmAggregationService
             ];
         }
 
-        return [
+        $forecast = [
             'currency'  => $currency,
             'weeks'     => $weeks,
             'total_in'  => round($totalIn, 2),
             'total_out' => round($totalOut, 2),
             'total_net' => round($totalIn - $totalOut, 2),
         ];
+        if ($includeDrafts) {
+            foreach ($forecast['weeks'] as $idx => &$week) {
+                $week['draft_in'] = round($draftByBucket[$idx] ?? 0.0, 2);
+            }
+            unset($week);
+            $forecast['total_draft_in'] = round(array_sum($draftByBucket), 2);
+            $forecast['unscheduled_draft_count'] = $unscheduledDraftCount;
+        }
+        return DraftCashFlow::withOutlook($forecast);
     }
 
     /**
@@ -3383,7 +3469,7 @@ final class CrmAggregationService
                    AND i.status = 'paid'
                    AND i.paid_at IS NOT NULL
                    AND i.due_date IS NOT NULL
-                   AND i.invoice_type != 'proforma'
+                   AND i.invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
               )
               SELECT pi.client_id,
                      c.company_name,
@@ -3446,7 +3532,7 @@ final class CrmAggregationService
               WHERE i.supplier_id = ?
                 AND i.status IN ('paid', 'sent', 'reminded')
                 -- tax_document je auto-paid bez upomínek — do statistiky účinnosti nepatří
-                AND i.invoice_type NOT IN ('proforma', 'tax_document')
+                AND i.invoice_type NOT IN ('proforma', 'tax_document','rent_calendar','advance_calendar')
                 AND i.issue_date >= ?"
         );
         $stmt->execute([$supplierId, $start]);
@@ -3498,7 +3584,7 @@ final class CrmAggregationService
               WHERE supplier_id = ?
                 AND status = 'paid'
                 AND paid_at IS NOT NULL
-                AND invoice_type != 'proforma'
+                AND invoice_type NOT IN ('proforma','rent_calendar','advance_calendar')
                 AND issue_date >= ?
                 AND paid_at >= issue_date"
         );

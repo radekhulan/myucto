@@ -35,6 +35,7 @@ final class PortfolioAction
             $userId,
             RequestAuthorization::isSuperadmin($request),
             new \DateTimeImmutable(),
+            RequestAuthorization::boundSupplierId($request),
         ));
     }
 
@@ -45,14 +46,20 @@ final class PortfolioAction
      *
      * Přístup ke KAŽDÉ firmě se ověřuje stejně jako u přehledu — seznam povolených
      * ID staví PortfolioAggregationService z `user_suppliers`, takže tudy nejde
-     * přečíst cizí firmu.
+     * přečíst cizí firmu. Token vázaný na firmu (a vlastní doména) projde jen
+     * pro tuto firmu.
      */
     public function monthlyCheck(Request $request, Response $response, array $args): Response
     {
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
         $supplierId = (int) ($args['supplierId'] ?? 0);
-        if (!$this->portfolio->userCanAccess($userId, RequestAuthorization::isSuperadmin($request), $supplierId)) {
+        if (!$this->portfolio->userCanAccess(
+            $userId,
+            RequestAuthorization::isSuperadmin($request),
+            $supplierId,
+            RequestAuthorization::boundSupplierId($request),
+        )) {
             return Json::error($response, 'not_found', 'Firma nenalezena.', 404);
         }
 

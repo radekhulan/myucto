@@ -15,7 +15,7 @@ const bool = (description) => ({ type: 'boolean', description });
  */
 export const DOCUMENT_ENTITY_TYPES = [
   'client', 'invoice', 'purchase_invoice', 'project', 'journal_entry', 'bank_transaction',
-  'cash_document', 'other_item', 'invoice_payment',
+  'cash_document', 'other_item', 'invoice_payment', 'internal_document',
 ];
 
 /**

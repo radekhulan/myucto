@@ -5,8 +5,9 @@
 #      a fuzz (L3) a testy účetní a daňové vrstvy. Bez mzdových toků, převodů z cizích
 #      systémů a generátorů ukázkových dat (dvě třetiny času plné sady, hlídá je plná
 #      sada a brány mezd). Padlé třídy se jednou zopakují sériově, flaky se vypíšou.
-#      Prošla-li nad stejným kódem už plná sada (test-parallel.php bez přepínačů),
-#      krok se přeskočí — její výsledek pokrývá vše.
+#      Proběhla-li nad stejným kódem už plná sada (test-parallel.php bez přepínačů),
+#      krok se nespouští znovu: AuditCore je její podmnožina, takže brána jen přečte,
+#      zda v jádru něco padlo (test-parallel.php --audit-check).
 #   2. invarianty nad DATY    — read-only, proti zvolené databázi
 #   3. křížové kontroly (L4)  — read-only, všechny firmy s uzavřeným obdobím
 #   4. struktura databáze proti migracím
@@ -68,9 +69,14 @@ function Invoke-Step {
     }
 }
 
-& $PhpBin (Join-Path $apiDir 'bin/test-parallel.php') --green-check
-if ($LASTEXITCODE -eq 0 -and -not $Full) {
-    Write-Host '=== Testy — přeskočeno, plná sada prošla nad stejným kódem' -ForegroundColor DarkGray
+& $PhpBin (Join-Path $apiDir 'bin/test-parallel.php') --audit-check
+$auditCheck = $LASTEXITCODE
+if ($auditCheck -eq 0 -and -not $Full) {
+    Write-Host '=== Testy — přeskočeno, plná sada nad stejným kódem nemá pád v jádru' -ForegroundColor DarkGray
+}
+elseif ($auditCheck -eq 2 -and -not $Full) {
+    $script:failed += 'Testy účetního a daňového jádra (AuditCore) — padly v plné sadě nad stejným kódem'
+    Write-Host '=== Testy — SELHALO v plné sadě nad stejným kódem (viz seznam výše), znovu se nespouští' -ForegroundColor Red
 }
 elseif ($Full) {
     Invoke-Step 'Plná testovací sada' {

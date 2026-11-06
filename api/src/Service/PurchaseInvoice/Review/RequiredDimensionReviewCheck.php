@@ -168,9 +168,9 @@ final class RequiredDimensionReviewCheck implements PurchaseReviewCheck
     {
         $marks = implode(',', array_fill(0, count($ids), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT DISTINCT source_id FROM journal_entries
-              WHERE supplier_id = ? AND source_type = 'purchase_invoice' AND reversed_by IS NULL
-                AND source_id IN ({$marks})"
+            "SELECT pi.id FROM purchase_invoices pi
+              WHERE pi.supplier_id = ? AND pi.id IN ({$marks})
+                AND " . \MyInvoice\Service\Accounting\DocumentPostingGroup::activePostingExistsSql("'purchase_invoice'", 'pi.id', 'pi.supplier_id', false)
         );
         $stmt->execute([$supplierId, ...$ids]);
         return array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));

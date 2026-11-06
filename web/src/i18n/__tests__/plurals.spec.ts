@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { i18n } from '@/i18n'
+import cs from '@/i18n/cs.json'
 
 /**
  * Česká čísla mají čtyři tvary a překlady je tak píšou. Vestavěné pravidlo
@@ -29,5 +30,17 @@ describe('české plurály', () => {
 
   it('u zprávy se třemi tvary sáhne po posledním, ne mimo rozsah', () => {
     expect(translate(shorter, 5)).toBe('5 verze')
+  })
+
+  // Karta mzdových běhů psala „chybí mzdový běh za 2 měsíců".
+  it.each([
+    [1, 'chybí mzdový běh za 1 měsíc '],
+    [2, 'chybí mzdové běhy za 2 měsíce '],
+    [5, 'chybí mzdové běhy za 5 měsíců '],
+  ])('chybějící předchozí běhy skloňuje podle počtu %i', (count, expected) => {
+    const source = (cs as { payroll: { runs: { missing_previous: { title: string } } } })
+      .payroll.runs.missing_previous.title
+    i18n.global.mergeLocaleMessage('cs', { __plural_probe: source })
+    expect(i18n.global.t('__plural_probe', { count, period: '1/2027' }, count)).toContain(expected)
   })
 })

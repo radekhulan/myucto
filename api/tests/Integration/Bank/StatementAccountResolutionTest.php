@@ -33,8 +33,13 @@ final class StatementAccountResolutionTest extends TestCase
 {
     private Connection $db;
     private BankStatementAction $action;
+    /** Vlastní účet třídy (projde mod-11): sdílený placeholder 1000000005 používají desítky jiných testů a jejich zbytky by měnily počty i zůstatky. */
+    private const ACCOUNT = '1000000128';
+
     private int $supplierId = 0;
     private int $userId = 0;
+    /** Nejvyšší ID výpisu před testem: počítají se jen výpisy tohoto testu, ne zbytky jiných tříd na sdíleném účtu. */
+    private int $statementBaseline = 0;
 
     /** @var int[] */
     private array $currencyIds = [];
@@ -64,6 +69,7 @@ final class StatementAccountResolutionTest extends TestCase
             $this->markTestSkipped('Chybí supplier v DB.');
         }
         $this->userId = (int) ($this->db->pdo()->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+        $this->statementBaseline = (int) $this->db->pdo()->query('SELECT COALESCE(MAX(id), 0) FROM bank_statements')->fetchColumn();
     }
 
     protected function tearDown(): void
@@ -193,7 +199,7 @@ final class StatementAccountResolutionTest extends TestCase
 
     public function testGpcReconciliationRequiresExplicitConfirmationAndRetriesSameUpload(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $currencyId = $this->registerCurrency('CZK', $account, '0100');
         $apiStatementId = $this->insertStatement('bank_api', $account, '0100', '2026-03-31', 1337.00, 'reconciliation-api');
         $this->db->pdo()->prepare('UPDATE bank_statements SET supplier_id = ? WHERE id = ?')
@@ -253,7 +259,7 @@ final class StatementAccountResolutionTest extends TestCase
 
     public function testGpcReconciliationConfirmationsRejectMalformedMultipartJson(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $invalidValues = [
             'not-json',
             json_encode([str_repeat('a', 63)], JSON_THROW_ON_ERROR),
@@ -318,7 +324,7 @@ final class StatementAccountResolutionTest extends TestCase
 
     public function testAccountBalancesAndListUseCalculatedApiClosing(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $currencyId = $this->registerCurrency('CZK', $account, '2250');
         $this->insertStatement('gpc', $account, '2250', '2099-06-30', 100.0, 'balance-anchor');
         $apiId = $this->insertStatement('bank_api', $account, '2250', '2099-07-15', 0.0, 'balance-api');
@@ -352,7 +358,7 @@ final class StatementAccountResolutionTest extends TestCase
      */
     public function testListCalculatesBalanceForImportedStatement(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $this->registerCurrency('CZK', $account, '2250');
         $id = $this->insertStatement('import', $account, '2250', '2099-07-31', 125.0, 'money-s3-import');
         $pdo = $this->db->pdo();
@@ -369,7 +375,7 @@ final class StatementAccountResolutionTest extends TestCase
 
     public function testApiWithoutInitialBalanceUsesMovementsInListAndAccountBalances(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $currencyId = $this->registerCurrency('CZK', $account, '2250');
         $id = $this->insertStatement('bank_api', $account, '2250', '2099-07-15', 0.0, 'zero-start-api');
         $pdo = $this->db->pdo();
@@ -534,7 +540,7 @@ final class StatementAccountResolutionTest extends TestCase
 
     public function testApiBalanceIsAuthoritativeOnlyWhenProvided(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $currencyId = $this->registerCurrency('CZK', $account, '2250');
         $this->insertStatement('bank_api', $account, '2250', '2099-06-30', 100.0, 'api-known');
         $unknown = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 0.0, 'api-unknown');
@@ -550,7 +556,7 @@ final class StatementAccountResolutionTest extends TestCase
 
     public function testReportedApiBalanceWinsOverSameDateCalculation(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $currencyId = $this->registerCurrency('CZK', $account, '2250');
         $this->insertStatement('gpc', $account, '2250', '2099-06-30', 100.0, 'reported-anchor');
         $this->insertStatement('bank_api', $account, '2250', '2099-07-15', 200.0, 'reported-api');
@@ -564,11 +570,39 @@ final class StatementAccountResolutionTest extends TestCase
         self::assertSame(200.0, (float) $months['2099-07']);
     }
 
+    /**
+     * Ranní stažení z API nese stav z okamžiku stažení. Pohyb, který přišel později téhož dne
+     * až s dalším stažením, do něj patří: měsíc ukáže zůstatek konce dne, ne ranní stav.
+     */
+    #[\PHPUnit\Framework\Attributes\TestWith([true])]
+    #[\PHPUnit\Framework\Attributes\TestWith([false])]
+    public function testMonthClosingUsesDayEndBalanceInsteadOfMorningDownload(bool $projectionFirst): void
+    {
+        $account = self::ACCOUNT;
+        $currencyId = $this->registerCurrency('CZK', $account, '2250');
+        $pdo = $this->db->pdo();
+        $this->insertStatement('gpc', $account, '2250', '2099-06-30', 1000.0, 'dayend-anchor');
+        if ($projectionFirst) $projection = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 0.0, 'dayend-projection');
+        $morning = $this->insertBankStatementWithBalances('bank_api', $account, '2250', '2099-07-31', 1000.0, 1000.0, null, null, 'dayend-morning');
+        if (!$projectionFirst) $projection = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 0.0, 'dayend-projection');
+        $pdo->prepare('UPDATE bank_statements SET curr_balance = NULL WHERE id = ?')->execute([$projection]);
+        $nextDay = $this->insertBankStatementWithBalances('bank_api', $account, '2250', '2099-08-01', 1000.0, 900.0, null, null, 'dayend-next');
+        $pdo->prepare("UPDATE bank_statements SET imported_at = CONCAT(statement_date, ' 00:05:00') WHERE id IN (?, ?)")->execute([$morning, $nextDay]);
+        $pdo->prepare("INSERT INTO bank_transactions (statement_id, posted_at, amount, currency) VALUES (?, '2099-07-31', -100, 'CZK')")->execute([$nextDay]);
+
+        $response = $this->action->accountBalances($this->mockRequest($this->supplierId, 'admin', [], [], ['filter' => ['year' => 2099, 'account' => $account]]), new Response());
+        $body = json_decode((string) $response->getBody(), true, 512, JSON_THROW_ON_ERROR);
+        $accounts = array_column($body['accounts'], null, 'id');
+        $months = array_column($accounts[$currencyId]['months'], 'balance', 'month');
+        self::assertSame(900.0, (float) $months['2099-07']);
+        self::assertSame(900.0, (float) $months['2099-08']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     public function testLinkedApiMovementAppearsInGpcListFiltersAndSuggestions(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $this->registerCurrency('CZK', $account, '2250');
         $apiId = $this->insertStatement('bank_api', $account, '2250', '2099-07-31', 100.0, 'alias-api');
         $gpcId = $this->insertStatement('gpc', $account, '2250', '2099-07-31', 100.0, 'alias-gpc');
@@ -631,7 +665,7 @@ final class StatementAccountResolutionTest extends TestCase
     #[\PHPUnit\Framework\Attributes\DataProvider('pdfEvidenceCases')]
     public function testCompleteEvidencePdfRemainsAccessibleOnMonthlyStatement(string $source, bool $partial): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $this->registerCurrency('CZK', $account, '2250');
         $apiId = $this->insertStatement('bank_api', $account, '2250', '2099-08-31', 100.0, 'pdf-api');
         $gpcId = $this->insertStatement($source, $account, '2250', '2099-08-31', 100.0, 'pdf-gpc');
@@ -738,19 +772,21 @@ final class StatementAccountResolutionTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT COUNT(*) FROM bank_statements
-              WHERE TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(account_number, ''), '[^0-9]', ''))
+              WHERE id > ?
+                AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(account_number, ''), '[^0-9]', ''))
                   = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))"
         );
-        $stmt->execute([$account]);
+        $stmt->execute([$this->statementBaseline, $account]);
         $n = (int) $stmt->fetchColumn();
         // Uklidit případné (nemělo by nastat) osiřelé řádky, ať tearDown nenechá smetí.
         if ($n > 0) {
             $ids = $this->db->pdo()->prepare(
                 "SELECT id FROM bank_statements
-                  WHERE TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(account_number, ''), '[^0-9]', ''))
+                  WHERE id > ?
+                    AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(account_number, ''), '[^0-9]', ''))
                       = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))"
             );
-            $ids->execute([$account]);
+            $ids->execute([$this->statementBaseline, $account]);
             foreach ($ids->fetchAll(PDO::FETCH_COLUMN) as $id) {
                 $this->statementIds[] = (int) $id;
             }
@@ -762,11 +798,12 @@ final class StatementAccountResolutionTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT COUNT(*) FROM bank_statements
-              WHERE source = ?
+              WHERE id > ?
+                AND source = ?
                 AND TRIM(LEADING '0' FROM REGEXP_REPLACE(IFNULL(account_number, ''), '[^0-9]', ''))
                   = TRIM(LEADING '0' FROM REGEXP_REPLACE(?, '[^0-9]', ''))"
         );
-        $stmt->execute([$source, $account]);
+        $stmt->execute([$this->statementBaseline, $source, $account]);
         return (int) $stmt->fetchColumn();
     }
 
@@ -778,7 +815,7 @@ final class StatementAccountResolutionTest extends TestCase
      */
     public function testDownloadedApiStatementWithBothBalancesAnchorsFreshAccount(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $this->registerCurrency('CZK', $account, '0100');
         $pdo = $this->db->pdo();
         $id = $this->insertBankStatementWithBalances('bank_api', $account, '0100', '2099-07-10', 0.0, 10000.0, 10000.0, 0.0, 'api-fresh-zero');
@@ -798,7 +835,7 @@ final class StatementAccountResolutionTest extends TestCase
      */
     public function testMidMonthStatementDoesNotOpenMonthWithBalanceAfterEarlierMovements(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $this->registerCurrency('CZK', $account, '0100');
         $pdo = $this->db->pdo();
         // Dřívější pohyb měsíce přišel jiným výpisem (jiný feed, jiné připojení).
@@ -825,7 +862,7 @@ final class StatementAccountResolutionTest extends TestCase
      */
     public function testFreshAccountOpensMonthAtZeroWhenOnlyMidMonthStatementExists(): void
     {
-        $account = '1000000005';
+        $account = self::ACCOUNT;
         $this->registerCurrency('CZK', $account, '0100');
         $pdo = $this->db->pdo();
 

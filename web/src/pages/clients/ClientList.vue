@@ -242,7 +242,7 @@ function formatPaymentDue(c: Client): string {
     '—',
   )
 }
-useWindowRefresh(['clients', 'invoices', 'purchase-invoices'], () => load(), () => !showDuplicatesModal.value)
+useWindowRefresh(() => load(), () => !showDuplicatesModal.value)
 </script>
 
 <template>

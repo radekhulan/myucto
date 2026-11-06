@@ -41,6 +41,9 @@ final class UserSupplierAdminAction
         $id = (int) ($args['id'] ?? 0);
         $user = $this->targetUser($id);
         if ($user === null) return Json::error($response, 'not_found', 'Uživatel nenalezen.', 404);
+        if ($user['role_type'] === 'instance_admin' || $user['system_key'] === 'instance_admin') {
+            return Json::error($response, 'system_role_locked', 'Technický správce nemá obchodní členství ve firmách.', 409);
+        }
         if ($user['system_key'] === 'superadmin') {
             return Json::error($response, 'system_role_locked', 'Superadmin má přístup ke všem firmám a membership se mu nepřiřazuje.', 409);
         }
@@ -77,7 +80,7 @@ final class UserSupplierAdminAction
             if ($role['role_type'] !== $user['role_type']) {
                 return Json::error($response, 'role_type_mismatch', 'Override role musí mít stejný typ jako výchozí role uživatele.', 400);
             }
-            if ($role['role_type'] === 'superadmin') return Json::error($response, 'system_role_locked', 'Superadmin roli nelze použít jako override.', 409);
+            if (in_array($role['role_type'], ['superadmin', 'instance_admin'], true)) return Json::error($response, 'system_role_locked', 'Superadmin roli nelze použít jako override.', 409);
         }
 
         try {

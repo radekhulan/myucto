@@ -5,14 +5,15 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\GoPay;
 
 use DateTimeImmutable;
-use DOMDocument;
 use DOMElement;
 use DOMXPath;
+use MyInvoice\Service\Xml\SafeXmlLoader;
+use MyInvoice\Service\Xml\UnsafeXmlException;
 
 final class GoPayClearingXmlParser
 {
     private const NAMESPACE = 'https://www.gopay.cz/clearing';
-    private const MAX_BYTES = 2_097_152;
+    public const MAX_BYTES = 33_554_432;
 
     /**
      * @return array{
@@ -27,24 +28,21 @@ final class GoPayClearingXmlParser
     public function parse(string $xml): array
     {
         if ($xml === '' || strlen($xml) > self::MAX_BYTES) {
-            throw new GoPayException('invalid_file_size', 'GoPay XML je prázdné nebo překračuje limit 2 MB.');
+            throw new GoPayException('invalid_file_size', 'GoPay XML je prázdné nebo překračuje limit 32 MB.');
         }
         if (preg_match('/<!\s*(?:DOCTYPE|ENTITY)\b/i', $xml) === 1) {
             throw new GoPayException('unsafe_xml', 'GoPay XML obsahuje zakázanou DTD nebo entitu.');
         }
 
-        $previous = libxml_use_internal_errors(true);
-        libxml_clear_errors();
         try {
-            $dom = new DOMDocument();
-            $dom->resolveExternals = false;
-            $dom->substituteEntities = false;
-            if (!$dom->loadXML($xml, LIBXML_NONET | LIBXML_NOBLANKS | LIBXML_NOCDATA)) {
-                throw new GoPayException('invalid_xml', 'Soubor není platné XML.');
-            }
-        } finally {
-            libxml_clear_errors();
-            libxml_use_internal_errors($previous);
+            $dom = SafeXmlLoader::load($xml, self::MAX_BYTES, LIBXML_NOCDATA);
+        } catch (UnsafeXmlException $e) {
+            throw match ($e->reason) {
+                UnsafeXmlException::DOCTYPE => new GoPayException('unsafe_xml', 'GoPay XML obsahuje zakázanou DTD nebo entitu.'),
+                UnsafeXmlException::TOO_LARGE, UnsafeXmlException::TOO_MANY_NODES
+                    => new GoPayException('invalid_file_size', 'GoPay XML je příliš velké na bezpečné zpracování.'),
+                default => new GoPayException('invalid_xml', 'Soubor není platné XML.'),
+            };
         }
 
         $root = $dom->documentElement;

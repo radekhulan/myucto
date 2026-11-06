@@ -117,7 +117,10 @@ function monthLabel(m: number | null): string {
 async function save() {
   saving.value = true
   try {
-    await taxApi.saveProfile({ year: year.value, ...profile })
+    // Rodinu (děti, manžel) edituje jen přiznání. Rodná čísla chodí maskovaná a backend
+    // je převezme podle id řádku, které se uložením mění, takže se rodina neposílá vůbec.
+    const { children: _children, spouse_claim: _spouse, ...rest } = profile
+    await taxApi.saveProfile({ year: year.value, ...rest })
     if (analysis.value) analysis.value.profile = { ...profile, saved: true }
     toast.success(t('tax.saved'))
   } catch (e: any) {

@@ -289,6 +289,48 @@ final class PayrollComponentDefaults
                 ['NAHRADA_VYDAJU_PREVZATA', 'Náhrada výdajů nepodléhající dani - převzatá', 'other', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', null, 'not_subject_to_tax'],
             ],
         ],
+        // ── Zákon č. 180/2026 Sb. (novela ZDP), účinnost 1. 1. 2027 ─────────────
+        //
+        // Změnilo se právo, proto NOVÁ VERZE (viz hlavička). Kódy, které tu nejsou,
+        // platí dál ve verzi 2026. Verze se založí až s rulesetem daně z příjmů
+        // 2027, který zná limit koše rekreace — do té doby ji {@see versions()}
+        // přeskočí celou.
+        [
+            'valid_from' => '2027-01-01',
+            'rows' => [
+                // § 6 odst. 9 písm. d) bod 2 od 2027 BEZ limitu. Rekreace a zájezd
+                // z bodu vypadly do bodu 3 s vlastním limitem, proto se složka
+                // přejmenovává: rekreaci sem zařadit nelze.
+                ['REKREACE_VOLNY_CAS', 'Volnočasový benefit (kultura, sport, knihy, předškolní zařízení)', 'benefit_recreation', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'non_cash_leisure', null],
+                // § 6 odst. 9 písm. d) bod 3 — rekreace a zájezd, 20 000 Kč za
+                // zdaňovací období. Podmínky formy a zdroje plnění (nepeněžní, FKSP,
+                // sociální fond, zisk po zdanění, nedaňový náklad) aplikace z dat
+                // nepozná, proto stejně jako bod 1 a 2 ruční posouzení.
+                ['REKREACE_ZAJEZD', 'Rekreace a zájezd', 'benefit_recreation', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', 'recreation', null],
+                // § 6 odst. 9 písm. d) bod 4 — příspěvek na osobní asistenci,
+                // pečovatelskou službu, tísňovou péči, odlehčovací službu, ranou péči,
+                // centrum denních služeb nebo denní stacionář, jsou-li komunitního
+                // charakteru a poskytované na základě oprávnění podle zákona
+                // o sociálních službách. Bez limitu; podmínky posoudí účetní.
+                ['KOMUNITNI_SOCIALNI_SLUZBY', 'Příspěvek na komunitní sociální služby', 'benefit_care', 'non_monetary', 'one_off', 'manual_review', 'manual_review', 'manual_review', 'excluded', 'manual_review', 'manual_review', 'included', null, null],
+                // § 6 odst. 7 písm. f) — plnění v rámci péče o zdraví zaměstnanců
+                // v rozsahu přílohy č. 4 ZDP „se nepovažuje za příjem a není
+                // předmětem daně". Není tedy ani vyměřovacím základem pojistného
+                // (§ 5 odst. 1 z. č. 589/1992 Sb., § 3 odst. 1 z. č. 592/1992 Sb.)
+                // a do JMHZ nepatří, stejně jako CESTOVNI_NAHRADA_LIMIT. Limit nemá.
+                ['PECE_O_ZDRAVI_PRILOHA4', 'Péče o zdraví zaměstnanců (příloha č. 4 ZDP)', 'benefit_health', 'non_monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'excluded', 'included', null, 'not_subject_to_tax'],
+                // § 6 odst. 9 písm. g) a odst. 19 — spropitné ze stravovacích
+                // služeb, které zaměstnanci vyplácí zaměstnavatel (je jeho plátcem).
+                // Osvobozené za měsíc do podílu 7 % tržeb ze stravovacích služeb
+                // (koš `food_service_tips`, strop z evidence firmy); nadlimitní část
+                // odbaví složka `.nadlimit` jako běžný zdanitelný příjem a vyměřovací
+                // základ. Mzdou podle § 109 ZP není (plnění od hosta, ne odměna za
+                // práci od zaměstnavatele), proto mimo průměrný výdělek; srážky ze
+                // mzdy ze stejného důvodu jako u příspěvku na stravování ne. Do JMHZ
+                // patří jako osvobozený příjem ze závislé činnosti.
+                ['SPROPITNE', 'Spropitné ze stravovacích služeb', 'other', 'monetary', 'one_off', 'exempt', 'excluded', 'excluded', 'excluded', 'excluded', 'included', 'included', 'food_service_tips', 'periodic_benefit_limit'],
+            ],
+        ],
     ];
 
     /** @var list<array{valid_from:string, rows:list<array{0:string,1:string,2:string,3:string,4:string,5:string,6:string,7:string,8:string,9:string,10:string,11:string,12:?string,13:?string}>}> */
@@ -479,9 +521,21 @@ final class PayrollComponentDefaults
                 "Zákonný koš osvobození {$value} neexistuje.",
             );
         }
-        $limit = $this->rulesets
-            ->forDate(PayrollRulesetDomain::IncomeTax, $validFrom)
-            ->parameter($basket->rulesetKey())
+        $year = (int) substr($validFrom, 0, 4);
+        if (!$basket->existsIn($year)) {
+            throw new PayrollRulesetException(
+                "Zákonný koš osvobození {$value} pro rok {$year} neexistuje.",
+            );
+        }
+        // Ruleset roku musí existovat vždy; bez číselného limitu (§ 6 odst. 9
+        // písm. d) bod 2 od 2027) v něm ale není co ověřovat.
+        $incomeTax = $this->rulesets->forDate(PayrollRulesetDomain::IncomeTax, $validFrom);
+        $key = $basket->rulesetKey();
+        if ($key === null || $basket->isUnlimited($year)) {
+            return $basket;
+        }
+        $limit = $incomeTax
+            ->parameter($key)
             ->value;
         if (!is_int($limit)) {
             throw new PayrollRulesetException(

@@ -298,7 +298,100 @@ final class AutoPostAndBulkTest extends TestCase
         self::assertSame(0, $failed, 'Záloha nemá v historii chybu zaúčtování.');
     }
 
+    /** Hromadné zaúčtování jen zajišťuje zápis: převzatou skupinu ponechá a nehlásí chybu. */
+    public function testBulkPostKeepsSplitPostingGroupIdempotent(): void
+    {
+        [$docId, $baseId, $vatId] = $this->splitImportedPurchase('BULK');
+        $before = [$this->journal->find($baseId, $this->supplierId), $this->journal->find($vatId, $this->supplierId)];
+
+        $res = $this->call('postPurchasesBulk', ['ids' => [$docId]]);
+
+        self::assertSame(200, $res['status']);
+        self::assertSame([$docId], $this->normalizeIds($res['body']['posted']), json_encode($res['body']) ?: '');
+        self::assertSame([$before[0], $before[1]], [$this->journal->find($baseId, $this->supplierId), $this->journal->find($vatId, $this->supplierId)]);
+    }
+
+    /** Zaúčtování podle návrhu skupinu ponechá; vlastní řádky z popupu jsou oprava a dostanou 409. */
+    public function testSinglePostKeepsSplitGroupButCustomLinesRequireRepost(): void
+    {
+        [$docId, $baseId, $vatId] = $this->splitImportedPurchase('SINGLE');
+        $before = [$this->journal->find($baseId, $this->supplierId), $this->journal->find($vatId, $this->supplierId)];
+
+        $plain = $this->callWithArgs('postPurchase', ['id' => $docId], []);
+        self::assertSame(200, $plain['status'], json_encode($plain['body']) ?: '');
+        self::assertSame($baseId, (int) $plain['body']['id']);
+
+        $custom = $this->callWithArgs('postPurchase', ['id' => $docId], ['lines' => [
+            ['account_code' => '501', 'side' => 'debit', 'amount' => 1210.00],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 1210.00],
+        ]]);
+        self::assertSame(409, $custom['status'], json_encode($custom['body']) ?: '');
+        self::assertSame('posting_group_requires_repost', $custom['body']['error']['code']);
+        self::assertSame($before, [$this->journal->find($baseId, $this->supplierId), $this->journal->find($vatId, $this->supplierId)]);
+    }
+
+    /** Hook po přijetí nesmí čekat na zámek období kvůli převzaté skupině (invariant auto-postu). */
+    public function testAutoPostOfOwnedGroupDoesNotWaitForLockedAccountingPeriods(): void
+    {
+        $this->setAutoPost(purchases: true);
+        $vendorId = $this->client('Dodavatel převzaté skupiny');
+        $docId = $this->purchase('PF-2099-GRPLOCK', $vendorId, '40', 1000.00, 210.00, 21.00);
+        // Převzatý předpis zapsaný napřímo: PostingService by v této transakci sám
+        // zamkl všechna období a souběžná uzávěrka by pak nešla nasimulovat.
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO journal_entries (supplier_id, period_id, entry_date, description, source_type, source_id, posted_at)
+            VALUES (?, ?, ?, 'Převzatý předpis', 'purchase_invoice', ?, NOW())")
+            ->execute([$this->supplierId, $this->periodId, self::YEAR . '-06-20', $docId]);
+        $entryId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO journal_document_postings (supplier_id, doc_type, doc_id, entry_id) VALUES (?, 'purchase_invoice', ?, ?)")
+            ->execute([$this->supplierId, $docId, $entryId]);
+
+        $other = Connection::withoutSharedTestConnection(static fn (): Connection => Bootstrap::buildContainer()->get(Connection::class));
+        try {
+            $other->pdo()->beginTransaction();
+            $lock = $other->pdo()->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? ORDER BY id LIMIT 1 FOR UPDATE');
+            $lock->execute([$this->supplierId]);
+            if ($lock->fetchColumn() === false) {
+                self::markTestSkipped('Firma nemá potvrzené účetní období, které by šlo zamknout z jiného spojení.');
+            }
+            $pdo->exec('SET SESSION innodb_lock_wait_timeout = 1');
+            $this->autoPoster->maybeAutoPost($this->supplierId, 'purchase_invoice', $docId, $this->userId);
+        } finally {
+            $pdo->exec('SET SESSION innodb_lock_wait_timeout = DEFAULT');
+            if ($other->pdo()->inTransaction()) {
+                $other->pdo()->rollBack();
+            }
+            $other->close();
+        }
+        self::assertSame($entryId, (int) $this->journal->findBySource($this->supplierId, 'purchase_invoice', $docId)['id']);
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
+
+    /** Syntetický převod PF: samostatný základ a DPH navázané linkerem jako Stereo. */
+    private function splitImportedPurchase(string $tag): array
+    {
+        $posting = Bootstrap::buildContainer()->get(\MyInvoice\Service\Accounting\PostingService::class);
+        $vendorId = $this->client('Dodavatel rozděleného zaúčtování ' . $tag);
+        $docId = $this->purchase('PF-2099-G' . $tag, $vendorId, '40', 1000.00, 210.00, 21.00);
+        $base = $posting->postDocument($this->supplierId, 'purchase_invoice', $docId, [
+            ['account_code' => '518', 'side' => 'debit', 'amount' => 1000.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 1000.0],
+        ], ['entry_date' => self::YEAR . '-06-20']);
+        $vat = $posting->postDocument($this->supplierId, 'manual', null, [
+            ['account_code' => '343', 'side' => 'debit', 'amount' => 210.0],
+            ['account_code' => '321', 'side' => 'credit', 'amount' => 210.0],
+        ], ['entry_date' => self::YEAR . '-06-20']);
+        foreach ([$base, $vat] as $entry) {
+            $this->db->pdo()->prepare('INSERT INTO stereo_nx_import_map
+                (supplier_id, source_ico, source_company_index, kind, source_key, source_hash, target_id)
+                VALUES (?, "00000000", 1, "accounting_journal", ?, ?, ?)')
+                ->execute([$this->supplierId, 'test-bulk-group-' . $entry, str_repeat('a', 64), $entry]);
+        }
+        (new \MyInvoice\Service\Migration\Shared\JournalEntryLinker($this->db, 'Stereo NX'))
+            ->attach($this->supplierId, $this->userId, 'purchase_invoice', 'manual', 'purchase_invoice', $docId, [$base, $vat]);
+        return [$docId, $base, $vat];
+    }
 
     private function setAutoPost(bool $invoices = false, bool $purchases = false): void
     {

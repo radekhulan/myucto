@@ -127,6 +127,11 @@ final class DocumentLockService
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $postedMap[(int) $row['source_id']] = (int) $row['id'];
         }
+        $unposted = array_values(array_diff($ids, array_keys($postedMap)));
+        foreach ((new DocumentPostingGroup($this->db))->activeMany($supplierId, $sourceType, $unposted) as $docId => $group) {
+            $owned = self::firstOwnedEntryId($group);
+            if ($owned !== null) $postedMap[$docId] = $owned;
+        }
 
         if ($sourceType === 'invoice') {
             $docStmt = $pdo->prepare(
@@ -206,6 +211,11 @@ final class DocumentLockService
             if ($entry !== null && $entry['posted_at'] !== null && $entry['reversed_by'] === null) {
                 $posted = true;
                 $entryId = (int) $entry['id'];
+            } else {
+                // Převzatý doklad drží předpis i vlastněným zápisem skupiny, když
+                // přímý člen se zdrojem někdo v deníku stornoval.
+                $entryId = self::firstOwnedEntryId((new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $id));
+                $posted = $entryId !== null;
             }
         }
         [$closed, $closing, $periodStatus] = $this->periodFlags($supplierId, $refDate);
@@ -300,6 +310,15 @@ final class DocumentLockService
             }
         }
         return $best;
+    }
+
+    /** Jen vlastněné členy skupiny: u nativního dokladu nemění dosavadní výsledek. */
+    private static function firstOwnedEntryId(array $group): ?int
+    {
+        foreach ($group as $entry) {
+            if ((bool) ($entry['grouped'] ?? false)) return (int) $entry['id'];
+        }
+        return null;
     }
 
     private static function nullableString(mixed $v): ?string

@@ -10,14 +10,20 @@ use MyInvoice\Repository\Payroll\PayrollDeletionException;
 use MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository;
 use MyInvoice\Repository\Payroll\PayrollEmploymentNotFoundException;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
+use MyInvoice\Repository\Payroll\PayrollPersonIdentifierCollisionException;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\License\LicenseState;
+use MyInvoice\Service\Payroll\CzIscoCodebook;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
+use MyInvoice\Service\Payroll\People\PayrollPeopleContactColumns;
 use MyInvoice\Service\Payroll\PayrollPersonCreateService;
+use MyInvoice\Service\Payroll\Security\PayrollEnforcementDisclosure;
+use MyInvoice\Service\Payroll\Security\PayrollIdentifierProbeGuard;
+use MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -35,6 +41,10 @@ final class PayrollPeopleAction
         private readonly LicenseCapacityGate $licenseCapacity,
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollEmployeeDeletionRepository $deletion,
+        private readonly PayrollIdentifierProbeGuard $identifierProbes,
+        private readonly PayrollAgreementAnnualHours $agreementHours,
+        private readonly CzIscoCodebook $czIsco,
+        private readonly PayrollPeopleContactColumns $contactColumns,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -96,12 +106,64 @@ final class PayrollPeopleAction
         ));
         $offset = max(0, (int) ($query['offset'] ?? 0));
 
-        $page = $this->people->listForTenant($supplierId, $limit, $offset, $filter, $search);
+        $sortKey = $query['sort_key'] ?? '';
+        $sortDir = $query['sort_dir'] ?? '';
+        if (!is_string($sortKey) || !is_string($sortDir)) {
+            return Json::error($response, 'validation_failed', 'Neplatné řazení seznamu osob.', 422);
+        }
+        if ($sortKey === '') {
+            $sortKey = PayrollPeopleRepository::LIST_DEFAULT_SORT;
+        }
+        if (!array_key_exists($sortKey, PayrollPeopleRepository::LIST_SORTS)
+            || !in_array($sortDir, ['', 'asc', 'desc'], true)
+        ) {
+            return Json::error($response, 'validation_failed', 'Neplatné řazení seznamu osob.', 422);
+        }
+
+        $year = (int) date('Y');
+        $page = $this->people->listForTenant(
+            $supplierId,
+            $limit,
+            $offset,
+            $filter,
+            $search,
+            $filter === PayrollPeopleRepository::FILTER_DPP_HOURS_LIMIT
+                ? $this->agreementHours->employeesNearLimit($supplierId, $year)
+                : [],
+            $sortKey,
+            $sortDir === 'desc',
+        );
+        $items = $this->withAgreementHours($supplierId, $page['items'], $year);
+        $items = $this->withPositionLabels($items);
+        // Kontakty se dešifrují jen na výslovnou žádost (sloupec je zapnutý)
+        // a jen oprávněnému; jinak by každé otevření seznamu psalo do auditu.
+        if (($query['include_contacts'] ?? '') === '1') {
+            $serverParams = $request->getServerParams();
+            $contacts = $this->contactColumns->forPage(
+                $request,
+                $supplierId,
+                array_map(static fn (array $person): int => (int) $person['id'], $items),
+                $this->ipMatcher->clientIpFromRequest(array_filter($serverParams, 'is_string', ARRAY_FILTER_USE_KEY)),
+                $request->getHeaderLine('User-Agent'),
+            );
+            if (PayrollPeopleContactColumns::allowed($request)) {
+                $items = array_map(static function (array $person) use ($contacts): array {
+                    $person['contacts'] = $contacts[(int) $person['id']] ?? ['email' => null, 'phone' => null];
+
+                    return $person;
+                }, $items);
+            }
+        }
 
         // Klíč `items` zůstává, aby stávající volající nespadli; `total`/`limit`/
         // `offset` přibyly vedle něj, protože seznam už nemusí být úplný.
+        $canSeeEnforcement = PayrollEnforcementDisclosure::canSeeEnforcement($request);
+
         return Json::ok($response, [
-            'items' => $page['items'],
+            'items' => array_map(
+                static fn (array $person): array => self::disclosedPerson($person, $canSeeEnforcement),
+                $items,
+            ),
             'total' => $page['total'],
             'limit' => $limit,
             'offset' => $offset,
@@ -127,7 +189,53 @@ final class PayrollPeopleAction
             return Json::error($response, 'not_found', 'Zaměstnanec nenalezen.', 404);
         }
 
-        return Json::ok($response, ['person' => $person]);
+        [$person] = $this->withAgreementHours($this->currentSupplierId($request), [$person], (int) date('Y'));
+
+        return Json::ok($response, ['person' => self::disclosedPerson(
+            $person,
+            PayrollEnforcementDisclosure::canSeeEnforcement($request),
+        )]);
+    }
+
+    /**
+     * Název pracovní pozice z číselníku CZ-ISCO. Číselník je soubor načtený
+     * jednou za požadavek, takže dohledání na řádek nestojí dotaz.
+     *
+     * @param list<array<string,mixed>> $people
+     * @return list<array<string,mixed>>
+     */
+    private function withPositionLabels(array $people): array
+    {
+        return array_map(function (array $person): array {
+            $code = $person['cz_isco_code'] ?? null;
+            $person['position_label'] = is_string($code) ? ($this->czIsco->find($code)['label'] ?? null) : null;
+
+            return $person;
+        }, $people);
+    }
+
+    /**
+     * Roční hodiny na DPP (§ 75 ZP) k osobám, které dohodu o provedení práce
+     * mají; ostatní dostanou `null`. Jeden dávkový výpočet za celou stránku.
+     *
+     * @param list<array<string,mixed>> $people
+     * @return list<array<string,mixed>>
+     */
+    private function withAgreementHours(int $supplierId, array $people, int $year): array
+    {
+        $employeeIds = [];
+        foreach ($people as $person) {
+            if (in_array('dpp', (array) ($person['relation_types'] ?? []), true)) {
+                $employeeIds[] = (int) $person['id'];
+            }
+        }
+        $summaries = $this->agreementHours->yearSummaries($supplierId, $employeeIds, $year);
+
+        return array_map(static function (array $person) use ($summaries): array {
+            $person['dpp_annual_hours'] = $summaries[(int) $person['id']] ?? null;
+
+            return $person;
+        }, $people);
     }
 
     /**
@@ -155,6 +263,12 @@ final class PayrollPeopleAction
             return $this->guardFailure($error);
         }
 
+        $serverParams = [];
+        foreach ($request->getServerParams() as $key => $value) {
+            if (is_string($key)) {
+                $serverParams[$key] = $value;
+            }
+        }
         try {
             $body = $request->getParsedBody();
             if (!is_array($body)) {
@@ -166,12 +280,6 @@ final class PayrollPeopleAction
                     throw new \InvalidArgumentException('Tělo požadavku musí být objekt.');
                 }
                 $input[$key] = $value;
-            }
-            $serverParams = [];
-            foreach ($request->getServerParams() as $key => $value) {
-                if (is_string($key)) {
-                    $serverParams[$key] = $value;
-                }
             }
             $person = $this->licenseCapacity->mutatePayrollEmployees(
                 fn (): array => $this->createService->create(
@@ -192,6 +300,20 @@ final class PayrollPeopleAction
                 403,
                 ['buy_url' => '/activation/purchase#payroll-addon'],
             );
+        } catch (PayrollPersonIdentifierCollisionException $e) {
+            // Založení s rodným číslem je táž otázka „patří tahle hodnota
+            // někomu?" jako uložení karty, proto stejný audit shody.
+            $this->identifierProbes->recordCollision(
+                $request,
+                $this->currentSupplierId($request),
+                null,
+                $e->identifierType,
+                'create',
+                false,
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($serverParams),
+            );
+            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\PDOException $e) {
@@ -263,6 +385,17 @@ final class PayrollPeopleAction
                 $request->getHeaderLine('User-Agent'),
             );
         } catch (PayrollDeletionException $e) {
+            if (PayrollEnforcementDisclosure::isRestrictedDeleteBlockerCode(
+                $e->errorCode,
+                PayrollEnforcementDisclosure::canSeeEnforcement($request),
+            )) {
+                return Json::error(
+                    $response,
+                    PayrollEnforcementDisclosure::RESTRICTED_DELETE_BLOCKER,
+                    PayrollEnforcementDisclosure::RESTRICTED_DELETE_MESSAGE,
+                    409,
+                );
+            }
             return Json::error(
                 $response,
                 $e->errorCode,
@@ -302,6 +435,27 @@ final class PayrollPeopleAction
         }
         $error = null;
         return true;
+    }
+
+    /**
+     * Blokátor smazání jmenuje exekuci; bez práva na agendu se nahradí obecnou
+     * větou, aby seznam zaměstnanců neprozradil, na koho exekuce dorazila.
+     *
+     * @param array<string,mixed> $person
+     * @return array<string,mixed>
+     */
+    private static function disclosedPerson(array $person, bool $canSeeEnforcement): array
+    {
+        if (!array_key_exists('delete_blocker', $person)) {
+            return $person;
+        }
+        $blocker = $person['delete_blocker'];
+        $person['delete_blocker'] = PayrollEnforcementDisclosure::redactDeleteBlocker(
+            is_array($blocker) ? $blocker : null,
+            $canSeeEnforcement,
+        );
+
+        return $person;
     }
 
     private function guardFailure(?Response $error): Response

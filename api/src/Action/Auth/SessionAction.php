@@ -381,6 +381,7 @@ final class SessionAction
                 // jinak `isClientRole` i `isSuperadmin` tiše propadnou na false.
                 'role' => (array) ($context['user']['role_summary'] ?? []),
                 'is_superadmin' => (bool) ($context['user']['is_superadmin'] ?? false),
+                'is_instance_admin' => (bool) ($context['user']['is_instance_admin'] ?? false),
                 'locale' => (string) ($context['user']['locale'] ?? 'cs'),
                 'totp_enabled' => (bool) ($context['user']['totp_enabled'] ?? false),
             ],

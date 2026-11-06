@@ -14,6 +14,7 @@ use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\ApiRequestLogger;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
+use MyInvoice\Service\Tenant\TenantDomainContext;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Psr\Http\Server\MiddlewareInterface;
@@ -85,6 +86,7 @@ final class AuthMiddleware implements MiddlewareInterface
     private const SESSION_IGNORED_PATHS = [
         'GET' => [
             '/api/auth/setup-status',
+            '/api/auth/domain-context',
         ],
         'POST' => [
             '/api/auth/login',
@@ -105,6 +107,7 @@ final class AuthMiddleware implements MiddlewareInterface
         private readonly UserRoleProfile $roleProfile,
         private readonly ApiRequestLogger $apiRequestLog,
         private readonly ?LoggerInterface $logger = null,
+        private readonly ?\MyInvoice\Service\Mcp\McpResourcePolicy $mcpResources = null,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -123,12 +126,14 @@ final class AuthMiddleware implements MiddlewareInterface
                 // Stopu po takových pokusech nese aplikační log a rate limiter.
                 $response = $this->responseFactory->createResponse(401);
                 $response = Json::error($response, 'invalid_token', 'Neplatný nebo expirovaný API token.', 401);
-                if (RequestPath::normalize($request->getUri()->getPath()) === '/mcp') {
-                    $base = rtrim((string) $this->config->get('app.url', ''), '/');
-                    return $response->withHeader('WWW-Authenticate',
-                        'Bearer resource_metadata="' . $base . '/.well-known/oauth-protected-resource"');
-                }
-                return $response;
+                return $this->withMcpChallenge($request, $response);
+            }
+
+            // I dříve vydaný token po změně role přestává být použitelný.
+            if (($tokenRow['user_role_type'] ?? null) === 'instance_admin'
+                || ($tokenRow['user_role_system_key'] ?? null) === 'instance_admin') {
+                return Json::error($this->responseFactory->createResponse(403),
+                    'token_forbidden', 'Technický účet používá pouze webovou relaci.', 403);
             }
 
             if (($tokenRow['audience'] ?? 'api') === 'mcp') {
@@ -139,16 +144,28 @@ final class AuthMiddleware implements MiddlewareInterface
                 $grant->execute([$tokenRow['id']]);
                 $binding = $grant->fetch(\PDO::FETCH_ASSOC);
                 $path = RequestPath::normalize($request->getUri()->getPath());
-                $resource = rtrim((string) $this->config->get('app.url', ''), '/') . '/mcp';
+                $resource = $request->getAttribute('mcp.resource');
+                if (!is_string($resource) || $request->getAttribute('mcp.internal') !== true) {
+                    $resource = $this->mcpResources?->endpoint($request)
+                        ?? rtrim((string) $this->config->get('app.url', ''), '/') . '/mcp';
+                }
                 if (!is_array($binding) || $binding['revoked_at'] !== null
                     || (int) $binding['active'] !== 1
                     || (string) $binding['resource'] !== $resource
+                    || ($this->mcpResources !== null && !$this->mcpResources->allowsGrant(
+                        $resource, (int) $tokenRow['user_id'], $tokenRow['supplier_id'], (string) $tokenRow['scope'],
+                    ))
                     || ($path !== '/mcp' && !($request->getAttribute('mcp.internal') === true
                         && str_starts_with($path, '/api/')))
                 ) {
-                    return Json::error($this->responseFactory->createResponse(401),
-                        'invalid_token', 'Token není určený pro tento zdroj.', 401);
+                    return $this->withMcpChallenge($request, Json::error($this->responseFactory->createResponse(401),
+                        'invalid_token', 'Token není určený pro tento zdroj.', 401));
                 }
+            }
+
+            if (($tokenRow['audience'] ?? 'api') === 'mcp') {
+                $tokenRow['mcp_resource'] = $resource;
+                $tokenRow['mcp_client_surface'] = $resource !== rtrim((string) $this->config->get('app.url', ''), '/') . '/mcp';
             }
 
             $ip = $this->ipMatcher->clientIp(
@@ -253,9 +270,25 @@ final class AuthMiddleware implements MiddlewareInterface
         if ($session === null && $token !== '' && $isLogout) {
             $session = $this->sessions->loadTombstoneForLogout($token);
             $logoutTombstone = $session !== null;
-            $user = $logoutTombstone
-                ? $this->loadUser((int) $session['user_id'])
-                : null;
+            $user = null;
+        }
+
+        if ($session !== null && !self::sessionMatchesHost($session, $request)) {
+            // Prohlížeč host-only cookie na cizí hostname nepošle. Session předložená
+            // jinde je přenesená ručně, proto se s ní zachází jako s žádnou.
+            $this->logger?->warning('Session odmítnuta: nepatří k tomuto hostname.', [
+                'user_id' => (int) $session['user_id'],
+                'session_domain_id' => $session['supplier_domain_id'] ?? null,
+                'host' => $request->getUri()->getHost(),
+                'method' => $method,
+                'route' => $path,
+            ]);
+            $session = null;
+            $user = null;
+            $logoutTombstone = false;
+        }
+        if ($logoutTombstone && $session !== null) {
+            $user = $this->loadUser((int) $session['user_id']);
         }
 
         if ($session !== null) {
@@ -295,10 +328,39 @@ final class AuthMiddleware implements MiddlewareInterface
 
         if ($request->getAttribute(self::ATTR_USER) === null) {
             $response = $this->responseFactory->createResponse(401);
+            // Relace ukončená novějším přihlášením nad limit licence dostane
+            // vlastní kód, aby aplikace řekla, proč uživatele odhlásila.
+            if ($token !== '' && $this->sessions->isSuperseded($token)) {
+                return Json::error(
+                    $response,
+                    'session_superseded',
+                    'Byli jste odhlášeni, protože se k vašemu účtu přihlásil někdo jiný.',
+                    401,
+                );
+            }
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
 
         return $handler->handle($request);
+    }
+
+    /**
+     * Session vydaná domain-login výměnou platí jen na své vlastní doméně.
+     * Canonical adresa (a každý request bez kontextu vlastní domény) přijme
+     * pouze session bez vazby, vlastní doména pouze session svázanou s ní.
+     * Jinak by vlastník DNS domény mohl token z výměny přehrát na `app.url`.
+     *
+     * @param array<string,mixed> $session
+     */
+    private static function sessionMatchesHost(array $session, Request $request): bool
+    {
+        $bound = $session['supplier_domain_id'] ?? null;
+        $bound = $bound !== null ? (int) $bound : null;
+        $context = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
+        if ($context instanceof TenantDomainContext && $context->mode === TenantDomainContext::CUSTOM) {
+            return $bound !== null && $bound > 0 && $bound === $context->domainId;
+        }
+        return $bound === null;
     }
 
     /**
@@ -371,4 +433,14 @@ final class AuthMiddleware implements MiddlewareInterface
     {
         return in_array($path, $allowlist[$method] ?? [], true);
     }
+    /** I odmítnutá audience musí MCP klienta odkázat na metadata cílové domény. */
+    private function withMcpChallenge(Request $request, Response $response): Response
+    {
+        if (RequestPath::normalize($request->getUri()->getPath()) !== '/mcp') return $response;
+        $base = $this->mcpResources !== null ? substr($this->mcpResources->endpoint($request), 0, -4)
+            : rtrim((string) $this->config->get('app.url', ''), '/');
+        return $response->withHeader('WWW-Authenticate',
+            'Bearer resource_metadata="' . $base . '/.well-known/oauth-protected-resource"');
+    }
+
 }

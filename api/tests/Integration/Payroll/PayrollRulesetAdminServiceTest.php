@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -32,7 +31,7 @@ use PHPUnit\Framework\TestCase;
 #[Group('integration')]
 final class PayrollRulesetAdminServiceTest extends TestCase
 {
-    private const CALC_ID = 'test.mz02w07.income-tax.2027';
+    private const CALC_ID = 'test.mz02w07.income-tax.2028';
     private const GAP_ID = 'test.mz02w07.codebooks.2029';
     private const OVERLAP_ID = 'test.mz02w07.income-tax.overlap';
 
@@ -46,7 +45,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer()
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build()
             ?? throw new \RuntimeException('DI kontejner není dostupný.');
         $db = $container->get(Connection::class);
         if (!$db instanceof Connection) {
@@ -341,11 +340,11 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     public function testAdminEditAloneUnblocksProductionCalculation(): void
     {
-        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2027-01-01', '2027-12-31');
+        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2028-01-01', '2028-12-31');
 
         $this->registry->forget();
         try {
-            $this->registry->provider()->forCalculation(PayrollRulesetDomain::IncomeTax, '2027-06-15');
+            $this->registry->provider()->forCalculation(PayrollRulesetDomain::IncomeTax, '2028-06-15');
             self::fail('Nová verze nesmí být použitelná dřív, než ji admin aktivuje.');
         } catch (PayrollRulesetException $e) {
             self::assertStringContainsString('not active', $e->getMessage());
@@ -360,7 +359,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
         $this->registry->forget();
         $version = $this->registry->provider()
-            ->forCalculation(PayrollRulesetDomain::IncomeTax, '2027-06-15');
+            ->forCalculation(PayrollRulesetDomain::IncomeTax, '2028-06-15');
 
         self::assertSame(self::CALC_ID, $version->id);
         self::assertSame('0.14', $version->parameter('advance.low_rate')->value);
@@ -368,7 +367,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     public function testGapInEffectivityBlocksApprovalAndActivation(): void
     {
-        // Vestavěná sada končí 2026-12-31, tahle verze začíná až 2029 → díra.
+        // Vestavěná sada číselníků končí 2026-12-31, tahle verze začíná až 2029 → díra.
         $this->createCustomRuleset(self::GAP_ID, 'codebooks', '2029-01-01', '2029-12-31');
         $entry = $this->apply(self::GAP_ID, 'review', 'Technická kontrola.', self::EDITOR);
 
@@ -391,16 +390,16 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     public function testOverlappingEffectivityIsRejectedOnSaveAndBlocksActivation(): void
     {
-        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2027-01-01', '2027-12-31');
+        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2028-01-01', '2028-12-31');
 
         try {
             $this->service->save(
                 self::OVERLAP_ID,
                 [
                     'domain' => 'income_tax',
-                    'version' => '2027.9.9',
-                    'effective_from' => '2027-06-01',
-                    'effective_to' => '2028-05-31',
+                    'version' => '2028.9.9',
+                    'effective_from' => '2028-06-01',
+                    'effective_to' => '2029-05-31',
                     'parameters' => ['advance.low_rate' => ['type' => 'decimal_rate', 'value' => '0.13']],
                     'sources' => [self::source()],
                 ],
@@ -414,7 +413,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         }
 
         // Kdyby se překryv do DB dostal mimo aplikaci, musí ho zastavit aktivace.
-        $this->insertRaw(self::OVERLAP_ID, 'income_tax', '2027-06-01', '2028-05-31', 'approved');
+        $this->insertRaw(self::OVERLAP_ID, 'income_tax', '2028-06-01', '2029-05-31', 'approved');
         $this->registry->forget();
 
         $blockers = $this->service->blockers(
@@ -426,7 +425,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     public function testTamperedOverrideFailsChecksumAndBlocksActivation(): void
     {
-        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2027-01-01', '2027-12-31');
+        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2028-01-01', '2028-12-31');
         $entry = $this->apply(self::CALC_ID, 'review', 'Technická kontrola.', self::EDITOR);
         self::assertTrue($entry['checksum_valid']);
 
@@ -468,7 +467,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     public function testRepeatedCommandIsIdempotentAndWritesNoSecondAuditRow(): void
     {
-        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2027-01-01', '2027-12-31');
+        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2028-01-01', '2028-12-31');
         $entry = $this->apply(self::CALC_ID, 'review', 'Technická kontrola.', self::EDITOR);
 
         // Audit je append-only, takže po starších bězích v tabulce záznamy zůstávají —
@@ -499,7 +498,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     public function testFourEyesIsAWarningNotABlocker(): void
     {
-        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2027-01-01', '2027-12-31');
+        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2028-01-01', '2028-12-31');
         $entry = $this->apply(self::CALC_ID, 'review', 'Technická kontrola.', self::EDITOR);
         // Schvaluje týž člověk, který verzi založil — smí to, ale musí to být vidět.
         $entry = $this->apply(self::CALC_ID, 'approve', 'Schvaluji sám.', self::EDITOR, $entry);
@@ -579,6 +578,45 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         self::assertNotSame('manual_review', $social['status']);
     }
 
+    /**
+     * Karta domény jmenuje parametry, ze kterých výpočet nečerpá, a u každého
+     * říká, o jakou situaci jde. „3 z 37" účetní nic neřekne.
+     */
+    public function testDomainCardNamesReviewItemsByCategory(): void
+    {
+        $overview = $this->service->overview();
+        /** @var list<array<string, mixed>> $domains */
+        $domains = $overview['domains'];
+        $incomeTax = array_column($domains, null, 'domain')['income_tax'];
+        /** @var list<array<string, mixed>> $items */
+        $items = $incomeTax['review_items'];
+        $byKey = array_column($items, null, 'key');
+
+        self::assertArrayNotHasKey('benefit_exemption.non_cash_leisure.yearly', $byKey);
+
+        $meal = $byKey['benefit_exemption.meal.per_shift'] ?? self::fail('Stravné 2027 v kartě chybí.');
+        self::assertSame('pending_publication', $meal['category']);
+        self::assertSame('2026-12', $meal['expected']);
+        self::assertSame([2027], $meal['years']);
+        self::assertSame('Osvobozený příspěvek na stravování za jednu směnu', $meal['label']);
+        self::assertIsString($meal['source_url']);
+
+        $spouse = $byKey['credit.spouse.eligibility'] ?? self::fail('Sleva na manžela v kartě chybí.');
+        self::assertSame('assessed_elsewhere', $spouse['category']);
+        self::assertSame('payroll-annual-settlement', $spouse['route']);
+        self::assertContains(2027, $spouse['years']);
+
+        $detail = $this->service->detail('cz-payroll-2027.income-tax.v1')
+            ?? self::fail('Vestavěný ruleset daně 2027 chybí.');
+        /** @var list<array<string, mixed>> $parameters */
+        $parameters = $detail['parameters'];
+        $byParameter = array_column($parameters, null, 'key');
+        self::assertSame('pending_publication', $byParameter['benefit_exemption.meal.per_shift']['review_category']);
+        self::assertSame('2026-12', $byParameter['benefit_exemption.meal.per_shift']['review_expected']);
+        self::assertNull($byParameter['benefit_exemption.non_cash_leisure.yearly']['review_category']);
+        self::assertSame('unlimited', $byParameter['benefit_exemption.non_cash_leisure.yearly']['value']);
+    }
+
     public function testManualReviewParameterExplainsWhatTheUserShouldDo(): void
     {
         $detail = $this->service->detail('cz-payroll-2026.social-insurance.v1')
@@ -609,7 +647,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     public function testAuditTrailRecordsWhoChangedWhatAndWhy(): void
     {
-        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2027-01-01', '2027-12-31');
+        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2028-01-01', '2028-12-31');
         $this->apply(self::CALC_ID, 'review', 'Technická kontrola sazeb.', self::EDITOR);
 
         $trail = $this->repository->auditTrail(self::CALC_ID);
@@ -625,7 +663,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     public function testAuditTrailIsAppendOnly(): void
     {
-        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2027-01-01', '2027-12-31');
+        $this->createCustomRuleset(self::CALC_ID, 'income_tax', '2028-01-01', '2028-12-31');
         $trail = $this->repository->auditTrail(self::CALC_ID);
         self::assertNotSame([], $trail);
 
@@ -667,7 +705,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
             $rulesetId,
             [
                 'domain' => $domain,
-                'version' => '2027.1.0',
+                'version' => '2028.1.0',
                 'effective_from' => $from,
                 'effective_to' => $to,
                 'capability' => 'supported',
@@ -693,7 +731,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
     ): void {
         $row = [
             'ruleset_id' => $rulesetId,
-            'version' => '2027.9.9',
+            'version' => '2028.9.9',
             'effective_from' => $from,
             'effective_to' => $to,
             'lifecycle' => $lifecycle,

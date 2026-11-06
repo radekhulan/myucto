@@ -52,9 +52,11 @@ final readonly class PayrollComponentDefinition
                 'Roční limit lze nastavit jen pro benefitní složku.'
             );
         }
-        if ($exemptionBasket !== null && !$kind->isBenefit()) {
+        if ($exemptionBasket !== null && !$exemptionBasket->allowsComponentKind($kind)) {
             throw new \InvalidArgumentException(
-                'Zákonný koš osvobození lze nastavit jen pro benefitní složku.'
+                $exemptionBasket === PayrollBenefitExemptionBasket::FoodServiceTips
+                    ? 'Koš spropitného lze nastavit jen pro složku druhu Ostatní.'
+                    : 'Zákonný koš osvobození lze nastavit jen pro benefitní složku.'
             );
         }
         if ($exemptionBasis !== null

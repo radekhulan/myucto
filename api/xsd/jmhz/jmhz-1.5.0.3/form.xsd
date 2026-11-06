@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/form/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:st="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/form/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:include schemaLocation="formBezPriznaku.xsd" />
+  <xs:include schemaLocation="formPestoun.xsd" />
+  <xs:include schemaLocation="formCinnostKS.xsd" />
+  <xs:include schemaLocation="formVezen.xsd" />
+  <xs:include schemaLocation="formMezinarodniPronajemSily.xsd" />
+  <xs:include schemaLocation="formJinyPrijem.xsd" />
+  <xs:include schemaLocation="formOzpTpp.xsd" />
+  <xs:include schemaLocation="formOdlozenyPrijem.xsd" />
+
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" schemaLocation="simpleTypes.xsd"/>
+
+  <xs:element name="formularZamestnani" type="formularZamestnaniType" />
+  <xs:complexType name="formularZamestnaniType">
+    <xs:sequence>
+      <xs:element name="hlavicka" type="formularHlavickaType" />
+      <xs:choice minOccurs="0">
+        <xs:element ref="bezPriznaku" />
+        <xs:element ref="pestoun" />
+        <xs:element ref="cinnostKS" />
+        <xs:element ref="vezen" />
+        <xs:element ref="mezinarodniPronajemSily" />
+        <xs:element ref="jinyPrijem" />
+        <xs:element ref="ozpTpp" />
+        <xs:element ref="odlozenyPrijem" />
+      </xs:choice>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:complexType name="formularHlavickaType">
+    <xs:sequence>
+      <xs:element name="idFormulare" type="st:guidType">
+        <xs:annotation>
+          <xs:documentation>GUID formuláře (ID  podání ve tvaru GUID)
+DS: Meta atributy > Formulář (ID 10012)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="typFormulare" type="st:typType">
+        <xs:annotation>
+          <xs:documentation>Číselník typ formuláře
+DS: Meta atributy > Formulář (ID 10016)
+R - Řádný
+O - Opravný
+S - Storno
+Obecné použití ve vrstvě Žurnál zprávy (využívá se pro formuláře i souhrn)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="primarniPpv" type="xs:boolean" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Primární pracovněprávní vztah zaměstnance
+DS: Meta atributy > Formulář (ID 10495)
+Příznak označující pracovněprávní vztah, který bude nosičem souhrnných dat zaměstnance.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="CustomAtribut1" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Custom atribut 1
+DS: Meta atributy > Obecné (ID 10582)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="CustomAtribut2" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Custom atribut 2
+DS: Meta atributy > Obecné (ID 10583)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="CustomAtribut3" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Custom atribut 3
+DS: Meta atributy > Obecné (ID 10584)</xs:documentation>
+        </xs:annotation>
+      </xs:element>      
+      <xs:element name="CustomAtribut4" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Custom atribut 4
+DS: Meta atributy > Obecné (ID 10585)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="CustomAtribut5" type="xs:string" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Custom atribut 5
+DS: Meta atributy > Obecné (ID 10586)</xs:documentation>
+        </xs:annotation>
+      </xs:element>            
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

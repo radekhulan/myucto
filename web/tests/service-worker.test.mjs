@@ -9,20 +9,24 @@ const source = await loadWorkerSource('service-worker.js')
 // `respondWith(fetch(...))`. Takový průchod totiž request přeposílá znovu ze
 // service workeru: odpovědi pak v DevTools i v logu serveru vypadají, že jdou
 // z SW cache, a odchylka v credentials/redirect semantice se projeví jako
-// náhodné 401 na /api/auth/me (a nekonečná smyčka / ↔ /login).
+// náhodné 401 na /api/auth/me (a nekonečná smyčka / ↔ /login). U POSTu
+// navíc iOS WebKit při přeposlání zahodí tělo streamované ze souboru
+// a upload faktury skončí na 400 no_file / no_files.
 test('API requests are left entirely to the browser', async () => {
-  for (const pathname of ['/api', '/api/v1/invoices', '/api/auth/me']) {
-    const worker = createWorker(source)
-    const result = worker.dispatchFetch({
-      url: `https://invoice.test${pathname}`,
-      method: 'GET',
-      destination: '',
-    })
+  for (const method of ['GET', 'POST']) {
+    for (const pathname of ['/api', '/api/v1/invoices', '/api/auth/me', '/api/admin/imports/ai-extract-pdf']) {
+      const worker = createWorker(source)
+      const result = worker.dispatchFetch({
+        url: `https://invoice.test${pathname}`,
+        method,
+        destination: '',
+      })
 
-    assert.equal(result, undefined, `${pathname} nesmí volat respondWith`)
-    assert.equal(worker.cacheOpenCount, 0)
-    assert.equal(worker.fetchCalls.length, 0)
-    assert.equal(worker.cachePutCalls.length, 0)
+      assert.equal(result, undefined, `${method} ${pathname} nesmí volat respondWith`)
+      assert.equal(worker.cacheOpenCount, 0)
+      assert.equal(worker.fetchCalls.length, 0)
+      assert.equal(worker.cachePutCalls.length, 0)
+    }
   }
 })
 

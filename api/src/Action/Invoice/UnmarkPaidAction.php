@@ -13,6 +13,8 @@ use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Eet\EetHistoryExistsException;
+use MyInvoice\Service\Eet\EetHistoryGuard;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
@@ -43,6 +45,7 @@ final class UnmarkPaidAction
         private readonly InvoicePdfRenderer $pdf,
         private readonly InvoicePaymentService $payments,
         private readonly DocumentLockService $locks,
+        private readonly EetHistoryGuard $eetHistory,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -59,6 +62,10 @@ final class UnmarkPaidAction
         }
         if ($invoice['status'] !== 'paid') {
             return Json::error($response, 'invalid_state', 'Lze vrátit zpět jen zaplacenou fakturu.', 409);
+        }
+        if (!empty($invoice['other_item_id'])) {
+            return Json::error($response, 'other_item_linked',
+                'Faktura je uhrazená úhradami navázané ostatní pohledávky. Úhradu odpojte v detailu pohledávky, nebo fakturu od pohledávky odpojte.', 409);
         }
 
         // Zámek dokladu (Epic F6): unmark-paid mění účetní fakt — v zavřeném období
@@ -103,12 +110,19 @@ final class UnmarkPaidAction
             );
         }
 
+        if ((string) ($invoice['invoice_type'] ?? '') === 'credit_note'
+            && ($eetConflict = $this->eetHistory->creditNoteRefundConflict((int) $invoice['supplier_id'], $id)) !== null) {
+            return Json::error($response, EetHistoryGuard::ERROR_CODE, $eetConflict, 409);
+        }
+
         $previousPaidAt = (string) ($invoice['paid_at'] ?? '');
 
         // Smaže evidované platby + přepočítá paid_total; u dokladu s kladnou částkou
         // k úhradě tím service rovnou revertuje status (sent/issued) a vyčistí paid_at.
         try {
             $this->payments->deleteAllForInvoice($id);
+        } catch (EetHistoryExistsException $e) {
+            return Json::error($response, EetHistoryGuard::ERROR_CODE, $e->getMessage(), 409);
         } catch (\RuntimeException $e) {
             return Json::error($response, 'payment_locked', $e->getMessage(), 409);
         }

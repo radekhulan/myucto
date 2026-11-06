@@ -126,6 +126,84 @@ final class KhEvidenceService
     }
 
     /**
+     * Čím se dnes sestavené KH liší od posledního podaného, po dokladech. Porovnává se
+     * podané XML, takže se projeví jen to, co by se v hlášení opravdu změnilo: úhrada ani
+     * jiná úprava bez dopadu na KH rozdíl nevyvolá. Následné KH je úplné, proto stačí
+     * poslední podání. Potvrzení výzvy řádky nenese a platí podání před ním.
+     *
+     * @return array{has_filing:bool, snapshot_available:bool,
+     *               submission:array{id:int, generated_at:string, form_variant:string}|null,
+     *               documents:list<array<string,mixed>>}
+     */
+    public function postFilingChanges(int $supplierId, int $year, int $month, string $period, string $currentXml): array
+    {
+        $quarterly = $period === 'quarterly';
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, generated_at, form_variant, xml_content FROM tax_submissions
+              WHERE supplier_id = ? AND form_code = 'dphkh1' AND period_year = ?
+                AND " . ($quarterly ? 'period_month IS NULL AND period_quarter = ?' : 'period_month = ? AND period_quarter IS NULL') . "
+                AND form_variant IN ('B', 'O', 'N', 'E')
+                AND status IN ('submitted', 'accepted') AND validation_status <> 'failed'
+           ORDER BY submitted_at DESC, generated_at DESC, id DESC"
+        );
+        $stmt->execute([$supplierId, $year, $quarterly ? (int) ceil($month / 3) : $month]);
+        $meta = static fn (array $row): array => [
+            'id' => (int) $row['id'], 'generated_at' => (string) $row['generated_at'], 'form_variant' => (string) $row['form_variant'],
+        ];
+        $latest = null;
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            $latest ??= $row;
+            if (KhSubmittedXmlReader::isConfirmation((string) $row['xml_content'])) {
+                continue;
+            }
+            return [
+                'has_filing' => true,
+                'snapshot_available' => true,
+                'submission' => $meta($row),
+                'documents' => self::changedDocuments((string) $row['xml_content'], $currentXml),
+            ];
+        }
+        return [
+            'has_filing' => $latest !== null,
+            'snapshot_available' => false,
+            'submission' => $latest !== null ? $meta($latest) : null,
+            'documents' => [],
+        ];
+    }
+
+    /**
+     * Řádky, kterými se dvě XML kontrolního hlášení liší.
+     *
+     * @return list<array{section:string, status:string, doc_number:string, is_aggregate:bool,
+     *                    filed:array{base:float, vat:float}|null, current:array{base:float, vat:float}|null}>
+     */
+    public static function changedDocuments(string $filedXml, string $currentXml): array
+    {
+        $current = [];
+        foreach (KhSubmittedXmlReader::read($currentXml) as $section => $rows) {
+            $current[$section] = ['rows' => $rows, 'totals' => ['count' => count($rows)] + ($rows[0] ?? [])];
+        }
+        $amount = static fn (?array $r): ?array => $r === null ? null : ['base' => (float) $r['base_total'], 'vat' => (float) $r['vat_total']];
+        $out = [];
+        foreach (self::compare(KhSubmittedXmlReader::read($filedXml), $current) as $section => $block) {
+            foreach ($block['rows'] as $row) {
+                if ($row['status'] === 'match') {
+                    continue;
+                }
+                $out[] = [
+                    'section'      => (string) $section,
+                    'status'       => (string) $row['status'],
+                    'doc_number'   => (string) $row['doc_number'],
+                    'is_aggregate' => !empty($row['is_aggregate']),
+                    'filed'        => $row['status'] === 'only_current' ? null : $amount($row),
+                    'current'      => $amount($row['current']),
+                ];
+            }
+        }
+        return $out;
+    }
+
+    /**
      * Porovnání po dokladech. Klíč dokladu = oddíl, číslo dokladu v KH, DIČ, kód předmětu
      * plnění (A.1/B.1 mají větu per kód) a příznak opravy; souhrnné oddíly A.5/B.3 se
      * porovnávají jedním řádkem souhrnu.

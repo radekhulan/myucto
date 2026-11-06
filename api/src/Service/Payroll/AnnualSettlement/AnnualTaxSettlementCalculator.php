@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\Calculation\CalculationStep;
 use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\PayrollRounding;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\IncomeTax\TaxCreditKind;
 use MyInvoice\Service\Payroll\IncomeTax\TaxIntegerMath;
 
@@ -31,6 +32,8 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxIntegerMath;
  *  2. Daň podle § 16 odst. 1: 15 % do 36násobku průměrné mzdy, 23 % nad.
  *  3. „nejdříve daň sníží o slevy na dani pro poplatníky daně z příjmů fyzických
  *     osob" — § 35ba, maximálně do výše daně (sleva nikdy nevytvoří přeplatek).
+ *     Od roku 2027 sem patří i sleva za umístění dítěte (§ 35ba odst. 1
+ *     písm. g), § 35bd), která se uplatňuje jen ročně.
  *  4. „pak vypočte částku daňového zvýhodnění … formou slevy na dani podle
  *     § 35c a daňového bonusu" — sleva do výše daně po § 35ba (§ 35c odst. 2),
  *     zbytek je bonus (§ 35c odst. 3).
@@ -67,11 +70,23 @@ use MyInvoice\Service\Payroll\IncomeTax\TaxIntegerMath;
  * ─────────────────────────────────────────────────────────────────────────────
  * Co se sem ZÁMĚRNĚ nepočítá
  * ─────────────────────────────────────────────────────────────────────────────
- * Srážková daň podle § 6 odst. 4. Je to samostatný základ daně a do ročního
- * zúčtování nevstupuje — § 38k odst. 7 věta druhá umožňuje ji do zúčtování
- * zahrnout jen tehdy, prokáže-li poplatník rozhodné skutečnosti a učiní
- * prohlášení do 15. února. Modul takový úkon neeviduje, takže se srážková daň
- * v ročním zúčtování nechává stranou a nese se jen jako doložený údaj.
+ * Srážková daň podle § 6 odst. 4 za zdaňovací období DO ROKU 2026. Je to
+ * samostatný základ daně a do ročního zúčtování nevstupuje — § 38k odst. 7
+ * věta druhá umožňuje ji do zúčtování zahrnout jen tehdy, prokáže-li poplatník
+ * rozhodné skutečnosti a učiní prohlášení do 15. února. Modul takový úkon
+ * neeviduje, takže se srážková daň v ročním zúčtování nechává stranou a nese
+ * se jen jako doložený údaj.
+ *
+ * Od zdaňovacího období 2027 je to naopak: příjmy podle § 6 odst. 4 jsou
+ * samostatným základem ZÁLOHY a § 38ch odst. 4 ZDP (zák. č. 360/2025 Sb.)
+ * počítá daň „z úhrnu mezd, vyjma příjmů podle § 6 odst. 4 plynoucích od
+ * jiného plátce daně". Vyjmuté jsou tedy jen příjmy od JINÉHO plátce; vlastní
+ * příjmy podle § 6 odst. 4 do úhrnu patří a sražené zálohy z nich se započtou
+ * (§ 38k odst. 7 věta druhá: „… a to i v případě příjmů podle § 6 odst. 4
+ * plynoucích od tohoto plátce daně"). Podmínku prohlášení podle § 38k odst. 4
+ * a 5 do 15. února splňuje každé roční zúčtování, protože bez ní se vůbec
+ * neprovede (§ 38ch odst. 1). Potvrzení od předchozích plátců příjmy podle
+ * § 6 odst. 4 nenesou, takže se v nich nic nevyjímá.
  */
 final class AnnualTaxSettlementCalculator
 {
@@ -87,12 +102,30 @@ final class AnnualTaxSettlementCalculator
         AnnualTaxRates $rates,
         array $blockers = [],
     ): AnnualSettlementResult {
-        $blockers = $this->withCalculationBlockers($input, $blockers);
+        $spouseFailures = $input->spouseClaim?->conditionFailures(
+            $input->taxYear,
+            $rates->spouseIncomeLimitMinorUnits,
+        ) ?? [];
+        $preschoolFailures = $this->preschoolFailures($input, $rates);
+        $blockers = $this->withCalculationBlockers(
+            $input,
+            $blockers,
+            $spouseFailures,
+            $preschoolFailures,
+        );
         if ($blockers !== []) {
             return AnnualSettlementResult::refused(
                 $input->taxYear,
                 $blockers,
-                ['rates' => $rates->toArray()],
+                [
+                    'rates' => $rates->toArray(),
+                    ...($spouseFailures !== []
+                        ? ['spouse_credit_failures' => $spouseFailures]
+                        : []),
+                    ...($preschoolFailures !== []
+                        ? ['preschool_credit_failures' => $preschoolFailures]
+                        : []),
+                ],
             );
         }
 
@@ -103,12 +136,33 @@ final class AnnualTaxSettlementCalculator
         //    už výše shodila výpočet na překážku.
         $external = $this->externalTotals($input);
 
-        // 1. Základ daně (§ 16 odst. 2).
+        // 0b. Vlastní příjmy podle § 6 odst. 4 od roku 2027 (viz hlavička):
+        //     do úhrnu mezd, sražená záloha do úhrnu záloh.
+        $separate = SeparateTaxBaseRegime::forTaxYear($input->taxYear)->isAdvance()
+            ? [
+                'base_minor_units' => $input->withholdingBaseMinorUnits,
+                'advance_tax_minor_units' => $input->withholdingTaxMinorUnits,
+            ]
+            : null;
+        $ownBase = TaxIntegerMath::add(
+            $input->advanceBaseMinorUnits,
+            $separate['base_minor_units'] ?? 0,
+        );
+
+        // 1. Základ daně (§ 16 odst. 2) — po odečtení nezdanitelných částí
+        //    (§ 15). Limity darů se měří z úhrnu PŘED odpočtem; zaokrouhluje
+        //    se až základ po odpočtu.
+        $baseBeforeDeductions = TaxIntegerMath::add(
+            $ownBase,
+            $external['advance_base_minor_units'],
+        );
+        $deductions = (new AnnualNonTaxableDeductionCalculator())->calculate(
+            $input->taxYear,
+            $baseBeforeDeductions,
+            $input->nonTaxableClaims,
+        );
         $roundedBase = $this->floorToMultiple(
-            TaxIntegerMath::add(
-                $input->advanceBaseMinorUnits,
-                $external['advance_base_minor_units'],
-            ),
+            $baseBeforeDeductions - $deductions->totalMinorUnits(),
             self::TAX_BASE_MULTIPLE_MINOR_UNITS,
         );
 
@@ -142,7 +196,16 @@ final class AnnualTaxSettlementCalculator
             ],
         ], 100);
 
-        // 3. Slevy podle § 35ba.
+        // 3a. Sleva za zastavenou exekuci (§ 35 odst. 4). § 35ba odst. 1 snižuje
+        //     daň „případně sníženou podle § 35", takže tahle sleva jde první,
+        //     a stejně jako ostatní slevy nejvýš do výše daně.
+        $enforcementCredit = min(
+            $taxBeforeCredits,
+            $deductions->enforcementCreditClaimedMinorUnits,
+        );
+        $taxAfterEnforcement = $taxBeforeCredits - $enforcementCredit;
+
+        // 3b. Slevy podle § 35ba.
         $creditBreakdown = [];
         $annualCredits = 0;
         foreach ($input->creditMonths as $claim) {
@@ -154,9 +217,55 @@ final class AnnualTaxSettlementCalculator
             ];
             $annualCredits = TaxIntegerMath::add($annualCredits, $amount);
         }
+        // § 35ba odst. 1 písm. b), § 35bb odst. 1 a § 35ba odst. 3: 1/12 roční
+        // částky za každý měsíc nároku, za měsíce ZTP/P manžela dvojnásobek.
+        // Podmínky nároku už prověřila překážka výše; sem dojde jen platný nárok.
+        if ($input->spouseClaim !== null) {
+            $spouseMonths = $input->spouseClaim->months();
+            $spouseZtpPMonths = $input->spouseClaim->ztpPMonths();
+            $amount = intdiv(
+                $rates->spouseCreditMinorUnits
+                    * ($spouseMonths + ($rates->spouseCreditZtpPMultiplier - 1) * $spouseZtpPMonths),
+                AnnualTaxRates::MONTHS_IN_YEAR,
+            );
+            $creditBreakdown['spouse'] = [
+                'months' => $spouseMonths,
+                'ztp_p_months' => $spouseZtpPMonths,
+                'amount_minor_units' => $amount,
+                'prorated' => true,
+            ];
+            $annualCredits = TaxIntegerMath::add($annualCredits, $amount);
+        }
+        // § 35ba odst. 1 písm. g), § 35bd: sleva za umístění dítěte. Je to
+        // sleva podle § 35ba, takže jde do téhož úhrnu a před daňové
+        // zvýhodnění (§ 35d odst. 7, § 35c odst. 2 a 3). Bez dvanáctinového
+        // krácení — § 35ba odst. 3 ho dává jen písm. b) až f).
+        if ($input->preschoolClaims !== []) {
+            $minimumWage = (int) $rates->minimumWageMinorUnits;
+            $children = [];
+            $amount = 0;
+            foreach ($input->preschoolClaims as $claim) {
+                $credit = $claim->creditMinorUnits($minimumWage);
+                $children[] = [
+                    'child_reference' => $claim->childReference,
+                    'expenses_minor_units' => $claim->expensesMinorUnits,
+                    'cap_minor_units' => $claim->capMinorUnits($minimumWage),
+                    'amount_minor_units' => $credit,
+                ];
+                $amount = TaxIntegerMath::add($amount, $credit);
+            }
+            $creditBreakdown['preschool'] = [
+                'children' => $children,
+                'minimum_wage_minor_units' => $minimumWage,
+                'amount_minor_units' => $amount,
+                'prorated' => false,
+                'statute' => AnnualPreschoolCreditStatute::SOURCE,
+            ];
+            $annualCredits = TaxIntegerMath::add($annualCredits, $amount);
+        }
         ksort($creditBreakdown);
-        $appliedCredits = min($taxBeforeCredits, $annualCredits);
-        $taxAfterCredits = $taxBeforeCredits - $appliedCredits;
+        $appliedCredits = min($taxAfterEnforcement, $annualCredits);
+        $taxAfterCredits = $taxAfterEnforcement - $appliedCredits;
 
         // 4. Daňové zvýhodnění podle § 35c.
         $childBreakdown = [];
@@ -208,8 +317,16 @@ final class AnnualTaxSettlementCalculator
         // kterou § 35c odst. 4 popisuje. Ř. 1 potvrzení naopak srážkově zdaněné
         // příjmy obsahovat MŮŽE, a práh by pak vyšel splněný tam, kde splněný
         // není. Na obou stranách se proto sčítá zálohový základ (ř. 5).
+        //
+        // Od roku 2027 příjmy podle § 6 odst. 4 nejsou „příjmy, z nichž je daň
+        // vybírána srážkou podle zvláštní sazby", takže je § 35c odst. 4 věta
+        // druhá z rozhodného příjmu nevylučuje — patří k němu stejně jako do
+        // úhrnu mezd výše.
         $qualifyingIncome = TaxIntegerMath::add(
-            $input->bonusQualifyingIncomeMinorUnits,
+            TaxIntegerMath::add(
+                $input->bonusQualifyingIncomeMinorUnits,
+                $separate['base_minor_units'] ?? 0,
+            ),
             $external['advance_base_minor_units'],
         );
         $thresholdMet = $qualifyingIncome >= $rates->bonusMinimumIncomeMinorUnits;
@@ -228,7 +345,10 @@ final class AnnualTaxSettlementCalculator
 
         // 5. Rozdíl na dani.
         $advanceTax = TaxIntegerMath::add(
-            $input->advanceTaxMinorUnits,
+            TaxIntegerMath::add(
+                $input->advanceTaxMinorUnits,
+                $separate['advance_tax_minor_units'] ?? 0,
+            ),
             $external['advance_tax_minor_units'],
         );
         $taxDifference = $advanceTax - $taxAfterAllCredits;
@@ -307,6 +427,13 @@ final class AnnualTaxSettlementCalculator
                 'total_bonus_qualifying_income_minor_units' => $qualifyingIncome,
                 'withholding_base_minor_units' => $input->withholdingBaseMinorUnits,
                 'withholding_tax_minor_units' => $input->withholdingTaxMinorUnits,
+                // Jen od roku 2027 — stopa za rok 2026 a dřív zůstává bajtově stejná.
+                ...($separate !== null
+                    ? ['separate_base_included' => [
+                        'regime' => SeparateTaxBaseRegime::SeparateAdvance->value,
+                        ...$separate,
+                    ]]
+                    : []),
                 'rate_steps' => [
                     $lowStep->jsonSerialize(),
                     $highStep->jsonSerialize(),
@@ -315,25 +442,129 @@ final class AnnualTaxSettlementCalculator
                 'children' => $childBreakdown,
                 'payout_threshold_minor_units' =>
                     AnnualSettlementStatute::PAYOUT_THRESHOLD_MINOR_UNITS,
+                ...$this->annualClaimsTrace(
+                    $input,
+                    $baseBeforeDeductions,
+                    $deductions,
+                    $enforcementCredit,
+                ),
             ],
             annualTaxBonusCandidateMinorUnits: $bonusCandidate,
             annualBonusAmountThresholdMet: $amountThresholdMet,
             annualBonusEligibilityReason: $bonusEligibilityReason,
+            taxBaseBeforeDeductionsMinorUnits: $baseBeforeDeductions,
+            nonTaxableDeductionsMinorUnits: $deductions->totalMinorUnits(),
+            enforcementCreditMinorUnits: $enforcementCredit,
         );
+    }
+
+    /**
+     * Stopa ročně uplatňovaných položek (§ 38h odst. 6).
+     *
+     * Jen když nějaké jsou — zúčtování bez nich má stopu stejnou jako dřív.
+     *
+     * @return array<string,mixed>
+     */
+    private function annualClaimsTrace(
+        AnnualSettlementInput $input,
+        int $baseBeforeDeductions,
+        AnnualNonTaxableDeductions $deductions,
+        int $enforcementCredit,
+    ): array {
+        if ($input->nonTaxableClaims === []
+            && $input->spouseClaim === null
+            && $input->preschoolClaims === []
+        ) {
+            return [];
+        }
+
+        return [
+            'annual_claims' => [
+                'items' => array_map(
+                    static fn (AnnualNonTaxableClaim $claim): array => $claim->jsonSerialize(),
+                    $input->nonTaxableClaims,
+                ),
+                'spouse' => $input->spouseClaim?->jsonSerialize(),
+                // Klíč jen se školkovným, aby stopa zúčtování bez něj zůstala stejná.
+                ...($input->preschoolClaims === []
+                    ? []
+                    : ['preschool' => array_map(
+                        static fn (AnnualPreschoolCreditClaim $claim): array => $claim->jsonSerialize(),
+                        $input->preschoolClaims,
+                    )]),
+            ],
+            'tax_base_before_deductions_minor_units' => $baseBeforeDeductions,
+            'non_taxable' => $deductions->toArray(),
+            'enforcement_credit' => [
+                'claimed_minor_units' => $deductions->enforcementCreditClaimedMinorUnits,
+                'applied_minor_units' => $enforcementCredit,
+            ],
+        ];
+    }
+
+    /**
+     * Nesplněné podmínky slevy za umístění dítěte podle dítěte.
+     *
+     * @return array<string,list<string>>
+     */
+    private function preschoolFailures(AnnualSettlementInput $input, AnnualTaxRates $rates): array
+    {
+        $failures = [];
+        foreach ($input->preschoolClaims as $claim) {
+            $claimFailures = $claim->conditionFailures(
+                $input->taxYear,
+                $rates->minimumWageMinorUnits,
+            );
+            if ($claimFailures !== []) {
+                $failures[$claim->childReference] = $claimFailures;
+            }
+        }
+
+        return $failures;
     }
 
     /**
      * Překážky, které pozná až výpočet — na rozdíl od těch z evidence.
      *
      * @param list<AnnualSettlementBlocker> $blockers
+     * @param list<string> $spouseFailures
+     * @param array<string,list<string>> $preschoolFailures
      * @return list<AnnualSettlementBlocker>
      */
     private function withCalculationBlockers(
         AnnualSettlementInput $input,
         array $blockers,
+        array $spouseFailures,
+        array $preschoolFailures = [],
     ): array {
         if ($input->completedMonths === 0) {
             $blockers[] = AnnualSettlementBlocker::NoApprovedMonths;
+        }
+        // § 38l odst. 1 a 2: ročně uplatňovanou položku plátce uzná jen
+        // doloženou.
+        foreach ($input->nonTaxableClaims as $claim) {
+            if (!$claim->isVerified()) {
+                $blockers[] = AnnualSettlementBlocker::AnnualClaimEvidenceUnverified;
+            }
+        }
+        if ($input->spouseClaim !== null && !$input->spouseClaim->isVerified()) {
+            $blockers[] = AnnualSettlementBlocker::AnnualClaimEvidenceUnverified;
+        }
+        if ($spouseFailures !== []) {
+            $blockers[] = AnnualSettlementBlocker::SpouseCreditConditionsNotMet;
+        }
+        foreach ($input->preschoolClaims as $claim) {
+            if (!$claim->isVerified()) {
+                $blockers[] = AnnualSettlementBlocker::AnnualClaimEvidenceUnverified;
+            }
+        }
+        if ($preschoolFailures !== []) {
+            $blockers[] = AnnualSettlementBlocker::PreschoolCreditConditionsNotMet;
+        }
+        if ($input->nonTaxableClaims !== []
+            && $input->taxYear < AnnualNonTaxableStatute::FIRST_SUPPORTED_YEAR
+        ) {
+            $blockers[] = AnnualSettlementBlocker::AnnualOnlyClaimsUnsupported;
         }
         foreach ($input->externalCertificates as $certificate) {
             // § 38ch odst. 4: do úhrnu mezd od všech plátců smí vstoupit jen

@@ -130,6 +130,37 @@ final class PasskeyServiceTest extends TestCase
             self::assertSame('Ověření passkey selhalo.', $e->getMessage());
             self::assertNull($e->getPrevious());
             self::assertStringNotContainsString('secret', $e->getMessage());
+            self::assertSame(PasskeyVerificationException::REASON_MALFORMED, $e->reason);
+            self::assertStringNotContainsString('secret', (string) $e->detail);
+        }
+    }
+
+    /**
+     * Důvod odmítnutí jde do auditního logu: bez něj se u správce klíčů, který
+     * vrací neplatné ověření, nedalo zjistit, co nesedí.
+     */
+    public function testRejectedAssertionCarriesReasonForAudit(): void
+    {
+        [$credential, $options, $payload] = $this->signedAssertion(storedCounter: 0, responseCounter: 0);
+
+        $tampered = $payload;
+        $tampered['response']['signature'] = self::base64url(random_bytes(70));
+        try {
+            $this->service->verifyAssertion($tampered, $options, $credential);
+            self::fail('Neplatný podpis musí selhat.');
+        } catch (PasskeyVerificationException $e) {
+            self::assertSame('Ověření passkey selhalo.', $e->getMessage());
+            self::assertSame(PasskeyVerificationException::REASON_ASSERTION_INVALID, $e->reason);
+            self::assertNotSame('', (string) $e->detail);
+        }
+
+        $foreign = $payload;
+        $foreign['id'] = $foreign['rawId'] = self::base64url(random_bytes(32));
+        try {
+            $this->service->verifyAssertion($foreign, $options, $credential);
+            self::fail('Cizí credential musí selhat.');
+        } catch (PasskeyVerificationException $e) {
+            self::assertSame(PasskeyVerificationException::REASON_CREDENTIAL_MISMATCH, $e->reason);
         }
     }
 

@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="http://schemas.cssz.cz/JMHZ/souhrn/2027"
+           xmlns:st="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/souhrn/2027" elementFormDefault="qualified" attributeFormDefault="unqualified"
+           version="1.5.0.3">
+
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" schemaLocation="simpleTypes.xsd"/>
+
+  <xs:element name="souhrn" type="souhrnType"/>
+  <xs:complexType name="souhrnType">
+    <xs:sequence>
+      <xs:element name="danUdajeMesic" type="danUdajeMesicType">
+        <xs:annotation>
+          <xs:documentation>Daňové údaje za hlášený měsíc</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="danUdajeRok" type="danUdajeRokType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Daňové údaje za rok. Uváděné v měsíci lednu nebo únoru nebo březnu.
+Období 010203</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="zamestnavatelUdajeRok" type="zamestnavatelUdajeRokType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Údaje o zaměstnavateli k 31.12. uváděné v prosinci.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="kolektivniSmlouvy">
+        <xs:annotation>
+          <xs:documentation>Kolektivní smlouvy</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="kolektivniSmlouva" type="kolektivniSmlouvaType" maxOccurs="unbounded"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="specifickaSkutecnost" type="specifickaSkutecnostSouhrnType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>V měsíci nastala specifická skutečnost
+IN13</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  
+  <xs:complexType name="danUdajeMesicType">
+    <xs:sequence>
+      <xs:element name="danZalohaPoSleve" type="st:nezaporneCislo14Type">
+        <xs:annotation>
+          <xs:documentation>Úhrn skutečně sražených záloh na dani po slevách
+DS: Souhrnná část > Daňové údaje (ID 10034)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="danBonus" type="st:nezaporneCislo14Type" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Úhrn vyplacených měsíčních daňových bonusů
+DS: Souhrnná část > Daňové údaje (ID 10035)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="danUdajeRokType">
+    <xs:sequence>
+      <xs:element name="danPreplatek" type="st:nezaporneCislo14Type">
+        <xs:annotation>
+          <xs:documentation>Úhrn přeplatků na dani z ročního zúčtování
+DS: Souhrnná část > Daňové údaje (ID 10036)
+Období 010203</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="danBonusDoplatek" type="st:nezaporneCislo14Type">
+        <xs:annotation>
+          <xs:documentation>Úhrn doplatků na daňových bonusech vyplacených zaměstnancům z ročního zúčtování
+DS: Souhrnná část > Daňové údaje (ID 10037)
+Období 010203</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="zamestnavatelUdajeRokType">
+    <xs:sequence>
+      <xs:element name="formaVlastnictvi" type="st:znakType">
+        <xs:annotation>
+          <xs:documentation>Forma
+DS: Souhrnná část > Hospodářská a finanční kontrola k 31.12. (ID 10220)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="zamestnavaniOzp" type="zamestnavaniOzpType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Zaměstnávám více než 25 zaměstnanců v pracovním poměru
+SIT06</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="zamestnavaniOzpType">
+    <xs:sequence>
+      <xs:element name="zecPocetPrepRok" type="st:nezaporneCislo14_2Type">
+        <xs:annotation>
+          <xs:documentation>Průměrný roční přepočtený počet zaměstnanců
+DS: Souhrnná část > Plnění povinného podílu zaměstnávání OZP (ID 10038)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="zecPocetPrepOzpRok" type="st:nezaporneCislo14_2Type">
+        <xs:annotation>
+          <xs:documentation>Průměrný roční přepočtený počet zaměstnanců, kteří jsou OZP
+DS: Souhrnná část > Plnění povinného podílu zaměstnávání OZP (ID 10039)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="podilZamZtp" type="st:nezaporneCislo5_2Type">
+        <xs:annotation>
+          <xs:documentation>Podíl osob se zdravotním postižením na celkovém počtu zaměstnanců
+DS: Souhrnná část > Plnění povinného podílu zaměstnávání OZP (ID 10452)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="kolektivniSmlouvaType">
+    <xs:sequence>
+      <xs:element name="typKolektSmlouvy" type="st:znakType" >
+        <xs:annotation>
+          <xs:documentation>Kolektivní smlouva/dohoda 
+DS: Souhrnná část > Kolektivní smlouva (ID10214)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="specifickaSkutecnostSouhrnType">
+    <xs:sequence>
+      <xs:element name="typ">
+        <xs:annotation>
+          <xs:documentation>Typ specifické právní skutečnosti
+DS: Souhrnná část > Specifická právní skutečnost (ID 10408)</xs:documentation>
+        </xs:annotation>
+        <xs:simpleType>
+          <xs:restriction base="xs:string">
+            <xs:minLength value="1" />
+            <xs:maxLength value="2" />
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="datum" type="xs:date">
+        <xs:annotation>
+          <xs:documentation>Datum specifické právní skutečnosti
+DS: Souhrnná část > Datum nastání specifické právní skutečnosti (ID 10409)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

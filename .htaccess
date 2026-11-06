@@ -30,7 +30,9 @@ Options -Indexes -MultiViews
     # `api/vendor.prod/` (produkční autoloader) a holé `vendor(/|$)` ho nematchne
     # (dostane '.', ne '/'). Pokrývá i `private.bak/`, `db.old/` apod. Suffix se
     # kotví na tečku, takže legitimní `/dbxyz` zůstává dostupné.
-    RewriteRule ^(private|db|log|source|storage|tools|cmd|docker|web/(src|shared|node_modules)|node_modules|api/(src|vendor|templates|tests|bin))(?:\.[^/]*)?(/|$) - [F,L]
+    # [NC]: na souborovém systému bez rozlišení velikosti písmen (macOS, některé
+    # NAS a síťové svazky) by jinak `/Storage/…` nebo `/PRIVATE/…` prošlo.
+    RewriteRule ^(private|db|log|source|storage|tools|cmd|docker|web/(src|shared|node_modules)|node_modules|api/(src|vendor|templates|tests|bin))(?:\.[^/]*)?(/|$) - [F,L,NC]
     RewriteRule ^mcp/ - [F,L,NC]
 
     # 2b) Blokovat cfg.php, tooling manifesty a zdrojové dokumenty.
@@ -126,7 +128,7 @@ Options -Indexes -MultiViews
 <IfModule mod_headers.c>
     Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
     Header always set X-Content-Type-Options "nosniff"
-    Header always set X-Frame-Options "DENY"
+    Header always set X-Frame-Options "SAMEORIGIN"
     Header always set Referrer-Policy "same-origin"
     Header always set Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), publickey-credentials-create=(self), publickey-credentials-get=(self), accelerometer=(self \"https://challenges.cloudflare.com\"), gyroscope=(self \"https://challenges.cloudflare.com\"), magnetometer=(self \"https://challenges.cloudflare.com\"), xr-spatial-tracking=(self \"https://challenges.cloudflare.com\")"
     Header always set Cross-Origin-Opener-Policy "same-origin"

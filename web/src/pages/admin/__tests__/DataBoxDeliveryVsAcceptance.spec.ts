@@ -192,6 +192,48 @@ describe('DataBox — doručeno vs. zpracováno', () => {
     expect(wrapper.text()).toContain('databox.outbox.deliveredNotProcessed')
   })
 
+  it('agendu bez výsledku od úřadu po doručení ukáže jako splněnou, ne jako „nevíme“', async () => {
+    const wrapper = await mountWith([submission({ agenda_code: 'PPZ_2026', settles_on_delivery: true })])
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    const text = wrapper.text()
+    expect(text).toContain('databox.acceptance.settled_by_delivery')
+    expect(text).toContain('databox.outbox.settledByDelivery')
+    expect(text).not.toContain('databox.acceptance.unknown')
+    expect(text).not.toContain('databox.outbox.deliveredNotProcessed')
+  })
+
+  it('agendu bez výsledku před doručením neslibuje odpověď úřadu ani splnění', async () => {
+    const wrapper = await mountWith([submission({
+      agenda_code: 'PPZ_2026',
+      settles_on_delivery: true,
+      dispatch_state: 'sent',
+      delivered_at: null,
+    })])
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    const text = wrapper.text()
+    expect(text).toContain('databox.acceptance.no_authority_result')
+    expect(text).not.toContain('databox.acceptance.settled_by_delivery')
+    expect(text).not.toContain('databox.acceptance.unknown')
+  })
+
+  it('bez nepřečtených zpráv hromadné označení nenabízí', async () => {
+    const wrapper = await mountWith([submission()])
+    await wrapper.findAll('nav button')[2].trigger('click')
+
+    const button = wrapper.find('[data-test="inbox-mark-all-read"]')
+    expect(button.exists()).toBe(true)
+    expect(button.attributes('disabled')).toBeDefined()
+  })
+
+  it('čekající doručenky nabídne nahoře nad seznamem', async () => {
+    const wrapper = await mountWith([submission({ dispatch_state: 'sent', delivered_at: null })])
+    await wrapper.findAll('nav button')[1].trigger('click')
+
+    expect(wrapper.find('[data-test="outbox-receipts-batch-jump"]').text()).toContain('(1)')
+  })
+
   it('teprve doložené přijetí ukáže „zpracováno“', async () => {
     const wrapper = await mountWith([
       submission({

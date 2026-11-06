@@ -153,6 +153,7 @@ final class PayrollTakeoverSicknessCompensation
 
             return 0;
         }
+        $segments = $this->withQuarterAverages($absence, $segments);
         $full = $this->calculator->calculate((string) $absence['date_from'], $averageHourlyMinor, $segments);
         $kept = array_values(array_filter(
             $full->segments,
@@ -176,6 +177,42 @@ final class PayrollTakeoverSicknessCompensation
         }
 
         return $result->compensationMinor;
+    }
+
+    /**
+     * Směny okna § 192 ZP v dalším kalendářním čtvrtletí než začátek nemoci dostanou
+     * průměr toho čtvrtletí: průměrný výdělek se zjišťuje k prvnímu dni čtvrtletí
+     * a platí po celé čtvrtletí (§ 351 a § 354 odst. 1 ZP). Bez schváleného průměru
+     * dalšího čtvrtletí zůstává průměr čtvrtletí, kdy nemoc začala.
+     *
+     * @param array<string,mixed> $absence
+     * @param list<array<string,mixed>> $segments
+     * @return list<array<string,mixed>>
+     */
+    private function withQuarterAverages(array $absence, array $segments): array
+    {
+        $startKey = substr((string) $absence['date_from'], 0, 4) . '-' . (intdiv((int) substr((string) $absence['date_from'], 5, 2) - 1, 3) + 1);
+        $byQuarter = [];
+        foreach ($segments as $i => $segment) {
+            $date = (string) $segment['local_date'];
+            $year = (int) substr($date, 0, 4);
+            $quarter = intdiv((int) substr($date, 5, 2) - 1, 3) + 1;
+            if ("{$year}-{$quarter}" === $startKey) {
+                continue;
+            }
+            if (!array_key_exists("{$year}-{$quarter}", $byQuarter)) {
+                $average = $this->averages->findApproved((int) $absence['supplier_id'], (int) $absence['employment_id'], $year, $quarter);
+                $byQuarter["{$year}-{$quarter}"] = $average !== null && ($average['support_status'] ?? null) === 'supported'
+                    && is_int($average['average_hourly_minor'] ?? null) && $average['average_hourly_minor'] > 0
+                    ? $average['average_hourly_minor']
+                    : null;
+            }
+            if ($byQuarter["{$year}-{$quarter}"] !== null) {
+                $segments[$i]['average_hourly_minor'] = $byQuarter["{$year}-{$quarter}"];
+            }
+        }
+
+        return $segments;
     }
 
     /**

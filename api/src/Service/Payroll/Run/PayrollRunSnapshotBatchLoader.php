@@ -301,7 +301,8 @@ final class PayrollRunSnapshotBatchLoader
         string $effectiveOn,
     ): array {
         return $this->grouped($this->fetch(
-            'SELECT id, agreement_reference, title, deduction_kind, legal_basis, priority_no,
+            'SELECT id, agreement_reference, title, deduction_kind, legal_basis,
+                    creditor_is_employer, jmhz_target, priority_no,
                     requested_minor, total_limit_minor, withheld_total_minor,
                     taken_over_withheld_minor,
                     valid_from, valid_to, delivered_on, row_version,

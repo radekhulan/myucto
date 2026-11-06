@@ -1,5 +1,6 @@
 import { api } from './client'
 import { downloadApiFile } from '@/utils/downloadFile'
+import type { PayrollAgreementAnnualHours } from './payroll'
 
 /** Soubor přenášený v JSON těle; obsah je base64 bez prefixu `data:`. */
 export interface ImportFilePayload {
@@ -384,7 +385,8 @@ export type AttendanceUnit = 'hours' | 'excel_duration' | 'amount' | 'text'
 export type AttendanceMeaning =
   | 'ignore' | 'person_name' | 'personal_number' | 'birth_number' | 'birth_date' | 'health_insurer_code'
   | 'relation_label'
-  | 'department' | 'cost_center' | 'position' | 'weekly_hours' | 'start_end_note' | 'monthly_wage'
+  | 'department' | 'cost_center' | 'position' | 'weekly_hours' | 'start_end_note' | 'start_date' | 'monthly_wage'
+  | 'hourly_rate' | 'end_date' | 'bank_account'
   | 'worked_hours' | 'overtime_hours' | 'night_hours' | 'weekend_hours' | 'holiday_work_hours'
   | 'afternoon_hours' | 'fund_hours'
   | 'vacation_hours' | 'holiday_hours' | 'sick_hours' | 'doctor_hours' | 'care_hours'
@@ -465,6 +467,7 @@ export interface AttendanceEmploymentOption {
   label: string
   code: string
   status: string
+  relation_type?: string
 }
 
 export type AttendanceMatchStatus = 'linked' | 'matched' | 'ambiguous' | 'not_found'
@@ -512,6 +515,13 @@ export interface AttendancePerson {
   weekly_hours: string | null
   start_end_note: string | null
   monthly_wage: string | null
+  /** Sjednaná hodinová sazba a konec dohody tak, jak jsou v podkladech. */
+  hourly_rate?: string | null
+  end_date?: string | null
+  /** Sjednaný konec dohody přečtený ze sloupce (`YYYY-MM-DD`). */
+  agreed_end_on?: string | null
+  /** Číslo účtu z podkladů jen maskované; celé ho při založení doplní server. */
+  bank_account_masked?: string | null
   /** Nástup a ukončení přečtené z poznámky (`YYYY-MM-DD`). */
   start_on?: string | null
   end_on?: string | null
@@ -529,6 +539,8 @@ export interface AttendancePerson {
   components: AttendanceComponentValue[]
   deductions?: AttendanceDeductionValue[]
   reference: { gross_minor: number | null; net_minor: number | null; hours: string | null }
+  /** Roční hodiny na DPP po započtení importované docházky; jen u osob přiřazených na DPP. */
+  dpp_annual_hours?: PayrollAgreementAnnualHours & { imported_minutes: number }
   warnings: string[]
 }
 
@@ -581,6 +593,7 @@ export interface AttendanceWageChange {
 export interface AttendanceSampleUpgrade {
   profile_id: number
   name: string
+  sample_key?: AttendanceSampleKey
   version: number | null
   latest_version: number
   rules: AttendanceRule[]
@@ -748,6 +761,9 @@ export interface AttendancePersonCreate {
   /** Sjednaná měsíční mzda v celých korunách (z mzdového výměru v podkladech). */
   monthly_gross: number | null
   planned_start_on: string
+  /** Hodinová sazba a konec dohody z podkladů; nečitelné vrátí server ve zprávě výsledku. */
+  hourly_rate?: string | null
+  fixed_term_end_on?: string | null
   personal_number: string | null
   activate: boolean
 }
@@ -772,12 +788,17 @@ export interface AttendanceBatchRow {
   source: string
 }
 
+/** Vestavěné vzory profilu: docházkový systém GIRITON a obecná šablona MyÚčto. */
+export type AttendanceSampleKey = 'giriton' | 'myucto' | 'pamica'
+
 export interface AttendanceProfile {
   id: number
   name: string
   rules: AttendanceRule[]
   components: AttendanceProfileComponent[]
   is_sample: boolean
+  /** Ze kterého vzoru profil vznikl; `null` u vlastního profilu. Starší server klíč neposílá. */
+  sample_key?: AttendanceSampleKey | null
   /** Verze vzoru, ze které profil vznikl; `null` u vlastního profilu. */
   sample_version: number | null
   /** Seznam profilů: upravený vzor má novější verzi. Uložení profilu příznak nevrací. */
@@ -925,10 +946,22 @@ export const payrollImportsApi = {
   deleteAttendanceProfile: (id: number) =>
     api.delete<{ deleted: true }>(`/payroll/imports/attendance/profiles/${id}`)
       .then(response => response.data),
-  /** Obnoví vzorový profil GIRITON; `restored: false` = vzor ve firmě už je. */
-  restoreAttendanceSampleProfile: () =>
-    api.post<{ profile: AttendanceProfile; restored: boolean }>('/payroll/imports/attendance/profiles/sample')
-      .then(response => response.data),
+  /** Obnoví vestavěný vzor podle klíče; `restored: false` = vzor ve firmě už je. */
+  restoreAttendanceSampleProfile: (sampleKey: AttendanceSampleKey = 'giriton') =>
+    api.post<{ profile: AttendanceProfile; restored: boolean }>('/payroll/imports/attendance/profiles/sample', {
+      sample_key: sampleKey,
+    }).then(response => response.data),
+  /**
+   * Šablona ke vzoru: XLSX pro Vzor MyÚčto (ukázkové řádky a list Návod),
+   * u Vzoru PAMICA ukázkový XML export se smyšlenými osobami za zvolený měsíc.
+   */
+  downloadAttendanceTemplate: (fallbackFilename: string, sampleKey: AttendanceSampleKey = 'myucto', period?: string) => {
+    const query = new URLSearchParams()
+    if (sampleKey !== 'myucto') query.set('sample', sampleKey)
+    if (period) query.set('period', period)
+    const qs = query.toString()
+    return downloadApiFile(`/payroll/imports/attendance/template${qs ? `?${qs}` : ''}`, fallbackFilename)
+  },
   copyAttendanceProfile: (id: number, targetSupplierId: number) =>
     api.post<{ profile: AttendanceProfile }>(`/payroll/imports/attendance/profiles/${id}/copy`, {
       target_supplier_id: targetSupplierId,

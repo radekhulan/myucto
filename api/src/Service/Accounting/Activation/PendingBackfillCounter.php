@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Accounting\Activation;
 
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Accounting\PostingService;
-use MyInvoice\Service\Accounting\TakenOverRecord;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 
 final class PendingBackfillCounter
 {
@@ -26,31 +25,22 @@ final class PendingBackfillCounter
         $stmt->execute($from !== null ? [$supplierId, $from] : [$supplierId]);
         $cashDocuments = (int) $stmt->fetchColumn();
 
-        $invoiceTypePlaceholders = implode(',', array_fill(0, count(PostingService::POSTABLE_ISSUED_INVOICE_TYPES), '?'));
+        // Rozsah sdílí s během doúčtování ({@see DocumentBackfill::scopeSql()}); kontrola
+        // úplnosti aktivace na shodě obou stran stojí.
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM invoices i
-              WHERE i.supplier_id = ? AND i.status NOT IN ('draft','cancelled')
-                AND i.invoice_type IN ({$invoiceTypePlaceholders}){$docDate}
-                AND " . OpeningBalanceDocuments::notInOpeningSql('invoice', 'i') . "
-                AND NOT " . TakenOverRecord::documentSql('invoice', 'i') . "
-                AND NOT EXISTS (SELECT 1 FROM journal_entries je
-                                 WHERE je.supplier_id = i.supplier_id AND je.source_type = 'invoice'
-                                   AND je.source_id = i.id AND je.reversed_by IS NULL)"
+              WHERE i.supplier_id = ?{$docDate}
+                AND " . DocumentBackfill::scopeSql('invoice', 'i') . "
+                AND NOT " . DocumentPostingGroup::activePostingExistsSql("'invoice'", 'i.id', 'i.supplier_id', false)
         );
-        $invoiceParams = array_merge([$supplierId], PostingService::POSTABLE_ISSUED_INVOICE_TYPES);
-        if ($from !== null) $invoiceParams[] = $from;
-        $stmt->execute($invoiceParams);
+        $stmt->execute($from !== null ? [$supplierId, $from] : [$supplierId]);
         $invoices = (int) $stmt->fetchColumn();
 
         $stmt = $pdo->prepare(
             "SELECT COUNT(*) FROM purchase_invoices pi
-              WHERE pi.supplier_id = ? AND pi.status IN ('received','booked','paid'){$docDate}
-                AND pi.document_kind <> 'advance'
-                AND " . OpeningBalanceDocuments::notInOpeningSql('purchase_invoice', 'pi') . "
-                AND NOT " . TakenOverRecord::documentSql('purchase_invoice', 'pi') . "
-                AND NOT EXISTS (SELECT 1 FROM journal_entries je
-                                 WHERE je.supplier_id = pi.supplier_id AND je.source_type = 'purchase_invoice'
-                                   AND je.source_id = pi.id AND je.reversed_by IS NULL)"
+              WHERE pi.supplier_id = ?{$docDate}
+                AND " . DocumentBackfill::scopeSql('purchase_invoice', 'pi') . "
+                AND NOT " . DocumentPostingGroup::activePostingExistsSql("'purchase_invoice'", 'pi.id', 'pi.supplier_id', false)
         );
         $stmt->execute($from !== null ? [$supplierId, $from] : [$supplierId]);
         $purchaseInvoices = (int) $stmt->fetchColumn();

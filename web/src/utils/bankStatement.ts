@@ -1,12 +1,26 @@
 import { bankApi, type BankStatement } from '@/api/bank'
 
+export function statementDownloadsWithMovements<T extends { transaction_count: number }>(
+  s: { evidence_statements?: T[] } | null | undefined,
+): T[] {
+  return (s?.evidence_statements ?? []).filter(source => source.transaction_count > 0)
+}
+
 export function statementClosingBalance(s: BankStatement): number | null {
   return s.curr_balance ?? s.balance_calculation?.confirmed_closing ?? s.balance_calculation?.closing ?? null
 }
 
-/** Výpis bez souboru, jehož GPC se skládá ze zůstatků a pohybů (bankovní API, převod z jiného programu). */
+/**
+ * Výpis bez souboru GPC, jehož GPC se skládá ze zůstatků a pohybů (bankovní API,
+ * převod z jiného programu, PDF výpis).
+ *
+ * PDF výpis sem patří ze stejného důvodu jako ostatní: originál je PDF, soubor GPC
+ * k němu neexistuje, ale zůstatky i pohyby ano — a účetní GPC chce. Je to navíc ten
+ * případ, pro který se import PDF výpisů zaváděl: banky, které GPC vůbec nedávají.
+ * Backend export umí (`GpcExportAction`), chybělo jen to, aby UI nabídlo tlačítko.
+ */
 function isGeneratedGpc(s: BankStatement): boolean {
-  return s.source === 'bank_api' || (s.source === 'import' && !s.has_file)
+  return s.source === 'bank_api' || s.source === 'pdf' || (s.source === 'import' && !s.has_file)
 }
 
 export function statementHasGpc(s: BankStatement): boolean {

@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Service\Report;
 
+use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Repository\AccountingSupplierSettingsRepository;
 use MyInvoice\Repository\TaxSubmissionRepository;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\Vat\VatClearingService;
 use MyInvoice\Service\Accounting\Vat\VatClearingTrigger;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Report\TaxSubmissionArchiver;
 use MyInvoice\Service\Validation\XmlSchemaValidator;
 use MyInvoice\Tests\Support\AbortedTransactionTrait;
@@ -63,6 +65,7 @@ final class TaxSubmissionLockAfterClearingErrorTest extends TestCase
             $this->createStub(XmlSchemaValidator::class),
             $settings,
             new VatClearingTrigger($clearing, $this->createStub(ActivityLogger::class)),
+            new DemoMode(new Config([])),
         );
     }
 }

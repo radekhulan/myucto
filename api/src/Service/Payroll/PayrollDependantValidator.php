@@ -37,7 +37,8 @@ use InvalidArgumentException;
  *   other_household_caregiver_status:string,
  *   other_caregiver_given_name:?string,
  *   other_caregiver_family_name:?string,
- *   other_caregiver_birth_date:?string
+ *   other_caregiver_birth_date:?string,
+ *   other_caregiver_birth_number:?string
  * }
  */
 final class PayrollDependantValidator
@@ -75,6 +76,7 @@ final class PayrollDependantValidator
         'other_caregiver_given_name',
         'other_caregiver_family_name',
         'other_caregiver_birth_date',
+        'other_caregiver_birth_number',
     ];
 
     /**
@@ -121,6 +123,7 @@ final class PayrollDependantValidator
         'other_caregiver_given_name' => 'Jméno jiné vyživující osoby',
         'other_caregiver_family_name' => 'Příjmení jiné vyživující osoby',
         'other_caregiver_birth_date' => 'Datum narození jiné vyživující osoby',
+        'other_caregiver_birth_number' => 'Rodné číslo jiné vyživující osoby',
         'effective_from' => 'Nárok od',
         'effective_to' => 'Nárok do',
     ];
@@ -315,7 +318,8 @@ final class PayrollDependantValidator
      *   other_household_caregiver_status:string,
      *   other_caregiver_given_name:?string,
      *   other_caregiver_family_name:?string,
-     *   other_caregiver_birth_date:?string
+     *   other_caregiver_birth_date:?string,
+     *   other_caregiver_birth_number:?string
      * }
      */
     private function otherCaregiver(array $input): array
@@ -341,17 +345,35 @@ final class PayrollDependantValidator
                 'other_caregiver_given_name' => null,
                 'other_caregiver_family_name' => null,
                 'other_caregiver_birth_date' => null,
+                'other_caregiver_birth_number' => null,
             ];
+        }
+
+        $birthDate = $this->date($input, 'other_caregiver_birth_date');
+        // Rodné číslo (10434) je nepovinné, kontrole 127 stačí datum narození.
+        // Prázdné pole při úpravě uložené rodné číslo nemění, jako u vyživované osoby.
+        $birthNumber = null;
+        $raw = $input['other_caregiver_birth_number'] ?? null;
+        if ($raw !== null) {
+            if (!is_string($raw) || trim($raw) === '') {
+                throw new InvalidArgumentException(
+                    'Rodné číslo jiné vyživující osoby nesmí být prázdné. Když ho nemáte, nechte pole prázdné.',
+                );
+            }
+            $birthNumber = CzechBirthNumber::normalize($raw);
+            if (CzechBirthNumber::birthDate($birthNumber) !== $birthDate) {
+                throw new InvalidArgumentException(
+                    'Rodné číslo jiné vyživující osoby neodpovídá jejímu datu narození.',
+                );
+            }
         }
 
         return [
             'other_household_caregiver_status' => $status,
             'other_caregiver_given_name' => $this->name($input, 'other_caregiver_given_name'),
             'other_caregiver_family_name' => $this->name($input, 'other_caregiver_family_name'),
-            'other_caregiver_birth_date' => $this->date(
-                $input,
-                'other_caregiver_birth_date',
-            ),
+            'other_caregiver_birth_date' => $birthDate,
+            'other_caregiver_birth_number' => $birthNumber,
         ];
     }
 

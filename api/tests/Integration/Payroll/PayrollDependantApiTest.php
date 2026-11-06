@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollDependantAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -62,7 +61,7 @@ final class PayrollDependantApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollDependantAction::class);
             $this->statutory = $container->get(
@@ -515,6 +514,39 @@ final class PayrollDependantApiTest extends TestCase
         );
     }
 
+    /** Nová verze nároku po zmrazené mzdě přebírá rodné číslo jiné osoby, zapečetěné pro nový řádek. */
+    public function testNewClaimVersionKeepsTheOtherCaregiverBirthNumber(): void
+    {
+        $dependantId = $this->createChild();
+        $created = $this->json($this->postClaim(
+            $dependantId,
+            $this->claim($this->otherCaregiver() + ['other_caregiver_birth_number' => '8001010006']),
+        ));
+        $claim = $created['dependants'][0]['claims'][0];
+        $this->approveRun('2026-03-01');
+
+        $response = $this->putClaim($dependantId, (int) $claim['id'], $this->claim([
+            'child_order' => 2,
+            'row_version' => $claim['row_version'],
+        ] + $this->otherCaregiver()));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $replacement = null;
+        foreach ($this->json($response)['dependants'][0]['claims'] as $row) {
+            if ($row['superseded_by_id'] === null) {
+                $replacement = $row;
+            }
+        }
+        self::assertIsArray($replacement);
+        self::assertNotSame($claim['id'], $replacement['id']);
+        self::assertSame($claim['other_caregiver_birth_number_masked'], $replacement['other_caregiver_birth_number_masked']);
+
+        $repository = new \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository(
+            $this->db,
+            \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
+        );
+        self::assertSame('8001010006', $repository->caregiverBirthNumbersFor($this->supplierId, [$this->employeeId])[$this->employeeId][$replacement['id']] ?? null);
+    }
+
     public function testChangeAfterApprovedRevisionCreatesNewVersionAndKeepsHistory(): void
     {
         $dependantId = $this->createChild();
@@ -747,18 +779,75 @@ final class PayrollDependantApiTest extends TestCase
         self::assertSame(1, $this->claimCount());
     }
 
-    public function testJmhzIdentityIncludesBirthDateWithoutBirthNumber(): void
+    /**
+     * Rodné číslo dítěte (10438) jde do měsíčního hlášení vedle data narození,
+     * jak ho uvádějí ostatní mzdové programy; jen číslicemi, jak ho chce XSD.
+     */
+    public function testJmhzIdentityIncludesBirthDateAndBirthNumber(): void
     {
         $id = $this->createChild(['given_name' => 'Jana', 'family_name' => 'Nováková']);
-        $repository = new \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository($this->db);
+        $repository = new \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository(
+            $this->db,
+            \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
+        );
         self::assertSame([
             $this->employeeId => ['dependant-' . $id => [
                 'given_name' => 'Jana',
                 'family_name' => 'Nováková',
                 'birth_date' => '2001-01-01',
+                'birth_number' => '0101010008',
             ]],
         ], $repository->identitiesFor($this->supplierId, [$this->employeeId]));
         self::assertSame([], $repository->identitiesFor($this->otherSupplierId, [$this->employeeId]));
+    }
+
+    /**
+     * Rodné číslo jiné vyživující osoby (10434) se ukládá šifrovaně, karta ukáže jen
+     * masku, příprava hlášení ho dohledá podle nároku a odpověď „ne" ho smaže.
+     */
+    public function testOtherCaregiverBirthNumberIsSealedMaskedAndClearedWithTheAnswer(): void
+    {
+        $dependantId = $this->createChild();
+        $response = $this->postClaimFor(
+            $this->employeeId,
+            $dependantId,
+            $this->claim($this->otherCaregiver() + ['other_caregiver_birth_number' => '8001010006']),
+        );
+        $claim = $this->claimOf($response, $dependantId);
+        self::assertNotNull($claim['other_caregiver_birth_number_masked']);
+        self::assertStringNotContainsString('0006', (string) $claim['other_caregiver_birth_number_masked']);
+
+        $stored = $this->db->pdo()->prepare('SELECT other_caregiver_birth_number_ciphertext FROM payroll_person_tax_child_claims WHERE id = ?');
+        $stored->execute([$claim['id']]);
+        self::assertStringNotContainsString('8001010006', (string) $stored->fetchColumn());
+
+        $repository = new \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository(
+            $this->db,
+            \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
+        );
+        self::assertSame(
+            [$this->employeeId => [$claim['id'] => '8001010006']],
+            $repository->caregiverBirthNumbersFor($this->supplierId, [$this->employeeId]),
+        );
+
+        $response = $this->putClaim($dependantId, (int) $claim['id'], $this->claim([
+            'row_version' => $claim['row_version'],
+            'other_household_caregiver_status' => 'none',
+        ]));
+        self::assertNull($this->claimOf($response, $dependantId)['other_caregiver_birth_number_masked']);
+        self::assertSame([], $repository->caregiverBirthNumbersFor($this->supplierId, [$this->employeeId]));
+    }
+
+    /** @return array<string,mixed> */
+    private function claimOf(Response $response, int $dependantId): array
+    {
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        foreach ($this->json($response)['dependants'] as $dependant) {
+            if ((int) $dependant['id'] === $dependantId) {
+                return $dependant['claims'][0];
+            }
+        }
+        self::fail('Vyživovaná osoba s nárokem chybí.');
     }
 
     // --- pomocníci ---------------------------------------------------------

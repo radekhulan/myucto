@@ -46,6 +46,7 @@ final class TaxReturnLineCatalog
         242 => 'Odečet na podporu výzkumu a vývoje (§ 34 odst. 4, § 34a až § 34e)',
         243 => 'Odečet na podporu odborného vzdělávání (§ 34 odst. 4, § 34f až § 34h)',
         250 => 'Základ daně snížený o odčitatelné položky podle § 34',
+        251 => 'Snížení základu daně veřejně prospěšného poplatníka (§ 20 odst. 7)',
         260 => 'Odečet darů na veřejně prospěšné účely (§ 20 odst. 8)',
         270 => 'Základ daně snížený o dary, zaokrouhlený na celé tisíce Kč dolů',
         280 => 'Sazba daně',

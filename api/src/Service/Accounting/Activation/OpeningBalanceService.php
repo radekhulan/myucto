@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Activation;
 
+use MyInvoice\Service\Accounting\AccountRoleResolver;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+
 use MyInvoice\Service\Accounting\AccountingPeriodStatus;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
@@ -150,6 +153,11 @@ final class OpeningBalanceService
         return $this->closingRepo->openingEntriesInPeriod($supplierId, (int) $period['id']) !== [];
     }
 
+    public function postPropertyOpening(\MyInvoice\Service\Property\Opening\OpeningOwnerProof $proof):array
+    {
+        return (new \MyInvoice\Repository\JournalEntryRepository($this->db,new \MyInvoice\Service\ActivityLogger($this->db)))->insertPropertyOpening($proof);
+    }
+
     public function post(int $supplierId, string $startsOn, array $meta): array
     {
         $draft = $this->draft($supplierId);
@@ -172,14 +180,19 @@ final class OpeningBalanceService
             throw new PostingException('period_not_open', 'Období zahájení účetnictví není otevřené.', 422);
         }
 
+        $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $startsOn);
+        $openingAccount = $profile->account('closing.opening_balance');
         $lines = [];
-        foreach ($draft['rows'] as $row) {
+        foreach ($draft['rows'] as $index => $row) {
+            if ($profile->framework === AccountingFrameworkService::CZ_504 && str_starts_with((string) $row['account_code'], $openingAccount)) {
+                throw new PostingException('opening_counteraccount_forbidden', 'Počáteční účet rozvažný doplní systém automaticky.', 400, ['row' => $index]);
+            }
             $amount = (float) $row['amount'];
             if ($row['side'] === 'debit') {
                 $lines[] = ['account_code' => $row['account_code'], 'side' => 'debit', 'amount' => $amount];
-                $lines[] = ['account_code' => '701', 'side' => 'credit', 'amount' => $amount];
+                $lines[] = ['account_code' => $openingAccount, 'side' => 'credit', 'amount' => $amount];
             } else {
-                $lines[] = ['account_code' => '701', 'side' => 'debit', 'amount' => $amount];
+                $lines[] = ['account_code' => $openingAccount, 'side' => 'debit', 'amount' => $amount];
                 $lines[] = ['account_code' => $row['account_code'], 'side' => 'credit', 'amount' => $amount];
             }
         }

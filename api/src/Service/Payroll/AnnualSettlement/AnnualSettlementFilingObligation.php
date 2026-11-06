@@ -12,10 +12,12 @@ namespace MyInvoice\Service\Payroll\AnnualSettlement;
  * k dani." Není to doporučení — plátce zúčtování provést nesmí.
  *
  * Povinnost plyne mimo jiné z toho, že poplatník má jiné příjmy podle § 7 až 10
- * nad 20 000 Kč, není daňovým rezidentem ČR a uplatňuje slevy podle
- * § 35ba odst. 1 písm. b) až e), dostal doplatky mezd za minulá léta, nebo mu
- * plátce oznámil dlužnou částku podle § 38i odst. 5 písm. b). Aplikace to
- * NEODVOZUJE — o většině těch skutečností nic neví. Odpovídá na to člověk.
+ * nad 20 000 Kč (za zdaňovací období 2027 nad 40 000 Kč a obecná hranice
+ * § 38g odst. 1 je 100 000 Kč místo 50 000 Kč, zák. č. 180/2026 Sb.), není
+ * daňovým rezidentem ČR a uplatňuje slevy podle § 35ba odst. 1 písm. b) až e)
+ * (od roku 2027 i g), dostal doplatky mezd za minulá léta, nebo mu plátce
+ * oznámil dlužnou částku podle § 38i odst. 5 písm. b). Aplikace to NEODVOZUJE —
+ * o většině těch skutečností nic neví. Odpovídá na to člověk.
  */
 enum AnnualSettlementFilingObligation: string
 {

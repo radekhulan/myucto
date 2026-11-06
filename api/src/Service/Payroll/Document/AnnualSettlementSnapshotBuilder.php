@@ -121,6 +121,7 @@ final class AnnualSettlementSnapshotBuilder
             $taxYear,
             $childRows,
         );
+        $spouseRow = $this->spouseRowSnapshot($supplierId, $employeeId, $result);
 
         $snapshot = [
             'schema_version' => self::SCHEMA_VERSION,
@@ -131,6 +132,9 @@ final class AnnualSettlementSnapshotBuilder
             'result' => $result->jsonSerialize(),
             'credit_rows' => $creditRows,
             'child_rows' => $childRows,
+            // Jen u zúčtování se slevou na manžela — bez ní zůstává snapshot
+            // i jeho otisk stejný jako dřív.
+            ...($spouseRow !== null ? ['spouse_row' => $spouseRow] : []),
         ];
         $snapshotJson = CanonicalJson::encode($snapshot);
         $snapshotHash = $this->snapshotFingerprint($snapshotJson, $supplierId);
@@ -148,6 +152,7 @@ final class AnnualSettlementSnapshotBuilder
             'document_rows_hash' => hash('sha256', CanonicalJson::encode([
                 'credit_rows' => $creditRows,
                 'child_rows' => $childRows,
+                ...($spouseRow !== null ? ['spouse_row' => $spouseRow] : []),
             ])),
             'sources' => $manifestSources,
         ];
@@ -230,6 +235,10 @@ final class AnnualSettlementSnapshotBuilder
             ? []
             : self::object($trace['external_certificates'], 'result.trace.external_certificates');
 
+        // Starší revize roční položky nenesou — rozpis je pak prázdný a sekce
+        // se na dokladu neukáže.
+        $claims = AnnualClaimsPrintBreakdown::fromResult($result);
+
         return new AnnualSettlementDocumentData(
             $snapshotHash,
             self::integerValue($snapshot['tax_year'] ?? null, 'tax_year'),
@@ -306,6 +315,11 @@ final class AnnualSettlementSnapshotBuilder
                 $external['tax_bonus_minor_units'] ?? 0,
                 'result.trace.external_certificates.tax_bonus_minor_units',
             ),
+            $claims['present'],
+            $claims['tax_base_before_deductions_minor_units'],
+            $claims['rows'],
+            $claims['non_taxable_deductions_minor_units'],
+            $claims['enforcement_credit_minor_units'],
         );
     }
 
@@ -378,6 +392,81 @@ final class AnnualSettlementSnapshotBuilder
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
+    /**
+     * Identita manžela a dítěte do 3 let pro roční JMHZ (10420 a blok
+     * slevaNaPartnera) a pro tisk.
+     *
+     * Zmrazuje se se zúčtováním stejně jako identita dětí: hlášení se podává
+     * až po provedení a pozdější oprava jména v evidenci nesmí přepsat, co
+     * plátce v zúčtování uznal. Rodné číslo se nezmrazuje — JMHZ ho u partnera
+     * i dítěte nevyžaduje, stačí datum narození (stejně jako u dětí výše).
+     *
+     * @return array<string,mixed>|null
+     */
+    private function spouseRowSnapshot(
+        int $supplierId,
+        int $employeeId,
+        AnnualSettlementResult $result,
+    ): ?array {
+        $claim = $result->trace['annual_claims']['spouse'] ?? null;
+        if (!is_array($claim)) {
+            return null;
+        }
+        $credit = $result->trace['credits']['spouse'] ?? null;
+        if (!is_array($credit)) {
+            throw new \DomainException(
+                'Roční zúčtování nese nárok na slevu na manžela, ale ne jeho výpočet.',
+            );
+        }
+        $identity = function (mixed $reference, string $field) use ($supplierId, $employeeId): array {
+            if (!is_string($reference)
+                || preg_match('/^dependant-([1-9][0-9]*)$/D', $reference, $match) !== 1
+            ) {
+                throw new \DomainException(
+                    'Sleva na manžela v ročním zúčtování nemá platný odkaz na osobu.',
+                );
+            }
+            $statement = $this->db->pdo()->prepare(
+                'SELECT given_name, family_name, birth_date
+                   FROM payroll_dependants
+                  WHERE supplier_id = ? AND employee_id = ? AND id = ?
+                  FOR UPDATE',
+            );
+            $statement->execute([$supplierId, $employeeId, (int) $match[1]]);
+            $row = $statement->fetch(PDO::FETCH_ASSOC);
+            $givenName = is_array($row) && is_string($row['given_name'] ?? null)
+                ? trim($row['given_name'])
+                : '';
+            $familyName = is_array($row) && is_string($row['family_name'] ?? null)
+                ? trim($row['family_name'])
+                : '';
+            if ($givenName === '' || $familyName === '') {
+                throw new \DomainException(
+                    'Osoba ze slevy na manžela nemá jméno potřebné pro JMHZ.',
+                );
+            }
+
+            return [
+                'reference' => $reference,
+                'given_name' => $givenName,
+                'family_name' => $familyName,
+                'birth_date' => self::stringValue($row['birth_date'] ?? null, $field),
+                'birth_number' => null,
+            ];
+        };
+
+        return [
+            'spouse' => $identity($claim['spouse_reference'] ?? null, 'spouse.birth_date'),
+            'children' => [$identity($claim['child_reference'] ?? null, 'spouse_child.birth_date')],
+            'months' => self::positiveIntValue($credit['months'] ?? null, 'spouse.months'),
+            'ztp_p_months' => self::integerValue($credit['ztp_p_months'] ?? null, 'spouse.ztp_p_months'),
+            'amount_minor_units' => self::integerValue(
+                $credit['amount_minor_units'] ?? null,
+                'spouse.amount_minor_units',
+            ),
+        ];
+    }
+
     private function childRowsSnapshot(
         int $supplierId,
         int $employeeId,

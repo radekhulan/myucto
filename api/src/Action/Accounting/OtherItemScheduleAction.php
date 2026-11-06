@@ -111,6 +111,15 @@ final class OtherItemScheduleAction
             $this->currentSupplierId($request), (int) $args['item_id'], $rows)]);
     }
 
+    /** Návrh splátkového kalendáře úvěru (anuita, lineární); nic neukládá. */
+    public function planInstallments(Request $request, Response $response, array $args): Response
+    {
+        if (!$this->requirePermission($request, $response, 'other_items', AccessLevel::READ, $err)) return $err;
+        $body = (array) ($request->getParsedBody() ?? []);
+        return $this->run($response, fn () => ['items' => $this->service->planLoan(
+            $this->currentSupplierId($request), (int) $args['item_id'], $body)]);
+    }
+
     /**
      * Automatické účtování opakování smí zapnout, obnovit nebo spustit jen člověk
      * v aplikaci. API token (a MCP nad ním) má k ostatním položkám zápisovou

@@ -1,12 +1,12 @@
 {
-    "manifest_sha256": "de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d",
+    "manifest_sha256": "39bb516b4fff204c44f0b8a6b9e0ec40601ef73af79460bdf937777e046c00d8",
     "payload": {
         "schema_version": "jmhz-spec-package.v1",
-        "package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1",
+        "package_key": "jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.11_manifest-v1",
         "versions": {
             "xsd": "1.4.3.6",
             "dictionary": "1.4.1.6",
-            "control_catalog": "1.4.2.10",
+            "control_catalog": "1.4.2.11",
             "process": "1.4.0.2",
             "instructions": "1.4.13"
         },
@@ -18,8 +18,8 @@
             },
             {
                 "role": "control_catalog_source",
-                "filename": "Katalog kontrol MH(public)_1.4.2.10.xlsx",
-                "sha256": "38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2"
+                "filename": "Katalog kontrol MH(public)_1.4.2.11.xlsx",
+                "sha256": "e5b664c135b63774b555e067c5ed83991bd919f023f3f577bcfafd030b441b62"
             }
         ],
         "counts": {

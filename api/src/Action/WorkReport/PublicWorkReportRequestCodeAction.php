@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\WorkReport;
 
+use MyInvoice\Http\AfterResponseTasks;
 use MyInvoice\Http\Json;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
 use MyInvoice\Service\ActivityLogger;
@@ -20,20 +21,31 @@ use Psr\Http\Message\ServerRequestInterface as Request;
  * Body: { email, cf_turnstile_response?, resend? }
  *
  * Pošle 6místný ověřovací kód na e-mail (jen je-li mezi povolenými adresami).
- * Odpověď je VŽDY generická ({ ok:true }) — proti enumeraci adres.
+ * Odpověď je VŽDY generická ({ ok:true, cooldown_remaining:<nastavený cooldown> })
+ * proti enumeraci adres: stejné tělo pro povolenou i cizí adresu a podobná doba
+ * odpovědi. E-mail se posílá až po odeslání odpovědi ({@see AfterResponseTasks});
+ * kde to SAPI neumí, posílá se synchronně a odpověď se srovná na společné minimum.
  */
 final class PublicWorkReportRequestCodeAction
 {
+    /**
+     * Minimální délka odpovědi (ms), když e-mail nejde odložit za odpověď.
+     * Stejná hodnota jako u obnovy hesla, musí pokrýt běžnou SMTP transakci.
+     */
+    public const MIN_SYNC_RESPONSE_MS = 1500;
+
     public function __construct(
         private readonly WorkReportLinkService $service,
         private readonly TurnstileVerifier $captcha,
         private readonly IpMatcher $ipMatcher,
         private readonly ActivityLogger $logger,
         private readonly PublicTenantGuard $tenantGuard,
+        private readonly AfterResponseTasks $afterResponse,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
     {
+        $started = hrtime(true);
         $token = (string) ($args['token'] ?? '');
         if (!ApprovalTokenValidator::isValidFormat($token)) {
             return Json::error($response, 'invalid_token', 'Neplatný odkaz.', 404);
@@ -59,10 +71,8 @@ final class PublicWorkReportRequestCodeAction
         $email = trim((string) ($body['email'] ?? ''));
         $force = !empty($body['resend']);
 
-        $cooldown = 0;
         if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $result = $this->service->issueCode($link, $email, $ip, $force);
-            $cooldown = (int) $result['cooldown_remaining'];
+            $result = $this->service->issueCode($link, $email, $ip, $force, $this->afterResponse);
             if ($result['sent']) {
                 $this->logger->log('work_report_link.code_sent', null, 'work_report_link', (int) $link['id'], [
                     'email_masked' => WorkReportLinkService::maskEmail(mb_strtolower($email)),
@@ -70,7 +80,15 @@ final class PublicWorkReportRequestCodeAction
             }
         }
 
-        // Generická odpověď bez ohledu na to, zda byla adresa povolená.
-        return Json::ok($response, ['ok' => true, 'cooldown_remaining' => $cooldown]);
+        // Generická odpověď bez ohledu na to, zda byla adresa povolená. Zbývající
+        // cooldown by povolenou adresu prozradil, proto se vrací vždy nastavený.
+        if (!$this->afterResponse->canDetach()) {
+            // usleep může na Windows skončit o pár milisekund dřív; spí se, dokud minimum
+            // skutečně neuplyne.
+            while (($remainingUs = self::MIN_SYNC_RESPONSE_MS * 1000 - intdiv(hrtime(true) - $started, 1000)) > 0) {
+                usleep($remainingUs);
+            }
+        }
+        return Json::ok($response, ['ok' => true, 'cooldown_remaining' => $this->service->resendCooldownSeconds()]);
     }
 }

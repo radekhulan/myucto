@@ -3,7 +3,7 @@ import { onMounted, onBeforeUnmount, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart, DoughnutController, ArcElement, Tooltip, Legend } from 'chart.js'
 import type { RevenueCategoryBreakdownItem } from '@/api/dashboard'
-import { formatMoney, formatPercent } from '@/composables/useFormat'
+import { formatMoneyWhole, formatPercent } from '@/composables/useFormat'
 import { useChartColors, categoryColors, CHART_MAX_CATEGORIES } from '@/composables/useTheme'
 import ChartEmptyState from './ChartEmptyState.vue'
 
@@ -66,7 +66,7 @@ function build() {
             label: (ctx) => {
               const v = ctx.parsed as number
               const pct = total > 0 ? (v / total) * 100 : 0
-              return ` ${ctx.label}: ${formatMoney(v, 'CZK')} (${formatPercent(pct, 1)})`
+              return ` ${ctx.label}: ${formatMoneyWhole(v, 'CZK')} (${formatPercent(pct, 1)})`
             },
           },
         },

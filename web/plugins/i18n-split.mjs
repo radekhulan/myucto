@@ -15,6 +15,9 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 const LOCALES = ['cs', 'en']
+const CHANGE_DELAY_MS = 50
+const RETRY_DELAY_MS = 100
+const MAX_RETRIES = 3
 
 function writeIfChanged(file, content) {
   try {
@@ -31,9 +34,13 @@ export default function i18nSplit({ srcDir }) {
     const map = JSON.parse(readFileSync(join(i18nDir, 'namespaces.generated.json'), 'utf8'))
     const core = new Set(map.core)
 
+    // Nejprve načíst oba jazyky: neúplný zápis nesmí smazat poslední platné chunky.
+    const locales = LOCALES.map(locale => ({
+      locale,
+      messages: JSON.parse(readFileSync(join(i18nDir, `${locale}.json`), 'utf8')),
+    }))
     mkdirSync(chunksDir, { recursive: true })
-    for (const locale of LOCALES) {
-      const messages = JSON.parse(readFileSync(join(i18nDir, `${locale}.json`), 'utf8'))
+    for (const { locale, messages } of locales) {
       const dir = join(chunksDir, locale)
       // Smazat a vytvořit znovu: po odstranění prostoru z cs.json by tu jinak
       // zůstal osiřelý kousek a `import.meta.glob` by ho pořád nabízel.
@@ -67,9 +74,31 @@ export default function i18nSplit({ srcDir }) {
         join(i18nDir, 'namespaces.generated.json'),
       ]
       server.watcher.add(watched)
+      let timer
+      let retries = 0
+      function regenerate() {
+        try {
+          generate()
+          // Již načtené prostory zůstávají v paměti i18n; nové chunky je samy nenahradí.
+          server.ws.send({ type: 'full-reload' })
+        } catch (error) {
+          // Watcher může dorazit mezi vyprázdněním souboru a dokončením zápisu.
+          // Opakování je omezené, trvalou chybu musí vývojář vidět v logu.
+          if ((error instanceof SyntaxError || error.code === 'ENOENT') && retries < MAX_RETRIES) {
+            retries += 1
+            timer = setTimeout(regenerate, RETRY_DELAY_MS)
+            return
+          }
+          server.config.logger.error(`[myucto-i18n-split] ${error.message}`, { error })
+        }
+      }
       server.watcher.on('change', (file) => {
-        if (watched.includes(file)) generate()
+        if (!watched.includes(file)) return
+        clearTimeout(timer)
+        retries = 0
+        timer = setTimeout(regenerate, CHANGE_DELAY_MS)
       })
+      server.httpServer?.once('close', () => clearTimeout(timer))
     },
   }
 }

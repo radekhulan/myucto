@@ -98,7 +98,13 @@ final class PohodaAssetPlan
             if (in_array($taxMethod, ['straight', 'accelerated'], true)) {
                 $group = (int) PohodaXml::text($card, 'RelSkOdp');
                 $taxGroup = $group >= 1 && $group <= 6 ? $group : null;
-                if ($taxGroup === null) {
+                if ($taxGroup === null && $group >= 10 && $group <= 99 && $group % 10 >= 1 && $group % 10 <= 6) {
+                    // Dvoumístný kód je skupina se zvláštním režimem odpisu (naměřeno: 42 u osobního
+                    // auta, skupina 2, odepsané za tři roky). Skupina je poslední číslice, plán převod
+                    // přebírá z odpisů POHODY, kartu je ale potřeba zkontrolovat.
+                    $taxGroup = $group % 10;
+                    $review[] = 'odpisová skupina ' . $taxGroup . ' je odvozená z kódu POHODY ' . $group . ', zkontrolujte ji';
+                } elseif ($taxGroup === null) {
                     $review[] = 'odpisová skupina chybí';
                 }
             }

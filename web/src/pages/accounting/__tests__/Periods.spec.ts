@@ -3,10 +3,11 @@ import { mount, flushPromises } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
   listPeriods: vi.fn(),
+  updatePeriodStart: vi.fn(),
 }))
 
 vi.mock('@/api/accounting', () => ({
-  accountingApi: { listPeriods: m.listPeriods, createPeriod: vi.fn() },
+  accountingApi: { listPeriods: m.listPeriods, createPeriod: vi.fn(), updatePeriodStart: m.updatePeriodStart },
 }))
 
 vi.mock('@/api/closing', () => ({
@@ -36,7 +37,7 @@ vi.mock('vue-router', () => ({
 }))
 
 vi.mock('vue-i18n', () => ({
-  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key, te: (key: string) => key.startsWith('accounting.periods.start_errors.') }),
 }))
 
 import Periods from '@/pages/accounting/Periods.vue'
@@ -72,6 +73,46 @@ describe('Periods: schválení závěrky je konečné', () => {
     expect(wrapper.text()).toContain('accounting.closing.approve.button')
     expect(wrapper.text()).toContain('accounting.closing.reopen.button')
     expect(wrapper.text()).not.toContain('accounting.closing.approve.revoke_button')
+  })
+})
+
+describe('Periods: začátek prvního období (#227)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it('změnu začátku nabízí jen u prvního otevřeného období', async () => {
+    m.listPeriods.mockResolvedValue([period(7, 'open'), period(6, 'open')])
+    const wrapper = await mountPage()
+    expect(wrapper.findAll('[data-test="period-change-start"]')).toHaveLength(1)
+
+    await wrapper.get('[data-test="period-change-start"]').trigger('click')
+    expect(wrapper.get('[data-test="period-start-dialog"]').text()).toContain('2026-12-31')
+  })
+
+  it('u uzavřeného prvního období změnu nenabízí', async () => {
+    m.listPeriods.mockResolvedValue([period(6, 'closed'), period(7, 'open')])
+    const wrapper = await mountPage()
+    expect(wrapper.find('[data-test="period-change-start"]').exists()).toBe(false)
+  })
+
+  it('pošle nový začátek s row_version a chybu serveru ukáže v dialogu', async () => {
+    m.listPeriods.mockResolvedValue([period(6, 'open')])
+    m.updatePeriodStart.mockRejectedValueOnce({
+      response: { data: { error: { code: 'entries_before_start', entries_count: 2, first_entry_date: '2026-03-01' } } },
+    })
+    const wrapper = await mountPage()
+    await wrapper.get('[data-test="period-change-start"]').trigger('click')
+    await wrapper.get('[data-test="period-start-save"]').trigger('click')
+    await flushPromises()
+
+    expect(m.updatePeriodStart).toHaveBeenCalledWith(6, '2026-01-01', 1)
+    expect(wrapper.get('[data-test="period-start-dialog"]').text()).toContain('accounting.periods.start_errors.entries_before_start')
+
+    m.updatePeriodStart.mockResolvedValueOnce({})
+    await wrapper.get('[data-test="period-start-save"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="period-start-dialog"]').exists()).toBe(false)
   })
 })
 

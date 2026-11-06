@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Registration;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
+
 /**
  * Skládá a ověřuje autoritativní snímek REGZEC A1.
  *
@@ -48,6 +50,13 @@ final class PayrollRegistrationA1SnapshotBuilder
      * @var list<string>
      */
     private array $identityKeys = PayrollRegistrationIdentityRequirements::A1_IDENTITY_FIELDS;
+
+    /**
+     * Ročník přihlášky podle dne nástupu (`scope.effective_on`): REGZEC27
+     * od 1. 1. 2027 přidává platnost pobytu (10568/10569), nové důvody
+     * volného přístupu (10105) a příslušnost k cizím předpisům u A1-SPEC.
+     */
+    private JmhzSpecVersion $specVersion = JmhzSpecVersion::V2026;
 
     /**
      * @param array<string,mixed> $input
@@ -112,6 +121,7 @@ final class PayrollRegistrationA1SnapshotBuilder
         array $identity,
         array $scope,
     ): ?PayrollRegistrationA1Snapshot {
+        $this->specVersion = self::versionFor($scope['effective_on'] ?? null);
         // Chybí-li celý podklad, nemá smysl rozepisovat jeho devět vnitřních
         // polí — účetní by dostala devět technických řádků o `source.*`, které
         // stejně nikde nevyplňuje. Jedna věta stačí.
@@ -215,6 +225,16 @@ final class PayrollRegistrationA1SnapshotBuilder
                 'pension',
                 fn (): array => $this->pension($pensionInput),
             );
+            $legislationInput = $this->object($input, 'foreign_legislation');
+            $foreignLegislation = $this->within(
+                'foreign_legislation',
+                fn (): array => $this->foreignLegislation($legislationInput),
+            );
+        } elseif ($variant === PayrollRegistrationBusinessMatrix::VARIANT_SPEC
+            && $this->specVersion === JmhzSpecVersion::V2027
+        ) {
+            // EDV 1.5.0.1 (JMHZ-2997): u A1-SPEC je 10427 povinné a 10428
+            // podmíněně povinné. REGZEC25 je u SPEC zakazuje, proto jen 2027.
             $legislationInput = $this->object($input, 'foreign_legislation');
             $foreignLegislation = $this->within(
                 'foreign_legislation',
@@ -774,7 +794,7 @@ final class PayrollRegistrationA1SnapshotBuilder
 
             return null;
         }
-        if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($value)) {
+        if (!PayrollRegistrationEmploymentStatusCodebook::isKnown($value, $this->specVersion)) {
             $this->malformed(
                 'employment_status_code',
                 'není v číselníku Klasifikace postavení v zaměstnání (NKPZ), '
@@ -850,12 +870,17 @@ final class PayrollRegistrationA1SnapshotBuilder
     private function orientationNumber(array $input, bool $isCzech, bool $czechResidence): ?string
     {
         $value = $this->optionalText($input, 'orientation_number', 12);
-        if ($value !== null && $isCzech
+        // EDV 1.5 (JMHZ-4797), ID 10079, 10508, 10515, 10521: od REGZEC27
+        // platí délka 1 až 4 u všech adres, bez rozlišení CZ / jiný stát.
+        $limited = $isCzech || $this->specVersion === JmhzSpecVersion::V2027;
+        if ($value !== null && $limited
             && !PayrollRegistrationHouseNumber::validOrientation($value, true)
         ) {
             $this->malformed(
                 'orientation_number',
-                'smí mít u ' . ($czechResidence ? 'adresy pobytu v ČR' : 'české adresy')
+                'smí mít u ' . ($czechResidence
+                    ? 'adresy pobytu v ČR'
+                    : ($isCzech ? 'české adresy' : 'adresy (od 1. 1. 2027 u všech adres)'))
                     . ' nejvýš ' . PayrollRegistrationHouseNumber::CZECH_ORIENTATION_MAX
                     . ' znaky, teď je „' . $value . '".',
                 $czechResidence ? 'orientation_number_cz_residence' : 'orientation_number_cz',
@@ -1062,11 +1087,35 @@ final class PayrollRegistrationA1SnapshotBuilder
         ];
     }
 
+    /**
+     * Den nástupu z rozsahu snímku → ročník. Neplatné datum hlásí kontrola
+     * zdroje, tady se jen nezvolí verze 2027.
+     */
+    private static function versionFor(mixed $effectiveOn): JmhzSpecVersion
+    {
+        if (!is_string($effectiveOn)
+            || preg_match('/^\d{4}-\d{2}-\d{2}$/D', $effectiveOn) !== 1
+        ) {
+            return JmhzSpecVersion::V2026;
+        }
+
+        return $effectiveOn >= JmhzSpecVersion::FIRST_2027_EVENT_DATE
+            ? JmhzSpecVersion::V2027
+            : JmhzSpecVersion::V2026;
+    }
+
     /** @param array<string,mixed> $input @return array<string,mixed> */
     private function foreignWorker(array $input): array
     {
         $freeAccess = $this->bool($input, 'free_access');
-        $reason = $this->coded('free_access_reason_code', $this->optionalText($input, 'free_access_reason_code', 4), PayrollRegistrationCodebooks::FREE_ACCESS_REASON, 'Důvod pro volný přístup na trh práce');
+        $reason = $this->coded(
+            'free_access_reason_code',
+            $this->optionalText($input, 'free_access_reason_code', 4),
+            $this->specVersion === JmhzSpecVersion::V2027
+                ? [...PayrollRegistrationCodebooks::FREE_ACCESS_REASON, ...PayrollRegistrationSpecVersionRules::FREE_ACCESS_REASONS_2027]
+                : PayrollRegistrationCodebooks::FREE_ACCESS_REASON,
+            'Důvod pro volný přístup na trh práce',
+        );
         $permitType = $this->coded('permit_type_code', $this->optionalText($input, 'permit_type_code', 4), PayrollRegistrationCodebooks::PERMIT_TYPE, 'Druh pracovního oprávnění');
         $permitId = $this->optionalText($input, 'permit_identifier', 64);
         $permitFrom = $this->optionalDate($input, 'permit_from');
@@ -1104,7 +1153,7 @@ final class PayrollRegistrationA1SnapshotBuilder
             $issuingOffice = null;
         }
 
-        return [
+        $worker = [
             'free_access' => $freeAccess,
             'free_access_reason_code' => $reason,
             'permit_type_code' => $permitType,
@@ -1112,6 +1161,21 @@ final class PayrollRegistrationA1SnapshotBuilder
             'permit_identifier' => $permitId,
             'permit_from' => $permitFrom,
             'permit_to' => $permitTo,
+        ];
+        if ($this->specVersion === JmhzSpecVersion::V2026) {
+            return $worker;
+        }
+        // REGZEC27 (EDV 1.5, JMHZ-3428), ID 10568 a 10569: platnost pobytu.
+        // Povinnost podle občanství hlídá PayrollRegistrationSpecVersionRules;
+        // tady se jen ověří tvar a pořadí. Klíče se do snímku 2026 nepíšou,
+        // aby snímky přihlášek do 31. 12. 2026 zůstaly bajtově stejné.
+        $stayFrom = $this->optionalDate($input, 'stay_valid_from');
+        $stayTo = $this->optionalDate($input, 'stay_valid_to');
+        $this->periodOrder('stay_valid_to', $stayFrom, $stayTo);
+
+        return $worker + [
+            'stay_valid_from' => $stayFrom,
+            'stay_valid_to' => $stayTo,
         ];
     }
 

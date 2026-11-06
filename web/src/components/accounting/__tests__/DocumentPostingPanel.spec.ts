@@ -1,4 +1,4 @@
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import type { JournalEntryWithLines } from '@/api/accounting'
@@ -22,6 +22,7 @@ vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: canWriteMock 
 // Vnořené komponenty si tahají data samy (Souvisí, Podle čeho se účtovalo) nebo mají
 // vlastní testy (rozpad na účty) — tady jde jen o to, kdy se sekce vůbec ukáže,
 // co pošle dál a kdy nabídne přeúčtování.
+vi.mock('@/workspace/supplierContext', () => ({ getWindowSupplierScope: () => ({ supplierId: 1, windowId: 'window-test' }) }))
 vi.mock('@/components/accounting/JournalLinesTable.vue', () => ({
   default: { name: 'JournalLinesTable', props: ['lines', 'dense'], template: '<div class="lines-table" />' },
 }))
@@ -32,13 +33,14 @@ vi.mock('@/components/accounting/JournalEntryNotes.vue', () => ({
   default: { name: 'JournalEntryNotes', props: ['entryId', 'defaultOpen'], template: '<div class="notes" />' },
 }))
 vi.mock('@/components/accounting/PostingOriginRow.vue', () => ({
-  default: { name: 'PostingOriginRow', props: ['source', 'docId'], template: '<div class="origin" />' },
+  default: { name: 'PostingOriginRow', props: ['source', 'docId'], template: '<div class="origin" />', methods: { reload: () => undefined } },
 }))
 vi.mock('@/components/accounting/RepostModal.vue', () => ({
   default: { name: 'RepostModal', props: ['open', 'source', 'docId', 'docLabel'], template: '<div class="repost-modal" />' },
 }))
 
 import DocumentPostingPanel from '@/components/accounting/DocumentPostingPanel.vue'
+import { windowContextKey } from '@/workspace/windowContext'
 
 function entry(id: number, overrides: Partial<JournalEntryWithLines> = {}): JournalEntryWithLines {
   return {
@@ -73,6 +75,32 @@ function mountPanel() {
 }
 
 describe('DocumentPostingPanel', () => {
+  it('po zaúčtování mimo detail se v okně obnoví, aniž by sekce zmizela', async () => {
+    journalForDocumentMock.mockReset()
+    journalForDocumentMock.mockResolvedValueOnce([entry(1)])
+    const wrapper = mount(DocumentPostingPanel, {
+      props: { source: 'invoices' as const, docId: 271 },
+      global: {
+        stubs: { RouterLink: { template: '<a><slot /></a>' } },
+        provide: { [windowContextKey as symbol]: { active: computed(() => true), paneId: computed(() => 'primary'), root: document.body, portal: document.body } },
+      },
+    })
+    await flushPromises()
+    expect(wrapper.text()).toContain('FV-1')
+
+    let finish!: (entries: JournalEntryWithLines[]) => void
+    journalForDocumentMock.mockImplementationOnce(() => new Promise((resolve) => { finish = resolve }))
+    window.dispatchEvent(new CustomEvent('myucto:window-data-changed', { detail: { supplierId: 1, resource: 'accounting', self: true } }))
+    await flushPromises()
+    expect(wrapper.text()).toContain('FV-1')
+
+    finish([entry(2)])
+    await flushPromises()
+    expect(journalForDocumentMock).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('FV-2')
+    wrapper.unmount()
+  })
+
   it('nezaúčtovaný doklad sekci vůbec nevykreslí', async () => {
     journalForDocumentMock.mockResolvedValueOnce([])
     const wrapper = mountPanel()

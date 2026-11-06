@@ -54,7 +54,12 @@ vi.mock('@/api/dimensions', async (importOriginal) => ({
     saveDocument: (...args: unknown[]) => m.saveDocument(...args),
   },
 }))
-vi.mock('@/components/ui/Modal.vue', () => ({ default: { template: '<div><slot /><slot name="footer" /></div>' } }))
+vi.mock('@/composables/useUserPrefs', () => ({
+  ensurePrefsLoaded: () => Promise.resolve(),
+  getPagePrefs: () => ({ value: {} }),
+  patchPagePrefs: vi.fn(),
+}))
+vi.mock('@/components/ui/Modal.vue',() => ({ default: { template: '<div><slot /><slot name="footer" /></div>' } }))
 vi.mock('@/components/purchase/ExtractionWarningText.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/dimensions/DimensionChips.vue', () => ({ default: { props: ['dimensions', 'splits'], template: '<span class="split-chips" />' } }))
 vi.mock('@/components/dimensions/ItemDimensionsToggle.vue', () => ({ default: { template: '<button class="item-toggle" />' } }))

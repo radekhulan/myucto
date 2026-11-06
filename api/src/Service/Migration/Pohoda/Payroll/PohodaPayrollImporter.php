@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Migration\Pohoda\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
+use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollInputFilter;
@@ -101,6 +102,7 @@ final class PohodaPayrollImporter
         private readonly PayrollComponentJmhzMappingRepository $jmhzMappings,
         private readonly PayrollTakeoverAccidentInsuranceRate $accidentRate,
         private readonly PayrollDeferredIncomeRepository $deferredIncomes,
+        private readonly PayrollComponentRepository $components,
     ) {}
 
     /**
@@ -564,6 +566,9 @@ final class PohodaPayrollImporter
                 // Plnění mimo hlášení (nezdaněná náhrada výdajů) zařazení nepotřebuje vůbec.
                 $default = PayrollComponentDefaults::classification($component['code'])
                     ?? ['component_kind' => $component['kind'], 'frequency_kind' => 'one_off', 'tax_treatment' => 'included', 'jmhz_treatment' => 'included'];
+                if (in_array($component['code'], PohodaPayrollCatalog::EXEMPT_BENEFITS, true)) {
+                    $default = array_replace($default, array_intersect_key(PohodaPayrollCatalog::EXEMPT_BENEFIT_TREATMENT, $default));
+                }
                 if (JmhzComponentSourceRule::issueCode($default['jmhz_treatment'], null, $default['tax_treatment'], $default['component_kind']) === null) {
                     continue;
                 }
@@ -629,6 +634,7 @@ final class PohodaPayrollImporter
                     implode(', ', $list),
                 ));
             }
+            $this->classifyExemptBenefits($supplierId, $year, $profile['components'], $protocol);
             $protocol->finish(self::STEP_PROFILE);
 
             $protocol->begin(self::STEP_MONTHS);
@@ -831,6 +837,13 @@ final class PohodaPayrollImporter
                         self::countedByModule($period, $moduleStart),
                     );
                     $skipped = count($applied['skipped'] ?? []);
+                    // Vstup, který brána odmítla, by jinak zmizel beze stopy (měsíc „ok", částka nikde).
+                    foreach ($applied['inputs']['errors'] ?? [] as $error) {
+                        $protocol->count(self::STEP_MONTHS, 'inputs_failed');
+                        if ($messages++ < self::MESSAGE_LIMIT) {
+                            $protocol->warn(self::STEP_MONTHS, 'input_failed', "{$period}: {$error['error_message']}", ['period' => $period]);
+                        }
+                    }
                     $this->map->put($supplierId, PohodaImportRepository::KIND_PAYROLL_MONTH, $key, (int) ($applied['batch']['id'] ?? $applied['import_id'] ?? 0), $runId);
                     if ($repeated) {
                         $this->repeatedMonth->supersedeInputs($supplierId, $period, $previousBatches,
@@ -1294,6 +1307,66 @@ final class PohodaPayrollImporter
         $ratio = array_sum($monthsByRelation) / count($monthsByRelation) / $periods;
 
         return $ratio >= 0.75 ? '10330' : '10331';
+    }
+
+    /**
+     * Benefity Z23/Z24, které PAMICA vedla bez daně a pojistného ({@see PohodaPayrollCatalog::EXEMPT_BENEFITS}).
+     * Výchozí číselník je zakládá k ručnímu posouzení a vstupní brána takovou složku
+     * odmítne, takže by se z převodu nedostal do vstupů ani koruna. Převod proto ještě
+     * před měsíci zapíše verzím složky platným v převáděném roce zacházení, které
+     * doložil zdroj; chybějící verzi roku založí stejně jako import docházky. Verzi,
+     * o které už rozhodla účetní (není k ručnímu posouzení), nemění.
+     *
+     * @param list<array{code:string,name:string,kind:string}> $profileComponents
+     */
+    private function classifyExemptBenefits(int $supplierId, int $year, array $profileComponents, ImportProtocol $protocol): void
+    {
+        $from = $year . '-01-01';
+        $to = $year . '-12-31';
+        $versions = $this->db->pdo()->prepare(
+            'SELECT id FROM payroll_component_definitions
+              WHERE supplier_id = ? AND code = ? AND valid_from <= ? AND (valid_to IS NULL OR valid_to >= ?)'
+        );
+        $classified = [];
+        foreach ($profileComponents as $component) {
+            $code = $component['code'];
+            if (!in_array($code, PohodaPayrollCatalog::EXEMPT_BENEFITS, true)) {
+                continue;
+            }
+            try {
+                $this->components->ensureDefaults($supplierId);
+                $versions->execute([$supplierId, $code, $from, $from]);
+                if ($versions->fetchAll(\PDO::FETCH_COLUMN) === []) {
+                    $definition = array_replace(AttendanceProfileComponents::definition($component, $from), PohodaPayrollCatalog::EXEMPT_BENEFIT_TREATMENT);
+                    $next = $this->components->nextVersionStart($supplierId, $code, $from);
+                    if ($next !== null) {
+                        $definition['valid_to'] = (new \DateTimeImmutable($next))->modify('-1 day')->format('Y-m-d');
+                    }
+                    $this->components->create($supplierId, $definition);
+                    $classified[$code] = true;
+                }
+                $versions->execute([$supplierId, $code, $to, $from]);
+                foreach ($versions->fetchAll(\PDO::FETCH_COLUMN) as $id) {
+                    $current = $this->components->find($supplierId, (int) $id);
+                    if ($current === null || $current['tax_treatment'] !== 'manual_review') {
+                        continue;
+                    }
+                    $this->components->update($supplierId, (int) $id,
+                        array_replace($current, PohodaPayrollCatalog::EXEMPT_BENEFIT_TREATMENT), (int) $current['row_version']);
+                    $classified[$code] = true;
+                }
+            } catch (\InvalidArgumentException|\DomainException $e) {
+                $protocol->warn(self::STEP_PROFILE, 'benefit_treatment_failed',
+                    "{$code}: zacházení s benefitem se nepodařilo zapsat - " . $e->getMessage());
+            }
+        }
+        if ($classified !== []) {
+            $protocol->count(self::STEP_PROFILE, 'benefits_classified', count($classified));
+            $protocol->info(self::STEP_PROFILE, 'benefits_classified', sprintf(
+                'Benefity, které PAMICA vedla bez daně a pojistného, jsou osvobozené v ročním limitu: %s.',
+                implode(', ', array_keys($classified)),
+            ));
+        }
     }
 
     /**

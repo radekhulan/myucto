@@ -159,6 +159,29 @@ final class XmlzamCooperationCoreTest extends TestCase
         (new XmlzamCooperationRequestParser(new XmlzamSchemaCatalog()))->parse($xml);
     }
 
+    /** DTD v UTF-16 regex nad surovými bajty nevidí; rozhoduje, co čte parser. */
+    public function testRejectsUtf16EncodedDtd(): void
+    {
+        $xml = str_replace(
+            ['encoding="UTF-8"', '<dokument '],
+            ['encoding="UTF-16"', '<!DOCTYPE dokument [<!ENTITY leaked "synthetic">]><dokument '],
+            self::requestXml(),
+        );
+        $utf16 = "\xFF\xFE" . mb_convert_encoding($xml, 'UTF-16LE', 'UTF-8');
+
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage('DTD');
+        (new XmlzamCooperationRequestParser(new XmlzamSchemaCatalog()))->parse($utf16);
+    }
+
+    public function testParsesRequestWithUtf8Bom(): void
+    {
+        $request = (new XmlzamCooperationRequestParser(new XmlzamSchemaCatalog()))
+            ->parse("\xEF\xBB\xBF" . self::requestXml());
+
+        self::assertSame('123-12345678-A1', $request->identifier);
+    }
+
     private static function requestXml(): string
     {
         return <<<'XML'

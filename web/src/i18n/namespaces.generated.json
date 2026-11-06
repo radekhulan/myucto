@@ -8,17 +8,26 @@
     "common",
     "crm",
     "demo",
+    "eet",
+    "favorites",
     "hosting",
     "instance_alert",
     "invoice",
+    "jointAllocations",
     "keyboard_shortcuts",
     "license",
+    "maintenance_notice",
     "nav",
+    "nonprofitCapital",
+    "nonprofitDppo",
+    "nonprofitFunding",
+    "nonprofitMembership",
     "passkeys",
     "payment_cards",
     "purchase_approval",
     "scan_attach",
     "search",
+    "securitiesDebt",
     "session_lock",
     "status",
     "supplier",
@@ -46,9 +55,11 @@
     "bank_accounts",
     "bank_connection",
     "bank_template_admin",
+    "capture_photo",
     "cash",
     "cash_settlement",
     "checks",
+    "client_mcp",
     "codebookTransfer",
     "company_email_templates",
     "company_profile",
@@ -72,14 +83,19 @@
     "expense_categories",
     "export",
     "foreign_income",
+    "frameworkConversion",
+    "fx504",
     "gopay",
     "group_stats",
     "imports",
+    "instance_admin",
     "instance_export",
     "integrations",
+    "internal_documents",
     "invoice_default_note",
     "kb_plus",
     "linked_documents",
+    "list_nav",
     "lock",
     "logbook",
     "logbook_fuel",
@@ -87,10 +103,14 @@
     "markdown_editor",
     "mcp_server_page",
     "mfa_setup",
+    "migration_nonprofit_notice",
     "migration_overview",
     "money_s3",
     "monthly_report",
     "myucto_import",
+    "nonprofitTax",
+    "nonprofitTaxJ6",
+    "nonprofitTaxNative",
     "oss_rates",
     "other_items",
     "pamica",
@@ -103,6 +123,7 @@
     "payroll_bank",
     "payroll_imports",
     "payroll_travel",
+    "pending_documents",
     "period_filter",
     "permissions",
     "pohoda",
@@ -113,6 +134,17 @@
     "product_posting",
     "profile_signing",
     "project",
+    "propertyCharges",
+    "propertyFunds",
+    "propertyIssuance",
+    "propertyOpening",
+    "propertyPayments",
+    "propertyRegistry",
+    "propertySaldo",
+    "propertyServiceLifecycle",
+    "propertySettlements",
+    "propertySetup",
+    "publicReceipt",
     "public_holidays",
     "purchase_invoice",
     "purchase_submissions",
@@ -124,6 +156,7 @@
     "revenue_categories",
     "roles",
     "sales_orders",
+    "securities504",
     "sent_emails",
     "settings",
     "setup",
@@ -138,13 +171,24 @@
     "tax_evidence",
     "template_tools",
     "time_billing",
+    "user_sessions",
     "users",
     "validation",
     "vat_classifications",
     "vendor",
-    "workReportTracking"
+    "workReportDisplay",
+    "workReportTracking",
+    "work_report_billing"
   ],
   "routes": {
+    "instance-admin": [
+      "instance_admin"
+    ],
+    "instance-admin-profile": [
+      "domain_login",
+      "mfa_setup",
+      "recovery_codes"
+    ],
     "login": [
       "app",
       "domain_login"
@@ -173,11 +217,19 @@
       "app",
       "errors"
     ],
+    "approval": [
+      "workReportDisplay",
+      "work_report_billing"
+    ],
     "work-report-tracking": [
-      "workReportTracking"
+      "workReportTracking",
+      "work_report_billing"
     ],
     "payroll-document-access": [
       "payrollDocumentAccess"
+    ],
+    "receipt-public": [
+      "publicReceipt"
     ],
     "not-found": [
       "errors"
@@ -189,7 +241,13 @@
       "dashboard",
       "errors",
       "taxReturn",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
+    ],
+    "portal-mcp": [
+      "client_mcp",
+      "mcp_server_page"
     ],
     "portal": [
       "portal",
@@ -205,8 +263,11 @@
     ],
     "portal-company-settings": [
       "company_email_templates",
+      "invoice_default_note",
       "settings",
-      "users"
+      "stock",
+      "users",
+      "workReportDisplay"
     ],
     "clients": [
       "purchase_invoice"
@@ -240,7 +301,8 @@
     "project-new": [
       "dimensions",
       "errors",
-      "project"
+      "project",
+      "work_report_billing"
     ],
     "project-detail": [
       "dimensions",
@@ -252,7 +314,8 @@
     "project-edit": [
       "dimensions",
       "errors",
-      "project"
+      "project",
+      "work_report_billing"
     ],
     "invoices": [
       "dimensions",
@@ -263,7 +326,9 @@
       "other_items",
       "payment_method",
       "project",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-ai-import": [
       "aiGateway",
@@ -284,7 +349,9 @@
       "refundInvoice",
       "settings",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-detail": [
       "accrual_period",
@@ -299,6 +366,7 @@
       "dimensions",
       "documents",
       "linked_documents",
+      "list_nav",
       "lock",
       "payment_method",
       "payment_order",
@@ -308,7 +376,9 @@
       "settings",
       "smtp_logs",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-edit": [
       "accrual_period",
@@ -325,7 +395,9 @@
       "refundInvoice",
       "settings",
       "stock",
-      "time_billing"
+      "time_billing",
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoices-export": [
       "aiGateway",
@@ -351,6 +423,7 @@
       "purchase_invoice"
     ],
     "purchase-invoice-submissions": [
+      "capture_photo",
       "dimensions",
       "purchase_invoice",
       "purchase_submissions"
@@ -375,17 +448,20 @@
     "imports-myucto": [
       "company_profile",
       "imports",
+      "migration_nonprofit_notice",
       "myucto_import"
     ],
     "imports-money-s3": [
       "company_profile",
       "imports",
+      "migration_nonprofit_notice",
       "money_s3",
       "premier"
     ],
     "imports-pohoda": [
       "company_profile",
       "imports",
+      "migration_nonprofit_notice",
       "pamica",
       "pohoda",
       "premier"
@@ -393,6 +469,7 @@
     "imports-pamica": [
       "company_profile",
       "imports",
+      "migration_nonprofit_notice",
       "pamica",
       "pohoda",
       "premier"
@@ -400,17 +477,20 @@
     "imports-premier": [
       "company_profile",
       "imports",
+      "migration_nonprofit_notice",
       "premier"
     ],
     "imports-stereo-nx": [
       "company_profile",
       "imports",
+      "migration_nonprofit_notice",
       "premier",
       "stereo_nx"
     ],
     "imports-abra-flexi": [
       "abra_flexi",
-      "imports"
+      "imports",
+      "migration_nonprofit_notice"
     ],
     "purchase-invoices-payment-orders": [
       "bank_connection",
@@ -427,6 +507,7 @@
     ],
     "purchase-invoice-ai-import": [
       "aiGateway",
+      "capture_photo",
       "dimensions",
       "integrations",
       "purchase_invoice"
@@ -434,6 +515,7 @@
     "purchase-invoice-new": [
       "accrual_suggest",
       "automation",
+      "capture_photo",
       "cash",
       "cash_settlement",
       "dimensions",
@@ -457,6 +539,7 @@
       "dimensions",
       "documents",
       "linked_documents",
+      "list_nav",
       "lock",
       "payment_method",
       "purchase_invoice",
@@ -466,6 +549,7 @@
     "purchase-invoice-edit": [
       "accrual_suggest",
       "automation",
+      "capture_photo",
       "cash",
       "cash_settlement",
       "dimensions",
@@ -479,6 +563,7 @@
       "vendor"
     ],
     "documents": [
+      "capture_photo",
       "documents"
     ],
     "scan-attach": [
@@ -489,11 +574,15 @@
       "other_items"
     ],
     "other-items": [
+      "dimensions",
       "other_items"
     ],
     "other-item-new": [
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "other-item-detail": [
       "dimensions",
@@ -503,7 +592,10 @@
     ],
     "other-item-edit": [
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "document-requests": [
       "document_requests"
@@ -612,13 +704,31 @@
       "automation",
       "dimensions",
       "documents",
+      "internal_documents",
       "linked_documents",
       "other_items"
     ],
     "accounting-journal-new": [
       "dimensions"
     ],
+    "accounting-internal-documents": [
+      "internal_documents"
+    ],
+    "accounting-internal-document-new": [
+      "dimensions",
+      "internal_documents"
+    ],
+    "accounting-internal-document-detail": [
+      "documents",
+      "internal_documents",
+      "linked_documents"
+    ],
+    "accounting-internal-document-edit": [
+      "dimensions",
+      "internal_documents"
+    ],
     "accounting-ai-assistant": [
+      "internal_documents",
       "other_items"
     ],
     "accounting-setup-assistant": [
@@ -656,8 +766,25 @@
     "accounting-dimension-profit": [
       "dimensions"
     ],
+    "accounting-joint-allocations": [
+      "dimensions"
+    ],
+    "accounting-nonprofit-membership": [
+      "dimensions",
+      "errors",
+      "payment_method",
+      "purchase_invoice",
+      "settings"
+    ],
+    "accounting-nonprofit-tax": [
+      "nonprofitTaxJ6"
+    ],
     "accounting-statement-mapping": [
       "settings"
+    ],
+    "accounting-saldo": [
+      "cash",
+      "purchase_invoice"
     ],
     "accounting-document-completeness": [
       "documentCompleteness"
@@ -681,6 +808,7 @@
       "manualQueue"
     ],
     "accounting-monthly-report": [
+      "dimensions",
       "monthly_report"
     ],
     "accounting-assets": [
@@ -696,7 +824,11 @@
       "dimensions"
     ],
     "accounting-period-closing": [
-      "checks"
+      "checks",
+      "dimensions",
+      "fx504",
+      "nonprofitTax",
+      "securities504"
     ],
     "accounting-closing-package": [
       "reports"
@@ -711,11 +843,15 @@
     "accounting-cash-new": [
       "cash",
       "dimensions",
+      "documents",
+      "linked_documents",
       "purchase_invoice"
     ],
     "accounting-cash-edit": [
       "cash",
       "dimensions",
+      "documents",
+      "linked_documents",
       "purchase_invoice"
     ],
     "accounting-cash-book": [
@@ -766,6 +902,11 @@
       "stock"
     ],
     "stock-opening-import": [
+      "eshop",
+      "imports",
+      "stock"
+    ],
+    "stock-history-import": [
       "eshop",
       "imports",
       "stock"
@@ -874,6 +1015,51 @@
       "logbook",
       "logbook_fuel"
     ],
+    "property-registry": [
+      "propertyRegistry",
+      "propertySetup"
+    ],
+    "property-charges": [
+      "propertyCharges",
+      "propertyRegistry",
+      "propertySetup"
+    ],
+    "property-service-settlements": [
+      "propertyOpening",
+      "propertyPayments",
+      "propertyRegistry",
+      "propertySaldo",
+      "propertySettlements"
+    ],
+    "accounting-securities-debt": [
+      "securities504"
+    ],
+    "accounting-framework-conversion": [
+      "frameworkConversion"
+    ],
+    "property-service-lifecycles": [
+      "propertyServiceLifecycle"
+    ],
+    "property-funds": [
+      "propertyFunds",
+      "propertyRegistry"
+    ],
+    "property-openings": [
+      "propertyOpening",
+      "propertyRegistry"
+    ],
+    "property-payments": [
+      "propertyCharges",
+      "propertyPayments",
+      "propertyRegistry",
+      "propertySaldo"
+    ],
+    "property-charge-issues": [
+      "propertyCharges",
+      "propertyIssuance",
+      "propertyRegistry",
+      "propertySetup"
+    ],
     "group-stats": [
       "errors",
       "group_stats"
@@ -942,12 +1128,18 @@
       "cron_jobs",
       "diagnostics"
     ],
+    "admin-instance": [
+      "instance_admin"
+    ],
     "admin-users": [
+      "instance_admin",
       "roles",
       "settings",
+      "user_sessions",
       "users"
     ],
     "admin-roles": [
+      "client_mcp",
       "permissions",
       "roles"
     ],
@@ -962,15 +1154,19 @@
       "refundInvoice",
       "settings",
       "stock",
-      "users"
+      "users",
+      "workReportDisplay"
     ],
     "accounting-activation": [
       "activation"
     ],
     "admin-branding": [
-      "settings"
+      "settings",
+      "stock",
+      "workReportDisplay"
     ],
     "admin-suppliers": [
+      "aiGateway",
       "settings"
     ],
     "payment-cards": [
@@ -978,6 +1174,9 @@
       "bank",
       "cash",
       "purchase_invoice"
+    ],
+    "eet-settings": [
+      "cash"
     ],
     "credit-cards": [
       "credit_cards"
@@ -1032,6 +1231,7 @@
       "activation",
       "automation",
       "bank",
+      "bank_template_admin",
       "dimensions",
       "purchase_invoice",
       "template_tools",
@@ -1039,7 +1239,8 @@
     ],
     "tools": [
       "cash",
-      "codebookTransfer"
+      "codebookTransfer",
+      "other_items"
     ],
     "admin-integrations": [
       "aiGateway",
@@ -1058,6 +1259,7 @@
       "activation",
       "automation",
       "bank",
+      "dimensions",
       "imports",
       "purchase_invoice",
       "settings",
@@ -1136,7 +1338,12 @@
       "errors"
     ],
     "admin-price-list": [
-      "price_list"
+      "price_list",
+      "work_report_billing"
+    ],
+    "admin-work-report-billing-templates": [
+      "price_list",
+      "work_report_billing"
     ],
     "admin-price-list-new": [
       "price_list"
@@ -1158,7 +1365,8 @@
       "purchase_invoice",
       "recurring",
       "settings",
-      "time_billing"
+      "time_billing",
+      "work_report_billing"
     ],
     "recurring-detail": [
       "payment_method",
@@ -1172,10 +1380,12 @@
       "purchase_invoice",
       "recurring",
       "settings",
-      "time_billing"
+      "time_billing",
+      "work_report_billing"
     ],
     "admin-diagnostics": [
-      "diagnostics"
+      "diagnostics",
+      "instance_admin"
     ],
     "admin-support": [
       "support_page"
@@ -1195,6 +1405,7 @@
       "api_tokens"
     ],
     "profile-mcp-server": [
+      "client_mcp",
       "mcp_server_page"
     ]
   }

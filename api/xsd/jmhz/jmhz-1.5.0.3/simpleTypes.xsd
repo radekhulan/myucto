@@ -1,0 +1,247 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           xmlns:bt="http://schemas.cssz.cz/baseTypes/v2"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" elementFormDefault="qualified" attributeFormDefault="unqualified"
+           version="1.5.0.3">
+
+  <xs:import namespace="http://schemas.cssz.cz/baseTypes/v2" schemaLocation="baseTypes2.xsd"/>
+
+  <xs:simpleType name="guidType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"/>
+    </xs:restriction>
+  </xs:simpleType>
+    <xs:simpleType name="typType">
+    <xs:restriction base="xs:string">
+      <xs:enumeration value="R"/>
+      <xs:enumeration value="O"/>
+      <xs:enumeration value="S"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="mesicType">
+    <xs:restriction base="bt:simpleNType">
+      <xs:minInclusive value="1"/>
+      <xs:maxInclusive value="12"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="rokType">
+    <xs:restriction base="bt:simpleNType">
+      <xs:minInclusive value="2023"/>
+      <xs:maxInclusive value="2100"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="variabilniSymbolType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:length value="10"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="ikMpsvType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:length value="10"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="idPpvType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="22"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="jmenoType">
+    <xs:restriction base="bt:simpleA_ZX_SP_Type">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="100"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="prijmeniType">
+    <xs:restriction base="bt:simpleA_ZX_SP_Type">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="100"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="druhCinnostiType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="([1-9][0-9]?)|[A-Z]{1,2}"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="rodneCisloType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:minLength value="9"/>
+      <xs:maxLength value="10"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="icoType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:length value="8"/>
+    </xs:restriction>
+  </xs:simpleType>
+    <xs:simpleType name="icoZahranicniType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:length value="15"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="kodAdresnihoMistaType">
+    <xs:restriction base="bt:simpleNType">
+      <xs:minInclusive value="1" />
+      <xs:maxInclusive value="999999999" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="uliceType">
+    <xs:restriction base="bt:simpleA_NN_ZZ_SP_Type">
+      <xs:minLength value="1" />
+      <xs:maxLength value="50" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="cisloPopisneType">
+    <xs:restriction base="bt:simpleNType">
+      <xs:minInclusive value="1" />
+      <xs:maxInclusive value="9999" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="cisloOrientacniType">
+    <xs:restriction base="bt:simpleA_NN_ZZType">
+      <xs:minLength value="1"/>
+      <xs:maxLength value="12"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="obecType">
+    <xs:restriction base="bt:simpleA_NN_ZZ_SP_Type">
+      <xs:minLength value="1" />
+      <xs:maxLength value="255" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="kodObceType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:length value="6" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="pscType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="\d{5}" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="kodStatuType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[A-Z][A-Z]"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="znakType">
+    <xs:restriction base="xs:string">
+      <xs:length value="1"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="rokLType">
+    <xs:restriction base="xs:string">
+      <xs:length value="12" />
+      <xs:pattern value="(A|N){12}" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="kodEldpType">
+    <xs:restriction base="xs:string">
+      <xs:minLength value="3" />
+      <xs:maxLength value="4" />
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="cislo14Type">
+    <xs:restriction base="xs:long">
+      <xs:totalDigits value="14"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="cislo8Type">
+    <xs:restriction base="xs:int">
+      <xs:totalDigits value="8"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo14Type">
+    <xs:restriction base="xs:unsignedLong">
+      <xs:totalDigits value="14"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo12Type">
+    <xs:restriction base="xs:unsignedLong">
+      <xs:totalDigits value="12"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo10Type">
+    <xs:restriction base="xs:unsignedInt">
+      <xs:totalDigits value="10"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo8Type">
+    <xs:restriction base="xs:unsignedInt">
+      <xs:totalDigits value="8"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo6Type">
+    <xs:restriction base="xs:unsignedInt">
+      <xs:totalDigits value="6"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo3Type">
+    <xs:restriction base="xs:unsignedInt">
+      <xs:totalDigits value="3"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo2Type">
+    <xs:restriction base="xs:unsignedInt">
+      <xs:totalDigits value="2"/>
+    </xs:restriction>
+  </xs:simpleType>
+
+  <xs:simpleType name="cislo8_3Type">
+    <xs:restriction base="xs:decimal">
+      <xs:totalDigits value="8"/>
+      <xs:fractionDigits value="3"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo14_2Type">
+    <xs:restriction base="xs:decimal">
+      <xs:totalDigits value="14"/>
+      <xs:fractionDigits value="2"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo11_3Type">
+    <xs:restriction base="xs:decimal">
+      <xs:totalDigits value="11"/>
+      <xs:fractionDigits value="3"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo8_3Type">
+    <xs:restriction base="xs:decimal">
+      <xs:totalDigits value="8"/>
+      <xs:fractionDigits value="3"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo7_3Type">
+    <xs:restriction base="xs:decimal">
+      <xs:totalDigits value="7"/>
+      <xs:fractionDigits value="3"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo7_2Type">
+    <xs:restriction base="xs:decimal">
+      <xs:totalDigits value="7"/>
+      <xs:fractionDigits value="2"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo5_2Type">
+    <xs:restriction base="xs:decimal">
+      <xs:totalDigits value="5"/>
+      <xs:fractionDigits value="2"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="nezaporneCislo4_2Type">
+    <xs:restriction base="xs:decimal">
+      <xs:totalDigits value="4"/>
+      <xs:fractionDigits value="2"/>
+      <xs:minInclusive value="0"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

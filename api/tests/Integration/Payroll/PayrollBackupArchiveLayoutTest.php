@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Backup\PayrollBackupArchiveLayout;
@@ -39,7 +38,7 @@ final class PayrollBackupArchiveLayoutTest extends TestCase
         self::assertTrue(mkdir($this->dataDir, 0750, true));
         putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
 
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         self::assertInstanceOf(ContainerInterface::class, $container);
         $connection = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);

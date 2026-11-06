@@ -43,12 +43,34 @@ final readonly class MonthlyEmploymentIncomeTaxResult implements JsonSerializabl
          * zakazuje. `null` = výsledek z doby před jejím zmrazením.
          */
         public ?TaxResidence $taxResidence = null,
+        /**
+         * Co se se samostatným základem podle § 6 odst. 4 ZDP stalo — srážková
+         * daň (do 2026), nebo záloha (od 2027). `withholding_*` pole nesou
+         * v obou případech tentýž základ a tutéž částku daně; o tom, kam se
+         * odvádí, jak se účtuje a zda vstupuje do ročního zúčtování, rozhoduje
+         * tenhle režim ({@see SeparateTaxBaseRegime}).
+         */
+        public SeparateTaxBaseRegime $separateBaseRegime = SeparateTaxBaseRegime::FinalWithholding,
+        /**
+         * Příjem podle § 6 odst. 4 bez osvobozených příjmů, PŘED zaokrouhlením
+         * samostatného základu (úhrn dílčích základů všech skupin). Od roku 2027
+         * ho hlášení vykazuje samostatně (JMHZ 10555).
+         */
+        public int $separateBaseIncomeMinorUnits = 0,
     ) {}
 
     /** @return array<string,mixed> */
     public function jsonSerialize(): array
     {
         $residence = $this->taxResidence === null ? [] : ['tax_residence' => $this->taxResidence->value];
+        // Výsledek do roku 2026 se serializuje bajtově stejně jako dřív — klíče
+        // režimu nese jen záloha ze samostatného základu (od roku 2027).
+        $separateBase = $this->separateBaseRegime->isAdvance()
+            ? [
+                SeparateTaxBaseRegime::RESULT_KEY => $this->separateBaseRegime->value,
+                'separate_base_income_minor_units' => $this->separateBaseIncomeMinorUnits,
+            ]
+            : [];
 
         return [
             'status' => $this->status->value,
@@ -77,6 +99,6 @@ final readonly class MonthlyEmploymentIncomeTaxResult implements JsonSerializabl
             'policy_hash' => $this->policyHash,
             'ruleset_id' => $this->rulesetId,
             'ruleset_hash' => $this->rulesetHash,
-        ] + $residence;
+        ] + $residence + $separateBase;
     }
 }

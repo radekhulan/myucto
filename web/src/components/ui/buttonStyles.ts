@@ -189,6 +189,8 @@ export const ICONS = {
   uturn:     'M3 10h10a8 8 0 0 1 8 8v2M3 10l6 6m-6-6l6-6',
   x:         'M6 18L18 6M6 6l12 12',
   chevron:   'M6 9l6 6 6-6',
+  chevronLeft:  'M15 18l-6-6 6-6',
+  chevronRight: 'M9 18l6-6-6-6',
   badgeCheck: 'M9 12l2 2 4-4m6 2a9 9 0 1 1-18 0 9 9 0 0 1 18 0z',
   link:      'M13.828 10.172a4 4 0 0 1 0 5.656l-3 3a4 4 0 0 1-5.656-5.656l1.5-1.5M10.172 13.828a4 4 0 0 1 0-5.656l3-3a4 4 0 0 1 5.656 5.656l-1.5 1.5',
   table:     'M4 6h16v12H4V6zm0 4h16M4 14h16M10 6v12M16 6v12',

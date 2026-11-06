@@ -74,7 +74,7 @@ function tabLabel(v: Tab): string {
     : v === 'balances' ? t('bank_accounts.tab_balances')
     : t('bank_accounts.tab_email_notices')
 }
-useWindowRefresh(['bank', 'bank-statements', 'bank-transactions', 'bank-match-suggestions', 'accounting', 'invoices', 'purchase-invoices', 'clients'], loadPendingCount)
+useWindowRefresh(loadPendingCount, undefined, { partial: true })
 </script>
 
 <template>

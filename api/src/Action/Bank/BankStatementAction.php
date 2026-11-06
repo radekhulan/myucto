@@ -89,6 +89,9 @@ final class BankStatementAction
      */
     private const PDF_ATTACH_MIN_COVERAGE = 0.8;
 
+    /** Kolik PDF se nejvýš přečte při jednom zobrazení, viz {@see healPdfBalances()}. */
+    private const PDF_BALANCE_HEAL_LIMIT = 5;
+
     public function __construct(
         private readonly Connection $db,
         private readonly StatementImporter $importer,
@@ -128,6 +131,7 @@ final class BankStatementAction
         // Výpis k účtu jiné firmy, kam smí uživatel importovat banku, se naimportuje tam.
         private readonly \MyInvoice\Security\CrossSupplierAuthorization $crossSupplier,
         private readonly ClientBankAccess $clientAccess,
+        private readonly \MyInvoice\Service\Bank\TransactionRematcher $rematcher,
         private readonly ?SubsetSumSolver $subsetSolver = null,
     ) {}
 
@@ -403,6 +407,7 @@ final class BankStatementAction
         // idempotentně vrať původní výpis místo druhé kopie.
         $existingPdfId = $this->statementWithPdfHash($pdfHash, $sid);
         if ($existingPdfId !== null) {
+            $this->recordPdfBalances($existingPdfId, $parsed);
             return Json::ok($response, $this->withTargetSupplier($request, [
                 'statement_id' => $existingPdfId,
                 'transactions' => 0,
@@ -420,11 +425,7 @@ final class BankStatementAction
             return Json::error($response, 'statement_overlap', $e->getMessage(), 409);
         }
         if ($target !== null) {
-            $this->db->pdo()->prepare(
-                'UPDATE bank_statements
-                    SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW()
-                  WHERE id = ?'
-            )->execute([$pdfBytes, $name, $pdfHash, strlen($pdfBytes), $target]);
+            $this->attachParsedPdf($target, $parsed, $pdfBytes, $name, $pdfHash);
 
             $this->logger->log('bank.statement_pdf_attached', $user['id'] ?? null, 'bank_statement', $target, [
                 'pdf_name' => $name,
@@ -453,6 +454,72 @@ final class BankStatementAction
         $this->logger->log('bank.statement_pdf_imported', $user['id'] ?? null, 'bank_statement', $r['statement_id'], $r + ['parser' => $parsed['parser'] ?? null], $ip, $request->getHeaderLine('User-Agent'), $sid);
 
         return Json::ok($response, $this->withTargetSupplier($request, $r, $sid));
+    }
+
+    /** @param array{header:array<string,mixed>,transactions:list<array<string,mixed>>} $parsed */
+    private function attachParsedPdf(int $target, array $parsed, string $pdfBytes, string $name, string $pdfHash): void
+    {
+        $this->db->pdo()->prepare(
+            'UPDATE bank_statements
+                SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW()
+              WHERE id = ?'
+        )->execute([$pdfBytes, $name, $pdfHash, strlen($pdfBytes), $target]);
+        $this->recordPdfBalances($target, $parsed);
+    }
+
+    /**
+     * Měsíc složený z bankovního feedu zůstatky nemá. PDF je údaj banky a parser je přečetl,
+     * takže zapsané doloží vypočtený zůstatek a jsou kotvou dalšího měsíce. Bez nich výpočet
+     * přiložené PDF odmítl jako neověřené (`balance_pdf_unverified`).
+     *
+     * @param array{header:array<string,mixed>,transactions:list<array<string,mixed>>} $parsed
+     */
+    private function recordPdfBalances(int $statementId, array $parsed): void
+    {
+        $previous = $parsed['header']['prev_balance'] ?? null;
+        $current = $parsed['header']['curr_balance'] ?? null;
+        if (!is_numeric($previous) || !is_numeric($current)) {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            "UPDATE bank_statements SET prev_balance = ?, curr_balance = ?
+              WHERE id = ? AND source = 'bank_api' AND file_content IS NULL AND curr_balance IS NULL"
+        )->execute([$previous, $current, $statementId]);
+    }
+
+    /**
+     * Dohledá zůstatky u měsíců, kde PDF visí, ale zůstatky z něj zapsané nejsou: PDF přiložené
+     * ručně, nebo importem před touhle opravou. Bez toho by takový měsíc zůstal „Zůstatek nelze
+     * bezpečně vypočítat" a opakovaný import by ho nespravil, dokud ho někdo nepošle znovu.
+     *
+     * Nečitelné PDF se zkouší znovu při každém zobrazení, proto strop na jeden požadavek.
+     * Vlastní obsah PDF se ověří stejně jako při přiložení: účet a pokrytí pohybů.
+     *
+     * @param list<int> $statementIds
+     */
+    private function healPdfBalances(array $statementIds): void
+    {
+        if ($statementIds === []) {
+            return;
+        }
+        $rows = $this->db->pdo()->query(
+            "SELECT id, account_number, pdf_content FROM bank_statements
+              WHERE id IN (" . implode(',', array_map('intval', $statementIds)) . ")
+                AND source = 'bank_api' AND file_content IS NULL AND curr_balance IS NULL
+                AND OCTET_LENGTH(pdf_content) > 0
+              ORDER BY statement_date DESC LIMIT " . self::PDF_BALANCE_HEAL_LIMIT
+        )->fetchAll(\PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            try {
+                $parsed = $this->pdfParsers->parse((string) $row['pdf_content']);
+            } catch (\Throwable) {
+                continue;
+            }
+            if (AccountNumberNormalizer::equals((string) ($parsed['header']['account_number'] ?? ''), (string) $row['account_number'])
+                && $this->pdfCoversStatement((int) $row['id'], $parsed['transactions'])) {
+                $this->recordPdfBalances((int) $row['id'], $parsed);
+            }
+        }
     }
 
     /**
@@ -952,6 +1019,10 @@ final class BankStatementAction
         // pak parametry scope predikátu ve WHERE a nakonec filtry.
         $stmt->execute(array_merge([$sid, $sid], $scopeParams, $filterParams));
         $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $this->healPdfBalances(array_map('intval', array_column(
+            array_filter($rows, static fn (array $row): bool => $row['source'] === 'bank_api' && !empty($row['has_pdf'])),
+            'id',
+        )));
         $balanceSummaries = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summaries(
             $sid,
             // Stav se počítá výpisům, jejichž GPC se skládá ze zůstatků (API, převod z jiného programu).
@@ -1189,21 +1260,28 @@ final class BankStatementAction
             $closings = [];
             foreach ($rows as $r) {
                 $reported = $r['bal'] !== null;
+                $confirmed = false;
                 if ($r['bal'] === null) {
                     $calculation = $balanceSummaries[(int) $r['id']];
                     if (!in_array($calculation['status'], ['calculated', 'confirmed'], true)) continue;
                     $r['bal'] = $calculation['confirmed_closing'] ?? $calculation['closing'];
                     if ($r['bal'] === null) continue;
+                    $confirmed = $calculation['status'] === 'confirmed';
                 }
+                // Potvrzený měsíc z API nese zůstatek banky doplněný na konec dne. Stažený
+                // výpis téhož dne může nést jen stav z rána (StatementBalanceService::withDayEndBalances).
                 $previous = $closings[(string) $r['ym']] ?? null;
                 if ($previous !== null && $previous['date'] === (string) $r['sdate']
                     && $r['src'] === 'bank_api'
-                    && (in_array($previous['src'], ['gpc', 'pdf'], true) || ($previous['reported'] && !$reported))) continue;
+                    && (in_array($previous['src'], ['gpc', 'pdf'], true)
+                        || ($previous['reported'] && !$reported && !$confirmed)
+                        || ($previous['confirmed'] && $reported))) continue;
                 $closings[(string) $r['ym']] = [
                     'bal' => (float) $r['bal'],
                     'date' => (string) $r['sdate'],
                     'src' => (string) $r['src'],
                     'reported' => $reported,
+                    'confirmed' => $confirmed,
                 ];
             }
             foreach ($emailRows as $r) {
@@ -1323,8 +1401,11 @@ final class BankStatementAction
         if ($allMonths !== []) {
             $ms = array_keys($allMonths);
             sort($ms);
-            $axis = $enumMonths($ms[0], $ms[count($ms) - 1]);
-            if (count($axis) > $capMonths) { $axis = array_slice($axis, -$capMonths); }
+            $last = $ms[count($ms) - 1];
+            // Osa začíná nejdřív $capMonths měsíců před koncem. Vyjmenování od nejstaršího
+            // měsíce by pojistka $enumMonths při dlouhém rozpětí useknula na konci.
+            $earliest = (new \DateTimeImmutable($last . '-01'))->modify('-' . ($capMonths - 1) . ' months')->format('Y-m');
+            $axis = $enumMonths(max($ms[0], $earliest), $last);
             foreach ($axis as $m) {
                 $monthEnd = date('Y-m-t', (int) strtotime($m . '-01'));
                 $sum = 0.0;
@@ -1636,9 +1717,11 @@ final class BankStatementAction
         $hash = hash('sha256', $content);
         $this->db->pdo()->prepare(
             'UPDATE bank_statements
-                SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW()
+                SET pdf_content = ?, pdf_name = ?, pdf_hash = ?, pdf_size_bytes = ?, pdf_uploaded_at = NOW(), '
+                . \MyInvoice\Service\Bank\BankApiMonthlyStatements::DROP_PDF_BALANCES . '
               WHERE id = ?'
         )->execute([$content, $name, $hash, strlen($content), $id]);
+        $this->healPdfBalances([$id]);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.pdf_uploaded', $user['id'] ?? null, 'bank_statement', $id, [
@@ -1716,7 +1799,8 @@ final class BankStatementAction
 
         $this->db->pdo()->prepare(
             'UPDATE bank_statements
-                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL
+                SET pdf_content = NULL, pdf_name = NULL, pdf_hash = NULL, pdf_size_bytes = NULL, pdf_uploaded_at = NULL, '
+                . \MyInvoice\Service\Bank\BankApiMonthlyStatements::DROP_PDF_BALANCES . '
               WHERE id = ?'
         )->execute([$id]);
 
@@ -1836,6 +1920,7 @@ final class BankStatementAction
         // zobrazení, kdo všechno byl touto platbou uhrazen.
         $matchedByTx = [];
         $matchedPurchasesByTx = [];
+        $matchedOtherItemsByTx = [];
         $txIds = array_map(static fn ($t) => (int) $t['id'], $transactions);
         if ($txIds !== []) {
             $ph = implode(',', array_fill(0, count($txIds), '?'));
@@ -1860,6 +1945,7 @@ final class BankStatementAction
             }
 
             $matchedPurchasesByTx = PurchasePaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
+            $matchedOtherItemsByTx = \MyInvoice\Service\Bank\OtherItemPaymentMatchReader::byTransactions($this->db->pdo(), $sid, $txIds);
         }
 
         // Automatizace: stav zaúčtování per transakce (jen double_entry, §3.7 #6).
@@ -1870,6 +1956,9 @@ final class BankStatementAction
         // vidět jen po rozbalení dokladů pohybu v nabídce „…".
         $dimensionsByTx = (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
             ->headerDimensionsIfEnabled($sid, 'bank_transaction', $txIds);
+        $ruleDimensionTypes = $dimensionsByTx !== null
+            ? (new \MyInvoice\Service\Accounting\Dimension\BankRuleDimensions($this->db))->typesFor($sid, $txIds)
+            : [];
 
         foreach ($transactions as &$t) {
             $t['card'] = $cardByTx[(int) $t['id']] ?? null;
@@ -1883,11 +1972,13 @@ final class BankStatementAction
             $t['matched_vendor_name'] = isset($t['matched_vendor_name']) && $t['matched_vendor_name'] !== null ? (string) $t['matched_vendor_name'] : null;
             $t['matched_invoices'] = $matchedByTx[$t['id']] ?? [];
             $t['matched_purchase_invoices'] = $matchedPurchasesByTx[$t['id']] ?? [];
+            $t['matched_other_items'] = $matchedOtherItemsByTx[$t['id']] ?? [];
             $t['posting'] = $postingByTx[$t['id']] ?? null;
             // Stav zpracování po importu nese výpis (`processing_failed`), ne pohyb.
             unset($t['processing_pending_at'], $t['processing_error']);
             if ($dimensionsByTx !== null) {
                 $t['dimensions'] = (object) ($dimensionsByTx[$t['id']] ?? []);
+                $t['rule_dimension_types'] = $ruleDimensionTypes[$t['id']] ?? [];
             }
         }
         unset($t);
@@ -1922,6 +2013,7 @@ final class BankStatementAction
             : null;
         $s['balance_calculation'] = null;
         if (\MyInvoice\Service\Bank\BankStatementSource::isStatement((string) $s['source'])) {
+            $this->healPdfBalances([$id]);
             $s['balance_calculation'] = (new \MyInvoice\Service\Bank\StatementBalanceService($this->db))->summary($sid, $id);
         }
         return Json::ok($response, $s);
@@ -1999,10 +2091,16 @@ final class BankStatementAction
      */
     public function createPurchaseInvoice(Request $request, Response $response, array $args): Response
     {
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         if (!RequestAuthorization::allows($request, 'purchase_invoices.create', AccessLevel::WRITE)) {
             return Json::error($response, 'forbidden', 'Pouze admin nebo účetní.', 403);
         }
+        return $this->withCurrentBankSource($request, $response, (int) ($args['id'] ?? 0), false,
+            fn (): Response => $this->createPurchaseInvoiceWithCurrentSource($request, $response, $args));
+    }
+
+    private function createPurchaseInvoiceWithCurrentSource(Request $request, Response $response, array $args): Response
+    {
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $txId = (int) ($args['id'] ?? 0);
         if (!$this->txBelongsToCurrentSupplier($request, $txId)) {
             return Json::error($response, 'not_found', 'Transakce nenalezena.', 404);
@@ -2016,7 +2114,7 @@ final class BankStatementAction
                     bt.counterparty_account, bt.description, bs.account_number
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
-              WHERE bt.id = ?'
+              WHERE bt.id = ? FOR UPDATE'
         );
         $stmt->execute([$txId]);
         $tx = $stmt->fetch(\PDO::FETCH_ASSOC);
@@ -2095,7 +2193,7 @@ final class BankStatementAction
 
         // Spáruj platbu na nově vzniklou přijatou fakturu (manuální, user-initiated klikem).
         // Draft fakturu neoznačujeme jako paid — to udělá uživatel po finalizaci; jen vazba.
-        $pdo->beginTransaction();
+        $own = self::beginAtomic($pdo, 'bank_purchase_match');
         try {
             $pdo->prepare(
                 "INSERT INTO payment_matches
@@ -2105,9 +2203,9 @@ final class BankStatementAction
             $pdo->prepare(
                 "UPDATE bank_transactions SET match_status = 'manual', matched_at = NOW(), matched_by = ? WHERE id = ?"
             )->execute([$userId ?: null, $txId]);
-            $pdo->commit();
+            self::commitAtomic($pdo, $own, 'bank_purchase_match');
         } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
+            self::rollbackAtomic($pdo, $own, 'bank_purchase_match', $e);
             throw $e;
         }
         $this->clientBankAccounts->captureForPurchaseInvoiceTransaction($piId, $txId);
@@ -2225,6 +2323,7 @@ final class BankStatementAction
             return $result;
         } catch (\Throwable $e) {
             self::rollbackAtomic($pdo, $own, $savepoint, $e);
+            if ($e instanceof \MyInvoice\Service\Accounting\PostingException) return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
             throw $e;
         }
     }
@@ -2371,7 +2470,7 @@ final class BankStatementAction
 
         // Efektivní měna transakce = měna transakce, jinak měna výpisu (= měna účtu), jinak CZK.
         $stmt = $pdo->prepare(
-            "SELECT bt.amount, bt.posted_at,
+            "SELECT bt.amount, bt.posted_at, bt.card_last4,
                     UPPER(COALESCE(NULLIF(bt.currency,''), NULLIF(bs.currency,''), 'CZK')) AS ccy
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
@@ -2398,14 +2497,14 @@ final class BankStatementAction
             return Json::ok($response, ['candidates' => $candidates, 'fallback' => false]);
         }
 
-        $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_DAY_WINDOW, false);
+        $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_DAY_WINDOW, false, ($tx['card_last4'] ?? null) !== null);
         if (RequestAuthorization::isClientType($request)) {
             $candidates = array_values(array_filter($candidates, static fn (array $candidate): bool => ClientBankAccess::canRead($request, (string) $candidate['type'])));
         }
         $fallback = false;
         if ($candidates === []) {
             $fallback = true;
-            $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_FALLBACK_DAY_WINDOW, true);
+            $candidates = $this->searchMatchCandidates($sid, $posted, $txAmount, $txCcy, self::CANDIDATE_FALLBACK_DAY_WINDOW, true, ($tx['card_last4'] ?? null) !== null);
         }
 
         if (RequestAuthorization::isClientType($request)) {
@@ -2419,7 +2518,7 @@ final class BankStatementAction
      *   converted_amount:?float,converted_currency:?string,issue_date:string,due_date:string,
      *   party:?string,paid:bool,currency_mismatch:bool}>
      */
-    private function searchMatchCandidates(int $sid, string $posted, float $txAmount, string $txCcy, int $win, bool $allowRawAmountFallback): array
+    private function searchMatchCandidates(int $sid, string $posted, float $txAmount, string $txCcy, int $win, bool $allowRawAmountFallback, bool $card = false): array
     {
         $pdo = $this->db->pdo();
 
@@ -2435,6 +2534,7 @@ final class BankStatementAction
                     WHERE i.supplier_id = ?
                       AND i.status IN ('issued','sent','reminded','paid')
                       AND i.invoice_type IN ('invoice','proforma','credit_note')
+                      AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i') . "
                       AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";
 
         $purchase = "SELECT 'purchase_invoice' AS mtype, p.id,
@@ -2479,7 +2579,7 @@ final class BankStatementAction
             } elseif ($txCcy === $local) {
                 // Cizoměnová faktura placená v CZK → přepočet kurzem faktury (CZK = částka × kurz).
                 $expected = FxPaymentSettlement::expectedLocalAmount($invMag, $rate);
-                $tol = FxPaymentSettlement::matchTolerance($expected, $absTol);
+                $tol = FxPaymentSettlement::matchTolerance($expected, $absTol, $card);
                 $converted = $expected;
             } elseif ($allowRawAmountFallback) {
                 // Fallback (nic nesedí přesně): porovnej syrovou magnitudu BEZ FX převodu —
@@ -2651,7 +2751,8 @@ final class BankStatementAction
                  WHERE i.supplier_id = ?
                    AND i.client_id IS NOT NULL
                    AND i.status IN ('issued','sent','reminded','paid')
-                   AND i.invoice_type IN ('invoice','proforma')";
+                   AND i.invoice_type IN ('invoice','proforma')
+                   AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i');
         $params = [$sid];
         if ($useWindow) {
             $sql .= " AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";
@@ -3441,7 +3542,7 @@ final class BankStatementAction
         } catch (\Throwable $e) {
             self::rollbackAtomic($pdo, $own, $savepoint, $e);
             if (TransactionFailure::aborted($e)) throw $e;
-            return Json::error($response, 'match_failed', 'Manuální párování selhalo: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'match_failed', 'Manuální párování selhalo: ' . $e->getMessage(), 500);
         }
 
         $this->recordManualMatchV2($txId, SupplierGuard::currentId($request), $userId);
@@ -3864,7 +3965,7 @@ final class BankStatementAction
         } catch (\Throwable $e) {
             self::rollbackAtomic($pdo, $own, $savepoint, $e);
             if (TransactionFailure::aborted($e)) throw $e;
-            return Json::error($response, 'match_failed', 'Sloučené párování selhalo: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'match_failed', 'Sloučené párování selhalo: ' . $e->getMessage(), 500);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -4015,7 +4116,8 @@ final class BankStatementAction
                                   WHERE oi.supplier_id = p.supplier_id AND oi.doc_type = 'purchase_invoice' AND oi.doc_id = p.id), 0)
                         + COALESCE((SELECT SUM(s.amount) FROM invoice_settlements s
                                     WHERE s.supplier_id = p.supplier_id AND s.doc_type = 'purchase_invoice'
-                                      AND s.doc_id = p.id AND s.status = 'confirmed'), 0) AS offset_paid,
+                                      AND s.doc_id = p.id AND s.status = 'confirmed'), 0)
+                        + p.settled_outside_amount AS offset_paid,
                         (SELECT COUNT(*) FROM cash_documents cd
                           WHERE cd.supplier_id = p.supplier_id AND cd.purchase_invoice_id = p.id
                             AND cd.status = 'posted') AS cash_count,
@@ -4182,7 +4284,7 @@ final class BankStatementAction
         } catch (\Throwable $e) {
             self::rollbackAtomic($pdo, $own, $savepoint, $e);
             if (TransactionFailure::aborted($e)) throw $e;
-            return Json::error($response, 'match_failed', 'Sloučené párování přijatých faktur selhalo: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'match_failed', 'Sloučené párování přijatých faktur selhalo: ' . $e->getMessage(), 500);
         }
 
         $this->recordManualMatchV2($txId, $supplierId, $userId);
@@ -4234,7 +4336,7 @@ final class BankStatementAction
         }
         // Load transaction for amount + posted_at
         $tx = $pdo->prepare(
-            'SELECT bt.posted_at, bt.amount, bt.statement_id,
+            'SELECT bt.posted_at, bt.amount, bt.statement_id, bt.card_last4,
                     COALESCE(NULLIF(bt.currency, ""), NULLIF(bs.currency, "")) AS currency
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
@@ -4358,7 +4460,14 @@ final class BankStatementAction
                 // i automatické párování). Menší platba nechá doklad částečně uhrazený a UI
                 // nabídne rozdíl vyrovnat zápočtem proti účtu. Sloučená úhrada
                 // (manualMatchPurchaseSplit) nesoulad odmítá celou, proto ji to netýká.
-                $settlesFully = FxPaymentSettlement::settlesRemaining($absAmount, $remaining, $docCurrency, $docRate, $txCurrency);
+                $settlesFully = FxPaymentSettlement::settlesRemaining(
+                    $absAmount,
+                    $remaining,
+                    $docCurrency,
+                    $docRate,
+                    $txCurrency,
+                    ($txRow['card_last4'] ?? null) !== null,
+                );
             }
 
             // Mark purchase paid — jen pokud ještě není (ručně zaplacenou jen navážeme,
@@ -4409,7 +4518,7 @@ final class BankStatementAction
         } catch (\Throwable $e) {
             self::rollbackAtomic($pdo, $own, $savepoint, $e);
             if (TransactionFailure::aborted($e)) throw $e;
-            return Json::error($response, 'match_failed', 'Párování selhalo: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'match_failed', 'Párování selhalo: ' . $e->getMessage(), 500);
         }
         $this->clientBankAccounts->captureForPurchaseInvoiceTransaction($purchaseInvoiceId, $txId);
         $this->recordManualMatchV2($txId, $supplierId, $userId);
@@ -4475,6 +4584,20 @@ final class BankStatementAction
         }
     }
 
+    /** Má pohyb živý zaúčtovaný zápis v deníku (banka, vypořádání nebo odpis karty)? */
+    private function hasPostedBankEntry(int $supplierId, int $txId): bool
+    {
+        $types = BankTransactionReleaseService::TRANSACTION_SOURCE_TYPES;
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM journal_entries
+              WHERE supplier_id = ? AND source_type IN (' . implode(',', array_fill(0, count($types), '?')) . ') AND source_id = ?
+                AND reversed_by IS NULL AND posted_at IS NOT NULL
+              LIMIT 1'
+        );
+        $stmt->execute([$supplierId, ...$types, $txId]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     private function performUnmatch(Request $request, Response $response, array $args): Response
     {
         $txId = (int) ($args['id'] ?? 0);
@@ -4512,6 +4635,18 @@ final class BankStatementAction
             }
         }
 
+        // Zrušení párování zaúčtovaného pohybu stornuje nebo odpojí zápis v deníku
+        // stejně jako /unpost, proto u interní role vyžaduje stejná práva. Nezaúčtovaný
+        // pohyb dál stačí bank WRITE. Klientská role v portálu páruje i ruší párování
+        // vlastních pohybů (párování samo účtuje), hlídá ji clientAccess a uzavřené období.
+        if (!RequestAuthorization::isClientType($request)
+            && $this->hasPostedBankEntry($supplierId, $txId)
+            && (!RequestAuthorization::allows($request, 'bank.unpost', AccessLevel::WRITE)
+                || !RequestAuthorization::allows($request, 'accounting', AccessLevel::WRITE))) {
+            return Json::error($response, 'forbidden',
+                'Pohyb je zaúčtovaný. Zrušení párování stornuje zápis v deníku a vyžaduje oprávnění odúčtovat banku.', 403);
+        }
+
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
 
         $savepoint = 'bank_tx_unmatch';
@@ -4538,7 +4673,7 @@ final class BankStatementAction
         } catch (\Throwable $e) {
             self::rollbackAtomic($pdo, $own, $savepoint, $e);
             if (TransactionFailure::aborted($e)) throw $e;
-            return Json::error($response, 'unmatch_failed', 'Zrušení spárování selhalo: ' . $e->getMessage(), 500);
+            return Json::internalError($response, 'unmatch_failed', 'Zrušení spárování selhalo: ' . $e->getMessage(), 500);
         }
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
@@ -4570,6 +4705,11 @@ final class BankStatementAction
             if (RequestAuthorization::isClientType($request)) $this->assertUnallocated($tx);
             if (RequestAuthorization::isClientType($request) && $tx['match_status'] === 'unmatched') {
                 $this->clientAccess->assertAvailable($request, $txId);
+            }
+            $allocated = $pdo->prepare('SELECT 1 FROM other_item_allocations WHERE bank_transaction_id = ? AND reversed_on IS NULL LIMIT 1');
+            $allocated->execute([$txId]);
+            if ($allocated->fetchColumn() !== false) {
+                throw new \DomainException('Pohyb je přiřazený ostatní položce. Nejprve zrušte přiřazení.', 409);
             }
             $note = array_key_exists('note', $body) ? ($note !== null ? trim($note) : null) : $tx['ignore_note'];
             $note = $note === '' ? null : $note;
@@ -4606,6 +4746,7 @@ final class BankStatementAction
             return Json::ok($response, ['unmatched' => true]);
         } catch (\Throwable $e) {
             self::rollbackAtomic($pdo, $own, 'bank_tx_unignore', $e);
+            if ($e instanceof \MyInvoice\Service\Accounting\PostingException) return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
             if ($e instanceof \DomainException) return Json::error($response, 'payment_unavailable', $e->getMessage(), self::domainHttpStatus($e));
             throw $e;
         }
@@ -4660,60 +4801,16 @@ final class BankStatementAction
         $txIds = $txs->fetchAll(\PDO::FETCH_COLUMN);
 
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
-        $newlyMatched = 0;
-        $newlyPartial = 0;
-        $stillUnmatched = 0;
-        $takenOver = 0;
-        $superseded = 0;
-        $matchIds = [];
-        foreach ($txIds as $txId) {
-            // Nejdřív cross-source dedup: pokud tatáž platba visí spárovaná na
-            // e-mailovém avízu, převezmi párování na oficiální výpis místo dvojího
-            // párování. Při importu to dělá StatementImporter; tady je to jediná
-            // cesta, jak dorovnat výpisy naimportované dřív (nebo pár, který se
-            // napoprvé nespojil).
-            $takeover = $this->reconciler->takeOverFromEmailNotice((int) $txId);
-            if ($takeover !== null) {
-                $takenOver++;
-                $newlyMatched++;
-                if ($takeover['match_status'] === 'auto_exact') $this->matcher->match((int) $txId);
-                $this->bankPosting->handleTransaction((int) $txId, $userId ?: null);
-                continue;
-            }
-
-            // Nespárované avízo nemá co předat, takže ho převzetí výš minulo — pro
-            // karetní výdaje a poplatky je tohle jediná cesta, jak se zbavit dvojího
-            // řádku po importu GPC za období pokryté i avízy (#76).
-            if ($this->reconciler->supersedeUnmatchedEmailNotice((int) $txId) !== null) $superseded++;
-
-            $matchIds[] = (int) $txId;
-        }
-
-        foreach ($this->matcher->matchBatch($matchIds) as $txId => $r) {
-            $s = (string) ($r['status'] ?? 'unmatched');
-            if ($s === 'auto_exact' && empty($r['already_recorded'])) $newlyMatched++;
-            elseif ($s === 'auto_partial') $newlyPartial++;
-            elseif ($s === 'unmatched') $stillUnmatched++;
-            // Automatizace: zaúčtování po (re)match (best-effort, no-op mimo double_entry).
-            $this->bankPosting->handleTransaction(
-                $txId,
-                $userId ?: null,
-                !empty($r['requires_review']),
-            );
-        }
+        $r = $this->rematcher->rematch(array_map('intval', $txIds), $userId ?: null);
+        $newlyMatched = $r['newly_matched'];
+        $newlyPartial = $r['newly_partial'];
+        $stillUnmatched = $r['still_unmatched'];
+        $takenOver = $r['taken_over'];
+        $superseded = $r['superseded'];
         // Zpracování přerušené při importu je tímhle dorovnané.
         StatementProcessingState::completeStatement($pdo, $statementId);
 
-        // Recompute matched_count na výpisu
-        $pdo->prepare(
-            "UPDATE bank_statements
-                SET matched_count = (
-                    SELECT COUNT(*) FROM bank_transactions
-                     WHERE statement_id = ?
-                       AND match_status IN ('auto_exact', 'auto_partial', 'manual')
-                )
-              WHERE id = ?"
-        )->execute([$statementId, $statementId]);
+        $this->rematcher->recountStatements([$statementId]);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.statement_rematch', $userId ?: null, 'bank_statement', $statementId, [

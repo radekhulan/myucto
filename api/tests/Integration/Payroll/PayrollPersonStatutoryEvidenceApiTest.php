@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollPersonStatutoryEvidenceAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -66,7 +65,7 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollPersonStatutoryEvidenceAction::class);
             $this->repository = $container->get(
@@ -242,6 +241,60 @@ final class PayrollPersonStatutoryEvidenceApiTest extends TestCase
             $withoutCredit->advanceTax->taxAfterCreditsMinorUnits
                 - self::TAXPAYER_CREDIT_MINOR_UNITS,
             $withCredit->advanceTax->taxAfterCreditsMinorUnits,
+        );
+    }
+
+    /**
+     * Sleva na studenta (§ 35bc ZDP od 1. 1. 2027): zápis hlídá věkovou
+     * hranici podle data narození, datum účinnosti zákona a uzavřený interval.
+     * Uložený nárok dojde až do snímku mzdového běhu jako druh `student`.
+     */
+    public function testStudentCreditRespectsTheAgeLimitOnWrite(): void
+    {
+        $student = static fn (string $from, ?string $to, string $kind = 'student'): array => [
+            'credit_kind' => $kind,
+            'evidence_status' => 'verified',
+            'evidence_reference' => 'credit:38l-school-confirmation',
+            'effective_from' => $from,
+            'effective_to' => $to,
+        ];
+
+        $payload = $this->completeEvidence();
+        $payload['sections']['tax_credit_claims'] = [$student('2027-01-01', '2027-05-31')];
+        $response = $this->save($payload);
+        self::assertSame(422, $response->getStatusCode(), 'bez data narození se věk posoudit nedá');
+        self::assertStringContainsString('data narození', (string) $this->json($response)['error']['message']);
+
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employees SET birth_date = ? WHERE supplier_id = ? AND id = ?',
+        )->execute(['2001-05-15', $this->supplierId, $this->employeeId]);
+
+        $payload['sections']['tax_credit_claims'] = [$student('2027-01-01', '2027-06-30')];
+        $response = $this->save($payload);
+        self::assertSame(422, $response->getStatusCode(), 'červen 2027 už je po 26. narozeninách');
+        self::assertStringContainsString('2027-05-31', (string) $this->json($response)['error']['message']);
+
+        $payload['sections']['tax_credit_claims'] = [$student('2026-12-01', '2027-05-31')];
+        self::assertSame(422, $this->save($payload)->getStatusCode(), 'sleva v roce 2026 neexistuje');
+
+        $payload['sections']['tax_credit_claims'] = [$student('2027-01-01', null)];
+        self::assertSame(422, $this->save($payload)->getStatusCode(), 'otevřený interval');
+        self::assertSame(0, $this->countRows('payroll_person_tax_credit_claims'));
+
+        $payload['sections']['tax_credit_claims'] = [$student('2027-01-01', '2027-05-31')];
+        $response = $this->save($payload);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+        // Doktorand smí do 28 let.
+        $payload['sections']['tax_credit_claims'] = [$student('2027-01-01', '2027-12-31', 'student-doctoral')];
+        $response = $this->save($payload);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+
+        $snapshot = $this->repository->snapshot($this->supplierId, $this->employeeId, '2027-03-31');
+        self::assertIsArray($snapshot);
+        self::assertSame(
+            ['student-doctoral'],
+            array_column($snapshot['income_tax']['credit_claims'], 'credit_kind'),
         );
     }
 

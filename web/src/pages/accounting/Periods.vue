@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, watch } from 'vue'
+import { computed, ref, onMounted, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute } from 'vue-router'
 import { accountingApi } from '@/api/accounting'
@@ -22,7 +22,7 @@ import DateInput from '@/components/ui/DateInput.vue'
 // embedded = vykresleno jako záložka uvnitř ToolsPage.vue (Nástroje); hlavičku dodává obálka.
 defineProps<{ embedded?: boolean }>()
 
-const { t } = useI18n()
+const { t, te } = useI18n()
 const auth = useAuthStore()
 const supplierStore = useSupplierStore()
 const toast = useToast()
@@ -58,6 +58,7 @@ useHotkey('escape', () => {
   if (showForm.value) showForm.value = false
   if (statusDialog.period) statusDialog.period = null
   if (showSettings.value) showSettings.value = false
+  if (startDialog.period) startDialog.period = null
 })
 
 const currentYear = new Date().getFullYear()
@@ -130,6 +131,55 @@ async function save() {
     await load()
   } catch (e: any) {
     error.value = localizedError(e) || t('common.error')
+  }
+}
+
+// ── Začátek prvního období (firma vzniklá v průběhu roku, § 3 ZoÚ) ─────────
+// Server dovolí posunout jen začátek nejstaršího otevřeného období; tlačítko se
+// proto ukazuje jen u něj.
+const firstPeriodId = computed(() => [...periods.value]
+  .sort((a, b) => String(a.starts_on).localeCompare(String(b.starts_on)))[0]?.id ?? null)
+
+function canChangeStart(p: ClosingPeriod): boolean {
+  return auth.canWrite('accounting.periods.manage') && p.id === firstPeriodId.value && p.status === 'open'
+}
+
+const startDialog = reactive({
+  period: null as ClosingPeriod | null,
+  starts_on: '',
+  saving: false,
+  error: '',
+})
+
+function openStartDialog(p: ClosingPeriod) {
+  startDialog.period = p
+  startDialog.starts_on = p.starts_on
+  startDialog.saving = false
+  startDialog.error = ''
+}
+
+function startError(e: any): string {
+  const err = e?.response?.data?.error
+  const key = `accounting.periods.start_errors.${err?.code}`
+  if (err?.code && te(key)) return t(key, { count: err.entries_count ?? 0, date: formatDate(err.first_entry_date ?? '') })
+  return localizedError(e) || t('common.error')
+}
+
+async function submitStartDialog() {
+  const p = startDialog.period
+  if (!p || startDialog.saving) return
+  startDialog.saving = true
+  startDialog.error = ''
+  try {
+    await accountingApi.updatePeriodStart(p.id, startDialog.starts_on, p.row_version)
+    startDialog.period = null
+    toast.success(t('common.saved'))
+    await load()
+  } catch (e: any) {
+    startDialog.error = startError(e)
+    if (e?.response?.data?.error?.code === 'version_conflict') await load()
+  } finally {
+    startDialog.saving = false
   }
 }
 
@@ -320,6 +370,10 @@ function statusBadge(status: string): string {
                     class="text-xs px-2 py-1 rounded-md border border-primary-200 text-primary-600 hover:bg-primary-50 font-medium">
                     {{ p.status === 'approved' ? t('accounting.closing.detail_link') : t('accounting.closing.wizard_link') }}
                   </RouterLink>
+                  <button v-if="canChangeStart(p)" @click="openStartDialog(p)" data-test="period-change-start"
+                    class="cursor-pointer text-xs px-2 py-1 rounded-md border border-neutral-300 text-neutral-700 hover:bg-neutral-50 font-medium">
+                    {{ t('accounting.periods.change_start') }}
+                  </button>
                   <template v-if="auth.canWrite('accounting.periods.close')">
                     <button v-if="p.status === 'closed'" @click="openStatusDialog(p, 'approve')"
                       class="cursor-pointer text-xs px-2 py-1 rounded-md border border-warning-500/50 text-warning-600 hover:bg-warning-50 font-medium">
@@ -357,6 +411,10 @@ function statusBadge(status: string): string {
               class="text-xs px-2 py-1 rounded-md border border-primary-200 text-primary-600 hover:bg-primary-50 font-medium">
               {{ p.status === 'approved' ? t('accounting.closing.detail_link') : t('accounting.closing.wizard_link') }}
             </RouterLink>
+            <button v-if="canChangeStart(p)" @click="openStartDialog(p)"
+              class="cursor-pointer text-xs px-2 py-1 rounded-md border border-neutral-300 text-neutral-700 hover:bg-neutral-50 font-medium">
+              {{ t('accounting.periods.change_start') }}
+            </button>
             <template v-if="auth.canWrite('accounting.periods.close')">
               <button v-if="p.status === 'closed'" @click="openStatusDialog(p, 'approve')"
                 class="cursor-pointer text-xs px-2 py-1 rounded-md border border-warning-500/50 text-warning-600 hover:bg-warning-50 font-medium">
@@ -409,6 +467,32 @@ function statusBadge(status: string): string {
       </div>
     </div>
 
+    <!-- Modal: začátek prvního období -->
+    <div v-if="startDialog.period" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+      <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5" data-test="period-start-dialog">
+        <h3 class="text-lg font-semibold mb-3">{{ t('accounting.periods.change_start_title', { year: startDialog.period.fiscal_year }) }}</h3>
+        <p class="text-sm text-neutral-600 mb-3">{{ t('accounting.periods.change_start_hint') }}</p>
+        <div class="grid grid-cols-2 gap-3 mb-3">
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.periods.starts_on') }}</label>
+            <DateInput v-model="startDialog.starts_on" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('accounting.periods.ends_on') }}</label>
+            <div class="h-10 px-3 flex items-center text-sm text-neutral-500">{{ formatDate(startDialog.period.ends_on) }}</div>
+          </div>
+        </div>
+        <div v-if="startDialog.error" class="text-sm text-danger-500 mb-3">{{ startDialog.error }}</div>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button @click="startDialog.period = null" :class="btnOutline('neutral')">{{ t('common.cancel') }}</button>
+          <button @click="submitStartDialog" :disabled="startDialog.saving || !startDialog.starts_on" :class="btnFilled('primary')" data-test="period-start-save">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+            {{ t('common.save') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
     <!-- Modal: schválení / znovuotevření -->
     <div v-if="statusDialog.period" class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
       <div class="bg-surface rounded-xl shadow-lg max-w-md w-full p-5">
@@ -446,9 +530,9 @@ function statusBadge(status: string): string {
         <template v-else-if="settings">
           <div class="space-y-2 mb-3">
             <label class="block text-sm">
-              <span class="font-medium">{{ t('accounting.closing.settings.avg_employees') }}</span>
+              <span class="font-medium">{{ t('accounting.closing.settings.avg_employees') }}:</span>
               <input type="number" min="0" step="1" v-model.number="settings.avg_employees"
-                class="mt-1 w-32 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+                class="mt-1 ml-2 w-32 h-9 px-2 border border-neutral-300 rounded-md text-sm" />
               <span class="block text-xs text-neutral-500 mt-0.5">{{ t('accounting.closing.settings.avg_employees_hint') }}</span>
             </label>
             <label class="flex items-start gap-2 text-sm cursor-pointer">

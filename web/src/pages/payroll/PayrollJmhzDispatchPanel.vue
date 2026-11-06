@@ -6,6 +6,7 @@ import { dataBoxApi, type GatewayStart } from '@/api/dataBox'
 import { PAYROLL_JMHZ_LATE_DISCOUNT_CONFIRMATION } from '@/api/payrollTransportCodes'
 import {
   payrollApi,
+  type PayrollJmhzFreezeBlocker,
   type PayrollJmhzIsdsEnqueueResult,
   type PayrollJmhzPvpojPreview,
   type PayrollJmhzTransportPoll,
@@ -15,6 +16,8 @@ import {
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import IsdsSendMethods from '@/components/submission/IsdsSendMethods.vue'
 import PayrollLateDiscountConfirm from '@/components/payroll/PayrollLateDiscountConfirm.vue'
+import JmhzFreezeBlockerList from './JmhzFreezeBlockerList.vue'
+import { freezeBlockersFromError } from './jmhzFreezeBlockers'
 import { useAuthStore } from '@/stores/auth'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 
@@ -41,6 +44,8 @@ interface DispatchState {
   error: string
   /** Proklik k chybě (měsíc podaný předchozím programem → přehled převzatých podání). */
   errorTarget?: ReturnType<typeof externalJmhzSubmissionTarget>
+  /** Nálezy blokace zmrazení hlášení se jmény a odkazy na opravu. */
+  blockers?: PayrollJmhzFreezeBlocker[]
   isds: PayrollJmhzIsdsEnqueueResult | null
   vrep: PayrollJmhzTransportPoll | null
   gateway: GatewayStart | null
@@ -256,6 +261,7 @@ async function dispatch(
     confirming: null,
     error: '',
     errorTarget: null,
+    blockers: [],
     gateway: null,
     lateDiscount: null,
   })
@@ -313,6 +319,7 @@ async function dispatch(
         t('payroll.submissions.overview.jmhz_dispatch_failed'),
       ),
       errorTarget: externalJmhzSubmissionTarget(exception),
+      blockers: freezeBlockersFromError(exception),
     })
   }
 }
@@ -499,6 +506,11 @@ function continueGateway(preview: PayrollJmhzPvpojPreview) {
             {{ t('payroll.external_jmhz.open_history') }}
           </RouterLink>
         </p>
+        <JmhzFreezeBlockerList
+          v-if="state(preview).blockers?.length"
+          :blockers="state(preview).blockers!"
+          :period="preview.period"
+        />
 
         <div
           v-if="state(preview).vrep"

@@ -49,7 +49,7 @@ final class TripCategoriesAction
             if (str_contains($e->getMessage(), 'Duplicate')) {
                 return Json::error($response, 'duplicate_code', 'Kód „' . (string) ($body['code'] ?? '') . '" už existuje.', 409);
             }
-            return Json::error($response, 'create_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'create_failed', $e->getMessage(), 500);
         }
         $this->log($request, 'trip_category.created', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId), 201);
@@ -74,7 +74,7 @@ final class TripCategoriesAction
             if (str_contains($e->getMessage(), 'Duplicate')) {
                 return Json::error($response, 'duplicate_code', 'Kód „' . (string) ($body['code'] ?? '') . '" už existuje.', 409);
             }
-            return Json::error($response, 'update_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'update_failed', $e->getMessage(), 500);
         }
         $this->log($request, 'trip_category.updated', $id, $body);
         return Json::ok($response, $this->repo->find($id, $supplierId));

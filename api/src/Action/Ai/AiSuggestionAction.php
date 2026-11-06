@@ -115,13 +115,13 @@ final class AiSuggestionAction
     private function validPayload(int $supplierId, array $payload): bool
     {
         $debit = trim((string) ($payload['debit_account_code'] ?? ''));
-        if ($debit === '' || preg_match('/^(?:311|321|314|324|325|33|34|221|211)/', $debit) === 1) return false;
+        if ($debit === '' || \MyInvoice\Service\Accounting\SettlementAccounts::isSettlement($debit)) return false;
         $stmt = $this->db->pdo()->prepare('SELECT 1 FROM chart_of_accounts WHERE supplier_id=? AND account_code=? AND is_active=1');
         $stmt->execute([$supplierId, $debit]);
         if ($stmt->fetchColumn() === false) return false;
         if (array_key_exists('credit_account_code', $payload)) {
             $credit = trim((string) $payload['credit_account_code']);
-            if ($credit === '' || preg_match('/^(?:311|321|314|324|325|33|34|221|211)/', $credit) === 1) return false;
+            if ($credit === '' || \MyInvoice\Service\Accounting\SettlementAccounts::isSettlement($credit)) return false;
             $stmt->execute([$supplierId, $credit]);
             if ($stmt->fetchColumn() === false) return false;
         }

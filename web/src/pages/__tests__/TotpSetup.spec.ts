@@ -14,6 +14,8 @@ const m = vi.hoisted(() => ({
   totpEnable: vi.fn(),
   passkeyStepUpOptions: vi.fn(),
   passkeyStepUpVerify: vi.fn(),
+  recoveryCodeStatus: vi.fn(),
+  recoveryStepUp: vi.fn(),
   store: {
     user: { totp_enabled: false, mfa_methods: [] as string[], passkey_count: 0 } as Record<string, unknown>,
   },
@@ -26,6 +28,8 @@ vi.mock('@/api/auth', () => ({
     totpEnable: m.totpEnable,
     passkeyStepUpOptions: m.passkeyStepUpOptions,
     passkeyStepUpVerify: m.passkeyStepUpVerify,
+    recoveryCodeStatus: m.recoveryCodeStatus,
+    recoveryStepUp: m.recoveryStepUp,
   },
 }))
 vi.mock('@/stores/auth', () => ({
@@ -52,6 +56,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   m.store.user = { totp_enabled: false, mfa_methods: [], passkey_count: 0 }
   m.totpStatus.mockResolvedValue({ enabled: false })
+  m.recoveryCodeStatus.mockResolvedValue({ remaining: 0 })
 })
 
 describe('TotpSetup — re-authentication before secret generation', () => {
@@ -111,5 +116,34 @@ describe('TotpSetup — re-authentication before secret generation', () => {
     expect(m.passkeyStepUpOptions).toHaveBeenCalledWith('totp.enable')
     expect(m.passkeyStepUpVerify).toHaveBeenCalledWith('ft', 'totp.enable', { id: 'cred' })
     expect(m.totpSetup).toHaveBeenCalledWith({ step_up_token: 'step-up-token' })
+  })
+
+  it('nefunkční klíč obejde záložním kódem pro totp.enable', async () => {
+    m.store.user = { totp_enabled: false, mfa_methods: ['passkey'], passkey_count: 1 }
+    m.recoveryCodeStatus.mockResolvedValue({ remaining: 3 })
+    m.recoveryStepUp.mockResolvedValue({ step_up_token: 'recovery-token', remaining: 2 })
+    m.totpSetup.mockResolvedValue({ secret: 'S', uri: 'otpauth://x', qr_data_uri: 'data:,' })
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.get('[data-test="totp-toggle-recovery"]').trigger('click')
+    await wrapper.get('[data-test="totp-recovery-code"]').setValue(' ABCDE-FGHIJ ')
+    await wrapper.get('[data-test="totp-start"]').trigger('click')
+    await flushPromises()
+
+    expect(m.passkeyStepUpOptions).not.toHaveBeenCalled()
+    expect(m.recoveryStepUp).toHaveBeenCalledWith('totp.enable', 'ABCDE-FGHIJ')
+    expect(m.totpSetup).toHaveBeenCalledWith({ step_up_token: 'recovery-token' })
+  })
+
+  it('bez zbývajících záložních kódů volbu nenabízí', async () => {
+    m.store.user = { totp_enabled: false, mfa_methods: ['passkey'], passkey_count: 1 }
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(m.recoveryCodeStatus).toHaveBeenCalled()
+    expect(wrapper.find('[data-test="totp-toggle-recovery"]').exists()).toBe(false)
   })
 })

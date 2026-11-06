@@ -186,6 +186,7 @@ final class CronJobGateRelevanceTest extends TestCase
     {
         yield 'bankovní napojení' => ['cron-bank-connections'];
         yield 'e-mailová avíza' => ['cron-bank-email-notices'];
+        yield 'stav tachometru z aut' => ['cron-logbook-odometer-source'];
         yield 'katalogový worker' => ['cron-catalog-worker'];
         yield 'stav podání EPO' => ['cron-epo-status'];
     }
@@ -272,7 +273,8 @@ final class CronJobGateRelevanceTest extends TestCase
         $pdo->method('query')->willThrowException(new \PDOException('no such table'));
         $gate = new CronJobGate(new Config([]), $pdo);
 
-        foreach (['cron-bank-connections', 'cron-bank-email-notices', 'cron-catalog-worker', 'cron-epo-status', 'cron-jmhz-poll'] as $script) {
+        foreach (['cron-bank-connections', 'cron-bank-email-notices', 'cron-catalog-worker', 'cron-epo-status', 'cron-jmhz-poll',
+            'cron-logbook-odometer-source'] as $script) {
             self::assertNull($gate->inactiveReason($this->job($script)), $script);
         }
     }

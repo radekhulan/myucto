@@ -28,7 +28,7 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
 
         $this->assertCleanSubmissionHasNoFailedControl($report);
         $this->assertUnimplementedBlockingControlKeepsSubmissionUnready($report);
-        $this->assertOfficialControl333SourceAnomalyIsLeftToTheCsszProtocol($report);
+        $this->assertControl333IsEvaluatedByItsRule($report);
         $this->assertFullMonthOfInsuranceDaysPassesDespiteLiteralFormula($report);
         $this->assertGovTalkVariableSymbolIsNotEvaluatedWithoutEnvelope($report);
         $this->assertRegistryControlsAreReportedAsNotEvaluable($report);
@@ -73,16 +73,15 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
         }
     }
 
-    private function assertOfficialControl333SourceAnomalyIsLeftToTheCsszProtocol(JmhzControlEvaluationReport $report): void
+    /**
+     * Katalog 1.4.2.11 sjednotil atributy kontroly 333 s pravidlem, takže se
+     * vyhodnocuje lokálně a nad bezvadným podáním projde.
+     */
+    private function assertControl333IsEvaluatedByItsRule(JmhzControlEvaluationReport $report): void
     {
-        $finding = array_values(array_filter(
-            $report->findings,
-            static fn (JmhzControlFinding $finding): bool => $finding->controlId === 333,
-        ))[0];
-
-        self::assertSame(JmhzControlOutcome::NotEvaluable, $finding->outcome);
-        self::assertStringContainsString('rozporné odkazy', $finding->message);
-        self::assertNotContains($finding, $report->coverageGaps());
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, 333)->outcome);
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, 368)->outcome);
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($report, 369)->outcome);
     }
 
     /**
@@ -1567,6 +1566,153 @@ final class JmhzScenario1ControlValidatorTest extends TestCase
      * vědomého zařazení mezi lokálně neověřitelné by skončila jako nepokrytá
      * a zablokovala by odeslání všeho.
      */
+    /**
+     * Kontrola 368 (katalog 1.4.2.11): dny pojištění ELDP sekce nesmí
+     * přesáhnout platnost jejího kódu. Interval se počítá včetně krajních
+     * dnů jako ve vzoru Pokynů 1.4.14, Příloha A (1. 2. až 28. 2. = 28 dnů),
+     * takže 15 dnů za 1. až 15. 7. projde a 16 dnů ne. Je to jediné čtení
+     * katalogu, se kterým projdou vzory, proto není mezi odchylkami.
+     */
+    public function testEldpDaysMustFitTheCodeValidityIncludingBothEnds(): void
+    {
+        $sections = static fn (int $days): string => <<<XML
+                              <form:eldp>
+                                <form:kod>1++</form:kod>
+                                <form:platnostOd>2026-07-01</form:platnostOd>
+                                <form:platnostDo>2026-07-15</form:platnostDo>
+                                <form:pocetDnu>{$days}</form:pocetDnu>
+                                <form:vymerovaciZaklad>1000</form:vymerovaciZaklad>
+                              </form:eldp>
+            XML;
+        $xml = static fn (int $days): string => JmhzXmlSample::document(
+            JmhzXmlSample::form('1000000001', '2000000000000000000001', eldp: $sections($days)),
+            formCount: 1,
+        );
+
+        $exact = $this->finding($this->validate($xml(15)), 368);
+        self::assertSame(JmhzControlOutcome::Passed, $exact->outcome);
+
+        $report = $this->validate($xml(16));
+        $finding = $this->finding($report, 368);
+        self::assertSame(JmhzControlOutcome::Failed, $finding->outcome);
+        self::assertSame(JmhzControlPassability::Blocking, $finding->passability);
+        self::assertSame(20368, $finding->errorCode);
+        self::assertStringContainsString('2026-07-01 až 2026-07-15 (15 dnů)', $finding->message);
+        self::assertContains(368, $this->blockingIds($report));
+        $evaluator = new JmhzScenario1ControlEvaluator(
+            JmhzControlSourceCatalog::load()->parameters(),
+            new JmhzDeadlinePolicy(CzechPayrollRulesets2026::provider()),
+        );
+        self::assertArrayNotHasKey(368, $evaluator->documentedDeviations());
+        self::assertArrayNotHasKey(134, $evaluator->documentedDeviations());
+    }
+
+    /**
+     * Kontrola 82 (katalog 1.4.2.11): při jakékoli specifické právní
+     * skutečnosti (10408) musí mít výplatní termín (10410) každá součást.
+     * Aplikace IN13 nevykazuje; kontrola je pojistka pro budoucí implementaci.
+     */
+    public function testPayoutDateRequiredForAnySpecificLegalFact(): void
+    {
+        $xml = static function (?string $fact, bool $payoutDate): string {
+            $document = JmhzXmlSample::minimal();
+            if ($fact !== null) {
+                $document = str_replace(
+                    '</so:souhrn>',
+                    "<so:specifickaSkutecnost><so:typ>{$fact}</so:typ><so:datum>2026-07-20</so:datum></so:specifickaSkutecnost></so:souhrn>",
+                    $document,
+                );
+            }
+            if ($payoutDate) {
+                $document = str_replace(
+                    '</form:dan>',
+                    '</form:dan><form:specifickaSkutecnost><form:vyplatniTermin>2026-07-15</form:vyplatniTermin></form:specifickaSkutecnost>',
+                    $document,
+                );
+            }
+
+            return $document;
+        };
+
+        self::assertSame(JmhzControlOutcome::NotApplicable, $this->finding($this->validate($xml(null, false)), 82)->outcome);
+        self::assertSame(JmhzControlOutcome::Passed, $this->finding($this->validate($xml('1', true)), 82)->outcome);
+        $missing = $this->finding($this->validate($xml('1', false)), 82);
+        self::assertSame(JmhzControlOutcome::Failed, $missing->outcome);
+        self::assertSame('Výplatní termín musí být uveden.', $missing->message);
+    }
+
+    /**
+     * Kontrola 369 (katalog 1.4.2.11): sekce s kódem ELDP musí mít platnost
+     * od i do. Chybějící konec platnosti podání zablokuje.
+     */
+    public function testEldpCodeRequiresBothValidityDates(): void
+    {
+        $section = <<<'XML'
+                              <form:eldp>
+                                <form:kod>1++</form:kod>
+                                <form:platnostOd>2026-07-01</form:platnostOd>
+                                <form:pocetDnu>31</form:pocetDnu>
+                                <form:vymerovaciZaklad>1000</form:vymerovaciZaklad>
+                              </form:eldp>
+            XML;
+        $report = $this->validate(JmhzXmlSample::document(
+            JmhzXmlSample::form('1000000001', '2000000000000000000001', eldp: $section),
+            formCount: 1,
+        ));
+        $finding = $this->finding($report, 369);
+
+        self::assertSame(JmhzControlOutcome::Failed, $finding->outcome);
+        self::assertSame(20369, $finding->errorCode);
+        self::assertStringContainsString('10242', $finding->message);
+        self::assertContains(369, $this->blockingIds($report));
+    }
+
+    /**
+     * Kontrola 333 má od katalogu 1.4.2.11 atributy 10495 a 10016 a pravidlo
+     * kontroly 332: chybějící příznak primárního vztahu u řádného formuláře
+     * je chyba (cJMHZ 40333), u stornujícího formuláře ne.
+     */
+    public function testControl333RequiresThePrimaryEmploymentFlag(): void
+    {
+        $withoutFlag = str_replace(
+            '<primarniPpv>true</primarniPpv>',
+            '',
+            JmhzXmlSample::minimal(),
+        );
+        $report = $this->validate($withoutFlag);
+        $finding = $this->finding($report, 333);
+
+        self::assertSame(JmhzControlOutcome::Failed, $finding->outcome);
+        self::assertSame(40333, $finding->errorCode);
+        self::assertContains(333, $this->blockingIds($report));
+        self::assertContains(332, $this->failedIds($report));
+
+        $cancelled = str_replace(
+            '<typFormulare>R</typFormulare>',
+            '<typFormulare>S</typFormulare>',
+            $withoutFlag,
+        );
+        self::assertNotContains(333, $this->failedIds($this->validate($cancelled)));
+    }
+
+    /**
+     * Kontrola 371 (katalog 1.4.2.11) je informativní výzva cJMHZ nad
+     * registrem zaměstnanců. Lokálně ji vyhodnotit nejde a podání nesmí
+     * blokovat ani hlásit jako varování.
+     */
+    public function testForeignWorkerRegistryNoticeIsLeftToTheCssz(): void
+    {
+        $report = $this->validate(JmhzXmlSample::minimal());
+        $finding = $this->finding($report, 371);
+
+        self::assertSame(JmhzControlOutcome::NotEvaluable, $finding->outcome);
+        self::assertSame(JmhzControlPassability::Passable, $finding->passability);
+        self::assertSame(40371, $finding->errorCode);
+        self::assertNotContains($finding, $report->coverageGaps());
+        self::assertNotContains($finding, $report->warnings());
+        self::assertStringContainsString('REGZEC A3', $finding->message);
+    }
+
     public function testDuplicateSubmissionGuidControlIsLeftToTheCsszRegistry(): void
     {
         $report = $this->validate(

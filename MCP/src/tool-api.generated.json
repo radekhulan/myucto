@@ -1,0 +1,1312 @@
+{
+  "add_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/projects"
+      ],
+      [
+        "GET",
+        "/api/clients"
+      ],
+      [
+        "GET",
+        "/api/invoices"
+      ]
+    ]
+  },
+  "add_invoice_payment": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/payments"
+      ]
+    ]
+  },
+  "add_purchase_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/items"
+      ]
+    ]
+  },
+  "add_work_report_entry": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/invoices/{id}/work-report"
+      ],
+      [
+        "GET",
+        "/api/projects"
+      ],
+      [
+        "GET",
+        "/api/clients"
+      ],
+      [
+        "GET",
+        "/api/invoices"
+      ],
+      [
+        "GET",
+        "/api/projects/{id}"
+      ],
+      [
+        "GET",
+        "/api/clients/{id}"
+      ],
+      [
+        "GET",
+        "/api/settings/supplier"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}/work-report"
+      ]
+    ]
+  },
+  "add_work_report_material": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/invoices/{id}/work-report"
+      ],
+      [
+        "GET",
+        "/api/projects"
+      ],
+      [
+        "GET",
+        "/api/clients"
+      ],
+      [
+        "GET",
+        "/api/invoices"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}/work-report/materials"
+      ]
+    ]
+  },
+  "apply_invoice_advance_drawdown": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/advance-drawdown"
+      ]
+    ]
+  },
+  "archive_project": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/projects/{id}"
+      ],
+      [
+        "POST",
+        "/api/projects/{id}/archive"
+      ]
+    ]
+  },
+  "bank_account_balances": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-statements/account-balances"
+      ]
+    ]
+  },
+  "cancel_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/cancel"
+      ]
+    ]
+  },
+  "cancel_purchase_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/transition"
+      ]
+    ]
+  },
+  "clone_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/clone"
+      ]
+    ]
+  },
+  "create_client": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/clients"
+      ],
+      [
+        "POST",
+        "/api/clients/lookup-ares"
+      ],
+      [
+        "GET",
+        "/api/clients"
+      ]
+    ]
+  },
+  "create_final_invoice_from_proforma": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/issue-final"
+      ]
+    ]
+  },
+  "create_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices"
+      ]
+    ]
+  },
+  "create_payment_tax_document": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/payments/{payment_id}/tax-document"
+      ]
+    ]
+  },
+  "create_purchase_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/purchase-invoices"
+      ],
+      [
+        "GET",
+        "/api/codebooks/currencies"
+      ],
+      [
+        "GET",
+        "/api/codebooks/cnb-rate"
+      ]
+    ]
+  },
+  "create_recurring_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/recurring"
+      ]
+    ]
+  },
+  "delete_invoice_draft": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/invoices/{id}"
+      ]
+    ]
+  },
+  "delete_invoice_payment": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/invoices/{id}/payments/{item_id}"
+      ],
+      [
+        "GET",
+        "/api/invoices/{id}/payments"
+      ]
+    ]
+  },
+  "delete_logbook_car": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/cars/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/logbook/cars/{id}"
+      ]
+    ]
+  },
+  "delete_logbook_fueling": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/fuelings/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/logbook/fuelings/{id}"
+      ]
+    ]
+  },
+  "delete_logbook_trip": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/trips/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/logbook/trips/{id}"
+      ]
+    ]
+  },
+  "delete_project": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/projects/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/projects/{id}"
+      ]
+    ]
+  },
+  "delete_purchase_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/purchase-invoices/{id}"
+      ]
+    ]
+  },
+  "delete_recurring_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/recurring/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/recurring/{id}"
+      ]
+    ]
+  },
+  "download_invoice_attachment": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/attachments/{item_id}"
+      ]
+    ]
+  },
+  "download_invoice_isdoc": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/isdoc"
+      ]
+    ]
+  },
+  "download_invoice_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/pdf"
+      ]
+    ]
+  },
+  "download_purchase_invoice_pdf": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/pdf"
+      ]
+    ]
+  },
+  "get_bank_statement": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-statements/{id}"
+      ]
+    ]
+  },
+  "get_client": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/clients/{id}"
+      ]
+    ]
+  },
+  "get_invoice": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ]
+    ]
+  },
+  "get_invoice_isdoc": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/isdoc"
+      ]
+    ]
+  },
+  "get_invoice_recipients": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/recipients"
+      ]
+    ]
+  },
+  "get_price_list_item": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/price-list-items/{id}"
+      ]
+    ]
+  },
+  "get_product_packaging": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/packaging"
+      ]
+    ]
+  },
+  "get_product_tracking": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/{id}/tracking"
+      ]
+    ]
+  },
+  "get_project": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/projects/{id}"
+      ]
+    ]
+  },
+  "get_purchase_invoice": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ]
+    ]
+  },
+  "get_purchase_invoice_activity": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/activity"
+      ]
+    ]
+  },
+  "get_purchase_invoice_payment": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/payment-qr"
+      ]
+    ]
+  },
+  "get_recurring_invoice": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/recurring/{id}"
+      ]
+    ]
+  },
+  "get_warehouse": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/warehouses/{id}"
+      ]
+    ]
+  },
+  "get_work_report": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/work-report"
+      ]
+    ]
+  },
+  "import_purchase_invoice_file": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/purchase-invoices/import-structured"
+      ]
+    ]
+  },
+  "issue_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/issue"
+      ]
+    ]
+  },
+  "link_invoice_advance": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/link-advance"
+      ]
+    ]
+  },
+  "link_purchase_advance": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/link-advance"
+      ]
+    ]
+  },
+  "list_bank_match_suggestions": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-statements/{id}/match-suggestions"
+      ]
+    ]
+  },
+  "list_bank_statements": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/bank-statements"
+      ]
+    ]
+  },
+  "list_currencies": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/codebooks/currencies"
+      ]
+    ]
+  },
+  "list_expense_categories": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/expense-categories"
+      ]
+    ]
+  },
+  "list_invoice_advance_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/advance-candidates"
+      ]
+    ]
+  },
+  "list_invoice_advance_drawdown_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/advance-drawdown"
+      ]
+    ]
+  },
+  "list_invoice_attachments": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/attachments"
+      ]
+    ]
+  },
+  "list_invoice_payments": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/payments"
+      ]
+    ]
+  },
+  "list_invoices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices"
+      ]
+    ]
+  },
+  "list_logbook_cars": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/cars"
+      ],
+      [
+        "GET",
+        "/api/logbook/cars/{id}"
+      ]
+    ]
+  },
+  "list_logbook_fuelings": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/fuelings"
+      ],
+      [
+        "GET",
+        "/api/logbook/fuelings/{id}"
+      ]
+    ]
+  },
+  "list_logbook_trip_categories": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/trip-categories"
+      ]
+    ]
+  },
+  "list_logbook_trips": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/trips"
+      ],
+      [
+        "GET",
+        "/api/logbook/trips/{id}"
+      ]
+    ]
+  },
+  "list_price_list_items": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/price-list-items"
+      ]
+    ]
+  },
+  "list_products": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items"
+      ]
+    ]
+  },
+  "list_proforma_final_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/final-candidates"
+      ]
+    ]
+  },
+  "list_projects": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/projects"
+      ]
+    ]
+  },
+  "list_purchase_advance_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/advance-candidates"
+      ]
+    ]
+  },
+  "list_purchase_invoices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices"
+      ]
+    ]
+  },
+  "list_purchase_settlement_candidates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}/settlement-candidates"
+      ]
+    ]
+  },
+  "list_recurring_invoices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/recurring"
+      ]
+    ]
+  },
+  "list_stock_locations": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/locations"
+      ]
+    ]
+  },
+  "list_suppliers": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/suppliers"
+      ]
+    ]
+  },
+  "list_unpaid_invoices": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices"
+      ]
+    ]
+  },
+  "list_vat_rates": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/settings/vat-rates"
+      ]
+    ]
+  },
+  "list_warehouses": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/warehouses"
+      ]
+    ]
+  },
+  "logbook_summary": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/summary"
+      ]
+    ]
+  },
+  "mark_invoice_paid": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/mark-paid"
+      ]
+    ]
+  },
+  "mark_purchase_invoice_paid": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/transition"
+      ]
+    ]
+  },
+  "pause_recurring_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/recurring/{id}/pause"
+      ]
+    ]
+  },
+  "preview_invoice_penalty": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}/penalty/preview"
+      ]
+    ]
+  },
+  "project_profitability": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/projects/profitability"
+      ],
+      [
+        "GET",
+        "/api/projects/{id}/profit"
+      ]
+    ]
+  },
+  "project_stats": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/projects/stats"
+      ]
+    ]
+  },
+  "receive_purchase_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/transition"
+      ]
+    ]
+  },
+  "recurring_invoice_history": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/recurring/{id}/invoices"
+      ]
+    ]
+  },
+  "remove_invoice_advance_drawdown": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/invoices/{id}/advance-drawdown"
+      ]
+    ]
+  },
+  "remove_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}"
+      ]
+    ]
+  },
+  "remove_purchase_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/items"
+      ]
+    ]
+  },
+  "remove_work_report_entry": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/invoices/{id}/work-report"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}/work-report"
+      ]
+    ]
+  },
+  "reschedule_recurring_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/recurring/{id}"
+      ],
+      [
+        "POST",
+        "/api/recurring/{id}/reschedule"
+      ]
+    ]
+  },
+  "resolve_price_list_item": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/price-list-items/{id}/resolve"
+      ]
+    ]
+  },
+  "resume_recurring_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/recurring/{id}/resume"
+      ]
+    ]
+  },
+  "run_recurring_invoice_now": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/recurring/{id}"
+      ],
+      [
+        "POST",
+        "/api/recurring/{id}/run-now"
+      ]
+    ]
+  },
+  "save_logbook_car": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/cars/{id}"
+      ],
+      [
+        "POST",
+        "/api/logbook/cars"
+      ],
+      [
+        "PUT",
+        "/api/logbook/cars/{id}"
+      ]
+    ]
+  },
+  "save_logbook_fueling": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/fuelings/{id}"
+      ],
+      [
+        "POST",
+        "/api/logbook/fuelings"
+      ],
+      [
+        "PUT",
+        "/api/logbook/fuelings/{id}"
+      ]
+    ]
+  },
+  "save_logbook_trip": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/logbook/trips/{id}"
+      ],
+      [
+        "POST",
+        "/api/logbook/trips"
+      ],
+      [
+        "PUT",
+        "/api/logbook/trips/{id}"
+      ]
+    ]
+  },
+  "save_project": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/projects/{id}"
+      ],
+      [
+        "POST",
+        "/api/projects"
+      ],
+      [
+        "PUT",
+        "/api/projects/{id}"
+      ]
+    ]
+  },
+  "search_clients": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/clients"
+      ]
+    ]
+  },
+  "search_products": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/items/search"
+      ]
+    ]
+  },
+  "send_invoice": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/send"
+      ]
+    ]
+  },
+  "send_invoice_reminder": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/reminder"
+      ]
+    ]
+  },
+  "set_purchase_invoice_project": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/project"
+      ]
+    ]
+  },
+  "stock_availability": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/availability"
+      ]
+    ]
+  },
+  "stock_quantities": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/stock/quantities"
+      ]
+    ]
+  },
+  "unlink_invoice_advance": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/invoices/{id}/link-advance"
+      ]
+    ]
+  },
+  "unlink_purchase_advance": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "DELETE",
+        "/api/purchase-invoices/{id}/link-advance"
+      ]
+    ]
+  },
+  "unmark_invoice_paid": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/invoices/{id}/unmark-paid"
+      ]
+    ]
+  },
+  "update_client": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/clients/{id}"
+      ],
+      [
+        "PUT",
+        "/api/clients/{id}"
+      ],
+      [
+        "POST",
+        "/api/clients/lookup-ares"
+      ]
+    ]
+  },
+  "update_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/projects"
+      ],
+      [
+        "GET",
+        "/api/clients"
+      ],
+      [
+        "GET",
+        "/api/invoices"
+      ]
+    ]
+  },
+  "update_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/invoices/{id}"
+      ]
+    ]
+  },
+  "update_purchase_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "GET",
+        "/api/codebooks/currencies"
+      ],
+      [
+        "GET",
+        "/api/clients/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}"
+      ]
+    ]
+  },
+  "update_purchase_invoice_item": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "PUT",
+        "/api/purchase-invoices/{id}/items"
+      ]
+    ]
+  },
+  "update_recurring_invoice": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/recurring/{id}"
+      ],
+      [
+        "PUT",
+        "/api/recurring/{id}"
+      ]
+    ]
+  },
+  "upload_invoice_attachment": {
+    "write": true,
+    "api": [
+      [
+        "POST",
+        "/api/invoices/{id}/attachments"
+      ]
+    ]
+  },
+  "upload_purchase_invoice_pdf": {
+    "write": true,
+    "api": [
+      [
+        "GET",
+        "/api/purchase-invoices/{id}"
+      ],
+      [
+        "POST",
+        "/api/purchase-invoices/{id}/pdf"
+      ]
+    ]
+  },
+  "whoami": {
+    "write": false,
+    "api": [
+      [
+        "GET",
+        "/api/auth/api-me"
+      ]
+    ]
+  }
+}

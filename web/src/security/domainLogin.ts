@@ -1,8 +1,10 @@
-import { authApi } from '@/api/auth'
+import { authApi, type DomainLoginConfirmation } from '@/api/auth'
 import { canonicalDomainLoginHandoffPath } from '@/security/clientRoutePolicy'
 
+import { CANONICAL_DOMAIN_LOGIN_KEY as CANONICAL_KEY } from '@/security/domainLoginContext'
+
 const TARGET_KEY = 'myinvoice.domain_login.target'
-const CANONICAL_KEY = 'myinvoice.domain_login.canonical'
+const CONFIRMATION_REQUIRED = 'domain_login_confirmation_required'
 const TERMINAL_AUTHORIZATION_ERRORS = ['invalid_domain_login_request', 'canonical_origin_required', 'forbidden_supplier'] as const
 type TerminalAuthorizationCode = typeof TERMINAL_AUTHORIZATION_ERRORS[number]
 interface TerminalAuthorizationError { code: TerminalAuthorizationCode; message: string; status: number }
@@ -19,9 +21,10 @@ interface CanonicalState {
   state: string
   handoffPath: string | null
   ownedCsrf?: string
-  previousOwnedCsrf?: string
   redirectUrl?: string
   terminalError?: TerminalAuthorizationError
+  /** Uživatel předání tohoto požadavku výslovně potvrdil. */
+  confirmed?: boolean
 }
 
 function base64Url(bytes: Uint8Array): string {
@@ -67,7 +70,7 @@ export function captureCanonicalDomainLogin(
   saveCanonical({
     ...(previous?.requestToken === requestToken && previous.state === state
       ? previous
-      : { previousOwnedCsrf: previous?.ownedCsrf || previous?.previousOwnedCsrf }),
+      : {}),
     requestToken,
     state,
     handoffPath: canonicalDomainLoginHandoffPath(handoffPath),
@@ -94,17 +97,6 @@ export function pendingCanonicalDomainLoginQuery(): Record<string, string> | nul
   }
 }
 
-/** A restarted portal request can reuse only a session we already owned. */
-export function reconcileCanonicalDomainLoginSession(csrf: string): void {
-  const pending = readCanonical()
-  if (!pending?.previousOwnedCsrf) return
-  saveCanonical({
-    ...pending,
-    previousOwnedCsrf: undefined,
-    ...(pending.previousOwnedCsrf === csrf ? { ownedCsrf: csrf } : {}),
-  })
-}
-
 export function pendingCanonicalDomainLoginHandoff(): string | null {
   return readCanonical()?.handoffPath ?? null
 }
@@ -116,7 +108,7 @@ export function clearCanonicalDomainLogin(): void {
 /** Only a login response can establish ownership; /me and session status cannot. */
 export function recordCanonicalDomainLoginSession(csrf: string): void {
   const pending = readCanonical()
-  if (pending && !pending.redirectUrl && !pending.terminalError && csrf) saveCanonical({ ...pending, ownedCsrf: csrf, previousOwnedCsrf: undefined })
+  if (pending && !pending.redirectUrl && !pending.terminalError && csrf) saveCanonical({ ...pending, ownedCsrf: csrf })
 }
 
 export function canonicalDomainLoginSessionCsrf(): string | null {
@@ -127,7 +119,43 @@ export function canonicalDomainLoginSessionCsrf(): string | null {
 export function advanceCanonicalDomainLoginSession(previousCsrf: string, csrf: string): void {
   const pending = readCanonical()
   if (pending?.ownedCsrf === previousCsrf && previousCsrf && csrf) {
-    saveCanonical({ ...pending, ownedCsrf: csrf, previousOwnedCsrf: undefined })
+    saveCanonical({ ...pending, ownedCsrf: csrf })
+  }
+}
+
+/**
+ * Předání existujícího přihlášení z canonical adresy potřebuje výslovné
+ * potvrzení. Implicitní je jen u session, kterou vytvořilo přihlášení v rámci
+ * tohoto toku (`ownedCsrf`); i tu ale server odmítne, pokud je starší než
+ * požadavek, a pak se potvrzení vyžádá dodatečně.
+ */
+export function needsCanonicalDomainLoginConfirmation(): boolean {
+  const pending = readCanonical()
+  return !!pending && !pending.redirectUrl && !pending.terminalError && !pending.ownedCsrf && !pending.confirmed
+}
+
+export function confirmPendingDomainLogin(): void {
+  const pending = readCanonical()
+  if (pending && !pending.redirectUrl && !pending.terminalError) saveCanonical({ ...pending, confirmed: true })
+}
+
+export function isDomainLoginConfirmationRequired(error: unknown): boolean {
+  return (error as { response?: { data?: { error?: { code?: string } } } })?.response?.data?.error?.code === CONFIRMATION_REQUIRED
+}
+
+/** Cílový hostname a firma čekajícího předání. Kód se tím nevydává. */
+export async function previewPendingDomainLogin(): Promise<DomainLoginConfirmation | null> {
+  const pending = readCanonical()
+  if (!pending || pending.redirectUrl || pending.terminalError) return null
+  try {
+    return await authApi.domainLoginPreview(pending.requestToken, pending.state, pending.ownedCsrf)
+  } catch (error: any) {
+    // Neplatný nebo cizí požadavek se nedá potvrdit. Bez vlastní dočasné
+    // session není co uklízet, takže se rovnou zahodí.
+    if (TERMINAL_AUTHORIZATION_ERRORS.includes(error?.response?.data?.error?.code) && !pending.ownedCsrf) {
+      clearCanonicalDomainLogin()
+    }
+    throw error
   }
 }
 
@@ -147,8 +175,17 @@ async function authorizeAndCleanup(): Promise<boolean> {
   let pending = readCanonical()
   if (!pending) return false
   if (!pending.redirectUrl && !pending.terminalError) {
+    // Potvrzení cíle nenahrazuje nové přihlášení svázané s tímto tokem.
+    if (!pending.ownedCsrf) {
+      throw { response: { status: 401, data: { error: { code: 'fresh_authentication_required' } } } }
+    }
     try {
-      const result = await authApi.domainLoginAuthorize(pending.requestToken, pending.state, pending.ownedCsrf)
+      const result = await authApi.domainLoginAuthorize(
+        pending.requestToken,
+        pending.state,
+        pending.ownedCsrf,
+        pending.confirmed === true,
+      )
       pending = { ...pending, redirectUrl: result.redirect_url }
       // Issuing a code is one-shot. Persist it before cleanup so a failed logout
       // can be retried after a reload without authorizing the request twice.
@@ -170,6 +207,28 @@ async function authorizeAndCleanup(): Promise<boolean> {
       saveCanonical(pending)
     }
   }
+  pending = await cleanupCanonicalDomainLoginSession(pending)
+  if (pending.terminalError) {
+    clearCanonicalDomainLogin()
+    throw { response: { status: pending.terminalError.status, data: { error: pending.terminalError } } }
+  }
+  if (!isDomainLoginCallbackUrl(pending.redirectUrl)) {
+    clearCanonicalDomainLogin()
+    throw new Error('Invalid domain login redirect')
+  }
+  window.location.replace(pending.redirectUrl)
+  clearCanonicalDomainLogin()
+  return true
+}
+
+/** Zrušení předání ukončí pouze dočasnou relaci, kterou tento tok vytvořil. */
+export async function cancelPendingDomainLogin(): Promise<void> {
+  const pending = readCanonical()
+  if (pending) await cleanupCanonicalDomainLoginSession(pending)
+  clearCanonicalDomainLogin()
+}
+
+async function cleanupCanonicalDomainLoginSession(pending: CanonicalState): Promise<CanonicalState> {
   if (pending.ownedCsrf) {
     // Explicit CSRF binds cleanup to the session created by this flow. A cookie
     // replaced by another tab must fail CSRF rather than log out that session.
@@ -191,17 +250,7 @@ async function authorizeAndCleanup(): Promise<boolean> {
     pending = { ...pending, ownedCsrf: undefined }
     saveCanonical(pending)
   }
-  if (pending.terminalError) {
-    clearCanonicalDomainLogin()
-    throw { response: { status: pending.terminalError.status, data: { error: pending.terminalError } } }
-  }
-  if (!isDomainLoginCallbackUrl(pending.redirectUrl)) {
-    clearCanonicalDomainLogin()
-    throw new Error('Invalid domain login redirect')
-  }
-  window.location.replace(pending.redirectUrl)
-  clearCanonicalDomainLogin()
-  return true
+  return pending
 }
 
 function isMissingSession(error: unknown): boolean {
@@ -248,13 +297,12 @@ function readCanonical(): CanonicalState | null {
       requestToken: value.requestToken,
       state: value.state,
       handoffPath: canonicalDomainLoginHandoffPath(value.handoffPath),
-      ...(typeof value.previousOwnedCsrf === 'string' && value.previousOwnedCsrf
-        ? { previousOwnedCsrf: value.previousOwnedCsrf } : {}),
       ...(typeof value.ownedCsrf === 'string' && value.ownedCsrf ? { ownedCsrf: value.ownedCsrf } : {}),
       ...(value.terminalError && TERMINAL_AUTHORIZATION_ERRORS.includes(value.terminalError.code)
         && typeof value.terminalError.message === 'string' && typeof value.terminalError.status === 'number'
         ? { terminalError: value.terminalError } : {}),
       ...(isDomainLoginCallbackUrl(value.redirectUrl) ? { redirectUrl: value.redirectUrl } : {}),
+      ...(value.confirmed === true ? { confirmed: true } : {}),
     }
   } catch {
     return null

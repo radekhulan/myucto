@@ -36,6 +36,7 @@ final class ActivityLogHashChainTest extends TestCase
     private int $deferredFrom = 0;
     /** Id, od kterého se ověřuje — cizí záznamy v sadě jsou pro tenhle test šum. */
     private int $from = 0;
+    private ?\Closure $restorePruneMark = null;
 
     protected function setUp(): void
     {
@@ -75,6 +76,9 @@ final class ActivityLogHashChainTest extends TestCase
         $pdo = $this->db->pdo();
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
+        }
+        if ($this->restorePruneMark !== null) {
+            ($this->restorePruneMark)();
         }
         if ($this->cleanup) {
             $pdo->prepare('DELETE FROM activity_log WHERE id >= ?')->execute([$this->from]);
@@ -392,6 +396,76 @@ final class ActivityLogHashChainTest extends TestCase
         } finally {
             $pdo->exec("SET time_zone = '{$original}'");
         }
+    }
+
+    /**
+     * Retence spravovaného provozu smaže starý začátek stopy. Ponechaný zbytek musí
+     * projít ověřením, i když mezi smazanými zůstal záznam, ze kterého aplikace čte stav.
+     */
+    public function testPruneKeepsRetainedActionsAndTheRestVerifies(): void
+    {
+        $this->keepPruneMark();
+        $old = [];
+        foreach (['test.old.a', 'accounting.description_edited', 'test.old.b'] as $action) {
+            $old[$action] = $this->insertOld($action);
+        }
+        $this->chain->sealPending();
+        $fresh = $this->write('test.fresh.a');
+        $this->write('test.fresh.b');
+
+        self::assertSame(2, $this->chain->prune(14, $this->from));
+
+        self::assertSame([], $this->row($old['test.old.a']));
+        self::assertSame([], $this->row($old['test.old.b']));
+        self::assertNotSame([], $this->row($old['accounting.description_edited']), 'Stavová akce zůstává.');
+        self::assertNotSame([], $this->row($fresh));
+        self::assertNotNull($this->chain->prunedBefore());
+        $r = $this->chain->verify($this->from);
+        self::assertTrue($r['ok'], (string) json_encode($r['broken'], JSON_UNESCAPED_UNICODE));
+    }
+
+    /** Za hranicí promazání se smazání záznamu pozná dál. */
+    public function testDeletingRecordAfterPruneStillBreaksTheChain(): void
+    {
+        $this->keepPruneMark();
+        $this->insertOld('test.old');
+        $this->chain->sealPending();
+        $this->write('test.a');
+        $id = $this->write('test.b');
+        $this->write('test.c');
+        self::assertSame(1, $this->chain->prune(14, $this->from));
+
+        $this->db->pdo()->prepare('DELETE FROM activity_log WHERE id = ?')->execute([$id]);
+
+        $r = $this->chain->verify($this->from);
+        self::assertFalse($r['ok']);
+        self::assertStringContainsString('řetěz přerušen', $r['broken'][0]['reason']);
+    }
+
+    /** Záznam se starým časem vložený přímo, čeká na zapečetění. */
+    private function insertOld(string $action): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO activity_log (action, created_at) VALUES (?, NOW() - INTERVAL 30 DAY)")
+            ->execute([$action]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    /** Hranice promazání je globální, po testu se vrátí. */
+    private function keepPruneMark(): void
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare("SELECT v FROM app_meta WHERE k = 'activity_log_pruned'");
+        $stmt->execute();
+        $previous = $stmt->fetchColumn();
+        $this->restorePruneMark = static function () use ($pdo, $previous): void {
+            if ($previous === false) {
+                $pdo->exec("DELETE FROM app_meta WHERE k = 'activity_log_pruned'");
+            } else {
+                $pdo->prepare("UPDATE app_meta SET v = ? WHERE k = 'activity_log_pruned'")->execute([$previous]);
+            }
+        };
     }
 
     /** @return array<string,mixed> */

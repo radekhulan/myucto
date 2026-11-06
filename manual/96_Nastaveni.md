@@ -11,6 +11,7 @@
 |---|---|---|
 | Potřebujete zahraniční sazbu DPH, jednotku nebo upravit klasifikaci DPH | Upravit číselník | [§ 96.3](#963-krok-za-krokem-ciselniky) |
 | Přichází nový kolega nebo externí účetní | Založit uživatele a přidělit roli a firmy | [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam) |
+| Technickou správu zajišťuje někdo, kdo nesmí vidět klientská data | Založit Správce instance a vymezit technický rozsah | [§ 96.4.1](#9641-spravce-instance) |
 | Chcete si změnit heslo, zapnout 2FA nebo passkey | Upravit Můj profil | [§ 96.5](#965-krok-za-krokem-muj-profil) |
 | Chcete změnit text e-mailů pro aktuální firmu | Upravit její e-mailovou šablonu | [§ 96.6](#966-krok-za-krokem-e-mailove-sablony) |
 | Posíláte e-maily z jiné adresy nebo přes jiný server | Nastavit odesílací profil | [§ 96.7](#967-krok-za-krokem-odesilaci-e-mailove-profily) |
@@ -40,6 +41,16 @@ Nastavení konkrétní firmy je v sekci **Firma**: **Nastavení**, **Externí in
 Správa opakovaně používaných fakturačních položek je kvůli návaznosti na vystavování dokladů v menu `Prodej → Ceník`.
 
 Nastavení globálních položek smí měnit jen superadministrátor nebo administrátor; viz [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam).
+
+V **Nastavení / Účetní rámec** lze zvolit **Nevýdělečné organizace (vyhláška 504)**. Zadejte první den existujícího účetního období a použijte **Uložit účetní rámec samostatně**. Změna vyžaduje příslušné oprávnění a v dotčeném intervalu nesmějí být zaúčtované zápisy. Přímo zde lze rámec 504 zapnout jen firmě bez účetní historie, tedy bez jediného zápisu v deníku a s prázdnou nebo nedotčenou výchozí osnovou. Nedotčená osnova podle vyhlášky 500 (žádný vlastní ani upravený účet a žádné použití v dokladech, předkontacích ani nastavení) se při uložení nahradí osnovou podle vyhlášky 504. Firmě, která už účtuje, aplikace změnu odmítne a nabídne odkaz na **Převod účetního rámce**. Platnost změn je vidět v historii rámce.
+
+U rozpoznané právní formy spolku, nadace, ústavu nebo SVJ se zobrazí doporučení rámce 504. Tlačítko **Zvolit doporučený rámec** pouze připraví výběr. Nic neukládá a nenahrazuje datum účinnosti ani samostatné potvrzení změny. Právní forma sama nepotvrzuje veřejnou prospěšnost ani osvobození příjmů. Existující účetnictví se převádí řízeně na hranici období přes **Převod účetního rámce**. Pro SVJ tato stránka místo formuláře vysvětlí, že se převádějí doložené počáteční stavy jednotek, a nabídne odkaz na Počáteční stavy SVJ. Nová firma, u které rejstřík uvede právní formu spolku, nadace, ústavu nebo SVJ, dostane rámec 504 i osnovu podle vyhlášky 504 rovnou při založení.
+
+> [!NOTE]
+> Účetní rámec 504 je určen pro produkční účetnictví nevýdělečných organizací. Dostupnost výpočtu, finalizace a podání DPPO závisí na období, doložených podkladech a podporované verzi formuláře; podrobnosti jsou v [Daň z příjmů](43_Dan_z_prijmu.md).
+
+
+Přepnutí rámce nepřevádí upravený ani používaný účtový rozvrh podle vyhlášky 500. Rozvrh podle vyhlášky 504 vznikne, když je rozvrh prázdný nebo je to nedotčená výchozí šablona.
 
 ## 96.3 Krok za krokem: číselníky
 
@@ -96,10 +107,14 @@ Stránka `Systém → Uživatelé` je jen pro superadmina.
 **Přiřadit firmy:** v editaci uživatele vyhledejte firmu podle názvu, IČO nebo ID a přidejte ji. Každý uživatel kromě
 superadmina má přístup pouze k firmám, které mu superadmin výslovně přidá. U přiřazené firmy ponechte **Výchozí roli**,
 nebo vyberte jinou aktivní roli stejného typu.
+Správce instance používá oddělené technické přiřazení popsané níže; běžné firemní oprávnění tím nezískává.
 
 **Odebrat uživatele:** aktivního uživatele nejdřív **deaktivujte**. U neaktivního se pak zobrazí **Smazat**. Smazání je
 trvalé a aplikace ho odmítne, pokud jsou na uživatele navázaná firemní, účetní nebo auditní data. V takovém případě účet
 ponechte deaktivovaný.
+
+**Aktivní relace:** superadmin otevře přehled všech přihlášení přes `Systém → Uživatelé → Aktivní relace`.
+Podrobnosti a odvolání relace popisuje [§ 101.9.1](101_Bezpecnost.md#10191-aktivni-relace).
 
 **Role a oprávnění:** `Systém → Role a oprávnění`. Superadmin může vytvořit interní roli typu **staff** nebo externí
 roli typu **client** a pro každou nastavit oprávnění po modulech a významných akcích (viz [§ 96.16.4](#96164-role-a-opravneni)).
@@ -109,6 +124,55 @@ její deaktivace nebo odebrání firmy se projeví bez nového přihlášení a 
 
 > [!WARNING]
 > Aplikace brání odebrání nebo deaktivaci posledního aktivního superadmina.
+
+### 96.4.1 Správce instance
+
+**Správce instance** zajišťuje technický provoz bez přístupu k firemním agendám. Aktivní účet zabírá uživatelské
+licenční místo, mzdové místo nečerpá. Přihlašuje se běžným účtem, může používat vlastní MFA a po přihlášení otevře samostatnou
+**Správu instance** mimo běžné pracovní panely a firemní menu aplikace. Horní lišta vypadá stejně jako v aplikaci, menu
+ale obsahuje jen **Přehled** a **Profil** a chybí v ní přepínač firem. Téma, jazyk a odhlášení jsou v uživatelském menu
+vpravo nahoře, na mobilu ve vysouvacím menu.
+
+Superadmin otevírá stejnou správu tlačítkem **Správa instance** na stránce **Systém → Diagnostika** jako běžnou stránku
+v pracovním panelu. Přímý odkaz na technickou plochu ho přesměruje do této integrované správy. Na spravované instalaci se
+o provoz stará provozovatel: Správa instance tam není dostupná a tlačítko se nezobrazí.
+
+**Založení a rozsah:**
+
+1. Superadmin otevře `Systém → Uživatelé`, založí účet a vybere roli **Správce instance**.
+2. Běžné firemní role se tomuto účtu nepřiřazují. Technický rozsah může zůstat prázdný, obsahovat vybrané firmy
+   nebo výslovně všechny firmy včetně budoucích.
+3. U přidělených firem správce vidí jen technické ID, název a omezený technický stav. Přidělení neotevře účetnictví,
+   doklady, kontakty, banku, mzdy ani přílohy.
+
+| Oblast | Dostupný rozsah |
+|---|---|
+| Stav instance | Verze aplikace, PHP a databáze, dostupnost potřebných rozšíření a technický stav úložiště |
+| SMTP | Výběr cíle schváleného superadminem a zadání nového hesla |
+| Test pošty | Neutrální zpráva na adresu předem schválenou superadminem |
+| Přidělené firmy | Název, technické ID a informace o použití společného nebo vlastního poštovního transportu |
+| Technický audit | Vlastní technické operace v aktuálně povoleném rozsahu, bez tajemství a obsahu dokladů |
+| Vlastní účet | Profil, heslo, MFA a vlastní relace |
+
+**Nastavení SMTP:** Superadmin ve Správě instance nejprve přidá schválený cíl: název, server, port, TLS režim,
+uživatelské jméno, odesílatele a testovacího příjemce. Cíl se neupravuje; pro jinou adresu nebo identitu vzniká nový.
+Používaný cíl nelze smazat. Správce instance pak zvolí povolený cíl a zadá heslo. Při přechodu na jiný cíl musí zadat
+nové heslo; aplikace na jiný server nepřenese dříve uložené tajemství. U stejného cíle může ponechat heslo beze změny.
+Uložené heslo se nikdy nezobrazuje.
+Superadmin může akcí **Použít konfiguraci instance** odstranit aktivní přepis i jeho uložené heslo a vrátit
+společné odesílání k původní konfiguraci. Schválené cíle přitom zůstanou uložené. Správce instance tuto akci nemá.
+
+Test má pevný neutrální obsah, neposílá doklad, firemní šablonu, podpis ani kopii do IMAP archivu. Příjemce se při
+testu nezadává. Opakování testu omezuje časový limit. Test společného transportu u přidělené firmy neověřuje její
+vlastní SMTP profil; firma s vlastním profilem takový test nenabízí. Nastavení vybraného společného transportu
+platí také pro běžné odesílání, které používá globální transport. Vlastní firemní transporty se spravují odděleně.
+Je-li transport řízen prostředím nebo spravovaným hostingem, technický správce jej nemůže přepsat.
+
+Správce instance nemůže spravovat uživatele, rozšiřovat svůj rozsah, obnovovat cizí hesla nebo MFA, vytvářet API
+tokeny, připojovat MCP, stahovat či obnovovat zálohy ani číst původní provozní logy. Stejná omezení platí pro přímé
+odkazy a API. Změny a testy zůstávají v auditu bez hodnot hesel. Odebrání technického přiřazení platí i pro otevřenou
+relaci. Převod běžného uživatele na tuto roli odebere jeho dřívější firemní přístupy a zneplatní přístupové relace
+a tokeny; osobní MFA faktory zůstávají zachované.
 
 ## 96.5 Krok za krokem: Můj profil
 
@@ -225,7 +289,7 @@ Všechny tři volby (sloupce, hustota, řazení) se ukládají **automaticky**, 
 ## 96.9 Krok za krokem: automatické účtování
 
 V sekci **Daňové nastavení** (jen u firem v režimu podvojné účetnictví; u daňové evidence se doklady neúčtují a blok se
-vůbec nezobrazí) jsou dva přepínače, ve výchozím stavu vypnuté:
+vůbec nezobrazí) jsou dva přepínače. Nová právnická osoba je má od založení zapnuté, stejně jako firma po dokončení průvodce aktivací účetnictví:
 
 <!-- cols: 40 60 -->
 | Přepínač | Co dělá |
@@ -233,10 +297,20 @@ vůbec nezobrazí) jsou dva přepínače, ve výchozím stavu vypnuté:
 | **Automaticky účtovat vydané faktury** | Po vystavení faktury ji aplikace rovnou zaúčtuje do deníku, stejným mechanismem jako ruční tlačítko Zaúčtovat ([Faktura PDF](16_Faktura_PDF.md#16103-zauctovani-do-deniku)). |
 | **Automaticky účtovat přijaté faktury** | Po přechodu přijaté faktury na stav Přijatá ji aplikace rovnou zaúčtuje ([§ 23.11.18](23_Prijate_faktury.md#231118-zauctovani-do-deniku-a-tlacitko-zauctovat)). Na další přechody stavu (uhrazená, stornovaná…) auto-post nereaguje. |
 
+Pod přepínači je pole **Účet závazku pro účtenky / paragony**. Zadáte-li závazkový účet třídy 3 z účtové osnovy
+firmy (typicky **325** Ostatní závazky), zaúčtují se přijaté doklady druhu **Účtenka / paragon** na tento účet místo
+závazku z předkontace (321). Ručně zvolená předkontace s jiným závazkem má přednost. Prázdné pole znamená závazek
+z předkontace. Aplikace odmítne účet, který v osnově není nebo není závazkový (například 311 nebo 518).
+
+Úhrady přijatých dokladů z pokladny, banky, platby kartou i zápočty vždy vyrovnávají účet, na kterém závazek dokladu
+skutečně vznikl. Účtenka zaúčtovaná na 325 se tedy uhradí 325/211 nebo 325/221 a saldo zůstane na jednom účtu.
+Úhrada dokladu, který ještě není zaúčtovaný, jde na závazek z kontace úhrady (321), proto účtenku zaúčtujte dřív,
+než ji uhradíte. Nastavení platí pro nově zaúčtované doklady, už zaúčtované se nepřeúčtují.
+
 **Postup:**
 
 1. Otevřete `Firma → Nastavení`, záložku **Daně a účetnictví**, sekci **Daňové nastavení (EPO výkazy DPH/KH)**.
-2. Zapněte požadované přepínače.
+2. Zapněte požadované přepínače, případně vyplňte účet závazku pro účtenky.
 3. V boxu **Automatika účtování** zvolte preset (**Vypnuto**, **Jen návrhy**, **Asistovaná**, **Plná automatika**).
 4. Případně upravte jednotlivé typy operací na vypnuto / návrh / automaticky, nastavte **Denní limit automatiky (Kč)** a zapněte **Ranní přehled e-mailem**.
 5. Uložte nastavení.
@@ -335,6 +409,10 @@ _myucto-challenge.portal.klient.cz TXT myucto-verification=<token>
 
 **Jak poznáte, že je hotovo:** Doména má stav **Aktivní** a obsluhuje svůj účel.
 
+Přihlášení z klientské domény vždy vyžaduje nové ověření heslem a případným druhým faktorem nebo passkey.
+Existující přihlášení na hlavní adrese aplikace se automaticky nepřebírá. Můžete se tak na klientské doméně
+přihlásit jiným účtem a současně zůstat přihlášeni jako správce v hlavním okně.
+
 Stavy domény: **Čeká na ověření** (publikujte DNS TXT, routing a TLS), **Ověřeno** (poslední kontrola prošla, lze
 aktivovat), **Aktivní**, **Ověření selhalo** (karta ukáže důvod), **Deaktivováno** (hostname nevydává firemní data).
 Rotace challenge zneplatní předchozí TXT hodnotu a vrátí neaktivní doménu do stavu čekání. Aktivní doménu nejdřív
@@ -359,7 +437,7 @@ vybudovala ručně a které převod z jiného programu nezaloží.
 
 Profil se hodí hlavně při opakovaném převodu firmy z jiného programu: stáhněte ho před smazáním firmy nebo před novým
 převodem a po ostrém převodu ho nahrajte zpět. Průvodci převodem ho nabízejí přímo (viz
-[§ 103.10.8](103_Prechod_z_Money_S3.md#103108-opakovany-prevod)). Nahrát profil smí jen uživatel, který smí měnit každou
+[§ 106.10.8](106_Prechod_z_Money_S3.md#106108-opakovany-prevod)). Nahrát profil smí jen uživatel, který smí měnit každou
 část nastavení, kterou profil obsahuje (nastavení firmy, účetnictví, pravidla banky). Podrobnosti a příkazy pro
 příkazovou řádku viz [§ 96.16.10](#961610-profil-firmy-podrobnosti).
 
@@ -572,7 +650,7 @@ a odmítal by legitimní kódy. Text, který nezačíná číslicí, se neulož�
 
 Vlastní kód přidávejte pro režim, který vestavěné nepokrývají, ne pro překlopení existujícího na jiný řádek. Vestavěné
 varianty už pokrývají tuzemský přenos podle režimu (§ 92c odpad, § 92d nemovitost, § 92e stavební práce), zvláštní režimy
-§ 89 a § 90 i rozlišení vývozu zboží od služby do 3. země. Pokud přesto namapujete kód na jiný řádek přiznání, respektuje
+§ 89 (přirážka `1c`/`2c`, zbytek ceny na ř. 26 `26c`) a § 90 i rozlišení vývozu zboží od služby do 3. země. Pokud přesto namapujete kód na jiný řádek přiznání, respektuje
 se to; přemapování podle skutečné sazby se spouští jen při rozporu sazby kódu se sazbou řádku, ne proti vašemu mapování.
 
 ### 96.16.3 Státní svátky
@@ -606,7 +684,7 @@ externí roli typu **client** a pro každou nastavit oprávnění po modulech a 
 | **Zápis** | Zahrnuje čtení a dovoluje příslušnou změnu nebo akci. |
 
 Role má po vytvoření neměnný typ. Klientské role nabízejí jen funkce bezpečné pro klientský portál; interní účetnictví,
-banka a globální správa se jim nepovolí. Tři předdefinované správcovské role mají pevná práva a nelze je deaktivovat,
+banka a globální správa se jim nepovolí. Čtyři předdefinované správcovské role mají pevná práva a nelze je deaktivovat,
 smazat ani upravit jejich matici:
 
 <!-- cols: 22 78 -->
@@ -615,16 +693,28 @@ smazat ani upravit jejich matici:
 | **Superadmin** | Plný přístup k firmám i celému systému. Jako jediný spravuje uživatele, role a přiřazení firem. |
 | **Admin** | Může dělat vše v přidělených firmách a pracovat s více firmami, které mu přidělí superadmin. Nemění celosystémové položky v menu Systém. |
 | **Admin Plus** | Má práva role Admin a navíc může v `Systém → Firmy` založit novou firmu. K nové firmě automaticky získá práva Admin. |
+| **Správce instance** | Technická správa bez přístupu k firemním agendám. Samostatný technický rozsah a schválené SMTP cíle; aktivní účet zabírá licenční místo. |
 
-Provozní nastavení firmy má pět samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
-**Branding firmy**, **Platební QR firmy** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
+Vestavěná role **Pouze pro čtení** nabízí u ostatních oprávnění nejvýše **Čtení**.
+Výjimkou jsou vlastní **API tokeny**, kde je výchozí **Čtení** a správce může povolit
+**Zápis** pro jejich správu. Token nezíská více práv než jeho uživatel. Účet s touto
+rolí bez jiných rolí licenční místo nečerpá. Vlastní čtecí role, klientské role
+i technické účty se do limitu aktivních uživatelů počítají, a to i při přiřazení
+jiné role pouze pro jednu firmu. Podrobnosti jsou v [§ 104.10.3](104_Licence_a_aktivace.md#104103-zkusebni-obdobi-a-stavy-licence).
+
+Provozní nastavení firmy má šest samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
+**Branding firmy**, **Platební QR firmy**, **Výchozí hodnoty dokladů** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
 samostatně zakázat nebo povolit pro zápis. V `Firma → Nastavení firmy` se zobrazí jen povolené záložky; totéž platí
 pro přímý odkaz a pro vlastní klientskou doménu. Samotné **Nastavení firmy** přístup do těchto editorů nezapíná.
 Právo **Měnit nastavení firmy** zůstává interní správě právních, daňových a účetních údajů.
+Oprávnění **Branding firmy** umožňuje upravit také vzhled PDF: kompaktní řádky položek, zobrazení autora dokladu, rozpis slevy a balení, bankovní spojení v patičce a sloupce a kompaktní zobrazení výkazu práce. Interní uživatelé nastavují vzhled v `Firma → Branding` nebo v `Firma → Nastavení`; klienti s tímto oprávněním v `Firma → Nastavení firmy` na záložce **Branding**. Kontaktní údaje brandingových profilů se spravují na stejné záložce. Volby vzhledu nemění účetní ani daňové údaje. Změna vzhledu se projeví u konceptů faktur. Již uložená PDF vystavených dokladů zůstávají zachována; výkazy u vystavených faktur zachovávají původní podobu i po přegenerování PDF.
+
 Interní role mají branding v položce `Firma → Branding`, platební QR a e-mailové šablony v `Firma → Nastavení`
 a superadmin odesílací profily v `Systém → E-maily a certifikáty`. Položka `Firma → Nastavení firmy` se jim proto
-v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR a e-mailovým šablonám
+v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR, e-mailovým šablonám a výchozím hodnotám dokladů
 u role bez práva **Měnit nastavení firmy**.
+
+Oprávnění **Výchozí hodnoty dokladů** (`settings.invoice_defaults`) se zápisem dovolí měnit výchozí splatnost včetně jednotky, hodinovou sazbu a zapnutí a český i anglický text poznámky pod položkami. Interní správce je najde v `Firma → Nastavení`; klient a interní uživatel bez práva měnit celé nastavení firmy v `Firma → Nastavení firmy → Výchozí hodnoty dokladů`. Hodnoty se používají při zakládání nových dokladů; již uložené koncepty a vystavené doklady zůstávají beze změny. Měna, DPH a zaokrouhlování do tohoto oprávnění nepatří. Poznámka může mít nejvýše 5 000 znaků a hodinová sazba šest desetinných míst. Běžná klientská a účetní role toto právo ve výchozím stavu nemá. Odebrání práva platí i pro uživatele s právem **Měnit nastavení firmy**.
 
 Klient s právem spravovat firemní podpisové profily může pro firmu nahrát certifikát P12/PFX a nastavit jeho použití
 pro PDF výstupy. Pro propojení profilu s odesílacím profilem potřebuje také správu odesílacích profilů. Správa se týká
@@ -650,6 +740,11 @@ a dál z něj vycházet.
 rolím ho přidělit nejde. Doklad v uzavřeném účetním období upraví i s tímto právem jen správce. Změnu částek, DPH nebo
 položek zaúčtované faktury (přeúčtuje deník) provede jen role, která má navíc **Zaúčtovat doklad**. Postup a omezení jsou
 v [§ 16.10.14](16_Faktura_PDF.md#161014-admin-akce-nad-vystavenou-fakturou).
+
+**Změnit DPH zařazení přijaté faktury** dovolí opravit nárok na odpočet a členění DPH přijaté faktury i po jejím přijetí
+a zaúčtování, bez storna (v detailu akce **Změnit DPH zařazení**). Mají ho správci a výchozí role účetní, klientským rolím
+ho přidělit nejde. Přeúčtování zaúčtovaného dokladu chce navíc **Zaúčtovat doklad**; uzavřené účetní období a podané
+období DPH dál přebije jen správce. Postup je v [§ 23.11.24](23_Prijate_faktury.md#231124-oprava-dph-zarazeni-bez-storna).
 
 Roli lze duplikovat jako základ nové role. Používanou roli nelze smazat; nejprve je nutné přeřadit uživatele a odstranit její
 přepisy u firem. Používanou roli lze deaktivovat, ale její uživatelé tím okamžitě ztratí firemní oprávnění. Při souběžné
@@ -756,10 +851,15 @@ a přepínač **Ranní přehled e-mailem** připravuje souhrn pro automatizačn�
 
 Podrobné nastavení je rozdělené do skupin:
 
-- **Platby a převody**: spárované bankovní platby, vlastní převody a jejich detektor,
+- **Platby a převody**: řádky **Vystavené faktury** a **Přijaté faktury**, spárované bankovní platby, vlastní převody a jejich detektor,
 - **Odvody**: jednotlivé druhy daní, sociální a zdravotní pojištění a rozpoznávání odvodů,
 - **Banka**: poplatky, úroky, vlastní pravidla a naučené kontace,
 - **AI**: návrhy bankovních plateb a dokladů; úroveň Automaticky je zde technicky zakázaná.
+
+Řádky **Vystavené faktury** a **Přijaté faktury** odpovídají přepínačům automatického účtování faktur v Daňovém
+nastavení ([§ 96.9](#969-krok-za-krokem-automaticke-uctovani)). Dokud řádek v tomto boxu nezměníte, řídí se zaúčtování
+faktur přepínačem. Úroveň uložená u řádku má potom přednost a faktura se automaticky zaúčtuje jen na úrovni
+**Automaticky**.
 
 Výsledná úroveň je vždy nejvýše tak automatická, jak dovoluje preset a konkrétní řádek. Nastavení **Vypnuto** detektor
 nebo typ operace nepustí, **Jen návrhy** vyžaduje potvrzení a **Automaticky** pouze dovoluje motoru pokračovat
@@ -958,6 +1058,41 @@ všech přihlašovacích metod, ručního inboxu a odeslání je v kapitole [Dat
 registraci externí aplikace spravuje provozovatel v `Mzdy → Odesílací brána ISDS`; popisuje ji kapitola
 [Odesílací brána ISDS](98_Odesilaci_brana_ISDS.md). Mzdové formuláře a jejich věcný stav popisuje kapitola
 [Podání a hlášení](85_Podani_a_hlaseni.md).
+
+### 96.16.13 Řízený převod z vyhlášky 500 na 504
+
+V nabídce Účetnictví otevřete Převod 500 → 504. Vyberte uzavřené zdrojové období vedené podle
+vyhlášky 500 a bezprostředně následující prázdné otevřené období. Původní období musí mít skutečnou
+účetní uzávěrku. Převod vytváří počáteční stavy nového období a datovanou změnu účtového rámce.
+Výkazy původního období nadále používají původní definice účtů.
+
+Pro každou nabídnutou účetní buňku vyberte cílový účet, hlavní nebo hospodářskou činnost, druh
+činnosti a daňový režim. Náhled ukazuje původní středisko, projekt a dimenze. Výsledek zdrojového
+období se otevírá na 931, nerozdělené výsledky minulých let na 932. Zisky a ztráty různých buněk se
+vzájemně neskrývají ani při celkovém nulovém výsledku.
+
+Zkontrolujte také definice účtů účinné od začátku nového období. Systém zachovává identitu, typ a
+nadřazený účet existujícího účtu; názvy a účetní metadata jsou datovaná. Nové cílové účty nevznikají
+zpětně v historii. Vyplňte referenci podkladu, vytvořte náhled a po kontrole jej výslovně potvrďte.
+Pokud se mezitím účetní podklad změní, vytvořte nový náhled. Při nejistém výsledku přenosu lze
+opakovat stejný příkaz jeho nabízenou akcí.
+
+Převod SVJ vyžaduje průkazný podklad pro převzetí jednotek, vlastníků, právních dluhů a krátkodobých
+i dlouhodobých záloh. Samotný zůstatek hlavní knihy tyto evidence nenahrazuje. Převod rovněž zastaví
+nevyřešené podrozvahové evidence a nativní uzávěrkové zápisy vyžadující navazující převzetí:
+saldokontní kurzové převody a jejich storna, otevření skladového uzavření nebo rozpouštění časového
+rozlišení drobného majetku. Cenné papíry a účelové fondy vyžadují podklad příslušné evidence.
+Zobrazené upozornění uvádí potřebný podklad; nevytváří náhradní evidenci z odhadu.
+
+Dosud nepoužitý převod lze zrušit jeho vlastní akcí po samostatném náhledu. Zrušení odstraní pouze
+jeho počáteční zápis a obnoví jeho vlastní změny konfigurace. Původní uzávěrka zůstává zachována.
+Pokud již existuje navazující účtování, rozhodnutí o výsledku, párování nebo samostatná změna
+konfigurace, zrušení se zablokuje.
+
+Po zrušení převodu lze samostatně vrátit a opravit i původní uzávěrku. Anonymizovaný klon
+zachovává zrušený převod jako samostatnou historii včetně původních částek a identit účetních zápisů.
+Osobní texty v historických podkladech se anonymizují; novější opravy původní historie se s převodem
+nesměšují. Neprůkazný nebo změněný historický podklad klonování zastaví.
 
 ## 96.17 Související kapitoly
 

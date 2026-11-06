@@ -21,6 +21,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
+import AssetPlanRevisionModal from '@/components/accounting/AssetPlanRevisionModal.vue'
+import ImportedAssetPlanAudit from '@/components/accounting/ImportedAssetPlanAudit.vue'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -37,8 +39,27 @@ const router = useRouter()
 const assetId = computed(() => Number(route.params.id))
 
 const asset = ref<AssetDetail | null>(null)
+const importedPlan = computed(() => asset.value?.imported_depreciation_plan ?? null)
 const plan = ref<DepreciationPlan | null>(null)
 const loading = ref(false)
+const showRevision = ref(false)
+const canRevisePlan = computed(() => !!importedPlan.value && !isTaxEvidence.value && asset.value?.status === 'in_use' && auth.canWrite('assets.depreciation'))
+const latestRevision = computed(() => importedPlan.value?.revisions?.at(-1))
+const effectiveUsefulLife = computed(() => {
+  const summary = plan.value?.asset_summary
+  if (summary && 'effective_acc_useful_life_months' in summary) return summary.effective_acc_useful_life_months
+  return latestRevision.value ? null : asset.value?.acc_useful_life_months ?? null
+})
+async function revisionSaved(): Promise<void> {
+  showRevision.value = false
+  await load()
+}
+async function refreshRevision(): Promise<void> {
+  showRevision.value = false
+  await load()
+  if (canRevisePlan.value) showRevision.value = true
+}
+
 
 async function load() {
   loading.value = true
@@ -109,13 +130,14 @@ function toggleMonths(row: DepreciationPlanRow) {
 }
 
 function rowStatus(row: DepreciationPlanRow): string {
+  if (row.source === 'imported') return t('accounting.assets.plan.status_imported')
   if (row.source === 'computed') return t('accounting.assets.plan.status_planned')
   return planTab.value === 'tax'
     ? t('accounting.assets.plan.status_confirmed')
     : t('accounting.assets.plan.status_posted')
 }
 function rowStatusClass(row: DepreciationPlanRow): string {
-  if (row.source === 'computed') return 'bg-neutral-100 text-neutral-500'
+  if (row.source === 'computed' || row.source === 'imported') return 'bg-neutral-100 text-neutral-500'
   return 'bg-success-50 text-success-600'
 }
 
@@ -136,10 +158,19 @@ const putIntoUseDate = ref(appIsoDate())
 const putIntoUseBook = ref(true)
 const acting = ref(false)
 
+function openPutIntoUse() {
+  if (importedPlan.value) {
+    putIntoUseDate.value = asset.value?.put_into_use_date ?? ''
+    putIntoUseBook.value = false
+  }
+  showPutIntoUse.value = true
+}
+
 async function runPutIntoUse() {
   acting.value = true
   try {
-    const r = await assetsApi.putIntoUse(assetId.value, { date: putIntoUseDate.value, book_entry: putIntoUseBook.value })
+    const date = importedPlan.value ? (asset.value?.put_into_use_date ?? '') : putIntoUseDate.value
+    const r = await assetsApi.putIntoUse(assetId.value, { date, book_entry: importedPlan.value ? false : putIntoUseBook.value })
     for (const w of r.warnings || []) toast.warning(w.message)
     showPutIntoUse.value = false
     toast.success(t('accounting.assets.lifecycle.put_into_use_done'))
@@ -197,7 +228,7 @@ async function runDeleteImprovement(impId: number) {
 const showPause = ref(false)
 const pauseYear = ref(new Date().getFullYear())
 const canPause = computed(() =>
-  asset.value?.tax_method === 'straight' || asset.value?.tax_method === 'accelerated')
+  !importedPlan.value && (asset.value?.tax_method === 'straight' || asset.value?.tax_method === 'accelerated'))
 
 async function runPause() {
   acting.value = true
@@ -221,7 +252,7 @@ async function runUnpause(year: number) {
 // ── Ruční přepis daňového odpisu roku (převzetí čísel účetní) ──────────────
 const overrideRow = ref<DepreciationPlanRow | null>(null)
 const overrideForm = ref({ amount: null as number | null, reason: '' })
-const canOverrideTax = computed(() => auth.canWrite('assets.depreciation'))
+const canOverrideTax = computed(() => !importedPlan.value && auth.canWrite('assets.depreciation'))
 
 function openOverride(row: DepreciationPlanRow) {
   overrideRow.value = row
@@ -313,7 +344,16 @@ const assetActions = computed<ActionItem[]>(() => {
       tier: 'primary',
       variant: 'primary',
       show: canWrite && draft,
-      run: () => { showPutIntoUse.value = true },
+      run: openPutIntoUse,
+    },
+    {
+      key: 'revise_plan',
+      label: t('accounting.assets.revision.title'),
+      icon: 'cycle',
+      tier: 'primary',
+      variant: 'warning',
+      show: canRevisePlan.value,
+      run: () => { showRevision.value = true },
     },
     {
       key: 'improvement',
@@ -321,7 +361,7 @@ const assetActions = computed<ActionItem[]>(() => {
       icon: 'plus',
       tier: 'primary',
       variant: 'primary',
-      show: canWrite && inUse,
+      show: canWrite && inUse && !importedPlan.value,
       run: () => { showImprovement.value = true },
     },
     {
@@ -483,6 +523,15 @@ const yearOptions = computed(() => {
         </div>
       </div>
 
+      <div v-if="importedPlan" data-testid="asset-imported-plan" class="rounded-lg border border-primary-500/30 bg-primary-50 p-4 mb-4 text-sm text-primary-700">
+        <h2 class="font-semibold">{{ t('accounting.assets.imported_plan.title') }}</h2>
+        <p class="mt-1">{{ t('accounting.assets.imported_plan.source', { program: importedPlan.source_program, tax: importedPlan.source_tax_method, accounting: importedPlan.source_accounting_method }) }}</p>
+        <p class="mt-1">{{ t('accounting.assets.imported_plan.locked_hint') }}</p>
+        <p v-if="latestRevision" class="mt-2 font-medium">{{ t('accounting.assets.revision.latest', { revision: latestRevision.revision, month: formatMonth(latestRevision.effective_from), months: latestRevision.remaining_months }) }}</p>
+      </div>
+      <ImportedAssetPlanAudit v-if="importedPlan" :plan="importedPlan" :original-useful-life="asset.acc_useful_life_months" />
+      <AssetPlanRevisionModal v-if="showRevision && asset && canRevisePlan" :asset="asset" @close="showRevision = false" @saved="revisionSaved" @refresh="refreshRevision" />
+
       <!-- Vyřazení info -->
       <div v-if="asset.status === 'disposed'" class="bg-warning-50 border border-warning-500/30 rounded-lg p-3 mb-4 text-sm">
         {{ t('accounting.assets.disposal_info', {
@@ -547,9 +596,9 @@ const yearOptions = computed(() => {
             <span class="text-xs text-neutral-500 block">{{ t('accounting.assets.fields.acc_method') }}</span>
             {{ t(`accounting.assets.accMethod.${asset.acc_method ?? 'straight_line'}`) }}
           </div>
-          <div v-if="asset.accumulated_account_code && asset.acc_method !== 'by_tax'">
+          <div v-if="asset.accumulated_account_code && asset.acc_method !== 'by_tax'" data-testid="asset-effective-useful-life">
             <span class="text-xs text-neutral-500 block">{{ t('accounting.assets.fields.acc_useful_life_months') }}</span>
-            {{ asset.acc_useful_life_months ?? '—' }}
+            {{ effectiveUsefulLife ?? '—' }}
           </div>
           <div v-if="asset.purchase_invoice_id">
             <span class="text-xs text-neutral-500 block">{{ t('accounting.assets.fields.purchase_invoice') }}</span>
@@ -592,7 +641,7 @@ const yearOptions = computed(() => {
               <td class="px-3 py-2">{{ imp.description || '—' }}</td>
               <td class="px-3 py-2 text-right font-mono">{{ formatMoney(num(imp.amount)) }}</td>
               <td class="px-3 py-2 text-right">
-                <button v-if="auth.canWrite('assets.write') && asset.status === 'in_use'" @click="runDeleteImprovement(imp.id)"
+                <button v-if="auth.canWrite('assets.write') && asset.status === 'in_use' && !importedPlan" @click="runDeleteImprovement(imp.id)"
                   class="cursor-pointer text-xs text-danger-500 hover:underline">{{ t('common.delete') }}</button>
               </td>
             </tr>
@@ -677,7 +726,7 @@ const yearOptions = computed(() => {
                         :class="btnIconSm('primary')">
                         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.chart" /></svg>
                       </RouterLink>
-                      <button v-if="row.is_paused && row.source === 'confirmed' && planTab === 'tax' && auth.canWrite('assets.write') && asset.status === 'in_use'"
+                      <button v-if="!importedPlan && row.is_paused && row.source === 'confirmed' && planTab === 'tax' && auth.canWrite('assets.write') && asset.status === 'in_use'"
                         @click.stop="runUnpause(row.fiscal_year)"
                         :title="t('accounting.assets.lifecycle.unpause')" :aria-label="t('accounting.assets.lifecycle.unpause')"
                         :class="btnIconSm('primary')">
@@ -735,9 +784,9 @@ const yearOptions = computed(() => {
       <!-- Modal: zařazení do užívání -->
       <Modal v-if="showPutIntoUse" :title="t('accounting.assets.lifecycle.put_into_use')" widthClass="max-w-md" @close="showPutIntoUse = false">
         <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.assets.lifecycle.put_into_use_date') }}</label>
-        <DateInput v-model="putIntoUseDate" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
+        <DateInput v-model="putIntoUseDate" :disabled="!!importedPlan" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm mb-3" />
         <label v-if="!isTaxEvidence" class="inline-flex items-center gap-2 text-sm mb-4">
-          <input v-model="putIntoUseBook" type="checkbox" class="rounded border-neutral-300" />
+          <input v-model="putIntoUseBook" :disabled="!!importedPlan" type="checkbox" class="rounded border-neutral-300" />
           {{ t('accounting.assets.lifecycle.put_into_use_book') }}
         </label>
         <p v-if="!putIntoUseBook && !isTaxEvidence" class="text-xs text-warning-600 mb-3">{{ t('accounting.assets.lifecycle.put_into_use_no_book_hint') }}</p>

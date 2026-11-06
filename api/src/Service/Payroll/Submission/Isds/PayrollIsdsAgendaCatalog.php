@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission\Isds;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSubmissionBridgeService;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzIsdsRecipientCatalog;
 use MyInvoice\Service\Payroll\Submission\Sickness\SicknessChannelCatalog;
@@ -57,7 +58,9 @@ final class PayrollIsdsAgendaCatalog
      * `agenda_code` z evidence povinností JMHZ je historicky psaný dvěma
      * způsoby — starší obligace nesou `JMHZ`, nové `JMHZ25`. Stejnou
      * normalizaci dělá i {@see \MyInvoice\Service\Submission\SubmissionArtifactValidator},
-     * takže by se sem hodnoty jinak nedostaly konzistentně.
+     * takže by se sem hodnoty jinak nedostaly konzistentně. Ročníky datové
+     * věty (`JMHZ27`, `REGZEC27`) převádí na kód agendy {@see JmhzSpecVersion};
+     * schránka ČSSZ pro JMHZ je pro obě verze tatáž.
      */
     private const ALIASES = ['JMHZ' => JmhzSubmissionBridgeService::AGENDA_CODE];
 
@@ -98,7 +101,7 @@ final class PayrollIsdsAgendaCatalog
 
     public static function canonical(string $agendaCode): string
     {
-        $normalized = strtoupper(trim($agendaCode));
+        $normalized = JmhzSpecVersion::canonicalAgendaCode($agendaCode);
 
         return self::ALIASES[$normalized] ?? $normalized;
     }

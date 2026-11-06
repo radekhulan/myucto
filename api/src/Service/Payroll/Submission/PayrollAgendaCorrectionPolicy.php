@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Submission;
 
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
+
 /**
  * Na jaké podání se u které agendy smí navázat oprava nebo storno.
  *
@@ -76,8 +78,10 @@ final class PayrollAgendaCorrectionPolicy
      */
     public static function correctableStatuses(string $agendaCode): array
     {
-        if (isset(self::AGENDA_STATUSES[$agendaCode])) {
-            return self::AGENDA_STATUSES[$agendaCode];
+        // `JMHZ27` je jen ročník datové věty téže agendy ({@see JmhzSpecVersion}).
+        $canonical = JmhzSpecVersion::canonicalAgendaCode($agendaCode);
+        if (isset(self::AGENDA_STATUSES[$canonical])) {
+            return self::AGENDA_STATUSES[$canonical];
         }
         if (!self::allowsPendingPredecessor($agendaCode)) {
             return self::DECIDED_STATUSES;
@@ -112,7 +116,7 @@ final class PayrollAgendaCorrectionPolicy
         string $agendaCode,
         string $submissionKind,
     ): bool {
-        return $agendaCode !== 'JMHZ25' || $submissionKind !== 'correction';
+        return !JmhzSpecVersion::isMonthlyAgenda($agendaCode) || $submissionKind !== 'correction';
     }
 
     /**
@@ -123,6 +127,6 @@ final class PayrollAgendaCorrectionPolicy
         string $agendaCode,
         string $submissionKind,
     ): bool {
-        return $agendaCode === 'JMHZ25' && $submissionKind === 'cancellation';
+        return JmhzSpecVersion::isMonthlyAgenda($agendaCode) && $submissionKind === 'cancellation';
     }
 }

@@ -234,7 +234,9 @@ final class CashDocumentAction
         $supplierId = $this->currentSupplierId($request);
         $id = (int) $args['id'];
         try {
-            $result = $this->service->post($supplierId, $id, $this->userId($request));
+            $body = (array) ($request->getParsedBody() ?? []);
+            $eetDeviceId = isset($body['eet_device_id']) && is_numeric($body['eet_device_id']) ? (int) $body['eet_device_id'] : null;
+            $result = $this->service->post($supplierId, $id, $this->userId($request), $eetDeviceId);
             $this->log($request, 'cash.document_posted', $id, ['doc_number' => $result['doc_number']]);
             $this->autoFueling($supplierId, $id, $this->userId($request));
             return Json::ok($response, $result);
@@ -255,6 +257,8 @@ final class CashDocumentAction
             $result = $this->service->reverse($supplierId, $id, [
                 'reason'     => (string) ($body['reason'] ?? ''),
                 'entry_date' => $body['entry_date'] ?? null,
+                'eet_correction_reason' => isset($body['eet_correction_reason']) ? (string) $body['eet_correction_reason'] : null,
+                'eet_device_id' => $body['eet_device_id'] ?? null,
             ], $this->userId($request));
             $this->log($request, 'cash.document_reversed', $id, ['reversal_entry_id' => $result['reversal_entry_id']]);
             return Json::ok($response, $result);

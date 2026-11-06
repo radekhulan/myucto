@@ -6,12 +6,12 @@ namespace MyInvoice\Security;
 
 final class PermissionCatalog
 {
-    public const VERSION = '2026-10-operational-settings-edit-issued-v2';
+    public const VERSION = '2026-10-seat-readonly-tokens-v2';
 
     /** @var list<string> */
     private const GROUPS = [
         'dashboard', 'clients', 'projects', 'invoices', 'purchase_invoices', 'recurring', 'price_list',
-        'bank', 'documents', 'accounting', 'other_items', 'tax_evidence', 'reports', 'payroll', 'cash', 'assets',
+        'bank', 'documents', 'accounting', 'property', 'other_items', 'tax_evidence', 'reports', 'payroll', 'cash', 'eet', 'assets',
         'stock', 'eshop', 'logbook', 'settings', 'utilities', 'profile',
     ];
 
@@ -55,6 +55,7 @@ final class PermissionCatalog
             ['purchase_invoices.payment_orders', 'purchase_invoices', 'Platební příkazy', $staffOnly],
             ['purchase_invoices.delete', 'purchase_invoices', 'Smazat přijatou fakturu', $both],
             ['purchase_invoices.approve', 'purchase_invoices', 'Schvalovat přijaté doklady', $staffOnly],
+            ['purchase_invoices.vat_treatment', 'purchase_invoices', 'Změnit DPH zařazení přijaté faktury', $staffOnly],
             ['price_list', 'price_list', 'Ceník', $both],
             ['recurring', 'recurring', 'Pravidelná fakturace', $both],
             ['recurring.create', 'recurring', 'Vytvořit šablonu', $both],
@@ -85,13 +86,39 @@ final class PermissionCatalog
             ['accounting.periods.close_override', 'accounting', 'Uzavřít období přes nezaúčtované doklady', $staffOnly],
             ['accounting.offsets', 'accounting', 'Vzájemné zápočty', $staffOnly],
             ['accounting.templates', 'accounting', 'Účetní šablony', $staffOnly],
+            ['property', 'property', 'Registr SVJ', $staffOnly],
+            ['property.registry.manage', 'property', 'Spravovat podklady registru SVJ', $staffOnly],
+            ['property.registry.confirm', 'property', 'Potvrzovat právní podklady SVJ', $staffOnly],
+            ['property.export', 'property', 'Exportovat registr SVJ', $staffOnly],
+            ['property.charges.manage', 'property', 'Spravovat složky a sazby SVJ', $staffOnly],
+            ['property.charges.confirm', 'property', 'Potvrzovat verze předpisů SVJ', $staffOnly],
+            ['property.charges.issue', 'property', 'Vydávat předpisy SVJ', $staffOnly],
+            ['property.charges.post', 'property', 'Účtovat předpisy SVJ', $staffOnly],
+            ['property.charges.reverse', 'property', 'Stornovat předpisy SVJ', $staffOnly],
+            ['property.receivables.manage', 'property', 'Připravovat přechody dluhů SVJ', $staffOnly],
+            ['property.receivables.confirm', 'property', 'Potvrzovat právní přechody dluhů SVJ', $staffOnly],
+            ['property.receivables.certificates', 'property', 'Vydávat potvrzení o dluzích SVJ', $staffOnly],
+            ['property.settlements.manage', 'property', 'Připravovat vyúčtování služeb SVJ', $staffOnly],
+            ['property.settlements.post', 'property', 'Účtovat vyúčtování služeb SVJ', $staffOnly],
+            ['property.settlements.reverse', 'property', 'Stornovat vyúčtování služeb SVJ', $staffOnly],
+            ['property.settlements.unwind', 'property', 'Rozpouštět dohady služeb SVJ', $staffOnly],
+            ['property.funds.post', 'property', 'Účtovat čerpání záloh a příjmy vlastníků SVJ', $staffOnly],
+            ['property.funds.reverse', 'property', 'Stornovat čerpání záloh a příjmy vlastníků SVJ', $staffOnly],
+            ['property.opening.manage', 'property', 'Připravovat počáteční stavy SVJ', $staffOnly],
+            ['property.opening.post', 'property', 'Potvrzovat počáteční stavy SVJ', $staffOnly],
+            ['property.opening.revise', 'property', 'Revidovat a stornovat počáteční stavy SVJ', $staffOnly],
+            ['property.payments.manage', 'property', 'Spravovat úhrady SVJ', $staffOnly],
+            ['property.payments.post', 'property', 'Účtovat úhrady SVJ', $staffOnly],
+            ['property.payments.reverse', 'property', 'Stornovat úhrady SVJ', $staffOnly],
             ['other_items', 'other_items', 'Ostatní pohledávky a závazky', $staffOnly],
             ['tax_evidence', 'tax_evidence', 'Daňová evidence', $staffOnly],
             ['tax_evidence.classification.write', 'tax_evidence', 'Klasifikovat pohyby', $staffOnly],
             ['tax_evidence.export', 'tax_evidence', 'Exportovat daňovou evidenci', $staffOnly],
             ['reports', 'reports', 'Daně a výkazy', $staffOnly],
             ['reports.finalize', 'reports', 'Finalizovat výkaz', $staffOnly],
-            ['reports.submit', 'reports', 'Elektronicky podat', $staffOnly],
+            ['reports.submissions', 'reports', 'Připravená podání DPH, KH a SH', $clientOnly],
+            ['reports.submit', 'reports', 'Elektronicky podat', $both],
+            ['reports.submissions.manage', 'reports', 'Spravovat nastavení daňových podání', $staffOnly],
             ['reports.reopen', 'reports', 'Znovu otevřít výkaz', $staffOnly],
             ['reports.export', 'reports', 'Exportovat výkaz', $staffOnly],
             ['payroll', 'payroll', 'Mzdy', $staffOnly],
@@ -121,6 +148,12 @@ final class PermissionCatalog
             ['cash', 'cash', 'Pokladna', $staffOnly],
             ['cash.document.write', 'cash', 'Pokladní doklady', $staffOnly],
             ['cash.close', 'cash', 'Uzavřít pokladnu a trvale mazat doklady', $staffOnly],
+            ['eet', 'eet', 'EET – evidence tržeb', $staffOnly],
+            ['eet.accept_payment', 'eet', 'Přijímat platby s evidencí EET', $staffOnly],
+            ['eet.correct', 'eet', 'Opravy a vratky EET, ruční opakování', $staffOnly],
+            ['eet.settings', 'eet', 'Nastavení EET, jednotky a zařízení', $staffOnly],
+            ['eet.certificates', 'eet', 'Správa pokladních certifikátů EET', $staffOnly],
+            ['eet.export', 'eet', 'Export evidence EET', $staffOnly],
             ['assets', 'assets', 'Majetek', $staffOnly],
             ['assets.write', 'assets', 'Spravovat majetek', $staffOnly],
             ['assets.depreciation', 'assets', 'Odpisy', $staffOnly],
@@ -150,6 +183,7 @@ final class PermissionCatalog
             ['settings.payment_qr', 'settings', 'Platební QR firmy', $both],
             ['settings.signing_profiles', 'settings', 'Firemní podpisové profily a PDF podpisy', $clientOnly],
             ['settings.branding', 'settings', 'Branding firmy', $both],
+            ['settings.invoice_defaults', 'settings', 'Výchozí hodnoty dokladů', $both],
             ['settings.ai_provider', 'settings', 'AI poskytovatel', $staffOnly],
             ['settings.signing', 'utilities', 'Elektronické podepisování', $staffOnly],
             ['utilities', 'utilities', 'Nástroje', $staffOnly],
@@ -158,6 +192,7 @@ final class PermissionCatalog
             ['utilities.archives', 'utilities', 'ZIP archivy', $staffOnly],
             ['profile', 'profile', 'Osobní profil', $both],
             ['profile.tokens', 'profile', 'API tokeny', $staffOnly],
+            ['profile.mcp', 'profile', 'Připojit AI asistenta (MCP)', $both],
         ];
 
         $definitions = [];
@@ -199,6 +234,8 @@ final class PermissionCatalog
     {
         if ($systemKey === 'accountant') {
             $none = [
+                // MCP zápis je opt-in; účetní zachová dosavadní čtecí přístup přes profile.tokens.
+                'profile.mcp',
                 // Neměnný originál je auditní stopa; trvalé vyřazení je zásah pro správce,
                 // který si ho může kterékoli roli přidělit v editoru rolí.
                 'documents.inbox.delete',
@@ -206,7 +243,8 @@ final class PermissionCatalog
                 // přidělí správce v editoru rolí, výchozí účetní ji nemá.
                 'invoices.edit_issued',
                 'accounting.periods.close', 'accounting.periods.manage',
-                'settings.ai_provider', 'settings.bank_accounts', 'settings.branding',
+                'property.registry.confirm', 'property.receivables.confirm', 'property.charges.confirm', 'property.charges.reverse', 'property.payments.reverse', 'property.opening.revise', 'property.settlements.reverse', 'property.funds.reverse',
+                'settings.ai_provider', 'settings.bank_accounts', 'settings.branding', 'settings.invoice_defaults',
                 'settings.company.write', 'settings.domains', 'settings.email_profiles', 'settings.email_templates', 'settings.payment_qr', 'utilities.import',
                 'payroll.settings', 'payroll.person.read_sensitive', 'payroll.approve',
                 'payroll.reopen', 'payroll.health_evidence', 'payroll.enforcement', 'payroll.enforcement.cooperation', 'payroll.insolvency', 'payroll.rulesets',
@@ -215,10 +253,13 @@ final class PermissionCatalog
                 // ve výchozím stavu zůstávají: prodloužit lhůtu nebo zadržet výmaz
                 // je konzervativní směr, kterým se nic neztratí.
                 'payroll.erasure',
+                // Pokladní certifikát s privátním klíčem podepisuje evidenci tržeb jménem firmy.
+                'eet.certificates',
             ];
             $read = [
                 'dashboard', 'dashboard.portfolio', 'tax_evidence', 'tax_evidence.export',
                 'reports.export', 'settings.company', 'price_list', 'utilities',
+                'property.export', 'eet.settings',
                 'utilities.export', 'utilities.archives', 'profile.tokens',
             ];
             $permissions = [];
@@ -233,8 +274,8 @@ final class PermissionCatalog
             'readonly' => [
                 'dashboard', 'dashboard.portfolio', 'clients', 'projects', 'invoices',
                 'purchase_invoices', 'purchase_invoices.approve', 'recurring', 'price_list', 'bank', 'documents', 'documents.requests', 'documents.inbox',
-                'accounting', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
-                'cash', 'assets', 'stock', 'eshop', 'logbook', 'settings.company', 'utilities',
+                'accounting', 'property', 'other_items', 'tax_evidence', 'tax_evidence.export', 'reports', 'reports.export',
+                'cash', 'eet', 'assets', 'stock', 'eshop', 'logbook', 'settings.company', 'utilities',
                 'utilities.export', 'utilities.archives', 'profile', 'profile.tokens',
             ],
             'client' => [
@@ -250,7 +291,7 @@ final class PermissionCatalog
 
         $permissions = [];
         foreach ($keys as $key) {
-            $permissions[$key] = in_array($key, ['profile'], true)
+            $permissions[$key] = $key === 'profile' && $systemKey !== 'readonly'
                 || $systemKey === 'client' && $key !== 'settings.company'
                 ? AccessLevel::WRITE->value
                 : AccessLevel::READ->value;

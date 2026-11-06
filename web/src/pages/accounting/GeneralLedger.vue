@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, reactive, computed, nextTick } from 'vue'
+import { ref, onMounted, reactive, computed, nextTick, watch, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import {
@@ -8,6 +8,7 @@ import {
   type GeneralLedgerReport,
   type GeneralLedgerAccount,
   type AccountStatementItem,
+  type ChartAccount,
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatMoney } from '@/composables/useFormat'
@@ -20,20 +21,25 @@ import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
 import { useSavedFilters, savedFilterTone, type SavedFilterTone } from '@/composables/useSavedFilters'
 import { ensurePrefsLoaded } from '@/composables/useUserPrefs'
 import type { SavedFilter } from '@/api/preferences'
-import { ICONS, btnOutline } from '@/components/ui/buttonStyles'
+import { ICONS, btnOutline, btnFilled } from '@/components/ui/buttonStyles'
+import Modal from '@/components/ui/Modal.vue'
+import { errorResponseData } from '@/utils/downloadFile'
 import ActivationBanner from '@/components/settings/activation/ActivationBanner.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { usePaneDom } from '@/composables/usePaneDom'
 import { allAccountingPeriodsRange, findAccountingPeriod } from '@/utils/accountingPeriod'
 import DateInput from '@/components/ui/DateInput.vue'
-import DimensionReportFilter from '@/components/dimensions/DimensionReportFilter.vue'
+import DimensionReportFilters from '@/components/dimensions/DimensionReportFilters.vue'
+import { dimensionValueIdsParam, parseDimensionValueIds } from '@/utils/dimensionFilter'
 import DimensionReportLinks from '@/components/dimensions/DimensionReportLinks.vue'
+import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const paneDom = usePaneDom()
+const accountFieldId = `ledger-account-${useId()}`
 
 const periods = ref<AccountingPeriod[]>([])
 const report = ref<GeneralLedgerReport | null>(null)
@@ -50,12 +56,18 @@ const filters = reactive({
   client: '',
   item: '',
   // Filtr na hodnotu dimenze (Firma → Dimenze) — bere jen řádky deníku s hodnotou.
-  dimension_value_id: null as number | null,
+  dimension_value_ids: [] as number[],
   dimension_descendants: true,
+  // Rozsah účtů (prefixový včetně krajů: 5 až 5 = celá třída 5); platí pro knihu i export.
+  account_from: '',
+  account_to: '',
 })
+// Účtová osnova pro našeptávač rozsahu účtů.
+const chartAccounts = ref<ChartAccount[]>([])
+const chartAccountsLoading = ref(true)
 
-function onDimensionValue(valueId: number | null) {
-  filters.dimension_value_id = valueId
+function onDimensionValues(valueIds: number[]) {
+  filters.dimension_value_ids = valueIds
   load()
 }
 
@@ -76,8 +88,10 @@ function queryParams() {
     vendor: filters.vendor || undefined,
     client: filters.client || undefined,
     item: filters.item || undefined,
-    ...(filters.dimension_value_id
-      ? { dimension_value_id: filters.dimension_value_id, dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
+    account_from: filters.account_from || undefined,
+    account_to: filters.account_to || undefined,
+    ...(filters.dimension_value_ids.length > 0
+      ? { dimension_value_id: dimensionValueIdsParam(filters.dimension_value_ids), dimension_descendants: (filters.dimension_descendants ? 1 : 0) as 0 | 1 }
       : {}),
   }
 }
@@ -86,23 +100,39 @@ function resetFilters() {
   filters.vendor = ''
   filters.client = ''
   filters.item = ''
-  filters.dimension_value_id = null
+  filters.account_from = ''
+  filters.account_to = ''
+  filters.dimension_value_ids = []
   load()
 }
 
+// Parametry knihy, která je na obrazovce: export z nich vychází, ne z rozepsaných polí filtru.
+const loadedQuery = ref<ReturnType<typeof queryParams> | null>(null)
+
+// Pořadí načtení: starší pomalejší odpověď nesmí přepsat novější knihu ani adresu.
+let loadSeq = 0
+
 async function load() {
   if (periods.value.length === 0) return
+  const seq = ++loadSeq
   loading.value = true
   expandedId.value = null
   closeMonth()
+  // Parametry i adresa ze stavu filtrů v okamžiku požadavku, ne až po odpovědi.
+  const params = queryParams()
+  const query = buildQuery(true)
   try {
-    report.value = await accountingApi.getGeneralLedger(queryParams())
-    void router.replace({ query: { ...buildQuery(true), ...(route.query.account_id ? { account_id: route.query.account_id } : {}) } })
+    const data = await accountingApi.getGeneralLedger(params)
+    if (seq !== loadSeq) return
+    report.value = data
+    loadedQuery.value = params
+    void router.replace({ query: { ...query, ...(route.query.account_id ? { account_id: route.query.account_id } : {}) } })
   } catch (e: any) {
+    if (seq !== loadSeq) return
     toast.error(e?.response?.data?.error?.message || t('common.error'))
     report.value = null
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
@@ -342,15 +372,32 @@ async function focusAccount(id: number) {
 }
 
 const exporting = ref(false)
+const showExport = ref(false)
+const exportOptions = reactive({ include_documents: false, format: 'pdf' as 'pdf' | 'xlsx' })
+// Podle načtené knihy, ne rozepsaných polí: upozornění popisuje, co je na obrazovce.
+const analyticBoundWithoutBreakdown = computed(() => {
+  const q = loadedQuery.value
+  // Syntetika má 3 znaky; delší mez je analytika (501.100 i bez tečky 501100).
+  return !!q && !q.analytics && [q.account_from, q.account_to].some(code => (code ?? '').length > 3)
+})
+// Rozpis s doklady je zatím jen v PDF (podobu XLSX je potřeba domluvit s maintainerem).
+watch(() => exportOptions.include_documents, (detail) => { if (detail) exportOptions.format = 'pdf' })
+function openExport() {
+  showExport.value = true
+}
 async function exportFile(format: 'pdf' | 'xlsx') {
-  if (!report.value) return
+  if (!report.value || !loadedQuery.value) return
   exporting.value = true
   try {
-    const r = await accountingApi.exportReport('/accounting/reports/general-ledger/export', { ...queryParams(), format })
+    const r = await accountingApi.exportReport('/accounting/reports/general-ledger/export', {
+      ...loadedQuery.value, format,
+      include_documents: exportOptions.include_documents ? 1 : 0,
+    })
     const label = report.value.all_periods ? 'vse' : report.value.period?.fiscal_year
-    downloadBlob(r.data as unknown as Blob, `hlavni-kniha-${label}.${format}`)
+    downloadBlob(r.data as unknown as Blob, `hlavni-kniha-${exportOptions.include_documents ? 'doklady-' : ''}${label}.${format}`)
+    showExport.value = false
   } catch (e: any) {
-    toast.error(e?.response?.data?.error?.message || t('common.error'))
+    toast.error((await errorResponseData(e))?.error?.message || t('common.error'))
   } finally {
     exporting.value = false
   }
@@ -376,8 +423,10 @@ function buildQuery(includeAfterClosing = false): Record<string, string> {
   if (filters.vendor) q.vendor = filters.vendor
   if (filters.client) q.client = filters.client
   if (filters.item) q.item = filters.item
-  if (filters.dimension_value_id) {
-    q.dimension_value_id = String(filters.dimension_value_id)
+  if (filters.account_from) q.account_from = filters.account_from
+  if (filters.account_to) q.account_to = filters.account_to
+  if (filters.dimension_value_ids.length > 0) {
+    q.dimension_value_id = dimensionValueIdsParam(filters.dimension_value_ids) as string
     if (!filters.dimension_descendants) q.dimension_descendants = '0'
   }
   return q
@@ -392,8 +441,9 @@ function applyQueryToPage(q: Record<string, string>) {
   filters.vendor = q.vendor ?? ''
   filters.client = q.client ?? ''
   filters.item = q.item ?? ''
-  const valueId = Number(q.dimension_value_id)
-  filters.dimension_value_id = Number.isSafeInteger(valueId) && valueId > 0 ? valueId : null
+  filters.account_from = q.account_from ?? ''
+  filters.account_to = q.account_to ?? ''
+  filters.dimension_value_ids = parseDimensionValueIds(q.dimension_value_id)
   filters.dimension_descendants = q.dimension_descendants !== '0'
   load()
 }
@@ -477,6 +527,10 @@ onMounted(async () => {
   await ensurePrefsLoaded()
   filters.analytics = tbl.flag('analytics')
   try { periods.value = await accountingApi.listPeriods() } catch { periods.value = [] }
+  // Našeptávač je jen pomůcka: bez osnovy jde rozsah zadat ručně. Neaktivní účty se
+  // počítají do mezí (staré pohyby), nabídka je i tak ukazuje jen aktivní.
+  accountingApi.listAccounts({ includeInactive: true }).then(list => { chartAccounts.value = list }).catch(() => { chartAccounts.value = [] })
+    .finally(() => { chartAccountsLoading.value = false })
   if (Object.keys(route.query).length === 0 && await saved.applyDefaultIfAny()) return
   const open = periods.value.filter(p => p.status === 'open')
   const def = open.length
@@ -496,8 +550,7 @@ onMounted(async () => {
   filters.period_id = periodId
   if (typeof q.from === 'string' && q.from) filters.from = q.from
   if (typeof q.to === 'string' && q.to) filters.to = q.to
-  const valueId = Number(q.dimension_value_id)
-  if (Number.isSafeInteger(valueId) && valueId > 0) filters.dimension_value_id = valueId
+  filters.dimension_value_ids = parseDimensionValueIds(q.dimension_value_id)
   filters.dimension_descendants = q.dimension_descendants !== '0'
   if (periodId === '') {
     const allRange = allAccountingPeriodsRange(periods.value)
@@ -509,6 +562,8 @@ onMounted(async () => {
   if (typeof q.vendor === 'string') filters.vendor = q.vendor
   if (typeof q.client === 'string') filters.client = q.client
   if (typeof q.item === 'string') filters.item = q.item
+  if (typeof q.account_from === 'string') filters.account_from = q.account_from
+  if (typeof q.account_to === 'string') filters.account_to = q.account_to
   await load()
   await focusAccountFromQuery()
 })
@@ -526,13 +581,9 @@ onMounted(async () => {
         <SavedFiltersMenu :ctrl="saved" />
         <ColumnPicker class="hidden md:block" :ctrl="tbl" />
         <DensityToggle class="hidden md:block" :ctrl="tbl" />
-        <button :disabled="!report || exporting" @click="exportFile('pdf')" :class="btnOutline('primary')">
+        <button :disabled="!report || loading || exporting" @click="openExport" :class="btnOutline('primary')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-          {{ t('accounting.general_ledger.export_pdf') }}
-        </button>
-        <button :disabled="!report || exporting" @click="exportFile('xlsx')" :class="btnOutline('primary')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>
-          {{ t('accounting.general_ledger.export_xlsx') }}
+          {{ t('accounting.general_ledger.export_open') }}
         </button>
       </div>
     </div>
@@ -631,17 +682,28 @@ onMounted(async () => {
             :placeholder="t('accounting.general_ledger.filter_item_placeholder')"
             class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
         </div>
+        <div>
+          <label :for="`${accountFieldId}-from`" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.general_ledger.filter_account_from') }}</label>
+          <ChartAccountSelect v-model.trim="filters.account_from" :input-id="`${accountFieldId}-from`" :accounts="chartAccounts" :loading="chartAccountsLoading" allow-prefix
+            :placeholder="t('accounting.general_ledger.filter_account_placeholder')" input-class="h-9 text-sm" @change="load" />
+        </div>
+        <div>
+          <label :for="`${accountFieldId}-to`" class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.general_ledger.filter_account_to') }}</label>
+          <ChartAccountSelect v-model.trim="filters.account_to" :input-id="`${accountFieldId}-to`" :accounts="chartAccounts" :loading="chartAccountsLoading" allow-prefix
+            :placeholder="t('accounting.general_ledger.filter_account_placeholder')" input-class="h-9 text-sm" @change="load" />
+        </div>
       </div>
-      <DimensionReportFilter class="mt-3"
-        :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants"
-        @update:value-id="onDimensionValue" @update:descendants="onDimensionDescendants" />
+      <p v-if="analyticBoundWithoutBreakdown" class="mt-2 text-xs text-warning-700">{{ t('accounting.general_ledger.range_analytics_hint') }}</p>
+      <DimensionReportFilters class="mt-3"
+        :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants"
+        @update:value-ids="onDimensionValues" @update:descendants="onDimensionDescendants" />
       <div class="flex flex-wrap items-center justify-end gap-2 mt-2">
         <button @click="resetFilters" class="cursor-pointer text-xs text-neutral-500 hover:text-neutral-700">{{ t('accounting.general_ledger.reset_filters') }}</button>
       </div>
     </div>
 
     <DimensionReportLinks current="ledger" :from="filters.from || report?.from || ''" :to="filters.to || report?.to || ''"
-      :value-id="filters.dimension_value_id" :descendants="filters.dimension_descendants" />
+      :value-ids="filters.dimension_value_ids" :descendants="filters.dimension_descendants" />
 
     <p v-if="report?.dimension" class="mb-4 rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-xs text-primary-800">
       {{ t('dimensions.filter_active_note') }}
@@ -844,5 +906,41 @@ onMounted(async () => {
         </table>
       </div>
     </div>
+    <Modal v-if="showExport && report" :title="t('accounting.general_ledger.export_title')" width-class="max-w-lg" @close="!exporting && (showExport = false)">
+      <div class="space-y-5">
+        <fieldset class="space-y-2">
+          <legend class="text-sm font-semibold mb-2">{{ t('accounting.general_ledger.export_content') }}</legend>
+          <label class="flex items-center gap-2 text-sm cursor-pointer"><input v-model="exportOptions.include_documents" type="radio" name="ledger-export-content" :value="false" />{{ t('accounting.general_ledger.export_summary') }}</label>
+          <label class="flex items-center gap-2 text-sm cursor-pointer"><input v-model="exportOptions.include_documents" type="radio" name="ledger-export-content" :value="true" />{{ t('accounting.general_ledger.export_detail') }}</label>
+        </fieldset>
+        <fieldset>
+          <legend class="text-sm font-semibold mb-2">{{ t('accounting.general_ledger.export_format') }}</legend>
+          <div class="flex flex-wrap gap-5">
+            <label class="inline-flex items-center gap-2 text-sm cursor-pointer"><input v-model="exportOptions.format" type="radio" name="ledger-export-format" value="pdf" />PDF</label>
+            <label class="inline-flex items-center gap-2 text-sm" :class="exportOptions.include_documents ? 'text-neutral-400' : 'cursor-pointer'"><input v-model="exportOptions.format" type="radio" name="ledger-export-format" value="xlsx" :disabled="exportOptions.include_documents" />XLSX</label>
+          </div>
+          <p v-if="exportOptions.include_documents" class="mt-1 text-xs text-neutral-500">{{ t('accounting.general_ledger.export_detail_pdf_only') }}</p>
+        </fieldset>
+        <div class="rounded-lg bg-neutral-50 border border-neutral-200 p-3 text-xs text-neutral-600 space-y-1">
+          <p class="font-medium">{{ t('accounting.general_ledger.export_scope') }}</p>
+          <p>{{ formatDate(report.from) }} – {{ formatDate(report.to) }}</p>
+          <p>{{ loadedQuery?.analytics ? t('accounting.general_ledger.filter_analytics') : t('accounting.general_ledger.export_without_analytics') }}</p>
+          <p>{{ loadedQuery?.after_closing ? t('accounting.reports.after_closing') : t('accounting.general_ledger.export_before_closing') }}</p>
+          <p v-if="loadedQuery?.vendor">{{ t('accounting.general_ledger.filter_vendor') }}: {{ loadedQuery.vendor }}</p>
+          <p v-if="loadedQuery?.client">{{ t('accounting.general_ledger.filter_client') }}: {{ loadedQuery.client }}</p>
+          <p v-if="loadedQuery?.item">{{ t('accounting.general_ledger.filter_item') }}: {{ loadedQuery.item }}</p>
+          <p v-if="loadedQuery?.account_from || loadedQuery?.account_to">{{ t('accounting.general_ledger.export_accounts', { from: loadedQuery.account_from || '…', to: loadedQuery.account_to || '…' }) }}</p>
+          <p v-if="report.dimension?.label">{{ t('accounting.general_ledger.export_dimension') }}: {{ report.dimension.label }}</p>
+          <p class="pt-1">{{ t('accounting.general_ledger.export_scope_hint') }}</p>
+        </div>
+        <p v-if="exporting" class="text-xs text-neutral-500" role="status" aria-live="polite">{{ t('accounting.general_ledger.export_preparing_hint') }}</p>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :disabled="exporting" :class="btnOutline('neutral')" @click="showExport = false"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" d="M6 18L18 6M6 6l12 12" /></svg>{{ t('common.cancel') }}</button>
+          <button type="button" :disabled="exporting || loading || !loadedQuery" :class="btnFilled('primary')" @click="exportFile(exportOptions.format)"><svg v-if="exporting" class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" /><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8v4a4 4 0 0 0-4 4H4z" /></svg><svg v-else class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.download" /></svg>{{ exporting ? t('accounting.general_ledger.export_preparing') : t('accounting.general_ledger.export_submit') }}</button>
+        </div>
+      </template>
+    </Modal>
   </div>
 </template>

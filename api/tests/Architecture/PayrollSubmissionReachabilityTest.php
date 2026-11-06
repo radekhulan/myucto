@@ -50,10 +50,6 @@ final class PayrollSubmissionReachabilityTest extends TestCase
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1DocumentResolver' => 'nahrazeno JmhzScenario1DocumentService',
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1Resolution' => 'nahrazeno JmhzScenario1DocumentService',
         'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzScenario1XmlSerializer' => 'volá se přes JmhzScenario1XmlValidator',
-        // Predikát měsíce bez příjmu volá příprava hlášení ze stejného
-        // jmenného prostoru (graf vidí jen `use`); tabulky situací zatím
-        // workflow nemají.
-        'MyInvoice\Service\Payroll\Submission\Jmhz\JmhzZeroReportProfile' => 'tabulky nulového hlášení nemají workflow',
         // Registrace staví snapshot přímo builderem: tahle služba váže
         // snapshot na revizi mzdového běhu, která u přihlášky před nástupem
         // z podstaty neexistuje. Zapojit ji znamená rozvázat tu vazbu i v SQL.

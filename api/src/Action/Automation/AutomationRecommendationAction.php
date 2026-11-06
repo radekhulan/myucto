@@ -28,6 +28,7 @@ final class AutomationRecommendationAction
             (int) ($user['id'] ?? 0),
             RequestAuthorization::isSuperadmin($request),
             $query,
+            RequestAuthorization::boundSupplierId($request),
         ));
     }
 
@@ -38,6 +39,7 @@ final class AutomationRecommendationAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         return Json::ok($response, $this->recommendations->requestRefresh(
             (int) ($user['id'] ?? 0), RequestAuthorization::isSuperadmin($request), $query['suppliers'],
+            RequestAuthorization::boundSupplierId($request),
         ), 202);
     }
 

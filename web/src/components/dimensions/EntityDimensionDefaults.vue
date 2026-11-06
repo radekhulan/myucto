@@ -37,6 +37,7 @@ const WRITE_PERMISSION: Record<DimensionDefaultsEntity, PermissionKey[]> = {
   projects: ['projects'],
   'stock/items': ['stock.items.write', 'accounting'],
   'eshop/categories': ['eshop.write', 'accounting'],
+  'accounting/bank-accounts': ['accounting'],
 }
 const canEdit = computed(() => dims.enabled.value && WRITE_PERMISSION[props.entity].every(p => auth.canWrite(p)))
 const hint = computed(() => ({
@@ -44,6 +45,7 @@ const hint = computed(() => ({
   projects: t('dimensions.defaults.hint_project'),
   'stock/items': t('dimensions.defaults.hint_product'),
   'eshop/categories': t('dimensions.defaults.hint_category'),
+  'accounting/bank-accounts': t('dimensions.defaults.hint_bank_account'),
 } as Record<DimensionDefaultsEntity, string>)[props.entity])
 const dirty = computed(() => JSON.stringify(compactDimensions(model.value)) !== saved.value)
 const hasValues = computed(() => Object.keys(compactDimensions(model.value)).length > 0)

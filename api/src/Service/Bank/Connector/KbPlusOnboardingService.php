@@ -9,9 +9,23 @@ use MyInvoice\Repository\BankConnectionRepository;
 use MyInvoice\Repository\KbPlusOAuthRepository;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
+use MyInvoice\Service\OAuth\OAuthAuthorization;
+use MyInvoice\Service\OAuth\OAuthCallback;
+use MyInvoice\Service\OAuth\OAuthClientFlow;
+use MyInvoice\Service\OAuth\OAuthException;
 
+/**
+ * Připojení účtu KB+ ve dvou krocích: registrace klienta u KB (registrační callback KB+)
+ * a OAuth souhlas (bez PKCE, KB+ ho nepodporuje). State a rozpracované přihlášení obou
+ * kroků drží společná vrstva {@see OAuthClientFlow} (doména bank, poskytovatel kb_plus).
+ *
+ * Redirect URI s `?supplier_id=` je registrovaná u KB při registraci klienta, proto zůstává;
+ * routa je alias společného callbacku. Přihlášení zahájená před přechodem na společnou
+ * vrstvu se dočtou z bank_oauth_sessions ({@see claim()}).
+ */
 final class KbPlusOnboardingService
 {
+    public const PROVIDER = 'kb_plus';
     private const REGISTRATION_TTL = 1800;
     private const OAUTH_TTL = 300;
     private const REGISTRATION_FIELDS = [
@@ -30,6 +44,7 @@ final class KbPlusOnboardingService
         private readonly BankConnectorCallGuard $calls,
         private readonly SecretEncryption $secrets,
         private readonly Config $config,
+        private readonly OAuthClientFlow $flow,
     ) {}
 
     public function status(int $supplierId, int $currencyId): array
@@ -38,7 +53,7 @@ final class KbPlusOnboardingService
         $blockers = $this->serverBlockers();
         $connection = $this->connections->findPublicByCurrency($supplierId, $currencyId);
         $client = $this->oauth->client($supplierId);
-        $flow = $this->oauth->publicStatus($supplierId, $currencyId);
+        $flow = $this->flowStatus($supplierId, $currencyId);
         $connected = $connection !== null && $connection['provider'] === 'kb_plus' && $connection['has_token'];
         $token = $connected ? $this->connectedCredentials($supplierId, $currencyId) : null;
         $batch = $this->batchSubmission($supplierId, $client, $connected, $token);
@@ -93,7 +108,8 @@ final class KbPlusOnboardingService
             unset($input['payment_batches']);
             $credentials = $this->registrationInput($input);
             try {
-                $state = $this->state();
+                $authorization = $this->flow->authorize(false, OAuthClientFlow::STATE_BASE64URL);
+                $state = $authorization->state;
                 $statement = $this->calls->call(
                     $credentials['client_registration_api_key'],
                     fn (): string => $this->registrationClient->createSoftwareStatement(
@@ -107,7 +123,7 @@ final class KbPlusOnboardingService
                     'redirect_uris' => [$this->oauthCallback($supplierId)],
                     'scopes' => $this->scopes($credentials + ['payment_batches' => $batches, 'api_plan' => $plan]),
                 ], $state);
-                $secret = $this->encodeSecret([
+                $secret = [
                     'state' => $state,
                     'encryption_key' => $begin['encryption_key'],
                     'payment_batches' => $batches,
@@ -116,8 +132,8 @@ final class KbPlusOnboardingService
                     'adaa_api_key' => $credentials['adaa_api_key'],
                     'batchda_api_key' => $credentials['batchda_api_key'],
                     'redirect_uri' => $this->oauthCallback($supplierId),
-                ]);
-                $this->storeSession($state, $supplierId, $currencyId, $userId, 'registration', $secret, self::REGISTRATION_TTL);
+                ];
+                $this->storeSession($authorization, $supplierId, $currencyId, $userId, 'registration', $secret, self::REGISTRATION_TTL);
                 return $this->started('registration_pending', $begin['url'], self::REGISTRATION_TTL);
             } catch (BankConnectorException $e) {
                 throw new BankConnectorOperationException($e->errorCode);
@@ -142,10 +158,9 @@ final class KbPlusOnboardingService
         return $this->calls->withConnectionLock($supplierId, $currencyId, function () use (
             $supplierId, $currencyId, $userId, $state, $callback,
         ): array {
-            $session = $this->claim($supplierId, $userId, $state, 'registration');
-            $hash = hash('sha256', $state);
+            [$open, $finish] = $this->claim($supplierId, $userId, $state, 'registration');
             try {
-                $secret = $this->decryptSession($session);
+                $secret = $open();
                 $client = $this->registration->complete(
                     (string) $secret['encryption_key'],
                     (string) $secret['state'],
@@ -159,20 +174,25 @@ final class KbPlusOnboardingService
                     'redirect_uri' => $secret['redirect_uri'],
                 ];
                 $this->saveClient($supplierId, $userId, $client);
-                $result = $this->startOAuth($supplierId, $currencyId, $userId, $client, KbPlusCredentialVault::plan($secret));
-                $this->oauth->finish($hash, true);
-                return $result;
+                $finish(true, null);
+                return $this->startOAuth($supplierId, $currencyId, $userId, $client, KbPlusCredentialVault::plan($secret));
             } catch (BankConnectorException $e) {
-                $this->oauth->finish($hash, false, $e->errorCode);
+                $finish(false, $e->errorCode);
                 throw new BankConnectorOperationException($e->errorCode);
             } catch (BankConnectorOperationException $e) {
-                $this->oauth->finish($hash, false, $e->errorCode);
+                $finish(false, $e->errorCode);
                 throw $e;
             } catch (\Throwable) {
-                $this->oauth->finish($hash, false, 'kb_plus_registration_invalid');
+                $finish(false, 'kb_plus_registration_invalid');
                 throw new BankConnectorOperationException('kb_plus_registration_invalid');
             }
         });
+    }
+
+    /** Návrat z KB na společný callback (nebo jeho alias) pro přihlášení zahájené přes společnou vrstvu. */
+    public function completeCallback(OAuthCallback $callback): int
+    {
+        return $this->completeOAuth($callback->supplierId(), $callback->userId(), $callback->state, $callback->code);
     }
 
     public function completeOAuth(
@@ -188,10 +208,9 @@ final class KbPlusOnboardingService
         return $this->calls->withConnectionLock($supplierId, $currencyId, function () use (
             $supplierId, $currencyId, $userId, $state, $code,
         ): int {
-            $session = $this->claim($supplierId, $userId, $state, 'oauth');
-            $hash = hash('sha256', $state);
+            [$open, $finish] = $this->claim($supplierId, $userId, $state, 'oauth');
             try {
-                $secret = $this->decryptSession($session);
+                $secret = $open();
                 $basic = KbPlusCredentialVault::plan($secret) === KbPlusCredentialVault::PLAN_BASIC;
                 try {
                     [$tokens, $accounts] = $this->calls->call(
@@ -250,23 +269,29 @@ final class KbPlusOnboardingService
                     $supplierId, $connectionId, 'kb_plus', $ciphertext, true,
                     strtoupper((string) $remote['iban']), '0100', $remoteCurrency,
                 );
-                $this->oauth->finish($hash, true);
+                $finish(true, null);
                 return $currencyId;
             } catch (BankConnectorOperationException $e) {
-                $this->oauth->finish($hash, false, $e->errorCode);
+                $finish(false, $e->errorCode);
                 throw $e;
             } catch (\Throwable) {
-                $this->oauth->finish($hash, false, 'kb_plus_oauth_failed');
+                $finish(false, 'kb_plus_oauth_failed');
                 throw new BankConnectorOperationException('kb_plus_oauth_failed');
             }
         });
     }
 
+    /** Účet rozpracovaného přihlášení; přihlášení z doby před společnou vrstvou se hledá v bank_oauth_sessions. */
     public function currencyForState(int $supplierId, int $userId, string $state): ?int
     {
-        return $this->validState($state)
-            ? $this->oauth->currencyForState(hash('sha256', $state), $supplierId, $userId)
-            : null;
+        if (!$this->validState($state)) return null;
+        $session = $this->flow->find($state);
+        if ($session !== null) {
+            return $session['supplier_id'] === $supplierId && $session['user_id'] === $userId
+                && $session['domain'] === BankOAuthCallbackHandler::DOMAIN && $session['provider'] === self::PROVIDER
+                ? $session['subject_id'] : null;
+        }
+        return $this->oauth->currencyForState(hash('sha256', $state), $supplierId, $userId);
     }
 
     /**
@@ -305,7 +330,9 @@ final class KbPlusOnboardingService
     /** @param array<string,mixed> $client */
     private function startOAuth(int $supplierId, int $currencyId, int $userId, #[\SensitiveParameter] array $client, string $plan): array
     {
-        $state = $this->state();
+        // KB+ PKCE nepodporuje; state v base64url jako před společnou vrstvou.
+        $authorization = $this->flow->authorize(false, OAuthClientFlow::STATE_BASE64URL);
+        $state = $authorization->state;
         $secret = $client + ['state' => $state, 'call_guard_key' => $this->state()];
         $secret['api_plan'] = $plan;
         // Souhlas nemůže přesáhnout registraci: Basic čte výpisy STATDA, Plus pohyby ADAA.
@@ -317,20 +344,46 @@ final class KbPlusOnboardingService
             $secret['scope'] = 'statda';
         }
         $url = $this->api->authorizationUrl($secret, $state);
-        $this->storeSession($state, $supplierId, $currencyId, $userId, 'oauth', $this->encodeSecret($secret), self::OAUTH_TTL);
+        $this->storeSession($authorization, $supplierId, $currencyId, $userId, 'oauth', $secret, self::OAUTH_TTL);
         return $this->started('authorization_pending', $url, self::OAUTH_TTL);
     }
 
+    /**
+     * Jednorázově převezme rozpracované přihlášení: ze společné vrstvy, jinak z bank_oauth_sessions
+     * (přihlášení zahájené před přechodem na ni). Vrací [otevření tajemství, ukončení přihlášení].
+     *
+     * @return array{0:\Closure():array<string,mixed>, 1:\Closure(bool, ?string):void}
+     */
     private function claim(int $supplierId, int $userId, string $state, string $stage): array
     {
         if (!$this->validState($state)) {
             throw new BankConnectorOperationException('kb_plus_onboarding_invalid');
         }
-        $session = $this->oauth->claim(hash('sha256', $state), $supplierId, $userId, $stage);
-        if ($session === null) {
+        try {
+            $session = $this->flow->claim($state, $supplierId, $userId, BankOAuthCallbackHandler::DOMAIN, self::PROVIDER, $stage);
+        } catch (OAuthException) {
+            throw new BankConnectorOperationException('credential_unavailable');
+        }
+        if ($session !== null) {
+            return [static fn (): array => $session->secret,
+                fn (bool $success, ?string $errorCode): mixed => $this->flow->finish($session, $success, $errorCode)];
+        }
+        $hash = hash('sha256', $state);
+        $legacy = $this->oauth->claim($hash, $supplierId, $userId, $stage);
+        if ($legacy === null) {
             throw new BankConnectorOperationException('kb_plus_onboarding_used_or_expired');
         }
-        return $session;
+        return [fn (): array => $this->decryptSession($legacy),
+            fn (bool $success, ?string $errorCode): mixed => $this->oauth->finish($hash, $success, $errorCode)];
+    }
+
+    /** Stav posledního přihlášení účtu pro UI; bez přihlášení ve společné vrstvě to z bank_oauth_sessions. */
+    private function flowStatus(int $supplierId, int $currencyId): ?array
+    {
+        $row = $this->flow->latest($supplierId, BankOAuthCallbackHandler::DOMAIN, self::PROVIDER, $currencyId);
+        if ($row === null) return $this->oauth->publicStatus($supplierId, $currencyId);
+        return ['stage' => $row['stage'], 'status' => $row['status'] === 'pending' && $row['expired'] ? 'expired' : $row['status'],
+            'error_code' => $row['error_code'], 'expires_at' => $row['expires_at']];
     }
 
     private function account(int $supplierId, int $currencyId): array
@@ -592,24 +645,40 @@ final class KbPlusOnboardingService
         }
     }
 
-    private function storeSession(string $state, int $supplierId, int $currencyId, int $userId, string $stage, string $secret, int $ttl): void
+    /**
+     * Uloží rozpracované přihlášení do společné vrstvy. Platí jen poslední zahájené, proto
+     * končí i rozpracované přihlášení účtu v bank_oauth_sessions.
+     *
+     * @param array<string,mixed> $secret
+     */
+    private function storeSession(OAuthAuthorization $authorization, int $supplierId, int $currencyId, int $userId, string $stage,
+        #[\SensitiveParameter] array $secret, int $ttl): void
     {
-        $hash = hash('sha256', $state);
-        $ciphertext = $this->secrets->encryptFor($secret, $this->sessionContext($supplierId, $currencyId, $userId, $hash, $stage));
-        if (!str_starts_with($ciphertext, 'enc:v2:')) {
-            throw new BankConnectorOperationException('encryption_failed');
+        $this->encodeSecret($secret);
+        $this->oauth->cancelPending($supplierId, $currencyId);
+        try {
+            $this->flow->store($authorization, $supplierId, $userId, BankOAuthCallbackHandler::DOMAIN, self::PROVIDER, $currencyId,
+                OAuthClientFlow::FLOW_REDIRECT, $secret, $ttl, $stage);
+        } catch (OAuthException $e) {
+            throw new BankConnectorOperationException($e->errorCode === OAuthException::ENCRYPTION_KEY ? 'encryption_key_unavailable' : 'encryption_failed');
         }
-        $this->oauth->replacePending($hash, $supplierId, $currencyId, $userId, $stage, $ciphertext, $ttl);
     }
 
     private function registrationStateFromResponse(int $supplierId, int $userId, #[\SensitiveParameter] array $callback): string
     {
-        $matched = null;
+        $candidates = [];
+        foreach ($this->flow->pendingForUser($supplierId, $userId, BankOAuthCallbackHandler::DOMAIN, self::PROVIDER, 'registration') as $session) {
+            $candidates[] = [$session->stateHash, static fn (): array => $session->secret];
+        }
         foreach ($this->oauth->pendingRegistrations($supplierId, $userId) as $session) {
+            $candidates[] = [(string) $session['state_hash'], fn (): array => $this->decryptSession($session)];
+        }
+        $matched = null;
+        foreach ($candidates as [$stateHash, $open]) {
             try {
-                $secret = $this->decryptSession($session);
+                $secret = $open();
                 $state = (string) ($secret['state'] ?? '');
-                if (!$this->validState($state) || !hash_equals((string) $session['state_hash'], hash('sha256', $state))) {
+                if (!$this->validState($state) || !hash_equals($stateHash, hash('sha256', $state))) {
                     continue;
                 }
                 $this->registration->complete(

@@ -59,7 +59,7 @@ final class RevenueCategoriesAction
             if (str_contains($e->getMessage(), 'Duplicate')) {
                 return Json::error($response, 'duplicate_code', "Kód '{$body['code']}' už existuje.", 409);
             }
-            return Json::error($response, 'create_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'create_failed', $e->getMessage(), 500);
         }
 
         $userId = (int) ($user['id'] ?? 0);
@@ -101,7 +101,7 @@ final class RevenueCategoriesAction
             if (str_contains($e->getMessage(), 'Duplicate')) {
                 return Json::error($response, 'duplicate_code', "Kód '{$merged['code']}' už existuje.", 409);
             }
-            return Json::error($response, 'update_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'update_failed', $e->getMessage(), 500);
         }
         $userId = (int) ($user['id'] ?? 0);
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());

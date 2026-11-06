@@ -6,6 +6,7 @@ namespace MyInvoice\Service\Payroll\Submission\Eldp;
 
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverMonth;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzActivityFamily;
+use MyInvoice\Service\Payroll\Pension\PayrollPensionStatus;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverYear;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookCatalog;
@@ -95,19 +96,23 @@ use Psr\Clock\ClockInterface;
  *   účinném od 1. 1. 2025 se evidenční list nevede za občana, který má nárok na
  *   výplatu starobního důchodu v plné výši, nebyl-li nebo není-li účasten
  *   důchodového pojištění v cizině; novela č. 360/2025 Sb. podmínku převzala
- *   („Věta první se nepoužije"). Měsíce od prvního měsíce výplaty se proto
- *   z listu vypustí, a nezbude-li žádný, list se nesestaví
+ *   („Věta první se nepoužije"). List se vede do měsíce, od něhož výplata
+ *   náleží, včetně něj (Metodická pomůcka ČSSZ k ELDP, příklad 8a); pozdější
+ *   měsíce se z listu vypustí, a nezbude-li žádný, list se nesestaví
  *   (`eldp_not_kept_full_old_age_pension`). Za roky do 2024 se list za
  *   pracujícího důchodce vedl dál (Metodická pomůcka ČSSZ k ELDP, příklad 8).
  * - **Kód D** (číselník kódů ELDP, druhý znak): výdělečná činnost po dovršení
- *   důchodového věku nebo poživatel předčasného starobního důchodu. Sekce se
- *   dělí ke dni, od kterého kód platí. Den uprostřed měsíce by vyžadoval
- *   rozdělit měsíční vyměřovací základ, který výpočet za část měsíce nevede,
- *   a proto blokuje (`eldp_pension_age_mid_month_unsupported`).
+ *   důchodového věku (§ 29 odst. 1 nebo 3 zákona č. 155/1995 Sb.). Předčasný
+ *   starobní důchod kód D nezakládá. Sekce se dělí ke dni, od kterého kód
+ *   platí. Den uprostřed měsíce by vyžadoval rozdělit měsíční vyměřovací
+ *   základ, který výpočet za část měsíce nevede, a proto blokuje
+ *   (`eldp_pension_age_mid_month_unsupported`).
  *
- * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí.
- * Kód D pro ostatní (po dovršení důchodového věku bez důchodu, předčasný důchod)
- * se skládá tímtéž pravidlem ({@see EldpPensionAgeCode}) i v hlášení
+ * Měsíční hlášení JMHZ třídu ELDP u poživatele starobního důchodu neuvádí
+ * až od měsíce, který následuje po měsíci, od něhož výplata náleží; ten ještě
+ * vykazuje stejně jako list ({@see PayrollPensionStatus::eldpKeptInMonth()}).
+ * Kód D pro ostatní (po dovršení důchodového věku bez plného důchodu) se skládá
+ * tímtéž pravidlem ({@see EldpPensionAgeCode}) i v hlášení
  * ({@see JmhzEldpEvidenceBuilder}), pokud zdroj nese potvrzené důchodové údaje.
  */
 final class EldpAnnualStatementBuilder
@@ -860,7 +865,8 @@ final class EldpAnnualStatementBuilder
                 throw new EldpValidationException(
                     'eldp_not_kept_full_old_age_pension',
                     "Za rok {$year} se evidenční list nevede: zaměstnanec má od "
-                        . self::monthLabel($notKeptFrom) . ' nárok na výplatu starobního '
+                        . self::monthLabel((string) $pension['full_pension_paid_from'] . '-01')
+                        . ' nárok na výplatu starobního '
                         . 'důchodu v plné výši a není účasten důchodového pojištění v cizině '
                         . '(§ 38 odst. 1 věta druhá zákona č. 582/1991 Sb.).',
                 );
@@ -2005,27 +2011,35 @@ final class EldpAnnualStatementBuilder
             'takeover_source' => $month->source,
         ];
 
-        if (!in_array($month->relationType, ['employment', 'dpc', 'dpp'], true)) {
+        if (!in_array($month->relationType, ['employment', 'dpc', 'dpp', 'partner_dependent', 'statutory_body'], true)) {
             $blockers[] = [
                 'code' => 'eldp_takeover_relationship_kind_unsupported',
-                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr, DPČ ani DPP ("
-                    . ($month->relationType ?? 'neuvedeno') . '); evidenční list jiný neumí.'
+                'message' => "Převzatý měsíc {$label} nemá druh vztahu pracovní poměr, DPČ, DPP, "
+                    . 'společník ani člen orgánu (' . ($month->relationType ?? 'neuvedeno')
+                    . '); evidenční list jiný neumí.'
                     . $where,
                 'detail' => $detail + ['relation_type' => $month->relationType],
             ];
 
             return null;
         }
-        $code = $month->relationType === 'employment'
-            ? $month->eldpCode()
-            : ($month->activityCode !== null
+        // Převzatý řádek nenese bližší určení, u společníka a člena orgánu
+        // proto rozhoduje jen rodina druhu činnosti (měsíční hlášení: S++).
+        $code = match (true) {
+            $month->relationType === 'employment' => $month->eldpCode(),
+            self::socialKind($month->relationType) === 'corporate_body' => $month->activityCode !== null
+                && PayrollEmploymentJmhzActivityFamily::isCorporateBodyActivity($month->activityCode)
+                    ? $month->activityCode . '++'
+                    : null,
+            default => $month->activityCode !== null
                 && PayrollEmploymentJmhzActivityFamily::matches(
                     $month->relationType,
                     $month->activityCode,
                     null,
                 )
                     ? $month->activityCode . '++'
-                    : null);
+                    : null,
+        };
         if ($code === null) {
             $blockers[] = [
                 'code' => 'eldp_takeover_activity_missing',
@@ -2414,35 +2428,45 @@ final class EldpAnnualStatementBuilder
      * Od kterého měsíce se list za poživatele starobního důchodu v plné výši
      * nevede; `null`, když se pravidlo na rok nebo osobu nevztahuje.
      *
+     * Zaměstnavatel vede list „do měsíce, od něhož pojištěnci náleží výplata
+     * starobního důchodu v plné výši" včetně tohoto měsíce (Metodická pomůcka
+     * ELDP, příklad 8a: důchod od 1. 5., list do 31. 5.). Nevede se tedy až od
+     * následujícího měsíce; pravidlo sdílí s měsíčním hlášením
+     * ({@see PayrollPensionStatus::eldpNotKeptFrom()}).
+     *
      * @param array{full_pension_paid_from:?string,foreign_insurance:bool} $pension
      */
     private static function fullPensionNotKeptFrom(int $year, array $pension): ?string
     {
-        if ($year < self::FULL_PENSION_EXCLUSION_FROM_YEAR
-            || $pension['full_pension_paid_from'] === null
-            || $pension['foreign_insurance']
-        ) {
+        if ($year < self::FULL_PENSION_EXCLUSION_FROM_YEAR || $pension['foreign_insurance']) {
             return null;
         }
 
-        return $pension['full_pension_paid_from'] . '-01';
+        return PayrollPensionStatus::eldpNotKeptFrom($pension['full_pension_paid_from']);
     }
 
     /**
-     * Druhý znak kódu ELDP „D" pro dobu od dovršení důchodového věku nebo od
-     * přiznání předčasného starobního důchodu (číselník kódů ELDP, ID 10240).
-     * Pravidlo je společné s měsíčním hlášením JMHZ ({@see EldpPensionAgeCode}).
+     * Druhý znak kódu ELDP „D" pro dobu od dovršení důchodového věku
+     * (číselník kódů ELDP, ID 10240; předčasný starobní důchod kód D
+     * nezakládá). Pravidlo je společné s měsíčním hlášením JMHZ
+     * ({@see EldpPensionAgeCode}).
      *
      * Měsíc, uvnitř kterého kód začíná, se nerozděluje: výpočet vede
      * vyměřovací základ jen za celý měsíc a rozdělit ho na dvě sekce by byl
      * vymyšlený údaj v zákonné evidenci.
      *
-     * Měsíc s kódem D nese odečtené doby (§ 38 odst. 4 písm. h) zákona
-     * č. 582/1991 Sb., údaj 40 ELDP) odvozené z nepřítomností
-     * ({@see EldpExcludedPeriodDeriver::deriveDeducted()}) a dny pojištění jsou
-     * interval Od–Do minus odečtené doby (Všeobecné zásady ELDP, údaj Dny).
-     * Převzatý měsíc nepřítomnosti v potřebném rozsahu doložit neumí, takže kód
-     * D nad ním blokuje.
+     * Každý řádek s kódem D, který v listu zůstane, nese odečtené doby
+     * (§ 38 odst. 4 písm. h) zákona č. 582/1991 Sb., údaj 40 ELDP): za roky do
+     * 2024 i u pracujícího poživatele důchodu (Metodická pomůcka ELDP,
+     * příklad 8), od roku 2025 do měsíce zahájení výplaty plného důchodu
+     * včetně (příklad 8a) a u poživatele s účastí na pojištění v cizině,
+     * jehož list se vede dál. Logické testy ELDP12 39, 47 a 48 chtějí
+     * u kódu D odečtené doby aspoň ve výši vyloučených dob a dnů měsíců „X",
+     * a odečtené doby jsou podle zásad jejich nadmnožinou. Odvozují se
+     * z nepřítomností ({@see EldpExcludedPeriodDeriver::deriveDeducted()})
+     * a dny pojištění jsou interval Od–Do minus odečtené doby (Všeobecné
+     * zásady ELDP, údaj Dny). Převzatý měsíc nepřítomnosti v potřebném
+     * rozsahu doložit neumí, takže blokuje.
      *
      * @param list<array<string,mixed>> $lines
      * @param list<array{code:string,message:string,detail:array<string,mixed>}> $blockers
@@ -2489,7 +2513,7 @@ final class EldpAnnualStatementBuilder
                 $blockers[] = [
                     'code' => 'eldp_pension_age_mid_month_unsupported',
                     'message' => "Kód ELDP se mění uprostřed měsíce {$label} (od {$codeFrom}: "
-                        . 'dovršení důchodového věku nebo předčasný starobní důchod). '
+                        . 'dovršení důchodového věku). '
                         . 'Vyměřovací základ za část měsíce výpočet nevede, takže měsíc nejde '
                         . 'rozdělit na dvě sekce; evidenční list podejte mimo aplikaci.',
                     'detail' => [

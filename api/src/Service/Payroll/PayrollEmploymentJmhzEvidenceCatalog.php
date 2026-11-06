@@ -9,8 +9,10 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
+use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecVersion;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationEmploymentStatusCodebook;
 use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelationshipDetailPolicy;
+use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationSpecVersionRules;
 
 final class PayrollEmploymentJmhzEvidenceCatalog
 {
@@ -19,7 +21,7 @@ final class PayrollEmploymentJmhzEvidenceCatalog
     private readonly JmhzCodebookCatalog $codebooks;
 
     public function __construct(
-        JmhzSpecPackageCatalog $packages,
+        private readonly JmhzSpecPackageCatalog $packages,
         private readonly JmhzExternalCodebookCatalog $externalCodebooks,
     ) {
         $this->manifest = $packages->load(
@@ -123,7 +125,7 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         ];
     }
 
-    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string,relationship_detail_mode:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>,tax_identifier_types:list<array{code:string,label:string}>,education_levels:list<array{code:string,label:string}>,work_mode_codes:list<array{code:string,label:string}>,employment_status_codes:list<array{code:string,label:string}>,workplace_progress_codes:list<array{code:string,label:string}>,pension_type_codes:list<array{code:string,label:string}>,proof_identity_type_codes:list<array{code:string,label:string}>,health_restriction_type_codes:list<array{code:string,label:string}>,foreign_worker_free_access_reason_codes:list<array{code:string,label:string}>,foreign_worker_permit_type_codes:list<array{code:string,label:string}>,labour_office_codes:list<array{code:string,label:string}>} */
+    /** @return array{package_key:string,manifest_sha256:string,external_codebooks:array<string,string|null>,activity_codes:list<array{code:string,label:string,relationship_detail_mode:string}>,relationship_detail_codes:list<array{code:string,label:string}>,apz_instruments:list<array{code:string,label:string}>,countries:list<array{code:string,label:string}>,tax_identifier_types:list<array{code:string,label:string}>,education_levels:list<array{code:string,label:string}>,work_mode_codes:list<array{code:string,label:string}>,employment_status_codes:list<array{code:string,label:string}>,workplace_progress_codes:list<array{code:string,label:string}>,pension_type_codes:list<array{code:string,label:string}>,proof_identity_type_codes:list<array{code:string,label:string}>,health_restriction_type_codes:list<array{code:string,label:string}>,foreign_worker_free_access_reason_codes:list<array{code:string,label:string}>,foreign_worker_permit_type_codes:list<array{code:string,label:string}>,labour_office_codes:list<array{code:string,label:string}>,from_2027:array<string,mixed>} */
     public function options(): array
     {
         $apzOptions = [];
@@ -174,6 +176,61 @@ final class PayrollEmploymentJmhzEvidenceCatalog
                 'druh_pracovniho_opravneni',
             ),
             'labour_office_codes' => $this->codebookOptions('krajske_pobocky_up_cr'),
+            'from_2027' => $this->optionsFrom2027(),
+        ];
+    }
+
+    /**
+     * Hodnoty číselníků, které přidává až EDV 1.5.0.3 a ČSSZ je přijme jen
+     * pro události od 1. 1. 2027 ({@see PayrollRegistrationSpecVersionRules}).
+     * Formulář je nabídne podle data události; popisky jsou z připnutého
+     * balíku 2027, ne opsané.
+     *
+     * @return array{employment_types:list<array{code:string,label:string}>,free_access_reason_codes:list<array{code:string,label:string}>,service_termination_reasons:list<array{code:string,label:string,employment_types:list<string>}>}
+     */
+    private function optionsFrom2027(): array
+    {
+        $pin = $this->packages->requirePin(JmhzSpecVersion::V2027);
+        $codebooks = new JmhzCodebookCatalog(
+            $this->packages->load($pin['package_key'], $pin['manifest_sha256']),
+        );
+        $pick = static function (string $key, ?array $only = null) use ($codebooks): array {
+            $options = [];
+            foreach ($codebooks->entries($key) as $entry) {
+                $code = $entry['item_code'] ?? null;
+                $label = $entry['label'] ?? null;
+                if (!is_string($code) || !is_string($label)) {
+                    throw new \UnexpectedValueException('Připnutý číselník JMHZ má neplatnou položku.');
+                }
+                if ($only === null || in_array($code, $only, true)) {
+                    $options[] = ['code' => $code, 'label' => trim($label)];
+                }
+            }
+
+            return $options;
+        };
+        $serviceTypes = PayrollRegistrationSpecVersionRules::SERVICE_TERMINATION_BY_TYPE;
+
+        return [
+            'employment_types' => $pick('druh_zamestnani', ['3', '4']),
+            'free_access_reason_codes' => $pick(
+                'duvod_pro_volny_pristup_na',
+                PayrollRegistrationSpecVersionRules::FREE_ACCESS_REASONS_2027,
+            ),
+            'service_termination_reasons' => array_map(
+                static fn (array $option): array => [
+                    ...$option,
+                    'employment_types' => array_values(array_map('strval', array_keys(array_filter(
+                        $serviceTypes,
+                        static fn (array $codes): bool => in_array($option['code'], $codes, true),
+                    )))),
+                ],
+                $pick('duvod_ukonceni_sluz_pomeru'),
+            ),
+            // Slovník 1.5.0.3 NKPZ nevkládá, nabídka 2027 jde z číselníku ČSÚ.
+            'employment_status_codes' => PayrollRegistrationEmploymentStatusCodebook::options(
+                JmhzSpecVersion::V2027,
+            ),
         ];
     }
 

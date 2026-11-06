@@ -15,6 +15,7 @@ use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\SecretEncryption;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\System\AppUrlConfiguration;
+use MyInvoice\Service\System\InstanceSecurityConfigurationCheck;
 use MyInvoice\Service\Tenant\HostnameNormalizer;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\Update\VersionService;
@@ -199,6 +200,59 @@ final class HealthActionTest extends TestCase
             'webauthn_compatible' => false,
         ], $body['configuration']['app_url']);
         self::assertStringNotContainsString('private-portal.example.test', (string) $response->getBody());
+    }
+
+    public function testAuthenticatedHealthReportsInsecureProductionDefaults(): void
+    {
+        $db = $this->createStub(Connection::class);
+        $db->method('ping')->willReturn(true);
+        $redis = $this->createStub(RedisProbe::class);
+        $redis->method('isAvailable')->willReturn(false);
+        $crypto = $this->createStub(SecretEncryption::class);
+        $crypto->method('validateKey')->willReturn(null);
+        $version = $this->createStub(VersionService::class);
+        $version->method('getCurrentVersion')->willReturn('test');
+        $policy = $this->createStub(MfaPolicyService::class);
+        $policy->method('isMethodAllowed')->willReturn(false);
+        $config = new Config([
+            'app' => ['env' => 'development', 'url' => 'https://invoice.example.test'],
+            'session' => ['cookie_secure' => false],
+        ]);
+        $action = new HealthAction(
+            $db,
+            $redis,
+            $crypto,
+            $version,
+            $this->createStub(PasskeyService::class),
+            $policy,
+            new SessionLockPolicy(new Config([])),
+            $this->appUrl('https://invoice.example.test'),
+            null,
+            new InstanceSecurityConfigurationCheck($config),
+        );
+
+        $authenticated = $action(
+            (new ServerRequestFactory())
+                ->createServerRequest('GET', '/api/health')
+                ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 17]),
+            (new ResponseFactory())->createResponse(),
+        );
+        $body = json_decode((string) $authenticated->getBody(), true, flags: JSON_THROW_ON_ERROR);
+
+        self::assertSame([
+            InstanceSecurityConfigurationCheck::CODE_COOKIE_INSECURE,
+            InstanceSecurityConfigurationCheck::CODE_ENV_DEVELOPMENT,
+            InstanceSecurityConfigurationCheck::CODE_PAYROLL_HASH_KEY,
+        ], array_column($body['warnings'], 'code'));
+
+        $anonymous = $action(
+            (new ServerRequestFactory())->createServerRequest('GET', '/api/health'),
+            (new ResponseFactory())->createResponse(),
+        );
+        self::assertArrayNotHasKey(
+            'warnings',
+            json_decode((string) $anonymous->getBody(), true, flags: JSON_THROW_ON_ERROR),
+        );
     }
 
     private function appUrl(string $url): AppUrlConfiguration

@@ -253,7 +253,7 @@ final class TaxAdvanceScheduleService
         $candidates = [];
         foreach ([$periodYear, $periodYear + 1] as $candidateYear) {
             foreach ($months as $month) {
-                $candidates[] = sprintf('%04d-%02d-%02d', $candidateYear, (int) $month, $dueDay);
+                $candidates[] = self::advanceDueDate($candidateYear, (int) $month, $dueDay);
             }
         }
         $count = $regime === 'semiannual' ? 2 : 4;
@@ -303,7 +303,7 @@ final class TaxAdvanceScheduleService
         $rows = [];
         $seq = 0;
         foreach ($months as $month) {
-            $dueDate = sprintf('%04d-%02d-%02d', $periodYear, (int) $month, $dueDay);
+            $dueDate = self::advanceDueDate($periodYear, (int) $month, $dueDay);
             if ($effectiveFrom !== '' && $dueDate < $effectiveFrom) {
                 continue;
             }
@@ -318,6 +318,16 @@ final class TaxAdvanceScheduleService
             ];
         }
         return $rows;
+    }
+
+    /**
+     * Splatnost zálohy § 38a ZDP („do 15. dne měsíce") je lhůta: připadne-li na sobotu,
+     * neděli nebo svátek, končí nejbližší následující pracovní den (§ 33 odst. 4 DŘ),
+     * stejně jako lhůty výkazů skládané přes {@see CzechWorkingDays::deadline()}.
+     */
+    private static function advanceDueDate(int $year, int $month, int $day): string
+    {
+        return CzechWorkingDays::deadline($year, $month, $day);
     }
 
     /**
@@ -365,6 +375,8 @@ final class TaxAdvanceScheduleService
             if ($m < $effectiveMonth && $previousMonthly !== null) {
                 $amount = max($previousMonthly, $statutoryMinimum);
             }
+            // Splatnost pojistného se na rozdíl od záloh na daň ({@see advanceDueDate}) neposouvá:
+            // § 33 odst. 4 DŘ upravuje daňové lhůty, pojistné řídí vlastní předpisy.
             if ($kind === 'health') {
                 // do 8. dne následujícího měsíce (prosinec → 8. 1. dalšího roku)
                 $dueMonth = $m === 12 ? 1 : $m + 1;

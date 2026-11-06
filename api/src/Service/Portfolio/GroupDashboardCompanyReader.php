@@ -11,6 +11,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\Accounting\Cash\CashRegisterService;
 use MyInvoice\Service\Accounting\Reports\FinancialStatementService;
+use MyInvoice\Service\Accounting\Reports\StatementMetrics;
 use MyInvoice\Service\Crm\CrmAggregationService;
 use Psr\Http\Message\ServerRequestInterface as Request;
 use Slim\Psr7\Response;
@@ -81,10 +82,7 @@ final class GroupDashboardCompanyReader
                 $report = $this->statements->accountView($id, (int) $period['id'], date('Y-m-d'));
                 return [
                     'currency' => 'CZK', 'from' => $period['starts_on'], 'to' => $report['as_of'],
-                    'revenue' => array_sum(array_column($report['profit_loss']['sections'], 'revenue_total')),
-                    'costs' => array_sum(array_column($report['profit_loss']['sections'], 'expense_total')),
-                    'profit' => $report['profit_loss']['profit'],
-                ];
+                ] + StatementMetrics::accountViewTotals($report);
             });
         } elseif ($section === 'trends' && $documents) {
             $this->part($row, 'monthly', function () use ($id, $period, $toExclusive, $excludeRelated): array {

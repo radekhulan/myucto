@@ -84,6 +84,7 @@ function response(overrides: Partial<PayrollDependantsResponse> = {}): PayrollDe
         other_caregiver_given_name: null,
         other_caregiver_family_name: null,
         other_caregiver_birth_date: null,
+        other_caregiver_birth_number_masked: null,
         effective_from: '2026-01-01',
         effective_to: null,
         superseded_by_id: null,
@@ -317,6 +318,7 @@ describe('PayrollPersonDependantsPanel', () => {
     await wrapper.find('[data-test="claim-caregiver-given-name"]').setValue('Petr')
     await wrapper.find('[data-test="claim-caregiver-family-name"]').setValue('Novák')
     await wrapper.find('[data-test="claim-caregiver-birth-date"]').setValue('1990-04-11')
+    await wrapper.find('[data-test="claim-caregiver-birth-number"]').setValue(' 900411/0006 ')
     await wrapper.find('[data-test="claim-effective-from"]').setValue('2026-01-01')
     await wrapper.find('[data-test="dependant-editor"]').trigger('submit')
     await flushPromises()
@@ -329,6 +331,7 @@ describe('PayrollPersonDependantsPanel', () => {
       other_caregiver_given_name: 'Petr',
       other_caregiver_family_name: 'Novák',
       other_caregiver_birth_date: '1990-04-11',
+      other_caregiver_birth_number: '900411/0006',
       ztp_p: false,
     }))
   })

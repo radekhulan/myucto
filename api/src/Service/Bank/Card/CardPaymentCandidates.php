@@ -80,7 +80,7 @@ final class CardPaymentCandidates
             "SELECT pi.id, pi.card_last4, pi.payment_method,
                     COALESCE(pi.amount_to_pay, pi.total_with_vat, 0) + COALESCE(pi.rounding, 0) AS amount_to_pay,
                     ({$settled}) AS settled_amount,
-                    pi.exchange_rate, cur.code AS currency, c.company_name AS vendor_name
+                    pi.exchange_rate, cur.code AS currency, c.company_name AS vendor_name, pi.vendor_id
                FROM purchase_invoices pi
                JOIN clients c ON c.id = pi.vendor_id AND c.supplier_id = pi.supplier_id
           LEFT JOIN currencies cur ON cur.id = pi.currency_id

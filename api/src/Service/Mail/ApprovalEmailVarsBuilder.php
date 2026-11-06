@@ -50,7 +50,7 @@ final class ApprovalEmailVarsBuilder
 
         return [
             'invoice'       => $invoice,
-            'work_report'   => $this->workReports->findByInvoice((int) $invoice['id']),
+            'work_report'   => $this->workReports->findByInvoice((int) $invoice['id'], (int) ($invoice['supplier_id'] ?? 0)),
             'approval_url'  => $approvalUrl,
             'is_test'       => $isTest,
             'is_reminder'   => $isReminder,

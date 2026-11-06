@@ -9,11 +9,9 @@ use MyInvoice\Http\Json;
 use MyInvoice\Http\SupplierGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
-use MyInvoice\Service\Report\KontrolniHlaseniBuilder;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\ClientRepository;
 use MyInvoice\Repository\InvoiceRepository;
-use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Repository\WorkReportRepository;
 use MyInvoice\Service\Accounting\AssetSale\InvoiceAssetSaleService;
 use MyInvoice\Service\Accounting\Cash\CashSettlementService;
@@ -21,18 +19,19 @@ use MyInvoice\Service\Accounting\DocumentAutoPoster;
 use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AdvanceCycleLock;
+use MyInvoice\Service\Invoice\CalendarInstalmentService;
+use MyInvoice\Service\Invoice\InvoiceCalendar;
 use MyInvoice\Service\Invoice\InvoiceIssuer;
 use MyInvoice\Service\Invoice\InvoiceItemKind;
 use MyInvoice\Service\Invoice\SnapshotBuilder;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\InvoicePdfRenderer;
-use MyInvoice\Service\Invoice\SimplifiedDocumentPolicy;
+use MyInvoice\Service\Invoice\InvoiceIssueTaxGate;
 use MyInvoice\Service\Stats\StatsRecomputer;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\StockIssueService;
 use MyInvoice\Service\Validation\InvoiceAmountPolicy;
-use MyInvoice\Service\Vat\VatStatusService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -60,17 +59,20 @@ final class IssueInvoiceAction
         private readonly WorkReportRepository $workReports,
         // § 31/31a — rozpis plateb kalendáře; bez něj kalendář není daňovým dokladem.
         private readonly \MyInvoice\Repository\PaymentScheduleRepository $paymentSchedule,
+        private readonly CalendarInstalmentService $calendarInstalments,
         private readonly InvoicePdfRenderer $pdfRenderer,
         private readonly DocumentLockService $locks,
         private readonly StockIssueService $stockIssue,
         private readonly DocumentAutoPoster $autoPoster,
         private readonly AdvanceCycleLock $cycleLock,
         private readonly InvoiceAssetSaleService $assetSale,
-        private readonly VatStatusService $vatStatus,
         private readonly CashSettlementService $cashSettlement,
-        private readonly TaxConstantsRepository $taxConstants,
+        private readonly InvoiceIssueTaxGate $taxGate,
         private readonly ClientRepository $clients,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
+        private readonly \MyInvoice\Service\Invoice\InvoicePaymentService $payments,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
+        private readonly \MyInvoice\Service\Invoice\InvoiceOtherItemLinkService $otherItemLink,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -106,6 +108,12 @@ final class IssueInvoiceAction
         }
         if ($invoice['status'] !== 'draft') {
             return Json::error($response, 'not_draft', 'Lze vystavit jen draft fakturu.', 409);
+        }
+
+        try {
+            $this->billing->assertCurrent($id, (int) $invoice['supplier_id']);
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         }
 
         // Zámek dokladu (Epic F6, H1): issue přiděluje varsymbol/číslo řady k issue/tax
@@ -159,19 +167,8 @@ final class IssueInvoiceAction
         // takový řádek vůbec nevznikne (`cleanDic() === ''` ho vyřadí), takže plnění z KH
         // tiše vypadne a nesedí na přiznání — varování v tu chvíli přichází pozdě, doklad
         // je u odběratele.
-        if (!empty($invoice['reverse_charge'])) {
-            $dicStmt = $this->db->pdo()->prepare('SELECT dic FROM clients WHERE id = ?');
-            $dicStmt->execute([(int) ($invoice['client_id'] ?? 0)]);
-            if (KontrolniHlaseniBuilder::cleanDic((string) ($dicStmt->fetchColumn() ?: '')) === '') {
-                return Json::error(
-                    $response,
-                    'reverse_charge_dic_missing',
-                    'Doklad v režimu přenesené daňové povinnosti musí nést DIČ odběratele '
-                        . '(§ 29 odst. 2 ZDPH). Bez něj plnění nelze uvést v kontrolním hlášení. '
-                        . 'Doplňte DIČ u odběratele, nebo režim přenesené povinnosti vypněte.',
-                    422,
-                );
-            }
+        if (($rejected = $this->taxGate->reverseChargeRejection($invoice)) !== null) {
+            return Json::error($response, $rejected['code'], $rejected['message'], $rejected['status']);
         }
 
         // § 31 / § 31a ZDPH — kalendář je daňovým dokladem jen tehdy, obsahuje-li ROZPIS
@@ -181,46 +178,23 @@ final class IssueInvoiceAction
         //
         // Součet rozpisu musí sedět na celkovou částku: rozejde-li se, není z čeho určit,
         // kolik vlastně bylo sjednáno.
-        if (($invoice['invoice_type'] ?? '') === 'payment_calendar') {
-            $scheduleTotal = $this->paymentSchedule->totalForInvoice((int) $invoice['supplier_id'], $id);
-            if ($this->paymentSchedule->forInvoice((int) $invoice['supplier_id'], $id) === []) {
-                return Json::error(
-                    $response,
-                    'payment_schedule_missing',
-                    'Splátkový ani platební kalendář nelze vystavit bez rozpisu plateb '
-                        . '(§ 31 a § 31a ZDPH) — bez něj nejde o daňový doklad.',
-                    422,
-                );
-            }
-            $invoiceTotal = round((float) ($invoice['total_with_vat'] ?? 0), 2);
-            if ((int) round($scheduleTotal * 100) !== (int) round($invoiceTotal * 100)) {
-                return Json::error(
-                    $response,
-                    'payment_schedule_mismatch',
-                    sprintf(
-                        'Součet rozpisu plateb (%s Kč) nesedí na celkovou částku dokladu (%s Kč).',
-                        number_format($scheduleTotal, 2, ',', ' '),
-                        number_format($invoiceTotal, 2, ',', ' '),
-                    ),
-                    422,
-                );
-            }
+        if (($invoice['invoice_type'] ?? '') === InvoiceCalendar::LEGACY) {
+            return Json::error(
+                $response,
+                'calendar_type_required',
+                'Vyberte typ dokladu: splátkový kalendář (§ 31 ZDPH, nájem), nebo platební kalendář (§ 31a ZDPH, zálohy).',
+                422,
+            );
+        }
+        if (InvoiceCalendar::isCalendar($invoice['invoice_type'] ?? null)
+            && ($rejected = $this->calendarInstalments->issueRejection($invoice)) !== null) {
+            return Json::error($response, $rejected['code'], $rejected['message'], 422);
         }
 
         // Koncový zákazník bez údajů smí být odběratelem jen zjednodušeného dokladu (§ 30).
         // Běžný daňový doklad musí nést jméno a adresu odběratele (§ 29 odst. 1 písm. c).
-        if (empty($invoice['is_simplified'])) {
-            $walkInStmt = $this->db->pdo()->prepare('SELECT is_walk_in FROM clients WHERE id = ?');
-            $walkInStmt->execute([(int) ($invoice['client_id'] ?? 0)]);
-            if ((int) $walkInStmt->fetchColumn() === 1) {
-                return Json::error(
-                    $response,
-                    'walk_in_customer_requires_simplified',
-                    'Doklad bez odběratele lze vystavit jen jako zjednodušený daňový doklad (§ 30 ZDPH). '
-                        . 'Vyberte odběratele, nebo zaškrtněte zjednodušený daňový doklad.',
-                    422,
-                );
-            }
+        if (($rejected = $this->taxGate->walkInRejection($invoice)) !== null) {
+            return Json::error($response, $rejected['code'], $rejected['message'], $rejected['status']);
         }
 
         // § 30 odst. 1 a 2 ZDPH — zjednodušený daňový doklad. Blokuje se stejně jako
@@ -230,35 +204,15 @@ final class IssueInvoiceAction
         // odběratel své identifikační údaje na dokladu POTŘEBUJE — bez nich se plnění
         // nedá vykázat v souhrnném ani kontrolním hlášení, takže špatně zvolený
         // zjednodušený doklad rozbije výkazy, ne jen náležitosti dokladu.
-        if (!empty($invoice['is_simplified'])) {
-            $lineStmt = $this->db->pdo()->prepare(
-                'SELECT dphdp3_line FROM vat_classifications
-                  WHERE code = ? AND (supplier_id = ? OR supplier_id IS NULL)
-                  ORDER BY supplier_id IS NULL LIMIT 1'
-            );
-            $lineStmt->execute([
-                (string) ($invoice['vat_classification_code'] ?? ''),
-                (int) $invoice['supplier_id'],
-            ]);
-            $line = $lineStmt->fetchColumn();
-
-            $docYear = (int) substr((string) (($invoice['tax_date'] ?? null) ?: $invoice['issue_date']), 0, 4);
-            $reason = SimplifiedDocumentPolicy::rejectionReason(
-                $invoice,
-                $line === false || $line === null ? null : (string) $line,
-                (float) ($this->taxConstants->forYear($docYear)['simplified_document_limit_with_vat']
-                    ?? SimplifiedDocumentPolicy::LIMIT_WITH_VAT),
-            );
-            if ($reason !== null) {
-                return Json::error($response, 'simplified_document_not_allowed', $reason, 422);
-            }
+        if (($rejected = $this->taxGate->simplifiedRejection($invoice)) !== null) {
+            return Json::error($response, $rejected['code'], $rejected['message'], $rejected['status']);
         }
 
         // Pokud projekt vyžaduje schválení výkazu A faktura má výkaz, musí být approved.
         // Faktury bez výkazu (např. fixní paušál) lze vystavit i u projektu s requires_approval.
         if (!empty($invoice['project_requires_approval'])
             && ($invoice['approval_status'] ?? 'none') !== 'approved'
-            && $this->workReports->findByInvoice($id) !== null
+            && $this->workReports->findByInvoice($id, (int) $invoice['supplier_id']) !== null
         ) {
             return Json::error(
                 $response,
@@ -275,30 +229,15 @@ final class IssueInvoiceAction
         // Rozhodné datum dokladu pro plátcovství DPH: DUZP (tax_date), jinak issue_date.
         // U dobropisu se tax_date při vystavení přepisuje datem doručení (§ 42 odst. 3,
         // UPDATE níže) — rozhodné datum ho musí zohlednit už teď.
-        $vatStatusDate = $invoice['invoice_type'] === 'credit_note' && !empty($invoice['corrective_delivered_on'])
-            ? (string) $invoice['corrective_delivered_on']
-            : (string) (($invoice['tax_date'] ?? null) ?: $invoice['issue_date']);
+        $vatStatusDate = InvoiceIssueTaxGate::vatStatusDate($invoice);
 
         // Neplátce nesmí vystavit doklad s DPH (§ 108 odst. 4 ZDPH: uvedená daň by se
         // musela odvést). Rozhoduje stav K ROZHODNÉMU DATU dokladu, ne dnešní cache —
         // firma, která k 30. 6. přestala být plátcem, smí v srpnu doúčtovat červnové
         // plnění s DPH, ale červencové už ne. Reverse charge se nekontroluje: RC řádky
         // daň nenesou a identifikovaná osoba (§ 6g–6l) RC doklad vystavit smí.
-        if (
-            (float) ($invoice['total_vat'] ?? 0) > 0
-            && empty($invoice['reverse_charge'])
-            && !$this->vatStatus->isVatPayerAt($supplierId, $vatStatusDate)
-        ) {
-            return Json::error(
-                $response,
-                'not_vat_payer_at_date',
-                sprintf(
-                    'Firma není k rozhodnému datu dokladu (%s) plátcem DPH — doklad s DPH nelze vystavit. '
-                        . 'Přepněte položky na sazbu 0 %%, nebo opravte datum zdanitelného plnění.',
-                    date('j. n. Y', strtotime($vatStatusDate)),
-                ),
-                422,
-            );
+        if (($rejected = $this->taxGate->vatPayerRejection($invoice)) !== null) {
+            return Json::error($response, $rejected['code'], $rejected['message'], $rejected['status']);
         }
 
         // Sklad (§5.1): předběžná kontrola dostupnosti PŘED přidělením varsymbolu —
@@ -350,7 +289,7 @@ final class IssueInvoiceAction
                 $vatStatusDate,
             );
         } catch (\RuntimeException $e) {
-            return Json::error($response, 'snapshot_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'snapshot_failed', $e->getMessage(), 500);
         }
 
         // Finální daňový doklad plně pokrytý zálohou (amount_to_pay <= 0) je fakticky
@@ -421,6 +360,9 @@ final class IssueInvoiceAction
             }
         };
         try {
+            $billingLock = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $billingLock->execute([$supplierId, $id]);
+            $this->billing->assertCurrent($id, $supplierId);
             if ($varsymbol === null) {
                 try {
                     // Zjednodušený doklad má vlastní řadu, je-li ve firmě nastavená.
@@ -434,7 +376,7 @@ final class IssueInvoiceAction
                 } catch (\InvalidArgumentException | \RuntimeException $e) {
                     if (TransactionFailure::rollbackIfAborted($pdo, $e)) throw $e;
                     if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
-                    return Json::error($response, 'varsymbol_failed', $e->getMessage(), 500);
+                    return Json::internalError($response, 'varsymbol_failed', $e->getMessage(), 500);
                 }
                 $allocated = true;
                 $issueParams[0] = $varsymbol;
@@ -445,7 +387,13 @@ final class IssueInvoiceAction
                 $releaseAllocated();
                 return Json::error($response, 'race_condition', 'Faktura byla mezitím změněna.', 409);
             }
+            // Koncept může mít úhrady už před potvrzením. Výstupy obnoví běžná větev po commitu.
+            if (!$autoPaid) $this->payments->recompute($id, refreshOutputs: false);
             InvoiceIssuer::record($pdo, $id, isset($user['id']) ? (int) $user['id'] : null);
+            if (InvoiceCalendar::isCalendar($invoice['invoice_type'] ?? null)) {
+                $this->calendarInstalments->createInstalments($invoice, (string) $varsymbol);
+                $calendarInstalmentIds = array_column($this->paymentSchedule->forInvoice($supplierId, $id), 'instalment_invoice_id');
+            }
             if ($stockEnabled) $this->stockIssue->issueForInvoice(
                 $supplierId,
                 array_merge($invoice, ['varsymbol' => $varsymbol]),
@@ -453,6 +401,10 @@ final class IssueInvoiceAction
             );
             $this->clients->markAsCustomer((int) $invoice['client_id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            $releaseAllocated();
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         } catch (StockException $e) {
             // Typicky insufficient_stock (409 + výčet chybějících položek) —
             // rollback vrátí fakturu do draftu, nic se nevystavilo.
@@ -503,19 +455,40 @@ final class IssueInvoiceAction
         // varsymbol a snapshoty, takže staré cached PDF už neodpovídá.
         $this->pdfRenderer->invalidate($id, 'invalidate_issue');
 
+        // Koncept navázaný na ostatní pohledávku (migrace 2246): po vystavení převezme její
+        // úhrady a auto-post ho vynechá. Koncept, který podmínky vazby už nesplňuje, se
+        // odpojí a zaúčtuje jako každá faktura. Chyba nesmí shodit vystavení.
+        $otherItemLink = ['status' => 'none'];
+        try {
+            $otherItemLink = $this->otherItemLink->afterIssue($supplierId, $id, isset($user['id']) ? (int) $user['id'] : null);
+        } catch (\Throwable $e) {
+            $this->logger->log('invoice.other_item_link_failed', $user['id'] ?? null, 'invoice', $id, [
+                'error' => $e->getMessage(),
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
+        if ($otherItemLink['status'] === 'unlinked') {
+            $this->logger->log('invoice.other_item_unlinked', $user['id'] ?? null, 'invoice', $id, [
+                'trigger' => 'issue',
+                'reason' => $otherItemLink['reason'] ?? null,
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
+
         // Auto-post hook (A2): má-li firma zapnutý auto_post_invoices a běží v podvojném
         // účetnictví, zaúčtuj vystavenou fakturu hned. Chyba zaúčtování NESMÍ zablokovat
         // vystavení — DocumentAutoPoster ji jen zaloguje (faktura zůstane vystavená
         // nezaúčtovaná, uživatel ji dožene ručně). Storno/proforma DocumentAutoPoster
         // odmítne (document_not_postable) — taky jen warning.
-        $this->autoPoster->maybeAutoPost(
-            $supplierId,
-            'invoice',
-            $id,
-            isset($user['id']) ? (int) $user['id'] : null,
-            $ip,
-            $request->getHeaderLine('User-Agent'),
-        );
+        // Kalendář se neúčtuje, předpis nesou doklady splátek.
+        foreach ($calendarInstalmentIds ?? [$id] as $postedId) {
+            $this->autoPoster->maybeAutoPost(
+                $supplierId,
+                'invoice',
+                (int) $postedId,
+                isset($user['id']) ? (int) $user['id'] : null,
+                $ip,
+                $request->getHeaderLine('User-Agent'),
+            );
+        }
 
         // Prodej majetku (1177): řádky navázané na kartu ji uzavřou — drobný majetek přejde na
         // 'sold', dlouhodobý se vyřadí (541/08x + 08x/02x). Až PO auto-postu, aby v deníku

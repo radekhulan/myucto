@@ -236,7 +236,38 @@ final class PohodaPayrollTakeover
             idPpv: is_string($record['id_ppv']) ? $record['id_ppv'] : null,
             checklistNotes: self::evidenceNotes($record),
             hourlyWageFrom: is_string($record['hourly_wage_from'] ?? null) ? $record['hourly_wage_from'] : null,
+            recurringComponents: self::recurringComponents($record),
         );
+    }
+
+    /**
+     * Opakované složky pro měsíce počítané MyÚčtem: příspěvek zaměstnavatele na penzijní
+     * a životní produkty (`MZ.KcPripoj`), stejná výchozí složka jako u PREMIER (karta 422).
+     * Druh smlouvy (penzijní připojištění, doplňkové penzijní spoření, životní pojištění)
+     * PAMICA ve mzdě nevede, zařazení do JMHZ 10292-10296 proto ověří účetní na složce.
+     *
+     * @param array<string,mixed> $record
+     * @return list<array{code:string,name:string,kind:string,amount:float,from:string,to:?string,allocation:string,calculation:string,definition:array<string,string>,note:?string}>
+     */
+    private static function recurringComponents(array $record): array
+    {
+        $pension = $record['pension_contribution'] ?? null;
+        if (!is_array($pension) || (float) ($pension['amount'] ?? 0) <= 0) {
+            return [];
+        }
+
+        return [[
+            'code' => 'PRISPEVEK_PENZE_ZIVOTNI',
+            'name' => 'Příspěvek na penzijní a životní produkty',
+            'kind' => 'benefit_pension',
+            'amount' => (float) $pension['amount'],
+            'from' => $pension['from'] . '-01',
+            'to' => null,
+            'allocation' => 'calendar_days',
+            'calculation' => 'fixed_amount',
+            'definition' => [],
+            'note' => 'příspěvek zaměstnavatele ze mzdy PAMICA (KcPripoj)',
+        ]];
     }
 
     /**

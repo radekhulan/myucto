@@ -18,15 +18,25 @@ final class ClientRoutePolicyTest extends TestCase
         $this->policy = new ClientRoutePolicy();
     }
 
+    public function testInvoiceDefaultsUseClientPermissionRoutePolicy(): void
+    {
+        self::assertTrue($this->policy->allowsApiRequest('GET', '/api/settings/client/invoice-defaults'));
+        self::assertTrue($this->policy->allowsApiRequest('PUT', '/api/settings/client/invoice-defaults'));
+    }
+
     public function testManifestCoversAuditedCoreAndLegacyAliasMatrixWithoutDuplicates(): void
     {
         $routes = $this->policy->routes();
         $names = array_column($routes, 'name');
         $patterns = array_column($routes, 'path_pattern');
 
-        self::assertCount(58, $routes);
-        self::assertCount(58, array_unique($names));
-        self::assertCount(58, array_unique($patterns));
+        // Současně zahrnuje archiv podání i samoobslužné klientské MCP.
+        self::assertCount(61, $routes);
+        self::assertCount(61, array_unique($names));
+        self::assertCount(61, array_unique($patterns));
+        self::assertContains('admin-work-report-billing-templates', $names);
+        self::assertContains('reports-submissions', $names);
+        self::assertContains('portal-mcp', $names);
         self::assertContains('data-exchange', $names);
         self::assertContains('admin-export', $names);
         self::assertContains('admin-import', $names);
@@ -58,9 +68,11 @@ final class ClientRoutePolicyTest extends TestCase
             '/',
             '/portal',
             '/projects', '/projects/new', '/projects/42', '/projects/42/edit', '/logbook',
+            '/admin/work-report-billing-templates', '/admin/work-report-billing-templates/',
             '/stock/items', '/stock/items/new', '/stock/items/42', '/stock/items/42/edit', '/stock/fulfillment',
             '/bank',
             '/bank/42',
+            '/reports/submissions',
             '/portal/document-requests',
             '/portal/purchase-invoice-submissions',
             '/portal/settings',
@@ -118,6 +130,8 @@ final class ClientRoutePolicyTest extends TestCase
             '/bank/42/edit',
             '/accounting/journal',
             '/admin/settings',
+            '/admin/work-report-billing-templates/42',
+            '/admin/work-report-billing-templates-extra',
             '/profile/api-tokens',
             '/profile/mcp-server',
             '/profile/signing-profiles',

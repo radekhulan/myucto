@@ -37,9 +37,9 @@ final class PortfolioAggregationService
     /**
      * @return array{companies: list<array<string,mixed>>, total: int, generated_at: string}
      */
-    public function overview(int $userId, bool $isSuperadmin, \DateTimeImmutable $now): array
+    public function overview(int $userId, bool $isSuperadmin, \DateTimeImmutable $now, ?int $boundSupplierId = null): array
     {
-        $supplierIds = $this->allowedSupplierIds($userId, $isSuperadmin);
+        $supplierIds = $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId);
         $volumes = (new PortfolioVolumeCounter($this->db))->countsFor($supplierIds);
         // Urgenci počítá jediné místo, totéž co ve správě firem. Vlastní varianta by se
         // od ní rozešla v predikátech (schvalované koncepty, pohyby mimo faktury).
@@ -89,22 +89,30 @@ final class PortfolioAggregationService
      * {@see overview()} — endpointy, které berou `supplier_id` z URL, se musí ptát
      * TADY, ne skládat vlastní variantu pravidla.
      */
-    public function userCanAccess(int $userId, bool $isSuperadmin, int $supplierId): bool
+    public function userCanAccess(int $userId, bool $isSuperadmin, int $supplierId, ?int $boundSupplierId = null): bool
     {
         return $supplierId > 0
-            && in_array($supplierId, $this->allowedSupplierIds($userId, $isSuperadmin), true);
+            && in_array($supplierId, $this->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId), true);
     }
 
-    /** @return list<int> */
-    private function allowedSupplierIds(int $userId, bool $isSuperadmin): array
+    /**
+     * Vázaný požadavek (token pro jednu firmu, vlastní doména) dostane nejvýš tuto
+     * firmu, i když je vlastník globální admin nebo člen více firem.
+     *
+     * @return list<int>
+     */
+    private function allowedSupplierIds(int $userId, bool $isSuperadmin, ?int $boundSupplierId = null): array
     {
         if ($isSuperadmin) {
-            return $this->allSupplierIds();
+            $ids = $this->allSupplierIds();
+        } else {
+            $ids = array_map('intval', array_keys($this->memberships->assignmentsForUser($userId)));
+            sort($ids);
         }
-        $assignments = $this->memberships->assignmentsForUser($userId);
-        $ids = array_keys($assignments);
-        sort($ids);
-        return $ids;
+        if ($boundSupplierId === null) {
+            return $ids;
+        }
+        return in_array($boundSupplierId, $ids, true) ? [$boundSupplierId] : [];
     }
 
     /** @return list<int> */

@@ -218,6 +218,13 @@ final class PayrollRegistrationFieldVocabulary
             'kód úřadu práce, který povolení vydal',
             null,
         ],
+        // REGZEC27 (EDV 1.5), ID 10568 a 10569.
+        'foreign_worker.stay_valid_from' => ['platnost pobytu od', null],
+        'foreign_worker.stay_valid_to' => ['platnost pobytu do', null],
+        'foreign_worker.citizenship' => [
+            'státní občanství',
+            'kartě osoby (Osobní údaje)',
+        ],
 
         // Adresní bloky, které se vyplňují přímo tady.
         'czech_residence_address' => ['adresa pobytu v ČR', null],

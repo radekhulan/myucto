@@ -53,10 +53,12 @@ final class PayrollPensionStatusTest extends TestCase
     }
 
     /**
-     * Starobní důchod přiznaný uprostřed měsíce se počítá od dalšího celého
-     * měsíce; v měsíci přiznání tedy ELDP běží dál.
+     * Starobní důchod přiznaný uprostřed měsíce náleží k výplatě od měsíce
+     * přiznání. List se vede do tohoto měsíce včetně (Všeobecné zásady ELDP;
+     * Metodická pomůcka ELDP, příklad 8a), takže důchod od 15. 7. ukončí list
+     * červencem, ne srpnem.
      */
-    public function testOldAgePensionCountsFromFirstWholeMonth(): void
+    public function testOldAgePensionCountsFromMonthOfPaymentStart(): void
     {
         $evidence = PayrollPensionStatus::normalize([], [
             self::pension('1', '2026-07-15', null),
@@ -64,7 +66,7 @@ final class PayrollPensionStatusTest extends TestCase
         ]);
 
         self::assertSame(
-            '2026-08',
+            '2026-07',
             PayrollPensionStatus::forInterval($evidence, '2026-07-01', '2026-07-31')['full_pension_paid_from'],
         );
         $firstDay = PayrollPensionStatus::normalize([], [self::pension('1', '2026-07-01', null)]);
@@ -72,6 +74,24 @@ final class PayrollPensionStatusTest extends TestCase
             '2026-07',
             PayrollPensionStatus::forInterval($firstDay, '2026-07-01', '2026-07-31')['full_pension_paid_from'],
         );
+    }
+
+    /**
+     * ELDP se vede do měsíce, od něhož výplata náleží, včetně něj (diskuse
+     * JMHZ #363); první měsíc bez ELDP je následující. Bez důchodu se vede vždy.
+     */
+    public function testEldpIsKeptUpToAndIncludingTheMonthOfPaymentStart(): void
+    {
+        self::assertTrue(PayrollPensionStatus::eldpKeptInMonth('2026-04', '2026-03-01'));
+        self::assertTrue(PayrollPensionStatus::eldpKeptInMonth('2026-04', '2026-04-01'));
+        self::assertTrue(PayrollPensionStatus::eldpKeptInMonth('2026-04', '2026-04-30'));
+        self::assertFalse(PayrollPensionStatus::eldpKeptInMonth('2026-04', '2026-05-01'));
+        self::assertFalse(PayrollPensionStatus::eldpKeptInMonth('2026-12', '2027-01-01'));
+        self::assertTrue(PayrollPensionStatus::eldpKeptInMonth(null, '2026-05-01'));
+
+        self::assertSame('2026-05-01', PayrollPensionStatus::eldpNotKeptFrom('2026-04'));
+        self::assertSame('2027-01-01', PayrollPensionStatus::eldpNotKeptFrom('2026-12'));
+        self::assertNull(PayrollPensionStatus::eldpNotKeptFrom(null));
     }
 
     /** Důchod, který skončil před intervalem, ani budoucí, interval nezasáhne. */

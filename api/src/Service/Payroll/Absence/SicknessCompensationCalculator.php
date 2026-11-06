@@ -18,7 +18,7 @@ final class SicknessCompensationCalculator
     public function __construct(private readonly PayrollRulesetProvider $rulesets) {}
 
     /**
-     * @param list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int}> $segments
+     * @param list<array{shift_id:?int,local_date:string,planned_minutes:int,eligible_minutes:int,average_hourly_minor?:int}> $segments
      */
     public function calculate(
         string $date,
@@ -43,9 +43,10 @@ final class SicknessCompensationCalculator
         $bandRate3 = $rules->reductionBandBasisPoints(3);
         $compensationRate = $rules->compensationRateBasisPoints();
 
-        $band1 = min($averageHourlyMinor, $boundary1);
-        $band2 = min(max($averageHourlyMinor - $boundary1, 0), $boundary2 - $boundary1);
-        $band3 = min(max($averageHourlyMinor - $boundary2, 0), $boundary3 - $boundary2);
+        $reducedNumerator = static fn (int $average): int
+            => min($average, $boundary1) * $bandRate1
+            + min(max($average - $boundary1, 0), $boundary2 - $boundary1) * $bandRate2
+            + min(max($average - $boundary2, 0), $boundary3 - $boundary2) * $bandRate3;
 
         // ─────────────────────────────────────────────────────────────────────
         // Zaokrouhlení náhrady — co zákon říká a co neříká
@@ -87,9 +88,7 @@ final class SicknessCompensationCalculator
         // je až o 1 Kč vyšší, než kdyby se úhrn sečetl nejdřív. Odchylka jde ve
         // prospěch zaměstnance; sečíst obojí by znamenalo přesunout zaokrouhlení
         // až do sestavení mzdy, což je samostatný zásah.
-        $reducedHourlyNumerator = $band1 * $bandRate1
-            + $band2 * $bandRate2
-            + $band3 * $bandRate3;
+        $reducedHourlyNumerator = $reducedNumerator($averageHourlyMinor);
         // Jen do stopy výpočtu a do UI — na aritmetice se nepodílí.
         $reducedHourlyMinor = RoundingMode::Ceil->roundFraction(
             $reducedHourlyNumerator,
@@ -107,21 +106,27 @@ final class SicknessCompensationCalculator
                 throw new InvalidArgumentException('Minuty DPN směny nejsou platné.');
             }
             $period = substr((string) $segment['local_date'], 0, 7);
+            // § 354 odst. 1 ZP: průměr platí pro čtvrtletí, do kterého den patří. Volající
+            // dává směnám v dalším čtvrtletí jeho průměr; v rámci měsíce je vždy jeden.
+            $segmentAverage = (int) ($segment['average_hourly_minor'] ?? $averageHourlyMinor);
+            if ($segmentAverage <= 0) {
+                throw new InvalidArgumentException('DPN náhrada vyžaduje kladný hodinový průměr.');
+            }
             // Váha směny je přímo počet započitatelných minut: čitatel přesného
             // podílu je `reducedHourlyNumerator * compensationRate * eligible`,
             // tedy konstanta krát minuty. Rozdělovat podle minut je proto
             // matematicky totožné a nepřeteče (čitatele jdou do 10^15 a násobek
             // s částkou by přetekl i 64bitový int).
             $minutesByPeriod[$period][$index] = $eligible;
-            $numeratorByPeriod[$period][$index] = $reducedHourlyNumerator
+            $numeratorByPeriod[$period][$index] = $reducedNumerator($segmentAverage)
                 * $compensationRate * $eligible;
             $calculatedSegments[$index] = [
                 'shift_id' => $segment['shift_id'],
                 'local_date' => $segment['local_date'],
                 'planned_minutes' => $planned,
                 'eligible_minutes' => $eligible,
-                'hourly_average_minor' => $averageHourlyMinor,
-                'reduced_hourly_minor' => $reducedHourlyMinor,
+                'hourly_average_minor' => $segmentAverage,
+                'reduced_hourly_minor' => RoundingMode::Ceil->roundFraction($reducedNumerator($segmentAverage), 10_000),
                 'compensation_minor' => 0,
                 'rounding' => 'ceil-to-czk-on-period-total',
             ];

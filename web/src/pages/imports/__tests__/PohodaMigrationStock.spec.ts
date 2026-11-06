@@ -95,6 +95,17 @@ describe('POHODA: převod skladu', () => {
     expect(m.start.mock.calls[0][1]).not.toHaveProperty('stock')
   })
 
+  it('obnovení náhledu po doběhu zkoušky ji nezneplatní, změna volby skladu ano', async () => {
+    const wrapper = await mountPage()
+    m.wizard.dryRunPassed.value = true
+    m.wizard.upload.value = JSON.parse(JSON.stringify(m.wizard.upload.value))
+    await flushPromises()
+    expect(m.wizard.dryRunPassed.value).toBe(true)
+    await wrapper.get('[data-testid="pohoda-stock-choice-HL"]').setValue('material')
+    await flushPromises()
+    expect(m.wizard.dryRunPassed.value).toBe(false)
+  })
+
   it('bez nejnovější agendy ve výběru sklad nenabízí', async () => {
     const wrapper = await mountPage()
     await wrapper.get('[data-testid="pohoda-year-2026"]').setValue(false)

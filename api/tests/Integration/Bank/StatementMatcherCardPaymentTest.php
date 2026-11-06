@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Bank;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\Card\CardMerchantMap;
 use MyInvoice\Service\Bank\StatementMatcher;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use PDO;
@@ -38,6 +39,8 @@ final class StatementMatcherCardPaymentTest extends TestCase
     private ?string $bankCode = null;
     private int $docSeq = 0;
     private int $statementSeq = 0;
+    /** @var array<string,int> */
+    private array $foreignCurrencies = [];
 
     protected function setUp(): void
     {
@@ -175,11 +178,29 @@ final class StatementMatcherCardPaymentTest extends TestCase
         self::assertSame(0, $this->matchCount($tx));
     }
 
-    /** Doklad placený kartou bez koncovky je jen návrh — a jen když ho nechce i jiná karta. */
-    public function testCardDocumentWithoutLast4IsOnlySuggested(): void
+    /**
+     * Doklad placený kartou bez koncovky: částka sedí na haléř a o tutéž částku nesoupeří
+     * žádný jiný pohyb kartou, takže není co hádat. Spáruje se a doklad si koncovku zapamatuje.
+     */
+    public function testCardDocumentWithoutLast4IsPairedWhenExactAndUncontested(): void
     {
         $doc = $this->seedPurchase(300.00, '2093-06-14', null);
         $tx = $this->seedTransaction($this->seedStatement(), -300.00, self::DAY, '1111');
+
+        $res = $this->matcher->match($tx);
+
+        self::assertSame('auto_exact', $res['status'] ?? null, (string) json_encode($res));
+        self::assertSame($doc, $res['purchase_invoice_id'] ?? null);
+        self::assertSame('paid', $this->purchaseStatus($doc));
+        self::assertSame([$doc], $this->matchedPurchases($tx));
+        self::assertSame('1111', $this->db->pdo()->query("SELECT card_last4 FROM purchase_invoices WHERE id = {$doc}")->fetchColumn());
+    }
+
+    /** Částka sedí jen v haléřové toleranci, ne přesně: doklad bez koncovky zůstává návrhem. */
+    public function testCardDocumentWithoutLast4AndInexactAmountIsOnlySuggested(): void
+    {
+        $doc = $this->seedPurchase(300.00, '2093-06-14', null);
+        $tx = $this->seedTransaction($this->seedStatement(), -300.04, self::DAY, '1111');
 
         $res = $this->matcher->match($tx);
 
@@ -187,6 +208,84 @@ final class StatementMatcherCardPaymentTest extends TestCase
         self::assertSame('card_match_requires_review', $res['reason'] ?? null);
         self::assertSame($doc, $res['purchase_invoice_id'] ?? null);
         self::assertSame('received', $this->purchaseStatus($doc));
+    }
+
+    /**
+     * Cizoměnová služba zaplacená kartou z korunového účtu: obchodník píše značku dohromady
+     * („ELEVENLABS.IO" proti „Eleven Labs") a karetní schéma přidá k ČNB kurzu přes 4 %.
+     */
+    public function testForeignDocumentPaidByCardWithMarkupAndJoinedMerchantName(): void
+    {
+        $vendor = $this->seedVendor('Elevenzz Labsyy Synthetic Inc.');
+        $doc = $this->seedPurchase(100.00, '2093-06-14', null, 'bank_transfer', 0.0, $vendor, $this->foreignCurrencyId('EUR'), 25.00);
+        $tx = $this->seedTransaction($this->seedStatement(), -2610.00, self::DAY, '6801',
+            "ELEVENZZLABSYY.IO\nNEW YORK USA\nPK: 535499******6801", 'Banka Creditas');
+
+        $res = $this->matcher->match($tx);
+
+        self::assertSame('auto_exact', $res['status'] ?? null, (string) json_encode($res));
+        self::assertSame($doc, $res['purchase_invoice_id'] ?? null);
+        self::assertSame('paid', $this->purchaseStatus($doc));
+    }
+
+    public function testForeignDocumentPaidByCardBeyondCardToleranceIsNotPaired(): void
+    {
+        $vendor = $this->seedVendor('Elevenzz Labsyy Synthetic Inc.');
+        $doc = $this->seedPurchase(100.00, '2093-06-14', null, 'bank_transfer', 0.0, $vendor, $this->foreignCurrencyId('EUR'), 25.00);
+        $tx = $this->seedTransaction($this->seedStatement(), -2680.00, self::DAY, '6801',
+            "ELEVENZZLABSYY.IO\nNEW YORK USA\nPK: 535499******6801", 'Banka Creditas');
+
+        $res = $this->matcher->match($tx);
+
+        self::assertNotSame('auto_exact', $res['status'] ?? null);
+        self::assertSame('received', $this->purchaseStatus($doc));
+    }
+
+    /**
+     * Pohyb z účtu v jiné cizí měně (USD) za doklad v EUR: banka uvádí původní částku nákupu
+     * v EUR a ta sedí na cent, takže se páruje bez jakéhokoli kurzu.
+     */
+    public function testDocumentPaidFromOtherForeignCurrencyAccountByOriginalAmount(): void
+    {
+        $vendor = $this->seedVendor('Gogolplexx Synthetic LLC');
+        $doc = $this->seedPurchase(25.00, '2093-06-13', null, 'bank_transfer', 0.0, $vendor, $this->foreignCurrencyId('EUR'), 25.00);
+        $tx = $this->seedTransaction($this->seedStatement(), -27.41, self::DAY, '8783',
+            "Gogolplexx Play\nMountain View USA\nPK: 535499******8783", 'Banka Creditas', 'USD', -25.00, 'EUR');
+
+        $res = $this->matcher->match($tx);
+
+        self::assertSame('auto_exact', $res['status'] ?? null, (string) json_encode($res));
+        self::assertSame($doc, $res['purchase_invoice_id'] ?? null);
+
+        $other = $this->seedPurchase(30.00, '2093-06-13', null, 'bank_transfer', 0.0, $vendor, $this->foreignCurrencyId('EUR'), 25.00);
+        $tx2 = $this->seedTransaction($this->seedStatement(), -27.41, self::DAY, '8783',
+            "Gogolplexx Play\nMountain View USA\nPK: 535499******8783", 'Banka Creditas', 'USD', -25.00, 'EUR');
+
+        self::assertNotSame('auto_exact', $this->matcher->match($tx2)['status'] ?? null, 'Jiná původní částka než doklad se nepáruje.');
+        self::assertSame('received', $this->purchaseStatus($other));
+    }
+
+    /**
+     * Obchodník, jehož text se s názvem dodavatele neshoduje: po ručním spárování se vazba
+     * naučí a další pohyb téhož obchodníka už najde doklad sám.
+     */
+    public function testLearnedMerchantPairsDocumentWithUnrelatedName(): void
+    {
+        $vendor = $this->seedVendor('Qwvx Drahy Synthetic a.s.');
+        $merchant = "www.zzqq.test/eshop/\nPraha 1 CZE\nPK: 535499******5194";
+        $doc = $this->seedPurchase(455.00, '2093-06-14', null, 'bank_transfer', 0.0, $vendor);
+        $tx = $this->seedTransaction($this->seedStatement(), -455.00, self::DAY, '5194', $merchant, 'Banka Creditas');
+
+        self::assertNotSame('auto_exact', $this->matcher->match($tx)['status'] ?? null);
+
+        $earlier = $this->seedTransaction($this->seedStatement(), -120.00, '2093-06-01', '5194', $merchant, 'Banka Creditas');
+        $row = $this->db->pdo()->query("SELECT * FROM bank_transactions WHERE id = {$earlier}")->fetch(PDO::FETCH_ASSOC);
+        (new CardMerchantMap($this->db))->recordManual($this->supplierId, $row, $vendor);
+
+        $res = $this->matcher->match($tx);
+
+        self::assertSame('auto_exact', $res['status'] ?? null, (string) json_encode($res));
+        self::assertSame($doc, $res['purchase_invoice_id'] ?? null);
     }
 
     public function testCardDocumentWithoutLast4IsNotSuggestedWhenOtherCardCompetes(): void
@@ -373,20 +472,55 @@ final class StatementMatcherCardPaymentTest extends TestCase
             ->execute([$this->supplierId, self::MARKER]);
         $pdo->prepare('DELETE FROM purchase_invoices WHERE supplier_id = ? AND vendor_invoice_number LIKE ?')
             ->execute([$this->supplierId, self::DOC_PREFIX . '%']);
+        $pdo->prepare('DELETE FROM clients WHERE supplier_id = ? AND note = ?')->execute([$this->supplierId, self::MARKER]);
+        $pdo->prepare('DELETE FROM currencies WHERE supplier_id = ? AND label = ?')->execute([$this->supplierId, self::MARKER]);
     }
 
-    private function seedPurchase(float $amount, string $date, ?string $last4, string $paymentMethod = 'card', float $rounding = 0.0): int
+    private function seedVendor(string $name): int
     {
+        $this->db->pdo()->prepare(
+            "INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, currency_default_id, is_customer, is_vendor, note)
+             SELECT ?, ?, 'Test 1', 'Test', '10000', country_id, ?, 0, 1, ? FROM clients WHERE id = ?"
+        )->execute([$this->supplierId, $name, $this->currencyId, self::MARKER, $this->vendorId]);
+        return (int) $this->db->pdo()->lastInsertId();
+    }
+
+    private function foreignCurrencyId(string $code): int
+    {
+        if (isset($this->foreignCurrencies[$code])) {
+            return $this->foreignCurrencies[$code];
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM currencies WHERE supplier_id = ? AND code = ? ORDER BY id LIMIT 1');
+        $stmt->execute([$this->supplierId, $code]);
+        $id = (int) ($stmt->fetchColumn() ?: 0);
+        if ($id === 0) {
+            $this->db->pdo()->prepare('INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en) VALUES (?, ?, ?, ?, ?, ?)')
+                ->execute([$this->supplierId, $code, self::MARKER, $code, $code, $code]);
+            $id = (int) $this->db->pdo()->lastInsertId();
+        }
+        return $this->foreignCurrencies[$code] = $id;
+    }
+
+    private function seedPurchase(
+        float $amount,
+        string $date,
+        ?string $last4,
+        string $paymentMethod = 'card',
+        float $rounding = 0.0,
+        ?int $vendorId = null,
+        ?int $currencyId = null,
+        ?float $rate = null,
+    ): int {
         $no = self::DOC_PREFIX . (++$this->docSeq);
         $this->db->pdo()->prepare(
             "INSERT INTO purchase_invoices
                 (supplier_id, vendor_id, varsymbol, vendor_invoice_number, document_kind,
-                 issue_date, tax_date, due_date, received_at, currency_id, vendor_snapshot,
+                 issue_date, tax_date, due_date, received_at, currency_id, exchange_rate, vendor_snapshot,
                  total_without_vat, total_with_vat, rounding, status, created_by, payment_method, card_last4)
-             VALUES (?, ?, ?, ?, 'invoice', ?, ?, ?, ?, ?, '{}', ?, ?, ?, 'received', ?, ?, ?)"
+             VALUES (?, ?, ?, ?, 'invoice', ?, ?, ?, ?, ?, ?, '{}', ?, ?, ?, 'received', ?, ?, ?)"
         )->execute([
-            $this->supplierId, $this->vendorId, 'C2093' . $this->docSeq, $no,
-            $date, $date, $date, $date, $this->currencyId, $amount, $amount, $rounding, $this->userId, $paymentMethod, $last4,
+            $this->supplierId, $vendorId ?? $this->vendorId, 'C2093' . $this->docSeq, $no,
+            $date, $date, $date, $date, $currencyId ?? $this->currencyId, $rate, $amount, $amount, $rounding, $this->userId, $paymentMethod, $last4,
         ]);
         return (int) $this->db->pdo()->lastInsertId();
     }
@@ -402,13 +536,22 @@ final class StatementMatcherCardPaymentTest extends TestCase
         return (int) $this->db->pdo()->lastInsertId();
     }
 
-    private function seedTransaction(int $statementId, float $amount, string $date, string $last4, ?string $description = null, ?string $counterpartyName = null): int
-    {
+    private function seedTransaction(
+        int $statementId,
+        float $amount,
+        string $date,
+        string $last4,
+        ?string $description = null,
+        ?string $counterpartyName = null,
+        string $currency = 'CZK',
+        ?float $originalAmount = null,
+        ?string $originalCurrency = null,
+    ): int {
         $this->db->pdo()->prepare(
             "INSERT INTO bank_transactions
-                (statement_id, posted_at, amount, currency, counterparty_name, card_last4, description)
-             VALUES (?, ?, ?, 'CZK', ?, ?, ?)"
-        )->execute([$statementId, $date, $amount, $counterpartyName, $last4, $description ?? 'PK: 000000******' . $last4]);
+                (statement_id, posted_at, amount, currency, original_amount, original_currency, counterparty_name, card_last4, description)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )->execute([$statementId, $date, $amount, $currency, $originalAmount, $originalCurrency, $counterpartyName, $last4, $description ?? 'PK: 000000******' . $last4]);
         return (int) $this->db->pdo()->lastInsertId();
     }
 

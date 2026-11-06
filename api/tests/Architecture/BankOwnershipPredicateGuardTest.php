@@ -84,11 +84,16 @@ final class BankOwnershipPredicateGuardTest extends TestCase
 
         self::assertStringContainsString('(new BankStatementOwnershipResolver($this->db))->transactionOwned($txId, $supplierId, $currentRead)', $body);
         $postingLock = self::methodBody(self::src('Service/Accounting/Bank/BankPostingService.php'), 'lockTransaction');
-        self::assertStringContainsString('(new BankTransactionContext($this->db))->lock($supplierId, $txId)', $postingLock);
+        self::assertStringContainsString('(new BankTransactionContext($this->db))->mutableTransaction($supplierId, $txId)', $postingLock);
         $contextLock = self::methodBody(self::src('Service/Bank/BankTransactionContext.php'), 'lock');
-        self::assertStringContainsString('transactionOwned($txId, $supplierId, true)', $contextLock);
         self::assertStringContainsString('$this->lockContext($supplierId)', $contextLock);
-        self::assertStringContainsString('$this->find($txId, true)', $contextLock);
+        self::assertStringContainsString('$this->findOwned($supplierId, $txId)', $contextLock);
+        $mutableLock = self::methodBody(self::src('Service/Bank/BankTransactionContext.php'), 'mutableTransaction');
+        self::assertStringContainsString('assertSourceMutable($supplierId, \'bank\', $txId)', $mutableLock);
+        self::assertStringContainsString('$this->findOwned($supplierId, $txId)', $mutableLock);
+        $ownedRead = self::methodBody(self::src('Service/Bank/BankTransactionContext.php'), 'findOwned');
+        self::assertStringContainsString('transactionOwned($txId, $supplierId, true)', $ownedRead);
+        self::assertStringContainsString('$this->find($txId, true)', $ownedRead);
         $resolver = self::methodBody(self::src('Repository/BankStatementOwnershipResolver.php'), 'transactionOwned');
         self::assertStringContainsString('self::sql(\'bs\', $currentRead)', $resolver);
         self::assertStringContainsString('self::params($supplierId)', $resolver);

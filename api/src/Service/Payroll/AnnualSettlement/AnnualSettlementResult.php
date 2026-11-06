@@ -60,6 +60,12 @@ final readonly class AnnualSettlementResult implements JsonSerializable
         public int $annualTaxBonusCandidateMinorUnits,
         public bool $annualBonusAmountThresholdMet,
         public string $annualBonusEligibilityReason,
+        /** Úhrn základů od všech plátců PŘED odečtením nezdanitelných částí. */
+        public int $taxBaseBeforeDeductionsMinorUnits = 0,
+        /** § 15: nezdanitelné části po limitech, nejvýš do výše základu. */
+        public int $nonTaxableDeductionsMinorUnits = 0,
+        /** § 35 odst. 4: uplatněná sleva za zastavenou exekuci, nejvýš do výše daně. */
+        public int $enforcementCreditMinorUnits = 0,
     ) {}
 
     /**
@@ -112,6 +118,9 @@ final readonly class AnnualSettlementResult implements JsonSerializable
         ?int $annualTaxBonusCandidateMinorUnits = null,
         ?bool $annualBonusAmountThresholdMet = null,
         ?string $annualBonusEligibilityReason = null,
+        ?int $taxBaseBeforeDeductionsMinorUnits = null,
+        int $nonTaxableDeductionsMinorUnits = 0,
+        int $enforcementCreditMinorUnits = 0,
     ): self {
         $candidate = $annualTaxBonusCandidateMinorUnits ?? $annualTaxBonusMinorUnits;
         $amountThresholdMet = $annualBonusAmountThresholdMet
@@ -144,6 +153,9 @@ final readonly class AnnualSettlementResult implements JsonSerializable
             $candidate,
             $amountThresholdMet,
             $eligibilityReason,
+            $taxBaseBeforeDeductionsMinorUnits ?? $roundedTaxBaseMinorUnits,
+            $nonTaxableDeductionsMinorUnits,
+            $enforcementCreditMinorUnits,
         );
     }
 
@@ -193,6 +205,16 @@ final readonly class AnnualSettlementResult implements JsonSerializable
             'monthly_tax_bonus_minor_units' =>
                 (int) ($this->trace['total_monthly_tax_bonus_minor_units'] ?? 0),
             'trace' => $this->trace,
+            // Ročně uplatňované položky (§ 38h odst. 6). Klíče se objeví jen
+            // u zúčtování, které nějaké má — výsledek bez nich zůstává
+            // bajtově stejný jako před jejich zavedením, takže se nemění
+            // otisk dřív uložených ani znovu spočítaných zúčtování.
+            ...(isset($this->trace['annual_claims']) ? [
+                'tax_base_before_deductions_minor_units' =>
+                    $this->taxBaseBeforeDeductionsMinorUnits,
+                'non_taxable_deductions_minor_units' => $this->nonTaxableDeductionsMinorUnits,
+                'enforcement_credit_minor_units' => $this->enforcementCreditMinorUnits,
+            ] : []),
         ];
     }
 }

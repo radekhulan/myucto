@@ -20,6 +20,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import DateInput from '@/components/ui/DateInput.vue'
+import { eetApi } from '@/api/eet'
+import { formInput } from '@/components/ui/formStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -249,12 +251,26 @@ const reverseReason = ref('')
 const reverseDate = ref('')
 const reverseSaving = ref(false)
 const reverseError = ref('')
+/** Doklad má evidovanou tržbu EET, storno zaeviduje zápornou opravu. */
+const reverseHasEet = ref(false)
+const reverseEetReason = ref<'refund' | 'wrong_data' | 'duplicate'>('refund')
+const REVERSE_EET_REASONS = ['refund', 'wrong_data', 'duplicate'] as const
 
-function openReverse(d: CashDocument) {
+async function openReverse(d: CashDocument) {
   reverseTarget.value = d
   reverseReason.value = ''
   reverseDate.value = ''
   reverseError.value = ''
+  reverseHasEet.value = false
+  reverseEetReason.value = 'refund'
+  if (!auth.canRead('eet')) return
+  try {
+    const r = await eetApi.records({ cash_document_id: d.id, limit: 20 })
+    if (reverseTarget.value?.id !== d.id) return
+    reverseHasEet.value = r.items.some(x => x.kind === 'sale') && !r.items.some(x => x.kind === 'correction')
+  } catch {
+    reverseHasEet.value = false
+  }
 }
 
 async function submitReverse() {
@@ -262,7 +278,8 @@ async function submitReverse() {
   if (reverseReason.value.trim().length < 3) { reverseError.value = t('cash.validation.reason'); return }
   reverseSaving.value = true
   try {
-    const res = await cashApi.reverseDocument(reverseTarget.value.id, reverseReason.value.trim(), reverseDate.value || undefined)
+    const res = await cashApi.reverseDocument(reverseTarget.value.id, reverseReason.value.trim(), reverseDate.value || undefined,
+      reverseHasEet.value ? reverseEetReason.value : undefined)
     toast.success(t('common.saved'))
     // M-14: storno hlásí posunutý protizápis i zápornou pokladnu — bez tohohle
     // se o obojím uživatel dozvěděl až z knihy.
@@ -708,6 +725,15 @@ async function postDraft(d: CashDocument) {
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.date') }}</label>
             <DateInput v-model="reverseDate" class="w-full h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+          </div>
+          <div v-if="reverseHasEet" class="rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 space-y-2" data-test="cash-reverse-eet">
+            <p class="text-xs text-warning-700">{{ t('eet.cash.reverse_warning') }}</p>
+            <label class="block text-sm font-medium text-neutral-700">
+              <span class="block mb-1">{{ t('eet.cash.reverse_reason') }}</span>
+              <select v-model="reverseEetReason" :class="formInput" data-test="cash-reverse-eet-reason">
+                <option v-for="r in REVERSE_EET_REASONS" :key="r" :value="r">{{ t(`eet.correction.reasons.${r}`) }}</option>
+              </select>
+            </label>
           </div>
           <p class="text-xs text-neutral-500">{{ t('cash.help.reverse_after_filing') }}</p>
           <div v-if="reverseError" class="text-sm text-danger-500">{{ reverseError }}</div>

@@ -38,6 +38,7 @@ final class StereoNxIssuedDocuments
         if ($sourceItems === []) {
             $review[] = 'issued_lines_missing';
             foreach (['z', 's', 't', '0'] as $slot) {
+                if (StereoNxRecapAmounts::isUnusedBucket($header, $slot)) continue;
                 $base = self::money($header, $slot === '0' ? 'BezDane' : 'ZaklDPH' . $slot);
                 $tax = $slot === '0' ? 0.0 : self::money($header, 'DPH' . $slot);
                 if ($base === 0.0 && $tax === 0.0) continue;
@@ -81,12 +82,15 @@ final class StereoNxIssuedDocuments
         $base = round(array_sum(array_column($items, 'total_without_vat')), 2);
         $tax = round(array_sum(array_column($items, 'total_vat')), 2);
         $gross = round($base + $tax, 2);
-        $rounding = self::money($header, 'Zaokrouhleni');
         $sourceTotal = self::money($header, 'Celkem');
+        $rounding = StereoNxRecapAmounts::isUnassignedZeroRounding($header, $gross, $sourceTotal)
+            ? 0.0 : self::money($header, 'Zaokrouhleni');
         if ((int) round(($gross + $rounding) * 100) !== (int) round($sourceTotal * 100)) {
             throw new StereoNxException('issued_total_mismatch', 'Součet vydaných položek neodpovídá hlavičce.');
         }
         foreach (['z', 's', 't', '0'] as $slot) {
+            $used = array_filter($items, static fn (array $item): bool => $item['source_slot'] === $slot);
+            if ($used === [] && StereoNxRecapAmounts::isUnusedBucket($header, $slot)) continue;
             $slotBase = round(array_sum(array_map(static fn (array $item): float => $item['source_slot'] === $slot ? $item['total_without_vat'] : 0.0, $items)), 2);
             $slotTax = round(array_sum(array_map(static fn (array $item): float => $item['source_slot'] === $slot ? $item['total_vat'] : 0.0, $items)), 2);
             if (abs($slotBase - self::money($header, $slot === '0' ? 'BezDane' : 'ZaklDPH' . $slot)) > 0.011

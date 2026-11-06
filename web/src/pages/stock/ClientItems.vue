@@ -11,6 +11,7 @@ import { useToast } from '@/composables/useToast'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import { unitPriceText } from '@/utils/unitPrice'
 
 const props = defineProps<{ mode: 'list' | 'detail' | 'editor' }>()
 const route = useRoute()
@@ -114,7 +115,7 @@ watch(() => [route.name, route.params.id, supplier.currentSupplierId], () => { p
       <EmptyState v-if="!items.length" boxed :title="t('stock.items.empty')" />
       <div v-else class="divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-surface shadow-sm">
         <article v-for="row in items" :key="row.id" class="flex flex-wrap items-center justify-between gap-3 p-4">
-          <div><div class="text-xs font-mono text-neutral-500">{{ row.sku }}</div><h2 class="font-medium">{{ row.name }}</h2><div class="mt-1 text-sm text-neutral-500">{{ t('stock.items.col_qty') }}: {{ row.qty }} {{ row.unit }} · {{ t('stock.items.col_sale_price') }}: {{ row.effective_price ?? row.sale_price_without_vat }}</div></div>
+          <div><div class="text-xs font-mono text-neutral-500">{{ row.sku }}</div><h2 class="font-medium">{{ row.name }}</h2><div class="mt-1 text-sm text-neutral-500">{{ t('stock.items.col_qty') }}: {{ row.qty }} {{ row.unit }} · {{ t('stock.items.col_sale_price') }}: {{ unitPriceText(row.effective_price ?? row.sale_price_without_vat) }}</div></div>
           <button type="button" :class="btnOutline('primary')" @click="router.push({ name: 'stock-item-detail', params: { id: row.id } })"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.eye" /></svg>{{ t('common.detail') }}</button>
         </article>
       </div>
@@ -125,11 +126,11 @@ watch(() => [route.name, route.params.id, supplier.currentSupplierId], () => { p
         <label class="text-sm font-medium">{{ t('stock.items.field_name') }}<input v-model="form.name" required maxlength="255" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3" /></label>
         <label class="text-sm font-medium">{{ t('stock.items.field_sku') }}<input v-model="form.sku" maxlength="50" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3 font-mono" /></label>
         <label class="text-sm font-medium">{{ t('stock.items.field_unit') }}<input v-model="form.unit" required list="client-stock-units" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3" /><datalist id="client-stock-units"><option v-for="unit in units" :key="unit.id" :value="unit.code" /></datalist></label>
-        <label class="text-sm font-medium">{{ t('stock.items.field_type') }}<select v-model="form.item_type" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3"><option v-for="type in ['goods', 'material', 'product'] as const" :key="type" :value="type">{{ t(`stock.item_type.${type}`) }}</option></select></label>
+        <label class="text-sm font-medium">{{ t('stock.items.field_type') }}<select v-model="form.item_type" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3"><option v-for="type in ['goods', 'material', 'product', 'service'] as const" :key="type" :value="type">{{ t(`stock.item_type.${type}`) }}</option></select></label>
         <label class="text-sm font-medium">{{ t('stock.tracking.mode') }}<select v-model="form.tracking_mode" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3"><option v-for="mode in ['none', 'lot', 'serial'] as const" :key="mode" :value="mode">{{ t(`stock.tracking.mode_${mode}`) }}</option></select></label>
         <label class="text-sm font-medium">{{ t('stock.items.field_ean') }}<input v-model="form.ean" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3" /></label>
         <label class="text-sm font-medium">{{ t('stock.items.field_vat_rate') }}<select v-model="form.vat_rate_id" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3"><option :value="null">—</option><option v-for="rate in vatRates" :key="rate.id" :value="rate.id">{{ rate.rate_percent }} % · {{ locale === 'en' ? rate.label_en : rate.label_cs }}</option></select></label>
-        <label class="text-sm font-medium">{{ t('stock.items.field_sale_price') }}<input v-model="form.sale_price_without_vat" type="number" min="0" step="0.01" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3" /></label>
+        <label class="text-sm font-medium">{{ t('stock.items.field_sale_price') }}<input v-model="form.sale_price_without_vat" type="number" min="0" step="any" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3" /></label>
         <label class="text-sm font-medium">{{ t('stock.items.field_min_qty') }}<input v-model="form.min_qty" type="number" min="0" step="0.001" class="mt-1 h-10 w-full rounded-md border border-neutral-300 bg-surface px-3" /></label>
         <label class="text-sm font-medium sm:col-span-2">{{ t('stock.items.field_note') }}<textarea v-model="form.note" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface p-3" /></label>
         <label class="flex items-center gap-2 text-sm"><input v-model="form.is_active" type="checkbox" />{{ t('stock.items.field_active') }}</label>

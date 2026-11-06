@@ -139,8 +139,18 @@ const certificateShareWithOthers = ref(false)
 const certificateShareOnlyWithoutValid = ref(false)
 const certificateSharingResults = ref<CertificateVaultSharingResult[] | null>(null)
 const certificateSharingId = ref<number | null>(null)
+/**
+ * Starý certifikát, který má nový všude nahradit. Nahrání nového i „Povolit
+ * v dalších firmách" ho pak zapíšou do všech firem (i tam, kde už platný
+ * certifikát je) a přepojí na něj datovou schránku, podpisové profily a mzdy.
+ */
+const certificateReplaceId = ref<number | null>(null)
+const certificateReplaceTarget = computed(() =>
+  certificates.value.find(c => c.id === certificateReplaceId.value) ?? null,
+)
 
 const sharingStatusOrder: CertificateVaultSharingStatus[] = [
+  'replaced',
   'enabled',
   'already_enabled',
   'skipped_has_valid',
@@ -158,7 +168,8 @@ const certificateSharingSummary = computed(() =>
 
 function sharingStatusClass(status: CertificateVaultSharingStatus): string {
   switch (status) {
-    case 'enabled': return 'border-success-500/30 bg-success-50 text-success-700'
+    case 'enabled':
+    case 'replaced': return 'border-success-500/30 bg-success-50 text-success-700'
     case 'skipped_no_permission': return 'border-warning-500/30 bg-warning-50 text-warning-800'
     default: return 'border-neutral-200 bg-neutral-100 text-neutral-600'
   }
@@ -497,6 +508,7 @@ async function uploadCertificate() {
     toast.error(certificateStepUpMissing.value)
     return
   }
+  if (!confirmCertificateReplace()) return
   certificateBusy.value = true
   certificateSharingResults.value = null
   try {
@@ -507,20 +519,42 @@ async function uploadCertificate() {
       proof: certificateStepUpProof(),
       shareWithOtherSuppliers: certificateShareWithOthers.value,
       shareOnlyWithoutValid: certificateShareWithOthers.value && certificateShareOnlyWithoutValid.value,
+      replaceCredentialId: certificateReplaceId.value,
     })
     certificateFile.value = null
     certificateLabel.value = ''
     certificatePassword.value = ''
+    certificateReplaceId.value = null
     if (certificateFileInput.value) certificateFileInput.value.value = ''
     resetCertificateStepUp()
     if (result.supplier_sharing) certificateSharingResults.value = result.supplier_sharing
     await Promise.all([loadCertificates(), loadPersonalCertificates()])
     toast.success(t('settings.certificate_vault_uploaded'))
+    if (result.supplier_sharing_error) {
+      toast.error(t('settings.certificate_vault_replace_failed', { reason: result.supplier_sharing_error }))
+    }
   } catch (e: any) {
     toast.error(apiErrorMessage(e, t('common.error')))
   } finally {
     certificateBusy.value = false
   }
+}
+
+/** Náhrada přepojí firmy hromadně, proto se jednou výslovně potvrzuje. */
+function confirmCertificateReplace(): boolean {
+  const target = certificateReplaceTarget.value
+  if (target === null) return true
+  return window.confirm(t('settings.certificate_vault_replace_confirm', { name: target.label }))
+}
+
+function replacedSummary(row: CertificateVaultSharingResult): string {
+  const counts = row.replaced
+  if (!counts) return ''
+  return t('settings.certificate_vault_replace_counts', {
+    dataBox: counts.data_box,
+    profiles: counts.signing_profiles,
+    payroll: counts.payroll,
+  })
 }
 
 function certificateStepUpProof() {
@@ -537,6 +571,12 @@ async function shareCertificateWithOtherSuppliers(certificate: CertificateVaultI
     toast.error(certificateStepUpMissing.value)
     return
   }
+  if (certificateReplaceId.value === certificate.id) {
+    toast.error(t('settings.certificate_vault_replace_same'))
+    return
+  }
+  if (!confirmCertificateReplace()) return
+  const replacing = certificateReplaceId.value !== null
   certificateSharingId.value = certificate.id
   certificateSharingResults.value = null
   try {
@@ -544,9 +584,14 @@ async function shareCertificateWithOtherSuppliers(certificate: CertificateVaultI
       certificate.id,
       certificateShareOnlyWithoutValid.value,
       certificateStepUpProof(),
+      certificateReplaceId.value,
     )
     resetCertificateStepUp()
-    toast.success(t('settings.certificate_vault_share_done'))
+    if (replacing) {
+      certificateReplaceId.value = null
+      await loadCertificates()
+    }
+    toast.success(t(replacing ? 'settings.certificate_vault_replace_done' : 'settings.certificate_vault_share_done'))
   } catch (e: any) {
     toast.error(apiErrorMessage(e, t('common.error')))
   } finally {
@@ -1241,6 +1286,17 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                 <span class="block text-xs text-neutral-500">{{ t('settings.certificate_vault_share_only_without_valid_hint') }}</span>
               </span>
             </label>
+            <label v-if="certificates.length > 0" class="block text-xs text-neutral-600">
+              {{ t('settings.certificate_vault_replace') }}
+              <select v-model="certificateReplaceId" data-testid="certificate-replace"
+                class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
+                <option :value="null">{{ t('settings.certificate_vault_replace_none') }}</option>
+                <option v-for="certificate in certificates" :key="certificate.id" :value="certificate.id">
+                  {{ certificate.label }} · {{ certificateDate(certificate.valid_from) }} – {{ certificateDate(certificate.valid_to) }}
+                </option>
+              </select>
+              <span class="mt-1 block text-neutral-500">{{ t('settings.certificate_vault_replace_hint') }}</span>
+            </label>
           </div>
           <p v-if="certificateStepUpMissing" class="mt-2 text-xs text-warning-700">{{ certificateStepUpMissing }}</p>
         </div>
@@ -1269,7 +1325,10 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
             <ul class="mt-3 divide-y divide-neutral-100 text-sm">
               <li v-for="row in certificateSharingResults" :key="row.supplier_id"
                 class="flex flex-wrap items-center justify-between gap-2 py-1.5">
-                <span class="min-w-0 break-words text-neutral-700">{{ row.name }}</span>
+                <span class="min-w-0 break-words text-neutral-700">
+                  {{ row.name }}
+                  <span v-if="row.status === 'replaced'" class="block text-[11px] text-neutral-500">{{ replacedSummary(row) }}</span>
+                </span>
                 <span class="rounded-full border px-2 py-0.5 text-[11px] whitespace-nowrap" :class="sharingStatusClass(row.status)">
                   {{ t(`settings.certificate_vault_share_status_${row.status}`) }}
                 </span>

@@ -9,6 +9,11 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\ChartOfAccountsTemplate;
+use MyInvoice\Service\Accounting\ChartOfAccountsTemplate504;
+use MyInvoice\Service\Accounting\PristineChart500;
+use MyInvoice\Service\Ares\AresClient;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 use Psr\Container\ContainerInterface;
@@ -112,6 +117,14 @@ final class CreateSupplierInitializationTest extends TestCase
             $this->scalar('SELECT accounting_mode FROM supplier_accounting_modes WHERE supplier_id = ? AND effective_from = ?', [$id, date('Y-01-01')]),
             'historie účetního režimu musí vzniknout spolu s firmou',
         );
+        self::assertSame(
+            'cz_500',
+            $this->scalar(
+                'SELECT accounting_framework FROM supplier_accounting_frameworks WHERE supplier_id = ? AND effective_from = ?',
+                [$id, '1900-01-01'],
+            ),
+            'nová firma musí dostat historický baseline účetního rámce',
+        );
         self::assertGreaterThan(0, (int) $this->scalar('SELECT COUNT(*) FROM chart_of_accounts WHERE supplier_id = ?', [$id]), 'podvojné účetnictví bez směrné osnovy je rozbitý stav');
         self::assertSame(1, (int) $this->scalar(
             'SELECT COUNT(*) FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = ?',
@@ -193,7 +206,10 @@ final class CreateSupplierInitializationTest extends TestCase
         $this->db->pdo()->prepare(
             'INSERT INTO ares_cache (ic, payload) VALUES (?, ?)
              ON DUPLICATE KEY UPDATE payload = VALUES(payload), fetched_at = NOW()'
-        )->execute([self::IC, json_encode(['found' => true, 'data' => ['taxpayer_type' => 'po']], JSON_UNESCAPED_UNICODE)]);
+        )->execute([self::IC, json_encode([
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
+            'found' => true, 'data' => ['taxpayer_type' => 'po'],
+        ], JSON_UNESCAPED_UNICODE)]);
 
         // Typ poplatníka NEPŘIŠEL — rozhodne právní forma z ARESu.
         $id = $this->create([
@@ -211,12 +227,73 @@ final class CreateSupplierInitializationTest extends TestCase
         self::assertSame(1, (int) $row['auto_post_invoices']);
     }
 
+    public function testNonprofitLegalFormFromAresStartsOnFramework504WithChart504(): void
+    {
+        $this->primeAres(['taxpayer_type' => 'po', 'legal_form' => '706']);
+
+        $id = $this->create([
+            'company_name' => '__TEST Založení spolek',
+            'ic'           => self::IC,
+            'is_vat_payer' => false,
+        ]);
+
+        self::assertSame('double_entry', (string) $this->supplierRow($id)['accounting_mode']);
+        self::assertSame(
+            [['1900-01-01', 'cz_504']],
+            $this->frameworkHistory($id),
+            'nevýdělečná organizace začíná na rámci vyhlášky 504',
+        );
+        self::assertSame($this->templateCodes(ChartOfAccountsTemplate504::ACCOUNTS), $this->chartCodes($id));
+        self::assertSame(0, (int) $this->scalar('SELECT COUNT(*) FROM posting_rules WHERE supplier_id = ?', [$id]), 'předkontace k analytikám 500 nesmí zůstat');
+    }
+
+    public function testCompanyLegalFormFromAresKeepsFramework500AndItsSeededChart(): void
+    {
+        $this->primeAres(['taxpayer_type' => 'po', 'legal_form' => '112']);
+
+        $id = $this->create([
+            'company_name' => '__TEST Založení s.r.o. s právní formou',
+            'ic'           => self::IC,
+            'is_vat_payer' => false,
+        ]);
+
+        self::assertSame([['1900-01-01', 'cz_500']], $this->frameworkHistory($id));
+        self::assertSame($this->templateCodes(ChartOfAccountsTemplate::ACCOUNTS), $this->chartCodes($id));
+        self::assertGreaterThan(0, (int) $this->scalar('SELECT COUNT(*) FROM posting_rules WHERE supplier_id = ?', [$id]));
+    }
+
+    public function testNewCompanyWithUntouchedChartCanSwitchTo504InSettings(): void
+    {
+        $id = $this->create([
+            'company_name'  => '__TEST Založení přepnutí 504',
+            'taxpayer_type' => 'po',
+            'is_vat_payer'  => false,
+        ]);
+        $startsOn = (string) $this->scalar('SELECT MIN(starts_on) FROM accounting_periods WHERE supplier_id = ?', [$id]);
+        self::assertNotSame('', $startsOn);
+
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            self::assertTrue((new PristineChart500($this->db))->isPristineForUpdate($id), 'čerstvě založená firma má nedotčenou šablonu 500');
+        } finally {
+            $pdo->rollBack();
+        }
+
+        self::assertTrue($this->container->get(AccountingFrameworkService::class)
+            ->changeFromSettings($id, $startsOn, AccountingFrameworkService::CZ_504, $this->userId));
+        self::assertSame($this->templateCodes(ChartOfAccountsTemplate504::ACCOUNTS), $this->chartCodes($id));
+    }
+
     public function testExplicitTaxpayerTypeWinsOverAres(): void
     {
         $this->db->pdo()->prepare(
             'INSERT INTO ares_cache (ic, payload) VALUES (?, ?)
              ON DUPLICATE KEY UPDATE payload = VALUES(payload), fetched_at = NOW()'
-        )->execute([self::IC, json_encode(['found' => true, 'data' => ['taxpayer_type' => 'po']], JSON_UNESCAPED_UNICODE)]);
+        )->execute([self::IC, json_encode([
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
+            'found' => true, 'data' => ['taxpayer_type' => 'po'],
+        ], JSON_UNESCAPED_UNICODE)]);
 
         $id = $this->create([
             'company_name'  => '__TEST Založení explicitní FO',
@@ -226,6 +303,46 @@ final class CreateSupplierInitializationTest extends TestCase
         ]);
 
         self::assertSame('tax_evidence', (string) $this->supplierRow($id)['accounting_mode']);
+    }
+
+    /** @param array<string,mixed> $data */
+    private function primeAres(array $data): void
+    {
+        $this->db->pdo()->prepare(
+            'INSERT INTO ares_cache (ic, payload) VALUES (?, ?)
+             ON DUPLICATE KEY UPDATE payload = VALUES(payload), fetched_at = NOW()'
+        )->execute([self::IC, json_encode([
+            'normalization_version' => AresClient::NORMALIZATION_VERSION,
+            'found' => true, 'data' => $data,
+        ], JSON_UNESCAPED_UNICODE)]);
+    }
+
+    /** @return list<array{0:string,1:string}> */
+    private function frameworkHistory(int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT effective_from, accounting_framework FROM supplier_accounting_frameworks WHERE supplier_id = ? ORDER BY effective_from'
+        );
+        $stmt->execute([$id]);
+        return array_map(static fn (array $row): array => [(string) $row[0], (string) $row[1]], $stmt->fetchAll(\PDO::FETCH_NUM));
+    }
+
+    /** @param list<array{code:string}> $accounts @return list<string> */
+    private function templateCodes(array $accounts): array
+    {
+        $codes = array_map(static fn (array $account): string => $account['code'], $accounts);
+        sort($codes, SORT_STRING);
+        return $codes;
+    }
+
+    /** @return list<string> */
+    private function chartCodes(int $id): array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT account_code FROM chart_of_accounts WHERE supplier_id = ?');
+        $stmt->execute([$id]);
+        $codes = array_map('strval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
+        sort($codes, SORT_STRING);
+        return $codes;
     }
 
     /** @param array<string,mixed> $body */

@@ -24,6 +24,170 @@ final class FxPaymentTest extends BankPostingTestCase
 {
     private int $eurId = 0;
 
+    #[\PHPUnit\Framework\Attributes\DataProvider('frameworkFxCases')]
+    public function testFrameworkRolesForRealizedFx(bool $nonprofit, float $paymentRate, string $role): void
+    {
+        $this->financialFramework($nonprofit);
+        $invoice = $this->fxSaleInvoice('ROLE-FX', $this->client('Synthetic FX roles'), 1000.00, 25.00);
+        $this->seedRate('EUR', self::YEAR . '-06-15', $paymentRate);
+        $tx = $this->fxIncoming($invoice, 1000.00);
+        $lines = $this->linesByAccountCode($this->entryIdForBankTx($tx));
+        $expected = $nonprofit ? ($role === 'gain' ? '645' : '545') : ($role === 'gain' ? '663.123' : '563.123');
+        self::assertArrayHasKey($expected, $lines);
+        self::assertSame(1000.0, (float) $lines[$expected][$role === 'gain' ? 'credit' : 'debit']);
+        self::assertSame(25000.0, (float) $lines['311']['credit']);
+        $this->assertBalanced($this->entryIdForBankTx($tx));
+    }
+
+    public static function frameworkFxCases(): array
+    {
+        return [[false, 26.0, 'gain'], [false, 24.0, 'loss'], [true, 26.0, 'gain'], [true, 24.0, 'loss']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('frameworkRoundingCases')]
+    public function testFrameworkRolesForBankRounding(bool $nonprofit, float $difference): void
+    {
+        $this->financialFramework($nonprofit);
+        $invoice = $this->saleInvoice('ROLE-ROUND', $this->client('Synthetic rounding'), 100.0);
+        $this->postPredpis('invoice', $invoice, '311', '602', 100.0);
+        $tx = $this->transaction($this->statement(), 100.0 + $difference, ['match_status' => 'manual']);
+        $this->invoicePayment($invoice, $tx, 100.0);
+        $result = $this->service->handleTransaction($tx, $this->userId);
+        self::assertSame('posted', $result['action'], json_encode($result));
+        $lines = $this->linesByAccountCode((int) $result['entry_id']);
+        $expected = $nonprofit ? ($difference > 0 ? '649' : '549') : ($difference > 0 ? '648' : '548');
+        self::assertSame(0.5, (float) ($lines[$expected][$difference > 0 ? 'credit' : 'debit'] ?? 0));
+        $this->assertBalanced((int) $result['entry_id']);
+    }
+
+    public static function frameworkRoundingCases(): array
+    {
+        return [[false, 0.5], [false, -0.5], [true, 0.5], [true, -0.5]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('frameworkRevaluationCases')]
+    public function testFrameworkRolesForRevaluationAtFiscalPeriodEnd(bool $nonprofit): void
+    {
+        $this->financialFramework($nonprofit);
+        $this->fxSaleInvoice('ROLE-REVALUE', $this->client('Synthetic revaluation'), 1000.0, 25.0);
+        $endsOn = self::YEAR . '-06-30';
+        $this->seedRate('EUR', $endsOn, 26.0);
+        $this->db->pdo()->prepare("UPDATE accounting_periods SET starts_on = ?, ends_on = ?, status = 'closing' WHERE id = ?")
+            ->execute(['2098-07-01', $endsOn, $this->periodId]);
+        $period = $this->periods->findById($this->supplierId, $this->periodId);
+        $closing = $this->container->get(\MyInvoice\Service\Accounting\Closing\ClosingService::class);
+        $bankPositions = [
+            ['account_code' => '221', 'currency_code' => 'EUR', 'foreign_balance' => 100.0],
+            ['account_code' => '211', 'currency_code' => 'EUR', 'foreign_balance' => 100.0],
+        ];
+        $decision = [];
+        if ($nonprofit) {
+            $map = $this->accounts->codeToIdMap($this->supplierId);
+            $this->journal->insert([
+                'supplier_id' => $this->supplierId, 'period_id' => $this->periodId, 'entry_date' => $endsOn,
+                'document_no' => 'SYN-FX-MONEY', 'source_type' => 'manual', 'source_id' => null,
+                'posted_at' => date('Y-m-d H:i:s'), 'posted_by' => $this->userId,
+            ], [
+                ['account_id' => $map['221']['id'], 'side' => 'debit', 'amount' => '2500.00', 'currency_code' => 'EUR', 'amount_foreign' => '100.00', 'fx_rate' => '25.00'],
+                ['account_id' => $map['211']['id'], 'side' => 'debit', 'amount' => '2500.00', 'currency_code' => 'EUR', 'amount_foreign' => '100.00', 'fx_rate' => '25.00'],
+                ['account_id' => $map['379']['id'], 'side' => 'credit', 'amount' => '5000.00'],
+            ]);
+            $catalog = (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog($this->db))->ensureForFramework($this->supplierId, $endsOn);
+            $this->db->pdo()->prepare('INSERT INTO dimension_values(supplier_id,type_id,code,name) VALUES (?,?,?,?)')
+                ->execute([$this->supplierId, $catalog['activity_kind']['id'], 'SYN_FX', 'Synthetic foreign currency activity']);
+            $dimensions = [$catalog['activity']['id'] => $catalog['activity']['values']['economic'],
+                $catalog['activity_kind']['id'] => (int) $this->db->pdo()->lastInsertId(), $catalog['tax_regime']['id'] => $catalog['tax_regime']['values']['subject']];
+            $preview = $closing->fxPreview($this->supplierId, $this->periodId);
+            $allocations = [];
+            foreach ($preview['positions'] as $position) {
+                if ($position['diff_cents'] === 0) continue;
+                $allocations[$position['key']] = ['reason' => 'Synthetic documented attribution of monetary revaluation',
+                    'cells' => [['amount' => \MyInvoice\Service\Accounting\Closing\Fx504Builder::decimal(abs($position['diff_cents'])), 'dimensions' => $dimensions]]];
+            }
+            $decision = ['snapshot_hash' => $preview['snapshot_hash'], 'case_decisions' => $preview['case_decisions'], 'decisions' => $allocations];
+            $bankPositions = [];
+        }
+        $closing->runFxRevaluation($this->supplierId, $this->periodId, $bankPositions, (int) $period['row_version'], [], $decision);
+        $entry = $this->journal->findActiveBySourceForUpdate($this->supplierId, 'fx_revaluation', \MyInvoice\Service\Accounting\Closing\ClosingSourceId::fxSaldo($this->periodId));
+        self::assertNotNull($entry);
+        $lines = $this->linesByAccountCode((int) $entry['id']);
+        $expected = $nonprofit ? '645' : '663.123';
+        self::assertSame(1000.0, (float) ($lines[$expected]['credit'] ?? 0));
+        $this->assertBalanced((int) $entry['id']);
+        $bank = $this->journal->findActiveBySourceForUpdate($this->supplierId, 'fx_revaluation', \MyInvoice\Service\Accounting\Closing\ClosingSourceId::fxBank($this->periodId));
+        self::assertNotNull($bank);
+        $bankLines = $this->linesByAccountCode((int) $bank['id']);
+        self::assertSame($nonprofit ? 200.0 : 5200.0, (float) ($bankLines[$expected]['credit'] ?? 0));
+        self::assertSame($nonprofit ? 100.0 : 2600.0, (float) $bankLines['211']['debit']);
+        self::assertSame($nonprofit ? 100.0 : 2600.0, (float) $bankLines['221']['debit']);
+        $this->assertBalanced((int) $bank['id']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('frameworkRevaluationCases')]
+    public function testFrameworkRolesForGeneratedFeeGap(bool $nonprofit): void
+    {
+        $this->financialFramework($nonprofit);
+        $invoice = $this->saleInvoice('ROLE-FEE', $this->client('Synthetic fee'), 100.0);
+        $this->postPredpis('invoice', $invoice, '311', '602', 100.0);
+        $tx = $this->transaction($this->statement(), 95.0, ['match_status' => 'manual', 'matched_invoice_id' => $invoice]);
+        $this->invoicePayment($invoice, $tx, 100.0);
+        $suggestion = $this->suggestionRepo->createIfNoPending([
+            'supplier_id' => $this->supplierId, 'bank_transaction_id' => $tx, 'rule_id' => null,
+            'source' => 'payment_match', 'debit_account_code' => '568', 'credit_account_code' => '311',
+            'amount' => 5.0, 'description' => 'Synthetic fee', 'note' => 'fee_gap',
+        ]);
+        $entry = $this->service->approveSuggestion($this->supplierId, (int) $suggestion['id'], $this->meta());
+        $lines = $this->linesByAccountCode($entry);
+        self::assertSame(5.0, (float) ($lines[$nonprofit ? '549.100' : '568']['debit'] ?? 0));
+        self::assertSame(95.0, (float) $lines['221']['debit']);
+        self::assertSame(100.0, (float) $lines['311']['credit']);
+        $this->assertBalanced($entry);
+    }
+
+    public static function frameworkRevaluationCases(): array
+    {
+        return [[false], [true]];
+    }
+
+    public function testNonprofitFxWithoutRequiredActivityLeavesNoBankJournal(): void
+    {
+        $this->financialFramework(true);
+        $invoice = $this->fxSaleInvoice('ROLE-FX-NO-ACT', $this->client('Synthetic missing activity'), 1000.00, 25.00);
+        $this->seedRate('EUR', self::YEAR . '-06-15', 26.00);
+        $catalog = (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog($this->db))
+            ->ensureForFramework($this->supplierId, self::YEAR . '-06-15', $this->userId);
+        self::assertArrayHasKey('activity', $catalog);
+        $tx = $this->transaction($this->statement(), 1000.00, ['match_status' => 'manual', 'currency' => 'EUR']);
+        $this->fxInvoicePayment($invoice, $tx, 1000.00);
+
+        $result = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('skipped', $result['action']);
+        self::assertSame('error', $result['reason']);
+        self::assertStringContainsString('povinných systémových dimenzí', $result['message']);
+        $stmt = $this->db->pdo()->prepare("SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ? AND source_type = 'bank' AND source_id = ?");
+        $stmt->execute([$this->supplierId, $tx]);
+        self::assertSame(0, (int) $stmt->fetchColumn());
+
+    }
+
+    private function financialFramework(bool $nonprofit): void
+    {
+        $this->db->pdo()->prepare('DELETE FROM supplier_accounting_frameworks WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $this->db->pdo()->prepare('INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, ?, ?), (?, ?, ?)')
+            ->execute([$this->supplierId, '2098-01-01', 'cz_500', $this->supplierId, $nonprofit ? '2098-07-01' : '2099-07-01', 'cz_504']);
+        $map = $this->accounts->codeToIdMap($this->supplierId);
+        foreach (['545', '645', '549', '649', '549.100', '563.123', '663.123'] as $code) {
+            if (!isset($map[$code])) {
+                $this->accounts->insert($this->supplierId, ['account_code' => $code, 'name' => 'Synthetic role ' . $code,
+                    'account_type' => $code[0] === '5' ? 'expense' : 'revenue', 'normal_side' => $code[0] === '5' ? 'debit' : 'credit', 'is_synthetic' => !str_contains($code, '.')]);
+            }
+        }
+        $rules = $this->container->get(\MyInvoice\Repository\PostingRuleRepository::class);
+        $rules->upsertOverride($this->supplierId, 'fx.loss', '563.123', null, 'Synthetic legacy loss');
+        $rules->upsertOverride($this->supplierId, 'fx.gain', null, '663.123', 'Synthetic legacy gain');
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -155,6 +319,87 @@ final class FxPaymentTest extends BankPostingTestCase
 
         self::assertSame('suggested', $res['action'], json_encode($res));
         self::assertSame(0, $this->entryCountForTx($second));
+    }
+
+    /**
+     * Karta z korunového účtu za cizoměnovou službu: karetní schéma přidá k ČNB kurzu přirážku
+     * přes 4 %. Pohyb kartou se vypořádá celý a rozdíl jde na 563, převod mimo kartu zůstane
+     * k ručnímu ověření.
+     */
+    public function testOutgoingCzkCardPaymentWithSchemeMarkupSettlesForeignPurchase(): void
+    {
+        $pf = $this->fxPurchaseInvoice('PF-EUR-CARD-MARKUP', $this->client('Karetní služba EUR'), 100.00, 25.00);
+        $card = $this->transaction($this->statement(), -2610.00, ['match_status' => 'manual', 'currency' => 'CZK']);
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '6801' WHERE id = ?")->execute([$card]);
+        $this->paymentMatch($card, $pf, 2610.00);
+
+        $res = $this->service->handleTransaction($card, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res));
+        $entryId = $this->entryIdForBankTx($card);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(2500.00, $byAcc['321']['debit'], 0.001);
+        self::assertEqualsWithDelta(2610.00, $byAcc['221']['credit'], 0.001);
+        self::assertEqualsWithDelta(110.00, $byAcc['563']['debit'], 0.001);
+        $this->assertBalanced($entryId);
+
+        $pfTransfer = $this->fxPurchaseInvoice('PF-EUR-TRANSFER-MARKUP', $this->client('Převod EUR'), 100.00, 25.00);
+        $transfer = $this->transaction($this->statement(), -2610.00, ['match_status' => 'manual', 'currency' => 'CZK']);
+        $this->paymentMatch($transfer, $pfTransfer, 2610.00);
+
+        $res = $this->service->handleTransaction($transfer, $this->userId);
+
+        self::assertSame('suggested', $res['action'], json_encode($res));
+        self::assertSame('cross_currency', $res['reason'] ?? '');
+    }
+
+    /**
+     * Doklad v jedné cizí měně zaplacený kartou z účtu v jiné cizí měně: banka uvádí původní
+     * částku nákupu v měně dokladu. Závazek se odúčtuje v nominálu kurzem předpisu, banka
+     * kurzem dne úhrady a rozdíl je kurzový.
+     */
+    public function testOutgoingPaymentFromOtherForeignCurrencyBooksExchangeDifference(): void
+    {
+        $pf = $this->fxPurchaseInvoice('PF-EUR-FROM-USD', $this->client('Služba v EUR'), 100.00, 25.00);
+        $this->seedRate('USD', self::YEAR . '-06-15', 23.00);
+        $tx = $this->transaction($this->statement(), -110.00, ['match_status' => 'manual', 'currency' => 'USD']);
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '8783', original_amount = -100.00, original_currency = 'EUR' WHERE id = ?")
+            ->execute([$tx]);
+        $this->paymentMatch($tx, $pf, 110.00);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('posted', $res['action'], json_encode($res));
+        $entryId = $this->entryIdForBankTx($tx);
+        $byAcc = $this->linesByAccountCode($entryId);
+        self::assertEqualsWithDelta(2500.00, $byAcc['321']['debit'], 0.001, 'Závazek v nominálu kurzem předpisu.');
+        self::assertEqualsWithDelta(2530.00, $byAcc['221']['credit'], 0.001, 'Banka = 110 USD kurzem dne úhrady.');
+        self::assertEqualsWithDelta(30.00, $byAcc['563']['debit'], 0.001);
+        $this->assertBalanced($entryId);
+
+        $saldo = $this->lineForAccount($entryId, '321');
+        self::assertSame('EUR', $saldo['currency_code']);
+        self::assertEqualsWithDelta(100.00, (float) $saldo['amount_foreign'], 0.001);
+        $bank = $this->lineForAccount($entryId, '221');
+        self::assertSame('USD', $bank['currency_code']);
+        self::assertEqualsWithDelta(110.00, (float) $bank['amount_foreign'], 0.001);
+    }
+
+    /** Původní částka nákupu menší než zbytek dokladu = částečná úhrada, ne vypořádání celého závazku. */
+    public function testOutgoingPartialPaymentFromOtherForeignCurrencyRoutesToReview(): void
+    {
+        $pf = $this->fxPurchaseInvoice('PF-EUR-FROM-USD-PART', $this->client('Služba v EUR částečně'), 100.00, 25.00);
+        $this->seedRate('USD', self::YEAR . '-06-15', 23.00);
+        $tx = $this->transaction($this->statement(), -66.00, ['match_status' => 'manual', 'currency' => 'USD']);
+        $this->db->pdo()->prepare("UPDATE bank_transactions SET card_last4 = '8783', original_amount = -60.00, original_currency = 'EUR' WHERE id = ?")
+            ->execute([$tx]);
+        $this->paymentMatch($tx, $pf, 66.00);
+
+        $res = $this->service->handleTransaction($tx, $this->userId);
+
+        self::assertSame('suggested', $res['action'], json_encode($res));
+        self::assertSame('cross_currency', $res['reason'] ?? '');
+        self::assertSame(0, $this->entryCountForTx($tx));
     }
 
     private function analytic(string $code): void

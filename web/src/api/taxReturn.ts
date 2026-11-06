@@ -96,6 +96,7 @@ export interface AvailableVariant {
 }
 
 export interface TaxReturnState {
+  nonprofit_filing_proof_hash?: string
   return: {
     year: number
     type: TaxpayerType
@@ -324,8 +325,8 @@ export const taxReturnApi = {
   saveInputs: (type: TaxpayerType, year: number, inputs: Record<string, unknown>, rowVersion: number, variant?: TaxReturnVariant, seq?: number) =>
     api.put<TaxReturnState>(`/tax-return/${type}/${year}/inputs${vsQuery(variant, seq)}`, { inputs, row_version: rowVersion }).then(r => r.data),
 
-  finalize: (type: TaxpayerType, year: number, rowVersion: number, variant?: TaxReturnVariant, seq?: number) =>
-    api.post<TaxReturnState>(`/tax-return/${type}/${year}/finalize${vsQuery(variant, seq)}`, { row_version: rowVersion }).then(r => r.data),
+  finalize: (type: TaxpayerType, year: number, rowVersion: number, variant?: TaxReturnVariant, seq?: number, nonprofitFilingProofHash?: string) =>
+    api.post<TaxReturnState>(`/tax-return/${type}/${year}/finalize${vsQuery(variant, seq)}`, { row_version: rowVersion, ...(nonprofitFilingProofHash ? { nonprofit_filing_proof_hash: nonprofitFilingProofHash } : {}) }).then(r => r.data),
 
   reopen: (type: TaxpayerType, year: number, rowVersion: number, variant?: TaxReturnVariant, seq?: number) =>
     api.post<TaxReturnState>(`/tax-return/${type}/${year}/reopen${vsQuery(variant, seq)}`, { row_version: rowVersion }).then(r => r.data),
@@ -340,12 +341,12 @@ export const taxReturnApi = {
     if (variant === 'dodatecne' && seq && seq > 0) params.set('seq', String(seq))
     return `/api/tax-return/${type}/${year}/xml?${params.toString()}`
   },
-  previewXmlUrl: (year: number, variant?: TaxReturnVariant, seq?: number): string => {
+  previewXmlUrl: (year: number, variant?: TaxReturnVariant, seq?: number, type: TaxpayerType = 'fo'): string => {
     const params = new URLSearchParams()
     supplierParam(params)
     if (variant && variant !== 'radne') params.set('variant', variant)
     if (variant === 'dodatecne' && seq && seq > 0) params.set('seq', String(seq))
-    return `/api/tax-return/fo/${year}/xml/preview?${params.toString()}`
+    return `/api/tax-return/${type}/${year}/xml/preview?${params.toString()}`
   },
 
   // Pracovní PDF sestava přiznání (DPPO i DPFO) — kontrola s účetní a archiv, není podáním.

@@ -21,6 +21,17 @@ final class DomainContextAction
 
     public function __invoke(Request $request, Response $response): Response
     {
+        $user = (array) $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, []);
+        if (\MyInvoice\Security\InstanceAdminRoutePolicy::isTechnicalUser($user)) {
+            $origin = $this->resolver->canonicalOrigin();
+            return Json::ok($response, [
+                'mode' => TenantDomainContext::CANONICAL,
+                'hostname' => (string) parse_url($origin, PHP_URL_HOST), 'origin' => $origin,
+                'locked' => false, 'supplier_id' => null, 'purpose' => null,
+                'feature_enabled' => false, 'canonical_base_url' => $origin,
+                'canonical_login_url' => $origin . '/login',
+            ]);
+        }
         $context = $request->getAttribute(TenantDomainMiddleware::ATTR_CONTEXT);
         if (!$context instanceof TenantDomainContext) {
             $context = $this->resolver->resolve($request);

@@ -37,7 +37,7 @@ final class AttendancePersonMatcher
 
     /**
      * @param list<array<string,mixed>> $persons
-     * @return array{persons:list<array<string,mixed>>,options:list<array{employment_id:int,employee_id:int,label:string,code:string,status:string}>}
+     * @return array{persons:list<array<string,mixed>>,options:list<array{employment_id:int,employee_id:int,label:string,code:string,status:string,relation_type:string}>}
      */
     public function match(int $supplierId, string $periodStart, string $periodEnd, array $persons): array
     {
@@ -82,6 +82,7 @@ final class AttendancePersonMatcher
                 'label' => $this->label($employment),
                 'code' => $employment['code'],
                 'status' => $employment['status'],
+                'relation_type' => $employment['relation_type'],
             ], $employments),
         ];
     }

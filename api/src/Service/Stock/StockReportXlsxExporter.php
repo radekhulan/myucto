@@ -114,6 +114,46 @@ final class StockReportXlsxExporter
     }
 
     /**
+     * @param array<string,mixed> $data výstup StockHistoryImportService::endState()
+     * @return array{bytes:string, filename:string, mime:string}
+     */
+    public function historyEndState(array $data): array
+    {
+        $cutover = $data['cutover_date'];
+        $ss = new Spreadsheet();
+        $sheet = $ss->getActiveSheet();
+        $sheet->setTitle('Koncový stav historie');
+        $sheet->setCellValue('A1', $cutover !== null
+            ? 'Koncový stav převzaté historie proti počátečnímu stavu v MyÚčtu k ' . $this->czDate($cutover)
+            : 'Koncový stav převzaté historie');
+        $sheet->getStyle('A1')->getFont()->setBold(true)->setSize(14);
+
+        $headers = ['Sklad', 'SKU', 'Název', 'MJ', 'Historie', 'MyÚčto', 'Rozdíl'];
+        $cols = count($headers);
+        $head = 3;
+        $this->headerRow($sheet, $head, $headers);
+
+        $r = $head + 1;
+        foreach ($data['items'] as $row) {
+            $sheet->setCellValueExplicit([1, $r], (string) $row['warehouse_code'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([2, $r], (string) $row['sku'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([3, $r], (string) $row['name'], DataType::TYPE_STRING);
+            $sheet->setCellValueExplicit([4, $r], (string) $row['unit'], DataType::TYPE_STRING);
+            $sheet->setCellValue([5, $r], (float) $row['history_qty']);
+            if ($row['stock_qty'] !== null) {
+                $sheet->setCellValue([6, $r], (float) $row['stock_qty']);
+                $sheet->setCellValue([7, $r], (float) $row['difference']);
+            }
+            $r++;
+        }
+        $sheet->setCellValue([1, $r], 'CELKEM (' . (int) $data['totals']['count'] . ' položek, s rozdílem ' . (int) $data['totals']['differences'] . ')');
+        $this->boldRow($sheet, $r, $cols);
+        $this->finishTable($sheet, $head, $r, $cols, 5);
+
+        return $this->out($ss, 'koncovy-stav-historie-' . ($cutover ?? date('Y-m-d')) . '.xlsx');
+    }
+
+    /**
      * List „Podle kategorií“: skupiny ocenění (StockValuationCategoryGroups),
      * součtový řádek = celkové ocenění a poznámka o dnešním zařazení karet.
      *

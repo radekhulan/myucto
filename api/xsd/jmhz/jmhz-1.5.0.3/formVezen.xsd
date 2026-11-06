@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/form/2027"
+           xmlns:xs="http://www.w3.org/2001/XMLSchema"
+           xmlns:st="http://schemas.cssz.cz/JMHZ/simpleTypes/2027"
+           targetNamespace="http://schemas.cssz.cz/JMHZ/form/2027" elementFormDefault="qualified"
+           version="1.5.0.3">
+
+  <xs:import namespace="http://schemas.cssz.cz/JMHZ/simpleTypes/2027" schemaLocation="simpleTypes.xsd"/>
+  <xs:include schemaLocation="formCommonTypes.xsd"/>
+
+  <xs:element name="vezen" type="vezenType"/>
+  <xs:complexType name="vezenType">
+    <xs:annotation>
+      <xs:documentation>DATOVÝ SCÉNÁŘ V MĚSÍČNÍM HLÁŠENÍ PODLE DRUHU ČINNOSTI:
+1 až 9 s příznakem 10502 = výkon trestu odnětí svobody</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="identifikace" type="identifikaceType"/>
+      <xs:element name="souhrnDataZec" type="souhrnDataZecVezenType" minOccurs="0"/>
+      <xs:element name="pojisteni" type="pojisteniVezenType"/>
+      <xs:element name="vykonavanaPozice" type="vykonavanaPoziceCoreType"/>
+      <xs:element name="prubehZamestnani" type="prubehZamestnaniVezenType"/>
+      <xs:element name="prijem" type="prijemType"/>
+      <xs:element name="mzda" type="mzdaVezenType" minOccurs="0"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="souhrnDataZecVezenType">
+    <xs:complexContent>
+      <xs:extension base="souhrnDataZecCoreType">
+        <xs:sequence>
+          <xs:element name="mzdaCista" type="mzdaCistaType"/>
+        </xs:sequence>
+      </xs:extension>
+    </xs:complexContent>
+  </xs:complexType>
+  <xs:complexType name="pojisteniVezenType">
+    <xs:sequence>
+      <xs:element name="trvani" type="trvaniType"/>
+      <xs:element name="eldpSeznam" type="eldpVezenType"/>
+      <xs:element name="nemocenskePojisteni" type="nemocenskePojisteniVezenType" minOccurs="0"/>
+      <xs:element name="slevaZamestnance" type="slevaZamestnanceType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="eldpVezenType">
+    <xs:annotation>
+      <xs:documentation>Evidenční listy důchodového pojištění</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="eldp" maxOccurs="unbounded">
+        <xs:annotation>
+          <xs:documentation>ELDP</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="kod" type="st:kodEldpType" minOccurs="0">
+              <xs:annotation>
+                <xs:documentation>Kód ELDP
+DS: Průběh pojištění v daném měsíci > ELDP (ID 10240)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="platnostOd" type="xs:date" minOccurs="0">
+              <xs:annotation>
+                <xs:documentation>Platnost kódu od
+DS: Průběh pojištění v daném měsíci > ELDP (ID 10241)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="platnostDo" type="xs:date" minOccurs="0">
+              <xs:annotation>
+                <xs:documentation>Platnost kódu do
+DS: Průběh pojištění v daném měsíci > ELDP (ID 10242)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="pocetDnu" type="st:nezaporneCislo2Type">
+              <xs:annotation>
+                <xs:documentation>Počet kalendářních dnů trvání doby důchodového pojištění v daném kalendářním měsíci
+DS: Průběh pojištění v daném měsíci > ELDP (ID 10356)</xs:documentation>
+               </xs:annotation>
+             </xs:element>
+            <xs:element name="vymerovaciZaklad" type="st:nezaporneCislo10Type" minOccurs="0">
+              <xs:annotation>
+                <xs:documentation>Vyměřovací základ
+DS: Průběh pojištění v daném měsíci > ELDP (ID 10245)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="vylouceneDny" type="vylouceneDnyVezenType" minOccurs="0"/>
+            <xs:element name="odecitaneDny" type="odecitaneDnyVezenType" minOccurs="0"/>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="vylouceneDnyVezenType">
+    <xs:annotation>
+      <xs:documentation>Vyloučené dny § 16 odst. 4 písm. a) a j) zákona č. 155/1995 Sb.</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="vylouceneDobyCelkem" type="st:nezaporneCislo10Type">
+        <xs:annotation>
+          <xs:documentation>Vyloučené doby - doba trvání omluvných důvodů uvedených v § 16 odst. 4 písm. a) zákona č. 155/1995 Sb.
+DS: Průběh pojištění v daném měsíci > ELDP > Vyloučené dny § 16 odst. 4 písm. a) a j) zákona č. 155/1995 Sb. (ID 10357)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="docasNeschopnost" type="st:nezaporneCislo8Type" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Vyloučené doby - doba trvání omluvných důvodů uvedených v § 16 odst. 4 písm. a) zákona č. 155/1995 Sb.
+DS: Průběh pojištění v daném měsíci > ELDP > Vyloučené dny § 16 odst. 4 písm. a) a j) zákona č. 155/1995 Sb. (ID 10358)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="penezitaPomocMaterstvi" type="st:nezaporneCislo8Type" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Počet dnů čerpání peněžité pomoci v mateřství
+DS: Průběh pojištění v daném měsíci > ELDP > Vyloučené dny § 16 odst. 4 písm. a) a j) zákona č. 155/1995 Sb. (ID 10359)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="nemocenskePojisteniVezenType">
+    <xs:annotation>
+      <xs:documentation>Nemocenské pojištění</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="vyloucenePar18" type="st:nezaporneCislo3Type">
+        <xs:annotation>
+          <xs:documentation>Vyloučené dny podle § 18 odst. 7 ZNP
+DS: Průběh pojištění v daném měsíci > Nemocenské pojištění > Vyloučené dny § 18 odst. 7 zákona č. 187/2006 Sb. (ID 10366)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="odecitaneDnyVezenType">
+    <xs:annotation>
+      <xs:documentation>Odečítané dny</xs:documentation>
+    </xs:annotation>
+    <xs:sequence>
+      <xs:element name="odecitaneDobyCelkem" type="st:nezaporneCislo10Type">
+        <xs:annotation>
+          <xs:documentation>Doby odečítané po důchodovém věku - počet dnů
+DS: Průběh pojištění v daném měsíci > ELDP > Odečítané dny (ID 10375)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="pracovniNeschopnost" type="st:nezaporneCislo2Type" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Počet dnů trvání dočasné pracovní neschopnosti (karanténa)
+DS: Průběh pojištění v daném měsíci > ELDP > Odečítané dny (ID 10462)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="materstvi" type="st:nezaporneCislo2Type" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation>Počet dnů čerpání peněžité pomoci v mateřství (do dne předcházejícímu porodu)
+DS: Průběh pojištění v daném měsíci > ELDP > Odečítané dny (ID 10463)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="prubehZamestnaniVezenType">
+    <xs:sequence>
+      <xs:element name="odpracovaneHodiny" type="odpracovaneHodinyType"/>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="mzdaVezenType">
+    <xs:sequence>
+      <xs:element name="nahrady" minOccurs="0">
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="docasnaNeschopnost" type="st:cislo8Type" minOccurs="0">
+              <xs:annotation>
+                <xs:documentation>Náhrady při dočasné pracovní neschopnosti (bez srážek nad rámec § 192 odst. 3 ZP)
+DS: Mzda > Náhrady (ID 10342)</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+</xs:schema>

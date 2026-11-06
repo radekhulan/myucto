@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Dimension\DimensionValueHistoryGuard;
+use MyInvoice\Service\Accounting\Dimension\SystemDimensionGuard;
 use PDO;
 
 /**
@@ -19,8 +20,8 @@ final class DimensionRepository
 {
     public const KINDS = ['cost_center', 'project', 'vehicle', 'location', 'deal', 'custom'];
 
-    private const TYPE_COLUMNS = 'id, supplier_id, supplier_group_id, code, name, kind, is_active, show_on_documents, sort_order, drives_accounts, drives_accounts_mask, requires_approval, approval_threshold, created_at, updated_at';
-    private const VALUE_COLUMNS = 'v.id, v.type_id, v.supplier_id, v.supplier_group_id, v.parent_id, v.code, v.name, v.is_active,
+    private const TYPE_COLUMNS = 'id, supplier_id, supplier_group_id, code, name, kind, system_key, is_active, show_on_documents, sort_order, drives_accounts, drives_accounts_mask, requires_approval, approval_threshold, created_at, updated_at';
+    private const VALUE_COLUMNS = 'v.id, v.type_id, v.semantic_key, v.supplier_id, v.supplier_group_id, v.parent_id, v.code, v.name, v.is_active,
         v.responsible_user_id, v.responsible_note, v.car_id, v.project_id, v.cost_center_id, v.note, v.sort_order,
         v.created_at, v.updated_at';
 
@@ -80,8 +81,8 @@ final class DimensionRepository
 
     public function setEnabled(int $supplierId, bool $enabled): void
     {
-        $this->db->pdo()->prepare('UPDATE supplier SET dimensions_enabled = ? WHERE id = ?')
-            ->execute([$enabled ? 1 : 0, $supplierId]);
+        (new SystemDimensionGuard($this->db))->setEnabled($supplierId, $enabled, fn () => $this->db->pdo()->prepare('UPDATE supplier SET dimensions_enabled = ? WHERE id = ?')
+            ->execute([$enabled ? 1 : 0, $supplierId]));
     }
 
     // ── typy ─────────────────────────────────────────────────────────────────
@@ -155,7 +156,12 @@ final class DimensionRepository
     }
 
     /** @param array<string,mixed> $changes */
-    public function updateType(int $supplierId, int $typeId, array $changes): void
+    public function updateType(int $supplierId, int $typeId, array $changes, ?int $actor = null, string $source = 'repository'): void
+    {
+        (new SystemDimensionGuard($this->db))->change('type', $typeId, $changes, fn () => $this->writeType($supplierId, $typeId, $changes), $actor, $source);
+    }
+
+    private function writeType(int $supplierId, int $typeId, array $changes): void
     {
         $sets = [];
         $params = [];
@@ -194,7 +200,7 @@ final class DimensionRepository
 
     public function deleteType(int $supplierId, int $typeId): bool
     {
-        return $this->history->deleteType($typeId, function () use ($supplierId, $typeId): bool {
+        return (new SystemDimensionGuard($this->db))->delete('type', $typeId, fn () => $this->history->deleteType($typeId, function () use ($supplierId, $typeId): bool {
             $pdo = $this->db->pdo();
             [$vis, $visParams] = $this->visibleSql($supplierId, 'dimension_types');
             // Strom se maže od listů; i tento mezikrok musí respektovat viditelnost a rollback.
@@ -203,7 +209,7 @@ final class DimensionRepository
             $stmt = $pdo->prepare("DELETE FROM dimension_types WHERE id = ? AND {$vis}");
             $stmt->execute([$typeId, ...$visParams]);
             return $stmt->rowCount() > 0;
-        });
+        }));
     }
 
     // ── hodnoty ──────────────────────────────────────────────────────────────
@@ -320,7 +326,12 @@ final class DimensionRepository
     }
 
     /** @param array<string,mixed> $data */
-    public function createValue(array $type, array $data): int
+    public function createValue(array $type, array $data, ?int $actor = null, string $source = 'repository'): int
+    {
+        return (new SystemDimensionGuard($this->db))->createValue($type, $data, fn () => $this->insertValue($type, $data), $actor, $source);
+    }
+
+    private function insertValue(array $type, array $data): int
     {
         $pdo = $this->db->pdo();
         $pdo->prepare(
@@ -348,9 +359,9 @@ final class DimensionRepository
     }
 
     /** @param array<string,mixed> $changes */
-    public function updateValue(int $supplierId, int $valueId, array $changes): void
+    public function updateValue(int $supplierId, int $valueId, array $changes, ?int $actor = null, string $source = 'repository'): void
     {
-        $this->history->changeValue($valueId, $changes, fn () => $this->writeValue($supplierId, $valueId, $changes));
+        (new SystemDimensionGuard($this->db))->change('value', $valueId, $changes, fn () => $this->history->changeValue($valueId, $changes, fn () => $this->writeValue($supplierId, $valueId, $changes)), $actor, $source);
     }
 
     private function writeValue(int $supplierId, int $valueId, array $changes): void
@@ -389,14 +400,14 @@ final class DimensionRepository
         return (bool) $stmt->fetchColumn();
     }
 
-    public function deleteValue(int $supplierId, int $valueId): bool
+    public function deleteValue(int $supplierId, int $valueId, ?int $actor = null, string $source = 'repository'): bool
     {
-        return $this->history->deleteValue($valueId, function () use ($supplierId, $valueId): bool {
+        return (new SystemDimensionGuard($this->db))->delete('value', $valueId, fn () => $this->history->deleteValue($valueId, function () use ($supplierId, $valueId): bool {
             [$vis, $visParams] = $this->visibleSql($supplierId, 'dimension_values');
             $stmt = $this->db->pdo()->prepare("DELETE FROM dimension_values WHERE id = ? AND {$vis}");
             $stmt->execute([$valueId, ...$visParams]);
             return $stmt->rowCount() > 0;
-        });
+        }), $actor, $source);
     }
 
     /**

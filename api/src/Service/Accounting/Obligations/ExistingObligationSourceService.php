@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Obligations;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Report\CzechWorkingDays;
 use MyInvoice\Service\Report\VatClassificationMapper;
+use MyInvoice\Service\Tax\Return\TaxReturnException;
 use MyInvoice\Service\Tax\Return\TaxReturnService;
 use MyInvoice\Service\Vat\VatStatusService;
 use PDO;
@@ -426,7 +427,14 @@ final class ExistingObligationSourceService
             || ($toDue !== null && $input > $toDue)) {
             return null;
         }
-        $preview = $this->taxReturns->balanceDueReadOnly($supplierId, $year, 'po');
+        try {
+            $preview = $this->taxReturns->balanceDueReadOnly($supplierId, $year, 'po');
+        } catch (TaxReturnException $e) {
+            if (!in_array($e->errorCode, ['dppo_accounting_framework_not_supported','nonprofit_dppo_ruleset_not_supported'], true)) {
+                throw $e;
+            }
+            return null;
+        }
         if ($preview === null || $preview['status'] !== 'draft' || $preview['balance_due'] <= 0) {
             return null;
         }

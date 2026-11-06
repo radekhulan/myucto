@@ -77,6 +77,29 @@ final class AutoPostingPolicyApiTest extends BankPostingTestCase
         self::assertSame('template_already_instantiated', $duplicate['body']['error']['code']);
     }
 
+    public function testVatRefundTemplateCreatesIncomingRuleOnVatSettlement(): void
+    {
+        $this->db->pdo()->prepare(
+            "DELETE FROM bank_posting_rules WHERE supplier_id=? AND system_template_key='remit.vat.refund'"
+        )->execute([$this->supplierId]);
+        $created = $this->callAction(
+            $this->container->get(BankRuleTemplateAction::class),
+            'instantiate',
+            'POST',
+            'admin',
+            [],
+            ['key' => 'remit.vat.refund'],
+        );
+        self::assertSame(201, $created['status']);
+        $rule = $created['body']['rule'];
+        self::assertSame('incoming', $rule['direction']);
+        self::assertSame('0710', $rule['counterparty_bank']);
+        self::assertSame('705', $rule['counterparty_prefix']);
+        self::assertNull($rule['variable_symbol']);
+        self::assertStringStartsWith('221', (string) $rule['debit_account_code']);
+        self::assertStringStartsWith('343', (string) $rule['credit_account_code']);
+    }
+
     public function testTemplateListAndInstantiationDoNotUseAnotherCompanyCatalog(): void
     {
         $otherSupplierId = (int) ($this->db->pdo()->query(

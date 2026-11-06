@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollSicknessCaseRepository;
@@ -52,7 +51,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         if (!$db instanceof Connection) {
             throw new \RuntimeException('Databázové spojení není dostupné.');
@@ -136,7 +135,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
     /** Endpoint musí jít sestavit kontejnerem, ne jen ručně v testu. */
     public function testContainerBuildsTheAction(): void
     {
-        $action = Bootstrap::buildContainer()->get(
+        $action = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(
             \MyInvoice\Action\Payroll\PayrollDeadlineOverviewAction::class,
         );
 
@@ -542,7 +541,7 @@ final class PayrollDeadlineOverviewTest extends TestCase
     public function testTaxableIncomeRequestEndpointRoundTrip(): void
     {
         $this->db->pdo()->prepare('UPDATE supplier SET payroll_enabled = 1 WHERE id = ?')->execute([$this->supplierId]);
-        $action = Bootstrap::buildContainer()->get(
+        $action = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(
             \MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class,
         );
         self::assertInstanceOf(\MyInvoice\Action\Payroll\PayrollTaxableIncomeConfirmationRequestAction::class, $action);

@@ -63,7 +63,7 @@ final class AnnualClosingAction
         } catch (\DomainException $e) {
             return Json::error($response, 'tax_evidence_closing_invalid', $e->getMessage(), 422);
         } catch (\Throwable $e) {
-            return Json::error($response, 'tax_evidence_closing_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'tax_evidence_closing_failed', $e->getMessage(), 500);
         }
     }
 }

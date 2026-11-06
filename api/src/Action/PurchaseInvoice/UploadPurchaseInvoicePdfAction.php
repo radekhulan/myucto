@@ -176,7 +176,7 @@ final class UploadPurchaseInvoicePdfAction
         }
 
         // Dedup: existuje už faktura se stejným hash u tenanta?
-        $existingByHash = $this->repo->findIdByPdfHash($supplierId, $sha256);
+        $existingByHash = $this->repo->findIdByPdfHash($supplierId, $sha256, activeOnly: true);
         if ($existingByHash !== null && (int) $existingByHash !== $id) {
             @unlink($tmpPath);
             return Json::error($response, 'pdf_already_archived',

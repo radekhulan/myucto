@@ -66,4 +66,27 @@ final class SecurityReportReferenceTest extends TestCase
             self::assertSame($key, $map->match('POST', '/api/documents/12/' . $action)?->key);
         }
     }
+
+    public function testDocumentUploadCannotPurgeTrashOrManageFolders(): void
+    {
+        $map = new RoutePermissionMap();
+        $expected = [
+            '/api/documents/trash/empty' => 'documents.delete',
+            '/api/document-folders/5/move' => 'documents.move',
+            '/api/document-folders/5/restore' => 'documents.restore',
+        ];
+        foreach ($expected as $path => $key) {
+            $rule = $map->match('POST', $path);
+            self::assertSame($key, $rule?->key, $path);
+        }
+        // Hromadná akce nese víc operací; trasa smí pustit dál jen čtenáře
+        // Dokumentů a jemné právo ověřuje akce podle `action`.
+        $bulk = $map->match('POST', '/api/documents/bulk');
+        self::assertSame('documents', $bulk?->key);
+        self::assertNotSame('documents.upload', $bulk?->key);
+        // Nahrávání a zakládání složek zůstává na `documents.upload`.
+        self::assertSame('documents.upload', $map->match('POST', '/api/documents')?->key);
+        self::assertSame('documents.upload', $map->match('POST', '/api/document-folders')?->key);
+        self::assertSame('documents.upload', $map->match('POST', '/api/documents/upload/start')?->key);
+    }
 }

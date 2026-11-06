@@ -36,6 +36,7 @@ import EmploymentExitDocumentsPanel from './EmploymentExitDocumentsPanel.vue'
 import EmploymentWageStatementPanel from './EmploymentWageStatementPanel.vue'
 import EmploymentJmhzIdentityPanel from './EmploymentJmhzIdentityPanel.vue'
 import EmploymentRegistrationPanel from './EmploymentRegistrationPanel.vue'
+import EmploymentJmhzPost20Panel from './EmploymentJmhzPost20Panel.vue'
 import EmploymentTerminationPanel from './EmploymentTerminationPanel.vue'
 import PayrollOpeningBalancesPanel from './PayrollOpeningBalancesPanel.vue'
 import {
@@ -271,13 +272,14 @@ const expanded = ref(!isClosed.value)
 const cardRoot = ref<HTMLElement | null>(null)
 
 async function focusSection(panel: string, field?: string): Promise<void> {
-  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination'].includes(panel)) return
+  if (!['jmhz_identity', 'jmhz_profile', 'employment_terms', 'employment_checklist', 'registration', 'deferred_income', 'termination', 'opening_balances'].includes(panel)) return
   expanded.value = true
   await nextTick()
   const root = cardRoot.value
   if (!root) return
   if (field && revealField(fieldSelector(field), root)) return
   const selector = panel === 'employment_checklist' ? '[data-test="employment-checklist"]'
+    : panel === 'opening_balances' ? '[data-test="opening-balances-needed"]'
     : panel === 'deferred_income' ? '[data-test="deferred-income"]'
     : panel === 'termination' ? '[data-test="employment-termination"]'
     : panel === 'employment_terms' ? '[data-test="terms-office"]'
@@ -287,7 +289,11 @@ async function focusSection(panel: string, field?: string): Promise<void> {
   revealField(selector, root)
 }
 
-defineExpose({ focusSection, employmentId: computed(() => props.employment.id) })
+defineExpose({
+  focusSection,
+  employmentId: computed(() => props.employment.id),
+  isPrimary: computed(() => props.employment.is_primary === true),
+})
 
 /**
  * Je karta rozložená do dvou sloupců (postranní pruh vlevo)?
@@ -425,6 +431,12 @@ function hydrate(employment: PayrollEmployment) {
     regular_workplace: terms.regular_workplace,
     jmhz_workplace_municipality_code: terms.jmhz_workplace_municipality_code,
     jmhz_workplace_country_code: terms.jmhz_workplace_country_code,
+    jmhz_workplace_address_point_code: terms.jmhz_workplace_address_point_code ?? null,
+    jmhz_workplace_street: terms.jmhz_workplace_street ?? null,
+    jmhz_workplace_house_number: terms.jmhz_workplace_house_number ?? null,
+    jmhz_workplace_orientation_number: terms.jmhz_workplace_orientation_number ?? null,
+    jmhz_workplace_postal_code: terms.jmhz_workplace_postal_code ?? null,
+    jmhz_state_prosecutor: terms.jmhz_state_prosecutor ?? null,
     jmhz_apz_contribution_status: terms.jmhz_apz_contribution_status,
     jmhz_apz_instrument_code: terms.jmhz_apz_instrument_code,
     jmhz_functional_benefits_status: terms.jmhz_functional_benefits_status,
@@ -542,6 +554,25 @@ function onActivityCodeChange() {
     termsForm.value.jmhz_relationship_detail_code = '1'
   }
 }
+
+/** Adresa pracoviště v ČR (JMHZ 2027, 10550 až 10554): ne bez obce ani mimo ČR (kód 111111). */
+const workplaceAddressApplies = computed(() => {
+  const code = termsForm.value?.jmhz_workplace_municipality_code ?? null
+  return code !== null && code !== '111111'
+})
+
+// Server adresu bez obce v ČR odmítne; po přepnutí na zahraničí se proto vyprázdní.
+watch(workplaceAddressApplies, applies => {
+  if (applies || termsForm.value === null) return
+  termsForm.value.jmhz_workplace_address_point_code = null
+  termsForm.value.jmhz_workplace_street = null
+  termsForm.value.jmhz_workplace_house_number = null
+  termsForm.value.jmhz_workplace_orientation_number = null
+  termsForm.value.jmhz_workplace_postal_code = null
+})
+
+/** Státní zástupce (JMHZ 2027, 10587) se uvádí u druhu činnosti K až S. */
+const stateProsecutorApplies = computed(() => /^[K-S]$/.test(termsForm.value?.activity_code ?? ''))
 
 const selectedRelationshipDetailMode = computed(() => {
   const activityCode = termsForm.value?.activity_code
@@ -1636,6 +1667,37 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                   <option v-for="country in jmhzOptions?.countries ?? []" :key="country.code" :value="country.code">{{ country.code }} · {{ country.label }}</option>
                 </select>
               </label>
+              <template v-if="workplaceAddressApplies">
+                <p class="text-xs text-neutral-500 sm:col-span-2" data-test="jmhz-address-hint">{{ t('payroll.people.jmhz_evidence.address_hint') }}</p>
+                <label :class="[FIELD, 'sm:col-span-2']">
+                  {{ t('payroll.people.jmhz_evidence.street') }}
+                  <input v-model="termsForm.jmhz_workplace_street" :disabled="!canEditTerms || busy" :class="INPUT" maxlength="50" data-test="jmhz-street">
+                </label>
+                <label :class="FIELD">
+                  {{ t('payroll.people.jmhz_evidence.house_number') }}
+                  <input v-model="termsForm.jmhz_workplace_house_number" :disabled="!canEditTerms || busy" :class="INPUT" inputmode="numeric" maxlength="4" data-test="jmhz-house-number">
+                </label>
+                <label :class="FIELD">
+                  {{ t('payroll.people.jmhz_evidence.orientation_number') }}
+                  <input v-model="termsForm.jmhz_workplace_orientation_number" :disabled="!canEditTerms || busy" :class="INPUT" maxlength="12" data-test="jmhz-orientation-number">
+                </label>
+                <label :class="FIELD">
+                  {{ t('payroll.people.jmhz_evidence.postal_code') }}
+                  <input v-model="termsForm.jmhz_workplace_postal_code" :disabled="!canEditTerms || busy" :class="INPUT" inputmode="numeric" maxlength="6" data-test="jmhz-postal-code">
+                </label>
+                <label :class="FIELD">
+                  {{ t('payroll.people.jmhz_evidence.address_point_code') }}
+                  <input v-model="termsForm.jmhz_workplace_address_point_code" :disabled="!canEditTerms || busy" :class="INPUT" inputmode="numeric" maxlength="9" data-test="jmhz-address-point">
+                </label>
+              </template>
+              <label v-if="stateProsecutorApplies" :class="FIELD">
+                {{ t('payroll.people.jmhz_evidence.state_prosecutor') }}
+                <select v-model="termsForm.jmhz_state_prosecutor" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-state-prosecutor">
+                  <option :value="null">{{ t('payroll.people.jmhz_evidence.state_prosecutor_unset') }}</option>
+                  <option :value="true">{{ t('payroll.people.jmhz_evidence.state_prosecutor_yes') }}</option>
+                  <option :value="false">{{ t('payroll.people.jmhz_evidence.state_prosecutor_no') }}</option>
+                </select>
+              </label>
               <label :class="[FIELD, 'sm:col-span-2']">
                 {{ t('payroll.people.regular_workplace') }}
                 <input v-model="termsForm.regular_workplace" :disabled="!canEditTerms || busy" :class="INPUT">
@@ -1839,7 +1901,14 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <div class="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                 <label v-for="field in ordinaryProfileFields" :key="field.key" class="flex items-start gap-2 text-sm text-neutral-700">
                   <input v-model="termsForm[field.key]" :data-a1-field="field.key" type="checkbox" :disabled="!canEditTerms || busy" class="mt-0.5 rounded border-neutral-300 text-warning-600 focus:ring-warning-500">
-                  <span class="min-w-0">{{ t(`payroll.people.jmhz_ordinary_profile.${field.label}`) }}</span>
+                  <span class="min-w-0">
+                    {{ t(`payroll.people.jmhz_ordinary_profile.${field.label}`) }}
+                    <span
+                      v-if="field.key === 'jmhz_ozp_employment_support_applies'"
+                      class="mt-0.5 block text-xs text-neutral-500"
+                      data-test="jmhz-ozp-support-hint"
+                    >{{ t('payroll.people.jmhz_ordinary_profile.ozp_employment_support_hint') }}</span>
+                  </span>
                 </label>
               </div>
               <p class="mt-2 text-xs text-neutral-500">{{ t('payroll.people.jmhz_ordinary_profile.monthly_hint') }}</p>
@@ -2174,6 +2243,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       :termination-end-date="terminationOverview?.employment.end_date ?? employment.end_date ?? null"
       :master-data-version="registrationMasterDataVersion"
     />
+    <EmploymentJmhzPost20Panel :employment-id="employment.id" />
 
     <EmploymentJmhzIdentityPanel
       :employment-id="employment.id"

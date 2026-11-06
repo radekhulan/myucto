@@ -3,7 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { RouterLink } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { purchaseStatsApi, type PurchaseSummary } from '@/api/purchaseStats'
-import { formatMoney, formatNumber, formatPercent } from '@/composables/useFormat'
+import { formatMoneyWhole, formatNumber, formatPercent } from '@/composables/useFormat'
 import type { TopClient } from '@/api/dashboard'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import RevenueChart from '@/components/charts/RevenueChart.vue'
@@ -177,7 +177,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
             {{ t('costs.rolling_12m', { currency: r.currency }) }}
           </div>
-          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoney(r.total, r.currency) }}</div>
+          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</div>
           <div v-if="r.prev_period_total > 0" class="text-xs mt-1"
             :class="r.total <= r.prev_period_total ? 'text-success-600' : 'text-danger-500'">
             {{ t('costs.rolling_12m_yoy', {
@@ -186,7 +186,7 @@ const hasAnyData = computed(() =>
             }) }}
           </div>
           <div class="text-xs text-neutral-500 mt-1">
-            {{ t('costs.rolling_12m_vs_prev', { total: formatMoney(r.prev_period_total, r.currency) }) }}
+            {{ t('costs.rolling_12m_vs_prev', { total: formatMoneyWhole(r.prev_period_total, r.currency) }) }}
           </div>
           <div class="text-[11px] text-neutral-400 mt-2">{{ t('costs.rolling_12m_hint') }}</div>
         </div>
@@ -198,7 +198,7 @@ const hasAnyData = computed(() =>
             {{ t('costs.costs_total_czk', { year: summary.year }) }}
           </div>
           <div class="text-2xl font-semibold text-primary-700 font-mono">
-            {{ formatMoney(costsTotalCzk.this_year, 'CZK') }}
+            {{ formatMoneyWhole(costsTotalCzk.this_year, 'CZK') }}
           </div>
           <div v-if="costsTotalCzk.change_pct !== null" class="text-xs mt-1"
             :class="costsTotalCzk.change_pct <= 0 ? 'text-success-600' : 'text-danger-500'">
@@ -217,7 +217,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
             {{ t('costs.costs_this_year', { year: summary.year, currency: r.currency }) }}
           </div>
-          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoney(r.total, r.currency) }}</div>
+          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</div>
           <div v-if="r.change_pct !== null" class="text-xs mt-1"
             :class="r.change_pct <= 0 ? 'text-success-600' : 'text-danger-500'">
             {{ r.change_pct >= 0 ? '▲' : '▼' }} {{ Math.abs(r.change_pct) }} % {{ t('costs.vs_prev_ytd', { year: summary.prev_year }) }}
@@ -237,10 +237,10 @@ const hasAnyData = computed(() =>
           </div>
           <div class="text-2xl font-semibold text-primary-700 font-mono"
             :title="t('costs.forecast_tooltip', {
-              ytd: formatMoney(f.ytd, f.currency),
+              ytd: formatMoneyWhole(f.ytd, f.currency),
               growth: Math.round((f.growth_ratio - 1) * 100 * 10) / 10,
-              remainder: formatMoney(f.prev_year_remainder, f.currency)
-            })">{{ formatMoney(f.forecast, f.currency) }}</div>
+              remainder: formatMoneyWhole(f.prev_year_remainder, f.currency)
+            })">{{ formatMoneyWhole(f.forecast, f.currency) }}</div>
           <div v-if="f.prev_year_full > 0" class="text-xs mt-1"
             :class="f.forecast <= f.prev_year_full ? 'text-success-600' : 'text-danger-500'">
             {{ f.forecast >= f.prev_year_full ? '▲' : '▼' }}
@@ -258,7 +258,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
             {{ t('costs.costs_prev_year', { year: summary.prev_year, currency: r.currency }) }}
           </div>
-          <div class="text-2xl font-semibold text-neutral-700 font-mono">{{ formatMoney(r.total, r.currency) }}</div>
+          <div class="text-2xl font-semibold text-neutral-700 font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</div>
           <div class="text-[11px] text-neutral-500 mt-2 flex flex-wrap gap-x-3 gap-y-0.5">
             <span>{{ t('costs.year_invoices_n', { n: r.invoice_count }) }}</span>
             <span>{{ t('costs.year_vendors_n', { n: r.vendor_count }) }}</span>
@@ -296,7 +296,7 @@ const hasAnyData = computed(() =>
           <div class="text-xs uppercase tracking-wide text-neutral-500 mb-1">
             {{ t('costs.costs_last_30d', { currency: r.currency }) }}
           </div>
-          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoney(r.total, r.currency) }}</div>
+          <div class="text-2xl font-semibold text-neutral-900 font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</div>
           <div class="text-xs text-neutral-500 mt-1">{{ r.invoice_count }} {{ t('costs.invoices_unit') }}</div>
           <div class="text-[11px] text-neutral-400 mt-2">{{ t('costs.last_30d_hint') }}</div>
         </div>
@@ -310,7 +310,7 @@ const hasAnyData = computed(() =>
           </div>
           <div class="text-[11px] text-neutral-500 mt-2 space-x-2">
             <span v-for="u in summary.kpi.unpaid_per_currency" :key="`up-${u.currency}`" class="font-mono">
-              {{ formatMoney(u.total, u.currency) }}
+              {{ formatMoneyWhole(u.total, u.currency) }}
             </span>
           </div>
           <div v-if="summary.kpi.overdue_count > 0" class="text-[11px] text-danger-500 mt-1">
@@ -405,12 +405,12 @@ const hasAnyData = computed(() =>
                     {{ summary.year }}
                     <span class="ml-1 text-[10px] font-normal text-primary-600 uppercase tracking-wide">{{ t('costs.forecast_label') }}</span>
                   </td>
-                  <td class="px-4 py-2 text-right font-mono text-primary-700">{{ formatMoney(f.forecast, f.currency) }}</td>
+                  <td class="px-4 py-2 text-right font-mono text-primary-700">{{ formatMoneyWhole(f.forecast, f.currency) }}</td>
                   <td class="px-4 py-2 text-right text-xs text-primary-600">—</td>
                 </tr>
                 <tr v-for="r in summary.costs_by_year" :key="`y-${r.year}-${r.currency}`">
                   <td class="px-4 py-2 font-medium">{{ r.year }}</td>
-                  <td class="px-4 py-2 text-right font-mono">{{ formatMoney(r.total, r.currency) }}</td>
+                  <td class="px-4 py-2 text-right font-mono">{{ formatMoneyWhole(r.total, r.currency) }}</td>
                   <td class="px-4 py-2 text-right text-xs text-neutral-500">{{ r.invoice_count }}</td>
                 </tr>
               </tbody>
@@ -436,7 +436,7 @@ const hasAnyData = computed(() =>
                   <td class="px-4 py-2 font-mono text-neutral-700">{{ ymLabel(row.ym) }}</td>
                   <td class="px-4 py-2 text-right font-mono space-x-3">
                     <span v-for="c in row.perCurrency" :key="`${row.ym}-${c.currency}`">
-                      {{ formatMoney(c.total, c.currency) }}
+                      {{ formatMoneyWhole(c.total, c.currency) }}
                     </span>
                   </td>
                 </tr>
@@ -471,7 +471,7 @@ const hasAnyData = computed(() =>
                     <RouterLink class="row-link" :to="`/clients/${v.vendor_id}`" @click.stop @auxclick.stop>{{ v.company_name }}</RouterLink>
                     <span v-if="v.currencies && v.currencies !== 'CZK'" class="ml-1 text-xs text-neutral-400">({{ v.currencies }})</span>
                   </td>
-                  <td class="px-4 py-2 text-right font-mono">{{ formatMoney(v.total_czk, 'CZK') }}</td>
+                  <td class="px-4 py-2 text-right font-mono">{{ formatMoneyWhole(v.total_czk, 'CZK') }}</td>
                   <td class="px-4 py-2 text-right text-xs text-neutral-500">{{ v.invoice_count }}</td>
                 </tr>
               </tbody>
@@ -497,7 +497,7 @@ const hasAnyData = computed(() =>
                       <div class="h-full bg-warning-500 rounded" :style="{ width: e.percent + '%' }"></div>
                     </div>
                   </td>
-                  <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoney(e.total_czk, 'CZK') }}</td>
+                  <td class="px-3 py-2 text-right font-mono text-neutral-900">{{ formatMoneyWhole(e.total_czk, 'CZK') }}</td>
                   <td class="px-5 py-2 text-right text-xs text-neutral-500 font-mono w-12">{{ formatPercent(e.percent, 1) }}</td>
                 </tr>
               </tbody>
@@ -524,7 +524,7 @@ const hasAnyData = computed(() =>
             <div class="flex items-baseline gap-2">
               <span class="text-3xl font-semibold font-mono"
                 :class="concentration.top3_pct >= 70 ? 'text-danger-500' : concentration.top3_pct >= 50 ? 'text-warning-600' : 'text-neutral-900'">{{ concentration.top3_pct }} %</span>
-              <span class="text-xs text-neutral-500">{{ formatMoney(concentration.top3_total, concentration.currency) }}</span>
+              <span class="text-xs text-neutral-500">{{ formatMoneyWhole(concentration.top3_total, concentration.currency) }}</span>
             </div>
             <div class="h-1.5 mt-2 bg-neutral-100 rounded-full overflow-hidden">
               <div class="h-full rounded-full"
@@ -537,7 +537,7 @@ const hasAnyData = computed(() =>
             <div class="flex items-baseline gap-2">
               <span class="text-3xl font-semibold font-mono"
                 :class="concentration.top5_pct >= 90 ? 'text-danger-500' : concentration.top5_pct >= 70 ? 'text-warning-600' : 'text-neutral-900'">{{ concentration.top5_pct }} %</span>
-              <span class="text-xs text-neutral-500">{{ formatMoney(concentration.top5_total, concentration.currency) }}</span>
+              <span class="text-xs text-neutral-500">{{ formatMoneyWhole(concentration.top5_total, concentration.currency) }}</span>
             </div>
             <div class="h-1.5 mt-2 bg-neutral-100 rounded-full overflow-hidden">
               <div class="h-full rounded-full"
@@ -579,17 +579,17 @@ const hasAnyData = computed(() =>
               <div class="grid grid-cols-3 gap-2 text-center">
                 <div class="rounded-md bg-neutral-50 border border-neutral-200 p-2">
                   <div class="text-[11px] text-neutral-500">{{ t('costs.outflow_30') }}</div>
-                  <div class="text-sm font-semibold font-mono text-neutral-900">{{ formatMoney(f.out_30, f.currency) }}</div>
+                  <div class="text-sm font-semibold font-mono text-neutral-900">{{ formatMoneyWhole(f.out_30, f.currency) }}</div>
                   <div class="text-[10px] text-neutral-400">{{ t('costs.outflow_n_invoices', { n: f.count_30 }) }}</div>
                 </div>
                 <div class="rounded-md bg-neutral-50 border border-neutral-200 p-2">
                   <div class="text-[11px] text-neutral-500">{{ t('costs.outflow_60') }}</div>
-                  <div class="text-sm font-semibold font-mono text-neutral-900">{{ formatMoney(f.out_60, f.currency) }}</div>
+                  <div class="text-sm font-semibold font-mono text-neutral-900">{{ formatMoneyWhole(f.out_60, f.currency) }}</div>
                   <div class="text-[10px] text-neutral-400">{{ t('costs.outflow_n_invoices', { n: f.count_60 }) }}</div>
                 </div>
                 <div class="rounded-md bg-neutral-50 border border-neutral-200 p-2">
                   <div class="text-[11px] text-neutral-500">{{ t('costs.outflow_90') }}</div>
-                  <div class="text-sm font-semibold font-mono text-neutral-900">{{ formatMoney(f.out_90, f.currency) }}</div>
+                  <div class="text-sm font-semibold font-mono text-neutral-900">{{ formatMoneyWhole(f.out_90, f.currency) }}</div>
                   <div class="text-[10px] text-neutral-400">{{ t('costs.outflow_n_invoices', { n: f.count_90 }) }}</div>
                 </div>
               </div>
@@ -604,7 +604,7 @@ const hasAnyData = computed(() =>
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('costs.aging_title') }}</h3>
           <span class="text-xs text-neutral-400">{{ t('costs.aging_hint') }}</span>
         </div>
-        <AgingChart :rows="agingRows" :format="(v, c) => formatMoney(v, c)" />
+        <AgingChart :rows="agingRows" :format="(v, c) => formatMoneyWhole(v, c)" />
         <div class="mt-4 overflow-x-auto">
           <table class="w-full text-xs">
             <thead class="bg-neutral-50 text-neutral-500 uppercase tracking-wide">
@@ -621,24 +621,24 @@ const hasAnyData = computed(() =>
               <tr v-for="r in agingRows" :key="`ag-${r.currency}`">
                 <td class="px-3 py-1.5 font-mono">{{ r.currency }}</td>
                 <td class="px-3 py-1.5 text-right font-mono">
-                  <div>{{ formatMoney(r.current, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.current, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.current_n }}×</div>
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono">
-                  <div>{{ formatMoney(r.b1_30, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.b1_30, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.b1_30_n }}×</div>
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono">
-                  <div>{{ formatMoney(r.b31_60, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.b31_60, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.b31_60_n }}×</div>
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono">
-                  <div>{{ formatMoney(r.b61_90, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.b61_90, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.b61_90_n }}×</div>
                 </td>
                 <td class="px-3 py-1.5 text-right font-mono"
                     :class="r.b90_plus > 0 ? 'text-danger-500 font-semibold' : ''">
-                  <div>{{ formatMoney(r.b90_plus, r.currency) }}</div>
+                  <div>{{ formatMoneyWhole(r.b90_plus, r.currency) }}</div>
                   <div class="text-neutral-400">{{ r.b90_plus_n }}×</div>
                 </td>
               </tr>

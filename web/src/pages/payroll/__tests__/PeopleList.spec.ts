@@ -157,6 +157,8 @@ function serveRoster(params: PageParams) {
       || (filter === 'needs_data' && item.data_gaps.length > 0)
       || (filter === 'blocking_data'
         && item.data_gaps.some(gap => gap.severity === 'blocking'))
+      || (filter === 'dpp_hours_limit'
+        && item.dpp_annual_hours != null && item.dpp_annual_hours.status !== 'ok')
     return passesFilter && (needle === '' || item.full_name.toLowerCase().includes(needle))
   })
 
@@ -180,8 +182,8 @@ function mountPage(employmentCardStub: unknown = true) {
     global: {
       stubs: {
         ActionBar: {
-          props: ['actions'],
-          template: '<div data-test="person-actions"><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" @click="action.run && action.run()">{{ action.label }}</button></div>',
+          props: ['actions', 'moreLabel'],
+          template: '<div data-test="person-actions"><span v-if="moreLabel" data-test="action-more-label">{{ moreLabel }}</span><button v-for="action in actions" v-show="action.show" :key="action.key" type="button" :data-test="`action-${action.key}`" :data-tier="action.tier" @click="action.run && action.run()">{{ action.label }}</button></div>',
         },
         RouterLink: {
           name: 'RouterLink',
@@ -279,6 +281,32 @@ describe('PeopleList toolbar and shared employee creation', () => {
   })
 
   /*
+   * Šest tlačítek vedle hledání a filtru zabralo celou šířku řádku a filtr
+   * (pevných 14rem) přetekl přes hledání i první tlačítko. Hledání s filtrem
+   * si drží minimální šířku, tlačítka se zalomí.
+   */
+  it('nedovolí tlačítkům stlačit hledání a filtr pod jejich šířku', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="people-toolbar-filters"]').classes()).toContain('lg:min-w-[30rem]')
+    const buttons = wrapper.get('[data-test="quick-inputs-link"]').element.parentElement!
+    expect(buttons.classList.contains('flex-wrap')).toBe(true)
+    expect(buttons.classList.contains('min-w-0')).toBe(true)
+  })
+
+  it('hromadné úpravy schová do Další funkce a na liště nechá měsíční zadání', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="quick-inputs-link"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="action-more-label"]').exists()).toBe(true)
+    for (const key of ['statutory-bulk', 'declaration-sign-bulk', 'health-insurer-bulk', 'workplace-bulk', 'bulk-closure']) {
+      expect(wrapper.get(`[data-test="action-${key}"]`).attributes('data-tier')).toBe('overflow')
+    }
+  })
+
+  /*
    * Zúžení nesmí zůstat v prohlížeči: kdyby hledal jen v načtené stránce,
    * o člověku ze třetí stránky by obrazovka tvrdila, že neexistuje.
    */
@@ -337,6 +365,60 @@ describe('PeopleList toolbar and shared employee creation', () => {
     expect(wrapper.text()).not.toContain('Beta Neaktivní')
     expect(wrapper.get('[data-test="quick-inputs-link"]').classes())
       .toContain('border')
+  })
+
+  /*
+   * Stovky brigádníků na DPP: seznam ukazuje roční hodiny proti limitu 300 h
+   * a filtr „u limitu" zužuje na serveru, aby šlo projít všechny najednou.
+   */
+  it('shows DPP annual hours badges and narrows to people near the limit on the server', async () => {
+    const dppHours = (totalHours: number, status: 'ok' | 'approaching' | 'exceeded') => ({
+      year: 2026,
+      total_minutes: totalHours * 60,
+      takeover_minutes: 0,
+      limit_minutes: 300 * 60,
+      warning_minutes: 240 * 60,
+      remaining_minutes: Math.max(0, 300 - totalHours) * 60,
+      status,
+    })
+    roster = [
+      { ...person(11, 'Hosteska Pod limitem', true, false), relation_types: ['dpp'], dpp_annual_hours: dppHours(120, 'ok') },
+      { ...person(12, 'Hosteska U limitu', true, false), relation_types: ['dpp'], dpp_annual_hours: dppHours(250, 'approaching') },
+      { ...person(13, 'Hosteska Přes limit', true, false), relation_types: ['dpp'], dpp_annual_hours: dppHours(310, 'exceeded') },
+      { ...person(14, 'Kmenový Zaměstnanec', true, false), relation_types: ['employment'], dpp_annual_hours: null },
+    ]
+
+    const wrapper = mountPage()
+    await flushPromises()
+
+    const ok = wrapper.get('[data-test="person-dpp-hours-11"]')
+    expect(ok.attributes('data-status')).toBe('ok')
+    expect(ok.text()).toContain('"hours":"120"')
+    expect(ok.attributes('title')).toContain('payroll.people.dpp_hours.title_ok')
+    expect(ok.attributes('title')).toContain('"remaining":"180"')
+    expect(ok.classes()).toContain('bg-neutral-100')
+    const approaching = wrapper.get('[data-test="person-dpp-hours-12"]')
+    expect(approaching.attributes('data-status')).toBe('approaching')
+    expect(approaching.classes()).toContain('bg-warning-50')
+    expect(approaching.attributes('title')).toContain('"remaining":"50"')
+    const exceeded = wrapper.get('[data-test="person-dpp-hours-13"]')
+    expect(exceeded.attributes('data-status')).toBe('exceeded')
+    expect(exceeded.classes()).toContain('bg-danger-50')
+    expect(wrapper.find('[data-test="person-dpp-hours-14"]').exists()).toBe(false)
+
+    const filter = wrapper.get('[data-test="people-filter"]')
+    await filter.get('input').trigger('focus')
+    const limitOption = filter.findAll('[role="option"]')
+      .find(option => option.text() === 'payroll.people.filters.dpp_hours_limit')
+    expect(limitOption).toBeDefined()
+    await limitOption!.trigger('click')
+    await flushPromises()
+
+    expect(m.peoplePage).toHaveBeenLastCalledWith(expect.objectContaining({ filter: 'dpp_hours_limit' }))
+    expect(wrapper.text()).toContain('Hosteska U limitu')
+    expect(wrapper.text()).toContain('Hosteska Přes limit')
+    expect(wrapper.text()).not.toContain('Hosteska Pod limitem')
+    expect(wrapper.text()).not.toContain('Kmenový Zaměstnanec')
   })
 
   /*
@@ -960,6 +1042,36 @@ describe('PeopleList toolbar and shared employee creation', () => {
     await flushPromises()
     expect(focus).toHaveBeenCalledExactlyOnceWith(44, 'jmhz_profile', 'jmhz_deep_mining_work_applies')
     expect(m.routerReplace).toHaveBeenCalledWith({ query: { employment: '44' } })
+    wrapper.unmount()
+  })
+
+  /*
+   * Blokace „chybí počáteční roční úhrny" vede na Počáteční stavy. Ty karta
+   * vztahu kreslí jen u hlavního vztahu a jen se známým začátkem vedení mezd,
+   * takže doskok musí počkat na capabilities a vybrat hlavní vztah.
+   */
+  it('doskočí na počáteční stavy hlavního vztahu až se známým začátkem mezd', async () => {
+    m.routeQuery.person = '4'
+    m.routeQuery.panel = 'opening_balances'
+    const focus = vi.fn()
+    m.person.mockResolvedValue({
+      ...person(4, 'Delta Nová', true, true),
+      employments: [{ id: 43, is_primary: false }, { id: 44, is_primary: true }],
+    })
+    const wrapper = mountPage(defineComponent({
+      props: ['employment', 'payrollStartPeriod'],
+      setup(props, { expose }) {
+        expose({
+          employmentId: computed(() => props.employment.id),
+          isPrimary: computed(() => props.employment.is_primary === true),
+          focusSection: (panel: string) => focus(props.employment.id, panel, props.payrollStartPeriod),
+        })
+        return () => null
+      },
+    }))
+    await flushPromises()
+
+    expect(focus).toHaveBeenCalledExactlyOnceWith(44, 'opening_balances', '2026-01-01')
     wrapper.unmount()
   })
 

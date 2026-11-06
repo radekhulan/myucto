@@ -65,24 +65,40 @@ final class PayrollRunReadinessImpactTest extends TestCase
     }
 
     /**
-     * Co vstupuje do zmrazeného snímku, se po zamknutí opraví jen novou revizí.
-     * Nezastavuje to, ale účetní o tom následku musí vědět předem.
+     * Neschválená docházka a rozpracované vstupy běh nezastaví, ale schválit
+     * ho nepůjde — v běhu jsou blokující validace. Předběžná kontrola je proto
+     * musí ukázat jako blokaci schválení, ne jako žluté varování.
      */
-    public function testFrozenSnapshotInputsWarnAboutCorrectionRevision(): void
+    public function testUnapprovedSourcesBlockApprovalNotStart(): void
     {
-        foreach (['draft_inputs_present', 'time_month_not_approved'] as $code) {
+        foreach (['draft_inputs_present', 'time_month_not_approved', 'time_month_missing', 'employment_without_inputs'] as $code) {
             $described = PayrollRunReadinessImpact::describe($code);
             self::assertSame(
-                PayrollRunReadinessImpact::IMPACT_REVISION,
+                PayrollRunReadinessImpact::IMPACT_APPROVAL,
                 $described['impact'],
                 $code,
             );
+            self::assertSame('blocker', $described['severity'], $code);
             self::assertSame(
                 PayrollRunReadinessImpact::SCOPE_MONTHLY,
                 $described['scope'],
                 $code,
             );
         }
+    }
+
+    /** Co by po zahájení blokovalo schválení, nesmí se před ním tvářit jako varování. */
+    public function testSnapshotBlockerIsNeverWeakerThanApprovalBlock(): void
+    {
+        $described = PayrollRunReadinessImpact::describeValidation('recurring_component_without_input', 'blocker');
+        self::assertSame(PayrollRunReadinessImpact::IMPACT_APPROVAL, $described['impact']);
+        self::assertSame('blocker', $described['severity']);
+
+        $warning = PayrollRunReadinessImpact::describeValidation('recurring_component_without_input', 'warning');
+        self::assertSame(PayrollRunReadinessImpact::IMPACT_REVISION, $warning['impact']);
+
+        $stop = PayrollRunReadinessImpact::describeValidation('employer_policy_missing', 'blocker');
+        self::assertSame(PayrollRunReadinessImpact::IMPACT_BLOCKING, $stop['impact']);
     }
 
     /**

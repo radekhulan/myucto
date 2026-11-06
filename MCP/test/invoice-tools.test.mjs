@@ -57,7 +57,8 @@ const NEW_TOOLS = {
   list_invoice_advance_candidates: 'read',
   list_proforma_final_candidates: 'read',
   link_invoice_advance: 'write',
-  unlink_invoice_advance: 'write',
+  unlink_invoice_advance: 'destructive',
+  remove_invoice_advance_drawdown: 'destructive',
   preview_invoice_penalty: 'read',
   create_invoice_penalty: 'write',
   add_invoice_payment: 'write',
@@ -114,7 +115,6 @@ test('jednoduché nástroje volají správnou cestu se správným tělem', async
     ['list_invoice_advance_candidates', { id: 42 }, 'GET', '/invoices/42/advance-candidates'],
     ['list_proforma_final_candidates', { id: 7 }, 'GET', '/invoices/7/final-candidates'],
     ['link_invoice_advance', { id: 42, advance_id: 7 }, 'POST', '/invoices/42/link-advance', { advance_id: 7 }],
-    ['unlink_invoice_advance', { id: 42 }, 'DELETE', '/invoices/42/link-advance'],
     ['preview_invoice_penalty', { id: 42, as_of: '2026-10-01' }, 'GET', '/invoices/42/penalty/preview'],
     ['create_invoice_penalty', { id: 42, principal: 1000 }, 'POST', '/invoices/42/penalty', { principal: 1000 }],
     ['add_invoice_payment', { id: 42, amount: 5000, paid_on: '2026-09-30', note: 'Hotově' },
@@ -237,11 +237,12 @@ test('smazání neexistující platby nic nezapíše', async () => {
 const calendarDraft = (overrides = {}) => ({
   id: 42,
   status: 'draft',
-  invoice_type: 'payment_calendar',
+  invoice_type: 'rent_calendar',
+  calendar_contract_ref: 'Nájemní smlouva 1/2026',
   client_id: 8,
   project_id: 3,
   issue_date: '2026-10-01',
-  tax_date: '2026-10-01',
+  tax_date: null,
   due_date: '2026-10-15',
   currency_id: 1,
   currency: 'CZK',
@@ -253,8 +254,10 @@ const calendarDraft = (overrides = {}) => ({
   payment_method: 'bank_transfer',
   rounding_mode: 'none',
   varsymbol: null,
+  total_without_vat: 10000,
+  total_vat: 2100,
   total_with_vat: 12100,
-  payment_schedule: [{ id: 1, due_on: '2026-10-15', base_amount: 0, vat_amount: 0, total_amount: 12100, note: null }],
+  payment_schedule: [{ id: 1, due_on: '2026-10-15', base_amount: 10000, vat_amount: 2100, total_amount: 12100, note: null }],
   items: [
     {
       id: 101, description: 'Nájem kanceláře', quantity: 12, duration_minutes: null, unit: 'měs',
@@ -280,8 +283,8 @@ test('rozpis plateb pošle celou hlavičku i položky se skrytými poli', async 
   const result = await run(client, 'set_invoice_payment_schedule', {
     invoice_id: 42,
     payment_schedule: [
-      { due_on: '2026-10-15', base_amount: 5000, vat_amount: 1050, note: ' první splátka ' },
-      { due_on: '2026-11-15', total_amount: 6050 },
+      { due_on: '2026-10-15', tax_date: '2026-10-01', base_amount: 5000, vat_amount: 1050, note: ' první splátka ' },
+      { due_on: '2026-11-15', base_amount: 5000, vat_amount: 1050, total_amount: 6050 },
     ],
   });
 
@@ -290,7 +293,8 @@ test('rozpis plateb pošle celou hlavičku i položky se skrytými poli', async 
   assert.equal(puts[0].method, 'PUT');
   assert.equal(puts[0].path, '/invoices/42');
   const body = puts[0].body;
-  assert.equal(body.invoice_type, 'payment_calendar');
+  assert.equal(body.invoice_type, 'rent_calendar');
+  assert.equal(body.calendar_contract_ref, 'Nájemní smlouva 1/2026');
   assert.equal(body.client_id, 8);
   assert.equal(body.project_id, 3);
   assert.equal(body.note_below_items, 'Splátky podle smlouvy');
@@ -306,8 +310,8 @@ test('rozpis plateb pošle celou hlavičku i položky se skrytými poli', async 
     tracking_allocations: [{ quantity: '1.000', serial_number: 'VIN-A', lot_code: null, expires_on: null }],
   });
   assert.deepEqual(body.payment_schedule, [
-    { due_on: '2026-10-15', total_amount: 6050, base_amount: 5000, vat_amount: 1050, note: 'první splátka' },
-    { due_on: '2026-11-15', total_amount: 6050 },
+    { due_on: '2026-10-15', total_amount: 6050, tax_date: '2026-10-01', base_amount: 5000, vat_amount: 1050, note: 'první splátka' },
+    { due_on: '2026-11-15', total_amount: 6050, base_amount: 5000, vat_amount: 1050 },
   ]);
   assert.equal(result.invoice_id, 42);
   assert.equal(result.previous_payment_schedule.length, 1);
@@ -325,12 +329,47 @@ test('rozpis s nesouhlasným součtem se neuloží a řekne rozdíl', async () =
   assert.deepEqual(client.writes(), []);
 });
 
+test('rozpis se sedící celkovou částkou, ale jiným základem nebo DPH se neuloží', async () => {
+  const cases = [
+    [[{ due_on: '2026-10-15', total_amount: 12100 }], /NEULOŽENO.*základ 0\.00 CZK.*10000\.00 CZK/s],
+    [[{ due_on: '2026-10-15', base_amount: 10100, vat_amount: 2000 }], /NEULOŽENO.*základ 10100\.00 CZK.*rozdíl 100\.00 CZK/s],
+    [[{ due_on: '2026-10-15', base_amount: 10000, vat_amount: 2000, total_amount: 12100 }], /nedává celkem/],
+  ];
+  for (const [schedule, message] of cases) {
+    const client = calendarClient();
+    await assert.rejects(run(client, 'set_invoice_payment_schedule', { invoice_id: 42, payment_schedule: schedule }), message);
+    assert.deepEqual(client.writes(), []);
+  }
+});
+
+test('platební kalendář DUZP splátky odmítne, bez něj rozpis uloží', async () => {
+  const draft = calendarDraft({ invoice_type: 'advance_calendar', calendar_contract_ref: null });
+  const rejected = calendarClient(draft);
+  await assert.rejects(run(rejected, 'set_invoice_payment_schedule', {
+    invoice_id: 42,
+    payment_schedule: [{ due_on: '2026-10-15', tax_date: '2026-10-15', base_amount: 10000, vat_amount: 2100 }],
+  }), /Splátka 1: platební kalendář DUZP nemá/);
+  assert.deepEqual(rejected.writes(), []);
+
+  const client = calendarClient(draft);
+  await run(client, 'set_invoice_payment_schedule', {
+    invoice_id: 42,
+    payment_schedule: [{ due_on: '2026-10-15', base_amount: 10000, vat_amount: 2100 }],
+  });
+  assert.equal(client.writes()[0].body.invoice_type, 'advance_calendar');
+  assert.deepEqual(client.writes()[0].body.payment_schedule, [
+    { due_on: '2026-10-15', total_amount: 12100, base_amount: 10000, vat_amount: 2100 },
+  ]);
+});
+
 test('rozpis odmítne chybné řádky i doklad, který není kalendář', async () => {
   const cases = [
     [calendarDraft(), [{ due_on: '2026-02-30', total_amount: 12100 }], /Splátka 1: datum/],
+    [calendarDraft(), [{ due_on: '2026-10-15', tax_date: '2026-02-30', total_amount: 12100 }], /Splátka 1: DUZP/],
     [calendarDraft(), [{ due_on: '2026-10-15' }], /Splátka 1: chybí `total_amount`/],
     [calendarDraft(), [{ due_on: '2026-10-15', base_amount: 10000, vat_amount: 2100, total_amount: 12000 }], /nedává celkem/],
-    [calendarDraft({ invoice_type: 'invoice' }), [{ due_on: '2026-10-15', total_amount: 12100 }], /jen platebnímu kalendáři/],
+    [calendarDraft({ invoice_type: 'invoice' }), [{ due_on: '2026-10-15', total_amount: 12100 }], /jen splátkovému nebo platebnímu kalendáři/],
+    [calendarDraft({ invoice_type: 'payment_calendar' }), [{ due_on: '2026-10-15', total_amount: 12100 }], /jen splátkovému nebo platebnímu kalendáři/],
     [calendarDraft({ status: 'issued', varsymbol: '20260042' }), [{ due_on: '2026-10-15', total_amount: 12100 }], /není koncept/],
   ];
   for (const [invoice, schedule, message] of cases) {
@@ -344,13 +383,19 @@ test('rozpis odmítne chybné řádky i doklad, který není kalendář', async 
 });
 
 test('create_invoice umí kalendář s rozpisem a upozorní na nesouhlasný součet', async () => {
-  assert.ok(tool('create_invoice').inputSchema.properties.invoice_type.enum.includes('payment_calendar'));
+  for (const name of ['create_invoice', 'update_invoice']) {
+    const { properties } = tool(name).inputSchema;
+    assert.ok(properties.invoice_type.enum.includes('rent_calendar'));
+    assert.ok(properties.invoice_type.enum.includes('advance_calendar'));
+    assert.ok(!properties.invoice_type.enum.includes('payment_calendar'));
+    assert.ok(properties.calendar_contract_ref);
+  }
   assert.ok(tool('create_invoice').inputSchema.properties.payment_schedule);
-  assert.ok(tool('update_invoice').inputSchema.properties.invoice_type.enum.includes('payment_calendar'));
 
   const args = {
     client_id: 8,
-    invoice_type: 'payment_calendar',
+    invoice_type: 'rent_calendar',
+    calendar_contract_ref: 'Nájemní smlouva 1/2026',
     items: [{ description: 'Nájem', quantity: 1, unit_price_without_vat: 10000, vat_rate_id: 1 }],
     payment_schedule: [{ due_on: '2026-10-15', base_amount: 5000, vat_amount: 1050 }],
   };
@@ -359,7 +404,11 @@ test('create_invoice umí kalendář s rozpisem a upozorní na nesouhlasný sou�
   assert.deepEqual(client.calls[0].body.payment_schedule, [
     { due_on: '2026-10-15', total_amount: 6050, base_amount: 5000, vat_amount: 1050 },
   ]);
+  assert.equal(client.calls[0].body.calendar_contract_ref, 'Nájemní smlouva 1/2026');
   assert.match(result.payment_schedule_warning, /6050\.00 CZK.*12100\.00 CZK/s);
+
+  const wrongVat = new FakeClient({ 'POST /invoices': { id: 52, total_with_vat: 6050, total_without_vat: 5000, total_vat: 1000, currency: 'CZK' } });
+  assert.match((await run(wrongVat, 'create_invoice', args)).payment_schedule_warning, /DPH \(1050\.00 CZK.*1000\.00 CZK/s);
 
   const matching = new FakeClient({ 'POST /invoices': { id: 51, total_with_vat: 6050, currency: 'CZK' } });
   assert.deepEqual(await run(matching, 'create_invoice', args), { id: 51, total_with_vat: 6050, currency: 'CZK' });
@@ -378,7 +427,7 @@ test('rozpis plateb u jiného typu než kalendáře create_invoice odmítne', as
     client_id: 8,
     items: [{ description: 'X', quantity: 1, unit_price_without_vat: 1, vat_rate_id: 1 }],
     payment_schedule: [{ due_on: '2026-10-15', total_amount: 1 }],
-  }), /jen dokladu typu `payment_calendar`/);
+  }), /jen dokladu typu `rent_calendar` nebo `advance_calendar`/);
   assert.deepEqual(client.calls, []);
 });
 

@@ -14,6 +14,7 @@ use MyInvoice\Service\Payroll\PayrollProductionGate;
 use MyInvoice\Service\Payroll\PayrollProductionGateException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzXmlException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzTransportException;
+use MyInvoice\Service\Payroll\Submission\PayrollDispatchCapabilityCatalog;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionAbandonService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionQueueService;
 use MyInvoice\Service\Payroll\Submission\PayrollSubmissionRetryConfirmationService;
@@ -258,9 +259,17 @@ final class PayrollSubmissionQueueAction
                     'Každá položka dávky musí nést vlastní idempotenční klíč.',
                 );
             }
+            $mode = $item['mode'] ?? null;
+            if ($mode !== null && !self::isMode($mode)) {
+                return $this->invalid(
+                    $response,
+                    'Neznámý způsob odeslání podání.',
+                );
+            }
             $items[] = [
                 'submission_id' => (int) $submissionId,
                 'idempotency_key' => $key,
+                'mode' => $mode,
             ];
         }
 
@@ -327,6 +336,10 @@ final class PayrollSubmissionQueueAction
                 'Identifikátor podání musí být kladné celé číslo.',
             );
         }
+        $mode = is_array($body) ? ($body['mode'] ?? null) : null;
+        if ($mode !== null && !self::isMode($mode)) {
+            return $this->invalid($response, 'Neznámý způsob odeslání podání.');
+        }
 
         try {
             $supplierId = $this->currentSupplierId($request);
@@ -342,6 +355,7 @@ final class PayrollSubmissionQueueAction
                 (int) $submissionId,
                 $idempotencyKey,
                 $this->userId($request),
+                $mode,
             );
         } catch (PayrollProductionGateException $exception) {
             return $this->noStore(Json::error(
@@ -469,6 +483,14 @@ final class PayrollSubmissionQueueAction
         }
 
         return $this->noStore(Json::ok($response, $result));
+    }
+
+    /** @phpstan-assert-if-true string $value */
+    private static function isMode(mixed $value): bool
+    {
+        return is_string($value)
+            && $value !== PayrollDispatchCapabilityCatalog::MODE_NONE
+            && in_array($value, PayrollDispatchCapabilityCatalog::MODES, true);
     }
 
     private static function environmentIn(mixed $value): ?string

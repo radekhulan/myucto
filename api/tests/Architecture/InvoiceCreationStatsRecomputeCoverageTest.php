@@ -87,6 +87,9 @@ final class InvoiceCreationStatsRecomputeCoverageTest extends TestCase
         'Action/Stock/SalesOrderAction.php' => [
             'invoice' => 'Vytváří pouze koncept z objednávky; standardní vystavení zajišťuje přepočet statistik.',
         ],
+        'Service/Invoice/CalendarInstalmentService.php' => [
+            'createInstalments' => 'Běží v transakci vystavení kalendáře; klienta i zakázku splátek přepočte IssueInvoiceAction po commitu.',
+        ],
         'Service/Stock/SalesOrderInvoiceService.php' => [
             'createDraft' => 'Vytváří pouze status=draft, který nevstupuje do statistik; vystavení probíhá standardní cestou.',
         ],

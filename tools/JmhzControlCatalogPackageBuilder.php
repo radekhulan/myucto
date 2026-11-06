@@ -11,16 +11,12 @@ require dirname(__DIR__) . '/api/vendor/autoload.php';
 
 final class JmhzControlCatalogPackageBuilder
 {
-    private const SOURCE_SHA256 =
-        '38a8eaf2d399feaeb92616b5244c0133b9d4acc0c087fa095dda4d75bc83f7b2';
-    private const SPEC_PACKAGE_KEY =
-        'jmhz-xsd-1.4.3.6_dictionary-1.4.1.6_controls-source-1.4.2.10_manifest-v1';
-    private const SPEC_MANIFEST_SHA256 =
-        'de478274906eac47d5d51c3a5837a8278ade1fa0dba3fc5dcde6c86d5d05113d';
+    /** @param array<string,mixed> $profile profil z `tools/jmhz-spec-package-profiles.php` */
+    public function __construct(private readonly array $profile) {}
 
     public function build(string $sourcePath, string $outputPath): void
     {
-        if (hash_file('sha256', $sourcePath) !== self::SOURCE_SHA256) {
+        if (hash_file('sha256', $sourcePath) !== $this->profile['control_catalog_sha256']) {
             throw new RuntimeException('Katalog kontrol JMHZ nemá očekávaný SHA-256.');
         }
 
@@ -42,13 +38,13 @@ final class JmhzControlCatalogPackageBuilder
         $parameterValues = array_merge(...array_column($parameters, 'values'));
         $payload = [
             'schema_version' => 'jmhz-control-source-catalog.v4',
-            'catalog_key' => 'jmhz-controls-1.4.2.10-source-v4',
-            'version' => '1.4.2.10',
-            'spec_package_key' => self::SPEC_PACKAGE_KEY,
-            'spec_manifest_sha256' => self::SPEC_MANIFEST_SHA256,
+            'catalog_key' => $this->profile['control_catalog_key'],
+            'version' => $this->profile['control_catalog_version'],
+            'spec_package_key' => $this->profile['package_key'],
+            'spec_manifest_sha256' => $this->profile['manifest_sha256'],
             'source' => [
                 'filename' => basename($sourcePath),
-                'sha256' => self::SOURCE_SHA256,
+                'sha256' => $this->profile['control_catalog_sha256'],
                 'sheets' => ['MH', 'Parametrické konstanty'],
             ],
             'counts' => [
@@ -108,6 +104,7 @@ final class JmhzControlCatalogPackageBuilder
     {
         $result = [];
         $seen = [];
+        $columns = $this->trailingColumns($sheet);
         for ($row = 2; $row <= $sheet->getHighestDataRow(); ++$row) {
             $rawId = $this->text($sheet->getCell("A{$row}"));
             if ($rawId === null) {
@@ -173,9 +170,14 @@ final class JmhzControlCatalogPackageBuilder
                 'detail_formula' => $this->formula($detailCell),
                 'error_message' => $this->requiredCachedText($messageCell),
                 'error_message_formula' => $this->formula($messageCell),
-                'source_label' => $this->requiredText($sheet->getCell("N{$row}")),
-                'note' => $this->text($sheet->getCell("O{$row}")),
+                'source_label' => $columns['source'] === null
+                    ? null
+                    : $this->requiredText($sheet->getCell("{$columns['source']}{$row}")),
+                'note' => $this->text($sheet->getCell("{$columns['note']}{$row}")),
             ];
+            if ($columns['consultation'] !== null) {
+                $record['consultation'] = $this->text($sheet->getCell("{$columns['consultation']}{$row}"));
+            }
             if ($sourceAnomaly !== null) {
                 $record['source_anomaly'] = $sourceAnomaly;
             }
@@ -185,6 +187,36 @@ final class JmhzControlCatalogPackageBuilder
         }
 
         return $result;
+    }
+
+    /**
+     * Poslední sloupce katalogu se hledají podle hlavičky. Katalog 1.4 má
+     * v N "Zdroj kontroly z as-is stavu anebo nová" a v O "Poznámka", katalog
+     * 1.5 zdroj vypustil a za Poznámku (N) přidal "Konzultace / Tbd" (O).
+     *
+     * @return array{source:?string,note:string,consultation:?string}
+     */
+    private function trailingColumns(Worksheet $sheet): array
+    {
+        $found = ['source' => null, 'note' => null, 'consultation' => null];
+        foreach (['N', 'O'] as $column) {
+            $header = mb_strtolower($this->text($sheet->getCell("{$column}1")) ?? '');
+            $key = match (true) {
+                str_starts_with($header, 'zdroj kontroly') => 'source',
+                str_starts_with($header, 'poznámka') => 'note',
+                str_starts_with($header, 'konzultace') => 'consultation',
+                default => throw new RuntimeException("Neznámá hlavička sloupce {$column} katalogu kontrol: {$header}."),
+            };
+            if ($found[$key] !== null) {
+                throw new RuntimeException("Hlavička katalogu kontrol {$key} je uvedena vícekrát.");
+            }
+            $found[$key] = $column;
+        }
+        if ($found['note'] === null) {
+            throw new RuntimeException('Katalog kontrol JMHZ neobsahuje sloupec Poznámka.');
+        }
+
+        return $found;
     }
 
     /**
@@ -355,7 +387,7 @@ final class JmhzControlCatalogPackageBuilder
             'Formulář zaměstnance (form)' => 'employee_form',
             'Měsíční podání JMHZ (global)' => 'global',
             'Měsíční podání JMHZ (nezařazeno)' => 'unassigned',
-            'Souhrnná vrstva (souhrn)' => 'summary',
+            'Souhrnná vrstva (souhrn)', 'Souhrnná část (souhrn)' => 'summary',
             'n/a' => 'unavailable',
             default => throw new RuntimeException("Neznámý rozsah kontroly {$value}."),
         };
@@ -387,10 +419,19 @@ if (PHP_SAPI !== 'cli') {
     throw new RuntimeException('Builder katalogu kontrol JMHZ je určen pouze pro CLI.');
 }
 $arguments = $_SERVER['argv'] ?? [];
-if (count($arguments) !== 3) {
-    fwrite(STDERR, "Použití: php tools/JmhzControlCatalogPackageBuilder.php <kontroly.xlsx> <manifest.json>\n");
+$profileKey = '2026';
+foreach ($arguments as $index => $argument) {
+    if (is_string($argument) && str_starts_with($argument, '--profile=')) {
+        $profileKey = substr($argument, strlen('--profile='));
+        unset($arguments[$index]);
+    }
+}
+$arguments = array_values($arguments);
+$profiles = require __DIR__ . '/jmhz-spec-package-profiles.php';
+if (count($arguments) !== 3 || !isset($profiles[$profileKey])) {
+    fwrite(STDERR, "Použití: php tools/JmhzControlCatalogPackageBuilder.php <kontroly.xlsx> <manifest.json> [--profile=2026|2027]\n");
     exit(2);
 }
 
-(new JmhzControlCatalogPackageBuilder())->build($arguments[1], $arguments[2]);
+(new JmhzControlCatalogPackageBuilder($profiles[$profileKey]))->build($arguments[1], $arguments[2]);
 fwrite(STDOUT, "Katalog kontrol JMHZ byl vytvořen.\n");

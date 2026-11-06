@@ -217,7 +217,7 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
     {
         $configuration = self::read(self::repoRoot() . '/docker/nginx.conf');
         preg_match_all(
-            '/location\s+~\s+([^\s{]+)\s*\{([^{}]*)}/s',
+            '/location\s+~(\*?)\s+([^\s{]+)\s*\{([^{}]*)}/s',
             $configuration,
             $locations,
             PREG_SET_ORDER,
@@ -225,8 +225,9 @@ final class ClientRoutePolicyDeploymentProtectionTest extends TestCase
 
         $denied = false;
         foreach ($locations as $location) {
-            if (preg_match('#' . $location[1] . '#D', self::MANIFEST_URI) === 1
-                && preg_match('/\breturn\s+403\s*;/', $location[2]) === 1
+            // `~*` je v nginx bez rozlišení velikosti písmen.
+            if (preg_match('#' . $location[2] . '#D' . ($location[1] === '*' ? 'i' : ''), self::MANIFEST_URI) === 1
+                && preg_match('/\breturn\s+403\s*;/', $location[3]) === 1
             ) {
                 $denied = true;
                 break;

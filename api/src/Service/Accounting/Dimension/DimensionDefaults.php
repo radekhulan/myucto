@@ -9,6 +9,9 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
+use MyInvoice\Service\Accounting\CreditCard\CreditCardAccounts;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use PDO;
 
@@ -32,15 +35,22 @@ final class DimensionDefaults
      */
     public function resolve(int $supplierId, ?int $clientId, ?int $projectId): array
     {
+        return array_intersect_key($this->resolveWithOrigins($supplierId, $clientId, $projectId), ['header' => 1, 'sources' => 1]);
+    }
+
+    public function resolveWithOrigins(int $supplierId, ?int $clientId, ?int $projectId): array
+    {
         $repo = new DimensionDefaultRepository($this->db);
         $layers = [];
         if ($projectId !== null && $projectId > 0) {
-            $layers['project'] = $repo->forEntity($supplierId, 'project', $projectId);
+            $layers['project:' . $projectId] = $repo->forEntity($supplierId, 'project', $projectId);
         }
         if ($clientId !== null && $clientId > 0) {
-            $layers['client'] = $repo->forEntity($supplierId, 'client', $clientId);
+            $layers['client:' . $clientId] = $repo->forEntity($supplierId, 'client', $clientId);
         }
-        return $this->merge($supplierId, $layers);
+        $result = $this->merge($supplierId, $layers);
+        $result['sources'] = array_map(static fn (string $source): string => explode(':', $source)[0], $result['sources']);
+        return $result;
     }
 
     /**
@@ -52,7 +62,7 @@ final class DimensionDefaults
      * @param list<int> $productIds
      * @return array<int,array{header:array<int,int>, sources:array<int,string>}> produkt => typ => hodnota, typ => 'product'|'product_category'
      */
-    public function forProducts(int $supplierId, array $productIds): array
+    public function forProducts(int $supplierId, array $productIds, bool $withOrigins = false): array
     {
         $productIds = array_values(array_unique(array_filter(array_map('intval', $productIds), static fn (int $id): bool => $id > 0)));
         if ($productIds === []) {
@@ -68,7 +78,7 @@ final class DimensionDefaults
         }
         $out = [];
         foreach ($productIds as $productId) {
-            $layers = ['product' => $own[$productId] ?? []];
+            $layers = ['product:' . $productId => $own[$productId] ?? []];
             foreach ($chains[$productId] ?? [] as $categoryId) {
                 $layers['product_category:' . $categoryId] = $categories[$categoryId] ?? [];
             }
@@ -77,6 +87,7 @@ final class DimensionDefaults
                 continue;
             }
             $merged['sources'] = array_map(static fn (string $s): string => explode(':', $s)[0], $merged['sources']);
+            if (!$withOrigins) unset($merged['origins']);
             $out[$productId] = $merged;
         }
         return $out;
@@ -91,7 +102,8 @@ final class DimensionDefaults
      *     včetně jejích výchozích
      *   • bankovní pohyb: dimenze hrazených faktur (vystavených i přijatých)
      *     a ostatních pohledávek a závazků včetně jejich výchozích; u více dokladů
-     *     jen hodnoty společné všem
+     *     jen hodnoty společné všem; výchozí dimenze vlastního bankovního účtu jen
+     *     řádku banky a protiúčtu pohybu bez dokladu ({@see DimensionStamper::fillBankAccount()})
      *   • ostatní pohledávka / závazek: protistrana
      *   • vzájemný zápočet: protistrana (dimenze započtených dokladů nesou řádky,
      *     {@see DimensionStamper})
@@ -112,19 +124,16 @@ final class DimensionDefaults
      *
      * @return array{header:array<int,int>, splits:array<int,array<int,float>>}
      */
-    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId): array
+    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId, bool $includeInactiveBankAccount = false): array
     {
-        $header = static fn (array $h): array => ['header' => $h, 'splits' => []];
         return match ($sourceType) {
-            'invoice' => $header($this->forDocument($supplierId, 'invoice', $sourceId)),
-            'purchase_invoice' => $header($this->forDocument($supplierId, 'purchase_invoice', $sourceId)),
-            'cash' => $header($this->forCash($supplierId, $sourceId)),
-            'bank' => $header($this->forBank($supplierId, $sourceId)),
-            'other_item' => $header($this->forDocument($supplierId, 'other_item', $sourceId)),
-            'offset' => $header($this->forOffset($supplierId, $sourceId)),
+            'invoice', 'purchase_invoice', 'other_item' => $this->forDocumentWithOrigins($supplierId, $sourceType, $sourceId) + ['splits' => [], 'split_origins' => []],
+            'cash' => $this->forCash($supplierId, $sourceId, true),
+            'bank' => $this->forBank($supplierId, $sourceId, true, $includeInactiveBankAccount),
+            'offset' => $this->forOffset($supplierId, $sourceId, true),
             'settlement' => $this->forSettlement($supplierId, $sourceId),
             'asset', 'asset_disposal', 'depreciation' => $this->forAsset($supplierId, $this->assetId($supplierId, $sourceType, $sourceId)),
-            default => $header([]),
+            default => ['header' => [], 'splits' => [], 'origins' => [], 'split_origins' => []],
         };
     }
 
@@ -187,10 +196,13 @@ final class DimensionDefaults
             $layers[] = [
                 'header' => $assignments->documentDimensions($supplierId, 'purchase_invoice', $purchaseId)['items'][$itemNo] ?? [],
                 'splits' => $assignments->documentSplits($supplierId, 'purchase_invoice', $purchaseId)[$itemNo] ?? [],
+                'origins' => $assignments->documentOrigins($supplierId, 'purchase_invoice', $purchaseId)['items'][$itemNo] ?? [],
+                'split_origins' => $assignments->documentSplitOrigins($supplierId, 'purchase_invoice', $purchaseId)[$itemNo] ?? [],
             ];
             if ($row['stock_item_id'] !== null) {
                 $productId = (int) $row['stock_item_id'];
-                $layers[] = ['header' => $this->forProducts($supplierId, [$productId])[$productId]['header'] ?? [], 'splits' => []];
+                $product = $this->forProducts($supplierId, [$productId], true)[$productId] ?? [];
+                $layers[] = ['header' => $product['header'] ?? [], 'splits' => [], 'origins' => $product['origins'] ?? []];
             }
         }
         $layers[] = $this->effectiveDimensions($supplierId, 'purchase_invoice', $purchaseId);
@@ -198,12 +210,13 @@ final class DimensionDefaults
     }
 
     /** @return array<int,int> */
-    private function forOffset(int $supplierId, int $agreementId): array
+    private function forOffset(int $supplierId, int $agreementId, bool $withOrigins = false): array
     {
         $stmt = $this->db->pdo()->prepare('SELECT partner_id FROM offset_agreements WHERE id = ? AND supplier_id = ?');
         $stmt->execute([$agreementId, $supplierId]);
         $partner = $stmt->fetchColumn();
-        return $partner === false ? [] : $this->resolve($supplierId, (int) $partner, null)['header'];
+        $result = $partner === false ? ['header' => [], 'origins' => []] : $this->resolveWithOrigins($supplierId, (int) $partner, null);
+        return $withOrigins ? $result + ['splits' => [], 'split_origins' => []] : $result['header'];
     }
 
     /** @return array{header:array<int,int>, splits:array<int,array<int,float>>} */
@@ -230,8 +243,10 @@ final class DimensionDefaults
             [
                 'header' => $assignments->documentDimensions($supplierId, $docType, $docId)['header'],
                 'splits' => $assignments->documentSplits($supplierId, $docType, $docId)[0] ?? [],
+                'origins' => $assignments->documentOrigins($supplierId, $docType, $docId)['header'],
+                'split_origins' => $assignments->documentSplitOrigins($supplierId, $docType, $docId)[0] ?? [],
             ],
-            ['header' => $this->forDocument($supplierId, $docType, $docId), 'splits' => []],
+            $this->forDocumentWithOrigins($supplierId, $docType, $docId) + ['splits' => []],
         ]);
     }
 
@@ -246,21 +261,27 @@ final class DimensionDefaults
     {
         $header = [];
         $splits = [];
+        $origins = [];
+        $splitOrigins = [];
+        $withOrigins = false;
         foreach ($layers as $layer) {
+            $withOrigins = $withOrigins || array_key_exists('origins', $layer) || array_key_exists('split_origins', $layer);
             foreach ($layer['splits'] as $typeId => $shares) {
                 if (!isset($header[$typeId]) && !isset($splits[$typeId]) && $shares !== []) {
                     $splits[(int) $typeId] = $shares;
+                    foreach ($shares as $valueId => $_) $splitOrigins[(int) $typeId][(int) $valueId] = DimensionAssignmentOrigin::normalize($layer['split_origins'][$typeId][$valueId] ?? []);
                 }
             }
             foreach ($layer['header'] as $typeId => $valueId) {
                 if (!isset($header[$typeId]) && !isset($splits[$typeId])) {
                     $header[(int) $typeId] = (int) $valueId;
+                    $origins[(int) $typeId] = DimensionAssignmentOrigin::normalize($layer['origins'][$typeId] ?? []);
                 }
             }
         }
         ksort($header);
         ksort($splits);
-        return ['header' => $header, 'splits' => $splits];
+        return ['header' => $header, 'splits' => $splits] + ($withOrigins ? ['origins' => $origins, 'split_origins' => $splitOrigins] : []);
     }
 
     /**
@@ -314,8 +335,14 @@ final class DimensionDefaults
         return $this->resolve($supplierId, $clientId, $projectId)['header'];
     }
 
+    private function forDocumentWithOrigins(int $supplierId, string $docType, int $docId): array
+    {
+        [$clientId, $projectId] = $this->documentParties($supplierId, $docType, $docId);
+        return $this->resolveWithOrigins($supplierId, $clientId, $projectId);
+    }
+
     /** @return array<int,int> */
-    private function forCash(int $supplierId, int $cashId): array
+    private function forCash(int $supplierId, int $cashId, bool $withOrigins = false): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT project_id, invoice_id, purchase_invoice_id FROM cash_documents WHERE id = ? AND supplier_id = ?'
@@ -323,9 +350,10 @@ final class DimensionDefaults
         $stmt->execute([$cashId, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
-            return [];
+            return $withOrigins ? ['header' => [], 'splits' => [], 'origins' => [], 'split_origins' => []] : [];
         }
-        $own = $row['project_id'] !== null ? $this->resolve($supplierId, null, (int) $row['project_id'])['header'] : [];
+        $ownState = $row['project_id'] !== null ? $this->resolveWithOrigins($supplierId, null, (int) $row['project_id']) : ['header' => [], 'origins' => []];
+        $own = $ownState['header'];
         $others = $row['invoice_id'] === null && $row['purchase_invoice_id'] === null
             ? array_keys($this->otherItemAllocations($supplierId, 'cash_document_id', $cashId))
             : [];
@@ -336,7 +364,14 @@ final class DimensionDefaults
             $others !== [] => self::commonHeader(array_column($this->cashDocuments($supplierId, $cashId)['documents'], 'header')),
             default => [],
         };
-        return self::fill($own, $linked);
+        $header = self::fill($own, $linked);
+        if (!$withOrigins) return $header;
+        $linkedState = match (true) {
+            $row['invoice_id'] !== null => $this->effectiveHeaderWithOrigins($supplierId, 'invoice', (int) $row['invoice_id']),
+            $row['purchase_invoice_id'] !== null => $this->effectiveHeaderWithOrigins($supplierId, 'purchase_invoice', (int) $row['purchase_invoice_id']),
+            default => ['origins' => self::commonOrigins($this->cashDocuments($supplierId, $cashId, true)['documents'], $linked, 'cash:' . $cashId)],
+        };
+        return ['header' => $header, 'splits' => [], 'origins' => ($ownState['origins'] ?? []) + ($linkedState['origins'] ?? []), 'split_origins' => []];
     }
 
     /**
@@ -345,7 +380,7 @@ final class DimensionDefaults
      *
      * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>}
      */
-    public function cashDocuments(int $supplierId, int $cashId): array
+    public function cashDocuments(int $supplierId, int $cashId, bool $withOrigins = false): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT doc_type FROM cash_documents
@@ -362,7 +397,7 @@ final class DimensionDefaults
                 'doc_type' => 'other_item',
                 'doc_id' => $itemId,
                 'amount' => round(abs($amount), 2),
-                'header' => $this->effectiveHeader($supplierId, 'other_item', $itemId),
+                ...($withOrigins ? $this->effectiveHeaderWithOrigins($supplierId, 'other_item', $itemId) : ['header' => $this->effectiveHeader($supplierId, 'other_item', $itemId)]),
             ];
         }
         return ['incoming' => $docType === 'in', 'documents' => $documents];
@@ -388,26 +423,152 @@ final class DimensionDefaults
      * Hlavička společná všem dokladům, které pohyb hradí. Hradí-li doklady s různou
      * hodnotou typu, typ tu chybí — rozdělí ho {@see DimensionStamper} po řádcích.
      *
+     * Výchozí dimenze vlastního bankovního účtu do hlavičky nepatří: platí jen pro řádek
+     * banky a protiúčet pohybu bez dokladu. S originy proto vrací i `bank_account`
+     * ({@see bankAccountLayer()}), které po řádcích doplní {@see DimensionStamper::fillBankAccount()}.
+     * Stejně omezenou vrstvu tvoří dimenze pravidla účtování zapsané k pohybu (`bank_rule`,
+     * {@see bankRuleLayer()}): doplní se na stejné řádky, ale ještě před výchozími
+     * hodnotami pravidel dimenzí podle účtu.
+     *
      * @return array<int,int>
      */
-    private function forBank(int $supplierId, int $transactionId): array
+    private function forBank(int $supplierId, int $transactionId, bool $withOrigins = false, bool $includeInactiveAccount = false): array
     {
-        return self::commonHeader(array_column($this->bankDocuments($supplierId, $transactionId)['documents'], 'header'));
+        $bank = $this->bankDocuments($supplierId, $transactionId, $withOrigins);
+        $documents = $bank['documents'];
+        $header = self::commonHeader(array_column($documents, 'header'));
+        if (!$withOrigins) {
+            return $header;
+        }
+        return [
+            'header' => $header,
+            'splits' => [],
+            'origins' => self::commonOrigins($documents, $header, 'bank:' . $transactionId),
+            'split_origins' => [],
+            'bank_account' => $this->bankAccountLayer($supplierId, $bank, $includeInactiveAccount),
+            'bank_rule' => $this->bankRuleLayer($supplierId, $transactionId, $bank, $includeInactiveAccount),
+        ];
+    }
+
+    /** @var array<string,array{id:int, kind:string, layer:array<int,int>}|null> (firma, číslo účtu, kód banky, i neaktivní) => účet */
+    private array $bankAccountCache = [];
+
+    private int $bankAccountGeneration = -1;
+
+    /**
+     * Výchozí dimenze vlastního bankovního účtu, na kterém pohyb leží, s tím, na které
+     * řádky zápisu patří: `synthetics` a `side` určují řádek banky, `pays_documents`
+     * říká, zda smí i na protiúčet (pohyb, který nehradí doklad).
+     *
+     * Účet výpisu se hledá stejně jako bankovní noha zápisu
+     * ({@see \MyInvoice\Service\Accounting\Bank\BankAnalyticResolver}), takže dimenze patří
+     * účtu, na jehož analytiku 221.xxx se pohyb účtuje. Přerazítkování už zaúčtovaného
+     * pohybu (`$includeInactive`) bere i účet, který mezitím někdo deaktivoval — pohyb
+     * na něm byl zaúčtován a dimenzi si má ponechat.
+     *
+     * Shoda účtu a jeho výchozí dimenze se drží v cache podle (firma, číslo účtu, kód
+     * banky), hromadné přerazítkování tak pro každý pohyb téhož účtu nečte znovu.
+     * Uložení výchozích dimenzí ({@see DimensionDefaultRepository::replace()}) cache zahodí.
+     *
+     * @param array{incoming:bool, documents:list<array<string,mixed>>, statement_account?:array{number:string, bank:string}} $bank z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool}|null
+     */
+    private function bankAccountLayer(int $supplierId, array $bank, bool $includeInactive): ?array
+    {
+        $account = $this->statementAccount($supplierId, $bank, $includeInactive);
+        if ($account === null || $account['layer'] === []) {
+            return null;
+        }
+        // merge() ověří, že hodnota je pořád aktivní a typ firma vidí.
+        $merged = $this->merge($supplierId, ['bank_account:' . $account['id'] => $account['layer']]);
+        if ($merged['header'] === []) {
+            return null;
+        }
+        return ['header' => $merged['header'], 'origins' => $merged['origins']] + self::bankLines($account, $bank);
+    }
+
+    /**
+     * Dimenze pravidla účtování, které pohyb zaúčtovalo ({@see BankRuleDimensions}), s týmiž
+     * řádky jako výchozí dimenze účtu ({@see bankAccountLayer()}): řádek banky a u pohybu,
+     * který nehradí doklad, protiúčet. Pravidlo popisuje druh pohybu, ne saldokonto
+     * hrazeného dokladu ani druhou nohu převodu, které se po dimenzi musí vyrovnat.
+     *
+     * @param array{incoming:bool, documents:list<array<string,mixed>>, statement_account?:array{number:string, bank:string}} $bank z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool}|null
+     */
+    private function bankRuleLayer(int $supplierId, int $transactionId, array $bank, bool $includeInactive): ?array
+    {
+        $rule = (new BankRuleDimensions($this->db))->onTransaction($supplierId, $transactionId);
+        if ($rule['header'] === []) {
+            return null;
+        }
+        return $rule + self::bankLines($this->statementAccount($supplierId, $bank, $includeInactive), $bank);
+    }
+
+    /**
+     * Řádky pohybu, na které patří výchozí hodnoty pohybu ({@see DimensionStamper::fillBankAccount()}).
+     *
+     * @param array{kind:string}|null $account účet výpisu z {@see statementAccount()}
+     * @param array{incoming:bool, documents:list<array<string,mixed>>} $bank
+     * @return array{synthetics:list<string>, side:string, pays_documents:bool}
+     */
+    private static function bankLines(?array $account, array $bank): array
+    {
+        return [
+            // Kreditní karta má vlastní nohu na úvěru 231.x; pravidla a ruční zápisy píšou 221.
+            'synthetics' => ($account['kind'] ?? '') === BankAnalyticAssigner::CREDIT_CARD_KIND
+                ? [CreditCardAccounts::SYNTHETIC, BankAnalyticAssigner::BANK_SYNTHETIC]
+                : [BankAnalyticAssigner::BANK_SYNTHETIC],
+            'side' => $bank['incoming'] ? 'debit' : 'credit',
+            'pays_documents' => $bank['documents'] !== [],
+        ];
+    }
+
+    /**
+     * Vlastní účet výpisu pohybu s jeho výchozími dimenzemi (cache viz {@see bankAccountLayer()}).
+     *
+     * @param array{statement_account?:array{number:string, bank:string}} $bank
+     * @return array{id:int, kind:string, layer:array<int,int>}|null
+     */
+    private function statementAccount(int $supplierId, array $bank, bool $includeInactive): ?array
+    {
+        if (!isset($bank['statement_account'])) {
+            return null;
+        }
+        $number = $bank['statement_account']['number'];
+        $bankCode = $bank['statement_account']['bank'];
+        if ($this->bankAccountGeneration !== DimensionDefaultRepository::generation()) {
+            $this->bankAccountCache = [];
+            $this->bankAccountGeneration = DimensionDefaultRepository::generation();
+        }
+        $key = $supplierId . '|' . $number . '|' . $bankCode . '|' . ($includeInactive ? 1 : 0);
+        if (!array_key_exists($key, $this->bankAccountCache)) {
+            // Výpis bez čísla účtu: matchCounterparty() vrátí null ještě před dotazem.
+            $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
+                ->matchCounterparty($supplierId, $number, $bankCode, $includeInactive);
+            $this->bankAccountCache[$key] = $account === null ? null : [
+                'id' => (int) $account['id'],
+                'kind' => (string) ($account['kind'] ?? ''),
+                'layer' => (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', (int) $account['id']),
+            ];
+        }
+        return $this->bankAccountCache[$key];
     }
 
     /**
      * Doklady, které bankovní pohyb hradí, s částkou alokace a efektivní hlavičkou.
      * Stejné zdroje jako úhrada v BankPostingService: vystavené faktury z invoice_payments
      * (bez nich z párování, jinak matched_invoice_id), přijaté faktury z párování.
-     * Více alokací na tentýž doklad se sečte.
+     * Více alokací na tentýž doklad se sečte. `statement_account` = číslo účtu a kód banky
+     * výpisu, na kterém pohyb leží (pro výchozí dimenze účtu, {@see forBank()}).
      *
-     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>}
+     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>, statement_account?:array{number:string, bank:string}}
      */
-    public function bankDocuments(int $supplierId, int $transactionId): array
+    public function bankDocuments(int $supplierId, int $transactionId, bool $withOrigins = false): array
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'SELECT bt.amount, bt.matched_invoice_id
+            'SELECT bt.amount, bt.matched_invoice_id, bs.account_number, bs.bank_code
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql()
@@ -461,11 +622,15 @@ final class DimensionDefaults
                     'doc_type' => $docType,
                     'doc_id' => $docId,
                     'amount' => round(abs($amount), 2),
-                    'header' => $this->effectiveHeader($supplierId, $docType, $docId),
+                    ...($withOrigins ? $this->effectiveHeaderWithOrigins($supplierId, $docType, $docId) : ['header' => $this->effectiveHeader($supplierId, $docType, $docId)]),
                 ];
             }
         }
-        return ['incoming' => (float) $tx['amount'] > 0, 'documents' => $documents];
+        return [
+            'incoming' => (float) $tx['amount'] > 0,
+            'documents' => $documents,
+            'statement_account' => ['number' => (string) ($tx['account_number'] ?? ''), 'bank' => (string) ($tx['bank_code'] ?? '')],
+        ];
     }
 
     /**
@@ -477,7 +642,7 @@ final class DimensionDefaults
     private function otherItemAllocations(int $supplierId, string $column, int $paymentId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT other_item_id, SUM(amount) AS amount FROM other_item_allocations
+            "SELECT other_item_id, SUM(amount + interest_amount + fee_amount) AS amount FROM other_item_allocations
               WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL
            GROUP BY other_item_id
            ORDER BY MIN(id)"
@@ -499,6 +664,32 @@ final class DimensionDefaults
     {
         $own = (new DimensionAssignmentRepository($this->db))->documentDimensions($supplierId, $docType, $docId)['header'];
         return self::fill($own, $this->forDocument($supplierId, $docType, $docId));
+    }
+
+    public function effectiveHeaderWithOrigins(int $supplierId, string $docType, int $docId): array
+    {
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $own = $assignments->documentDimensions($supplierId, $docType, $docId)['header'];
+        $defaults = $this->forDocumentWithOrigins($supplierId, $docType, $docId);
+        return ['header' => self::fill($own, $defaults['header']), 'origins' => $assignments->documentOrigins($supplierId, $docType, $docId)['header'] + $defaults['origins']];
+    }
+
+    private static function commonOrigins(array $documents, array $header, string $moduleRef): array
+    {
+        $origins = [];
+        foreach ($header as $typeId => $_) {
+            $selected = null;
+            foreach ($documents as $document) {
+                $origin = DimensionAssignmentOrigin::normalize($document['origins'][$typeId] ?? []);
+                if ($selected === null) $selected = $origin;
+                elseif ($selected !== $origin) {
+                    $selected = ['origin' => 'module', 'ref' => $moduleRef];
+                    break;
+                }
+            }
+            $origins[$typeId] = $selected ?? DimensionAssignmentOrigin::normalize();
+        }
+        return $origins;
     }
 
     /** @return array{0:?int,1:?int} klient, zakázka */
@@ -536,7 +727,7 @@ final class DimensionDefaults
             array_push($all, ...array_values($dims));
         }
         if ($all === []) {
-            return ['header' => [], 'sources' => []];
+            return ['header' => [], 'sources' => [], 'origins' => []];
         }
         $dimRepo = new DimensionRepository($this->db);
         $types = [];
@@ -546,6 +737,7 @@ final class DimensionDefaults
         $values = $dimRepo->valuesByIds($supplierId, $all);
         $header = [];
         $sources = [];
+        $origins = [];
         foreach ($layers as $source => $dims) {
             foreach ($dims as $typeId => $valueId) {
                 $value = $values[$valueId] ?? null;
@@ -555,10 +747,11 @@ final class DimensionDefaults
                 }
                 $header[$typeId] = $valueId;
                 $sources[$typeId] = $source;
+                $origins[$typeId] = ['origin' => 'entity_default', 'ref' => $source];
             }
         }
         ksort($header);
         ksort($sources);
-        return ['header' => $header, 'sources' => $sources];
+        return ['header' => $header, 'sources' => $sources, 'origins' => $origins];
     }
 }

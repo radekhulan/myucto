@@ -6,6 +6,7 @@ namespace MyInvoice\Action\Approval;
 
 use MyInvoice\Http\Json;
 use MyInvoice\Repository\InvoiceRepository;
+use MyInvoice\Service\Accounting\DocumentLockService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Approval\ApprovalTokenValidator;
 use MyInvoice\Service\Captcha\TurnstileVerifier;
@@ -41,6 +42,7 @@ final class PublicApprovalDecideAction
         private readonly IpMatcher $ipMatcher,
         private readonly AutoIssueAndSendService $autoIssue,
         private readonly PublicTenantGuard $tenantGuard,
+        private readonly DocumentLockService $locks,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -124,6 +126,20 @@ final class PublicApprovalDecideAction
             'decided_by_email' => $decidedBy,
             'comment' => $approveComment !== '' ? $approveComment : null,
         ], $ip, $ua);
+
+        // Koncept v uzavřeném účetním období nevystaví ani schválení zákazníkem: ruční
+        // vystavení tam odmítne i účetní (409) a přebít ho smí jen správce. Schválení
+        // zůstane zapsané, vystavení dokončí účetní ručně.
+        if (($invoice['status'] ?? '') === 'draft' && $this->locks->forInvoice($invoice)->inClosedPeriod) {
+            $this->logger->log('invoice.approval_auto_issue_blocked', null, 'invoice', $invoiceId, [
+                'reason' => 'period_closed',
+                'by'     => 'public',
+            ], $ip, $ua);
+            return Json::ok($response, [
+                'decision' => 'approved',
+                'message'  => 'Výkaz byl schválen. Faktura bude obratem zaslána.',
+            ]);
+        }
 
         try {
             $autoResult = $this->autoIssue->run($invoiceId, null, $ip, $ua);

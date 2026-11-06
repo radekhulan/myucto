@@ -57,6 +57,20 @@ final readonly class AnnualSettlementDocumentData
         public int $externalAdvanceBaseMinorUnits = 0,
         public int $externalAdvanceTaxMinorUnits = 0,
         public int $externalTaxBonusMinorUnits = 0,
+        /**
+         * Ročně uplatňované položky (§ 38h odst. 6).
+         *
+         * Sekce se na dokladu ukáže jen při `annualClaimsPresent`; bez nich
+         * zůstává doklad stejný jako dřív. Řádky jsou hotové z výsledku
+         * výpočtu, nic se tu nepřepočítává.
+         *
+         * @param list<array{label:string,claimed_minor_units:int,amount_minor_units:int}> $nonTaxableRows
+         */
+        public bool $annualClaimsPresent = false,
+        public int $taxBaseBeforeDeductionsMinorUnits = 0,
+        public array $nonTaxableRows = [],
+        public int $nonTaxableDeductionsMinorUnits = 0,
+        public int $enforcementCreditMinorUnits = 0,
     ) {
         if (preg_match('/^[a-f0-9]{64}$/D', $sourceSnapshotSha256) !== 1) {
             throw new \InvalidArgumentException(
@@ -138,6 +152,49 @@ final readonly class AnnualSettlementDocumentData
                 'Rozdíl na dani neodpovídá úhrnu zálohově sražené daně.',
             );
         }
+        $this->assertAnnualClaims();
+    }
+
+    private function assertAnnualClaims(): void
+    {
+        if (!$this->annualClaimsPresent) {
+            if ($this->taxBaseBeforeDeductionsMinorUnits !== 0
+                || $this->nonTaxableRows !== []
+                || $this->nonTaxableDeductionsMinorUnits !== 0
+                || $this->enforcementCreditMinorUnits !== 0
+            ) {
+                throw new \InvalidArgumentException(
+                    'Doklad uvádí roční položky, ale neoznačuje je jako přítomné.',
+                );
+            }
+
+            return;
+        }
+        if ($this->nonTaxableDeductionsMinorUnits < 0
+            || $this->enforcementCreditMinorUnits < 0
+            || $this->nonTaxableDeductionsMinorUnits > $this->taxBaseBeforeDeductionsMinorUnits
+        ) {
+            throw new \InvalidArgumentException(
+                'Nezdanitelné části na dokladu nejsou platné.',
+            );
+        }
+        // § 16 odst. 2: základ po odpočtu se zaokrouhluje na celá sta Kč dolů.
+        $afterDeductions = $this->taxBaseBeforeDeductionsMinorUnits
+            - $this->nonTaxableDeductionsMinorUnits;
+        if (intdiv($afterDeductions, 10_000) * 10_000 !== $this->roundedTaxBaseMinorUnits) {
+            throw new \InvalidArgumentException(
+                'Základ daně po odpočtu neodpovídá základu před odpočty.',
+            );
+        }
+        $rowsTotal = 0;
+        foreach ($this->nonTaxableRows as $row) {
+            $rowsTotal += $row['amount_minor_units'];
+        }
+        if ($rowsTotal !== $this->nonTaxableDeductionsMinorUnits) {
+            throw new \InvalidArgumentException(
+                'Řádky nezdanitelných částí nesedí na jejich úhrn.',
+            );
+        }
     }
 
     /** § 38ch odst. 4 — úhrn za všechny plátce, ne jen za tohoto. */
@@ -197,6 +254,11 @@ final readonly class AnnualSettlementDocumentData
             'settlement_difference_minor_units' => $this->settlementDifferenceMinorUnits,
             'payable_minor_units' => $this->payableMinorUnits,
             'outcome' => $this->outcome,
+            'annual_claims_present' => $this->annualClaimsPresent,
+            'tax_base_before_deductions_minor_units' => $this->taxBaseBeforeDeductionsMinorUnits,
+            'non_taxable_rows' => $this->nonTaxableRows,
+            'non_taxable_deductions_minor_units' => $this->nonTaxableDeductionsMinorUnits,
+            'enforcement_credit_minor_units' => $this->enforcementCreditMinorUnits,
         ];
     }
 }

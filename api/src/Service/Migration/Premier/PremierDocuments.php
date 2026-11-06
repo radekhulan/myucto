@@ -23,11 +23,20 @@ namespace MyInvoice\Service\Migration\Premier;
  * **Úhrady** vede PREMIER vazbou řádku deníku na fakturu (`VAZBY`: `UD` ↔ `VF`/`PF`).
  * Uhrazeno = pohyb navázaných řádků na účtu partnera (banka, pokladna, zápočet, haléřový
  * a kurzový rozdíl).
+ *
+ * **Sborník a vazby nesou kód agendy, ne řadu.** Deník (`SB_KOD`) i `VAZBY` označují fakturu
+ * kódem agendy (`VF` vydané, `PF` přijaté) a jejím `INTER`; řada faktury (`DOKLAD` v `FA_OUT`,
+ * třeba `VFA`, `VFP`) se od kódu agendy liší, vede-li firma víc číselných řad. `INTER` je
+ * v tabulce faktur jedinečný, takže kód agendy s `INTER` určí fakturu stejně přesně jako řada
+ * ({@see directionOf()}).
  */
 final class PremierDocuments
 {
     public const ISSUED = 'issued';
     public const PURCHASE = 'purchase';
+
+    /** Kód agendy faktur ve sborníku deníku a ve vazbách (`SB_KOD`, `VAZBY.KOD_*`). */
+    private const AGENDA = [self::ISSUED => 'VF', self::PURCHASE => 'PF'];
 
     /** Rozdíl položek proti deníku, který se ještě bere jako kurzové zaokrouhlení. */
     private const ITEMS_TOLERANCE = 1.0;
@@ -35,8 +44,11 @@ final class PremierDocuments
     /** @var array<string,list<array<string,mixed>>> „směr|INTER" → položky */
     private array $items = [];
 
-    /** @var array<string,list<int>> „řada|INTER faktury" → INTER navázaných řádků deníku */
+    /** @var array<string,list<int>> „směr|INTER faktury" → INTER navázaných řádků deníku */
     private array $payments = [];
+
+    /** @var array<string,array{direction:string,from:int,to:int}> vazby faktura ↔ faktura téhož směru (dobropis k faktuře) */
+    private array $documentLinks = [];
 
     /** @var array<string,string> řada faktury (`VF`, `ZVF`…) → směr */
     private array $series = [];
@@ -95,10 +107,16 @@ final class PremierDocuments
         foreach ($links as $l) {
             $from = strtoupper(trim((string) ($l['KOD_ZDR'] ?? '')));
             $to = strtoupper(trim((string) ($l['KOD_TER'] ?? '')));
-            if ($from === 'UD' && isset($this->series[$to])) {
-                $this->payments[$to . '|' . (int) $l['INT_TER']][] = (int) $l['INT_ZDR'];
-            } elseif ($to === 'UD' && isset($this->series[$from])) {
-                $this->payments[$from . '|' . (int) $l['INT_ZDR']][] = (int) $l['INT_TER'];
+            $fromDir = $this->directionOf($from);
+            $toDir = $this->directionOf($to);
+            if ($from === 'UD' && $toDir !== null) {
+                $this->payments[$toDir . '|' . (int) $l['INT_TER']][] = (int) $l['INT_ZDR'];
+            } elseif ($to === 'UD' && $fromDir !== null) {
+                $this->payments[$fromDir . '|' . (int) $l['INT_ZDR']][] = (int) $l['INT_TER'];
+            } elseif ($fromDir !== null && $fromDir === $toDir && (int) $l['INT_ZDR'] !== (int) $l['INT_TER']) {
+                $pair = [(int) $l['INT_ZDR'], (int) $l['INT_TER']];
+                sort($pair);
+                $this->documentLinks[$fromDir . '|' . $pair[0] . '|' . $pair[1]] = ['direction' => $fromDir, 'from' => $pair[0], 'to' => $pair[1]];
             }
         }
         foreach ($this->payments as $k => $ids) {
@@ -121,7 +139,7 @@ final class PremierDocuments
             foreach ($backup->rows($table) as $h) {
                 $series[strtoupper(trim((string) ($h['DOKLAD'] ?? '')))] = $dir;
                 if ($year !== null) {
-                    $docYear = self::accountingYear($h, $journal);
+                    $docYear = self::accountingYear($h, $journal, $dir);
                     if ($docYear === null || $docYear > $year) {
                         continue;
                     }
@@ -158,7 +176,7 @@ final class PremierDocuments
      *
      * @param array<string,mixed> $h
      */
-    private static function accountingYear(array $h, PremierJournal $journal): ?int
+    private static function accountingYear(array $h, PremierJournal $journal, string $direction): ?int
     {
         $inter = (int) ($h['INTER'] ?? 0);
         $series = strtoupper(trim((string) ($h['DOKLAD'] ?? '')));
@@ -169,8 +187,44 @@ final class PremierDocuments
         if ($issue === null) {
             return null;
         }
-        $accounting = $journal->firstLinkedDate($series, $inter) ?? self::date($h['DATUM_USK'] ?? null) ?? $issue;
+        $linked = array_filter([$journal->firstLinkedDate($series, $inter), $journal->firstLinkedDate(self::AGENDA[$direction], $inter)]);
+        $accounting = ($linked !== [] ? min($linked) : null) ?? self::date($h['DATUM_USK'] ?? null) ?? $issue;
         return $journal->yearOf($accounting);
+    }
+
+    /**
+     * Řádky deníku faktury: ve sborníku řady i kódu agendy ({@see AGENDA}). U řady shodné
+     * s kódem agendy je to tentýž seznam.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function linkedRows(string $direction, string $series, int $inter): array
+    {
+        $agenda = self::AGENDA[$direction];
+        $rows = $this->journal->linkedRows($series, $inter);
+        if ($agenda === $series) {
+            return $rows;
+        }
+        $seen = array_fill_keys(array_column($rows, 'inter'), true);
+        foreach ($this->journal->linkedRows($agenda, $inter) as $r) {
+            if (!isset($seen[$r['inter']])) {
+                $rows[] = $r;
+            }
+        }
+        return $rows;
+    }
+
+    /**
+     * Směr faktur podle kódu ze sborníku deníku nebo z vazeb: řada faktury, nebo kód agendy
+     * směru, který v záloze nějakou fakturu má. `null` = kód nepatří fakturám.
+     */
+    public function directionOf(string $code): ?string
+    {
+        if (isset($this->series[$code])) {
+            return $this->series[$code];
+        }
+        $direction = array_search($code, self::AGENDA, true);
+        return $direction !== false && in_array($direction, $this->series, true) ? $direction : null;
     }
 
     /**
@@ -191,10 +245,21 @@ final class PremierDocuments
         return $out;
     }
 
-    /** @return array<string,string> řady faktur (`VF`, `PF`, zálohové listy…) → směr */
+    /**
+     * Kódy faktur ve sborníku deníku → směr: řady faktur (`VF`, `VFA`, zálohové listy…)
+     * a kódy agend směrů, které v záloze faktury mají ({@see directionOf()}).
+     *
+     * @return array<string,string>
+     */
     public function invoiceSeries(): array
     {
-        return $this->series;
+        $out = $this->series;
+        foreach (self::AGENDA as $direction => $code) {
+            if (!isset($out[$code]) && in_array($direction, $this->series, true)) {
+                $out[$code] = $direction;
+            }
+        }
+        return $out;
     }
 
     /**
@@ -206,12 +271,23 @@ final class PremierDocuments
     {
         $out = [];
         foreach ($this->payments as $key => $rows) {
-            [$series, $inter] = explode('|', $key);
+            [$direction, $inter] = explode('|', $key);
             foreach ($rows as $row) {
-                $out[$row][] = ['direction' => $this->series[$series], 'inter' => (int) $inter];
+                $out[$row][] = ['direction' => $direction, 'inter' => (int) $inter];
             }
         }
         return $out;
+    }
+
+    /**
+     * Vazby faktura ↔ faktura téhož směru z `VAZBY` (dobropis k opravované faktuře), každá
+     * dvojice jednou.
+     *
+     * @return list<array{direction:string,from:int,to:int}>
+     */
+    public function documentLinks(): array
+    {
+        return array_values($this->documentLinks);
     }
 
     /**
@@ -253,7 +329,7 @@ final class PremierDocuments
         if ($inter <= 0 || $series === '' || $number === '') {
             return null;
         }
-        $rows = $this->journal->linkedRows($series, $inter);
+        $rows = $this->linkedRows($direction, $series, $inter);
         $issue = self::date($h['DATUM_VYS'] ?? null) ?? self::date($h['DATUM_USK'] ?? null);
         $supply = self::date($h['DATUM_USK'] ?? null) ?? $issue;
         if ($issue === null) {
@@ -316,6 +392,7 @@ final class PremierDocuments
         $buckets = [];
         $rounding = 0.0;
         $total = 0.0;
+        $advance = 0.0;
         foreach ($doc['rows'] as $r) {
             if ($account === null) {
                 break;
@@ -325,9 +402,15 @@ final class PremierDocuments
                 continue;
             }
             $value = round($normal * $sign * $r['amount'], 2);
-            $total += $value;
             $kind = $r['line_kind'];
             $code = $r['vat_code'];
+            if ($kind === 'Z' && $code === '') {
+                // Vypořádání zálohy (MD 324 / D 311): úhrada dokladu přijatou zálohou, ne plnění -
+                // do položek ani do DPH nepatří, doklad ji nese jako odpočet zálohy.
+                $advance -= $value;
+                continue;
+            }
+            $total += $value;
             $isVatLine = $kind === 'D' || ($kind === '' && $code !== '' && str_starts_with(self::otherSide($r, $account), '343'));
             if ($kind === 'O' || ($code === '' && !$isVatLine && self::isRoundingAccount(self::otherSide($r, $account)) && abs($value) < 1.0)) {
                 $rounding += $value;
@@ -368,6 +451,7 @@ final class PremierDocuments
         $doc['base'] = round(array_sum(array_column($doc['items'], 'base')), 2);
         $doc['vat'] = round(array_sum(array_column($doc['items'], 'vat')), 2);
         $doc['total'] = round($total, 2);
+        $doc['advance_deducted'] = round($advance, 2);
         if ($doc['booked'] && abs($doc['base'] + $doc['vat'] + $doc['rounding'] - $doc['total']) >= 0.005) {
             $doc['rounding'] = round($doc['total'] - $doc['base'] - $doc['vat'], 2);
         }
@@ -501,7 +585,7 @@ final class PremierDocuments
         $paid = 0.0;
         $paidAt = null;
         $rows = [];
-        foreach ($this->payments[$doc['series'] . '|' . $doc['inter']] ?? [] as $inter) {
+        foreach ($this->payments[$doc['direction'] . '|' . $doc['inter']] ?? [] as $inter) {
             $r = $this->journal->row($inter);
             if ($r === null || isset($own[$inter])) {
                 continue;
@@ -523,13 +607,13 @@ final class PremierDocuments
             $doc['paid'] = 0.0;
             $doc['payment_rows'] = [];
         }
-        $doc['settled'] = abs($doc['total'] - $doc['paid']) < 0.01;
+        $doc['settled'] = abs($doc['total'] - ($doc['advance_deducted'] ?? 0.0) - $doc['paid']) < 0.01;
     }
 
     /** @param array<string,mixed> $doc */
     private function openAt(array $doc, string $date): bool
     {
-        $paid = 0.0;
+        $paid = (float) ($doc['advance_deducted'] ?? 0.0);
         foreach ($doc['payment_rows'] as $p) {
             if ($p['date'] < $date) {
                 $paid += $p['amount'];

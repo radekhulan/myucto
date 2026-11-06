@@ -14,13 +14,17 @@ use PHPUnit\Framework\TestCase;
 #[\PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations]
 final class KbPlusCredentialVaultTest extends TestCase
 {
+    use \MyInvoice\Tests\Support\InlineOAuthRotation;
+
     public function testRefreshRotationIsPersistedBeforeCredentialIsUsed(): void
     {
         $api = $this->createMock(KbPlusApiClient::class);
         $repository = $this->createMock(KbPlusOAuthRepository::class);
         $secrets = $this->createMock(SecretEncryption::class);
-        $vault = new KbPlusCredentialVault($api, $repository, $secrets);
+        $vault = new KbPlusCredentialVault($api, $repository, $secrets, $this->inlineRotationFlow());
         $serialized = $vault->encode($this->credentials(['access_expires_at' => time() - 1]));
+        $repository->expects(self::once())->method('connectionCredential')->with(7, 19)->willReturn('enc:v2:stored');
+        $secrets->method('decryptFor')->willReturn($serialized);
 
         $api->expects(self::once())->method('refreshAccessToken')->willReturn([
             'access_token' => 'rotated-access-token-0001',
@@ -49,8 +53,10 @@ final class KbPlusCredentialVaultTest extends TestCase
         $api = $this->createMock(KbPlusApiClient::class);
         $repository = $this->createMock(KbPlusOAuthRepository::class);
         $secrets = $this->createMock(SecretEncryption::class);
-        $vault = new KbPlusCredentialVault($api, $repository, $secrets);
+        $vault = new KbPlusCredentialVault($api, $repository, $secrets, $this->inlineRotationFlow());
         $serialized = $vault->encode($this->credentials(['access_expires_at' => time() - 1]));
+        $repository->expects(self::once())->method('connectionCredential')->with(7, 19)->willReturn('enc:v2:stored');
+        $secrets->method('decryptFor')->willReturn($serialized);
 
         $api->method('refreshAccessToken')->willReturn([
             'access_token' => 'rotated-access-token-0001',
@@ -69,8 +75,10 @@ final class KbPlusCredentialVaultTest extends TestCase
         $api = $this->createMock(KbPlusApiClient::class);
         $repository = $this->createMock(KbPlusOAuthRepository::class);
         $secrets = $this->createMock(SecretEncryption::class);
-        $vault = new KbPlusCredentialVault($api, $repository, $secrets);
+        $vault = new KbPlusCredentialVault($api, $repository, $secrets, $this->inlineRotationFlow());
         $serialized = $vault->encode($this->credentials(['access_expires_at' => time() - 1]));
+        $repository->expects(self::once())->method('connectionCredential')->with(7, 19)->willReturn('enc:v2:stored');
+        $secrets->method('decryptFor')->willReturn($serialized);
         $api->method('refreshAccessToken')->willReturn([
             'access_token' => 'rotated-access-token-0001', 'token_type' => 'Bearer',
             'expires_in' => 180, 'scope' => 'adaa bpisp',
@@ -92,6 +100,7 @@ final class KbPlusCredentialVaultTest extends TestCase
             $this->createMock(KbPlusApiClient::class),
             $this->createMock(KbPlusOAuthRepository::class),
             $this->createMock(SecretEncryption::class),
+            $this->inlineRotationFlow(),
         );
         $readOnly = $vault->encode($this->credentials(['batchda_api_key' => '', 'scope' => 'adaa']));
 

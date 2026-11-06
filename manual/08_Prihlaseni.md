@@ -83,8 +83,12 @@ potvrzuje se jiným klíčem, nebo TOTP kódem.
 
 1. Klikněte vpravo nahoře na své jméno a zvolte **2FA / TOTP**.
 2. Klikněte na **Nastavit TOTP**.
-3. Naskenujte QR kód v autentikační aplikaci (Google Authenticator, Authy,
-   1Password, Bitwarden, Microsoft Authenticator), případně vložte secret ručně.
+3. Naskenujte QR kód v autentikační aplikaci (doporučujeme
+   [Proton Authenticator](https://proton.me/authenticator) nebo
+   [Ente Auth](https://ente.com/auth/), případně
+   [Google Authenticator](https://support.google.com/accounts/answer/1066447) nebo
+   [Microsoft Authenticator](https://support.microsoft.com/cs-cz/authenticator/download-microsoft-authenticator);
+   funguje i 1Password nebo Bitwarden), případně vložte secret ručně.
 4. Zadejte šestimístný kód a klikněte na **Aktivovat TOTP**.
 
 **Jak poznáte, že je hotovo:** stav ukazuje „TOTP je aktivní.“ Při dalším

@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\DocumentPostingGroup;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -160,6 +161,137 @@ final class JournalIntegrityServiceTest extends TestCase
     }
 
     // ── testy ───────────────────────────────────────────────────────────────────
+
+    public function testPostingFindingsFollowRemainingOwnedMembersOnBothDocumentSides(): void
+    {
+        $groups = new DocumentPostingGroup($this->db);
+        foreach (['invoice', 'purchase_invoice'] as $type) {
+            if ($type === 'invoice') {
+                $docId = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 1210);
+                $table = 'invoices';
+            } else {
+                $this->db->pdo()->prepare("INSERT INTO purchase_invoices
+                    (supplier_id, vendor_id, vendor_invoice_number, document_kind, issue_date, due_date,
+                     received_at, currency_id, vendor_snapshot, total_without_vat, total_vat, total_with_vat,
+                     status, booked_at, created_by)
+                    VALUES (?, ?, 'TEST-INTEGRITY-GROUP', 'invoice', ?, ?, ?, ?, '{}', 1000, 210, 1210,
+                            'booked', ?, ?)")
+                    ->execute([$this->supplierId, $this->clientId, self::YEAR . '-06-15', self::YEAR . '-06-30',
+                        self::YEAR . '-06-15', $this->currencyId, self::YEAR . '-06-15 10:00:00', $this->userId]);
+                $docId = (int) $this->db->pdo()->lastInsertId();
+                $table = 'purchase_invoices';
+            }
+            $direct = $this->insertBalancedEntry($type, $docId, 1000);
+            $owned = $this->insertBalancedEntry('manual', null, 210);
+            $groups->attach($this->supplierId, $type, $docId, [$direct, $owned]);
+            $reversal = $this->insertBalancedEntry('manual', null, 1000);
+            $this->db->pdo()->prepare('UPDATE journal_entries SET reversed_by = ? WHERE supplier_id = ? AND id = ?')
+                ->execute([$reversal, $this->supplierId, $direct]);
+
+            $findings = $this->service->check($this->supplierId);
+            $missing = array_filter($findings[JournalIntegrityService::TYPE_BOOKED_WITHOUT_ENTRY]['sample'],
+                static fn (array $row): bool => $row['source_type'] === $type && (int) $row['source_id'] === $docId);
+            self::assertSame([], array_values($missing), 'Zbývající člen skupiny je stále aktivní předpis.');
+
+            $this->db->pdo()->prepare("UPDATE {$table} SET booked_at = NULL WHERE supplier_id = ? AND id = ?")
+                ->execute([$this->supplierId, $docId]);
+            $findings = $this->service->check($this->supplierId);
+            self::assertContains($owned, array_map('intval', array_column(
+                $findings[JournalIntegrityService::TYPE_ENTRY_WITHOUT_BOOKED]['sample'], 'entry_id')),
+                'Opačná kontrola musí najít aktivní vlastněný zápis bez booked_at.');
+            $documentEntries = array_filter($findings[JournalIntegrityService::TYPE_ENTRY_WITHOUT_BOOKED]['sample'],
+                static fn (array $row): bool => $row['source_type'] === $type && (int) $row['source_id'] === $docId);
+            self::assertCount(1, $documentEntries, 'Stornovaný člen ani jeho protizápis nejsou aktivním předpisem.');
+
+            $this->db->pdo()->prepare("UPDATE {$table} SET status = 'cancelled' WHERE supplier_id = ? AND id = ?")
+                ->execute([$this->supplierId, $docId]);
+            $findings = $this->service->check($this->supplierId);
+            self::assertContains($owned, array_map('intval', array_column(
+                $findings[JournalIntegrityService::TYPE_CANCELLED_WITH_ENTRY]['sample'], 'entry_id')),
+                'Stornovaný doklad nesmí skrýt zbylý aktivní předpis skupiny.');
+
+            $ownedReversal = $this->insertBalancedEntry('manual', null, 210);
+            $this->db->pdo()->prepare('UPDATE journal_entries SET reversed_by = ? WHERE supplier_id = ? AND id = ?')
+                ->execute([$ownedReversal, $this->supplierId, $owned]);
+            $findings = $this->service->check($this->supplierId);
+            self::assertNotContains($owned, array_map('intval', array_column(
+                $findings[JournalIntegrityService::TYPE_CANCELLED_WITH_ENTRY]['sample'], 'entry_id')));
+        }
+    }
+
+    /** @return list<int> */
+    private function amountMismatchEntries(): array
+    {
+        return array_map('intval', array_column(
+            $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_AMOUNT_MISMATCH]['sample'], 'entry_id'));
+    }
+
+    private function reverseEntry(int $entryId, float $amount): void
+    {
+        $reversal = $this->insertBalancedEntry('manual', null, $amount);
+        $this->db->pdo()->prepare('UPDATE journal_entries SET reversed_by = ? WHERE supplier_id = ? AND id = ?')
+            ->execute([$reversal, $this->supplierId, $entryId]);
+    }
+
+    /**
+     * Skupina zaúčtování rozdělí saldokonto mezi zápis základu a zápis DPH: žádný člen
+     * sám celkovou částku dokladu nenese, dohromady ano. To není nález.
+     */
+    public function testGroupSplittingSaldoAcrossMembersIsNotAmountMismatch(): void
+    {
+        $before = $this->amountMismatchCount();
+        $invoiceId = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 1210.00);
+        $direct = $this->insertBalancedEntry('invoice', $invoiceId, 1000.00);
+        $owned = $this->insertBalancedEntry('manual', null, 210.00);
+        (new DocumentPostingGroup($this->db))->attach($this->supplierId, 'invoice', $invoiceId, [$direct, $owned]);
+
+        self::assertSame($before, $this->amountMismatchCount(), 'Součet saldokonta všech členů skupiny sedí s dokladem.');
+        self::assertNotContains($direct, $this->service->amountMismatchEntryIds($this->supplierId));
+    }
+
+    /** Po stornu přímého člena se doklad kontroluje přes zbylé členy skupiny. */
+    public function testGroupWithReversedDirectMemberIsCheckedThroughRemainingMembers(): void
+    {
+        $groups = new DocumentPostingGroup($this->db);
+        $before = $this->amountMismatchCount();
+
+        $wrong = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 1210.00);
+        $wrongDirect = $this->insertBalancedEntry('invoice', $wrong, 1210.00);
+        $wrongOwned = $this->insertBalancedEntry('manual', null, 999.00);
+        $groups->attach($this->supplierId, 'invoice', $wrong, [$wrongDirect, $wrongOwned]);
+        $this->reverseEntry($wrongDirect, 1210.00);
+
+        $right = $this->insertInvoice(self::YEAR . '-06-15 10:00:00', 1210.00);
+        $rightDirect = $this->insertBalancedEntry('invoice', $right, 1210.00);
+        $rightOwned = $this->insertBalancedEntry('manual', null, 1210.00);
+        $groups->attach($this->supplierId, 'invoice', $right, [$rightDirect, $rightOwned]);
+        $this->reverseEntry($rightDirect, 1210.00);
+
+        self::assertSame($before + 1, $this->amountMismatchCount(), 'Nesoulad zbylého člena je jediný nový nález.');
+        self::assertContains($wrongOwned, $this->amountMismatchEntries());
+        self::assertNotContains($rightOwned, $this->amountMismatchEntries());
+        $ids = $this->service->amountMismatchEntryIds($this->supplierId);
+        self::assertContains($wrongOwned, $ids, 'Filtr deníku ukáže zbylý člen skupiny.');
+        self::assertCount($this->amountMismatchCount(), $ids, 'Filtr a počet na dashboardu se nesmí rozejít.');
+    }
+
+    /** Vlastnictví přežívá smazání dokladu, kontrola sirotků musí vidět i vlastněné zápisy. */
+    public function testOrphanCheckSeesOwnedEntriesOfDeletedDocument(): void
+    {
+        $before = $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_ORPHAN_ENTRY]['count'];
+        $invoiceId = $this->insertInvoice(null, 1210.00);
+        $direct = $this->insertBalancedEntry('invoice', $invoiceId, 1000.00);
+        $owned = $this->insertBalancedEntry('manual', null, 210.00);
+        (new DocumentPostingGroup($this->db))->attach($this->supplierId, 'invoice', $invoiceId, [$direct, $owned]);
+        $this->db->pdo()->prepare('DELETE FROM invoices WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $invoiceId]);
+
+        $orphans = $this->service->check($this->supplierId)[JournalIntegrityService::TYPE_ORPHAN_ENTRY];
+        self::assertSame($before + 2, $orphans['count'], 'Přímý i vlastněný zápis smazaného dokladu, každý jednou.');
+        $ownedRows = array_values(array_filter($orphans['sample'], static fn (array $row): bool => $row['entry_id'] === $owned));
+        self::assertCount(1, $ownedRows);
+        self::assertSame('invoice', $ownedRows[0]['source_type']);
+        self::assertSame($invoiceId, $ownedRows[0]['source_id']);
+    }
 
     public function testDetectsAllFiveInconsistencies(): void
     {

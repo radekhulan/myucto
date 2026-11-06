@@ -8,6 +8,7 @@ import { myuctoImportApi, MYUCTO_IMPORT_MAX_BYTES, type MyuctoImportResult, type
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import ImportJobProgress from '@/components/exchange/ImportJobProgress.vue'
 import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
+import MigrationNonprofitNotice from '@/components/migration/MigrationNonprofitNotice.vue'
 
 const { t, te } = useI18n()
 const auth = useAuthStore()
@@ -221,6 +222,7 @@ onBeforeUnmount(() => { revision++; stopPolling() })
       <p class="mt-1 text-sm text-neutral-500">{{ t('myucto_import.intro') }}</p>
       <p class="mt-2 text-sm text-neutral-500">{{ t(format === 'myinvoice' ? 'myucto_import.myinvoice.scope_hint' : 'myucto_import.accounting_hint') }}</p>
     </div>
+    <MigrationNonprofitNotice native />
     <div class="rounded-xl border border-warning-500/30 bg-warning-50 p-4 text-sm text-warning-700">
       {{ t('myucto_import.requirements') }}
     </div>

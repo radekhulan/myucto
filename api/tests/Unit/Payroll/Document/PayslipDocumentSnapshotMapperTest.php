@@ -62,6 +62,42 @@ final class PayslipDocumentSnapshotMapperTest extends TestCase
         self::assertSame('336', $document['insurance_liability_account']);
     }
 
+    /**
+     * Od roku 2027 není daň ze samostatného základu podle § 6 odst. 4 ZDP
+     * srážkovou daní, ale zálohou (zák. č. 360/2025 Sb.) — páska ji tak musí
+     * pojmenovat. Rok 2026 zůstává „Srážková daň".
+     */
+    public function testSeparateBaseTaxIsLabelledByTheRegime(): void
+    {
+        $labels = [];
+        foreach ([null, 'separate-advance'] as $regime) {
+            $result = $this->calculatedResult();
+            $person = &$result['people'][0];
+            $person['statutory']['income_tax']['withholding_tax_minor_units'] = 10_000;
+            $person['statutory']['net_pay']['withholding_tax_minor_units'] = 10_000;
+            $person['statutory']['net_pay']['net_payable_minor_units'] = 4_266_300;
+            $person['statutory']['net_payable_minor_units'] = 4_266_300;
+            $person['payable_after_enforcement_minor'] = 4_266_300;
+            if ($regime !== null) {
+                $person['statutory']['income_tax']['calculation_date'] = '2027-01-31';
+                $person['statutory']['income_tax']['separate_base_regime'] = $regime;
+            }
+            unset($person);
+
+            $document = (new PayslipDocumentSnapshotMapper())->attach(
+                $this->inputSnapshot(),
+                $result,
+            )['people'][0]['payslip_document'];
+            $labels[] = $document['other_deduction_lines'][0]['label'];
+            self::assertSame(10_000, $document['other_deduction_lines'][0]['amount_minor_units']);
+        }
+
+        self::assertSame([
+            'Srážková daň',
+            'Záloha na daň ze samostatného základu (§ 6 odst. 4 ZDP)',
+        ], $labels);
+    }
+
     /** Účtová osnova běžně používá analytiky s tečkou (např. 522.100). */
     public function testAcceptsAnalyticalAccountCodesWithDot(): void
     {

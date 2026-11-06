@@ -53,7 +53,7 @@ const progressJob = computed(() => {
         cancelling-key="eshop.jobs.job_cancelling"
         @cancel="$emit('cancel')"
       />
-      <p v-if="job?.cancel_requested" class="mt-2 text-xs text-warning-700">{{ t('eshop.jobs.cancel_requested') }}</p>
-      <p v-if="['queued', 'running'].includes(job.status)" class="mt-2 text-xs text-neutral-500">{{ t('eshop.jobs.cancel_boundary') }}</p>
+      <p v-if="job?.cancel_requested && ['queued', 'running'].includes(job.status)" class="mt-2 text-xs text-warning-700">{{ t('eshop.jobs.cancel_requested') }}</p>
+      <p v-if="canCancel && ['queued', 'running'].includes(job.status)" class="mt-2 text-xs text-neutral-500">{{ t('eshop.jobs.cancel_boundary') }}</p>
   </div>
 </template>

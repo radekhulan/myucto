@@ -60,13 +60,19 @@ final class ApprovalListAction
         $perPage = min(200, max(5, (int) ($q['per_page'] ?? $default)));
 
         // Repository vrací ['data'=>..., 'meta'=>...] když perPage>0.
-        return Json::ok($response, $this->repo->listForApprovalInbox(
+        $result = $this->repo->listForApprovalInbox(
             supplierId: $supplierId,
             statusFilter: $statusFilter,
             minDaysSince: $overdueDays,
             maxReminders: null,
             page: $page,
             perPage: $perPage,
-        ));
+        );
+        // Token odkazu ke schválení potřebuje jen cron připomínek. Přehled stačí číst
+        // s právem READ a token by z něj dělal schválení (= vystavení a odeslání faktury).
+        foreach ($result['data'] ?? [] as $i => $row) {
+            unset($result['data'][$i]['approval_token']);
+        }
+        return Json::ok($response, $result);
     }
 }

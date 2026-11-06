@@ -25,7 +25,7 @@ final class StockDocumentRepository
         'id, supplier_id, doc_type, origin, warehouse_id, warehouse_to_id, doc_number, doc_date,
          description, partner_name, invoice_id, purchase_invoice_id, purchase_order_id, stock_take_id,
          journal_entry_id, reversal_document_id, status, booked_at, booked_by,
-         created_by, created_at, updated_at, allow_over_delivery';
+         created_by, created_at, updated_at, allow_over_delivery, history_import_job_id';
 
     /** Stavy, jejichž pohyby jsou součástí skladové knihy (viz class docblock). */
     private const LEDGER_STATUSES = "('posted','reversed')";
@@ -615,6 +615,7 @@ final class StockDocumentRepository
         $r['reversal_document_id'] = $r['reversal_document_id'] !== null ? (int) $r['reversal_document_id'] : null;
         $r['booked_by'] = $r['booked_by'] !== null ? (int) $r['booked_by'] : null;
         $r['created_by'] = $r['created_by'] !== null ? (int) $r['created_by'] : null;
+        $r['history_import_job_id'] = $r['history_import_job_id'] !== null ? (int) $r['history_import_job_id'] : null;
         return $r;
     }
 

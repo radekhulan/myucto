@@ -8,9 +8,11 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Service\Accounting\AccountingPeriodProvisioner;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\Bank\BankRuleTemplateSeeder;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\LegalFormProfileRecommendation;
 use MyInvoice\Service\Ares\CrpDphClient;
 use MyInvoice\Service\Ares\SupplierRegistryEnricher;
 use MyInvoice\Service\Bank\OwnBankAccountRegistrar;
@@ -50,6 +52,7 @@ final class SupplierInitializer
         private readonly BankStatementOwnershipResolver $bankOwnership,
         private readonly ChartOfAccountsSeeder $coaSeeder,
         private readonly AccountingModeRepository $accountingModes,
+        private readonly AccountingFrameworkService $accountingFramework,
         private readonly AccountingPeriodProvisioner $periodProvisioner,
         private readonly AutoPostingPolicyService $autoPosting,
         private readonly LoggerInterface $log,
@@ -113,8 +116,10 @@ final class SupplierInitializer
         string $accountingMode,
         bool $isVatPayer,
         bool $isIdentified = false,
+        ?int $userId = null,
     ): void {
         VatStatusService::seedInitialStatus($pdo, $supplierId, $isVatPayer, $isIdentified);
+        $this->accountingFramework->initializeCz500Baseline($supplierId, $userId);
 
         // ⚠️ Historie účetního režimu musí vzniknout spolu s firmou — jinak dotazy
         // „jaký režim platil v roce X" padají na dnešní `supplier.accounting_mode`.
@@ -159,7 +164,38 @@ final class SupplierInitializer
         }
         $this->applyVatRegistryData($supplierId, $input);
         $this->alignAccountingModeWithLegalForm($supplierId, $input);
+        $this->alignAccountingFrameworkWithLegalForm($supplierId, $userId);
         $this->finalizeProfile($supplierId, $userId);
+    }
+
+    /**
+     * Nevýdělečná organizace a SVJ účtují podle vyhlášky 504. Právní formu zná
+     * až ARES, proto se rámec srovnává tady: výchozí 500 se u nové firmy přepíše
+     * na 504 a nedotčená šablona osnovy 500 se vymění za šablonu 504. Rozhoduje
+     * {@see LegalFormProfileRecommendation}, ostatní firmy zůstávají beze změny.
+     */
+    public function alignAccountingFrameworkWithLegalForm(int $supplierId, ?int $userId = null): void
+    {
+        try {
+            $stmt = $this->db->pdo()->prepare('SELECT legal_form, accounting_mode FROM supplier WHERE id = ?');
+            $stmt->execute([$supplierId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            if (!is_array($row)) {
+                return;
+            }
+            $recommendation = LegalFormProfileRecommendation::forLegalForm(
+                $row['legal_form'] === null ? null : (string) $row['legal_form'],
+                (string) ($row['accounting_mode'] ?? ''),
+            );
+            if ($recommendation['accounting_framework'] !== AccountingFrameworkService::CZ_504) {
+                return;
+            }
+            if ($this->accountingFramework->adoptCz504BaselineForNewSupplier($supplierId, $userId)) {
+                $this->log->info('supplier-init: účetní rámec 504 podle právní formy', ['supplier_id' => $supplierId]);
+            }
+        } catch (\Throwable $e) {
+            $this->log->warning('supplier-init: účetní rámec se nepodařilo srovnat s právní formou', ['error' => $e->getMessage()]);
+        }
     }
 
     /**

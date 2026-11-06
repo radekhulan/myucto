@@ -65,6 +65,24 @@ final class AnnualTaxCertificateFormCatalogTest extends TestCase
         );
     }
 
+    /**
+     * Za rok 2027 potvrzení o srážkové dani neexistuje — ani kdyby MF vzor
+     * vydalo: z příjmů podle § 6 odst. 4 ZDP se od 1. 1. 2027 sráží záloha.
+     * Hláška to musí říct, ne tvrdit, že jen chybí vzor.
+     */
+    public function testWithholdingCertificateDoesNotExistFrom2027(): void
+    {
+        $this->expectException(\DomainException::class);
+        $this->expectExceptionMessage(
+            'Za rok 2027 se potvrzení o srážkové dani ze závislé činnosti nevystavuje',
+        );
+
+        AnnualTaxCertificateFormCatalog::resolve(
+            2027,
+            PayrollDocumentKind::TaxableIncomeWithholdingCertificate,
+        );
+    }
+
     public function testKnownTaxYearsAreEnumeratedInsteadOfCompared(): void
     {
         self::assertSame([2026], AnnualTaxCertificateFormCatalog::knownTaxYears());

@@ -113,7 +113,7 @@ final class VatCoefficientAction
         try {
             $coef = $this->builder->computeAnnualCoefficient($supplierId, $year);
         } catch (\Throwable $e) {
-            return Json::error($response, 'settlement_failed', $e->getMessage(), 500);
+            return Json::internalError($response, 'settlement_failed', $e->getMessage(), 500);
         }
         if ($coef['kr_year'] <= 0.0) {
             return Json::error(

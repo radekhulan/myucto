@@ -20,6 +20,13 @@ final class CashDocumentDeletionGuard extends ForeignKeyDeletionGuard
     protected static function blockers(): array
     {
         return [
+            'unit_payment_evidence' => [
+                'message' => 'Pokladní doklad nelze smazat, protože %d jeho vazeb patří do plateb jednotek. Zkontrolujte evidenci plateb jednotek.',
+                'references' => [
+                    ['table' => 'unit_payment_sources', 'column' => 'cash_document_id'],
+                    ['table' => 'unit_payment_workflows', 'column' => 'cash_document_id'],
+                ],
+            ],
             'payroll_payment_evidence' => [
                 'message' => 'Pokladní doklad nelze smazat — je použit jako doklad o vyplacení mezd '
                     . '(%d vazeb). Nejdřív to spárování zrušte v Mzdy → Platby, teprve pak půjde '

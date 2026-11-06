@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Closing;
 
+use MyInvoice\Service\Accounting\AccountingRoleProfile;
 use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
 
 /**
@@ -21,13 +22,14 @@ use MyInvoice\Service\Accounting\Dimension\DimensionStamper;
  */
 final class OpeningTakeoverComparison
 {
-    public static function accountKey(string $code): ?string
+    public static function accountKey(string $code, ?AccountingRoleProfile $profile = null): ?string
     {
-        if (str_starts_with($code, '70')) {
+        $profile ??= new AccountingRoleProfile();
+        if ($profile->isClosingAccount($code)) {
             return null;
         }
-        return str_starts_with($code, ClosingEntryBuilder::ACCOUNT_RETAINED_RESULT)
-            ? ClosingEntryBuilder::ACCOUNT_RETAINED_RESULT
+        return str_starts_with($code, $profile->account('result.pending_approval'))
+            ? $profile->account('result.pending_approval')
             : $code;
     }
 
@@ -36,11 +38,11 @@ final class OpeningTakeoverComparison
      * @param array<string,float> $existingBalances účet => signed netto převzatých zápisů (MD kladně)
      * @return array{diff: list<array{account_code:string, expected:float, existing:float, difference:float}>, accounts:int}
      */
-    public static function compare(array $expectedLines, array $existingBalances): array
+    public static function compare(array $expectedLines, array $existingBalances, ?AccountingRoleProfile $profile = null): array
     {
         $expected = [];
         foreach ($expectedLines as $line) {
-            $key = self::accountKey((string) $line['account_code']);
+            $key = self::accountKey((string) $line['account_code'], $profile);
             if ($key === null) {
                 continue;
             }
@@ -50,7 +52,7 @@ final class OpeningTakeoverComparison
 
         $existing = [];
         foreach ($existingBalances as $code => $balance) {
-            $key = self::accountKey((string) $code);
+            $key = self::accountKey((string) $code, $profile);
             if ($key !== null) {
                 $existing[$key] = ($existing[$key] ?? 0) + self::cents((float) $balance);
             }
@@ -79,7 +81,7 @@ final class OpeningTakeoverComparison
         ];
     }
 
-    public static function compareWithDimensions(array $expectedLines, array $existingBalances, array $linkedDimensionTypes = []): array
+    public static function compareWithDimensions(array $expectedLines, array $existingBalances, array $linkedDimensionTypes = [], ?AccountingRoleProfile $profile = null): array
     {
         $existingLines = [];
         $totals = [];
@@ -92,12 +94,12 @@ final class OpeningTakeoverComparison
                 'amount' => abs((float) $row['bal']),
             ] + array_intersect_key($row, ['dimensions' => true, 'dimension_splits' => true, 'cost_center' => true, 'project_id' => true]);
         }
-        $comparison = self::compare($expectedLines, $totals);
+        $comparison = self::compare($expectedLines, $totals, $profile);
         if ($comparison['diff'] !== []) {
             return $comparison;
         }
-        $expectedLines = self::allocatedLines($expectedLines, $linkedDimensionTypes);
-        $existingLines = self::allocatedLines($existingLines, $linkedDimensionTypes);
+        $expectedLines = self::allocatedLines($expectedLines, $linkedDimensionTypes, $profile);
+        $existingLines = self::allocatedLines($existingLines, $linkedDimensionTypes, $profile);
         $expected = self::dimensionalRepresentation($expectedLines);
         $existing = self::dimensionalRepresentation($existingLines);
         $originalExpected = $expected;
@@ -110,11 +112,11 @@ final class OpeningTakeoverComparison
         return $comparison;
     }
 
-    private static function allocatedLines(array $lines, array $linkedDimensionTypes): array
+    private static function allocatedLines(array $lines, array $linkedDimensionTypes, ?AccountingRoleProfile $roleProfile): array
     {
         $allocated = [];
         foreach ($lines as $line) {
-            $code = self::accountKey((string) $line['account_code']);
+            $code = self::accountKey((string) $line['account_code'], $roleProfile);
             if ($code === null) {
                 continue;
             }

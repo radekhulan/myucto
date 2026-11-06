@@ -787,7 +787,14 @@ final class JmhzReportPlanner
             }
         }
         if ($form->hasSummary && $form->declarationSigned === true) {
-            $result = JmhzStatutoryChanges::credits($sections, $frozen, $monthStart, $form->credits, $reference);
+            $result = JmhzStatutoryChanges::credits(
+                $sections,
+                $frozen,
+                $monthStart,
+                $form->credits,
+                $reference,
+                $form->birthDate,
+            );
             $plan['warnings'] = [...$plan['warnings'], ...$result['warnings']];
             foreach ($result['changes'] as $change) {
                 $plan['_steps']['credits'] = true;

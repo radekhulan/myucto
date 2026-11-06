@@ -2,7 +2,7 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { rolesApi, type PermissionCatalogResponse, type RoleDetail, type RoleListItem } from '@/api/roles'
-import { CLIENT_BANK_ACTION_KEYS, CLIENT_STOCK_ACTION_KEYS, OPERATIONAL_SETTINGS_KEYS, setRolePermission, type PermissionValue } from '@/security/permissions'
+import { CLIENT_BANK_ACTION_KEYS, CLIENT_STOCK_ACTION_KEYS, OPERATIONAL_SETTINGS_KEYS, rolePermissionLevels, setRolePermission, type PermissionValue } from '@/security/permissions'
 import { useToast } from '@/composables/useToast'
 import { btnFilled, btnOutline, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
@@ -16,20 +16,23 @@ const saving = ref(false)
 const creating = ref(false)
 const form = reactive({ name: '', role_type: 'staff' as 'staff' | 'client', is_active: true, permissions: {} as Record<string, PermissionValue> })
 
-const fixedRoleKeys = new Set(['superadmin', 'admin', 'admin_plus'])
+const fixedRoleKeys = new Set(['superadmin', 'admin', 'admin_plus', 'instance_admin'])
 const fixedRoleOrder: Record<string, number> = { superadmin: 0, admin_plus: 1, admin: 2 }
 const orderedRoles = computed(() => [...roles.value].sort((a, b) =>
   (fixedRoleOrder[a.system_key ?? ''] ?? Number.MAX_SAFE_INTEGER)
   - (fixedRoleOrder[b.system_key ?? ''] ?? Number.MAX_SAFE_INTEGER)))
 const locked = computed(() => fixedRoleKeys.has(selected.value?.system_key ?? ''))
+const readonlyRole = computed(() => selected.value?.system_key === 'readonly')
 const applicableGroups = computed(() => Object.entries(catalog.value?.groups ?? {}).map(([key, permissions]) => ({
   key,
   permissions: permissions.filter(p => form.role_type === 'staff' ? p.role_types.includes('staff') : p.role_types.includes('client')),
 })).filter(group => group.permissions.length > 0))
 
 function permissionLabel(permission: { key: string; label: string }): string {
+  if (permission.key === 'profile.mcp') return t('client_mcp.permission_label')
   if ((OPERATIONAL_SETTINGS_KEYS as readonly string[]).includes(permission.key)) return t(`roles.operational_permissions.${permission.key.slice(9)}`)
   if (permission.key === 'stock' || (CLIENT_STOCK_ACTION_KEYS as readonly string[]).includes(permission.key)) return t(`roles.stock_permissions.${permission.key.replaceAll('.', '_')}`)
+  if (['reports.submissions', 'reports.submissions.manage', 'reports.submit'].includes(permission.key)) return t(`roles.submission_permissions.${permission.key.replaceAll('.', '_')}`)
   if (permission.key === 'price_list') return t('permissions.groups.price_list')
   if (permission.key === 'bank' || (CLIENT_BANK_ACTION_KEYS as readonly string[]).includes(permission.key)) return t(`roles.bank_permissions.${permission.key.replace('.', '_')}`)
   if (locale.value === 'cs') return permission.label
@@ -38,11 +41,13 @@ function permissionLabel(permission: { key: string; label: string }): string {
 }
 
 function permissionLevels(key: string): readonly PermissionValue[] {
-  if ((OPERATIONAL_SETTINGS_KEYS as readonly string[]).includes(key)) return [0, 2]
-  if (form.role_type === 'client' && (key === 'bank' || key === 'stock')) return [0, 1]
-  if (form.role_type === 'client' && (CLIENT_STOCK_ACTION_KEYS as readonly string[]).includes(key)) return [0, 2]
-  if (form.role_type === 'client' && (CLIENT_BANK_ACTION_KEYS as readonly string[]).includes(key)) return [0, 2]
-  return [0, 1, 2]
+  const levels = rolePermissionLevels(form.role_type, key)
+  return readonlyRole.value && key !== 'profile.tokens' ? levels.filter(level => level !== 2) : levels
+}
+
+function editablePermissions(permissions: Record<string, PermissionValue>): Record<string, PermissionValue> {
+  return Object.fromEntries(Object.entries(permissions).map(([key, level]) =>
+    [key, readonlyRole.value && key !== 'profile.tokens' && level === 2 ? (permissionLevels(key).includes(1) ? 1 : 0) : level]))
 }
 
 function isFixedRole(role: Pick<RoleListItem, 'system_key'>): boolean {
@@ -76,7 +81,7 @@ async function openRole(role: RoleListItem) {
     form.name = detail.name
     form.role_type = detail.role_type === 'client' ? 'client' : 'staff'
     form.is_active = detail.is_active
-    form.permissions = { ...detail.permissions }
+    form.permissions = editablePermissions(detail.permissions)
   } catch (e: any) { toast.error(e?.response?.data?.error?.message || t('common.error')) }
 }
 
@@ -100,7 +105,7 @@ async function save() {
   }
   saving.value = true
   try {
-    const permissions = Object.fromEntries(Object.entries(form.permissions).filter(([, level]) => level > 0)) as Record<string, PermissionValue>
+    const permissions = Object.fromEntries(Object.entries(editablePermissions(form.permissions)).filter(([, level]) => level > 0)) as Record<string, PermissionValue>
     if (creating.value) {
       const created = await rolesApi.create({ name: form.name.trim(), type: form.role_type, permissions })
       creating.value = false
@@ -166,6 +171,7 @@ onMounted(load)
           {{ roleDescription(selected?.system_key ?? null) }}
         </div>
         <div v-else class="space-y-4">
+          <p v-if="readonlyRole" class="text-sm text-neutral-500">{{ t('roles.readonly_hint') }}</p>
           <section v-for="group in applicableGroups" :key="group.key" class="border border-neutral-200 rounded-lg overflow-hidden">
             <h2 class="font-semibold px-3 py-2 bg-neutral-50">{{ t(`permissions.groups.${group.key}`, group.key) }}</h2>
             <div class="divide-y divide-neutral-100">

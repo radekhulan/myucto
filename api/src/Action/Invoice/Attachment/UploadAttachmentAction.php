@@ -128,7 +128,7 @@ final class UploadAttachmentAction
                 @mkdir($dir, 0755, true);
             }
             if (!is_writable($dir)) {
-                return Json::error($response, 'storage_not_writable',
+                return Json::internalError($response, 'storage_not_writable',
                     'Adresář pro přílohy není zapisovatelný: ' . $dir, 500);
             }
 
@@ -136,7 +136,7 @@ final class UploadAttachmentAction
             try {
                 $file->moveTo($tmpPath);
             } catch (\Throwable $e) {
-                return Json::error($response, 'move_failed',
+                return Json::internalError($response, 'move_failed',
                     'Nepodařilo se přesunout nahraný soubor: ' . $e->getMessage(), 500);
             }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Import;
 
 use MyInvoice\Infrastructure\Config\RuntimePaths;
+use MyInvoice\Support\Imaging\ImagickGuard;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -23,10 +24,6 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
     public const MAX_EDGE = 1600;
     /** Tvrdý strop jednoho běhu rasterizace (s) — PDF přichází od nedůvěryhodného uživatele. */
     public const TIMEOUT = 30;
-
-    private const IMAGICK_MEMORY = 256 * 1024 * 1024;
-    private const IMAGICK_MAP = 512 * 1024 * 1024;
-    private const IMAGICK_MAX_PIXELS = 20000;
 
     public function __construct(
         private readonly LoggerInterface $logger,
@@ -83,47 +80,28 @@ final class PdfPageRasterizer implements PdfPageRasterizerInterface
     /** @return list<string> */
     private function viaImagick(string $pdfPath, int $maxPages): array
     {
-        $limits = [\Imagick::RESOURCETYPE_MEMORY => self::IMAGICK_MEMORY, \Imagick::RESOURCETYPE_MAP => self::IMAGICK_MAP];
-        if (defined('Imagick::RESOURCETYPE_TIME')) {
-            $limits[\Imagick::RESOURCETYPE_TIME] = $this->timeoutSeconds;
-        }
-        foreach (['RESOURCETYPE_WIDTH', 'RESOURCETYPE_HEIGHT'] as $c) {
-            if (defined('Imagick::' . $c)) {
-                $limits[constant('Imagick::' . $c)] = self::IMAGICK_MAX_PIXELS;
-            }
-        }
-        // Limity jsou v php-fpm globální pro celý proces → po práci se vrací původní hodnoty.
-        $previous = [];
+        // Limity jsou v php-fpm globální pro celý proces → ImagickGuard je po práci vrátí.
         try {
-            foreach ($limits as $type => $value) {
-                $previous[$type] = \Imagick::getResourceLimit($type);
-                \Imagick::setResourceLimit($type, $value);
-            }
-            $im = new \Imagick();
-            $im->setResolution(self::DPI, self::DPI);
-            $im->readImage('pdf:' . $pdfPath . '[0-' . ($maxPages - 1) . ']');
-            $out = [];
-            foreach ($im as $page) {
-                $page->setImageBackgroundColor('white');
-                $page->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
-                if (max($page->getImageWidth(), $page->getImageHeight()) > self::MAX_EDGE) {
-                    $page->thumbnailImage(self::MAX_EDGE, self::MAX_EDGE, true);
+            return ImagickGuard::withLimits(static function () use ($pdfPath, $maxPages): array {
+                $im = new \Imagick();
+                $im->setResolution(self::DPI, self::DPI);
+                $im->readImage('pdf:' . $pdfPath . '[0-' . ($maxPages - 1) . ']');
+                $out = [];
+                foreach ($im as $page) {
+                    $page->setImageBackgroundColor('white');
+                    $page->setImageAlphaChannel(\Imagick::ALPHACHANNEL_REMOVE);
+                    if (max($page->getImageWidth(), $page->getImageHeight()) > self::MAX_EDGE) {
+                        $page->thumbnailImage(self::MAX_EDGE, self::MAX_EDGE, true);
+                    }
+                    $page->setImageFormat('png');
+                    $out[] = $page->getImageBlob();
                 }
-                $page->setImageFormat('png');
-                $out[] = $page->getImageBlob();
-            }
-            $im->clear();
-            return array_slice($out, 0, $maxPages);
+                $im->clear();
+                return array_slice($out, 0, $maxPages);
+            }, $this->timeoutSeconds);
         } catch (\Throwable $e) {
             $this->logger->info('Imagick rasterizace PDF selhala: ' . $e->getMessage());
             return [];
-        } finally {
-            foreach ($previous as $type => $value) {
-                try {
-                    \Imagick::setResourceLimit($type, $value);
-                } catch (\Throwable) {
-                }
-            }
         }
     }
 

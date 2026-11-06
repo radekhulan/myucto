@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Payroll\Posting;
 
 use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
+use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollEmploymentAccountingClassifier;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -505,14 +506,28 @@ final class PayrollPostingLineBuilder
                 "employee:{$employeeId}:advance-tax",
                 'Zálohová daň ze závislé činnosti',
             );
-            $this->addEmployeeCharge(
-                $allocations,
-                $settlementBuckets,
-                $withholdingTax,
-                $this->withholdingTaxAccount($accounts, $configuredAccounts),
-                "employee:{$employeeId}:withholding-tax",
-                'Srážková daň ze závislé činnosti',
-            );
+            // Od roku 2027 je daň ze samostatného základu podle § 6 odst. 4
+            // ZDP zálohou (§ 38h), odvádí se jedním převodem se zálohami
+            // a patří proto na účet ZÁLOHOVÉ daně, ne na analytiku srážkové.
+            if (SeparateTaxBaseRegime::fromResultSnapshot($tax)->isAdvance()) {
+                $this->addEmployeeCharge(
+                    $allocations,
+                    $settlementBuckets,
+                    $withholdingTax,
+                    $accounts['income_tax_credit'],
+                    "employee:{$employeeId}:separate-base-advance-tax",
+                    'Záloha na daň ze samostatného základu (§ 6 odst. 4 ZDP)',
+                );
+            } else {
+                $this->addEmployeeCharge(
+                    $allocations,
+                    $settlementBuckets,
+                    $withholdingTax,
+                    $this->withholdingTaxAccount($accounts, $configuredAccounts),
+                    "employee:{$employeeId}:withholding-tax",
+                    'Srážková daň ze závislé činnosti',
+                );
+            }
             $this->addEmployeeBonus(
                 $allocations,
                 $settlementBuckets,

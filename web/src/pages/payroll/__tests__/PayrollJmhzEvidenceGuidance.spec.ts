@@ -10,6 +10,7 @@ import PayrollJmhzOrdinaryEvidencePanel from '../PayrollJmhzOrdinaryEvidencePane
 const mocks = vi.hoisted(() => ({ get: vi.fn() }))
 vi.mock('@/api/payroll', () => ({ payrollApi: { jmhzOrdinaryEvidence: mocks.get } }))
 vi.mock('@/composables/useFormat', () => ({ formatPeriod: () => 'srpen 2026' }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
 
 async function render(code: string, context: Record<string, string> = {}, locale = 'cs') {
   mocks.get.mockResolvedValue({ scopes: [{

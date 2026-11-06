@@ -14,6 +14,7 @@ vi.mock('@/composables/useMigrationWizard', () => ({
 }))
 vi.mock('@/api/premier', () => ({ premierApi: {}, isPremierUploadReady: () => true }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
+vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_framework: 'cz_500', entity_profile: 'unknown' } }) }))
 vi.mock('@/components/settings/CompanyProfileBox.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/migration/MoneyS3Protocol.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/exchange/ImportJobProgress.vue', () => ({ default: { template: '<div />' } }))
@@ -81,5 +82,16 @@ describe('PREMIER: roky průvodce podle účetního roku firmy', () => {
     const wrapper = await mountPage(false)
     expect(wrapper.get('[data-testid="premier-year-label-2025"]').text()).toBe('2025')
     expect(wrapper.get('[data-testid="premier-years-selected"]').text()).toBe('2025, 2026')
+    expect(wrapper.find('[data-testid="migration-nonprofit-notice"]').exists()).toBe(false)
+  })
+
+  it('neziskovka podle náhledu převodu: výrazné upozornění', async () => {
+    m.wizard = wizard(false)
+    m.wizard.upload.value.nonprofit_notice = { level: 'warning', code: 'migration_nonprofit_untested', message: '' }
+    const wrapper = mount(PremierMigration, {
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' }, 'i18n-t': { template: '<span />' } } },
+    })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="migration-nonprofit-notice"]').text()).toContain('migration_nonprofit_notice.title')
   })
 })

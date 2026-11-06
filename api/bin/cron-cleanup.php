@@ -5,9 +5,11 @@ declare(strict_types=1);
 /**
  * Denní cleanup — login_attempts (>24h), expirované a staré odvolané sessions,
  * použité password_resets, login_otps + trusted_devices, WebAuthn flow/proofy,
+ * rozpracovaná OAuth přihlášení k externím službám,
  * expirované jednorázové granty, log files >90 dní, soubory nahrané do převodů
  * (Money S3, POHODA/PAMICA, PREMIER, Stereo NX, MyÚčto) a importů na pozadí po 24 hodinách
- * bez práce s nimi a assety frontendu z předchozích vydání.
+ * bez práce s nimi a assety frontendu z předchozích vydání. Ve spravovaném provozu
+ * navíc auditní stopu (activity_log) starší 14 dní.
  *
  * POZN: PDF se NEMAŽE. Aktivní cache může pominout (renderer ji znovu vytvoří),
  * ale archivovaná historie (storage/invoices/sup-N/_archive) obsahuje verze
@@ -23,8 +25,10 @@ require __DIR__ . '/../vendor/autoload.php';
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\ActivityLogHashChain;
 use MyInvoice\Service\Cron\CronRun;
 use MyInvoice\Service\Document\ScanAttach\ScanStagingCleaner;
+use MyInvoice\Service\System\ManagedModeGuard;
 
 $rootDir    = Bootstrap::rootDir();
 $config     = Config::load($rootDir);
@@ -83,11 +87,28 @@ $report['login_otps'] = (int) $n;
 $n = $pdo->exec("DELETE FROM trusted_devices WHERE expires_at < NOW()");
 $report['trusted_devices'] = (int) $n;
 
-// 3d) api_request_log — log volání veřejného API (MCP server) starší 90 dní.
-// Není to auditní stopa podle § 33a (ta je v activity_log a maže se NIKDY), jen
-// provozní přehled „co token volal", takže retence je krátká a bez pečetění.
-$n = $pdo->exec("DELETE FROM api_request_log WHERE ts < NOW() - INTERVAL 90 DAY");
+// 3c1) Rozpracovaná OAuth přihlášení k externím službám (oauth_sessions) a jejich
+// předchůdce u bank (bank_oauth_sessions) — den po expiraci, tajemství dokončených
+// přihlášení se maže už při dokončení.
+$n = $pdo->exec('DELETE FROM oauth_sessions WHERE expires_at < CURRENT_TIMESTAMP(6) - INTERVAL 1 DAY');
+$report['oauth_sessions'] = (int) $n;
+$n = $pdo->exec("DELETE FROM bank_oauth_sessions
+    WHERE status IN ('pending','processing','completed','failed') AND expires_at < CURRENT_TIMESTAMP(6) - INTERVAL 1 DAY");
+$report['bank_oauth_sessions'] = (int) $n;
+
+// 3d) api_request_log — log volání veřejného API (MCP server) starší 90 dní, ve
+// spravovaném provozu 7 dní. Není to auditní stopa podle § 33a (ta je v activity_log),
+// jen provozní přehled „co token volal", takže retence je krátká a bez pečetění.
+$managed = (new ManagedModeGuard($config))->isManaged();
+$n = $pdo->exec('DELETE FROM api_request_log WHERE ts < NOW() - INTERVAL ' . ($managed ? 7 : 90) . ' DAY');
 $report['api_request_log'] = (int) $n;
+
+// 3d1) activity_log — ve spravovaném provozu 14 dní, na self-hostu se nemaže nikdy.
+// Akce, ze kterých aplikace čte stav, a odeslané e-maily zůstávají
+// (ActivityLogHashChain::RETAINED_ACTIONS).
+if ($managed) {
+    $report['activity_log'] = (new ActivityLogHashChain($connection))->prune(14);
+}
 
 // 3e) Jednorázové mzdové download granty — audit stažení zůstává v activity_log.
 $n = $pdo->exec(

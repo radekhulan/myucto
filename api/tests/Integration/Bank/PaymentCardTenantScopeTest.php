@@ -230,6 +230,57 @@ final class PaymentCardTenantScopeTest extends TestCase
         self::assertSame(404, $status);
     }
 
+    /**
+     * Účtenka připojená z DMS k pohybu (nebo k jeho zápisu v deníku) je doklad: platba
+     * už nesmí svítit v „Platbách bez dokladu", i když nemá spárovanou přijatou fakturu.
+     */
+    public function testPaymentWithAttachedDocumentIsNotUnmatched(): void
+    {
+        $pdo = $this->db->pdo();
+        $statement = $this->seedStatement();
+        $insertTx = $pdo->prepare(
+            "INSERT INTO bank_transactions (statement_id, posted_at, amount, currency, card_last4, description)
+             VALUES (?, ?, -359.00, 'CZK', '7778', 'PK: 000000******7778')"
+        );
+        $insertTx->execute([$statement, '2093-06-16']);
+        $direct = (int) $pdo->lastInsertId();
+        $insertTx->execute([$statement, '2093-06-17']);
+        $viaEntry = (int) $pdo->lastInsertId();
+
+        $sha = hash('sha256', self::MARKER . random_bytes(8));
+        $pdo->prepare(
+            "INSERT INTO documents (supplier_id, title, original_name, filename, sha256, mime_type, size_bytes, doc_type)
+             VALUES (?, ?, 'uctenka.pdf', 'uctenka.pdf', ?, 'application/pdf', 100, 'pdf')"
+        )->execute([$this->supplierA, self::MARKER, $sha]);
+        $docId = (int) $pdo->lastInsertId();
+
+        $ids = function (): array {
+            $r = $this->overview->unmatched($this->supplierA, '2093-06-01', '2093-06-30');
+            return array_merge([], ...array_map(static fn ($g) => array_column($g['transactions'], 'id'), $r['groups']));
+        };
+        self::assertContains($direct, $ids());
+        self::assertContains($viaEntry, $ids());
+
+        $pdo->prepare("INSERT INTO document_links (document_id, supplier_id, entity_type, entity_id) VALUES (?, ?, 'bank_transaction', ?)")
+            ->execute([$docId, $this->supplierA, $direct]);
+        $pdo->prepare(
+            "INSERT IGNORE INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status)
+             VALUES (?, 2093, '2093-01-01', '2093-12-31', 'open')"
+        )->execute([$this->supplierA]);
+        $period = $pdo->prepare('SELECT id FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = 2093');
+        $period->execute([$this->supplierA]);
+        $pdo->prepare(
+            "INSERT INTO journal_entries (supplier_id, period_id, entry_date, document_no, description, source_type, source_id)
+             VALUES (?, ?, '2093-06-17', ?, 'Platba kartou', 'bank', ?)"
+        )->execute([$this->supplierA, (int) $period->fetchColumn(), self::MARKER, $viaEntry]);
+        $entryId = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO document_links (document_id, supplier_id, entity_type, entity_id) VALUES (?, ?, 'journal_entry', ?)")
+            ->execute([$docId, $this->supplierA, $entryId]);
+
+        self::assertNotContains($direct, $ids());
+        self::assertNotContains($viaEntry, $ids());
+    }
+
     // ── helpers ──────────────────────────────────────────────────────────────
 
     /** @return array{0:int, 1:array<string,mixed>} */
@@ -267,6 +318,11 @@ final class PaymentCardTenantScopeTest extends TestCase
     {
         $pdo = $this->db->pdo();
         $pdo->prepare('DELETE FROM payment_cards WHERE label LIKE ?')->execute([self::LABEL . '%']);
+        $pdo->prepare('DELETE FROM journal_entries WHERE document_no = ?')->execute([self::MARKER]);
+        $pdo->prepare('DELETE FROM accounting_periods WHERE supplier_id = ? AND fiscal_year = 2093
+                        AND NOT EXISTS (SELECT 1 FROM journal_entries je WHERE je.period_id = accounting_periods.id)')
+            ->execute([$this->supplierA]);
+        $pdo->prepare('DELETE FROM documents WHERE title = ?')->execute([self::MARKER]);
         $pdo->prepare('DELETE FROM bank_statements WHERE file_name LIKE ?')->execute(['%' . self::MARKER . '%']);
     }
 }

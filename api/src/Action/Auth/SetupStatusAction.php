@@ -10,6 +10,7 @@ use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Invoice\OverduePolicy;
+use MyInvoice\Service\System\MaintenanceNoticeService;
 use MyInvoice\Service\System\ManagedModeGuard;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -32,6 +33,7 @@ final class SetupStatusAction
         // v /api/health.
         private readonly ManagedModeGuard $managed,
         private readonly OverduePolicy $overduePolicy,
+        private readonly MaintenanceNoticeService $maintenanceNotices,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -40,7 +42,9 @@ final class SetupStatusAction
         // nestačí: instance, která ten příznak zdědí z cizího cfg nad ostrou
         // databází, by rozdávala funkční přístup k reálným datům. Platí proto
         // tytéž dvě pojistky, kterými se řídí provisioning (assertSafeTarget()).
-        $demoEnabled = (bool) $this->config->get('demo.enabled', false) && $this->demoTargetMatches();
+        $user = (array) $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, []);
+        $demoEnabled = !\MyInvoice\Security\InstanceAdminRoutePolicy::isTechnicalUser($user)
+            && (bool) $this->config->get('demo.enabled', false) && $this->demoTargetMatches();
         $demoEmail = $demoEnabled ? trim((string) $this->config->get('demo.login_email', '')) : '';
         $demoPassword = $demoEnabled ? (string) $this->config->get('demo.login_password', '') : '';
 
@@ -49,6 +53,9 @@ final class SetupStatusAction
             'version'     => '0.1.0',
             'managed'     => $this->managed->isManaged(),
             'overdue_includes_today' => $this->overduePolicy->includesToday(),
+            // Ohlášení plánované údržby. Je tady, protože ho musí vidět i
+            // přihlašovací stránka; běžící aplikace si payload obnovuje sama.
+            'maintenance_notices' => $this->maintenanceNotices->active(),
             'passwordless_login_enabled' =>
                 (bool) $this->config->get('auth.passwordless_login.enabled', false)
                 && $this->passkeys->isAvailable()

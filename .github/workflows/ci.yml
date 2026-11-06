@@ -59,6 +59,25 @@ jobs:
   backend:
     name: Backend (PHP 8.5 + PHPUnit)
     runs-on: ubuntu-latest
+    needs: backend-tests
+    if: always()
+    steps:
+      - name: Require all backend shards
+        shell: pwsh
+        env:
+          BACKEND_TEST_RESULT: ${{ needs.backend-tests.result }}
+        run: |
+          if ($env:BACKEND_TEST_RESULT -ne 'success') {
+              throw "Backend test shards finished with result: $env:BACKEND_TEST_RESULT"
+          }
+
+  backend-tests:
+    name: Backend (PHP 8.5 + PHPUnit, shard ${{ matrix.shard }}/4)
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
 
     # Bez databáze se přeskočí celá Integration suita včetně testů atomicity
     # session — tedy zrovna to, co hlídá nejcitlivější garance autentizace.
@@ -71,7 +90,7 @@ jobs:
         ports:
           - 3306:3306
         options: >-
-          --tmpfs /var/lib/mysql:rw,size=4g
+          --tmpfs /var/lib/mysql:rw,size=8g
           --health-cmd="healthcheck.sh --connect --innodb_initialized"
           --health-interval=5s
           --health-timeout=5s
@@ -108,7 +127,7 @@ jobs:
         run: |
           sudo apt-get update
           if ($LASTEXITCODE -ne 0) { throw 'Package index update failed.' }
-          sudo apt-get install --no-install-recommends -y ghostscript poppler-utils
+          sudo apt-get install --no-install-recommends -y ghostscript poppler-utils librsvg2-bin
           if ($LASTEXITCODE -ne 0) { throw 'PDF backend installation failed.' }
           foreach ($file in Get-ChildItem -Path '/etc/ImageMagick-*/policy.xml') {
               [xml]$policy = Get-Content -LiteralPath $file.FullName -Raw
@@ -131,6 +150,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Ghostscript is unavailable.' }
           pdftoppm -v
           if ($LASTEXITCODE -ne 0) { throw 'Poppler is unavailable.' }
+          rsvg-convert --version
+          if ($LASTEXITCODE -ne 0) { throw 'rsvg-convert is unavailable.' }
           php --ri imagick
           if ($LASTEXITCODE -ne 0) { throw 'Imagick is unavailable.' }
 
@@ -144,6 +165,22 @@ jobs:
       - name: Install composer dependencies
         working-directory: api
         run: composer install --prefer-dist --no-interaction --no-progress
+
+      - name: Size isolated MariaDB test caches
+        shell: pwsh
+        run: |
+          @'
+          <?php
+          $pdo = new PDO('mysql:host=127.0.0.1;port=3306', 'root', 'ci', [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+          $pdo->exec('SET GLOBAL table_open_cache = 32768');
+          $pdo->exec('SET GLOBAL table_definition_cache = 32768');
+          $actual = $pdo->query('SELECT @@GLOBAL.table_open_cache, @@GLOBAL.table_definition_cache')->fetch(PDO::FETCH_NUM);
+          if (array_map('intval', $actual) !== [32768, 32768]) {
+              throw new RuntimeException('Unexpected test database cache capacity.');
+          }
+          echo "Isolated MariaDB test caches: 32768 tables each\n";
+          '@ | php
+          if ($LASTEXITCODE -ne 0) { throw 'Test database cache configuration failed.' }
 
       # cfg.php je gitignored, CI si ho generuje. Píšeme ho jako soubor, ne přes
       # MYINVOICE_* proměnné — ty by prosákly i do unit testů Configu, které
@@ -254,13 +291,13 @@ jobs:
         working-directory: api
         env:
           MYINVOICE_TEST_URL: http://localhost:8080
-        run: php bin/test-parallel.php --processes=8 --application --timings=test-results/timings.json --log-junit=test-results/phpunit.xml
+        run: php bin/test-parallel.php --processes=8 --application --shard=${{ matrix.shard }}/4 --timings=test-results/timings.json --log-junit=test-results/phpunit.xml
 
       - name: Backend test results and timings
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: backend-test-results
+          name: backend-test-results-${{ matrix.shard }}
           path: api/test-results/
           if-no-files-found: ignore
 

@@ -48,8 +48,11 @@ final readonly class JmhzProtocolParser
      * doložený `Item/@subtype` téže agendy.
      */
     private const REGISTRATION_SUBTYPES = [
-        'CSSZ_REGZEC' => 'REGZEC25',
-        'CSSZ_PREZEC' => 'PREZEC26',
+        // REGZEC27 = verze 2027 pro události od 1. 1. 2027 (JmhzSpecVersion).
+        // Tvar protokolu 2027 zatím doložený není; přijme se jen tentýž tvar
+        // s ročníkem 2027 a jeden protokol nesmí ročníky míchat.
+        'CSSZ_REGZEC' => ['REGZEC25', 'REGZEC27'],
+        'CSSZ_PREZEC' => ['PREZEC26'],
     ];
 
     /**
@@ -304,16 +307,22 @@ final readonly class JmhzProtocolParser
             $result->getAttribute('errNumber'),
             false,
         );
-        $subtype = self::REGISTRATION_SUBTYPES[$class];
+        $subtypes = self::REGISTRATION_SUBTYPES[$class];
+        $subtype = null;
         $parts = [];
         $sequences = [];
         foreach ($result->getElementsByTagName('Item') as $item) {
-            if (trim($item->getAttribute('subtype')) !== $subtype) {
+            $itemSubtype = trim($item->getAttribute('subtype'));
+            if (!in_array($itemSubtype, $subtypes, true)
+                || ($subtype !== null && $subtype !== $itemSubtype)
+            ) {
                 throw new JmhzTransportException(
                     'jmhz_protocol_part_unknown',
-                    'Část registračního protokolu nemá doložený druh `' . $subtype . '`.',
+                    'Část registračního protokolu nemá doložený druh `'
+                        . implode('`/`', $subtypes) . '`.',
                 );
             }
+            $subtype = $itemSubtype;
             $itemOutcome = $this->assertOutcome($item->getAttribute('result'));
             $sequence = trim($item->getAttribute('sqnr'));
             $itemErrors = $this->parseRegistrationErrors(

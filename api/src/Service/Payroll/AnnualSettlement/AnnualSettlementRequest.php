@@ -86,6 +86,9 @@ final readonly class AnnualSettlementRequest
             AnnualSettlementAnnualClaims::Unknown,
             null,
             null,
+            // Řádek ještě neexistuje. Verze 1 by se vrátila v náhledu, klient ji
+            // poslal zpět a repozitář by první uložení odmítl jako zaniklou žádost.
+            0,
         );
     }
 

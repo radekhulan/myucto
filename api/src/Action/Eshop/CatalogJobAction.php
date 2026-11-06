@@ -117,6 +117,23 @@ final class CatalogJobAction
         if (!empty($job['input']['stock_take_id'])) {
             return Json::error($response, 'stock_take_preparation', 'Přípravu inventury ovládejte v detailu inventury.', 409);
         }
+        $historyKinds = [
+            \MyInvoice\Service\Stock\StockHistoryImportService::APPLY_KIND,
+            \MyInvoice\Service\Stock\StockHistoryImportService::ROLLBACK_KIND,
+        ];
+        if ($args['operation'] === 'cancel' && $job['kind'] === $historyKinds[0]
+            && !RequestAuthorization::canRollbackStockHistoryImport($request)) {
+            // Zastavené převzetí bez data přechodu nechá zamčený celý sklad, jako rozjeté vrácení.
+            return Json::error($response, 'forbidden', 'Převzetí historie skladu může zastavit jen správce firmy.', 403);
+        }
+        if ($args['operation'] === 'retry' && in_array($job['kind'], $historyKinds, true)) {
+            // Opakovat jde jen poslední převzetí nebo vrácení; starší úloha by přepsala novější stav.
+            $stmt = $this->db->pdo()->prepare('SELECT MAX(id) FROM catalog_jobs WHERE supplier_id = ? AND kind IN (?, ?)');
+            $stmt->execute([$supplierId, ...$historyKinds]);
+            if ((int) $stmt->fetchColumn() !== $id) {
+                return Json::error($response, 'history_import_retry_unsupported', 'Opakovat jde jen poslední převzetí nebo vrácení historie skladu.', 409);
+            }
+        }
         $changed = $args['operation'] === 'retry' ? $this->jobs->retry($supplierId, $id) : $this->jobs->cancel($supplierId, $id);
         if (!$changed) {
             return Json::error($response, 'job_state_conflict', 'Aktuální stav úlohy tuto operaci nepovoluje.', 409);
@@ -155,10 +172,11 @@ final class CatalogJobAction
     private function present(array $job): array
     {
         $job['stock_take_id'] = $job['input']['stock_take_id'] ?? null;
-        if (in_array($job['kind'], ['price_matrix_preview', 'catalog_import_stage', 'stock_opening_import_stage'], true)) {
+        if (in_array($job['kind'], ['price_matrix_preview', 'catalog_import_stage', 'stock_opening_import_stage', 'stock_history_import_stage'], true)) {
             $applyKind = match ($job['kind']) {
                 'price_matrix_preview' => 'price_matrix_apply',
                 'catalog_import_stage' => 'catalog_import_apply',
+                'stock_history_import_stage' => 'stock_history_import_apply',
                 default => 'stock_opening_import_apply',
             };
             $stmt = $this->db->pdo()->prepare('SELECT id FROM catalog_jobs WHERE supplier_id = ? AND kind = ?

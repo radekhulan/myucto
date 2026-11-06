@@ -103,7 +103,7 @@ DPH lze zapnout jen u účelů **Prodej** a **Nákup**. U úhrad faktur, převod
 2. Vyberte fakturu. Partner (dodavatel s IČ a DIČ) se předvyplní. Částka je uzamčená: přijatou fakturu hradíte vždy v **plné zbývající výši**.
 3. Klikněte na **Vystavit**.
 
-**Vratka od dodavatele (příjem):** Klikněte na **Příjem**, zvolte účel **Úhrada přijaté faktury**, vyberte fakturu, na které už úhrada visí, zadejte vrácenou částku (libovolnou, nejvýše uhrazenou) a doklad vystavte.
+**Vratka od dodavatele (příjem):** Klikněte na **Příjem**, zvolte účel **Úhrada přijaté faktury**, vyberte fakturu, na které už úhrada visí, zadejte vrácenou částku (libovolnou, nejvýše uhrazenou) a doklad vystavte. Když vratku později stornujete nebo smažete a zbývající úhrady kryjí celou fakturu, faktura je znovu uhrazená s datem poslední zbývající úhrady, stejně jako po zrušení spárování bankovní vratky ([§ 29](29_Banka.md)).
 
 **Jak poznáte, že je hotovo:** Faktura je označená jako uhrazená a doklad je v seznamu se stavem **Vystaven**. U zálohové faktury se plátci DPH navíc připraví koncept daňového dokladu k přijaté platbě.
 
@@ -203,6 +203,7 @@ V rozbaleném detailu je sekce **Přílohy** pro sken účtenky, paragonu nebo p
 - **Nahrát sken**: vybrané soubory (PDF nebo obrázek) se uloží do modulu Dokumenty a rovnou se k dokladu připojí.
 - **Připojit dokument**: připojí soubor, který už v Dokumentech je (vyhledání podle názvu nebo obsahu).
 - U každé přílohy je **náhled** (otevře soubor v nové záložce), stažení a **odpojení**. Odpojení soubor nemaže, jen zruší vazbu; soubor zůstává v Dokumentech.
+- **Zobrazit originál**: ukáže první přílohu ve formátu PDF nebo obrázek přímo vedle detailu dokladu. Stejné tlačítko a sekci **Přílohy** má i formulář úprav rozpracovaného dokladu. U nového dokladu vyberete sken tlačítkem **Přiložit originál** v hlavičce formuláře: náhled se hned otevře vedle formuláře, soubor ale zůstává jen v prohlížeči a do Dokumentů se nahraje a k dokladu připojí až při uložení. Když formulář opustíte bez uložení, nic se nenahraje. Pokud se po uložení originál připojit nepodaří, doklad zůstane uložený a aplikace vás upozorní, ať originál nahrajete v úpravě nebo detailu dokladu. Umístění vpravo nebo pod formulářem přepnete v hlavičce náhledu, šířku změníte tažením rozhraní nebo šipkami na klávesnici a aplikace si volbu pamatuje (podrobně viz [§ 23.11.4](23_Prijate_faktury.md#23114-nahrani-dokladu-drag-and-drop-isdoc-a-limity)).
 
 Obráceně lze pokladní doklad připojit i z detailu dokumentu v sekci **Souvisí s** (hledá se podle čísla dokladu, partnera nebo popisu). Připojit jde jen doklad téže firmy. Při smazání pokladního dokladu se jeho vazby na přílohy zruší, soubory samotné zůstanou v Dokumentech. Sekce se zobrazuje uživatelům s přístupem k modulu Dokumenty; nahrávat a připojovat mohou ti, kdo mají práva nahrát a přesunout dokument.
 
@@ -253,7 +254,7 @@ Povinná pole jsou **celková částka včetně DPH** (u úhrady přijaté faktu
 
 Ve valutové pokladně zadáváte částku v měně pokladny. Systém použije kurz ČNB k datu dokladu; není-li pro daný den dostupný, použije dostupný kurz v povoleném náhradním okně, jinak uložení odmítne. Pole **Kurz** lze vyplnit ručně (prázdné = kurz ČNB k datu vystavení); liší-li se od denního kurzu ČNB, zobrazí se upozornění. Do deníku se uloží korunový ekvivalent, zatímco na řádku 211 zůstane částka v cizí měně a použitý kurz. U rozpisu DPH zadáváte základ a daň v měně pokladny; jednotlivé řádky se převedou do CZK a jejich korunový součet musí přesně odpovídat zaúčtované částce.
 
-Doklad uložíte dvojím způsobem. **Vystavit** doklad rovnou zaúčtuje a přidělí mu číslo. **Uložit jako koncept** doklad jen uloží jako **Rozpracován**, bez čísla a bez zaúčtování. Po vystavení se zobrazí číslo přiděleného dokladu a případná varování (například záporný zůstatek pokladny po zaúčtování).
+Doklad uložíte dvojím způsobem. **Vystavit** doklad rovnou zaúčtuje a přidělí mu číslo. **Uložit jako koncept** doklad jen uloží jako **Rozpracován**, bez čísla a bez zaúčtování. U nového dokladu je navíc **Vystavit a další**: doklad vystaví a hned otevře nový prázdný doklad ve stejné pokladně, se stejným typem (příjem nebo výdej) a datem, takže více dokladů za sebou zapíšete bez návratu na seznam. Po vystavení se zobrazí číslo přiděleného dokladu a případná varování (například záporný zůstatek pokladny po zaúčtování).
 
 > [!WARNING]
 > **Limit plateb v hotovosti.** U dokladu nad **270 000 Kč** se zobrazí upozornění na zákon č. 254/2004 Sb., o omezení plateb v hotovosti. Platbu nad tento limit provedenou mezi týmiž osobami v jeden den je nutné uhradit bezhotovostně. Nejde o blokaci: doklad se uloží i zaúčtuje, upozornění jen připomíná povinnost plátce.

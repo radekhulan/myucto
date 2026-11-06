@@ -376,6 +376,36 @@ final class AccountingSetupRepository
         return array_map(fn (array $row): array => $this->decode($row) ?? [], $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
+    /**
+     * Záznamy přeúčtování mazání dokladu nebrání. Ostrý běh pak smazaný doklad nečeká a návrat
+     * změn ho přeskočí. Stopu o smazání nese auditní log dokladu.
+     */
+    public function deleteReclassificationItems(int $supplierId, int $invoiceId): void
+    {
+        $this->db->pdo()->prepare(
+            'DELETE FROM accounting_reclassification_items
+              WHERE supplier_id = ? AND purchase_invoice_id = ?'
+        )->execute([$supplierId, $invoiceId]);
+    }
+
+    /**
+     * Záznam přeúčtování si zápis jen pamatuje a jeho smazání nebrání. Ostrý běh doklad bez
+     * původního zápisu přeskočí podle otisku v before_json, návrat změn ho vykáže jako změněný.
+     *
+     * @param list<int> $entryIds
+     */
+    public function detachReclassificationItemsFromEntries(int $supplierId, array $entryIds): void
+    {
+        if ($entryIds === []) {
+            return;
+        }
+        $marks = implode(',', array_fill(0, count($entryIds), '?'));
+        $this->db->pdo()->prepare(
+            "UPDATE accounting_reclassification_items SET correction_entry_id = NULL
+              WHERE supplier_id = ? AND correction_entry_id IN ($marks)"
+        )->execute([$supplierId, ...$entryIds]);
+    }
+
     public function hasRollbackSnapshot(int $supplierId, int $jobId): bool
     {
         $stmt = $this->db->pdo()->prepare(

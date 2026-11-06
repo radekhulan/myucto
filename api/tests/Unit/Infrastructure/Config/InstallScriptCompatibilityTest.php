@@ -139,6 +139,50 @@ final class InstallScriptCompatibilityTest extends TestCase
     }
 
     /**
+     * Instalátor dřív natvrdo zapisoval `app.env = development` a vypnutou Secure
+     * cookie. Výchozí musí být produkce, vývojový režim jen na výslovnou volbu a
+     * vypnutí Secure cookie jen pro HTTP adresu.
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('generatorProvider')]
+    public function testGeneratorDefaultsToProductionAndDerivesSecureCookieFromScheme(string $relativePath): void
+    {
+        $contents = self::read($relativePath);
+
+        self::assertStringNotContainsString(
+            "=> 'development',",
+            $contents,
+            "{$relativePath} zapisuje app.env = development natvrdo.",
+        );
+        self::assertMatchesRegularExpression(
+            '/APP_ENV="production"|\$appEnv = \'production\'/',
+            $contents,
+            "{$relativePath} nemá produkční výchozí app.env.",
+        );
+        self::assertMatchesRegularExpression(
+            '/(if \[\[ "\$APP_URL" == http:\/\/\* \]\]|if \(\$appIsHttp\) \{)[\s\S]{0,400}?\'cookie_secure\' => false,/',
+            $contents,
+            "{$relativePath} vypíná Secure cookie bez ohledu na schéma app.url.",
+        );
+    }
+
+    /**
+     * Nová instalace dostane vlastní klíč mzdových otisků a všechna tajemství
+     * vznikají z kryptograficky bezpečného zdroje (ne z Get-Random).
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('generatorProvider')]
+    public function testGeneratorCreatesStrongPayrollHashKey(string $relativePath): void
+    {
+        $contents = self::read($relativePath);
+
+        self::assertStringContainsString("'payroll_hash_key' => '',", $contents);
+        self::assertMatchesRegularExpression(
+            '/PAYROLL_HASH_KEY=\$\(openssl rand -base64 32\)|\$payrollHashKey = New-Base64Key/',
+            $contents,
+        );
+        self::assertStringNotContainsString('Get-Random', $contents);
+    }
+
+    /**
      * `Set-Content -Encoding UTF8` píše v PS 5.1 BOM. BOM před `<?php` v
      * cfg.docker.php se vypíše na výstup ještě před hlavičkami a znemožní
      * odeslání session cookie — přihlášení projde, ale aplikace hned odhlásí.

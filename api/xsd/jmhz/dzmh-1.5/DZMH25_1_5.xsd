@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="utf-8"?>
+<xs:schema xmlns="http://schemas.cssz.cz/JMHZ/dotazNaStav/2025"
+  xmlns:xs="http://www.w3.org/2001/XMLSchema"
+  xmlns:bt="http://schemas.cssz.cz/baseTypes/v2"
+  targetNamespace="http://schemas.cssz.cz/JMHZ/dotazNaStav/2025"
+  elementFormDefault="qualified" attributeFormDefault="unqualified" version="1.5.0.0">
+  <xs:import namespace="http://schemas.cssz.cz/baseTypes/v2" schemaLocation="baseTypes2.xsd" />
+  <xs:annotation>
+	<xs:documentation>
+	
+XML schéma podání na DIS Dotaz zaměstnavatele na měsíční hlášení
+<p/>
+Verze 1.5.0.0    30.09.2026 	- nový atribut /DZMH/SENDER/VlastniIdPodani
+
+	</xs:documentation>
+  </xs:annotation>
+  <xs:element name="DZMH" type="DzmhType" />
+  <xs:complexType name="DzmhType">
+    <xs:sequence>
+      <xs:element name="VENDOR" minOccurs="0">
+        <xs:complexType>
+          <xs:attribute name="productName" type="xs:string" />
+          <xs:attribute name="productVersion" type="xs:string" />
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="SENDER" minOccurs="0">
+        <xs:complexType>
+          <xs:attribute name="EmailNotifikace" type="xs:string" />
+          <xs:attribute name="ISDSreport" type="xs:string" />
+          <xs:attribute name="VlastniIdPodani" use="optional">
+            <xs:simpleType>
+                <xs:restriction base="xs:string">
+                    <xs:maxLength value="36"/>
+                </xs:restriction>
+            </xs:simpleType>
+          </xs:attribute>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="variabilniSymbol" type="variabilniSymbolType">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Variabilní symbol zaměstnavatele.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:choice>
+        <xs:element name="idPodani" type="guidType">
+          <xs:annotation>
+            <xs:documentation xml:lang="cs">GUID podání (ID podání ve tvaru GUID)
+DS: Meta atributy > Podání (ID 10001)
+Unikátní GUID pro Měsiční hlášení generovaný na straně ZEL.
+Je stejné za celé mesícní hlášení.</xs:documentation>
+          </xs:annotation>
+        </xs:element>
+        <xs:sequence>
+          <xs:element name="mesic" type="mesicType">
+            <xs:annotation>
+              <xs:documentation xml:lang="cs">Měsíc
+DS: Meta atributy > Podání (ID 10010)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+          <xs:element name="rok" type="rokType">
+            <xs:annotation>
+              <xs:documentation xml:lang="cs">Rok
+DS: Meta atributy > Podání (ID 10011)</xs:documentation>
+            </xs:annotation>
+          </xs:element>
+        </xs:sequence>
+      </xs:choice>
+    </xs:sequence>
+    <xs:attribute name="verze" type="xs:string" use="required" />
+  </xs:complexType>
+
+  <xs:element name="DZMHOdpoved" type="DzmhOdpovedType" />
+  <xs:complexType name="DzmhOdpovedType">
+    <xs:sequence>
+      <xs:element name="variabilniSymbol" type="variabilniSymbolType">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Variabilní symbol zaměstnavatele.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="idPodani" type="guidType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">GUID podání (ID podání ve tvaru GUID)
+DS: Meta atributy > Podání (ID 10001)
+Unikátní GUID pro Měsíční hlášení generovaný na straně ZEL.
+Je stejné za celé měsíční hlášení.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="mesic" type="mesicType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Měsíc
+DS: Meta atributy > Podání (ID 10010)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="rok" type="rokType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Rok
+DS: Meta atributy > Podání (ID 10011)</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="stavMH">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Stav zpracování měsíčního hlášení.</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="kod" type="xs:int">
+              <xs:annotation>
+                <xs:documentation xml:lang="cs">Kód stavu zpracování měsíčního hlášení.</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="nazev" type="xs:string">
+              <xs:annotation>
+                <xs:documentation xml:lang="cs">Název stavu zpracování měsíčního hlášení.</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+            <xs:element name="datumZpracovani" type="xs:dateTime">
+              <xs:annotation>
+                <xs:documentation xml:lang="cs">Datum a čas nastavení stavu zpracování.</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+      <xs:element name="protokoly" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Seznam protokolů o kompletnosti.</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="protokol" type="protokolType" maxOccurs="unbounded">
+              <xs:annotation>
+                <xs:documentation xml:lang="cs">Protokol o kompletnosti konkrétního řádného/opravného/storno podání.</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+    <xs:attribute name="verze" type="xs:string" use="required" />
+  </xs:complexType>
+
+  <xs:complexType name="protokolType">
+    <xs:sequence>
+      <xs:element name="datumProtokolu" type="xs:dateTime">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Datum a čas vytvoření protokolu.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="datumPodani" type="xs:dateTime">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Datum a čas přijetí konkrétního podání je reprezentován datumem a časem 1.dílčího podání.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="idKonkretnihoPodani" type="xs:string">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">ID konkrétního podání je reprezentováno identifikátorem 1.dílčího podání.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="kod" type="xs:int">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Kód stavu zpracování konkrétního podání.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="nazev" type="xs:string">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Název stavu zpracování konkrétního podání.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="chybySeznam" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Seznam chyb k protokolu o kompletnosti konkrétního podání.</xs:documentation>
+        </xs:annotation>
+        <xs:complexType>
+          <xs:sequence>
+            <xs:element name="chyba" type="chybaType" maxOccurs="unbounded">
+              <xs:annotation>
+                <xs:documentation xml:lang="cs">Chyba.</xs:documentation>
+              </xs:annotation>
+            </xs:element>
+          </xs:sequence>
+        </xs:complexType>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+  <xs:complexType name="chybaType">
+    <xs:sequence>
+      <xs:element name="id" type="guidType">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Jednoznačné ID chyby v systému cJMHZ.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="typChyby">
+        <xs:simpleType>
+          <xs:annotation>
+            <xs:documentation xml:lang="cs">Chyba z příjmu na DIS nebo ze zpracování na cJMHZ.</xs:documentation>
+          </xs:annotation>
+          <xs:restriction base="xs:token">
+            <xs:enumeration value="prijem" />
+            <xs:enumeration value="zpracovani" />
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="castPodani">
+        <xs:simpleType>
+          <xs:annotation>
+            <xs:documentation xml:lang="cs">Část podání, které se chyba týká.</xs:documentation>
+          </xs:annotation>
+          <xs:restriction base="xs:token">
+            <xs:enumeration value="global" />
+            <xs:enumeration value="souhrn" />
+            <xs:enumeration value="pvpoj" />
+            <xs:enumeration value="form" />
+            <xs:enumeration value="nezarazeno" />
+          </xs:restriction>
+        </xs:simpleType>
+      </xs:element>
+      <xs:element name="idFormulare" type="guidType" minOccurs="0">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">GUID formuláře z měsíčního hlášení.
+Vyplněno pro část podání formularOsoby.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="kod" type="xs:int">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Kód chyby odpovídá součtu ID kontroly z katalogu kontrol a offsetu, který je specifický pro interní systémy.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+      <xs:element name="popis" type="xs:string">
+        <xs:annotation>
+          <xs:documentation xml:lang="cs">Popis chyby z katalogu kontrol.</xs:documentation>
+        </xs:annotation>
+      </xs:element>
+    </xs:sequence>
+  </xs:complexType>
+
+  <xs:simpleType name="variabilniSymbolType">
+    <xs:restriction base="bt:simpleNNType">
+      <xs:length value="10" />
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="mesicType">
+    <xs:restriction base="bt:simpleNType">
+      <xs:minInclusive value="1"/>
+      <xs:maxInclusive value="12"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="rokType">
+    <xs:restriction base="bt:simpleNType">
+      <xs:minInclusive value="2023"/>
+      <xs:maxInclusive value="2100"/>
+    </xs:restriction>
+  </xs:simpleType>
+  <xs:simpleType name="guidType">
+    <xs:restriction base="xs:string">
+      <xs:pattern value="[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"/>
+    </xs:restriction>
+  </xs:simpleType>
+</xs:schema>

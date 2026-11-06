@@ -277,6 +277,7 @@ final class StockDocumentService
 
         // 2b) Zámek účetního období (jen double_entry; tax_evidence řeší doc-lock jinde).
         $this->guardPeriodOpen($supplierId, $docDate);
+        $this->guardHistoryUnlocked($supplierId, $docDate);
 
         // 2c) Otevřená inventura na dotčených skladech blokuje pohyby (A13).
         $this->warehouses->lockForStockOperation($supplierId, array_filter([$warehouseId, $warehouseToId]));
@@ -399,6 +400,7 @@ final class StockDocumentService
             // Guardy shodné s post: období (storno v uzavřeném období → 409),
             // otevřená inventura na dotčených skladech.
             $this->guardPeriodOpen($supplierId, $docDate);
+            $this->guardHistoryUnlocked($supplierId, $docDate);
             $this->warehouses->lockForStockOperation($supplierId, array_filter([$counterWh, $counterWhTo]));
             $this->guardNoOpenStockTake($supplierId, $counterWh, $counterWhTo);
 
@@ -693,6 +695,29 @@ final class StockDocumentService
         }
     }
 
+    /**
+     * Převzatá historie skladu (import z jiného programu) je uzavřená: doklad s datem do
+     * jejího posledního dne by ji přecenil a rozbil vyrovnání se stavem, ze kterého firma
+     * pokračuje. Platí i pro storno převzatého dokladu, ten se vrací jen celým importem.
+     */
+    private function guardHistoryUnlocked(int $supplierId, string $docDate): void
+    {
+        // Sdílený zámek: import historie mění hranici pod zámkem firmy, doklad ji tak nepřečte zastaralou.
+        $stmt = $this->db->pdo()->prepare('SELECT stock_history_locked_until FROM supplier WHERE id = ? LOCK IN SHARE MODE');
+        $stmt->execute([$supplierId]);
+        $lockedUntil = $stmt->fetchColumn();
+        if (is_string($lockedUntil) && $docDate <= $lockedUntil) {
+            throw new StockException(
+                $lockedUntil === StockHistoryImportService::LOCK_RUNNING ? 'stock_history_import_running' : 'stock_history_locked',
+                $lockedUntil === StockHistoryImportService::LOCK_RUNNING
+                    ? 'Probíhá převzetí nebo vrácení historie skladu. Doklad zaúčtujte po jeho dokončení.'
+                    : 'Doklad spadá do převzaté historie skladu (do ' . $lockedUntil . '). Opravu proveďte dokladem s pozdějším datem.',
+                409,
+                ['doc_date' => $docDate, 'locked_until' => $lockedUntil],
+            );
+        }
+    }
+
     /** Otevřená inventura (status=counting) na dotčeném skladu blokuje pohyby (A13). */
     private function guardNoOpenStockTake(int $supplierId, int $warehouseId, ?int $warehouseToId): void
     {
@@ -814,6 +839,12 @@ final class StockDocumentService
                 // B10: neaktivní karta blokuje NOVÉ řádky draftu.
                 $inactive[] = ['stock_item_id' => $itemId, 'sku' => $meta[$itemId]['sku'], 'name' => $meta[$itemId]['name']];
                 continue;
+            }
+            if ($meta[$itemId]['item_type'] === 'service') {
+                throw new StockException('service_item_no_stock', 'Služba nevede zásobu, na skladový doklad nepatří.', 422, [[
+                    'stock_item_id' => $itemId,
+                    'sku'           => $meta[$itemId]['sku'],
+                ]]);
             }
 
             $qtyT = StockValuation::qtyToT((string) ($rl['qty'] ?? '0'));

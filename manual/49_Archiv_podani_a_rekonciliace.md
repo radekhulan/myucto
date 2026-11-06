@@ -31,9 +31,33 @@ Související výpočty jsou popsány v kapitolách [Výkazy DPH](41_Vykazy_DPH.
 ## 49.2 Než začnete
 
 - **Hotová účetní nebo evidenční kontrola** daného období a vygenerované XML, které nehlásí blokující chybu.
-- **Pro přímé podání osobní kvalifikovaný certifikát** ve formátu P12/PFX se soukromým klíčem (jak ho získat, viz [§ 49.9.5](#4995-jak-ziskat-vhodny-certifikat)). Nahrajete ho v `Systém → E-maily a certifikáty`, záložka **Certifikáty a elektronické podpisy**, a v každé firmě povolíte tlačítkem **Povolit pro tuto firmu** v části **Certifikáty EPO**. Správce instalace musí mít nastavený šifrovací klíč (viz [§ 49.9.6](#4996-zabezpeceni-certifikatu)).
+- **Pro přímé podání osobní kvalifikovaný certifikát** ve formátu P12/PFX se soukromým klíčem (jak ho získat, viz [§ 49.9.5](#4995-jak-ziskat-vhodny-certifikat)). Interní obsluha ho nahraje v `Systém → E-maily a certifikáty`, záložka **Certifikáty a elektronické podpisy**, a v každé firmě povolí tlačítkem **Povolit pro tuto firmu** v části **Certifikáty EPO**. Klient s právem k podávání nahraje svůj certifikát přímo v archivu tlačítkem **Certifikáty**. Správce instalace musí mít nastavený šifrovací klíč (viz [§ 49.9.6](#4996-zabezpeceni-certifikatu)).
 - **Oprávnění jednat za firmu.** Certifikát prokazuje totožnost podepisující osoby, ne její oprávnění jednat. Jednatel podepisuje v rozsahu svého oprávnění, účetní nebo daňový poradce potřebuje plnou moc uplatněnou u příslušného finančního úřadu každé zastupované firmy.
 - **Pro OSS** se EPO nepoužívá, viz upozornění v [§ 49.3](#493-krok-za-krokem-asistovane-podani).
+
+### 49.2.1 Klientské podávání připravených výkazů
+
+Účetní může připravit XML a vlastní podání přenechat klientovi. Správce v **Systém → Role a oprávnění**
+u vlastní role typu **client** povolí čtení **Připravená podání DPH, KH a SH** (`reports.submissions`).
+Výchozí klientská role zůstává bez přístupu. Přístup platí i na klientské doméně a vždy jen pro vybranou
+firmu, ke které je klient přiřazen.
+
+Samotné čtení dovoluje prohlížet archiv přiznání k DPH, kontrolních a souhrnných hlášení, stáhnout
+jejich připravené XML a přiložená potvrzení a zobrazit platební údaje DPH včetně QR platby.
+Nezpřístupňuje výpočet výkazu, účetní doklady, daň z příjmů, OSS ani mzdy.
+
+Pro odesílání přidejte **Zápis** u **Elektronicky podat** (`reports.submit`). Aplikace s tímto právem
+zpřístupní i čtení připravených podání; pro samotné prohlížení stačí `reports.submissions`.
+Klient pak otevře připravený snapshot a použije asistované EPO, přímé EPO
+s vlastním osobním certifikátem nebo odesílací bránu datové schránky. Vlastní certifikát může nahrát
+a povolit pro svou firmu přímo přes **Certifikáty** v archivu. Smazání certifikátu v klientském portálu není dostupné.
+Po odeslání může nahrát potvrzení, doložit podání a obnovit jeho stav.
+Přístup vyžaduje přihlášení v prohlížeči; API token klientské role ho nenahrazuje.
+
+Nastavení prostředí a složek archivu, směrování finančních úřadů, mazání snapshotů, uvolnění nejistého
+pokusu a přiřazování zpráv z příchozí datové schránky zůstává interní obsluze.
+Klient nemá přístup ani k porovnání podaného KH s aktuálními účetními doklady.
+Chybu ve výkazu předá účetní, která připraví opravený snapshot.
 
 ## 49.3 Krok za krokem: asistované podání
 
@@ -85,7 +109,7 @@ Přímý režim vytvoří uznávaný elektronický podpis ZAREP, provede test of
 
 Přiznání k DPH, kontrolní hlášení, souhrnné hlášení a přiznání k dani z příjmů (DPPO, DPFO) můžete místo přes EPO poslat datovou zprávou z datové schránky firmy. Do zprávy jde přesně archivovaný XML snapshot, stejný jako pro EPO. Podpis ani ZAREP nejsou potřeba, totožnost dokládá odeslání z vaší schránky.
 
-1. Zkontrolujte, kam se podání pošle. V nastavení stránky `Daně → EPO podání a archív` je část **Datové schránky finančního úřadu** se čtyřmi řádky: DPH, kontrolní hlášení, souhrnné hlášení a DPPO/DPFO. Výchozí je schránka krajského finančního úřadu podle **Kódu finančního úřadu** v nastavení firmy, u kódu 13 Specializovaný finanční úřad. Pro kterýkoli řádek můžete vybrat jinou schránku z číselníku příjemců.
+1. Zkontrolujte, kam se podání pošle. V nastavení stránky `Daně → EPO podání a archív` je část **Datové schránky finančního úřadu** se čtyřmi řádky: DPH, kontrolní hlášení, souhrnné hlášení a DPPO/DPFO. Výchozí je schránka krajského finančního úřadu podle **Finančního úřadu** vybraného v nastavení firmy, u kódu 13 Specializovaný finanční úřad. Pro kterýkoli řádek můžete vybrat jinou schránku z číselníku příjemců.
 2. U validního snapshotu (**XSD · OK**), který ještě nebyl podaný, klikněte na **Odeslat datovou schránkou**.
 3. V dialogu zkontrolujte finanční úřad a ID jeho schránky, věc zprávy a přílohu. Výchozí cíl se bere z kódu finančního úřadu zapsaného v samotném XML. Když vybraná schránka patří jinému úřadu, než kterému je XML adresované, dialog na to upozorní.
 4. Zvolte způsob přihlášení k datové schránce: **Odesílací brána**, **Mobilní klíč**, **Jméno a heslo**, nebo **Systémový certifikát**. Jednotlivé způsoby popisuje kapitola [Datová schránka](97_Datova_schranka.md). Jméno a heslo se nikam neukládá.
