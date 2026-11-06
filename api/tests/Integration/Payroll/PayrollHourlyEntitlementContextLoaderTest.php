@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollHourlyEvidenceRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
@@ -28,7 +27,7 @@ final class PayrollHourlyEntitlementContextLoaderTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->time = $container->get(PayrollTimeRepository::class);
         $pdo = $this->db->pdo();

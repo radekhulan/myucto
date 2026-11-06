@@ -230,6 +230,10 @@ sazby po účinných úsecích; při více sazbách během měsíce se jednotliv
 nikoli zvlášť za každou položku nebo den. Neuložený rozepsaný formulář
 náhled nemění.
 
+Firemní volba zaokrouhlení na celé koruny (nahoru nebo matematicky) platí
+i pro hodinovou odměnu z DPP a DPČ. Použitá volba se uchovává v podkladu
+výpočtu společně s přesnými částkami před zaokrouhlením.
+
 Součet peněžních vstupů v hlavní tabulce není totéž co náhled nových
 hodinových nároků. Náhled k němu ručně nepřičítejte: při přípravě běhu
 se ověřené hodinové nároky vytvářejí do vstupů automaticky před jejich

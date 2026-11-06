@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Action\Payroll\PayrollHourlyEvidenceAction;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -35,7 +34,7 @@ final class PayrollHourlyEvidenceRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->action = $container->get(PayrollHourlyEvidenceAction::class);
         $pdo = $this->db->pdo();
@@ -139,7 +138,7 @@ final class PayrollHourlyEvidenceRepositoryTest extends TestCase
 
     public function testHolidayTimeOffRevalidatesRemunerationBeforeApproval(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $data = $container->get(\MyInvoice\Service\Payroll\PayrollAbsenceValidator::class)->absence([
             'employment_id' => $this->employmentId, 'absence_type' => 'holiday_compensatory_time_off',
             'date_from' => '2026-06-08', 'date_to' => '2026-06-08',
