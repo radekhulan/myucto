@@ -231,7 +231,11 @@ podmínek a předchozí je uzavřená dnem před novou účinností.
 **Hodinová mzda a odměna.** Na kartě pracovního vztahu zvolte hodinový způsob
 odměňování, zadejte **Sjednanou hodinovou sazbu (Kč/h)**, druh podkladu
 (mzdový výměr, smlouva, dohoda, vnitřní předpis nebo kolektivní smlouva)
-a jeho označení či odkaz. Sazba může mít dvě desetinná
+a jeho označení či odkaz. Po přepnutí na hodinový režim karta podklad
+předvyplní: u pracovního poměru **Mzdový výměr** s označením „Mzdový výměr
+účinný od“ a datem účinnosti verze, u DPP a DPČ **Dohodu** s názvem dohody.
+Předvyplněné označení sleduje změnu data účinnosti, dokud ho nepřepíšete.
+Sazba může mít dvě desetinná
 místa. Každý souběžný vztah má vlastní způsob odměňování a vlastní historii.
 U DPP a DPČ jde o hodinovou odměnu. Sjednaná sazba není průměrným ani
 pravděpodobným hodinovým výdělkem.
@@ -243,9 +247,20 @@ na ni vrátit nelze. Změnu sazby i přechod mezi měsíčním
 a hodinovým odměňováním můžete uložit novou verzí s účinností během
 měsíce. Výpočet vyžaduje jednoznačné rozdělení skutečné práce podle
 účinných sazeb a podklad pro měsíční část; chybějící rozvrh či rozpad
-nelze nahradit odhadem. Před přechodem ukončete aktivní pravidelný předpis
-základní mzdy. Starší verze podmínek musí obsahovat svou vlastní měsíční
+nelze nahradit odhadem. Má-li vztah aktivní pravidelný předpis základní
+mzdy, karta po pokusu o uložení nabídne tlačítko **Ukončit předpis … k … a
+uložit**: předpis skončí den před účinností nové hodinové verze ve stejném
+uložení, takže se mzda nevyplatí dvakrát. Starší verze podmínek musí obsahovat svou vlastní měsíční
 částku, aby vymazání měsíční mzdy při přechodu nezměnilo minulost.
+
+**Chyby a varování u pole.** Neprojde-li uložení kvůli konkrétnímu údaji,
+karta ho orámuje červeně, hlášku napíše přímo pod něj a na pole najede;
+je-li ve sbalených **Dalších údajích**, sama je rozbalí. Údaj, který byl
+uložený už dříve a v této změně se nemění, uložení neblokuje. Neprojde-li
+kontrolou číselníku (například místo výkonu práce nebo druh činnosti),
+uložení proběhne, pole se orámuje žlutě s vysvětlením a pod formulářem
+zůstane souhrn **Uloženo** s odkazem **Ukázat pole**. Opravte ho před
+přípravou podání; tvrdě se kontroluje až tam.
 
 Karta upozorní na sazbu pod hodinovým minimem pro běžný stanovený týden
 podle pravidel platných k datu účinnosti. Kratší sjednaný úvazek toto

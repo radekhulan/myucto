@@ -511,7 +511,34 @@ export type PayrollEmploymentTermsPayload = Omit<
 export type PayrollEmploymentTermsCorrectionPayload =
   Omit<PayrollEmploymentTermsPayload, 'effective_from'> & {
     monthly_gross_minor?: number | null
+    end_recurring_base?: boolean
   }
+
+/**
+ * Varování k uložení podmínek: pole, které neprošlo číselníkovou nebo
+ * konzistenční kontrolou, ale v požadavku se neměnilo. Uložení proběhlo,
+ * tvrdě se údaj hlídá až tam, kde se použije (podání, výpočet běhu).
+ */
+export interface PayrollEmploymentSaveWarning {
+  field: string
+  code: string
+  message: string
+}
+
+export interface PayrollEmploymentSaveResult {
+  employment: PayrollEmployment
+  warnings: PayrollEmploymentSaveWarning[]
+}
+
+function employmentSaveResult(data: { employment: PayrollEmployment; warnings?: unknown }): PayrollEmploymentSaveResult {
+  const warnings = Array.isArray(data.warnings)
+    ? data.warnings.filter((item): item is PayrollEmploymentSaveWarning =>
+      typeof item === 'object' && item !== null
+        && typeof (item as PayrollEmploymentSaveWarning).field === 'string'
+        && typeof (item as PayrollEmploymentSaveWarning).message === 'string')
+    : []
+  return { employment: data.employment, warnings }
+}
 
 export interface PayrollEmploymentCreatePayload {
   code: string
@@ -2616,7 +2643,8 @@ export interface PayrollManualTimeSummary {
   id: number
   time_month_revision_no: number
   content_sha256: string
-  reason: string
+  /** `null` = první zadání bez vlastního důvodu (server drží interní výchozí text). */
+  reason: string | null
   segments: PayrollManualTimeSegment[]
 }
 
@@ -2640,7 +2668,8 @@ export interface PayrollManualTimeSummaryRevision extends PayrollManualTimeSumma
 export interface PayrollManualTimeSummaryPayload {
   employment_id: number
   row_version: number
-  reason: string
+  /** Při prvním zadání bez náhrady jiného zdroje volitelný; server doplní výchozí důvod. */
+  reason: string | null
   replace_source: boolean
   segments: PayrollManualTimeSegment[]
 }
@@ -8907,8 +8936,8 @@ export const payrollApi = {
       `/payroll/people/${personId}/payout-rules/apply-defaults`,
     ).then(response => response.data),
   createEmployment: (personId: number, payload: PayrollEmploymentCreatePayload) =>
-    api.post<{ employment: PayrollEmployment }>(`/payroll/people/${personId}/employments`, payload)
-      .then(response => response.data.employment),
+    api.post<{ employment: PayrollEmployment; warnings?: PayrollEmploymentSaveWarning[] }>(`/payroll/people/${personId}/employments`, payload)
+      .then(response => employmentSaveResult(response.data)),
   // Mzda smí jet i s novou verzí podmínek — „od září bereš víc" je jedna
   // změna, ne dvě. Klíč je volitelný: kdo ho nepošle, mzdy se nedotkne.
   remunerationOptions: (effectiveFrom: string) =>
@@ -8918,12 +8947,12 @@ export const payrollApi = {
   addEmploymentTerms: (
     employmentId: number,
     rowVersion: number,
-    payload: PayrollEmploymentTermsPayload & { monthly_gross_minor?: number | null },
+    payload: PayrollEmploymentTermsPayload & { monthly_gross_minor?: number | null; end_recurring_base?: boolean },
   ) =>
-    api.put<{ employment: PayrollEmployment }>(`/payroll/employments/${employmentId}/terms`, {
+    api.put<{ employment: PayrollEmployment; warnings?: PayrollEmploymentSaveWarning[] }>(`/payroll/employments/${employmentId}/terms`, {
       row_version: rowVersion,
       ...payload,
-    }).then(response => response.data.employment),
+    }).then(response => employmentSaveResult(response.data)),
   /**
    * OPRAVA platné verze podmínek — přepis na místě, bez nové verze.
    *
@@ -8936,10 +8965,10 @@ export const payrollApi = {
     rowVersion: number,
     payload: PayrollEmploymentTermsCorrectionPayload,
   ) =>
-    api.patch<{ employment: PayrollEmployment }>(
+    api.patch<{ employment: PayrollEmployment; warnings?: PayrollEmploymentSaveWarning[] }>(
       `/payroll/employments/${employmentId}/terms/current`,
       { row_version: rowVersion, ...payload },
-    ).then(response => response.data.employment),
+    ).then(response => employmentSaveResult(response.data)),
   employmentJmhzEvidenceOptions: () =>
     api.get<{ options: PayrollEmploymentJmhzEvidenceOptions }>(
       '/payroll/jmhz/employment-evidence-options',

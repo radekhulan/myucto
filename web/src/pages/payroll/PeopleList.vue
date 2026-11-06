@@ -3,6 +3,8 @@ import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } 
 import { useI18n } from 'vue-i18n'
 import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter, type LocationQueryRaw } from 'vue-router'
 import { apiErrorMessage } from '@/api/errors'
+import FieldNote from '@/components/ui/FieldNote.vue'
+import { apiErrorField } from './payrollFieldFeedback'
 import PayrollJmhzReturnBar from './PayrollJmhzReturnBar.vue'
 import {
   payrollApi,
@@ -123,7 +125,59 @@ watch(() => newEmployment.value?.relation_type, (relationType) => {
     newEmployment.value.terms.hourly_rate_minor = null
   }
 })
+/*
+ * Podklad hodinového sjednání se předvyplní stejně jako na kartě vztahu:
+ * DPP a DPČ dohoda, pracovní poměr mzdový výměr účinný ode dne nástupu.
+ * Předvyplněný text sleduje druh vztahu a datum, dokud ho nikdo nepřepíše.
+ */
+let newEmploymentPrefilledBasis: string | null = null
+watch(() => [newEmployment.value?.terms.remuneration_type, newEmployment.value?.relation_type, newEmployment.value?.terms.planned_start_on] as const, ([type, relation, start], previous) => {
+  const draft = newEmployment.value
+  if (!draft || type !== 'hourly' || !['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(relation ?? '')) return
+  const agreement = relation === 'dpp' || relation === 'dpc'
+  const relationChanged = previous !== undefined && previous[1] !== relation
+  if (!draft.terms.remuneration_basis_kind || (relationChanged && draft.terms.remuneration_basis_kind === (agreement ? 'wage_statement' : 'agreement'))) {
+    draft.terms.remuneration_basis_kind = agreement ? 'agreement' : 'wage_statement'
+  }
+  const current = (draft.terms.remuneration_basis ?? '').trim()
+  if (current !== '' && current !== newEmploymentPrefilledBasis) return
+  newEmploymentPrefilledBasis = agreement
+    ? t(`payroll.people.remuneration.basis_default_${relation}`)
+    : start ? t('payroll.people.remuneration.basis_default_wage_statement', { date: formatDate(start) }) : null
+  draft.terms.remuneration_basis = newEmploymentPrefilledBasis
+})
 const newEmploymentError = ref('')
+/*
+ * Pole nového vztahu, kvůli kterému založení neprošlo — lokální kontrola nebo
+ * `error.details.field` ze serveru. Pole, které formulář nemá (pracoviště,
+ * kódy JMHZ), zůstává jen v souhrnné hlášce; doplní se pak na kartě vztahu.
+ */
+const NEW_EMPLOYMENT_FIELD_TARGETS: Record<string, string> = {
+  remuneration_type: 'new-employment-remuneration-type',
+  hourly_rate_minor: 'new-employment-hourly-rate',
+  remuneration_basis_kind: 'new-employment-remuneration-basis-kind',
+  remuneration_basis: 'new-employment-remuneration-basis',
+  monthly_gross_minor: 'new-employment-monthly-gross',
+  office_id: 'new-employment-office',
+  weekly_hours: 'new-employment-weekly-hours',
+  planned_start_on: 'new-employment-planned-start',
+}
+const newEmploymentInvalidField = ref<string | null>(null)
+function newEmploymentFieldClass(field: string): string {
+  return newEmploymentInvalidField.value === field ? 'border-danger-500' : 'border-neutral-300'
+}
+function newEmploymentFieldError(field: string): string | null {
+  return newEmploymentInvalidField.value === field && newEmploymentError.value !== '' ? newEmploymentError.value : null
+}
+function rejectNewEmploymentField(field: string, message: string): void {
+  newEmploymentError.value = message
+  newEmploymentInvalidField.value = field
+  const target = NEW_EMPLOYMENT_FIELD_TARGETS[field]
+  if (target) void nextTick(() => revealField(`[data-test="${target}"]`))
+}
+watch(() => [newEmployment.value?.terms.remuneration_type, newEmploymentHourlyRate.value, newEmploymentMonthlyGross.value, newEmployment.value?.terms.remuneration_basis_kind, newEmployment.value?.terms.remuneration_basis, newEmployment.value?.terms.office_id, newEmployment.value?.terms.weekly_hours, newEmployment.value?.terms.planned_start_on], () => {
+  newEmploymentInvalidField.value = null
+})
 const advancedProfileOpen = ref(false)
 const personProfilePanel = ref<InstanceType<typeof PayrollPersonProfilePanel> | null>(null)
 const deletingPerson = ref(false)
@@ -960,6 +1014,8 @@ function startCreate(personId: number) {
   newEmploymentMonthlyGross.value = null
   newEmploymentHourlyRate.value = ''
   newEmploymentError.value = ''
+  newEmploymentInvalidField.value = null
+  newEmploymentPrefilledBasis = null
   newEmployment.value = employmentDraft(
     '',
     'employment',
@@ -1025,21 +1081,22 @@ async function saveNew(personId: number) {
   const hourly = newEmployment.value.terms.remuneration_type === 'hourly'
   const hourlyRate = parsePayrollAmountToMinor(newEmploymentHourlyRate.value)
   if (hourly && (hourlyRate === null || hourlyRate <= 0 || hourlyRate > 1_000_000_000)) {
-    newEmploymentError.value = t('payroll.people.remuneration.hourly_invalid')
+    rejectNewEmploymentField('hourly_rate_minor', t('payroll.people.remuneration.hourly_invalid'))
     return
   }
   if (hourly && !(newEmployment.value.terms.remuneration_basis ?? '').trim()) {
-    newEmploymentError.value = t('payroll.people.remuneration.basis_required')
+    rejectNewEmploymentField('remuneration_basis', t('payroll.people.remuneration.basis_required'))
     return
   }
   if (hourly && !newEmployment.value.terms.remuneration_basis_kind) {
-    newEmploymentError.value = t('payroll.people.remuneration.basis_kind_required')
+    rejectNewEmploymentField('remuneration_basis_kind', t('payroll.people.remuneration.basis_kind_required'))
     return
   }
   savingNew.value = true
   newEmploymentError.value = ''
+  newEmploymentInvalidField.value = null
   try {
-    const employment = await payrollApi.createEmployment(personId, {
+    const { employment, warnings } = await payrollApi.createEmployment(personId, {
       ...newEmployment.value,
       monthly_gross_minor: !hourly && Number(newEmploymentMonthlyGross.value) > 0
         ? Math.round(Number(newEmploymentMonthlyGross.value) * 100)
@@ -1071,9 +1128,17 @@ async function saveNew(personId: number) {
     void refreshDataGaps(personId)
     creatingForId.value = null
     newEmployment.value = null
-    toast.success(t('payroll.people.employment_created'))
+    if (warnings.length > 0) {
+      toast.warning(t('payroll.people.employment_created_with_warnings', { messages: warnings.map(warning => warning.message).join(' ') }))
+    } else {
+      toast.success(t('payroll.people.employment_created'))
+    }
   } catch (error) {
     newEmploymentError.value = apiErrorMessage(error, t('payroll.people.mutation_failed'))
+    const field = apiErrorField(error)
+    if (field !== null && NEW_EMPLOYMENT_FIELD_TARGETS[field]) {
+      rejectNewEmploymentField(field, newEmploymentError.value)
+    }
     toast.error(newEmploymentError.value)
   } finally {
     savingNew.value = false
@@ -2044,7 +2109,7 @@ onMounted(async () => {
             {{ t('payroll.people.relation_type') }} <RequiredMark />
             <SearchableSelect v-model="newEmployment.relation_type" class="mt-1" :options="relationOptions" :clearable="false" accent="payroll" />
           </label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><DateInput v-model="newEmployment.terms.planned_start_on" required class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.planned_start') }} <RequiredMark /><DateInput v-model="newEmployment.terms.planned_start_on" required :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('planned_start_on')]" data-test="new-employment-planned-start" /><FieldNote :error="newEmploymentFieldError('planned_start_on')" /></label>
           <label v-if="officeOptions.length > 0" class="text-xs text-neutral-600">
             {{ t('payroll.people.office_label') }} <RequiredMark />
             <SearchableSelect
@@ -2059,31 +2124,36 @@ onMounted(async () => {
               data-test="new-employment-office"
               @update:model-value="newEmployment.terms.office_id = $event === null ? null : Number($event)"
             />
+            <FieldNote :error="newEmploymentFieldError('office_id')" />
           </label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('weekly_hours')]" data-test="new-employment-weekly-hours"><FieldNote :error="newEmploymentFieldError('weekly_hours')" /></label>
           <label class="text-xs text-neutral-600">
             {{ t('payroll.people.remuneration.type') }}
-            <select v-model="newEmployment.terms.remuneration_type" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-type">
+            <select v-model="newEmployment.terms.remuneration_type" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('remuneration_type')]" :aria-invalid="newEmploymentInvalidField === 'remuneration_type'" data-test="new-employment-remuneration-type">
               <option :value="null">{{ t('payroll.people.remuneration.legacy') }}</option>
               <option value="monthly">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}</option>
               <option v-if="['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(newEmployment.relation_type)" value="hourly">{{ t(`payroll.people.remuneration.hourly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}</option>
             </select>
+            <FieldNote :error="newEmploymentFieldError('remuneration_type')" />
           </label>
           <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
             {{ t('payroll.people.remuneration.hourly_rate') }} <RequiredMark />
-            <input v-model="newEmploymentHourlyRate" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-hourly-rate">
+            <input v-model="newEmploymentHourlyRate" inputmode="decimal" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('hourly_rate_minor')]" :aria-invalid="newEmploymentInvalidField === 'hourly_rate_minor'" data-test="new-employment-hourly-rate">
+            <FieldNote :error="newEmploymentFieldError('hourly_rate_minor')" />
           </label>
-          <label v-else class="text-xs text-neutral-600">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="0.01" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label v-else class="text-xs text-neutral-600">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="0.01" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('monthly_gross_minor')]" data-test="new-employment-monthly-gross"><FieldNote :error="newEmploymentFieldError('monthly_gross_minor')" /></label>
           <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
             {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark />
-            <select v-model="newEmployment.terms.remuneration_basis_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis-kind">
+            <select v-model="newEmployment.terms.remuneration_basis_kind" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('remuneration_basis_kind')]" :aria-invalid="newEmploymentInvalidField === 'remuneration_basis_kind'" data-test="new-employment-remuneration-basis-kind">
               <option :value="null">{{ t('payroll.people.remuneration.basis_kind_empty') }}</option>
               <option v-for="kind in ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement']" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
             </select>
+            <FieldNote :error="newEmploymentFieldError('remuneration_basis_kind')" />
           </label>
           <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
             {{ t('payroll.people.remuneration.basis') }} <RequiredMark />
-            <input v-model="newEmployment.terms.remuneration_basis" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis">
+            <input v-model="newEmployment.terms.remuneration_basis" maxlength="255" :class="['mt-1 w-full rounded-md border bg-surface px-3 py-2 text-sm', newEmploymentFieldClass('remuneration_basis')]" :aria-invalid="newEmploymentInvalidField === 'remuneration_basis'" data-test="new-employment-remuneration-basis">
+            <FieldNote :error="newEmploymentFieldError('remuneration_basis')" />
             <span class="mt-1 block">{{ t('payroll.people.remuneration.basis_hint') }}</span>
           </label>
           <p v-if="newEmployment.terms.remuneration_type === 'hourly'" class="sm:col-span-2 text-xs text-warning-800" data-test="new-employment-hourly-warning">{{ t('payroll.people.remuneration.calculation_evidence') }}</p>

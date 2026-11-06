@@ -496,7 +496,7 @@ describe('EmploymentCard', () => {
    * k datu, které si musel vymyslet.
    */
   it('běžnou úpravu uloží jako opravu platné verze, ne jako novou', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     // Dokud není co uložit, lišta se neukazuje — karta nevypadá jako formulář.
@@ -520,7 +520,7 @@ describe('EmploymentCard', () => {
   })
 
   it('novou verzi založí, jen když si ji uživatel vybere — a vyžádá si datum', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const stored = employment()
     stored.terms[0]!.effective_from = '2099-12-31'
     const wrapper = await mountCard(stored)
@@ -569,7 +569,7 @@ describe('EmploymentCard', () => {
   it.each(['employment', 'small_scale_employment', 'dpp', 'dpc'] as const)('uloží hodinovou sazbu a podklad pro %s bez měsíční částky', async (relation) => {
     const stored = employment()
     stored.relation_type = relation
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(stored)
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
     const wrapper = await mountCard(stored)
     expect(wrapper.get('[data-test="terms-remuneration-type"]').text()).toContain(
       `payroll.people.remuneration.hourly_${['dpp', 'dpc'].includes(relation) ? 'reward' : 'wage'}`,
@@ -602,6 +602,7 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
     await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetická smlouva')
+    await wrapper.get('[data-test="terms-remuneration-basis-kind"]').findAll('option')[0]!.setSelected()
     await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     const kind = wrapper.get('[data-test="terms-remuneration-basis-kind"]')
     expect(kind.classes()).toContain('border-danger-500')
@@ -609,6 +610,125 @@ describe('EmploymentCard', () => {
     expect(kind.element.parentElement?.textContent).toContain('payroll.people.remuneration.basis_kind_required')
     await kind.setValue('contract')
     expect(wrapper.get('[data-test="terms-remuneration-basis-kind"]').classes()).not.toContain('border-danger-500')
+  })
+
+  it('u pracovního poměru předvyplní mzdový výměr s datem účinnosti a text sleduje datum, dokud ho nikdo nepřepíše', async () => {
+    const wrapper = await mountCard()
+    await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+    await flushPromises()
+    expect((wrapper.get('[data-test="terms-remuneration-basis-kind"]').element as HTMLSelectElement).value).toBe('wage_statement')
+    const basis = () => (wrapper.get('[data-test="terms-remuneration-basis"]').element as HTMLInputElement).value
+    expect(basis()).toContain('payroll.people.remuneration.basis_default_wage_statement')
+    wrapper.get('[data-test="terms-effective-from-field"]').findComponent(DateInput).vm.$emit('update:modelValue', '2099-03-15')
+    await flushPromises()
+    expect(basis()).toMatch(/15\D+0?3\D+2099/)
+    await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Vlastní výměr č. 7')
+    wrapper.get('[data-test="terms-effective-from-field"]').findComponent(DateInput).vm.$emit('update:modelValue', '2099-04-01')
+    await flushPromises()
+    expect(basis()).toBe('Vlastní výměr č. 7')
+  })
+
+  it.each(['dpp', 'dpc'] as const)('u %s předvyplní i označení dohody', async (relation) => {
+    const stored = employment()
+    stored.relation_type = relation
+    const wrapper = await mountCard(stored)
+    await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+    await flushPromises()
+    expect((wrapper.get('[data-test="terms-remuneration-basis"]').element as HTMLInputElement).value)
+      .toBe(`payroll.people.remuneration.basis_default_${relation}`)
+  })
+
+  it('serverovou chybu s details.field ukáže u pole, otevře podrobnosti a na pole najede', async () => {
+    vi.mocked(revealField).mockClear()
+    vi.mocked(payrollApi.correctEmploymentTerms).mockRejectedValue({
+      response: { status: 422, data: { error: { code: 'validation_failed', message: 'Obec pracoviště není v číselníku.', details: { field: 'work_place' } } } },
+    })
+    const wrapper = await mountCard()
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('38')
+    await wrapper.get('[data-test="save-mode-correct"]').setValue()
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="terms-save-error"]').text()).toContain('Obec pracoviště není v číselníku.')
+    const note = wrapper.get('[data-test="terms-workplace"] [data-test="field-note-error"]')
+    expect(note.text()).toContain('Obec pracoviště není v číselníku.')
+    expect(revealField).toHaveBeenCalledWith('[data-test="jmhz-municipality"]', expect.anything())
+    expect((wrapper.get('[data-test="terms-advanced"]').element as HTMLDetailsElement).open).toBe(true)
+  })
+
+  it('serverovou chybu u základního pole zvýrazní a po opravě hodnoty hlášku u pole schová', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockRejectedValue({
+      response: { status: 422, data: { error: { code: 'validation_failed', message: 'Druh činnosti neplatí.', details: { field: 'activity_code' } } } },
+    })
+    const wrapper = await mountCard()
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('38')
+    await wrapper.get('[data-test="save-mode-correct"]').setValue()
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+    const activity = wrapper.get('[data-test="jmhz-activity-code"]')
+    expect(activity.classes()).toContain('border-danger-500')
+    expect(activity.attributes('aria-invalid')).toBe('true')
+    expect(activity.element.parentElement?.textContent).toContain('Druh činnosti neplatí.')
+    await activity.setValue('1')
+    expect(wrapper.get('[data-test="jmhz-activity-code"]').classes()).not.toContain('border-danger-500')
+  })
+
+  it('chybu bez details.field (starší server) ukáže jen v souhrnném pruhu', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockRejectedValue({
+      response: { status: 422, data: { error: { code: 'validation_failed', message: 'Obecná chyba.' } } },
+    })
+    const wrapper = await mountCard()
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('38')
+    await wrapper.get('[data-test="save-mode-correct"]').setValue()
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="terms-save-error"]').text()).toContain('Obecná chyba.')
+    expect(wrapper.find('[data-test="field-note-error"]').exists()).toBe(false)
+  })
+
+  it('varování z uložení ukáže žlutě u pole i souhrnně a hlásí, že uložení proběhlo', async () => {
+    toastMocks.warning = vi.fn()
+    toastMocks.success.mockClear()
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({
+      employment: employment(),
+      warnings: [{ field: 'activity_code', code: 'codebook_mismatch', message: 'Druh činnosti není v aktuálním číselníku.' }],
+    })
+    const wrapper = await mountCard()
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('38')
+    await wrapper.get('[data-test="save-mode-correct"]').setValue()
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+    const activity = wrapper.get('[data-test="jmhz-activity-code"]')
+    expect(activity.classes()).toContain('border-warning-500')
+    expect(activity.element.parentElement?.querySelector('[data-test="field-note-warning"]')?.textContent).toContain('Druh činnosti není v aktuálním číselníku.')
+    expect(wrapper.get('[data-test="terms-save-warnings"]').text()).toContain('Druh činnosti není v aktuálním číselníku.')
+    expect(toastMocks.warning).toHaveBeenCalledWith(expect.stringContaining('payroll.people.terms_saved_with_warnings'))
+    expect(toastMocks.success).not.toHaveBeenCalled()
+  })
+
+  it('aktivní předpis základní mzdy nabídne ukončit ke dni před účinností a uložení zopakuje s příznakem', async () => {
+    vi.mocked(payrollApi.addEmploymentTerms)
+      .mockRejectedValueOnce({ response: { status: 422, data: { error: {
+        code: 'validation_failed',
+        message: 'Vztah má aktivní předpis Základní mzda.',
+        details: { field: 'remuneration_type', code: 'recurring_base_wage_active', recurring_name: 'Základní mzda' },
+      } } } })
+      .mockResolvedValueOnce({ employment: employment(), warnings: [] })
+    const wrapper = await mountCard()
+    await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+    await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
+    wrapper.get('[data-test="terms-effective-from-field"]').findComponent(DateInput).vm.$emit('update:modelValue', '2099-03-01')
+    await flushPromises()
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+    expect(vi.mocked(payrollApi.addEmploymentTerms).mock.calls[0]![2]).not.toHaveProperty('end_recurring_base')
+    const confirm = wrapper.get('[data-test="terms-end-recurring-base-confirm"]')
+    expect(confirm.text()).toContain('payroll.people.remuneration.end_recurring_base_named')
+    expect(confirm.text()).toContain('Základní mzda')
+    expect(confirm.text()).toMatch(/28\D+0?2\D+2099/)
+    await confirm.trigger('click')
+    await flushPromises()
+    expect(vi.mocked(payrollApi.addEmploymentTerms).mock.calls[1]![2]).toMatchObject({ remuneration_type: 'hourly', end_recurring_base: true, effective_from: '2099-03-01' })
+    expect(wrapper.find('[data-test="terms-end-recurring-base"]').exists()).toBe(false)
   })
 
   it.each(['', '0', '-1', '180.555', '10000000.01', 'nesjednáno'])('odmítne neplatnou hodinovou sazbu %s před uložením', async (rate) => {
@@ -622,15 +742,17 @@ describe('EmploymentCard', () => {
   })
 
   it('vyžaduje podklad a uloží hodinovou sazbu také jako novou účinnou verzi', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     expect(wrapper.get('[data-test="save-mode-version"]').element).toHaveProperty('checked', true)
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200.05')
+    await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('')
     await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     expect(wrapper.get('[data-test="terms-save-error"]').text()).toContain('payroll.people.remuneration.basis_required')
     expect(payrollApi.correctEmploymentTerms).not.toHaveBeenCalled()
     await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetický mzdový výměr')
+    await wrapper.get('[data-test="terms-remuneration-basis-kind"]').findAll('option')[0]!.setSelected()
     await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     expect(wrapper.get('[data-test="terms-save-error"]').text()).toContain('payroll.people.remuneration.basis_kind_required')
     await wrapper.get('[data-test="terms-remuneration-basis-kind"]').setValue('wage_statement')
@@ -647,7 +769,7 @@ describe('EmploymentCard', () => {
     stored.monthly_gross_minor = null
     Object.assign(stored.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Nová dohoda', monthly_gross_minor: null })
     stored.terms.push({ ...stored.terms[0]!, id: 99, remuneration_type: 'monthly', hourly_rate_minor: null, monthly_gross_minor: 4000000, remuneration_basis: 'Původní výměr', effective_from: '2025-01-01', effective_to: '2025-12-31' })
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(stored)
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
     const wrapper = await mountCard(stored)
     expect(wrapper.get('[data-test="terms-hourly-rate"]').element).toHaveProperty('value', '180.50')
     expect(wrapper.findAll('[data-test="terms-history-row"]')).toHaveLength(2)
@@ -664,7 +786,7 @@ describe('EmploymentCard', () => {
     const stored = employment()
     stored.monthly_gross_minor = 4000000
     Object.assign(stored.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetická dohoda', monthly_gross_minor: null })
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(stored)
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
     const wrapper = await mountCard(stored)
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('monthly')
     expect(wrapper.get('[data-test="terms-monthly-gross"]').element).toHaveProperty('value', '')
@@ -680,7 +802,7 @@ describe('EmploymentCard', () => {
   it('u stávajícího měsíčního režimu dovolí ponechat mzdu nesjednanou', async () => {
     const stored = employment()
     stored.terms[0]!.remuneration_type = 'monthly'
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(stored)
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
     const wrapper = await mountCard(stored)
     await wrapper.get('[data-test="terms-monthly-gross"]').setValue('')
     await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
@@ -707,7 +829,7 @@ describe('EmploymentCard', () => {
     stored.relation_type = 'dpp'
     stored.monthly_gross_minor = null
     Object.assign(stored.terms[0]!, { remuneration_type: null, monthly_gross_minor: null, probable_hourly_earning_minor: 18050, probable_earning_rationale: 'Syntetický podklad' })
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(stored)
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
     const wrapper = await mountCard(stored)
     expect(wrapper.get('[data-test="terms-history"]').text()).toContain('payroll.people.remuneration.legacy')
     await wrapper.get('[data-test="terms-weekly-hours"]').setValue('20.00')
@@ -719,7 +841,7 @@ describe('EmploymentCard', () => {
   })
 
   it('přechod do hodinového režimu zachová i účinnost uprostřed měsíce', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
@@ -735,7 +857,7 @@ describe('EmploymentCard', () => {
   it('změnu sazby při zachovaném hodinovém režimu dovolí i uprostřed měsíce', async () => {
     const stored = employment()
     Object.assign(stored.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis_kind: 'contract', remuneration_basis: 'Syntetická smlouva', effective_from: '2026-01-15' })
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(stored)
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
     const wrapper = await mountCard(stored)
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
     const picker = wrapper.get('[data-test="terms-effective-from-field"]').findComponent(DateInput)
@@ -746,7 +868,7 @@ describe('EmploymentCard', () => {
   })
 
   it('zpřesnění legacy na měsíční režim dovolí i uprostřed měsíce', async () => {
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('monthly')
     const picker = wrapper.get('[data-test="terms-effective-from-field"]').findComponent(DateInput)
@@ -797,7 +919,7 @@ describe('EmploymentCard', () => {
     vi.mocked(payrollApi.remunerationOptions).mockRejectedValue(new Error('Ruleset nedostupný'))
     const stored = employment()
     Object.assign(stored.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis_kind: 'contract', remuneration_basis: 'Syntetická smlouva' })
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(stored)
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
     const wrapper = await mountCard(stored)
     expect(wrapper.get('[data-test="terms-hourly-minimum-unverified"]').text()).toContain('minimum_unverified')
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
@@ -816,7 +938,7 @@ describe('EmploymentCard', () => {
   })
 
   it('mzdu vezme jako součást téže změny a pošle ji v haléřích', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     expect((wrapper.get('[data-test="terms-monthly-gross"]').element as HTMLInputElement).value)
@@ -831,7 +953,7 @@ describe('EmploymentCard', () => {
 
   /* Q8-11: úvazek se zadával jako 9375 místo 93,75 %. */
   it('úvazek ukáže i přijme v procentech s desetinnou čárkou', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     expect((wrapper.get('[data-test="terms-workload"]').element as HTMLInputElement).value).toBe('100')
@@ -849,7 +971,7 @@ describe('EmploymentCard', () => {
    * účetní nevyžádá — běžná cesta zůstává stejně dlouhá.
    */
   it('pravděpodobný výdělek nabídne až na vyžádání a pošle ho v haléřích', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     expect(wrapper.find('[data-test="terms-probable-earning-hourly"]').exists()).toBe(false)
@@ -899,7 +1021,7 @@ describe('EmploymentCard', () => {
   it('uloží režim stravování i podmínky jedním tlačítkem a v pořadí', async () => {
     const afterMeal = { ...employment(), meal_entitlement_basis: 'calendar_day' as const, row_version: 2 }
     vi.mocked(payrollApi.setEmploymentMealEntitlementBasis).mockResolvedValue(afterMeal)
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(afterMeal)
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: afterMeal, warnings: [] })
     const wrapper = await mountCard()
 
     await wrapper.get('[data-test="employment-meal-entitlement-basis"]').setValue('calendar_day')
@@ -995,7 +1117,7 @@ describe('EmploymentCard', () => {
   })
 
   it('běžný vztah nemá JMHZ výjimku a změnu uloží jen jednou do účinných podmínek', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     const profile = wrapper.get('[data-test="jmhz-ordinary-profile"]')
@@ -1027,7 +1149,7 @@ describe('EmploymentCard', () => {
   )
 
   it('při uložení podmínek už prohlášení plátce k srážkové dani neposílá', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     const checks = wrapper.get('[data-test="jmhz-ordinary-profile"]').findAll('input[type="checkbox"]')
@@ -1060,7 +1182,7 @@ describe('EmploymentCard', () => {
   })
 
   it('uloží zvýšenou sazbu a slevu i bez volitelných odkazů na podklady', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     await wrapper.get('[data-test="social-employer-rate-category"]').setValue('risk_employment')
@@ -1081,7 +1203,7 @@ describe('EmploymentCard', () => {
    * je ale rozlišuje. U písm. c) je kód pevný a karta jen řekne, co se vykáže.
    */
   it('u písm. b) se zeptá na kategorizaci rizika a pošle ji, u písm. c) jen vysvětlí', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     expect(wrapper.find('[data-test="jmhz-risk-categorization"]').exists()).toBe(false)
@@ -1104,7 +1226,7 @@ describe('EmploymentCard', () => {
    * Karta se na něj ptá až u „ano" a pole druhého druhu uživatele vyčistí.
    */
   it('u dočasného přidělení se zeptá na uživatele a pošle jen pole zvoleného druhu', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     expect(wrapper.find('[data-test="jmhz-assignment-user"]').exists()).toBe(false)
@@ -1148,7 +1270,7 @@ describe('EmploymentCard', () => {
    * skutečném zápisu.
    */
   it('historické 10502 srovná tiše a odešle až s první skutečnou změnou', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const legacy = employment()
     legacy.terms[0]!.activity_code = 'A'
     legacy.terms[0]!.jmhz_relationship_detail_code = '1'
@@ -1166,7 +1288,7 @@ describe('EmploymentCard', () => {
   })
 
   it('vybere obec atomicky z připnutého CISOB a odešle kanonický název i kód', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     const municipality = selectByTest(wrapper, 'jmhz-municipality')
@@ -1190,7 +1312,7 @@ describe('EmploymentCard', () => {
    * a hned smazat" v jednom testu měří jen to překreslení.
    */
   it('vymazání obce sundá i název a stát pracoviště', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const stored = employment()
     stored.terms[0]!.jmhz_workplace_municipality_code = '554782'
     stored.terms[0]!.work_place = 'Hlavní město Praha'
@@ -1870,7 +1992,7 @@ describe('EmploymentCard', () => {
    * na ni míří blokátor běhu `employment_without_office`.
    */
   it('nabídne výběr mzdové účtárny mezi základními údaji a pošle ji na server', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     const office = selectByTest(wrapper, 'terms-office')
@@ -1909,7 +2031,7 @@ describe('EmploymentCard', () => {
    * vymyslet větu do časové osy.
    */
   it('uloží změnu i bez vyplněného důvodu', async () => {
-    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue(employment())
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
     const wrapper = await mountCard()
 
     await wrapper.get('[data-test="terms-weekly-hours"]').setValue('39.00')

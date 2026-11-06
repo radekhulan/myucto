@@ -233,9 +233,12 @@ describe('PeopleList toolbar and shared employee creation', () => {
       }],
     })
     m.createEmployment.mockResolvedValue({
-      id: 44,
-      employee_id: 4,
-      relation_type: 'employment',
+      employment: {
+        id: 44,
+        employee_id: 4,
+        relation_type: 'employment',
+      },
+      warnings: [],
     })
     m.capabilities.mockResolvedValue({ state: { start_period: '2026-01-01' } })
     m.employerSettings.mockResolvedValue({ offices: [], default_health_insurer_code: null })
@@ -552,13 +555,70 @@ describe('PeopleList toolbar and shared employee creation', () => {
     await flushPromises()
     await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
     await wrapper.get('[data-test="new-employment-hourly-rate"]').setValue('180,50')
+    await wrapper.get('[data-test="new-employment-remuneration-basis"]').setValue('')
     await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
     expect(m.createEmployment).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="new-employment-form"]').text()).toContain('payroll.people.remuneration.basis_required')
+    const basis = wrapper.get('[data-test="new-employment-remuneration-basis"]')
+    expect(basis.classes()).toContain('border-danger-500')
+    expect(basis.element.parentElement?.querySelector('[data-test="field-note-error"]')?.textContent).toContain('payroll.people.remuneration.basis_required')
     await wrapper.get('[data-test="new-employment-remuneration-basis"]').setValue('Syntetická dohoda')
     await wrapper.get('[data-test="new-employment-remuneration-basis-kind"]').setValue('agreement')
     await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
     expect(m.createEmployment).toHaveBeenCalledWith(1, expect.objectContaining({ monthly_gross_minor: null, terms: expect.objectContaining({ remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetická dohoda' }) }))
+  })
+
+  it('u nového hodinového pracovního poměru předvyplní mzdový výměr od nástupu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
+    await flushPromises()
+    expect((wrapper.get('[data-test="new-employment-remuneration-basis-kind"]').element as HTMLSelectElement).value).toBe('wage_statement')
+    expect((wrapper.get('[data-test="new-employment-remuneration-basis"]').element as HTMLInputElement).value)
+      .toContain('payroll.people.remuneration.basis_default_wage_statement')
+  })
+
+  it('serverovou chybu s details.field ukáže u pole nového vztahu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    m.createEmployment.mockRejectedValueOnce({ response: { status: 422, data: { error: {
+      code: 'validation_failed', message: 'Sazba je pod minimem.', details: { field: 'hourly_rate_minor' },
+    } } } })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
+    await wrapper.get('[data-test="new-employment-hourly-rate"]').setValue('50')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    await flushPromises()
+    const rate = wrapper.get('[data-test="new-employment-hourly-rate"]')
+    expect(rate.classes()).toContain('border-danger-500')
+    expect(rate.element.parentElement?.querySelector('[data-test="field-note-error"]')?.textContent).toContain('Sazba je pod minimem.')
+  })
+
+  it('varování z uložení nového vztahu ohlásí, že vztah vznikl', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    m.createEmployment.mockResolvedValueOnce({
+      employment: { id: 44, employee_id: 1, relation_type: 'employment' },
+      warnings: [{ field: 'work_place', code: 'codebook_mismatch', message: 'Místo výkonu práce neodpovídá CISOB.' }],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    await flushPromises()
+    expect(m.toastWarning).toHaveBeenCalledWith(expect.stringContaining('Místo výkonu práce neodpovídá CISOB.'))
   })
 
   it('podklad sjednání nabízí jen u hodinového režimu nového vztahu', async () => {

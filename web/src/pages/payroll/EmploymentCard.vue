@@ -13,12 +13,14 @@ import {
   type PayrollEmploymentJmhzEvidenceOptions,
   type PayrollMealEntitlementBasis,
   type PayrollJmhzMunicipalityOption,
+  type PayrollEmploymentSaveWarning,
   type PayrollEmploymentTermsPayload,
   type PayrollTerminationOverview,
 } from '@/api/payroll'
 import type { PayrollOffice } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import CzIscoPicker from '@/components/payroll/CzIscoPicker.vue'
+import FieldNote from '@/components/ui/FieldNote.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -51,6 +53,7 @@ import {
 import DateInput from '@/components/ui/DateInput.vue'
 import Modal from '@/components/ui/Modal.vue'
 import { usePersonCardSaveSection } from './personCardSave'
+import { apiErrorDetailCode, apiErrorDetails, apiErrorField, previousCalendarDay } from './payrollFieldFeedback'
 
 const props = defineProps<{
   employment: PayrollEmployment
@@ -412,31 +415,152 @@ watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, termsFor
   saveMode.value = 'version'
 })
 
-// Odměnu z DPP a DPČ sjednává vždy dohoda (§ 75, § 76 ZP), druh podkladu je tedy jasný.
-watch(() => termsForm.value?.remuneration_type, (type) => {
+/*
+ * Podklad sjednání se při přechodu na hodinový režim předvyplní: odměnu z DPP
+ * a DPČ sjednává vždy dohoda (§ 75, § 76 ZP), mzdu v pracovním poměru mzdový
+ * výměr (§ 113 odst. 3 ZP). Zákon podklad nevyžaduje, databáze ano — účetní
+ * ho tak jen potvrdí, nemusí ho vymýšlet. Předvyplněné označení sleduje datum
+ * účinnosti, dokud ho nikdo nepřepíše.
+ */
+let prefilledBasis: string | null = null
+function defaultBasisText(): string | null {
+  const relation = props.employment.relation_type
+  if (relation === 'dpp' || relation === 'dpc') return t(`payroll.people.remuneration.basis_default_${relation}`)
+  const date = minimumEffectiveFrom.value
+  if (!date) return null
+  return t('payroll.people.remuneration.basis_default_wage_statement', { date: formatDate(date) })
+}
+watch(() => [termsForm.value?.remuneration_type, minimumEffectiveFrom.value] as const, ([type]) => {
   const form = termsForm.value
-  if (form && type === 'hourly' && !form.remuneration_basis_kind && ['dpp', 'dpc'].includes(props.employment.relation_type)) {
-    form.remuneration_basis_kind = 'agreement'
+  if (!form || type !== 'hourly' || !supportsHourly.value || !dirty.value) return
+  if (!form.remuneration_basis_kind) {
+    form.remuneration_basis_kind = ['dpp', 'dpc'].includes(props.employment.relation_type) ? 'agreement' : 'wage_statement'
   }
+  const current = (form.remuneration_basis ?? '').trim()
+  if (current !== '' && current !== prefilledBasis) return
+  prefilledBasis = defaultBasisText()
+  form.remuneration_basis = prefilledBasis
 })
 
-/** Pole, kvůli kterému uložení neprošlo; zvýrazní se a stránka na něj najede. */
-type RemunerationField = 'hourly-rate' | 'remuneration-basis' | 'monthly-gross' | 'remuneration-basis-kind'
-const invalidField = ref<RemunerationField | null>(null)
-watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, grossInput.value, termsForm.value?.remuneration_basis_kind, termsForm.value?.remuneration_basis], () => {
-  invalidField.value = null
+/*
+ * Pole, kvůli kterému uložení neprošlo — klíč těla podmínek, stejný jako
+ * v `error.details.field` ze serveru. Zvýrazní se, hláška stojí u něj
+ * a stránka na něj najede (i do sbalených „Dalších údajů").
+ */
+const FIELD_ALIASES: Record<string, string> = { work_place: 'jmhz_workplace_municipality_code' }
+const FIELD_TARGETS: Record<string, string> = {
+  remuneration_type: 'terms-remuneration-type',
+  hourly_rate_minor: 'terms-hourly-rate',
+  monthly_gross_minor: 'terms-monthly-gross',
+  remuneration_basis_kind: 'terms-remuneration-basis-kind',
+  remuneration_basis: 'terms-remuneration-basis',
+  weekly_hours: 'terms-weekly-hours',
+  workload_basis_points: 'terms-workload',
+  leave_entitlement_weeks_override: 'terms-leave-weeks',
+  probable_hourly_earning_minor: 'terms-probable-earning-hourly',
+  probable_earning_rationale: 'terms-probable-earning-rationale',
+  office_id: 'terms-office',
+  activity_code: 'jmhz-activity-code',
+  jmhz_relationship_detail_code: 'jmhz-relationship-detail',
+  planned_start_on: 'terms-planned-start',
+  contract_signed_on: 'terms-contract-signed',
+  fixed_term_end_on: 'terms-fixed-end',
+  jmhz_workplace_municipality_code: 'jmhz-municipality',
+  jmhz_workplace_country_code: 'jmhz-country',
+  jmhz_workplace_street: 'jmhz-street',
+  jmhz_workplace_house_number: 'jmhz-house-number',
+  jmhz_workplace_orientation_number: 'jmhz-orientation-number',
+  jmhz_workplace_postal_code: 'jmhz-postal-code',
+  jmhz_workplace_address_point_code: 'jmhz-address-point',
+  jmhz_state_prosecutor: 'jmhz-state-prosecutor',
+  regular_workplace: 'terms-regular-workplace',
+  cz_isco_code: 'terms-cz-isco',
+  jmhz_apz_contribution_status: 'jmhz-apz-status',
+  jmhz_apz_instrument_code: 'jmhz-apz-instrument',
+  jmhz_functional_benefits_status: 'jmhz-functional-benefits',
+  jmhz_temporary_assignment_status: 'jmhz-temporary-assignment',
+  jmhz_assignment_user_kind: 'jmhz-assignment-user-kind',
+  jmhz_assignment_user_ico: 'jmhz-assignment-user-ico',
+  jmhz_assignment_user_country_code: 'jmhz-assignment-user-country',
+  jmhz_assignment_user_foreign_id: 'jmhz-assignment-user-foreign-id',
+  jmhz_assignment_user_name: 'jmhz-assignment-user-name',
+  social_insurance_participation: 'terms-social-mode',
+  health_insurance_participation: 'terms-health-mode',
+  tax_regime: 'terms-tax-regime',
+  foreign_legislation_country_code: 'terms-foreign-country',
+  a1_certificate_until: 'terms-a1-until',
+  social_employer_rate_category: 'social-employer-rate-category',
+  social_employer_rate_category_evidence: 'social-employer-rate-category-evidence',
+  jmhz_risk_categorization_code: 'jmhz-risk-categorization',
+  social_part_time_discount_reason: 'social-part-time-discount-reason',
+  social_part_time_discount_notified_on: 'social-part-time-discount-notified-on',
+  social_part_time_discount_evidence: 'social-part-time-discount-evidence',
+}
+function canonicalField(field: string): string {
+  return FIELD_ALIASES[field] ?? field
+}
+const invalidField = ref<string | null>(null)
+/** Varování k uloženým polím (`warnings` z odpovědi uložení), podle klíče pole. */
+const fieldWarnings = ref<Record<string, string>>({})
+const saveWarnings = ref<PayrollEmploymentSaveWarning[]>([])
+
+function fieldInvalid(field: string): boolean {
+  return invalidField.value === field
+}
+function fieldClass(field: string): string {
+  if (invalidField.value === field) return 'border-danger-500'
+  return fieldWarnings.value[field] ? 'border-warning-500' : ''
+}
+function fieldError(field: string): string | null {
+  return invalidField.value === field && saveError.value !== '' ? saveError.value : null
+}
+function fieldWarning(field: string): string | null {
+  return fieldWarnings.value[field] ?? null
+}
+
+/** Hodnota pole tak, jak ji účetní vidí — podle ní se pozná, že chybu opravuje. */
+function fieldValue(field: string): string {
+  if (field === 'hourly_rate_minor') return hourlyRateInput.value
+  if (field === 'monthly_gross_minor') return grossInput.value
+  if (field === 'probable_hourly_earning_minor') return probableEarningInput.value
+  const form = termsForm.value as Record<string, unknown> | null
+  return JSON.stringify(form?.[field] ?? null)
+}
+watch(() => [invalidField.value, invalidField.value === null ? null : fieldValue(invalidField.value)] as const, (now, before) => {
+  if (now[0] !== null && before !== undefined && now[0] === before[0] && now[1] !== before[1]) invalidField.value = null
+})
+watch(() => termsForm.value?.remuneration_type, () => {
+  if (invalidField.value !== null && invalidField.value !== 'remuneration_type') invalidField.value = null
 })
 
-function rejectField(field: RemunerationField, message: string): false {
+async function revealTermsField(field: string): Promise<void> {
+  if (field === 'probable_hourly_earning_minor' || field === 'probable_earning_rationale') probableEarningOpen.value = true
+  await nextTick()
+  const target = FIELD_TARGETS[field]
+  if (target) revealField(`[data-test="${target}"]`, cardRoot.value ?? document)
+}
+
+function rejectField(field: string, message: string): false {
   saveError.value = message
-  invalidField.value = field
-  void nextTick(() => {
-    const element = document.querySelector<HTMLElement>(`[data-test="terms-${field}"]`)
-    element?.scrollIntoView({ block: 'center', behavior: 'smooth' })
-    element?.focus({ preventScroll: true })
-  })
+  invalidField.value = canonicalField(field)
+  void revealTermsField(invalidField.value)
   return false
 }
+
+/*
+ * Přechod na hodinový režim narazil na aktivní předpis základní mzdy. Server
+ * ho umí ve stejné transakci ukončit ke dni před účinností nové verze —
+ * uživatel to jen výslovně potvrdí, nemusí kvůli tomu odcházet na předpisy.
+ */
+const endRecurringOffer = ref<{ name: string | null; date: string } | null>(null)
+const endRecurringLabel = computed(() => {
+  const offer = endRecurringOffer.value
+  if (offer === null) return ''
+  const date = formatDate(offer.date)
+  return offer.name
+    ? t('payroll.people.remuneration.end_recurring_base_named', { name: offer.name, date })
+    : t('payroll.people.remuneration.end_recurring_base', { date })
+})
 
 // Minimum se čte až pro hodinový vztah a skutečné datum ukládané verze.
 // Opožděná odpověď pro jiný den nesmí přepsat právě zvolený rok/podmínky.
@@ -557,6 +681,8 @@ function hydrate(employment: PayrollEmployment) {
   versionEffectiveFrom.value = minimumNewTermsDate.value
   saveMode.value = 'correct'
   saveError.value = ''
+  invalidField.value = null
+  endRecurringOffer.value = null
   baseline.value = fingerprint()
 }
 
@@ -708,6 +834,9 @@ function selectMunicipality(code: string | null) {
 }
 
 function discardChanges() {
+  endRecurringOffer.value = null
+  invalidField.value = null
+  prefilledBasis = null
   hydrate(props.employment)
 }
 
@@ -719,23 +848,25 @@ function discardChanges() {
  * jako první a `row_version` pro podmínky se bere z odpovědi, ne z propu:
  * dva zápisy za sebou by jinak druhý shodily na konflikt verzí.
  */
-async function save(): Promise<boolean> {
+async function save(options: { endRecurringBase?: boolean } = {}): Promise<boolean> {
   const form = termsForm.value
   if (!form || busy.value) return false
   if (!dirty.value) return true
+  endRecurringOffer.value = null
+  invalidField.value = null
   const gross = hourlyRemuneration.value ? null : inputToMinor(grossInput.value)
   const hourlyRate = hourlyRemuneration.value ? inputToMinor(hourlyRateInput.value) : null
   if (hourlyRemuneration.value && (!supportsHourly.value || hourlyRate === null || !Number.isFinite(hourlyRate) || hourlyRate <= 0 || hourlyRate > 1_000_000_000)) {
-    return rejectField('hourly-rate', t('payroll.people.remuneration.hourly_invalid'))
+    return rejectField('hourly_rate_minor', t('payroll.people.remuneration.hourly_invalid'))
   }
   if (hourlyRemuneration.value && !(form.remuneration_basis ?? '').trim()) {
-    return rejectField('remuneration-basis', t('payroll.people.remuneration.basis_required'))
+    return rejectField('remuneration_basis', t('payroll.people.remuneration.basis_required'))
   }
   if (form.remuneration_type === 'monthly' && currentTerms.value?.remuneration_type === 'hourly' && gross === null) {
-    return rejectField('monthly-gross', t('payroll.people.remuneration.monthly_required'))
+    return rejectField('monthly_gross_minor', t('payroll.people.remuneration.monthly_required'))
   }
   if (hourlyRemuneration.value && !form.remuneration_basis_kind) {
-    return rejectField('remuneration-basis-kind', t('payroll.people.remuneration.basis_kind_required'))
+    return rejectField('remuneration_basis_kind', t('payroll.people.remuneration.basis_kind_required'))
   }
   if (Number.isNaN(gross)) {
     saveError.value = t('payroll.people.gross_invalid')
@@ -757,6 +888,8 @@ async function save(): Promise<boolean> {
     return false
   }
   saveError.value = ''
+  fieldWarnings.value = {}
+  saveWarnings.value = []
   busy.value = true
   try {
     let rowVersion = props.employment.row_version
@@ -781,8 +914,10 @@ async function save(): Promise<boolean> {
       probable_earning_rationale: probableEarning === null
         ? null
         : form.probable_earning_rationale,
+      ...(options.endRecurringBase ? { end_recurring_base: true } : {}),
     }
-    const updated = saveMode.value === 'version'
+    const versionMode = saveMode.value === 'version'
+    const { employment: updated, warnings } = versionMode
       ? await payrollApi.addEmploymentTerms(props.employment.id, rowVersion, {
         ...shared,
         effective_from: versionEffectiveFrom.value,
@@ -790,9 +925,15 @@ async function save(): Promise<boolean> {
       : await payrollApi.correctEmploymentTerms(props.employment.id, rowVersion, shared)
     emit('updated', updated)
     hydrate(updated)
-    toast.success(saveMode.value === 'version'
-      ? t('payroll.people.terms_saved')
-      : t('payroll.people.terms_corrected'))
+    prefilledBasis = null
+    const saved = versionMode ? t('payroll.people.terms_saved') : t('payroll.people.terms_corrected')
+    if (warnings.length > 0) {
+      saveWarnings.value = warnings
+      fieldWarnings.value = Object.fromEntries(warnings.map(warning => [canonicalField(warning.field), warning.message]))
+      toast.warning(t('payroll.people.terms_saved_with_warnings', { saved, count: warnings.length }))
+    } else {
+      toast.success(saved)
+    }
     return true
   } catch (error) {
     const detail = (error as {
@@ -814,11 +955,37 @@ async function save(): Promise<boolean> {
       // verze musí začínat později…"); obecné „nepovedlo se" ho jen zakrylo
       // a uživatel neměl podle čeho jednat.
       saveError.value = apiErrorMessage(error, t('payroll.people.mutation_failed'))
+      /*
+       * Server jmenuje pole v `details.field` — hláška pak stojí u něj, ne jen
+       * v pruhu u Uložit, a stránka na pole najede. Bez klíče (starší server)
+       * zůstává jen souhrnný pruh.
+       */
+      const field = apiErrorField(error)
+      if (field !== null) {
+        invalidField.value = canonicalField(field)
+        void revealTermsField(invalidField.value)
+      }
+      if (apiErrorDetailCode(error) === 'recurring_base_wage_active' && !options.endRecurringBase) {
+        const details = apiErrorDetails(error)
+        const name = [details.recurring_name, details.name].find(value => typeof value === 'string' && value !== '') as string | undefined
+        const effectiveFrom = saveMode.value === 'version' ? versionEffectiveFrom.value : currentTerms.value?.effective_from ?? ''
+        if (/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
+          endRecurringOffer.value = { name: name ?? null, date: previousCalendarDay(effectiveFrom) }
+        }
+      }
     }
     return false
   } finally {
     busy.value = false
   }
+}
+
+function confirmEndRecurringBase(): void {
+  void save({ endRecurringBase: true })
+}
+
+function warningHasTarget(field: string): boolean {
+  return FIELD_TARGETS[canonicalField(field)] !== undefined
 }
 
 /*
@@ -854,7 +1021,7 @@ const { managed } = usePersonCardSaveSection({
     .filter(part => part !== '')
     .join(' · '),
   dirty: () => canEditTerms.value && dirty.value,
-  save,
+  save: () => save(),
   discard: discardChanges,
   focus: () => saveBar.value?.scrollIntoView?.({ behavior: 'smooth', block: 'center' }),
 })
@@ -1466,7 +1633,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
 
       <!-- HLAVNÍ SLOUPEC — to, co účetní edituje. -->
       <div class="min-w-0">
-    <form v-if="termsForm" data-test="employment-terms" @submit.prevent="save">
+    <form v-if="termsForm" data-test="employment-terms" @submit.prevent="save()">
       <!--
         ZÁKLADNÍ ÚDAJE — editovatelné rovnou, bez vstupu do formuláře.
         Výběr polí: to, co mzdová účetní mění v běžném provozu a co rozhoduje
@@ -1483,16 +1650,17 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         <div :class="GRID">
           <label :class="FIELD">
             {{ t('payroll.people.remuneration.type') }}
-            <select v-model="termsForm.remuneration_type" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-type">
+            <select v-model="termsForm.remuneration_type" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('remuneration_type')]" :aria-invalid="fieldInvalid('remuneration_type')" data-test="terms-remuneration-type">
               <option v-if="currentTerms?.remuneration_type == null" :value="null">{{ t('payroll.people.remuneration.legacy') }}</option>
               <option value="monthly">{{ t(`payroll.people.remuneration.monthly_${remunerationNoun}`) }}</option>
               <option v-if="supportsHourly" value="hourly">{{ t(`payroll.people.remuneration.hourly_${remunerationNoun}`) }}</option>
             </select>
+            <FieldNote :error="fieldError('remuneration_type')" :warning="fieldWarning('remuneration_type')" />
           </label>
           <label v-if="hourlyRemuneration" :class="FIELD">
             {{ t('payroll.people.remuneration.hourly_rate') }} <RequiredMark />
-            <input v-model="hourlyRateInput" inputmode="decimal" :disabled="!canEditTerms || busy" :class="[INPUT, invalidField === 'hourly-rate' ? 'border-danger-500' : '']" :aria-invalid="invalidField === 'hourly-rate'" data-test="terms-hourly-rate">
-            <span v-if="invalidField === 'hourly-rate'" class="mt-1 block text-xs text-danger-600">{{ saveError }}</span>
+            <input v-model="hourlyRateInput" inputmode="decimal" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('hourly_rate_minor')]" :aria-invalid="fieldInvalid('hourly_rate_minor')" data-test="terms-hourly-rate">
+            <FieldNote :error="fieldError('hourly_rate_minor')" :warning="fieldWarning('hourly_rate_minor')" />
           </label>
           <label v-else :class="FIELD">
             {{ t(`payroll.people.remuneration.monthly_${remunerationNoun}`) }}
@@ -1501,27 +1669,27 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 v-model="grossInput"
                 inputmode="decimal"
                 :disabled="!canEditTerms || busy"
-                :class="[INPUT, 'pr-10', invalidField === 'monthly-gross' ? 'border-danger-500' : '']"
-                :aria-invalid="invalidField === 'monthly-gross'"
+                :class="[INPUT, 'pr-10', fieldClass('monthly_gross_minor')]"
+                :aria-invalid="fieldInvalid('monthly_gross_minor')"
                 data-test="terms-monthly-gross"
               >
               <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-neutral-500">Kč</span>
             </div>
-            <span v-if="invalidField === 'monthly-gross'" class="mt-1 block text-xs text-danger-600">{{ saveError }}</span>
+            <FieldNote :error="fieldError('monthly_gross_minor')" :warning="fieldWarning('monthly_gross_minor')" />
           </label>
 
           <label :class="FIELD">
             {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark v-if="hourlyRemuneration" />
-            <select v-model="termsForm.remuneration_basis_kind" :disabled="!canEditTerms || busy" :class="[INPUT, invalidField === 'remuneration-basis-kind' ? 'border-danger-500' : '']" :aria-invalid="invalidField === 'remuneration-basis-kind'" data-test="terms-remuneration-basis-kind">
+            <select v-model="termsForm.remuneration_basis_kind" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('remuneration_basis_kind')]" :aria-invalid="fieldInvalid('remuneration_basis_kind')" data-test="terms-remuneration-basis-kind">
               <option :value="null">{{ t('payroll.people.remuneration.basis_kind_empty') }}</option>
               <option v-for="kind in remunerationBasisKinds" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
             </select>
-            <span v-if="invalidField === 'remuneration-basis-kind'" class="mt-1 block text-xs text-danger-600">{{ saveError }}</span>
+            <FieldNote :error="fieldError('remuneration_basis_kind')" :warning="fieldWarning('remuneration_basis_kind')" />
           </label>
           <label :class="[FIELD, 'sm:col-span-2 lg:col-span-3']">
             {{ t('payroll.people.remuneration.basis') }} <RequiredMark v-if="hourlyRemuneration" />
-            <input v-model="termsForm.remuneration_basis" maxlength="255" :disabled="!canEditTerms || busy" :class="[INPUT, invalidField === 'remuneration-basis' ? 'border-danger-500' : '']" :aria-invalid="invalidField === 'remuneration-basis'" data-test="terms-remuneration-basis">
-            <span v-if="invalidField === 'remuneration-basis'" class="mt-1 block text-xs text-danger-600">{{ saveError }}</span>
+            <input v-model="termsForm.remuneration_basis" maxlength="255" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('remuneration_basis')]" :aria-invalid="fieldInvalid('remuneration_basis')" data-test="terms-remuneration-basis">
+            <FieldNote :error="fieldError('remuneration_basis')" :warning="fieldWarning('remuneration_basis')" />
             <span :class="HINT">{{ t('payroll.people.remuneration.basis_hint') }} {{ t('payroll.people.remuneration.version_hint') }}</span>
           </label>
           <p v-if="hourlyRemuneration" class="sm:col-span-2 lg:col-span-3 rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800" data-test="terms-hourly-warning">
@@ -1542,10 +1710,11 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               v-model="termsForm.weekly_hours"
               inputmode="decimal"
               :disabled="!canEditTerms || busy"
-              :class="INPUT"
+              :class="[INPUT, fieldClass('weekly_hours')]" :aria-invalid="fieldInvalid('weekly_hours')"
               data-test="terms-weekly-hours"
               data-a1-field="weekly_hours"
             >
+            <FieldNote :error="fieldError('weekly_hours')" :warning="fieldWarning('weekly_hours')" />
           </label>
 
           <label :class="FIELD">
@@ -1555,10 +1724,11 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               type="text"
               inputmode="decimal"
               :disabled="!canEditTerms || busy"
-              :class="INPUT"
+              :class="[INPUT, fieldClass('workload_basis_points')]" :aria-invalid="fieldInvalid('workload_basis_points')"
               :placeholder="t('payroll.people.workload_percent_placeholder')"
               data-test="terms-workload"
             >
+            <FieldNote :error="fieldError('workload_basis_points')" :warning="fieldWarning('workload_basis_points')" />
           </label>
 
           <label :class="FIELD">
@@ -1570,9 +1740,10 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               max="12"
               step="1"
               :disabled="!canEditTerms || busy"
-              :class="INPUT"
+              :class="[INPUT, fieldClass('leave_entitlement_weeks_override')]" :aria-invalid="fieldInvalid('leave_entitlement_weeks_override')"
               data-test="terms-leave-weeks"
             >
+            <FieldNote :error="fieldError('leave_entitlement_weeks_override')" :warning="fieldWarning('leave_entitlement_weeks_override')" />
           </label>
 
           <!--
@@ -1600,9 +1771,10 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                   v-model="probableEarningInput"
                   inputmode="decimal"
                   :disabled="!canEditTerms || busy"
-                  :class="INPUT"
+                  :class="[INPUT, fieldClass('probable_hourly_earning_minor')]" :aria-invalid="fieldInvalid('probable_hourly_earning_minor')"
                   data-test="terms-probable-earning-hourly"
                 >
+                <FieldNote :error="fieldError('probable_hourly_earning_minor')" :warning="fieldWarning('probable_hourly_earning_minor')" />
                 <span :class="HINT">{{ t('payroll.people.probable_earning_hourly_hint') }}</span>
               </label>
               <label :class="FIELD">
@@ -1611,9 +1783,10 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                   v-model="termsForm.probable_earning_rationale"
                   maxlength="1000"
                   :disabled="!canEditTerms || busy"
-                  :class="INPUT"
+                  :class="[INPUT, fieldClass('probable_earning_rationale')]" :aria-invalid="fieldInvalid('probable_earning_rationale')"
                   data-test="terms-probable-earning-rationale"
                 >
+                <FieldNote :error="fieldError('probable_earning_rationale')" :warning="fieldWarning('probable_earning_rationale')" />
                 <span :class="HINT">{{ t('payroll.people.probable_earning_rationale_hint') }}</span>
               </label>
             </div>
@@ -1639,6 +1812,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               data-a1-field="office_id"
               @update:model-value="termsForm.office_id = $event === null ? null : Number($event)"
             />
+            <FieldNote :error="fieldError('office_id')" :warning="fieldWarning('office_id')" />
             <span v-if="officeOptions.length === 0" :class="HINT">{{ t('payroll.people.office_empty') }}</span>
           </label>
 
@@ -1652,7 +1826,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <select
               v-model="termsForm.activity_code"
               :disabled="!canEditTerms || busy"
-              :class="INPUT"
+              :class="[INPUT, fieldClass('activity_code')]" :aria-invalid="fieldInvalid('activity_code')"
               data-test="jmhz-activity-code"
               data-a1-field="activity_code"
               @change="onActivityCodeChange"
@@ -1660,6 +1834,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <option :value="null">—</option>
               <option v-for="option in jmhzOptions?.activity_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option>
             </select>
+            <FieldNote :error="fieldError('activity_code')" :warning="fieldWarning('activity_code')" />
             <span v-if="jmhzOptionsFailed" :class="[HINT, 'text-danger-700']">{{ t('payroll.people.jmhz_evidence.options_failed') }}</span>
           </label>
 
@@ -1671,13 +1846,14 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <select
               v-model="termsForm.jmhz_relationship_detail_code"
               :disabled="!canEditTerms || busy || selectedRelationshipDetailMode === 'fixed_none'"
-              :class="INPUT"
+              :class="[INPUT, fieldClass('jmhz_relationship_detail_code')]" :aria-invalid="fieldInvalid('jmhz_relationship_detail_code')"
               data-test="jmhz-relationship-detail"
               data-a1-field="jmhz_relationship_detail_code"
             >
               <option :value="null">—</option>
               <option v-for="option in jmhzOptions?.relationship_detail_codes ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option>
             </select>
+            <FieldNote :error="fieldError('jmhz_relationship_detail_code')" :warning="fieldWarning('jmhz_relationship_detail_code')" />
             <span v-if="jmhzFormHint" :class="HINT" data-test="jmhz-form-hint">{{ jmhzFormHint }}</span>
           </label>
 
@@ -1731,16 +1907,19 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               v-model="termsForm.planned_start_on"
               required
               :disabled="!canEditTerms || busy"
-              :class="INPUT"
+              :class="[INPUT, fieldClass('planned_start_on')]" :aria-invalid="fieldInvalid('planned_start_on')"
               data-test="terms-planned-start" />
+            <FieldNote :error="fieldError('planned_start_on')" :warning="fieldWarning('planned_start_on')" />
           </label>
           <label :class="FIELD">
             {{ t('payroll.people.contract_signed') }}
-            <DateInput v-model="termsForm.contract_signed_on" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-contract-signed" />
+            <DateInput v-model="termsForm.contract_signed_on" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('contract_signed_on')]" :aria-invalid="fieldInvalid('contract_signed_on')" data-test="terms-contract-signed" />
+            <FieldNote :error="fieldError('contract_signed_on')" :warning="fieldWarning('contract_signed_on')" />
           </label>
           <label :class="FIELD">
             {{ t('payroll.people.fixed_end') }}
-            <DateInput v-model="termsForm.fixed_term_end_on" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-fixed-end" />
+            <DateInput v-model="termsForm.fixed_term_end_on" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('fixed_term_end_on')]" :aria-invalid="fieldInvalid('fixed_term_end_on')" data-test="terms-fixed-end" />
+            <FieldNote :error="fieldError('fixed_term_end_on')" :warning="fieldWarning('fixed_term_end_on')" />
           </label>
           <div>
             <dt :class="READ_LABEL">{{ t('payroll.people.actual_start') }}</dt>
@@ -1792,52 +1971,62 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                   @search="searchMunicipalities"
                   @update:model-value="selectMunicipality"
                 />
+                <FieldNote :error="fieldError('jmhz_workplace_municipality_code')" :warning="fieldWarning('jmhz_workplace_municipality_code')" />
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.country_code') }}
-                <select v-model="termsForm.jmhz_workplace_country_code" :disabled="!canEditTerms || busy" :class="INPUT">
+                <select v-model="termsForm.jmhz_workplace_country_code" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_country_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_country_code')" data-test="jmhz-country">
                   <option :value="null">—</option>
                   <option v-for="country in jmhzOptions?.countries ?? []" :key="country.code" :value="country.code">{{ country.code }} · {{ country.label }}</option>
                 </select>
+                <FieldNote :error="fieldError('jmhz_workplace_country_code')" :warning="fieldWarning('jmhz_workplace_country_code')" />
               </label>
               <template v-if="workplaceAddressApplies">
                 <p class="text-xs text-neutral-500 sm:col-span-2" data-test="jmhz-address-hint">{{ t('payroll.people.jmhz_evidence.address_hint') }}</p>
                 <label :class="[FIELD, 'sm:col-span-2']">
                   {{ t('payroll.people.jmhz_evidence.street') }}
-                  <input v-model="termsForm.jmhz_workplace_street" :disabled="!canEditTerms || busy" :class="INPUT" maxlength="50" data-test="jmhz-street">
+                  <input v-model="termsForm.jmhz_workplace_street" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_street')]" :aria-invalid="fieldInvalid('jmhz_workplace_street')" maxlength="50" data-test="jmhz-street">
+                  <FieldNote :error="fieldError('jmhz_workplace_street')" :warning="fieldWarning('jmhz_workplace_street')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_evidence.house_number') }}
-                  <input v-model="termsForm.jmhz_workplace_house_number" :disabled="!canEditTerms || busy" :class="INPUT" inputmode="numeric" maxlength="4" data-test="jmhz-house-number">
+                  <input v-model="termsForm.jmhz_workplace_house_number" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_house_number')]" :aria-invalid="fieldInvalid('jmhz_workplace_house_number')" inputmode="numeric" maxlength="4" data-test="jmhz-house-number">
+                  <FieldNote :error="fieldError('jmhz_workplace_house_number')" :warning="fieldWarning('jmhz_workplace_house_number')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_evidence.orientation_number') }}
-                  <input v-model="termsForm.jmhz_workplace_orientation_number" :disabled="!canEditTerms || busy" :class="INPUT" maxlength="12" data-test="jmhz-orientation-number">
+                  <input v-model="termsForm.jmhz_workplace_orientation_number" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_orientation_number')]" :aria-invalid="fieldInvalid('jmhz_workplace_orientation_number')" maxlength="12" data-test="jmhz-orientation-number">
+                  <FieldNote :error="fieldError('jmhz_workplace_orientation_number')" :warning="fieldWarning('jmhz_workplace_orientation_number')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_evidence.postal_code') }}
-                  <input v-model="termsForm.jmhz_workplace_postal_code" :disabled="!canEditTerms || busy" :class="INPUT" inputmode="numeric" maxlength="6" data-test="jmhz-postal-code">
+                  <input v-model="termsForm.jmhz_workplace_postal_code" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_postal_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_postal_code')" inputmode="numeric" maxlength="6" data-test="jmhz-postal-code">
+                  <FieldNote :error="fieldError('jmhz_workplace_postal_code')" :warning="fieldWarning('jmhz_workplace_postal_code')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_evidence.address_point_code') }}
-                  <input v-model="termsForm.jmhz_workplace_address_point_code" :disabled="!canEditTerms || busy" :class="INPUT" inputmode="numeric" maxlength="9" data-test="jmhz-address-point">
+                  <input v-model="termsForm.jmhz_workplace_address_point_code" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_workplace_address_point_code')]" :aria-invalid="fieldInvalid('jmhz_workplace_address_point_code')" inputmode="numeric" maxlength="9" data-test="jmhz-address-point">
+                  <FieldNote :error="fieldError('jmhz_workplace_address_point_code')" :warning="fieldWarning('jmhz_workplace_address_point_code')" />
                 </label>
               </template>
               <label v-if="stateProsecutorApplies" :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.state_prosecutor') }}
-                <select v-model="termsForm.jmhz_state_prosecutor" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-state-prosecutor">
+                <select v-model="termsForm.jmhz_state_prosecutor" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_state_prosecutor')]" :aria-invalid="fieldInvalid('jmhz_state_prosecutor')" data-test="jmhz-state-prosecutor">
                   <option :value="null">{{ t('payroll.people.jmhz_evidence.state_prosecutor_unset') }}</option>
                   <option :value="true">{{ t('payroll.people.jmhz_evidence.state_prosecutor_yes') }}</option>
                   <option :value="false">{{ t('payroll.people.jmhz_evidence.state_prosecutor_no') }}</option>
                 </select>
+                <FieldNote :error="fieldError('jmhz_state_prosecutor')" :warning="fieldWarning('jmhz_state_prosecutor')" />
               </label>
               <label :class="[FIELD, 'sm:col-span-2']">
                 {{ t('payroll.people.regular_workplace') }}
-                <input v-model="termsForm.regular_workplace" :disabled="!canEditTerms || busy" :class="INPUT">
+                <input v-model="termsForm.regular_workplace" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('regular_workplace')]" :aria-invalid="fieldInvalid('regular_workplace')" data-test="terms-regular-workplace">
+                <FieldNote :error="fieldError('regular_workplace')" :warning="fieldWarning('regular_workplace')" />
               </label>
-              <div :class="[FIELD, 'sm:col-span-2']">
+              <div :class="[FIELD, 'sm:col-span-2']" data-test="terms-cz-isco">
                 {{ t('payroll.people.cz_isco_code') }}
                 <CzIscoPicker v-model="termsForm.cz_isco_code" class="mt-1" />
+                <FieldNote :error="fieldError('cz_isco_code')" :warning="fieldWarning('cz_isco_code')" />
               </div>
             </div>
             <p v-if="jmhzOptions" class="mt-2 text-xs text-success-700">{{ t('payroll.people.jmhz_evidence.external_codebook_verified', { date: jmhzOptions.external_codebooks.verified_through }) }}</p>
@@ -1856,28 +2045,32 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <div :class="GRID">
               <label :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.apz_status') }}
-                <select v-model="termsForm.jmhz_apz_contribution_status" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-apz-status" @change="onApzStatusChange">
+                <select v-model="termsForm.jmhz_apz_contribution_status" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_apz_contribution_status')]" :aria-invalid="fieldInvalid('jmhz_apz_contribution_status')" data-test="jmhz-apz-status" @change="onApzStatusChange">
                   <option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option>
                 </select>
+                <FieldNote :error="fieldError('jmhz_apz_contribution_status')" :warning="fieldWarning('jmhz_apz_contribution_status')" />
               </label>
               <label v-if="termsForm.jmhz_apz_contribution_status === 'yes'" :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.apz_instrument') }}
-                <select v-model="termsForm.jmhz_apz_instrument_code" required :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-apz-instrument">
+                <select v-model="termsForm.jmhz_apz_instrument_code" required :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_apz_instrument_code')]" :aria-invalid="fieldInvalid('jmhz_apz_instrument_code')" data-test="jmhz-apz-instrument">
                   <option :value="null" disabled>{{ t('payroll.people.jmhz_evidence.select_apz') }}</option>
                   <option v-for="option in jmhzOptions?.apz_instruments ?? []" :key="option.code" :value="option.code">{{ option.code }} · {{ option.label }}</option>
                 </select>
+                <FieldNote :error="fieldError('jmhz_apz_instrument_code')" :warning="fieldWarning('jmhz_apz_instrument_code')" />
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.functional_benefits') }}
-                <select v-model="termsForm.jmhz_functional_benefits_status" :disabled="!canEditTerms || busy" :class="INPUT">
+                <select v-model="termsForm.jmhz_functional_benefits_status" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_functional_benefits_status')]" :aria-invalid="fieldInvalid('jmhz_functional_benefits_status')" data-test="jmhz-functional-benefits">
                   <option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option>
                 </select>
+                <FieldNote :error="fieldError('jmhz_functional_benefits_status')" :warning="fieldWarning('jmhz_functional_benefits_status')" />
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.jmhz_evidence.temporary_assignment') }}
-                <select v-model="termsForm.jmhz_temporary_assignment_status" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-temporary-assignment" @change="onTemporaryAssignmentChange">
+                <select v-model="termsForm.jmhz_temporary_assignment_status" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_temporary_assignment_status')]" :aria-invalid="fieldInvalid('jmhz_temporary_assignment_status')" data-test="jmhz-temporary-assignment" @change="onTemporaryAssignmentChange">
                   <option v-for="state in ['unverified','no','yes']" :key="state" :value="state">{{ t(`payroll.people.jmhz_evidence.state.${state}`) }}</option>
                 </select>
+                <FieldNote :error="fieldError('jmhz_temporary_assignment_status')" :warning="fieldWarning('jmhz_temporary_assignment_status')" />
               </label>
             </div>
             <!--
@@ -1887,34 +2080,39 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <div v-if="termsForm.jmhz_temporary_assignment_status === 'yes'" :class="[GRID, 'mt-3']" data-test="jmhz-assignment-user">
               <label :class="FIELD" data-a1-field="jmhz_assignment_user_kind">
                 {{ t('payroll.people.jmhz_assignment_user.kind') }}
-                <select v-model="termsForm.jmhz_assignment_user_kind" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-kind" @change="onAssignmentUserKindChange">
+                <select v-model="termsForm.jmhz_assignment_user_kind" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_assignment_user_kind')]" :aria-invalid="fieldInvalid('jmhz_assignment_user_kind')" data-test="jmhz-assignment-user-kind" @change="onAssignmentUserKindChange">
                   <option :value="null" disabled>{{ t('payroll.people.jmhz_assignment_user.select_kind') }}</option>
                   <option value="ico">{{ t('payroll.people.jmhz_assignment_user.kind_ico') }}</option>
                   <option value="foreign">{{ t('payroll.people.jmhz_assignment_user.kind_foreign') }}</option>
                 </select>
+                <FieldNote :error="fieldError('jmhz_assignment_user_kind')" :warning="fieldWarning('jmhz_assignment_user_kind')" />
                 <span :class="HINT">{{ t('payroll.people.jmhz_assignment_user.hint') }}</span>
               </label>
               <label v-if="termsForm.jmhz_assignment_user_kind === 'ico'" :class="FIELD">
                 {{ t('payroll.people.jmhz_assignment_user.ico') }}
-                <input v-model="termsForm.jmhz_assignment_user_ico" inputmode="numeric" maxlength="8" pattern="[0-9]{8}" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-ico">
+                <input v-model="termsForm.jmhz_assignment_user_ico" inputmode="numeric" maxlength="8" pattern="[0-9]{8}" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_assignment_user_ico')]" :aria-invalid="fieldInvalid('jmhz_assignment_user_ico')" data-test="jmhz-assignment-user-ico">
+                <FieldNote :error="fieldError('jmhz_assignment_user_ico')" :warning="fieldWarning('jmhz_assignment_user_ico')" />
                 <span :class="HINT">{{ t('payroll.people.jmhz_assignment_user.ico_hint') }}</span>
               </label>
               <template v-if="termsForm.jmhz_assignment_user_kind === 'foreign'">
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_assignment_user.country') }}
-                  <select v-model="termsForm.jmhz_assignment_user_country_code" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-country">
+                  <select v-model="termsForm.jmhz_assignment_user_country_code" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_assignment_user_country_code')]" :aria-invalid="fieldInvalid('jmhz_assignment_user_country_code')" data-test="jmhz-assignment-user-country">
                     <option :value="null" disabled>—</option>
                     <option v-for="country in (jmhzOptions?.countries ?? []).filter(item => item.code !== 'CZ')" :key="country.code" :value="country.code">{{ country.code }} · {{ country.label }}</option>
                   </select>
+                  <FieldNote :error="fieldError('jmhz_assignment_user_country_code')" :warning="fieldWarning('jmhz_assignment_user_country_code')" />
                 </label>
                 <label :class="FIELD">
                   {{ t('payroll.people.jmhz_assignment_user.foreign_id') }}
-                  <input v-model="termsForm.jmhz_assignment_user_foreign_id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-foreign-id">
+                  <input v-model="termsForm.jmhz_assignment_user_foreign_id" inputmode="numeric" maxlength="8" pattern="[0-9]{8}" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_assignment_user_foreign_id')]" :aria-invalid="fieldInvalid('jmhz_assignment_user_foreign_id')" data-test="jmhz-assignment-user-foreign-id">
+                  <FieldNote :error="fieldError('jmhz_assignment_user_foreign_id')" :warning="fieldWarning('jmhz_assignment_user_foreign_id')" />
                   <span :class="HINT">{{ t('payroll.people.jmhz_assignment_user.foreign_id_hint') }}</span>
                 </label>
                 <label :class="[FIELD, 'sm:col-span-2']">
                   {{ t('payroll.people.jmhz_assignment_user.name') }}
-                  <input v-model="termsForm.jmhz_assignment_user_name" maxlength="100" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-assignment-user-name">
+                  <input v-model="termsForm.jmhz_assignment_user_name" maxlength="100" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_assignment_user_name')]" :aria-invalid="fieldInvalid('jmhz_assignment_user_name')" data-test="jmhz-assignment-user-name">
+                  <FieldNote :error="fieldError('jmhz_assignment_user_name')" :warning="fieldWarning('jmhz_assignment_user_name')" />
                 </label>
               </template>
             </div>
@@ -1926,15 +2124,17 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <div :class="GRID">
               <label :class="FIELD">
                 {{ t('payroll.people.social_mode') }}
-                <select v-model="termsForm.social_insurance_participation" :disabled="!canEditTerms || busy" :class="INPUT">
+                <select v-model="termsForm.social_insurance_participation" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('social_insurance_participation')]" :aria-invalid="fieldInvalid('social_insurance_participation')" data-test="terms-social-mode">
                   <option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option>
                 </select>
+                <FieldNote :error="fieldError('social_insurance_participation')" :warning="fieldWarning('social_insurance_participation')" />
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.health_mode') }}
-                <select v-model="termsForm.health_insurance_participation" :disabled="!canEditTerms || busy" :class="INPUT">
+                <select v-model="termsForm.health_insurance_participation" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('health_insurance_participation')]" :aria-invalid="fieldInvalid('health_insurance_participation')" data-test="terms-health-mode">
                   <option v-for="mode in ['automatic','included','excluded','foreign']" :key="mode" :value="mode">{{ t(`payroll.people.insurance_mode.${mode}`) }}</option>
                 </select>
+                <FieldNote :error="fieldError('health_insurance_participation')" :warning="fieldWarning('health_insurance_participation')" />
               </label>
               <label
                 v-if="employment.relation_type !== 'dpp' && employment.relation_type !== 'dpc'"
@@ -1954,17 +2154,20 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.tax_regime_label') }}
-                <select v-model="termsForm.tax_regime" :disabled="!canEditTerms || busy" :class="INPUT">
+                <select v-model="termsForm.tax_regime" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('tax_regime')]" :aria-invalid="fieldInvalid('tax_regime')" data-test="terms-tax-regime">
                   <option v-for="mode in ['advance','withholding','foreign','manual_review']" :key="mode" :value="mode">{{ t(`payroll.people.tax_regime.${mode}`) }}</option>
                 </select>
+                <FieldNote :error="fieldError('tax_regime')" :warning="fieldWarning('tax_regime')" />
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.foreign_country') }}
-                <input v-model="termsForm.foreign_legislation_country_code" maxlength="2" :disabled="!canEditTerms || busy" :class="[INPUT, 'uppercase']">
+                <input v-model="termsForm.foreign_legislation_country_code" maxlength="2" :disabled="!canEditTerms || busy" :class="[INPUT, 'uppercase', fieldClass('foreign_legislation_country_code')]" :aria-invalid="fieldInvalid('foreign_legislation_country_code')" data-test="terms-foreign-country">
+                <FieldNote :error="fieldError('foreign_legislation_country_code')" :warning="fieldWarning('foreign_legislation_country_code')" />
               </label>
               <label :class="FIELD">
                 {{ t('payroll.people.a1_certificate_until') }}
-                <DateInput v-model="termsForm.a1_certificate_until" :disabled="!canEditTerms || busy" :class="INPUT" />
+                <DateInput v-model="termsForm.a1_certificate_until" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('a1_certificate_until')]" :aria-invalid="fieldInvalid('a1_certificate_until')" data-test="terms-a1-until" />
+                <FieldNote :error="fieldError('a1_certificate_until')" :warning="fieldWarning('a1_certificate_until')" />
               </label>
             </div>
           </section>
@@ -1982,13 +2185,15 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <div :class="GRID">
               <label :class="FIELD">
                 {{ t('payroll.people.social_employer_rate_category_label') }}
-                <select v-model="termsForm.social_employer_rate_category" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-employer-rate-category" data-a1-field="social_employer_rate_category">
+                <select v-model="termsForm.social_employer_rate_category" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('social_employer_rate_category')]" :aria-invalid="fieldInvalid('social_employer_rate_category')" data-test="social-employer-rate-category" data-a1-field="social_employer_rate_category">
                   <option v-for="category in ['ordinary','rescue_and_company_fire_service','risk_employment']" :key="category" :value="category">{{ t(`payroll.people.social_employer_rate_category.${category}`) }}</option>
                 </select>
+                <FieldNote :error="fieldError('social_employer_rate_category')" :warning="fieldWarning('social_employer_rate_category')" />
               </label>
               <label v-if="termsForm.social_employer_rate_category !== 'ordinary'" :class="[FIELD, 'sm:col-span-2']">
                 {{ t('payroll.people.social_employer_rate_category_evidence') }}
-                <input v-model="termsForm.social_employer_rate_category_evidence" maxlength="190" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-employer-rate-category-evidence">
+                <input v-model="termsForm.social_employer_rate_category_evidence" maxlength="190" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('social_employer_rate_category_evidence')]" :aria-invalid="fieldInvalid('social_employer_rate_category_evidence')" data-test="social-employer-rate-category-evidence">
+                <FieldNote :error="fieldError('social_employer_rate_category_evidence')" :warning="fieldWarning('social_employer_rate_category_evidence')" />
                 <span :class="HINT">{{ t('payroll.people.social_employer_rate_category_evidence_hint') }}</span>
               </label>
               <!--
@@ -1997,11 +2202,12 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               -->
               <label v-if="termsForm.social_employer_rate_category === 'rescue_and_company_fire_service'" :class="[FIELD, 'sm:col-span-2']" data-a1-field="jmhz_risk_categorization_code">
                 {{ t('payroll.people.jmhz_risk_categorization.label') }}
-                <select v-model="termsForm.jmhz_risk_categorization_code" :disabled="!canEditTerms || busy" :class="INPUT" data-test="jmhz-risk-categorization">
+                <select v-model="termsForm.jmhz_risk_categorization_code" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('jmhz_risk_categorization_code')]" :aria-invalid="fieldInvalid('jmhz_risk_categorization_code')" data-test="jmhz-risk-categorization">
                   <option :value="null" disabled>{{ t('payroll.people.jmhz_risk_categorization.select') }}</option>
                   <option value="6">{{ t('payroll.people.jmhz_risk_categorization.code_6') }}</option>
                   <option value="7">{{ t('payroll.people.jmhz_risk_categorization.code_7') }}</option>
                 </select>
+                <FieldNote :error="fieldError('jmhz_risk_categorization_code')" :warning="fieldWarning('jmhz_risk_categorization_code')" />
                 <span :class="HINT">{{ t('payroll.people.jmhz_risk_categorization.hint') }}</span>
               </label>
               <p v-if="termsForm.social_employer_rate_category === 'risk_employment'" :class="[HINT, 'sm:col-span-2']" data-test="jmhz-risk-categorization-auto">
@@ -2012,18 +2218,21 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <div :class="GRID">
               <label :class="FIELD">
                 {{ t('payroll.people.social_part_time_discount_label') }}
-                <select v-model="termsForm.social_part_time_discount_reason" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-part-time-discount-reason" data-a1-field="social_part_time_discount_reason">
+                <select v-model="termsForm.social_part_time_discount_reason" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('social_part_time_discount_reason')]" :aria-invalid="fieldInvalid('social_part_time_discount_reason')" data-test="social-part-time-discount-reason" data-a1-field="social_part_time_discount_reason">
                   <option v-for="reason in ['none','age_55_plus','child_care_under_10','dependent_close_person_care','study_under_26','retraining_jobseeker','disabled_person','under_21']" :key="reason" :value="reason">{{ t(`payroll.people.social_part_time_discount_reason.${reason}`) }}</option>
                 </select>
+                <FieldNote :error="fieldError('social_part_time_discount_reason')" :warning="fieldWarning('social_part_time_discount_reason')" />
               </label>
               <label v-if="termsForm.social_part_time_discount_reason !== 'none'" :class="FIELD">
                 {{ t('payroll.people.social_part_time_discount_notified_on') }}
-                <DateInput v-model="termsForm.social_part_time_discount_notified_on" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-part-time-discount-notified-on" />
+                <DateInput v-model="termsForm.social_part_time_discount_notified_on" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('social_part_time_discount_notified_on')]" :aria-invalid="fieldInvalid('social_part_time_discount_notified_on')" data-test="social-part-time-discount-notified-on" />
+                <FieldNote :error="fieldError('social_part_time_discount_notified_on')" :warning="fieldWarning('social_part_time_discount_notified_on')" />
                 <span :class="HINT">{{ t('payroll.people.social_part_time_discount_notified_on_hint') }}</span>
               </label>
               <label v-if="termsForm.social_part_time_discount_reason !== 'none'" :class="[FIELD, 'sm:col-span-2']">
                 {{ t('payroll.people.social_part_time_discount_evidence') }}
-                <input v-model="termsForm.social_part_time_discount_evidence" maxlength="190" :disabled="!canEditTerms || busy" :class="INPUT" data-test="social-part-time-discount-evidence">
+                <input v-model="termsForm.social_part_time_discount_evidence" maxlength="190" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('social_part_time_discount_evidence')]" :aria-invalid="fieldInvalid('social_part_time_discount_evidence')" data-test="social-part-time-discount-evidence">
+                <FieldNote :error="fieldError('social_part_time_discount_evidence')" :warning="fieldWarning('social_part_time_discount_evidence')" />
                 <span :class="HINT">{{ t('payroll.people.social_part_time_discount_evidence_hint') }}</span>
               </label>
             </div>
@@ -2078,6 +2287,17 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           data-test="terms-save-error"
           role="alert"
         >{{ saveError }}</p>
+        <div
+          v-if="endRecurringOffer"
+          class="mb-3 flex flex-wrap items-center justify-between gap-2 rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-xs text-warning-800"
+          data-test="terms-end-recurring-base"
+        >
+          <span class="min-w-0">{{ t('payroll.people.remuneration.end_recurring_base_hint') }}</span>
+          <button type="button" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']" :disabled="busy" data-test="terms-end-recurring-base-confirm" @click="confirmEndRecurringBase">
+            <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>
+            {{ endRecurringLabel }}
+          </button>
+        </div>
 
         <div class="flex flex-wrap items-end justify-between gap-3">
           <fieldset class="min-w-0">
@@ -2134,6 +2354,32 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
         </label>
       </div>
     </form>
+
+    <!--
+      Uloženo, ale některý dříve uložený údaj neprošel kontrolou číselníku.
+      Neblokuje — tvrdě se hlídá až v podání nebo výpočtu běhu. Souhrn zůstává
+      vidět i po zmizení toastu a každá položka vede na své pole.
+    -->
+    <div
+      v-if="saveWarnings.length > 0"
+      class="mt-3 rounded-md border border-warning-500/40 bg-warning-50 p-3 text-xs text-warning-800"
+      role="status"
+      data-test="terms-save-warnings"
+    >
+      <p class="font-medium">{{ t('payroll.people.terms_warnings_title') }}</p>
+      <ul class="mt-1 space-y-1">
+        <li v-for="warning in saveWarnings" :key="`${warning.field}:${warning.code}`" class="flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span class="min-w-0">{{ warning.message }}</span>
+          <button
+            v-if="warningHasTarget(warning.field)"
+            type="button"
+            class="font-medium text-warning-900 underline"
+            data-test="terms-save-warning-show"
+            @click="revealTermsField(canonicalField(warning.field))"
+          >{{ t('payroll.people.terms_warning_show') }}</button>
+        </li>
+      </ul>
+    </div>
 
     <details class="mt-3 rounded-lg border border-neutral-200 bg-surface p-3" data-test="terms-history">
       <summary class="cursor-pointer text-sm font-medium text-neutral-900">{{ t('payroll.people.remuneration.history') }}</summary>
