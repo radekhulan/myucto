@@ -21942,16 +21942,15 @@ paths:
         Chybějící klíč v těle hodnotu ponechá, `expires_on: null` datum smaže. Pohyby šarže
         ukazují na její id, takže zůstávají; nový text se propíše do konceptů faktur,
         nezaúčtovaných i zaúčtovaných skladových dokladů této karty (příjemka, výdejka,
-        převodka, protidoklad storna), do rozpracované expedice (zásilka ve stavu `packing`,
-        řádky otevřených úloh vychystání) a do vystavených zálohových faktur, ze kterých ještě
-        nevznikla finální faktura (finál pak vydá opravenou šarži).
+        převodka, protidoklad storna) a do rozpracované expedice (zásilka ve stavu `packing`,
+        řádky otevřených úloh vychystání).
 
         Dobropis k vystavené faktuře vrací kusy, které výdejka faktury skutečně vydala,
         a obnovení stornované faktury vydává kusy vrácené stornem, takže obě operace pracují
-        s opravenou šarží. Vystavené a stornované faktury (včetně uloženého PDF), vyúčtované
-        zálohy, expedované zásilky, vratky a log čtečky si ponechají původní text. Uložené PDF
-        nevyúčtované zálohy zůstane, ale při příštím přegenerování se vykreslí s opraveným
-        kódem. Vratka k expedované zásilce bere identitu šarže ze snapshotu zásilky
+        s opravenou šarží. Vystavené a stornované faktury (včetně uloženého PDF), vystavené
+        zálohové faktury, expedované zásilky, vratky a log čtečky si ponechají původní text.
+        Finální faktura vytvořená po opravě ze zálohové faktury proto nese starý kód a šarži
+        si v ní vyberete znovu z nabídky. Vratka k expedované zásilce bere identitu šarže ze snapshotu zásilky
         (`GET /api/v1/stock/fulfillment/tasks/{id}`), ne z karty: vstup `stock_tracking_unit_id`
         s novým kódem skončí `fulfillment_tracking_invalid`.
 
@@ -43218,7 +43217,7 @@ components:
           type: object
           description: Počet přepsaných kopií textu šarže podle druhu.
           properties:
-            invoices: { type: integer, description: Řádky konceptů faktur a zálohových faktur bez finálu. }
+            invoices: { type: integer, description: Řádky konceptů faktur. }
             stock_drafts: { type: integer, description: Řádky nezaúčtovaných skladových dokladů. }
             stock_posted: { type: integer, description: Řádky zaúčtovaných a stornovaných skladových dokladů. }
             fulfillment: { type: integer, description: Rozpracované zásilky a řádky otevřených úloh vychystání. }

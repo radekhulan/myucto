@@ -339,25 +339,6 @@ final class StockTrackingRepository
         );
     }
 
-    /**
-     * Řádky vystavených zálohových faktur karty s výběrem kusů, ze kterých ještě nevznikla
-     * finální faktura (nemá potomka `invoice_type = 'invoice'` přes `parent_invoice_id`),
-     * zamčené k přepisu. Finální faktura výběr z proformy kopíruje, takže po opravě šarže
-     * musí kopírovat už nový text; PDF proformy zůstává (odešlo zákazníkovi). Vyúčtovaná
-     * proforma se nepřepisuje.
-     *
-     * @return list<array{id:int, invoice_id:int, json:string}>
-     */
-    public function lockUnsettledProformaTracking(int $supplierId, int $itemId): array
-    {
-        $stmt = $this->db->pdo()->prepare("SELECT ii.id, ii.invoice_id, ii.tracking_json AS json FROM invoices i STRAIGHT_JOIN invoice_items ii ON ii.invoice_id = i.id WHERE i.supplier_id = ? AND i.status IN ('issued','sent','reminded','paid') AND i.invoice_type = 'proforma' AND ii.stock_item_id = ? AND ii.tracking_json IS NOT NULL AND NOT EXISTS (SELECT 1 FROM invoices f WHERE f.supplier_id = i.supplier_id AND f.parent_invoice_id = i.id AND f.invoice_type = 'invoice') FOR UPDATE");
-        $stmt->execute([$supplierId, $itemId]);
-        return array_map(
-            static fn (array $row): array => ['id' => (int) $row['id'], 'invoice_id' => (int) $row['invoice_id'], 'json' => (string) $row['json']],
-            $stmt->fetchAll(PDO::FETCH_ASSOC),
-        );
-    }
-
     public function updateInvoiceItemTracking(int $itemRowId, string $json): void
     {
         $this->db->pdo()->prepare('UPDATE invoice_items SET tracking_json = ? WHERE id = ?')->execute([$json, $itemRowId]);

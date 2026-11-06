@@ -1152,20 +1152,18 @@ této karty:
 - konceptů faktur,
 - nezaúčtovaných i zaúčtovaných skladových dokladů (příjemka, výdejka, převodka,
   protidoklad storna),
-- rozpracované expedice,
-- vystavených zálohových faktur, ze kterých ještě nevznikla finální faktura,
-  aby finální faktura vydala opravenou šarži.
+- rozpracované expedice.
 
 Dobropis k vystavené faktuře a obnovení stornované faktury vezmou opravenou
 šarži samy: vrací nebo znovu vydávají kusy, které výdejka faktury skutečně
 vydala. Oprava se zapisuje do historie změn.
 
-Beze změny zůstávají vystavené a stornované faktury, vyúčtované zálohové
-faktury, expedované zásilky a jejich vratky. U vystavené faktury zůstává i uložené
-PDF s původním kódem, protože odešlo zákazníkovi. U nevyúčtované zálohové
-faktury se přepisuje text šarže na dokladu: uložené PDF zálohy zůstane, ale při
-příštím přegenerování (například po aktualizaci MyÚčta) se vykreslí
-s opraveným kódem.
+Beze změny zůstávají vystavené a stornované faktury, vystavené zálohové faktury,
+expedované zásilky a jejich vratky. U vystavené faktury a zálohové faktury zůstává
+i uložené PDF s původním kódem, protože odešlo zákazníkovi. Finální faktura
+vytvořená ze zálohové faktury po opravě šarže proto nese původní kód. Nejde ji
+vystavit se starým kódem: otevřete koncept finální faktury a šarži na řádku
+vyberte znovu z nabídky, kde je už opravený kód.
 
 Převodní jednotky šarží se definují přesným zlomkem vůči základní jednotce karty,
 například 12 kusů jako 12/1, a slouží jen k zadání množství v alokacích šarží

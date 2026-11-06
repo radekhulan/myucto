@@ -17,18 +17,16 @@ use MyInvoice\Repository\StockTrackingRepository;
  * `TrackingAllocationService::resolveUnit`), a zaúčtovaný řádek ho zobrazuje. Ty se přepisují
  * ve stejné transakci:
  *
- *  - koncepty faktur a vystavené zálohové faktury bez finální faktury
- *    (`invoice_items.tracking_json`),
+ *  - koncepty faktur (`invoice_items.tracking_json`),
  *  - řádky skladových dokladů (`stock_document_lines.tracking_input_json`): koncepty
  *    i zaúčtované a stornované doklady,
  *  - rozpracovaná expedice (`fulfillment_shipment_items.tracking_snapshot` zásilky `packing`)
  *    a řádky otevřených úloh vychystání.
  *
- * Nepřepisuje se vystavená ani stornovaná faktura (obnovení stornované faktury bere kusy
- * z vrácené výdejky), vyúčtovaná záloha, expedovaná zásilka, vratky a log čtečky. Uložené PDF
- * vystavené faktury zůstává, jak odešlo zákazníkovi. U nevyúčtované zálohy se uložené PDF
- * nezneplatňuje, ale přepsaný text se vykreslí při příštím přegenerování PDF (cache se
- * zneplatní třeba změnou šablony).
+ * Nepřepisuje se žádný vystavený doklad: vystavená ani stornovaná faktura (obnovení stornované
+ * faktury bere kusy z vrácené výdejky), vystavená zálohová faktura (finální faktura z ní si
+ * šarži po opravě vybere znovu), expedovaná zásilka, vratky a log čtečky. Uložené PDF
+ * vystavené faktury zůstává, jak odešlo zákazníkovi.
  */
 final class TrackingUnitRenameService
 {
@@ -136,18 +134,14 @@ final class TrackingUnitRenameService
 
         $args = [$unitId, $oldLot, $oldExpires, $newLot, $newExpires];
 
-        // Koncepty faktur (jejich cache PDF je po opravě zastaralá) a vystavené zálohy bez finálu.
+        // Koncepty faktur (jejich cache PDF je po opravě zastaralá).
         $invoiceIds = [];
-        foreach ([true => $this->tracking->lockDraftInvoiceTracking($supplierId, $itemId), false => $this->tracking->lockUnsettledProformaTracking($supplierId, $itemId)] as $isDraft => $rows) {
-            foreach ($rows as $row) {
-                $json = $this->rewriteList($row['json'], ...$args);
-                if ($json !== null) {
-                    $this->tracking->updateInvoiceItemTracking($row['id'], $json);
-                    $updated['invoices']++;
-                    if ($isDraft) {
-                        $invoiceIds[$row['invoice_id']] = true;
-                    }
-                }
+        foreach ($this->tracking->lockDraftInvoiceTracking($supplierId, $itemId) as $row) {
+            $json = $this->rewriteList($row['json'], ...$args);
+            if ($json !== null) {
+                $this->tracking->updateInvoiceItemTracking($row['id'], $json);
+                $updated['invoices']++;
+                $invoiceIds[$row['invoice_id']] = true;
             }
         }
         $updated['stock_drafts'] = $this->rewriteLines($supplierId, $this->tracking->lockDraftDocumentLineTracking($supplierId, $itemId), $args);

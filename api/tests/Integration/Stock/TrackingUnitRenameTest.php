@@ -212,7 +212,7 @@ final class TrackingUnitRenameTest extends StockTestCase
         }
     }
 
-    public function testFinalFromUnsettledProformaIssuesTheSameLotAfterRename(): void
+    public function testIssuedProformaIsNotRewrittenAndFinalNeedsNewLotSelection(): void
     {
         $sid = $this->createSupplier();
         $wh = $this->warehouse($sid);
@@ -221,28 +221,43 @@ final class TrackingUnitRenameTest extends StockTestCase
         $unitId = $this->unitId($sid, $item, self::OLD);
         $selection = [['quantity' => '2', 'lot_code' => self::OLD, 'expires_on' => self::OLD_EXPIRES]];
         $open = $this->createInvoice($sid, [$this->line($item, $wh, '2', $selection)], 'proforma');
-        $settled = $this->createInvoice($sid, [$this->line($item, $wh, '2', $selection)], 'proforma');
         $this->forceStatus($open, 'paid', '9' . random_int(1000000, 9999999));
-        $this->forceStatus($settled, 'paid', '9' . random_int(1000000, 9999999));
-        $creator = $this->container->get(\MyInvoice\Service\Invoice\FinalFromProformaCreator::class);
-        $settledFinal = $creator->create($settled, $this->userId);
         $renderer = $this->container->get(\MyInvoice\Service\Pdf\InvoicePdfRenderer::class);
         $renderer->render($open);
         $pdfBefore = $this->pdfColumns($open);
-        $settledBefore = $this->rawTracking($settled);
+        $openBefore = $this->rawTracking($open);
 
-        self::assertSame(200, $this->rename($sid, $item, $unitId, ['lot_code' => self::NEW, 'expires_on' => self::NEW_EXPIRES])->getStatusCode());
+        $res = $this->rename($sid, $item, $unitId, ['lot_code' => self::NEW, 'expires_on' => self::NEW_EXPIRES]);
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame(0, $this->body($res)['updated']['invoices'], 'Vystavená záloha se nepřepisuje.');
 
-        self::assertSame(self::NEW, $this->storedItems($open)[0]['tracking_allocations'][0]['lot_code'], 'Proforma bez finálu se přepíše.');
-        self::assertSame($pdfBefore, $this->pdfColumns($open), 'PDF proformy se nezneplatňuje.');
-        self::assertSame($settledBefore, $this->rawTracking($settled), 'Vyúčtovaná proforma (s finálem) se nepřepíše.');
-        self::assertSame(self::NEW, $this->storedItems($settledFinal)[0]['tracking_allocations'][0]['lot_code'], 'Koncept finálu se přepíše jako každý koncept.');
+        self::assertSame($openBefore, $this->rawTracking($open), 'Vystavená zálohová faktura zůstává bajtově stejná.');
+        self::assertSame($pdfBefore, $this->pdfColumns($open), 'PDF zálohy se nezneplatňuje.');
 
-        $finalId = $creator->create($open, $this->userId);
-        self::assertSame(self::NEW, $this->storedItems($finalId)[0]['tracking_allocations'][0]['lot_code'], 'Finál zkopíruje už nový text.');
+        // Finál vytvořený po opravě nese starý kód; vystavit ho jde až po novém výběru šarže.
+        $finalId = $this->container->get(\MyInvoice\Service\Invoice\FinalFromProformaCreator::class)->create($open, $this->userId);
+        self::assertSame(self::OLD, $this->storedItems($finalId)[0]['tracking_allocations'][0]['lot_code']);
+        $res = $this->issue($sid, $finalId);
+        self::assertGreaterThanOrEqual(400, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame(5000, $this->unitBalance($sid, $item, 'lot:L-NEW|2027-03-01'), 'Nic se nevydalo.');
+        self::assertSame('draft', $this->invoiceStatus($finalId));
+
+        $items = $this->storedItems($finalId);
+        $items[0]['tracking_allocations'] = [['quantity' => '2', 'lot_code' => self::NEW, 'expires_on' => self::NEW_EXPIRES]];
+        $res = $this->container->get(\MyInvoice\Action\Invoice\UpdateInvoiceAction::class)(
+            $this->adminRequest($sid, 'PUT', ['items' => $items]), new Psr7Response(), ['id' => (string) $finalId],
+        );
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
         $res = $this->issue($sid, $finalId);
         self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
-        self::assertSame(3000, $this->unitBalance($sid, $item, 'lot:L-NEW|2027-03-01'), 'Finál vydal tutéž šarži.');
+        self::assertSame(3000, $this->unitBalance($sid, $item, 'lot:L-NEW|2027-03-01'), 'Finál po novém výběru vydal opravenou šarži.');
+    }
+
+    private function invoiceStatus(int $invoiceId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM invoices WHERE id = ?');
+        $stmt->execute([$invoiceId]);
+        return (string) $stmt->fetchColumn();
     }
 
     public function testDraftOfAnotherCardWithSameLotTextIsNotRewritten(): void
