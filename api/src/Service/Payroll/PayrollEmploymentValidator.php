@@ -138,9 +138,10 @@ final class PayrollEmploymentValidator
     }
 
     /** @param array<string,mixed> $input
+     *  @param ?list<array{field:string,code:string,message:string}> $warnings výstup, viz {@see terms()}
      *  @return EmploymentCreateInput
      */
-    public function create(array $input): array
+    public function create(array $input, ?array &$warnings = null): array
     {
         /*
          * Kód je nepovinný a prázdný znamená „vygeneruj".
@@ -167,7 +168,7 @@ final class PayrollEmploymentValidator
             throw new \InvalidArgumentException('Chybí počáteční smluvní podmínky.');
         }
 
-        $terms = $this->terms($this->stringKeyed($input['terms']), relationType: $relationType);
+        $terms = $this->terms($this->stringKeyed($input['terms']), relationType: $relationType, warnings: $warnings);
         if ($terms['remuneration_type'] === 'hourly' && $gross !== null) {
             throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
         }

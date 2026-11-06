@@ -13,6 +13,13 @@ use PDO;
 
 final class PayrollTimeRepository
 {
+    /**
+     * Interní důvod prvního ručního souhrnu bez zadaného důvodu (vzor
+     * {@see PayrollHourlyEvidenceRepository::INITIAL_REASON}). Navenek se
+     * vrací jako `reason: null` a obrazovka ukáže přeložený popisek.
+     */
+    public const MANUAL_SUMMARY_INITIAL_REASON = 'Prvotní zadání hodin';
+
     public function __construct(
         private readonly Connection $db,
         private readonly PayrollJmhzWorkMonthSummaryBuilder $jmhzWorkSummary,
@@ -763,7 +770,8 @@ final class PayrollTimeRepository
                 $sourceLabel = $month['work_source'] === 'import_summary' ? 'docházku ze souhrnu importu' : 'hodiny z ručního souhrnu';
                 throw new \InvalidArgumentException(
                     "Pracovní měsíc bere {$sourceLabel}. Časový záznam by byl druhým "
-                    . 'zdrojem téhož měsíce, proto se neuložil.'
+                    . 'zdrojem téhož měsíce, proto se neuložil. Chcete-li evidovat docházku, '
+                    . 'obnovte zdroj Docházka v panelu Odpracované hodiny.'
                 );
             }
             $seriesKey = bin2hex(random_bytes(16));
@@ -867,7 +875,10 @@ final class PayrollTimeRepository
             ))->format('Y-m-01');
             $month = $this->lockOpenMonth($supplierId, $employmentId, $periodStart, $monthVersion, $userId);
             if ($kind === 'entry' && ($month['work_source'] ?? 'entries') !== 'entries') {
-                throw new \InvalidArgumentException('Časové záznamy lze měnit jen při zvoleném zdroji docházky.');
+                throw new \InvalidArgumentException(
+                    'Časové záznamy lze měnit jen při zvoleném zdroji docházky. Měsíc teď bere hodiny '
+                    . 'z jiného zdroje; obnovte zdroj Docházka v panelu Odpracované hodiny a záznam pak upravte.'
+                );
             }
             $currentVersion = PayrollTimeValue::int($current['row_version'] ?? null, 'row_version');
             if ($currentVersion !== $expectedVersion) {
@@ -1195,7 +1206,7 @@ final class PayrollTimeRepository
             ];
         }
         return ['id' => (int) $row['id'], 'time_month_revision_no' => (int) $row['time_month_revision_no'],
-            'content_sha256' => (string) $row['content_sha256'], 'reason' => (string) $row['reason'], 'segments' => $items];
+            'content_sha256' => (string) $row['content_sha256'], 'reason' => self::publicReason((string) $row['reason']), 'segments' => $items];
     }
 
     /** @param list<int> $employmentIds @param list<string> $periods @return array<int,array<string,array<string,mixed>>> */
@@ -1301,7 +1312,7 @@ final class PayrollTimeRepository
             $id = (int) $row['id'];
             $groups[$period][$id] ??= [
                 'id' => $id, 'time_month_revision_no' => (int) $row['time_month_revision_no'],
-                'content_sha256' => (string) $row['content_sha256'], 'reason' => (string) $row['reason'],
+                'content_sha256' => (string) $row['content_sha256'], 'reason' => self::publicReason((string) $row['reason']),
                 'created_by' => $row['created_by'] === null ? null : (int) $row['created_by'],
                 'created_by_name' => $row['created_by_name'] === null ? null : (string) $row['created_by_name'],
                 'created_at' => (string) $row['created_at'], 'segments' => [],
@@ -1320,7 +1331,7 @@ final class PayrollTimeRepository
     }
 
     /** @param list<array<string,mixed>> $segments @return array<string,mixed> */
-    public function saveManualSummary(int $supplierId, int $employmentId, string $periodStart, int $expectedVersion, string $reason, bool $replaceSource, array $segments, ?int $userId): array
+    public function saveManualSummary(int $supplierId, int $employmentId, string $periodStart, int $expectedVersion, ?string $reason, bool $replaceSource, array $segments, ?int $userId): array
     {
         $pdo = $this->db->pdo();
         $scope = $this->beginTransactionScope();
@@ -1368,10 +1379,23 @@ final class PayrollTimeRepository
                     }
                 }
             }
-            if (array_diff_key($required, $covered) !== []) {
-                throw new \InvalidArgumentException('Úseky musí bez mezer pokrýt celé trvání vztahu v měsíci; doplňte i dny bez práce (0 h).');
+            $missing = array_keys(array_diff_key($required, $covered));
+            if ($missing !== []) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Úseky musí bez mezer pokrýt celé trvání vztahu v měsíci; chybí %s. Doplňte i dny bez práce (0 h).',
+                    self::dayRanges($missing),
+                ));
             }
             $existing = $this->manualSummary($supplierId, $employmentId, $periodStart);
+            if ($reason === null) {
+                // Důvod chce jen změna: oprava uloženého souhrnu nebo nahrazení
+                // jiného zdroje. První zadání do prázdného měsíce ho nemá.
+                if ($existing !== null || $source === 'import_summary'
+                    || ($source !== 'manual_summary' && $this->hasEntriesInPeriod($supplierId, $employmentId, $periodStart))) {
+                    throw new \InvalidArgumentException('Uveďte důvod změny hodin (nejvýše ' . \MyInvoice\Service\Payroll\Time\PayrollTimeService::SOURCE_REASON_MAX_LENGTH . ' znaků).');
+                }
+                $reason = self::MANUAL_SUMMARY_INITIAL_REASON;
+            }
             // Souhrn importu se váže na revizi měsíce: bez nové revize by ho
             // čtení aktuálního importu dál vidělo vedle ručního souhrnu.
             if ($existing !== null || $source === 'import_summary') {
@@ -1399,6 +1423,41 @@ final class PayrollTimeRepository
             throw $e;
         }
         return ['month' => $this->monthState($supplierId, $employmentId, $periodStart), 'manual_summary' => $this->manualSummary($supplierId, $employmentId, $periodStart)];
+    }
+
+    /**
+     * Chybějící dny jako souvislé rozsahy („5.–7. 5., 20. 5."), aby účetní
+     * nemusela hledat mezeru v kalendáři sama.
+     *
+     * @param list<string> $days dny Y-m-d
+     */
+    private static function dayRanges(array $days): string
+    {
+        sort($days);
+        $ranges = [];
+        foreach ($days as $day) {
+            $last = array_key_last($ranges);
+            if ($last !== null
+                && (new \DateTimeImmutable($ranges[$last][1]))->modify('+1 day')->format('Y-m-d') === $day) {
+                $ranges[$last][1] = $day;
+                continue;
+            }
+            $ranges[] = [$day, $day];
+        }
+        $format = static fn (string $day): string => (int) substr($day, 8, 2) . '. ' . (int) substr($day, 5, 2) . '.';
+        $parts = array_map(
+            static fn (array $range): string => $range[0] === $range[1]
+                ? $format($range[0])
+                : (int) substr($range[0], 8, 2) . '.–' . $format($range[1]),
+            $ranges,
+        );
+
+        return (count($days) === 1 ? 'den ' : 'dny ') . implode(', ', $parts);
+    }
+
+    private static function publicReason(string $reason): ?string
+    {
+        return $reason === self::MANUAL_SUMMARY_INITIAL_REASON ? null : $reason;
     }
 
     private function assertManualSourceHasNoMaterializedAmounts(int $supplierId, int $employmentId, string $periodStart): void

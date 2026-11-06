@@ -26,10 +26,13 @@ final class PayrollTimeService
     public function saveManualSummary(int $supplierId, string $period, array $input, ?int $userId): array
     {
         [$periodStart, $periodEnd] = $this->periodBounds($period);
+        // Důvod je nepovinný jen u prvního zadání; zda jde o první, ví až
+        // repozitář pod zámkem měsíce.
         $reason = $input['reason'] ?? null;
-        if (!is_string($reason) || trim($reason) === '' || mb_strlen(trim($reason)) > self::SOURCE_REASON_MAX_LENGTH) {
+        if (($reason !== null && !is_string($reason)) || (is_string($reason) && mb_strlen(trim($reason)) > self::SOURCE_REASON_MAX_LENGTH)) {
             throw new \InvalidArgumentException('Uveďte důvod zadání hodin (nejvýše ' . self::SOURCE_REASON_MAX_LENGTH . ' znaků).');
         }
+        $reason = is_string($reason) && trim($reason) !== '' ? trim($reason) : null;
         $replace = $input['replace_source'] ?? false;
         if (!is_bool($replace)) {
             throw new \InvalidArgumentException('Potvrzení nahrazení zdroje musí být boolean.');
@@ -70,7 +73,7 @@ final class PayrollTimeService
         }
         return $this->repository->saveManualSummary(
             $supplierId, $this->positiveInt($input, 'employment_id'), $periodStart,
-            $this->nonNegativeInt($input, 'row_version'), trim($reason), $replace, $normalized, $userId,
+            $this->nonNegativeInt($input, 'row_version'), $reason, $replace, $normalized, $userId,
         );
     }
 

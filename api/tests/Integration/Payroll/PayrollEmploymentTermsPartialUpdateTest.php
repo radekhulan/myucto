@@ -279,7 +279,10 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
         $error = $this->json($response)['error'];
         self::assertStringContainsString('MZDA_MESICNI', $error['message']);
         self::assertStringContainsString('2026-02-28', $error['message']);
-        self::assertSame(['field' => 'remuneration_type', 'code' => 'recurring_base_wage_active'], $error['details']);
+        self::assertSame('remuneration_type', $error['details']['field']);
+        self::assertSame('recurring_base_wage_active', $error['details']['code']);
+        self::assertIsInt($error['details']['recurring_id']);
+        self::assertStringContainsString($error['details']['recurring_name'], $error['message']);
 
         // Výslovný souhlas ukončí předpis v téže transakci ke dni před účinností.
         $hourly = $this->call('addTerms', $employment, $payload + ['end_recurring_base' => true]);

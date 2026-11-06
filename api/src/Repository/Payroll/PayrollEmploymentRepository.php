@@ -2156,7 +2156,10 @@ final class PayrollEmploymentRepository
                     (string) $first['code'],
                     (string) $first['valid_from'],
                     (new \DateTimeImmutable((string) $data['effective_from']))->modify('-1 day')->format('Y-m-d'),
-                ), 'remuneration_type', 'recurring_base_wage_active');
+                ), 'remuneration_type', 'recurring_base_wage_active', null, [
+                    'recurring_id' => (int) $first['id'],
+                    'recurring_name' => (string) $first['name'],
+                ]);
             }
             $endOn = (new \DateTimeImmutable((string) $data['effective_from']))->modify('-1 day')->format('Y-m-d');
             $end = $this->db->pdo()->prepare(

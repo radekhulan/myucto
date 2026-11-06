@@ -8,6 +8,7 @@ use MyInvoice\Action\Payroll\PayrollTimeAction;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
+use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -466,6 +467,52 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame('Syntetická oprava', $monthHistory['manual_summary_history'][2]['reason']);
         self::assertSame($this->userId, $monthHistory['manual_summary_history'][2]['created_by']);
         self::assertNotNull($monthHistory['manual_summary_history'][2]['created_at']);
+    }
+
+    /**
+     * První ruční souhrn do prázdného měsíce důvod nepotřebuje: server doplní
+     * výchozí a navenek ho vrací jako `null` (obrazovka ukáže popisek).
+     * Změna uloženého souhrnu důvod chce dál. Mezera v úsecích vypíše dny.
+     */
+    public function testFirstManualSummaryNeedsNoReasonButChangeDoes(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $path = '/api/payroll/time/months/2026-05/manual-summary';
+        $segment = static fn (string $from, string $to, int $units): array => ['date_from' => $from, 'date_to' => $to,
+            'worked_duration_units' => $units, 'overtime_duration_units' => null, 'worked_days' => $units === 0 ? 0 : 1];
+        $payload = ['employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => null, 'replace_source' => false,
+            'segments' => [$segment('2026-05-01', '2026-05-04', 0), $segment('2026-05-08', '2026-05-19', 0), $segment('2026-05-21', '2026-05-31', 0)]];
+
+        $gap = $this->action->saveManualSummary($this->request('POST', $path)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(422, $gap->getStatusCode());
+        self::assertStringContainsString('chybí dny 5.–7. 5., 20. 5.', (string) $this->json($gap)['error']['message']);
+
+        $payload['segments'] = [$segment('2026-05-01', '2026-05-31', 0)];
+        $saved = $this->action->saveManualSummary($this->request('POST', $path)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $body = $this->json($saved);
+        self::assertNull($body['manual_summary']['reason']);
+        $stmt = $this->db->pdo()->prepare('SELECT reason FROM payroll_time_month_manual_summaries WHERE supplier_id = ? AND employment_id = ?');
+        $stmt->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame(PayrollTimeRepository::MANUAL_SUMMARY_INITIAL_REASON, $stmt->fetchColumn());
+
+        // Docházka do měsíce s ručním souhrnem neprojde a hláška řekne, kde zdroj vrátit.
+        $entry = $this->saveEntry(monthVersion: $body['month']['row_version']);
+        self::assertGreaterThanOrEqual(400, $entry->getStatusCode());
+        self::assertStringContainsString('obnovte zdroj Docházka v panelu Odpracované hodiny', (string) $entry->getBody());
+
+        unset($payload['reason']);
+        $payload['row_version'] = $body['month']['row_version'];
+        $payload['segments'] = [$segment('2026-05-01', '2026-05-01', 1), $segment('2026-05-02', '2026-05-31', 0)];
+        $change = $this->action->saveManualSummary($this->request('POST', $path)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(422, $change->getStatusCode());
+        self::assertStringContainsString('důvod', (string) $this->json($change)['error']['message']);
+
+        $payload['reason'] = 'Oprava po kontrole';
+        $changed = $this->action->saveManualSummary($this->request('POST', $path)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $changed->getStatusCode(), (string) $changed->getBody());
+        self::assertSame('Oprava po kontrole', $this->json($changed)['manual_summary']['reason']);
     }
 
     public function testManualSummaryNeedsNoAttendanceAndEnforcesTenantVersionAndSession(): void

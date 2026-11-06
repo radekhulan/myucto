@@ -97,11 +97,12 @@ final class PayrollEmploymentAction
         if (($error = $this->authorize($request, $response)) !== null) {
             return $error;
         }
+        $warnings = [];
         try {
             $employment = $this->employments->create(
                 $this->currentSupplierId($request),
                 (int) $args['id'],
-                $this->validator->create($this->body($request)),
+                $this->validator->create($this->body($request), $warnings),
                 $this->userId($request),
                 $this->ip($request),
                 $request->getHeaderLine('User-Agent'),
@@ -109,7 +110,7 @@ final class PayrollEmploymentAction
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);
         }
-        return Json::ok($response, ['employment' => $employment], 201);
+        return Json::ok($response, ['employment' => $employment, 'warnings' => $warnings], 201);
     }
 
     /** @param array{id:string} $args */

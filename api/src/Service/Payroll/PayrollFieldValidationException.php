@@ -13,21 +13,25 @@ namespace MyInvoice\Service\Payroll;
  */
 final class PayrollFieldValidationException extends \InvalidArgumentException
 {
+    /** @param array<string,scalar|null> $extra doplňující údaje do `details` (např. `recurring_id`) */
     public function __construct(
         string $message,
         public readonly string $field,
         public readonly ?string $errorCode = null,
         ?\Throwable $previous = null,
+        public readonly array $extra = [],
     ) {
         parent::__construct($message, 0, $previous);
     }
 
-    /** @return array{field:string,code?:string} */
+    /** @return array<string,scalar|null> */
     public function details(): array
     {
-        return $this->errorCode === null
-            ? ['field' => $this->field]
-            : ['field' => $this->field, 'code' => $this->errorCode];
+        return [
+            'field' => $this->field,
+            ...($this->errorCode === null ? [] : ['code' => $this->errorCode]),
+            ...$this->extra,
+        ];
     }
 
     /**

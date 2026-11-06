@@ -196,11 +196,13 @@ importovaný měsíc zůstává beze změny.
    odpracovaných dnů nevyplňujte nulou.
 3. Při změně podmínek v měsíci vyplňte hodiny zvlášť pro jednotlivé úseky.
    Úsek musí ležet v trvání vztahu a jedné účinné verzi podmínek; úseky se
-   nesmějí překrývat a musí bez mezer pokrýt celé trvání vztahu v měsíci.
-   Dny bez práce zahrňte do úseku s `0`. Rozvržený fond se za skutečně
-   odpracované hodiny nedoplňuje.
-4. Uveďte důvod a podklad (nejvýše 450 znaků). Jestliže už měsíc obsahuje
-   docházku nebo souhrn importu, výslovně potvrďte nahrazení zdroje.
+   nesmějí překrývat a musí bez mezer pokrýt celé trvání vztahu v měsíci;
+   při mezeře aplikace vypíše chybějící dny. Dny bez práce zahrňte do úseku
+   s `0`. Rozvržený fond se za skutečně odpracované hodiny nedoplňuje.
+4. U prvního zadání do měsíce bez jiného zdroje je důvod nepovinný; historie
+   pak ukáže „Prvotní zadání hodin". Při změně uloženého souhrnu nebo nahrazení
+   jiného zdroje uveďte důvod a podklad (nejvýše 450 znaků). Jestliže už měsíc
+   obsahuje docházku nebo souhrn importu, výslovně potvrďte nahrazení zdroje.
    Původní evidence zůstane zachovaná, ale její hodiny se k ručnímu
    souhrnu nepřičtou.
 5. Souhrn uložte a klikněte na **Schválit v docházce**. V **Docházce
