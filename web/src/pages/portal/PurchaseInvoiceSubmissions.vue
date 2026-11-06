@@ -302,24 +302,27 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
         </label>
       </div>
 
-      <div
-        class="flex flex-col gap-3 rounded-lg border-2 border-dashed px-4 py-4 transition"
-        :class="dragOver ? 'border-primary-500 bg-primary-50' : 'border-neutral-200'"
+      <div class="flex flex-col gap-3">
+      <label
+        class="block cursor-pointer rounded-lg border-2 border-dashed p-6 text-center transition"
+        :class="[
+          dragOver ? 'border-primary-500 bg-primary-50' : 'border-neutral-300 hover:border-primary-400 hover:bg-primary-50/30',
+          uploading ? 'pointer-events-none opacity-60' : '',
+        ]"
         data-test="portal-dropzone"
         @dragenter.prevent="dragOver = true"
         @dragover.prevent="dragOver = true"
         @dragleave.prevent="dragOver = false"
         @drop.prevent="onDrop"
       >
-      <p class="text-sm" :class="dragOver ? 'text-primary-700' : 'text-neutral-500'">{{ t('purchase_submissions.drop_hint') }}</p>
+        <input ref="fileInput" type="file" multiple :accept="allowed" class="hidden" :disabled="uploading" @change="selectFiles" />
+        <svg class="mx-auto mb-2 h-8 w-8" :class="dragOver ? 'text-primary-500' : 'text-neutral-400'" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 0 1-.88-7.9 5 5 0 0 1 9.9-1A5.5 5.5 0 0 1 18.5 16H17m-5-4v9m0-9l-3 3m3-3l3 3" />
+        </svg>
+        <span class="block text-sm font-medium" :class="dragOver ? 'text-primary-700' : 'text-neutral-700'">{{ t('purchase_submissions.drop_title') }}</span>
+        <span class="mt-1 block text-xs text-neutral-500">{{ t('purchase_submissions.drop_hint') }}</span>
+      </label>
       <div class="flex flex-wrap items-center gap-3">
-        <label :class="btnOutline('neutral')">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 16V4m0 0L7 9m5-5 5 5M5 14v5a1 1 0 001 1h12a1 1 0 001-1v-5" />
-          </svg>
-          {{ t('purchase_submissions.choose_files') }}
-          <input ref="fileInput" type="file" multiple :accept="allowed" class="hidden" @change="selectFiles" />
-        </label>
         <CapturePhotoButton :disabled="uploading" @captured="(f: File) => addFiles([f])" />
         <span v-if="files.length" class="text-sm text-neutral-600">
           {{ t('purchase_submissions.files_selected', { n: files.length }) }}

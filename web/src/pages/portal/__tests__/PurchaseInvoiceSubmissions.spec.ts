@@ -95,6 +95,10 @@ describe('Předání dokladů: smazání a odmítnutí', () => {
     const second = new File(['%PDF-2'], 'faktura-2.pdf', { type: 'application/pdf' })
     const photo = new File(['jpg'], 'foto-20261106-170000.jpg', { type: 'image/jpeg' })
 
+    // Celá plocha pro přetažení je zároveň klikací výběr souborů (jako v AI importu).
+    const dropzone = wrapper.get('[data-test="portal-dropzone"]')
+    expect(dropzone.element.tagName).toBe('LABEL')
+    expect(dropzone.find('input[type="file"][multiple]').exists()).toBe(true)
     const input = wrapper.get('input[type="file"][multiple]')
     for (const file of [first, second]) {
       Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
