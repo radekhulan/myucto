@@ -4015,6 +4015,30 @@ paths:
         '404':
           $ref: '#/components/responses/NotFound'
 
+  /api/v1/work-report-billing-templates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [WorkReports]
+      summary: Seznam šablon účtování výkazů práce
+      description: |
+        Aktivní šablony aktuální firmy včetně paušálu a pásem hodin, seřazené podle názvu
+        a ID, nejvýše 500 záznamů. Archivované šablony se nevracejí. Dostupné i pro token
+        se scope `read`; vyžaduje čtení alespoň jednoho oprávnění `price_list`, `invoices`
+        nebo `projects`. Funguje i pro firmy se zapnutým skladem a na klientských doménách.
+        ID z odpovědi lze předat jako `billing_template_id` při uložení výkazu práce.
+        Vytváření, úpravy a archivace šablon jsou dostupné pouze ve webovém rozhraní.
+      responses:
+        '200':
+          description: Aktivní šablony firmy; prázdné pole, pokud žádné neexistují.
+          content:
+            application/json:
+              schema:
+                type: array
+                maxItems: 500
+                items: { $ref: '#/components/schemas/WorkReportBillingTemplate' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
   /api/v1/invoices/{id}/work-report/billing-preview:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -48299,6 +48323,13 @@ components:
               up_to_hours: { type: [number, "null"], description: "Rostoucí kumulativní hranice hodin včetně hodin paušálu; poslední pásmo null = bez limitu." }
               rate: { type: number, minimum: 0 }
               description: { type: string }
+    WorkReportBillingTemplate:
+      allOf:
+        - $ref: '#/components/schemas/WorkReportBillingSettings'
+        - type: object
+          required: [id]
+          properties:
+            id: { type: integer, format: int64, minimum: 1, description: "ID aktivní firemní šablony pro billing_template_id výkazu." }
     WorkReportBillingPreview:
       type: object
       properties:

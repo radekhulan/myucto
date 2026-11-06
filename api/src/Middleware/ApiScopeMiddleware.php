@@ -94,6 +94,7 @@ final class ApiScopeMiddleware implements MiddlewareInterface
         '#^/api/catalog/exports/[0-9]+/download$#',
         '#^/api/catalog/changes$#',
         '#^/api/price-list-items(/|$)#',
+        '#^/api/work-report-billing-templates$#',
         // EET a mobilní aplikace: čtení evidence (Domů, Tržby, detail tržby) a se scope
         // `read_write` přijetí platby, QR záměr, opakování, oprava a rychlá účtenka.
         // Nastavení, jednotky, zařízení, certifikáty, diagnostika a export zůstávají
@@ -202,6 +203,8 @@ final class ApiScopeMiddleware implements MiddlewareInterface
      */
     private const BEARER_READ_ONLY = [
         '#^/api/property(/|$)#',
+        // Integrace vybírá existující šablonu výkazu; její správu provádí uživatel v aplikaci.
+        '#^/api/work-report-billing-templates$#',
         // Účetní mutace, které historicky leží mimo /api/accounting. Široký
         // allowlist faktur a banky je nesmí omylem zpřístupnit read_write PAT.
         '#^/api/invoices/[0-9]+/book$#',
