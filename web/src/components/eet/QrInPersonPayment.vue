@@ -330,16 +330,20 @@ const eetUnconfirmed = computed(() => eetIsOpen(confirmed.value))
               </button>
             </div>
           </dl>
-          <button v-if="createError && !loading" type="button" :class="btnOutline('primary')" class="whitespace-nowrap" :disabled="!amountUsable" data-test="eet-qr-retry" @click="regenerate">
-            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.qr" /></svg>
-            {{ t('eet.qr.retry') }}
-          </button>
+          <div v-if="createError && !loading">
+            <button type="button" :class="btnOutline('primary')" class="whitespace-nowrap" :disabled="!amountUsable" data-test="eet-qr-retry" @click="regenerate">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.qr" /></svg>
+              {{ t('eet.qr.retry') }}
+            </button>
+          </div>
 
-          <button type="button" class="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline cursor-pointer"
-            :aria-expanded="editOpen" data-test="eet-qr-edit-toggle" @click="editOpen = !editOpen">
-            <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
-            {{ t('eet.qr.edit_toggle') }}
-          </button>
+          <div>
+            <button type="button" class="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline cursor-pointer"
+              :aria-expanded="editOpen" data-test="eet-qr-edit-toggle" @click="editOpen = !editOpen">
+              <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+              {{ t('eet.qr.edit_toggle') }}
+            </button>
+          </div>
           <div v-if="editOpen" class="space-y-3 rounded-md border border-neutral-200 p-3" data-test="eet-qr-edit">
             <label :class="formLabel">
               <span>{{ t('eet.pay.amount') }} ({{ currency }})</span>
