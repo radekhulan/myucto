@@ -176,6 +176,11 @@ final class PayrollRunPersistenceTest extends TestCase
         $time = $this->container->get(\MyInvoice\Repository\Payroll\PayrollTimeRepository::class);
         $time->saveManualSummary($this->supplierId, $this->employmentId, '2026-06-01', 0, 'Doložených 160 hodin', false,
             [['date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'worked_duration_units' => 480000, 'overtime_duration_units' => 0, 'worked_days' => 20]], $this->actors[0]);
+        // Neschválené hodiny se opravují v panelu hodin, ne v podmínkách vztahu.
+        $unapproved = $this->container->get(PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-06-01', '2026-07-15');
+        $timeBlockers = array_values(array_filter($unapproved->validations, static fn ($validation): bool => str_starts_with($validation->code, 'hourly_time_')));
+        self::assertNotSame([], $timeBlockers, json_encode(array_map(static fn ($validation): string => $validation->code, $unapproved->validations)));
+        self::assertSame("/payroll/quick-inputs?period=2026-06&employment={$this->employmentId}&hours=1", $timeBlockers[0]->remediationPath);
         $month = $time->monthState($this->supplierId, $this->employmentId, '2026-06-01');
         $time->approveMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $month['row_version'], null, $this->actors[0]);
         $source = (new \MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence($this->db))->loadMany($this->supplierId, [$this->employmentId], '2026-06-01')[$this->employmentId];
@@ -215,6 +220,9 @@ final class PayrollRunPersistenceTest extends TestCase
         $previewRows = $this->container->get(PayrollRunSnapshotBuilder::class)->employmentRows($this->supplierId, '2026-06-01', '2026-06-30', null);
         $preview = (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->forMany($this->supplierId, '2026-06-01', $previewRows)[$this->employmentId];
         self::assertTrue($preview['complete'], json_encode($preview['blockers'], JSON_THROW_ON_ERROR));
+        // Kontrola před zahájením: mzda vznikne až zamčením, vztah „bez vstupu" není.
+        $beforeStart = $this->container->get(PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-06-01', '2026-07-15');
+        self::assertNotContains('employment_without_inputs', array_map(static fn ($validation): string => $validation->code, $beforeStart->validations));
         $run = $this->productionService->createRun($this->supplierId, '2026-06-01', '2026-07-15', null, $this->actors[0]);
         $locked = $this->productionService->lockInputs($this->supplierId, (int) $run['id'], (int) $run['row_version'], 'minimum-lock', $this->actors[0]);
         $stmt = $pdo->prepare('SELECT input.id, input.amount_minor FROM payroll_inputs input JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id WHERE input.supplier_id = ? AND input.employment_id = ? AND component.code = "DOPLATEK_MINIMALNI_MZDA" AND input.status IN ("approved", "locked")');

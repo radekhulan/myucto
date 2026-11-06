@@ -181,4 +181,21 @@ final class JmhzBlockerExplainerTest extends TestCase
         self::assertStringContainsString('nelze bezpečně doplnit odhadem', $message);
         self::assertStringNotContainsString('nulu', $message);
     }
+
+    public function testWorkplaceBlockerPrefersTheConcreteMismatch(): void
+    {
+        $blocker = new JmhzScenario1Blocker(
+            'jmhz_workplace_codebooks_unverified',
+            'employment',
+            7,
+            ['10229'],
+            'Místo výkonu práce „Praha" neodpovídá úřednímu názvu obce „Hlavní město Praha".',
+        );
+
+        self::assertStringContainsString('„Hlavní město Praha"', $blocker->toArray()['reason']);
+        self::assertSame(
+            'Chybí ověřené číselníkové údaje pracoviště.',
+            JmhzBlockerExplainer::reason('jmhz_workplace_codebooks_unverified'),
+        );
+    }
 }

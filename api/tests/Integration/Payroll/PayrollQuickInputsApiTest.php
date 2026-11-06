@@ -1033,6 +1033,61 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertSame(5, $items[0]['employment_row_version']);
     }
 
+    /**
+     * Plánovaný vztah s nástupem v měsíci zahrne snímek mzdového běhu a bez
+     * mzdy ho zablokuje. Rychlý vstup ho proto musí ukázat a dovolit zadat
+     * a schválit základ; vztah s nástupem až v dalším měsíci do něj nepatří.
+     * Obojí čte jedno pravidlo PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql().
+     */
+    public function testPlannedEmploymentStartingInMonthIsListedLikeInPayrollRun(): void
+    {
+        $this->employmentEvent($this->employmentId, 'created', null, 'planned', '2026-06-05');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET status = "planned", start_date = "2026-06-05", actual_start_date = NULL
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $later = $this->employment($this->supplierId, 'Pozdější nástup', 'SYN-POZDEJI');
+        $this->employmentEvent($later, 'created', null, 'planned', '2026-07-03');
+        $this->db->pdo()->prepare(
+            'UPDATE payroll_employments
+                SET status = "planned", start_date = "2026-07-03", actual_start_date = NULL
+              WHERE supplier_id = ? AND id = ?'
+        )->execute([$this->supplierId, $later]);
+
+        $row = $this->firstRow('2026-06');
+        self::assertSame($this->employmentId, $row['employment_id']);
+        self::assertSame('planned', $row['effective_status']);
+        $listed = PayrollTimeValue::row($this->json($this->action->list(
+            $this->request('GET')->withQueryParams(['period' => '2026-06']),
+            new Response(),
+        ))['month'] ?? null, 'month');
+        self::assertSame([$this->employmentId], array_column($listed['items'], 'employment_id'));
+        self::assertSame(1, $listed['total'] ?? null);
+
+        $saved = $this->action->save(
+            $this->request('PUT')->withParsedBody([
+                'period' => '2026-06',
+                'rows' => [[
+                    'employment_id' => $this->employmentId,
+                    'employment_row_version' => $row['employment_row_version'],
+                    'base_amount_minor' => 3_500_000,
+                    'overtime_mode' => 'amount',
+                    'overtime_hours_milli' => null,
+                    'overtime_amount_minor' => 0,
+                    'bonus_amount_minor' => 0,
+                    'versions' => ['base' => null, 'overtime' => null, 'bonus' => null],
+                ]],
+            ]),
+            new Response(),
+        );
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        // Správce smí schvalovat, rychlý vstup proto základ rovnou schválí.
+        $base = PayrollTimeValue::row($this->json($saved)['month'] ?? null, 'month')['items'][0]['inputs']['base'];
+        self::assertSame(3_500_000, $base['amount_minor']);
+        self::assertSame('approved', $base['status']);
+    }
+
     public function testSuspensionInMonthRequiresExplicitBase(): void
     {
         $this->employmentEvent($this->employmentId, 'created', null, 'planned', '2026-01-01');

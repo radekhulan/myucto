@@ -135,6 +135,29 @@ final class PayrollHourlyReservedComponentGuardTest extends TestCase
         $this->inputs->create($this->supplierId, $data, $this->userId);
     }
 
+    /** Kolize ručního vstupu s hodinovým výpočtem jmenuje osobu, vztah, složku a odkáže na nápravu. */
+    public function testExternalBaseWageConflictNamesPersonComponentAndLink(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = "MZDA_MESICNI"');
+        $stmt->execute([$this->supplierId]);
+        $componentId = (int) $stmt->fetchColumn();
+
+        try {
+            (new \MyInvoice\Repository\Payroll\PayrollHourlyWageCollisionGuard($this->db))
+                ->externalInputs($this->supplierId, '2026-05-01', [['employment_id' => $this->employmentId, 'component_id' => $componentId]]);
+            self::fail('Ruční základní mzda vedle hodinového výpočtu musí neprojít.');
+        } catch (\MyInvoice\Service\Payroll\PayrollHourlyWageConflictException $e) {
+            self::assertStringContainsString('Syntetická klasifikace hodin (vztah SYN-CLASSIFICATION)', $e->getMessage());
+            self::assertStringContainsString('MZDA_MESICNI', $e->getMessage());
+            self::assertSame(
+                "/payroll/quick-inputs?period=2026-05&employment={$this->employmentId}&hours=1",
+                $e->responseExtra()['details']['link'],
+            );
+        }
+    }
+
     public function testDefaultsDoNotOverlayCustomComponentWithReservedCode(): void
     {
         $pdo = $this->db->pdo();

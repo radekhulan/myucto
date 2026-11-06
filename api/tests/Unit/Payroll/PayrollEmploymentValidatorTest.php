@@ -8,6 +8,7 @@ use MyInvoice\Service\Payroll\CzIscoCodebook;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\PayrollEmploymentTermsBody;
+use MyInvoice\Service\Payroll\PayrollFieldValidationException;
 use MyInvoice\Service\Payroll\Import\Registration\RegistrationImportWriter;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzSpecPackageCatalog;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
@@ -274,19 +275,144 @@ final class PayrollEmploymentValidatorTest extends TestCase
         );
     }
 
-    public function testWorkplaceNameMismatchNamesTheFieldAndOfficialName(): void
+    /**
+     * Zdroj pravdy je kód obce. Volný text „Praha" (import, generátor ukázek)
+     * uložení nezastaví; vrátí varování s úředním názvem a provenience CISOB
+     * se nezapíše, takže příprava JMHZ nesoulad dál hlídá.
+     */
+    public function testWorkplaceNameMismatchIsAWarningWithoutProvenance(): void
     {
         $terms = $this->terms();
+        $terms['effective_from'] = '2026-09-01';
         $terms['work_place'] = 'Praha';
         $terms['jmhz_workplace_municipality_code'] = '554782';
         $terms['jmhz_workplace_country_code'] = 'CZ';
 
+        $warnings = null;
+        $result = $this->validator()->terms($terms, warnings: $warnings);
+
+        self::assertSame('Praha', $result['work_place']);
+        self::assertSame('554782', $result['jmhz_workplace_municipality_code']);
+        self::assertNull($result['jmhz_external_codebook_manifest_sha256']);
+        self::assertNull($result['jmhz_external_codebook_overlay_key']);
+        self::assertCount(1, $warnings);
+        self::assertSame('work_place', $warnings[0]['field']);
+        self::assertSame('workplace_name_mismatch', $warnings[0]['code']);
+        self::assertStringContainsString('Místo výkonu práce „Praha"', $warnings[0]['message']);
+        self::assertStringContainsString('„Hlavní město Praha"', $warnings[0]['message']);
+    }
+
+    public function testEmptyWorkplaceIsFilledWithOfficialMunicipalityName(): void
+    {
+        $terms = $this->terms();
+        $terms['effective_from'] = '2026-09-01';
+        $terms['work_place'] = null;
+        $terms['jmhz_workplace_municipality_code'] = '554782';
+        $terms['jmhz_workplace_country_code'] = 'CZ';
+
+        $warnings = null;
+        $result = $this->validator()->terms($terms, warnings: $warnings);
+
+        self::assertSame('Hlavní město Praha', $result['work_place']);
+        self::assertSame(JmhzExternalCodebookCatalog::DEFAULT_MANIFEST_SHA256, $result['jmhz_external_codebook_manifest_sha256']);
+        self::assertSame([], $warnings);
+    }
+
+    /**
+     * Nový nebo změněný kód obce se ověřuje tvrdě a chyba nese pole; stejný
+     * kód, který už je uložený, uložení jiného pole nezablokuje.
+     */
+    public function testUnknownMunicipalityCodeIsHardOnlyWhenChanged(): void
+    {
+        $terms = $this->terms();
+        $terms['effective_from'] = '2026-09-01';
+        $terms['work_place'] = 'Neznámá obec';
+        $terms['jmhz_workplace_municipality_code'] = '999999';
+        $terms['jmhz_workplace_country_code'] = 'CZ';
+
         try {
             $this->validator()->terms($terms);
-            self::fail('Neshodný název místa výkonu práce musí neprojít.');
-        } catch (\InvalidArgumentException $e) {
-            self::assertStringContainsString('Místo výkonu práce „Praha"', $e->getMessage());
-            self::assertStringContainsString('„Hlavní město Praha"', $e->getMessage());
+            self::fail('Neznámý nový kód obce musí neprojít.');
+        } catch (PayrollFieldValidationException $e) {
+            self::assertSame('jmhz_workplace_municipality_code', $e->field);
+        }
+
+        $stored = $terms;
+        $terms['weekly_hours'] = '30';
+        $warnings = null;
+        $result = $this->validator()->terms($terms, stored: $stored, warnings: $warnings);
+        self::assertSame('999999', $result['jmhz_workplace_municipality_code']);
+        self::assertNull($result['jmhz_external_codebook_manifest_sha256']);
+        self::assertSame(['jmhz_workplace_municipality_code'], array_column($warnings, 'field'));
+    }
+
+    public function testUnchangedCodebookFieldsWarnButChangedOnesFailWithField(): void
+    {
+        $terms = $this->terms();
+        $terms['activity_code'] = 'ZZ';
+        $terms['jmhz_temporary_assignment_status'] = 'yes';
+        $terms['jmhz_assignment_user_kind'] = 'ico';
+        $terms['jmhz_assignment_user_ico'] = '12345678';
+        $terms['cz_isco_code'] = '12345';
+
+        try {
+            $this->validator()->terms(['activity_code' => 'ZZ'] + $this->terms());
+            self::fail('Neznámý nový druh činnosti musí neprojít.');
+        } catch (PayrollFieldValidationException $e) {
+            self::assertSame('activity_code', $e->field);
+        }
+
+        $warnings = null;
+        $result = $this->validator()->terms($terms, stored: $terms, warnings: $warnings);
+        self::assertSame('ZZ', $result['activity_code']);
+        self::assertSame('12345678', $result['jmhz_assignment_user_ico']);
+        self::assertSame('12345', $result['cz_isco_code']);
+        self::assertEqualsCanonicalizing(
+            ['activity_code', 'jmhz_assignment_user_ico', 'cz_isco_code'],
+            array_column($warnings, 'field'),
+        );
+
+        $changedIco = $terms;
+        $changedIco['jmhz_assignment_user_ico'] = '87654321';
+        try {
+            $this->validator()->terms($changedIco, stored: $terms);
+            self::fail('Změněné IČO uživatele musí projít kontrolním součtem.');
+        } catch (PayrollFieldValidationException $e) {
+            self::assertSame('jmhz_assignment_user_ico', $e->field);
+        }
+    }
+
+    public function testForeignRegimeWithoutCountryIsSoftOnlyWhenUnchanged(): void
+    {
+        $terms = $this->terms();
+        $terms['foreign_legislation_country_code'] = null;
+
+        $warnings = null;
+        $result = $this->validator()->terms($terms, stored: $terms, warnings: $warnings);
+        self::assertSame('foreign', $result['tax_regime']);
+        self::assertSame(['foreign_legislation_country_code'], array_column($warnings, 'field'));
+
+        $this->expectException(PayrollFieldValidationException::class);
+        $this->validator()->terms($terms, stored: ['tax_regime' => 'advance'] + $terms);
+    }
+
+    /** Podklad odměňování chybí u hodinového vztahu: chyba ukáže na konkrétní pole. */
+    public function testHourlyBasisErrorsNameTheField(): void
+    {
+        $valid = $this->terms() + ['remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'remuneration_basis_kind' => 'agreement', 'remuneration_basis' => 'Dohoda'];
+        foreach ([
+            'remuneration_basis' => ['remuneration_basis' => null],
+            'remuneration_basis_kind' => ['remuneration_basis_kind' => null],
+            'hourly_rate_minor' => ['hourly_rate_minor' => 0],
+            'monthly_gross_minor' => ['monthly_gross_minor' => 100],
+        ] as $field => $changes) {
+            try {
+                $this->validator()->terms(array_replace($valid, $changes), stored: $valid, relationType: 'employment');
+                self::fail("Hodinové odměňování bez {$field} bylo přijato.");
+            } catch (PayrollFieldValidationException $e) {
+                self::assertSame($field, $e->field);
+                self::assertSame(['details' => ['field' => $field]], PayrollFieldValidationException::responseExtra($e));
+            }
         }
     }
 

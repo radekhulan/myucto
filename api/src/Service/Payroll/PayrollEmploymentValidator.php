@@ -138,9 +138,10 @@ final class PayrollEmploymentValidator
     }
 
     /** @param array<string,mixed> $input
+     *  @param ?list<array{field:string,code:string,message:string}> $warnings výstup, viz {@see terms()}
      *  @return EmploymentCreateInput
      */
-    public function create(array $input): array
+    public function create(array $input, ?array &$warnings = null): array
     {
         /*
          * Kód je nepovinný a prázdný znamená „vygeneruj".
@@ -167,7 +168,7 @@ final class PayrollEmploymentValidator
             throw new \InvalidArgumentException('Chybí počáteční smluvní podmínky.');
         }
 
-        $terms = $this->terms($this->stringKeyed($input['terms']), relationType: $relationType);
+        $terms = $this->terms($this->stringKeyed($input['terms']), relationType: $relationType, warnings: $warnings);
         if ($terms['remuneration_type'] === 'hourly' && $gross !== null) {
             throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
         }
@@ -224,6 +225,17 @@ final class PayrollEmploymentValidator
      *        tím zahodit — viz {@see otherWithholdingEligibility()}.
      * @param ?string $relationType Druh vztahu načtený serverem nebo právě
      *        validovaný při založení; váže rodinu činností JMHZ k právnímu typu.
+     * @param ?array<string,mixed> $stored Uložená verze podmínek, kterou požadavek
+     *        mění ({@see \MyInvoice\Repository\Payroll\PayrollEmploymentRepository::currentTerms()}).
+     *        Předává ji zápisová cesta, NIKDY klient. Číselníkové a konzistenční
+     *        kontroly pole, které se proti ní nemění, uložení neblokují — skončí
+     *        ve `$warnings` a tvrdě se hlídají až tam, kde se hodnota použije
+     *        (příprava JMHZ a REGZEC, výpočet běhu). Typy, formáty, výčty
+     *        a celé hodinové odměňování zůstávají tvrdé vždy.
+     * @param ?list<array{field:string,code:string,message:string}> $warnings
+     *        výstup: kontroly nezměněných polí, které neprošly, a nesoulad názvu
+     *        místa výkonu práce s CISOB
+     * @param-out list<array{field:string,code:string,message:string}> $warnings
      * @return TermsInput
      */
     public function terms(
@@ -231,61 +243,71 @@ final class PayrollEmploymentValidator
         ?string $storedCzIscoCode = null,
         ?string $storedOtherWithholdingEligibility = null,
         ?string $relationType = null,
+        ?array $stored = null,
+        ?array &$warnings = null,
     ): array {
+        $warnings ??= [];
         $effectiveFrom = $this->requiredDate($input, 'effective_from');
         $remunerationType = $input['remuneration_type'] ?? null;
         if ($remunerationType !== null && !in_array($remunerationType, ['monthly', 'hourly'], true)) {
-            throw new \InvalidArgumentException('Způsob odměňování není podporován.');
+            throw new PayrollFieldValidationException('Způsob odměňování není podporován.', 'remuneration_type');
         }
         $hourlyRate = $input['hourly_rate_minor'] ?? null;
         $basisKind = $input['remuneration_basis_kind'] ?? null;
         if ($basisKind !== null && !in_array($basisKind, self::REMUNERATION_BASIS_KINDS, true)) {
-            throw new \InvalidArgumentException('Druh podkladu odměňování není podporován.');
+            throw new PayrollFieldValidationException('Druh podkladu odměňování není podporován.', 'remuneration_basis_kind');
         }
         if (isset($input['remuneration_basis']) && !is_string($input['remuneration_basis'])) {
-            throw new \InvalidArgumentException('Označení podkladu odměňování musí být text.');
+            throw new PayrollFieldValidationException('Označení podkladu odměňování musí být text.', 'remuneration_basis');
         }
         $basis = $this->optionalText($input, 'remuneration_basis', 255);
         if ($remunerationType === 'hourly') {
             if ($relationType !== null && !in_array($relationType, ['employment', 'small_scale_employment', 'dpp', 'dpc'], true)) {
-                throw new \InvalidArgumentException('Hodinové odměňování není pro tento typ vztahu podporováno.');
+                throw new PayrollFieldValidationException('Hodinové odměňování není pro tento typ vztahu podporováno.', 'remuneration_type');
             }
-            if (!is_int($hourlyRate) || $hourlyRate <= 0 || $hourlyRate > self::MAX_HOURLY_RATE_MINOR || $basisKind === null || $basis === null) {
-                throw new \InvalidArgumentException('Hodinové odměňování vyžaduje kladnou sazbu v haléřích, druh a označení podkladu.');
+            if (!is_int($hourlyRate) || $hourlyRate <= 0 || $hourlyRate > self::MAX_HOURLY_RATE_MINOR) {
+                throw new PayrollFieldValidationException('Hodinové odměňování vyžaduje kladnou hodinovou sazbu v haléřích.', 'hourly_rate_minor');
+            }
+            // Podklad vyžaduje databázová podmínka chk_payroll_terms_remuneration.
+            if ($basisKind === null) {
+                throw new PayrollFieldValidationException('Hodinové odměňování vyžaduje druh podkladu odměňování (mzdový výměr, smlouva, dohoda…).', 'remuneration_basis_kind');
+            }
+            if ($basis === null) {
+                throw new PayrollFieldValidationException('Hodinové odměňování vyžaduje označení podkladu odměňování, například „Mzdový výměr účinný od 1. 1. 2027".', 'remuneration_basis');
             }
             if ($this->optionalMonthlyGrossMinor($input) !== null) {
-                throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
+                throw new PayrollFieldValidationException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.', 'monthly_gross_minor');
             }
         } elseif ($hourlyRate !== null) {
-            throw new \InvalidArgumentException('Měsíční odměňování nesmí mít hodinovou sazbu.');
+            throw new PayrollFieldValidationException('Měsíční odměňování nesmí mít hodinovou sazbu.', 'hourly_rate_minor');
         }
         $plannedStart = $this->requiredDate($input, 'planned_start_on');
         $fixedEnd = $this->optionalDate($input, 'fixed_term_end_on');
         if ($fixedEnd !== null && $fixedEnd < $plannedStart) {
-            throw new \InvalidArgumentException('Konec doby určité nesmí předcházet plánovanému nástupu.');
+            throw new PayrollFieldValidationException('Konec doby určité nesmí předcházet plánovanému nástupu.', 'fixed_term_end_on');
         }
 
         $officeId = $input['office_id'] ?? null;
         if ($officeId !== null && (!is_int($officeId) || $officeId <= 0)) {
-            throw new \InvalidArgumentException('Mzdová účtárna není platná.');
+            throw new PayrollFieldValidationException('Mzdová účtárna není platná.', 'office_id');
         }
         $hours = $input['weekly_hours'] ?? null;
         if ($hours !== null) {
             if ((!is_string($hours) && !is_int($hours))
                 || preg_match('/^(\d{1,3})(?:\.(\d{1,2}))?$/', (string) $hours, $parts) !== 1) {
-                throw new \InvalidArgumentException('Týdenní pracovní doba není platná.');
+                throw new PayrollFieldValidationException('Týdenní pracovní doba není platná.', 'weekly_hours');
             }
             $whole = (int) $parts[1];
             $fraction = str_pad($parts[2] ?? '', 2, '0');
             $centiHours = ($whole * 100) + (int) $fraction;
             if ($centiHours <= 0 || $centiHours > 16800) {
-                throw new \InvalidArgumentException('Týdenní pracovní doba musí být větší než nula a nejvýše 168 hodin.');
+                throw new PayrollFieldValidationException('Týdenní pracovní doba musí být větší než nula a nejvýše 168 hodin.', 'weekly_hours');
             }
             $hours = sprintf('%d.%02d', intdiv($centiHours, 100), $centiHours % 100);
         }
         $workload = $input['workload_basis_points'] ?? 10000;
         if (!is_int($workload) || $workload < 1 || $workload > 10000) {
-            throw new \InvalidArgumentException('Úvazek musí být od 0,01 % do 100 %.');
+            throw new PayrollFieldValidationException('Úvazek musí být od 0,01 % do 100 %.', 'workload_basis_points');
         }
 
         $social = $this->inputString($input['social_insurance_participation'] ?? 'automatic');
@@ -299,10 +321,25 @@ final class PayrollEmploymentValidator
         $country = strtoupper(trim($this->inputString($input['foreign_legislation_country_code'] ?? '')));
         $country = $country === '' ? null : $country;
         if ($country !== null && !preg_match('/^[A-Z]{2}$/', $country)) {
-            throw new \InvalidArgumentException('Kód státu cizích právních předpisů není platný.');
+            throw new PayrollFieldValidationException('Kód státu cizích právních předpisů není platný.', 'foreign_legislation_country_code');
         }
-        if (($social === 'foreign' || $health === 'foreign' || $tax === 'foreign') && $country === null) {
-            throw new \InvalidArgumentException('Cizí režim vyžaduje kód státu právních předpisů.');
+        if ($social === 'foreign' || $health === 'foreign' || $tax === 'foreign') {
+            self::soft(
+                self::unchanged($stored, [
+                    'social_insurance_participation' => $social,
+                    'health_insurance_participation' => $health,
+                    'tax_regime' => $tax,
+                    'foreign_legislation_country_code' => $country,
+                ]),
+                'foreign_legislation_country_code',
+                'foreign_legislation_country_missing',
+                static function () use ($country): void {
+                    if ($country === null) {
+                        throw new \InvalidArgumentException('Cizí režim vyžaduje kód státu právních předpisů.');
+                    }
+                },
+                $warnings,
+            );
         }
 
         $workPlace = $this->optionalText($input, 'work_place', 255);
@@ -311,54 +348,95 @@ final class PayrollEmploymentValidator
             $this->optionalText($input, 'jmhz_workplace_country_code', 2) ?? '',
         );
         $workplaceCountry = $workplaceCountry === '' ? null : $workplaceCountry;
+        $workplaceVerified = false;
         if ($municipalityCode === null) {
             if ($workplaceCountry !== null) {
-                throw new \InvalidArgumentException(
+                throw new PayrollFieldValidationException(
                     'Pracoviště JMHZ vyžaduje k místu výkonu práce současně šestimístný kód obce a kód státu.',
+                    'jmhz_workplace_municipality_code',
                 );
             }
         } else {
-            if ($workplaceCountry === null || $workPlace === null) {
-                throw new \InvalidArgumentException(
+            if ($workplaceCountry === null) {
+                throw new PayrollFieldValidationException(
                     'Pracoviště JMHZ vyžaduje k místu výkonu práce současně šestimístný kód obce a kód státu.',
+                    'jmhz_workplace_country_code',
                 );
             }
             if (preg_match('/^[0-9]{6}$/', $municipalityCode) !== 1) {
-                throw new \InvalidArgumentException('Kód obce pracoviště JMHZ musí mít přesně šest číslic.');
+                throw new PayrollFieldValidationException('Kód obce pracoviště JMHZ musí mít přesně šest číslic.', 'jmhz_workplace_municipality_code');
             }
             if (preg_match('/^[A-Z]{2}$/', $workplaceCountry) !== 1) {
-                throw new \InvalidArgumentException('Kód státu pracoviště JMHZ musí mít dvě velká písmena.');
+                throw new PayrollFieldValidationException('Kód státu pracoviště JMHZ musí mít dvě velká písmena.', 'jmhz_workplace_country_code');
             }
-            $this->jmhzEvidence->requireWorkplace(
-                $municipalityCode,
-                $workPlace,
-                $workplaceCountry,
-                $effectiveFrom,
+            // Zdroj pravdy je kód obce; prázdné místo výkonu práce doplní
+            // úřední název z CISOB, jinak by ho musel každý import opisovat.
+            $workPlace ??= $this->jmhzEvidence->officialMunicipalityName($municipalityCode, $effectiveFrom)
+                ?? throw new PayrollFieldValidationException(
+                    'Pracoviště JMHZ vyžaduje k místu výkonu práce současně šestimístný kód obce a kód státu.',
+                    'work_place',
+                );
+            $workplaceUnchanged = self::unchanged($stored, [
+                'jmhz_workplace_municipality_code' => $municipalityCode,
+                'jmhz_workplace_country_code' => $workplaceCountry,
+            ]);
+            $workplaceVerified = self::soft(
+                $workplaceUnchanged,
+                'jmhz_workplace_municipality_code',
+                'workplace_municipality_unverified',
+                fn () => $this->jmhzEvidence->requireWorkplaceMunicipality($municipalityCode, $effectiveFrom),
+                $warnings,
             );
+            $workplaceVerified = self::soft(
+                $workplaceUnchanged,
+                'jmhz_workplace_country_code',
+                'workplace_country_unverified',
+                fn () => $this->jmhzEvidence->requireWorkplaceCountry($workplaceCountry, $effectiveFrom),
+                $warnings,
+            ) && $workplaceVerified;
+            /*
+             * Název obce uložení neblokuje nikdy: `work_place` je volný text
+             * smlouvy (mzdový výměr, A1). Do JMHZ ale jde jako název obce
+             * (10229) a běh ho ověřuje proti CISOB, takže nesoulad se vrátí
+             * jako varování a provenience číselníku se nezapíše.
+             */
+            if ($workplaceVerified) {
+                $mismatch = $this->jmhzEvidence->workplaceNameMismatch($municipalityCode, $workPlace, $effectiveFrom);
+                if ($mismatch !== null) {
+                    $warnings[] = ['field' => 'work_place', 'code' => 'workplace_name_mismatch', 'message' => $mismatch];
+                    $workplaceVerified = false;
+                }
+            }
         }
         // Provenience se zapisuje jen tam, kde připnuté číselníky na období
-        // sahají. U vztahu staršího než JMHZ žádná neexistuje a vymýšlet ji by
-        // znamenalo tvrdit, že se hodnota ověřila proti něčemu, co pro tu dobu
-        // není.
-        $externalCodebook = $municipalityCode === null
+        // sahají a pracoviště jimi prošlo. U vztahu staršího než JMHZ žádná
+        // neexistuje a vymýšlet ji by znamenalo tvrdit, že se hodnota ověřila
+        // proti něčemu, co pro tu dobu není.
+        $externalCodebook = !$workplaceVerified
             || !$this->jmhzEvidence->externalCodebooksCover($effectiveFrom)
             ? null
             : $this->jmhzEvidence->externalCodebookProvenance($effectiveFrom);
-        $workplaceAddress = $this->workplaceAddress($input, $municipalityCode);
+        $workplaceAddress = $this->workplaceAddress($input, $municipalityCode, $stored, $warnings);
 
         $apzStatus = $this->verifiedState($input, 'jmhz_apz_contribution_status');
         $apzCode = $this->optionalText($input, 'jmhz_apz_instrument_code', 8);
         if ($apzStatus === 'yes') {
             if ($apzCode === null) {
-                throw new \InvalidArgumentException('Příspěvek APZ vyžaduje kód nástroje APZ.');
+                throw new PayrollFieldValidationException('Příspěvek APZ vyžaduje kód nástroje APZ.', 'jmhz_apz_instrument_code');
             }
-            $this->jmhzEvidence->requireApzInstrument($apzCode);
+            self::soft(
+                self::unchanged($stored, ['jmhz_apz_instrument_code' => $apzCode]),
+                'jmhz_apz_instrument_code',
+                'apz_instrument_unknown',
+                fn () => $this->jmhzEvidence->requireApzInstrument($apzCode),
+                $warnings,
+            );
         } elseif ($apzCode !== null) {
-            throw new \InvalidArgumentException('Bez příspěvku APZ nesmí být kód nástroje APZ vyplněn.');
+            throw new PayrollFieldValidationException('Bez příspěvku APZ nesmí být kód nástroje APZ vyplněn.', 'jmhz_apz_instrument_code');
         }
         $functionalBenefits = $this->verifiedState($input, 'jmhz_functional_benefits_status');
         $temporaryAssignment = $this->verifiedState($input, 'jmhz_temporary_assignment_status');
-        $assignmentUser = $this->temporaryAssignmentUser($input, $temporaryAssignment);
+        $assignmentUser = $this->temporaryAssignmentUser($input, $temporaryAssignment, $stored, $warnings);
         [$rateCategory, $rateCategoryEvidence] = $this->socialEmployerRateCategory($input);
         $riskCategorization = $this->riskCategorizationCode($input, $rateCategory);
         [$discountReason, $discountEvidence, $discountNotifiedOn] =
@@ -369,30 +447,65 @@ final class PayrollEmploymentValidator
             'jmhz_relationship_detail_code',
             1,
         );
-        if ($activityCode !== null) {
-            $this->jmhzEvidence->requireActivityCode($activityCode);
-        }
+        $activityUnchanged = self::unchanged($stored, [
+            'activity_code' => $activityCode,
+            'jmhz_relationship_detail_code' => $relationshipDetailCode,
+        ]);
+        $activityKnown = $activityCode === null || self::soft(
+            $activityUnchanged,
+            'activity_code',
+            'activity_code_unknown',
+            fn () => $this->jmhzEvidence->requireActivityCode($activityCode),
+            $warnings,
+        );
         if ($relationshipDetailCode !== null) {
-            $this->jmhzEvidence->requireRelationshipDetailCode($relationshipDetailCode);
-        }
-        if ($activityCode !== null) {
-            $relationshipDetailCode = PayrollRegistrationRelationshipDetailPolicy::requireForEvidence(
-                $activityCode,
-                $relationshipDetailCode,
+            self::soft(
+                $activityUnchanged,
+                'jmhz_relationship_detail_code',
+                'relationship_detail_code_unknown',
+                fn () => $this->jmhzEvidence->requireRelationshipDetailCode($relationshipDetailCode),
+                $warnings,
             );
         }
-        if ($relationType !== null) {
-            $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode);
+        if ($activityCode !== null && $activityKnown) {
+            $normalizedDetail = $relationshipDetailCode;
+            if (self::soft(
+                $activityUnchanged,
+                'jmhz_relationship_detail_code',
+                'relationship_detail_code_invalid',
+                static function () use (&$normalizedDetail, $activityCode, $relationshipDetailCode): void {
+                    $normalizedDetail = PayrollRegistrationRelationshipDetailPolicy::requireForEvidence(
+                        $activityCode,
+                        $relationshipDetailCode,
+                    );
+                },
+                $warnings,
+            )) {
+                $relationshipDetailCode = $normalizedDetail;
+            }
+        }
+        if ($relationType !== null && $activityKnown) {
+            self::soft(
+                $activityUnchanged,
+                'activity_code',
+                'activity_family_mismatch',
+                fn () => $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode),
+                $warnings,
+            );
         }
 
         $probableEarning = $this->probableEarning($input);
         $healthAssociationMember = $this->requiredBool($input, 'health_association_member', false);
         if ($healthAssociationMember && in_array($relationType, ['dpp', 'dpc'], true)) {
-            throw new \InvalidArgumentException(
+            throw new PayrollFieldValidationException(
                 'Člen družstva nebo SVJ se pro zdravotní pojištění posuzuje jen u vztahu, '
                 . 'který není dohodou. U DPP a DPČ platí vlastní hranice příjmu.',
+                'health_association_member',
             );
         }
+        $storedCzIscoCode ??= is_string($stored['cz_isco_code'] ?? null) ? $stored['cz_isco_code'] : null;
+        $czIscoCode = $this->optionalCzIscoCode($input, 'cz_isco_code', $storedCzIscoCode, $warnings);
+        $warnings = self::uniqueWarnings($warnings);
 
         return [
             'office_id' => $officeId,
@@ -446,7 +559,7 @@ final class PayrollEmploymentValidator
                 'jmhz_deep_mining_work_applies',
                 false,
             ),
-            'cz_isco_code' => $this->optionalCzIscoCode($input, 'cz_isco_code', $storedCzIscoCode),
+            'cz_isco_code' => $czIscoCode,
             'activity_code' => $activityCode,
             'jmhz_relationship_detail_code' => $relationshipDetailCode,
             'social_insurance_participation' => $social,
@@ -470,6 +583,85 @@ final class PayrollEmploymentValidator
             'is_primary' => $this->requiredBool($input, 'is_primary', false),
             'change_reason' => $this->optionalText($input, 'change_reason', 500),
         ];
+    }
+
+    /**
+     * Shoduje se pole požadavku s uloženou verzí? Porovnává se po normalizaci
+     * (ořez, prázdný text = null, čísla jako text). Bez uložené verze (založení,
+     * import) je každé pole „změněné", takže kontrola zůstává tvrdá.
+     *
+     * @param ?array<string,mixed> $stored
+     * @param array<string,mixed> $values
+     */
+    private static function unchanged(?array $stored, array $values): bool
+    {
+        if ($stored === null) {
+            return false;
+        }
+        foreach ($values as $key => $value) {
+            if (self::comparable($value) !== self::comparable($stored[$key] ?? null)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static function comparable(mixed $value): ?string
+    {
+        if (is_bool($value)) {
+            return $value ? '1' : '0';
+        }
+        if (is_int($value) || is_float($value)) {
+            return (string) $value;
+        }
+        if (!is_string($value)) {
+            return null;
+        }
+        $value = trim($value);
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * Číselníková nebo konzistenční kontrola, která u NEZMĚNĚNÉHO pole uložení
+     * nezastaví. Změněné pole projde kontrolou tvrdě a chyba nese `field`.
+     *
+     * @param callable():void $check
+     * @param list<array{field:string,code:string,message:string}> $warnings
+     * @return bool prošla kontrola?
+     */
+    private static function soft(bool $unchanged, string $field, string $code, callable $check, array &$warnings): bool
+    {
+        try {
+            $check();
+
+            return true;
+        } catch (\InvalidArgumentException $e) {
+            $failedField = $e instanceof PayrollFieldValidationException ? $e->field : $field;
+            if (!$unchanged) {
+                throw $e instanceof PayrollFieldValidationException
+                    ? $e
+                    : new PayrollFieldValidationException($e->getMessage(), $failedField, null, $e);
+            }
+            $warnings[] = ['field' => $failedField, 'code' => $code, 'message' => $e->getMessage()];
+
+            return false;
+        }
+    }
+
+    /**
+     * @param list<array{field:string,code:string,message:string}> $warnings
+     * @return list<array{field:string,code:string,message:string}>
+     */
+    private static function uniqueWarnings(array $warnings): array
+    {
+        $unique = [];
+        foreach ($warnings as $warning) {
+            $unique[$warning['field'] . '|' . $warning['code']] ??= $warning;
+        }
+
+        return array_values($unique);
     }
 
     /**
@@ -628,7 +820,7 @@ final class PayrollEmploymentValidator
     private function requiredDate(array $input, string $key): string
     {
         return $this->date($this->inputString($input[$key] ?? ''), $key)
-            ?? throw new \InvalidArgumentException("Pole {$key} je povinné.");
+            ?? throw new PayrollFieldValidationException("Pole {$key} je povinné.", $key);
     }
 
     /** @param array<string,mixed> $input */
@@ -646,7 +838,7 @@ final class PayrollEmploymentValidator
         $errors = \DateTimeImmutable::getLastErrors();
         if ($date === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
             || $date->format('Y-m-d') !== $value) {
-            throw new \InvalidArgumentException("Pole {$key} musí být datum YYYY-MM-DD.");
+            throw new PayrollFieldValidationException("Pole {$key} musí být datum YYYY-MM-DD.", $key);
         }
         return $value;
     }
@@ -715,9 +907,10 @@ final class PayrollEmploymentValidator
             return null;
         }
         if (!in_array($code, ['6', '7'], true)) {
-            throw new \InvalidArgumentException(
+            throw new PayrollFieldValidationException(
                 'Kategorizace rizika pro JMHZ musí být 6 (zdravotnický záchranář)'
                 . ' nebo 7 (člen jednotky HZS podniku).',
+                'jmhz_risk_categorization_code',
             );
         }
 
@@ -733,7 +926,14 @@ final class PayrollEmploymentValidator
      * aby v podmínkách nezůstal osiřelý uživatel. Nevyplněný uživatel
      * uložení nebrání, hlášení ho vyžádá nálezem.
      *
+     * IČO s kontrolním součtem a tvar zahraniční identifikace hlídá kontrola
+     * 103 ČSSZ, ne databáze: u nezměněného uživatele uložení nezastaví a
+     * hlášení je vyžádá samo. Druh uživatele a úplnost údajů hlídá
+     * `chk_payroll_employment_term_assignment_user`, ty zůstávají tvrdé.
+     *
      * @param array<string,mixed> $input
+     * @param ?array<string,mixed> $stored
+     * @param list<array{field:string,code:string,message:string}> $warnings
      * @return array{
      *   jmhz_assignment_user_kind:?string,
      *   jmhz_assignment_user_ico:?string,
@@ -742,7 +942,7 @@ final class PayrollEmploymentValidator
      *   jmhz_assignment_user_name:?string
      * }
      */
-    private function temporaryAssignmentUser(array $input, string $status): array
+    private function temporaryAssignmentUser(array $input, string $status, ?array $stored, array &$warnings): array
     {
         $empty = [
             'jmhz_assignment_user_kind' => null,
@@ -757,33 +957,76 @@ final class PayrollEmploymentValidator
         }
         if ($kind === 'ico') {
             $ico = preg_replace('/\s+/', '', $this->inputString($input['jmhz_assignment_user_ico'] ?? ''));
-            if (!is_string($ico) || !self::validIco($ico)) {
-                throw new \InvalidArgumentException(
+            $ico = is_string($ico) ? $ico : '';
+            if ($ico === '') {
+                throw new PayrollFieldValidationException(
                     'IČO uživatele u dočasného přidělení musí mít osm číslic a platný kontrolní součet.',
+                    'jmhz_assignment_user_ico',
                 );
             }
+            self::soft(
+                self::unchanged($stored, ['jmhz_assignment_user_kind' => 'ico', 'jmhz_assignment_user_ico' => $ico]),
+                'jmhz_assignment_user_ico',
+                'assignment_user_ico_invalid',
+                static function () use ($ico): void {
+                    if (!self::validIco($ico)) {
+                        throw new \InvalidArgumentException(
+                            'IČO uživatele u dočasného přidělení musí mít osm číslic a platný kontrolní součet.',
+                        );
+                    }
+                },
+                $warnings,
+            );
 
             return ['jmhz_assignment_user_kind' => 'ico', 'jmhz_assignment_user_ico' => $ico] + $empty;
         }
         if ($kind !== 'foreign') {
-            throw new \InvalidArgumentException('Druh uživatele u dočasného přidělení není podporován.');
+            throw new PayrollFieldValidationException('Druh uživatele u dočasného přidělení není podporován.', 'jmhz_assignment_user_kind');
         }
         $country = strtoupper(trim($this->inputString($input['jmhz_assignment_user_country_code'] ?? '')));
         $foreignId = preg_replace('/\s+/', '', $this->inputString($input['jmhz_assignment_user_foreign_id'] ?? ''));
+        $foreignId = is_string($foreignId) ? $foreignId : '';
         $name = $this->optionalText($input, 'jmhz_assignment_user_name', 100);
-        if (preg_match('/^[A-Z]{2}$/', $country) !== 1 || $country === 'CZ') {
-            throw new \InvalidArgumentException(
-                'Zahraniční uživatel u dočasného přidělení potřebuje dvoupísmenný kód cizího státu.',
-            );
-        }
-        if (!is_string($foreignId) || preg_match('/^[0-9]{8}$/', $foreignId) !== 1) {
-            throw new \InvalidArgumentException(
-                'Registrační číslo zahraničního uživatele musí mít pro JMHZ přesně osm číslic.',
+        if ($country === '' || $foreignId === '') {
+            throw new PayrollFieldValidationException(
+                'Zahraniční uživatel u dočasného přidělení potřebuje kód cizího státu a registrační číslo.',
+                $country === '' ? 'jmhz_assignment_user_country_code' : 'jmhz_assignment_user_foreign_id',
             );
         }
         if ($name === null) {
-            throw new \InvalidArgumentException('Doplňte název zahraničního uživatele.');
+            throw new PayrollFieldValidationException('Doplňte název zahraničního uživatele.', 'jmhz_assignment_user_name');
         }
+        $unchanged = self::unchanged($stored, [
+            'jmhz_assignment_user_kind' => 'foreign',
+            'jmhz_assignment_user_country_code' => $country,
+            'jmhz_assignment_user_foreign_id' => $foreignId,
+        ]);
+        self::soft(
+            $unchanged,
+            'jmhz_assignment_user_country_code',
+            'assignment_user_country_invalid',
+            static function () use ($country): void {
+                if (preg_match('/^[A-Z]{2}$/', $country) !== 1 || $country === 'CZ') {
+                    throw new \InvalidArgumentException(
+                        'Zahraniční uživatel u dočasného přidělení potřebuje dvoupísmenný kód cizího státu.',
+                    );
+                }
+            },
+            $warnings,
+        );
+        self::soft(
+            $unchanged,
+            'jmhz_assignment_user_foreign_id',
+            'assignment_user_foreign_id_invalid',
+            static function () use ($foreignId): void {
+                if (preg_match('/^[0-9]{8}$/', $foreignId) !== 1) {
+                    throw new \InvalidArgumentException(
+                        'Registrační číslo zahraničního uživatele musí mít pro JMHZ přesně osm číslic.',
+                    );
+                }
+            },
+            $warnings,
+        );
 
         return [
             'jmhz_assignment_user_kind' => 'foreign',
@@ -840,7 +1083,7 @@ final class PayrollEmploymentValidator
     {
         $value = trim($this->inputString($input[$key] ?? ''));
         if (mb_strlen($value) > $maxLength) {
-            throw new \InvalidArgumentException("Pole {$key} je příliš dlouhé.");
+            throw new PayrollFieldValidationException("Pole {$key} je příliš dlouhé.", $key);
         }
         return $value === '' ? null : $value;
     }
@@ -850,7 +1093,7 @@ final class PayrollEmploymentValidator
     {
         $value = $this->optionalText($input, $key, $maxLength);
         if ($value !== null && !preg_match('/^[A-Za-z0-9._\/-]+$/', $value)) {
-            throw new \InvalidArgumentException("Pole {$key} není platný kód.");
+            throw new PayrollFieldValidationException("Pole {$key} není platný kód.", $key);
         }
         return $value;
     }
@@ -878,34 +1121,40 @@ final class PayrollEmploymentValidator
      *      formulář, ve kterém mění dovolenou nebo mzdu, aniž by ho blokovalo
      *      cizí historické pole — ale jakmile na CZ-ISCO sáhne, musí trefit
      *      číselník. Nové hodnoty jsou tím vynucené, existující nezablokované.
+     *      Uložení takového kódu vrátí varování, aby ho účetní mohla opravit.
      *
      * @param array<string,mixed> $input
+     * @param list<array{field:string,code:string,message:string}> $warnings
      */
-    private function optionalCzIscoCode(array $input, string $key, ?string $storedCode = null): ?string
+    private function optionalCzIscoCode(array $input, string $key, ?string $storedCode = null, ?array &$warnings = null): ?string
     {
         $value = $this->optionalText($input, $key, 16);
         if ($value === null) {
             return null;
         }
         if (preg_match('/^[0-9]{4,5}$/D', $value) !== 1) {
-            throw new \InvalidArgumentException(
+            throw new PayrollFieldValidationException(
                 "Kód CZ-ISCO {$value} nemá platný tvar. Zadejte čtyř- nebo pětimístné číslo, například 25120.",
+                $key,
             );
         }
         $status = $this->czIsco->status($value);
         if ($status === CzIscoCodebook::STATUS_ACTIVE || $status === CzIscoCodebook::STATUS_RETIRED) {
             return $value;
         }
-        if ($storedCode !== null && $storedCode === $value) {
-            return $value;
-        }
-        throw new \InvalidArgumentException(sprintf(
+        $message = sprintf(
             'Kód CZ-ISCO %s v klasifikaci zaměstnání ČSÚ (verze %s) neexistuje. '
                 . 'Vyberte kód z našeptávače — stačí napsat část názvu profese, '
                 . 'třeba „účetní" najde 43111 Účetní všeobecní.',
             $value,
             CzIscoCodebook::CLASSIFICATION_VERSION,
-        ));
+        );
+        if ($storedCode !== null && $storedCode === $value) {
+            $warnings[] = ['field' => $key, 'code' => 'cz_isco_code_unknown', 'message' => $message];
+
+            return $value;
+        }
+        throw new PayrollFieldValidationException($message, $key);
     }
 
     /**
@@ -970,12 +1219,16 @@ final class PayrollEmploymentValidator
      * Plná adresa místa výkonu práce pro JMHZ 2027 (10550 až 10554, datový
      * slovník 1.5.0.3; tvar podle XSD 1.5.0.3 `adresaType`). Všechny části
      * jsou nepovinné; u místa výkonu mimo ČR (kód obce 111111, IN41) ani bez
-     * kódu obce se adresa v ČR uvést nesmí.
+     * kódu obce se adresa v ČR uvést nesmí. Tvar části a vazbu na kód obce
+     * ověřuje až XSD hlášení, takže nezměněná uložená adresa uložení
+     * nezastaví; délku hlídá šířka sloupce a ta zůstává tvrdá.
      *
      * @param array<string,mixed> $input
+     * @param ?array<string,mixed> $stored
+     * @param list<array{field:string,code:string,message:string}> $warnings
      * @return array<string,?string>
      */
-    private function workplaceAddress(array $input, ?string $municipalityCode): array
+    private function workplaceAddress(array $input, ?string $municipalityCode, ?array $stored, array &$warnings): array
     {
         $fields = [
             'jmhz_workplace_address_point_code' => [9, '/^[1-9][0-9]{0,8}$/D', 'Kód adresního místa má nejvýše devět číslic.'],
@@ -994,17 +1247,36 @@ final class PayrollEmploymentValidator
                 ? str_replace(' ', '', $raw)
                 : $raw;
             $value = $this->optionalText([$key => $value], $key, $length);
-            if ($value !== null && $pattern !== null && preg_match($pattern, $value) !== 1) {
-                throw new \InvalidArgumentException($message);
+            if ($value !== null && $pattern !== null) {
+                self::soft(
+                    self::unchanged($stored, [$key => $value]),
+                    $key,
+                    'workplace_address_invalid',
+                    static function () use ($pattern, $value, $message): void {
+                        if (preg_match($pattern, $value) !== 1) {
+                            throw new \InvalidArgumentException($message);
+                        }
+                    },
+                    $warnings,
+                );
             }
             $address[$key] = $value;
         }
-        if (array_filter($address, static fn (?string $value): bool => $value !== null) !== []
-            && ($municipalityCode === null || $municipalityCode === '111111')
-        ) {
-            throw new \InvalidArgumentException(
-                'Adresu místa výkonu práce v ČR lze uvést jen s kódem obce v ČR; u místa výkonu'
-                    . ' mimo ČR (kód obce 111111) se nevyplňuje.',
+        $filled = array_filter($address, static fn (?string $value): bool => $value !== null);
+        if ($filled !== []) {
+            self::soft(
+                self::unchanged($stored, [...$address, 'jmhz_workplace_municipality_code' => $municipalityCode]),
+                (string) array_key_first($filled),
+                'workplace_address_without_municipality',
+                static function () use ($municipalityCode): void {
+                    if ($municipalityCode === null || $municipalityCode === '111111') {
+                        throw new \InvalidArgumentException(
+                            'Adresu místa výkonu práce v ČR lze uvést jen s kódem obce v ČR; u místa výkonu'
+                                . ' mimo ČR (kód obce 111111) se nevyplňuje.',
+                        );
+                    }
+                },
+                $warnings,
             );
         }
 

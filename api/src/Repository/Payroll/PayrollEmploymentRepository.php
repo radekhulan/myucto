@@ -492,6 +492,7 @@ final class PayrollEmploymentRepository
         bool $replaceMonthlyGross = false,
         ?int $monthlyGrossMinor = null,
         bool $correctEffectiveFrom = false,
+        bool $endRecurringBase = false,
     ): array {
         return $this->transaction(function () use (
             $supplierId,
@@ -504,6 +505,7 @@ final class PayrollEmploymentRepository
             $replaceMonthlyGross,
             $monthlyGrossMinor,
             $correctEffectiveFrom,
+            $endRecurringBase,
         ): array {
             $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
             $employeeId = (int) $employment['employee_id'];
@@ -554,7 +556,7 @@ final class PayrollEmploymentRepository
             if (!$correctEffectiveFrom) {
                 $data['effective_from'] = $storedFrom;
             }
-            $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, (int) $previous['id'], $storedTo);
+            $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, (int) $previous['id'], $storedTo, $endRecurringBase, $userId);
             $movedFrom = (string) $data['effective_from'];
             $data['tax_declaration_signed'] = $this->taxDeclarationSigned(
                 $supplierId,
@@ -682,6 +684,7 @@ final class PayrollEmploymentRepository
         ?string $userAgent,
         bool $replaceMonthlyGross = false,
         ?int $monthlyGrossMinor = null,
+        bool $endRecurringBase = false,
     ): array {
         return $this->transaction(function () use (
             $supplierId,
@@ -693,6 +696,7 @@ final class PayrollEmploymentRepository
             $userAgent,
             $replaceMonthlyGross,
             $monthlyGrossMinor,
+            $endRecurringBase,
         ): array {
             $employment = $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
             $employeeId = (int) $employment['employee_id'];
@@ -748,7 +752,7 @@ final class PayrollEmploymentRepository
             // Nová verze platí od svého data napořád — nesmí začít v měsíci,
             // za který je mzda zaúčtovaná nebo vyplacená, ani před ním.
             $this->assertTermsOpenFrom($supplierId, $employmentId, (string) $data['effective_from'], null);
-            $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, null, null);
+            $this->assertRemunerationChange($supplierId, $employmentId, $previous, $data, $employment, null, null, $endRecurringBase, $userId);
             $data['monthly_gross_minor'] = $data['remuneration_type'] === 'hourly' ? null : ($replaceMonthlyGross
                 ? $monthlyGrossMinor
                 : (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
@@ -2107,31 +2111,85 @@ final class PayrollEmploymentRepository
         }
     }
 
-    /** @param array<string,mixed>|null $previous @param array<string,mixed> $data @param array<string,mixed> $employment */
-    private function assertRemunerationChange(int $supplierId, int $employmentId, ?array $previous, array $data, array $employment, ?int $correctingId, ?string $effectiveTo): void
+    /**
+     * Přechod na hodinové odměňování v téže transakci jako zápis podmínek.
+     *
+     * Aktivní předpis měsíční základní mzdy by vedle hodinového výpočtu
+     * vyplatil mzdu podruhé. Bez výslovného `$endRecurringBase` se proto
+     * přechod odmítne s názvem předpisu; s ním se předpis ukončí ke dni před
+     * účinností hodinové verze (jen při přechodu z měsíčního režimu).
+     *
+     * Starší měsíční verze bez vlastní částky dědí mzdu z projekce vztahu,
+     * kterou hodinová verze vynuluje. Částku, kterou dnes reálně dědí, jim
+     * proto zapíšeme výslovně. Výsledná hodnota (`COALESCE` ve snímku běhu)
+     * se nemění, a proto se nemění ani `row_version` verze — otisk snímků
+     * uzavřených měsíců zůstává stejný.
+     *
+     * @param array<string,mixed>|null $previous
+     * @param array<string,mixed> $data
+     * @param array<string,mixed> $employment
+     */
+    private function assertRemunerationChange(int $supplierId, int $employmentId, ?array $previous, array $data, array $employment, ?int $correctingId, ?string $effectiveTo, bool $endRecurringBase = false, ?int $userId = null): void
     {
         if ($data['remuneration_type'] !== 'hourly') return;
         $stmt = $this->db->pdo()->prepare(
-            'SELECT recurring.id FROM payroll_recurring_components recurring FORCE INDEX (idx_payroll_recurring_effective)
+            'SELECT recurring.id, recurring.valid_from, component.code, component.name
+               FROM payroll_recurring_components recurring FORCE INDEX (idx_payroll_recurring_effective)
               JOIN payroll_component_definitions component ON component.supplier_id = recurring.supplier_id AND component.id = recurring.component_id
              WHERE recurring.supplier_id = ? AND recurring.employment_id = ? AND recurring.is_active = 1
                AND component.component_kind = "base_wage" AND (recurring.valid_to IS NULL OR recurring.valid_to >= ?)
-               AND (? IS NULL OR recurring.valid_from <= ?) LIMIT 1'
+               AND (? IS NULL OR recurring.valid_from <= ?)
+             ORDER BY recurring.valid_from, recurring.id
+             FOR UPDATE'
         );
         $stmt->execute([$supplierId, $employmentId, $data['effective_from'], $effectiveTo, $effectiveTo]);
-        if ($stmt->fetchColumn() !== false) {
-            throw new \InvalidArgumentException('Před hodinovým odměňováním ukončete aktivní předpis měsíční základní mzdy.');
+        $recurring = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($recurring !== []) {
+            $transition = ($previous['remuneration_type'] ?? 'monthly') !== 'hourly';
+            if (!$endRecurringBase || !$transition) {
+                $first = $recurring[0];
+                throw new \MyInvoice\Service\Payroll\PayrollFieldValidationException(sprintf(
+                    'Vztah má aktivní předpis měsíční základní mzdy „%s" (%s) platný od %s. Vedle hodinového '
+                        . 'odměňování by se mzda vyplatila dvakrát. Ukončete předpis ke dni %s, nebo potvrďte, '
+                        . 'že se má ukončit spolu s přechodem na hodinové odměňování.',
+                    (string) $first['name'],
+                    (string) $first['code'],
+                    (string) $first['valid_from'],
+                    (new \DateTimeImmutable((string) $data['effective_from']))->modify('-1 day')->format('Y-m-d'),
+                ), 'remuneration_type', 'recurring_base_wage_active', null, [
+                    'recurring_id' => (int) $first['id'],
+                    'recurring_name' => (string) $first['name'],
+                ]);
+            }
+            $endOn = (new \DateTimeImmutable((string) $data['effective_from']))->modify('-1 day')->format('Y-m-d');
+            $end = $this->db->pdo()->prepare(
+                'UPDATE payroll_recurring_components
+                    SET valid_to = CASE WHEN valid_from <= ? THEN ? ELSE valid_to END,
+                        is_active = CASE WHEN valid_from <= ? THEN is_active ELSE 0 END,
+                        updated_by = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ?'
+            );
+            foreach ($recurring as $row) {
+                $end->execute([$endOn, $endOn, $endOn, $userId, $supplierId, (int) $row['id']]);
+            }
+            $this->activityLogger->log(
+                'payroll.employment.recurring_base_ended',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['recurring_component_ids' => array_map('intval', array_column($recurring, 'id')), 'valid_to' => $endOn],
+                null,
+                null,
+                $supplierId,
+            );
         }
         if ($employment['monthly_gross_minor'] !== null) {
-            $stmt = $this->db->pdo()->prepare(
-                'SELECT id FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?
-                   AND monthly_gross_minor IS NULL AND (remuneration_type IS NULL OR remuneration_type = "monthly")
-                   AND (? IS NULL OR id <> ?) LIMIT 1'
-            );
-            $stmt->execute([$supplierId, $employmentId, $correctingId, $correctingId]);
-            if ($stmt->fetchColumn() !== false) {
-                throw new \InvalidArgumentException('Starší podmínky přebírají měsíční mzdu z pracovního vztahu. Nejdříve výslovně opravte jejich sjednanou mzdu, aby se zachovala historie.');
-            }
+            $this->db->pdo()->prepare(
+                'UPDATE payroll_employment_terms SET monthly_gross_minor = ?
+                  WHERE supplier_id = ? AND employment_id = ?
+                    AND monthly_gross_minor IS NULL AND (remuneration_type IS NULL OR remuneration_type = "monthly")
+                    AND (? IS NULL OR id <> ?)'
+            )->execute([(int) $employment['monthly_gross_minor'], $supplierId, $employmentId, $correctingId, $correctingId]);
         }
     }
 

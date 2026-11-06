@@ -11,6 +11,12 @@ final class JmhzBlockerExplainer
     /** Nálezy, u kterých účetní potřebuje vědět, KTERÁ pole hlášení se jich týkají. */
     private const FIELD_LISTING_CODES = ['jmhz_scenario1_whole_czk_required'];
 
+    /**
+     * Nálezy, u kterých konkrétní věta zdroje (např. „Místo výkonu práce
+     * „Praha" neodpovídá úřednímu názvu…") má přednost před obecným důvodem.
+     */
+    private const MESSAGE_FIRST_CODES = ['jmhz_workplace_codebooks_unverified'];
+
     /** @var array<string,string>|null */
     private static ?array $attributeNames = null;
 
@@ -379,6 +385,9 @@ final class JmhzBlockerExplainer
      */
     public static function reason(string $code, ?string $message = null): string
     {
+        if (in_array($code, self::MESSAGE_FIRST_CODES, true) && $message !== null && trim($message) !== '') {
+            return trim($message);
+        }
         $reason = self::REASONS[$code] ?? null;
         if ($reason !== null) {
             return $reason;

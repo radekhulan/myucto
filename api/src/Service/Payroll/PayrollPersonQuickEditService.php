@@ -23,7 +23,7 @@ final class PayrollPersonQuickEditService
 
     /**
      * @param array<string,mixed> $input
-     * @return array{profile:array<string,mixed>,employment:?array<string,mixed>}
+     * @return array{profile:array<string,mixed>,employment:?array<string,mixed>,warnings:list<array{field:string,code:string,message:string}>}
      */
     public function save(
         int $supplierId,
@@ -109,6 +109,7 @@ final class PayrollPersonQuickEditService
             return [
                 'profile' => $profile,
                 'employment' => $employment ?? $this->primaryEmployment($supplierId, $employeeId),
+                'warnings' => $normalizedEmployment['warnings'] ?? [],
             ];
         });
     }
@@ -141,6 +142,7 @@ final class PayrollPersonQuickEditService
     /**
      * @param array<string,mixed> $input
      * @return array{
+     *   warnings:list<array{field:string,code:string,message:string}>,
      *   id:int,
      *   row_version:int,
      *   monthly_gross_minor:?int,
@@ -181,9 +183,13 @@ final class PayrollPersonQuickEditService
             // Zařazení pro srážkovou daň rychlá editace vůbec nenabízí, takže
             // ho nesmí přepsat na „neurčeno" — přebírá se uložené.
             $this->employments->currentOtherWithholdingEligibility($supplierId, $id),
+            // Pole, která rychlá editace nemění, neblokují uložení mzdy.
+            stored: $current,
+            warnings: $warnings,
         );
 
         return [
+            'warnings' => $warnings,
             'id' => $id,
             'row_version' => $rowVersion,
             'monthly_gross_minor' => $monthlyGross,

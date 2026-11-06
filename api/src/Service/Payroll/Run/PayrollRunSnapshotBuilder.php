@@ -305,7 +305,7 @@ final class PayrollRunSnapshotBuilder
                 } else {
                     foreach ($preview['blockers'] as $blocker) {
                         $validations[] = new PayrollRunValidation('blocker', (string) $blocker['code'], 'employment', $employmentId,
-                            (string) $blocker['message'], $hourlyLink);
+                            (string) $blocker['message'], self::hourlyBlockerLink((string) $blocker['code'], $periodStart, $employmentId, $hourlyLink));
                     }
                     if ($preview['complete'] && !isset($hourlyMaterializationBlockers[$employmentId])) {
                         $latest = [];
@@ -535,7 +535,15 @@ final class PayrollRunSnapshotBuilder
                 \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
                 true,
             );
-            if ($inputs === [] && !$deferredWithoutIncome) {
+            // Hodinová mzda vznikne jako vstup až zamčením podkladů. Před zahájením
+            // běhu proto vztah s úplným náhledem a nenulovým nárokem „bez vstupu"
+            // není; nezmrazený nárok po zamčení hlídá `hourly_claims_not_materialized`.
+            $hourlyPreview = $hourlyPreviews[$employmentId] ?? null;
+            $hourlyWagePending = is_array($hourlyPreview)
+                && ($hourlyPreview['complete'] ?? false) === true
+                && ($hourlyPreview['settlement_only'] ?? true) === false
+                && (int) ($hourlyPreview['payable_total_minor'] ?? 0) > 0;
+            if ($inputs === [] && !$deferredWithoutIncome && !$hourlyWagePending) {
                 // Vztah bez složky je většinou chyba zadání (zapomenutá mzda).
                 // Výjimku (override) tu NEnabízíme: když měsíc bez vstupu
                 // nevysvětluje schválená nepřítomnost, zastaví vztah zákonný
@@ -1609,40 +1617,7 @@ final class PayrollRunSnapshotBuilder
           LEFT JOIN payroll_employment_terminations termination
                  ON termination.supplier_id = employment.supplier_id
                 AND termination.employment_id = employment.id
-              WHERE employment.effective_status IS NOT NULL
-                AND employment.effective_status NOT IN ("archived", "no_show")
-                AND COALESCE(
-                    employment.actual_start_date,
-                    employment.start_date,
-                    "1900-01-01"
-                ) <= ?
-                AND (
-                    employment.end_date IS NULL
-                    OR employment.end_date >= ?
-                    OR EXISTS (
-                        SELECT 1
-                          FROM payroll_inputs post_termination_input
-                         WHERE post_termination_input.supplier_id =
-                               employment.supplier_id
-                           AND post_termination_input.employment_id =
-                               employment.id
-                           AND post_termination_input.period_start = ?
-                           AND post_termination_input.status <> "cancelled"
-                    )
-                    OR EXISTS (
-                        SELECT 1
-                          FROM payroll_employment_deferred_incomes deferred_without_income
-                         WHERE deferred_without_income.supplier_id =
-                               employment.supplier_id
-                           AND deferred_without_income.employment_id =
-                               employment.id
-                           AND deferred_without_income.period_start = ?
-                           AND deferred_without_income.deferred_type IN (' . implode(', ', array_map(
-                               static fn (string $type): string => '"' . $type . '"',
-                               \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
-                           )) . ')
-                    )
-                )
+              WHERE ' . PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql() . '
                 AND ' . $officeSql . '
               ORDER BY employment.employee_id, employment.id'
         );
@@ -1662,10 +1637,7 @@ final class PayrollRunSnapshotBuilder
             $periodStart,
             $periodStart,
             $periodStart,
-            $periodEnd,
-            $periodStart,
-            $periodStart,
-            $periodStart,
+            ...PayrollEmploymentLifecycleSql::payrollPeriodMembershipParams($periodStart, $periodEnd),
             ...($officeId === null ? [] : [$officeId]),
         ]);
         return array_values($stmt->fetchAll(PDO::FETCH_ASSOC));
@@ -1893,6 +1865,18 @@ final class PayrollRunSnapshotBuilder
             ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
             PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
         );
+    }
+
+    /**
+     * Blokace hodin a doložení příplatků se opravují v panelu hodin Rychlého
+     * měsíčního vstupu, ne v podmínkách vztahu.
+     */
+    private static function hourlyBlockerLink(string $code, string $periodStart, int $employmentId, string $fallback): string
+    {
+        return str_starts_with($code, 'hourly_time_')
+            || in_array($code, ['hourly_premium_evidence_missing', 'hourly_premium_partition_missing'], true)
+            ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId . '&hours=1'
+            : $fallback;
     }
 
     /** @param array<string,mixed> $data */

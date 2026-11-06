@@ -244,6 +244,66 @@ final class PayrollPersonQuickEditApiTest extends TestCase
         self::assertSame('T', $body['employment']['terms'][0]['activity_code']);
     }
 
+    /**
+     * Rychlá editace mění mzdu; holé „Praha" místo úředního názvu obce
+     * z importu ji dřív u verze od září 2026 zablokovalo. Teď se uloží
+     * a nesoulad se vrátí jako varování u pole.
+     */
+    public function testQuickEditReturnsWarningForBareWorkplaceName(): void
+    {
+        $profile = $this->profiles->save(
+            $this->supplierId,
+            $this->employeeId,
+            $this->profileValidator->validate($this->profilePayload('Původní Zaměstnanec')),
+            0,
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $employment = $this->employments->create(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentValidator->create([
+                'code' => 'SYN-PRAHA',
+                'relation_type' => 'employment',
+                'monthly_gross_minor' => 4_200_000,
+                'terms' => $this->termsPayload('2026-01-01', '40'),
+            ]),
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employment_terms SET work_place = 'Praha' WHERE supplier_id = ? AND employment_id = ?"
+        )->execute([$this->supplierId, $employment['id']]);
+
+        $saved = $this->put([
+            'profile' => [
+                ...$this->profilePayload('Původní Zaměstnanec'),
+                'row_version' => $profile['row_version'],
+                'identity_history' => [[
+                    'id' => $profile['identity_history'][0]['id'],
+                    'full_name' => 'Původní Zaměstnanec',
+                    'first_name' => 'Původní',
+                    'last_name' => 'Zaměstnanec',
+                    'effective_from' => '2026-01-01',
+                    'effective_to' => null,
+                ]],
+            ],
+            'employment' => [
+                'id' => $employment['id'],
+                'row_version' => $employment['row_version'],
+                'monthly_gross_minor' => 4_500_000,
+                'terms' => ['work_place' => 'Praha'] + $this->termsPayload('2026-09-01', '40'),
+            ],
+        ]);
+
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $body = $this->json($saved);
+        self::assertSame(4_500_000, $body['employment']['monthly_gross_minor']);
+        self::assertSame(['work_place'], array_column($body['warnings'], 'field'));
+    }
+
     public function testProfileTermsAndGrossAreSavedAtomicallyAndKeepHistory(): void
     {
         $profile = $this->profiles->save(

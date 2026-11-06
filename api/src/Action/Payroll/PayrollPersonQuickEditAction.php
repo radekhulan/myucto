@@ -73,7 +73,13 @@ final class PayrollPersonQuickEditAction
             );
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (\InvalidArgumentException $e) {
-            return Json::error($response, 'validation_failed', $e->getMessage(), 422);
+            return Json::error(
+                $response,
+                'validation_failed',
+                $e->getMessage(),
+                422,
+                \MyInvoice\Service\Payroll\PayrollFieldValidationException::responseExtra($e),
+            );
         } catch (\PDOException $e) {
             if ((string) $e->getCode() !== '23000') {
                 throw $e;

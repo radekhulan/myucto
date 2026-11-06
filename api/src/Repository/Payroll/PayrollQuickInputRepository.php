@@ -838,14 +838,7 @@ final class PayrollQuickInputRepository
                 AND average.employment_id = employment.id
                 AND average.applicable_year = ?
                 AND average.applicable_quarter = ?
-              WHERE employment.effective_status IN ("active", "suspended", "ended")
-                AND COALESCE(
-                      employment.actual_start_date,
-                      employment.start_date,
-                      CASE WHEN employment.is_legacy_projection = 1
-                           THEN "1900-01-01" ELSE NULL END
-                    ) <= ?
-                AND (employment.end_date IS NULL OR employment.end_date >= ?)'
+              WHERE ' . PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql()
             . $employmentFilter
             . ' ORDER BY employee.full_name, employment.is_primary DESC, employment.id'
             . ($employmentIds === null ? ' LIMIT ? OFFSET ?' : '')
@@ -864,8 +857,7 @@ final class PayrollQuickInputRepository
             $periodStart,
             $year,
             $quarter,
-            $periodEnd,
-            $periodStart,
+            ...PayrollEmploymentLifecycleSql::payrollPeriodMembershipParams($periodStart, $periodEnd),
             ...($employmentIds ?? ($focusEmploymentId === null ? [] : [$focusEmploymentId])),
             ...$searchClause['params'],
         ];
@@ -1339,22 +1331,14 @@ final class PayrollQuickInputRepository
                JOIN payroll_employees employee
                  ON employee.supplier_id = employment.supplier_id
                 AND employee.id = employment.employee_id
-              WHERE employment.effective_status IN ("active", "suspended", "ended")
-                AND COALESCE(
-                      employment.actual_start_date,
-                      employment.start_date,
-                      CASE WHEN employment.is_legacy_projection = 1
-                           THEN "1900-01-01" ELSE NULL END
-                    ) <= ?
-                AND (employment.end_date IS NULL OR employment.end_date >= ?)'
+              WHERE ' . PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql()
             . ($focusEmploymentId === null ? '' : ' AND employment.id = ?')
             . $searchClause['sql']
         );
         $stmt->execute([
             $periodEnd,
             $supplierId,
-            $periodEnd,
-            $periodStart,
+            ...PayrollEmploymentLifecycleSql::payrollPeriodMembershipParams($periodStart, $periodEnd),
             ...($focusEmploymentId === null ? [] : [$focusEmploymentId]),
             ...$searchClause['params'],
         ]);

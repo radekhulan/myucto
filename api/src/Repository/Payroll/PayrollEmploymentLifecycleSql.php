@@ -30,6 +30,61 @@ final class PayrollEmploymentLifecycleSql
                 )';
     }
 
+    /**
+     * Pracovní vztahy, které patří do mzdového období — jediné pravidlo pro
+     * snímek mzdového běhu ({@see \MyInvoice\Service\Payroll\Run\PayrollRunSnapshotBuilder::employmentRows()})
+     * i Rychlý měsíční vstup. Dokud měl rychlý vstup vlastní kopii (jen
+     * aktivní, přerušené a ukončené), běh zahrnul plánovaný vztah s nástupem
+     * v měsíci a blokoval ho chybějící mzdou, kterou nebylo kde zadat.
+     *
+     * Očekává alias `employment` se sloupcem `effective_status` (stav k období,
+     * {@see effectiveStatusAtPlaceholder()}). Parametry v pořadí
+     * {@see payrollPeriodMembershipParams()}.
+     */
+    public static function payrollPeriodMembershipSql(): string
+    {
+        return 'employment.effective_status IS NOT NULL
+                AND employment.effective_status NOT IN ("archived", "no_show")
+                AND COALESCE(
+                    employment.actual_start_date,
+                    employment.start_date,
+                    "1900-01-01"
+                ) <= ?
+                AND (
+                    employment.end_date IS NULL
+                    OR employment.end_date >= ?
+                    OR EXISTS (
+                        SELECT 1
+                          FROM payroll_inputs post_termination_input
+                         WHERE post_termination_input.supplier_id =
+                               employment.supplier_id
+                           AND post_termination_input.employment_id =
+                               employment.id
+                           AND post_termination_input.period_start = ?
+                           AND post_termination_input.status <> "cancelled"
+                    )
+                    OR EXISTS (
+                        SELECT 1
+                          FROM payroll_employment_deferred_incomes deferred_without_income
+                         WHERE deferred_without_income.supplier_id =
+                               employment.supplier_id
+                           AND deferred_without_income.employment_id =
+                               employment.id
+                           AND deferred_without_income.period_start = ?
+                           AND deferred_without_income.deferred_type IN (' . implode(', ', array_map(
+                               static fn (string $type): string => '"' . $type . '"',
+                               PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
+                           )) . ')
+                    )
+                )';
+    }
+
+    /** @return list<string> */
+    public static function payrollPeriodMembershipParams(string $periodStart, string $periodEnd): array
+    {
+        return [$periodEnd, $periodStart, $periodStart, $periodStart];
+    }
+
     public static function effectiveMonthlyGrossAtPlaceholder(): string
     {
         return self::effectiveMonthlyGrossAt('?');

@@ -31,44 +31,73 @@ final class PayrollEmploymentJmhzEvidenceCatalog
         $this->codebooks = new JmhzCodebookCatalog($this->manifest);
     }
 
-    public function requireWorkplace(
-        string $municipalityCode,
-        string $municipalityName,
-        string $countryCode,
-        string $termEffectiveOn,
-    ): void
+    /**
+     * Kód obce pracoviště (10230) proti CISOB. Název obce se tu NEPOROVNÁVÁ:
+     * zdroj pravdy je kód a `work_place` je volný text smlouvy, který se
+     * s úředním názvem srovná zvlášť ({@see workplaceNameMismatch()}).
+     *
+     * Období, na které připnuté číselníky nesahají, se NEOVĚŘUJE. JMHZ platí
+     * od roku 2026 a starší stav číselníků neexistuje — u vztahu, který začal
+     * dřív, tedy není co ověřit. Fail-closed zůstává tam, kam patří — při
+     * sestavení podání, kde se hodnoty do JMHZ opravdu odesílají.
+     */
+    public function requireWorkplaceMunicipality(string $municipalityCode, string $termEffectiveOn): void
     {
-        // Období, na které připnuté číselníky nesahají, se NEOVĚŘUJE. JMHZ platí
-        // od roku 2026 a starší stav číselníků neexistuje — u vztahu, který začal
-        // dřív, tedy není co ověřit. Dokud se tu házela chyba, nešlo uložit
-        // zaměstnance s nástupem v roce 2025 a zákazník s tím nemohl udělat nic:
-        // je to mezera v našich datech, ne v jeho. Fail-closed zůstává tam, kam
-        // patří — při sestavení podání, kde se hodnoty do JMHZ opravdu odesílají.
         if (!$this->externalCodebooks->coversDate($termEffectiveOn)) {
             return;
         }
         try {
-            $this->externalCodebooks->requireKnownMunicipality(
-                $municipalityCode,
-                $municipalityName,
-                $termEffectiveOn,
-            );
-            $this->externalCodebooks->requireKnownCountry($countryCode, $termEffectiveOn);
+            $this->externalCodebooks->requireMunicipalityCode($municipalityCode, $termEffectiveOn);
         } catch (JmhzCodebookValueException|JmhzCodebookUnavailableException $e) {
-            // Číselník porovnává název s polem „Místo výkonu práce"; hláška musí
-            // říct, které pole a na jaký úřední název ho opravit.
-            $official = $this->externalCodebooks->findMunicipality($municipalityCode, $termEffectiveOn)['label'] ?? null;
-            if (is_string($official) && !hash_equals($official, $municipalityName)) {
-                throw new \InvalidArgumentException(sprintf(
-                    'Místo výkonu práce „%s" neodpovídá úřednímu názvu obce „%s" pro kód %s v číselníku CISOB. Opravte místo výkonu práce na „%s", nebo kód obce pracoviště JMHZ.',
-                    $municipalityName,
-                    $official,
-                    $municipalityCode,
-                    $official,
-                ), 0, $e);
-            }
             throw new \InvalidArgumentException($e->getMessage(), 0, $e);
         }
+    }
+
+    /** Kód státu pracoviště (10231) proti CZEMALFA; mimo pokrytí číselníků se neověřuje. */
+    public function requireWorkplaceCountry(string $countryCode, string $termEffectiveOn): void
+    {
+        if (!$this->externalCodebooks->coversDate($termEffectiveOn)) {
+            return;
+        }
+        try {
+            $this->externalCodebooks->requireKnownCountry($countryCode, $termEffectiveOn);
+        } catch (JmhzCodebookValueException|JmhzCodebookUnavailableException $e) {
+            throw new \InvalidArgumentException($e->getMessage(), 0, $e);
+        }
+    }
+
+    /** Úřední název obce podle kódu; `null` = kód k datu v CISOB není. */
+    public function officialMunicipalityName(string $municipalityCode, string $validOn): ?string
+    {
+        $label = $this->externalCodebooks->findMunicipality($municipalityCode, $validOn)['label'] ?? null;
+
+        return is_string($label) && $label !== '' ? $label : null;
+    }
+
+    /**
+     * Věta pro účetní, když se místo výkonu práce liší od úředního názvu obce
+     * v CISOB; `null` = shoda, nebo není s čím porovnat.
+     *
+     * Hlášení JMHZ nese v 10229 název obce a běh ho ověřuje proti CISOB, takže
+     * s neshodným názvem se měsíční hlášení nepřipraví. Uložení podmínek tím
+     * ale blokované není — je to varování s návodem, co opravit.
+     */
+    public function workplaceNameMismatch(string $municipalityCode, string $workPlace, string $validOn): ?string
+    {
+        $official = $this->officialMunicipalityName($municipalityCode, $validOn);
+        if ($official === null || hash_equals($official, $workPlace)) {
+            return null;
+        }
+
+        return sprintf(
+            'Místo výkonu práce „%s" neodpovídá úřednímu názvu obce „%s" pro kód %s v číselníku CISOB. '
+                . 'Měsíční hlášení JMHZ ho vykazuje jako název obce, takže se s ním nepřipraví. '
+                . 'Opravte místo výkonu práce na „%s", nebo kód obce pracoviště JMHZ.',
+            $workPlace,
+            $official,
+            $municipalityCode,
+            $official,
+        );
     }
 
     public function requireApzInstrument(string $code): void

@@ -169,7 +169,7 @@ final class PayrollInputsAction
         } catch (PayrollRunClosedException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 409);
         } catch (\MyInvoice\Service\Payroll\PayrollHourlyWageConflictException $e) {
-            return Json::error($response, $e::ERROR_CODE, $e->getMessage(), 409);
+            return Json::error($response, $e::ERROR_CODE, $e->getMessage(), 409, $e->responseExtra());
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         }
@@ -413,7 +413,7 @@ final class PayrollInputsAction
         } catch (PayrollRunClosedException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), 409);
         } catch (\MyInvoice\Service\Payroll\PayrollHourlyWageConflictException $e) {
-            return Json::error($response, $e::ERROR_CODE, $e->getMessage(), 409);
+            return Json::error($response, $e::ERROR_CODE, $e->getMessage(), 409, $e->responseExtra());
         } catch (\InvalidArgumentException|\DomainException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);
         } catch (PayrollInputConflictException $e) {

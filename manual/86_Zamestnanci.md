@@ -243,9 +243,12 @@ na ni vrátit nelze. Změnu sazby i přechod mezi měsíčním
 a hodinovým odměňováním můžete uložit novou verzí s účinností během
 měsíce. Výpočet vyžaduje jednoznačné rozdělení skutečné práce podle
 účinných sazeb a podklad pro měsíční část; chybějící rozvrh či rozpad
-nelze nahradit odhadem. Před přechodem ukončete aktivní pravidelný předpis
-základní mzdy. Starší verze podmínek musí obsahovat svou vlastní měsíční
-částku, aby vymazání měsíční mzdy při přechodu nezměnilo minulost.
+nelze nahradit odhadem. Aktivní pravidelný předpis základní mzdy by vedle
+hodinového výpočtu vyplatil mzdu podruhé: karta ho při přechodu pojmenuje
+a nabídne ho ukončit ke dni před účinností hodinové verze, jinak se přechod
+neuloží. Starší verze podmínek, které měsíční mzdu dosud přebíraly z
+pracovního vztahu, dostanou při přechodu tutéž částku zapsanou výslovně, takže
+se mzda za minulé měsíce nezmění.
 
 Karta upozorní na sazbu pod hodinovým minimem pro běžný stanovený týden
 podle pravidel platných k datu účinnosti. Kratší sjednaný úvazek toto
@@ -1047,9 +1050,14 @@ nepotvrdil; zmrazený snímek si poznamená, že hodnota vznikla výkladem
 výchozího stavu.
 
 **Místo výkonu práce.** Obec se vybírá našeptávačem, stát z připnuté nabídky;
-obec, kód obce a stát se ukládají jen jako úplná trojice a aplikace kontroluje
-shodu názvu s kódem i platnost státu podle číselníků CISOB a CZEM. Podmínky před
-začátkem účinnosti připnutých číselníků nelze označit jako ověřené. Budoucí
+kód obce a stát se ukládají jen spolu a aplikace ověřuje platnost kódu obce
+a státu podle číselníků CISOB a CZEM. Zdrojem pravdy je kód obce: prázdné místo
+výkonu práce doplní úředním názvem obce. Místo výkonu práce zůstává volným textem
+smlouvy (mzdový výměr, A1); když se od úředního názvu liší (třeba „Praha" místo
+„Hlavní město Praha"), uložení proběhne, karta ukáže u pole žluté varování
+s úředním názvem a příprava měsíčního hlášení JMHZ vztah zastaví, dokud se název
+neopraví. Podmínky před začátkem účinnosti připnutých číselníků nelze označit
+jako ověřené. Budoucí
 změnu lze naplánovat, ale přesahuje-li vykazované období ověřené pokrytí
 číselníku, mzdový snímek ji označí jako neověřenou a bez novějšího snímku
 číselníku se neodešle.
