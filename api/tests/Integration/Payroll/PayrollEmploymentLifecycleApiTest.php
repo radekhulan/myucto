@@ -977,6 +977,43 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertContains('terms_changed', array_column($changed['timeline'], 'event_type'));
     }
 
+    /**
+     * Nová verze od září 2026 (pokrytí CISOB) s místem výkonu „Praha" se uloží
+     * a vrátí varování u pole; nový neznámý druh činnosti vrátí 422 s polem.
+     * Dřív obojí končilo 422 bez vazby na pole a neshodný název blokoval
+     * každou novou verzi podmínek.
+     */
+    public function testTermsSaveReturnsFieldWarningsAndFieldErrors(): void
+    {
+        $employment = $this->create($this->employeeId, 'VAROVANI-1', 'employment', true);
+        $payload = [
+            'jmhz_workplace_municipality_code' => '554782',
+            'jmhz_workplace_country_code' => 'CZ',
+        ] + $this->termsPayload(true, '2026-09-01');
+
+        $response = $this->action->addTerms(
+            $this->request('PUT', "/api/payroll/employments/{$employment['id']}/terms", ['row_version' => $employment['row_version'], ...$payload]),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $body = $this->json($response);
+        self::assertSame(['work_place'], array_column($body['warnings'], 'field'));
+        self::assertSame('jmhz_workplace_name_mismatch', $body['warnings'][0]['code']);
+        self::assertSame('Praha', $body['employment']['terms'][0]['work_place']);
+
+        $response = $this->action->correctTerms(
+            $this->request('PATCH', "/api/payroll/employments/{$employment['id']}/terms/current", [
+                'row_version' => $body['employment']['row_version'],
+                'activity_code' => 'ZZ',
+            ] + $payload),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame(['field' => 'activity_code'], $this->json($response)['error']['details']);
+    }
+
     /** Ukončený vztah je archiv — opravovat se v něm nedá stejně jako verzovat. */
     public function testCorrectionIsRefusedOnAClosedEmployment(): void
     {

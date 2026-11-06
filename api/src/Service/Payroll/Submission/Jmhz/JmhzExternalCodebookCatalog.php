@@ -112,8 +112,13 @@ final class JmhzExternalCodebookCatalog
         return $entry !== null && $this->entryCovers($entry, $validOn) ? $entry : null;
     }
 
-    /** @return array<string,mixed> */
-    public function requireMunicipality(string $code, string $name, string $validOn): array
+    /**
+     * Obec podle kódu s plnou chybou (nepokryté období, neznámý kód). Název
+     * se neporovnává — na to je {@see requireMunicipality()}.
+     *
+     * @return array<string,mixed>
+     */
+    public function requireMunicipalityCode(string $code, string $validOn): array
     {
         $package = $this->packageForDate($validOn);
         $this->assertCovered($package['manifest'], 'obce', $validOn);
@@ -121,6 +126,14 @@ final class JmhzExternalCodebookCatalog
         if ($entry === null || !$this->entryCovers($entry, $validOn)) {
             throw new JmhzCodebookValueException("Kód obce {$code} není v připnutém číselníku CISOB platný.");
         }
+
+        return $entry;
+    }
+
+    /** @return array<string,mixed> */
+    public function requireMunicipality(string $code, string $name, string $validOn): array
+    {
+        $entry = $this->requireMunicipalityCode($code, $validOn);
         if (!hash_equals($entry['label'], $name)) {
             throw new JmhzCodebookValueException(
                 "Název obce neodpovídá připnutému číselníku CISOB pro kód {$code}.",

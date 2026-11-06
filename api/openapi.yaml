@@ -27909,6 +27909,14 @@ paths:
                 required: [employment]
                 properties:
                   employment: { $ref: '#/components/schemas/PayrollEmployment' }
+                  warnings:
+                    type: array
+                    description: |
+                      Kontroly polí, která se proti uložené verzi nezměnila a neprošla
+                      číselníkem JMHZ (nebo nesoulad místa výkonu práce s úředním
+                      názvem obce). Uložení proběhlo; hodnoty se tvrdě ověří až
+                      v přípravě podání.
+                    items: { $ref: '#/components/schemas/PayrollEmploymentTermsWarning' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Konflikt verze nebo již zúčtovaná verze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -27942,6 +27950,14 @@ paths:
                 required: [employment]
                 properties:
                   employment: { $ref: '#/components/schemas/PayrollEmployment' }
+                  warnings:
+                    type: array
+                    description: |
+                      Kontroly polí, která se proti uložené verzi nezměnila a neprošla
+                      číselníkem JMHZ (nebo nesoulad místa výkonu práce s úředním
+                      názvem obce). Uložení proběhlo; hodnoty se tvrdě ověří až
+                      v přípravě podání.
+                    items: { $ref: '#/components/schemas/PayrollEmploymentTermsWarning' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: Konflikt verze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
@@ -46869,6 +46885,23 @@ components:
                 type: array
                 items: { type: string }
               example: { name: ["Název zakázky je povinný"], payment_due_days: ["Splatnost musí být 1–365 dní"] }
+            details:
+              type: object
+              description: |
+                Doplňující údaje chyby. U validace podmínek pracovního vztahu nese
+                `field` (klíč pole těla, ke kterému chyba patří) a případně `code`.
+              additionalProperties: true
+              properties:
+                field: { type: string, example: activity_code }
+                code: { type: string, example: recurring_base_wage_active }
+
+    PayrollEmploymentTermsWarning:
+      type: object
+      required: [field, code, message]
+      properties:
+        field: { type: string, example: work_place }
+        code: { type: string, example: jmhz_workplace_name_mismatch }
+        message: { type: string }
 
     KhEvidenceRow:
       type: object

@@ -19,6 +19,7 @@ use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
+use MyInvoice\Service\Payroll\PayrollFieldValidationException;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
 use MyInvoice\Service\Payroll\Absence\MinimumWageFloor;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetException;
@@ -117,6 +118,7 @@ final class PayrollEmploymentAction
         if (($error = $this->authorize($request, $response, true)) !== null) {
             return $error;
         }
+        $warnings = [];
         try {
             $body = $this->body($request);
             $supplierId = $this->currentSupplierId($request);
@@ -141,6 +143,10 @@ final class PayrollEmploymentAction
                     $employmentId,
                 ),
                 $this->employments->currentRelationType($supplierId, $employmentId),
+                // Číselníkové kontroly polí, která se proti uložené verzi
+                // nemění, uložení neblokují — vrátí se jako varování.
+                $this->employments->currentTerms($supplierId, $employmentId),
+                $warnings,
             );
             $employment = $this->employments->addTerms(
                 $supplierId,
@@ -154,11 +160,12 @@ final class PayrollEmploymentAction
                 // a do nové verze se přenese hodnota předchozí verze.
                 array_key_exists('monthly_gross_minor', $body),
                 $this->validator->optionalMonthlyGrossMinor($body),
+                $this->endRecurringBase($body),
             );
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);
         }
-        return Json::ok($response, ['employment' => $employment]);
+        return Json::ok($response, ['employment' => $employment, 'warnings' => $warnings]);
     }
 
     /**
@@ -187,6 +194,7 @@ final class PayrollEmploymentAction
         if (($error = $this->authorize($request, $response, true)) !== null) {
             return $error;
         }
+        $warnings = [];
         try {
             $body = $this->body($request);
             $supplierId = $this->currentSupplierId($request);
@@ -220,6 +228,8 @@ final class PayrollEmploymentAction
                     $employmentId,
                 ),
                 $this->employments->currentRelationType($supplierId, $employmentId),
+                $this->employments->currentTerms($supplierId, $employmentId),
+                $warnings,
             );
             $employment = $this->employments->correctTerms(
                 $supplierId,
@@ -232,11 +242,12 @@ final class PayrollEmploymentAction
                 array_key_exists('monthly_gross_minor', $body),
                 $this->validator->optionalMonthlyGrossMinor($body),
                 $correctEffectiveFrom,
+                $this->endRecurringBase($body),
             );
         } catch (\Throwable $e) {
             return $this->domainError($response, $e);
         }
-        return Json::ok($response, ['employment' => $employment]);
+        return Json::ok($response, ['employment' => $employment, 'warnings' => $warnings]);
     }
 
     /**
@@ -539,6 +550,22 @@ final class PayrollEmploymentAction
         return [...$current, ...$body];
     }
 
+    /**
+     * Výslovný souhlas s ukončením aktivního předpisu měsíční základní mzdy
+     * ke dni před účinností hodinové verze. Bez něj repozitář přechod odmítne.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function endRecurringBase(array $body): bool
+    {
+        $value = $body['end_recurring_base'] ?? false;
+        if (!is_bool($value)) {
+            throw new PayrollFieldValidationException('Pole end_recurring_base musí být boolean.', 'end_recurring_base');
+        }
+
+        return $value;
+    }
+
     /** @return array<string,mixed> */
     private function body(Request $request): array
     {
@@ -621,6 +648,7 @@ final class PayrollEmploymentAction
                 'validation_failed',
                 $e->getMessage(),
                 422,
+                PayrollFieldValidationException::responseExtra($e),
             ),
             $e instanceof \PDOException && $e->getCode() === '23000' => Json::error(
                 $response,

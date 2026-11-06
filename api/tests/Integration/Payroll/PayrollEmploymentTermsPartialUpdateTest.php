@@ -276,20 +276,52 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
             'remuneration_basis_kind' => 'wage_statement', 'remuneration_basis' => 'Syntetický výměr'];
         $response = $this->action->addTerms($this->request('PUT', '/terms', $payload), new Response(), ['id' => (string) $employment['id']]);
         self::assertSame(422, $response->getStatusCode());
-        self::assertStringContainsString('předpis', (string) $response->getBody());
-        $this->db->pdo()->prepare('UPDATE payroll_recurring_components SET is_active = 0 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $employment['id']]);
-        // Syntetická starší instalace: pouze projekce nese mzdu, stará verze ji nemá.
-        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET monthly_gross_minor = NULL WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $employment['id']]);
-        $response = $this->action->addTerms($this->request('PUT', '/terms', $payload), new Response(), ['id' => (string) $employment['id']]);
-        self::assertSame(422, $response->getStatusCode());
-        self::assertStringContainsString('Starší podmínky', (string) $response->getBody());
-        $stmt = $this->db->pdo()->prepare('SELECT monthly_gross_minor FROM payroll_employments WHERE supplier_id = ? AND id = ?');
+        $error = $this->json($response)['error'];
+        self::assertStringContainsString('MZDA_MESICNI', $error['message']);
+        self::assertStringContainsString('2026-02-28', $error['message']);
+        self::assertSame(['field' => 'remuneration_type', 'code' => 'recurring_base_wage_active'], $error['details']);
+
+        // Výslovný souhlas ukončí předpis v téže transakci ke dni před účinností.
+        $hourly = $this->call('addTerms', $employment, $payload + ['end_recurring_base' => true]);
+        self::assertSame('hourly', $hourly['terms'][0]['remuneration_type']);
+        $stmt = $this->db->pdo()->prepare('SELECT valid_to, is_active FROM payroll_recurring_components WHERE supplier_id = ? AND employment_id = ?');
         $stmt->execute([$this->supplierId, $employment['id']]);
-        self::assertSame(4000000, (int) $stmt->fetchColumn());
-        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET monthly_gross_minor = 4000000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $employment['id']]);
+        self::assertSame(['valid_to' => '2026-02-28', 'is_active' => 1], array_map(
+            static fn ($value) => is_numeric($value) ? (int) $value : $value,
+            $stmt->fetch(\PDO::FETCH_ASSOC),
+        ));
+    }
+
+    /**
+     * Syntetická starší instalace: mzdu nese jen projekce vztahu, stará verze
+     * ji nemá. Přechod na hodinové odměňování ji dřív zablokoval slepou
+     * hláškou; teď starší verzi doplní částku, kterou reálně dědila.
+     */
+    public function testHourlyModeMaterializesLegacyProjectionIntoOlderTerms(): void
+    {
+        $employment = $this->activeEmployment();
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET monthly_gross_minor = NULL WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $employment['id']]);
+        $stmt = $this->db->pdo()->prepare('SELECT row_version FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?');
+        $stmt->execute([$this->supplierId, $employment['id']]);
+        $termVersion = (int) $stmt->fetchColumn();
+        $payload = ['row_version' => $employment['row_version'], 'effective_from' => '2026-03-01',
+            'remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000,
+            'remuneration_basis_kind' => 'wage_statement', 'remuneration_basis' => 'Syntetický výměr'];
+
         $hourly = $this->call('addTerms', $employment, $payload);
+
         self::assertSame('hourly', $hourly['terms'][0]['remuneration_type']);
         self::assertSame(4000000, $hourly['terms'][1]['monthly_gross_minor']);
+        self::assertNull($hourly['monthly_gross_minor']);
+        // Mzda za únor zůstává stejná a otisk verze (row_version) se nezměnil
+        // — kromě ukončení verze, které ji zkrátilo o konec platnosti.
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . \MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql::effectiveMonthlyGrossAtPlaceholder() . '
+               FROM payroll_employments employment WHERE employment.supplier_id = ? AND employment.id = ?'
+        );
+        $stmt->execute(['2026-02-01', '2026-02-01', $this->supplierId, $employment['id']]);
+        self::assertSame(4000000, (int) $stmt->fetchColumn());
+        self::assertSame($termVersion + 1, $hourly['terms'][1]['row_version']);
     }
 
     public function testDatabaseRejectsNullModeWithHourlyRate(): void
