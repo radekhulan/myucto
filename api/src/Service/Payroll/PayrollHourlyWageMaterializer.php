@@ -172,17 +172,19 @@ final class PayrollHourlyWageMaterializer
         }
         if ($claimPairs !== []) {
             $pairsSql = implode(',', $claimPairs);
+            $pairIds = array_values(array_unique(array_filter($claimPairArgs, 'is_int')));
+            $pairIn = implode(',', array_fill(0, count($pairIds), '?'));
             $conflicts = $pdo->prepare("SELECT input.employment_id, component.code,
                     EXISTS (SELECT 1 FROM payroll_surcharge_input_materializations attendance
                         WHERE attendance.supplier_id = input.supplier_id AND attendance.input_id = input.id) AS attendance_owned
                 FROM payroll_inputs input
                 JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id
-                WHERE input.supplier_id = ? AND input.period_start = ?
+                WHERE input.supplier_id = ? AND input.employment_id IN ($pairIn) AND input.period_start = ?
                   AND input.status <> 'cancelled' AND (input.employment_id, component.code) IN ($pairsSql)
                   AND NOT EXISTS (SELECT 1 FROM payroll_hourly_wage_materializations owned
                       WHERE owned.supplier_id = input.supplier_id AND owned.input_id = input.id)
                 ORDER BY input.employment_id, input.id FOR UPDATE");
-            $conflicts->execute([$supplierId, $periodStart, ...$claimPairArgs]);
+            $conflicts->execute([$supplierId, ...$pairIds, $periodStart, ...$claimPairArgs]);
             foreach ($conflicts->fetchAll(PDO::FETCH_ASSOC) as $conflict) {
                 $id = (int) $conflict['employment_id'];
                 // Příplatek z docházky měsíčního vztahu platí práci tohoto měsíce,
@@ -207,8 +209,10 @@ final class PayrollHourlyWageMaterializer
         }
         if ($premiumPairs !== []) {
             $premiumPairSql = implode(',', $premiumPairs);
-            $stmt = $pdo->prepare("SELECT employment_id, surcharge_kind, claim_source FROM payroll_surcharge_period_claims WHERE supplier_id = ? AND period_start = ? AND (employment_id, surcharge_kind) IN ($premiumPairSql) ORDER BY employment_id, surcharge_kind FOR UPDATE");
-            $stmt->execute([$supplierId, $periodStart, ...$premiumPairArgs]);
+            $premiumIds = array_values(array_unique(array_filter($premiumPairArgs, 'is_int')));
+            $premiumIn = implode(',', array_fill(0, count($premiumIds), '?'));
+            $stmt = $pdo->prepare("SELECT employment_id, surcharge_kind, claim_source FROM payroll_surcharge_period_claims WHERE supplier_id = ? AND employment_id IN ($premiumIn) AND period_start = ? AND (employment_id, surcharge_kind) IN ($premiumPairSql) ORDER BY employment_id, surcharge_kind FOR UPDATE");
+            $stmt->execute([$supplierId, ...$premiumIds, $periodStart, ...$premiumPairArgs]);
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $id = (int) $row['employment_id'];
                 if (isset($blockers[$id]) || $row['claim_source'] === 'time') continue;
