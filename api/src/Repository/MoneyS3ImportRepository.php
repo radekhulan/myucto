@@ -32,6 +32,12 @@ final class MoneyS3ImportRepository extends AbstractMigrationImportRepository
     public const KIND_SMALL_ASSET = 'small_asset';
     /** Čerpání poskytnuté (klíč `pad|…`) nebo přijaté zálohy (`iad|…`), které převod spároval podle saldokonta ({@see \MyInvoice\Service\Migration\MoneyS3\AdvanceDeductionMatcher}). */
     public const KIND_ADVANCE_DEDUCTION = 'advance_deduction';
+    /** Daňová evidence: úhrada z peněžního deníku, zápočet, zařazení pohybu, ostatní položka, podání DPH. */
+    public const KIND_TAX_PAYMENT = 'tax_payment';
+    public const KIND_TAX_OFFSET = 'tax_offset';
+    public const KIND_TAX_CLASSIFICATION = 'tax_classification';
+    public const KIND_OTHER_ITEM = 'other_item';
+    public const KIND_VAT_FILING = 'vat_filing';
 
     protected function runsTable(): string
     {

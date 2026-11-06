@@ -9,6 +9,7 @@ use MyInvoice\Service\Migration\MoneyS3\MoneyS3Exception;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Backup;
 use MyInvoice\Service\Migration\MoneyS3\Ms3Table;
 use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticAgenda;
+use MyInvoice\Tests\Fixtures\MoneyS3\SyntheticTaxAgenda;
 use PHPUnit\Framework\TestCase;
 
 final class Ms3BackupTest extends TestCase
@@ -134,9 +135,10 @@ final class Ms3BackupTest extends TestCase
     }
 
     /**
-     * Daňová evidence vede v Money místo účetního deníku peněžní deník. Náhled to u roku
-     * řekne (ne jen „rok nemá účetní deník") a pozná agendu, kterou převod nepřevede.
-     * Agenda, která na podvojné účetnictví přešla, převoditelná zůstává.
+     * Daňová evidence vede v Money místo účetního deníku peněžní deník. Náhled pozná agendu
+     * vedenou celou jako daňová evidence (převod ji převede do daňové evidence). V agendě,
+     * která na podvojné účetnictví přešla, rok daňové evidence řekne, že se nepřevede
+     * (ne jen „rok nemá účetní deník"); převoditelná zůstává od roku podvojného účetnictví.
      */
     public function testAgendaInfoRecognizesTaxRecordsYears(): void
     {
@@ -149,8 +151,7 @@ final class Ms3BackupTest extends TestCase
         self::assertTrue($taxRecords->taxRecordsOnly());
         self::assertSame([0, 0], array_column($taxRecords->years, 'journal_rows'));
         self::assertSame([2, 2], array_column($taxRecords->years, 'cashbook_rows'));
-        self::assertSame(['tax_records_year', 'tax_records_year'], array_column($taxRecords->warnings, 'code'));
-        self::assertStringStartsWith('Rok v adresáři ROK.002 nemá účetní deník, ale peněžní deník', $taxRecords->warnings[1]['message']);
+        self::assertSame([], $taxRecords->warnings);
         // Náhled z meta.json bez nového údaje není úplný - průvodce ho přečte znovu ze zálohy.
         $stored = $taxRecords->toArray();
         self::assertTrue(AgendaInfo::isComplete($stored));
@@ -163,5 +164,75 @@ final class Ms3BackupTest extends TestCase
         self::assertSame([null, 2025], array_column($switched->years, 'fiscal_year'));
         self::assertSame(['tax_records_year'], array_column($switched->warnings, 'code'));
         self::assertStringStartsWith('Rok v adresáři ROK.001 nemá účetní deník, ale peněžní deník', $switched->warnings[0]['message']);
+        self::assertStringEndsWith('rok se nepřevede.', $switched->warnings[0]['message']);
+        // Přechod z daňové evidence na podvojné účetnictví je v pořádku.
+        self::assertSame(['tax_evidence', 'double_entry'], array_column($switched->years, 'accounting_mode'));
+        self::assertNull($switched->taxRecordsAfterDoubleEntry());
+    }
+
+    /**
+     * `Rok.DAT` nese rok, hranice období, režim a plátcovství roku (sekce „Global"; stejně
+     * pojmenovaná proměnná jiné sekce s rokem nesouvisí). Záloha bez `Rok.DAT` je nemá.
+     */
+    public function testYearSettingsReadMoneyYearModeAndVatPayer(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/tax.lz', SyntheticTaxAgenda::files());
+        $backup = Ms3Backup::extract($this->tmp . '/tax.lz', $this->tmp . '/tax');
+        self::assertSame(
+            ['year' => 2025, 'period_start' => '2025-01-01', 'period_end' => '2025-12-31', 'double_entry' => false, 'vat_payer' => true],
+            $backup->yearSettings($backup->dir() . '/ROK.001'),
+        );
+        self::assertSame(2024, $backup->yearSettings($backup->dir() . '/ROK.002')['year']);
+
+        SyntheticAgenda::writeDir($this->tmp . '/a');
+        self::assertSame(
+            ['year' => null, 'period_start' => null, 'period_end' => null, 'double_entry' => null, 'vat_payer' => null],
+            Ms3Backup::open($this->tmp . '/a')->yearSettings($this->tmp . '/a/ROK.001'),
+        );
+    }
+
+    /**
+     * Náhled agendy nese rok a režim, jak je vede Money: adresář ROK.001 je tu rok 2025,
+     * ROK.002 rok 2024 (pořadí adresářů pořadí let neurčuje). Hláška u roku daňové evidence
+     * uvádí i rok. Bez `Rok.DAT` rozhoduje obsah roku.
+     */
+    public function testAgendaInfoCarriesMoneyYearAndAccountingMode(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/tax.lz', SyntheticTaxAgenda::files());
+        $tax = AgendaInfo::fromBackup(Ms3Backup::extract($this->tmp . '/tax.lz', $this->tmp . '/tax'));
+        self::assertSame([2025, 2024], array_column($tax->years, 'money_year'));
+        self::assertSame(['tax_evidence', 'tax_evidence'], array_column($tax->years, 'accounting_mode'));
+        self::assertTrue($tax->taxRecordsOnly());
+        self::assertNull($tax->taxRecordsAfterDoubleEntry());
+        // Agenda vedená celá jako daňová evidence se převede do daňové evidence: rok převodu
+        // je rok Money a upozornění „rok se nepřevede" nemá.
+        self::assertSame([2025, 2024], array_column($tax->years, 'fiscal_year'));
+        self::assertSame([2024, 2025], $tax->fiscalYears());
+        self::assertSame([], $tax->warnings);
+
+        $stored = $tax->toArray();
+        self::assertTrue(AgendaInfo::isComplete($stored));
+        unset($stored['years'][1]['accounting_mode']);
+        self::assertFalse(AgendaInfo::isComplete($stored), 'meta.json bez režimu roku se přečte znovu ze zálohy');
+
+        SyntheticAgenda::writeDir($this->tmp . '/a');
+        $doubleEntry = AgendaInfo::fromBackup(Ms3Backup::open($this->tmp . '/a'));
+        self::assertSame([null, null], array_column($doubleEntry->years, 'money_year'));
+        self::assertSame(['double_entry', 'double_entry'], array_column($doubleEntry->years, 'accounting_mode'));
+        self::assertNull($doubleEntry->taxRecordsAfterDoubleEntry());
+    }
+
+    /**
+     * Agenda, která se v Money z podvojného účetnictví vrátila do daňové evidence: převod
+     * by ji přepnul do podvojného i pro roky daňové evidence. Náhled vrátí první takový rok.
+     */
+    public function testAgendaReturnedToTaxRecordsIsRecognized(): void
+    {
+        SyntheticAgenda::writeLzFiles($this->tmp . '/back.lz', SyntheticTaxAgenda::filesReturnedToTaxRecords());
+        $agenda = AgendaInfo::fromBackup(Ms3Backup::extract($this->tmp . '/back.lz', $this->tmp . '/back'));
+        self::assertSame(['double_entry', 'tax_evidence'], array_column($agenda->years, 'accounting_mode'));
+        self::assertFalse($agenda->taxRecordsOnly());
+        self::assertSame(['year' => 2025, 'dir' => 'ROK.002'], $agenda->taxRecordsAfterDoubleEntry());
+        self::assertStringContainsString('od roku 2025 (adresář ROK.002) znovu daňovou evidenci', AgendaInfo::textTaxRecordsAfterDoubleEntry(['year' => 2025, 'dir' => 'ROK.002']));
     }
 }

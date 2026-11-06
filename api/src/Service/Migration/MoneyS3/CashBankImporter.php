@@ -35,7 +35,7 @@ final class CashBankImporter
      * Pole bankovní knihy (`BankKnih`), se kterými pracuje převod pohybů: pohyby všech let
      * leží v paměti naráz (výpisy po účtech a letech), tak jen s nimi.
      */
-    private const BANK_FIELDS = ['Doklad', 'Ucet', 'DatPlat', 'DatUcPr', 'Celkem', 'ValutyKUhr', 'ValutyZak0', 'Vydej', 'Kurs', 'PocetJedn', 'AdNazev', 'VarSym', 'Popis'];
+    private const BANK_FIELDS = ['Cislo', 'Doklad', 'Ucet', 'DatPlat', 'DatUcPr', 'Celkem', 'ValutyKUhr', 'ValutyZak0', 'Vydej', 'Kurs', 'PocetJedn', 'AdNazev', 'VarSym', 'Popis'];
 
     public function __construct(
         private readonly Connection $db,
@@ -78,7 +78,17 @@ final class CashBankImporter
               WHERE id = ? AND supplier_id = ? AND currency_code <> "CZK" AND opening_foreign_date IS NULL'
         );
         foreach ($meta as $code => $m) {
-            $registers[$code] = $this->ensureRegister($ctx, (string) $code, $m['name'], $m['primary'], $m['currency']);
+            $currency = $m['currency'];
+            if ($ctx->taxRecords && $currency !== 'CZK') {
+                // Daňová evidence vede pokladny jen v Kč (valutovou pokladnu aplikace v ní nezaloží)
+                // a peněžní deník je v Kč i v Money: doklady se převezmou v Kč z `Celkem`.
+                $p->warn(self::STEP_CASH, 'register_currency_tax_records', sprintf(
+                    'Pokladna %s je v Money vedená v %s. Daňová evidence vede pokladny jen v Kč: převod ji založí jako korunovou, '
+                    . 'doklady převezme v Kč podle Money a částku ve valutě uvede v popisu dokladu.', $code, $currency
+                ), ['register' => $code, 'currency' => $currency]);
+                $currency = 'CZK';
+            }
+            $registers[$code] = $this->ensureRegister($ctx, (string) $code, $m['name'], $m['primary'], $currency);
             if ($registers[$code] !== null && $registers[$code]['currency'] !== 'CZK' && $m['opening'] !== null) {
                 $setOpening->execute([$m['opening']['amount'], $m['opening']['date'], $registers[$code]['id'], $ctx->supplierId]);
                 if ($setOpening->rowCount() > 0) {
@@ -121,9 +131,13 @@ final class CashBankImporter
             $plain = $year . '|' . $docNo;
             $owner[$plain] ??= $registerCode;
             $key = $owner[$plain] === $registerCode ? $plain : $plain . '|' . $registerCode;
+            $movementKey = $r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0);
             $register = $registers[$registerCode] ?? null;
             if (isset($existing[$key])) {
                 $ctx->cashDocuments[$key] = $existing[$key];
+                if ($ctx->taxRecords) {
+                    $ctx->movements['cash'][$movementKey] = $existing[$key];
+                }
                 $p->count(self::STEP_CASH, 'existing');
                 // Valuty se doplní i do uzavřeného roku: pohyb v deníku se nemění, jde jen
                 // o souběžnou částku ve valutě, ze které pokladna počítá valutový zůstatek.
@@ -176,6 +190,18 @@ final class CashBankImporter
             }
             $vatDeduction = $vatClass['deduction'] ?? 'full';
             $vatAsset = $isOut && ($vatClass['fixed_asset'] ?? false);
+            $purpose = $isOut ? 'purchase' : 'sale';
+            if ($ctx->taxRecords) {
+                [$purpose, $keepVat] = self::taxRecordsPurpose($ctx, $r, $isOut);
+                if (!$keepVat) {
+                    $vatLines = [];
+                }
+            }
+            $description = trim((string) ($r['Popis'] ?? '')) ?: $docNo;
+            $stored = $ctx->taxRecords ? self::storedForeign($r) : null;
+            if ($stored !== null) {
+                $description = self::foreignDescription($description, $stored);
+            }
             $rule = mb_substr(trim((string) ($r['PrKont'] ?? '')), 0, 64);
             $ruleKey = null;
             if ($rule !== '') {
@@ -186,14 +212,14 @@ final class CashBankImporter
                 $ctx->supplierId,
                 $registerId,
                 $isOut ? 'out' : 'in',
-                $isOut ? 'purchase' : 'sale',
+                $purpose,
                 $number,
                 $issue,
                 InvoiceImporter::date($r, ['DatUplDPH']) ?? $issue,
                 mb_substr(trim((string) ($r['AdNazev'] ?? '')), 0, 255) ?: null,
                 mb_substr(CodebookImporter::ico((string) ($r['AdICO'] ?? '')), 0, 20) ?: null,
                 mb_substr(strtoupper(str_replace(' ', '', trim((string) ($r['AdDIC'] ?? '')))), 0, 20) ?: null,
-                mb_substr(trim((string) ($r['Popis'] ?? '')) ?: $docNo, 0, 255),
+                mb_substr($description, 0, 255),
                 $vatLines === [] ? 'none' : 'vat',
                 abs($amount),
                 $fx['currency'] ?? 'CZK',
@@ -213,6 +239,9 @@ final class CashBankImporter
             }
             $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_CASH_DOCUMENT, $key, $id, $ctx->runId);
             $ctx->cashDocuments[$key] = $id;
+            if ($ctx->taxRecords) {
+                $ctx->movements['cash'][$movementKey] = $id;
+            }
             $p->count(self::STEP_CASH, 'created');
         }
         if (!$ctx->options->relinkOnly) {
@@ -391,9 +420,16 @@ final class CashBankImporter
                 if ($year > 0 && $rate > 0) {
                     $rates[$year] = $rate;
                 }
+                // Počáteční stav účtu roku (`PocStav`) — kotva zůstatků výpisů v daňové
+                // evidenci, která deník s otevíracím zápisem nemá.
+                $openings = $accounts[$code]['openings'] ?? [];
+                if ($year > 0) {
+                    $openings[$year] = StatementBalanceService::cents(number_format((float) ($r['PocStav'] ?? 0), 2, '.', ''));
+                }
                 // Pozdější rok přepíše dřívější — firma mohla banku mezitím změnit.
                 $accounts[$code] = [
                     'rates' => $rates,
+                    'openings' => $openings,
                     'label' => trim((string) ($r['Popis'] ?? '')),
                     'number' => trim((string) ($r['Ucet'] ?? '')),
                     'bank' => trim((string) ($r['BKod'] ?? '')),
@@ -455,6 +491,9 @@ final class CashBankImporter
                     $txKey = $txKeys[$statementKey][$i];
                     if (isset($existingTx[$txKey])) {
                         $ctx->bankTransactions[$txKey] = $existingTx[$txKey];
+                        if ($ctx->taxRecords) {
+                            $ctx->movements['bank'][$r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0)] = $existingTx[$txKey];
+                        }
                         // Párování úhrad porovnává částky v Kč i u pohybů uzavřených let.
                         if ($lockedCurrency !== 'CZK') {
                             $ctx->bankTransactionCzk[$existingTx[$txKey]] = self::transactionAmount($r, $lockedCurrency)[1];
@@ -468,7 +507,9 @@ final class CashBankImporter
             $meta = $accounts[$code] ?? ['number' => '', 'bank' => '', 'iban' => '', 'primary' => '', 'currency' => 'CZK', 'year' => 0];
             $currency = $meta['currency'];
             $running = null;
-            if ($currency === 'CZK') {
+            if ($ctx->taxRecords) {
+                $running = $currency === 'CZK' ? ($meta['openings'][$year] ?? null) : null;
+            } elseif ($currency === 'CZK') {
                 $primary = AccountCode::fromMoney($meta['primary']);
                 $accountId = $primary !== null ? ($ctx->accountIds[$primary] ?? null) : null;
                 $periodId = $ctx->periods[$year]['id'] ?? null;
@@ -534,8 +575,12 @@ final class CashBankImporter
                     } else {
                         $debit -= $cents;
                     }
+                    $movementKey = $r['__dir'] . '|' . (int) ($r['Cislo'] ?? 0);
                     if (isset($existingTx[$txKey])) {
                         $ctx->bankTransactions[$txKey] = $existingTx[$txKey];
+                        if ($ctx->taxRecords) {
+                            $ctx->movements['bank'][$movementKey] = $existingTx[$txKey];
+                        }
                         if ($currency !== 'CZK') {
                             $ctx->bankTransactionCzk[$existingTx[$txKey]] = $czk;
                         }
@@ -555,6 +600,9 @@ final class CashBankImporter
                     ]);
                     $this->map->put($ctx->supplierId, MoneyS3ImportRepository::KIND_BANK_TRANSACTION, $txKey, $id, $ctx->runId);
                     $ctx->bankTransactions[$txKey] = $id;
+                    if ($ctx->taxRecords) {
+                        $ctx->movements['bank'][$movementKey] = $id;
+                    }
                     if ($currency !== 'CZK') {
                         $ctx->bankTransactionCzk[$id] = $czk;
                     }
@@ -722,6 +770,49 @@ final class CashBankImporter
     }
 
     /**
+     * Účel pokladního dokladu daňové evidence podle jeho řádků v peněžním deníku Money
+     * ({@see Ms3CashBook}) a zda si doklad nechá řádky DPH:
+     *
+     *   - úhrada faktury nebo pohledávky: účel ostatní bez DPH; úhradou ho udělá až
+     *     navázání úhrady ({@see TaxRecordsImporter::payments()}), DPH nese faktura,
+     *   - daňový příjem nebo výdaj bez dokladu: prodej nebo nákup s řádky DPH
+     *     (zjednodušený daňový doklad),
+     *   - průběžná položka: převod,
+     *   - ostatní (vklad, výběr, nedaňové, DPH): účel ostatní mimo základ daně; vklad
+     *     a výběr zařadí krok zařazení pohybů ({@see TaxRecordsImporter::classification()}).
+     *
+     * Doklad bez řádků deníku (nulový) zůstane prodejem nebo nákupem.
+     *
+     * @param array<string,mixed> $r
+     * @return array{0:string,1:bool} [účel, ponechat řádky DPH]
+     */
+    private static function taxRecordsPurpose(ImportContext $ctx, array $r, bool $isOut): array
+    {
+        $movement = ($ctx->cashBooks[(string) ($r['__dir'] ?? '')] ?? null)?->movements[Ms3CashBook::key('PK', (int) ($r['Cislo'] ?? 0))] ?? null;
+        if ($movement === null) {
+            return [$isOut ? 'purchase' : 'sale', true];
+        }
+        $buckets = [];
+        foreach ($movement['parts'] as $part) {
+            if ($part['link'] !== null && in_array($part['link']['table'], ['FV', 'FP', 'KP'], true)) {
+                return ['other', false];
+            }
+            if ($part['bucket'] !== null && $part['bucket'] !== Ms3CashBook::VAT) {
+                $buckets[$part['bucket']] = true;
+            }
+        }
+        if (count($buckets) === 1) {
+            return match ((string) array_key_first($buckets)) {
+                'income_taxable' => ['sale', true],
+                'expense_taxable' => ['purchase', true],
+                'transfer' => ['transfer', false],
+                default => ['other', false],
+            };
+        }
+        return ['other', false];
+    }
+
+    /**
      * Klíč bankovního dokladu v mapě převodu. Každý účet má v Money vlastní číselnou řadu,
      * takže stejné číslo dokladu na dalším účtu téhož roku je běžné: první účet (podle
      * kódu) si ponechá klíč „rok|číslo" — mapy dřívějších převodů platí dál — další účet
@@ -752,7 +843,8 @@ final class CashBankImporter
      * Pokladna na stejném účtu, kterou firma už má, se použije — pokladna je v MyÚčtu
      * vázaná na účet (unikátní na firmu), druhá na týž účet nevznikne. Valutová pokladna
      * Money (`Mena`) vznikne ve své měně; už převedenou korunovou pokladnu převod na měnu
-     * z Money přepne ({@see alignRegisterCurrency()}).
+     * z Money přepne ({@see alignRegisterCurrency()}). Daňová evidence sem posílá vždy Kč
+     * ({@see importCash()}).
      *
      * @return array{id:int,currency:string}|null
      */
@@ -765,6 +857,11 @@ final class CashBankImporter
         $pdo = $this->db->pdo();
         $account = AccountCode::fromMoney($primaryAccount);
         $account = $account !== null && isset($ctx->accountIds[$account]) ? $account : null;
+        if ($account === null && $ctx->taxRecords) {
+            // Daňová evidence osnovu nemá: první pokladna Money je pokladna firmy na 211
+            // (stejně jako pokladna založená v aplikaci), další dostanou volnou analytiku.
+            $account = $this->map->all($ctx->supplierId, MoneyS3ImportRepository::KIND_CASH_REGISTER) === [] ? '211' : $this->freeCashAccount($ctx->supplierId);
+        }
         if ($account !== null) {
             $stmt = $pdo->prepare('SELECT id FROM cash_registers WHERE supplier_id = ? AND account_code = ? LIMIT 1');
             $stmt->execute([$ctx->supplierId, $account]);
@@ -890,6 +987,57 @@ final class CashBankImporter
     }
 
     /**
+     * Valuta pokladního dokladu jen tak, jak ji Money uložilo: částka (`ValutyKUhr`,
+     * záložně `ValutyZak0`), kurz `Kurs` za `PocetJedn` jednotek. Na rozdíl od
+     * {@see cashForeign()} nic nedopočítává; chybějící údaj je null. Null pro doklad v Kč.
+     *
+     * @param array<string,mixed> $r
+     * @return array{currency:string,amount:?float,rate:?float,units:int}|null
+     */
+    public static function storedForeign(array $r): ?array
+    {
+        $currency = self::currency((string) ($r['Mena'] ?? ''));
+        if ($currency === 'CZK') {
+            return null;
+        }
+        $amount = abs(round((float) ($r['ValutyKUhr'] ?? 0), 2)) ?: abs(round((float) ($r['ValutyZak0'] ?? 0), 2));
+        $rate = (float) ($r['Kurs'] ?? 0);
+        return ['currency' => $currency, 'amount' => $amount > 0 ? $amount : null, 'rate' => $rate > 0 ? $rate : null,
+            'units' => max(1, (int) ($r['PocetJedn'] ?? 1))];
+    }
+
+    /**
+     * Popis dokladu korunové pokladny s valutou z Money, např. „Ubytování (Money: 120,00 EUR,
+     * kurz 25,000 Kč)". Popis má 255 znaků: zkrátí se text, údaj o valutě zůstane celý.
+     *
+     * @param array{currency:string,amount:?float,rate:?float,units:int} $fx {@see storedForeign()}
+     */
+    public static function foreignDescription(string $text, array $fx): string
+    {
+        $parts = [$fx['amount'] !== null ? number_format($fx['amount'], 2, ',', ' ') . ' ' . $fx['currency'] : $fx['currency']];
+        if ($fx['rate'] !== null) {
+            $parts[] = 'kurz ' . number_format($fx['rate'], 3, ',', ' ') . ' Kč' . ($fx['units'] > 1 ? '/' . $fx['units'] . ' ' . $fx['currency'] : '');
+        }
+        $suffix = ' (Money: ' . implode(', ', $parts) . ')';
+        return rtrim(mb_substr($text, 0, 255 - mb_strlen($suffix))) . $suffix;
+    }
+
+    /** První volná analytika pokladny 211.nnn firmy (účet pokladny je ve firmě unikátní). */
+    private function freeCashAccount(int $supplierId): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT account_code FROM cash_registers WHERE supplier_id = ?');
+        $stmt->execute([$supplierId]);
+        $used = array_flip(array_map('strval', $stmt->fetchAll(PDO::FETCH_COLUMN)));
+        for ($n = 1; $n < 1000; $n++) {
+            $code = sprintf('211.%03d', $n);
+            if (!isset($used[$code])) {
+                return $code;
+            }
+        }
+        throw new MoneyS3Exception('cash_register_accounts', 'Firma nemá volnou analytiku pokladny 211.');
+    }
+
+    /**
      * Skutečné číslo účtu firmy zná Money. Na měnový účet firmy (CZK, EUR…) se doplní účet
      * v té měně z POSLEDNÍHO roku agendy (banku mohla firma změnit) jen tehdy, když tam žádné
      * není — vyplněný účet převod nepřepisuje.
@@ -957,10 +1105,10 @@ final class CashBankImporter
         return BankSymbols::variableSymbolAndDescription(trim((string) ($r['VarSym'] ?? '')), trim((string) ($r['Popis'] ?? '')), false);
     }
 
-    /** Měna pokladny/účtu z Money (prázdná = domácí). */
+    /** Měna pokladny/účtu z Money (prázdná = domácí). `mb_`: `strtoupper` z „Kč" neudělá „KČ". */
     private static function currency(string $mena): string
     {
-        $m = strtoupper(trim($mena));
+        $m = mb_strtoupper(trim($mena));
         return in_array($m, ['', 'KČ', 'CZK'], true) ? 'CZK' : $m;
     }
 }
