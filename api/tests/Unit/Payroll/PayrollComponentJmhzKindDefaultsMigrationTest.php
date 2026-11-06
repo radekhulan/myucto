@@ -34,6 +34,7 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         '1931_payroll_component_vacation_settlement_mapping.sql',
         '1983_payroll_component_meal_allowance_taxable_mapping.sql',
         '2252_payroll_holiday_time_off.sql',
+        '2254_payroll_component_minimum_wage.sql',
     ];
 
     /**
@@ -47,6 +48,7 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         'MZDA_HODINOVA_ZAKLAD',
         'MZDA_DOSAZENA_PRESCAS',
         'NAHRADA_MZDY_VOLNO_ZA_SVATEK',
+        'DOPLATEK_MINIMALNI_MZDA',
     ];
 
     private const PACKAGE_TRANSITION = '2210_payroll_component_jmhz_catalog_1_4_2_11_package.sql';

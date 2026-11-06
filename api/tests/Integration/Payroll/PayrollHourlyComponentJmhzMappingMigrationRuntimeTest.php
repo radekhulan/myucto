@@ -55,10 +55,12 @@ final class PayrollHourlyComponentJmhzMappingMigrationRuntimeTest extends TestCa
         'MZDA_HODINOVA_ZAKLAD' => '10329',
         'MZDA_DOSAZENA_PRESCAS' => '10329',
         'NAHRADA_MZDY_VOLNO_ZA_SVATEK' => '10339',
+        'DOPLATEK_MINIMALNI_MZDA' => '10329',
     ];
 
     private const BACKFILLS = [
         '2252_payroll_holiday_time_off.sql',
+        '2254_payroll_component_minimum_wage.sql',
     ];
 
     public function testBackfillAddsOnlyMissingMappingsAndKeepsAccountantChoices(): void

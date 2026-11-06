@@ -28,9 +28,9 @@
 Hromadně zadáte měsíc rychleji v [Rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md).
 Absence, cestovní náhrady, benefity a srážky se zadávají ve vlastních agendách.
 
-Rezervované složky hodinového základu, dosažené mzdy za přesčas a placeného
-volna za svátek musí zachovat výchozí zařazení pro daň, pojištění,
-průměrný výdělek a výkazy. Vlastní složka se stejným kódem a odlišným
+Rezervované složky hodinového základu, dosažené mzdy za přesčas, placeného
+volna za svátek a doplatku do minima musí zachovat výchozí zařazení pro daň,
+pojištění, průměrný výdělek a výkazy. Vlastní složka se stejným kódem a odlišným
 zařazením zablokuje přípravu běhu. Název, četnost, účetní předkontace
 a cílová kolonka JMHZ zůstávají nastavitelné.
 

@@ -70,6 +70,7 @@ final class PayrollHourlyReservedComponentGuardTest extends TestCase
         }
         yield 'dosažený přesčas' => [PayrollHourlyWageComponents::ACHIEVED_OVERTIME, 'social_treatment', 'excluded'];
         yield 'náhrada nesmí vstoupit do průměru' => [PayrollHourlyWageComponents::HOLIDAY_TIME_OFF, 'average_earning_treatment', 'included'];
+        yield 'doplatek minima' => [PayrollHourlyWageComponents::MINIMUM_TOP_UP, 'health_treatment', 'excluded'];
     }
 
     #[DataProvider('incompatibleClassifications')]
