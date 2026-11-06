@@ -21,7 +21,9 @@ a před mzdovým během (viz [§ 75.4](75_Uplne_mzdy.md#754-krok-za-krokem-zprac
 ## 79.2 Než začnete
 
 1. **Pracovní vztahy** účinné ve zpracovávaném měsíci (`Mzdy → Zaměstnanci`).
-   Bez nich stránka ukáže **V tomto měsíci nejsou účinné pracovní vztahy**.
+   Stránka ukazuje tytéž vztahy, které zahrne mzdový běh za měsíc, včetně
+   plánovaného vztahu s nástupem v tomto měsíci nebo dřív, ještě než se nástup
+   potvrdí. Bez nich stránka ukáže **V tomto měsíci nejsou účinné pracovní vztahy**.
 2. **Mzdové složky** firmy (`Mzdy → Mzdové složky a vstupy`).
 3. **Absence a docházka** za měsíc zapsané a rozhodnuté. Nabídnutá mzda se
    o ně krátí.
