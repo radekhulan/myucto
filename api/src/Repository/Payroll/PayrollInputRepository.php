@@ -1031,6 +1031,7 @@ final class PayrollInputRepository
             if ($row['component_kind'] !== $expectedKind || $row['annual_limit_minor'] !== null || $row['exemption_basket'] !== null) {
                 throw new \InvalidArgumentException('Chráněná složka hodinové mzdy nemá platnou klasifikaci.');
             }
+            \MyInvoice\Service\Payroll\PayrollHourlyWageComponents::assertReservedClassification($row);
             $components[$code] = $row;
         }
         $values = [];
