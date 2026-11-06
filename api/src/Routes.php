@@ -874,7 +874,8 @@ final class Routes
         $app->post   ('/api/recurring/{id:[0-9]+}/reschedule', [RecurringTemplateAction::class, 'reschedule']);
 
         // Work reports — výkaz víceprací (M5)
-        $app->map(['GET', 'POST'], '/api/work-report-billing-templates', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
+        $app->get('/api/work-report-billing-templates', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
+        $app->post('/api/work-report-billing-templates', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
         $app->map(['PUT', 'DELETE'], '/api/work-report-billing-templates/{id:[0-9]+}', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
         $app->post('/api/work-report-billing-preview', [\MyInvoice\Action\WorkReport\BillingAction::class, 'previewUnsaved']);
         $app->get('/api/invoices/{id:[0-9]+}/work-report/billing-preview', [\MyInvoice\Action\WorkReport\BillingAction::class, 'preview']);

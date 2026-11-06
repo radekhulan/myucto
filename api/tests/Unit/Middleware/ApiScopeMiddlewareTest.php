@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Middleware;
 
 use MyInvoice\Middleware\ApiScopeMiddleware;
+use MyInvoice\Middleware\ApiVersionRewriteMiddleware;
 use MyInvoice\Middleware\AuthMiddleware;
 use PHPUnit\Framework\TestCase;
 use Psr\Http\Message\ResponseInterface;
@@ -15,6 +16,56 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 
 final class ApiScopeMiddlewareTest extends TestCase
 {
+    public function testBearerCanReadWorkReportBillingTemplatesThroughPublicApi(): void
+    {
+        $scope = $this->middleware();
+        $handler = new class($scope, $this->okHandler()) implements RequestHandlerInterface {
+            public function __construct(
+                private readonly ApiScopeMiddleware $scope,
+                private readonly RequestHandlerInterface $next,
+            ) {}
+
+            public function handle(ServerRequestInterface $request): ResponseInterface
+            {
+                TestCase::assertSame('/api/work-report-billing-templates', $request->getUri()->getPath());
+                return $this->scope->process($request, $this->next);
+            }
+        };
+        $app = \Slim\Factory\AppFactory::create();
+        \MyInvoice\Routes::register($app);
+        foreach (['GET', 'HEAD'] as $method) {
+            self::assertSame(\Slim\Routing\RoutingResults::FOUND,
+                $app->getRouteResolver()->computeRoutingResults('/api/work-report-billing-templates', $method)->getRouteStatus());
+            foreach (['read', 'read_write'] as $tokenScope) {
+                foreach ([false, true] as $clientSurface) {
+                    $request = $this->bearer($method, '/api/v1/work-report-billing-templates', $tokenScope)
+                        ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => $tokenScope, 'mcp_client_surface' => $clientSurface]);
+                    $response = (new ApiVersionRewriteMiddleware())->process($request, $handler);
+                    self::assertSame(204, $response->getStatusCode(), (string) $response->getBody());
+                    self::assertSame('1', $response->getHeaderLine('X-API-Version'));
+                }
+            }
+        }
+    }
+
+    public function testBearerCannotManageWorkReportBillingTemplatesOrReachSiblingEndpoints(): void
+    {
+        foreach (['read', 'read_write'] as $scope) {
+            foreach (['POST', 'PUT', 'PATCH', 'DELETE'] as $method) {
+                $response = $this->middleware()->process($this->bearer($method, '/api/work-report-billing-templates', $scope), $this->okHandler());
+                self::assertSame(403, $response->getStatusCode());
+                self::assertSame('token_write_forbidden', $this->errorCode($response));
+            }
+            foreach (['/api/work-report-billing-templates/7', '/api/work-report-billing-templates-extra', '/api/work-report-billing-preview'] as $path) {
+                foreach (['GET', 'POST', 'PUT', 'DELETE'] as $method) {
+                    $response = $this->middleware()->process($this->bearer($method, $path, $scope), $this->okHandler());
+                    self::assertSame(403, $response->getStatusCode(), $method . ' ' . $path);
+                    self::assertSame('token_endpoint_forbidden', $this->errorCode($response));
+                }
+            }
+        }
+    }
+
     public function testDelegatedInvoiceDefaultsRemainSessionOnly(): void
     {
         foreach (['GET', 'PUT'] as $method) {
