@@ -6,6 +6,8 @@ ALTER TABLE payroll_component_definitions
 -- Dorovnání existujících složek odpovídá PayrollComponentJmhzMappingDefaults.
 -- Výslovné zařazení účetní, včetně vypnutého nebo ze staršího balíku,
 -- se nepřepisuje. Vyloučené a ručně posuzované složky zůstávají beze změny.
+-- Vlastní stejnojmenná složka jiného druhu, než má výchozí číselník, zůstává
+-- mimo zařazení podle kódu (definice příznak výchozí složky nemá).
 SET NAMES utf8mb4;
 
 INSERT INTO payroll_component_jmhz_mappings
@@ -23,8 +25,9 @@ SELECT target.supplier_id,
                by_code.attribute_id
           FROM payroll_component_definitions definition
           JOIN (
-                SELECT 'DOPLATEK_MINIMALNI_MZDA' AS code, '10329' AS attribute_id
+                SELECT 'DOPLATEK_MINIMALNI_MZDA' AS code, '10329' AS attribute_id, 'hourly_wage' AS component_kind
                ) by_code ON by_code.code = definition.code
+                        AND by_code.component_kind = definition.component_kind
          WHERE definition.jmhz_treatment = 'included'
        ) target
   JOIN payroll_jmhz_spec_packages package

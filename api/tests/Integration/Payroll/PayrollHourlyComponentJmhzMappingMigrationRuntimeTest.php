@@ -6,6 +6,7 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
+use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -94,7 +95,7 @@ final class PayrollHourlyComponentJmhzMappingMigrationRuntimeTest extends TestCa
             }
         }
         $component = $db->prepare('INSERT INTO payroll_component_definitions
-            (supplier_id, code, name, jmhz_treatment) VALUES (?, ?, ?, ?)');
+            (supplier_id, code, name, component_kind, jmhz_treatment) VALUES (?, ?, ?, ?, ?)');
         $mapping = $db->prepare('INSERT INTO payroll_component_jmhz_mappings
             (supplier_id, component_definition_id, spec_package_id, target_attribute_id, is_active, disabled_at)
             VALUES (?, ?, ?, ?, ?, ?)');
@@ -103,9 +104,11 @@ final class PayrollHourlyComponentJmhzMappingMigrationRuntimeTest extends TestCa
         // Dvě firmy a více verzí stejného kódu: migrace nesmí pokrýt jen první shodu.
         foreach ([1, 2] as $supplierId) {
             foreach (self::CODES as $code => $target) {
-                foreach (['missing', 'missing_version', 'custom', 'disabled', 'previous', 'excluded', 'manual_review'] as $state) {
+                foreach (['missing', 'missing_version', 'custom', 'disabled', 'previous', 'excluded', 'manual_review', 'other_kind'] as $state) {
                     $treatment = in_array($state, ['excluded', 'manual_review'], true) ? $state : 'included';
-                    $component->execute([$supplierId, $code, 'Syntetická vlastní složka ' . $state, $treatment]);
+                    // Vlastní stejnojmenná složka jiného druhu nedostane zařazení podle kódu.
+                    $kind = $state === 'other_kind' ? 'bonus' : PayrollComponentDefaults::template($code)['component_kind'];
+                    $component->execute([$supplierId, $code, 'Syntetická vlastní složka ' . $state, $kind, $treatment]);
                     $id = (int) $db->lastInsertId();
                     if (str_starts_with($state, 'missing')) {
                         $missing[$id] = [$supplierId, $target];
@@ -122,7 +125,7 @@ final class PayrollHourlyComponentJmhzMappingMigrationRuntimeTest extends TestCa
         }
         $readChoices = static fn (): array => $db->query('SELECT * FROM payroll_component_jmhz_mappings
             WHERE component_definition_id IN (' . implode(',', $untouched) . ') ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
-        $readDefinitions = static fn (): array => $db->query('SELECT id, supplier_id, code, name, jmhz_treatment
+        $readDefinitions = static fn (): array => $db->query('SELECT id, supplier_id, code, name, component_kind, jmhz_treatment
             FROM payroll_component_definitions ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
         $choicesBefore = $readChoices();
         $definitionsBefore = $readDefinitions();
@@ -163,6 +166,7 @@ final class PayrollHourlyComponentJmhzMappingMigrationRuntimeTest extends TestCa
                 supplier_id INT UNSIGNED NOT NULL,
                 code VARCHAR(100) NOT NULL,
                 name VARCHAR(255) NOT NULL,
+                component_kind VARCHAR(40) NOT NULL,
                 jmhz_treatment ENUM('included','excluded','manual_review') NOT NULL,
                 UNIQUE KEY uq_payroll_component_supplier_id (supplier_id, id),
                 FOREIGN KEY (supplier_id) REFERENCES supplier(id)

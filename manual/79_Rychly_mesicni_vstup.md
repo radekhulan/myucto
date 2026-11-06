@@ -305,6 +305,14 @@ proč se určitý příjem do minima nepočítá. Podklady po účinných úsec�
 ukazují skutečně odpracovanou běžnou dobu, stanovenou týdenní dobu
 a účinné minimum. Částky určuje server, náhled není další ruční vstup.
 
+Složky `MZDA_HODINOVA_ZAKLAD`, `MZDA_DOSAZENA_PRESCAS`,
+`NAHRADA_MZDY_VOLNO_ZA_SVATEK` a `DOPLATEK_MINIMALNI_MZDA` vznikají u vztahu
+s hodinovými podmínkami v daném měsíci jen tímto výpočtem, ručně ani importem
+je zadat nejde. U ostatních vztahů jsou to běžné složky jako dřív. Vede-li
+firma pod stejným kódem vlastní složku s jiným zacházením, hodinový výpočet
+se zastaví s chybou a vlastní složku je potřeba v číselníku upravit nebo
+ukončit.
+
 **Hodinové posouzení je výchozí.** Používá přesnou dobu běžné práce
 bez přesčasu. Kratší sjednaný úvazek nesnižuje hodinové minimum.
 Je-li doložená kratší zákonná stanovená týdenní doba, může být

@@ -284,7 +284,12 @@ final class PayrollComponentJmhzMappingDefaults
         $params = [$packageId];
         $byCode = [];
         foreach ($table['codes'] as $code => $target) {
-            $byCode[] = 'WHEN ? THEN ?';
+            if (\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isReserved($code)) {
+                $byCode[] = 'WHEN definition.code = ? AND definition.component_kind = ? THEN ?';
+                array_push($params, $code, PayrollComponentDefaults::template($code)['component_kind'], $target);
+                continue;
+            }
+            $byCode[] = 'WHEN definition.code = ? THEN ?';
             array_push($params, $code, $target);
         }
         $byKind = [];
@@ -307,7 +312,7 @@ final class PayrollComponentJmhzMappingDefaults
                   JOIN payroll_jmhz_dictionary_attributes attribute
                     ON attribute.package_id = ?
                    AND attribute.attribute_id = COALESCE(
-                         CASE definition.code ' . implode(' ', $byCode) . ' END,
+                         CASE ' . implode(' ', $byCode) . ' END,
                          CASE ' . implode(' ', $byKind) . ' END
                        )
                  WHERE definition.supplier_id = ?
@@ -333,7 +338,7 @@ final class PayrollComponentJmhzMappingDefaults
         string $taxTreatment,
     ): ?string {
         $byCode = self::DEFAULTS[$code] ?? null;
-        if ($byCode !== null) {
+        if ($byCode !== null && self::codeTargetApplies($code, $componentKind)) {
             return $byCode;
         }
         if ($componentKind === 'bonus') {
@@ -344,6 +349,19 @@ final class PayrollComponentJmhzMappingDefaults
         }
 
         return self::KIND_DEFAULTS[$componentKind] ?? null;
+    }
+
+    /**
+     * Kód, který si nově vyhradil hodinový výpočet, mohla firma dřív použít pro
+     * vlastní složku jiného druhu. Té zůstává výchozí zařazení podle druhu.
+     */
+    private static function codeTargetApplies(string $code, string $componentKind): bool
+    {
+        if (!\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isReserved($code)) {
+            return true;
+        }
+
+        return PayrollComponentDefaults::template($code)['component_kind'] === $componentKind;
     }
 
     /**

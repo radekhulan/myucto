@@ -575,6 +575,32 @@ final class PayrollInputImportServiceTest extends TestCase
     }
 
     /**
+     * Kód vyhrazený hodinovému výpočtu zůstává u vztahu bez hodinových podmínek
+     * běžnou vlastní složkou firmy; import ho odmítne jen hodinovému vztahu.
+     */
+    public function testReservedHourlyCodeIsImportedOnlyOutsideHourlyRemuneration(): void
+    {
+        $this->createComponent('DOPLATEK_MINIMALNI_MZDA');
+        $csv = $this->csv([[self::EMPLOYMENT_CODE, 'DOPLATEK_MINIMALNI_MZDA', '25000', 'imp-own-reserved']]);
+
+        $monthly = $this->imports->preview($this->supplierId, self::PERIOD, 'csv', 'odmeny.csv', $csv);
+        self::assertSame(1, $monthly['accepted_count']);
+
+        $this->db->pdo()->prepare(
+            'INSERT INTO payroll_employment_terms
+                (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type,
+                 hourly_rate_minor, remuneration_basis_kind, remuneration_basis, weekly_hours, workload_basis_points)
+             VALUES (?, ?, "2026-06-15", "2026-01-01", "hourly", 20000, "contract", "Syntetické podmínky", 40, 10000)'
+        )->execute([$this->supplierId, $this->employmentId]);
+        $hourly = $this->imports->preview($this->supplierId, self::PERIOD, 'csv', 'odmeny.csv', $csv);
+        self::assertSame(0, $hourly['accepted_count']);
+        self::assertStringContainsString(
+            'U hodinového vztahu',
+            PayrollTimeValue::rows($hourly['errors'], 'errors')[0]['error_message'],
+        );
+    }
+
+    /**
      * Název souboru jde do protokolu a odtud do UI. Cesta se musí useknout na
      * holé jméno, jinak by šlo do jména propašovat adresářovou navigaci.
      */
