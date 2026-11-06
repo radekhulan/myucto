@@ -36,6 +36,7 @@ final class StockClientAccessDeniedTest extends TestCase
             ['GET', '/api/stock/documents'],
             ['POST', '/api/stock/items'],
             ['GET', '/api/stock/reports/valuation'],
+            ['POST', '/api/stock/reports/value-trend-jobs'],
             ['POST', '/api/stock/takes'],
             ['POST', '/api/stock/documents'],
             ['POST', '/api/stock/warehouses'],

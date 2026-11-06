@@ -35,7 +35,7 @@ const active = computed(() => jobs.value.some(j => j.status === 'queued' || j.st
 const STATUS: Record<string, string> = { queued: 'bg-neutral-100 text-neutral-600', running: 'bg-primary-50 text-primary-700', completed: 'bg-success-50 text-success-700', failed: 'bg-danger-50 text-danger-700', cancelled: 'bg-warning-50 text-warning-700' }
 function isActive(job: CatalogJob) { return job.status === 'queued' || job.status === 'running' }
 function canManage(job: CatalogJob) {
-  if (job.kind === 'stock_valuation') return auth.canWrite('stock')
+  if (job.kind === 'stock_valuation' || job.kind === 'stock_value_trend') return auth.canWrite('stock')
   if (job.kind.startsWith('stock_opening_import_') || job.kind.startsWith('stock_history_import_')) return auth.canWrite('stock.documents.write')
   if (isBulk(job) || workflowUrl(job)) return auth.canWrite('eshop.write') && auth.canWrite('stock.items.write')
   return auth.canWrite('eshop.write')

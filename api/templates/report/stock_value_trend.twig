@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Vývoj hodnoty zásob</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 7pt; color: #15131D; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; margin-bottom: 3mm; }
+    table.book { width: 100%; border-collapse: collapse; }
+    table.book thead th { font-size: 7pt; font-weight: normal; color: #555; text-align: right; padding: 1mm 1.2mm; border-bottom: 0.3pt solid #ccc; }
+    table.book thead th.thl { text-align: left; }
+    table.book tbody td { padding: 0.8mm 1.2mm; border-bottom: 0.2pt solid #eee; }
+    table.book tfoot td { font-weight: bold; padding: 1.5mm 1.2mm; border-top: 0.5pt solid #333; }
+    .num { text-align: right; white-space: nowrap; }
+    table.book tfoot td { font-size: 6.5pt; white-space: nowrap; }
+</style>
+</head>
+<body>
+<div class="header-title">Vývoj hodnoty zásob{% if parent %}: {{ parent.name }}{% endif %}</div>
+{# Šířky sloupců jsou stejné u všech tabulek (podle 12 dat), poslední tabulka s méně daty se neroztáhne. #}
+{% set labelWidth = 14 %}
+{% set colWidth = (100 - labelWidth) / per_table %}
+{% for t in tables %}
+<table class="book" style="width: {{ labelWidth + colWidth * t.heads|length }}%; margin-bottom: 6mm;{% if not loop.last %} page-break-after: always;{% endif %}">
+    <thead>
+        <tr>
+            <th class="thl" style="width: {{ labelWidth }}%;">Kategorie</th>
+            {% for d in t.heads %}<th style="width: {{ colWidth }}%;">{{ d|cz_date }}</th>{% endfor %}
+        </tr>
+    </thead>
+    <tbody>
+        {% for row in t.rows %}
+            <tr>
+                <td>{{ row.label }}</td>
+                {% for c in row.cells %}<td class="num">{{ c }}</td>{% endfor %}
+            </tr>
+        {% endfor %}
+    </tbody>
+    <tfoot>
+        <tr>
+            <td>CELKEM</td>
+            {% for c in t.total %}<td class="num">{{ c }}</td>{% endfor %}
+        </tr>
+    </tfoot>
+</table>
+{% endfor %}
+<p style="font-size: 7pt; color: #555;">Hodnoty jsou v Kč, zaokrouhlené na celé koruny.{% if has_groups %} {{ group_note }}{% endif %}</p>
+</body>
+</html>

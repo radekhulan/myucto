@@ -41,6 +41,7 @@ final class ClientStockRoutePolicyTest extends TestCase
             ['PUT', '/api/stock/items/1/dimensions', false], ['PUT', '/api/stock/items/1/units', false],
             ['POST', '/api/stock/locations', false], ['POST', '/api/stock/warehouses', false],
             ['GET', '/api/stock/levels', false], ['GET', '/api/stock/reports/valuation', false],
+            ['POST', '/api/stock/reports/value-trend-jobs', false],
             ['POST', '/api/stock/takes', false], ['POST', '/api/stock/takes/1/close', false],
             ['POST', '/api/stock/opening-import/preview', false], ['GET', '/api/stock/sales-orders', false],
             ['GET', '/api/stock/purchase-orders', false], ['GET', '/api/stock/vendor-offers', false],
