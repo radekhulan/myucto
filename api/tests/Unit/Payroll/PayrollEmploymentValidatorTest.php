@@ -297,7 +297,7 @@ final class PayrollEmploymentValidatorTest extends TestCase
         self::assertNull($result['jmhz_external_codebook_overlay_key']);
         self::assertCount(1, $warnings);
         self::assertSame('work_place', $warnings[0]['field']);
-        self::assertSame('jmhz_workplace_name_mismatch', $warnings[0]['code']);
+        self::assertSame('workplace_name_mismatch', $warnings[0]['code']);
         self::assertStringContainsString('Místo výkonu práce „Praha"', $warnings[0]['message']);
         self::assertStringContainsString('„Hlavní město Praha"', $warnings[0]['message']);
     }

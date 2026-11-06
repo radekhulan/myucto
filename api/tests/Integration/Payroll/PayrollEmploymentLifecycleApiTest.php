@@ -999,7 +999,7 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         $body = $this->json($response);
         self::assertSame(['work_place'], array_column($body['warnings'], 'field'));
-        self::assertSame('jmhz_workplace_name_mismatch', $body['warnings'][0]['code']);
+        self::assertSame('workplace_name_mismatch', $body['warnings'][0]['code']);
         self::assertSame('Praha', $body['employment']['terms'][0]['work_place']);
 
         $response = $this->action->correctTerms(

@@ -46900,7 +46900,7 @@ components:
       required: [field, code, message]
       properties:
         field: { type: string, example: work_place }
-        code: { type: string, example: jmhz_workplace_name_mismatch }
+        code: { type: string, example: workplace_name_mismatch }
         message: { type: string }
 
     KhEvidenceRow:

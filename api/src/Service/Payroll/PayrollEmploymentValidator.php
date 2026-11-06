@@ -383,14 +383,14 @@ final class PayrollEmploymentValidator
             $workplaceVerified = self::soft(
                 $workplaceUnchanged,
                 'jmhz_workplace_municipality_code',
-                'jmhz_workplace_municipality_unverified',
+                'workplace_municipality_unverified',
                 fn () => $this->jmhzEvidence->requireWorkplaceMunicipality($municipalityCode, $effectiveFrom),
                 $warnings,
             );
             $workplaceVerified = self::soft(
                 $workplaceUnchanged,
                 'jmhz_workplace_country_code',
-                'jmhz_workplace_country_unverified',
+                'workplace_country_unverified',
                 fn () => $this->jmhzEvidence->requireWorkplaceCountry($workplaceCountry, $effectiveFrom),
                 $warnings,
             ) && $workplaceVerified;
@@ -403,7 +403,7 @@ final class PayrollEmploymentValidator
             if ($workplaceVerified) {
                 $mismatch = $this->jmhzEvidence->workplaceNameMismatch($municipalityCode, $workPlace, $effectiveFrom);
                 if ($mismatch !== null) {
-                    $warnings[] = ['field' => 'work_place', 'code' => 'jmhz_workplace_name_mismatch', 'message' => $mismatch];
+                    $warnings[] = ['field' => 'work_place', 'code' => 'workplace_name_mismatch', 'message' => $mismatch];
                     $workplaceVerified = false;
                 }
             }
@@ -427,7 +427,7 @@ final class PayrollEmploymentValidator
             self::soft(
                 self::unchanged($stored, ['jmhz_apz_instrument_code' => $apzCode]),
                 'jmhz_apz_instrument_code',
-                'jmhz_apz_instrument_unknown',
+                'apz_instrument_unknown',
                 fn () => $this->jmhzEvidence->requireApzInstrument($apzCode),
                 $warnings,
             );
@@ -454,7 +454,7 @@ final class PayrollEmploymentValidator
         $activityKnown = $activityCode === null || self::soft(
             $activityUnchanged,
             'activity_code',
-            'jmhz_activity_code_unknown',
+            'activity_code_unknown',
             fn () => $this->jmhzEvidence->requireActivityCode($activityCode),
             $warnings,
         );
@@ -462,7 +462,7 @@ final class PayrollEmploymentValidator
             self::soft(
                 $activityUnchanged,
                 'jmhz_relationship_detail_code',
-                'jmhz_relationship_detail_code_unknown',
+                'relationship_detail_code_unknown',
                 fn () => $this->jmhzEvidence->requireRelationshipDetailCode($relationshipDetailCode),
                 $warnings,
             );
@@ -472,7 +472,7 @@ final class PayrollEmploymentValidator
             if (self::soft(
                 $activityUnchanged,
                 'jmhz_relationship_detail_code',
-                'jmhz_relationship_detail_code_invalid',
+                'relationship_detail_code_invalid',
                 static function () use (&$normalizedDetail, $activityCode, $relationshipDetailCode): void {
                     $normalizedDetail = PayrollRegistrationRelationshipDetailPolicy::requireForEvidence(
                         $activityCode,
@@ -488,7 +488,7 @@ final class PayrollEmploymentValidator
             self::soft(
                 $activityUnchanged,
                 'activity_code',
-                'jmhz_activity_family_mismatch',
+                'activity_family_mismatch',
                 fn () => $this->assertRelationActivityFamily($relationType, $activityCode, $relationshipDetailCode),
                 $warnings,
             );
@@ -967,7 +967,7 @@ final class PayrollEmploymentValidator
             self::soft(
                 self::unchanged($stored, ['jmhz_assignment_user_kind' => 'ico', 'jmhz_assignment_user_ico' => $ico]),
                 'jmhz_assignment_user_ico',
-                'jmhz_assignment_user_ico_invalid',
+                'assignment_user_ico_invalid',
                 static function () use ($ico): void {
                     if (!self::validIco($ico)) {
                         throw new \InvalidArgumentException(
@@ -1004,7 +1004,7 @@ final class PayrollEmploymentValidator
         self::soft(
             $unchanged,
             'jmhz_assignment_user_country_code',
-            'jmhz_assignment_user_country_invalid',
+            'assignment_user_country_invalid',
             static function () use ($country): void {
                 if (preg_match('/^[A-Z]{2}$/', $country) !== 1 || $country === 'CZ') {
                     throw new \InvalidArgumentException(
@@ -1017,7 +1017,7 @@ final class PayrollEmploymentValidator
         self::soft(
             $unchanged,
             'jmhz_assignment_user_foreign_id',
-            'jmhz_assignment_user_foreign_id_invalid',
+            'assignment_user_foreign_id_invalid',
             static function () use ($foreignId): void {
                 if (preg_match('/^[0-9]{8}$/', $foreignId) !== 1) {
                     throw new \InvalidArgumentException(
@@ -1251,7 +1251,7 @@ final class PayrollEmploymentValidator
                 self::soft(
                     self::unchanged($stored, [$key => $value]),
                     $key,
-                    'jmhz_workplace_address_invalid',
+                    'workplace_address_invalid',
                     static function () use ($pattern, $value, $message): void {
                         if (preg_match($pattern, $value) !== 1) {
                             throw new \InvalidArgumentException($message);
@@ -1267,7 +1267,7 @@ final class PayrollEmploymentValidator
             self::soft(
                 self::unchanged($stored, [...$address, 'jmhz_workplace_municipality_code' => $municipalityCode]),
                 (string) array_key_first($filled),
-                'jmhz_workplace_address_without_municipality',
+                'workplace_address_without_municipality',
                 static function () use ($municipalityCode): void {
                     if ($municipalityCode === null || $municipalityCode === '111111') {
                         throw new \InvalidArgumentException(
