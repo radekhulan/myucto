@@ -59,6 +59,9 @@ final class PayrollHourlyEntitlementContextLoader
         $floorSegments = [];
         $employmentTypes = [];
         foreach ($employments as $employment) $employmentTypes[(int) $employment['employment_id']] = (string) $employment['relation_type'];
+        // Týdenní rozvrh se čte jen tam, kde rozhoduje o automatické nule za svátek.
+        $patternIds = array_values(array_filter($ids, static fn(int $id): bool => self::needsWeekPattern($termsByEmployment[$id], $employmentTypes[$id] ?? '', $periodStart, $end, $calendar, $data[$id])));
+        foreach ($this->weekCalendars($supplierId, $patternIds, $periodStart, $lock) as $id => $rows) $data[$id]['calendars'] = $rows;
         foreach ($termsByEmployment as $id => $terms) {
             $floorSegments[$id] = PayrollHourlyAverageFloorResolver::segments($terms, $policies[$id] ?? [], $periodStart, $end, $employmentTypes[$id] ?? '', $provider);
             $current = array_values(array_filter($floorSegments[$id], static fn(array $part): bool => $part['date_from'] <= $end && $part['date_to'] >= $end));
@@ -95,7 +98,7 @@ final class PayrollHourlyEntitlementContextLoader
                 'settlement_source' => ($source['work_source'] ?? null) === 'settlement_only' ? $source : null,
                 'ledger_source_sha256' => self::hash($ledger[$id]),
                 'schedule_source' => $data[$id]['shifts'], 'absence_source' => $data[$id]['absences'],
-                'calendar_source' => $data[$id]['calendars'],
+                'calendar_source' => $data[$id]['calendars'] ?? null,
                 'premium_segments' => $current ? self::zeroIdleSegments($saved['premium_segments'], $segments) : null,
                 'nonworked_holidays' => null, 'holiday_time_off_grants' => null, 'overtime_time_off_allocations' => null,
             ];
@@ -208,6 +211,9 @@ final class PayrollHourlyEntitlementContextLoader
         $calendar = self::calendar($periodStart, $ledger);
         $terms = $this->terms($supplierId, $employmentId, $periodStart);
         $agreement = in_array($this->relationType($supplierId, $employmentId), ['dpp', 'dpc'], true);
+        if (self::needsWeekPattern($terms, $agreement ? 'dpp' : 'employment', $periodStart, self::end($periodStart), $calendar, $data)) {
+            $data['calendars'] = $this->weekCalendars($supplierId, [$employmentId], $periodStart, false)[$employmentId];
+        }
         $options = ['nonworked_holidays' => [], 'holiday_time_off_entitlements' => [], 'overtime_time_off_entitlements' => [], 'time_off_absences' => [],
             'automatic_assessment' => self::automaticZeros($terms, $agreement ? 'dpp' : 'employment', $periodStart, self::end($periodStart), $calendar, $data, $ledger[$employmentId])];
         foreach ($agreement ? [] : $calendar['dates'] ?? [] as $date) {
@@ -408,7 +414,7 @@ final class PayrollHourlyEntitlementContextLoader
     private function proofData(int $supplierId, array $ids, string $periodStart, bool $lock = false): array
     {
         $in = implode(',', array_fill(0, count($ids), '?'));
-        $result = array_fill_keys($ids, ['shifts' => [], 'absences' => [], 'calendars' => []]);
+        $result = array_fill_keys($ids, ['shifts' => [], 'absences' => []]);
         $from = (new \DateTimeImmutable($periodStart))->modify('-2 days')->format('Y-m-d H:i:s');
         $until = (new \DateTimeImmutable($periodStart))->modify('first day of next month')->modify('+2 days')->format('Y-m-d H:i:s');
         $stmt = $this->db->pdo()->prepare("SELECT * FROM payroll_shifts FORCE INDEX (idx_payroll_shift_month) WHERE supplier_id = ? AND employment_id IN ($in) AND starts_at_utc >= ? AND starts_at_utc < ? AND status <> 'superseded' ORDER BY employment_id, starts_at_utc, id" . ($lock ? ' FOR UPDATE' : ''));
@@ -417,6 +423,22 @@ final class PayrollHourlyEntitlementContextLoader
         $stmt = $this->db->pdo()->prepare("SELECT * FROM payroll_absences FORCE INDEX (idx_payroll_absence_period) WHERE supplier_id = ? AND employment_id IN ($in) AND date_from <= ? AND date_to >= ? AND status = 'approved' ORDER BY employment_id, date_from, id" . ($lock ? ' FOR UPDATE' : ''));
         $stmt->execute([$supplierId, ...$ids, self::end($periodStart), $periodStart]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $result[(int) $row['employment_id']]['absences'][] = $row;
+        return $result;
+    }
+
+    /** @param list<array<string,mixed>> $terms */
+    private static function needsWeekPattern(array $terms, string $employmentType, string $periodStart, string $end, ?array $calendar, array $data): bool
+    {
+        if (in_array($employmentType, ['dpp', 'dpc'], true) || $calendar === null || $data['shifts'] === []) return false;
+        return array_filter($calendar['dates'] ?? [], static fn(string $date): bool => $date >= $periodStart && $date <= $end && self::hourlyOn($terms, $date)) !== [];
+    }
+
+    /** @param list<int> $ids @return array<int,list<array<string,mixed>>> */
+    private function weekCalendars(int $supplierId, array $ids, string $periodStart, bool $lock): array
+    {
+        if ($ids === []) return [];
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $result = array_fill_keys($ids, []);
         $stmt = $this->db->pdo()->prepare("SELECT calendar.id, calendar.employment_id, calendar.schedule_type, calendar.week_pattern, calendar.valid_from, calendar.valid_to, calendar.row_version,
                 (SELECT JSON_ARRAYAGG(JSON_OBJECT('day_date', day_row.day_date, 'day_kind', day_row.day_kind, 'planned_minutes', day_row.planned_minutes))
                    FROM payroll_calendar_days day_row WHERE day_row.supplier_id = calendar.supplier_id AND day_row.calendar_id = calendar.id
@@ -429,7 +451,7 @@ final class PayrollHourlyEntitlementContextLoader
             $days = $row['days_json'] === null ? [] : json_decode((string) $row['days_json'], true, flags: JSON_THROW_ON_ERROR);
             unset($row['days_json']);
             usort($days, static fn(array $a, array $b): int => $a['day_date'] <=> $b['day_date']);
-            $result[(int) $row['employment_id']]['calendars'][] = [...$row, 'days' => $days];
+            $result[(int) $row['employment_id']][] = [...$row, 'days' => $days];
         }
         return $result;
     }
