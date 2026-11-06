@@ -176,6 +176,40 @@ final class TrackingUnitRenameTest extends StockTestCase
         self::assertSame($issuedBefore, $this->rawTracking($invoiceId));
     }
 
+    public function testCreditNoteOfInvoiceShippedInTwoIssuesReturnsAllUnits(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $item = $this->lotItem($sid, 'REN-Q1B');
+        $this->receiveLot($sid, $wh, $item, '12', self::OLD, self::OLD_EXPIRES);
+        $unitId = $this->unitId($sid, $item, self::OLD);
+        $invoiceId = $this->createInvoice($sid, [$this->line($item, $wh, '10', [['quantity' => '10', 'lot_code' => self::OLD, 'expires_on' => self::OLD_EXPIRES]])]);
+        $this->forceStatus($invoiceId, 'issued', 'FV' . random_int(10000000, 99999999));
+        $invoiceItemId = (int) $this->storedItems($invoiceId)[0]['id'];
+        // Faktura vydaná po částech (zásilky vychystání): každá zásilka je vlastní výdejka téhož řádku.
+        foreach (['6', '4'] as $qty) {
+            $issue = $this->documents->create($sid, [
+                'doc_type' => 'issue', 'origin' => 'manual', 'warehouse_id' => $wh, 'doc_date' => '2099-06-10',
+                'description' => 'Expedice zásilky', 'invoice_id' => $invoiceId,
+                'lines' => [['stock_item_id' => $item, 'qty' => $qty, 'invoice_item_id' => $invoiceItemId,
+                    'tracking_allocations' => [['quantity' => $qty, 'lot_code' => self::OLD, 'expires_on' => self::OLD_EXPIRES]]]],
+            ], $this->userId);
+            $this->documents->post($sid, (int) $issue['id'], $this->userId);
+        }
+        self::assertSame(2000, $this->unitBalance($sid, $item, 'lot:L-OLD|2027-01-31'));
+
+        self::assertSame(200, $this->rename($sid, $item, $unitId, ['lot_code' => self::NEW, 'expires_on' => self::NEW_EXPIRES])->getStatusCode());
+
+        $creditId = (int) $this->cancelInvoice($sid, $invoiceId, 'credit_note')['credit_note_id'];
+        $selection = $this->storedItems($creditId)[0]['tracking_allocations'];
+        self::assertCount(1, $selection);
+        self::assertSame(self::NEW, $selection[0]['lot_code']);
+        self::assertEqualsWithDelta(10.0, (float) $selection[0]['quantity'], 0.0001, 'Dobropis vrací součet obou výdejek, ne jen poslední.');
+        $res = $this->issue($sid, $creditId);
+        self::assertSame(200, $res->getStatusCode(), (string) $res->getBody());
+        self::assertSame(12000, $this->unitBalance($sid, $item, 'lot:L-NEW|2027-03-01'), 'Všech 10 ks se vrátilo do opravené šarže.');
+    }
+
     public function testUncancelAfterRenameIssuesTheSameLotAgain(): void
     {
         foreach (['cancel-then-rename', 'rename-then-cancel'] as $order) {

@@ -291,17 +291,28 @@ final class StockTrackingRepository
     }
 
     /**
-     * Kusy, které výdejka faktury skutečně vydala, po řádcích faktury (`invoice_item_id`)
-     * a s AKTUÁLNÍM textem kmene šarže. `$documentStatus` je `posted` (platná výdejka,
-     * vstup dobropisu) nebo `reversed` (výdejka vrácená stornem, vstup obnovení faktury).
-     * U řádku se bere jen jeho poslední výdejní řádek, takže opakované vydání a storno
-     * kusy nezdvojí.
+     * Kusy, které výdejky faktury skutečně vydaly, po řádcích faktury (`invoice_item_id`)
+     * a s AKTUÁLNÍM textem kmene šarže.
+     *
+     * `$documentStatus = 'posted'` (vstup dobropisu): platné výdejky faktury se sčítají
+     * všechny. Faktura může být vydána po částech, například zásilkami vychystání, a každá
+     * zásilka je vlastní výdejka se stejným `invoice_id` a `invoice_item_id`; dobropis má
+     * vrátit součet všech, ne jen poslední.
+     *
+     * `$documentStatus = 'reversed'` (vstup obnovení stornované faktury): jen automatická
+     * výdejka vystavení (`origin = 'invoice'`), kterou storno vrátilo, a z ní poslední řádek
+     * položky. Opakované obnovení a storno zakládá vždy novou výdejku, takže starší vrácené
+     * výdejky téhož řádku by kusy zdvojily.
      *
      * @return array<int, list<array{quantity:string, serial_number:?string, lot_code:?string, expires_on:?string}>> invoice_item_id => kusy
      */
     public function issuedUnitsByInvoiceItem(int $supplierId, int $invoiceId, string $documentStatus = 'posted'): array
     {
-        $stmt = $this->db->pdo()->prepare("SELECT l.invoice_item_id, u.serial_number, u.lot_code, u.expires_on, SUM(a.quantity) AS quantity FROM stock_documents d JOIN stock_document_lines l ON l.document_id = d.id AND l.supplier_id = d.supplier_id JOIN stock_tracking_allocations a ON a.stock_document_line_id = l.id AND a.supplier_id = l.supplier_id JOIN stock_tracking_units u ON u.id = a.stock_tracking_unit_id AND u.supplier_id = a.supplier_id WHERE d.supplier_id = ? AND d.invoice_id = ? AND d.doc_type = 'issue' AND d.status = ? AND a.direction = 'out' AND l.invoice_item_id IS NOT NULL AND l.id = (SELECT MAX(l2.id) FROM stock_documents d2 JOIN stock_document_lines l2 ON l2.document_id = d2.id WHERE d2.supplier_id = d.supplier_id AND d2.invoice_id = d.invoice_id AND d2.doc_type = 'issue' AND d2.status = d.status AND l2.invoice_item_id = l.invoice_item_id) GROUP BY l.invoice_item_id, u.id, u.serial_number, u.lot_code, u.expires_on ORDER BY l.invoice_item_id, u.id");
+        $latestOnly = $documentStatus !== 'posted';
+        $sql = "SELECT l.invoice_item_id, u.serial_number, u.lot_code, u.expires_on, SUM(a.quantity) AS quantity FROM stock_documents d JOIN stock_document_lines l ON l.document_id = d.id AND l.supplier_id = d.supplier_id JOIN stock_tracking_allocations a ON a.stock_document_line_id = l.id AND a.supplier_id = l.supplier_id JOIN stock_tracking_units u ON u.id = a.stock_tracking_unit_id AND u.supplier_id = a.supplier_id WHERE d.supplier_id = ? AND d.invoice_id = ? AND d.doc_type = 'issue' AND d.status = ? AND a.direction = 'out' AND l.invoice_item_id IS NOT NULL"
+            . ($latestOnly ? " AND d.origin = 'invoice' AND l.id = (SELECT MAX(l2.id) FROM stock_documents d2 JOIN stock_document_lines l2 ON l2.document_id = d2.id WHERE d2.supplier_id = d.supplier_id AND d2.invoice_id = d.invoice_id AND d2.doc_type = 'issue' AND d2.origin = 'invoice' AND d2.status = d.status AND l2.invoice_item_id = l.invoice_item_id)" : '')
+            . ' GROUP BY l.invoice_item_id, u.id, u.serial_number, u.lot_code, u.expires_on ORDER BY l.invoice_item_id, u.id';
+        $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute([$supplierId, $invoiceId, $documentStatus]);
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
