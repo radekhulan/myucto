@@ -142,6 +142,20 @@ final class PayrollHourlyWageMaterializer
         // bez dřívějšího zápisu proto nekoliduje s měsíčními podklady.
         $relevant = static fn (int $employmentId, array $plan): bool => !$ready[$employmentId]['settlement_only']
             || $plan['full'] !== 0 || $plan['delta'] !== 0 || $plan['replaced'] !== [];
+        // Náhled ověřuje složku jen u nenulového nároku, vstup ale vzniká i z
+        // opravného rozdílu k nule. Neplatná složka blokuje jen dotčený vztah.
+        $componentProblems = null;
+        foreach ($plans as $employmentId => $items) {
+            foreach ($items as $plan) {
+                if ($plan['delta'] === 0) continue;
+                $code = (string) $plan['claim']['component_code'];
+                $componentProblems ??= PayrollHourlyWageComponents::definitionProblems($pdo, $supplierId, $periodStart);
+                if (!isset($componentProblems[$code])) continue;
+                $blockers[$employmentId][] = ['code' => 'hourly_component_definition_invalid', 'remediation' => '/payroll/components',
+                    'message' => sprintf('Mzdová složka %s je ve firmě vedená jako vlastní nebo nemá v měsíci jednoznačnou verzi s klasifikací hodinové mzdy. Upravte nebo ukončete vlastní složku v číselníku.', $code)];
+                break;
+            }
+        }
 
         $normalIds = array_keys(array_filter($plans, static fn (int $id): bool => !$ready[$id]['settlement_only'], ARRAY_FILTER_USE_KEY));
         if ($normalIds !== []) {
@@ -176,7 +190,8 @@ final class PayrollHourlyWageMaterializer
             $pairIn = implode(',', array_fill(0, count($pairIds), '?'));
             $conflicts = $pdo->prepare("SELECT input.employment_id, component.code,
                     EXISTS (SELECT 1 FROM payroll_surcharge_input_materializations attendance
-                        WHERE attendance.supplier_id = input.supplier_id AND attendance.input_id = input.id) AS attendance_owned
+                        WHERE attendance.supplier_id = input.supplier_id AND attendance.input_id = input.id) AS attendance_owned,
+                    (input.source_period_start IS NULL OR input.source_period_start = input.period_start) AS current_work
                 FROM payroll_inputs input
                 JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id
                 WHERE input.supplier_id = ? AND input.employment_id IN ($pairIn) AND input.period_start = ?
@@ -187,9 +202,11 @@ final class PayrollHourlyWageMaterializer
             $conflicts->execute([$supplierId, ...$pairIds, $periodStart, ...$claimPairArgs]);
             foreach ($conflicts->fetchAll(PDO::FETCH_ASSOC) as $conflict) {
                 $id = (int) $conflict['employment_id'];
-                // Příplatek z docházky měsíčního vztahu platí práci tohoto měsíce,
-                // vypořádání dřívějšího nároku ho nezdvojuje.
-                if (isset($blockers[$id]) || ($ready[$id]['settlement_only'] && (int) $conflict['attendance_owned'] === 1)) continue;
+                // Příplatek z docházky nebo ruční vstup měsíčního vztahu za práci
+                // tohoto měsíce vypořádání dřívějšího nároku nezdvojuje; doplatek
+                // za dřívější období by ale mohl platit tentýž nárok.
+                if (isset($blockers[$id]) || ($ready[$id]['settlement_only']
+                    && ((int) $conflict['attendance_owned'] === 1 || (int) $conflict['current_work'] === 1))) continue;
                 $blockers[$id][] = ['code' => 'hourly_claim_component_conflict', 'remediation' => $inputsLink . $id,
                     'message' => sprintf('Hodinový nárok koliduje s existující složkou %s. Ponechte jediný podklad: zrušte ruční vstup této složky, hodinový výpočet ji doplní sám.', $conflict['code'])];
             }
