@@ -44,6 +44,32 @@ final class RequestAuthorization
     }
 
     /**
+     * Je to syntetický požadavek úlohy na pozadí (cron, fronta), ne požadavek
+     * přihlášeného člověka? Takový požadavek nevzniká z HTTP, skládá ho jen kód
+     * přes {@see asBackground()}.
+     */
+    public static function isBackgroundAuth(Request $request): bool
+    {
+        return $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD)
+            === \MyInvoice\Service\Auth\LoginPolicyService::BACKGROUND_AUTH_METHOD;
+    }
+
+    /** Syntetický požadavek úlohy na pozadí; protějšek {@see isBackgroundAuth()}. */
+    public static function asBackground(Request $request): Request
+    {
+        return $request->withAttribute(
+            \MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD,
+            \MyInvoice\Service\Auth\LoginPolicyService::BACKGROUND_AUTH_METHOD,
+        );
+    }
+
+    /** Syntetický požadavek ověřený API tokenem; protějšek {@see isBearerAuth()}. */
+    public static function asBearer(Request $request): Request
+    {
+        return $request->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'bearer');
+    }
+
+    /**
      * Smí tenhle token vidět v Dokumentech evidenci mzdových PODÁNÍ?
      *
      * ⚠️ Jediná výjimka z pravidla, že mzdová evidence je session-only, a týká

@@ -173,6 +173,35 @@ final class SupplierSsoScopeTest extends TestCase
         self::assertNull($repo->groupIdOf(11));
     }
 
+    /**
+     * Filtr firem v souhrnech jen zužuje to, co volající povolil podle členství:
+     * povinné SSO cílové firmy a vazba požadavku platí, členství se znovu nevykládá.
+     * Druhý výklad členství dřív tiše odřízl globálního správce i firmy bez SSO.
+     */
+    public function testSupplierFilterEnforcesLoginPolicyAndBindingWithoutReinterpretingMembership(): void
+    {
+        $this->db->pdo()->exec("INSERT INTO supplier VALUES (14,'Synthetic D',NULL,'double_entry',0,'any',NULL)");
+        $admin = ['id' => 10, 'role' => 'admin'];
+        $password = $this->request('session', 'password')->withAttribute(AuthMiddleware::ATTR_USER, $admin);
+        $entra = $this->request('session', 'oidc:entra')->withAttribute(AuthMiddleware::ATTR_USER, $admin);
+
+        self::assertSame([11, 14], $this->suppliers->filterAllowedSupplierIds($password, [11, 12, 13, 14]));
+        self::assertSame([11, 12, 13, 14], $this->suppliers->filterAllowedSupplierIds($entra, [11, 12, 13, 14]));
+        self::assertSame([11, 14], $this->suppliers->filterAllowedSupplierIds(
+            $this->request('bearer', 'password')->withAttribute(AuthMiddleware::ATTR_USER, $admin), [11, 12, 13, 14],
+        ));
+
+        $bound = $entra->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['supplier_id' => 12, 'issued_auth_method' => 'oidc:entra'])
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer');
+        self::assertSame([12], $this->suppliers->filterAllowedSupplierIds($bound, [11, 12, 13, 14]));
+
+        $domain = $entra->withAttribute(\MyInvoice\Middleware\TenantDomainMiddleware::ATTR_CONTEXT, new \MyInvoice\Service\Tenant\TenantDomainContext(
+            \MyInvoice\Service\Tenant\TenantDomainContext::CUSTOM, 'firma.synthetic.invalid', 'https://firma.synthetic.invalid', 1, 14,
+        ));
+        self::assertSame([14], $this->suppliers->filterAllowedSupplierIds($domain, [11, 12, 13, 14]));
+        self::assertSame([], $this->suppliers->filterAllowedSupplierIds($password, [0, -1]));
+    }
+
     #[DataProvider('authenticationMethods')]
     public function testCustomDomainMcpGrantUsesTheOriginalAuthentication(?string $method, ?string $origin, bool $allowed): void
     {

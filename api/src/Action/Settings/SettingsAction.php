@@ -375,8 +375,17 @@ final class SettingsAction
     private function membershipDenies(Request $request, int $supplierId): bool
     {
         if ($supplierId <= 0) return true;
-        $access = $this->supplierAccess->resolve($request->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $supplierId)->withQueryParams([]));
-        return $access->denied || $access->supplierId !== $supplierId;
+        $boundSupplierId = $this->boundSupplierId($request);
+        if ($boundSupplierId !== null) {
+            if ($supplierId !== $boundSupplierId) return true;
+        } elseif (!RequestAuthorization::isSuperadmin($request)) {
+            // Stejně jako SupplierAccessResolver: kdo není globální správce, smí jen
+            // do přiřazené firmy; bez členství nesmí nikam (fail-closed).
+            $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+            if (!in_array($supplierId, $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0)), true)) return true;
+        }
+        // Členství výše; doména a povinné SSO cílové firmy platí pro každého včetně správce.
+        return $this->supplierAccess->filterAllowedSupplierIds($request, [$supplierId]) === [];
     }
 
     private function boundSupplierId(Request $request): ?int

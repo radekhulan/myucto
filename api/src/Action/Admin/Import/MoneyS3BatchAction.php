@@ -342,9 +342,12 @@ final class MoneyS3BatchAction extends AbstractMigrationAction
     /** @return list<int>|null firmy, ke kterým má uživatel přístup (null = všechny) */
     private function allowedSupplierIds(Request $request): ?array
     {
-        $all = RequestAuthorization::isSuperadmin($request);
         $ids = $this->userSuppliers->allowedSupplierIds(self::userId($request));
-        if ($all) $ids = array_map('intval', $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN));
+        // Stejně jako přepínač firem: uživatel bez členství je legacy „bez omezení",
+        // klient bez členství nesmí nic (fail-closed).
+        if ($ids === [] && RequestAuthorization::isClientType($request)) return [];
+        $all = RequestAuthorization::isSuperadmin($request) || $ids === [];
+        if ($all) $ids =array_map('intval', $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN));
         $allowed = $this->supplierAccess->filterAllowedSupplierIds($request, $ids);
         return $all && $allowed === $ids ? null : $allowed;
     }
