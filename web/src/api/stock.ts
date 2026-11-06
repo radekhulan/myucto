@@ -681,6 +681,22 @@ export interface StockDocumentLine {
   unit?: string
 }
 
+/** Bez práva číst faktury přijdou jen čísla řádků nestornovaných faktur. */
+export interface ReceiptSalesInvoice {
+  line_nos: number[]
+  invoice_id?: number
+  varsymbol?: string | null
+  status?: string
+  client_name?: string | null
+}
+
+export interface ReceiptInvoicePayload {
+  client_id: number
+  price_level_id?: number | null
+  lines?: { line_id: number; manual_price?: boolean }[]
+  allow_duplicate?: boolean
+}
+
 export interface StockDocument {
   id: number
   supplier_id: number
@@ -712,6 +728,8 @@ export interface StockDocument {
   warehouse_to_code?: string | null
   warehouse_to_name?: string | null
   lines?: StockDocumentLine[]
+  /** Jen detail příjemky: vydané faktury vzniklé z jejích řádků. */
+  sales_invoices?: ReceiptSalesInvoice[]
   warnings?: string[]
 }
 
@@ -1232,6 +1250,10 @@ export const stockApi = {
   documentPdfUrl: (id: number) => downloadUrl(`/stock/documents/${id}/pdf`),
   documentsForInvoice: (invoiceId: number) =>
     api.get<StockDocument[]>(`/invoices/${invoiceId}/stock-documents`).then(r => r.data),
+  sourceReceipts: (invoiceId: number) =>
+    api.get<StockDocument[]>(`/invoices/${invoiceId}/source-receipts`).then(r => r.data),
+  createInvoiceFromReceipt: (id: number, payload: ReceiptInvoicePayload) =>
+    api.post<{ id: number }>(`/stock/documents/${id}/invoice`, payload).then(r => r.data),
 
   // ── Inventury ───────────────────────────────────────────────────────────
   listTakes: (filters: { warehouse_id?: number; status?: StockTakeStatus } = {}) =>

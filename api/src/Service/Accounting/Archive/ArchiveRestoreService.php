@@ -144,6 +144,7 @@ final class ArchiveRestoreService
         'sales_order_reservations',
         'sales_order_operation_keys',
         'sales_order_invoice_links',
+        'stock_receipt_invoice_links',
         'sales_order_returns',
         'fulfillment_tasks',
         'fulfillment_task_lines',
@@ -191,6 +192,7 @@ final class ArchiveRestoreService
     private const NO_ID_TABLES = [
         'sales_order_operation_keys',
         'sales_order_invoice_links',
+        'stock_receipt_invoice_links',
         'sales_order_fulfillment_links',
         'accounting_supplier_settings',
         'stock_levels',

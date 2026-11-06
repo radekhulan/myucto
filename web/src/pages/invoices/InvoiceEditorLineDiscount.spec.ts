@@ -271,3 +271,25 @@ describe('InvoiceEditor: sleva v % zadaná u řádku', () => {
     wrapper.unmount()
   })
 })
+
+describe('InvoiceEditor: řádek „cenu zadá člověk"', () => {
+  it('označí řádek bez ceny, zadaná cena označení zhasne a příznak jde zpět při uložení', async () => {
+    createInvoice.mockClear()
+    const { wrapper, vm } = await mountEditor()
+    try {
+      vm.loaded = true
+      Object.assign(vm.form.items[0], { description: 'Kampaň', vat_rate_id: 1, unit_price_without_vat: 0, manual_price: true })
+      await wrapper.vm.$nextTick()
+      expect(wrapper.findAll('[data-test="manual-price"]')).toHaveLength(2) // tabulka a mobilní karta
+
+      await wrapper.find('form').trigger('submit')
+      expect(createInvoice.mock.calls[0][0].items[0]).toMatchObject({ manual_price: true })
+
+      vm.form.items[0].unit_price_without_vat = 500
+      await wrapper.vm.$nextTick()
+      expect(wrapper.find('[data-test="manual-price"]').exists()).toBe(false)
+    } finally {
+      wrapper.unmount()
+    }
+  })
+})

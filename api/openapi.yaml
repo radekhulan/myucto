@@ -23604,6 +23604,59 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { description: 'Nedostatek zásob, otevřená inventura na skladu, nebo uzavřené účetní období.' }
         '422': { description: 'Doklad není draft, nebo je neplatný (chybí sklad/řádky).' }
+  /api/v1/stock/documents/{id}/invoice:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [Stock, Invoices]
+      summary: Koncept vydané faktury z příjemky
+      description: |
+        Z řádků zaúčtované příjemky založí koncept vydané faktury pro odběratele.
+        Nikdy ji nevystaví. Ceny dává stejné nacenění jako `POST /api/v1/stock/items/quote`:
+        individuální cena, cenová hladina odběratele nebo hladina zvolená v `price_level_id`, akce.
+        Ceny jsou bez DPH, měna je výchozí měna odběratele. Sériová čísla a šarže z příjemky se
+        přenesou do `tracking_allocations` řádku, výdejka při vystavení vydá právě ty kusy.
+        Řádek, u kterého se cena nedá určit (`manual_price` nebo karta bez ceny v měně dokladu),
+        dostane cenu 0 a příznak `manual_price`. Dokud má takový řádek cenu 0, faktura se nevystaví
+        (`POST /api/v1/invoices/{id}/issue` vrátí 422 `manual_price_missing`). Opakované vytvoření
+        z týchž řádků s `allow_duplicate` se zapíše do historie činností.
+        Vazbu vidí `sales_invoices` na detailu příjemky a `GET /api/v1/invoices/{id}/source-receipts`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [client_id]
+              properties:
+                client_id: { type: integer, format: int64, description: Odběratel. }
+                price_level_id: { type: [integer, 'null'], format: int64, description: Cenová hladina dokladu. Přebije hladinu odběratele. }
+                lines:
+                  type: array
+                  minItems: 1
+                  description: Vybrané řádky příjemky. Bez klíče všechny.
+                  items:
+                    type: object
+                    required: [line_id]
+                    properties:
+                      line_id: { type: integer, format: int64, description: '`lines[].id` z detailu příjemky.' }
+                      manual_price: { type: boolean, default: false, description: Cenu zadá člověk v editoru. Cena 0 a označený řádek. }
+                allow_duplicate: { type: boolean, default: false, description: Založit fakturu i z řádků, ze kterých už nestornovaná faktura vznikla. }
+      responses:
+        '201':
+          description: Založený koncept faktury.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '400': { description: 'Doklad neprošel validací faktury nebo je datum v uzavřeném období.' }
+        '403': { description: Skladový modul není zapnutý nebo chybí právo psát skladové doklady či vytvářet faktury. }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { description: '`stock.error.receipt_already_invoiced`: z vybraných řádků už faktura vznikla, `error.items` je vypíše jako `sales_invoices` na detailu příjemky (znovu s `allow_duplicate`). `stock.error.not_a_receipt`, `stock.error.receipt_not_posted`, `stock.error.receipt_reversed`: doklad není příjemka, není zaúčtovaný nebo je stornovaný.' }
+        '422': { description: 'Chybí odběratel, odběratel nebo hladina nepatří firmě, řádek na příjemce není, karta nemá sazbu DPH.' }
   /api/v1/stock/documents/{id}/reverse:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -25635,6 +25688,25 @@ paths:
       responses:
         '200':
           description: Skladové doklady svázané s fakturou.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/StockDocument' }
+        '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo číst sklad. }
+  /api/v1/invoices/{id}/source-receipts:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [Invoices, Stock]
+      summary: Příjemky, ze kterých faktura vznikla
+      responses:
+        '200':
+          description: Příjemky s vazbou na tuto fakturu.
           content:
             application/json:
               schema:
@@ -42841,6 +42913,19 @@ components:
         lines:
           type: array
           items: { $ref: '#/components/schemas/StockDocumentLine' }
+        sales_invoices:
+          type: array
+          readOnly: true
+          description: Jen na detailu příjemky. Vydané faktury vzniklé z jejích řádků, novější první. Bez práva číst faktury jen `line_nos` nestornovaných faktur.
+          items:
+            type: object
+            required: [line_nos]
+            properties:
+              invoice_id: { type: integer, format: int64 }
+              varsymbol: { type: [string, 'null'] }
+              status: { type: string }
+              client_name: { type: [string, 'null'] }
+              line_nos: { type: array, items: { type: integer }, description: Čísla řádků příjemky. }
         warnings:
           type: array
           items: { type: string }
@@ -49804,6 +49889,7 @@ components:
         unit_price_without_vat: { type: number, format: double, description: "Jednotková cena bez DPH, až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek." }
         list_unit_price: { type: [number, "null"], format: double, description: "Ceníková cena za jednotku před slevou, ve stejném základu jako `unit_price_without_vat` (v režimu „ceny s DPH\" brutto). Informační údaj, částky dokladu z ní nevychází. NULL = neznámá." }
         line_discount_pct: { type: [number, "null"], format: double, description: "Sleva z ceníkové ceny v % (3 desetinná místa), dopočtená serverem z `list_unit_price` a `unit_price_without_vat`. Záporná = přirážka. NULL = bez slevy. S hlavičkovou slevou `discount_percent` nesouvisí." }
+        manual_price: { type: boolean, description: "Cenu řádku má zadat člověk (cena je zatím 0). Zhasne s první nenulovou cenou." }
         vat_rate_id: { type: integer, description: "FK do /codebooks/vat-rates (kontextově k supplierovi)" }
         vat_rate_snapshot:
           type: number
@@ -49880,6 +49966,7 @@ components:
         unit: { type: string, default: "ks", description: "Kód jednotky, s číselníkem `/codebooks/units` se páruje bez ohledu na velikost písmen." }
         unit_price_without_vat: { type: number, format: double, description: "Jednotková cena BEZ DPH, až 6 desetinných míst (součty řádku a dokladu jsou na 2 místech). Může být záporná pro slevový řádek, ale ne současně se záporným množstvím." }
         list_unit_price: { type: [number, "null"], format: double, description: "Volitelná ceníková cena za jednotku před slevou, ve stejném základu jako `unit_price_without_vat`. Kladné číslo, jinak se uloží NULL. Server z ní dopočítá `line_discount_pct`, poslané procento ignoruje. Při úpravě dokladu ji pošlete znovu (GET ji vrací), jinak se smaže." }
+        manual_price: { type: boolean, default: false, description: "Cenu řádku zadá člověk: koncept smí být zatím nulový, editor řádek označí. Uloží se jen u konceptu s cenou 0. Vystavení řádek s příznakem a cenou 0 odmítne (`manual_price_missing`). Při úpravě dokladu ho pošlete znovu." }
         vat_rate_id: { type: integer, description: "FK do /codebooks/vat-rates (kontextově k supplierovi)" }
         order_index: { type: integer, description: "Pořadí v rámci faktury. Default = pozice v poli." }
         vat_classification_code: { type: [string, "null"], description: "Volitelný kód klasifikace plnění (DPH přiznání / KH). Když nevyplněno, server dopočítá default podle sazby + reverse charge + země klienta." }

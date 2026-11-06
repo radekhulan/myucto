@@ -386,6 +386,79 @@ final class StockDocumentRepository
         return array_map([self::class, 'cast'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
     }
 
+    /**
+     * Vydané faktury vzniklé z řádků příjemky (migrace 2245), novější první. Storno faktury
+     * tu zůstává: je to historie dokladu, rozhoduje až kontrola dvojího vytvoření.
+     *
+     * Skladník bez práva na faktury dostane jen čísla řádků nestornovaných faktur: stačí na
+     * upozornění, že faktura existuje. Číslo ani odběratele z dokladu, který nesmí číst, ne.
+     *
+     * @return list<array{line_nos:list<int>, invoice_id?:int, varsymbol?:?string, status?:string, client_name?:?string}>
+     */
+    public function salesInvoicesOfReceipt(int $supplierId, int $documentId, bool $canReadInvoices): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT i.id AS invoice_id, i.varsymbol, i.status, c.company_name AS client_name,
+                    GROUP_CONCAT(l.line_no ORDER BY l.line_no) AS line_nos
+               FROM stock_receipt_invoice_links l
+               JOIN invoices i ON i.id = l.invoice_id
+               JOIN clients c ON c.id = i.client_id
+              WHERE l.supplier_id = ? AND l.document_id = ?
+              GROUP BY i.id, i.varsymbol, i.status, c.company_name
+              ORDER BY i.id DESC'
+        );
+        $stmt->execute([$supplierId, $documentId]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $r) {
+            $lineNos = array_map('intval', explode(',', (string) $r['line_nos']));
+            if ($canReadInvoices) {
+                $out[] = [
+                    'invoice_id' => (int) $r['invoice_id'],
+                    'varsymbol' => $r['varsymbol'],
+                    'status' => (string) $r['status'],
+                    'client_name' => $r['client_name'],
+                    'line_nos' => $lineNos,
+                ];
+            } elseif ($r['status'] !== 'cancelled') {
+                $out[] = ['line_nos' => $lineNos];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Příjemky, z jejichž řádků faktura vznikla (migrace 2245).
+     *
+     * @return list<array<string,mixed>>
+     */
+    public function receiptsOfSalesInvoice(int $supplierId, int $invoiceId): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . self::COLUMNS . ' FROM stock_documents
+              WHERE supplier_id = ? AND id IN (
+                    SELECT document_id FROM stock_receipt_invoice_links WHERE supplier_id = ? AND invoice_id = ?
+              )
+              ORDER BY doc_date DESC, id DESC'
+        );
+        $stmt->execute([$supplierId, $supplierId, $invoiceId]);
+        return array_map([self::class, 'cast'], $stmt->fetchAll(PDO::FETCH_ASSOC) ?: []);
+    }
+
+    /**
+     * Zapíše vazbu vybraných řádků příjemky na fakturu.
+     *
+     * @param list<int> $lineNos
+     */
+    public function linkSalesInvoice(int $supplierId, int $documentId, array $lineNos, int $invoiceId): void
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'INSERT INTO stock_receipt_invoice_links (supplier_id, document_id, line_no, invoice_id) VALUES (?, ?, ?, ?)'
+        );
+        foreach ($lineNos as $lineNo) {
+            $stmt->execute([$supplierId, $documentId, $lineNo, $invoiceId]);
+        }
+    }
+
     /** @return list<array<string,mixed>> */
     public function listByPurchaseInvoice(int $supplierId, int $purchaseInvoiceId): array
     {
