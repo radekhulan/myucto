@@ -1980,7 +1980,7 @@ useWindowRefresh(async () => {
       </div>
       <div v-else class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
         <h3 class="text-sm font-medium text-neutral-700 mb-3">{{ t('purchase_invoice.pdf.title') }}</h3>
-        <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <PdfDropzone v-if="auth.canWrite('purchase_invoices') && !lockedForMe" crop-photos :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
         <p v-else class="text-sm text-neutral-500">{{ t('purchase_invoice.pdf.no_pdf') }}</p>
       </div>
 

@@ -1795,7 +1795,7 @@ useWindowTitle(
 
       <!-- DRAG & DROP PDF (jen nahoře u nové faktury, schovaný po prvním interaction) -->
       <div v-if="!isEdit && !submissionId && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <PdfDropzone accept-structured :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <PdfDropzone accept-structured crop-photos :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
         <div class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
         <p class="text-xs text-neutral-500 mt-2">
           {{ t('purchase_invoice.extraction.ai_pending') }}
@@ -1926,7 +1926,7 @@ useWindowTitle(
 
       <!-- Replace dropzone když user vybere replace -->
       <div v-else-if="isEdit && dropzoneVisible" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">
-        <PdfDropzone :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
+        <PdfDropzone crop-photos :uploading="pdfUploading" @file-dropped="onPdfDropped" @error="onPdfError" />
         <div class="mt-2 flex flex-wrap gap-2"><CapturePhotoButton :disabled="pdfUploading" @captured="onPdfDropped" /></div>
       </div>
 

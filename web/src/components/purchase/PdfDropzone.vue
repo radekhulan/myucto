@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
+import { isPhotoFile } from '@/composables/usePhotoCapture'
 
 const props = withDefaults(defineProps<{
   uploading?: boolean
@@ -18,6 +20,13 @@ const props = withDefaults(defineProps<{
   sizeHint?: string
   /** Přepis atributu `accept` na file inputu. */
   accept?: string
+  /**
+   * Fotky projdou před vydáním ořezem dokladu ({@link PhotoCropDialog}) — stejná
+   * obrazovka, jakou nabízí „Vyfotit“, jen pro fotku vybranou ze souborů nebo
+   * přetaženou sem. Zapínat tam, kde se čeká doklad vyfocený mobilem; u příloh,
+   * které fotkou být nemusí, zůstává vypnuto.
+   */
+  cropPhotos?: boolean
 }>(), {
   uploading: false,
   maxSizeBytes: 20 * 1024 * 1024,
@@ -25,6 +34,7 @@ const props = withDefaults(defineProps<{
   hideWhenInteracted: false,
   multiple: false,
   extraExtensions: () => [],
+  cropPhotos: false,
 })
 
 const emit = defineEmits<{
@@ -36,6 +46,14 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const isDragging = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
+/** Fotky z výběru čekající na ořez, zpracovávají se po jedné. */
+const cropQueue = ref<File[]>([])
+const cropIndex = ref(0)
+const cropResults = ref<File[]>([])
+/** Celý přijatý výběr; výřezy se do něj vrátí na svá místa a vydá se najednou. */
+let pendingSelection: File[] = []
+
+const cropCurrent = computed<File | null>(() => cropQueue.value[cropIndex.value] ?? null)
 
 function onDragEnter(e: DragEvent) {
   e.preventDefault()
@@ -76,16 +94,51 @@ function onFileInput(e: Event) {
  */
 function handleSelection(selected: File[]): void {
   if (selected.length === 0) return
-  if (!props.multiple) {
-    handleFile(selected[0])
+  const candidates = props.multiple ? selected : selected.slice(0, 1)
+  const accepted = candidates.filter(file => validate(file))
+  if (accepted.length === 0) return
+
+  const photos = props.cropPhotos ? accepted.filter(isPhotoFile) : []
+  if (photos.length === 0) {
+    emitSelection(accepted)
     return
   }
-  const accepted = selected.filter(file => validate(file))
-  if (accepted.length > 0) emit('files-dropped', accepted)
+  // Výběr se vydá teprve po ořezu, aby PDF a fotky z jednoho dropu šly pohromadě.
+  pendingSelection = accepted
+  cropQueue.value = photos
+  cropIndex.value = 0
+  cropResults.value = []
 }
 
-function handleFile(file: File) {
-  if (validate(file)) emit('file-dropped', file)
+function emitSelection(files: File[]): void {
+  if (files.length === 0) return
+  if (props.multiple) emit('files-dropped', files)
+  else emit('file-dropped', files[0])
+}
+
+/** Hotová fotka; po poslední se výřezy vrátí na svá místa v původním výběru. */
+function onCropDone(file: File): void {
+  cropResults.value = [...cropResults.value, file]
+  if (cropIndex.value + 1 < cropQueue.value.length) {
+    cropIndex.value += 1
+    return
+  }
+  const queue = [...cropResults.value]
+  const merged = pendingSelection.map(file => (isPhotoFile(file) ? queue.shift() ?? file : file))
+  resetCrop()
+  emitSelection(merged)
+}
+
+/** Zrušení ořezu zahodí celý výběr — uživatel chtěl začít znovu, ne nahrát rozdělanou dávku. */
+function onCropCancel(): void {
+  resetCrop()
+}
+
+function resetCrop(): void {
+  pendingSelection = []
+  cropQueue.value = []
+  cropIndex.value = 0
+  cropResults.value = []
 }
 
 /** Klient-side validace; server samozřejmě udělá magic-bytes check znovu. */
@@ -166,5 +219,9 @@ const cls = computed(() => {
         ? 'purchase_invoice.pdf.max_size_hint_structured'
         : 'purchase_invoice.pdf.max_size_hint') }}</p>
     </div>
+
+    <PhotoCropDialog v-if="cropCurrent" :key="cropIndex" :file="cropCurrent" keep-name
+      :step="cropIndex + 1" :steps="cropQueue.length"
+      @done="onCropDone" @cancel="onCropCancel" />
   </div>
 </template>

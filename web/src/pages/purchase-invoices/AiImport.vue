@@ -14,6 +14,8 @@ import { canUsePurchaseAiExtraction } from '@/security/purchaseAiExtraction'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
+import { isPhotoFile } from '@/composables/usePhotoCapture'
 import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
 
 const { t } = useI18n()
@@ -65,8 +67,56 @@ const aiExtracting = ref(false)
 const aiResult = ref<AiExtractResult | null>(null)
 const aiPerRequestModel = ref('')  // empty = použít default
 
-// Přijme 1..N souborů z file-pickeru i drag&drop: 1 = single-file flow, více = dávka.
+/** Fotky z výběru čekající na ořez, zpracovávají se po jedné. */
+const cropQueue = ref<File[]>([])
+const cropIndex = ref(0)
+const cropResults = ref<File[]>([])
+/** Celý výběr; výřezy se do něj vrátí na svá místa a extrakce se spustí najednou. */
+let cropSelection: File[] = []
+const cropCurrent = computed<File | null>(() => cropQueue.value[cropIndex.value] ?? null)
+
+/**
+ * Fotka papírového dokladu jde nejdřív do ořezu: server fotku jen zmenší, takže
+ * čím víc je v záběru stolu, tím míň pixelů zbyde na čísla, která z dokladu čte
+ * AI. Z „Vyfotit“ přichází fotka ořezaná už z dialogu, proto tlačítko volá
+ * {@link useAiFiles} a tudy nechodí.
+ */
 function acceptAiFiles(files: File[]) {
+  if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value || files.length === 0) return
+  const photos = files.filter(isPhotoFile)
+  if (photos.length === 0) {
+    useAiFiles(files)
+    return
+  }
+  cropSelection = files
+  cropQueue.value = photos
+  cropIndex.value = 0
+  cropResults.value = []
+}
+
+/** Hotová fotka; po poslední se výřezy vrátí na svá místa v původním výběru. */
+function onCropDone(file: File) {
+  cropResults.value = [...cropResults.value, file]
+  if (cropIndex.value + 1 < cropQueue.value.length) {
+    cropIndex.value += 1
+    return
+  }
+  const queue = [...cropResults.value]
+  const merged = cropSelection.map(f => (isPhotoFile(f) ? queue.shift() ?? f : f))
+  resetCrop()
+  useAiFiles(merged)
+}
+
+/** Zrušení ořezu zahodí celý výběr — uživatel chtěl začít znovu, ne spustit extrakci. */
+function resetCrop() {
+  cropSelection = []
+  cropQueue.value = []
+  cropIndex.value = 0
+  cropResults.value = []
+}
+
+// Přijme 1..N souborů z file-pickeru i drag&drop: 1 = single-file flow, více = dávka.
+function useAiFiles(files: File[]) {
   if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value || files.length === 0) return
   const pdfs = files.filter(f =>
     f.type === 'application/pdf' || f.type.startsWith('image/') ||
@@ -350,7 +400,8 @@ watch(() => suppliers.currentSupplierId, () => {
 
       <div class="space-y-3">
         <div v-if="!quotaExhausted" class="flex flex-wrap gap-2 justify-end">
-          <CapturePhotoButton :disabled="aiExtracting || aiBatchRunning" @captured="(f: File) => acceptAiFiles([f])" />
+          <!-- Z „Vyfotit“ jde fotka už ořezaná, do ořezu podruhé nemá chodit. -->
+          <CapturePhotoButton :disabled="aiExtracting || aiBatchRunning" @captured="(f: File) => useAiFiles([f])" />
         </div>
         <label class="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition"
           :class="aiDragOver
@@ -548,6 +599,9 @@ watch(() => suppliers.currentSupplierId, () => {
     </div>
     <MergeDocumentsPanel v-if="canExtract && aiConfigured" :disabled="!canStartExtraction"
       :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
+    <PhotoCropDialog v-if="cropCurrent" :key="cropIndex" :file="cropCurrent" keep-name
+      :step="cropIndex + 1" :steps="cropQueue.length"
+      @done="onCropDone" @cancel="resetCrop" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" :only-flagged="!auth.isClientRole" @close="reviewIds = null" />
   </div>
 </template>
