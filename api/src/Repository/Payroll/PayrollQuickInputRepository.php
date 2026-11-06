@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository\Payroll;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Absence\PayrollWageProrationService;
 use MyInvoice\Service\Payroll\Component\PayrollRecurringAmountCalculator;
@@ -1041,8 +1042,15 @@ final class PayrollQuickInputRepository
             $periodStart,
             $employmentIdsOnPage,
         );
-        $workedTime = $this->workedTimeForPage($supplierId, $periodStart, $periodEnd, $rows, $employmentIdsOnPage);
-        $hourlyPreviews = (new PayrollHourlyWagePreview($this->db))->forMany($supplierId, $periodStart, $rows);
+        [$hourlyPreviews, $failedPreviews] = $this->hourlyPreviews($supplierId, $periodStart, $rows);
+        // Podklady hodin se čtou jen pro vztahy s hodinovým výpočtem; čistě
+        // měsíční firma na ně nepoloží jediný dotaz.
+        $hourlyRows = array_values(array_filter($rows, static fn (array $row): bool =>
+            (bool) ($row['hourly_remuneration_in_period'] ?? false) || isset($hourlyPreviews[(int) $row['employment_id']])));
+        $workedTime = $hourlyRows === [] ? [] : $this->workedTimeForPage(
+            $supplierId, $periodStart, $periodEnd, $hourlyRows,
+            array_map(static fn (array $row): int => (int) $row['employment_id'], $hourlyRows),
+        );
 
         $items = [];
         foreach ($rows as $row) {
@@ -1062,8 +1070,11 @@ final class PayrollQuickInputRepository
                 $policies[$employmentId] ?? $employerDefault,
                 $claims[$employmentId] ?? [],
             );
-            $item['worked_time'] = $workedTime[$employmentId];
+            $item['worked_time'] = $workedTime[$employmentId] ?? null;
             $preview = $hourlyPreviews[$employmentId] ?? null;
+            if (isset($failedPreviews[$employmentId])) {
+                $item['blockers'][] = 'hourly_preview_unavailable';
+            }
             if ($preview !== null) {
                 unset($preview['_source_snapshot']);
                 foreach ($preview['blockers'] as $blocker) $item['blockers'][] = (string) $blocker['code'];
@@ -1073,6 +1084,41 @@ final class PayrollQuickInputRepository
             $items[] = $item;
         }
         return ['period' => $period, 'items' => $items, 'total' => $total];
+    }
+
+    /**
+     * Náhled hodinové mzdy stránky. Chyba podkladů jednoho vztahu nesmí shodit
+     * rychlý vstup ostatním: dávka se při selhání zopakuje po vztazích a vadný
+     * hodinový vztah dostane blokaci. Odvolanou transakci vyhazuje dál.
+     *
+     * @param list<array<string,mixed>> $rows
+     * @return array{0:array<int,array<string,mixed>>,1:array<int,true>}
+     */
+    private function hourlyPreviews(int $supplierId, string $periodStart, array $rows): array
+    {
+        $preview = new PayrollHourlyWagePreview($this->db);
+        try {
+            return [$preview->forMany($supplierId, $periodStart, $rows), []];
+        } catch (\Throwable $e) {
+            if (TransactionFailure::aborted($e)) {
+                throw $e;
+            }
+        }
+        $result = [];
+        $failed = [];
+        foreach ($rows as $row) {
+            try {
+                $result += $preview->forMany($supplierId, $periodStart, [$row]);
+            } catch (\Throwable $e) {
+                if (TransactionFailure::aborted($e)) {
+                    throw $e;
+                }
+                if ((bool) ($row['hourly_remuneration_in_period'] ?? false)) {
+                    $failed[(int) $row['employment_id']] = true;
+                }
+            }
+        }
+        return [$result, $failed];
     }
 
     /** @param list<array<string,mixed>> $rows @param list<int> $ids @return array<int,array<string,mixed>> */

@@ -76,7 +76,7 @@ final class PayrollQuickInputsApiTest extends TestCase
 
     public function testWorkedTimeIsBatchedAndKeepsExactManualSegments(): void
     {
-        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, effective_to, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-06-15", "2026-01-01"), (?, ?, "2026-06-16", NULL, "2026-01-01")')
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, effective_to, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-06-15", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr"), (?, ?, "2026-06-16", NULL, "2026-01-01", "hourly", 21000, "wage_statement", "Syntetický výměr")')
             ->execute([$this->supplierId, $this->employmentId, $this->supplierId, $this->employmentId]);
         $time = $this->container->get(PayrollTimeService::class);
         $saved = $time->saveManualSummary($this->supplierId, '2026-06', [
@@ -107,6 +107,39 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertSame(['entries'], $worked['available_sources']);
     }
 
+    public function testMonthlyRowsDoNotLoadWorkedHours(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-01-01", "2026-01-01", 4200000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $item = $this->firstRow('2026-06');
+        self::assertNull($item['worked_time']);
+        self::assertNull($item['hourly_wage_preview']);
+        self::assertFalse($item['hourly_remuneration_in_period']);
+    }
+
+    public function testFailedHourlyPreviewBlocksOnlyItsRow(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-01-01", "2026-01-01", 4200000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $hourlyId = $this->employment($this->supplierId, 'Syntetická hodinová osoba', 'SYN-HODINOVA');
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
+            ->execute([$this->supplierId, $hourlyId]);
+        // Dočasná tabulka v session zastíní evidenci nároků; dotaz náhledu
+        // hodinové mzdy tak selže stejně jako při vadných podkladech.
+        $this->db->pdo()->exec('CREATE TEMPORARY TABLE payroll_hourly_wage_claims (id INT)');
+        try {
+            $response = $this->action->list($this->request('GET')->withQueryParams(['period' => '2026-06']), new Response());
+        } finally {
+            $this->db->pdo()->exec('DROP TEMPORARY TABLE IF EXISTS payroll_hourly_wage_claims');
+        }
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $items = array_column($this->json($response)['month']['items'], null, 'employment_id');
+        self::assertContains('hourly_preview_unavailable', $items[$hourlyId]['blockers']);
+        self::assertNotContains('hourly_preview_unavailable', $items[$this->employmentId]['blockers']);
+        self::assertNull($items[$this->employmentId]['worked_time']);
+        self::assertNotNull($items[$hourlyId]['worked_time']);
+    }
+
     public function testMonthlyBaseRemainsEditableWithRetiredHourlyClaim(): void
     {
         $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-01-01", "2026-01-01", 4200000)')
@@ -126,7 +159,7 @@ final class PayrollQuickInputsApiTest extends TestCase
 
     public function testManualHoursCannotSilentlyKeepMaterializedSurcharge(): void
     {
-        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
             ->execute([$this->supplierId, $this->employmentId]);
         $this->firstRow('2026-06');
         $stmt = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = "PRIPLATEK_NOCNI"');
