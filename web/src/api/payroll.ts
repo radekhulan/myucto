@@ -1677,6 +1677,8 @@ export interface PayrollTimeOverviewItem {
     full_name: string
   }
   manual_summary?: PayrollManualTimeSummary | null
+  /** Vztah má v měsíci hodinové podmínky; jen pak je souhrn importu vybraným zdrojem hodin. */
+  hourly_remuneration_in_period?: boolean
   calendar: PayrollWorkCalendar | null
   month: PayrollTimeMonthState
   summary: {
@@ -1757,6 +1759,7 @@ export interface PayrollTimeOverview extends PayrollHistoricalPeriodInfo {
  */
 export interface PayrollTimeHistoryItem {
   manual_summary?: PayrollManualTimeSummary | null
+  hourly_remuneration_in_period?: boolean
   manual_summary_history?: PayrollManualTimeSummaryRevision[]
   manual_summary_history_truncated?: boolean
   manual_summary_history_offset?: number
@@ -2793,7 +2796,7 @@ export interface PayrollHourlyWagePreview {
 
 export interface PayrollQuickInputRow {
   hourly_wage_preview?: PayrollHourlyWagePreview | null
-  worked_time?: PayrollWorkedTime
+  worked_time?: PayrollWorkedTime | null
   hourly_remuneration_in_period?: boolean
   employee_id: number
   employment_id: number

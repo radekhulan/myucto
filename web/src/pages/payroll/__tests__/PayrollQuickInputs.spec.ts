@@ -62,7 +62,7 @@ vi.mock('@/composables/useToast', () => ({
 // `createI18n` — továrna proto musí původní modul rozprostřít, ne nahradit.
 vi.mock('vue-i18n', async (importOriginal) => ({
   ...(await importOriginal<typeof import('vue-i18n')>()),
-  useI18n: () => ({ t: (key: string) => key, locale: ref('cs-CZ') }),
+  useI18n: () => ({ t: (key: string) => key, te: (key: string) => key === 'payroll.hourly_preview.blockers.hourly_time_missing', locale: ref('cs-CZ') }),
 }))
 
 // Preference tabulek (přepínač příplatků, zvolené sloupce složek) drží stav,
@@ -404,19 +404,33 @@ describe('PayrollQuickInputs', () => {
       .toContain('payroll.quick_inputs.continue_to_runs')
   })
 
-  it('proklik otevře podklady již vybraného importu i u nehodinového vztahu', async () => {
+  it('importovaný měsíc měsíčně odměňovaného vztahu nenabízí podklady hodin ani výměnu zdroje', async () => {
     m.routeQuery = { period: '2026-11', employment: '12', hours: '1' }
     m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({ hourly_remuneration_in_period: false, worked_time: {
-      month: { id: 1, row_version: 2, revision_no: 1, status: 'approved', work_source: 'import_summary' },
+      month: { id: 1, row_version: 2, revision_no: 1, status: 'open', work_source: 'import_summary' },
       manual_summary: null, suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30' }],
       worked_duration_units: 22500, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false,
+      available_sources: ['entries', 'import_summary'],
     } })] }))
     const wrapper = mountPage()
     await flushPromises()
-    expect(wrapper.find('[data-testid="quick-worked-hours-12"]').exists()).toBe(true)
-    expect(wrapper.findAll('[data-test="worked-hours-panel"]')).toHaveLength(1)
-    expect(wrapper.get('[data-test="worked-hours-current"]').text()).toContain('source_import')
-    expect(m.load).toHaveBeenCalledTimes(1)
+    expect(wrapper.find('[data-testid="quick-worked-hours-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-worked-hours-mobile-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-panel"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-restore-panel"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="quick-base-12"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('přeloží blokaci hodinové mzdy podle kódu a serverový text použije jen jako zálohu', async () => {
+    m.load.mockImplementation(async period => ({ period, items: [fixture({
+      hourly_remuneration_in_period: true,
+      blockers: ['hourly_time_missing'],
+      hourly_wage_preview: { complete: false, blockers: [{ code: 'hourly_time_missing', message: 'Doložte skutečně odpracovanou dobu.', context: {} }], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: null, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('payroll.hourly_preview.blockers.hourly_time_missing')
+    expect(wrapper.text()).not.toContain('Doložte skutečně odpracovanou dobu.')
   })
 
   it('opens historical hourly settlement evidence while keeping current monthly base editable', async () => {

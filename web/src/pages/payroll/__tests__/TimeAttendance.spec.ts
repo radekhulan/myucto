@@ -220,6 +220,25 @@ describe('TimeAttendance', () => {
     m.routeQuery = {}
   })
 
+  it('importovaný měsíc měsíčně odměňovaného vztahu ponechá mřížku i přehled beze změny', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original, hourly_remuneration_in_period: false,
+      month: { ...original.month, work_source: 'import_summary' },
+      summary: { ...original.summary, work_source: 'import_summary', worked_duration_units: 0, actual_minutes: 0, difference_minutes: -9_600 },
+      shifts: [], entries: [],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="time-selected-source"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="grid-summary-source"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').attributes('disabled')).toBeUndefined()
+    await openRowEditor(wrapper)
+    expect(wrapper.find('[data-test="time-inactive-records-hint"]').exists()).toBe(false)
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
   it('historie měsíce použije přesný vybraný souhrn a ne archivní denní záznamy', async () => {
     m.routeQuery = { period: '2026-09', employment: '12' }
     m.timeMonth.mockResolvedValue({ items: [{ ...row(12, 'Syntetická Osoba'), entries: [] }], total: 1, limit: 25, offset: 0 })
