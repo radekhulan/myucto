@@ -276,6 +276,8 @@ Výsledek rozlišuje počet pohybů nalezených v souboru, počet skutečně zal
 
 Pokud měsíční GPC obsahuje platby již načtené z API, připojí se k existujícím pohybům. Rozdílné bankovní reference se propojí automaticky, pokud kromě účtu, měny, data a částky souhlasí protiúčet s variabilním symbolem nebo dostatečně podrobný popis platby. Rozdíly v mezerách, interpunkci a doplněném názvu před oddělovačem se zohledňují. Každá platba musí mít jediný protějšek v obou zdrojích. Samotné datum a částka bez dalších údajů mohou vyžadovat potvrzení nalezených dvojic. Před potvrzením porovnejte údaje obou zdrojů; původní párování a zaúčtování zůstane zachované. Podrobnosti jsou v kapitole [Bankovní účty](30_Bankovni_ucty.md).
 
+Pohyby převzaté převodem z jiného programu nesou referenci podle dokladu původního programu, ne banky. Výpis GPC a stažení z napojené banky je párují stejně jako pohyby z API: jistou shodu propojí, nejistou předloží k potvrzení. Výpis v PDF nezaloží pohyby z převzatého období účtu v téže měně, tedy od prvního převzatého pohybu do posledního převzatého výpisu, protože v evidenci už jsou. Výsledek importu to ohlásí. Pohyb z prvního nebo posledního dne, který převod nepřevzal, doplňte ručně. Pohyby výpisu mimo převzaté období se založí běžně.
+
 #### 29.13.1.1 Filtry, řazení a export nespárovaných
 
 V záložce **Všechny pohyby** lze kombinovat hledání, rok, vlastní účet a stav spárování, v podvojném účetnictví také stav zaúčtování. Částku lze zadat i jako `1 234,50`; hledá se přesná částka bez ohledu na znaménko. Po návratu z deníku se filtry a řazení obnoví, pro každou firmu zvlášť. U zaúčtovaných pohybů se zobrazuje i protiúčet.

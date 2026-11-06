@@ -591,6 +591,7 @@ async function onFileSelected(e: Event) {
   // zůstat jen v odpovědi API / activity_logu.
   let attachedCount = 0
   let skippedDuplicateCount = 0
+  let skippedMigratedCount = 0
   // Výpis je uložený, ale zpracování pohybů spadlo: uživatel to musí vědět hned,
   // opakované nahrání téhož souboru už pohyby nezpracuje.
   let processingFailedCount = 0
@@ -601,6 +602,7 @@ async function onFileSelected(e: Event) {
       else { okCount++; lastNonDuplicate = r }
       for (const w of r.warnings ?? []) {
         if (w.code === 'transactions_skipped_as_duplicate') skippedDuplicateCount += w.skipped ?? 0
+        if (w.code === 'transactions_skipped_as_migrated') skippedMigratedCount += w.skipped ?? 0
       }
       if (r.processing_failed) processingFailedCount++
     }
@@ -635,6 +637,14 @@ async function onFileSelected(e: Event) {
         skipped: skippedWarning.skipped ?? lastNonDuplicate.skipped_duplicates ?? 0,
       }))
     }
+    const migrated = lastNonDuplicate.warnings?.find(w => w.code === 'transactions_skipped_as_migrated')
+    if (migrated) {
+      toast.warning(t('bank.warning.transactions_skipped_as_migrated', {
+        skipped: migrated.skipped ?? 0,
+        since: formatDate(migrated.since ?? ''),
+        until: formatDate(migrated.until ?? ''),
+      }))
+    }
     const rebased = lastNonDuplicate.warnings?.find(w => w.code === 'imported_balances_rebased')
     if (rebased) {
       toast.warning(t('bank.warning.imported_balances_rebased', {
@@ -658,6 +668,9 @@ async function onFileSelected(e: Event) {
     }
     if (skippedDuplicateCount > 0) {
       toast.warning(t('bank.warning.transactions_skipped_as_duplicate_batch', { count: skippedDuplicateCount }))
+    }
+    if (skippedMigratedCount > 0) {
+      toast.warning(t('bank.warning.transactions_skipped_as_migrated_batch', { count: skippedMigratedCount }))
     }
   }
 

@@ -287,6 +287,29 @@ describe('StatementList.vue — varování z importu bankovního výpisu (#19)',
     expect(m.push).toHaveBeenCalledWith('/bank/42')
   })
 
+  it('výpis v PDF s pohyby z převzatého období → toast.warning s obdobím převzetí', async () => {
+    const result: ImportResult = {
+      statement_id: 44,
+      transactions: 1,
+      matched: 0,
+      duplicate: false,
+      parsed_transactions: 3,
+      skipped_duplicates: 0,
+      warnings: [{ code: 'transactions_skipped_as_migrated', parsed: 3, inserted: 1, skipped: 2, since: '2099-03-01', until: '2099-03-10' }],
+    }
+    m.upload.mockResolvedValue(result)
+
+    const wrapper = mount(StatementList, { global: { stubs } })
+    await flushPromises()
+
+    await selectFiles(wrapper, [gpcFile('vypis.pdf')])
+
+    expect(m.toastWarning).toHaveBeenCalledWith(
+      'bank.warning.transactions_skipped_as_migrated:' + JSON.stringify({ skipped: 2, since: '01. 03. 2099', until: '10. 03. 2099' }),
+    )
+    expect(m.push).toHaveBeenCalledWith('/bank/44')
+  })
+
   it('znovunahraný TÝŽ výpis (duplicate=true) → žádné toast.warning navíc, jen klidný souhrn', async () => {
     const result: ImportResult = {
       statement_id: 42,

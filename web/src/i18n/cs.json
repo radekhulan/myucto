@@ -25052,6 +25052,8 @@
       "imported_balances_rebased": "Stavy {statements} převzatých výpisů účtu se podle výpisu banky posunuly o {shift}. Počáteční stav účtu vychází {opening}, deník se nemění: zkontrolujte počáteční stav účtu v účetnictví.",
       "transactions_skipped_as_duplicate": "Ve výpisu bylo {parsed} pohybů, založeno {inserted}. {skipped} pohybů se shoduje s už evidovanými (překrývající se výpis) a nebylo založeno - zkontrolujte prosím, že jde skutečně o duplicity.",
       "transactions_skipped_as_duplicate_batch": "Z nahraných výpisů bylo přeskočeno {count} pohybů jako duplicity s už evidovanými - zkontrolujte prosím, že jde skutečně o duplicity.",
+      "transactions_skipped_as_migrated": "Účet má pohyby od {since} do {until} převzaté převodem z jiného programu. {skipped} pohybů výpisu z tohoto období se nezaložilo, v evidenci už jsou. Pohyb z prvního nebo posledního dne, který převod nepřevzal, doplňte ručně.",
+      "transactions_skipped_as_migrated_batch": "Z nahraných výpisů se nezaložilo {count} pohybů z období převzatého převodem z jiného programu, v evidenci už jsou. Pohyb z prvního nebo posledního dne převzetí, který převod nepřevzal, doplňte ručně.",
       "processing_failed": "Výpis je uložený, ale párování a zaúčtování jeho pohybů se nepodařilo dokončit. Otevřete výpis a použijte „Přepárovat výpis“.",
       "processing_failed_batch": "Výpisy uložené bez dokončeného párování pohybů: {count}. Otevřete je a použijte „Přepárovat výpis“."
     },

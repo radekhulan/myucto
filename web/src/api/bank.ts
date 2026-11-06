@@ -342,10 +342,12 @@ export interface BankTransactionsParams {
  *   (`error` = text chyby). Dokončí ho „Znovu spárovat".
  * - `imported_balances_rebased`: první výpis banky na účtu dorovnal stavy výpisů převzatých
  *   z jiného programu (`shift`, `statements`, `opening` = vypočtený počáteční stav).
+ * - `transactions_skipped_as_migrated`: výpis v PDF nezaložil pohyby z období `since`–`until`,
+ *   které na účet převzal převod z jiného programu (`skipped` = počet přeskočených).
  * FE si hlášku skládá z i18n — `message` je jen český text pro activity_log.
  */
 export interface ImportWarning {
-  code: 'transactions_skipped_as_duplicate' | 'processing_failed' | 'imported_balances_rebased'
+  code: 'transactions_skipped_as_duplicate' | 'transactions_skipped_as_migrated' | 'processing_failed' | 'imported_balances_rebased'
   message?: string
   error?: string
   parsed?: number
@@ -354,6 +356,8 @@ export interface ImportWarning {
   shift?: number
   statements?: number
   opening?: number
+  since?: string
+  until?: string
 }
 
 export interface IgnoreNoticeCandidate {
