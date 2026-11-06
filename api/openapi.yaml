@@ -25754,6 +25754,16 @@ paths:
       tags: [Purchase invoices, Stock]
       summary: Návrh příjemky ke skladovým položkám přijaté faktury
       description: Vrací, co zbývá přijmout na sklad, navrhované pořizovací ceny a kandidáty vedlejších nákladů.
+      parameters:
+        - in: query
+          name: stock_item_ids
+          required: false
+          style: deepObject
+          explode: true
+          description: "Karta vybraná pro řádek faktury, `stock_item_ids[<purchase_invoice_item_id>]=<stock_item_id>`. Řádek se pak vrátí v `lines` se zbytkem a cenou přepočtenými podle balení této karty."
+          schema:
+            type: object
+            additionalProperties: { type: integer, format: int64 }
       responses:
         '200':
           description: Návrh příjemky nebo prázdný návrh pro druh dokladu, ze kterého příjemku nelze vytvořit.
@@ -25778,9 +25788,9 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/StockDocument' }
-        '403': { description: Skladový modul není u tohoto dodavatele zapnutý nebo token nemá právo zapisovat do skladu. }
+        '403': { description: "Skladový modul není u tohoto dodavatele zapnutý, token nemá právo zapisovat do skladu, nebo řádek žádá uložení kódu ke kartě bez práva `stock.items.write` (kód chyby `stock.error.card_write_forbidden`)." }
         '404': { $ref: '#/components/responses/NotFound' }
-        '409': { description: Požadované množství překračuje dosud nepřijaté množství. }
+        '409': { description: "Požadované množství překračuje dosud nepřijaté množství (`stock.error.over_receipt`), nebo se řádek faktury už přijímá na jinou kartu (`stock.error.receipt_card_mismatch`)." }
         '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/purchase-invoices/{id}/stock-receipts:
     parameters:
@@ -42856,6 +42866,9 @@ components:
         already_received: { type: string }
         remaining_qty: { type: string }
         unit_cost: { type: string }
+        seller_item_code: { type: [string, 'null'], description: "Kód položky dodavatele z řádku faktury." }
+        matched_stock_item_id: { type: [integer, 'null'], format: int64, description: "Karta spárovaná podle kódu. Může se lišit od `stock_item_id`, když je karta na řádku faktury přiřazená ručně. U návrhu (`match_source` sku nebo code_ean) je řádek v `unmatched_lines` se `stock_item_id` null: kartu potvrďte výslovným `lines[].stock_item_id` v POST." }
+        match_source: { type: [string, 'null'], enum: [vendor_sku, ean, sku, code_ean, null], description: "Podle čeho se karta spárovala. Samo se použije jen `vendor_sku` (kód dodavatele u karty) a `ean` (platný EAN z pole EAN řádku). `sku` (kód karty) a `code_ean` (kód řádku je platný EAN) jsou jen návrh." }
     StockReceiptCostCandidate:
       type: object
       required: [purchase_invoice_item_id, description, amount]
@@ -42881,6 +42894,10 @@ components:
             lines:
               type: array
               items: { $ref: '#/components/schemas/StockReceiptProposalLine' }
+            unmatched_lines:
+              type: array
+              description: Řádky s kódem bez karty použitelné samy, včetně návrhů podle kódu karty (`match_source` sku nebo code_ean, karta v `matched_stock_item_id`). Do příjemky jdou jen s výslovně zadaným `stock_item_id`. Stejné řádky jsou i v `cost_candidates`.
+              items: { $ref: '#/components/schemas/StockReceiptProposalLine' }
             cost_candidates:
               type: array
               items: { $ref: '#/components/schemas/StockReceiptCostCandidate' }
@@ -42890,6 +42907,7 @@ components:
           properties:
             purchase_invoice_id: { type: integer, format: int64 }
             lines: { type: array, maxItems: 0 }
+            unmatched_lines: { type: array, maxItems: 0 }
             cost_candidates: { type: array, maxItems: 0 }
             not_receivable_kind: { type: string, enum: [advance, tax_document, credit_note] }
     StockReceiptCreate:
@@ -42909,7 +42927,11 @@ components:
               purchase_invoice_item_id: { type: integer, format: int64 }
               stock_item_id: { type: integer, format: int64 }
               quantity: { type: [string, number] }
-              unit_cost: { type: [string, number, 'null'] }
+              unit_cost: { type: [string, number, 'null'], description: "Pořizovací cena za základní jednotku zvolené karty. Bez hodnoty ji server spočítá z řádku faktury podle balení zvolené karty." }
+              remember_seller_code:
+                type: boolean
+                default: false
+                description: "Jen `true` uloží kód z řádku faktury ke kartě pro tohoto dodavatele a odebere ho z jeho ostatních karet. Vyžaduje právo `stock.items.write`, bez něj se požadavek odmítne se stavem 403 a příjemka nevznikne. Zápis je v logu aktivit."
         landed_costs:
           type: array
           items:
@@ -50293,6 +50315,8 @@ components:
           description: "Nákladový účet položky, včetně analytiky. NULL odvodí účet z druhu nákladu."
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381): začátek období, do kterého náklad řádku patří. NULL = bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Konec období nákladu řádku. Část nákladu za koncem účetního období odloží uzávěrka na 381." }
+        seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele z dokladu. Podle něj se řádek v návrhu příjemky páruje se skladovou kartou." }
+        item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží z dokladu (jen číslice v délce 8, 12, 13 nebo 14), použije se při párování se skladovou kartou." }
         is_fixed_asset:
           type: boolean
           default: false
@@ -50331,6 +50355,8 @@ components:
         expense_account_code: { type: [string, "null"], description: "Vlastní nákladový účet položky; NULL odvodí účet z druhu nákladu." }
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — začátek období. Jen spolu s `accrual_to`; neplatná dvojice se uloží jako bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381) — konec období (včetně)." }
+        seller_item_code: { type: [string, "null"], maxLength: 80, description: "Kód položky dodavatele. Delší kód se nezkracuje, uloží se null. Round-trip: uložení položek je DELETE + INSERT, nepošlete-li kód zpět, zanikne." }
+        item_ean: { type: [string, "null"], maxLength: 20, description: "EAN zboží, jen číslice v délce 8, 12, 13 nebo 14, jinak se uloží null. Round-trip stejně jako `seller_item_code`." }
         stock_item_id:
           type: [integer, "null"]
           description: |

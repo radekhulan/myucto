@@ -1146,7 +1146,9 @@
         "2242_sessions_admin_last_seen.sql",
         "2243_work_report_billing.sql",
         "2244_payroll_import_profile_pamica_sample.sql",
-        "2245_session_device_class.sql"
+        "2245_session_device_class.sql",
+        "2248_purchase_invoice_item_codes.sql",
+        "2249_stock_item_match_indexes.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -22636,10 +22638,12 @@
                 "import_tax_excluded": "tinyint(1) NOT NULL DEFAULT 0",
                 "import_tax_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
                 "is_fixed_asset": "tinyint(1) NOT NULL DEFAULT 0",
+                "item_ean": "varchar(20) NULL DEFAULT NULL",
                 "order_index": "int(11) NOT NULL DEFAULT 0",
                 "purchase_invoice_id": "bigint(20) unsigned NOT NULL",
                 "purchase_order_line_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "quantity": "decimal(10,3) NOT NULL DEFAULT 1.000",
+                "seller_item_code": "varchar(80) NULL DEFAULT NULL",
                 "stock_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "total_vat": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "total_with_vat": "decimal(12,2) NOT NULL DEFAULT 0.00",
@@ -25069,6 +25073,7 @@
                 "idx_siv_offer": "BTREE (supplier_id, is_active, availability_state)",
                 "idx_siv_staleness": "BTREE (supplier_id, stock_qty_updated_at)",
                 "idx_siv_supplier": "BTREE (supplier_id)",
+                "idx_siv_vendor_sku": "BTREE (supplier_id, client_id, vendor_sku)",
                 "uq_siv_item_client": "UNIQUE BTREE (stock_item_id, client_id)"
             },
             "foreign_keys": {
@@ -25124,6 +25129,7 @@
                 "idx_si_export": "BTREE (supplier_id, export_eshop, item_type)",
                 "idx_si_manufacturer": "BTREE (manufacturer_id)",
                 "idx_si_supplier_active": "BTREE (supplier_id, is_active, item_type)",
+                "idx_si_supplier_ean": "BTREE (supplier_id, ean)",
                 "idx_si_supplier_lifecycle": "BTREE (supplier_id, lifecycle_status, is_active)",
                 "idx_si_supplier_name": "BTREE (supplier_id, name)",
                 "uq_si_supplier_id": "UNIQUE BTREE (supplier_id, id)",
