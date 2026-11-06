@@ -205,10 +205,6 @@ final class MoneyS3BatchImportTest extends TestCase
     }
 
     /**
-     * Agendu vedenou v Money jako daňová evidence převod nepřevede. Dávka ji proto odmítne
-     * s vysvětlením dřív, než firmu založí - jinak by po ní zůstala prázdná firma.
-     */
-    /**
      * Agendu vedenou v Money jako daňová evidence dávka převede do nové firmy v daňové
      * evidenci: firmu do podvojného účetnictví nepřepne a deník nezaloží.
      */
