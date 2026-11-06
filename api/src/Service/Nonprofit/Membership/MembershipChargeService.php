@@ -142,6 +142,8 @@ final class MembershipChargeService
 
     private function issueContext(int $supplier, array $request, bool $current): array
     {
+        // Sazba je pouze zdroj předvyplnění. Důkaz ani jeho ověření na měnitelném číselníku nezávisí.
+        if (isset($request['rate_id'])) (new MembershipRateService($this->db))->assertUsable($supplier, $request['rate_id'], $current);
         $member = $this->members->member($supplier, $request['member_id'], $current)
             ?? throw new MembershipException('nonprofit_membership_member_not_found', 'Člen nebyl nalezen v této organizaci.', 404);
         $history = $this->members->history($supplier, $member['id'], $current);

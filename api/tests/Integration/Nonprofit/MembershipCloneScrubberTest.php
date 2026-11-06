@@ -70,7 +70,13 @@ final class MembershipCloneScrubberTest extends TestCase
             self::assertSame(0, (int) $target->pdo()->query('SELECT COUNT(*) FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE()')->fetchColumn());
             $hashMap = FinancialCloneHashMap::create($target->pdo());
             [$supplier, $memberId, $period, $actor, $charges, $members] = $this->fixture($target, $posting);
+            $rate = (new \MyInvoice\Service\Nonprofit\Membership\MembershipRateService($target))->save($supplier, null, [
+                'name' => 'Synthetic standard', 'amount' => '500.00', 'receivable_account' => '315.100', 'revenue_account' => '684.100',
+                'title_key' => 'synthetic-standard', 'period_months' => 12, 'title_reference' => 'Synthetic resolution', 'evidence' => 'Synthetic evidence',
+                'classification' => $this->classification, 'is_active' => true, 'row_version' => 0,
+            ]);
             $request = $this->chargeRequest($memberId);
+            $request['rate_id'] = $rate['id'];
             $preview = $charges->previewIssue($supplier, $request);
             $issued = $charges->confirmIssue($supplier, $request, $preview['expected_case_version'], $preview['preview_hash'], 'private-issue', $actor);
             $members->appendRevision($supplier, $memberId, ['status' => 'suspended', 'effective_from' => '2027-01-01', 'expected_revision' => 1,
@@ -160,6 +166,9 @@ final class MembershipCloneScrubberTest extends TestCase
             $commandRequest = $target->pdo()->prepare('SELECT request_json FROM nonprofit_membership_charge_commands WHERE supplier_id=? AND id=?');
             $commandRequest->execute([$supplier, $operation['command_id']]);
             $command = json_decode((string) $commandRequest->fetchColumn(), true, flags: JSON_THROW_ON_ERROR);
+            self::assertSame($rate['id'], $command['request']['rate_id']);
+            self::assertArrayNotHasKey('rate_id', $operation['proof']);
+            self::assertSame('Synthetic standard', (new \MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository($target))->find($supplier, $rate['id'])['name']);
             self::assertSame(NonprofitTaxRules::hash([
                 'activity_value_id' => $rebasedClassification['activity']['value_id'],
                 'activity_kind_value_id' => $rebasedClassification['activity_kind']['value_id'],

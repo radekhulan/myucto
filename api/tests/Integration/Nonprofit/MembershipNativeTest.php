@@ -104,6 +104,73 @@ final class MembershipNativeTest extends TestCase
             self::assertSame(array_fill_keys(array_keys($line['dimensions']), ['origin' => 'explicit', 'ref' => null]), $line['dimension_origins']);
         }
     }
+
+    public function testRateChangesAndRetirementDoNotRewriteFinancialProofOrReplay(): void
+    {
+        $rates = new \MyInvoice\Service\Nonprofit\Membership\MembershipRateService($this->db);
+        $input = ['name' => 'Synthetic standard', 'amount' => '500.00', 'receivable_account' => '315.100', 'revenue_account' => '684.100',
+            'title_key' => 'synthetic-rate', 'period_months' => 12, 'title_reference' => 'Synthetic resolution', 'evidence' => 'Synthetic evidence',
+            'classification' => $this->classification, 'is_active' => true, 'row_version' => 0];
+        $rate = $rates->save($this->supplier, null, $input);
+        $member = $this->member('SYN-RATE', 'synthetic-rate');
+        $request = $this->request($member['id']);
+        $request['rate_id'] = $rate['id'];
+        // Výslovná úprava předpisu se nesmí přepsat hodnotou 500 ze sazby.
+        $request['amount'] = '625.00';
+        $preview = $this->charges->previewIssue($this->supplier, $request);
+        $input['amount'] = '750.00'; $input['name'] = 'Synthetic updated'; $input['row_version'] = 1;
+        $rates->save($this->supplier, $rate['id'], $input);
+        self::assertSame($preview['preview_hash'], $this->charges->previewIssue($this->supplier, $request)['preview_hash']);
+        $issued = $this->charges->confirmIssue($this->supplier, $request, 0, $preview['preview_hash'], 'synthetic-rate-issue', $this->actor);
+        self::assertSame(62500, $issued['operation']['amount_cents']);
+        self::assertArrayNotHasKey('rate_id', $issued['operation']['proof']);
+        $command = (new MembershipChargeRepository($this->db))->command($this->supplier, 'synthetic-rate-issue');
+        self::assertSame($rate['id'], $command['request']['request']['rate_id']);
+        $q = $this->pdo->prepare('SELECT rate_id FROM nonprofit_membership_charge_commands WHERE supplier_id=? AND id=?');
+        $q->execute([$this->supplier, $command['id']]);
+        self::assertSame($rate['id'], (int) $q->fetchColumn());
+
+        $input['row_version'] = 2; $input['is_active'] = false;
+        $rates->save($this->supplier, $rate['id'], $input);
+        $replayed = $this->charges->confirmIssue($this->supplier, $request, 0, $preview['preview_hash'], 'synthetic-rate-issue', $this->actor);
+        self::assertTrue($replayed['idempotent_replay']);
+        self::assertSame($issued['operation']['record_hash'], $replayed['operation']['record_hash']);
+        self::assertSame($issued['operation']['proof'], $replayed['operation']['proof']);
+        $request['title_key'] = 'synthetic-new';
+        $this->expectException(\MyInvoice\Service\Nonprofit\Membership\MembershipException::class);
+        $this->expectExceptionMessage('sazba není dostupná');
+        $this->charges->previewIssue($this->supplier, $request);
+    }
+
+    public function testRateIsTenantScopedAndRejectsStaleUpdateAndForeignDimensions(): void
+    {
+        $rates = new \MyInvoice\Service\Nonprofit\Membership\MembershipRateService($this->db);
+        $input = ['name' => 'Synthetic reduced', 'amount' => '250.00', 'receivable_account' => '315.100', 'revenue_account' => '684.100',
+            'title_key' => 'synthetic-reduced', 'period_months' => 6, 'title_reference' => 'Synthetic resolution', 'evidence' => 'Synthetic evidence',
+            'classification' => null, 'is_active' => true, 'row_version' => 0];
+        $rate = $rates->save($this->supplier, null, $input);
+        $repository = new \MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository($this->db);
+        self::assertNull($repository->find($this->supplier + 100000, $rate['id']));
+        self::assertSame([], $repository->page($this->supplier + 100000, 0, true));
+        try {
+            $rates->assertUsable($this->supplier + 100000, $rate['id'], false);
+            self::fail('Cizí sazba byla přijata.');
+        } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $e) {
+            self::assertSame('nonprofit_membership_rate_unavailable', $e->errorCode);
+        }
+        $input['row_version'] = 1;
+        $rates->save($this->supplier, $rate['id'], $input);
+        try {
+            $rates->save($this->supplier, $rate['id'], $input);
+            self::fail('Zastaralá verze byla přijata.');
+        } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $e) {
+            self::assertSame('nonprofit_membership_rate_changed', $e->errorCode);
+        }
+        $input['row_version'] = 2;
+        $input['classification'] = ['activity_value_id' => 2147483645, 'activity_kind_value_id' => 2147483646, 'tax_regime_value_id' => 2147483647];
+        $this->expectException(\MyInvoice\Service\Nonprofit\Membership\MembershipException::class);
+        $rates->save($this->supplier, $rate['id'], $input);
+    }
     public function testReplayUsesCapturedClassificationAfterValueRetirement(): void
     {
         $member = $this->member('M-RETIRED-DIM', 'retired-dimension');

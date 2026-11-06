@@ -144,6 +144,9 @@ final class AnonymizationPolicy
         'nonprofit_membership_charge_commands' => ['idempotency_key'=>'keep','request_json'=>'keep','request_hash'=>'keep'],
         'nonprofit_membership_charge_operations' => ['preview_hash'=>'keep','proof_json'=>'keep','receipt_json'=>'keep','parent_hash'=>'keep','record_hash'=>'keep'],
         'nonprofit_membership_charge_claims' => ['record_hash'=>'keep'],
+        // Sazba je firemní číselník, ne finanční důkaz. Volné podklady mohou obsahovat osobní údaje.
+        'nonprofit_membership_rates' => ['name'=>'keep', 'receivable_account'=>'keep', 'revenue_account'=>'keep',
+            'title_key'=>'keep', 'title_reference'=>'text', 'evidence'=>'text', 'classification_json'=>'keep'],
         'nonprofit_legal_profiles' => ['profile_json'=>'keep','module_proof_json'=>'keep','reason'=>'keep','idempotency_key'=>'keep','request_hash'=>'keep','record_hash'=>'keep'],
         'nonprofit_tax_saving_sources' => ['basis_json'=>'keep','record_hash'=>'keep'],
         'nonprofit_tax_saving_commands' => ['idempotency_key'=>'keep','request_json'=>'keep','request_hash'=>'keep'],

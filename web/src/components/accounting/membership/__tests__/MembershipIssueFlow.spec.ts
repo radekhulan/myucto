@@ -4,6 +4,7 @@ import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatDate } from '@/composables/useFormat'
 import Flow from '../MembershipIssueFlow.vue'
+import MembershipRates from '../MembershipRates.vue'
 import type { MemberRevision, MembershipPreview } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
@@ -105,7 +106,7 @@ const overview = (supplier = 5) => ({
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
   return mount(Flow, {
     props: { supplier: 5, canManage: true, member: { id: 9, member_number: 'M-1', label: 'Synthetic member' }, history: [revision], periods: [period], ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput, SearchableSelect, RouterLink } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput, SearchableSelect, RouterLink, MembershipRates: true } },
   })
 }
 async function fill(w: ReturnType<typeof mounted>, omit: string[] = []) {
@@ -136,6 +137,22 @@ beforeEach(() => {
 })
 
 describe('Membership issue flow', () => {
+  it('applies explicit rate defaults, permits overrides and keeps the rate reference only in the request', async () => {
+    const w = mounted()
+    await fill(w)
+    w.findComponent(MembershipRates).vm.$emit('selected', { id: 42, supplier_id: 5, name: 'Synthetic standard', amount: '500.00',
+      receivable_account: '311', revenue_account: '684', title_key: 'synthetic-standard', period_months: 6,
+      title_reference: 'Synthetic resolution', evidence: 'Synthetic evidence', is_active: true, row_version: 1,
+      classification: { activity_value_id: 1001, activity_kind_value_id: 1101, tax_regime_value_id: 1202 } })
+    await flushPromises()
+    expect((w.get('[data-field="amount"]').element as HTMLInputElement).value).toBe('500.00')
+    expect((w.get('[data-field="period-to"]').element as HTMLInputElement).value).toBe('2026-06-30')
+    await w.get('[data-field="amount"]').setValue('625')
+    await review(w)
+    expect(api.preview.mock.calls.at(-1)?.[1].request).toMatchObject({ rate_id: 42, amount: '625.00' })
+    w.unmount()
+  })
+
   it('does not preview a stale valid model while a visible date input is invalid', async () => {
     const w = mounted()
     await fill(w)

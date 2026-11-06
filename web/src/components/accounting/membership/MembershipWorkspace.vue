@@ -14,6 +14,7 @@ import { appIsoDate } from '@/utils/date'
 import { errorBox, errorMessage, memberStatusBadge } from './membershipFormat'
 import MembershipMemberDetail from './MembershipMemberDetail.vue'
 import MembershipReconciliation from './MembershipReconciliation.vue'
+import MembershipRates from './MembershipRates.vue'
 
 const props = defineProps<{ supplier: number; canManage: boolean }>()
 const { t, tm, rt } = useI18n()
@@ -153,6 +154,11 @@ const createActions = computed<ActionItem[]>(() => [
     <p v-if="error" role="alert" :class="errorBox" data-section="workspace-error">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="workspace-notice">{{ notice }}</p>
     <ActionBar :actions="actions" />
+
+    <details class="rounded-lg border bg-surface p-4" data-section="rates-management">
+      <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</summary>
+      <MembershipRates :key="supplier" :supplier="supplier" :can-manage="canManage" />
+    </details>
 
     <section v-if="canManage" class="space-y-3 rounded-lg border bg-surface p-4" data-section="create-member">
       <h2 class="font-semibold">{{ t('nonprofitMembership.createTitle') }}</h2>

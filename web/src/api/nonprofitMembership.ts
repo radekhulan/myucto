@@ -51,6 +51,7 @@ export interface MembershipClassification { activity_value_id: number; activity_
 
 /** Přesná množina klíčů, kterou přijímá MembershipChargeRequest::issue. */
 export interface MembershipIssueRequest {
+  rate_id?: number
   member_id: number; title_key: string; period_from: string; period_to: string; accounting_date: string; due_date: string
   amount: string; receivable_account: string; revenue_account: string; title_reference: string; evidence: string
   nonreciprocal: true; reason: string; classification: MembershipClassification
@@ -105,7 +106,19 @@ function options(supplier: number) {
 }
 const base = '/accounting/nonprofit-membership'
 
+export interface MembershipRateInput {
+  name: string; amount: string; receivable_account: string; revenue_account: string; title_key: string
+  period_months: number; title_reference: string; evidence: string; classification: MembershipClassification | null
+  is_active: boolean; row_version: number
+}
+export interface MembershipRate extends MembershipRateInput { id: number; supplier_id: number }
+export interface MembershipRatePage { items: MembershipRate[]; next_after_id: number | null }
+
 export const membershipApi = {
+  rate: (supplier: number, id: number) => api.get<MembershipRate>(`${base}/rates/${id}`, options(supplier)).then(r => r.data),
+  rates: (supplier: number, afterId = 0, activeOnly = true) => api.get<MembershipRatePage>(`${base}/rates`, { ...options(supplier), params: { after_id: afterId, active_only: activeOnly ? 1 : 0 } }).then(r => r.data),
+  createRate: (supplier: number, body: MembershipRateInput) => api.post<MembershipRate>(`${base}/rates`, body, options(supplier)).then(r => r.data),
+  updateRate: (supplier: number, id: number, body: MembershipRateInput) => api.put<MembershipRate>(`${base}/rates/${id}`, body, options(supplier)).then(r => r.data),
   members: (supplier: number, afterId = 0, limit = 50) => api.get<MemberPage>(`${base}/members`, { ...options(supplier), params: { after_id: afterId, limit } }).then(r => r.data),
   member: (supplier: number, id: number, afterClaimId = 0, limit = 50) => api.get<MemberDetail>(`${base}/members/${id}`, { ...options(supplier), params: { after_claim_id: afterClaimId, limit } }).then(r => r.data),
   claim: (supplier: number, id: number) => api.get<ClaimRow>(`${base}/claims/${id}`, options(supplier)).then(r => r.data),

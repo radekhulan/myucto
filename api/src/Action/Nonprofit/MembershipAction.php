@@ -32,7 +32,7 @@ final class MembershipAction
     private readonly MembershipReconciliationService $reconciliation;
     private readonly TenantReferenceGuard $tenantRefs;
 
-    public function __construct(Connection $db, PostingService $posting)
+    public function __construct(private readonly Connection $db, PostingService $posting)
     {
         $this->tenantRefs = new TenantReferenceGuard($db);
         $this->members = new MembershipRepository($db);
@@ -51,6 +51,43 @@ final class MembershipAction
             $items = $this->members->page($supplier, $after, $limit);
             return ['items' => $items, 'next_after_id' => count($items) === $limit ? $items[array_key_last($items)]['id'] : null];
         });
+    }
+
+    public function rates(Request $request, Response $response): Response
+    {
+        return $this->handle($request, $response, false, function (int $supplier) use ($request): array {
+            $query = $request->getQueryParams();
+            $after = $this->queryInteger($query['after_id'] ?? 0, 'after_id', 0);
+            $active = $this->queryInteger($query['active_only'] ?? 1, 'active_only', 0, 1);
+            $items = (new \MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository($this->db))->page($supplier, $after, (bool) $active);
+            return ['items' => $items, 'next_after_id' => count($items) === 100 ? $items[array_key_last($items)]['id'] : null];
+        });
+    }
+
+    public function createRate(Request $request, Response $response): Response
+    {
+        return $this->saveRate($request, $response, null);
+    }
+
+    public function rate(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, false, fn (int $supplier): array =>
+            (new \MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository($this->db))->find($supplier, (int) $args['id'])
+            ?? throw new MembershipException('nonprofit_membership_rate_not_found', 'Sazba nebyla nalezena v této organizaci.', 404));
+    }
+
+    public function updateRate(Request $request, Response $response, array $args): Response
+    {
+        return $this->saveRate($request, $response, (int) $args['id']);
+    }
+
+    private function saveRate(Request $request, Response $response, ?int $id): Response
+    {
+        return $this->handle($request, $response, true, function (int $supplier) use ($request, $id): array {
+            $body = $request->getParsedBody();
+            if (!is_array($body)) throw new MembershipException('nonprofit_membership_invalid', 'Sazba musí být strukturovaný požadavek.');
+            return (new \MyInvoice\Service\Nonprofit\Membership\MembershipRateService($this->db))->save($supplier, $id, $body);
+        }, $id === null ? 201 : 200);
     }
 
     public function member(Request $request, Response $response, array $args): Response

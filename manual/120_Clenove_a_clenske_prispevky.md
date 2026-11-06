@@ -14,6 +14,18 @@ Změny stavu se zapisují jako další revize přes **Změnit stav členství** 
 
 ## 120.2 Předpis příspěvku
 
+### Sazby členských příspěvků
+
+V rozbalovací části **Sazby členských příspěvků** založte šablony své organizace. Každá sazba obsahuje název, částku na jednoho člena, účet pohledávky, výnosový účet 684 nebo jeho analytiku, označení příspěvku, výchozí délku období a texty podkladu. Analytiky lze členit podle vlastních potřeb; nemusí odpovídat částce příspěvku. Vstupní poplatek může mít vlastní sazbu a vlastní označení. Rodinná částka za domácnost se touto sazbou nerozděluje.
+
+U nového předpisu vyberte sazbu a zvolte **Použít sazbu**. Výchozí délka (měsíc, čtvrtletí, pololetí, rok) se počítá od vyplněného začátku příspěvku, jinak od účetního data. Konec připadne na den před měsíčním výročím; pokud výroční den v cílovém měsíci neexistuje, použije se poslední den cílového měsíce a od něj předchozí den. Volba ručního období data nemění. Před náhledem vždy zkontrolujte a případně upravte obě data, částku, účty a texty. Délka příspěvku neurčuje platnost členství ani automaticky nezapisuje jeho prodloužení či ukončení. Předpis lze zadat také bez sazby.
+
+Sazba smí předvyplnit všechny tři účetní dimenze, pokud je v ní firma výslovně nastavila. Ve formuláři zůstávají viditelné a upravitelné a náhled je ověří stejně jako ruční volbu. Z výnosového účtu se dimenze automaticky neodvozují.
+
+Změna sazby nepřepisuje rozepsaný ani zaúčtovaný předpis. Pro změnu rozepsaného předpisu sazbu znovu výslovně použijte. Dřívější předpisy drží skutečně potvrzené částky a účetní podklady. Nepoužívanou sazbu vyřaďte vypnutím **Nabízet pro nové předpisy**; zůstane dohledatelná přes **Zobrazit i vyřazené sazby**. Současnou změnu stejné sazby z jiného okna je třeba nejdřív znovu načíst.
+
+### Zadání a potvrzení
+
 Zvolte **Nový předpis příspěvku**. Pokud firmě nebo zvolenému období chybí některý předpoklad (otevřené účetní období, potvrzený právní profil spolku, osy činnosti, druhu činnosti a daňového režimu v dimenzích, výnosový účet 684 v účtové osnově), formulář ho hned nahoře vypíše s odkazem, kde ho doplnit.
 
 Vyberte otevřené účetní období, účetní datum, splatnost a období, za které příspěvek náleží. Vyplňte označení příspěvku (například `CP-2027`), částku, pohledávkový a výnosový účet z rozvrhu, odkaz na titul a doložení částky. Jakmile začnete formulář vyplňovat, vypíše pod sebou všechno, co ještě chybí.
@@ -22,7 +34,7 @@ Stejné označení nejde u člena předepsat dvakrát na překrývající se obd
 
 Výnos se účtuje na účet 684 (přijaté členské příspěvky) nebo jeho analytiku. Když období příspěvku přesahuje rozvahový den účetního období, náhled to oznámí a krok uzávěrky **Časové rozlišení** odloží část připadající na další období na účet 384 a v dalším období ji rozpustí.
 
-Výslovně vyberte činnost, druh činnosti a daňový režim z účetních dimenzí firmy. Hodnoty se nepředvyplňují podle výnosového účtu. V náhledu zkontrolujte také ověřené členění; bez jeho shody s vaší volbou nelze předpis potvrdit.
+Vyberte nebo zkontrolujte činnost, druh činnosti a daňový režim z účetních dimenzí firmy. Předvyplnění je možné jen výslovně nastavenou sazbou, nikoli podle výnosového účtu. V náhledu zkontrolujte také ověřené členění; bez jeho shody s vaší volbou nelze předpis potvrdit.
 
 Účetní období musí mít potvrzený právní profil spolku s hlavní nepodnikatelskou činností. Zkontrolujte také revizi členství platnou k účetnímu datu. Samotné číslo účtu ani označení organizace neprokazuje právní titul.
 

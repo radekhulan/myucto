@@ -11,7 +11,7 @@ import { accountingApi, type AccountingPeriod, type ChartAccount } from '@/api/a
 import type { DimensionOverview } from '@/api/dimensions'
 import { nonprofitDppoApi } from '@/api/nonprofitDppo'
 import type { LegalOverview } from '@/api/nonprofitDppoTypes'
-import { membershipApi, type MemberRevision, type MembershipConfirmBody, type MembershipIssueRequest, type MembershipPreview } from '@/api/nonprofitMembership'
+import { membershipApi, type MemberRevision, type MembershipConfirmBody, type MembershipIssueRequest, type MembershipPreview, type MembershipRate } from '@/api/nonprofitMembership'
 import { accountPickerOptions } from '@/utils/chartAccountOptions'
 import { formatDate, formatMoney } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
@@ -19,6 +19,8 @@ import { dimensionValueName } from '@/utils/dimensionValueLabel'
 import { activeThroughout, amountDecimal, errorBox, formatDateRange, isIsoDate, revisionAt, titleKeyPattern, warningBox } from './membershipFormat'
 import MembershipConfirmBar from './MembershipConfirmBar.vue'
 import { useGuardedCommit } from './useGuardedCommit'
+import MembershipRates from './MembershipRates.vue'
+import { membershipRatePeriodEnd } from './membershipRatePeriod'
 
 const props = defineProps<{
   supplier: number; canManage: boolean
@@ -37,6 +39,23 @@ const form = reactive({
   activityValueId: null as number | null, activityKindValueId: null as number | null, taxRegimeValueId: null as number | null,
 })
 const accounts = ref<ChartAccount[]>([])
+const appliedRate = ref<MembershipRate | null>(null)
+function applyRate(rate: MembershipRate | null) {
+  if (commit.locked.value) return
+  appliedRate.value = rate
+  commit.touch()
+  if (!rate) return
+  form.amount = rate.amount; form.receivable = rate.receivable_account; form.revenue = rate.revenue_account
+  form.titleKey = rate.title_key; form.titleReference = rate.title_reference; form.evidence = rate.evidence
+  form.activityValueId = rate.classification?.activity_value_id ?? null
+  form.activityKindValueId = rate.classification?.activity_kind_value_id ?? null
+  form.taxRegimeValueId = rate.classification?.tax_regime_value_id ?? null
+  if (rate.period_months) {
+    const from = isIsoDate(form.periodFrom) ? form.periodFrom : form.accountingDate
+    const to = membershipRatePeriodEnd(from, rate.period_months)
+    if (to) { form.periodFrom = from; form.periodTo = to }
+  }
+}
 const accountsError = ref(false)
 const classOverview = ref<DimensionOverview | null>(null)
 const classState = ref<'idle' | 'loading' | 'ready' | 'error'>('idle')
@@ -161,6 +180,7 @@ const started = computed(() => [form.titleKey, form.amount, form.reason, form.ti
 
 function buildRequest(): MembershipIssueRequest {
   return {
+    ...(appliedRate.value ? { rate_id: appliedRate.value.id } : {}),
     member_id: props.member.id, title_key: form.titleKey, period_from: form.periodFrom, period_to: form.periodTo,
     accounting_date: form.accountingDate, due_date: form.dueDate, amount: amountDecimal(form.amount) ?? '',
     receivable_account: form.receivable ?? '', revenue_account: form.revenue ?? '',
@@ -244,6 +264,7 @@ function clampDates() {
 watch(() => form.periodId, () => { clampDates(); void loadProfile() })
 watch([form, () => latestProfile.value?.id ?? 0, () => props.member.id], () => commit.touch(), { deep: true, flush: 'sync' })
 watch(() => props.supplier, () => {
+  appliedRate.value = null
   commit.reset()
   accounts.value = []
   form.receivable = null
@@ -317,6 +338,8 @@ const actions = computed<ActionItem[]>(() => [
 
 <template>
   <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="issue-flow">
+    <MembershipRates :key="supplier" :supplier="supplier" :can-manage="canManage" selectable :disabled="commit.locked.value" @selected="applyRate" />
+    <p v-if="appliedRate" class="text-sm text-neutral-500" data-section="applied-rate">{{ t('nonprofitMembership.rateApplied', { name: appliedRate.name }) }}</p>
     <h3 class="break-words font-semibold">{{ t('nonprofitMembership.issueTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.issueHelp') }}</p>
     <div v-if="missingPrerequisites.length" :class="warningBox" data-section="issue-prerequisites">
