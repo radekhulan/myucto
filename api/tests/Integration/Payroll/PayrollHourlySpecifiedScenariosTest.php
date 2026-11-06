@@ -120,6 +120,15 @@ final class PayrollHourlySpecifiedScenariosTest extends TestCase
         self::assertSame(53800, $halfUpClaim['payable_minor']);
     }
 
+    public function testDifficultEnvironmentForShorterStatedWeekUsesFortyHourMinimumBase(): void
+    {
+        // § 118 odst. 1 ZP: 10 % základní sazby minimální mzdy, ne sazby přepočtené na 37,5 h.
+        $preview = $this->preview(20000, 99000, [$this->segment(150, difficult: 40)], '37.5');
+        $claim = array_column($preview['claims'], null, 'purpose')['premium_difficult_environment'];
+        self::assertSame(53760, $claim['analytical_minor']);
+        self::assertSame(53800, $claim['payable_minor']);
+    }
+
     /** @return array<string,mixed> */
     private function segment(int $worked, int $overtime = 0, int $night = 0, int $weekend = 0, int $difficult = 0,
         string $from = '2026-06-01', string $to = '2026-06-30'): array
@@ -132,7 +141,7 @@ final class PayrollHourlySpecifiedScenariosTest extends TestCase
     }
 
     /** @param list<array<string,mixed>> $segments @return array<string,mixed> */
-    private function preview(int $rate, int $average, array $segments): array
+    private function preview(int $rate, int $average, array $segments, string $weeklyHours = '40'): array
     {
         $pdo = $this->db->pdo();
         $pdo->prepare('INSERT INTO payroll_employees (supplier_id, full_name, taxpayer_type, is_active) VALUES (?, "Syntetický hodinový scénář", "employee", 1)')->execute([$this->supplierId]);
@@ -141,7 +150,7 @@ final class PayrollHourlySpecifiedScenariosTest extends TestCase
         $employment = (int) $pdo->lastInsertId();
         $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, actual_start_on,
             weekly_hours, workload_basis_points, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
-            VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-01-01", 40, 10000, "hourly", ?, "contract", "Syntetická smlouva")')->execute([$this->supplierId, $employment, $rate]);
+            VALUES (?, ?, "2026-01-01", "2026-01-01", "2026-01-01", ?, 10000, "hourly", ?, "contract", "Syntetická smlouva")')->execute([$this->supplierId, $employment, $weeklyHours, $rate]);
         $pdo->prepare('INSERT INTO payroll_average_earning_snapshots (supplier_id, employment_id, applicable_year, applicable_quarter,
             revision_no, source_kind, decisive_from, decisive_to, gross_earnings_minor, longer_period_allocated_minor, worked_minutes, worked_days,
             average_hourly_minor, rationale, support_status, status, ruleset_id, ruleset_hash, input_hash, input_trace, created_by, approved_by, approved_at)

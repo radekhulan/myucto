@@ -36,7 +36,8 @@ final class PayrollHourlyEntitlementCalculator
             if ($kind === PayrollSurchargeKind::Overtime && $this->isAgreement()) continue;
             $this->initialize('premium_' . $kind->value, $kind->componentCode());
         }
-        if (!$context->settlementOnly) $this->initialize('holiday_nonworked_compensation', 'NAHRADA_MZDY_SVATEK');
+        // § 115 odst. 3 ZP: náhrada za neodpracovaný svátek dohodám nepřísluší (§ 77 odst. 2 ZP).
+        if (!$context->settlementOnly && !$this->isAgreement()) $this->initialize('holiday_nonworked_compensation', 'NAHRADA_MZDY_SVATEK');
         $this->initialize('holiday_time_off_compensation', 'NAHRADA_MZDY_VOLNO_ZA_SVATEK');
         if ($context->entitlementContext === null || ($context->entitlementContext['schema_version'] ?? null) !== 'hourly-entitlements.v1') {
             $this->fail('entitlements', 'hourly_premium_evidence_missing', 'Doložte příplatkové hodiny a způsob vypořádání dalších nároků, včetně výslovných nul.');
@@ -119,7 +120,7 @@ final class PayrollHourlyEntitlementCalculator
                 });
             }
         }
-        if (!$context->settlementOnly) $this->guard('holiday_nonworked_compensation', fn() => $this->nonworkedHolidays());
+        if (!$context->settlementOnly && !$this->isAgreement()) $this->guard('holiday_nonworked_compensation', fn() => $this->nonworkedHolidays());
         $this->guard('premium_overtime', fn() => $this->historicalOvertime());
         $this->guard('holiday_time_off_compensation', fn() => $this->holidayGrants());
         return $this->finish($hash);
@@ -208,7 +209,8 @@ final class PayrollHourlyEntitlementCalculator
         if ($fixed !== null && $kind->allowsLowerAgreedRate()) {
             return PayrollExactFraction::product([self::units($fixed), $units, $factors], [PayrollDuration::UNITS_PER_HOUR]);
         }
-        $basisMinor = $basis === 'average' ? $this->average($segment) : $this->minimumFloor($segment);
+        // § 118 odst. 1 ZP: základní sazba minimální mzdy pro 40 hodin týdně, ne přepočet na kratší stanovenou dobu.
+        $basisMinor = $basis === 'average' ? $this->average($segment) : $this->minimumBase40($segment);
         $statutoryHourly = PayrollExactFraction::product([$basisMinor, $statutory], [10000]);
         if ($fixed !== null) {
             $hourly = new PayrollExactFraction(self::units($fixed));
@@ -439,6 +441,18 @@ final class PayrollHourlyEntitlementCalculator
     {
         // Staré čisté kontexty zůstávají reprodukovatelné; nový loader vždy dodává účinné úseky.
         if (!array_key_exists('minimum_floor_segments', $this->evidence)) return self::positive($this->evidence['minimum_hourly_minor'] ?? null);
+        return self::positive($this->floorSegment($segment)['minimum_hourly_minor'] ?? null);
+    }
+
+    private function minimumBase40(?array $segment): int
+    {
+        if (!array_key_exists('minimum_floor_segments', $this->evidence)) return self::positive($this->evidence['minimum_hourly_minor'] ?? null);
+        return self::positive($this->floorSegment($segment)['minimum_base40_minor'] ?? null);
+    }
+
+    /** @return array<string,mixed> */
+    private function floorSegment(?array $segment): array
+    {
         $from = self::date($segment['date_from'] ?? null);
         $to = self::date($segment['date_to'] ?? null);
         $rows = $this->evidence['minimum_floor_segments'];
@@ -447,7 +461,7 @@ final class PayrollHourlyEntitlementCalculator
         if (count($matches) !== 1 || $matches[0]['date_from'] > $from || $matches[0]['date_to'] < $to) throw new PayrollHourlyCalculationException('hourly_minimum_floor_partition_missing', 'Doložte účinné minimum a rozdělte podklady podle změny stanovené týdenní doby.');
         self::date($matches[0]['date_from']);
         self::date($matches[0]['date_to']);
-        return self::positive($matches[0]['minimum_hourly_minor'] ?? null);
+        return $matches[0];
     }
 
     private function dueOn(string $date, string $kind): string

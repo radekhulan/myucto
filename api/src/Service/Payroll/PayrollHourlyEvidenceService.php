@@ -45,12 +45,15 @@ final class PayrollHourlyEvidenceService
             $suggested[] = ['date_from' => $segment['date_from'], 'date_to' => $segment['date_to'],
                 'overtime_duration_units' => $segment['overtime_duration_units'], 'overtime_mode' => $mode];
         }
+        $options = $this->context->evidenceOptions($supplierId, $employmentId, $periodStart);
+        $automatic = $options['automatic_assessment'];
+        unset($options['automatic_assessment']);
         return ['period' => substr($periodStart, 0, 7), 'employment_id' => $employmentId,
             'work_source' => $source['work_source'] ?? 'entries',
             'row_version' => (int) ($evidence['revision_no'] ?? 0),
             'work_source_hash' => $source === null ? '' : PayrollHourlyEvidenceRepository::bindingHash($source),
             'can_write' => $writable, 'segments_suggested' => $suggested, 'evidence' => $evidence,
-            'options' => $this->context->evidenceOptions($supplierId, $employmentId, $periodStart),
+            'options' => $options, 'automatic_assessment' => $automatic,
             ...$this->repository->history($supplierId, $employmentId, $periodStart, $offset)];
     }
 

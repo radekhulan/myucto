@@ -16,6 +16,9 @@ use PDO;
 /** Neměnné doklady příplatkových vrstev nad jedním zvoleným zdrojem hodin. */
 final class PayrollHourlyEvidenceRepository
 {
+    /** Důvod se vyžaduje jen u přepisu dříve uložené revize. */
+    public const INITIAL_REASON = 'Prvotní doložení podkladů';
+
     public function __construct(private readonly Connection $db) {}
 
     /** @param list<int> $employmentIds @return array<int,array<string,mixed>> */
@@ -51,6 +54,7 @@ final class PayrollHourlyEvidenceRepository
         foreach ($rows as &$row) {
             $row['id'] = (int) $row['id'];
             $row['revision_no'] = (int) $row['revision_no'];
+            if ($row['revision_no'] === 1 && $row['reason'] === self::INITIAL_REASON) $row['reason'] = null;
         }
         return ['history' => $rows, 'history_offset' => $offset, 'history_has_more' => $more];
     }
@@ -74,7 +78,7 @@ final class PayrollHourlyEvidenceRepository
     public function save(int $supplierId, int $employmentId, string $periodStart, array $input, ?int $userId, callable $validateSelections): array
     {
         $version = PayrollHourlyEvidenceBody::integer($input['row_version'] ?? null, 0, PHP_INT_MAX);
-        $reason = PayrollHourlyEvidenceBody::text($input['reason'] ?? null);
+        $reason = $version === 0 && trim((string) ($input['reason'] ?? '')) === '' ? self::INITIAL_REASON : PayrollHourlyEvidenceBody::text($input['reason'] ?? null);
         $payload = PayrollHourlyEvidenceBody::normalize($input, $periodStart);
         $sourceHash = $input['work_source_hash'] ?? null;
         if (!is_string($sourceHash) || preg_match('/^[a-f0-9]{64}$/D', $sourceHash) !== 1) throw new \InvalidArgumentException('Chybí platný otisk zdroje hodin.');
@@ -117,10 +121,22 @@ final class PayrollHourlyEvidenceRepository
         return $this->latestMany($supplierId, [$employmentId], $periodStart)[$employmentId];
     }
 
+    /**
+     * Doklad se váže na obsah zvoleného zdroje hodin, ne na stav jeho schválení:
+     * schválení měsíce ani zápisů uloženou evidenci nezneplatní.
+     */
     public static function bindingHash(array $source): string
     {
-        return (string) (($source['work_source'] ?? null) === 'manual_summary'
-            ? ($source['manual_summary']['content_sha256'] ?? '') : ($source['source_sha256'] ?? ''));
+        return match ($source['work_source'] ?? null) {
+            'manual_summary' => (string) ($source['manual_summary']['content_sha256'] ?? ''),
+            'entries' => hash('sha256', CanonicalJson::encode(['schema_version' => 'hourly-evidence-entries-binding.v1',
+                'time_month_id' => $source['time_month_id'] ?? null, 'period_start' => $source['period_start'] ?? null,
+                'time_entries' => array_map(static function (array $entry): array {
+                    unset($entry['status']);
+                    return $entry;
+                }, $source['time_entries'] ?? [])])),
+            default => (string) ($source['source_sha256'] ?? ''),
+        };
     }
 
     private static function validatePremiumLayers(array $payload, array $source): void
