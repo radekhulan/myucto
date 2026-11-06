@@ -145,9 +145,10 @@ final class PaymentOrderRepository
             $itemStmt = $pdo->prepare(
                 'INSERT INTO payment_order_items
                    (payment_order_id, purchase_invoice_id, invoice_id, tax_submission_id, tax_advance_schedule_id,
+                    other_item_id, other_item_installment_id,
                     payee_name, payee_account_number, payee_bank_code, payee_iban, payee_bic, amount, currency,
                     variable_symbol, constant_symbol, specific_symbol, message, account_verified)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             foreach ($items as $it) {
                 $itemStmt->execute([
@@ -156,6 +157,8 @@ final class PaymentOrderRepository
                     isset($it['invoice_id']) ? (int) $it['invoice_id'] : null,
                     isset($it['tax_submission_id']) ? (int) $it['tax_submission_id'] : null,
                     isset($it['tax_advance_schedule_id']) ? (int) $it['tax_advance_schedule_id'] : null,
+                    isset($it['other_item_id']) ? (int) $it['other_item_id'] : null,
+                    isset($it['other_item_installment_id']) ? (int) $it['other_item_installment_id'] : null,
                     $it['payee_name'] ?? null,
                     $it['payee_account_number'] ?? null,
                     $it['payee_bank_code'] ?? null,
@@ -246,6 +249,21 @@ final class PaymentOrderRepository
                              -- stačí, že jde o korunový příkaz (daně se platí jen v CZK).
                              WHEN (poi.tax_submission_id IS NOT NULL OR poi.tax_advance_schedule_id IS NOT NULL)
                                   AND ? = 'CZK'
+                             THEN 1
+                             -- Ostatní závazek: pořád otevřený a zbytek pokryje platbu. Zbytek
+                             -- splátky dokontroluje otherItemInstallmentsStillPayable().
+                             WHEN oi.id IS NOT NULL
+                                  AND oi.side = 'payable'
+                                  AND oi.status IN ('confirmed','posted')
+                                  AND oi.deleted_at IS NULL
+                                  AND oi.currency = ?
+                                  -- Splátka může nést i úrok a poplatek nad jistinou, její
+                                  -- zbytek hlídá otherItemInstallmentsStillPayable().
+                                  AND (poi.other_item_installment_id IS NOT NULL
+                                       OR oi.amount - oi.settled_outside_amount
+                                          - COALESCE((SELECT SUM(a.amount) FROM other_item_allocations a
+                                                       WHERE a.other_item_id = oi.id AND a.supplier_id = oi.supplier_id
+                                                         AND a.reversed_on IS NULL), 0) + 0.005 >= poi.amount)
                              THEN 1 ELSE 0 END) AS payable_count
                FROM payment_order_items poi
           LEFT JOIN purchase_invoices pi
@@ -254,12 +272,50 @@ final class PaymentOrderRepository
           LEFT JOIN invoices inv
                  ON inv.id = poi.invoice_id AND inv.supplier_id = ?
           LEFT JOIN currencies icur ON icur.id = inv.currency_id AND icur.supplier_id = inv.supplier_id
+          LEFT JOIN other_items oi
+                 ON oi.id = poi.other_item_id AND oi.supplier_id = ?
               WHERE poi.payment_order_id = ?"
         );
-        $stmt->execute([strtoupper($currency), strtoupper($currency), strtoupper($currency), $supplierId, $supplierId, $orderId]);
+        $code = strtoupper($currency);
+        $stmt->execute([$code, $code, $code, $code, $supplierId, $supplierId, $supplierId, $orderId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
         $total = (int) ($row['total_count'] ?? 0);
-        return $total > 0 && $total === (int) ($row['payable_count'] ?? 0);
+        return $total > 0 && $total === (int) ($row['payable_count'] ?? 0)
+            && $this->otherItemInstallmentsStillPayable($orderId, $supplierId);
+    }
+
+    /**
+     * Položka na splátku ostatního závazku smí do banky, jen dokud zbytek té splátky
+     * ({@see \MyInvoice\Service\Accounting\OtherItemInstallmentCoverage}) platbu pokryje.
+     * Kontrola zbytku celé položky by nepoznala, že splátku mezitím uhradila jiná platba.
+     */
+    private function otherItemInstallmentsStillPayable(int $orderId, int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT other_item_id, other_item_installment_id, amount FROM payment_order_items
+              WHERE payment_order_id = ? AND other_item_installment_id IS NOT NULL'
+        );
+        $stmt->execute([$orderId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if ($rows === []) {
+            return true;
+        }
+        $coverage = (new OtherItemRepository($this->db))->installmentCoverage(
+            $supplierId,
+            array_map(static fn (array $r): int => (int) $r['other_item_id'], $rows),
+        );
+        foreach ($rows as $r) {
+            $remaining = null;
+            foreach ($coverage[(int) $r['other_item_id']] ?? [] as $installment) {
+                if ($installment['id'] === (int) $r['other_item_installment_id']) {
+                    $remaining = (float) $installment['remaining_amount'];
+                }
+            }
+            if ($remaining === null || $remaining + 0.005 < (float) $r['amount']) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @return list<array<string,mixed>> */
@@ -277,6 +333,8 @@ final class PaymentOrderRepository
             $r['invoice_id']          = isset($r['invoice_id']) ? (int) $r['invoice_id'] : null;
             $r['tax_submission_id']   = isset($r['tax_submission_id']) ? (int) $r['tax_submission_id'] : null;
             $r['tax_advance_schedule_id'] = isset($r['tax_advance_schedule_id']) ? (int) $r['tax_advance_schedule_id'] : null;
+            $r['other_item_id']       = isset($r['other_item_id']) ? (int) $r['other_item_id'] : null;
+            $r['other_item_installment_id'] = isset($r['other_item_installment_id']) ? (int) $r['other_item_installment_id'] : null;
             $r['amount']              = (float) $r['amount'];
         }
         return $rows;

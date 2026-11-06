@@ -30,6 +30,7 @@ import DesktopUtilityActions from './DesktopUtilityActions.vue'
 import TabletNavigationRail from './TabletNavigationRail.vue'
 import StorageQuotaBanner from './StorageQuotaBanner.vue'
 import InstanceCriticalBar from './InstanceCriticalBar.vue'
+import MaintenanceNoticeBanner from './MaintenanceNoticeBanner.vue'
 import InstancePreviewBar from './InstancePreviewBar.vue'
 import { instanceStatus } from '@/api/instanceStatus'
 import { hostingNavAttention, resolveHostingActions } from '@/api/hostingActions'
@@ -358,6 +359,8 @@ const navSections = computed<NavSection[]>(() => {
           { to: '/recurring', label: t('nav.recurring'), icon: ICONS.recurring, newTo: '/recurring/new' },
           { to: '/projects', label: t('nav.projects'), icon: ICONS.projects, newTo: '/projects/new' },
           ...(!isStockEnabled ? [{ to: '/admin/price-list', label: t('nav.price_list'), icon: ICONS.price_list, permission: 'price_list' as PermissionKey }] : []),
+          // Se skladem Ceník v menu není, šablony účtování výkazů mají vlastní položku.
+          ...(isStockEnabled ? [{ to: '/admin/work-report-billing-templates', label: t('nav.work_report_billing_templates'), icon: ICONS.price_list, permission: 'price_list' as PermissionKey }] : []),
         ],
       },
       {
@@ -484,6 +487,15 @@ const navSections = computed<NavSection[]>(() => {
         ...(!isStockEnabled ? [{
           to: '/admin/price-list',
           label: t('nav.price_list'),
+          icon: ICONS.price_list,
+          permission: 'price_list' as PermissionKey,
+          access: 'read' as const,
+        }] : []),
+        // Se skladem Ceník v menu není (nahrazuje ho katalog), šablony účtování
+        // výkazů proto mají vlastní položku; bez skladu se otevírají z Ceníku.
+        ...(isStockEnabled ? [{
+          to: '/admin/work-report-billing-templates',
+          label: t('nav.work_report_billing_templates'),
           icon: ICONS.price_list,
           permission: 'price_list' as PermissionKey,
           access: 'read' as const,
@@ -719,7 +731,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/accounting/periods', label: t('nav.section_closing'), icon: ICONS.approvals, dividerBefore: true },
         { to: '/admin/accounting-activation', label: t('nav.accounting_activation'), icon: ICONS.updates, permission: 'accounting.periods.manage' as PermissionKey, access: 'write' },
         ...(nonprofitScope ? [
-          { to: '/accounting/nonprofit-capital', label: t('nonprofitCapital.title'), icon: ICONS.approvals },
+          { to: '/accounting/nonprofit-capital', label: t('nonprofitCapital.title'), icon: ICONS.approvals, dividerBefore: true },
           { to: '/accounting/nonprofit-funding', label: t('nonprofitFunding.title'), icon: ICONS.approvals },
           { to: '/accounting/nonprofit-membership', label: t('nonprofitMembership.title'), icon: ICONS.approvals },
         ] : []),
@@ -871,7 +883,8 @@ const navSections = computed<NavSection[]>(() => {
         ] : []),
         ...((isAdmin || isAdminPlus) ? [{ to: '/admin/suppliers', label: t('nav.suppliers'), icon: ICONS.suppliers }] : []),
         ...(isAdmin ? [
-          { to: '/admin/users',        label: t('nav.users'),      icon: ICONS.users },
+          // Uživatelé a jejich relace jsou na ukázkové instanci skutečné účty, ne demo data.
+          ...(auth.isDemo ? [] : [{ to: '/admin/users', label: t('nav.users'), icon: ICONS.users }]),
           { to: '/admin/roles',        label: t('nav.roles'),      icon: ICONS.approvals },
           { to: '/admin/emails',       label: t('nav.emails'),     icon: ICONS.email },
           { to: '/admin/activity-log', label: t('nav.log'),        icon: ICONS.log },
@@ -1008,7 +1021,7 @@ function filterNavigation(sections: NavSection[]): NavSection[] {
         // ukáže jen kvůli oblasti, kterou role jinde v menu nenajde.
         if (auth.isSuperadmin) return false
         return auth.canWrite('settings.email_profiles') || (!auth.canWrite('settings.company.write')
-          && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.email_templates')))
+          && (auth.canWrite('settings.payment_qr') || auth.canWrite('settings.invoice_defaults') || auth.canWrite('settings.email_templates')))
       }
       const permission = navPermission(item)
       if (item.to.startsWith('/admin/settings') || item.to.startsWith('/admin/integrations')) return auth.canWrite('settings.company.write')
@@ -2033,6 +2046,7 @@ onBeforeUnmount(() => {
                dokud backend nic nehlásí (zdravá instalace, vypnutý režim nebo
                zatím NEZMĚŘENÁ spotřeba). -->
           <StorageQuotaBanner />
+          <MaintenanceNoticeBanner poll />
           <div
             v-if="licenseBanner"
             class="mb-5 rounded-lg border px-4 py-3 text-sm flex flex-wrap items-center justify-between gap-2"

@@ -862,6 +862,8 @@ final class PayrollRunCommandService
                 reason: $reason,
                 correctionRevision: $refreshAsCorrection,
                 staleSourceCount: $staleSourceCount,
+                hasApprovedRevision: $command === PayrollRunCommand::CANCEL
+                    && $this->runs->latestApprovedRevision($supplierId, $runId) !== null,
             );
             $transition = $this->workflow->transition($from, $command, $context);
 
@@ -904,8 +906,8 @@ final class PayrollRunCommandService
                 if ($reopenAsCorrection || $refreshAsCorrection) {
                     $this->runs->unlockInputsForCorrection(
                         $supplierId,
+                        $runId,
                         (string) $run['period_start'],
-                        $run['office_id'] === null ? null : (int) $run['office_id'],
                     );
                 } else {
                     $this->runs->lockApprovedInputs(
@@ -1179,6 +1181,20 @@ final class PayrollRunCommandService
                  */
                 if ($command === PayrollRunCommand::CANCEL) {
                     $this->runs->abandonRevisionsOnCancel($supplierId, $runId);
+                    /*
+                     * Zrušený běh, který nikdy nebyl schválený, nesmí dál držet
+                     * zámek vstupů. Jinak docházka s příplatky nešla schválit
+                     * ani po zrušení („vstupy uzamčené mzdovým během") a cesta
+                     * ven nevedla. Schválený základ opravy si vstupy drží dál
+                     * svým snímkem, tam se zámek nevrací.
+                     */
+                    if ($this->runs->latestApprovedRevision($supplierId, $runId) === null) {
+                        $this->runs->unlockInputsForCorrection(
+                            $supplierId,
+                            $runId,
+                            (string) $run['period_start'],
+                        );
+                    }
                     $revision = $revision === null
                         ? null
                         : $this->runs->revision(

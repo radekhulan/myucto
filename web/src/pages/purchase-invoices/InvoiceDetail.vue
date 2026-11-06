@@ -784,12 +784,15 @@ function transitionLabel(target: PurchaseInvoiceStatus): string {
 const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
-  && !invoice.value.booked_at
   && !invoice.value.locked?.journal_entry_id
   && invoice.value.document_kind !== 'advance'
   && invoice.value.status !== 'draft'
   && invoice.value.status !== 'cancelled'
   && auth.canWrite('purchase_invoices'))
+
+// Doklad označený jako zaúčtovaný (booked_at), ke kterému v deníku zápis není - typicky
+// po převodu z jiného programu, kde doklad zaúčtovaný nebyl. Zaúčtování zůstává dostupné.
+const bookedWithoutEntry = computed(() => canPostToJournal.value && !!invoice.value?.booked_at)
 
 // Místo slepého confirm() se otevře náhled kontace — u dokladu v cizí měně nebo
 // v přenesené daňové povinnosti má zápis víc než dva řádky a odklepnout ho neviděný
@@ -948,7 +951,7 @@ const purchaseActions = computed<ActionItem[]>(() => {
     show: isDoubleEntry.value && auth.canWrite('bank.rules'), run: () => { postingRuleOpen.value = true } })
 
   items.push({ key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
-    show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
+    show: isDoubleEntry.value && !!inv.locked?.journal_entry_id,
     to: { name: 'accounting-journal', query: { source_type: 'purchase_invoice', source_id: String(inv.id) } } })
 
   items.push({ key: 'stock-receipt', label: t('stock.receipt.action'), icon: 'box', tier: 'secondary', variant: 'success',
@@ -1097,6 +1100,12 @@ useWindowRefresh(async () => {
             :can-acknowledge="auth.canWrite('purchase_invoices')" />
         </h1>
         <ActionBar :actions="purchaseActions" />
+      </div>
+
+      <!-- Příznak zaúčtování bez zápisu v deníku (např. převzato z jiného programu nezaúčtované). -->
+      <div v-if="bookedWithoutEntry" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700" data-test="booked-without-entry">
+        <div class="font-medium">{{ t('common.booked_without_entry_title') }}</div>
+        <div class="mt-1 text-warning-700/90">{{ t('common.booked_without_entry_hint') }}</div>
       </div>
 
       <div v-if="invoice.document_kind === 'advance' && isDoubleEntry"
@@ -1495,10 +1504,6 @@ useWindowRefresh(async () => {
       <PurchaseApprovalPanel v-if="showApprovalPanel" :invoice-id="invoice.id"
         :approval-status="invoice.approval_status ?? 'none'" :refresh-key="approvalRefreshKey" />
 
-      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
-           se přerazítkují. -->
-      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
-
       <!-- Zaúčtování — účetní klasifikace je dostupná i před vznikem zápisu,
            samotná kontace se dál načítá na pozadí. -->
       <DocumentPostingPanel ref="postingPanelRef" source="purchase-invoices" :doc-id="invoice.id" always-visible
@@ -1596,6 +1601,9 @@ useWindowRefresh(async () => {
           </table>
         </div>
       </DocumentPostingPanel>
+      <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
+           se přerazítkují. Sbalené pod zaúčtováním, stejně jako u vydané faktury. -->
+      <DocumentDimensionsPanel doc-type="purchase-invoices" :doc-id="invoice.id" collapsible :initially-open="missingDimensions(invoice).length > 0" @saved="postingPanelRef?.reload()" />
       <!-- ═══ Položky ═══ -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <h3 class="text-sm font-medium text-neutral-700 px-5 py-3 border-b border-neutral-100">{{ t('purchase_invoice.items.title') }}</h3>

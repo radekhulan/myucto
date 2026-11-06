@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzBlockerExplainer;
@@ -29,7 +28,7 @@ final class JmhzBlockerNamesTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('Aplikační kontejner není dostupný.');
         }
@@ -58,7 +57,7 @@ final class JmhzBlockerNamesTest extends TestCase
     /** Bez výslovného předání v kontejneru by most zůstal u holého počtu. */
     public function testBridgeIsWiredWithPeopleRepository(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         self::assertNotNull($container);
         $bridge = $container->get(JmhzSubmissionBridgeService::class);
 

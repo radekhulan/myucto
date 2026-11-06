@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollEmployerSettingsAction;
 use MyInvoice\Action\Payroll\PayrollOfficeRegistrationAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -43,7 +42,7 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollEmployerSettingsAction::class);
             $this->registrationAction = $container->get(PayrollOfficeRegistrationAction::class);

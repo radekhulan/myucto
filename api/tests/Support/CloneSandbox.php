@@ -281,12 +281,19 @@ final class CloneSandbox
             if ($triggers) {
                 if (!$objectsMatch) {
                     $cloner->finalize($cloner->plan($source), $schema);
-                } else {
-                    // Pořadí triggerů jedné tabulky a události dává pořadí zakládání.
-                    foreach ($expected['layout']['triggers'] as $trigger) {
-                        if (isset($dirty[(string) $trigger['EVENT_OBJECT_TABLE']])) {
-                            $server->exec(self::showCreate($server, 'TRIGGER', $source, (string) $trigger['TRIGGER_NAME']));
+                } elseif ($dirty !== []) {
+                    $session = (string) $server->query('SELECT @@SESSION.sql_mode')->fetchColumn();
+                    $mode = $server->prepare('SET SESSION sql_mode = ?');
+                    try {
+                        // Pořadí triggerů jedné tabulky a události dává pořadí zakládání.
+                        foreach ($expected['layout']['triggers'] as $trigger) {
+                            if (isset($dirty[(string) $trigger['EVENT_OBJECT_TABLE']])) {
+                                $mode->execute([(string) $trigger['SQL_MODE']]);
+                                $server->exec(self::showCreate($server, 'TRIGGER', $source, (string) $trigger['TRIGGER_NAME']));
+                            }
                         }
+                    } finally {
+                        $mode->execute([$session]);
                     }
                 }
             }
@@ -331,9 +338,8 @@ final class CloneSandbox
      */
     private static function layout(PDO $server, string $database): array
     {
-        // sql_mode a znakovou sadu dostane trigger od spojení, které ho zakládá, ani
-        // čerstvá kopie je nepřebírá. Srovnává se definice a pořadí.
-        $triggers = array_map(static fn (array $t): array => array_intersect_key($t, array_flip(['TRIGGER_NAME', 'EVENT_OBJECT_TABLE', 'ACTION_TIMING', 'EVENT_MANIPULATION', 'ACTION_ORDER', 'ACTION_STATEMENT', 'DEFINER'])), TriggerMetadata::read($server, $database));
+        // Srovnává se definice, pořadí a režim SQL, pod kterým se trigger vyhodnocuje.
+        $triggers = array_map(static fn (array $t): array => array_intersect_key($t, array_flip(['TRIGGER_NAME', 'EVENT_OBJECT_TABLE', 'ACTION_TIMING', 'EVENT_MANIPULATION', 'ACTION_ORDER', 'ACTION_STATEMENT', 'DEFINER', 'SQL_MODE'])), TriggerMetadata::read($server, $database));
         $layout = ['tables' => [], 'columns' => [], 'versioned' => [], 'triggers' => $triggers, 'views' => [], 'routines' => []];
         foreach ((new DatabaseCloner($server))->tableTypes($database) as $name => $type) {
             if ($type === 'VIEW') {

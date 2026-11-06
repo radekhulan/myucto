@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollXmlzamCooperationAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Deletion\DocumentDeletionGuard;
 use MyInvoice\Repository\DocumentFileRepository;
@@ -51,7 +50,7 @@ final class XmlzamCooperationFlowTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->database = $container->get(Connection::class);
         $this->pdo = $this->database->pdo();
         $this->pdo->beginTransaction();
@@ -80,7 +79,7 @@ final class XmlzamCooperationFlowTest extends TestCase
 
     public function testFlowIsRegisteredAndUsesDedicatedStorage(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $database = $container->get(Connection::class);
 
         self::assertInstanceOf(XmlzamCooperationFlowService::class, $container->get(XmlzamCooperationFlowService::class));

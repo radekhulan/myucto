@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\InvoiceRepository;
 use MyInvoice\Repository\PurchaseInvoiceRepository;
+use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -33,41 +34,55 @@ final class PaidRemainingListTest extends TestCase
     private int $czkId = 0;
     private int $vendorId = 0;
     private int $userId = 0;
+    private int $settlementAccountId = 0;
     private bool $inTx = false;
 
     protected function setUp(): void
     {
-        $rootDir = dirname(__DIR__, 4);
-        if (!is_file($rootDir . '/cfg.php')) {
-            $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
-        }
-        try {
-            $container = Bootstrap::buildContainer();
-            $this->db = $container->get(Connection::class);
-            $this->purchases = $container->get(PurchaseInvoiceRepository::class);
-            $this->invoices = $container->get(InvoiceRepository::class);
-        } catch (\Throwable $e) {
-            $this->markTestSkipped('DI nedostupné: ' . $e->getMessage());
-        }
+        $container = Bootstrap::buildContainer();
+        $this->db = $container->get(Connection::class);
+        $this->purchases = $container->get(PurchaseInvoiceRepository::class);
+        $this->invoices = $container->get(InvoiceRepository::class);
 
         $pdo = $this->db->pdo();
-        $source = (int) ($pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
-        $this->czkId = (int) ($pdo->query("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1")->fetchColumn() ?: 0);
-        $this->userId = (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
-        $countryId = (int) ($pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn() ?: 0);
-        if ($source === 0 || $this->czkId === 0 || $this->userId === 0 || $countryId === 0) {
-            $this->markTestSkipped('Chybí základní data (supplier/currency/user/country) v DB.');
-        }
+        $source = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $this->userId = (int) $pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn();
+        $countryId = (int) $pdo->query("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1")->fetchColumn();
+        self::assertGreaterThan(0, $source);
+        self::assertGreaterThan(0, $this->userId);
+        self::assertGreaterThan(0, $countryId);
 
         $pdo->beginTransaction();
         $this->inTx = true;
-        $this->supplierId = $this->createIsolatedSupplier($pdo, $source);
-        $pdo->prepare(
-            'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email,
-                                  language, currency_default_id, is_customer, is_vendor)
-             VALUES (?, "Protistrana seznam", "Test 1", "Praha", "11000", ?, "test@example.com", "cs", ?, 1, 1)'
-        )->execute([$this->supplierId, $countryId, $this->czkId]);
-        $this->vendorId = (int) $pdo->lastInsertId();
+        try {
+            $this->supplierId = $this->createIsolatedSupplier($pdo, $source);
+            $pdo->prepare("UPDATE supplier SET company_name = 'Syntetická firma seznamu úhrad', display_name = 'Syntetická firma seznamu úhrad', accounting_mode = 'double_entry' WHERE id = ?")
+                ->execute([$this->supplierId]);
+            $this->setVatPayerAt($pdo, $this->supplierId, '1900-01-01', true);
+            $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '1900-01-01', 'cz_500')")
+                ->execute([$this->supplierId]);
+            $pdo->prepare("INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default) VALUES (?, 'CZK', 'CZK', 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 1)")
+                ->execute([$this->supplierId]);
+            $this->czkId = (int) $pdo->lastInsertId();
+            $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([$this->czkId, $this->supplierId]);
+            $pdo->prepare(
+                'INSERT INTO clients (supplier_id, company_name, street, city, zip, country_id, main_email,
+                                      language, currency_default_id, is_customer, is_vendor)
+                 VALUES (?, "Syntetická protistrana seznamu úhrad", "Testovací 1", "Praha", "11000", ?, "paid-remaining@example.test", "cs", ?, 1, 1)'
+            )->execute([$this->supplierId, $countryId, $this->czkId]);
+            $this->vendorId = (int) $pdo->lastInsertId();
+            $container->get(ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+            $account = $pdo->prepare("SELECT id FROM chart_of_accounts WHERE supplier_id = ? AND account_code = '395' AND is_active = 1");
+            $account->execute([$this->supplierId]);
+            $this->settlementAccountId = (int) $account->fetchColumn();
+            self::assertGreaterThan(0, $this->settlementAccountId);
+        } catch (\Throwable $error) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $this->inTx = false;
+            throw $error;
+        }
     }
 
     protected function tearDown(): void
@@ -216,14 +231,10 @@ final class PaidRemainingListTest extends TestCase
     /** Úhrada zápočtem proti účtu — jeden z kanálů, které SSOT sčítá. */
     private function settle(int $pfId, float $amount): void
     {
-        $accountId = (int) ($this->db->pdo()->query('SELECT id FROM chart_of_accounts ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
-        if ($accountId === 0) {
-            self::markTestSkipped('Chybí účtový rozvrh.');
-        }
         $this->db->pdo()->prepare(
             "INSERT INTO invoice_settlements (supplier_id, doc_type, doc_id, settled_on, amount, account_id, status)
              VALUES (?, 'purchase_invoice', ?, '2099-06-20', ?, ?, 'confirmed')"
-        )->execute([$this->supplierId, $pfId, $amount, $accountId]);
+        )->execute([$this->supplierId, $pfId, $amount, $this->settlementAccountId]);
     }
 
     /** Bankovní párování: `$txAmount` se znaménkem pohybu, `$matched` jako ho ukládá párování (kladné). */

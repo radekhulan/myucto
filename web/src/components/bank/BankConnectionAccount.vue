@@ -47,6 +47,7 @@ const syncing = ref(false)
 const syncSeconds = ref(0)
 let syncTimer: number | null = null
 const available = computed(() => props.providers.filter(p => p.implemented && p.capabilities.statement_import && p.bank_codes.includes(props.account.bank_code || '')))
+const providerLabel = computed(() => props.providers.find(p => p.code === provider.value)?.label ?? t('bank_connection.unavailable'))
 const newCertificate = computed(() => !!clientId.value || !!certificate.value || !!certificatePassword.value)
 const canSave = computed(() => props.canWrite && !busy.value && !!provider.value && (certificateProvider.value
   ? (newCertificate.value ? !!clientId.value.trim() && !!certificate.value : !!props.connection?.has_token)
@@ -62,9 +63,19 @@ const invalidPeriod = computed(() => {
 })
 watch(() => props.connection, connection => {
   enabled.value = connection?.enabled ?? true
-  provider.value = connection?.provider ?? available.value[0]?.code ?? ''
+  provider.value = providerForAccount(connection?.provider)
 }, { immediate: true })
-watch(available, value => { if (!provider.value) provider.value = value[0]?.code ?? '' })
+watch(available, () => { provider.value = providerForAccount(provider.value || props.connection?.provider) })
+
+/*
+ * Banku určuje kód banky účtu, uživatel ji nevybírá. Uložené spojení s jiným
+ * poskytovatelem (účtu se změnil kód banky) by backend odmítl jako
+ * provider_account_mismatch, proto má přednost poskytovatel podle kódu banky.
+ */
+function providerForAccount(current?: string | null): string {
+  if (current && available.value.some(p => p.code === current)) return current
+  return available.value[0]?.code ?? current ?? ''
+}
 watch([from, to], clearReconciliation)
 watch(() => route.query.currency_id, currencyId => {
   if (String(currencyId) === String(props.account.id)) opened.value = true
@@ -238,11 +249,13 @@ async function confirmReconciliation() {
       </div>
       <form v-if="canWrite && provider !== 'creditas' && (!['kb_plus', 'csas'].includes(provider) || connection?.has_token)" class="space-y-3" @submit.prevent="save">
         <div v-if="!['kb_plus', 'csas'].includes(provider)" class="grid sm:grid-cols-2 gap-3">
-          <label class="text-sm">{{ t('bank_connection.provider') }}
-            <select v-model="provider" class="w-full h-9 px-3 mt-1 border border-neutral-300 rounded-md bg-surface" :disabled="busy">
-              <option v-for="p in providers" :key="p.code" :value="p.code" :disabled="!available.includes(p)">{{ p.label }}{{ !available.includes(p) ? ` (${t('bank_connection.unavailable')})` : '' }}</option>
-            </select>
-          </label>
+          <!-- Banku určuje kód banky účtu (každý kód má jediné napojení), nevybírá se. -->
+          <div class="text-sm">
+            <span>{{ t('bank_connection.provider') }}</span>
+            <p class="w-full h-9 px-3 mt-1 flex items-center border border-neutral-200 rounded-md bg-neutral-50 text-neutral-700" data-testid="connection-provider">
+              {{ providerLabel }}
+            </p>
+          </div>
           <label v-if="!certificateProvider" class="text-sm">{{ t('bank_connection.token') }}
             <input v-model="token" type="password" autocomplete="new-password" spellcheck="false" class="w-full h-9 px-3 mt-1 border border-neutral-300 rounded-md bg-surface" :disabled="busy" :placeholder="connection?.has_token ? t('bank_connection.token_unchanged') : t('bank_connection.token_required')" />
           </label>

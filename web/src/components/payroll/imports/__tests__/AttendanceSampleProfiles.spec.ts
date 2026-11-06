@@ -32,7 +32,7 @@ vi.mock('@/api/errors', () => ({ apiErrorMessage: (_: unknown, fallback: string)
 import AttendanceMappingPanel from '../AttendanceMappingPanel.vue'
 import AttendanceTemplateDownload from '../AttendanceTemplateDownload.vue'
 import { provideAttendanceWorkspace, type AttendanceWorkspace } from '../attendanceWorkspace'
-import { ATTENDANCE_TEMPLATE_FILENAME, missingSampleKeys, profileSampleKey } from '../importHelpers'
+import { ATTENDANCE_PAMICA_TEMPLATE_FILENAME, ATTENDANCE_TEMPLATE_FILENAME, missingSampleKeys, profileSampleKey } from '../importHelpers'
 
 function profile(id: number, overrides: Partial<AttendanceProfile> = {}): AttendanceProfile {
   return {
@@ -50,6 +50,7 @@ function profile(id: number, overrides: Partial<AttendanceProfile> = {}): Attend
 
 const giriton = () => profile(1, { name: 'Vzor GIRITON', is_sample: true, sample_key: 'giriton', sample_version: 9 })
 const myucto = () => profile(2, { name: 'Vzor MyÚčto', is_sample: true, sample_key: 'myucto', sample_version: 1 })
+const pamica = () => profile(4, { name: 'Vzor PAMICA', is_sample: true, sample_key: 'pamica', sample_version: 1 })
 
 function workspace(profiles: AttendanceProfile[]): AttendanceWorkspace {
   const list = ref(profiles)
@@ -100,17 +101,18 @@ describe('vestavěné vzory profilu', () => {
   it('vzor bez klíče ze staršího serveru je GIRITON a chybějící vzory jdou obnovit', () => {
     expect(profileSampleKey(profile(5, { is_sample: true, sample_key: undefined }))).toBe('giriton')
     expect(profileSampleKey(profile(6))).toBeNull()
-    expect(missingSampleKeys([giriton()])).toEqual(['myucto'])
-    expect(missingSampleKeys([giriton(), myucto(), profile(3)])).toEqual([])
-    expect(missingSampleKeys([profile(3)])).toEqual(['giriton', 'myucto'])
+    expect(missingSampleKeys([giriton()])).toEqual(['myucto', 'pamica'])
+    expect(missingSampleKeys([giriton(), myucto(), pamica(), profile(3)])).toEqual([])
+    expect(missingSampleKeys([profile(3)])).toEqual(['giriton', 'myucto', 'pamica'])
   })
 
   it('nabízí obnovu jen smazaného vzoru a obnoví ho podle klíče', async () => {
     m.restore.mockResolvedValue({ profile: myucto(), restored: true })
-    const wrapper = mountPanel([giriton()])
+    const wrapper = mountPanel([giriton(), pamica()])
     await flushPromises()
 
     expect(wrapper.find('[data-testid="attendance-profile-restore-sample-giriton"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="attendance-profile-restore-sample-pamica"]').exists()).toBe(false)
     const button = wrapper.get('[data-testid="attendance-profile-restore-sample-myucto"]')
     expect(button.text()).toBe('payroll_imports.mapping.restore_sample_myucto')
     await button.trigger('click')
@@ -121,11 +123,12 @@ describe('vestavěné vzory profilu', () => {
     expect(wrapper.find('[data-testid="attendance-profile-restore-sample-myucto"]').exists()).toBe(false)
   })
 
-  it('bez obou vzorů nabízí obnovu GIRITON i MyÚčto, bez práva nastavení žádnou', async () => {
+  it('bez vzorů nabízí obnovu GIRITON, MyÚčto i PAMICA, bez práva nastavení žádnou', async () => {
     const wrapper = mountPanel([profile(3)])
     await flushPromises()
     expect(wrapper.find('[data-testid="attendance-profile-restore-sample-giriton"]').text()).toBe('payroll_imports.mapping.restore_sample')
     expect(wrapper.find('[data-testid="attendance-profile-restore-sample-myucto"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="attendance-profile-restore-sample-pamica"]').text()).toBe('payroll_imports.mapping.restore_sample_pamica')
 
     const readOnly = mountPanel([profile(3)], { canManage: false, canPreview: true })
     await flushPromises()
@@ -146,7 +149,23 @@ describe('vestavěné vzory profilu', () => {
     expect(hint.text()).toContain('payroll_imports.mapping.sample_hint_myucto')
     await hint.get('[data-testid="attendance-template-download"]').trigger('click')
     await flushPromises()
-    expect(m.download).toHaveBeenCalledWith(ATTENDANCE_TEMPLATE_FILENAME)
+    expect(m.download).toHaveBeenCalledWith(ATTENDANCE_TEMPLATE_FILENAME, 'myucto', undefined)
+  })
+
+  it('u Vzoru PAMICA nabízí ukázkový XML za vybraný měsíc', async () => {
+    m.download.mockResolvedValue({})
+    const wrapper = mountPanel([giriton(), pamica()])
+    await flushPromises()
+    await wrapper.get('[data-testid="attendance-profile-4"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-testid="attendance-profile-myucto-hint"]').exists()).toBe(false)
+    const hint = wrapper.get('[data-testid="attendance-profile-pamica-hint"]')
+    expect(hint.text()).toContain('payroll_imports.mapping.sample_hint_pamica')
+    const button = hint.get('[data-testid="attendance-template-download"]')
+    expect(button.text()).toBe('payroll_imports.template.pamica_download')
+    await button.trigger('click')
+    await flushPromises()
+    expect(m.download).toHaveBeenCalledWith(ATTENDANCE_PAMICA_TEMPLATE_FILENAME, 'pamica', '2026-06')
   })
 
   it('bez práva na import šablonu u vzoru nenabízí', async () => {
@@ -167,7 +186,7 @@ describe('tlačítko šablony XLSX', () => {
 
     await button.trigger('click')
     await flushPromises()
-    expect(m.download).toHaveBeenCalledWith('podklady-mzdy-myucto.xlsx')
+    expect(m.download).toHaveBeenCalledWith('podklady-mzdy-myucto.xlsx', 'myucto', undefined)
     expect(m.error).toHaveBeenCalledWith('payroll_imports.template.failed')
   })
 

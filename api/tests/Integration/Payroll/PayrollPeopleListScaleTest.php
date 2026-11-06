@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Tests\Fixtures\Payroll\PayrollRunScaleFixture;
@@ -39,7 +38,7 @@ final class PayrollPeopleListScaleTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $people = $container->get(PayrollPeopleRepository::class);
         if (!$db instanceof Connection || !$people instanceof PayrollPeopleRepository) {

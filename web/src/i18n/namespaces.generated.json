@@ -16,6 +16,7 @@
     "jointAllocations",
     "keyboard_shortcuts",
     "license",
+    "maintenance_notice",
     "nav",
     "nonprofitCapital",
     "nonprofitDppo",
@@ -123,6 +124,7 @@
     "payroll_bank",
     "payroll_imports",
     "payroll_travel",
+    "pending_documents",
     "period_filter",
     "permissions",
     "pohoda",
@@ -170,12 +172,14 @@
     "tax_evidence",
     "template_tools",
     "time_billing",
+    "user_sessions",
     "users",
     "validation",
     "vat_classifications",
     "vendor",
     "workReportDisplay",
-    "workReportTracking"
+    "workReportTracking",
+    "work_report_billing"
   ],
   "routes": {
     "instance-admin": [
@@ -215,10 +219,12 @@
       "errors"
     ],
     "approval": [
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "work-report-tracking": [
-      "workReportTracking"
+      "workReportTracking",
+      "work_report_billing"
     ],
     "payroll-document-access": [
       "payrollDocumentAccess"
@@ -237,7 +243,8 @@
       "errors",
       "taxReturn",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "portal-mcp": [
       "client_mcp",
@@ -257,8 +264,11 @@
     ],
     "portal-company-settings": [
       "company_email_templates",
+      "invoice_default_note",
       "settings",
-      "users"
+      "stock",
+      "users",
+      "workReportDisplay"
     ],
     "clients": [
       "purchase_invoice"
@@ -292,7 +302,8 @@
     "project-new": [
       "dimensions",
       "errors",
-      "project"
+      "project",
+      "work_report_billing"
     ],
     "project-detail": [
       "dimensions",
@@ -304,7 +315,8 @@
     "project-edit": [
       "dimensions",
       "errors",
-      "project"
+      "project",
+      "work_report_billing"
     ],
     "invoices": [
       "dimensions",
@@ -316,7 +328,8 @@
       "payment_method",
       "project",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-ai-import": [
       "aiGateway",
@@ -338,7 +351,8 @@
       "settings",
       "stock",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-detail": [
       "accrual_period",
@@ -364,7 +378,8 @@
       "smtp_logs",
       "stock",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoice-edit": [
       "accrual_period",
@@ -382,7 +397,8 @@
       "settings",
       "stock",
       "time_billing",
-      "workReportDisplay"
+      "workReportDisplay",
+      "work_report_billing"
     ],
     "invoices-export": [
       "aiGateway",
@@ -559,11 +575,15 @@
       "other_items"
     ],
     "other-items": [
+      "dimensions",
       "other_items"
     ],
     "other-item-new": [
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "other-item-detail": [
       "dimensions",
@@ -573,7 +593,10 @@
     ],
     "other-item-edit": [
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "document-requests": [
       "document_requests"
@@ -748,7 +771,11 @@
       "dimensions"
     ],
     "accounting-nonprofit-membership": [
-      "dimensions"
+      "dimensions",
+      "errors",
+      "payment_method",
+      "purchase_invoice",
+      "settings"
     ],
     "accounting-nonprofit-tax": [
       "nonprofitTaxJ6"
@@ -1109,6 +1136,7 @@
       "instance_admin",
       "roles",
       "settings",
+      "user_sessions",
       "users"
     ],
     "admin-roles": [
@@ -1134,7 +1162,9 @@
       "activation"
     ],
     "admin-branding": [
-      "settings"
+      "settings",
+      "stock",
+      "workReportDisplay"
     ],
     "admin-suppliers": [
       "aiGateway",
@@ -1230,6 +1260,7 @@
       "activation",
       "automation",
       "bank",
+      "dimensions",
       "imports",
       "purchase_invoice",
       "settings",
@@ -1308,7 +1339,12 @@
       "errors"
     ],
     "admin-price-list": [
-      "price_list"
+      "price_list",
+      "work_report_billing"
+    ],
+    "admin-work-report-billing-templates": [
+      "price_list",
+      "work_report_billing"
     ],
     "admin-price-list-new": [
       "price_list"
@@ -1330,7 +1366,8 @@
       "purchase_invoice",
       "recurring",
       "settings",
-      "time_billing"
+      "time_billing",
+      "work_report_billing"
     ],
     "recurring-detail": [
       "payment_method",
@@ -1344,7 +1381,8 @@
       "purchase_invoice",
       "recurring",
       "settings",
-      "time_billing"
+      "time_billing",
+      "work_report_billing"
     ],
     "admin-diagnostics": [
       "diagnostics",

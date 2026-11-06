@@ -44,6 +44,24 @@ const jsdomTests = [
   'src/pages/payroll/__tests__/{EmploymentCard,EnforcementCases,EnforcementTerminationNoticePanel,PayrollExternalJmhzSubmissionsPanel}.spec.ts',
 ]
 
+const nativeDomTests = [
+  'src/utils/downloadFile.spec.ts',
+  'src/utils/__tests__/mergeDocuments.spec.ts',
+  'src/workspace/__tests__/{windowManager,frameSurface}.spec.ts',
+  'src/pages/accounting/__tests__/{CashDocumentEditor,JournalFocus,JournalDimensionFilter,GeneralLedger}.spec.ts',
+  'src/components/workspace/__tests__/{WorkspaceWindowSwitcher,WorkspaceFavorites}.spec.ts',
+  'src/pages/tax-evidence/__tests__/CashJournal.spec.ts',
+  'src/components/accounting/__tests__/SecuritiesDebt504Workspace.spec.ts',
+  'src/components/accounting/membership/__tests__/MembershipWorkspace.spec.ts',
+  'src/api/__tests__/{payrollRegzel,payrollDocuments}.spec.ts',
+  'src/pages/documents/__tests__/ScanAttach.spec.ts',
+  'src/pages/clients/__tests__/{ClientForm.emailFormat,ClientForm.validation}.spec.ts',
+  'src/pages/payroll/__tests__/{HealthInsurerAccounts,PayrollPayments,PayrollPersonStatutoryEvidencePanel,TimeAttendance}.spec.ts',
+  'src/components/payroll/__tests__/{PayrollFileDropzoneInteraction,PayrollRiskySavingsPanel}.spec.ts',
+  'src/components/property/settlements/__tests__/{SettlementDossier,SettlementCompositeCost,PropertySettlements}.spec.ts',
+  'src/components/property/payments/receivables/__tests__/{PartySaldoPanel,SaldoWorkflow}.spec.ts',
+]
+
 // Časové pásmo se pinuje ještě před startem workerů: `formatUtcDateTime`
 // převádí UTC sloupce do pásma stroje, takže bez tohohle by tytéž testy prošly
 // na vývojářském Windows (Praha) a spadly v CI (UTC).
@@ -68,19 +86,25 @@ export default defineConfig({
     maxWorkers: Math.min(8, availableParallelism()),
     maxConcurrency: 1,
     projects: [
-      { extends: true, test: { name: 'node', environment: 'node', include: nodeTests } },
+      { extends: true, test: { name: 'node', environment: 'node', pool: 'vmThreads', vmMemoryLimit: '1GB', include: nodeTests } },
       {
         extends: true,
-        test: { name: 'browser-api', environment: 'jsdom', setupFiles: ['./tests/setup-dom.ts'], include: jsdomTests },
+        test: { name: 'native-dom', environment: 'happy-dom', pool: 'threads', setupFiles: ['./tests/setup-dom.ts'], include: nativeDomTests },
+      },
+      {
+        extends: true,
+        test: { name: 'browser-api', environment: 'jsdom', pool: 'threads', setupFiles: ['./tests/setup-dom.ts'], include: jsdomTests },
       },
       {
         extends: true,
         test: {
           name: 'dom',
           environment: 'happy-dom',
+          pool: 'vmThreads',
+          vmMemoryLimit: '1GB',
           setupFiles: ['./tests/setup-dom.ts'],
           include: ['src/**/*.{test,spec}.ts'],
-          exclude: [...nodeTests, ...jsdomTests],
+          exclude: [...nodeTests, ...jsdomTests, ...nativeDomTests],
         },
       },
     ],

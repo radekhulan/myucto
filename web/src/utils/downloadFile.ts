@@ -29,16 +29,23 @@ function saveBlob(data: Blob, disposition: string | undefined, fallback: string)
  * se proto zpátky do objektu, aby se uživatel dozvěděl skutečný důvod.
  */
 async function unwrapBlobError(error: any): Promise<never> {
-  const data = error?.response?.data
-  if (data instanceof Blob) {
-    try {
-      error.response.data = JSON.parse(await data.text())
-    } catch {
-      // Neparsovatelné tělo necháváme být — původní chyba je pořád lepší
-      // než chyba z parsování.
-    }
+  if (error?.response?.data instanceof Blob) {
+    error.response.data = await errorResponseData(error)
   }
   throw error
+}
+
+/** Tělo chybové odpovědi, u stahování (`responseType: 'blob'`) rozbalené z JSON. */
+export async function errorResponseData(error: any): Promise<any> {
+  const data = error?.response?.data
+  if (!(data instanceof Blob)) return data
+  try {
+    return JSON.parse(await data.text())
+  } catch {
+    // Neparsovatelné tělo necháváme být — původní chyba je pořád lepší
+    // než chyba z parsování.
+    return data
+  }
 }
 
 /**

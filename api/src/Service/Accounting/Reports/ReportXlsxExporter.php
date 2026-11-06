@@ -49,6 +49,12 @@ final class ReportXlsxExporter
         if (!empty($data['analytics'])) {
             $sub .= ' (rozpad po analytikách)';
         }
+        // Kód „0“ (třída 0) je platná mez, proto porovnání s prázdným řetězcem, ne empty().
+        $accountFrom = (string) ($data['account_from'] ?? '');
+        $accountTo = (string) ($data['account_to'] ?? '');
+        if ($accountFrom !== '' || $accountTo !== '') {
+            $sub .= ' · Účty: ' . ($accountFrom !== '' ? $accountFrom : '…') . ' - ' . ($accountTo !== '' ? $accountTo : '…');
+        }
         $sheet->setCellValue('A2', $sub);
         if ((int) ($data['draft_count'] ?? 0) > 0) {
             $sheet->setCellValue('A3', 'V rozsahu je ' . (int) $data['draft_count'] . ' nezaúčtovaných konceptů — nejsou zahrnuty.');
@@ -432,7 +438,7 @@ final class ReportXlsxExporter
 
         if (($data['counter_totals'] ?? []) !== []) {
             $tr = $r + 2;
-            $sheet->setCellValue("A{$tr}", 'Součty podle protiúčtu (složený zápis se dělí poměrem řádků protistrany)');
+            $sheet->setCellValue("A{$tr}", 'Součty podle protiúčtu (dvojice se shodnou částkou patří své dvojici, ostatní řádky se dělí poměrem)');
             $sheet->getStyle("A{$tr}")->getFont()->setBold(true);
             $tr++;
             foreach ($data['counter_totals'] as $row) {

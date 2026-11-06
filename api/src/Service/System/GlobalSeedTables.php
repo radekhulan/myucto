@@ -189,6 +189,7 @@ final class GlobalSeedTables
      * @var list<string>
      */
     public const RESET_KEEP_USERS_SUPPLIER = [
+        'work_report_billing_templates',
         // Účet, přihlášení a jeho druhé faktory. Bez passkeys a záchranných kódů by
         // se uživatel s vynuceným MFA po resetu nepřihlásil.
         'users', 'sessions', 'trusted_devices', 'login_otps',
@@ -255,11 +256,11 @@ final class GlobalSeedTables
         'accounting_periods', 'entity_category_history',
         'accounting_account_definition_history', 'chart_of_accounts', 'accounting_supplier_settings', 'accounting_document_series',
         // Vlastní druhy ostatních položek nesou vlastní číselné řady, které reset ponechává.
-        'other_item_kinds',
+        'other_item_kinds', 'other_item_posting_profiles', 'other_item_settings',
         'accounting_fixed_exchange_rates',
         'auto_posting_policy', 'expense_classification_rules', 'revenue_classification_rules', 'posting_rules',
         'journal_entry_templates', 'journal_entry_template_lines',
-        'bank_posting_rules', 'bank_rule_templates', 'tax_evidence_bank_rules',
+        'bank_posting_rules', 'bank_posting_rule_dimensions', 'bank_rule_templates', 'tax_evidence_bank_rules',
         'statement_account_overrides', 'statement_function_map',
         'cost_centers', 'dimension_types', 'dimension_values', 'dimension_account_rules',
         'dimension_account_map',
@@ -314,7 +315,9 @@ final class GlobalSeedTables
      *   generátor pak padal na `uq_wh_supplier_code` („Duplicate entry '1-HLAVNI'")
      *   a purge už sirotka neuměl uklidit.
      * - pracovní kalendáře, směny a pravidla výplat mají employment/employee (osobní data).
-     * - dimension_defaults jsou výchozí dimenze KLIENTA a projektu, které se mažou.
+     * - dimension_defaults jsou výchozí dimenze klienta, zakázky, produktu a kategorie,
+     *   které se mažou. Výchozí dimenze bankovního účtu jsou konfigurace ponechaného
+     *   účtu, proto zůstanou ({@see self::RESET_KEEP_USERS_SUPPLIER_PARTIAL}).
      * - payroll_period_ownership, accounting_setup_* a tax_advance_schedules jsou stopa
      *   převodu, průvodce nebo párování nad smazanými daty; převod je založí znovu.
      *
@@ -428,7 +431,7 @@ final class GlobalSeedTables
         'odometer_readings',
         'offset_agreement_items', 'offset_agreements',
         'oss_filing_evidence',
-        'other_item_allocations', 'other_item_installments', 'other_item_posting_lines',
+        'other_item_allocations', 'other_item_auto_match_blocks', 'other_item_installments', 'other_item_posting_lines', 'other_item_posting_overrides',
         'other_item_schedule_occurrences', 'other_item_schedules', 'other_items',
         'password_resets',
         'payment_matches', 'payment_order_items', 'payment_orders',
@@ -583,6 +586,7 @@ final class GlobalSeedTables
     public const SAMPLE_MARKERS = [
         'payroll_attendance_sample_seeded_at' => 'payroll_import_profiles',
         'payroll_attendance_myucto_sample_seeded_at' => 'payroll_import_profiles',
+        'payroll_attendance_pamica_sample_seeded_at' => 'payroll_import_profiles',
         'integration_sample_seeded_at'        => 'integration_connections',
     ];
 
@@ -594,6 +598,18 @@ final class GlobalSeedTables
     }
 
     /**
+     * Tabulky ze seznamu mazaných ({@see self::RESET_KEEP_USERS_SUPPLIER_WIPES}), ve kterých
+     * režim `--keep-users-supplier` ponechá řádky patřící ponechané konfiguraci. Hodnota je
+     * podmínka řádků, které se smažou.
+     *
+     * @var array<string, string>
+     */
+    public const RESET_KEEP_USERS_SUPPLIER_PARTIAL = [
+        // Výchozí dimenze vlastního bankovního účtu: účet, typy i hodnoty dimenzí zůstávají.
+        'dimension_defaults' => 'supplier_bank_account_id IS NULL',
+    ];
+
+    /**
      * Keep-list režimu `--keep-users-supplier` a smíšené tabulky, u kterých se v tomto
      * režimu maže jen per-tenant část (ty, které jsou konfigurací, zůstávají celé).
      *
@@ -602,7 +618,8 @@ final class GlobalSeedTables
     public static function resetKeepUsersSupplier(bool $keepCache): array
     {
         $keep = array_values(array_unique(array_merge(self::resetKeep($keepCache), self::RESET_KEEP_USERS_SUPPLIER)));
-        $partial = array_diff_key(self::RESET_PARTIAL, array_flip(self::RESET_KEEP_USERS_SUPPLIER));
+        $partial = array_diff_key(self::RESET_PARTIAL, array_flip(self::RESET_KEEP_USERS_SUPPLIER))
+            + self::RESET_KEEP_USERS_SUPPLIER_PARTIAL;
 
         return ['keep' => $keep, 'partial' => $partial];
     }

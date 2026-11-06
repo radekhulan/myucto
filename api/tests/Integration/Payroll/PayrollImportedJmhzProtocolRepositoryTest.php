@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollImportedJmhzProtocolRepository;
 use MyInvoice\Repository\Payroll\PayrollRegistrationIdentityRepository;
@@ -39,7 +38,7 @@ final class PayrollImportedJmhzProtocolRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $db);
         $sensitive = $container->get(PayrollSensitiveData::class);

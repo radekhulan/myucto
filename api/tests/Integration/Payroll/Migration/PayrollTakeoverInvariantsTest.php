@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Migration;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Migration\MoneyS3\ImportProtocol;
 use MyInvoice\Service\Migration\Pohoda\Payroll\PohodaPayrollImporter;
@@ -42,7 +41,7 @@ final class PayrollTakeoverInvariantsTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->importer = $container->get(PohodaPayrollImporter::class);
         $this->invariants = $container->get(PayrollTakeoverInvariants::class);

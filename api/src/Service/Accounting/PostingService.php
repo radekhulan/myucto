@@ -25,6 +25,7 @@ use MyInvoice\Service\Accounting\Product\IssuedDiscountAllocation;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\Accounting\Revenue\RevenueRuleMatcher;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Service\Invoice\MultiPurposeVoucher;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuancePostingBatchContext;
@@ -427,6 +428,16 @@ final class PostingService
             } else {
                 $periodStatuses = $batchContext->periodStatuses($this->db);
             }
+            if ($sourceId !== null && $sourceType === 'invoice') {
+                // Fakturu krytou ostatní pohledávkou (migrace 2246) účtuje zápis pohledávky.
+                // Čte se až pod zámkem období, který drží i navázání faktury.
+                $covered = $pdo->prepare('SELECT other_item_id FROM invoices WHERE id = ? AND supplier_id = ? LOCK IN SHARE MODE');
+                $covered->execute([$sourceId, $supplierId]);
+                $coveringItem = $covered->fetchColumn();
+                if ($coveringItem !== false && $coveringItem !== null) {
+                    throw self::coveredByOtherItemException($sourceId);
+                }
+            }
             if ($sourceId !== null && in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
                 $group = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $sourceId, true);
                 // Zaúčtovat již převzatý doklad je idempotentní jen pro cesty, které
@@ -496,12 +507,7 @@ final class PostingService
             // z dokladů, ne z deníku, takže ho tyto zápisy nemění. Flag nastavuje jen ClosingService.
             $closingStepInLock = $dateLocked && $allowClosing;
             if ($dateLocked && !$taxNeutralRewrite && !$closingStepInLock) {
-                throw new PostingException(
-                    'date_locked',
-                    'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
-                        . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
-                        . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (jen admin).',
-                );
+                throw self::dateLockedException($entryDate, (string) $lockedUntil);
             }
 
             $resolved = $batchDocument['resolved_lines'] ?? $this->prepareDocumentLines($supplierId, $sourceType, $sourceId, $lines, $entryDate, true);
@@ -1020,6 +1026,10 @@ final class PostingService
                       WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL"
                 );
                 $released->execute([$reversalDate, $supplierId, (int) $original['source_id']]);
+                if ($released->rowCount() > 0) {
+                    InvoiceOtherItemPayments::syncForItems($pdo, $supplierId,
+                        InvoiceOtherItemPayments::itemsOfPayment($pdo, $supplierId, $column, (int) $original['source_id']));
+                }
             }
 
             $this->activity->log(
@@ -1409,6 +1419,9 @@ final class PostingService
                 'Vydaný doklad #' . $invoiceId . ' typu "' . $invoiceType . '" se do deníku neúčtuje.',
             );
         }
+        if (($inv['other_item_id'] ?? null) !== null) {
+            throw self::coveredByOtherItemException($invoiceId);
+        }
 
         // DDKP (daňový doklad k přijaté platbě, §28/2/d ZDPH) NENÍ běžná faktura:
         // zákazník už zaplatil zálohu (zaúčtováno 221/324), doklad jen přiznává DPH ze
@@ -1507,7 +1520,7 @@ final class PostingService
         // Výnos je výnos bez ohledu na to, kterému státu patří daň — OSS základ jde na
         // TÝŽ výnosový účet (a do téhož rozpadu; revenueWeights počítá váhy ze VŠECH
         // položek dokladu, tedy i z těch OSS, takže by rozpad jinak nesouhlasil).
-        $this->appendSplit($lines, $weights, $revenue, $otherSide, $net + $ossNet + $voucherNet, $cc);
+        $this->appendSplit($lines, $weights, $revenue, self::sideBySign($net + $ossNet + $voucherNet, $otherSide, $isCreditNote), $net + $ossNet + $voucherNet, $cc);
         if ($vat !== 0.0) {
             $lines[] = $this->line($this->outputVatAccount($supplierId), $vatSide($vat), abs($vat), $cc);
         }
@@ -1820,40 +1833,40 @@ final class PostingService
             // § 76 v plné výši (krácení koeficientem jde souhrnně přes přiznání, ř. 43k/52).
             // Neodpočitatelná část daně je nákladem stejně jako u tuzemského dokladu bez nároku.
             [$supplierVat, $deductibleSelfAssessed, $deductibleSupplierVat, $nonDeductibleVat] = self::reverseChargeVatSplit($vat, $selfAssessedVat, $vatDeduction, $pct);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, round($net + $nonDeductibleVat, 2), $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign(round($net + $nonDeductibleVat, 2), $expenseSide, $isCreditNote), round($net + $nonDeductibleVat, 2), $cc);
             if ($selfAssessedVat !== 0.0) {
                 // Samovyměření: obě nohy patří na RŮZNÉ analytiky — odpočet na vstup, přiznaná
                 // daň na výstup. Na plochém 343 se okamžitě vynetovaly a v zúčtování období
                 // po nich nezůstala stopa.
                 if ($deductibleSelfAssessed !== 0.0) {
-                    $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($deductibleSelfAssessed), $cc);  // nárok na odpočet
+                    $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSelfAssessed, $expenseSide, $isCreditNote), abs($deductibleSelfAssessed), $cc);  // nárok na odpočet
                 }
-                $lines[] = $this->line($this->outputVatAccount($supplierId), $payableSide, abs($selfAssessedVat), $cc); // povinnost přiznat daň
+                $lines[] = $this->line($this->outputVatAccount($supplierId), self::sideBySign($selfAssessedVat, $payableSide, $isCreditNote), abs($selfAssessedVat), $cc); // povinnost přiznat daň
             }
             if ($deductibleSupplierVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($deductibleSupplierVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleSupplierVat, $expenseSide, $isCreditNote), abs($deductibleSupplierVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $supplierVat, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'none') {
             $expenseAmount = round($net + $vat, 2);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($expenseAmount, $expenseSide, $isCreditNote), $expenseAmount, $cc);
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount, $cc, $totalOnCredit);
         } elseif ($vatDeduction === 'proportional') {
             $deductibleVat    = round($vat * $pct, 2);
             $nonDeductibleVat = round($vat - $deductibleVat, 2);
             $expenseAmount    = round($net + $nonDeductibleVat, 2);
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $expenseAmount, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($expenseAmount, $expenseSide, $isCreditNote), $expenseAmount, $cc);
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($deductibleVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleVat, $expenseSide, $isCreditNote), abs($deductibleVat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $expenseAmount + $deductibleVat, $cc, $totalOnCredit);
         } else {
-            $this->appendSplit($lines, $weights, $expense, $expenseSide, $net, $cc);
+            $this->appendSplit($lines, $weights, $expense, self::sideBySign($net, $expenseSide, $isCreditNote), $net, $cc);
             if ($vat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $expenseSide, abs($vat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($vat, $expenseSide, $isCreditNote), abs($vat), $cc);
             }
             $lines[] = $this->withForeign($this->line($payable, $payableSide, abs($totalCzk), $cc), $pi, $rate);
             $this->appendRounding($lines, $totalCzk, $net + $vat, $cc, $totalOnCredit);
@@ -2543,6 +2556,24 @@ final class PostingService
     }
 
     /**
+     * Strana řádku podle znaménka jeho částky vůči směru dokladu (#326). Směr dokladu
+     * určuje znaménko celkové částky; řádek s opačným znaménkem (záporný základ u kladné
+     * faktury, třeba vrácené zálohované obaly 0 % převáží zboží 21 %) patří na opačnou
+     * stranu. Slepé abs() by ho zapsalo na normální stranu a zápis by se rozvážil
+     * o dvojnásobek částky. Při shodném znaménku vrací `$normalSide` beze změny.
+     *
+     * @param 'debit'|'credit' $normalSide
+     * @return 'debit'|'credit'
+     */
+    private static function sideBySign(float $amount, string $normalSide, bool $isCreditNote): string
+    {
+        if (self::cents($amount) === 0 || ($amount < 0.0) === $isCreditNote) {
+            return $normalSide;
+        }
+        return $normalSide === 'debit' ? 'credit' : 'debit';
+    }
+
+    /**
      * Druhová strana dokladu (náklad u přijaté, výnos u vydané): buď jedna noha (dosud),
      * nebo rozpad dle vah z klasifikace položek.
      *
@@ -2717,10 +2748,10 @@ final class PostingService
                     || (string) ($allocation['tax_treatment'] ?? '') === 'non_deductible') {
                     $accountCode = $this->nonDeductibleExpenseAccount($supplierId, $accountCode, $entryDate, $currentRead);
                 }
-                $lines[] = $this->line($accountCode, $debitSide, abs($accountAmount), $cc);
+                $lines[] = $this->line($accountCode, self::sideBySign($accountAmount, $debitSide, $isCreditNote), abs($accountAmount), $cc);
             }
             if ($deductibleVat !== 0.0) {
-                $lines[] = $this->line($this->inputVatAccount($supplierId), $debitSide, abs($deductibleVat), $cc);
+                $lines[] = $this->line($this->inputVatAccount($supplierId), self::sideBySign($deductibleVat, $debitSide, $isCreditNote), abs($deductibleVat), $cc);
             }
             $allocatedCzk = round($allocatedCzk + $accountAmount + $deductibleVat, 2);
         }
@@ -3114,6 +3145,37 @@ final class PostingService
             $this->lockedUntilCache[$supplierId] = ($v === false || $v === null) ? null : (string) $v;
         }
         return $this->lockedUntilCache[$supplierId];
+    }
+
+    /**
+     * Zámek k datu bez cache — pro kontrolu nanečisto, která má narazit na tentýž
+     * zámek jako ostrý zápis ({@see postDocument}), aniž by cokoli zamykala.
+     */
+    public function currentLockedUntil(int $supplierId): ?string
+    {
+        unset($this->lockedUntilCache[$supplierId]);
+        return $this->lockedUntil($supplierId);
+    }
+
+    /** Faktura navázaná na ostatní pohledávku vlastní zápis nemá, účtuje ji zápis pohledávky. */
+    public static function coveredByOtherItemException(int $invoiceId): PostingException
+    {
+        return new PostingException(
+            'invoice_covered_by_other_item',
+            'Vydaná faktura #' . $invoiceId . ' je navázaná na ostatní pohledávku, která ji zaúčtovala. Vlastní zápis faktura nemá.',
+            409,
+        );
+    }
+
+    /** Odmítnutí zápisu do zamčeného data; text sdílí ostrý zápis i kontrola nanečisto. */
+    public static function dateLockedException(string $entryDate, string $lockedUntil): PostingException
+    {
+        return new PostingException(
+            'date_locked',
+            'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
+                . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
+                . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (jen admin).',
+        );
     }
 
     private function lockedUntilForUpdate(int $supplierId): ?string
@@ -4266,7 +4328,8 @@ final class PostingService
                     " . ($isPurchase ? 'd.vat_deduction, d.vat_deduction_percent' : "'full' AS vat_deduction, 100 AS vat_deduction_percent") . ",
                     " . ($isPurchase ? 'd.tax_deductible' : '1 AS tax_deductible') . ",
                     " . ($isPurchase ? 'd.received_at, d.received_at_source' : 'NULL AS received_at, NULL AS received_at_source') . ",
-                    " . ($isPurchase ? 'NULL AS revenue_rule_key' : 'd.revenue_rule_key') . "
+                    " . ($isPurchase ? 'NULL AS revenue_rule_key' : 'd.revenue_rule_key') . ",
+                    " . ($isPurchase ? 'NULL AS other_item_id' : 'd.other_item_id') . "
                FROM {$table} d
                LEFT JOIN currencies cur ON cur.id = d.currency_id
               WHERE d.id = ? AND d.supplier_id = ?"

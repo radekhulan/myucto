@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Migration;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverEmployment;
@@ -33,7 +32,7 @@ final class PayrollTakeoverMonthlyWageRepeatTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $this->container->get(Connection::class);
         $this->writer = $this->container->get(PayrollTakeoverEmploymentWriter::class);
         $pdo = $this->db->pdo();

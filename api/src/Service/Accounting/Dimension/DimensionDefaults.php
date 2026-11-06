@@ -9,6 +9,9 @@ use MyInvoice\Repository\BankStatementOwnershipResolver;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Repository\DimensionDefaultRepository;
 use MyInvoice\Repository\DimensionRepository;
+use MyInvoice\Repository\SupplierBankAccountRepository;
+use MyInvoice\Service\Accounting\Bank\BankAnalyticAssigner;
+use MyInvoice\Service\Accounting\CreditCard\CreditCardAccounts;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use PDO;
 
@@ -99,7 +102,8 @@ final class DimensionDefaults
      *     včetně jejích výchozích
      *   • bankovní pohyb: dimenze hrazených faktur (vystavených i přijatých)
      *     a ostatních pohledávek a závazků včetně jejich výchozích; u více dokladů
-     *     jen hodnoty společné všem
+     *     jen hodnoty společné všem; výchozí dimenze vlastního bankovního účtu jen
+     *     řádku banky a protiúčtu pohybu bez dokladu ({@see DimensionStamper::fillBankAccount()})
      *   • ostatní pohledávka / závazek: protistrana
      *   • vzájemný zápočet: protistrana (dimenze započtených dokladů nesou řádky,
      *     {@see DimensionStamper})
@@ -120,12 +124,12 @@ final class DimensionDefaults
      *
      * @return array{header:array<int,int>, splits:array<int,array<int,float>>}
      */
-    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId): array
+    public function sourceDimensions(int $supplierId, string $sourceType, int $sourceId, bool $includeInactiveBankAccount = false): array
     {
         return match ($sourceType) {
             'invoice', 'purchase_invoice', 'other_item' => $this->forDocumentWithOrigins($supplierId, $sourceType, $sourceId) + ['splits' => [], 'split_origins' => []],
             'cash' => $this->forCash($supplierId, $sourceId, true),
-            'bank' => $this->forBank($supplierId, $sourceId, true),
+            'bank' => $this->forBank($supplierId, $sourceId, true, $includeInactiveBankAccount),
             'offset' => $this->forOffset($supplierId, $sourceId, true),
             'settlement' => $this->forSettlement($supplierId, $sourceId),
             'asset', 'asset_disposal', 'depreciation' => $this->forAsset($supplierId, $this->assetId($supplierId, $sourceType, $sourceId)),
@@ -419,30 +423,152 @@ final class DimensionDefaults
      * Hlavička společná všem dokladům, které pohyb hradí. Hradí-li doklady s různou
      * hodnotou typu, typ tu chybí — rozdělí ho {@see DimensionStamper} po řádcích.
      *
+     * Výchozí dimenze vlastního bankovního účtu do hlavičky nepatří: platí jen pro řádek
+     * banky a protiúčet pohybu bez dokladu. S originy proto vrací i `bank_account`
+     * ({@see bankAccountLayer()}), které po řádcích doplní {@see DimensionStamper::fillBankAccount()}.
+     * Stejně omezenou vrstvu tvoří dimenze pravidla účtování zapsané k pohybu (`bank_rule`,
+     * {@see bankRuleLayer()}): doplní se na stejné řádky, ale ještě před výchozími
+     * hodnotami pravidel dimenzí podle účtu.
+     *
      * @return array<int,int>
      */
-    private function forBank(int $supplierId, int $transactionId, bool $withOrigins = false): array
+    private function forBank(int $supplierId, int $transactionId, bool $withOrigins = false, bool $includeInactiveAccount = false): array
     {
-        $documents = $this->bankDocuments($supplierId, $transactionId, $withOrigins)['documents'];
+        $bank = $this->bankDocuments($supplierId, $transactionId, $withOrigins);
+        $documents = $bank['documents'];
         $header = self::commonHeader(array_column($documents, 'header'));
-        return $withOrigins
-            ? ['header' => $header, 'splits' => [], 'origins' => self::commonOrigins($documents, $header, 'bank:' . $transactionId), 'split_origins' => []]
-            : $header;
+        if (!$withOrigins) {
+            return $header;
+        }
+        return [
+            'header' => $header,
+            'splits' => [],
+            'origins' => self::commonOrigins($documents, $header, 'bank:' . $transactionId),
+            'split_origins' => [],
+            'bank_account' => $this->bankAccountLayer($supplierId, $bank, $includeInactiveAccount),
+            'bank_rule' => $this->bankRuleLayer($supplierId, $transactionId, $bank, $includeInactiveAccount),
+        ];
+    }
+
+    /** @var array<string,array{id:int, kind:string, layer:array<int,int>}|null> (firma, číslo účtu, kód banky, i neaktivní) => účet */
+    private array $bankAccountCache = [];
+
+    private int $bankAccountGeneration = -1;
+
+    /**
+     * Výchozí dimenze vlastního bankovního účtu, na kterém pohyb leží, s tím, na které
+     * řádky zápisu patří: `synthetics` a `side` určují řádek banky, `pays_documents`
+     * říká, zda smí i na protiúčet (pohyb, který nehradí doklad).
+     *
+     * Účet výpisu se hledá stejně jako bankovní noha zápisu
+     * ({@see \MyInvoice\Service\Accounting\Bank\BankAnalyticResolver}), takže dimenze patří
+     * účtu, na jehož analytiku 221.xxx se pohyb účtuje. Přerazítkování už zaúčtovaného
+     * pohybu (`$includeInactive`) bere i účet, který mezitím někdo deaktivoval — pohyb
+     * na něm byl zaúčtován a dimenzi si má ponechat.
+     *
+     * Shoda účtu a jeho výchozí dimenze se drží v cache podle (firma, číslo účtu, kód
+     * banky), hromadné přerazítkování tak pro každý pohyb téhož účtu nečte znovu.
+     * Uložení výchozích dimenzí ({@see DimensionDefaultRepository::replace()}) cache zahodí.
+     *
+     * @param array{incoming:bool, documents:list<array<string,mixed>>, statement_account?:array{number:string, bank:string}} $bank z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool}|null
+     */
+    private function bankAccountLayer(int $supplierId, array $bank, bool $includeInactive): ?array
+    {
+        $account = $this->statementAccount($supplierId, $bank, $includeInactive);
+        if ($account === null || $account['layer'] === []) {
+            return null;
+        }
+        // merge() ověří, že hodnota je pořád aktivní a typ firma vidí.
+        $merged = $this->merge($supplierId, ['bank_account:' . $account['id'] => $account['layer']]);
+        if ($merged['header'] === []) {
+            return null;
+        }
+        return ['header' => $merged['header'], 'origins' => $merged['origins']] + self::bankLines($account, $bank);
+    }
+
+    /**
+     * Dimenze pravidla účtování, které pohyb zaúčtovalo ({@see BankRuleDimensions}), s týmiž
+     * řádky jako výchozí dimenze účtu ({@see bankAccountLayer()}): řádek banky a u pohybu,
+     * který nehradí doklad, protiúčet. Pravidlo popisuje druh pohybu, ne saldokonto
+     * hrazeného dokladu ani druhou nohu převodu, které se po dimenzi musí vyrovnat.
+     *
+     * @param array{incoming:bool, documents:list<array<string,mixed>>, statement_account?:array{number:string, bank:string}} $bank z {@see bankDocuments()}
+     * @return array{header:array<int,int>, origins:array<int,array<string,mixed>>, synthetics:list<string>, side:string, pays_documents:bool}|null
+     */
+    private function bankRuleLayer(int $supplierId, int $transactionId, array $bank, bool $includeInactive): ?array
+    {
+        $rule = (new BankRuleDimensions($this->db))->onTransaction($supplierId, $transactionId);
+        if ($rule['header'] === []) {
+            return null;
+        }
+        return $rule + self::bankLines($this->statementAccount($supplierId, $bank, $includeInactive), $bank);
+    }
+
+    /**
+     * Řádky pohybu, na které patří výchozí hodnoty pohybu ({@see DimensionStamper::fillBankAccount()}).
+     *
+     * @param array{kind:string}|null $account účet výpisu z {@see statementAccount()}
+     * @param array{incoming:bool, documents:list<array<string,mixed>>} $bank
+     * @return array{synthetics:list<string>, side:string, pays_documents:bool}
+     */
+    private static function bankLines(?array $account, array $bank): array
+    {
+        return [
+            // Kreditní karta má vlastní nohu na úvěru 231.x; pravidla a ruční zápisy píšou 221.
+            'synthetics' => ($account['kind'] ?? '') === BankAnalyticAssigner::CREDIT_CARD_KIND
+                ? [CreditCardAccounts::SYNTHETIC, BankAnalyticAssigner::BANK_SYNTHETIC]
+                : [BankAnalyticAssigner::BANK_SYNTHETIC],
+            'side' => $bank['incoming'] ? 'debit' : 'credit',
+            'pays_documents' => $bank['documents'] !== [],
+        ];
+    }
+
+    /**
+     * Vlastní účet výpisu pohybu s jeho výchozími dimenzemi (cache viz {@see bankAccountLayer()}).
+     *
+     * @param array{statement_account?:array{number:string, bank:string}} $bank
+     * @return array{id:int, kind:string, layer:array<int,int>}|null
+     */
+    private function statementAccount(int $supplierId, array $bank, bool $includeInactive): ?array
+    {
+        if (!isset($bank['statement_account'])) {
+            return null;
+        }
+        $number = $bank['statement_account']['number'];
+        $bankCode = $bank['statement_account']['bank'];
+        if ($this->bankAccountGeneration !== DimensionDefaultRepository::generation()) {
+            $this->bankAccountCache = [];
+            $this->bankAccountGeneration = DimensionDefaultRepository::generation();
+        }
+        $key = $supplierId . '|' . $number . '|' . $bankCode . '|' . ($includeInactive ? 1 : 0);
+        if (!array_key_exists($key, $this->bankAccountCache)) {
+            // Výpis bez čísla účtu: matchCounterparty() vrátí null ještě před dotazem.
+            $account = (new SupplierBankAccountRepository($this->db, new BankStatementOwnershipResolver($this->db)))
+                ->matchCounterparty($supplierId, $number, $bankCode, $includeInactive);
+            $this->bankAccountCache[$key] = $account === null ? null : [
+                'id' => (int) $account['id'],
+                'kind' => (string) ($account['kind'] ?? ''),
+                'layer' => (new DimensionDefaultRepository($this->db))->forEntity($supplierId, 'bank_account', (int) $account['id']),
+            ];
+        }
+        return $this->bankAccountCache[$key];
     }
 
     /**
      * Doklady, které bankovní pohyb hradí, s částkou alokace a efektivní hlavičkou.
      * Stejné zdroje jako úhrada v BankPostingService: vystavené faktury z invoice_payments
      * (bez nich z párování, jinak matched_invoice_id), přijaté faktury z párování.
-     * Více alokací na tentýž doklad se sečte.
+     * Více alokací na tentýž doklad se sečte. `statement_account` = číslo účtu a kód banky
+     * výpisu, na kterém pohyb leží (pro výchozí dimenze účtu, {@see forBank()}).
      *
-     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>}
+     * @return array{incoming:bool, documents:list<array{doc_type:string, doc_id:int, amount:float, header:array<int,int>}>, statement_account?:array{number:string, bank:string}}
      */
     public function bankDocuments(int $supplierId, int $transactionId, bool $withOrigins = false): array
     {
         $pdo = $this->db->pdo();
         $stmt = $pdo->prepare(
-            'SELECT bt.amount, bt.matched_invoice_id
+            'SELECT bt.amount, bt.matched_invoice_id, bs.account_number, bs.bank_code
                FROM bank_transactions bt
                JOIN bank_statements bs ON bs.id = bt.statement_id
               WHERE bt.id = ? AND ' . BankStatementOwnershipResolver::sql()
@@ -500,7 +626,11 @@ final class DimensionDefaults
                 ];
             }
         }
-        return ['incoming' => (float) $tx['amount'] > 0, 'documents' => $documents];
+        return [
+            'incoming' => (float) $tx['amount'] > 0,
+            'documents' => $documents,
+            'statement_account' => ['number' => (string) ($tx['account_number'] ?? ''), 'bank' => (string) ($tx['bank_code'] ?? '')],
+        ];
     }
 
     /**
@@ -512,7 +642,7 @@ final class DimensionDefaults
     private function otherItemAllocations(int $supplierId, string $column, int $paymentId): array
     {
         $stmt = $this->db->pdo()->prepare(
-            "SELECT other_item_id, SUM(amount) AS amount FROM other_item_allocations
+            "SELECT other_item_id, SUM(amount + interest_amount + fee_amount) AS amount FROM other_item_allocations
               WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL
            GROUP BY other_item_id
            ORDER BY MIN(id)"

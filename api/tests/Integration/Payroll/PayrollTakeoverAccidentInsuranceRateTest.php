@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAccidentInsuranceRateRepository;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverAccidentInsuranceRate;
@@ -29,7 +28,7 @@ final class PayrollTakeoverAccidentInsuranceRateTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $pdo = $this->db->pdo();
         $source = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();

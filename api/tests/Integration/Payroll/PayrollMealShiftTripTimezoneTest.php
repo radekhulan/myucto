@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Component\PayrollMealShiftEvidenceService;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -40,7 +39,7 @@ final class PayrollMealShiftTripTimezoneTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }

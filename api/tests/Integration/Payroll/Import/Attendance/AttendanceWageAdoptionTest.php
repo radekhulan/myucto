@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
@@ -43,7 +42,7 @@ final class AttendanceWageAdoptionTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $service = $this->container->get(AttendanceImportService::class);
         if (!$db instanceof Connection || !$service instanceof AttendanceImportService) {

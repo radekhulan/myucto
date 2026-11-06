@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollCzIscoAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -32,7 +31,7 @@ final class PayrollCzIscoSearchApiTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DI kontejner.');
         }
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->action = $container->get(PayrollCzIscoAction::class);
 

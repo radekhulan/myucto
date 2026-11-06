@@ -214,12 +214,15 @@ export type JournalPostingSource = JournalDocumentSource | 'bank-transactions'
  * zápis nemá, její zaúčtování tvoří úhrada (314/221, 221/324) a zúčtování v konečné
  * faktuře. Takové zápisy se jen ukazují, přeúčtovávají se u svého dokladu.
  */
-export type JournalEntryRelation = 'own' | 'advance_payment' | 'advance_final'
+export type JournalEntryRelation = 'own' | 'advance_payment' | 'advance_final' | 'other_item'
 
 /** Zápis i s řádky, jak ho vrací /journal/for-document/{source}/{id}. */
 export interface JournalEntryWithLines extends JournalEntry {
   lines: JournalLine[]
   relation?: JournalEntryRelation
+  /** U vztahu `other_item`: ostatní pohledávka, jejíž zápis fakturu účtuje. */
+  other_item_id?: number
+  other_item_document_no?: string | null
 }
 
 /** Jeden navržený řádek kontace — MD/DAL s názvem účtu, ať uživatel nepotvrzuje holá čísla. */
@@ -926,6 +929,9 @@ export interface LedgerReportParams {
   client?: string
   /** Hledání dle textu položky faktury (vydané i přijaté) — jen General ledger. */
   item?: string
+  /** Rozsah účtů (prefixový včetně krajů, např. 5 až 5 = třída 5) — jen General ledger. */
+  account_from?: string
+  account_to?: string
   /**
    * Stav PO uzavření knih. Výchozí (nezadáno) je stav PŘED uzavřením — po uzavření
    * jsou rozvahové účty převedené na 702 a konečné stavy vycházejí nulové, takže
@@ -979,6 +985,9 @@ export interface GeneralLedgerReport {
   vendor?: string | null
   client?: string | null
   item?: string | null
+  /** Použitý rozsah účtů (prázdný = bez omezení). */
+  account_from?: string
+  account_to?: string
   draft_count: number
   months: string[]
   accounts: GeneralLedgerAccount[]
@@ -1099,7 +1108,7 @@ export interface OpenItemsListReport {
   totals: { open_count: number; open_md: number; open_d: number; unmatched: number }
 }
 
-/** Součet účtu podle protiúčtu; složený zápis se dělí poměrem řádků protistrany. */
+/** Součet účtu podle protiúčtu; dvojice se shodnou částkou patří své dvojici, ostatní řádky se dělí poměrem. */
 export interface AccountCounterTotal {
   account_id: number | null
   account_code: string | null

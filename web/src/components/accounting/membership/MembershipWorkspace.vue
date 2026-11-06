@@ -4,18 +4,19 @@ import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { formInput as field, formLabel } from '@/components/ui/formStyles'
 import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
+import ClientFormModal from '@/components/modals/ClientFormModal.vue'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import { accountingApi, type AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type MemberRow } from '@/api/nonprofitMembership'
 import type { Client } from '@/api/clients'
+import { formatDate } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { errorMessage } from './membershipFormat'
+import { errorBox, errorMessage, memberStatusBadge } from './membershipFormat'
 import MembershipMemberDetail from './MembershipMemberDetail.vue'
 import MembershipReconciliation from './MembershipReconciliation.vue'
 
 const props = defineProps<{ supplier: number; canManage: boolean }>()
-const { t } = useI18n()
-
+const { t, tm, rt } = useI18n()
 
 const members = ref<MemberRow[]>([])
 const nextAfter = ref<number | null>(null)
@@ -28,7 +29,9 @@ const clientId = ref<number | null>(null)
 const clientLabel = ref('')
 const memberNumber = ref('')
 const creating = ref(false)
+const root = ref<HTMLElement | null>(null)
 const detailPane = ref<HTMLElement | null>(null)
+const dataVersion = ref(0)
 let alive = true
 let generation = 0
 let createTicket = 0
@@ -41,10 +44,22 @@ function openMember(row: MemberRow) {
   selected.value = { id: row.id, label: labelOf(row) }
 }
 
+/** Po zavření detailu se fokus vrací na tlačítko řádku, ze kterého se detail otevřel. */
+async function closeMember() {
+  const id = selected.value?.id
+  selected.value = null
+  await nextTick()
+  if (id === undefined) return
+  const target = root.value?.querySelector<HTMLElement>(`[data-member="${id}"] [data-action="open-member"]`)
+    ?? root.value?.querySelector<HTMLElement>('[data-focus="members-heading"]')
+  target?.focus()
+}
+
 watch(() => selected.value?.id, async id => {
   if (id === undefined) return
   await nextTick()
   detailPane.value?.scrollIntoView({ block: 'start', behavior: 'smooth' })
+  detailPane.value?.querySelector<HTMLElement>('[data-focus="member-heading"]')?.focus({ preventScroll: true })
 })
 
 async function load(append = false) {
@@ -79,6 +94,14 @@ async function reloadAll() {
 
 function chooseClient(client: Client | null) {
   clientLabel.value = client?.company_name ?? ''
+}
+
+const clientModalOpen = ref(false)
+
+function onClientCreated(client: Client) {
+  clientId.value = client.id
+  chooseClient(client)
+  clientModalOpen.value = false
 }
 
 async function create() {
@@ -123,45 +146,59 @@ const createActions = computed<ActionItem[]>(() => [
 </script>
 
 <template>
-  <div class="space-y-5">
+  <div ref="root" class="space-y-5">
     <h1 class="text-xl font-semibold">{{ t('nonprofitMembership.title') }}</h1>
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.help') }}</p>
     <p v-if="!canManage" role="status" class="text-sm text-neutral-500" data-section="readonly">{{ t('nonprofitMembership.readonly') }}</p>
-    <p v-if="error" role="alert" class="rounded border border-danger-300 p-3" data-section="workspace-error">{{ error }}</p>
-    <p v-if="notice" role="status" class="text-sm text-success-700" data-section="workspace-notice">{{ notice }}</p>
+    <p v-if="error" role="alert" :class="errorBox" data-section="workspace-error">{{ error }}</p>
+    <p v-if="notice" role="status" class="text-sm text-success-600" data-section="workspace-notice">{{ notice }}</p>
     <ActionBar :actions="actions" />
 
     <section v-if="canManage" class="space-y-3 rounded-lg border bg-surface p-4" data-section="create-member">
       <h2 class="font-semibold">{{ t('nonprofitMembership.createTitle') }}</h2>
       <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.createHelp') }}</p>
       <fieldset :disabled="creating" class="grid gap-3 sm:grid-cols-2">
-        <label>{{ t('nonprofitMembership.client') }}
-          <ClientSearchSelect v-model="clientId" :selected-label="clientLabel || null" data-field="member-client" @selected="chooseClient" />
-        </label>
+        <div :class="formLabel">
+          <span id="membership-client-label">{{ t('nonprofitMembership.client') }}</span>
+          <div class="mt-1 flex items-start gap-2">
+            <div class="min-w-0 flex-1" role="group" aria-labelledby="membership-client-label">
+              <ClientSearchSelect v-model="clientId" :selected-label="clientLabel || null" data-field="member-client" @selected="chooseClient" />
+            </div>
+            <button type="button" class="cursor-pointer shrink-0 h-9 px-3 inline-flex items-center gap-1.5 border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md text-sm font-medium" :title="t('client.new_title')" :aria-label="t('client.new_title')" data-action="member-new-client" @click="clientModalOpen = true">
+              <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m8-8H4" /></svg>
+              <span class="hidden sm:inline">{{ t('client.new_title') }}</span>
+            </button>
+          </div>
+        </div>
         <label :class="formLabel">{{ t('nonprofitMembership.memberNumber') }}<input v-model="memberNumber" :class="field" maxlength="80" data-field="member-number" /></label>
       </fieldset>
       <ActionBar :actions="createActions" />
+      <ClientFormModal v-if="clientModalOpen" @created="onClientCreated" @close="clientModalOpen = false" />
     </section>
-
-    <MembershipReconciliation v-if="periods.length" :supplier="supplier" :periods="periods" />
 
     <div :class="selected ? 'grid gap-5 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]' : ''" data-section="members-layout">
     <div v-if="selected" ref="detailPane" class="min-w-0 scroll-mt-4 self-start lg:sticky lg:top-4 lg:order-last" data-section="member-detail-pane">
       <MembershipMemberDetail
         :key="selected.id"
         :supplier="supplier" :can-manage="canManage" :member-id="selected.id" :label="selected.label" :periods="periods"
-        @changed="load()" @close="selected = null"
+        @changed="dataVersion++; load()" @close="closeMember()"
       />
     </div>
     <section class="min-w-0 space-y-3" data-section="members">
-      <h2 class="font-semibold">{{ t('nonprofitMembership.members') }}</h2>
-      <p v-if="!members.length && !loading" class="text-sm text-neutral-500" data-section="members-empty">{{ t('nonprofitMembership.membersEmpty') }}</p>
+      <h2 tabindex="-1" class="font-semibold focus:outline-none" data-focus="members-heading">{{ t('nonprofitMembership.members') }}</h2>
+      <p v-if="loading && !members.length" role="status" class="text-sm text-neutral-500" data-section="members-loading">{{ t('common.loading') }}</p>
+      <div v-else-if="!members.length && !loading" class="space-y-2 text-sm text-neutral-500" data-section="members-empty">
+        <p>{{ t('nonprofitMembership.membersEmpty') }}</p>
+        <ol class="list-decimal space-y-1 pl-5" data-section="members-steps">
+          <li v-for="(step, index) in tm('nonprofitMembership.firstSteps')" :key="index">{{ rt(step) }}</li>
+        </ol>
+      </div>
       <div v-for="row in members" :key="row.id" :class="['flex flex-wrap items-center justify-between gap-3 rounded border bg-surface p-3', selected?.id === row.id ? 'border-primary-400 ring-1 ring-primary-300' : '']" data-section="member-row" :data-member="row.id" :aria-current="selected?.id === row.id ? 'true' : undefined">
-        <div class="space-y-1 text-sm">
-          <p class="font-medium">{{ row.member_number }} · {{ labelOf(row) }}</p>
+        <div class="min-w-0 space-y-1 text-sm">
+          <p class="break-words font-medium">{{ row.member_number }} · {{ labelOf(row) }}</p>
           <p v-if="row.revision_no === null || row.effective_from === null || row.status === null" class="text-warning-700" data-field="member-revision">{{ t('nonprofitMembership.noRevision') }}</p>
-          <p v-else-if="row.effective_from > today" class="text-warning-700" data-field="member-revision">{{ t('nonprofitMembership.futureRevision', { status: t(`nonprofitMembership.status_${row.status}`), date: row.effective_from }) }}</p>
-          <p v-else data-field="member-revision">{{ t(`nonprofitMembership.status_${row.status}`) }} · {{ t('nonprofitMembership.sinceDate', { date: row.effective_from }) }}</p>
+          <p v-else-if="row.effective_from > today" class="text-warning-700" data-field="member-revision">{{ t('nonprofitMembership.futureRevision', { status: t(`nonprofitMembership.status_${row.status}`), date: formatDate(row.effective_from) }) }}</p>
+          <p v-else class="flex flex-wrap items-center gap-2" data-field="member-revision"><span :class="memberStatusBadge(row.status)" data-field="member-status">{{ t(`nonprofitMembership.status_${row.status}`) }}</span><span>{{ t('nonprofitMembership.sinceDate', { date: formatDate(row.effective_from) }) }}</span></p>
         </div>
         <button type="button" :class="btnOutline('primary')" data-action="open-member" @click="openMember(row)">
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.eye" /></svg>{{ t('nonprofitMembership.openMember') }}
@@ -172,5 +209,7 @@ const createActions = computed<ActionItem[]>(() => [
       </button>
     </section>
     </div>
+
+    <MembershipReconciliation v-if="periods.length" :supplier="supplier" :periods="periods" :data-version="dataVersion" />
   </div>
 </template>

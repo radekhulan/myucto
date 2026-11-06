@@ -311,7 +311,7 @@ Kompletní pořadí je v [manual/INDEX.md](manual/INDEX.md).
 |---|---|
 | `api/` | PHP backend, služby, repository, CLI a PHPUnit testy |
 | `web/` | Vue 3 + TypeScript frontend |
-| `dist/` | produkční frontendový build |
+| `web/dist/` | lokální produkční frontendový build (gitignorovaný) |
 | `db/migrations/` | verzované idempotentní databázové migrace |
 | `manual/` | český uživatelský manuál |
 | `cmd/` | Windows a Linux wrappery pro provozní úlohy |
@@ -323,11 +323,38 @@ Kompletní pořadí je v [manual/INDEX.md](manual/INDEX.md).
 # Backendové testy (paralelně nad izolovanými testovacími databázemi)
 .\cmd\test.ps1
 
-# Frontendová typová kontrola a build
-Set-Location web; pnpm type-check; pnpm build
+# Backend s měřením fází a jednotlivých testů; výchozí počet workerů je nejvýše 8
+php api/bin/test-parallel.php --timings=api/test-results/timings.json --log-junit=api/test-results/junit.xml
+
+# Volitelné měření s větším počtem workerů na dimenzované testovací MariaDB
+php api/bin/test-parallel.php --processes=16
+
+# Frontendová typová kontrola, testy a build
+Set-Location web
+npm run type-check
+npm run test:unit
+npm run test:pwa
+npm run build
 ```
 
-Po změně `web/src` commitni také aktualizovaný `dist/`. Po změně veřejného API
+Backendové CI rozděluje aplikační testy do čtyř částí přes `--application --shard=1/4`
+až `--shard=4/4`. Třída včetně všech datových sad zůstává pohromadě, každá se spustí
+právě v jedné části a sériové HTTP testy běží v první. Architektonické a invariantní
+brány zůstávají povinné. Samostatná část nikdy nevystaví potvrzení úspěchu celé sady.
+Volitelné `--rerun-failures` uchová původní JUnit report a výsledek sériového opakování
+uloží zvlášť do `*.rerun.xml`.
+
+Počet workerů násobí také počet tabulek v pracovních kopiích. K nim přibývají
+databáze fixture pro testy klonování. Vyšší paralelismus proto porovnej měřením
+s kapacitou `table_open_cache` a `table_definition_cache` testovací MariaDB.
+Při překročení cache může čekání na otevírání tabulek převážit získaný čas.
+
+Mzdové fixture sdílejí pouze neměnné katalogy specifikací. Pravidla, vyhodnocení,
+databázové spojení a transakce zůstávají oddělené. Frontend používá izolované VM
+workery; testy měnící nativní DOM prototypy nebo pracující s nativními binárními daty
+běží v samostatných thread workerech. Změna poolu musí projít celou sadou.
+
+Po změně `web/src` spusť build; `web/dist/` se necommituje. Po změně veřejného API
 aktualizuj `api/openapi.yaml`. Po změně funkce aktualizuj kapitolu manuálu a obnov
 HTML přes `php tools/generateManualHtml.php`.
 

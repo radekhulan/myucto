@@ -154,6 +154,71 @@ final class PurchaseAdvanceCoveredStatusTest extends BankPostingTestCase
         self::assertSame(['received', null], $this->state($final), 'Zbývá doplatit 210 Kč.');
     }
 
+    /**
+     * Issue #313: faktura propojená se zálohou dřív, než se záloha spárovala s platbou,
+     * odečítala nulovou zálohu a chtěla doplatit i ji. Spárování zálohy ji doplní.
+     */
+    public function testAdvancePaidAfterLinkingIsDeductedFromFinal(): void
+    {
+        $vendor  = $this->client('Dodavatel záloha po propojení');
+        $advance = $this->purchaseInvoice('ZPF-STAV-9', $vendor, 1210.00, 'advance');
+        $final   = $this->finalPurchase('PF-STAV-9', $vendor, $advance, 0.00);
+        self::assertSame(1210.0, $this->amountToPay($final), 'Neuhrazená záloha se při propojení neodečte.');
+
+        $this->match($this->transaction($this->statement(), -1210.00, ['posted_at' => self::YEAR . '-06-24']), $advance);
+
+        self::assertSame(0.0, $this->amountToPay($final), 'Spárovaná záloha se odečte.');
+        self::assertSame(['paid', self::YEAR . '-06-24'], $this->state($final), 'Faktura krytá zálohou je uhrazená.');
+    }
+
+    public function testPartlyCoveredFinalKeepsRemainderAfterAdvanceIsPaid(): void
+    {
+        $vendor  = $this->client('Dodavatel záloha s doplatkem po propojení');
+        $advance = $this->purchaseInvoice('ZPF-STAV-10', $vendor, 1000.00, 'advance');
+        $final   = $this->finalPurchase('PF-STAV-10', $vendor, $advance, 0.00);
+
+        $this->match($this->transaction($this->statement(), -1000.00, ['posted_at' => self::YEAR . '-06-24']), $advance);
+
+        self::assertSame(210.0, $this->amountToPay($final), 'Zbývá doplatit jen rozdíl nad zálohu.');
+        self::assertSame(['received', null], $this->state($final));
+    }
+
+    /** Ručně zadaná záloha na konečné faktuře se spárováním zálohy nepřepisuje. */
+    public function testManualAdvanceAmountOnFinalIsKept(): void
+    {
+        $vendor  = $this->client('Dodavatel ruční záloha na faktuře');
+        $advance = $this->purchaseInvoice('ZPF-STAV-11', $vendor, 1210.00, 'advance');
+        $final   = $this->finalPurchase('PF-STAV-11', $vendor, $advance, 500.00);
+
+        $this->match($this->transaction($this->statement(), -1210.00, ['posted_at' => self::YEAR . '-06-24']), $advance);
+
+        self::assertSame(710.0, $this->amountToPay($final));
+    }
+
+    /**
+     * Issue #313, existující data: záloha spárovaná dřív, než dopočet při změně úhrady
+     * existoval (tady přímý zápis párování bez háčku). Backfill při aktualizaci uhrazenou
+     * zálohu doplní, dry-run nic nezapíše a druhý běh nemá co dělat.
+     */
+    public function testLinkedAdvanceBackfillFillsExistingFinals(): void
+    {
+        $vendor  = $this->client('Dodavatel backfill zálohy po propojení');
+        $advance = $this->purchaseInvoice('ZPF-STAV-12', $vendor, 1000.00, 'advance');
+        $final   = $this->finalPurchase('PF-STAV-12', $vendor, $advance, 0.00);
+        $tx = $this->transaction($this->statement(), -1000.00, ['posted_at' => self::YEAR . '-06-24', 'match_status' => 'manual']);
+        $this->paymentMatch($tx, $advance, 1000.00);
+        $this->markPaid($advance, self::YEAR . '-06-24');
+
+        $backfill = new \MyInvoice\Service\PurchaseInvoice\LinkedAdvanceAmount($this->db);
+        $dry = array_values(array_filter($backfill->backfill($this->supplierId, false), static fn (array $r): bool => $r['final_id'] === $final));
+        self::assertSame([['supplier_id' => $this->supplierId, 'final_id' => $final, 'advance_id' => $advance, 'amount' => 1000.0]], $dry);
+        self::assertSame(1210.0, $this->amountToPay($final), 'Dry-run nic nezapíše.');
+
+        $backfill->backfill($this->supplierId, true);
+        self::assertSame(210.0, $this->amountToPay($final), 'Odečte se uhrazená záloha, zbývá doplatek.');
+        self::assertSame([], array_values(array_filter($backfill->backfill($this->supplierId, false), static fn (array $r): bool => $r['final_id'] === $final)));
+    }
+
     /** Srovnání existujících dat: dry-run nic nemění, --apply srovná, druhý běh nemá co dělat. */
     public function testBackfillIsDryRunByDefaultAndIdempotent(): void
     {
@@ -198,6 +263,11 @@ final class PurchaseAdvanceCoveredStatusTest extends BankPostingTestCase
              VALUES (?, 'Služba', 1, 'ks', 1000.00, ?, 21.00, 1000.00, 210.00, 1210.00, 0)"
         )->execute([$id, $this->vatRateId]);
         return $id;
+    }
+
+    private function amountToPay(int $id): float
+    {
+        return (float) $this->db->pdo()->query("SELECT amount_to_pay FROM purchase_invoices WHERE id = {$id}")->fetchColumn();
     }
 
     private function markPaid(int $id, string $date): void

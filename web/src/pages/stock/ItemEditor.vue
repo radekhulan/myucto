@@ -1480,7 +1480,7 @@ function onImgError(e: Event) {
     <form @submit.prevent="submit" autocomplete="off">
       <fieldset :disabled="submitting" class="min-w-0 m-0 border-0 p-0">
     <!-- Tab strip (e-shopové taby jen v editaci) -->
-    <div v-if="isEdit" ref="tabList" role="tablist" :aria-label="t('stock.items.editor_ux.tabs_label')" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto">
+    <div v-if="isEdit" ref="tabList" role="tablist" :aria-label="t('stock.items.editor_ux.tabs_label')" class="border-b border-neutral-200 mb-4 flex gap-1 overflow-x-auto overflow-y-hidden">
       <button v-for="tt in tabs" :key="tt"
         type="button" role="tab" :id="`${pageId}-tab-${tt}`" :aria-controls="`${pageId}-panel-${tt}`" :tabindex="tab === tt ? 0 : -1" :aria-selected="tab === tt"
         @click="tab = tt" @keydown="onTabKey($event, tt)"

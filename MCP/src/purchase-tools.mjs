@@ -807,8 +807,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'link_purchase_advance',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['POST', '/api/purchase-invoices/{id}/link-advance'],
+    ],
     title: 'Spárovat přijatou fakturu se zálohou',
     description:
       'Spáruje konečnou fakturu se zálohou (nebo samostatným daňovým dokladem k záloze), ať se '
@@ -828,8 +830,10 @@ export const PURCHASE_TOOLS = [
   },
   {
     name: 'unlink_purchase_advance',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/purchase-invoices/{id}'],
+      ['DELETE', '/api/purchase-invoices/{id}/link-advance'],
+    ],
     title: 'Zrušit spárování se zálohou',
     description:
       'Zruší vazbu konečné faktury na zálohu. Odečtená záloha na faktuře zůstane, upravuje se ručně. '
@@ -839,6 +843,7 @@ export const PURCHASE_TOOLS = [
     destructive: true,
     run: async (c, a, tool) => {
       const pi = await loadPurchase(c, a.id, tool);
+      refuseIfPosted(pi, a.id, 'Zrušení vazby na zálohu');
       const advance = pi?.linked_advance;
       if (!advance) throw new Error(`Přijatá faktura ${purchaseLabel(pi, a.id)} se zálohou spárovaná není.`);
       requireConfirm(a, `Od faktury ${purchaseLabel(pi, a.id)} se má odpojit záloha`,

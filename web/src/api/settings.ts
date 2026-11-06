@@ -362,6 +362,8 @@ export interface Supplier {
   // účinek jen v režimu double_entry.
   auto_post_invoices?: boolean
   auto_post_purchases?: boolean
+  /** Automatické párování banky s ostatními pohledávkami a závazky (migrace 2239). */
+  auto_match_other_items?: boolean
   /** Účet závazku pro účtenky / paragony (migrace 2204); null = závazek z předkontace (321). */
   receipt_payable_account_code?: string | null
   // Tax settings pro EPO výkazy DPH/KH (migrace 0038, fáze 6)
@@ -499,6 +501,18 @@ export interface BrandingProfile {
 }
 
 /** Úzký supplier-scoped výřez, který lze delegovat klientské roli. */
+export interface InvoiceDefaultsSettings {
+  id: number
+  default_currency: string
+  default_payment_due_days: number
+  default_payment_due_unit: 'days' | 'month'
+  default_hourly_rate: number
+  default_note_below_items_enabled: boolean
+  default_note_below_items_cs: string | null
+  default_note_below_items_en: string | null
+}
+export type InvoiceDefaultsPayload = Omit<InvoiceDefaultsSettings, 'id' | 'default_currency'>
+
 export interface OperationalBrandingSettings {
   id: number
   company_name: string
@@ -511,6 +525,12 @@ export interface OperationalBrandingSettings {
   email_accent_color: string
   pdf_logo_show_name: boolean
   invoice_pdf_monochrome?: boolean
+  invoice_pdf_show_issued_by?: boolean
+  invoice_pdf_show_line_discount?: boolean
+  invoice_pdf_compact_items?: boolean
+  invoice_pdf_bank_in_footer?: boolean
+  invoice_pdf_show_base_qty?: boolean
+  work_report_display_options?: Partial<import('./invoices').WorkReportDisplayOptions> | null
   branding_profiles_enabled: boolean
   logo_path: string | null
   has_email_logo?: boolean
@@ -1149,9 +1169,12 @@ export const settingsApi = {
         ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
       },
     }).then(r => r.data),
+  getClientInvoiceDefaults: () => api.get<InvoiceDefaultsSettings>('/settings/client/invoice-defaults').then(r => r.data),
+  updateClientInvoiceDefaults: (payload: InvoiceDefaultsPayload, supplierId: number) =>
+    api.put<InvoiceDefaultsSettings>('/settings/client/invoice-defaults', payload, { headers: { 'X-Supplier-Id': String(supplierId) } }).then(r => r.data),
   getClientBranding: () => api.get<OperationalBrandingSettings>('/settings/client/branding').then(r => r.data),
-  updateClientBranding: (payload: Partial<OperationalBrandingSettings>) =>
-    api.put<OperationalBrandingSettings>('/settings/client/branding', payload).then(r => r.data),
+  updateClientBranding: (payload: Partial<OperationalBrandingSettings>, supplierId?: number) =>
+    api.put<OperationalBrandingSettings>('/settings/client/branding', payload, supplierId ? { headers: { 'X-Supplier-Id': String(supplierId) } } : undefined).then(r => r.data),
   getClientPaymentQrSettings: () =>
     api.get<PaymentQrSettings>('/settings/client/payment-qr').then(r => r.data),
   updateClientPaymentQrSettings: (payload: PaymentQrSettings) =>

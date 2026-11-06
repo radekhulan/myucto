@@ -434,7 +434,10 @@ final class PayrollRunReadinessService
                  * Skutečné brány (zamknutí, schválení, příprava plateb) zůstávají
                  * tam, kde byly; tohle je jen předběžný přehled.
                  */
-                $classification = PayrollRunReadinessImpact::describe($code);
+                $classification = PayrollRunReadinessImpact::describeValidation(
+                    $code,
+                    $validation->severity,
+                );
                 $groups[$code] = [
                     'code' => $code,
                     'severity' => $classification['severity'],
@@ -455,6 +458,14 @@ final class PayrollRunReadinessService
                     'subject_type' => PayrollWarningSuppressionCatalog::subjectType($code),
                     'subject_ids' => [],
                 ];
+            }
+            // Skupina téhož kódu se zařadí podle nejpřísnější validace v ní.
+            if ($validation->severity === 'blocker'
+                && $groups[$code]['impact'] !== PayrollRunReadinessImpact::IMPACT_BLOCKING
+            ) {
+                $upgraded = PayrollRunReadinessImpact::describeValidation($code, 'blocker');
+                $groups[$code]['impact'] = $upgraded['impact'];
+                $groups[$code]['severity'] = $upgraded['severity'];
             }
             if ($groups[$code]['hideable']) {
                 foreach (PayrollWarningSuppressionCatalog::subjects(

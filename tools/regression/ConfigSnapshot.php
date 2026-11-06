@@ -9,8 +9,9 @@ use MyInvoice\Infrastructure\Config\Config;
 final class ConfigSnapshot
 {
     /**
-     * Přesné zkontrolované revize Config: původní loader a jeho ekvivalentní
-     * vyhodnocení ENV sdílené s hasEnvironmentOverride() pro technickou správu.
+     * Přesné zkontrolované revize Config: původní loader, jeho ekvivalentní
+     * vyhodnocení ENV sdílené s hasEnvironmentOverride() pro technickou správu
+     * a výchozí hodnoty ohlášení plánované údržby (maintenance_notice.*).
      * Izolace DB, přihlašovacích údajů a runtime cest zůstává v obou stejná.
      */
     private const SOURCE_SIGNATURES = [
@@ -18,6 +19,9 @@ final class ConfigSnapshot
         '58f8c23bc5640b01812ebedd5793d5e66c56fe41bffd377b122c7fdd7e985bd5',
         // Výchozí hodnoty a ENV pro auth.oidc; DB, údaje ani runtime cesty beze změny.
         'a5754f37fffb4c39253cecabadf8f730409abc79048598edb4eff9a5a00a9cb6',
+        '9e814cc44989bd9ff1ea7f7add02232761c699e4d35c39d9e6f5d6329e532eb2',
+        // auth.oidc spolu s maintenance_notice.*; DB, údaje ani runtime cesty beze změny.
+        'da7795bcf5c4d560e9558938d6975d8a801531293dc59ff7ced3b9de163c1f0f',
     ];
 
     private static ?Config $config = null;

@@ -144,6 +144,8 @@ export interface BankTransaction {
   period_closed?: boolean
   /** Dimenze pohybu (typ → hodnota); jen u firmy se zapnutými dimenzemi. */
   dimensions?: import('./dimensions').DimensionMap
+  /** Typy z `dimensions`, které pohybu zapsalo pravidlo účtování (ostatní jsou zadané ručně). */
+  rule_dimension_types?: number[]
   /** Stav zaúčtování transakce (Epic AUTOMATIZACE) — jen u double_entry firmy, jinak null. */
   posting?: {
     status: 'posted' | 'suggested' | null
@@ -211,6 +213,10 @@ export interface MatchCandidate {
   id: number
   /** Jen u `other_item`: strana položky. */
   side?: 'receivable' | 'payable'
+  /** Jen u `other_item`: síla shody 0 až 100, důvody a splátka, jejíž zbytek odpovídá platbě. */
+  match_score?: number
+  match_reasons?: Array<'variable_symbol' | 'counterparty_account' | 'installment_amount' | 'installment_due' | 'remaining_amount'>
+  installment?: { id: number; position: number; due_on: string; remaining_amount: number } | null
   ref: string | null
   amount: number
   currency: string

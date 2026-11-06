@@ -27,7 +27,7 @@ import EetCreditNoteRefundDialog from '@/components/eet/EetCreditNoteRefundDialo
 import { eetApi, type EetCreditNoteRefundInfo, type EetInvoiceSummaryItem } from '@/api/eet'
 import { useEetCapabilities } from '@/composables/useEetCapabilities'
 import { stockApi, type StockDocument } from '@/api/stock'
-import { formatMoney, formatHourlyRate, formatUnitPrice, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
+import { formatPeriod, formatMoney, formatHourlyRate, formatUnitPrice, formatDate, formatNumber, formatPercent, statusLabel, typeLabel, statusBadgeClass, displayStatus } from '@/composables/useFormat'
 import { durationTotal, formatDuration, isPreciseUnitPrice, isTimeItem, itemQuantity, workRowTotal } from '@/utils/timeBilling'
 import { invoiceIssuedBy } from '@/pages/invoices/invoiceIssuedBy'
 import { useAuthStore } from '@/stores/auth'
@@ -39,6 +39,7 @@ import { insufficientStockItems, type InsufficientStockItem } from '@/components
 import { useHotkey } from '@/composables/useHotkey'
 import { useToast } from '@/composables/useToast'
 import { useAccountingPeriodToast } from '@/composables/useAccountingPeriodToast'
+import BillingRecap from '@/components/work-reports/BillingRecap.vue'
 import WorkReportModal from '@/components/modals/WorkReportModal.vue'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import { offsetRoute } from '@/components/accounting/offsetLink'
@@ -56,6 +57,7 @@ import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
+import InvoiceOtherItemLink from '@/components/invoices/InvoiceOtherItemLink.vue'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import ListNavArrows from '@/components/ui/ListNavArrows.vue'
 import { useListNavigation } from '@/composables/useListNavigation'
@@ -248,7 +250,7 @@ const wrHasDates = computed(() => !!workReport.value?.items.some(i => !!i.work_d
 /** Viditelné sloupce výkazu; bez uložených voleb vše jako dřív. */
 const wrShow = computed(() => {
   const options = workReport.value?.effective_display_options
-  return { hours: options?.hours !== false, rate: options?.rate !== false, amount: options?.amount !== false }
+  return { hours: options?.hours !== false, rate: !workReport.value?.billing_snapshot && options?.rate !== false, amount: !workReport.value?.billing_snapshot && options?.amount !== false }
 })
 const hasPdfSigningProfiles = computed(() => signingProfiles.value.some(
   profile => profile.is_active && profile.allowed_usages.includes('pdf'),
@@ -577,6 +579,28 @@ async function deletePayment(p: InvoicePayment) {
 async function onReposted() {
   await load()
   toast.success(t('accounting.repost.done'))
+}
+
+// Faktura krytá ostatní pohledávkou: vazba mění zaúčtování i úhrady faktury.
+const otherItemLinkRef = ref<InstanceType<typeof InvoiceOtherItemLink> | null>(null)
+const canLinkOtherItem = computed(() =>
+  isDoubleEntry.value
+  && auth.canWrite('accounting.journal.post')
+  && auth.canWrite('invoices')
+  && auth.canRead('other_items')
+  && !lockedForMe.value)
+const canOfferOtherItemLink = computed(() =>
+  !!invoice.value
+  && canLinkOtherItem.value
+  && !invoice.value.other_item_id
+  && invoice.value.invoice_type === 'invoice'
+  && invoice.value.status !== 'cancelled'
+  && Math.abs(Number(invoice.value.total_vat ?? 0)) < 0.005)
+
+async function onOtherItemLinkChanged(updated: Invoice) {
+  invoice.value = updated
+  await postingPanelRef.value?.reload()
+  invoicesApi.activity(updated.id).then(a => { activity.value = a }).catch(() => {})
 }
 
 async function loadSignatureProfiles() {
@@ -1863,11 +1887,16 @@ async function updateApprovalStatus() {
 const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
-  && !invoice.value.booked_at
   && !invoice.value.locked?.journal_entry_id
+  && !invoice.value.other_item_id
   && invoice.value.status !== 'draft'
   && invoice.value.status !== 'cancelled'
   && auth.canWrite('invoices'))
+
+// Doklad označený jako zaúčtovaný (booked_at), ke kterému v deníku zápis není - typicky
+// po převodu z jiného programu, kde doklad zaúčtovaný nebyl. Zaúčtování zůstává dostupné.
+const bookedWithoutEntry = computed(() => canPostToJournal.value && !!invoice.value?.booked_at
+  && ['invoice', 'credit_note', 'tax_document', 'penalty'].includes(invoice.value.invoice_type))
 
 async function postToJournal() {
   if (!invoice.value || !canPostToJournal.value) return
@@ -2014,10 +2043,13 @@ const invoiceActions = computed<ActionItem[]>(() => {
       title: t('invoice.wr_btn') as string, run: () => { wrModalOpen.value = true } },
     // ── zaúčtování (podvojné účetnictví) — sekundární, ať nekoliduje s primární
     // platební/upomínkovou akcí (pravidlo „1 primární akce dle stavu" výše) ──
+    { key: 'other-item-link', label: t('invoice.other_item_link.action'), icon: 'link', tier: 'secondary', variant: 'primary',
+      show: canOfferOtherItemLink.value, disabled: b,
+      title: t('invoice.other_item_link.action_tooltip') as string, run: () => { void otherItemLinkRef.value?.open() } },
     { key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
       show: canPostToJournal.value, disabled: b, loading: busy.value === 'post', run: postToJournal },
     { key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
-      show: isDoubleEntry.value && (!!inv.booked_at || !!inv.locked?.journal_entry_id),
+      show: isDoubleEntry.value && !!inv.locked?.journal_entry_id,
       to: { name: 'accounting-journal', query: { source_type: 'invoice', source_id: String(inv.id) } } },
     // Koncept vyúčtovací faktury po úhradě zálohy → daňový doklad k přijaté platbě
     // (záloha na plnění, které ještě nenastalo). Route vyžaduje invoices.delete
@@ -2064,6 +2096,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
       show: canAdminEdit.value, disabled: b, run: editIssued },
     { key: 'unmark-paid', label: t('invoice.unmark_paid'), icon: 'uturn', tier: 'advanced', variant: 'warning',
       show: isAdmin.value && inv.status === 'paid', disabled: b, loading: busy.value === 'unmark-paid', run: unmarkPaid },
+    { key: 'isdoc', label: t('invoice.download_isdoc'), icon: 'download', tier: 'advanced', variant: 'neutral',
+      show: !isDraft.value && inv.status !== 'cancelled',
+      href: invoicesApi.isdocUrl(inv.id), download: true },
     { key: 'rebuild-snapshots', label: t('invoice.rebuild_snapshots'), icon: 'cycle', tier: 'advanced', variant: 'warning',
       show: isAdmin.value && !isDraft.value && inv.status !== 'cancelled',
       disabled: b, loading: busy.value === 'rebuild-snapshots', run: rebuildSnapshots },
@@ -2154,6 +2189,12 @@ useWindowRefresh(async () => {
           </span>
         </h1>
         <ActionBar :actions="invoiceActions" />
+      </div>
+
+      <!-- Příznak zaúčtování bez zápisu v deníku (např. převzato z jiného programu nezaúčtované). -->
+      <div v-if="bookedWithoutEntry" class="p-3 bg-warning-50 border border-warning-500/40 rounded-md text-sm text-warning-700" data-test="booked-without-entry">
+        <div class="font-medium">{{ t('common.booked_without_entry_title') }}</div>
+        <div class="mt-1 text-warning-700/90">{{ t('common.booked_without_entry_hint') }}</div>
       </div>
 
       <div class="flex items-start justify-between gap-4">
@@ -2568,6 +2609,9 @@ useWindowRefresh(async () => {
           </table>
         </div>
       </div>
+      <!-- Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou) -->
+      <InvoiceOtherItemLink ref="otherItemLinkRef" :invoice="invoice" :can-link="canLinkOtherItem"
+        @updated="onOtherItemLinkChanged" />
       <!-- Zápočet dobropisu s opravovanou fakturou (issue #140) -->
       <CreditNoteOffsetNotice v-if="!isDraft && hasCreditNoteOffsetContext"
         doc-type="invoice" :doc-id="invoice.id" :is-credit-note="invoice.invoice_type === 'credit_note'"
@@ -2760,7 +2804,7 @@ useWindowRefresh(async () => {
         @reposted="onReposted" />
       <!-- Dimenze dokladu (Firma → Dimenze) — i u zaúčtovaného dokladu, řádky deníku
            se přerazítkují. -->
-      <DocumentDimensionsPanel doc-type="invoices" :doc-id="invoice.id" @saved="postingPanelRef?.reload()" />
+      <DocumentDimensionsPanel doc-type="invoices" :doc-id="invoice.id" collapsible @saved="postingPanelRef?.reload()" />
 
       <!-- Položky -->
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
@@ -2805,7 +2849,7 @@ useWindowRefresh(async () => {
             </tr>
             <tr v-else :class="item.item_kind === 'discount' ? 'text-warning-700' : ''">
               <td class="px-4 py-2.5 whitespace-pre-wrap">
-                {{ item.description }}
+                <a v-if="item.linked_work_report_id" href="#invoice-work-report" class="text-primary-700 hover:underline" :title="t('work_report_billing.linked_report')">{{ item.description }}</a><template v-else>{{ item.description }}</template>
                 <!-- OSS je vlastnost ŘÁDKU, ne dokladu — dole v doložce je jen souhrn zemí,
                      takže bez tohohle štítku není vidět, který řádek do OSS jde a který čeká na posouzení. -->
                 <span v-if="item.oss_applicable"
@@ -2843,7 +2887,7 @@ useWindowRefresh(async () => {
             <div v-if="item.item_kind === 'text'" class="text-sm whitespace-pre-wrap font-medium text-neutral-800" data-test="invoice-text-row-mobile">{{ item.description }}</div>
             <template v-else>
             <div class="text-sm whitespace-pre-wrap" :class="item.item_kind === 'discount' ? 'text-warning-700' : 'text-neutral-900'">
-              {{ item.description }}
+              <a v-if="item.linked_work_report_id" href="#invoice-work-report" class="text-primary-700 hover:underline" :title="t('work_report_billing.linked_report')">{{ item.description }}</a><template v-else>{{ item.description }}</template>
               <span v-if="item.oss_applicable"
                 class="ml-1.5 px-1 py-0.5 rounded bg-primary-50 text-primary-700 text-[10px] font-semibold whitespace-nowrap">
                 {{ t('invoice.oss.enabled') }}&nbsp;{{ item.oss_consumer_country || '—' }}
@@ -3315,11 +3359,17 @@ useWindowRefresh(async () => {
 
 
       <!-- Výkaz víceprací -->
-      <div v-if="workReport" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
+      <div v-if="workReport" id="invoice-work-report" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden scroll-mt-4">
         <header class="px-5 py-3 border-b border-neutral-200 flex items-baseline justify-between gap-3">
           <h3 class="text-sm font-semibold uppercase tracking-wide text-neutral-500">{{ t('invoice.work_report') }}</h3>
           <span class="text-sm text-neutral-700">{{ workReport.title }}</span>
         </header>
+        <div v-if="workReport.billing_snapshot" class="px-5 py-3 space-y-3">
+          <p v-if="workReport.billing_period" class="text-sm text-neutral-500">{{ t('work_report_billing.period') }}: {{ formatPeriod(workReport.billing_period) }}</p>
+          <p v-if="workReport.billing_error" class="text-sm text-warning-600" data-test="billing-error">{{ t('work_report_billing.invalid', { message: workReport.billing_error }) }}</p>
+          <p v-else-if="workReport.billing_stale" class="text-sm text-warning-600">{{ t('work_report_billing.stale') }}</p>
+          <BillingRecap v-if="workReport.billing_preview" :preview="workReport.billing_preview" :currency="invoice.currency" :prices-include-vat="!!invoice.prices_include_vat" />
+        </div>
         <!-- Desktop: tabulka -->
         <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm table-sticky-first" :class="{ 'wr-compact': workReport.effective_display_options?.compact }">
@@ -3328,8 +3378,8 @@ useWindowRefresh(async () => {
               <th class="text-left px-5 py-2 font-medium">{{ t('invoice.wr_description') }}</th>
               <th v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="text-left px-4 py-2 font-medium w-32">{{ t('invoice.wr_date') }}</th>
               <th v-if="workReport.effective_display_options?.hours !== false" class="text-right px-4 py-2 font-medium w-28">{{ t('invoice.wr_hours') }}</th>
-              <th v-if="workReport.effective_display_options?.rate !== false" class="text-right px-4 py-2 font-medium w-32">{{ t('invoice.wr_rate') }}</th>
-              <th v-if="workReport.effective_display_options?.amount !== false" class="text-right px-5 py-2 font-medium w-36">{{ t('invoice.wr_total') }}</th>
+              <th v-if="wrShow.rate" class="text-right px-4 py-2 font-medium w-32">{{ t('invoice.wr_rate') }}</th>
+              <th v-if="wrShow.amount" class="text-right px-5 py-2 font-medium w-36">{{ t('invoice.wr_total') }}</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-neutral-100">
@@ -3337,14 +3387,14 @@ useWindowRefresh(async () => {
               <td class="px-5 py-2 text-neutral-800 whitespace-pre-wrap">{{ it.description }}</td>
               <td v-if="workReport.effective_display_options?.date !== false && wrHasDates" class="px-4 py-2 text-neutral-600 whitespace-nowrap">{{ formatDate(it.work_date) }}</td>
               <td v-if="workReport.effective_display_options?.hours !== false" class="px-4 py-2 text-right font-mono">{{ (it.duration_minutes != null ? formatDuration(it.duration_minutes) : Number(it.hours).toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 })) }}</td>
-              <td v-if="workReport.effective_display_options?.rate !== false" class="px-4 py-2 text-right font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</td>
-              <td v-if="workReport.effective_display_options?.amount !== false" class="px-5 py-2 text-right font-mono">{{ formatMoney(workRowTotal(it), invoice.currency) }}</td>
+              <td v-if="wrShow.rate" class="px-4 py-2 text-right font-mono">{{ formatHourlyRate(it.rate, invoice.currency) }}</td>
+              <td v-if="wrShow.amount" class="px-5 py-2 text-right font-mono">{{ formatMoney(workRowTotal(it), invoice.currency) }}</td>
             </tr>
             <tr v-if="workReport.effective_display_options?.hours !== false || workReport.effective_display_options?.amount !== false" class="bg-neutral-50 font-semibold">
               <td class="px-5 py-2 text-right" :colspan="workReport.effective_display_options?.date !== false && wrHasDates ? 2 : 1">{{ t('invoice.totals.total') }}</td>
               <td v-if="workReport.effective_display_options?.hours !== false" class="px-4 py-2 text-right font-mono">{{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</td>
-              <td v-if="workReport.effective_display_options?.rate !== false"></td>
-              <td v-if="workReport.effective_display_options?.amount !== false" class="px-5 py-2 text-right font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</td>
+              <td v-if="wrShow.rate"></td>
+              <td v-if="wrShow.amount" class="px-5 py-2 text-right font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</td>
             </tr>
           </tbody>
         </table>
@@ -3368,7 +3418,7 @@ useWindowRefresh(async () => {
           </div>
           <div v-if="workReport.effective_display_options?.hours !== false || workReport.effective_display_options?.amount !== false" class="bg-neutral-50 p-3 flex items-center justify-between font-semibold">
             <span v-if="workReport.effective_display_options?.hours !== false" class="font-mono">Σ {{ durationTotal(workReport.items) ?? workReport.total_hours.toLocaleString('cs', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) }} h</span>
-            <span v-if="workReport.effective_display_options?.amount !== false" class="font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</span>
+            <span v-if="wrShow.amount" class="font-mono">{{ formatMoney(workReport.total_amount, invoice.currency) }}</span>
           </div>
         </div>
       </div>

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\AccessLevel;
@@ -40,7 +39,7 @@ final class PayrollPeopleContactColumnsTest extends TestCase
         if (!is_file(dirname(__DIR__, 4) . '/cfg.php')) {
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->pdo = $this->container->get(Connection::class)->pdo();
         $source = (int) $this->pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
         if ($source <= 0) {

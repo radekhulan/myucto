@@ -17,7 +17,8 @@
  * Výjimkou jsou KONCEPTY OSTATNÍCH POHLEDÁVEK A ZÁVAZKŮ
  * (other-item-tools.mjs): založení, úprava a smazání konceptu, splátkový
  * kalendář a opakování bez automatického účtování. Do deníku se tím nic
- * nezapisuje. Potvrzení a zaúčtování, storno, přeúčtování, párování úhrad,
+ * nezapisuje. Přiřazení úhrady k ostatní položce (allocate_other_item_payment) jen
+ * spáruje existující platbu. Potvrzení a zaúčtování, storno, přeúčtování, odpárování úhrad,
  * generování opakování ani zapnutí automatického účtování v katalogu nejsou
  * a server je tokenu odmítne (`BEARER_WRITE_EXCEPTIONS` je výčet metoda + cesta).
  * Druhou výjimkou jsou ANALYTICKÉ ÚČTY OSNOVY (create_analytic_account,
@@ -3232,6 +3233,8 @@ export const TOOLS = [
       from: date('Začátek rozsahu uvnitř účetního období.'),
       to: date('Konec rozsahu uvnitř účetního období.'),
       after_closing: bool('Stav po uzávěrkových operacích.'),
+      account_from: str('Účet od, včetně; stačí začátek kódu (5, 501).'),
+      account_to: str('Účet do, včetně analytik (5 až 5 = celá třída 5).'),
       ...DIMENSION_FILTER,
     }, ['period_id']),
     write: false,
@@ -3244,6 +3247,8 @@ export const TOOLS = [
       from: a.from,
       to: a.to,
       after_closing: a.after_closing ? 1 : undefined,
+      account_from: a.account_from,
+      account_to: a.account_to,
       ...dimensionQuery(a),
     }, tool),
   },
@@ -3371,8 +3376,8 @@ export const TOOLS = [
       automation: str('Původ zaúčtování.', { enum: ['auto', 'approved', 'manual'] }),
       reversal: str('Stav storna.', { enum: ['reversed', 'reversal', 'any', 'none'] }),
       integrity: str('Jen zjištěné rozdíly částek dokladu a deníku.', { enum: ['amount_mismatch'] }),
-      account_from: str('Účet od, včetně.'),
-      account_to: str('Účet do, včetně.'),
+      account_from: str('Účet od, včetně; stačí začátek kódu (5, 501).'),
+      account_to: str('Účet do, včetně analytik (5 až 5 = celá třída 5).'),
       amount_from: num('Částka od, včetně.'),
       amount_to: num('Částka do, včetně.'),
       ...DIMENSION_FILTER,

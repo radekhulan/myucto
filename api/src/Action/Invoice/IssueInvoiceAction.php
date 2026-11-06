@@ -71,6 +71,8 @@ final class IssueInvoiceAction
         private readonly ClientRepository $clients,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
         private readonly \MyInvoice\Service\Invoice\InvoicePaymentService $payments,
+        private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
+        private readonly \MyInvoice\Service\Invoice\InvoiceOtherItemLinkService $otherItemLink,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -106,6 +108,12 @@ final class IssueInvoiceAction
         }
         if ($invoice['status'] !== 'draft') {
             return Json::error($response, 'not_draft', 'Lze vystavit jen draft fakturu.', 409);
+        }
+
+        try {
+            $this->billing->assertCurrent($id, (int) $invoice['supplier_id']);
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         }
 
         // Zámek dokladu (Epic F6, H1): issue přiděluje varsymbol/číslo řady k issue/tax
@@ -352,6 +360,9 @@ final class IssueInvoiceAction
             }
         };
         try {
+            $billingLock = $pdo->prepare('SELECT id FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $billingLock->execute([$supplierId, $id]);
+            $this->billing->assertCurrent($id, $supplierId);
             if ($varsymbol === null) {
                 try {
                     // Zjednodušený doklad má vlastní řadu, je-li ve firmě nastavená.
@@ -390,6 +401,10 @@ final class IssueInvoiceAction
             );
             $this->clients->markAsCustomer((int) $invoice['client_id'], $supplierId);
             if ($ownTransaction) $pdo->commit();
+        } catch (\MyInvoice\Service\WorkReport\WorkReportBillingConflict $e) {
+            if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            $releaseAllocated();
+            return Json::error($response, 'billing_stale', $e->getMessage(), 409);
         } catch (StockException $e) {
             // Typicky insufficient_stock (409 + výčet chybějících položek) —
             // rollback vrátí fakturu do draftu, nic se nevystavilo.
@@ -439,6 +454,24 @@ final class IssueInvoiceAction
         // Smaž cached draft PDF (Faktura-draft-NN.pdf) — po vystavení má faktura nový
         // varsymbol a snapshoty, takže staré cached PDF už neodpovídá.
         $this->pdfRenderer->invalidate($id, 'invalidate_issue');
+
+        // Koncept navázaný na ostatní pohledávku (migrace 2246): po vystavení převezme její
+        // úhrady a auto-post ho vynechá. Koncept, který podmínky vazby už nesplňuje, se
+        // odpojí a zaúčtuje jako každá faktura. Chyba nesmí shodit vystavení.
+        $otherItemLink = ['status' => 'none'];
+        try {
+            $otherItemLink = $this->otherItemLink->afterIssue($supplierId, $id, isset($user['id']) ? (int) $user['id'] : null);
+        } catch (\Throwable $e) {
+            $this->logger->log('invoice.other_item_link_failed', $user['id'] ?? null, 'invoice', $id, [
+                'error' => $e->getMessage(),
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
+        if ($otherItemLink['status'] === 'unlinked') {
+            $this->logger->log('invoice.other_item_unlinked', $user['id'] ?? null, 'invoice', $id, [
+                'trigger' => 'issue',
+                'reason' => $otherItemLink['reason'] ?? null,
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
 
         // Auto-post hook (A2): má-li firma zapnutý auto_post_invoices a běží v podvojném
         // účetnictví, zaúčtuj vystavenou fakturu hned. Chyba zaúčtování NESMÍ zablokovat

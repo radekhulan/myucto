@@ -548,9 +548,14 @@ export function duplicateDraft(draft: ProfileDraft, name: string): ProfileDraft 
   }
 }
 
-export const ATTENDANCE_SAMPLE_KEYS: AttendanceSampleKey[] = ['giriton', 'myucto']
+export const ATTENDANCE_SAMPLE_KEYS: AttendanceSampleKey[] = ['giriton', 'myucto', 'pamica']
 /** Název souboru šablony, pokud ho server v hlavičce nepošle. */
 export const ATTENDANCE_TEMPLATE_FILENAME = 'podklady-mzdy-myucto.xlsx'
+/** Ukázkový XML export pro Vzor PAMICA, pokud server název nepošle. */
+export const ATTENDANCE_PAMICA_TEMPLATE_FILENAME = 'pamica-dochazka-vzor.xml'
+/** Soubory importu docházky: XLSX a CSV z docházkových systémů, XML exportu pro PAMICA. */
+export const ATTENDANCE_FILE_EXTENSIONS = ['xlsx', 'csv', 'xml']
+export const ATTENDANCE_FILE_ACCEPT = '.xlsx,.csv,.xml'
 
 /** Klíč vzoru profilu; vzor ze serveru bez klíčů je GIRITON (jediný vzor té doby). */
 export function profileSampleKey(profile: AttendanceProfile | null | undefined): AttendanceSampleKey | null {

@@ -1703,8 +1703,9 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.bank_code') }}</label>
-            <input v-model="currencyDraft.bank_code" type="text"
+            <input v-model="currencyDraft.bank_code" type="text" maxlength="10"
               class="w-full h-10 px-3 bg-surface border border-neutral-300 rounded-md text-sm font-mono" />
+            <p class="mt-1 text-xs text-neutral-500">{{ t('bank_accounts.bank_code_hint') }}</p>
           </div>
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.bank_name') }}</label>

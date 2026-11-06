@@ -10,6 +10,7 @@ use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Invoice\RefundDocument;
@@ -87,6 +88,9 @@ final class StatementMatcher
         // Jistý převod mezi vlastními účty se spáruje dřív, než by se pohyb nabídl
         // k úhradě dokladu (i bez VS). Nullable kvůli izolovaným konstrukcím v testech.
         private readonly ?\MyInvoice\Service\Accounting\Bank\TransferPairService $ownTransfers = null,
+        // Ostatní pohledávky a závazky se zkouší až po fakturách, jen u firmy se zapnutým
+        // automatickým párováním. Nullable kvůli izolovaným konstrukcím v testech.
+        private readonly ?\MyInvoice\Service\Accounting\OtherItemAutoMatcher $otherItems = null,
     ) {}
 
     /**
@@ -304,7 +308,10 @@ final class StatementMatcher
 
     public function match(int $transactionId): array
     {
-        return $this->rememberReason($transactionId, $this->afterMatch($transactionId, $this->doMatch($transactionId, false)));
+        return $this->rememberReason($transactionId, $this->matchOtherItem(
+            $transactionId,
+            $this->afterMatch($transactionId, $this->doMatch($transactionId, false)),
+        ));
     }
 
     /**
@@ -345,10 +352,48 @@ final class StatementMatcher
                 $results[$transactionId] = $fallback;
             }
         }
+        // Ostatní položky až po všech průchodech: pohyb, který si nárokuje faktura (i až
+        // shodou částky a data), jim nepřipadne.
         foreach ($results as $transactionId => $result) {
-            $results[$transactionId] = $this->rememberReason($transactionId, $result);
+            $results[$transactionId] = $this->rememberReason($transactionId, $this->matchOtherItem($transactionId, $result));
         }
         return $results;
+    }
+
+    /**
+     * Pohyb, který fakturační párování nespárovalo ani nenavrhlo, zkusí přiřadit ostatní
+     * pohledávce nebo závazku ({@see \MyInvoice\Service\Accounting\OtherItemAutoMatcher}).
+     * Přiřazení běží v savepointu: odmítnuté (přeplatek, uzavřené období, pohyb zaúčtovaný
+     * jinam) se celé vrátí a pohyb zůstane k ručnímu výběru v dialogu Spárovat.
+     *
+     * @param array<string,mixed> $result
+     * @return array<string,mixed>
+     */
+    private function matchOtherItem(int $transactionId, array $result): array
+    {
+        if ($this->otherItems === null || !\MyInvoice\Service\Accounting\OtherItemAutoMatcher::eligible($result)) {
+            return $result;
+        }
+        $pdo = $this->db->pdo();
+        try {
+            $other = TransactionFailure::retrying($pdo, function () use ($pdo, $transactionId): ?array {
+                $this->begin($pdo);
+                try {
+                    $found = $this->otherItems?->matchTransaction($transactionId);
+                    $this->commit($pdo);
+                    return $found;
+                } catch (\Throwable $e) {
+                    $this->rollBackIfOpen($pdo, $e);
+                    throw $e;
+                }
+            });
+        } catch (\MyInvoice\Service\Accounting\OtherItemException
+            | \MyInvoice\Service\Accounting\PostingException
+            | \MyInvoice\Service\Accounting\Closing\ClosingException) {
+            return ['status' => 'unmatched', 'reason' => \MyInvoice\Service\Accounting\OtherItemAutoMatcher::RESULT_CANDIDATES]
+                + array_diff_key($result, ['reason' => true]);
+        }
+        return $other === null ? $result : $other + array_diff_key($result, ['reason' => true, 'status' => true]);
     }
 
     /**
@@ -811,6 +856,7 @@ final class StatementMatcher
                    AND {$candidateSql}
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'proforma')
+                   AND " . InvoiceOtherItemPayments::notLinkedSql('i') . "
                  ORDER BY vs_match_rank DESC, i.id LIMIT 100";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$vs, $vs, $vsKey, $supplierId, ...$candidateParams]);

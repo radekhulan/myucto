@@ -52,6 +52,7 @@ export interface SupplierBrief {
   oss_enabled: boolean
   /** 'fo' = OSVČ (fyzická osoba), 'po' = s.r.o. (právnická osoba), null = nenastaveno. */
   taxpayer_type: 'fo' | 'po' | null
+  default_hourly_rate?: number
   default_payment_due_days: number
   default_payment_due_unit: 'days' | 'month'
   /** Výchozí režim cen u nových faktur (false = bez DPH, true = ceny s DPH). */
@@ -130,6 +131,8 @@ export interface SetupStatus {
   passwordless_login_enabled: boolean
   /** Poskytovatelé identity (OpenID Connect); prázdné = přihlášení přes organizaci vypnuté. */
   sso_providers?: SsoProvider[]
+  /** Ohlášení plánované údržby. `undefined` = starší backend bez pole. */
+  maintenance_notices?: import('@/api/maintenanceNotice').MaintenanceNotice[]
   captcha: {
     provider: 'turnstile' | 'none'
     site_key: string

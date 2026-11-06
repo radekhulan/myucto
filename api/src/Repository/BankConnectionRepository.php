@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Bank\AuthoritativeTransactionReconciler;
 use PDO;
 use PDOException;
 
@@ -64,6 +65,29 @@ final class BankConnectionRepository
         );
 
         return array_map([$this, 'castInternal'], $stmt !== false ? ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []) : []);
+    }
+
+    /**
+     * Poslední den, do kterého má účet pohyby převzaté z jiného programu (výpisy
+     * `source = 'import'`), hledaný jen od `$since`. Účet se porovnává stejným klíčem,
+     * jakým párování pohybů hledá uložené kandidáty.
+     */
+    public function takenOverThrough(int $supplierId, string $currency, string $accountNumber, string $bankCode, string $since): ?string
+    {
+        $key = AuthoritativeTransactionReconciler::account($accountNumber, $bankCode);
+        if ($key === null || $currency === '') return null;
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT account_number, bank_code, statement_date FROM bank_statements
+              WHERE supplier_id = ? AND statement_date >= ? AND source = 'import' AND currency = ?"
+        );
+        $stmt->execute([$supplierId, $since, $currency]);
+        $through = null;
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            if (AuthoritativeTransactionReconciler::account((string) $row['account_number'], (string) $row['bank_code']) !== $key) continue;
+            $date = substr((string) $row['statement_date'], 0, 10);
+            if ($through === null || $date > $through) $through = $date;
+        }
+        return $through;
     }
 
     public function ensure(int $supplierId, int $currencyId, string $provider): int

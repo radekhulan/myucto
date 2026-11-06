@@ -8,26 +8,35 @@ use MyInvoice\Service\Anonymization\{DatabaseCloner,TextScrubber,Pseudonymizer,P
 use MyInvoice\Repository\Property\Receivables\{PartyEventRepository,DebtCertificateRepository};
 use MyInvoice\Service\Property\Payments\PaymentLocks;
 use MyInvoice\Service\Property\PropertyException;
-use MyInvoice\Tests\Support\{ChargeIssuanceFixture,PaymentCorrectionFixture,ReceivableFixture};
+use MyInvoice\Tests\Support\{ChargeIssuanceFixture,CloneSandbox,PaymentCorrectionFixture,ReceivableFixture};
 use PDO;
 use PHPUnit\Framework\TestCase;
 final class ReceivableLifecycleTest extends TestCase
 {
     use ChargeIssuanceFixture,PaymentCorrectionFixture,ReceivableFixture;
-    private Connection $db;private array $f;private PDO $server;private string $ownedSchema;private ?string $targetSchema=null;private array $connections=[];private Config $config;
+    private Connection $db;private array $f;private PDO $server;private string $ownedSchema;private ?string $targetSchema=null;private string $targetSchemaName;private array $connections=[];private Config $config;
     protected function setUp():void
     {
         $container=Bootstrap::buildContainer();$this->config=$container->get(Config::class);$source=(string)$container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
         self::assertStringEndsWith('_test',$source);self::assertContains($this->config->get('db.host'),['localhost','127.0.0.1','::1']);
-        $this->ownedSchema='myucto_s5_lifecycle_'.bin2hex(random_bytes(5)).'_test';$this->server=new PDO('mysql:host='.$this->config->get('db.host').';port='.$this->config->get('db.port',3306).';charset=utf8mb4',$this->config->get('db.user'),$this->config->get('db.pass',''),[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
-        $cloner=new DatabaseCloner($this->server);$plan=$cloner->plan($source);$cloner->copyTables($plan,$this->ownedSchema,static function():void{});$cloner->finalize($plan,$this->ownedSchema);
+        $this->targetSchemaName='myucto_s5_lifecycle_'.bin2hex(random_bytes(5)).'_test_copy_test';$this->server=new PDO('mysql:host='.$this->config->get('db.host').';port='.$this->config->get('db.port',3306).';charset=utf8mb4',$this->config->get('db.user'),$this->config->get('db.pass',''),[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+        $this->ownedSchema=CloneSandbox::acquire($this->server,$source,true);
         $this->connect($this->ownedSchema);$this->connect($this->ownedSchema);$this->db=$this->connections[0];
     }
     protected function tearDown():void
     {
         foreach($this->connections as $db){if($db->pdo()->inTransaction())$db->pdo()->rollBack();$db->close();}
         $schemas=array_filter([$this->targetSchema,$this->ownedSchema]);
-        foreach($schemas as $schema){self::assertMatchesRegularExpression('/^myucto_s5_lifecycle_[a-f0-9]{10}_test(?:_copy_test)?$/D',$schema);\MyInvoice\Tests\Support\OwnedTestDatabaseCleanup::drop($this->server,$schema,$schemas);}
+        foreach($schemas as $schema){
+            if($schema===$this->ownedSchema){
+                self::assertMatchesRegularExpression('/^myucto_clonesandbox_[a-f0-9]{10}_test$/D',$schema);
+                self::assertTrue(CloneSandbox::isLeased($schema));
+            }else{
+                self::assertSame($this->targetSchemaName,$schema);
+                self::assertMatchesRegularExpression('/^myucto_s5_lifecycle_[a-f0-9]{10}_test(?:_copy_test)?$/D',$schema);
+            }
+            CloneSandbox::dropOrRelease($this->server,$schema,$schemas);
+        }
     }
     public function testOldSnapshotCannotHideCurrentPartyHeadAndPeriodOwnershipSerializes():void
     {
@@ -96,7 +105,7 @@ final class ReceivableLifecycleTest extends TestCase
         $original = $this->fingerprint($source->pdo());
         $money = $this->moneySnapshot($source->pdo(), $f['supplier']);
 
-        $this->targetSchema = $this->ownedSchema . '_copy_test';
+        $this->targetSchema = $this->targetSchemaName;
         (new \MyInvoice\Service\Anonymization\AnonymizationService($this->config))->run(
             new \MyInvoice\Service\Anonymization\AnonymizationOptions(source: $this->ownedSchema, target: $this->targetSchema, seed: 'synthetic-s4-s5-full-pipeline'),
             static function (): void {},
@@ -141,7 +150,7 @@ final class ReceivableLifecycleTest extends TestCase
     {
         $this->db->pdo()->beginTransaction();$this->f=$this->issuanceFixture($this->db);$base=$this->settledPaymentFixture('1000','5000');$f=$this->f;$old=$base['charge']['snapshot']['liability_groups'][0]['members'][0];$request=$this->request($base,$f['clients'][2],1,null,'2026-02-02T10:00:00+01:00',[$old]);$request['acquisition']['evidence']='Synthetic person@example.test';$request['acquisition']['kind']='Synthetic deed person@example.test';$repo=new PartyEventRepository($this->db);$event=$repo->confirm($f['supplier'],$request,$repo->preview($f['supplier'],$request)['preview_hash'],'opaque-transfer',$f['actor']);
         $certRepo=new DebtCertificateRepository($this->db);$certRequest=['unit_id'=>$base['charge']['unit_id'],'as_of'=>'2026-02-03T00:00:00+01:00','known_at'=>PartyEventRepository::now(),'requester_id'=>$old,'authority_evidence'=>'person@example.test','purpose'=>'Synthetic history','coverage_acknowledgement'=>'S3 S4 scope only'];$certificate=$certRepo->issue($f['supplier'],$certRequest,$certRepo->preview($f['supplier'],$certRequest)['preview_hash'],'opaque-certificate',$f['actor']);$this->db->pdo()->commit();
-        $sourceHash=$this->fingerprint($this->db->pdo());$cloner=new DatabaseCloner($this->server);$plan=$cloner->plan($this->ownedSchema);$this->targetSchema=$this->ownedSchema.'_copy_test';$cloner->copyTables($plan,$this->targetSchema,static function():void{});$target=$this->connect($this->targetSchema);
+        $sourceHash=$this->fingerprint($this->db->pdo());$cloner=new DatabaseCloner($this->server);$plan=$cloner->plan($this->ownedSchema);$this->targetSchema=$this->targetSchemaName;$cloner->copyTables($plan,$this->targetSchema,static function():void{});$target=$this->connect($this->targetSchema);
         $settlementInputs=\MyInvoice\Service\Anonymization\SettlementCloneScrubber::captureInputs($target);
         $scrubber=new TextScrubber(new Pseudonymizer(str_repeat('synthetic-s5-',4)));$registry=(new PropertyCloneScrubber($target->pdo(),$scrubber))->run();$versions=(new ChargesCloneScrubber($target->pdo(),$scrubber))->run($registry);$issuance=(new IssuanceCloneScrubber($target,$scrubber))->run($registry,$versions);
         foreach($target->pdo()->query('SELECT id,counterparty_account FROM bank_transactions WHERE counterparty_account IS NOT NULL')->fetchAll(PDO::FETCH_ASSOC) as $row){$fact=json_decode($scrubber->scrubJson(json_encode(['counterparty_account'=>$row['counterparty_account']],JSON_THROW_ON_ERROR)),true,flags:JSON_THROW_ON_ERROR);$target->pdo()->prepare('UPDATE bank_transactions SET counterparty_account=? WHERE id=?')->execute([$fact['counterparty_account'],$row['id']]);}

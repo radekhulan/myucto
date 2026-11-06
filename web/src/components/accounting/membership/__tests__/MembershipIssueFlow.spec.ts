@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { defineComponent, h } from 'vue'
 import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { formatDate } from '@/composables/useFormat'
 import Flow from '../MembershipIssueFlow.vue'
 import type { MemberRevision, MembershipPreview } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
@@ -16,8 +17,12 @@ vi.mock('@/api/nonprofitDppo', () => ({ nonprofitDppoApi: dppo }))
 
 const ActionBar = defineComponent({
   props: ['actions'],
-  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; disabled?: boolean; show?: unknown; run: () => void }>)
-    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, disabled: a.disabled, onClick: a.run }, a.label))),
+  setup: p => () => h('div', (p.actions as Array<{ key: string; label: string; variant?: string; loading?: boolean; disabled?: boolean; show?: unknown; run: () => void }>)
+    .filter(a => a.show !== false).map(a => h('button', { 'data-action': a.key, 'data-variant': a.variant, 'data-loading': a.loading ? 'true' : undefined, disabled: a.disabled, onClick: a.run }, a.label))),
+})
+const RouterLink = defineComponent({
+  props: ['to'],
+  setup: (p, { slots, attrs }) => () => h('a', { ...attrs, 'data-to': JSON.stringify(p.to) }, slots.default?.()),
 })
 const DateInput = defineComponent({
   props: ['modelValue'], emits: ['update:modelValue'],
@@ -100,7 +105,7 @@ const overview = (supplier = 5) => ({
 function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
   return mount(Flow, {
     props: { supplier: 5, canManage: true, member: { id: 9, member_number: 'M-1', label: 'Synthetic member' }, history: [revision], periods: [period], ...props },
-    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput, SearchableSelect } },
+    global: { plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })], stubs: { ActionBar, DateInput, SearchableSelect, RouterLink } },
   })
 }
 async function fill(w: ReturnType<typeof mounted>, omit: string[] = []) {
@@ -193,7 +198,8 @@ describe('Membership issue flow', () => {
     await fill(w)
     await review(w)
     const deferral = w.get('[data-section="issue-deferral"]').text()
-    expect(deferral).toContain('2026-12-31')
+    expect(deferral).toContain(formatDate('2026-12-31'))
+    expect(deferral).not.toContain('2026-12-31')
     expect(deferral).toContain('600')
     w.unmount()
   })
@@ -210,6 +216,7 @@ describe('Membership issue flow', () => {
     const w = mounted()
     await fill(w)
     await review(w)
+    expect(w.get('[data-action="confirm"]').attributes('data-variant')).toBe('success')
     expect(w.get('[data-action="confirm"]').attributes('disabled')).toBeDefined()
     await w.get('[data-field="ack"]').setValue(true)
     await w.get('[data-action="confirm"]').trigger('click')
@@ -220,6 +227,26 @@ describe('Membership issue flow', () => {
       operation: 'issue', request: expectedRequest, expected_case_version: 0, preview_hash: hash, idempotency_key: expect.stringMatching(token),
     })
     expect(w.emitted('done')).toHaveLength(1)
+    w.unmount()
+  })
+
+  it('shows progress on the preview and on the confirmation while the server answers', async () => {
+    let answerPreview: (value: MembershipPreview) => void = () => {}
+    api.preview.mockImplementation(() => new Promise<MembershipPreview>(resolve => { answerPreview = resolve }))
+    const w = mounted()
+    await fill(w)
+    expect(w.get('[data-action="issue-preview"]').attributes('data-loading')).toBeUndefined()
+    await w.get('[data-action="issue-preview"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[data-action="issue-preview"]').attributes('data-loading')).toBe('true')
+    answerPreview(previewResult())
+    await flushPromises()
+    api.confirm.mockReturnValue(new Promise(() => {}))
+    await w.get('[data-field="ack"]').setValue(true)
+    expect(w.get('[data-action="confirm"]').attributes('data-loading')).toBeUndefined()
+    await w.get('[data-action="confirm"]').trigger('click')
+    await flushPromises()
+    expect(w.get('[data-action="confirm"]').attributes('data-loading')).toBe('true')
     w.unmount()
   })
 
@@ -275,6 +302,7 @@ describe('Membership issue flow', () => {
     await flushPromises()
     expect(api.confirm).toHaveBeenCalledTimes(1)
     expect(w.get('[data-section="uncertain"]').text()).toContain(cs.nonprofitMembership.uncertain)
+    expect(w.get('[data-section="uncertain"]').classes()).toEqual(expect.arrayContaining(['rounded-lg', 'bg-warning-50']))
     expect(w.get('fieldset').attributes('disabled')).toBeDefined()
     expect(w.get('[data-field="ack"]').attributes('disabled')).toBeDefined()
     expect(w.find('[data-action="issue-preview"]').exists()).toBe(false)
@@ -357,14 +385,15 @@ describe('Membership issue flow', () => {
 
   it.each([
     ['no profile at all', null, 'profileMissing'],
-    ['a foundation', legal('foundation', true), 'profileNotAssociation'],
-    ['an association with business main activity', legal('association', false), 'profileNotAssociation'],
+    ['a foundation', legal('foundation', true), 'prerequisiteProfileNotAssociation'],
+    ['an association with business main activity', legal('association', false), 'prerequisiteProfileNotAssociation'],
   ])('does not preview with %s as legal profile', async (_name, profile, message) => {
     dppo.profile.mockResolvedValue(profile === null ? { ...legal(), latest: null } : profile)
     const w = mounted()
     await fill(w)
     expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeDefined()
-    expect(w.get('[data-section="issue-problem"]').text()).toContain((cs.nonprofitMembership as Record<string, string>)[message as string])
+    expect(w.get('[data-section="issue-prerequisites"]').text()).toContain((cs.nonprofitMembership as unknown as Record<string, string>)[message as string])
+    expect(w.find('[data-section="issue-problem"]').exists()).toBe(false)
     await w.get('[data-action="issue-preview"]').trigger('click')
     expect(api.preview).not.toHaveBeenCalled()
     w.unmount()
@@ -460,7 +489,7 @@ describe('Membership issue flow: explicit accounting classification', () => {
     api.classificationOptions.mockResolvedValue(mutate(overview()))
     const w = mounted()
     await fill(w).catch(() => undefined)
-    expect(w.find('[data-section="classification-missing"]').exists()).toBe(true)
+    expect(w.find('[data-prerequisite="dimensions"]').exists()).toBe(true)
     expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeDefined()
     await w.get('[data-action="issue-preview"]').trigger('click')
     await flushPromises()
@@ -636,6 +665,139 @@ describe('Membership issue flow: explicit accounting classification', () => {
     expect(w.text()).toContain(messages.classificationReviewTitle)
     expect(w.text()).toContain(messages.classificationTaxAdvisory)
     expect(w.text()).not.toContain('nonprofitMembership.')
+    w.unmount()
+  })
+
+  it('shows the proven member revision with its effective date', async () => {
+    const w = mounted()
+    await fill(w)
+    await review(w)
+    const proof = w.get('[data-field="proof-revision"]').text()
+    expect(proof).toContain(formatDate('2020-01-01'))
+    expect(w.get('[data-field="review-amount"]').classes()).toContain('tabular-nums')
+    expect(w.get('[data-section="issue-preview"]').text()).not.toMatch(/\d{4}-\d{2}-\d{2}/)
+    w.unmount()
+  })
+
+  it('shows a failed legal profile lookup in the shared error box', async () => {
+    dppo.profile.mockRejectedValue({ response: { status: 500, data: {} } })
+    const w = mounted()
+    await flushPromises()
+    const box = w.get('[data-section="profile-error"]')
+    expect(box.text()).toBe(cs.nonprofitMembership.profileError)
+    expect(box.classes()).toEqual(expect.arrayContaining(['bg-danger-50', 'text-danger-700']))
+    w.unmount()
+  })
+
+  it('lists every missing input at once only after the user starts filling the form', async () => {
+    const w = mounted()
+    await flushPromises()
+    expect(w.find('[data-section="issue-problem"]').exists()).toBe(false)
+    await w.get('[data-field="title-key"]').setValue('CP 2027')
+    const items = w.findAll('[data-section="issue-problem"] li').map(li => li.text())
+    expect(items).toContain(cs.nonprofitMembership.issueTitleKeyInvalid)
+    expect(items).toContain(cs.nonprofitMembership.issueAmountInvalid)
+    expect(items).toContain(cs.nonprofitMembership.issueAccountsInvalid)
+    expect(items).toContain(cs.nonprofitMembership.issueEvidenceRequired)
+    expect(items).toContain(cs.nonprofitMembership.issueNonreciprocalRequired)
+    expect(w.get('[data-section="issue-problem"]').classes()).toContain('bg-warning-50')
+    w.unmount()
+  })
+
+  it('warns when the membership does not cover the whole dues period but leaves the decision to the server', async () => {
+    const w = mounted({ history: [{ ...revision, effective_from: '2026-03-01' }] })
+    await fill(w, ['accounting-date'])
+    await w.get('[data-field="accounting-date"]').setValue('2026-10-19')
+    const warning = w.get('[data-section="issue-coverage-warning"]').text()
+    expect(warning).toContain(formatDate('2026-01-01'))
+    expect(warning).toContain(formatDate('2026-12-31'))
+    expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeUndefined()
+    await w.get('[data-field="period-from"]').setValue('2026-03-01')
+    expect(w.find('[data-section="issue-coverage-warning"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('lists no prerequisite when the company is ready', async () => {
+    const w = mounted()
+    await flushPromises()
+    expect(w.find('[data-section="issue-prerequisites"]').exists()).toBe(false)
+    w.unmount()
+  })
+
+  it('points to the tax assessment of the period when the legal profile is missing', async () => {
+    dppo.profile.mockResolvedValue({ ...legal(), latest: null })
+    const w = mounted()
+    await flushPromises()
+    const item = w.get('[data-prerequisite="profile"]')
+    expect(item.text()).toContain(cs.nonprofitMembership.profileMissing)
+    expect(JSON.parse(item.get('[data-action="prerequisite-link"]').attributes('data-to')!)).toEqual({ name: 'accounting-nonprofit-tax', params: { id: 11 } })
+    w.unmount()
+  })
+
+  it('points to the dimensions when the company has no classification axes', async () => {
+    api.classificationOptions.mockResolvedValue({ enabled: true, group: null, types: [], values: [] })
+    const w = mounted()
+    await flushPromises()
+    const item = w.get('[data-prerequisite="dimensions"]')
+    expect(JSON.parse(item.get('[data-action="prerequisite-link"]').attributes('data-to')!)).toEqual({ name: 'company-dimensions' })
+    w.unmount()
+  })
+
+  it('points to the chart of accounts when no membership revenue account exists', async () => {
+    accounting.listAccounts.mockResolvedValue([account(1, '311', 'Receivables', 'asset'), account(3, '602', 'Sales', 'revenue')])
+    const w = mounted()
+    await flushPromises()
+    const item = w.get('[data-prerequisite="revenue-account"]')
+    expect(item.text()).toContain(cs.nonprofitMembership.prerequisiteRevenueAccount)
+    expect(JSON.parse(item.get('[data-action="prerequisite-link"]').attributes('data-to')!)).toEqual({ name: 'accounting-accounts' })
+    w.unmount()
+  })
+
+  it('explains the charge label and shows no internal ids, English types or debit shortcuts', async () => {
+    api.preview.mockImplementation(() => Promise.resolve(previewResult(2)))
+    const w = mounted()
+    await fill(w)
+    expect(w.get('[data-field="title-key-help"]').text()).toBe(cs.nonprofitMembership.titleKeyHelp)
+    expect(w.get('[data-section="issue-profile"]').text()).not.toMatch(/association|č\. 77/)
+    await review(w)
+    expect(w.get('[data-field="review-case"]').text()).toBe(cs.nonprofitMembership.caseExisting)
+    expect(w.get('[data-field="proof-profile"]').text()).not.toContain('77')
+    expect(w.get('[data-section="issue-plan"]').text()).toContain('Má dáti')
+    w.unmount()
+  })
+
+  it('points to the accounting periods when no period is open and does not pretend to load a profile', async () => {
+    const w = mounted({ periods: [{ ...period, status: 'closed' }] })
+    await flushPromises()
+    const item = w.get('[data-prerequisite="period"]')
+    expect(item.text()).toContain(cs.nonprofitMembership.prerequisiteNoOpenPeriod)
+    expect(JSON.parse(item.get('[data-action="prerequisite-link"]').attributes('data-to')!)).toEqual({ name: 'accounting-periods' })
+    await w.get('[data-field="title-key"]').setValue('CP-2027')
+    const list = w.get('[data-section="issue-problem"]').text()
+    expect(list).not.toContain(cs.nonprofitMembership.profileLoading)
+    expect(list).not.toContain(cs.nonprofitMembership.issueNeedPeriod)
+    expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeDefined()
+    w.unmount()
+  })
+
+  it('shows a failed profile lookup once, in its error box and not again in the list', async () => {
+    dppo.profile.mockRejectedValue({ response: { status: 500, data: {} } })
+    const w = mounted()
+    await flushPromises()
+    await w.get('[data-field="title-key"]').setValue('CP-2027')
+    expect(w.get('[data-section="profile-error"]').text()).toBe(cs.nonprofitMembership.profileError)
+    expect(w.get('[data-section="issue-problem"]').text()).not.toContain(cs.nonprofitMembership.profileError)
+    w.unmount()
+  })
+
+  it('does not repeat a missing prerequisite in the list below the form', async () => {
+    api.classificationOptions.mockResolvedValue({ enabled: true, group: null, types: [], values: [] })
+    const w = mounted()
+    await flushPromises()
+    await w.get('[data-field="title-key"]').setValue('CP-2027')
+    expect(w.get('[data-section="issue-prerequisites"]').text()).toContain(cs.nonprofitMembership.classificationMissing)
+    expect(w.get('[data-section="issue-problem"]').text()).not.toContain(cs.nonprofitMembership.classificationMissing)
+    expect(w.findAll('[role="alert"]').map(el => el.text()).join(' ')).not.toContain(cs.nonprofitMembership.classificationMissing)
     w.unmount()
   })
 })

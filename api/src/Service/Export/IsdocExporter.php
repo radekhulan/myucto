@@ -495,7 +495,8 @@ final class IsdocExporter
             $bankCode = (string) ($bank['bank_code'] ?? '');
             $iban = trim((string) ($bank['iban'] ?? ''));
             $bic  = trim((string) ($bank['bic'] ?? ''));
-            if ($iban === '' && $accountNumber !== '' && $bankCode !== '') {
+            $czechBankCode = \MyInvoice\Service\Bank\AccountNumberNormalizer::canonicalBankCode($bankCode) !== null;
+            if ($iban === '' && $accountNumber !== '' && $bankCode !== '' && $czechBankCode) {
                 $iban = $this->computeCzechIban($accountNumber, $bankCode);
             }
             if ($bic === '' && $bankCode !== '') {

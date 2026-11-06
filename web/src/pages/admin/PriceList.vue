@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
 import { priceListApi, type PriceListItem } from '@/api/priceList'
 import { apiErrorMessage } from '@/api/errors'
 import { useToast } from '@/composables/useToast'
@@ -81,10 +81,15 @@ onMounted(async () => {
         <h1 class="text-2xl font-semibold">{{ t('price_list.title') }}</h1>
         <p class="mt-1 text-sm text-neutral-500">{{ t('price_list.subtitle') }}</p>
       </div>
+      <div class="flex flex-wrap items-center gap-2">
+        <RouterLink v-if="auth.canRead('price_list')" :to="{ name: 'admin-work-report-billing-templates' }" :class="btnOutline('neutral')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('work_report_billing.templates') }}
+        </RouterLink>
       <button v-if="canWrite" type="button" :class="btnFilled('primary')" @click="createItem">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.plus" /></svg>
         {{ t('price_list.new') }}
       </button>
+      </div>
     </header>
 
     <div v-if="error" class="mb-4 rounded-md border border-danger-300 bg-danger-50 px-4 py-3 text-sm text-danger-700">

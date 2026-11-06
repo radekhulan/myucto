@@ -12,6 +12,15 @@ use PHPUnit\Framework\TestCase;
 
 final class PermissionCatalogTest extends TestCase
 {
+    public function testInvoiceDefaultsAreExplicitlyDelegatedAndNotGrantedToAccountants(): void
+    {
+        $catalog = new PermissionCatalog();
+        self::assertTrue($catalog->allowsRoleType('settings.invoice_defaults', 'staff'));
+        self::assertTrue($catalog->allowsRoleType('settings.invoice_defaults', 'client'));
+        self::assertArrayNotHasKey('settings.invoice_defaults', $catalog->legacyPreset('accountant'));
+        self::assertArrayNotHasKey('settings.invoice_defaults', $catalog->legacyPreset('client'));
+    }
+
     public function testReadOnlyPresetContainsNoWriteIncludingProfile(): void
     {
         $preset = (new PermissionCatalog())->legacyPreset('readonly');

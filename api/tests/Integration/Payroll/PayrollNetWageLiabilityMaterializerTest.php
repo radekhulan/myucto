@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPaymentLiabilityRepository;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
@@ -32,7 +31,7 @@ final class PayrollNetWageLiabilityMaterializerTest extends TestCase
 
     protected function setUp(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $this->db = $connection;
         $pdo = $connection->pdo();

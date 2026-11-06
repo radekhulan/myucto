@@ -177,8 +177,38 @@ konečných faktur vhodných k propojení se zálohou a záloh s částkou dostu
 k postupnému čerpání na konceptu faktury. Umožňuje také náhled úroku z prodlení
 k vydané faktuře. Čtení přijatých faktur zpřístupňuje obdobné přehledy záloh
 a vyúčtovacích faktur od dodavatele. Tyto nástroje pouze zobrazují podklady;
-propojení dokladů, čerpání zálohy a vytvoření penalizační faktury se přes ně
-neprovádí.
+zápis provádějí samostatné nástroje se zápisovým tokenem:
+
+| Operace | Nástroje | Potřebné právo zápisu |
+|---|---|---|
+| Propojení nebo odpojení vydané zálohy | `link_invoice_advance`, `unlink_invoice_advance` | Vydané faktury |
+| Čerpání na konceptu nebo jeho odebrání | `apply_invoice_advance_drawdown`, `remove_invoice_advance_drawdown` | Vydané faktury |
+| Finální faktura ze zálohy | `create_final_invoice_from_proforma` | Vystavování vydaných faktur (`invoices.issue`) |
+| Daňový doklad k přijaté platbě | `create_payment_tax_document` | Evidence úhrad (`invoices.mark_paid`) |
+| Propojení nebo odpojení přijaté zálohy | `link_purchase_advance`, `unlink_purchase_advance` | Přijaté faktury |
+
+Obecný zápis vydaných faktur nenahrazuje samostatné právo vystavování nebo
+evidence úhrad. Zámky dokladů a uzavřených období platí stejně jako v aplikaci;
+klient je nemůže obejít. Tvorba penalizační faktury se klientským připojením
+nezpřístupňuje.
+
+Při ručním režimu daňového dokladu k platbě postupujte takto:
+
+1. Přijatou platbu zálohy vyhledejte přes `list_invoice_payments` a její koncept
+   dokladu založte přes `create_payment_tax_document`.
+2. Koncept zkontrolujte a vystavte přes `issue_invoice`. Opakované založení
+   k téže platbě vrátí existující doklad.
+3. Zálohu čerpejte na konceptu běžné faktury přes `apply_invoice_advance_drawdown`,
+   nebo založte finální koncept přes `create_final_invoice_from_proforma`.
+   Finální koncept zkontrolujte a samostatně vystavte. Opakované založení finálu
+   vrátí již existující doklad.
+
+Čerpání vyžaduje vystavený daňový doklad k platbě, stejnou protistranu a měnu
+a nevyčerpanou částku zálohy; OSS nepodporuje. Opakované čerpání na stejném
+konceptu nahradí dosavadní odpočet. Odpojení vazby vydané i přijaté faktury
+a odebrání čerpání se provedou až s `confirm: true`. Bez potvrzení asistent
+ukáže náhled. Samotné odpojení vazby ponechá odečtenou zálohu na dokladu;
+odebrání čerpání odstraní i odpočtové řádky konceptu.
 
 Na stejné stránce v klientském portálu vidíte svá připojení pro tuto firmu
 na této doméně a můžete je odvolat i po odebrání oprávnění k novým připojením.
@@ -989,7 +1019,7 @@ s oprávněním čtení a zápis.
 #### 105.8.8.5 Ostatní pohledávky a závazky
 
 Nájem, půjčka nebo úvěr, leasing, kauce, pojistné a poplatky se evidují jako
-ostatní pohledávky a závazky (viz [kapitola 52](52_Ucetni_denik.md)). Asistent
+ostatní pohledávky a závazky (viz [§ 52.14.14](52_Ucetni_denik.md) a [§ 50.10.4](50_Pruvodce_ucetniho.md)). Asistent
 je umí číst i připravit, ale **jen jako koncept**. Koncept nemá zápis v deníku;
 potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuje.
 
@@ -998,6 +1028,7 @@ potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuj
 | Čtení | `list_other_items`, `get_other_item`, `list_other_item_kinds`, `list_other_item_allocations`, `other_item_payment_candidates`, `list_other_item_schedules`, `get_other_item_schedule`, `get_other_item_installments` |
 | Koncept | `create_other_item`, `update_other_item`, `delete_other_item` |
 | Splátkový kalendář | `set_other_item_installments`, `clear_other_item_installments` |
+| Úhrada | `allocate_other_item_payment` (po potvrzení uživatele) |
 | Opakování | `create_other_item_schedule`, `set_other_item_schedule_status` |
 | Analytické účty | `chart_of_accounts` (čtení), `create_analytic_account`, `update_analytic_account` |
 | Smlouva a další dokumenty | `upload_document` nebo `link_document` s typem `other_item`, `list_entity_documents`, `unlink_document` |
@@ -1007,7 +1038,17 @@ potvrdí a zaúčtuje ho účetní v aplikaci, kde vidí kontext a krok potvrzuj
 jejichž součet musí přesně odpovídat částce dokladu. Agenda je jen v Kč. Při
 úpravě asistent načte současný stav a pošle celý doklad, takže nezadaná pole se
 nezmění. Jediný protiřádek se při změně částky přepočte, u více protiřádků se
-asistent zeptá na nové rozdělení. Upravit a smazat lze jen koncept.
+asistent zeptá na nové rozdělení. Upravit a smazat lze jen koncept. Koncept může
+nést i účet protistrany (`counterparty_account`, český účet `číslo/kód banky`
+nebo IBAN), podle kterého aplikace nabízí úhrady k přiřazení.
+
+**Účetní profily.** `list_other_item_kinds` vrací u druhů účetní profil
+(`posting_profiles`: vznik, úhrada z banky a z pokladny) a u vestavěných druhů
+nezávazný návrh kontace. Prázdný účet položky a protiúčet konceptu doplní při
+zaúčtování profil druhu. `get_other_item` ukazuje v `posting_rules`, co se
+zaúčtuje a odkud kontace pochází. Vlastní kontaci úhrad (`posting_overrides`)
+může asistent nastavit jen konceptu; profily druhů a kontaci potvrzené položky
+mění účetní v aplikaci ([§ 52.14.14.12](52_Ucetni_denik.md#52141412-ucetni-profily-druhu-a-vlastni-kontace)).
 
 **Smlouva u dokladu.** Analyzovaný soubor (např. PDF smlouvy o zápůjčce)
 asistent nahraje nástrojem `upload_document` a koncept založí s `document_id`,
@@ -1033,13 +1074,17 @@ zápisem zkontroluje, že:
 
 - splátek je 2 až 120 a termíny jdou vzestupně, nejdříve od data vzniku dokladu,
 - částky jsou kladné a na haléře,
-- součet splátek přesně odpovídá částce dokladu,
+- součet splátek (u rozdělených splátek součet jistiny) přesně odpovídá částce dokladu,
+- jistina, úrok a poplatek rozdělené splátky dávají dohromady její částku,
 - doklad zatím nemá spárovanou úhradu.
 
-U úvěru a leasingu patří do kalendáře jen jistina; úroky a poplatky nejsou
-součástí částky dokladu. Uložení **nahradí celý dosavadní kalendář**, proto
+U úvěru a leasingu je částkou dokladu jistina. Splátku lze rozdělit na jistinu,
+úrok a poplatek (`principal_amount`, `interest_amount`, `fee_amount`), například
+podle splátkového kalendáře banky. Uložení **nahradí celý dosavadní kalendář**, proto
 asistent posílá vždy všechny splátky. Zrušení celého kalendáře vyžaduje
-potvrzení. Splátky slouží k plánu cashflow a do deníku nic nezapisují.
+potvrzení. Kalendář slouží k plánu cashflow a do deníku nic nezapisuje; úrok
+a poplatek se zaúčtují až s úhradou splátky ve webovém rozhraní
+([§ 52.14.14.13](52_Ucetni_denik.md#52141413-uvery-a-leasing-jistina-urok-a-poplatek)).
 
 **Opakování** vytvoří z dokladu pravidelnou řadu (měsíčně, čtvrtletně, ročně).
 Aplikace další doklady zakládá dopředu jako koncepty. Automatické účtování
@@ -1059,8 +1104,10 @@ nebo znovu aktivuje. Číslo účtu se změnit nedá, syntetické účty asisten
 čte a nepoužitou analytiku smažete jen v aplikaci. Funguje to u firmy
 s podvojným účetnictvím a s oprávněním zápisu do účetnictví.
 
+**Úhrada.** Nástrojem `allocate_other_item_payment` asistent přiřadí bankovní transakci nebo pokladní doklad (právě jedno z toho) k potvrzené či zaúčtované položce na zadanou částku. Kandidáty vypíše `other_item_payment_candidates`. Je to zápis, takže vyžaduje potvrzení a asistent ho bez něj neprovede. Splátku určí server sám (přesná shoda zbytku, jinak první otevřená) a stejně jako v aplikaci odmítne přeplatek, cizí měnu, platbu opačného směru i konceptu. Do deníku nic nezapíše. Odpojení úhrady zůstává v aplikaci.
+
 Přes asistenta **nejde**: potvrdit nebo zaúčtovat doklad, stornovat ho,
-přeúčtovat, spárovat nebo odpojit úhradu ani ručně vygenerovat doklady
+přeúčtovat, odpojit úhradu ani ručně vygenerovat doklady
 z opakování. Tyto kroky dělá účetní v aplikaci.
 
 #### 105.8.8.6 Soubory a přílohy

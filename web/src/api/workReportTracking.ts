@@ -1,3 +1,4 @@
+import type { PublicWorkReportBillingPreview } from './workReportBilling'
 import type { WorkReportDisplayOptions } from './invoices'
 import axios from 'axios'
 import { api } from './client'
@@ -40,6 +41,10 @@ export interface WrPreviewMaterial {
 }
 
 export interface WrPreviewReport {
+  prices_include_vat?: boolean
+  billing_enabled?: boolean
+  billing_preview?: PublicWorkReportBillingPreview | null
+  billing_period?: string | null
   invoice_id: number
   label: string | null
   date: string

@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Document\DocumentsAction;
 use MyInvoice\Action\Payroll\PayrollStatutoryObligationAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -42,7 +41,7 @@ final class PayrollStatutoryObligationActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_statutory_obligation_evidence')) {
             $this->markTestSkipped('Migrace 1588 neproběhla.');

@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollComponentsAction;
 use MyInvoice\Action\Payroll\PayrollInputsAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -39,7 +38,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }

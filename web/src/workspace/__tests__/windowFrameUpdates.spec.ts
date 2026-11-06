@@ -98,6 +98,29 @@ afterEach(async () => {
 })
 
 describe('window frame updates', () => {
+  it('připraví externí odkaz již v capture fázi skutečného pracovního iframe', async () => {
+    const post = await boot()
+    post.mockClear()
+    const anchor = document.createElement('a')
+    anchor.href = 'https://public.example.test/payroll/order'
+    anchor.rel = 'nofollow'
+    const label = document.createElement('span')
+    label.textContent = 'Synthetic external order'
+    anchor.append(label)
+    document.querySelector('[data-content]')!.append(anchor)
+    let observed: { target: string; rel: string; defaultPrevented: boolean } | undefined
+    anchor.addEventListener('click', event => {
+      observed = { target: anchor.target, rel: anchor.rel, defaultPrevented: event.defaultPrevented }
+      event.preventDefault()
+    })
+
+    label.dispatchEvent(new MouseEvent('click', { button: 0, bubbles: true, cancelable: true }))
+
+    expect(observed).toEqual({ target: '_blank', rel: 'nofollow noopener', defaultPrevented: false })
+    expect(mocks.router!.currentRoute.value.fullPath).toBe('/report')
+    expect(post.mock.calls.some(([message]) => message.type === 'myucto-window-navigate')).toBe(false)
+  })
+
   it('rebuilds a data view that became stale and offers a reload on a route that may hold work', async () => {
     await boot()
     message('myucto-window-state', { paneId: 'primary' })
@@ -191,6 +214,17 @@ describe('window frame updates', () => {
       expect(document.body.classList.contains('workspace-window-single-padded')).toBe(false)
       shellMain.style.paddingTop = '0px'
       message('myucto-window-state', { theme: 'dark', locale: 'cs', accent: 'teal', singlePanel: true })
+      await flushPromises()
+      expect(document.body.classList.contains('workspace-window-single-padded')).toBe(true)
+
+      // Hláška nad oknem (údržba) se zobrazí a zavře křížkem bez nové zprávy o vzhledu.
+      const banner = document.createElement('div')
+      shellMain.style.paddingTop = '24px'
+      shellMain.prepend(banner)
+      await flushPromises()
+      expect(document.body.classList.contains('workspace-window-single-padded')).toBe(false)
+      banner.remove()
+      shellMain.style.paddingTop = '0px'
       await flushPromises()
       expect(document.body.classList.contains('workspace-window-single-padded')).toBe(true)
 

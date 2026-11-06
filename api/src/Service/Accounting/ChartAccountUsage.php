@@ -39,6 +39,8 @@ final class ChartAccountUsage
         'purchase_invoice_vat_allocations' => ['account_code'],
         'other_items'                      => ['account_code', 'counter_account_code'],
         'other_item_posting_lines'        => ['account_code'],
+        'other_item_posting_profiles'     => ['debit_account_code', 'credit_account_code'],
+        'other_item_posting_overrides'    => ['debit_account_code', 'credit_account_code'],
         'payroll_dimensions'               => ['default_account_code'],
         'payroll_employees'                => ['net_settlement_account_code'],
         'payroll_employee_profiles'        => ['partner_settlement_account_code'],
@@ -187,7 +189,9 @@ final class ChartAccountUsage
             'purchase_invoice_vat_allocations' => 'rozpad DPH přijatých faktur',
             'other_items'                 => 'ostatní pohledávky a závazky',
             'other_item_posting_lines'    => 'kontace ostatních pohledávek a závazků',
-            default                        => $table,
+            'other_item_posting_profiles' => 'účetní profily druhů ostatních položek',
+            'other_item_posting_overrides' => 'vlastní kontace úhrad ostatních položek',
+            default                       => $table,
         };
     }
 }

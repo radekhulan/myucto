@@ -103,10 +103,9 @@ const ledgerLink = computed(() => {
 })
 
 /**
- * Deník filtrovaný na tenhle účet. Deník nezná account_id, filtruje textovým
- * ROZSAHEM kódů — u syntetiky je proto horní mez `kód + 999999`, aby se do rozsahu
- * vešly i její analytiky (`221` … `221999999` chytí `221.100` i `221100`, ale už
- * ne `222`). Analytika je list, tam stačí rozsah sama na sebe.
+ * Deník filtrovaný na tenhle účet. Deník nezná account_id, filtruje prefixovým
+ * ROZSAHEM kódů včetně krajů — `221` až `221` zahrne syntetiku i všechny její
+ * analytiky (`221.100`, `221100`), ne už `222`.
  */
 const journalLink = computed(() => {
   const r = report.value
@@ -115,7 +114,7 @@ const journalLink = computed(() => {
     name: 'accounting-journal',
     query: {
       account_from: code,
-      account_to: r?.account.is_synthetic ? code + '999999' : code,
+      account_to: code,
       date_from: filters.from,
       date_to: filters.to,
     },

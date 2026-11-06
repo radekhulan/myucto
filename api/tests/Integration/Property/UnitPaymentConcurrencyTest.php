@@ -5,7 +5,7 @@ namespace MyInvoice\Tests\Integration\Property;
 use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
-use MyInvoice\Service\Anonymization\DatabaseCloner;
+use MyInvoice\Tests\Support\CloneSandbox;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Property\Payments\{PaymentLocks,PaymentSourceProof,PaymentException};
 use MyInvoice\Repository\Property\Payments\PaymentRepository;
@@ -27,13 +27,9 @@ final class UnitPaymentConcurrencyTest extends TestCase
         $source = (string) $container->get(Connection::class)->pdo()->query('SELECT DATABASE()')->fetchColumn();
         self::assertStringEndsWith('_test', $source);
         self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
-        $this->ownedSchema = 'myucto_payment_race_' . bin2hex(random_bytes(5)) . '_test';
         $this->server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
             $config->get('db.user'), $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
-        $cloner = new DatabaseCloner($this->server);
-        $plan = $cloner->plan($source);
-        $cloner->copyTables($plan, $this->ownedSchema, static function (): void {});
-        $cloner->finalize($plan, $this->ownedSchema);
+        $this->ownedSchema = CloneSandbox::acquire($this->server, $source, true);
         $data = $config->all();
         $data['db']['name'] = $this->ownedSchema;
         for ($i = 0; $i < 2; ++$i) {
@@ -51,8 +47,9 @@ final class UnitPaymentConcurrencyTest extends TestCase
             if ($db->pdo()->inTransaction()) $db->pdo()->rollBack();
             $db->close();
         }
-        self::assertMatchesRegularExpression('/^myucto_payment_race_[a-f0-9]{10}_test$/D', $this->ownedSchema);
-        $this->server->exec('DROP DATABASE ' . DatabaseCloner::quote($this->ownedSchema));
+        self::assertMatchesRegularExpression('/^myucto_clonesandbox_[a-f0-9]{10}_test$/D', $this->ownedSchema);
+        self::assertTrue(CloneSandbox::isLeased($this->ownedSchema));
+        CloneSandbox::dropOrRelease($this->server, $this->ownedSchema, [$this->ownedSchema]);
     }
 
 

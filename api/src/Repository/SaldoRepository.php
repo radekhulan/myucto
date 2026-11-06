@@ -110,6 +110,17 @@ final class SaldoRepository
      * a co kontrola hlásí, saldo neschová.
      */
     private const SHORTFALL_TOLERANCE_CZK = 1.0;
+    /**
+     * Uhrazeno u ostatní položky k asOf: přiřazené úhrady (`paid`) a úhrada převzatá z jiného
+     * programu mimo evidované kanály (`settled_outside_amount`, migrace 2207). Ta datum nenese,
+     * stejně jako u přijatých faktur, a je to jediný údaj, kterým převod uzavře položku vyrovnanou
+     * zápočtem nebo interním dokladem: ruční zápis na položku navázat nejde a bankovní párování
+     * ji jako uhrazenou nenabídne. Úhradu mimo evidenci započítává stejně {@see OtherItemRepository}
+     * (detail, seznam, párování v bance). Obě složky jsou v měně položky: úhradu jde přiřadit jen
+     * položce v Kč a převody plní úhradu mimo evidenci také jen u položek v Kč (POHODA cizí měnu
+     * nepřevádí, ABRA zakládá položky v Kč), poměr k zaúčtované Kč částce tedy sedí.
+     */
+    private const OTHER_ITEM_PAID_SQL = '(COALESCE(paid.paid_sum, 0) + oi.settled_outside_amount)';
     private const CANDIDATE_PAGE_SIZE = 5000;
 
     public function __construct(
@@ -260,7 +271,7 @@ final class SaldoRepository
         bool $orderByDue,
     ): array {
         $booked = "ROUND(SUM(CASE WHEN l.side = 'debit' THEN l.signed_amount ELSE -l.signed_amount END), 2)";
-        $paid = 'COALESCE(paid.paid_sum, 0)';
+        $paid = self::OTHER_ITEM_PAID_SQL;
         $ratio = "CASE WHEN ABS({$booked}) < 0.005 THEN 0
                        ELSE LEAST(1, GREATEST(0, {$paid} / ABS({$booked}))) END";
         $partnerFilter = $partnerId === null ? '' : ' AND oi.partner_id = ' . $partnerId;
@@ -319,7 +330,8 @@ final class SaldoRepository
                    AND oi.deleted_at IS NULL
                    {$partnerFilter}{$dueFilter}
                  GROUP BY oi.id, oi.document_no, oi.issued_on, oi.due_on, oi.status,
-                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount, paid.paid_sum
+                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount,
+                          oi.settled_outside_amount, paid.paid_sum
                 HAVING " . self::openFilterSql($booked, $ratio) . $order;
 
         $map = static function (array $row): array {
@@ -384,7 +396,7 @@ final class SaldoRepository
                        COALESCE(cl.company_name, NULLIF(oi.partner_name, ''), 'Bez partnera') AS partner_name,
                        oi.currency AS currency_code, oi.amount AS amount_foreign,
                        ROUND(SUM(CASE WHEN l.side = 'debit' THEN ja.amount ELSE -ja.amount END), 2) AS booked_signed,
-                       COALESCE(paid.paid_sum, 0) AS paid_as_of
+                       " . self::OTHER_ITEM_PAID_SQL . " AS paid_as_of
                   FROM journal_settlement_allocations ja
                   JOIN journal_entries e ON e.id = ja.entry_id AND e.supplier_id = ja.supplier_id
                   " . JournalSettlementAllocationSql::lineJoin('ja', 'l') . "
@@ -425,7 +437,8 @@ final class SaldoRepository
                    AND oi.deleted_at IS NULL
                    {$partnerFilter}" . self::dueBeforeSql('oi', $dueBefore, 'due_on') . "
                  GROUP BY oi.id, oi.document_no, oi.issued_on, oi.due_on, oi.status,
-                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount, paid.paid_sum
+                          oi.partner_id, cl.company_name, oi.partner_name, oi.currency, oi.amount,
+                          oi.settled_outside_amount, paid.paid_sum
                  ORDER BY {$order}";
         $stmt = $this->db->pdo()->prepare($sql);
         $stmt->execute(self::asOfParams($sql, $asOf));

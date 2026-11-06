@@ -10,7 +10,9 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Middleware\FirstRunLockMiddleware;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\PasskeyService;
+use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Invoice\OverduePolicy;
+use MyInvoice\Service\System\MaintenanceNoticeService;
 use PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations;
 use PHPUnit\Framework\TestCase;
 use Slim\Psr7\Factory\ResponseFactory;
@@ -38,6 +40,7 @@ final class SetupStatusActionTest extends TestCase
             new ManagedModeGuard(new Config([])),
             new OverduePolicy(new Config(['invoices' => ['overdue_includes_today' => true]])),
             new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry(new \MyInvoice\Infrastructure\Config\Config([])),
+            $this->noNotices(),
         );
 
         $response = $action(
@@ -67,6 +70,7 @@ final class SetupStatusActionTest extends TestCase
             new ManagedModeGuard(new Config([])),
             new OverduePolicy(new Config([])),
             new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry(new \MyInvoice\Infrastructure\Config\Config([])),
+            $this->noNotices(),
         );
 
         $response = $action(
@@ -77,5 +81,14 @@ final class SetupStatusActionTest extends TestCase
 
         self::assertFalse($body['passwordless_login_enabled']);
         self::assertFalse($body['overdue_includes_today']);
+        self::assertSame([], $body['maintenance_notices']);
+    }
+
+    private function noNotices(): MaintenanceNoticeService
+    {
+        $db = $this->createStub(Connection::class);
+        $db->method('hasTable')->willReturn(false);
+
+        return new MaintenanceNoticeService(new Config([]), $db, new ManagedModeGuard(new Config([])), null, sys_get_temp_dir() . '/missing-maintenance-notice.json');
     }
 }

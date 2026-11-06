@@ -403,6 +403,7 @@ final class AutomationFeedService
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $duplicates = $this->duplicateEntries($rows, $supplierIds);
         $out = [];
+        $ownAccounts = new \MyInvoice\Service\Accounting\Bank\StatementOwnAccount($this->db);
         foreach ($rows as $r) {
             $sid = (int) $r['supplier_id'];
             $note = $r['note'] === null ? null : (string) $r['note'];
@@ -411,7 +412,7 @@ final class AutomationFeedService
                 $direction = (float) $r['signed_amount'] >= 0 ? 'incoming' : 'outgoing';
                 $conflicts = [];
                 foreach ($this->rules->findActive($sid, $direction) as $rule) {
-                    if ($this->ruleMatcher->matching($rule, $r)) {
+                    if ($this->ruleMatcher->matching($rule, $ownAccounts->withOwnAccount($sid, $r, $r))) {
                         $conflicts[] = [
                             'id' => $rule['id'], 'name' => $rule['name'],
                             'debit_account_code' => $rule['debit_account_code'],

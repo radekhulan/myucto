@@ -587,6 +587,71 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda s valutovými pokladnami: POE v eurech (211002, počáteční stav 100 EUR kurzem
+     * 25 = 2 500 Kč) a POH ve forintech (211003, 50 000 HUF kurzem 6,20 za 100 HUF =
+     * 3 100 Kč). Money vede kurz forintu za 100 jednotek (`PSMnozstvi`, `PocetJedn`).
+     * Počáteční stavy jsou v deníku obou let (protiúčet 325000), řádky XP měnu nenesou.
+     * Rok 2025: příjem CPE250001 289,20 EUR × 24,35 = 7 042 Kč a výdej CVH250001
+     * 10 120 HUF × 6,121 / 100 = 619 Kč; řádky deníku nesou `Mena`, `Kurz` a `CastkaCM`.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithForeignCash(): array
+    {
+        $files = self::files();
+        $registerFields = array_merge(self::REGISTER_FIELDS, [['PocStav', 'E', 10], ['PSMnozstvi', 'L', 4]]);
+        $cashFields = array_merge(self::CASH_FIELDS, [['Mena', 'C', 3], ['Kurs', 'E', 10], ['PocetJedn', 'L', 4], ['ValutyKUhr', 'E', 10], ['ValutyZak0', 'E', 10]]);
+        $journalFields = array_merge(self::JOURNAL_FIELDS, [['Mena', 'C', 3], ['Kurz', 'E', 10], ['CastkaCM', 'E', 10]]);
+        $append = static function (string $path, array $fields, array $rows) use (&$files): void {
+            $table = strtoupper(pathinfo($path, PATHINFO_FILENAME));
+            $existing = iterator_to_array(Ms3Table::fromString($files[$path], $table)->rows(), false);
+            $files[$path] = Ms3FixtureWriter::table($fields, array_merge($existing, $rows));
+        };
+        foreach (['ROK.001' => '2024', 'ROK.002' => '2025'] as $dir => $year) {
+            $append($dir . '/UcOsnova.DAT', self::CHART_FIELDS, [
+                ['Ucet' => '211002', 'Nazev' => 'Pokladna EUR'],
+                ['Ucet' => '211003', 'Nazev' => 'Pokladna HUF'],
+            ]);
+            $append($dir . '/SzUcPokl.DAT', $registerFields, [
+                ['Zkrat' => 'POE', 'Popis' => 'Pokladna EUR', 'UcPokl' => 'P', 'PrimUcet' => '211002', 'Mena' => 'EUR', 'PSKurz' => 25.0, 'PSMnozstvi' => 1, 'PocStav' => 100.0],
+                ['Zkrat' => 'POH', 'Popis' => 'Pokladna HUF', 'UcPokl' => 'P', 'PrimUcet' => '211003', 'Mena' => 'HUF', 'PSKurz' => 6.2, 'PSMnozstvi' => 100, 'PocStav' => 50000.0],
+            ]);
+            $append($dir . '/UcDenik.DAT', $journalFields, [
+                ['Cislo' => -201, 'Zdroj' => 'XP', 'Datum' => $year . '-01-01', 'Popis' => 'Počáteční stav roku ' . $year, 'UcMD' => '211002', 'UcD' => '701000', 'Castka' => 2500.0],
+                ['Cislo' => -202, 'Zdroj' => 'XP', 'Datum' => $year . '-01-01', 'Popis' => 'Počáteční stav roku ' . $year, 'UcMD' => '211003', 'UcD' => '701000', 'Castka' => 3100.0],
+                ['Cislo' => -203, 'Zdroj' => 'XP', 'Datum' => $year . '-01-01', 'Popis' => 'Počáteční stav roku ' . $year, 'UcMD' => '701000', 'UcD' => '325000', 'Castka' => 5600.0],
+            ]);
+        }
+        $append('ROK.002/UcDenik.DAT', $journalFields, [
+            ['Cislo' => 40, 'Zdroj' => 'PK', 'Doklad' => 'CPE250001', 'Datum' => '2025-04-10', 'Popis' => 'Tržba v eurech', 'UcMD' => '211002', 'UcD' => '602000', 'Castka' => 7042.0,
+                'Mena' => 'EUR', 'Kurz' => 24.35, 'CastkaCM' => 289.2],
+            ['Cislo' => 41, 'Zdroj' => 'PK', 'Doklad' => 'CVH250001', 'Datum' => '2025-04-12', 'Popis' => 'Nákup ve forintech', 'UcMD' => '501100', 'UcD' => '211003', 'Castka' => 619.0,
+                'Mena' => 'HUF', 'Kurz' => 6.121, 'CastkaCM' => 10120.0],
+        ]);
+        $append('ROK.002/PoklKnih.DAT', $cashFields, [
+            ['Doklad' => 'CPE250001', 'Pokl' => 'POE', 'Vydej' => 0, 'DatVyst' => '2025-04-10', 'DatUcPr' => '2025-04-10', 'Popis' => 'Tržba v eurech', 'Celkem' => 7042.0,
+                'Mena' => 'EUR', 'Kurs' => 24.35, 'PocetJedn' => 1, 'ValutyKUhr' => 289.2],
+            ['Doklad' => 'CVH250001', 'Pokl' => 'POH', 'Vydej' => 1, 'DatVyst' => '2025-04-12', 'DatUcPr' => '2025-04-12', 'Popis' => 'Nákup ve forintech', 'Celkem' => 619.0,
+                'Mena' => 'HUF', 'Kurs' => 6.121, 'PocetJedn' => 100, 'ValutyZak0' => 10120.0],
+        ]);
+        // Každá pokladna má v Money vlastní řadu; HUF zatím jen výdeje, příjmová řada CPH
+        // se pozná podle CVH. `Cislo` = příští číslo (CPE250002–3 Money už vydalo a smazalo).
+        $files['ROK.002/CisRady.DAT'] = Ms3FixtureWriter::table(
+            [['Rada', 'C', 10], ['Cislo', 'L', 4], ['PocetMist', 'L', 4], ['PP', 'B', 1], ['VP', 'B', 1]],
+            [
+                ['Rada' => 'PPrr', 'Cislo' => 3, 'PocetMist' => 3, 'PP' => 1],
+                ['Rada' => 'PVrr', 'Cislo' => 3, 'PocetMist' => 3, 'VP' => 1],
+                ['Rada' => 'CPErr', 'Cislo' => 4, 'PocetMist' => 4, 'PP' => 1],
+                ['Rada' => 'CVErr', 'Cislo' => 1, 'PocetMist' => 4, 'VP' => 1],
+                ['Rada' => 'CPHrr', 'Cislo' => 1, 'PocetMist' => 4, 'PP' => 1],
+                ['Rada' => 'CVHrr', 'Cislo' => 2, 'PocetMist' => 4, 'VP' => 1],
+                ['Rada' => 'BPrr', 'Cislo' => 4, 'PocetMist' => 3],
+            ],
+        );
+        return $files;
+    }
+
+    /**
      * Agenda s evidencí majetku (`MajInv`, `MjInvPoh`):
      *   - traktor DM-001 zařazený 1. 7. 2023 za 120 000 Kč, rovnoměrně ve 2. skupině, účetně
      *     2 000 Kč měsíčně od srpna 2023 (před převodem 5 měsíců = 10 000 Kč), v deníku

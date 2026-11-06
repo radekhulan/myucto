@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateNoIncomeException;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificateSnapshotBuilder;
@@ -128,7 +127,7 @@ final class AnnualTaxCertificateKindScopeTest extends TestCase
      */
     private function fixture(array $months): array
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $sensitive = $container->get(PayrollSensitiveData::class);

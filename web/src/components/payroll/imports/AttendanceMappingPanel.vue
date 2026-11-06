@@ -25,6 +25,8 @@ import AttendanceTemplateDownload from './AttendanceTemplateDownload.vue'
 import { useAttendanceWorkspace } from './attendanceWorkspace'
 import { upgradedProfile, upgradeMatchesProfile } from './attendanceWages'
 import {
+  ATTENDANCE_FILE_ACCEPT,
+  ATTENDANCE_FILE_EXTENSIONS,
   draftComponents,
   draftRules,
   draftSignature,
@@ -74,6 +76,7 @@ const restoringKey = ref<AttendanceSampleKey | null>(null)
 const RESTORE_LABELS: Record<AttendanceSampleKey, { label: string; hint: string }> = {
   giriton: { label: 'payroll_imports.mapping.restore_sample', hint: 'payroll_imports.mapping.restore_sample_hint' },
   myucto: { label: 'payroll_imports.mapping.restore_sample_myucto', hint: 'payroll_imports.mapping.restore_sample_myucto_hint' },
+  pamica: { label: 'payroll_imports.mapping.restore_sample_pamica', hint: 'payroll_imports.mapping.restore_sample_pamica_hint' },
 }
 
 const isNew = computed(() => draft.value !== null && draft.value.id === null)
@@ -520,6 +523,11 @@ watch(workspace.mappingFocus, focus => {
             <p class="min-w-0 max-w-2xl flex-1">{{ t('payroll_imports.mapping.sample_hint_myucto') }}</p>
             <AttendanceTemplateDownload v-if="canPreview" />
           </div>
+          <div v-else-if="draftSampleKey === 'pamica'" class="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-lg bg-accent-50 px-3 py-2 text-sm text-accent-700"
+            data-testid="attendance-profile-pamica-hint">
+            <p class="min-w-0 max-w-2xl flex-1">{{ t('payroll_imports.mapping.sample_hint_pamica') }}</p>
+            <AttendanceTemplateDownload v-if="canPreview" sample-key="pamica" :period="period" />
+          </div>
           <p v-else-if="draft.is_sample" class="mt-3 rounded-lg bg-accent-50 px-3 py-2 text-sm text-accent-700">{{ t('payroll_imports.mapping.sample_hint') }}</p>
           <div v-if="upgradePending" class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 px-3 py-2 text-sm text-warning-800" data-testid="attendance-profile-upgrade">
             <p class="font-medium">{{ t('payroll_imports.mapping.upgrade_title') }}</p>
@@ -560,8 +568,8 @@ watch(workspace.mappingFocus, focus => {
             <ImportFilesDropzone
               v-model:files="files"
               test-id="attendance-mapping-dropzone"
-              accept=".xlsx,.csv"
-              :allowed-extensions="['xlsx', 'csv']"
+              :accept="ATTENDANCE_FILE_ACCEPT"
+              :allowed-extensions="ATTENDANCE_FILE_EXTENSIONS"
               :drop-hint="t('payroll_imports.attendance.drop_hint')"
               :disabled="busy !== null"
             />

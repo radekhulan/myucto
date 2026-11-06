@@ -160,7 +160,7 @@ final class PayrollRunValidationMessageFormatter
                 ? 'Další kontrola vyžaduje doplnění zákonných údajů.'
                 : sprintf('Dalších %d kontrol vyžaduje doplnění zákonných údajů.', $unknown);
         }
-        $parts[] = 'Opravte uvedené podklady a otevřete novou revizi mzdového běhu.';
+        $parts[] = 'Opravte uvedené podklady a v mzdovém běhu klikněte na Obnovit podklady.';
 
         return self::message($parts);
     }

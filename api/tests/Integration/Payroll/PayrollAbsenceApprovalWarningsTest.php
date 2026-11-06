@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Absence\PayrollAbsenceApprovalWarnings;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -30,7 +29,7 @@ final class PayrollAbsenceApprovalWarningsTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $this->db = Bootstrap::buildContainer()->get(Connection::class);
+            $this->db = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }

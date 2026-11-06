@@ -106,6 +106,26 @@ final class InvoicePdfBankInFooterTest extends TestCase
         self::assertMatchesRegularExpression('~Var\. symbol</td>\s*<td class="meta-value mono">2026000123</td>~u', $html);
     }
 
+    /**
+     * Issue #314: britský účet tiskne číslo účtu a sort code zvlášť, ne jako české
+     * „číslo / kód". Platí v platebním panelu i v patičce.
+     */
+    public function testBritishAccountPrintsSortCodeBesideAccountNumber(): void
+    {
+        $british = ['currency' => 'GBP', 'bank_snapshot' => json_encode([
+            'account_number' => '12345678', 'bank_code' => '608464', 'bank_name' => 'Testovací banka',
+            'iban' => 'GB33BUKB20201555555555', 'bic' => 'BUKBGB22',
+        ])] + $this->invoice();
+
+        $html = $this->render($british);
+        self::assertStringContainsString('<div class="bank-value">12345678</div>', $html);
+        self::assertStringContainsString('<div class="bank-meta-line">Sort code: 60-84-64</div>', $html);
+        self::assertStringNotContainsString('12345678 / ', $html);
+
+        $footer = $this->pageFooter($this->render(['bank_snapshot' => $british['bank_snapshot']] + $this->invoice(['invoice_pdf_bank_in_footer' => 1])));
+        self::assertStringContainsString('12345678 · Sort code: 60-84-64', $footer);
+    }
+
     public function testOptionWithoutQrDropsThePanelAndKeepsTheFooter(): void
     {
         // Platební kalendář QR nedostává, bankovní spojení ale potřebuje.

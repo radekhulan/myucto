@@ -36,6 +36,8 @@ declare module 'vue-router' {
     access?: AccessLevel
     staffOnly?: boolean
     superadminOnly?: boolean
+    /** Na ukázkové instanci (demo) se stránka nesmí otevřít vůbec, ani superadminovi. */
+    demoHidden?: boolean
     instanceAdminOnly?: boolean
     adminPlusOnly?: boolean
     companyAdminOnly?: boolean
@@ -104,6 +106,7 @@ const routes: RouteRecordRaw[] = [
 ]
 
 const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[], AccessLevel?]> = {
+  'admin-work-report-billing-templates': ['price_list'],
   'admin-price-list': ['price_list'], 'admin-price-list-view': ['price_list'],
   'admin-price-list-new': ['price_list', 'write'], 'admin-price-list-edit': ['price_list', 'write'],
   home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
@@ -565,6 +568,8 @@ export async function authorizationGuard(
   }
 
   if (auth.isClientRole && to.matched.some(r => r.meta.staffOnly)) return denyFallback(to.name, auth)
+
+  if (auth.isDemo && to.matched.some((r) => r.meta.demoHidden)) return denyFallback(to.name, auth)
 
   const superadminOnly = to.matched.some((r) => r.meta.superadminOnly)
   if (superadminOnly && !auth.isSuperadmin) {

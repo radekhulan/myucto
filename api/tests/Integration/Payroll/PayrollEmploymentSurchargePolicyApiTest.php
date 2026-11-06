@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollEmploymentSurchargePolicyAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -39,7 +38,7 @@ final class PayrollEmploymentSurchargePolicyApiTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         self::assertInstanceOf(ContainerInterface::class, $container);
         $connection = $container->get(Connection::class);
         $action = $container->get(PayrollEmploymentSurchargePolicyAction::class);

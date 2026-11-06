@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRulesetRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -46,7 +45,7 @@ final class PayrollRulesetAdminServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer()
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build()
             ?? throw new \RuntimeException('DI kontejner není dostupný.');
         $db = $container->get(Connection::class);
         if (!$db instanceof Connection) {
@@ -577,6 +576,45 @@ final class PayrollRulesetAdminServiceTest extends TestCase
         self::assertSame(4, $social['manual_review_parameter_count']);
         self::assertSame(21, $social['parameter_count']);
         self::assertNotSame('manual_review', $social['status']);
+    }
+
+    /**
+     * Karta domény jmenuje parametry, ze kterých výpočet nečerpá, a u každého
+     * říká, o jakou situaci jde. „3 z 37" účetní nic neřekne.
+     */
+    public function testDomainCardNamesReviewItemsByCategory(): void
+    {
+        $overview = $this->service->overview();
+        /** @var list<array<string, mixed>> $domains */
+        $domains = $overview['domains'];
+        $incomeTax = array_column($domains, null, 'domain')['income_tax'];
+        /** @var list<array<string, mixed>> $items */
+        $items = $incomeTax['review_items'];
+        $byKey = array_column($items, null, 'key');
+
+        self::assertArrayNotHasKey('benefit_exemption.non_cash_leisure.yearly', $byKey);
+
+        $meal = $byKey['benefit_exemption.meal.per_shift'] ?? self::fail('Stravné 2027 v kartě chybí.');
+        self::assertSame('pending_publication', $meal['category']);
+        self::assertSame('2026-12', $meal['expected']);
+        self::assertSame([2027], $meal['years']);
+        self::assertSame('Osvobozený příspěvek na stravování za jednu směnu', $meal['label']);
+        self::assertIsString($meal['source_url']);
+
+        $spouse = $byKey['credit.spouse.eligibility'] ?? self::fail('Sleva na manžela v kartě chybí.');
+        self::assertSame('assessed_elsewhere', $spouse['category']);
+        self::assertSame('payroll-annual-settlement', $spouse['route']);
+        self::assertContains(2027, $spouse['years']);
+
+        $detail = $this->service->detail('cz-payroll-2027.income-tax.v1')
+            ?? self::fail('Vestavěný ruleset daně 2027 chybí.');
+        /** @var list<array<string, mixed>> $parameters */
+        $parameters = $detail['parameters'];
+        $byParameter = array_column($parameters, null, 'key');
+        self::assertSame('pending_publication', $byParameter['benefit_exemption.meal.per_shift']['review_category']);
+        self::assertSame('2026-12', $byParameter['benefit_exemption.meal.per_shift']['review_expected']);
+        self::assertNull($byParameter['benefit_exemption.non_cash_leisure.yearly']['review_category']);
+        self::assertSame('unlimited', $byParameter['benefit_exemption.non_cash_leisure.yearly']['value']);
     }
 
     public function testManualReviewParameterExplainsWhatTheUserShouldDo(): void

@@ -1331,7 +1331,7 @@ final class TaxReturnService
             $sideEffects,
             self::FORMA[$variant] ?? 'B',
         );
-        if ($row !== null && $sideEffects) {
+        if ($row !== null && $sideEffects && $archived['submission_id'] !== null) {
             $this->returns->setLastSubmission($supplierId, $year, $type, (int) $archived['submission_id'], $variant, $seq);
         }
 

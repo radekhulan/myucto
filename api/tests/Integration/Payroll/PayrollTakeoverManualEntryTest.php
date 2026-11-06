@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollStatutoryAccumulatorRepository;
@@ -41,7 +40,7 @@ final class PayrollTakeoverManualEntryTest extends TestCase
     protected function setUp(): void
     {
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->service = $container->get(PayrollTakeoverManualEntryService::class);
             $this->accumulators = $container->get(PayrollStatutoryAccumulatorRepository::class);

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Document\PayrollSheetSnapshotBuilder;
 use PHPUnit\Framework\Attributes\Group;
@@ -21,13 +20,13 @@ final class PayrollSheetAnnualSettlementEvidenceTest extends TestCase
 {
     public function testEvidenceQueryMatchesTheSchemaAndReportsMissingRowAsNull(): void
     {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         if (!$connection->hasTable('payroll_annual_settlement_requests')) {
             $this->markTestSkipped('Migrace ročního zúčtování neproběhla.');
         }
 
-        $builder = Bootstrap::buildContainer()->get(PayrollSheetSnapshotBuilder::class);
+        $builder = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSheetSnapshotBuilder::class);
         self::assertInstanceOf(PayrollSheetSnapshotBuilder::class, $builder);
 
         $method = new \ReflectionMethod(

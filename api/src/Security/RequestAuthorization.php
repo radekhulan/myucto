@@ -174,6 +174,12 @@ final class RequestAuthorization
         return self::isSessionAuth($request) && $role->isActive && $role->isSuperadmin();
     }
 
+    /** Přehled a ukončování browserových relací patří výhradně superadminovi. */
+    public static function canManageUserSessions(Request $request): bool
+    {
+        return self::isSessionAuth($request) && self::isSuperadmin($request);
+    }
+
     public static function canCreateSupplier(Request $request): bool
     {
         return self::effectiveRole($request)->canCreateSupplier();
@@ -247,6 +253,17 @@ final class RequestAuthorization
     public static function canChangeFiledVatPeriod(Request $request): bool
     {
         return self::isCompanyAdmin($request);
+    }
+
+    /**
+     * Dokončit aktivaci podvojného účetnictví přes zbývající chyby doúčtování smí jen
+     * správce firmy. Delegovaná role s právem spravovat účetní období průvodce projde,
+     * ale rozhodnutí, že část historie zůstane nedoúčtovaná, za firmu nedělá.
+     */
+    public static function canForceAccountingActivation(Request $request): bool
+    {
+        return self::isCompanyAdmin($request)
+            && self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE);
     }
 
     /** Klient čte jen připravená podání, interní role dál používají agendu výkazů. */

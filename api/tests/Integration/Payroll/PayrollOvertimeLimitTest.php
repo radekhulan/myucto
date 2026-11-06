@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
 use MyInvoice\Service\Payroll\Run\PayrollRunCommand;
@@ -41,7 +40,7 @@ final class PayrollOvertimeLimitTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->builder = $container->get(PayrollRunSnapshotBuilder::class);
         $this->time = $container->get(PayrollTimeService::class);

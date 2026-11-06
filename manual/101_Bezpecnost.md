@@ -249,6 +249,36 @@ znamená zákaz.
 **Jak poznáte, že je hotovo:** Podezřelé záznamy jste vysvětlili nebo
 eskalovali. Doporučujeme kontrolu aspoň jednou měsíčně.
 
+### 101.9.1 Aktivní relace
+
+Superadmin otevře **Systém → Uživatelé → Aktivní relace**. Přehled ukazuje platná přihlášení napříč instalací;
+vlastní relace je vždy první, ostatní jsou seřazené podle posledního kontaktu od nejnovějšího. Každý řádek uvádí
+uživatele, e-mail, IP adresu, prohlížeč nebo zařízení, čas přihlášení, poslední kontakt a konec platnosti. Vlastní
+přihlášení označuje štítek **Tato relace**. Více zařízení stejného uživatele má samostatné řádky.
+
+Čas posledního kontaktu se zapisuje nejvýše jednou za pět minut a může zahrnovat požadavky na pozadí. Neprokazuje tedy,
+že uživatel právě pracuje. Zavření prohlížeče platné přihlášení nemusí ukončit. Přehled se automaticky obnovuje každých
+30 sekund, pokud je stránka viditelná a relace není uzamčená. Tlačítko **Obnovit** načte aktuální stav; větší seznam se
+stránkuje.
+
+Tlačítkem **Ukončit relaci** a následným potvrzením superadmin odvolá vybrané přihlášení včetně jeho bezpečnostně
+obnovených generací. Ostatní přihlášení stejného uživatele zůstanou platná. Odvolání se projeví při příštím požadavku
+daného zařízení a uživatel se musí znovu přihlásit. Ukončení vlastní relace vyžaduje zvláštní potvrzení a přejde na
+přihlášení. Jednotlivé relace lze označit a hromadně ukončit; **Vybrat všechny na stránce** označí jen právě zobrazené
+řádky. Potvrzení hromadného ukončení upozorní, pokud výběr zahrnuje vlastní relaci. Akce se zaznamená do Logu jako
+`auth.session_revoked` (hromadná akce jako `auth.sessions_revoked`).
+
+API tokeny ani MCP připojení přehled nezobrazuje a tlačítko **Ukončit relaci** je neodvolává. Přihlášení technických
+účtů správce instance v přehledu nejsou a superadmin je odtud ukončit nemůže.
+
+**Počet současně přihlášených zařízení.** Licence může omezit, kolik relací smí mít jeden uživatel současně, zvlášť
+v prohlížeči počítače a zvlášť na mobilním zařízení (telefon, tablet, mobilní aplikace). Standardně je to jedna relace
+v prohlížeči a jedna na mobilu. Nové přihlášení nad tento počet ukončí nejstarší relaci stejného druhu a odhlášené
+zařízení při příštím požadavku zobrazí na přihlašovací stránce, že se k účtu přihlásil někdo jiný. Uložené přihlášení
+v témže prohlížeči je stále jedna relace, nová vzniká až přihlášením v jiném prohlížeči nebo na jiném zařízení.
+Přihlášení na vlastní doméně firmy se počítá zvlášť a hlavní aplikaci neodhlásí. Instalace bez platné licence relace
+neomezuje.
+
 ## 101.10 Když něco nejde
 
 <!-- cols: 30 34 36 -->

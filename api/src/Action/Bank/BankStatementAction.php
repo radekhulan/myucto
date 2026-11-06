@@ -131,6 +131,7 @@ final class BankStatementAction
         // Výpis k účtu jiné firmy, kam smí uživatel importovat banku, se naimportuje tam.
         private readonly \MyInvoice\Security\CrossSupplierAuthorization $crossSupplier,
         private readonly ClientBankAccess $clientAccess,
+        private readonly \MyInvoice\Service\Bank\TransactionRematcher $rematcher,
         private readonly ?SubsetSumSolver $subsetSolver = null,
     ) {}
 
@@ -1955,6 +1956,9 @@ final class BankStatementAction
         // vidět jen po rozbalení dokladů pohybu v nabídce „…".
         $dimensionsByTx = (new \MyInvoice\Repository\DimensionAssignmentRepository($this->db))
             ->headerDimensionsIfEnabled($sid, 'bank_transaction', $txIds);
+        $ruleDimensionTypes = $dimensionsByTx !== null
+            ? (new \MyInvoice\Service\Accounting\Dimension\BankRuleDimensions($this->db))->typesFor($sid, $txIds)
+            : [];
 
         foreach ($transactions as &$t) {
             $t['card'] = $cardByTx[(int) $t['id']] ?? null;
@@ -1974,6 +1978,7 @@ final class BankStatementAction
             unset($t['processing_pending_at'], $t['processing_error']);
             if ($dimensionsByTx !== null) {
                 $t['dimensions'] = (object) ($dimensionsByTx[$t['id']] ?? []);
+                $t['rule_dimension_types'] = $ruleDimensionTypes[$t['id']] ?? [];
             }
         }
         unset($t);
@@ -2529,6 +2534,7 @@ final class BankStatementAction
                     WHERE i.supplier_id = ?
                       AND i.status IN ('issued','sent','reminded','paid')
                       AND i.invoice_type IN ('invoice','proforma','credit_note')
+                      AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i') . "
                       AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";
 
         $purchase = "SELECT 'purchase_invoice' AS mtype, p.id,
@@ -2745,7 +2751,8 @@ final class BankStatementAction
                  WHERE i.supplier_id = ?
                    AND i.client_id IS NOT NULL
                    AND i.status IN ('issued','sent','reminded','paid')
-                   AND i.invoice_type IN ('invoice','proforma')";
+                   AND i.invoice_type IN ('invoice','proforma')
+                   AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i');
         $params = [$sid];
         if ($useWindow) {
             $sql .= " AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";
@@ -4794,60 +4801,16 @@ final class BankStatementAction
         $txIds = $txs->fetchAll(\PDO::FETCH_COLUMN);
 
         $userId = (int) (((array) $request->getAttribute(AuthMiddleware::ATTR_USER, []))['id'] ?? 0);
-        $newlyMatched = 0;
-        $newlyPartial = 0;
-        $stillUnmatched = 0;
-        $takenOver = 0;
-        $superseded = 0;
-        $matchIds = [];
-        foreach ($txIds as $txId) {
-            // Nejdřív cross-source dedup: pokud tatáž platba visí spárovaná na
-            // e-mailovém avízu, převezmi párování na oficiální výpis místo dvojího
-            // párování. Při importu to dělá StatementImporter; tady je to jediná
-            // cesta, jak dorovnat výpisy naimportované dřív (nebo pár, který se
-            // napoprvé nespojil).
-            $takeover = $this->reconciler->takeOverFromEmailNotice((int) $txId);
-            if ($takeover !== null) {
-                $takenOver++;
-                $newlyMatched++;
-                if ($takeover['match_status'] === 'auto_exact') $this->matcher->match((int) $txId);
-                $this->bankPosting->handleTransaction((int) $txId, $userId ?: null);
-                continue;
-            }
-
-            // Nespárované avízo nemá co předat, takže ho převzetí výš minulo — pro
-            // karetní výdaje a poplatky je tohle jediná cesta, jak se zbavit dvojího
-            // řádku po importu GPC za období pokryté i avízy (#76).
-            if ($this->reconciler->supersedeUnmatchedEmailNotice((int) $txId) !== null) $superseded++;
-
-            $matchIds[] = (int) $txId;
-        }
-
-        foreach ($this->matcher->matchBatch($matchIds) as $txId => $r) {
-            $s = (string) ($r['status'] ?? 'unmatched');
-            if ($s === 'auto_exact' && empty($r['already_recorded'])) $newlyMatched++;
-            elseif ($s === 'auto_partial') $newlyPartial++;
-            elseif ($s === 'unmatched') $stillUnmatched++;
-            // Automatizace: zaúčtování po (re)match (best-effort, no-op mimo double_entry).
-            $this->bankPosting->handleTransaction(
-                $txId,
-                $userId ?: null,
-                !empty($r['requires_review']),
-            );
-        }
+        $r = $this->rematcher->rematch(array_map('intval', $txIds), $userId ?: null);
+        $newlyMatched = $r['newly_matched'];
+        $newlyPartial = $r['newly_partial'];
+        $stillUnmatched = $r['still_unmatched'];
+        $takenOver = $r['taken_over'];
+        $superseded = $r['superseded'];
         // Zpracování přerušené při importu je tímhle dorovnané.
         StatementProcessingState::completeStatement($pdo, $statementId);
 
-        // Recompute matched_count na výpisu
-        $pdo->prepare(
-            "UPDATE bank_statements
-                SET matched_count = (
-                    SELECT COUNT(*) FROM bank_transactions
-                     WHERE statement_id = ?
-                       AND match_status IN ('auto_exact', 'auto_partial', 'manual')
-                )
-              WHERE id = ?"
-        )->execute([$statementId, $statementId]);
+        $this->rematcher->recountStatements([$statementId]);
 
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $this->logger->log('bank.statement_rematch', $userId ?: null, 'bank_statement', $statementId, [

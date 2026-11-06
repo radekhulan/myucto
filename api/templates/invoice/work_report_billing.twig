@@ -1,0 +1,20 @@
+{# Rekapitulace používá stejné serverové řádky jako přenos do faktury. #}
+<div class="wr-title" style="font-size:10pt;margin-top:6mm;">{{ t('Cenová rekapitulace', 'Billing summary') }}</div>
+<table class="items">
+  <thead><tr>
+    <th>{{ t('Popis', 'Description') }}</th>
+    {% if wr_original_display.hours %}<th class="num nowrap">{{ t('Množství', 'Quantity') }}</th>{% endif %}
+    {% if wr_original_display.rate %}<th class="num nowrap">{{ invoice.prices_include_vat ? t('Cena/MJ s DPH', 'Unit price incl. VAT') : t('Cena/MJ', 'Unit price') }}</th>{% endif %}
+    <th class="num nowrap">{{ invoice.prices_include_vat ? t('Celkem s DPH', 'Total incl. VAT') : t('Celkem', 'Total') }}</th>
+  </tr></thead>
+  <tbody>
+    {% for row in work_report.billing_preview.items|default([]) %}
+    <tr><td>{{ row.description|nl2br }}</td>
+      {% if wr_original_display.hours %}<td class="num nowrap">{% if row.duration_minutes is not null %}{{ (row.duration_minutes // 60) }}:{{ '%02d'|format(row.duration_minutes % 60) }}{% else %}{{ row.quantity|number_format(row.unit == 'ks' ? 0 : 3, decimal_sep, thousand_sep) }}{% endif %} {{ row.unit }}</td>{% endif %}
+      {% if wr_original_display.rate %}<td class="num nowrap">{{ row.unit_price_without_vat|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>{% endif %}
+      <td class="num nowrap">{{ row.total_amount|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td>
+    </tr>
+    {% endfor %}
+    <tr class="wr-total"><td colspan="{{ 1 + (wr_original_display.hours ? 1 : 0) + (wr_original_display.rate ? 1 : 0) }}" style="text-align:right">{{ t('Celkem', 'Total') }}</td><td class="num nowrap">{{ work_report.billing_preview.total_amount|default(0)|number_format(2, decimal_sep, thousand_sep) }} {{ invoice.currency }}</td></tr>
+  </tbody>
+</table>

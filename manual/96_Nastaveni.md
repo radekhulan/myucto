@@ -42,12 +42,12 @@ Správa opakovaně používaných fakturačních položek je kvůli návaznosti 
 
 Nastavení globálních položek smí měnit jen superadministrátor nebo administrátor; viz [§ 96.4](#964-krok-za-krokem-uzivatele-role-a-pristup-k-firmam).
 
-V **Nastavení / Účetní rámec** lze pro testování zvolit **Nevýdělečné organizace (vyhláška 504)**. Zadejte první den existujícího účetního období a použijte **Uložit účetní rámec samostatně**. Změna vyžaduje příslušné oprávnění a v dotčeném intervalu nesmějí být zaúčtované zápisy. Přímo zde lze rámec 504 zapnout jen firmě bez účetní historie, tedy bez jediného zápisu v deníku a s prázdnou nebo nedotčenou výchozí osnovou. Nedotčená osnova podle vyhlášky 500 (žádný vlastní ani upravený účet a žádné použití v dokladech, předkontacích ani nastavení) se při uložení nahradí osnovou podle vyhlášky 504. Firmě, která už účtuje, aplikace změnu odmítne a nabídne odkaz na **Převod účetního rámce**. Platnost změn je vidět v historii rámce.
+V **Nastavení / Účetní rámec** lze zvolit **Nevýdělečné organizace (vyhláška 504)**. Zadejte první den existujícího účetního období a použijte **Uložit účetní rámec samostatně**. Změna vyžaduje příslušné oprávnění a v dotčeném intervalu nesmějí být zaúčtované zápisy. Přímo zde lze rámec 504 zapnout jen firmě bez účetní historie, tedy bez jediného zápisu v deníku a s prázdnou nebo nedotčenou výchozí osnovou. Nedotčená osnova podle vyhlášky 500 (žádný vlastní ani upravený účet a žádné použití v dokladech, předkontacích ani nastavení) se při uložení nahradí osnovou podle vyhlášky 504. Firmě, která už účtuje, aplikace změnu odmítne a nabídne odkaz na **Převod účetního rámce**. Platnost změn je vidět v historii rámce.
 
 U rozpoznané právní formy spolku, nadace, ústavu nebo SVJ se zobrazí doporučení rámce 504. Tlačítko **Zvolit doporučený rámec** pouze připraví výběr. Nic neukládá a nenahrazuje datum účinnosti ani samostatné potvrzení změny. Právní forma sama nepotvrzuje veřejnou prospěšnost ani osvobození příjmů. Existující účetnictví se převádí řízeně na hranici období přes **Převod účetního rámce**. Pro SVJ tato stránka místo formuláře vysvětlí, že se převádějí doložené počáteční stavy jednotek, a nabídne odkaz na Počáteční stavy SVJ. Nová firma, u které rejstřík uvede právní formu spolku, nadace, ústavu nebo SVJ, dostane rámec 504 i osnovu podle vyhlášky 504 rovnou při založení.
 
-> [!WARNING]
-> Účetní rámec 504 je v testování a zatím není vhodný pro produkční účetnictví. Dostupnost výpočtu, finalizace a podání DPPO závisí na období, doložených podkladech a podporované verzi formuláře; podrobnosti jsou v [Daň z příjmů](43_Dan_z_prijmu.md). V této sekci se při výběru nebo používání rámce 504 zobrazuje žluté upozornění.
+> [!NOTE]
+> Účetní rámec 504 je určen pro produkční účetnictví nevýdělečných organizací. Dostupnost výpočtu, finalizace a podání DPPO závisí na období, doložených podkladech a podporované verzi formuláře; podrobnosti jsou v [Daň z příjmů](43_Dan_z_prijmu.md).
 
 
 Přepnutí rámce nepřevádí upravený ani používaný účtový rozvrh podle vyhlášky 500. Rozvrh podle vyhlášky 504 vznikne, když je rozvrh prázdný nebo je to nedotčená výchozí šablona.
@@ -112,6 +112,9 @@ Správce instance používá oddělené technické přiřazení popsané níže;
 **Odebrat uživatele:** aktivního uživatele nejdřív **deaktivujte**. U neaktivního se pak zobrazí **Smazat**. Smazání je
 trvalé a aplikace ho odmítne, pokud jsou na uživatele navázaná firemní, účetní nebo auditní data. V takovém případě účet
 ponechte deaktivovaný.
+
+**Aktivní relace:** superadmin otevře přehled všech přihlášení přes `Systém → Uživatelé → Aktivní relace`.
+Podrobnosti a odvolání relace popisuje [§ 101.9.1](101_Bezpecnost.md#10191-aktivni-relace).
 
 **Role a oprávnění:** `Systém → Role a oprávnění`. Superadmin může vytvořit interní roli typu **staff** nebo externí
 roli typu **client** a pro každou nastavit oprávnění po modulech a významných akcích (viz [§ 96.16.4](#96164-role-a-opravneni)).
@@ -699,15 +702,19 @@ rolí bez jiných rolí licenční místo nečerpá. Vlastní čtecí role, klie
 i technické účty se do limitu aktivních uživatelů počítají, a to i při přiřazení
 jiné role pouze pro jednu firmu. Podrobnosti jsou v [§ 104.10.3](104_Licence_a_aktivace.md#104103-zkusebni-obdobi-a-stavy-licence).
 
-Provozní nastavení firmy má pět samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
-**Branding firmy**, **Platební QR firmy** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
+Provozní nastavení firmy má šest samostatných oprávnění: **Odesílací profily firmy**, **E-mailové šablony firmy**,
+**Branding firmy**, **Platební QR firmy**, **Výchozí hodnoty dokladů** a klientské **Firemní podpisové profily a PDF podpisy**. Každou oblast lze
 samostatně zakázat nebo povolit pro zápis. V `Firma → Nastavení firmy` se zobrazí jen povolené záložky; totéž platí
 pro přímý odkaz a pro vlastní klientskou doménu. Samotné **Nastavení firmy** přístup do těchto editorů nezapíná.
 Právo **Měnit nastavení firmy** zůstává interní správě právních, daňových a účetních údajů.
+Oprávnění **Branding firmy** umožňuje upravit také vzhled PDF: kompaktní řádky položek, zobrazení autora dokladu, rozpis slevy a balení, bankovní spojení v patičce a sloupce a kompaktní zobrazení výkazu práce. Interní uživatelé nastavují vzhled v `Firma → Branding` nebo v `Firma → Nastavení`; klienti s tímto oprávněním v `Firma → Nastavení firmy` na záložce **Branding**. Kontaktní údaje brandingových profilů se spravují na stejné záložce. Volby vzhledu nemění účetní ani daňové údaje. Změna vzhledu se projeví u konceptů faktur. Již uložená PDF vystavených dokladů zůstávají zachována; výkazy u vystavených faktur zachovávají původní podobu i po přegenerování PDF.
+
 Interní role mají branding v položce `Firma → Branding`, platební QR a e-mailové šablony v `Firma → Nastavení`
 a superadmin odesílací profily v `Systém → E-maily a certifikáty`. Položka `Firma → Nastavení firmy` se jim proto
-v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR a e-mailovým šablonám
+v menu ukáže jen kvůli oblasti, kterou jinde nenajdou: odesílacím profilům, nebo platebnímu QR, e-mailovým šablonám a výchozím hodnotám dokladů
 u role bez práva **Měnit nastavení firmy**.
+
+Oprávnění **Výchozí hodnoty dokladů** (`settings.invoice_defaults`) se zápisem dovolí měnit výchozí splatnost včetně jednotky, hodinovou sazbu a zapnutí a český i anglický text poznámky pod položkami. Interní správce je najde v `Firma → Nastavení`; klient a interní uživatel bez práva měnit celé nastavení firmy v `Firma → Nastavení firmy → Výchozí hodnoty dokladů`. Hodnoty se používají při zakládání nových dokladů; již uložené koncepty a vystavené doklady zůstávají beze změny. Měna, DPH a zaokrouhlování do tohoto oprávnění nepatří. Poznámka může mít nejvýše 5 000 znaků a hodinová sazba šest desetinných míst. Běžná klientská a účetní role toto právo ve výchozím stavu nemá. Odebrání práva platí i pro uživatele s právem **Měnit nastavení firmy**.
 
 Klient s právem spravovat firemní podpisové profily může pro firmu nahrát certifikát P12/PFX a nastavit jeho použití
 pro PDF výstupy. Pro propojení profilu s odesílacím profilem potřebuje také správu odesílacích profilů. Správa se týká

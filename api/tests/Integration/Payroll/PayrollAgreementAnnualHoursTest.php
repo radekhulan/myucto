@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollPeopleRepository;
 use MyInvoice\Service\Payroll\Import\Attendance\AttendanceImportService;
@@ -35,7 +34,7 @@ final class PayrollAgreementAnnualHoursTest extends TestCase
     protected function setUp(): void
     {
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->container = $container;
             $this->db = $container->get(Connection::class);
             $this->people = $container->get(PayrollPeopleRepository::class);

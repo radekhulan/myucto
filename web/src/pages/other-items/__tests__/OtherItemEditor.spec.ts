@@ -8,8 +8,10 @@ const m = vi.hoisted(() => ({
   routerReplace: vi.fn(),
   listAccounts: vi.fn(),
   listKinds: vi.fn(),
+  saveProfiles: vi.fn(),
   dimsSave: vi.fn(),
   dimsLoad: vi.fn(),
+  toastError: vi.fn(),
   supplier: { accounting_mode: 'tax_evidence' },
 }))
 
@@ -18,15 +20,21 @@ vi.mock('@/composables/useFormat', () => ({ formatMoney: (value: number) => Stri
 
 vi.mock('@/api/otherItems', () => ({
   otherItemsApi: { get: m.get, update: m.update, create: vi.fn() },
-  otherItemKindsApi: { list: m.listKinds },
+  otherItemKindsApi: { list: m.listKinds, savePostingProfiles: m.saveProfiles },
 }))
 
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplier: m.supplier }),
 }))
 
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true }) }))
+vi.mock('@/api/otherItemSettings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/otherItemSettings')>()),
+  otherItemSettingsApi: { get: vi.fn().mockResolvedValue({ document_folder: 'Smlouvy/{YYYY}', document_folder_default: 'Ostatní pohledávky a závazky/{YYYY}/{MM}', is_default: false }), update: vi.fn() },
+}))
+
 vi.mock('@/composables/useToast', () => ({
-  useToast: () => ({ error: vi.fn(), success: vi.fn() }),
+  useToast: () => ({ error: m.toastError, success: vi.fn() }),
 }))
 
 vi.mock('vue-router', () => ({
@@ -220,6 +228,44 @@ describe('OtherItemEditor partner', () => {
     expect(pickers[1]!.props('accounts')).toHaveLength(3)
   })
 
+  it('načte účet protistrany jako číslo/kód banky a odešle ho bez samostatného kódu', async () => {
+    m.get.mockResolvedValue({ ...(await m.get()), counterparty_account: '19-1000000005', counterparty_bank_code: '0100' })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    const account = wrapper.get('[data-test="counterparty-account"]')
+    expect((account.element as HTMLInputElement).value).toBe('19-1000000005/0100')
+    await account.setValue('CZ18 0100 0000 0010 0000 0005')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).toHaveBeenCalledWith(42, expect.objectContaining({
+      counterparty_account: 'CZ18 0100 0000 0010 0000 0005',
+      counterparty_bank_code: null,
+    }))
+  })
+
+  it('účet protistrany v neplatném tvaru neodešle', async () => {
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('[data-test="counterparty-account"]').setValue('1000000005')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).not.toHaveBeenCalled()
+    expect(m.toastError).toHaveBeenCalledWith('other_items.counterparty_account_invalid')
+  })
+
+  it('prázdný účet protistrany pošle jako null', async () => {
+    m.get.mockResolvedValue({ ...(await m.get()), counterparty_account: '1000000005', counterparty_bank_code: '0100' })
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('[data-test="counterparty-account"]').setValue('  ')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(m.update).toHaveBeenCalledWith(42, expect.objectContaining({ counterparty_account: null, counterparty_bank_code: null }))
+  })
+
   it('při úpravě zachová rozdělenou kontaci a odešle oba protiřádky', async () => {
     m.supplier.accounting_mode = 'double_entry'
     m.listAccounts.mockResolvedValue([
@@ -246,5 +292,50 @@ describe('OtherItemEditor partner', () => {
       counter_account_code: null,
       posting_lines: [{ account_code: '518', amount: 700 }, { account_code: '378', amount: 500 }],
     }))
+  })
+
+  it('nabídne návrh účtů druhu bez profilu a uloží ho jako výchozí jen po kliknutí', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    const suggested = { id: null, side: 'payable', builtin: true, builtin_code: 'rent', name: null, is_active: true,
+      posting_profiles: {}, posting_suggestion: { debit_account_code: '381', credit_account_code: '325', available: true } }
+    m.listKinds.mockResolvedValue([suggested])
+    m.saveProfiles.mockResolvedValue({})
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.get('[data-test="origin-suggestion"]').text()).toContain('other_items.posting.suggested_for_kind')
+
+    await wrapper.get('[data-test="origin-suggestion-use"]').trigger('click')
+    expect(wrapper.find('[data-test="origin-suggestion"]').exists()).toBe(false)
+    const pickers = wrapper.findAllComponents({ name: 'ChartAccountSelect' })
+    expect(pickers[0]!.props('modelValue')).toBe('325')
+    expect(pickers[1]!.props('modelValue')).toBe('381')
+    expect(m.saveProfiles).not.toHaveBeenCalled()
+  })
+
+  it('návrh uloží jako profil vzniku druhu a znovu načte druhy', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    m.listKinds.mockResolvedValue([{ id: null, side: 'payable', builtin: true, builtin_code: 'rent', name: null, is_active: true,
+      posting_profiles: {}, posting_suggestion: { debit_account_code: '381', credit_account_code: '325', available: true } }])
+    m.saveProfiles.mockResolvedValue({})
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    await wrapper.get('[data-test="origin-suggestion-save"]').trigger('click')
+    await flushPromises()
+    expect(m.saveProfiles).toHaveBeenCalledWith(expect.objectContaining({ builtin_code: 'rent' }), {
+      origin: { debit_account_code: '381', credit_account_code: '325', description_template: null, dimensions: [], is_active: true },
+    })
+    expect(m.listKinds).toHaveBeenCalledTimes(2)
+  })
+
+  it('nenabízí návrh, když není použitelný nebo je v daňové evidenci', async () => {
+    m.supplier.accounting_mode = 'double_entry'
+    m.listAccounts.mockResolvedValue([])
+    m.listKinds.mockResolvedValue([{ id: null, side: 'payable', builtin: true, builtin_code: 'rent', name: null, is_active: true,
+      posting_profiles: {}, posting_suggestion: { debit_account_code: '381', credit_account_code: '325', available: false } }])
+    const wrapper = shallowMount(OtherItemEditor)
+    await flushPromises()
+    expect(wrapper.find('[data-test="origin-suggestion"]').exists()).toBe(false)
   })
 })

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Export\Instance\InstanceExportService;
@@ -80,7 +79,7 @@ final class PayrollInstanceExportCoverageTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB connection.');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->scopes = $container->get(TenantScopeResolver::class);
             $this->export = $container->get(InstanceExportService::class);

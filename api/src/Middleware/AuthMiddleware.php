@@ -347,6 +347,16 @@ final class AuthMiddleware implements MiddlewareInterface
 
         if ($request->getAttribute(self::ATTR_USER) === null) {
             $response = $this->responseFactory->createResponse(401);
+            // Relace ukončená novějším přihlášením nad limit licence dostane
+            // vlastní kód, aby aplikace řekla, proč uživatele odhlásila.
+            if ($token !== '' && $this->sessions->isSuperseded($token)) {
+                return Json::error(
+                    $response,
+                    'session_superseded',
+                    'Byli jste odhlášeni, protože se k vašemu účtu přihlásil někdo jiný.',
+                    401,
+                );
+            }
             return Json::error($response, 'unauthenticated', 'Nepřihlášený uživatel.', 401);
         }
 

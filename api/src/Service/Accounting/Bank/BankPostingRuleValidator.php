@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Accounting\Bank;
 
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Service\Accounting\ForeignCurrencyAccountPolicy;
+use MyInvoice\Service\Accounting\OtherItemException;
+use MyInvoice\Service\Accounting\OtherItemService;
 use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Bank\AccountNumberNormalizer;
@@ -21,7 +23,10 @@ final class BankPostingRuleValidator
 {
     private const SALDO_BLACKLIST = ['311', '321', '314', '324', '325'];
 
-    public function __construct(private readonly ChartOfAccountsRepository $accounts) {}
+    public function __construct(
+        private readonly ChartOfAccountsRepository $accounts,
+        private readonly OtherItemService $otherItems,
+    ) {}
 
     /**
      * Nové pravidlo. `mode` je vždy 'suggest' (R7, H4e); automatiku zapíná jen
@@ -38,7 +43,11 @@ final class BankPostingRuleValidator
         }
         $debit = trim((string) ($body['debit_account_code'] ?? ''));
         $credit = trim((string) ($body['credit_account_code'] ?? ''));
-        $this->assertAccounts($supplierId, $direction, $debit, $credit);
+        $currency = strtoupper(self::nn($body['applies_currency'] ?? null) ?? 'CZK');
+        $otherItemId = $this->otherItemTarget($supplierId, $direction, $body['other_item_id'] ?? null, $debit, $credit, $currency);
+        if ($otherItemId === null) {
+            $this->assertAccounts($supplierId, $direction, $debit, $credit);
+        }
 
         $account = self::nn($body['counterparty_account'] ?? null, static fn (string $v): string => AccountNumberNormalizer::normalize($v));
         $vs = self::nn($body['variable_symbol'] ?? null, static fn (string $v): string => VariableSymbolNormalizer::digits($v));
@@ -57,12 +66,13 @@ final class BankPostingRuleValidator
         if ($operationType !== null && !in_array($operationType, OperationType::all(), true)) {
             throw self::err('invalid_operation_type', 'Neplatný typ operace.');
         }
-        $currency = strtoupper(self::nn($body['applies_currency'] ?? null) ?? 'CZK');
         $this->assertFxAccounts($direction, $debit, $credit, $currency);
 
         return [
             'name'                 => self::nn($body['name'] ?? null) ?? 'Pravidlo',
             'direction'            => $direction,
+            // Vlastnictví účtu ověřuje volající (REST API), import ho dohledá podle čísla.
+            'bank_account_id'      => self::positiveId($body['bank_account_id'] ?? null),
             'counterparty_account' => $account,
             'counterparty_bank'    => $bank,
             'counterparty_prefix'  => $prefix,
@@ -78,10 +88,67 @@ final class BankPostingRuleValidator
             'operation_type'       => $operationType,
             'auto_amount_cap'      => self::amount($body['auto_amount_cap'] ?? null),
             'applies_currency'     => $currency,
+            'other_item_id'        => $otherItemId,
         ];
     }
 
-    public function assertAccounts(int $supplierId, string $direction, string $debit, string $credit): void
+    /**
+     * Cílová ostatní položka pravidla: patří firmě, je potvrzená nebo zaúčtovaná, v CZK,
+     * pohledávka u příchozí a závazek u odchozí platby. Pravidlo pak účtuje na účet položky
+     * (ne-bankovní strana = účet pohledávky či závazku položky), aby přiřazení úhrady
+     * nevyžadovalo druhý zápis. Saldokontní účet (325, ...) tu zákaz H2 neporušuje: platbu
+     * páruje přiřazení k položce, pravidlo jen určuje kterou. Ověří i účty v osnově a bankovní
+     * stranu ({@see assertAccounts}). Prázdná hodnota cíl ruší.
+     */
+    public function otherItemTarget(int $supplierId, string $direction, mixed $raw, string $debit, string $credit, string $currency): ?int
+    {
+        if ($raw === null || $raw === '' || $raw === 0 || $raw === '0') {
+            return null;
+        }
+        $id = filter_var($raw, FILTER_VALIDATE_INT);
+        if ($id === false || $id <= 0) {
+            throw self::err('rule_other_item_invalid', 'Neplatná ostatní položka pravidla.');
+        }
+        try {
+            $item = $this->otherItems->get($supplierId, $id);
+            $account = $this->otherItems->settlementAccountCode($supplierId, $item);
+        } catch (OtherItemException) {
+            throw self::err('rule_other_item_invalid', 'Ostatní položka pravidla nebyla nalezena nebo nemá platný zápis.');
+        }
+        if (!in_array((string) $item['status'], ['confirmed', 'posted'], true)) {
+            throw self::err('rule_other_item_invalid', 'Pravidlo může přiřazovat jen potvrzené nebo zaúčtované položce.');
+        }
+        if ((string) $item['currency'] !== 'CZK' || $currency !== 'CZK') {
+            throw self::err('rule_other_item_currency', 'Pravidlo s ostatní položkou pracuje jen v CZK.');
+        }
+        if ((string) $item['side'] !== ($direction === 'incoming' ? 'receivable' : 'payable')) {
+            throw self::err('rule_other_item_direction', $direction === 'incoming'
+                ? 'Příchozí platbu lze přiřadit jen pohledávce.'
+                : 'Odchozí platbu lze přiřadit jen závazku.');
+        }
+        $this->assertAccounts($supplierId, $direction, $debit, $credit, $account ?? false);
+        $nonBank = $direction === 'incoming' ? $credit : $debit;
+        if ($account !== null && $nonBank !== $account) {
+            throw self::err('rule_other_item_account', 'Pravidlo s ostatní položkou musí účtovat na její účet ' . $account . '.');
+        }
+        return $id;
+    }
+
+    /** Volitelné id (vlastní účet pravidla): prázdné nebo 0 = bez omezení. */
+    public static function positiveId(mixed $raw): ?int
+    {
+        if ($raw === null || $raw === '' || $raw === 0 || $raw === '0' || $raw === false) {
+            return null;
+        }
+        $id = filter_var($raw, FILTER_VALIDATE_INT);
+        if ($id === false || $id <= 0) {
+            throw self::err('invalid_bank_account', 'Neplatný vlastní bankovní účet pravidla.');
+        }
+        return $id;
+    }
+
+    /** @param string|false|null $otherItemAccount účet cílové položky pravidla (false = položka bez účtu), null = bez položky */
+    public function assertAccounts(int $supplierId, string $direction, string $debit, string $credit, string|false|null $otherItemAccount = null): void
     {
         $map = $this->accounts->codeToIdMap($supplierId);
         foreach ([$debit, $credit] as $code) {
@@ -94,8 +161,11 @@ final class BankPostingRuleValidator
         if (!str_starts_with($bankSide, '221')) {
             throw self::err('rule_bank_side_required', 'Bankovní strana musí být účet 221 dle směru platby.');
         }
-        // H2: ne-bankovní strana nesmí být saldokontní.
+        // H2: ne-bankovní strana nesmí být saldokontní. Výjimkou je účet cílové položky pravidla.
         $nonBank = $direction === 'incoming' ? $credit : $debit;
+        if (is_string($otherItemAccount) && $nonBank === $otherItemAccount) {
+            return;
+        }
         foreach (self::SALDO_BLACKLIST as $prefix) {
             if (str_starts_with($nonBank, $prefix)) {
                 throw self::err('rule_saldo_forbidden', 'Platby faktur se párují, ne účtují pravidlem.');

@@ -288,8 +288,8 @@ function clientRouteParityErrors(manifestRoutes: readonly ManifestRoute[]): stri
 describe('sdílená klientská plocha vlastní domény', () => {
   it('obsahuje auditovanou klientskou plochu včetně nastavení firmy a legacy aliasů', () => {
     // Archiv podání a klientské MCP přidávají dvě samostatné auditované routy.
-    expect(clientDomainRoutes).toHaveLength(60)
-    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(60)
+    expect(clientDomainRoutes).toHaveLength(61)
+    expect(new Set(clientDomainRoutes.map(route => route.name)).size).toBe(61)
     expect(clientDomainRoutes.slice(-3).map(route => route.name))
       .toEqual(['data-exchange', 'admin-export', 'admin-import'])
   })
@@ -311,7 +311,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       if (route!.path.includes(':')) parameterized.push(definition.name)
     }
 
-    expect(rendered).toHaveLength(52)
+    expect(rendered).toHaveLength(53)
     expect(redirects).toEqual([
       'profile-totp',
       'profile-shortcuts',
@@ -342,7 +342,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
     }
     expect(Object.fromEntries(kindCounts)).toEqual({
       client_redirect: 4,
-      permission: 44,
+      permission: 45,
       router_redirect: 8,
       self_service: 4,
     })
@@ -470,7 +470,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
 
   it('pokrývá každý literální cíl klientské navigace manifestem a routerem', () => {
     const paths = [...new Set(clientNavigationPaths())]
-    expect(paths).toHaveLength(25)
+    expect(paths).toHaveLength(26)
 
     const routeNames = new Set(clientDomainRoutes.map(route => route.name))
     for (const path of paths) {
@@ -483,6 +483,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
 
     expect([...new Set(paths.map(path => String(router.resolve(path).name)))].sort()).toEqual([
       'admin-price-list',
+      'admin-work-report-billing-templates',
       'bank-statements',
       'client-new',
       'clients',

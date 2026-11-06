@@ -4,6 +4,82 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { installFrameNavigation, installShiftClickNavigation, internalAnchorNavigation } from '../frameNavigation'
 
 describe('navigace uvnitř pracovního okna', () => {
+  it.each(['https://public.example.test/payroll?plan=addon#order', 'http://docs.example.test/manual', '//support.example.test/help'])('externí odkaz %s připraví pro nativní otevření mimo pracovní iframe', href => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: { render: () => null } }] })
+    const anchor = document.createElement('a')
+    anchor.href = href
+    anchor.rel = 'nofollow noreferrer'
+    const label = document.createElement('span')
+    anchor.append(label)
+    const event = new MouseEvent('click', { button: 0, cancelable: true })
+    Object.defineProperty(event, 'target', { value: label })
+
+    expect(internalAnchorNavigation(router, event, true, true)).toBeNull()
+    expect(anchor.target).toBe('_blank')
+    expect(Array.from(anchor.relList)).toEqual(['nofollow', 'noreferrer', 'noopener'])
+    expect(event.defaultPrevented).toBe(false)
+    expect(internalAnchorNavigation(router, event, true, true)).toBeNull()
+    expect(Array.from(anchor.relList)).toEqual(['nofollow', 'noreferrer', 'noopener'])
+  })
+
+  it.each(['_self', '_blank', '_parent', '_top', 'named-window', ''])('zachová explicitní cíl externího odkazu %j', target => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const anchor = document.createElement('a')
+    anchor.href = 'https://public.example.test/order'
+    anchor.setAttribute('target', target)
+    anchor.rel = 'nofollow'
+    const event = new MouseEvent('click', { button: 0, cancelable: true })
+    Object.defineProperty(event, 'target', { value: anchor })
+
+    expect(internalAnchorNavigation(router, event, true, true)).toBeNull()
+    expect(anchor.getAttribute('target')).toBe(target)
+    expect(anchor.rel).toBe('nofollow')
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it.each([{ ctrlKey: true }, { metaKey: true }, { shiftKey: true }, { altKey: true }, { button: 1 }, { button: 2 }])('ponechá modifikované externí kliknutí prohlížeči: %j', options => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const anchor = document.createElement('a')
+    anchor.href = 'https://public.example.test/order'
+    const event = new MouseEvent('click', { button: 0, cancelable: true, ...options })
+    Object.defineProperty(event, 'target', { value: anchor })
+
+    expect(internalAnchorNavigation(router, event, true, true)).toBeNull()
+    expect(anchor.hasAttribute('target')).toBe(false)
+    expect(anchor.hasAttribute('rel')).toBe(false)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it.each(['/invoices/42?view=detail#items', '#details', 'mailto:synthetic@example.test', 'tel:+420123456789', 'blob:https://public.example.test/synthetic-export'])('nemění cíl interních a newebových odkazů: %s', href => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/:pathMatch(.*)*', component: { render: () => null } }] })
+    const anchor = document.createElement('a')
+    anchor.href = href
+    const event = new MouseEvent('click', { button: 0, cancelable: true })
+    Object.defineProperty(event, 'target', { value: anchor })
+
+    internalAnchorNavigation(router, event, true, true)
+    expect(anchor.hasAttribute('target')).toBe(false)
+    expect(anchor.hasAttribute('rel')).toBe(false)
+    expect(event.defaultPrevented).toBe(false)
+  })
+
+  it('vynechá stahování a kliknutí zrušené jiným listenerem', () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [] })
+    const anchor = document.createElement('a')
+    anchor.href = 'https://public.example.test/export.csv'
+    anchor.download = ''
+    const event = new MouseEvent('click', { button: 0, cancelable: true })
+    Object.defineProperty(event, 'target', { value: anchor })
+
+    expect(internalAnchorNavigation(router, event, true, true)).toBeNull()
+    expect(anchor.hasAttribute('target')).toBe(false)
+    anchor.removeAttribute('download')
+    event.preventDefault()
+    expect(internalAnchorNavigation(router, event, true, true)).toBeNull()
+    expect(anchor.hasAttribute('target')).toBe(false)
+    expect(anchor.hasAttribute('rel')).toBe(false)
+  })
+
   it('Shift klik přesměruje do pravého panelu i bez aktivního rozdělení', () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id', component: { render: () => null } }] })
     const anchor = document.createElement('a')

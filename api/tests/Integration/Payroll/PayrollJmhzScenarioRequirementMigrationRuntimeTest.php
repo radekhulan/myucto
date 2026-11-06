@@ -138,6 +138,7 @@ final class PayrollJmhzScenarioRequirementMigrationRuntimeTest extends TestCase
             PHP_BINARY,
             $this->rootDir . '/api/bin/migrate.php',
             '--no-backfills',
+            '--no-analyze',
             '--only=1334_payroll_jmhz_spec_codebooks.sql,'
                 . '1335_payroll_jmhz_spec_marker_fidelity.sql,'
                 . '1339_payroll_jmhz_scenario_requirement_catalog.sql,'

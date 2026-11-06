@@ -79,7 +79,7 @@ final class AttendanceMyUctoSampleProfileTest extends TestCase
 
     public function testRegistryKeepsGiritonAndAddsMyUcto(): void
     {
-        self::assertSame(['giriton', 'myucto'], AttendanceSampleProfiles::keys());
+        self::assertSame(['giriton', 'myucto', 'pamica'], AttendanceSampleProfiles::keys());
         self::assertSame(AttendanceSampleProfile::NAME, AttendanceSampleProfiles::name('giriton'));
         self::assertSame(AttendanceSampleProfile::rules(), AttendanceSampleProfiles::rules('giriton'));
         self::assertSame(AttendanceSampleProfile::VERSION, AttendanceSampleProfiles::version('giriton'));

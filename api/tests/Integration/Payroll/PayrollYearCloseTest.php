@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollYearCloseAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -51,7 +50,7 @@ final class PayrollYearCloseTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->service = $container->get(PayrollYearCloseService::class);
             $this->action = $container->get(PayrollYearCloseAction::class);
@@ -148,7 +147,7 @@ final class PayrollYearCloseTest extends TestCase
             self::assertSame($employeeId, $blocker['people'][0]['employee_id']);
         }
 
-        $openings = Bootstrap::buildContainer()->get(PayrollOpeningBalanceService::class);
+        $openings = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollOpeningBalanceService::class);
         $months = [];
         for ($month = 1; $month <= 5; ++$month) {
             $months[] = [

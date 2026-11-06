@@ -36,7 +36,7 @@ use PHPUnit\Framework\TestCase;
 final class TaxConstantsPayrollRatesMatchRulesetTest extends TestCase
 {
     /** @var non-empty-list<int> $YEARS */
-    private const YEARS = [2025, 2026];
+    private const YEARS = [2025, 2026, 2027];
 
     /**
      * Sazby, které starší modul počítá — všechny, ne jen ty dvě zaměstnavatelské.

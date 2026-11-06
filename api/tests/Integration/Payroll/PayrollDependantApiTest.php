@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollDependantAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -62,7 +61,7 @@ final class PayrollDependantApiTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollDependantAction::class);
             $this->statutory = $container->get(
@@ -543,7 +542,7 @@ final class PayrollDependantApiTest extends TestCase
 
         $repository = new \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository(
             $this->db,
-            Bootstrap::buildContainer()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
+            \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
         );
         self::assertSame('8001010006', $repository->caregiverBirthNumbersFor($this->supplierId, [$this->employeeId])[$this->employeeId][$replacement['id']] ?? null);
     }
@@ -789,7 +788,7 @@ final class PayrollDependantApiTest extends TestCase
         $id = $this->createChild(['given_name' => 'Jana', 'family_name' => 'Nováková']);
         $repository = new \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository(
             $this->db,
-            Bootstrap::buildContainer()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
+            \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
         );
         self::assertSame([
             $this->employeeId => ['dependant-' . $id => [
@@ -824,7 +823,7 @@ final class PayrollDependantApiTest extends TestCase
 
         $repository = new \MyInvoice\Repository\Payroll\PayrollDependantJmhzIdentityRepository(
             $this->db,
-            Bootstrap::buildContainer()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
+            \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Security\PayrollSensitiveData::class),
         );
         self::assertSame(
             [$this->employeeId => [$claim['id'] => '8001010006']],

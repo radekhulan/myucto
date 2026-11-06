@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Repository;
 
+use MyInvoice\Service\Accounting\AccountCodeRange;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Dimension\DimensionFilter;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
@@ -1795,12 +1796,14 @@ final class JournalEntryRepository
     /** Je aktivní filtr na rozsah účtu (account_from/account_to)? SSOT pro buildWhere() i paginate(). */
     private static function hasAccountRangeFilter(array $filters): bool
     {
-        return !empty($filters['account_from']) || !empty($filters['account_to']);
+        // Kód „0“ (třída 0) je platná mez, proto porovnání s prázdným řetězcem, ne empty().
+        return (string) ($filters['account_from'] ?? '') !== '' || (string) ($filters['account_to'] ?? '') !== '';
     }
 
     /**
-     * Normalizované meze rozsahu účtu z filtru — chybějící strana se doplní neutrální
-     * hranicí. SSOT pro EXISTS filtr v buildWhere() i pro FILTERED_NET_AMOUNT_SUBQUERY
+     * Meze rozsahu účtu z filtru pro `BETWEEN ? AND ?`. Rozsah je prefixový včetně krajů
+     * (5 až 5 = třída 5, 501 až 518 včetně 518.100), pravidlo drží
+     * AccountCodeRange. SSOT pro EXISTS filtr v buildWhere() i pro FILTERED_NET_AMOUNT_SUBQUERY
      * v paginate() (obojí musí vidět STEJNÝ rozsah, jinak by se řádek objevil v seznamu,
      * ale sloupec Částka by počítal jiný rozsah účtů, než podle kterého se filtrovalo).
      *
@@ -1808,10 +1811,9 @@ final class JournalEntryRepository
      */
     private static function accountRangeBounds(array $filters): array
     {
-        return [
-            (string) ($filters['account_from'] ?? '0'),
-            (string) ($filters['account_to'] ?? 'ZZZZZZZZZZ'),
-        ];
+        // Vstup od uživatele už ověřil JournalAction (parse); kód z hledání účtu přichází
+        // z databáze a nemusí abecedou projít, proto se tu jen sestaví meze.
+        return AccountCodeRange::sqlBoundsFor((string) ($filters['account_from'] ?? ''), (string) ($filters['account_to'] ?? ''));
     }
 
     /**

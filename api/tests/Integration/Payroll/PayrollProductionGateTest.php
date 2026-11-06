@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollModuleStateRepository;
 use MyInvoice\Service\Payroll\PayrollProductionGate;
@@ -24,7 +23,7 @@ final class PayrollProductionGateTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->gate = new PayrollProductionGate(
             $container->get(PayrollModuleStateRepository::class),

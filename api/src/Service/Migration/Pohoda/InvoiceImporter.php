@@ -348,7 +348,7 @@ final class InvoiceImporter
             ? ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']]
             : self::payment($doc, $amounts);
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : 'sent');
-        $booked = !$review && $type !== 'proforma';
+        $booked = !$review && $type !== 'proforma' && !self::postedLater($doc);
         if ($doc['foreign'] !== '') {
             $amounts['items'] = ForeignCurrencyTakeover::withDerivedAmounts($amounts['items'], $doc['foreign_rate'], $doc['foreign_units'], $doc['foreign_total']);
         }
@@ -516,7 +516,7 @@ final class InvoiceImporter
         $pay = $type === 'tax_document'
             ? ['paid' => $amounts['total'], 'settled' => true, 'paid_at' => $doc['tax'] ?? $doc['issue']]
             : self::payment($doc, $amounts);
-        $unbooked = $review || $type === 'advance';
+        $unbooked = $review || $type === 'advance' || self::postedLater($doc);
         $status = $review ? 'draft' : ($pay['settled'] ? 'paid' : ($unbooked ? 'received' : 'booked'));
         // Datum pro KH je v Pohodě den, ke kterému účetní odpočet uplatnila - MyÚčto
         // ho respektuje jen jako ručně zadané datum přijetí (§ 73).
@@ -606,6 +606,17 @@ final class InvoiceImporter
             $p->count($step, 'advance_deductions_with_vat', $amounts['advance_items']);
         }
         $this->reportNumberAndReview($ctx, $step, $doc['number'], $number, $class['reasons']);
+    }
+
+    /**
+     * Předkontace „Nevím" (zaúčtuje se později): POHODA doklad do deníku nezapsala, takže
+     * převzatý doklad zaúčtovaný není a dostupné musí zůstat jeho zaúčtování. Jiné doklady
+     * bez zápisu se stejným číslem (předkontace „Bez", mzdové závazky, nulové doklady,
+     * zápis pod jiným číslem) se tím nemění, příznak zaúčtování u nich zůstává.
+     */
+    private static function postedLater(array $doc): bool
+    {
+        return mb_strtolower(trim(PohodaXml::text($doc['h'], 'accounting/ids'))) === 'nevím';
     }
 
     /** @return array<string,mixed> */

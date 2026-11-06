@@ -54,6 +54,18 @@ final class CashBackfill
 
         $stats = ['posted' => 0, 'skipped' => 0, 'failed' => 0];
         $skipReasons = [];
+        $issues = [];
+        $issue = static function (array $doc, string $severity, string $code, string $message) use (&$issues): void {
+            $issues[] = [
+                'source_type' => 'cash',
+                'source_id' => (int) $doc['id'],
+                'document_no' => trim((string) ($doc['doc_number'] ?? '')),
+                'entry_date' => (string) ($doc['issue_date'] ?? ''),
+                'severity' => $severity,
+                'error_code' => $code,
+                'message' => $message,
+            ];
+        };
         $sumAmount = 0.0;
         $ensuredYears = [];
         $processed = 0;
@@ -97,16 +109,22 @@ final class CashBackfill
                 if (in_array($e->errorCode, ['date_locked', 'period_not_open'], true)) {
                     $stats['skipped']++;
                     $skipReasons[$reason] = ($skipReasons[$reason] ?? 0) + 1;
+                    $issue($doc, 'skipped', $reason, $e->getMessage());
                     $emit(sprintf("  [SKIP] %-50s %s\n", $label, $e->getMessage()));
                 } else {
                     $stats['failed']++;
+                    $issue($doc, 'failed', $e->errorCode, $e->getMessage());
                     $emit(sprintf("  [FAIL] %-50s %s\n", $label, $e->getMessage()));
                 }
             } catch (CashException $e) {
                 $stats['failed']++;
+                $issue($doc, 'failed', $e->errorCode, $e->getMessage());
                 $emit(sprintf("  [FAIL] %-50s %s\n", $label, $e->getMessage()));
             } catch (\Throwable $e) {
                 $stats['failed']++;
+                $issue($doc, 'failed', 'processing_error', $e instanceof \PDOException
+                    ? 'Doklad se nepodařilo zpracovat kvůli chybě databáze.'
+                    : 'Doklad se nepodařilo zpracovat: ' . mb_substr($e->getMessage(), 0, 300));
                 $emit(sprintf("  [FAIL] %-50s %s\n", $label, $e->getMessage()));
             }
         }
@@ -120,6 +138,7 @@ final class CashBackfill
         return $stats + [
             'sum_amount' => round($sumAmount, 2),
             'skip_reasons' => $skipReasons,
+            'issues' => $issues,
             'processed' => $processed,
             'cancelled' => $cancelled,
         ];

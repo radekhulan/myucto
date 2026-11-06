@@ -1525,7 +1525,12 @@ zablokuje; revizi přepočtěte opravným během po schválení nemoci.
 **Pracující důchodce** nemá v hlášení údaje pro evidenční list (třída, dny
 a vyměřovací základ ELDP), vyloučené dny podle § 18 ale nese dál. Za
 pracujícího důchodce aplikace považuje zaměstnance s ověřenou slevou
-pracujícího důchodce v zákonné evidenci osoby.
+pracujícího důchodce v zákonné evidenci osoby. Měsíc, od kterého mu náleží
+výplata starobního důchodu v plné výši, ale hlášení ještě vykazuje s údaji
+pro evidenční list, i když v něm sleva už náleží (důchod od 1. dne měsíce):
+údaje se vyplňují do tohoto měsíce včetně, stejně jako roční evidenční list.
+Jen interval pojištění s nulou dnů se hlásí až od následujícího měsíce. Měsíc
+výplaty aplikace bere ze sekce **Pobíraný důchod** zákonné evidence osoby.
 
 **Zaměstnanec po dosažení důchodového věku** bez ověřené slevy pracujícího
 důchodce: kód ELDP v hlášení nese druhý znak `D` (například `1D+`) od dne
@@ -1850,15 +1855,34 @@ se u něj neukazuje. Dřív než osm dnů před nástupem aplikace přihlášku
 nepřipraví a napíše, od kterého dne to jde.
 
 **Události od 1. 1. 2027 (REGZEC27).** Ročník formuláře REGZEC určuje
-rozhodné datum události, ne den odeslání: nástup (A1), skončení (A2), skončení
-uvedené ve změně nebo opravě (A3, A4) a den platnosti (A5 až A7) od 1. 1. 2027
-se hlásí formulářem REGZEC27, dřívější události dál formulářem REGZEC25, i když
-je podáváte v roce 2027. Ostrá ČSSZ přijímá REGZEC27 až od 1. 1. 2027, proto
-plnou registraci s nástupem v prvních dnech ledna 2027 aplikace připraví
-nejdřív 1. 1. 2027. Částečné přihlášení PREZEC se ročníkem nemění a zaměstnance
-s českým občanstvím s nástupem v lednu 2027 jím přihlásíte už v prosinci, osm
-dnů před nástupem. U cizince ze státu mimo EHP chce REGZEC27 navíc platnost
-pobytu (od a do) a číslo orientační má u všech adres nejvýš čtyři znaky.
+rozhodné datum události: nástup (A1), skončení (A2) a den platnosti (A5 až A7)
+od 1. 1. 2027 se hlásí formulářem REGZEC27, dřívější události dál formulářem
+REGZEC25, i když je podáváte v roce 2027. U změny a opravy (A3, A4) rozhoduje
+jen datum skončení pracovního vztahu: u vztahu skončeného do 31. 12. 2026 jde
+REGZEC25, u trvajícího vztahu nebo skončeného později REGZEC27, a to i tehdy,
+když změna platí už od roku 2026. Ostrá ČSSZ přijímá REGZEC27 od 23. 12. 2026;
+změnu trvajícího vztahu připravenou dřív proto aplikace pošle ještě jako
+REGZEC25, od 23. 12. 2026 jako REGZEC27. Takovou změnu nebo opravu připravenou
+ve formátu REGZEC25, která do 22. 12. 2026 neodešla, aplikace od 23. 12. 2026
+neodešle: v kartě podání místo tlačítka odeslání nabídne **Připravit znovu**,
+které ze stejné schválené události připraví REGZEC27 a původní podání zruší.
+
+Změna i oprava u vztahu, který už skončil, nese datum skončení, jinak by ji
+ČSSZ předala k ručnímu zpracování. Datum musí být stejné jako to, které vede
+ČSSZ: aplikace ho bere z odeslané odhlášky (A2), a jen když žádná odhláška
+z aplikace neodešla, z karty pracovního vztahu. Liší-li se datum na kartě od
+odeslané odhlášky, změnu ani opravu neschválí; datum na kartě opravte. Opravu
+samotného data skončení (s písemným vysvětlením) aplikace nepodává, vyřiďte ji
+s ČSSZ. Oprava (A4) běžného pracovního vztahu s datem skončení nese navíc údaj
+o skončení úmrtím a podklady pro podporu v nezaměstnanosti; aplikace je převezme
+ze schválené odhlášky. Bez schválené odhlášky aplikace opravu skončeného
+vztahu odmítne a napíše proč.
+
+Plnou registraci
+s nástupem v lednu 2027 aplikace připraví nejdřív 23. 12. 2026 a vždy nejvýš
+osm dnů před nástupem. Částečné přihlášení PREZEC se ročníkem nemění.
+U cizince ze státu mimo EHP chce REGZEC27 navíc platnost pobytu (od a do)
+a číslo orientační má u všech adres nejvýš čtyři znaky.
 
 **Nástup v jiný den (oprava A4).** Byla-li přihláška podaná s předpokládaným
 dnem nástupu a zaměstnanec nastoupil jindy, podejte opravu A4. Opravu

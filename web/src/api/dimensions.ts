@@ -253,7 +253,7 @@ export function documentDimensionsBody(payload: DocumentDimensionsPayload) {
 export type DimensionDocType = 'purchase-invoices' | 'invoices' | 'cash-documents' | 'bank-transactions' | 'journal-templates' | 'recurring-templates' | 'other-items' | 'assets'
 
 /** Karta s výchozími dimenzemi (klient slouží jako odběratel i dodavatel). */
-export type DimensionDefaultsEntity = 'clients' | 'projects' | 'stock/items' | 'eshop/categories'
+export type DimensionDefaultsEntity = 'clients' | 'projects' | 'stock/items' | 'eshop/categories' | 'accounting/bank-accounts'
 
 /** history = návrh z posledního přijatého dokladu téhož dodavatele (nejnižší přednost). */
 export type DimensionPrefillSource = 'project' | 'client' | 'document' | 'history'

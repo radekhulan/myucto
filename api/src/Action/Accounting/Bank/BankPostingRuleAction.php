@@ -15,6 +15,10 @@ use MyInvoice\Service\Accounting\Bank\BankMessageNormalizer;
 use MyInvoice\Service\Accounting\Bank\BankPostingRuleValidator;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\Bank\BankRuleMatcher;
+use MyInvoice\Service\Accounting\Bank\StatementOwnAccount;
+use MyInvoice\Service\Accounting\Dimension\DimensionException;
+use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
+use MyInvoice\Service\Accounting\Dimension\DimensionService;
 use MyInvoice\Service\Accounting\OperationType;
 use MyInvoice\Service\Accounting\Learning\RulePromotionService;
 use MyInvoice\Service\ActivityLogger;
@@ -51,6 +55,7 @@ final class BankPostingRuleAction
         private readonly RulePromotionService $promotion,
         private readonly AccountingCorrectionRepository $corrections,
         private readonly SupplierBankAccountRepository $bankAccounts,
+        private readonly DimensionService $dimensions,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -65,7 +70,7 @@ final class BankPostingRuleAction
         $result = $this->rules->paginateForTenant($supplierId, $direction, $active, $perPage, ($page - 1) * $perPage);
         $items = array_map(static fn (array $rule): array => $rule + [
             'promotion_candidate' => RulePromotionService::isCandidate($rule),
-        ], $result['items']);
+        ], $this->withDimensions($supplierId, $result['items']));
         return Json::ok($response, ['items' => $items, 'total' => $result['total'], 'page' => $page, 'per_page' => $perPage]);
     }
 
@@ -79,7 +84,7 @@ final class BankPostingRuleAction
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
-        return Json::ok($response, ['rule' => $rule + ['promotion_candidate' => false]]);
+        return Json::ok($response, ['rule' => $this->withDimensions($supplierId, [$rule])[0] + ['promotion_candidate' => false]]);
     }
 
     public function demote(Request $request, Response $response, array $args): Response
@@ -92,7 +97,7 @@ final class BankPostingRuleAction
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
-        return Json::ok($response, ['rule' => $rule + ['promotion_candidate' => false]]);
+        return Json::ok($response, ['rule' => $this->withDimensions($supplierId, [$rule])[0] + ['promotion_candidate' => false]]);
     }
 
     public function history(Request $request, Response $response, array $args): Response
@@ -150,6 +155,8 @@ final class BankPostingRuleAction
         $body = (array) ($request->getParsedBody() ?? []);
         try {
             $data = $this->normalizeRule($supplierId, $body, true);
+            $this->assertOwnBankAccount($supplierId, $data['bank_account_id']);
+            $dimensions = $this->normalizeDimensions($supplierId, $body, []);
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
@@ -167,7 +174,15 @@ final class BankPostingRuleAction
             $data['mode_set_manually_at'] = date('Y-m-d H:i:s');
         }
         $userId = $this->userId($request);
-        $ruleId = $this->rules->insert($supplierId, $data, $userId);
+        // Pravidlo a jeho dimenze najednou: pravidlo z pohybu je rovnou automatické a souběžný
+        // import by jinak mohl pohyb zaúčtovat ještě bez dimenzí.
+        $ruleId = (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $data, $userId, $dimensions): int {
+            $id = $this->rules->insert($supplierId, $data, $userId);
+            if ($dimensions !== null) {
+                $this->rules->replaceDimensions($supplierId, $id, $dimensions);
+            }
+            return $id;
+        });
         $this->log($request, 'bank_rule.created', $ruleId, ['name' => $data['name']]
             + ($sourceTxId > 0 ? ['source_transaction_id' => $sourceTxId] : []));
 
@@ -185,7 +200,7 @@ final class BankPostingRuleAction
         } elseif (!empty($body['backfill_suggestions'])) {
             $payload['backfilled'] = $this->backfill($supplierId, $ruleId, $data['direction'], $userId);
         }
-        $rule = $this->rules->find($supplierId, $ruleId);
+        $rule = $this->withDimensions($supplierId, [$this->rules->find($supplierId, $ruleId)])[0];
         return Json::ok($response, ['rule' => $rule] + $payload, 201);
     }
 
@@ -204,11 +219,17 @@ final class BankPostingRuleAction
         $body = (array) ($request->getParsedBody() ?? []);
         try {
             $fields = $this->normalizeUpdate($supplierId, $existing, $body);
+            $dimensions = $this->normalizeDimensions($supplierId, $body, $this->rules->dimensions($supplierId, $id));
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
-        $this->rules->update($supplierId, $id, $fields);
-        $this->log($request, 'bank_rule.updated', $id, array_keys($fields));
+        (new DimensionPeriodGuard($this->db))->transaction(function () use ($supplierId, $id, $fields, $dimensions): void {
+            $this->rules->update($supplierId, $id, $fields);
+            if ($dimensions !== null) {
+                $this->rules->replaceDimensions($supplierId, $id, $dimensions);
+            }
+        });
+        $this->log($request, 'bank_rule.updated', $id, [...array_keys($fields), ...($dimensions !== null ? ['dimensions'] : [])]);
 
         // Sjednoceno s create: úprava kritérií pravidla umí přepočítat návrhy nad historií;
         // backfill přes suggestRuleForBackfill invaliduje starší pending návrhy dotčených pohybů
@@ -222,7 +243,7 @@ final class BankPostingRuleAction
                 $this->userId($request),
             );
         }
-        $rule = $this->rules->find($supplierId, $id);
+        $rule = $this->withDimensions($supplierId, [$this->rules->find($supplierId, $id)])[0];
         return Json::ok($response, $backfilled === null ? $rule : $rule + ['backfilled' => $backfilled]);
     }
 
@@ -286,15 +307,16 @@ final class BankPostingRuleAction
         $alreadyPosted = 0;
         $applicable = 0;
         $sample = [];
+        $ownAccounts = new StatementOwnAccount($this->db);
         foreach ($txs as $tx) {
-            if (!$this->matcher->matching($rule, [
+            if (!$this->matcher->matching($rule, $ownAccounts->withOwnAccount($supplierId, [
                 'amount'               => (float) $tx['amount'],
                 'variable_symbol'      => $tx['variable_symbol'],
                 'counterparty_account' => $tx['counterparty_account'],
                 'counterparty_bank'    => $tx['counterparty_bank'],
                 'description'          => $tx['description'],
                 'counterparty_name'    => $tx['counterparty_name'],
-            ])) {
+            ], $tx))) {
                 continue;
             }
             $matched++;
@@ -366,6 +388,10 @@ final class BankPostingRuleAction
         if (array_key_exists('counterparty_bank', $body)) {
             $fields['counterparty_bank'] = self::nn($body['counterparty_bank']);
         }
+        if (array_key_exists('bank_account_id', $body)) {
+            $fields['bank_account_id'] = BankPostingRuleValidator::positiveId($body['bank_account_id']);
+            $this->assertOwnBankAccount($supplierId, $fields['bank_account_id']);
+        }
         if (array_key_exists('counterparty_prefix', $body)) {
             $fields['counterparty_prefix'] = self::nn($body['counterparty_prefix'], static fn (string $v): string => ltrim(preg_replace('/\D/', '', $v) ?? '', '0'));
         }
@@ -384,9 +410,14 @@ final class BankPostingRuleAction
         }
         $debit = trim((string) ($body['debit_account_code'] ?? $existing['debit_account_code']));
         $credit = trim((string) ($body['credit_account_code'] ?? $existing['credit_account_code']));
-        if (array_key_exists('direction', $body)
+        // Pravidlo s cílovou ostatní položkou ověří účty spolu s položkou níže.
+        $keepsOtherItem = array_key_exists('other_item_id', $body)
+            ? !in_array($body['other_item_id'], [null, '', 0, '0'], true)
+            : ($existing['other_item_id'] ?? null) !== null;
+        if (!$keepsOtherItem && (array_key_exists('direction', $body)
             || array_key_exists('debit_account_code', $body)
-            || array_key_exists('credit_account_code', $body)) {
+            || array_key_exists('credit_account_code', $body)
+            || ($existing['other_item_id'] ?? null) !== null)) {
             $this->assertAccounts($supplierId, $direction, $debit, $credit);
         }
         if (array_key_exists('debit_account_code', $body) || array_key_exists('credit_account_code', $body)) {
@@ -417,6 +448,21 @@ final class BankPostingRuleAction
             (string) ($fields['applies_currency'] ?? $existing['applies_currency'] ?? 'CZK'),
         );
 
+        // Cílová ostatní položka: nová, nebo stávající po změně směru či kontace.
+        if (array_key_exists('other_item_id', $body)
+            || (($existing['other_item_id'] ?? null) !== null
+                && (array_key_exists('direction', $body) || array_key_exists('debit_account_code', $body)
+                    || array_key_exists('credit_account_code', $body) || array_key_exists('applies_currency', $body)))) {
+            $fields['other_item_id'] = $this->validator->otherItemTarget(
+                $supplierId,
+                $direction,
+                array_key_exists('other_item_id', $body) ? $body['other_item_id'] : $existing['other_item_id'],
+                (string) ($fields['debit_account_code'] ?? $existing['debit_account_code']),
+                (string) ($fields['credit_account_code'] ?? $existing['credit_account_code']),
+                (string) ($fields['applies_currency'] ?? $existing['applies_currency'] ?? 'CZK'),
+            );
+        }
+
         // Režim se mění výhradně auditovatelnými promote/demote endpointy.
         if (array_key_exists('mode', $body) && in_array($body['mode'], ['suggest', 'auto'], true)) {
             $mode = (string) $body['mode'];
@@ -430,6 +476,62 @@ final class BankPostingRuleAction
         }
 
         return $fields;
+    }
+
+    private function assertOwnBankAccount(int $supplierId, ?int $bankAccountId): void
+    {
+        if ($bankAccountId !== null && $this->bankAccounts->find($supplierId, $bankAccountId) === null) {
+            throw $this->err('invalid_bank_account', 'Vlastní bankovní účet pravidla ve firmě není.');
+        }
+    }
+
+    /**
+     * Dimenze pravidla z těla požadavku (typ => hodnota), null = beze změny. Prázdná mapa
+     * dimenze smaže, novou hodnotu ověří stejně jako výchozí dimenze klienta. Nezměněná
+     * mapa projde i u firmy, která dimenze mezitím vypnula (formulář je pak nezobrazí).
+     *
+     * @param array<string,mixed> $body
+     * @param array<int,int> $current dosavadní dimenze pravidla (hodnoty smí zůstat i uzavřené)
+     * @return array<int,int>|null
+     */
+    private function normalizeDimensions(int $supplierId, array $body, array $current): ?array
+    {
+        if (!array_key_exists('dimensions', $body)) {
+            return null;
+        }
+        $raw = $body['dimensions'];
+        if ($raw !== null && !is_array($raw)) {
+            throw $this->err('invalid_dimension', 'Dimenze pravidla musí být mapa typ => hodnota.');
+        }
+        $raw = array_filter((array) $raw, static fn (mixed $v): bool => $v !== null && $v !== '' && (int) $v > 0);
+        if ($raw === []) {
+            return [];
+        }
+        $asMap = [];
+        foreach ($raw as $typeId => $valueId) {
+            $asMap[(int) $typeId] = (int) $valueId;
+        }
+        ksort($asMap);
+        if ($asMap === $current) {
+            return null;
+        }
+        try {
+            $this->dimensions->requireEnabledFor($supplierId);
+            return $this->dimensions->normalize($supplierId, $raw, array_values($current));
+        } catch (DimensionException $e) {
+            // Neplatná hodnota je validační chyba pravidla (422), ne chyba serveru.
+            throw new \MyInvoice\Service\Accounting\PostingException($e->errorCode, $e->getMessage(), $e->httpStatus === 409 ? 409 : 422);
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rules
+     * @return list<array<string,mixed>>
+     */
+    private function withDimensions(int $supplierId, array $rules): array
+    {
+        $map = $this->rules->dimensionsFor($supplierId, array_map(static fn (array $r): int => (int) $r['id'], $rules));
+        return array_map(static fn (array $r): array => $r + ['dimensions' => (object) ($map[(int) $r['id']] ?? [])], $rules);
     }
 
     private function assertAccounts(int $supplierId, string $direction, string $debit, string $credit): void
@@ -534,6 +636,7 @@ final class BankPostingRuleAction
         $stmt = $this->db->pdo()->prepare(
             "SELECT bt.id, bt.posted_at, bt.amount, bt.variable_symbol, bt.counterparty_account,
                     bt.counterparty_bank, bt.description, bt.counterparty_name, bt.match_status,
+                    bs.account_number AS recipient_account, bs.bank_code AS recipient_bank,
                     EXISTS (SELECT 1 FROM journal_entries je WHERE je.supplier_id = ?
                               AND je.source_type = 'bank' AND je.source_id = bt.id AND je.reversed_by IS NULL) AS already_posted,
                     EXISTS (SELECT 1 FROM accounting_periods p WHERE p.supplier_id = ?

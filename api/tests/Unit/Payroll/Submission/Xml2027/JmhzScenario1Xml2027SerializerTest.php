@@ -226,6 +226,8 @@ final class JmhzScenario1Xml2027SerializerTest extends TestCase
         self::assertStringNotContainsString('<so:souhrn>', $packages[1]);
         self::assertStringContainsString('<formularePocetCelkem>4</formularePocetCelkem>', $packages[1]);
         foreach ($packages as $xml) {
+            // Diskuse JMHZ #627: všechny dílčí balíky jednoho hlášení nesou totéž datum a čas vyplnění.
+            self::assertStringContainsString('<datumVyplneni>2027-02-05T09:30:00Z</datumVyplneni>', $xml);
             $validator->validateFrozen($xml);
         }
     }

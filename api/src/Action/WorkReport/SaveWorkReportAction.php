@@ -39,6 +39,8 @@ final class SaveWorkReportAction
         private readonly IpMatcher $ipMatcher,
         private readonly InvoicePdfRenderer $pdf,
         private readonly DocumentLockService $locks,
+        private readonly \MyInvoice\Infrastructure\Database\Connection $db,
+        private readonly \MyInvoice\Repository\WorkReportBillingTemplateRepository $billingTemplates,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -77,7 +79,12 @@ final class SaveWorkReportAction
         // Částečný PUT (#113): vynechaný klíč = hodnota uloženého výkazu (items = jeho řádky).
         $stored = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
         // project_id je volitelné — faktura nemusí mít zakázku, výkaz pak také ne.
-        $projectIdRaw = array_key_exists('project_id', $body) ? $body['project_id'] : ($stored['project_id'] ?? null);
+        // Výchozí šablonu zakázky volí klient výslovně (billing_template_id); požadavek bez
+        // cenového ujednání (MCP, API) zůstává běžným výkazem bez pásmového účtování.
+        $inheritsBillingProject = $stored === null && (($body['billing_snapshot'] ?? null) !== null
+            || ($body['billing_template_id'] ?? null) !== null);
+        $projectIdRaw = array_key_exists('project_id', $body) ? $body['project_id']
+            : ($stored['project_id'] ?? ($inheritsBillingProject ? ($invoice['project_id'] ?? null) : null));
         $projectId = ($projectIdRaw !== null && $projectIdRaw !== '' && (int) $projectIdRaw > 0)
             ? (int) $projectIdRaw
             : null;
@@ -114,6 +121,39 @@ final class SaveWorkReportAction
         }
 
         try {
+            $templateId = array_key_exists('billing_template_id', $body) ? $body['billing_template_id'] : ($stored['billing_template_id'] ?? null);
+            $snapshot = $stored['billing_snapshot'] ?? null;
+            if (array_key_exists('billing_template_id', $body)) {
+                if ($templateId === null) {
+                    $snapshot = null;
+                } else {
+                    if (!filter_var($templateId, FILTER_VALIDATE_INT) || (int) $templateId <= 0) throw new \InvalidArgumentException('Neplatné cenové ujednání.');
+                    // Uložený otisk funguje i po archivaci šablony. Novou vazbu vždy ověřujeme proti firmě.
+                    if ((int) $templateId !== (int) ($stored['billing_template_id'] ?? 0)) {
+                        $snapshot = $this->billingTemplates->find((int) $templateId, SupplierGuard::currentId($request));
+                        if ($snapshot === null) throw new \InvalidArgumentException('Cenové ujednání nepatří aktuální firmě.');
+                    }
+                }
+            }
+            if (array_key_exists('billing_snapshot', $body)) $snapshot = $body['billing_snapshot'];
+            if ($snapshot !== null) {
+                $snapshot = \MyInvoice\Service\WorkReport\WorkReportBilling::validate($snapshot);
+                if ($snapshot['currency'] !== $invoice['currency']) throw new \InvalidArgumentException('Měna cenového ujednání se liší od měny faktury.');
+            }
+            $period = \MyInvoice\Service\WorkReport\WorkReportBilling::period(array_key_exists('billing_period', $body) ? $body['billing_period'] : ($stored['billing_period'] ?? null));
+        } catch (\InvalidArgumentException $e) {
+            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+        }
+
+        if ($invoice['status'] !== 'draft' && ($snapshot != ($stored['billing_snapshot'] ?? null)
+            || $period !== ($stored['billing_period'] ?? null)
+            || ($templateId === null ? null : (int) $templateId) !== ($stored['billing_template_id'] ?? null))) {
+            return Json::error($response, 'billing_conflict', 'Cenové ujednání a období lze měnit pouze na konceptu faktury.', 409);
+        }
+
+        if ($snapshot === null && ($stored['billing_snapshot'] ?? null) !== null && $items === null) $items = $stored['items'];
+
+        try {
             if ($items !== null) {
                 $items = array_map(
                     static fn (array $item): array => TimeBilling::normalizeWorkReportItem($item),
@@ -144,16 +184,51 @@ final class SaveWorkReportAction
             }
         }
 
-        $id = $this->repo->save($invoiceId, SupplierGuard::currentId($request), $projectId, $title, $items, $vatRateId);
-        if (array_key_exists('display_options', $body)) {
-            $this->repo->saveDisplayOptions($invoiceId, $displayOptions, SupplierGuard::currentId($request));
+        if ($snapshot !== null && $invoice['status'] === 'draft') {
+            try {
+                \MyInvoice\Service\WorkReport\WorkReportBilling::calculate([
+                    'title' => $title, 'billing_snapshot' => $snapshot, 'billing_period' => $period,
+                    'items' => $items ?? $stored['items'] ?? [],
+                ], $invoice);
+            } catch (\InvalidArgumentException $e) {
+                return Json::error($response, 'validation_failed', $e->getMessage(), 400);
+            }
+        }
+
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $lock = $pdo->prepare('SELECT status FROM invoices WHERE supplier_id = ? AND id = ? FOR UPDATE');
+            $lock->execute([SupplierGuard::currentId($request), $invoiceId]);
+            if ($lock->fetchColumn() !== $invoice['status']) throw new \DomainException('Faktura byla mezitím změněna.');
+            if ($this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request)) !== $stored) throw new \DomainException('Výkaz byl mezitím změněn. Obnovte jej před uložením.');
+            if ($snapshot === null && $this->repo->hasBillingItems($invoiceId, SupplierGuard::currentId($request))) {
+                throw new \DomainException('Nejprve odeberte z faktury propojené položky účtování, potom vypněte cenové ujednání.');
+            }
+            $id = $this->repo->save($invoiceId, SupplierGuard::currentId($request), $projectId, $title, $items, $vatRateId);
+            $this->repo->saveBilling($invoiceId, SupplierGuard::currentId($request), $templateId === null ? null : (int) $templateId, $snapshot, $period);
+            if (array_key_exists('display_options', $body)) {
+                $this->repo->saveDisplayOptions($invoiceId, $displayOptions, SupplierGuard::currentId($request));
+            }
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            if ($e instanceof \DomainException) return Json::error($response, 'billing_conflict', $e->getMessage(), 409);
+            throw $e;
         }
         $wr = $this->repo->findByInvoice($invoiceId, SupplierGuard::currentId($request));
-        $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
-
-        $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $action = ($invoice['status'] !== 'draft') ? 'work_report.force_saved' : 'work_report.saved';
-        $this->logger->log($action, $user['id'] ?? null, 'work_report', $id, null, $ip, $request->getHeaderLine('User-Agent'));
+        try {
+            $this->pdf->invalidate($invoiceId, 'invalidate_workreport');
+        } catch (\Throwable $e) {
+            error_log('work_report.save_pdf_failed: ' . $e->getMessage());
+        }
+        try {
+            $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
+            $action = ($invoice['status'] !== 'draft') ? 'work_report.force_saved' : 'work_report.saved';
+            $this->logger->log($action, $user['id'] ?? null, 'work_report', $id, null, $ip, $request->getHeaderLine('User-Agent'));
+        } catch (\Throwable $e) {
+            error_log('work_report.save_log_failed: ' . $e->getMessage());
+        }
 
         return Json::ok($response, $wr);
     }

@@ -109,6 +109,24 @@ final class AccountingBackfillJobRepository
         return $row === false ? null : $this->cast($row);
     }
 
+    /**
+     * Poslední doběhnutá kontrola nanečisto (i neúspěšná) pro tytéž vstupy — podklad
+     * pro vynucené doúčtování, které správce spouští přes nalezené chyby.
+     */
+    public function finishedDryRun(int $supplierId, string $startsOn, string $openingHash): ?array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM accounting_backfill_jobs
+              WHERE supplier_id = ? AND kind = 'dry_run' AND status IN ('completed', 'failed')
+                AND JSON_UNQUOTE(JSON_EXTRACT(params, '$.starts_on')) = ?
+                AND JSON_UNQUOTE(JSON_EXTRACT(params, '$.opening_hash')) = ?
+              ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute([$supplierId, $startsOn, $openingHash]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null : $this->cast($row);
+    }
+
     public function markRunning(int $id): bool
     {
         $stmt = $this->db->pdo()->prepare(

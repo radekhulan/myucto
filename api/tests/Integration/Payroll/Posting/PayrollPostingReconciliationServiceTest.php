@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll\Posting;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\Payroll\PayrollPostingReconciliationRepository;
@@ -48,7 +47,7 @@ final class PayrollPostingReconciliationServiceTest extends TestCase
         }
 
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->posting = $container->get(PostingService::class);
             $this->reconciliation = $container->get(

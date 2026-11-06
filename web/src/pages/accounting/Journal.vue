@@ -183,10 +183,11 @@ async function load(reset = true): Promise<boolean> {
     total.value = r.total
     perPage.value = r.per_page
     return true
-  } catch (e) {
+  } catch (e: any) {
     if (seq === loadSeq && !disposed && supplierId === requestSupplierId()) {
       if (!reset) page.value--
-      toast.error(t('common.error'))
+      // Neplatný filtr (např. rozsah účtů 6 až 5) vrací server jako 422 s hláškou.
+      toast.error(e?.response?.data?.error?.message || t('common.error'))
     }
     return false
   } finally {
@@ -1029,7 +1030,6 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
             <option value="">{{ t('common.all') }}</option>
             <option value="amount_mismatch">{{ t('accounting.journal.filter_integrity_amount_mismatch') }}</option>
           </select>
-          <p class="text-[11px] text-neutral-500 mt-1">{{ t('accounting.journal.filter_integrity_hint') }}</p>
         </div>
         <div>
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('accounting.journal.filter_account_from') }}</label>

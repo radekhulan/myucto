@@ -62,6 +62,8 @@ Sekce **Měny + bankovní účty** je čistý seznam účtů firmy. Účet zde n
 > [!TIP]
 > Slovenský účet můžete zadat slovenským IBANem, se správným kódem banky a měnou EUR.
 
+U zahraničního účtu zadejte do **Kód banky** národní kód banky, například britský sort code `60-84-64` (nejvýše 10 znaků). Faktura ho vytiskne na samostatném řádku („Sort code: 60-84-64“) vedle čísla účtu, takže z něj zaplatí i odběratel domácím převodem. Necháte-li pole prázdné, vezme faktura sort code z britského IBANu. Výpisy, párování a QR platba pracují jen s českým kódem banky, u zahraničního účtu proto rozhoduje IBAN.
+
 ## 30.4 Krok za krokem: analytika 221 a dokladová řada
 
 Jen pro podvojné účetnictví. Každý bankovní účet má vlastní analytiku syntetického účtu 221 (221.100, 221.200 …), která se přidělí automaticky.
@@ -70,7 +72,8 @@ Jen pro podvojné účetnictví. Každý bankovní účet má vlastní analytiku
 2. U každého účtu zkontrolujte **Název**, **Druh** (běžný účet, spořicí účet, termínovaný vklad), **Analytika**, **Dokladová řada** a **Aktivní**. Účet kreditní karty (231) se tu nenastavuje, spravuje ho stránka Kreditní karty.
 3. Potřebujete-li účet namapovat na konkrétní analytiku, kterou už v osnově používáte (například termínovaný vklad na 221.100), přepište číslo za tečkou (1 až 6 číslic). Vedle se ukáže výsledný účet.
 4. Chcete-li změnit dokladovou řadu zápisů (například `BCR`), přepište ji. Smí obsahovat písmena A-Z a číslice, nejvýše 10 znaků, a jedna řada patří vždy jen jednomu účtu.
-5. Klikněte na **Uložit**.
+5. Máte-li zapnuté [dimenze](114_Dimenze.md), můžete účtu nastavit **Výchozí dimenze**: ve sloupci klikněte na **Upravit** a pro každý typ vyberte nejvýše jednu hodnotu. Dostane je řádek banky pohybů na účtu, které hodnotu typu nemají samy ani z hrazených dokladů, a u pohybů bez dokladu (úroky, srážková daň, poplatky) i jejich protiúčet (viz [§ 114.11.5](114_Dimenze.md#114115-vychozi-dimenze)).
+6. Klikněte na **Uložit**.
 
 **Jak poznáte, že je hotovo:** Zobrazí se hláška „Bankovní účty byly uloženy.“ a u každého účtu je vidět jeho analytika (například `221.200`). Po změně řady aplikace ukáže počet přečíslovaných bankovních zápisů v otevřených obdobích.
 
@@ -209,6 +212,7 @@ V tabulce u každého účtu nastavíte:
 | **Druh** | Běžný účet / spořicí účet / termínovaný vklad |
 | **Analytika** | Číslo za tečkou - vedle se hned ukáže výsledný účet (např. `221.200`) |
 | **Dokladová řada** | Řada, pod kterou se bankovní zápisy účtu číslují v deníku (např. `BCR`) |
+| **Výchozí dimenze** | Jen se zapnutými dimenzemi. Hodnoty, které zaúčtování doplní řádku banky a u pohybu bez dokladu i protiúčtu, když je řádek nemá z pohybu, hrazeného dokladu ani pravidla dimenzí |
 | **Aktivní** | Neaktivní účet se do kontací nenabízí, ale své číslo si drží |
 
 Číslo můžete **přepsat**, typicky když už některý účet v rozvrhu vedete pod konkrétní analytikou a chcete na ni bankovní účet **namapovat** (například termínovaný vklad na 221.100). Analytiku, kterou už používá jiný účet, systém odmítne, a jednou přidělenou analytiku **nelze zrušit**, jde ji jen změnit na jiné číslo. Analytika, na které už leží účetní zápisy, se sama nikdy nepřidělí, aby nový účet nezdědil cizí zůstatek.
@@ -270,7 +274,7 @@ Datum při načítání určuje vytvoření souboru v bance. V CEB povolte vytv�
 
 #### 30.11.5.2 Česká spořitelna (0800)
 
-Česká spořitelna používá Premium Accounts API v3 pro pohyby a Premium Payments API v1 pro odesílání platebních příkazů. Na [Erste Developer Portal](https://developers.erstegroup.com) vytvořte aplikaci, přidejte Premium Accounts API, pro odesílání příkazů také Premium Payments API, a OAuth2 Authorization Code. V jejím nastavení zaregistrujte přesnou návratovou adresu z formuláře MyÚčta (**Návratová adresa pro registraci aplikace**). Produkční přístup musí být schválený a služba aktivovaná u banky. Zadejte produkční **WEB-API-key**, **OAuth Client ID** a **OAuth Client Secret** a pokračujte do banky k udělení souhlasu (**Udělit nebo obnovit souhlas v bance**). MyÚčto vybere pouze účet se shodným číslem a měnou, další účty připojte samostatně. Přístupové údaje jsou šifrované, přístup se automaticky obnovuje refresh tokenem. Po vypršení nebo odvolání souhlasu připojení zopakujte. Správce má vypnout logování citlivých parametrů návratu z banky; samotné upozornění připojení neblokuje.
+Česká spořitelna používá Premium Accounts API v3 pro pohyby a Premium Payments API v1 pro odesílání platebních příkazů. Na [Erste Developer Portal](https://developers.erstegroup.com) vytvořte aplikaci, přidejte Premium Accounts API, pro odesílání příkazů také Premium Payments API, a OAuth2 Authorization Code. V jejím nastavení zaregistrujte přesnou návratovou adresu z formuláře MyÚčta (**Návratová adresa pro registraci aplikace**). Produkční přístup musí být schválený a služba aktivovaná u banky. Zadejte produkční **WEB-API-key**, **OAuth Client ID** a **OAuth Client Secret** a pokračujte do banky k udělení souhlasu (**Udělit nebo obnovit souhlas v bance**). MyÚčto vybere pouze účet se shodným číslem a měnou, další účty připojte samostatně. Banka si při každém připojení vyžádá nové přihlášení. Máte-li v George Business víc pracovních prostorů (firem), vyberte prostor firmy, jejíž účet právě připojujete. Souhlas udělený za jinou firmu MyÚčto odmítne a u účtu vysvětlí proč. Přístupové údaje jsou šifrované, přístup se automaticky obnovuje refresh tokenem. Po vypršení nebo odvolání souhlasu připojení zopakujte. Správce má vypnout logování citlivých parametrů návratu z banky; samotné upozornění připojení neblokuje.
 
 Pro testování nastavte v `cfg.php` volbu `bank_connectors.csas.sandbox` na `true`:
 

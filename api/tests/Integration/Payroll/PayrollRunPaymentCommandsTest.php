@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployerPolicyRepository;
@@ -69,7 +68,7 @@ final class PayrollRunPaymentCommandsTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->container = $container;
         $db = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $db);

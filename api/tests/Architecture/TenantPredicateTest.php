@@ -135,6 +135,7 @@ final class TenantPredicateTest extends TestCase
         'cash_registers',
         'cash_documents',
         'bank_posting_rules',
+        'bank_posting_rule_dimensions',
         'bank_posting_suggestions',
         'supplier_bank_accounts',
         'bank_transfer_matches',
@@ -430,6 +431,7 @@ final class TenantPredicateTest extends TestCase
         // zápisu nad pěti firmami je jedno licenční místo. Zúžit počítání na
         // jednu firmu by limit rozbilo — každá firma by měla vlastní počet.
         'SeatPolicy.php::seatConditionSql' => 'licenční místa se počítají za celou instalaci',
+        'SeatPolicy.php::countActiveWriteTokens' => 'tokeny se zápisem se do licenčních míst počítají za celou instalaci',
 
         // Superadmin-only endpointy (jinak 403) — globální rozsah je jejich smysl.
         'ListSentEmailsAction.php::__invoke'         => 'superadmin přehled odeslaných e-mailů napříč instancí',

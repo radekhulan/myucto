@@ -73,6 +73,9 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+/** Příznak pro přihlašovací stránku: relaci ukončilo novější přihlášení jinde. */
+export const SESSION_SUPERSEDED_KEY = 'myucto:session-superseded'
+
 // 401 → redirect na /login (kromě situace kdy už jsme na /login nebo /setup)
 api.interceptors.response.use(
   (response) => {
@@ -109,7 +112,12 @@ api.interceptors.response.use(
       'session_expired',
       'invalid_token',
       'mfa_reauthentication_required',
+      'session_superseded',
     ].includes(code)) {
+      // Přihlašovací stránka pak řekne, proč relace skončila (limit relací podle licence).
+      if (code === 'session_superseded') {
+        try { sessionStorage.setItem(SESSION_SUPERSEDED_KEY, '1') } catch { /* soukromé okno */ }
+      }
       const windowScope = getWindowSupplierScope()
       if (windowScope) {
         postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: '/login' })

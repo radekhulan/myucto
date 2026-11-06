@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { flushPromises, mount } from '@vue/test-utils'
+import { config, flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { formatPeriod } from '@/composables/useFormat'
 
 const m = vi.hoisted(() => ({
@@ -20,6 +20,9 @@ const m = vi.hoisted(() => ({
   toastError: vi.fn(),
   revealField: vi.fn(),
 }))
+
+// Průvodce měsícem a akce řádků vedou odkazy do jiných agend.
+config.global.stubs = { ...config.global.stubs, RouterLink: RouterLinkStub }
 
 vi.mock('@/utils/revealField', () => ({ revealField: m.revealField }))
 
@@ -1752,6 +1755,32 @@ describe('TimeAttendance — měsíční mřížka', () => {
     expect(panel.exists()).toBe(true)
     expect(panel.text()).toContain('payroll.time.approve_errors.holiday_arrangement_missing')
     expect(wrapper.find('[data-test="approve-error-link"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  /**
+   * Svátek v jinak pracovní den je neodpracovaná hodina, která se do fondu
+   * počítá (10268 + 10275 = 10260). Hromadné schválení dřív porovnávalo jen
+   * odpracovanou dobu s fondem a u měsíce se svátkem varovalo, že práce fond
+   * nepokrývá.
+   */
+  it('hromadné schválení nevaruje pod fondem, když chybějící hodiny pokryje svátek', async () => {
+    const page = gridPage(['Osoba A', 'Osoba B'])
+    const [holidayMonth, shortMonth] = page.items as any[]
+    holidayMonth.summary = { ...holidayMonth.summary, fund_minutes: 10_080 }
+    holidayMonth.jmhz_work_summary.preview.holiday_millihours = 8_000
+    shortMonth.summary = { ...shortMonth.summary, fund_minutes: 10_080 }
+    m.timeMonth.mockResolvedValue(page)
+    const wrapper = mount(TimeAttendance, GRID_MOUNT)
+    await flushPromises()
+
+    await wrapper.find('thead input[type="checkbox"]').trigger('change')
+    await wrapper.get('[data-test="bulk-approve-open"]').trigger('click')
+    await flushPromises()
+
+    const warning = wrapper.get('[data-test="bulk-approve-under-fund"]')
+    expect(warning.text()).not.toContain('Osoba A')
+    expect(warning.text()).toContain('Osoba B')
     wrapper.unmount()
   })
 

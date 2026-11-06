@@ -51,6 +51,8 @@ final class DocumentLinker
             'invoice' => $this->draftIds('invoices', $ctx->supplierId),
         ];
         $orphans = [];
+        $evidence = null;
+        $evidential = [];
         // Mapa převodu může ukazovat na záznam smazaný (zápis stornovaný) v MyÚčtu.
         $live = $this->liveRecords($ctx->supplierId);
         // Ostatní pohledávky vede Money v deníku pod zdrojem KP (převod ho čte jako ruční
@@ -86,6 +88,14 @@ final class DocumentLinker
                         $p->count(self::STEP_LINK, 'review_unlinked');
                         continue;
                     }
+                    if ($retype === null && in_array($docType, ['invoice', 'purchase_invoice'], true)) {
+                        $evidence ??= $this->evidencePostings($ctx);
+                        $neutral = $evidence['neutral'][$year . '|' . ($docType === 'invoice' ? 'FV' : 'FP') . '|' . $docNo] ?? null;
+                        if ($neutral !== null) {
+                            $evidential[] = ['type' => $docType, 'year' => (int) $year, 'document_no' => $docNo, 'id' => $docId] + $neutral;
+                            continue;
+                        }
+                    }
                     if (count($orphans) < ImportProtocol::LIST_LIMIT) {
                         $orphans[] = ['type' => $docType, 'year' => (int) $year, 'document_no' => $docNo, 'id' => $docId];
                     }
@@ -95,6 +105,9 @@ final class DocumentLinker
                 $new = $this->entries->attach($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $retype ?? $sourceType, $sourceType, $docType, $docId, $entries);
                 $p->count(self::STEP_LINK, $new ? 'linked' : 'existing');
             }
+        }
+        if ($evidential !== []) {
+            $this->linkEvidential($ctx, $evidential, $evidence ?? [], $live);
         }
         $p->set('orphans', $orphans);
         if ($orphans !== []) {
@@ -621,6 +634,184 @@ final class DocumentLinker
         if ($marked > 0) {
             $ctx->protocol->count(self::STEP_PAYMENTS, 'booked_without_invoice', $marked);
         }
+    }
+
+    /**
+     * Faktura, kterou Money zaúčtovalo jen evidenčně (řádky deníku MD = D, bez účinku),
+     * protože výnos či náklad nese ostatní pohledávka (KP) nebo závazek (KZ) se stejným
+     * párovacím symbolem — typicky prodej pozemku: pohledávka PPS 311/641, k ní vystavená
+     * faktura pro odběratele 311/311. Převod evidenční řádky vynechává, faktura by tak
+     * zůstala „zaúčtovaná" bez zápisu v deníku.
+     *
+     * Jediná pohledávka (závazek) se shodným symbolem i částkou ze stejného nebo předchozího
+     * roku, kterou nečerpá jiná faktura, se navěsí jako zápis faktury (stejně jako KP
+     * převedená do přiznání). Úhradu pohledávky z Money pak faktura převezme. Faktura bez
+     * takového protějšku zůstane zaúčtovaná jen evidenčně; v Doúčtování dokladů se
+     * nenabídne, protože by výnos zdvojila.
+     *
+     * @param list<array{type:string,year:int,document_no:string,id:int,par:string,amount:float}> $docs
+     * @param array{neutral:array<string,array{par:string,amount:float}>,claims:array<string,array<string,array{year:int,doc:string,amounts:list<float>}>>} $evidence
+     * @param array<string,array<int,true>> $live
+     */
+    private function linkEvidential(ImportContext $ctx, array $docs, array $evidence, array $live): void
+    {
+        $p = $ctx->protocol;
+        $pdo = $this->db->pdo();
+        $matches = [];
+        $claimUse = [];
+        foreach ($docs as $i => $doc) {
+            $source = $doc['type'] === 'invoice' ? 'KP' : 'KZ';
+            $found = [];
+            foreach ($evidence['claims'][$source . '|' . $doc['par']] ?? [] as $claimKey => $claim) {
+                if ($doc['par'] === '' || ($claim['year'] !== $doc['year'] && $claim['year'] !== $doc['year'] - 1)
+                    || isset($ctx->otherReceivables[$claimKey])) {
+                    continue;
+                }
+                foreach ($claim['amounts'] as $amount) {
+                    if (ReconciliationTolerance::sameCent($amount, $doc['amount'])) {
+                        $found[$claimKey] = $claim;
+                        break;
+                    }
+                }
+            }
+            if (count($found) === 1) {
+                $matches[$i] = array_key_first($found);
+                $claimUse[$matches[$i]] = ($claimUse[$matches[$i]] ?? 0) + 1;
+            }
+        }
+
+        $owners = $pdo->prepare(
+            'SELECT e.id FROM journal_entries e
+              WHERE e.supplier_id = ? AND e.id = ?
+                AND ((e.source_type = \'manual\' AND e.source_id IS NULL) OR (e.source_type = ? AND e.source_id = ?))
+                AND NOT EXISTS (SELECT 1 FROM journal_document_postings g
+                                 WHERE g.supplier_id = e.supplier_id AND g.entry_id = e.id AND NOT (g.doc_type = ? AND g.doc_id = ?))'
+        );
+        $settlements = null;
+        $markIssuedPaid = $pdo->prepare(
+            "UPDATE invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?), paid_total = total_with_vat
+              WHERE id = ? AND supplier_id = ? AND status IN ('issued', 'sent', 'reminded')"
+        );
+        $markPurchasePaid = $pdo->prepare(
+            "UPDATE purchase_invoices SET status = 'paid', paid_at = COALESCE(paid_at, ?)
+              WHERE id = ? AND supplier_id = ? AND document_kind = 'invoice' AND status IN ('received', 'booked')"
+        );
+        $indexes = [];
+        $linked = 0;
+        $evidentialOnly = 0;
+        foreach ($docs as $i => $doc) {
+            $claimKey = $matches[$i] ?? null;
+            if ($claimKey === null || $claimUse[$claimKey] !== 1) {
+                $evidentialOnly++;
+                continue;
+            }
+            [$claimYear, $claimDoc] = explode('|', $claimKey, 2);
+            $indexes[$claimYear] ??= $this->journalIndex($ctx->supplierId, (int) $claimYear);
+            $entries = [];
+            foreach ($indexes[$claimYear]['manual'][$claimDoc] ?? [] as $entry) {
+                if (!isset($live['entry'][$entry['id']])) {
+                    continue;
+                }
+                $owners->execute([$ctx->supplierId, $entry['id'], $doc['type'], $doc['id'], $doc['type'], $doc['id']]);
+                if ($owners->fetchColumn() !== false) {
+                    $entries[] = $entry['id'];
+                }
+            }
+            if ($entries === []) {
+                $evidentialOnly++;
+                continue;
+            }
+            $this->entries->attach($ctx->supplierId, $ctx->userId > 0 ? $ctx->userId : null, $doc['type'], 'manual', $doc['type'], $doc['id'], $entries);
+            $linked++;
+            $settlements ??= $this->claimSettlements($ctx);
+            $paidAt = $settlements[($doc['type'] === 'invoice' ? 'KP|' : 'KZ|') . $claimKey] ?? null;
+            if ($paidAt !== null) {
+                ($doc['type'] === 'invoice' ? $markIssuedPaid : $markPurchasePaid)->execute([$paidAt, $doc['id'], $ctx->supplierId]);
+                if (($doc['type'] === 'invoice' ? $markIssuedPaid : $markPurchasePaid)->rowCount() > 0) {
+                    $p->count(self::STEP_LINK, 'evidential_paid_by_claim');
+                }
+            }
+        }
+        if ($linked > 0) {
+            $p->count(self::STEP_LINK, 'evidential_linked_claim', $linked);
+            $p->info(self::STEP_LINK, 'evidential_linked_claim', $linked . ' faktur Money zaúčtovalo jen evidenčně (MD = D); '
+                . 'zápisem faktury je ostatní pohledávka nebo závazek se stejným párovacím symbolem a částkou.');
+        }
+        if ($evidentialOnly > 0) {
+            $p->count(self::STEP_LINK, 'evidential_only', $evidentialOnly);
+            $p->info(self::STEP_LINK, 'evidential_only', $evidentialOnly . ' faktur Money zaúčtovalo jen evidenčně (MD = D) bez dohledatelného '
+                . 'protějšku. Zůstávají zaúčtované bez vlastního zápisu; účetní účinek je v deníku pod jiným dokladem.');
+        }
+    }
+
+    /**
+     * Evidenční zaúčtování faktur v deníku Money a ostatní pohledávky/závazky podle
+     * párovacího symbolu. `neutral`: „rok|FV|číslo" faktury, jejíž všechny řádky jsou
+     * bez účinku (MD = D nebo nulová částka); `claims`: „KP|symbol" → „rok|číslo" → částky.
+     *
+     * @return array{neutral:array<string,array{par:string,amount:float}>,claims:array<string,array<string,array{year:int,doc:string,amounts:list<float>}>>}
+     */
+    private function evidencePostings(ImportContext $ctx): array
+    {
+        $docs = [];
+        $claims = [];
+        foreach ($ctx->backup->rowsAcrossYears('UcDenik', ['Zdroj', 'Doklad', 'Castka', 'UcMD', 'UcD', 'ParSym']) as $row) {
+            $source = strtoupper(trim((string) ($row['Zdroj'] ?? '')));
+            $docNo = trim((string) ($row['Doklad'] ?? ''));
+            $year = $ctx->yearOf($row);
+            if ($year === null || $docNo === '' || !in_array($source, ['FV', 'FP', 'KP', 'KZ'], true)) {
+                continue;
+            }
+            $par = trim((string) ($row['ParSym'] ?? ''));
+            $amount = abs(round((float) ($row['Castka'] ?? 0), 2));
+            $effect = Ms3Journal::effect($row) !== null;
+            if ($source === 'FV' || $source === 'FP') {
+                $key = $year . '|' . $source . '|' . $docNo;
+                $docs[$key] ??= ['par' => $par, 'amount' => 0.0, 'effect' => false];
+                $docs[$key]['effect'] = $docs[$key]['effect'] || $effect;
+                $docs[$key]['amount'] = max($docs[$key]['amount'], $amount);
+                if ($docs[$key]['par'] === '') {
+                    $docs[$key]['par'] = $par;
+                }
+                continue;
+            }
+            if ($effect && $par !== '') {
+                $claims[$source . '|' . $par][$year . '|' . $docNo]['year'] = $year;
+                $claims[$source . '|' . $par][$year . '|' . $docNo]['doc'] = $docNo;
+                $claims[$source . '|' . $par][$year . '|' . $docNo]['amounts'][] = $amount;
+            }
+        }
+        $neutral = [];
+        foreach ($docs as $key => $doc) {
+            if (!$doc['effect']) {
+                $neutral[$key] = ['par' => $doc['par'], 'amount' => $doc['amount']];
+            }
+        }
+        return ['neutral' => $neutral, 'claims' => $claims];
+    }
+
+    /**
+     * Datum úhrady ostatních pohledávek a závazků z Money (`UhDatum`), jen plně uhrazené
+     * (bez zbytku k úhradě). Klíč „KP|rok|číslo", resp. „KZ|rok|číslo".
+     *
+     * @return array<string,string>
+     */
+    private function claimSettlements(ImportContext $ctx): array
+    {
+        $out = [];
+        foreach (['KP' => 'KnihPohl', 'KZ' => 'KnihZav'] as $source => $table) {
+            foreach ($ctx->backup->rowsAcrossYears($table) as $r) {
+                $year = $ctx->yearOf($r);
+                $docNo = trim((string) ($r['Doklad'] ?? ''));
+                $paidAt = trim((string) ($r['UhDatum'] ?? ''));
+                if ($year === null || $docNo === '' || preg_match('/^\d{4}-\d{2}-\d{2}$/', $paidAt) !== 1
+                    || (int) ($r['Storno'] ?? 0) === 1 || abs(round((float) ($r['UhZbyva'] ?? 0), 2)) >= 0.005) {
+                    continue;
+                }
+                $out[$source . '|' . $year . '|' . $docNo] = $paidAt;
+            }
+        }
+        return $out;
     }
 
     /**

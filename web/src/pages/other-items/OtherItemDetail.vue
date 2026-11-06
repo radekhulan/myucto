@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { otherItemsApi, type OtherItem, type OtherItemAllocation, type OtherItemPaymentCandidate, type OtherItemPostingLine } from '@/api/otherItems'
 import { otherItemKindLabel } from '@/utils/otherItemKind'
+import { OTHER_ITEM_DEFAULT_FOLDER, otherItemSettingsApi, resolveOtherItemFolder } from '@/api/otherItemSettings'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -17,9 +18,11 @@ import Modal from '@/components/ui/Modal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
+import OtherItemPostingRules from '@/components/accounting/OtherItemPostingRules.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { appIsoDate } from '@/utils/date'
+import { formatAccountNumber } from '@/utils/bankAccount'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -44,6 +47,7 @@ const repostSplit = ref(false)
 const repostLines = ref<OtherItemPostingLine[]>([])
 const repostDate = ref(appIsoDate())
 const repostReason = ref('')
+const postingAccounts = ref<ChartAccount[]>([])
 const isDoubleEntry = computed(() => supplier.currentSupplier?.accounting_mode === 'double_entry')
 const isTaxEvidence = computed(() => supplier.currentSupplier?.accounting_mode === 'tax_evidence')
 const canEdit = computed(() => item.value?.status === 'draft' && auth.canWrite('other_items'))
@@ -51,15 +55,12 @@ const canPost = computed(() => auth.canWrite('other_items') && (!isDoubleEntry.v
 const canManageBankPayment = computed(() => auth.canRead('bank') && auth.canWrite('bank.match'))
 const canManageCashPayment = computed(() => auth.canRead('cash') && auth.canWrite('cash.document.write'))
 const canAllocate = computed(() => auth.canWrite('other_items') && (canManageBankPayment.value || canManageCashPayment.value) && item.value?.currency === 'CZK'
-  && (item.value?.status === 'posted' || item.value?.status === 'confirmed') && Number(item.value?.remaining_amount || 0) > 0)
+  && (item.value?.status === 'posted' || item.value?.status === 'confirmed') && payableAmount.value > 0)
 const canRepost = computed(() => isDoubleEntry.value && item.value?.status === 'posted' && !!item.value?.journal_entry_id
   && auth.canWrite('other_items') && auth.canWrite('accounting.journal.post'))
-const documentFolderPath = computed(() => {
-  const issuedOn = item.value?.issued_on || ''
-  return /^\d{4}-\d{2}-\d{2}$/.test(issuedOn)
-    ? `Ostatní pohledávky a závazky/${issuedOn.slice(0, 4)}/${issuedOn.slice(5, 7)}`
-    : undefined
-})
+const folderTemplate = ref(OTHER_ITEM_DEFAULT_FOLDER)
+const documentFolderPath = computed(() => resolveOtherItemFolder(folderTemplate.value, item.value?.issued_on))
+if (auth.canRead('documents')) otherItemSettingsApi.get().then(s => { folderTemplate.value = s.document_folder }, () => {})
 const repostAccountChoices = computed(() => repostAccounts.value.filter(account => account.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
 const repostBalanceAccounts = computed(() => repostAccountChoices.value.filter(account =>
   account.account_type === (item.value?.side === 'receivable' ? 'asset' : 'liability'),
@@ -68,9 +69,17 @@ const paymentQuery = ref('')
 const paymentCandidates = ref<OtherItemPaymentCandidate[]>([])
 const candidatesLoading = ref(false)
 const selectedPayment = ref<OtherItemPaymentCandidate | null>(null)
+/** Kolik zbývá zaplatit: u rozdělených splátek úvěru i úrok a poplatek, jinak saldo. */
+const payableAmount = computed(() => Number(item.value?.remaining_payment ?? item.value?.remaining_amount ?? 0))
 const allocationAmount = ref<number | null>(null)
 let paymentTimer: ReturnType<typeof setTimeout> | null = null
 let paymentRequest = 0
+
+/** Štítky důvodů shody kandidáta (VS, účet protistrany, splátka, zbývající dluh). */
+function matchLabels(candidate: OtherItemPaymentCandidate): string[] {
+  return (candidate.match_reasons || []).map(reason => t(`other_items.match_reason.${reason}`,
+    { number: candidate.installment?.position ?? '' }))
+}
 
 function statusLabel(value: string): string {
   const key = `other_items.status.${value}`
@@ -83,6 +92,9 @@ async function load() {
     const [detail, linked] = await Promise.all([otherItemsApi.get(id.value), otherItemsApi.allocations(id.value)])
     item.value = detail
     allocations.value = linked
+    if (isDoubleEntry.value && postingAccounts.value.length === 0) {
+      postingAccounts.value = await accountingApi.listAccounts().catch(() => [])
+    }
   } catch (error: any) {
     item.value = null
     allocations.value = []
@@ -113,7 +125,7 @@ onBeforeUnmount(() => { if (paymentTimer) clearTimeout(paymentTimer) })
 
 function selectPayment(candidate: OtherItemPaymentCandidate) {
   selectedPayment.value = candidate
-  allocationAmount.value = Math.min(Math.abs(Number(candidate.amount)), Number(item.value?.remaining_amount || 0))
+  allocationAmount.value = Math.min(Math.abs(Number(candidate.amount)), payableAmount.value)
   paymentCandidates.value = []
 }
 
@@ -131,6 +143,29 @@ async function allocate() {
     allocationAmount.value = null
     paymentQuery.value = ''
     await load()
+  } catch (error: any) {
+    toast.error(error?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    busy.value = false
+  }
+}
+
+// Účet protistrany jde u potvrzeného či zaúčtovaného dokladu změnit samostatně (párování úhrad).
+const canEditCounterparty = computed(() => auth.canWrite('other_items')
+  && (item.value?.status === 'confirmed' || item.value?.status === 'posted'))
+const counterpartyEditing = ref(false)
+const counterpartyInput = ref('')
+function startCounterpartyEdit() {
+  counterpartyInput.value = formatAccountNumber(item.value?.counterparty_account, item.value?.counterparty_bank_code) || ''
+  counterpartyEditing.value = true
+}
+async function saveCounterparty() {
+  if (!item.value || busy.value) return
+  busy.value = true
+  try {
+    item.value = await otherItemsApi.updateCounterpartyAccount(id.value, counterpartyInput.value.trim() || null)
+    counterpartyEditing.value = false
+    toast.success(t('other_items.counterparty_saved'))
   } catch (error: any) {
     toast.error(error?.response?.data?.error?.message || t('common.error'))
   } finally {
@@ -334,7 +369,35 @@ onMounted(load)
             <div><dt class="text-neutral-500">{{ t('other_items.due_on') }}</dt><dd>{{ item.due_on ? formatDate(item.due_on) : '–' }}</dd></div>
             <div v-if="isDoubleEntry"><dt class="text-neutral-500">{{ t('other_items.accounting_on') }}</dt><dd>{{ item.accounting_on ? formatDate(item.accounting_on) : '–' }}</dd></div>
             <div><dt class="text-neutral-500">{{ t('other_items.variable_symbol') }}</dt><dd>{{ item.variable_symbol || '–' }}</dd></div>
+            <div>
+              <dt class="text-neutral-500">{{ t('other_items.counterparty_account') }}</dt>
+              <dd v-if="!counterpartyEditing" class="flex flex-wrap items-center gap-2">
+                <span class="font-mono" data-test="counterparty-account">{{ formatAccountNumber(item.counterparty_account, item.counterparty_bank_code) || '–' }}</span>
+                <button v-if="canEditCounterparty" type="button" data-test="counterparty-edit" class="inline-flex items-center gap-1 text-xs text-primary-700 hover:underline whitespace-nowrap" @click="startCounterpartyEdit">
+                  <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.edit" /></svg>
+                  {{ t('common.edit') }}
+                </button>
+              </dd>
+              <dd v-else>
+                <form class="flex flex-wrap items-center gap-2" data-test="counterparty-form" @submit.prevent="saveCounterparty">
+                  <input v-model="counterpartyInput" type="text" maxlength="60" :aria-label="t('other_items.counterparty_account')" :placeholder="t('other_items.counterparty_account_placeholder')" class="h-9 w-56 rounded-md border border-neutral-300 bg-surface px-2 font-mono text-sm" />
+                  <button type="submit" :disabled="busy" :class="btnFilled('primary')" class="whitespace-nowrap">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
+                    {{ t('common.save') }}
+                  </button>
+                  <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="counterpartyEditing = false">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+                    {{ t('common.cancel') }}
+                  </button>
+                </form>
+                <p class="mt-1 text-xs text-neutral-500">{{ t('other_items.counterparty_edit_hint') }}</p>
+              </dd>
+            </div>
             <div v-if="item.currency !== 'CZK'"><dt class="text-neutral-500">{{ t('other_items.exchange_rate') }}</dt><dd>{{ item.exchange_rate || '–' }}</dd></div>
+            <div v-if="item.linked_invoice" data-test="linked-invoice">
+              <dt class="text-neutral-500">{{ t('other_items.linked_invoice') }}</dt>
+              <dd><RouterLink :to="`/invoices/${item.linked_invoice.id}`" class="font-mono text-primary-700 hover:underline">{{ item.linked_invoice.varsymbol || `#${item.linked_invoice.id}` }}</RouterLink></dd>
+            </div>
             <div class="sm:col-span-2"><dt class="text-neutral-500">{{ t('other_items.note') }}</dt><dd class="whitespace-pre-wrap">{{ item.note || '–' }}</dd></div>
           </dl>
         </section>
@@ -344,7 +407,8 @@ onMounted(load)
             <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.amount') }}</dt><dd class="tabular-nums">{{ formatMoney(item.amount, item.currency) }}</dd></div>
             <div class="flex justify-between gap-3"><dt class="text-neutral-500">{{ t('other_items.paid_amount') }}</dt><dd class="tabular-nums">{{ formatMoney(item.paid_amount, item.currency) }}</dd></div>
             <div v-if="Number(item.settled_outside_amount || 0) > 0" class="flex justify-between gap-3 pl-3" :title="t('other_items.settled_outside_hint')"><dt class="text-neutral-500">{{ t('other_items.settled_outside') }}</dt><dd class="tabular-nums text-neutral-500">{{ formatMoney(item.settled_outside_amount ?? 0, item.currency) }}</dd></div>
-            <div class="flex justify-between gap-3 border-t border-neutral-200 pt-3 font-semibold"><dt>{{ t('other_items.remaining') }}</dt><dd class="tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</dd></div>
+            <div class="flex justify-between gap-3 border-t border-neutral-200 pt-3 font-semibold"><dt>{{ t(item.has_split_installments ? 'other_items.remaining_principal' : 'other_items.remaining') }}</dt><dd class="tabular-nums">{{ formatMoney(item.remaining_amount, item.currency) }}</dd></div>
+            <div v-if="item.has_split_installments" class="flex justify-between gap-3" :title="t('other_items.remaining_payment_hint')" data-test="remaining-payment"><dt class="text-neutral-500">{{ t('other_items.remaining_payment') }}</dt><dd class="tabular-nums">{{ formatMoney(payableAmount, item.currency) }}</dd></div>
           </dl>
         </section>
       </div>
@@ -366,6 +430,8 @@ onMounted(load)
           <ActionBar :actions="postingActions" />
         </div>
       </section>
+      <OtherItemPostingRules v-if="isDoubleEntry && item.posting_rules?.payment_bank" :item="item" :accounts="postingAccounts"
+                             :can-write="auth.canWrite('other_items')" :can-repost="canRepost" @changed="item = $event" @repost="openRepost" />
       <OtherItemJournalContext v-if="isDoubleEntry && item.journal_entry_id" :entry-id="Number(item.journal_entry_id)" />
       <LinkedDocumentsPanel v-if="auth.canRead('documents')" class="mt-4" entity-type="other_item" :entity-id="id" uploadable :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
       <OtherItemPlans :item="item" />
@@ -380,10 +446,14 @@ onMounted(load)
             <div>
               <span class="font-medium">{{ t(allocation.bank_transaction_id ? 'other_items.bank_payment' : 'other_items.cash_payment') }} #{{ allocation.bank_transaction_id || allocation.cash_document_id }}</span>
               <span class="ml-2 text-neutral-500">{{ formatDate(allocation.payment_on) }}</span>
+              <span v-if="allocation.auto_match_reason" class="ml-2 inline-flex rounded bg-primary-50 px-1.5 py-0.5 text-xs text-primary-700" data-test="allocation-auto" :title="t(`other_items.auto_match_reason.${allocation.auto_match_reason}`)">{{ t('other_items.auto_matched') }}</span>
               <span v-if="allocation.reversed_on" class="ml-2 text-warning-700">{{ t('other_items.payment_reversed_on', { date: formatDate(allocation.reversed_on) }) }}</span>
             </div>
             <div class="flex flex-wrap items-center gap-3">
-              <strong class="tabular-nums" :class="allocation.reversed_on ? 'line-through text-neutral-500' : ''">{{ formatMoney(allocation.amount, item.currency) }}</strong>
+              <span v-if="Number(allocation.interest_amount || 0) + Number(allocation.fee_amount || 0) > 0" class="text-xs text-neutral-500 tabular-nums" data-test="allocation-split">
+                {{ t('other_items.allocation_split', { principal: formatMoney(allocation.amount, item.currency), interest: formatMoney(allocation.interest_amount ?? 0, item.currency), fee: formatMoney(allocation.fee_amount ?? 0, item.currency) }) }}
+              </span>
+              <strong class="tabular-nums" :class="allocation.reversed_on ? 'line-through text-neutral-500' : ''">{{ formatMoney(allocation.total_amount ?? allocation.amount, item.currency) }}</strong>
               <button v-if="auth.canWrite('other_items') && (allocation.bank_transaction_id ? canManageBankPayment : canManageCashPayment)" type="button" :disabled="busy" class="text-warning-700 hover:underline disabled:opacity-50" @click="unallocate(allocation)">{{ t('other_items.unlink_payment') }}</button>
             </div>
           </div>
@@ -398,7 +468,12 @@ onMounted(load)
             <div v-if="candidatesLoading" class="mt-2 text-xs text-neutral-500">{{ t('common.loading') }}</div>
             <div v-if="paymentCandidates.length" class="mt-2 max-h-52 overflow-y-auto rounded-md border border-neutral-200">
               <button v-for="candidate in paymentCandidates" :key="`${candidate.source}:${candidate.id}`" type="button" class="flex w-full flex-wrap items-center justify-between gap-2 border-b border-neutral-100 px-3 py-2 text-left text-sm hover:bg-neutral-50" @click="selectPayment(candidate)">
-                <span><span class="font-medium">{{ t(candidate.source === 'bank' ? 'other_items.bank_payment' : 'other_items.cash_payment') }} #{{ candidate.id }}</span><span class="ml-2 text-neutral-500">{{ formatDate(candidate.payment_on) }} · {{ candidate.description }}</span></span>
+                <span>
+                  <span class="font-medium">{{ t(candidate.source === 'bank' ? 'other_items.bank_payment' : 'other_items.cash_payment') }} #{{ candidate.id }}</span><span class="ml-2 text-neutral-500">{{ formatDate(candidate.payment_on) }} · {{ candidate.description }}</span>
+                  <span v-if="matchLabels(candidate).length" class="mt-1 flex flex-wrap gap-1" data-test="match-reasons">
+                    <span v-for="label in matchLabels(candidate)" :key="label" class="rounded bg-success-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-success-700">{{ label }}</span>
+                  </span>
+                </span>
                 <strong class="tabular-nums">{{ formatMoney(Math.abs(candidate.amount), candidate.currency) }}</strong>
               </button>
             </div>
@@ -406,7 +481,7 @@ onMounted(load)
           <div v-else class="flex flex-wrap items-end gap-3">
             <div class="text-sm"><span class="font-medium">{{ t(selectedPayment.source === 'bank' ? 'other_items.bank_payment' : 'other_items.cash_payment') }} #{{ selectedPayment.id }}</span><div class="text-neutral-500">{{ formatDate(selectedPayment.payment_on) }} · {{ selectedPayment.description }}</div></div>
             <label class="text-sm font-medium">{{ t('other_items.allocation_amount') }}
-              <input v-model.number="allocationAmount" required type="number" min="0.01" step="0.01" :max="Math.min(Math.abs(selectedPayment.amount), Number(item.remaining_amount))" class="mt-1 block h-9 w-36 rounded-md border border-neutral-300 bg-surface px-2 text-right" />
+              <input v-model.number="allocationAmount" required type="number" min="0.01" step="0.01" :max="Math.min(Math.abs(selectedPayment.amount), payableAmount)" class="mt-1 block h-9 w-36 rounded-md border border-neutral-300 bg-surface px-2 text-right" />
             </label>
             <button type="submit" :disabled="busy" :class="btnFilled('success')">
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.link" /></svg>
@@ -416,6 +491,7 @@ onMounted(load)
               <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
               {{ t('common.cancel') }}
             </button>
+            <p v-if="item.has_split_installments" class="w-full text-xs text-neutral-500">{{ t('other_items.allocation_split_hint') }}</p>
           </div>
         </form>
         <p v-else-if="item.currency !== 'CZK'" class="mt-3 text-sm text-neutral-500">{{ t('other_items.foreign_payment_hint') }}</p>

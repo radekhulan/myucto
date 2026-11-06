@@ -39,6 +39,10 @@ final class ClientMcpToolPolicyTest extends TestCase
         'update_purchase_invoice', 'add_purchase_invoice_item', 'update_purchase_invoice_item', 'remove_purchase_invoice_item',
         'upload_invoice_attachment', 'upload_purchase_invoice_pdf', 'import_purchase_invoice_file',
     ];
+    private const ADVANCE_WRITE_TOOLS = [
+        'link_invoice_advance', 'unlink_invoice_advance', 'apply_invoice_advance_drawdown', 'remove_invoice_advance_drawdown',
+        'create_final_invoice_from_proforma', 'create_payment_tax_document', 'link_purchase_advance', 'unlink_purchase_advance',
+    ];
 
     #[TestWith(['client_read'])]
     #[TestWith(['client_write'])]
@@ -56,7 +60,8 @@ final class ClientMcpToolPolicyTest extends TestCase
             $additions = ['get_work_report', 'list_vat_rates', ...self::DOCUMENT_READ_TOOLS,
                 ...self::OPERATIONAL_READ_TOOLS, ...self::DETAIL_READ_TOOLS, ...self::ADVANCE_READ_TOOLS];
             if ($scope === 'read_write' && $preset !== 'client_read') {
-                array_push($additions, 'add_work_report_entry', 'add_work_report_material', 'remove_work_report_entry', ...self::DOCUMENT_WRITE_TOOLS);
+                array_push($additions, 'add_work_report_entry', 'add_work_report_material', 'remove_work_report_entry',
+                    ...self::DOCUMENT_WRITE_TOOLS, ...self::ADVANCE_WRITE_TOOLS);
             }
             $expected = [...$baseline[$preset][$scope], ...$additions];
             sort($expected);
@@ -112,10 +117,23 @@ final class ClientMcpToolPolicyTest extends TestCase
         foreach (['get_product', 'get_product_prices', 'create_warehouse', 'create_product', 'create_stock_document',
             'post_stock_document', 'trial_balance', 'list_payroll_people', 'get_tax_return',
             'get_product_customer_prices', 'quote_product_prices', 'lookup_company_in_ares', 'stock_in_transit',
-            'list_purchase_payment_orders', 'link_invoice_advance', 'unlink_invoice_advance', 'create_final_invoice_from_proforma',
-            'apply_invoice_advance_drawdown', 'remove_invoice_advance_drawdown', 'link_purchase_advance',
-            'unlink_purchase_advance', 'create_invoice_penalty'] as $name) {
+            'list_purchase_payment_orders', 'create_invoice_penalty'] as $name) {
             self::assertNotContains($name, $allowed);
+        }
+    }
+
+    #[TestWith(['invoices', ['link_invoice_advance', 'unlink_invoice_advance', 'apply_invoice_advance_drawdown', 'remove_invoice_advance_drawdown']])]
+    #[TestWith(['invoices.issue', ['create_final_invoice_from_proforma']])]
+    #[TestWith(['invoices.mark_paid', ['create_payment_tax_document']])]
+    #[TestWith(['purchase_invoices', ['link_purchase_advance', 'unlink_purchase_advance']])]
+    public function testAdvanceWritesRequireTheirOwnWritePermission(string $key, array $expected): void
+    {
+        sort($expected);
+        foreach ([0, 1, 2] as $level) {
+            $actual = array_values(array_intersect(self::ADVANCE_WRITE_TOOLS,
+                $this->catalog('client_none', overrides: [$key => $level])));
+            sort($actual);
+            self::assertSame($level === 2 ? $expected : [], $actual, $key . ': ' . $level);
         }
     }
 

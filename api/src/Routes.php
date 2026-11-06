@@ -64,6 +64,7 @@ use MyInvoice\Action\Admin\SupplierSearchAction;
 use MyInvoice\Action\Settings\EmailBrandingAction;
 use MyInvoice\Action\Settings\BrandingProfilesAction;
 use MyInvoice\Action\Settings\ClientBrandingSettingsAction;
+use MyInvoice\Action\Settings\ClientInvoiceDefaultsSettingsAction;
 use MyInvoice\Action\Settings\ClientPaymentQrSettingsAction;
 use MyInvoice\Action\Settings\EmailProfilesAction;
 use MyInvoice\Action\Settings\SupplierEmailTemplateAction;
@@ -756,6 +757,10 @@ final class Routes
         $app->get    ('/api/invoices/{id:[0-9]+}/final-candidates',   FinalCandidatesAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/link-advance',       LinkInvoiceAdvanceAction::class);
         $app->delete ('/api/invoices/{id:[0-9]+}/link-advance',       UnlinkInvoiceAdvanceAction::class);
+        // Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou)
+        $app->get    ('/api/invoices/{id:[0-9]+}/other-item-candidates', [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'candidates']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/other-item-link',       [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'link']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/other-item-link',       [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'unlink']);
         // Postupné čerpání zálohy konceptem faktury (milníky smlouvy o dílo)
         $app->get    ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'candidates']);
         $app->post   ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'apply']);
@@ -885,6 +890,11 @@ final class Routes
         $app->post   ('/api/recurring/{id:[0-9]+}/reschedule', [RecurringTemplateAction::class, 'reschedule']);
 
         // Work reports — výkaz víceprací (M5)
+        $app->map(['GET', 'POST'], '/api/work-report-billing-templates', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
+        $app->map(['PUT', 'DELETE'], '/api/work-report-billing-templates/{id:[0-9]+}', \MyInvoice\Action\WorkReport\BillingTemplateAction::class);
+        $app->post('/api/work-report-billing-preview', [\MyInvoice\Action\WorkReport\BillingAction::class, 'previewUnsaved']);
+        $app->get('/api/invoices/{id:[0-9]+}/work-report/billing-preview', [\MyInvoice\Action\WorkReport\BillingAction::class, 'preview']);
+        $app->post('/api/invoices/{id:[0-9]+}/work-report/billing-transfer', [\MyInvoice\Action\WorkReport\BillingAction::class, 'transfer']);
         $app->get    ('/api/invoices/{id:[0-9]+}/work-report', GetWorkReportAction::class);
         $app->put    ('/api/invoices/{id:[0-9]+}/work-report', SaveWorkReportAction::class);
         $app->put    ('/api/invoices/{id:[0-9]+}/work-report/materials', SaveWorkReportMaterialsAction::class);
@@ -3196,12 +3206,17 @@ final class Routes
             $g->get   ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'list']);
             $g->post  ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'create']);
             $g->get   ('/other-items/bank-candidates',         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'bankMatchCandidates']);
+            $g->get   ('/other-items/settings',                [\MyInvoice\Action\Accounting\OtherItemSettingsAction::class, 'get']);
+            $g->put   ('/other-items/settings',                [\MyInvoice\Action\Accounting\OtherItemSettingsAction::class, 'update']);
             $g->get   ('/other-items/kinds',                   [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'list']);
             $g->post  ('/other-items/kinds',                   [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'create']);
             $g->put   ('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'update']);
             $g->put   ('/other-items/kinds/builtin/{side:receivable|payable}/{code:[a-z]+}', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'updateBuiltin']);
             $g->delete('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'delete']);
-            $g->get   ('/other-items/schedules',               [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'list']);
+            $g->get   ('/other-items/kinds/{id:[0-9]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'postingProfiles']);
+            $g->put   ('/other-items/kinds/{id:[0-9]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'savePostingProfiles']);
+            $g->put   ('/other-items/kinds/builtin/{side:receivable|payable}/{code:[a-z]+}/posting-profiles', [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'saveBuiltinPostingProfiles']);
+            $g->get   ('/other-items/schedules',              [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'list']);
             $g->get   ('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'get']);
             $g->delete('/other-items/schedules/{id:[0-9]+}',   [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'delete']);
             $g->post  ('/other-items/schedules/{id:[0-9]+}/generate', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'generate']);
@@ -3209,12 +3224,15 @@ final class Routes
             $g->post  ('/other-items/{item_id:[0-9]+}/schedule', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'create']);
             $g->get   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'installments']);
             $g->put   ('/other-items/{item_id:[0-9]+}/installments', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'setInstallments']);
+            $g->post  ('/other-items/{item_id:[0-9]+}/installments/plan', [\MyInvoice\Action\Accounting\OtherItemScheduleAction::class, 'planInstallments']);
             $g->get   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'get']);
             $g->put   ('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'update']);
             $g->delete('/other-items/{id:[0-9]+}',             [\MyInvoice\Action\Accounting\OtherItemAction::class, 'delete']);
+            $g->put   ('/other-items/{id:[0-9]+}/counterparty-account', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'updateCounterpartyAccount']);
             $g->post  ('/other-items/{id:[0-9]+}/post',        [\MyInvoice\Action\Accounting\OtherItemAction::class, 'post']);
             $g->post  ('/other-items/{id:[0-9]+}/reverse',     [\MyInvoice\Action\Accounting\OtherItemAction::class, 'reverse']);
             $g->post  ('/other-items/{id:[0-9]+}/repost',      [\MyInvoice\Action\Accounting\OtherItemAction::class, 'repost']);
+            $g->put   ('/other-items/{id:[0-9]+}/posting-overrides', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'setPostingOverrides']);
             $g->get   ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocations']);
             $g->get   ('/other-items/{id:[0-9]+}/payment-candidates', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'paymentCandidates']);
             $g->post  ('/other-items/{id:[0-9]+}/allocations', [\MyInvoice\Action\Accounting\OtherItemAction::class, 'allocate']);
@@ -3244,6 +3262,8 @@ final class Routes
             // Automatizace (mini-epic) — pravidla účtování + fronta návrhů.
             $g->get   ('/bank-accounts',                              [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'list']);
             $g->patch ('/bank-accounts/{id:[0-9]+}',                  [\MyInvoice\Action\Accounting\Bank\SupplierBankAccountAction::class, 'update']);
+            $g->get   ('/bank-accounts/{id:[0-9]+}/dimensions',       [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'getBankAccount']);
+            $g->put   ('/bank-accounts/{id:[0-9]+}/dimensions',       [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'saveBankAccount']);
             $g->get   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'settings']);
             $g->put   ('/gopay/settings',                             [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'saveSettings']);
             $g->get   ('/gopay/pending',                              [\MyInvoice\Action\Accounting\GoPay\GoPayAction::class, 'pending']);
@@ -3667,6 +3687,9 @@ final class Routes
         $app->get    ('/api/admin/imports/{id:[0-9]+}/report',  \MyInvoice\Action\Admin\Import\ImportJobReportAction::class);
         $app->post   ('/api/admin/imports/{id:[0-9]+}/cancel',  CancelImportJobAction::class);
         $app->delete ('/api/admin/imports/{id:[0-9]+}',         \MyInvoice\Action\Admin\Import\DeleteImportJobAction::class);
+        $app->get('/api/admin/user-sessions', [\MyInvoice\Action\Admin\UserSessionAction::class, 'list']);
+        $app->post('/api/admin/user-sessions/terminate', [\MyInvoice\Action\Admin\UserSessionAction::class, 'terminateSelected']);
+        $app->delete('/api/admin/user-sessions/{id}', [\MyInvoice\Action\Admin\UserSessionAction::class, 'terminate']);
         $app->get    ('/api/admin/users',           [UserAdminAction::class, 'list']);
         $app->post   ('/api/admin/users',           [UserAdminAction::class, 'create']);
         $app->put    ('/api/admin/users/{id:[0-9]+}', [UserAdminAction::class, 'update']);
@@ -3744,6 +3767,7 @@ final class Routes
         $app->get ('/api/settings/accounting-activation/jobs', [AccountingActivationAction::class, 'jobs']);
         $app->get ('/api/settings/accounting-activation/jobs/{id:[0-9]+}', [AccountingActivationAction::class, 'job']);
         $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/cancel', [AccountingActivationAction::class, 'cancel']);
+        $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/force-complete', [AccountingActivationAction::class, 'forceComplete']);
         $app->get ('/api/settings/supplier/invoice-counter', [SupplierInvoiceCounterAction::class, 'peek']);
         $app->put ('/api/settings/supplier/invoice-counter', SupplierInvoiceCounterAction::class);
         $app->get('/api/settings/email-templates', [SupplierEmailTemplateAction::class, 'list']);
@@ -3794,6 +3818,8 @@ final class Routes
         $app->post   ('/api/settings/client/email-profiles/{id:[0-9]+}/folders', [EmailProfilesAction::class, 'browseImapFolders']);
         $app->put    ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'update']);
         $app->delete ('/api/settings/client/email-profiles/{id:[0-9]+}', [EmailProfilesAction::class, 'delete']);
+        $app->get    ('/api/settings/client/invoice-defaults', [ClientInvoiceDefaultsSettingsAction::class, 'get']);
+        $app->put    ('/api/settings/client/invoice-defaults', [ClientInvoiceDefaultsSettingsAction::class, 'update']);
         $app->get    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'get']);
         $app->put    ('/api/settings/client/branding', [ClientBrandingSettingsAction::class, 'update']);
         $app->get    ('/api/settings/client/payment-qr', [ClientPaymentQrSettingsAction::class, 'get']);

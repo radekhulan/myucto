@@ -76,6 +76,7 @@ final class RoutePermissionMap
         ['*', '#^/api/settings/client/branding(/|$)#', 'settings.branding', AccessLevel::WRITE],
         ['*', '#^/api/settings/branding-profiles(/|$)#', 'settings.branding', AccessLevel::WRITE],
         ['*', '#^/api/settings/client/payment-qr(/|$)#', 'settings.payment_qr', AccessLevel::WRITE],
+        ['*', '#^/api/settings/client/invoice-defaults$#', 'settings.invoice_defaults', AccessLevel::WRITE],
         ['*', '#^/api/settings/client/(signing|pdf-signing)(/|$)#', 'settings.signing_profiles', AccessLevel::WRITE],
         ['GET', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::READ],
         ['*', '#^/api/settings/domains(/|$)#', 'settings.domains', AccessLevel::WRITE],
@@ -114,6 +115,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::WRITE],
         ['*', '#^/api/invoices/[0-9]+/book$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Faktura krytá ostatní pohledávkou: výběr čte ostatní položky, vazba mění zaúčtování.
+        ['GET', '#^/api/invoices/[0-9]+/other-item-candidates$#', 'other_items', AccessLevel::READ],
+        ['*', '#^/api/invoices/[0-9]+/other-item-link$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/issue(-final)?$#', 'invoices.issue', AccessLevel::WRITE],
         // Import už vystaveného dokladu zakládá rovnou vystavenou fakturu: vystavení
         // hlídá mapa, založení (`invoices.create`) dohlíží akce.
@@ -1022,6 +1026,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/portal/document-requests$#', 'documents.submit', AccessLevel::READ],
         ['POST', '#^/api/portal/document-requests/[0-9]+/upload$#', 'documents.submit', AccessLevel::WRITE],
         ['GET', '#^/api/portal(/|$)#', 'profile', AccessLevel::READ],
+        ['GET', '#^/api/work-report-billing-templates(/|$)#', 'price_list', AccessLevel::READ],
+        ['*', '#^/api/work-report-billing-templates(/|$)#', 'price_list', AccessLevel::WRITE],
+        ['POST', '#^/api/work-report-billing-preview$#', 'invoices', AccessLevel::READ],
         ['GET', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::READ],
         ['*', '#^/api/(work-reports)(/|$)#', 'projects', AccessLevel::WRITE],
     ];
@@ -1164,6 +1171,9 @@ final class RoutePermissionMap
             $picker = $read && preg_match('#^/api/price-list-items(?:/[0-9]+(?:/(?:prices|resolve))?)?$#D', $path) === 1;
             return new RoutePermission(self::PERMISSION, 'price_list', $read ? AccessLevel::READ : AccessLevel::WRITE,
                 $picker ? ['invoices', 'recurring'] : []);
+        }
+        if (in_array($method, ['GET', 'HEAD'], true) && $path === '/api/work-report-billing-templates') {
+            return new RoutePermission(self::PERMISSION, 'price_list', AccessLevel::READ, ['invoices', 'projects']);
         }
         if ($method === 'GET' && preg_match('#^/api/codebooks/(currencies|units|vat-rates)$#D', $path) === 1) {
             return new RoutePermission(self::PERMISSION, 'settings.company', AccessLevel::READ,

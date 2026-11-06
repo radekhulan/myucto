@@ -19,9 +19,10 @@ Kapitolu otevřete, když:
 <!-- cols: 26 40 34 -->
 | Kdy | Co udělat | Kde v aplikaci |
 |---|---|---|
-| na začátku měsíce | Rozvrhnout směny | `Mzdy → Docházka a směny`, **Rozvrhnout směny podle kalendáře** |
+| na začátku měsíce | Rozvrhnout směny (jen nepravidelná pracovní doba) | `Mzdy → Docházka a směny`, u řádku **Další → Rozvrhnout směny podle kalendáře** |
 | průběžně | Zapisovat skutečnost, přesčas a příznaky | `Mzdy → Docházka a směny` |
-| před mzdovým během | Schválit měsíc docházky | `Mzdy → Docházka a směny`, **Schválit měsíc** |
+| průběžně | Zadat dovolenou, nemoc a jinou nepřítomnost | `Mzdy → Docházka a směny`, **Zadat nepřítomnost** nebo u řádku **Nepřítomnost** |
+| před mzdovým během | Schválit měsíc docházky všem | `Mzdy → Docházka a směny`, **Schválit měsíc všem** |
 | jednou při sjednání | Nastavit sazby příplatků | `Mzdy → Nastavení mezd`, záložka **Politiky a připravenost**; karta pracovního vztahu |
 
 ## 77.2 Než začnete
@@ -42,10 +43,15 @@ Kapitolu otevřete, když:
 
 ## 77.3 Krok za krokem: docházka za měsíc
 
+Nahoře na stránce je průvodce **Jak zpracovat měsíc** se třemi kroky:
+odpracovaný čas, nepřítomnosti a schválení měsíce všem.
+
 1. Otevřete `Mzdy → Docházka a směny` a zvolte měsíc v poli **Období**.
-2. Zkontrolujte pracovní kalendář, úvazek a naplánované směny. Chybí-li
-   směny, klikněte na **Rozvrhnout směny podle kalendáře**. Směny potřebuje
-   i náhrada mzdy při nemoci a za dovolenou.
+2. Dovolenou, nemoc, ošetřovné a jiné nepřítomnosti zadejte tlačítkem
+   **Zadat nepřítomnost** (nebo **Nepřítomnost** u řádku zaměstnance).
+   Mřížka pak tyto dny vynechá. U nepravidelné pracovní doby zkontrolujte
+   naplánované směny: u řádku **Další → Rozvrhnout směny podle kalendáře**.
+   Směny potřebuje náhrada mzdy při nemoci a za dovolenou.
 3. Doplňte skutečně odpracovaný čas (**Skutečně odpracovaný čas**). V měsíční
    mřížce můžete použít **Vyplnit pracovní dny**, **Zkopírovat minulý měsíc**
    nebo **Import z CSV nebo XLSX** a změny uložit tlačítkem **Uložit mřížku**.
@@ -54,7 +60,12 @@ Kapitolu otevřete, když:
    **k** odpracované době, ne místo ní.
 4. U směny s pracovní pohotovostí vyplňte **Pohotovost (min)**.
 5. Porovnejte docházku s absencemi, svátky a změnami vztahu.
-6. Vyřešte varování a klikněte na **Schválit měsíc**.
+6. Klikněte na **Schválit měsíc všem**. Dialog hromadného schválení předvyplní
+   souhrn pro každý vztah. Pokud pracovnímu poměru nepokryje fond odpracovaná
+   doba spolu se svátky v pracovní dny, dialog to ukáže a nabídne **Doplnit
+   chybějící pracovní dny podle kalendáře**. Vztahy s nepřítomností schválíte tlačítkem
+   **Schválit jednotlivě** přímo z dialogu. Jednotlivý měsíc schválíte také
+   tlačítkem **Schválit měsíc** u řádku.
 7. V dialogu **Potvrzení pracovního souhrnu JMHZ** zkontrolujte předvyplněné
    hodiny (fond, **Skutečně odpracováno**, neodpracované hodiny po druzích),
    výslovně odpovězte na otázky **Byly v měsíci neodpracované hodiny?**
@@ -69,7 +80,8 @@ a období je připravené pro [mzdový běh](80_Mzdove_behy.md).
 > [!WARNING]
 > Docházku schvalte dřív, než u mzdového běhu kliknete na **Spočítat mzdy**.
 > Po uzamčení vstupů se příplatky do běhu nedostanou a schválení měsíce
-> skončí chybou.
+> s příplatky skončí chybou. Pak v mzdovém běhu klikněte na **Zrušit běh**,
+> měsíc schvalte a v běhu dejte **Začít znovu a spočítat**.
 
 ## 77.4 Krok za krokem: import docházky z CSV nebo XLSX
 

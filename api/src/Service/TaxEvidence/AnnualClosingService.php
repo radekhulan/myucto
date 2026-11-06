@@ -6,6 +6,7 @@ namespace MyInvoice\Service\TaxEvidence;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\TaxConstantsRepository;
+use MyInvoice\Service\Demo\DemoMode;
 
 final class AnnualClosingService
 {
@@ -20,6 +21,7 @@ final class AnnualClosingService
         private readonly CashJournalService $cashJournal,
         private readonly TaxConstantsRepository $constants,
         private readonly TaxExpenseAllocationCalculator $taxExpenses,
+        private readonly DemoMode $demo,
     ) {}
 
     /** @return array<string,mixed> */
@@ -27,6 +29,16 @@ final class AnnualClosingService
     {
         $this->assertYear($year);
         $row = $this->find($supplierId, $year);
+        if ($row === null && $this->demo->enabled()) {
+            // Ukázka je jen ke čtení: otevření uzávěrky roku ji nezakládá, ukáže se
+            // prázdný rozpracovaný stav se stejnými výchozími hodnotami jako v tabulce.
+            return [
+                'id' => 0, 'supplier_id' => $supplierId, 'year' => $year, 'status' => 'draft',
+                'checklist' => [], 'opening_balances' => [], 'closing_balances' => [],
+                'unsupported_cases' => [], 'source_snapshot' => [], 'source_hash' => null,
+                'row_version' => 1, 'finalized_at' => null, 'finalized_by' => null, 'adjustments' => [],
+            ];
+        }
         if ($row === null) {
             $this->db->pdo()->prepare(
                 'INSERT INTO tax_evidence_closings (supplier_id, year) VALUES (?, ?)'

@@ -125,6 +125,20 @@ final class Bootstrap
             // bere SecurityClock z databáze a zbytek se normalizuje na UTC explicitně.
             ClockInterface::class => fn () => new \Symfony\Component\Clock\NativeClock(),
             SecurityClock::class => fn () => new DatabaseSecurityClock(),
+            // Limit souběžných relací a licenční brána tokenů jsou v konstruktoru
+            // volitelné (přímo sestavené testy je nepotřebují), a PHP-DI volitelný
+            // parametr nevyplní. Proto explicitní bindy, jinak by v provozu chyběly.
+            \MyInvoice\Service\Auth\SessionManager::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Auth\SessionManager(
+                $c->get(Connection::class),
+                $c->get(Config::class),
+                $c->get(SecurityClock::class),
+                $c->get(\MyInvoice\Service\License\SessionConcurrencyPolicy::class),
+            ),
+            \MyInvoice\Service\Auth\ApiTokenService::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Auth\ApiTokenService(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Infrastructure\Cache\RedisFactory::class),
+                $c->get(\MyInvoice\Service\License\LicenseCapacityGate::class),
+            ),
 
             LoggerInterface::class => function (ContainerInterface $c) use ($config): LoggerInterface {
                 $logger = new Logger('myinvoice');
@@ -701,6 +715,15 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard::class),
                 $c->get(\MyInvoice\Service\Bank\MatchedInvoicePaymentRepair::class),
                 $c->get(\MyInvoice\Service\Accounting\Bank\TransferPairService::class),
+                $c->get(\MyInvoice\Service\Accounting\OtherItemAutoMatcher::class),
+            ),
+            // ?ActivityLogger je optional class-param, autowire ho nevyplní; bez něj by
+            // automatické přiřazení úhrady chybělo v aktivitě položky.
+            \MyInvoice\Service\Accounting\OtherItemAutoMatcher::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Accounting\OtherItemAutoMatcher(
+                $c->get(Connection::class),
+                $c->get(\MyInvoice\Service\Accounting\OtherItemBankMatchService::class),
+                $c->get(\MyInvoice\Repository\OtherItemRepository::class),
+                $c->get(\MyInvoice\Service\ActivityLogger::class),
             ),
 
             // Autowire by optional ?PayrollBankEvidenceGuard nevyplnil (nullable
@@ -766,6 +789,8 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Accounting\Card\CardSettlementService::class),
                 // Dorovnání zúčtování zálohy na konečné faktuře po změně úhrady zálohy.
                 $c->get(\MyInvoice\Service\Accounting\AdvanceSettlementSync::class),
+                // Pravidlo s cílovou ostatní položkou pohyb zároveň přiřadí položce.
+                $c->get(\MyInvoice\Service\Accounting\OtherItemService::class),
             ),
 
             // Ú-16 — protizápis úhrady mzdového závazku. ?BankAnalyticResolver je

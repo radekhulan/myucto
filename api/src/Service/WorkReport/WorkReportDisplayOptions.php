@@ -42,6 +42,28 @@ final class WorkReportDisplayOptions
     {
         $options = $report['effective_display_options'] ?? self::resolve(null, $report['display_options'] ?? null);
         $report['effective_display_options'] = $options;
+        if (array_key_exists('billing_snapshot', $report)) {
+            $report['billing_enabled'] = $report['billing_snapshot'] !== null;
+            // Veřejnost potřebuje rekapitulaci, nikoli šablonu, sazby pásem a interní otisk.
+            unset($report['billing_snapshot'], $report['billing_template_id'], $report['billing_transferred_fingerprint'], $report['billing_stale'], $report['billing_error']);
+            if (is_array($report['billing_preview'] ?? null)) {
+                $preview = $report['billing_preview'];
+                $report['billing_preview'] = [
+                    'items' => array_map(static fn (array $item): array => [
+                        'billing_key' => $item['billing_key'],
+                        'description' => $item['description'],
+                        'unit' => $item['unit'],
+                        'quantity' => $options['hours'] ? $item['quantity'] : null,
+                        'unit_price_without_vat' => $options['rate'] ? $item['unit_price_without_vat'] : null,
+                        'total_amount' => $options['amount'] ? $item['total_amount'] : null,
+                    ], $preview['items']),
+                    'total_hours' => $options['hours'] ? $preview['total_hours'] : null,
+                    'included_hours' => $options['hours'] ? $preview['included_hours'] : null,
+                    'extra_hours' => $options['hours'] ? $preview['extra_hours'] : null,
+                    'total_amount' => $options['amount'] ? $preview['total_amount'] : null,
+                ];
+            }
+        }
         foreach ($report['items'] as &$item) {
             if (!$options['date']) $item['work_date'] = null;
             if (!$options['hours']) {

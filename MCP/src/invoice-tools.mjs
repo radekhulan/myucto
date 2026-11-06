@@ -448,8 +448,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_final_invoice_from_proforma',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['POST', '/api/invoices/{id}/issue-final'],
+    ],
     title: 'Finální faktura ze zálohy',
     description:
       'Ze zaplacené (i částečně) zálohové faktury založí KONCEPT finálního daňového dokladu: '
@@ -485,8 +486,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'apply_invoice_advance_drawdown',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['POST', '/api/invoices/{id}/advance-drawdown'],
+    ],
     title: 'Odečíst část zálohy na faktuře',
     description:
       'Postupné čerpání zálohy (smlouva s milníky): na KONCEPT běžné faktury s vlastními položkami '
@@ -508,13 +510,20 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'remove_invoice_advance_drawdown',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/advance-drawdown'],
+    ],
     title: 'Odebrat čerpání zálohy z faktury',
-    description: 'Z KONCEPTU faktury odebere odpočtové řádky zálohy i vazbu na zálohovou fakturu.',
-    inputSchema: schema({ id: id('ID konceptu faktury.') }, ['id']),
+    description: 'Z KONCEPTU faktury odebere odpočtové řádky zálohy i vazbu na zálohovou fakturu. Vyžaduje `confirm: true`.',
+    inputSchema: schema({ id: id('ID konceptu faktury.'), confirm: CONFIRM }, ['id']),
     write: true,
-    run: (c, a, tool) => c.del(`/invoices/${seg(a.id)}/advance-drawdown`, tool),
+    destructive: true,
+    run: async (c, a, tool) => {
+      const invoice = await loadDraftInvoice(c, a.id, tool);
+      requireConfirm(a, 'Odebrat se mají odpočtové řádky zálohy i její vazba', invoiceLabel(invoice, a.id));
+      return c.del(`/invoices/${seg(a.id)}/advance-drawdown`, tool);
+    },
   },
   {
     name: 'list_invoice_advance_candidates',
@@ -544,8 +553,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'link_invoice_advance',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['POST', '/api/invoices/{id}/link-advance'],
+    ],
     title: 'Propojit fakturu se zálohou',
     description:
       'Ručně propojí fakturu se zálohovou fakturou téhož odběratele a měny. Nemá-li faktura '
@@ -561,16 +571,25 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'unlink_invoice_advance',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['GET', '/api/invoices/{id}'],
+      ['DELETE', '/api/invoices/{id}/link-advance'],
+    ],
     title: 'Zrušit propojení faktury se zálohou',
     description:
       'Zruší propojení faktury se zálohovou fakturou. Odečtená záloha (`advance_paid_amount`) '
       + 'na faktuře zůstane, případně ji uprav. Nejde u daňového dokladu k platbě ani u finálu '
-      + 's odpočty záloh podle § 37a ZDPH.',
-    inputSchema: schema({ id: id('ID faktury.') }, ['id']),
+      + 's odpočty záloh podle § 37a ZDPH. Bez `confirm: true` pouze ukáže dotčený doklad a ponechanou zálohu.',
+    inputSchema: schema({ id: id('ID faktury.'), confirm: CONFIRM }, ['id']),
     write: true,
-    run: (c, a, tool) => c.del(`/invoices/${seg(a.id)}/link-advance`, tool),
+    destructive: true,
+    run: async (c, a, tool) => {
+      const invoice = await getInvoice(c, a.id, tool);
+      if (!invoice?.parent_invoice_id) throw new Error(`Faktura ${invoiceLabel(invoice, a.id)} nemá vazbu na zálohu.`);
+      requireConfirm(a, 'Zrušit se má vazba na zálohu',
+        `${invoiceLabel(invoice, a.id)}; odečtená záloha ${money(invoice.advance_paid_amount, invoice.currency)} na faktuře zůstane`);
+      return c.del(`/invoices/${seg(a.id)}/link-advance`, tool);
+    },
   },
 
   // ── Penále ───────────────────────────────────────────────────────────────
@@ -678,8 +697,9 @@ export const INVOICE_TOOLS = [
   },
   {
     name: 'create_payment_tax_document',
-    api: false,
-    apiReason: NOT_IN_CLIENT_CATALOG,
+    api: [
+      ['POST', '/api/invoices/{id}/payments/{payment_id}/tax-document'],
+    ],
     title: 'Daňový doklad k přijaté platbě',
     description:
       'K přijaté platbě zálohové faktury založí KONCEPT daňového dokladu k přijaté úplatě '

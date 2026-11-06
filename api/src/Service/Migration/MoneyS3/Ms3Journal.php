@@ -26,6 +26,9 @@ final class Ms3Journal
      */
     public const FIELDS = ['Zdroj', 'Doklad', 'Datum', 'DatPlnDPH', 'Popis', 'Castka', 'UcMD', 'UcD', 'Stred', 'Zakazka'];
 
+    /** Valuta řádku deníku (měna, kurz, částka v měně) - čte jen převod deníku. */
+    public const CURRENCY_FIELDS = ['Mena', 'Kurz', 'CastkaCM', 'PocetJedn'];
+
     /** @param array<string,mixed> $row */
     public static function isOpening(array $row): bool
     {

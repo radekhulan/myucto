@@ -227,7 +227,8 @@ final class CompanyProfileExporter
             "SELECT t.code AS type_code, v.code AS value_code,
                     c.ic AS client_ic, c.company_name AS client_name,
                     p.name AS project_name, p.project_number, pc.ic AS project_client_ic, pc.company_name AS project_client_name,
-                    si.sku AS product_sku, sc.code AS category_code
+                    si.sku AS product_sku, sc.code AS category_code,
+                    sba.account_canonical AS bank_account, sba.bank_code_norm AS bank_code
                FROM dimension_defaults d
                JOIN dimension_types t ON t.id = d.dimension_type_id
                JOIN dimension_values v ON v.id = d.dimension_value_id
@@ -236,8 +237,9 @@ final class CompanyProfileExporter
           LEFT JOIN clients pc ON pc.id = p.client_id AND pc.supplier_id = d.supplier_id
           LEFT JOIN stock_items si ON si.id = d.product_id AND si.supplier_id = d.supplier_id
           LEFT JOIN stock_categories sc ON sc.id = d.product_category_id AND sc.supplier_id = d.supplier_id
+          LEFT JOIN supplier_bank_accounts sba ON sba.id = d.supplier_bank_account_id AND sba.supplier_id = d.supplier_id
               WHERE d.supplier_id = ?
-              ORDER BY d.client_id IS NULL, c.company_name, p.name, si.sku, sc.code, t.code"
+              ORDER BY d.client_id IS NULL, c.company_name, p.name, si.sku, sc.code, sba.account_canonical, sba.bank_code_norm, t.code"
         );
         $stmt->execute([$supplierId]);
         $out = [];
@@ -272,6 +274,14 @@ final class CompanyProfileExporter
                 $out[] = [
                     'entity' => 'product_category',
                     'product_category' => ['code' => (string) $r['category_code']],
+                    'type_code' => (string) $r['type_code'],
+                    'value_code' => (string) $r['value_code'],
+                ];
+            } elseif ($r['bank_account'] !== null) {
+                // Vlastní bankovní účet se páruje číslem účtu a kódem banky (unikátní ve firmě).
+                $out[] = [
+                    'entity' => 'bank_account',
+                    'bank_account' => ['account' => (string) $r['bank_account'], 'bank_code' => (string) $r['bank_code']],
                     'type_code' => (string) $r['type_code'],
                     'value_code' => (string) $r['value_code'],
                 ];
@@ -360,20 +370,41 @@ final class CompanyProfileExporter
     /** @return list<array<string,mixed>> */
     private function bankPostingRules(int $supplierId): array
     {
-        $stmt = $this->db->pdo()->prepare(
-            'SELECT name, direction, counterparty_account, counterparty_bank, counterparty_prefix, variable_symbol,
-                    message_contains, amount_min, amount_max, applies_currency, debit_account_code, credit_account_code,
-                    description, priority, operation_type, auto_amount_cap, system_template_key, mode, is_active
-               FROM bank_posting_rules WHERE supplier_id = ? ORDER BY priority, id'
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare(
+            'SELECT r.id, r.name, r.direction, r.counterparty_account, r.counterparty_bank, r.counterparty_prefix, r.variable_symbol,
+                    r.message_contains, r.amount_min, r.amount_max, r.applies_currency, r.debit_account_code, r.credit_account_code,
+                    r.description, r.priority, r.operation_type, r.auto_amount_cap, r.system_template_key, r.mode, r.is_active,
+                    sba.account_canonical AS own_account, sba.bank_code_norm AS own_bank_code
+               FROM bank_posting_rules r
+          LEFT JOIN supplier_bank_accounts sba ON sba.id = r.bank_account_id AND sba.supplier_id = r.supplier_id
+              WHERE r.supplier_id = ? ORDER BY r.priority, r.id'
         );
         $stmt->execute([$supplierId]);
+        // Dimenze pravidel jedním dotazem; typ a hodnota kódem jako u výchozích dimenzí.
+        $dims = $pdo->prepare(
+            'SELECT d.rule_id, t.code AS type_code, v.code AS value_code
+               FROM bank_posting_rule_dimensions d
+               JOIN dimension_types t ON t.id = d.dimension_type_id
+               JOIN dimension_values v ON v.id = d.dimension_value_id
+              WHERE d.supplier_id = ?
+              ORDER BY d.rule_id, t.code'
+        );
+        $dims->execute([$supplierId]);
+        $byRule = [];
+        foreach ($dims->fetchAll(PDO::FETCH_ASSOC) as $d) {
+            $byRule[(int) $d['rule_id']][] = ['type_code' => (string) $d['type_code'], 'value_code' => (string) $d['value_code']];
+        }
 
-        return array_map(static function (array $r): array {
+        return array_map(static function (array $r) use ($byRule): array {
             foreach (['amount_min', 'amount_max', 'auto_amount_cap'] as $k) {
                 $r[$k] = $r[$k] === null ? null : (float) $r[$k];
             }
             $r['priority'] = (int) $r['priority'];
             $r['is_active'] = (bool) $r['is_active'];
+            $r['bank_account'] = $r['own_account'] === null ? null : ['account' => (string) $r['own_account'], 'bank_code' => (string) $r['own_bank_code']];
+            $r['dimensions'] = $byRule[(int) $r['id']] ?? [];
+            unset($r['id'], $r['own_account'], $r['own_bank_code']);
             return $r;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }

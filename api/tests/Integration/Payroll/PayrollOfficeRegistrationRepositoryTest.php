@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollOfficeRegistrationConflictException;
 use MyInvoice\Repository\Payroll\PayrollOfficeRegistrationRepository;
@@ -19,7 +18,7 @@ final class PayrollOfficeRegistrationRepositoryTest extends TestCase
 
     public function testVersionsAreTenantScopedAppendOnlyAndOrderedByEffectiveDate(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $registrations = $container->get(PayrollOfficeRegistrationRepository::class);
         self::assertInstanceOf(Connection::class, $db);

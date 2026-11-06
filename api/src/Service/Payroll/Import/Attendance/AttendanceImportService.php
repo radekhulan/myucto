@@ -18,6 +18,7 @@ use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollInputImportRepository;
 use MyInvoice\Repository\Payroll\PayrollPersonProfileRepository;
 use MyInvoice\Repository\Payroll\PayrollTermsSettledException;
+use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\License\LicenseCapacityGate;
 use MyInvoice\Service\License\LicensePayrollLimitExceeded;
 use MyInvoice\Service\Payroll\Absence\ImportAbsenceCompensationRates;
@@ -120,6 +121,7 @@ final class AttendanceImportService
         private readonly PayrollPersonProfileValidator $profileValidator,
         private readonly PayrollPersonProfileRepository $personProfiles,
         private readonly PayrollPersonAccountVerificationService $accountVerification,
+        private readonly DemoMode $demo,
     ) {
     }
 
@@ -879,6 +881,11 @@ final class AttendanceImportService
      */
     private function ensureSampleProfile(int $supplierId): array
     {
+        // Ukázka je jen ke čtení: otevřením importu se vzory nezakládají, nepřevádějí
+        // ani se na firmě nenastavuje značka, že je dostala. Zobrazí se, co v datech je.
+        if ($this->demo->enabled()) {
+            return [];
+        }
         $modified = [];
         foreach (AttendanceSampleProfiles::keys() as $key) {
             $this->profiles->seedSampleOnce(

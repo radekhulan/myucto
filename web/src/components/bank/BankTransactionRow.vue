@@ -21,6 +21,7 @@ import WhyChip from '@/components/automation/WhyChip.vue'
 import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
 import DocumentDimensionsPanel from '@/components/dimensions/DocumentDimensionsPanel.vue'
 import DimensionChips from '@/components/dimensions/DimensionChips.vue'
+import { manualMovementDimensions } from './ruleDimensions'
 import { useDimensions } from '@/composables/useDimensions'
 import type { DimensionMap } from '@/api/dimensions'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
@@ -180,6 +181,9 @@ const rulePrefill = computed<BankPostingRulePayload>(() => ({
   credit_account_code: props.tx.posting?.credit_account_code || (props.tx.amount > 0 ? '' : '221'),
   description: null,
   mode: 'suggest',
+  // Omezení na vlastní účet je volba ve formuláři, ne výchozí stav.
+  bank_account_id: null,
+  dimensions: manualMovementDimensions(props.tx),
 }))
 
 const {

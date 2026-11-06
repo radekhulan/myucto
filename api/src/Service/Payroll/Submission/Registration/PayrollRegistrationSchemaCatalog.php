@@ -36,14 +36,17 @@ final class PayrollRegistrationSchemaCatalog
      * když je
      * - A1: nástup 10223 (je-li vyplněno i skončení 10224, pak 10224) >= 1. 1. 2027,
      * - A2: skončení 10224 >= 1. 1. 2027,
-     * - A3, A4: skončení 10224 prázdné, nebo >= 1. 1. 2027,
+     * - A3, A4: skončení 10224 prázdné, nebo >= 1. 1. 2027 (ČSSZ, odpovědi
+     *   4 a 13: rozhoduje jen 10224),
      * - A5 až A7: platnost 10009 >= 1. 1. 2027,
      * - A8: obě verze bez omezení.
      * REGZEC 2025 zrcadlově jen s daty do 31. 12. 2026.
      *
-     * U A3/A4 bez skončení připouští ČSSZ obě verze; rozhoduje pak den
-     * platnosti změny, stejně jako u ostatních akcí. U A8 taky (storno
-     * podané stejným ročníkem jako stornovaná událost).
+     * U A8 rozhoduje den platnosti (storno podané stejným ročníkem jako
+     * stornovaná událost).
+     *
+     * Vrací datum pro hlášky a pro volbu ročníku u akcí s datem. U A3/A4 bez
+     * skončení datum o ročníku nerozhoduje, viz {@see self::versionFor()}.
      *
      * @param array<string,mixed>|null $eventData `data` zmrazené události
      */
@@ -52,15 +55,107 @@ final class PayrollRegistrationSchemaCatalog
         string $effectiveOn,
         ?array $eventData,
     ): string {
-        if (in_array($actionCode, [3, 4], true) && is_array($eventData)) {
-            $employment = $eventData['delta']['employment'] ?? null;
-            $endOn = is_array($employment) ? ($employment['end_on'] ?? null) : null;
-            if (is_string($endOn) && $endOn !== '') {
-                return $endOn;
-            }
+        return self::changeEndOn($actionCode, $eventData) ?? $effectiveOn;
+    }
+
+    /**
+     * Ročník REGZEC podání. ČSSZ, Otázky a odpovědi k NV2027
+     * (developers.mpsv.cz, stránka dokumentace NV2027), odpovědi 4 a 13:
+     * u A3/A4 rozhoduje VÝHRADNĚ datum skončení 10224 v podání. Vyplněné
+     * před 1. 1. 2027 znamená REGZEC25, vyplněné později nebo prázdné
+     * REGZEC27; platnost 10009 ani datum opravovaného oznámení se
+     * nezohledňují, takže i změna údajů z roku 2026 u trvajícího vztahu jde
+     * jako REGZEC27. Prázdné 10224 ale ostrá ČSSZ v REGZEC27 přijme až od
+     * 23. 12. 2026 (odpověď 5), proto u něj rozhoduje den vyhotovení
+     * ({@see JmhzSpecVersion::forRegistrationChangeWithoutEnd()}).
+     * Ostatní akce jdou podle {@see self::decisiveDate()}.
+     *
+     * @param array<string,mixed>|null $eventData `data` zmrazené události
+     */
+    public static function versionFor(
+        int $actionCode,
+        string $effectiveOn,
+        ?array $eventData,
+        string $preparedOn,
+    ): JmhzSpecVersion {
+        if (in_array($actionCode, [3, 4], true)
+            && self::changeEndOn($actionCode, $eventData) === null
+        ) {
+            return JmhzSpecVersion::forRegistrationChangeWithoutEnd($preparedOn);
         }
 
-        return $effectiveOn;
+        return JmhzSpecVersion::forRegistrationEventDate(
+            self::decisiveDate($actionCode, $effectiveOn, $eventData),
+        );
+    }
+
+    /** Kód blokace odeslání změny bez 10224, která zastarala na REGZEC25. */
+    public const STALE_CHANGE_CODE = 'registration_regzec25_change_stale';
+
+    /**
+     * Zmrazená změna nebo oprava (A3, A4) bez data skončení 10224, jejíž
+     * ročník už neodpovídá dni odeslání. Typicky REGZEC25 připravená před
+     * 23. 12. 2026 a odesílaná 23. 12. 2026 nebo později: tehdy už ČSSZ
+     * změnu aktivního vztahu přijímá jen jako REGZEC27 (Otázky a odpovědi
+     * k NV2027, odpovědi 4, 5 a 13). Opačný případ nenastane, REGZEC27 bez
+     * 10224 se před 23. 12. 2026 nepřipraví. Jediné pravidlo pro bránu
+     * odeslání i pro seznam podání.
+     */
+    public static function changeVintageExpired(
+        int $actionCode,
+        bool $carriesEndOn,
+        JmhzSpecVersion $frozen,
+        string $sendOn,
+    ): bool {
+        return in_array($actionCode, [3, 4], true)
+            && !$carriesEndOn
+            && $frozen !== JmhzSpecVersion::forRegistrationChangeWithoutEnd($sendOn);
+    }
+
+    /**
+     * Ročník zmrazené změny nebo opravy podle formuláře v archivu
+     * (`xsd_version` artefaktu) a dat události. Neznámý formulář = false:
+     * o odeslání pak rozhoduje brána přenosu nad samotnou větou.
+     *
+     * @param array<string,mixed>|null $eventData `data` zmrazené události
+     */
+    public static function frozenChangeVintageExpired(
+        int $actionCode,
+        ?array $eventData,
+        ?string $frozenForm,
+        string $sendOn,
+    ): bool {
+        $frozen = match ($frozenForm) {
+            'REGZEC25' => JmhzSpecVersion::V2026,
+            'REGZEC27' => JmhzSpecVersion::V2027,
+            default => null,
+        };
+
+        return $frozen !== null && self::changeVintageExpired(
+            $actionCode,
+            self::changeEndOn($actionCode, $eventData) !== null,
+            $frozen,
+            $sendOn,
+        );
+    }
+
+    public static function staleChangeMessage(): string
+    {
+        return 'Podání bylo připraveno ve formátu REGZEC25; od 23. 12. 2026'
+            . ' ČSSZ změny aktivního vztahu přijímá jen jako REGZEC27.'
+            . ' Připravte ho znovu.';
+    }
+
+    /** @param array<string,mixed>|null $eventData */
+    private static function changeEndOn(int $actionCode, ?array $eventData): ?string
+    {
+        if (!in_array($actionCode, [3, 4], true) || !is_array($eventData)) {
+            return null;
+        }
+        $employment = $eventData['delta']['employment'] ?? null;
+        $endOn = is_array($employment) ? ($employment['end_on'] ?? null) : null;
+
+        return is_string($endOn) && $endOn !== '' ? $endOn : null;
     }
 
     /**
@@ -77,10 +172,14 @@ final class PayrollRegistrationSchemaCatalog
      * před nástupem v roce 2027 proto odchází jako PREZEC26.
      *
      * @param string $documentType formulář tak, jak ho určila interakce (`REGZEC25`, `PREZEC26`)
+     * @param JmhzSpecVersion|null $version ročník z {@see self::versionFor()}; bez něj podle data události
      */
-    public function documentTypeFor(string $documentType, string $eventDate): string
-    {
-        $version = JmhzSpecVersion::forRegistrationEventDate($eventDate);
+    public function documentTypeFor(
+        string $documentType,
+        string $eventDate,
+        ?JmhzSpecVersion $version = null,
+    ): string {
+        $version ??= JmhzSpecVersion::forRegistrationEventDate($eventDate);
         if ($version === JmhzSpecVersion::V2026 || $documentType === 'PREZEC26') {
             return $documentType;
         }

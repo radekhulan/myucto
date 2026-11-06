@@ -13,6 +13,7 @@ use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Repository\AccountingBackfillJobRepository;
 use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
+use MyInvoice\Service\Accounting\Activation\BackfillService;
 use MyInvoice\Service\Accounting\Activation\OpeningBalanceService;
 use MyInvoice\Service\Accounting\Activation\PendingBackfillCounter;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
@@ -26,9 +27,13 @@ use Psr\Http\Message\ServerRequestInterface as Request;
 
 final class AccountingActivationAction
 {
+    private const FORCE_REASON_MIN = 5;
+    private const FORCE_REASON_MAX = 500;
+
     public function __construct(
         private readonly Connection $db,
         private readonly AccountingBackfillJobRepository $jobs,
+        private readonly BackfillService $backfill,
         private readonly OpeningBalanceService $opening,
         private readonly PendingBackfillCounter $pending,
         private readonly ChartOfAccountsSeeder $seeder,
@@ -206,20 +211,42 @@ final class AccountingActivationAction
         if (!$opening['totals']['balanced']) {
             return Json::error($response, 'opening_unbalanced', 'Otevírací rozvaha není vyrovnaná.', 422);
         }
-        if ($kind === 'execute') {
+        $body = (array) ($request->getParsedBody() ?? []);
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $force = null;
+        if ($kind === 'execute' && $this->forceRequested($request, $body)) {
+            $force = $this->forceDecision($request, $response, $body);
+            if ($force instanceof Response) return $force;
+        }
+        if ($kind === 'execute' && $force === null) {
             $dryRun = $this->jobs->completedDryRun($supplierId, $startsOn, $opening['hash']);
             if ($dryRun === null || (int) ($dryRun['report_json']['failed_total'] ?? 1) !== 0) {
                 return Json::error($response, 'dry_run_required', 'Po změnách spusťte znovu kontrolu nanečisto.', 409);
             }
+        } elseif ($kind === 'execute') {
+            // Vynucené doúčtování přeskočí jen chyby jednotlivých položek. Kontrola nanečisto
+            // nad týmiž vstupy musí doběhnout celá a s vyrovnaným deníkem.
+            $dryRun = $this->jobs->finishedDryRun($supplierId, $startsOn, $opening['hash']);
+            $dryReport = is_array($dryRun['report_json'] ?? null) ? $dryRun['report_json'] : null;
+            if ($dryReport === null) {
+                return Json::error($response, 'dry_run_required', 'Po změnách spusťte znovu kontrolu nanečisto.', 409);
+            }
+            if (isset($dryReport['fatal_error'])) {
+                return Json::error($response, 'activation_force_fatal', 'Kontrola skončila dřív, než prošla všechny zdroje. Opravte příčinu a spusťte ji znovu.', 409);
+            }
+            if (!($dryReport['balance']['balanced'] ?? false)) {
+                return Json::error($response, 'journal_unbalanced', 'Deník není vyrovnaný - aktivaci nelze dokončit.', 409);
+            }
         }
 
-        $body = (array) ($request->getParsedBody() ?? []);
         $params = [
             'starts_on' => $startsOn,
             'opening_hash' => $opening['hash'],
             'with_rules' => (bool) ($body['with_rules'] ?? false),
         ];
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        if ($force !== null) {
+            $params['force'] = ['by' => (int) ($user['id'] ?? 0), 'reason' => $force['reason']];
+        }
         try {
             $jobId = $this->jobs->create($supplierId, $kind, $params, (int) ($user['id'] ?? 0));
         } catch (PDOException $e) {
@@ -254,8 +281,71 @@ final class AccountingActivationAction
             }
             return Json::error($response, 'worker_start_failed', 'Doúčtování se nepodařilo spustit. Zkuste to znovu.', 500);
         }
-        $this->audit($request, 'accounting_activation.' . $kind . '_started', $supplierId, ['job_id' => $jobId] + $params);
+        $this->audit(
+            $request,
+            'accounting_activation.' . $kind . ($force !== null ? '_forced' : '') . '_started',
+            $supplierId,
+            ['job_id' => $jobId] + $params,
+        );
         return Json::ok($response, ['job_id' => $jobId, 'status' => 'queued'], 201);
+    }
+
+    /**
+     * Dokončí aktivaci nad posledním neúspěšným doúčtováním, které skončilo jen chybami
+     * jednotlivých položek. Vyžaduje `force=1`, `confirm=true` a důvod; brány nad stavem
+     * deníku a vstupů drží {@see BackfillService::forceComplete()}.
+     */
+    public function forceComplete(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->requireAdmin($request, $response)) !== null) return $error;
+        $supplierId = SupplierGuard::currentId($request);
+        $body = (array) ($request->getParsedBody() ?? []);
+        $force = $this->forceDecision($request, $response, $body);
+        if ($force instanceof Response) return $force;
+        $jobId = (int) ($args['id'] ?? 0);
+        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
+        $this->jobs->reapStale($supplierId);
+        try {
+            $report = $this->backfill->forceComplete($jobId, $supplierId, (int) ($user['id'] ?? 0), $force['reason']);
+        } catch (PostingException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        $this->audit($request, 'accounting_activation.force_completed', $supplierId, [
+            'job_id' => $jobId,
+            'reason' => $force['reason'],
+            'failed_total' => (int) ($report['failed_total'] ?? 0),
+        ]);
+        $payload = $this->statusPayload($supplierId);
+        return $payload === null
+            ? Json::error($response, 'not_found', 'Firma nebyla nalezena.', 404)
+            : Json::ok($response, $payload);
+    }
+
+    private function forceRequested(Request $request, array $body): bool
+    {
+        $query = $request->getQueryParams();
+        return filter_var($body['force'] ?? $query['force'] ?? false, FILTER_VALIDATE_BOOL);
+    }
+
+    /**
+     * Vynucení je rozhodnutí správce s výslovným potvrzením a důvodem. Bez potvrzení
+     * server odmítne i požadavek, který si `force=1` poslal sám.
+     *
+     * @return array{reason:string}|Response
+     */
+    private function forceDecision(Request $request, Response $response, array $body): array|Response
+    {
+        if (!RequestAuthorization::canForceAccountingActivation($request)) {
+            return Json::error($response, 'forbidden', 'Vynutit dokončení aktivace může jen správce firmy.', 403);
+        }
+        if (!$this->forceRequested($request, $body) || !filter_var($body['confirm'] ?? false, FILTER_VALIDATE_BOOL)) {
+            return Json::error($response, 'force_confirmation_required', 'Vynucené dokončení vyžaduje výslovné potvrzení.', 422);
+        }
+        $reason = trim((string) ($body['reason'] ?? ''));
+        if (mb_strlen($reason) < self::FORCE_REASON_MIN) {
+            return Json::error($response, 'force_reason_required', 'Uveďte důvod vynuceného dokončení.', 422);
+        }
+        return ['reason' => mb_substr($reason, 0, self::FORCE_REASON_MAX)];
     }
 
     private function requireAdmin(Request $request, Response $response): ?Response

@@ -15,9 +15,10 @@ final class AttendanceSampleProfiles
 {
     public const GIRITON = AttendanceSampleProfile::KEY;
     public const MYUCTO = AttendanceMyUctoSampleProfile::KEY;
+    public const PAMICA = AttendancePamicaSampleProfile::KEY;
 
     /** Klient drží stejné hodnoty jako union `AttendanceSampleKey` (PayrollEnumContractTest). */
-    public const KEYS = [self::GIRITON, self::MYUCTO];
+    public const KEYS = [self::GIRITON, self::MYUCTO, self::PAMICA];
 
     /** @return list<string> */
     public static function keys(): array
@@ -35,6 +36,7 @@ final class AttendanceSampleProfiles
         return match ($key) {
             self::GIRITON => AttendanceSampleProfile::NAME,
             self::MYUCTO => AttendanceMyUctoSampleProfile::NAME,
+            self::PAMICA => AttendancePamicaSampleProfile::NAME,
             default => throw new \InvalidArgumentException('Neznámý vzor profilu mapování.'),
         };
     }
@@ -44,6 +46,7 @@ final class AttendanceSampleProfiles
         return match ($key) {
             self::GIRITON => AttendanceSampleProfile::VERSION,
             self::MYUCTO => AttendanceMyUctoSampleProfile::VERSION,
+            self::PAMICA => AttendancePamicaSampleProfile::VERSION,
             default => throw new \InvalidArgumentException('Neznámý vzor profilu mapování.'),
         };
     }
@@ -54,6 +57,7 @@ final class AttendanceSampleProfiles
         return match ($key) {
             self::GIRITON => AttendanceSampleProfile::rules(),
             self::MYUCTO => AttendanceMyUctoSampleProfile::rules(),
+            self::PAMICA => AttendancePamicaSampleProfile::rules(),
             default => throw new \InvalidArgumentException('Neznámý vzor profilu mapování.'),
         };
     }
@@ -64,6 +68,7 @@ final class AttendanceSampleProfiles
         return match ($key) {
             self::GIRITON => AttendanceSampleProfile::components(),
             self::MYUCTO => AttendanceMyUctoSampleProfile::components(),
+            self::PAMICA => AttendancePamicaSampleProfile::components(),
             default => throw new \InvalidArgumentException('Neznámý vzor profilu mapování.'),
         };
     }

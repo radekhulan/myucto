@@ -59,6 +59,8 @@ class RecordingClient {
     if (path === '/codebooks/currencies') return [{ id: 7, code: 'CZK' }, { id: 8, code: 'EUR' }];
     if (path === '/codebooks/cnb-rate') return { rate: 25, rate_date: '2026-01-01' };
     if (path === '/settings/supplier') return { default_hourly_rate: 900 };
+    if (this.name === 'unlink_invoice_advance') return { ...row, parent_invoice_id: 8, advance_paid_amount: 100 };
+    if (this.name === 'unlink_purchase_advance') return { ...row, linked_advance: { id: 8, total_with_vat: 100, currency: 'CZK' } };
     return row;
   }
 

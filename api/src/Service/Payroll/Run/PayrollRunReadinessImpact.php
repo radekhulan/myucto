@@ -20,6 +20,11 @@ namespace MyInvoice\Service\Payroll\Run;
  * - {@see self::IMPACT_ANYTIME}  — dá, a nic to nestojí. Ukázat, nezastavit.
  * - {@see self::IMPACT_REVISION} — dá, ale až přes OPRAVNOU REVIZI, protože
  *   údaj vstupuje do zmrazeného snímku. Taky nezastavit, ale říct následek.
+ * - {@see self::IMPACT_APPROVAL} — běh se zahájí i spočítá, ale SCHVÁLIT ho
+ *   nepůjde, dokud se to neopraví. Kontrola nad zmrazeným snímkem z toho
+ *   udělá blokující validaci. Patří sem červeně, ne žlutě: dřív se tu
+ *   neschválená docházka ukazovala jako varování a po zahájení se tatáž věc
+ *   objevila jako blokace schválení.
  * - {@see self::IMPACT_BLOCKING} — nedá; výpočet nemá z čeho vyjít.
  *
  * Když si u nálezu nejsme jistí, patří do `anytime`. Falešná závora je horší
@@ -43,6 +48,9 @@ final class PayrollRunReadinessImpact
 
     /** Opraví se, ale po zamknutí vstupů to stojí opravnou revizi. */
     public const IMPACT_REVISION = 'revision';
+
+    /** Spočítat jde, schválit ne — v běhu z toho je blokující validace. */
+    public const IMPACT_APPROVAL = 'approval';
 
     /** Bez tohohle se nedá počítat. */
     public const IMPACT_BLOCKING = 'blocking';
@@ -71,11 +79,16 @@ final class PayrollRunReadinessImpact
          */
         'period_before_module_start' => [self::IMPACT_BLOCKING, self::SCOPE_SETUP],
 
+        // ── Spočítat jde, schválit ne: v běhu jsou to blokující validace ─────
+        'draft_inputs_present' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        'time_month_not_approved' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        'time_month_missing' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        // Vztah bez schválené složky výpočet neprojde (zákonný výpočet skončí
+        // ruční kontrolou „chybí schválená mzdová složka"), i když snímek sám
+        // to hlásí jen jako varování. Cesta ven: zadat složku, případně 0 Kč.
+        'employment_without_inputs' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+
         // ── Skupina 2: opraví se, ale po zamknutí přes opravnou revizi ───────
-        // Všechno, co vstupuje do zmrazeného snímku vstupů.
-        'draft_inputs_present' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
-        'time_month_not_approved' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
-        'time_month_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         // Rozhodnutí nepřítomnosti mění snímek vstupů (schválené nepřítomnosti).
         'absence_pending_decision' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         // § 75 ZP — roční limit DPP 300 h včetně převzatých hodin. Výpočet běží,
@@ -83,7 +96,6 @@ final class PayrollRunReadinessImpact
         'dpp_annual_hours_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         // § 76 odst. 2 ZP — průměr DPČ nad polovinu stanovené týdenní doby.
         'dpc_weekly_average_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
-        'employment_without_inputs' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'recurring_component_without_input' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'missing_effective_employment_term' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'part_time_discount_intent_missing' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
@@ -127,6 +139,29 @@ final class PayrollRunReadinessImpact
     /** Nálezy identity pro ČSSZ mají společné zařazení — všechny do skupiny 1. */
     private const IDENTITY_PREFIX = 'jmhz_identity_';
 
+    /**
+     * Zařazení nálezu z kontroly snímku. Validace, kterou běh nad zmrazenými
+     * vstupy hlásí jako blokující, nesmí být v předběžné kontrole slabší než
+     * „neschválí se" — jinak účetní uvidí žlutou a po zahájení červenou.
+     *
+     * @return array{impact:string,scope:string,severity:string}
+     */
+    public static function describeValidation(string $code, string $validationSeverity): array
+    {
+        $classification = self::describe($code);
+        if ($validationSeverity === 'blocker'
+            && in_array($classification['impact'], [self::IMPACT_ANYTIME, self::IMPACT_REVISION], true)
+        ) {
+            return [
+                'impact' => self::IMPACT_APPROVAL,
+                'scope' => $classification['scope'],
+                'severity' => 'blocker',
+            ];
+        }
+
+        return $classification;
+    }
+
     /** @return array{impact:string,scope:string,severity:string} */
     public static function describe(string $code): array
     {
@@ -142,7 +177,7 @@ final class PayrollRunReadinessImpact
             'impact' => $impact,
             'scope' => $scope,
             'severity' => match ($impact) {
-                self::IMPACT_BLOCKING => 'blocker',
+                self::IMPACT_BLOCKING, self::IMPACT_APPROVAL => 'blocker',
                 self::IMPACT_REVISION => 'warning',
                 default => 'info',
             },

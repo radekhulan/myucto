@@ -129,6 +129,10 @@ function jmhzOptions() {
         { code: '7', label: '§ 42 odst. 1 písm. h)', employment_types: ['3'] },
         { code: '15', label: '§ 18 písm. d)', employment_types: ['4'] },
       ],
+      employment_status_codes: [
+        { code: '1111', label: 'Zaměstnanci v pracovním poměru na dobu neurčitou' },
+        { code: '2219', label: 'Zaměstnavatelé – fyzické osoby jinde neuvedené' },
+      ],
     },
   }
 }
@@ -972,6 +976,61 @@ describe('EmploymentRegistrationPanel', () => {
     expect(m.prepare).toHaveBeenCalledWith(5, 'production', 91)
   })
 
+  it('offers Prepare again instead of sending a stale REGZEC25 change', async () => {
+    m.events.mockResolvedValue([{
+      id: 91,
+      employment_id: 5,
+      environment: 'test',
+      interaction: 'change',
+      action_code: 3,
+      effective_on: '2026-12-01',
+      source_kind: 'verified_change',
+      source_reference: 'personnel-change-19',
+      snapshot_fingerprint: 'c'.repeat(64),
+      approved_at: '2026-12-10 09:00:00',
+      consumed: true,
+      created: false,
+    }])
+    m.preview.mockResolvedValue({ ...preview, agenda_code: 'REGZEC25', interaction: 'change', action_code: 3 })
+    const prepared = {
+      obligation_id: 22,
+      part_id: 23,
+      artifact_id: 24,
+      status: 'ready',
+      row_version: 1,
+      environment: 'production',
+      agenda_code: 'REGZEC25',
+      interaction: 'change',
+      artifact_sha256: 'd'.repeat(64),
+      deadline,
+    }
+    m.prepare
+      .mockResolvedValueOnce({ ...prepared, submission_id: 21, created: false, vintage_expired: true })
+      .mockResolvedValueOnce({ ...prepared, submission_id: 31, created: true, vintage_expired: false, replaced_submission_id: 21 })
+
+    const wrapper = mountPanel()
+    await flushPromises()
+    await wrapper.get('[data-test="registration-event-select"]').setValue('91')
+    await wrapper.get('[data-test="registration-preview"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="registration-prepare"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="registration-vintage-expired"]').exists()).toBe(true)
+    const actions = wrapper.get('[data-test="registration-transport-actions"]')
+    expect(actions.text()).toContain('registration.reprepare')
+    expect(actions.text()).not.toContain('registration.send_production')
+
+    await actions.get('button').trigger('click')
+    await flushPromises()
+
+    expect(m.send).not.toHaveBeenCalled()
+    expect(m.prepare).toHaveBeenLastCalledWith(5, 'production', 91, 'auto', { replacesSubmissionId: 21 })
+    expect(wrapper.find('[data-test="registration-vintage-expired"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="registration-transport-actions"]').text())
+      .toContain('registration.send_production')
+  })
+
   it('creates an A5 source, selects it and previews the exact event', async () => {
     const event = {
       id: 92,
@@ -1525,6 +1584,29 @@ describe('EmploymentRegistrationPanel', () => {
     const after = await openForeignA1('2027-01-04')
     expect(after.text()).toContain('zvláštní dlouhodobý pobyt')
     expect(after.text()).toContain('vyslání zaměstnavatelem')
+  })
+
+  it('offers employment status codes from the ČSÚ codebook for a start from 1 January 2027', async () => {
+    const statusCodes = async (startOn: string) => {
+      const suggested = a1Suggested()
+      m.a1Profile.mockResolvedValue(a1View({
+        suggested: { ...suggested, employment: { ...suggested.employment, actual_start_on: startOn } },
+      }))
+      const wrapper = mountPanel()
+      await flushPromises()
+      await wrapper.get('[data-test="registration-a1-toggle"]').trigger('click')
+      await flushPromises()
+      return wrapper.get('[data-test="a1-employment-status-code"]').findAll('option')
+        .map(option => option.attributes('value'))
+    }
+
+    const before = await statusCodes('2026-12-31')
+    expect(before).toContain('1341')
+    expect(before).not.toContain('2219')
+
+    const after = await statusCodes('2027-01-04')
+    expect(after).toContain('2219')
+    expect(after).not.toContain('1341')
   })
 
   it('keeps the A2 prefill disabled without a termination record', async () => {

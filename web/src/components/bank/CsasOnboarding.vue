@@ -24,6 +24,13 @@ type PaymentSubmissionState = 'available' | 'authorization_scope_missing' | 'acc
 const paymentSubmission = ref<PaymentSubmissionState>(null)
 let disposed = false
 const canStart = computed(() => props.canWrite && ready.value && !busy.value && fieldNames.every(key => fields.value[key].trim()))
+// Návrat z banky nese účet a důvod; starší návrat bez účtu platí pro všechny účty ČS.
+const callbackError = computed(() => {
+  if (route.query.csas !== 'error') return ''
+  const currency = String(route.query.currency_id ?? '')
+  if (currency !== '' && currency !== String(props.currencyId)) return ''
+  return String(route.query.code ?? '') === 'statement_account_mismatch' ? 'bank_connection.csas_error_account_mismatch' : 'bank_connection.csas_error'
+})
 onMounted(async () => {
   try {
     const { data } = await api.get<{ callback_url: string; server_ready: boolean; environment: 'sandbox' | 'production'; payment_submission?: PaymentSubmissionState }>(`/settings/bank-connections/${props.currencyId}/csas/onboarding`)
@@ -80,6 +87,6 @@ async function start() {
       <button type="submit" :class="btnFilled('primary')" :disabled="!canStart"><svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.link" /></svg>{{ t('bank_connection.csas_connect') }}</button>
     </form>
     <p v-if="callback && !ready" class="text-sm text-warning-700">{{ t('bank_connection.csas_server') }}</p>
-    <p v-if="error || route.query.csas === 'error'" role="alert" class="text-sm text-danger-600">{{ t('bank_connection.csas_error') }}</p>
+    <p v-if="error || callbackError" role="alert" class="text-sm text-danger-600" data-test="csas-error">{{ t(error ? 'bank_connection.csas_error' : callbackError) }}</p>
   </div>
 </template>
