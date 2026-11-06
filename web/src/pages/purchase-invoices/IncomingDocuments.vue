@@ -606,6 +606,7 @@ onBeforeUnmount(() => { context++; loadRequest++ })
       <PdfDropzone
         multiple
         accept-structured
+        crop-photos
         :extra-extensions="['xml']"
         :accept="ALLOWED_FILES"
         :uploading="uploading"

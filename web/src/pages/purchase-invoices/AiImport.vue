@@ -14,6 +14,8 @@ import { canUsePurchaseAiExtraction } from '@/security/purchaseAiExtraction'
 import { ICONS, btnFilled, btnOutlineSm } from '@/components/ui/buttonStyles'
 import ExtractionReviewModal from '@/components/purchase/ExtractionReviewModal.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
+import { usePhotoCropQueue } from '@/composables/usePhotoCropQueue'
 import MergeDocumentsPanel from '@/components/upload/MergeDocumentsPanel.vue'
 
 const { t } = useI18n()
@@ -65,8 +67,22 @@ const aiExtracting = ref(false)
 const aiResult = ref<AiExtractResult | null>(null)
 const aiPerRequestModel = ref('')  // empty = použít default
 
-// Přijme 1..N souborů z file-pickeru i drag&drop: 1 = single-file flow, více = dávka.
+/** Celý výběr; výřezy se do něj vrátí na svá místa a extrakce se spustí najednou. */
+const crop = usePhotoCropQueue(files => useAiFiles(files))
+
+/**
+ * Fotka papírového dokladu jde nejdřív do ořezu: server fotku jen zmenší, takže
+ * čím víc je v záběru stolu, tím míň pixelů zbyde na čísla, která z dokladu čte
+ * AI. Z „Vyfotit“ přichází fotka ořezaná už z dialogu, proto tlačítko volá
+ * {@link useAiFiles} a tudy nechodí.
+ */
 function acceptAiFiles(files: File[]) {
+  if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value || files.length === 0) return
+  crop.start(files)
+}
+
+// Přijme 1..N souborů z file-pickeru i drag&drop: 1 = single-file flow, více = dávka.
+function useAiFiles(files: File[]) {
   if (!canStartExtraction.value || aiExtracting.value || aiBatchRunning.value || files.length === 0) return
   const pdfs = files.filter(f =>
     f.type === 'application/pdf' || f.type.startsWith('image/') ||
@@ -350,7 +366,8 @@ watch(() => suppliers.currentSupplierId, () => {
 
       <div class="space-y-3">
         <div v-if="!quotaExhausted" class="flex flex-wrap gap-2 justify-end">
-          <CapturePhotoButton :disabled="aiExtracting || aiBatchRunning" @captured="(f: File) => acceptAiFiles([f])" />
+          <!-- Z „Vyfotit“ jde fotka už ořezaná, do ořezu podruhé nemá chodit. -->
+          <CapturePhotoButton :disabled="aiExtracting || aiBatchRunning" @captured="(f: File) => useAiFiles([f])" />
         </div>
         <label class="block border-2 border-dashed rounded-lg p-6 text-center cursor-pointer transition"
           :class="aiDragOver
@@ -548,6 +565,9 @@ watch(() => suppliers.currentSupplierId, () => {
     </div>
     <MergeDocumentsPanel v-if="canExtract && aiConfigured" :disabled="!canStartExtraction"
       :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
+    <PhotoCropDialog v-if="crop.current.value" :key="crop.step.value" :file="crop.current.value" from-file
+      :step="crop.step.value" :steps="crop.steps.value" :skip-count="crop.remaining.value"
+      @done="crop.done" @skip-rest="crop.skipRest" @cancel="crop.cancel" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" :only-flagged="!auth.isClientRole" @close="reviewIds = null" />
   </div>
 </template>

@@ -1043,6 +1043,8 @@
     "processing": "Processing the photo...",
     "decode_failed": "The photo could not be processed. Your browser probably cannot read this format (for example HEIC).",
     "fallback_hint": "You can upload the original file unchanged, or take the photo again.",
+    "fallback_hint_file": "You can upload the original file unchanged, or cancel the crop.",
+    "skip_rest": "Skip cropping the rest ({n})",
     "upload": "Upload",
     "upload_original": "Upload original file",
     "retake": "Take again",

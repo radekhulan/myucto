@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import {
-  detectDocumentQuad, isConvexQuad, otsuThreshold, quadArea, rectifiedSize,
-  rectToQuadHomography, warpQuad, type Pixels, type Quad,
+  detectDocumentQuad, isConvexQuad, nearestCornerIndex, otsuThreshold, quadArea,
+  rectifiedSize, rectToQuadHomography, warpQuad, type Pixels, type Quad,
 } from '../documentCrop'
 
 /** Tmavý podklad s bílým čtyřúhelníkem (bod uvnitř podle znaménka vektorových součinů). */
@@ -49,6 +49,37 @@ describe('documentCrop', () => {
     expect(detectDocumentQuad(scene(100, 100, full))).toBeNull()
     const tiny: Quad = [{ x: 45, y: 45 }, { x: 52, y: 45 }, { x: 52, y: 52 }, { x: 45, y: 52 }]
     expect(detectDocumentQuad(scene(100, 100, tiny))).toBeNull()
+  })
+
+  it('najde tmavý doklad na světlém podkladu', () => {
+    // Účtenka vyfocená v šeru nebo celá potištěná termopáska na bílém stole:
+    // světlá polarita by vrátila stůl, tedy celý záběr.
+    const quad: Quad = [{ x: 55, y: 30 }, { x: 150, y: 35 }, { x: 145, y: 265 }, { x: 50, y: 270 }]
+    expectNear(detectDocumentQuad(scene(200, 300, quad, 240, 55))!, quad, 3)
+  })
+
+  it('na fotce samotného potištěného papíru ořez nenavrhne', () => {
+    // Papír přes celý záběr s řádky textu uvnitř: největší světlá oblast je celá
+    // stránka (krajní body = rohy fotky) a tmavé řádky jsou každý zvlášť malé.
+    const page = scene(120, 200, [{ x: 0, y: 0 }, { x: 120, y: 0 }, { x: 120, y: 200 }, { x: 0, y: 200 }], 245, 245)
+    for (let line = 0; line < 8; line++) {
+      for (let y = 20 + line * 20; y < 26 + line * 20; y++) {
+        // Text má okraje, takže stránku nerozdělí na pásy.
+        for (let x = 15; x < 105; x++) {
+          const o = (y * 120 + x) * 4
+          page.data[o] = page.data[o + 1] = page.data[o + 2] = 40
+        }
+      }
+    }
+    expect(detectDocumentQuad(page)).toBeNull()
+  })
+
+  it('roh se chytá s tolerancí, dál než tolerance se nechytne nic', () => {
+    const quad: Quad = [{ x: 10, y: 10 }, { x: 90, y: 12 }, { x: 88, y: 180 }, { x: 12, y: 175 }]
+    expect(nearestCornerIndex(quad, { x: 40, y: 40 }, 44)).toBe(0)
+    expect(nearestCornerIndex(quad, { x: 70, y: 30 }, 44)).toBe(1)
+    expect(nearestCornerIndex(quad, { x: 50, y: 95 }, 44)).toBeNull()
+    expect(nearestCornerIndex(quad, { x: 50, y: 95 }, 100)).not.toBeNull()
   })
 
   it('Otsu oddělí dvě skupiny jasů', () => {

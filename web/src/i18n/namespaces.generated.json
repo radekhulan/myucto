@@ -536,6 +536,7 @@
       "attachment_check",
       "automation",
       "bank",
+      "capture_photo",
       "cash",
       "cash_settlement",
       "credit_note_offset",

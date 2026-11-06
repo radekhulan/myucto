@@ -223,6 +223,9 @@ Další rok převedete i později zopakováním postupu (§ 109.8.4).
 | ruční úpravy základu daně z přiznání k DPPO | položky rozpracovaného přiznání k DPPO |
 | uzavřený rok | uzávěrka roku v MyÚčtu (702/710) a navazující počáteční stavy |
 
+Při přeúčtování přeplatku mezi vydanými fakturami se bankovní a pokladní úhrady
+zpracují společně podle data a při shodném datu podle pořadí řádků deníku PREMIER.
+
 **Faktura v cizí měně.** Převezme se v měně a kurzu dokladu, když částky
 položek v měně přepočtené kurzem dávají na haléř koruny ze zaúčtování
 v deníku (z nich PREMIER počítá přiznání). DPH, kontrolní hlášení i deník
