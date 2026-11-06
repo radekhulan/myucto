@@ -263,6 +263,17 @@ final class CronCatalog
                 'critical' => false,
             ],
             [
+                // Plánovaný export dokladů do Pohody e-mailem účetní. Bez zapnutého
+                // nastavení u firmy skončí hned, takže běží vždy.
+                'script' => 'cron-scheduled-pohoda-export',
+                'recommended' => 'daily_0630',
+                'linux_cron' => '30 6 * * *',
+                'windows_schtasks' => '/sc daily /st 06:30',
+                'max_age_hours' => 36,
+                'weekdays_only' => false,
+                'critical' => true,
+            ],
+            [
                 'script' => 'cron-send-approval-reminders',
                 'recommended' => 'weekdays_0915',
                 'linux_cron' => '15 9 * * 1-5',
