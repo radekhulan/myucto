@@ -876,6 +876,7 @@ final class Bootstrap
             \MyInvoice\Service\Tenant\SupplierAccessResolver::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Tenant\SupplierAccessResolver(
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Repository\UserSupplierRepository::class),
+                $c->get(\MyInvoice\Service\Auth\LoginPolicyService::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
                 $c->get(\MyInvoice\Service\Tenant\DefaultSupplierService::class),
             ),
@@ -924,6 +925,7 @@ final class Bootstrap
                 $c->get(\MyInvoice\Service\Auth\MfaOfferService::class),
                 $c->get(\MyInvoice\Service\Auth\SessionLockPolicy::class),
                 $c->get(ClockInterface::class),
+                $c->get(\MyInvoice\Service\Tenant\SupplierAccessResolver::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
                 $c->get(\MyInvoice\Service\Import\ClientAiExtractionPolicy::class),
             ),

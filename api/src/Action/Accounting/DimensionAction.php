@@ -75,6 +75,7 @@ final class DimensionAction
         private readonly DimensionAccountMapService $accountMap,
         private readonly OtherItemRepository $otherItems,
         private readonly OtherItemService $otherItemService,
+        private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
     ) {}
 
     // ── účtotvorná dimenze ──────────────────────────────────────────────────
@@ -502,7 +503,7 @@ final class DimensionAction
             $accessible = $this->accessibleSupplierIds($request);
             if (isset($body['group_id'])) {
                 $groupId = (int) $body['group_id'];
-                $this->dimensions->joinGroup($supplierId, $groupId, $accessible, RequestAuthorization::isSuperadmin($request));
+                $this->dimensions->joinGroup($supplierId, $groupId, $accessible, false);
                 $this->log($request, 'dimension.group_joined', $groupId, []);
             } elseif (isset($body['name'])) {
                 $this->dimensions->renameGroup($supplierId, (string) $body['name']);
@@ -561,10 +562,9 @@ final class DimensionAction
      */
     private function accessibleSupplierIds(Request $request): array
     {
-        if (RequestAuthorization::isSuperadmin($request)) {
-            return $this->repo->allSupplierIds();
-        }
-        return $this->userSuppliers->allowedSupplierIds((int) ($this->userId($request) ?? 0));
+        $ids = RequestAuthorization::isSuperadmin($request) ? $this->repo->allSupplierIds()
+            : $this->userSuppliers->allowedSupplierIds((int) ($this->userId($request) ?? 0));
+        return $this->supplierAccess->filterAllowedSupplierIds($request, $ids);
     }
 
     /** @param array<string,mixed> $payload */

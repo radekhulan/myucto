@@ -108,7 +108,7 @@ final class DimensionProfitAction
         $hidden = 0;
         if ($type['level'] === 'global') {
             $bound = self::isSupplierBoundRequest($request);
-            $allowed = $this->feed->allowedSupplierIds((int) ($this->userId($request) ?? 0), RequestAuthorization::isSuperadmin($request));
+            $allowed = $this->feed->allowedSupplierIds((int) ($this->userId($request) ?? 0), RequestAuthorization::isSuperadmin($request), RequestAuthorization::boundSupplierId($request), $request);
             $members = [];
             foreach ($this->dimensions->groupMembers((int) $type['supplier_group_id']) as $member) {
                 if ($member['id'] === $supplierId || (!$bound && in_array($member['id'], $allowed, true))) {

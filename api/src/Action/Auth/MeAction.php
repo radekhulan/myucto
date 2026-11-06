@@ -47,6 +47,7 @@ final class MeAction
         private readonly MfaOfferService $mfaOffers,
         private readonly SessionLockPolicy $lockPolicy,
         private readonly ClockInterface $clock,
+        private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
         ?EntityCache $cache = null,
         private readonly ?\MyInvoice\Service\Import\ClientAiExtractionPolicy $clientAi = null,
     ) {
@@ -143,6 +144,13 @@ final class MeAction
             ));
         }
 
+        $visibleIds = $this->supplierAccess->filterAllowedSupplierIds($request, array_column($suppliers, 'id'));
+        $visibleSet = array_fill_keys($visibleIds, true);
+        $suppliers = array_values(array_filter($suppliers, static fn (array $s): bool => isset($visibleSet[(int) $s['id']])));
+        if (!isset($visibleSet[$currentSupplierId])) $currentSupplierId = $visibleIds[0] ?? 0;
+        $roleRequest = $request->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $currentSupplierId)
+            ->withQueryParams([])->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $currentSupplierId);
+
         $frameworks = new AccountingFrameworkService($this->db, new AccountingFrameworkRepository($this->db));
         $effectiveFrameworks = $frameworks->forDateForSuppliers(array_map(static fn (array $supplier): int => (int) $supplier['id'], $suppliers), date('Y-m-d'));
         foreach ($suppliers as &$s) {
@@ -225,8 +233,8 @@ final class MeAction
         $totpEnabled  = (bool) ($user['totp_enabled'] ?? false);
         $requireTotp  = (bool) $this->config->get('auth.require_totp', false);
         $mustSetupTotp = $requireTotp && !$totpEnabled;
-        $effectiveRole = $this->permissions->resolve($request);
         $defaultRole = $this->permissions->resolveDefault($request);
+        $effectiveRole = $currentSupplierId > 0 ? $this->permissions->resolve($roleRequest) : $defaultRole;
         $roleSummary = $effectiveRole->id > 0 ? [
             'id' => $effectiveRole->id,
             'name' => $effectiveRole->name,

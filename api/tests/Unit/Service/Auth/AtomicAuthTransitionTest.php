@@ -205,6 +205,65 @@ final class AtomicAuthTransitionTest extends TestCase
         self::assertNotNull($this->sessions->load($second['session']['token']));
     }
 
+    public function testEntraPasskeyLoginConsumesTicketAndCommitsExternalSessionTogether(): void
+    {
+        [$credentialId, $record] = $this->createCredential(4, 'Entra local MFA');
+        $identities = new \MyInvoice\Service\Auth\Oidc\ExternalIdentityRepository($this->db);
+        $identityId = $identities->link($this->userId, new \MyInvoice\Service\Auth\Oidc\ExternalIdentity(
+            'entra', 'https://issuer.example.invalid', null, 'synthetic-subject', null, null,
+        ), 'self');
+        $flows = new \MyInvoice\Service\Auth\Oidc\OidcFlowStore($this->db);
+        $binding = $flows::newBinding();
+        $ticket = $flows->createTicket('entra', $binding, $this->userId, $identityId, null);
+        $completed = $this->transitionFor($record->publicKeyCredentialId)->completeLogin(
+            $this->createLoginFlow(), ['rawId' => 'synthetic'], '127.0.0.1', 'PHPUnit', $this->userId, $ticket, $binding,
+        );
+        $session = $this->sessions->load($completed['session']['token']);
+        self::assertSame('oidc:entra', $session['auth_method']);
+        self::assertSame('strong', $session['assurance_level']);
+        self::assertSame($credentialId, $session['auth_credential_id']);
+        self::assertSame($identityId, (int) $session['external_identity_id']);
+        self::assertFalse($flows->consumeTicket($ticket));
+    }
+
+    public static function invalidSsoTickets(): array
+    {
+        return ['used' => ['used'], 'unlinked' => ['unlinked'], 'other_browser' => ['other_browser'], 'expired' => ['expired']];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('invalidSsoTickets')]
+    public function testInvalidEntraTicketCannotCommitPasskeySessionOrCounter(string $change): void
+    {
+        [$credentialId, $record] = $this->createCredential(4, 'Entra rejected MFA');
+        $identities = new \MyInvoice\Service\Auth\Oidc\ExternalIdentityRepository($this->db);
+        $identityId = $identities->link($this->userId, new \MyInvoice\Service\Auth\Oidc\ExternalIdentity(
+            'entra', 'https://issuer.example.invalid', null, 'synthetic-subject', null, null,
+        ), 'self');
+        $flows = new \MyInvoice\Service\Auth\Oidc\OidcFlowStore($this->db);
+        $binding = $flows::newBinding();
+        $ticket = $flows->createTicket('entra', $binding, $this->userId, $identityId, null);
+        if ($change === 'used') $flows->consumeTicket($ticket);
+        if ($change === 'unlinked') $identities->unlink($this->userId, $identityId);
+        if ($change === 'other_browser') $binding = $flows::newBinding();
+        if ($change === 'expired') {
+            $this->db->pdo()->prepare('UPDATE oidc_login_flows SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND WHERE id = ?')
+                ->execute([hash('sha256', $ticket)]);
+        }
+        $ceremony = $this->createLoginFlow();
+        try {
+            $this->transitionFor($record->publicKeyCredentialId)->completeLogin(
+                $ceremony, ['rawId' => 'synthetic'], '127.0.0.1', 'PHPUnit', $this->userId, $ticket, $binding,
+            );
+            self::fail('Neplatný SSO lístek nesmí dokončit přihlášení.');
+        } catch (OneTimeTokenException) {
+        }
+        self::assertSame(4, $this->credentials->findActiveForUserById($this->userId, $credentialId)?->record->counter);
+        $count = $this->db->pdo()->prepare('SELECT COUNT(*) FROM sessions WHERE user_id = ?');
+        $count->execute([$this->userId]);
+        self::assertSame(0, (int) $count->fetchColumn());
+        $this->assertCeremonyUsed($ceremony);
+    }
+
     private function createLoginFlow(): string
     {
         return $this->ceremonies->create(
@@ -1249,6 +1308,7 @@ final class AtomicAuthTransitionTest extends TestCase
             $this->sessions,
             $this->stepUp,
             $this->proofs,
+            new \MyInvoice\Service\Auth\Oidc\OidcFlowStore($this->db),
         );
     }
 

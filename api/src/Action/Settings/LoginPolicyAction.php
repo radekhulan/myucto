@@ -46,7 +46,10 @@ final class LoginPolicyAction
             'login_sso_provider' => $row['login_sso_provider'],
             // Vynucení pro celou instalaci přebíjí nastavení firmy; firma ho jen ukazuje.
             'global_sso_provider' => $global,
-            'providers' => array_values(array_filter($this->providers->publicList(), static fn (array $p): bool => $p['strong'])),
+            'providers' => array_values(array_filter(
+                $this->providers->publicList(),
+                fn (array $p): bool => $this->providers->get($p['id'])?->supportsLoginPolicy() === true,
+            )),
             'can_manage' => RequestAuthorization::canManageLoginPolicy($request),
             'users_without_identity' => $this->usersWithoutIdentity($supplierId, $global ?? $row['login_sso_provider'] ?? 'entra'),
         ]);
@@ -77,10 +80,7 @@ final class LoginPolicyAction
         $provider = null;
         if ($policy === 'sso_required') {
             $provider = (string) ($body['login_sso_provider'] ?? '');
-            // Vynutit jde jen poskytovatele, který nese celé přihlášení včetně MFA.
-            // U Googlu a dalších dokončuje přihlášení místní druhý faktor, sezení
-            // pak nese metodu toho faktoru a politika by ho odmítla.
-            if (!$this->providers->isEnabled() || $this->providers->get($provider)?->isStrong() !== true) {
+            if (!$this->providers->isEnabled() || $this->providers->get($provider)?->supportsLoginPolicy() !== true) {
                 return Json::error($response, 'sso_disabled', 'Poskytovatel identity není v této instalaci zapnutý.', 422);
             }
             $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);

@@ -268,8 +268,9 @@ return [
         // Účty v MyÚčto zakládá dál správce; s identitou se propojí pozvánkou
         // (Nastavení → Uživatelé) nebo z profilu. Podle e-mailu se nepropojuje nikdy.
         //
-        // Microsoft Entra ID nahrazuje celé přihlášení včetně MFA (MFA vynucuje
-        // tenant, typicky Conditional Access). Firma může v Nastavení → Přihlášení
+        // Microsoft Entra ID výchozně nahrazuje celé přihlášení včetně MFA (MFA vynucuje
+        // tenant, typicky Conditional Access). skip_mfa=false zachová místní MFA.
+        // Firma může v Nastavení → Přihlášení
         // vyžadovat přihlášení výhradně přes Entra; heslo a passkey tam pak neplatí.
         // Tajemství patří do ENV (MYINVOICE_OIDC_ENTRA_CLIENT_SECRET), ne sem.
         'oidc' => [
@@ -284,6 +285,7 @@ return [
                     'client_id'     => '', // Application (client) ID
                     'client_secret' => '', // ENV MYINVOICE_OIDC_ENTRA_CLIENT_SECRET
                     'allow_guests'  => false, // true = smí i hosté B2B tenantu
+                    'skip_mfa'      => true,
                 ],
                 // Google, Apple a Seznam nahrazují jen heslo. Druhý faktor (passkey,
                 // TOTP) se po návratu ověří v MyÚčto stejně jako po hesle, citlivé

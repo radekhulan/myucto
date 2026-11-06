@@ -152,7 +152,7 @@ final class PortfolioMembershipTest extends TestCase
         $action = Bootstrap::buildContainer()->get(\MyInvoice\Action\Portfolio\PortfolioAction::class);
         $request = (new \Slim\Psr7\Factory\ServerRequestFactory())
             ->createServerRequest('GET', '/api/portfolio/overview')
-            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin'])
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin', 'is_superadmin' => true])
             ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'bearer')
             ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read', 'supplier_id' => $this->supplierA]);
 

@@ -58,6 +58,8 @@ final class PasskeyActionTest extends TestCase
     private PasskeySessionTransitionService&MockObject $sessionTransitions;
     private MfaProtectedOperationService&MockObject $protectedOperations;
     private MfaRecoveryCodeService&MockObject $recoveryCodes;
+    private \MyInvoice\Service\Auth\LoginPolicyService&MockObject $loginPolicy;
+    private \MyInvoice\Service\Auth\Oidc\OidcFlowStore&MockObject $oidcFlows;
 
     protected function setUp(): void
     {
@@ -81,6 +83,8 @@ final class PasskeyActionTest extends TestCase
         // Registrace passkey vydává první sadu záložních kódů; testy tu sledují
         // ceremonii, ne kódy, takže atrapa mlčí a vrací prázdno.
         $this->recoveryCodes = $this->createMock(MfaRecoveryCodeService::class);
+        $this->loginPolicy = $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class);
+        $this->oidcFlows = $this->createMock(\MyInvoice\Service\Auth\Oidc\OidcFlowStore::class);
     }
 
     public function testCredentialListContainsOnlyPublicMetadata(): void
@@ -272,7 +276,13 @@ final class PasskeyActionTest extends TestCase
         self::assertSame(429, $response->getStatusCode());
     }
 
-    public function testLoginVerifyIssuesStrongPasskeySessionOnlyAfterCounterUpdate(): void
+    public static function loginOrigins(): array
+    {
+        return ['local' => [false], 'entra' => [true]];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('loginOrigins')]
+    public function testLoginVerifyIssuesStrongPasskeySessionOnlyAfterCounterUpdate(bool $sso): void
     {
         $stored = $this->storedCredential(42, 17, 'Pixel 9');
         $payload = ['rawId' => 'synthetic-base64url', 'response' => []];
@@ -289,6 +299,9 @@ final class PasskeyActionTest extends TestCase
             ->willReturn(false);
         $now = new \DateTimeImmutable('2026-07-24 12:00:00 UTC');
         $context = \MyInvoice\Service\Auth\SessionAuthContext::strong('passkey', $now, 42);
+        if ($sso) {
+            $context = $context->withExternalIdentity('entra', 5);
+        }
         $session = [
             'token' => str_repeat('c', 64),
             'csrf_token' => str_repeat('d', 64),
@@ -303,9 +316,18 @@ final class PasskeyActionTest extends TestCase
             'locale' => 'cs',
             'totp_enabled' => 0,
         ];
+        if ($sso) {
+            $this->loginPolicy->method('requiredProviderForUser')->willReturn('entra');
+            $this->sessionCookies->method('name')->willReturn('__Host-myinvoice_session');
+            $this->oidcFlows->expects(self::once())->method('peekTicket')
+                ->with(str_repeat('f', 64), str_repeat('b', 64))
+                ->willReturn(['provider' => 'entra', 'user_id' => 17, 'external_identity_id' => 5, 'return_to' => null]);
+            $this->sessions->expects(self::never())->method('create');
+            $this->sessions->expects(self::never())->method('destroy');
+        }
         $this->sessionTransitions->expects(self::once())
             ->method('completeLogin')
-            ->with('flow-token', $payload, '127.0.0.1', 'PHPUnit', 17)
+            ->with('flow-token', $payload, '127.0.0.1', 'PHPUnit', 17, $sso ? str_repeat('f', 64) : null, $sso ? str_repeat('b', 64) : null)
             ->willReturn([
                 'session' => $session,
                 'credential' => $stored,
@@ -327,11 +349,11 @@ final class PasskeyActionTest extends TestCase
                 string $userAgent,
                 \MyInvoice\Service\Auth\SessionAuthContext $context,
                 array $issuedSession,
-            ): \Psr\Http\Message\ResponseInterface {
+            ) use ($sso): \Psr\Http\Message\ResponseInterface {
                 self::assertSame(17, $user['id']);
                 self::assertSame('127.0.0.1', $ip);
                 self::assertSame('PHPUnit', $userAgent);
-                self::assertSame('passkey', $context->authMethod);
+                self::assertSame($sso ? 'oidc:entra' : 'passkey', $context->authMethod);
                 self::assertSame('strong', $context->assuranceLevel);
                 self::assertSame(42, $context->authCredentialId);
                 self::assertSame(str_repeat('c', 64), $issuedSession['token']);
@@ -341,9 +363,11 @@ final class PasskeyActionTest extends TestCase
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/webauthn/login/verify')
             ->withHeader('User-Agent', 'PHPUnit')
+            ->withCookieParams(['__Host-myinvoice_oidc' => str_repeat('b', 64)])
             ->withParsedBody([
                 'flow_token' => 'flow-token',
                 'credential' => $payload,
+                'sso_ticket' => $sso ? str_repeat('f', 64) : '',
             ]);
         $response = $this->action()->loginVerify(
             $request,
@@ -351,6 +375,20 @@ final class PasskeyActionTest extends TestCase
         );
 
         self::assertSame(204, $response->getStatusCode());
+    }
+
+    public function testInvalidSsoTicketCannotIssuePasskeySession(): void
+    {
+        $this->sessionCookies->method('name')->willReturn('__Host-myinvoice_session');
+        $this->oidcFlows->expects(self::once())->method('peekTicket')
+            ->with(str_repeat('f', 64), null)->willReturn(null);
+        $this->sessionTransitions->expects(self::never())->method('completeLogin');
+        $this->loginIssuer->expects(self::never())->method('issuePrepared');
+        $request = (new ServerRequestFactory())->createServerRequest('POST', '/api/auth/webauthn/login/verify')
+            ->withParsedBody(['flow_token' => 'flow-token', 'sso_ticket' => str_repeat('f', 64)]);
+        $response = $this->action()->loginVerify($request, (new ResponseFactory())->createResponse());
+        self::assertSame(401, $response->getStatusCode());
+        self::assertSame('sso_flow_invalid', $this->errorCode($response));
     }
 
     public function testDiscoverableLoginResolvesUserFromCredentialAndIssuesStrongSession(): void
@@ -797,9 +835,9 @@ final class PasskeyActionTest extends TestCase
             $this->sessionTransitions,
             $this->protectedOperations,
             $this->recoveryCodes,
-            $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            $this->loginPolicy,
             new \MyInvoice\Security\UserRoleProfile($this->db),
-            $this->createMock(\MyInvoice\Service\Auth\Oidc\OidcFlowStore::class),
+            $this->oidcFlows,
         );
     }
 

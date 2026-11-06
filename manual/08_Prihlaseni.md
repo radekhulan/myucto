@@ -50,10 +50,16 @@ přihlášení přes Microsoft Entra ID zapnul ([§ 101.6.1](101_Bezpecnost.md#1
    propojí. Odkaz platí 3 dny a jde použít jen jednou. Přihlásit se musíte účtem se stejnou e-mailovou adresou, na kterou pozvánka přišla.
 2. Příště klikněte na přihlašovací obrazovce na **Přihlásit se přes Microsoft Entra ID**.
 3. Přihlaste se u Microsoftu, včetně ověření, které vaše organizace vyžaduje.
-   Heslo ani kód z autentikátoru v MyÚčto nezadáváte.
+   Výchozně heslo ani kód z autentikátoru v MyÚčto nezadáváte. Pokud správce
+   vyžaduje také místní MFA (`skip_mfa = false`), po návratu potvrdíte passkey
+   nebo zadáte kód stejně jako při přihlášení heslem.
 
 Propojit účet můžete i sami: **Profil → Propojené účty → Propojit s Microsoft Entra ID**.
 Před propojením potvrdíte svou totožnost heslem nebo druhým faktorem.
+
+Propojení účtu i ověření citlivé operace dokončete před zamčením aplikace.
+Po ručním nebo automatickém zamčení je potřeba aplikaci odemknout a ověření
+zahájit znovu.
 
 Vyžaduje-li vaše firma přihlášení přes Microsoft, heslem ani přístupovým klíčem
 se nepřihlásíte. Aplikace vás pak na přihlašovací obrazovce na tlačítko
@@ -98,6 +104,9 @@ znovu tlačítkem poskytovatele.
 3. V e-mailu otevřete odkaz (platí 1 hodinu) a nastavte nové heslo.
 
 **Jak poznáte, že je hotovo:** přihlásíte se novým heslem.
+
+Úspěšná obnova i změna hesla v profilu zneplatní všechny dosud nepoužité
+odkazy pro obnovu nebo prvotní nastavení hesla. Starší e-mail už nelze použít.
 
 Nedorazil-li e-mail, zkontrolujte spam a požádejte správce, ať ověří SMTP
 (`cfg.php` → `smtp.*`). V krajním případě správce nastaví heslo z CLI, viz

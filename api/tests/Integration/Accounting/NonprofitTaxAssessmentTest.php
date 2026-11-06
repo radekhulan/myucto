@@ -512,7 +512,7 @@ final class NonprofitTaxAssessmentTest extends TestCase
     {
         $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('DELETE', '/api/suppliers/' . $this->supplier)
             ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, 1)
-            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actor, 'role' => 'admin']);
+            ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->actor, 'role' => 'admin', 'is_superadmin' => true]);
         return Bootstrap::buildContainer()->get(\MyInvoice\Action\Settings\SettingsAction::class)
             ->deleteSupplierById($request, new \Slim\Psr7\Response(), ['id' => (string) $this->supplier]);
     }

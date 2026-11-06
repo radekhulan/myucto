@@ -298,6 +298,17 @@ final class PasskeyAction
         $credentialPayload = $body['credential'] ?? null;
         $credentialPayload = is_array($credentialPayload) ? $credentialPayload : [];
         $flowToken = trim((string) ($body['flow_token'] ?? ''));
+        $ssoTicketRaw = trim((string) ($body['sso_ticket'] ?? ''));
+        $ssoTicket = null;
+        $binding = null;
+        if ($ssoTicketRaw !== '') {
+            $bindingName = \MyInvoice\Service\Auth\Oidc\OidcFlowStore::bindingCookieName($this->sessionCookies->name());
+            $binding = $request->getCookieParams()[$bindingName] ?? null;
+            $ssoTicket = $this->oidcFlows->peekTicket($ssoTicketRaw, is_string($binding) ? $binding : null);
+            if ($ssoTicket === null) {
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
+        }
         $loginContext = $this->ceremonies->peekLoginContext($flowToken);
         $discoverable = ($loginContext['purpose'] ?? null)
             === WebAuthnCeremonyStore::PURPOSE_DISCOVERABLE_LOGIN;
@@ -315,6 +326,8 @@ final class PasskeyAction
                     $this->clientIp($request),
                     $request->getHeaderLine('User-Agent'),
                     $candidateUserId,
+                    $ssoTicketRaw !== '' ? $ssoTicketRaw : null,
+                    is_string($binding) ? $binding : null,
                 )
                 : $this->sessionTransitions->completeLogin(
                     $flowToken,
@@ -322,19 +335,28 @@ final class PasskeyAction
                     $this->clientIp($request),
                     $request->getHeaderLine('User-Agent'),
                     (int) ($candidateUserId ?? 0),
+                    $ssoTicketRaw !== '' ? $ssoTicketRaw : null,
+                    is_string($binding) ? $binding : null,
                 );
             $verifiedUserId = (int) $completed['user']['id'];
+            if ($ssoTicket !== null && $ssoTicket['user_id'] !== $verifiedUserId) {
+                $this->sessions->destroy((string) $completed['session']['token']);
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
             $this->bruteForce->recordPasskeySuccess($verifiedUserId);
             // Passkey bez hesla je taky místní přihlášení a nesmí obejít firmu,
             // která vyžaduje poskytovatele identity. Sezení už vzniklo v transakci
             // ceremonie, proto se hned zruší.
             $requiredProvider = $this->loginPolicy->requiredProviderForUser($verifiedUserId, null);
             if ($requiredProvider !== null
+                && ($ssoTicket['provider'] ?? null) !== $requiredProvider
                 && $this->loginPolicy->isBreakGlass($this->roleProfile->forUser($verifiedUserId)['system_key'] ?? null)
             ) {
                 $requiredProvider = null;
             }
-            if ($requiredProvider !== null) {
+            if ($requiredProvider !== null
+                && $completed['auth_context']->authMethod !== SessionAuthContext::EXTERNAL_PREFIX . $requiredProvider
+            ) {
                 $this->sessions->destroy((string) $completed['session']['token']);
                 $this->logger->log('auth.login_failed', $verifiedUserId, 'user', $verifiedUserId, [
                     'reason' => 'sso_required', 'provider' => $requiredProvider, 'login_method' => 'passkey',
@@ -346,13 +368,6 @@ final class PasskeyAction
                     403,
                     ['provider' => $requiredProvider],
                 );
-            }
-            // Přihlášení přes Google, Apple či Seznam dokončené passkey: lístek,
-            // kterým prohlížeč prošel prvním krokem, se tím spotřebuje, ať po vydání
-            // sezení nezůstane platný v historii prohlížeče.
-            $ssoTicket = trim((string) ($body['sso_ticket'] ?? ''));
-            if (preg_match('/^[a-f0-9]{64}$/D', $ssoTicket) === 1) {
-                $this->oidcFlows->consumeTicket($ssoTicket);
             }
             return $this->loginIssuer->issuePrepared(
                 $response,

@@ -107,6 +107,10 @@ final class OidcLoginFlowTest extends TestCase
             ),
             $this->sessions,
             new ActivityLogger($this->db),
+            new \MyInvoice\Service\Auth\SessionLockService($this->db,
+                new \MyInvoice\Service\Auth\SessionLockPolicy($this->config), $clock,
+                new \MyInvoice\Service\Auth\WebAuthnCeremonyStore($this->db, $clock)),
+            $clock,
         );
         $this->createUser();
     }
@@ -286,6 +290,19 @@ final class OidcLoginFlowTest extends TestCase
         self::assertTrue($this->policy->sessionAllowedForSupplier($this->supplierId, 'password', 'instance_admin'));
     }
 
+    public function testSupplierPolicyStillRequiresEntraWithLocalMfa(): void
+    {
+        $this->enforceOnSupplier();
+        $data = $this->config->all();
+        $data['auth']['oidc']['providers']['entra']['skip_mfa'] = false;
+        $config = new Config($data);
+        $policy = new LoginPolicyService($this->db, $config, new OidcProviderRegistry($config));
+        self::assertSame('entra', $policy->requiredProviderForUser($this->userId, null));
+        self::assertSame('entra', $policy->requiredProviderForSupplier($this->supplierId));
+        self::assertFalse($policy->sessionAllowedForSupplier($this->supplierId, 'password', null));
+        self::assertTrue($policy->sessionAllowedForSupplier($this->supplierId, 'oidc:entra', null));
+    }
+
     public function testExternalSessionIsCappedToConfiguredLifetime(): void
     {
         $oid = self::guid();
@@ -317,6 +334,26 @@ final class OidcLoginFlowTest extends TestCase
         );
     }
 
+    public function testStepUpCannotCompleteAfterEntraStopsReplacingMfa(): void
+    {
+        $oid = self::guid();
+        $this->loginRoundTrip($oid, invite: $this->invites->issue($this->userId, 'entra', null));
+        $session = $this->sessions->create($this->userId, self::IP, self::UA, SessionAuthContext::basic('password'));
+        $binding = OidcFlowStore::newBinding();
+        $url = $this->service->start(
+            FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_STEP_UP, $binding, '/settings',
+            $this->userId, $session['token'], MfaStepUpService::OPERATION_API_TOKEN_CREATE,
+        );
+        $data = $this->config->all();
+        $data['auth']['oidc']['providers']['entra']['skip_mfa'] = false;
+        $provider = (new OidcProviderRegistry(new Config($data)))->get('entra');
+        self::assertNotNull($provider);
+        $this->expectOidcError(OidcException::PROVIDER_DISABLED, fn () => $this->service->complete(
+            $provider, ['state' => self::queryParam($url, 'state'), 'code' => 'synthetic-code'],
+            $binding, $session['token'], self::IP, self::UA,
+        ));
+    }
+
     public function testStepUpFromOtherSessionIsRejected(): void
     {
         $oid = self::guid();
@@ -328,6 +365,73 @@ final class OidcLoginFlowTest extends TestCase
             OidcException::FLOW_INVALID,
             fn () => $this->stepUpRoundTrip($session['token'], $oid, $other['token']),
         );
+    }
+
+    public function testLinkCannotCompleteAfterManualSessionLock(): void
+    {
+        [$session, $binding, $state] = $this->startLink();
+        $this->lockForCallback($session['token']);
+        $this->expectOidcError(OidcException::FLOW_INVALID, fn () => $this->complete($state, $binding, $session['token']));
+        self::assertSame(0, $this->identities->countForUser($this->userId));
+    }
+
+    public function testLinkCannotCompleteAfterIdleDeadline(): void
+    {
+        [$session, $binding, $state] = $this->startLink();
+        $this->db->pdo()->prepare('UPDATE users SET session_lock_after_minutes = 1 WHERE id = ?')->execute([$this->userId]);
+        $this->db->pdo()->prepare('UPDATE sessions SET last_user_activity_at = UTC_TIMESTAMP(6) - INTERVAL 2 MINUTE WHERE id = ?')
+            ->execute([$session['token']]);
+        $this->expectOidcError(OidcException::FLOW_INVALID, fn () => $this->complete($state, $binding, $session['token']));
+        self::assertSame(0, $this->identities->countForUser($this->userId));
+    }
+
+    public function testLinkCannotCompleteAfterLocalUserDeactivation(): void
+    {
+        [$session, $binding, $state] = $this->startLink();
+        $this->db->pdo()->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$this->userId]);
+        $this->expectOidcError(OidcException::FLOW_INVALID, fn () => $this->complete($state, $binding, $session['token']));
+        self::assertSame(0, $this->identities->countForUser($this->userId));
+    }
+
+    public function testActiveSessionCanCompleteLink(): void
+    {
+        [$session, $binding, $state] = $this->startLink();
+        self::assertSame(OidcFlowStore::PURPOSE_LINK, $this->complete($state, $binding, $session['token'])->purpose);
+        self::assertSame(1, $this->identities->countForUser($this->userId));
+    }
+
+    public function testStepUpCannotIssueProofForLockedSession(): void
+    {
+        $oid = self::guid();
+        $this->loginRoundTrip($oid, invite: $this->invites->issue($this->userId, 'entra', null));
+        $session = $this->sessions->create($this->userId, self::IP, self::UA, SessionAuthContext::basic('password'));
+        $this->lockForCallback($session['token']);
+        $this->expectOidcError(OidcException::FLOW_INVALID, fn () => $this->stepUpRoundTrip($session['token'], $oid));
+    }
+
+    private function startLink(): array
+    {
+        $session = $this->sessions->create($this->userId, self::IP, self::UA, SessionAuthContext::basic('password'));
+        $binding = OidcFlowStore::newBinding();
+        $url = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LINK, $binding, '/profile', $this->userId, $session['token']);
+        $this->idp->nextClaims = $this->idp->claims(self::guid(), (string) $this->idp->lastNonce);
+        return [$session, $binding, self::queryParam($url, 'state')];
+    }
+
+    private function lockForCallback(string $token): void
+    {
+        $credentials = new PasskeyCredentialRepository($this->db);
+        $record = \Webauthn\CredentialRecord::create(
+            random_bytes(32), 'public-key', ['internal'], 'none', \Webauthn\TrustPath\EmptyTrustPath::create(),
+            \Symfony\Component\Uid\Uuid::fromBinary(str_repeat("\0", 16)), random_bytes(77),
+            $credentials->userHandle($this->userId), 0, null, true, false, true,
+        );
+        $credentials->save($this->userId, $record, 'Synthetic lock key');
+        $clock = new DatabaseSecurityClock();
+        $locks = new \MyInvoice\Service\Auth\SessionLockService($this->db,
+            new \MyInvoice\Service\Auth\SessionLockPolicy($this->config), $clock,
+            new \MyInvoice\Service\Auth\WebAuthnCeremonyStore($this->db, $clock));
+        self::assertTrue($locks->lockManually($token)->locked);
     }
 
     /** @param array<string,mixed> $claims */

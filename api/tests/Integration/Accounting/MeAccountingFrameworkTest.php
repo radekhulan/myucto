@@ -119,7 +119,7 @@ $config = $container->get(Config::class);
 $db = $container->get(Connection::class);
 $cacheConfig = new Config(['redis' => ['enabled' => false], 'cache' => ['entities_enabled' => true]]);
 $cache = new EntityCache(new RedisFactory($cacheConfig), $cacheConfig);
-$action = new MeAction($db, $config, $container->get(UserSupplierRepository::class), $container->get(PermissionResolver::class), $container->get(LicenseService::class), $container->get(PasskeyCredentialRepository::class), $container->get(MfaPolicyService::class), $container->get(MfaOfferService::class), $container->get(SessionLockPolicy::class), $container->get(ClockInterface::class), $cache);
+$action = new MeAction($db, $config, $container->get(UserSupplierRepository::class), $container->get(PermissionResolver::class), $container->get(LicenseService::class), $container->get(PasskeyCredentialRepository::class), $container->get(MfaPolicyService::class), $container->get(MfaOfferService::class), $container->get(SessionLockPolicy::class), $container->get(ClockInterface::class), $container->get(\MyInvoice\Service\Tenant\SupplierAccessResolver::class), $cache);
 $user = $db->pdo()->query('SELECT * FROM users WHERE id = 1')->fetch(PDO::FETCH_ASSOC);
 $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/auth/me')->withHeader('X-Supplier-Id', '11')
     ->withAttribute(AuthMiddleware::ATTR_USER, $user)

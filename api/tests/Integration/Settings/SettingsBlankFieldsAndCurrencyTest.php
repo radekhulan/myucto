@@ -271,7 +271,7 @@ final class SettingsBlankFieldsAndCurrencyTest extends TestCase
     {
         return (new ServerRequestFactory())->createServerRequest($method, $uri)
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierId)
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'admin', 'is_superadmin' => true])
             ->withParsedBody($body);
     }
 

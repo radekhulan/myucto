@@ -91,7 +91,7 @@ final class McpOAuth
                 || (int) $row['user_active'] !== 1
                 || (int) $row['role_active'] !== 1
                 || !$this->resources->allowsGrant((string) $row['resource'], (int) $row['user_id'],
-                    $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'])
+                    $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'], $row['issued_auth_method'] ?? null)
             ) {
                 $pdo->rollBack();
                 return null;
@@ -129,7 +129,7 @@ final class McpOAuth
         $pdo->beginTransaction();
         try {
             $stmt = $pdo->prepare(
-                'SELECT g.*, t.revoked_at AS token_revoked, u.is_active AS user_active,
+                'SELECT g.*, t.revoked_at AS token_revoked, t.issued_auth_method, u.is_active AS user_active,
                         r.is_active AS role_active
                    FROM mcp_oauth_grants g
                    JOIN api_tokens t ON t.id = g.access_token_id
@@ -147,7 +147,7 @@ final class McpOAuth
                 || (int) $row['user_active'] !== 1
                 || (int) $row['role_active'] !== 1
                 || !$this->resources->allowsGrant((string) $row['resource'], (int) $row['user_id'],
-                    $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'])
+                    $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'], $row['issued_auth_method'] ?? null)
             ) {
                 $pdo->rollBack();
                 return null;

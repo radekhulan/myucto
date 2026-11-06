@@ -36,6 +36,7 @@ use Slim\Psr7\Factory\ServerRequestFactory;
  * jen heslo. Druhý faktor účtu se vyžaduje dál a lístek bez vazby na prohlížeč
  * nebo pro jiného uživatele neprojde.
  */
+#[\PHPUnit\Framework\Attributes\AllowMockObjectsWithoutExpectations]
 final class LoginActionSsoTicketTest extends TestCase
 {
     private const TICKET = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -74,11 +75,62 @@ final class LoginActionSsoTicketTest extends TestCase
         self::assertStringContainsString('sso_flow_invalid', (string) $response->getBody());
     }
 
+    public function testRequiredEntraTicketStillRequiresTotp(): void
+    {
+        [$response] = $this->login(
+            ['provider' => 'entra', 'user_id' => 17, 'external_identity_id' => 5, 'return_to' => null],
+            true,
+            requiredProvider: 'entra',
+        );
+        self::assertSame(401, $response->getStatusCode());
+        self::assertStringContainsString('totp_required', (string) $response->getBody());
+    }
+
+    public function testEntraTotpSessionKeepsRequiredProviderAndStrongAssurance(): void
+    {
+        [$response, $captured] = $this->login(
+            ['provider' => 'entra', 'user_id' => 17, 'external_identity_id' => 5, 'return_to' => null],
+            true,
+            requiredProvider: 'entra',
+            body: ['totp' => '123456'],
+        );
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('oidc:entra', $captured['context']->authMethod);
+        self::assertSame('strong', $captured['context']->assuranceLevel);
+        self::assertSame(5, $captured['context']->externalIdentityId);
+        self::assertNotNull($captured['context']->mfaVerifiedAt);
+    }
+
+    public function testOtherProvidersTicketDoesNotSatisfyRequiredEntra(): void
+    {
+        [$response] = $this->login(
+            ['provider' => 'google', 'user_id' => 17, 'external_identity_id' => 5, 'return_to' => null],
+            false,
+            requiredProvider: 'entra',
+        );
+        self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString('sso_required', (string) $response->getBody());
+    }
+
+    public function testEntraWithoutLocalFactorEntersRequiredMfaSetup(): void
+    {
+        [$response, $captured] = $this->login(
+            ['provider' => 'entra', 'user_id' => 17, 'external_identity_id' => 5, 'return_to' => null],
+            false,
+            requiredProvider: 'entra',
+            requireMfa: true,
+        );
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame('setup', $captured['context']->assuranceLevel);
+        self::assertSame('oidc:entra', $captured['context']->authMethod);
+        self::assertSame(5, $captured['context']->externalIdentityId);
+    }
+
     /**
      * @param array{provider:string,user_id:int,external_identity_id:int,return_to:?string}|null $ticket
      * @return array{0:ResponseInterface,1:array<string,mixed>}
      */
-    private function login(?array $ticket, bool $totpEnabled): array
+    private function login(?array $ticket, bool $totpEnabled, ?string $requiredProvider = null, array $body = [], bool $requireMfa = false): array
     {
         $statement = $this->createMock(\PDOStatement::class);
         $statement->method('execute')->willReturn(true);
@@ -128,21 +180,27 @@ final class LoginActionSsoTicketTest extends TestCase
             },
         );
 
+        $totp = $this->createMock(TotpService::class);
+        $totp->method('verifyAndConsume')->willReturn(true);
+        $clock = $this->createMock(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-11-06 12:00:00 UTC'));
+        $policy = $this->createMock(LoginPolicyService::class);
+        $policy->method('requiredProviderForUser')->willReturn($requiredProvider);
         $action = new LoginAction(
             $db, $hasher, $bruteForce, $turnstile, $this->createMock(ActivityLogger::class), $ipMatcher,
             new Config(['auth' => ['email_otp' => ['enabled' => false]]]),
-            $this->createMock(TotpService::class), $this->createMock(SecretEncryption::class),
+            $totp, $this->createMock(SecretEncryption::class),
             $this->createMock(EmailOtpService::class), $this->createMock(TrustedDeviceService::class),
             $credentials, $passkeys, $this->createMock(WebAuthnCeremonyStore::class),
-            new MfaPolicyService(new Config(['auth' => ['require_mfa' => false, 'allowed_mfa_methods' => ['passkey', 'totp']]])),
-            $issuer, $this->createMock(ClockInterface::class), $this->createMock(MfaRecoveryCodeService::class),
-            $this->createMock(LoginPolicyService::class), $flows,
+            new MfaPolicyService(new Config(['auth' => ['require_mfa' => $requireMfa, 'allowed_mfa_methods' => ['passkey', 'totp']]])),
+            $issuer, $clock, $this->createMock(MfaRecoveryCodeService::class),
+            $policy, $flows,
         );
 
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/login')
             ->withCookieParams(['__Host-myinvoice_oidc' => self::BINDING])
-            ->withParsedBody(['sso_ticket' => self::TICKET]);
+            ->withParsedBody(['sso_ticket' => self::TICKET] + $body);
 
         return [$action($request, (new ResponseFactory())->createResponse()), $captured];
     }

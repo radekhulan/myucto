@@ -18,7 +18,7 @@ use PHPUnit\Framework\TestCase;
  */
 final class LoginPolicyGlobalTest extends TestCase
 {
-    private function policy(string $required, bool $oidcEnabled = true): LoginPolicyService
+    private function policy(string $required, bool $oidcEnabled = true, bool $skipMfa = true): LoginPolicyService
     {
         $config = new Config([
             'app' => ['url' => 'https://ucto.example.test'],
@@ -32,6 +32,7 @@ final class LoginPolicyGlobalTest extends TestCase
                         'tenant_id' => FakeOidcIdp::TENANT,
                         'client_id' => FakeOidcIdp::CLIENT,
                         'client_secret' => 'test-secret',
+                        'skip_mfa' => $skipMfa,
                     ],
                     'seznam' => [
                         'enabled' => true,
@@ -64,6 +65,17 @@ final class LoginPolicyGlobalTest extends TestCase
 
         self::assertNull($policy->requiredProviderForUser(1, 'instance_admin'));
         self::assertTrue($policy->sessionAllowedForSupplier(42, 'password', 'instance_admin'));
+    }
+
+    public function testEntraWithLocalMfaStillEnforcesSso(): void
+    {
+        $policy = $this->policy('entra', skipMfa: false);
+
+        self::assertSame('entra', $policy->globalRequiredProvider());
+        self::assertSame('entra', $policy->requiredProviderForUser(7, null));
+        self::assertSame('entra', $policy->requiredProviderForSupplier(42));
+        self::assertFalse($policy->sessionAllowedForSupplier(42, 'password', null));
+        self::assertTrue($policy->sessionAllowedForSupplier(42, 'oidc:entra', null));
     }
 
     public function testFirstFactorOrUnknownProviderNeverEnforcesGlobally(): void

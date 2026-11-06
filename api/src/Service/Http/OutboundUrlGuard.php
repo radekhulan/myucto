@@ -160,8 +160,9 @@ final class OutboundUrlGuard
         if ($host === '') {
             throw new OutboundRequestException('URL neobsahuje host.');
         }
-        // Koncová tečka ("host." == "host") by rozbila porovnání s allowlistem.
-        $host = rtrim($host, '.');
+        if (str_ends_with($host, '.')) {
+            throw new OutboundRequestException('Host v URL nesmí končit tečkou.', OutboundRequestException::TARGET_BLOCKED);
+        }
 
         $port = isset($parts['port']) ? (int) $parts['port'] : 443;
         if ($port < 1 || $port > 65535) {

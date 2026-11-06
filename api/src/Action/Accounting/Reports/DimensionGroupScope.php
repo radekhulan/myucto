@@ -40,7 +40,7 @@ trait DimensionGroupScope
         if (self::isSupplierBoundRequest($request)) {
             return [[$supplierId], count(array_diff($members, [$supplierId]))];
         }
-        $allowed = $feed->allowedSupplierIds((int) ($this->userId($request) ?? 0), RequestAuthorization::isSuperadmin($request));
+        $allowed = $feed->allowedSupplierIds((int) ($this->userId($request) ?? 0), RequestAuthorization::isSuperadmin($request), RequestAuthorization::boundSupplierId($request), $request);
         foreach ($members as $member) {
             if ($member === $supplierId) {
                 continue;

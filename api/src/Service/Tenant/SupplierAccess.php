@@ -19,5 +19,6 @@ final class SupplierAccess
         public readonly int $supplierId,
         public readonly bool $denied,
         public readonly ?int $roleIdOverride,
+        public readonly ?string $requiredLoginProvider = null,
     ) {}
 }

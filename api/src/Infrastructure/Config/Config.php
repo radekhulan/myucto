@@ -346,6 +346,7 @@ final class Config
                             'client_id' => '',
                             'client_secret' => '',
                             'allow_guests' => false,
+                            'skip_mfa' => true,
                         ],
                         'google' => [
                             'enabled' => false,
@@ -543,6 +544,7 @@ final class Config
             'MYINVOICE_OIDC_ENTRA_CLIENT_ID'         => ['auth.oidc.providers.entra.client_id', 'string'],
             'MYINVOICE_OIDC_ENTRA_CLIENT_SECRET'     => ['auth.oidc.providers.entra.client_secret', 'string'],
             'MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS'      => ['auth.oidc.providers.entra.allow_guests', 'bool'],
+            'MYINVOICE_OIDC_ENTRA_SKIP_MFA'          => ['auth.oidc.providers.entra.skip_mfa', 'bool'],
             'MYINVOICE_OIDC_GOOGLE_ENABLED'          => ['auth.oidc.providers.google.enabled', 'bool'],
             'MYINVOICE_OIDC_GOOGLE_CLIENT_ID'        => ['auth.oidc.providers.google.client_id', 'string'],
             'MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET'    => ['auth.oidc.providers.google.client_secret', 'string'],

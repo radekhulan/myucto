@@ -50,8 +50,11 @@ final class SupplierScopeLoginPolicyTest extends TestCase
         $resolver = $this->createStub(SupplierAccessResolver::class);
         $resolver->method('resolve')->willReturn(new SupplierAccess(self::SUPPLIER, false, null));
         $policy = $this->createStub(LoginPolicyService::class);
-        $policy->method('sessionAllowedForSupplier')
-            ->willReturnCallback(static fn (int $supplierId, ?string $method): bool => $method === 'oidc:entra');
+        $policy->method('requestAllowedForSupplier')->willReturnCallback(static function (ServerRequestInterface $request): bool {
+            $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
+            $token = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
+            return ($session['auth_method'] ?? $token['issued_auth_method'] ?? null) === 'oidc:entra';
+        });
         $policy->method('requiredProviderForSupplier')->willReturn('entra');
 
         $handler = new class implements RequestHandlerInterface {

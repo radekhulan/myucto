@@ -66,6 +66,7 @@ services:
       # Prázdné hodnoty nepřebíjí cfg.docker.php; politiku lze nastavit v .env.
       MYINVOICE_AUTH_REQUIRE_MFA: ${MYINVOICE_AUTH_REQUIRE_MFA:-}
       MYINVOICE_AUTH_MFA_METHODS: ${MYINVOICE_AUTH_MFA_METHODS:-}
+      MYINVOICE_OIDC_ENTRA_SKIP_MFA: ${MYINVOICE_OIDC_ENTRA_SKIP_MFA:-}
       MYINVOICE_AUTH_PASSWORDLESS_LOGIN: ${MYINVOICE_AUTH_PASSWORDLESS_LOGIN:-}
       MYINVOICE_SESSION_LOCK_AFTER_MINUTES: ${MYINVOICE_SESSION_LOCK_AFTER_MINUTES:-}
       # Lokální AI přes Ollamu (Nastavení → Integrace → AI brána). Prázdné = výchozí.

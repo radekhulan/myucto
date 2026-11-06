@@ -28,6 +28,48 @@ use Slim\Psr7\Factory\ServerRequestFactory;
 #[AllowMockObjectsWithoutExpectations]
 final class MeActionTest extends TestCase
 {
+    private function supplierAccess(): \MyInvoice\Service\Tenant\SupplierAccessResolver
+    {
+        $access = $this->createStub(\MyInvoice\Service\Tenant\SupplierAccessResolver::class);
+        $access->method('filterAllowedSupplierIds')->willReturnArgument(1);
+        return $access;
+    }
+
+    public function testProfileOmitsCompaniesRejectedByLoginPolicyAndKeepsTheUserProfile(): void
+    {
+        $statement = $this->createStub(\PDOStatement::class);
+        $statement->method('fetchAll')->willReturn([['id' => 12]]);
+        $pdo = $this->createStub(\PDO::class);
+        $pdo->method('prepare')->willReturn($statement);
+        $db = $this->createStub(Connection::class);
+        $db->method('hasColumn')->willReturn(true);
+        $db->method('pdo')->willReturn($pdo);
+        $memberships = $this->createStub(UserSupplierRepository::class);
+        $memberships->method('allowedSupplierIds')->willReturn([12]);
+        $access = $this->createMock(\MyInvoice\Service\Tenant\SupplierAccessResolver::class);
+        $access->expects(self::once())->method('filterAllowedSupplierIds')->with(self::anything(), [12])->willReturn([]);
+        $role = new EffectiveRole(2, 'Synthetic staff', 'staff', true);
+        $permissions = $this->createMock(PermissionResolver::class);
+        $permissions->expects(self::never())->method('resolve');
+        $permissions->method('resolveDefault')->willReturn($role);
+        $clock = $this->createStub(ClockInterface::class);
+        $clock->method('now')->willReturn(new \DateTimeImmutable('2026-11-06 12:00:00 UTC'));
+        $config = new Config([]);
+        $action = new MeAction($db, $config, $memberships, $permissions,
+            $this->createStub(LicenseService::class), $this->createStub(PasskeyCredentialRepository::class),
+            new MfaPolicyService($config), $this->createStub(MfaOfferService::class),
+            new SessionLockPolicy($config), $clock, $access);
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/auth/me')
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'name' => 'Synthetic user', 'email' => 'synthetic@example.invalid'])
+            ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 12);
+        $response = $action($request, (new ResponseFactory())->createResponse());
+        $body = json_decode((string) $response->getBody(), true, flags: JSON_THROW_ON_ERROR);
+        self::assertSame(200, $response->getStatusCode());
+        self::assertSame([], $body['suppliers']);
+        self::assertSame(0, $body['current_supplier_id']);
+        self::assertSame(10, $body['user']['id']);
+    }
+
     public function testTechnicalProfileDoesNotReadMembershipOrExposeCommercialOrTenantData(): void
     {
         $db = $this->createMock(Connection::class);
@@ -49,7 +91,7 @@ final class MeActionTest extends TestCase
         $clock->method('now')->willReturn(new \DateTimeImmutable('2026-10-23 12:00:00 UTC'));
         $config = new Config([]);
         $action = new MeAction($db, $config, $memberships, $permissions, $license, $credentials,
-            new MfaPolicyService($config), $offers, new SessionLockPolicy($config), $clock);
+            new MfaPolicyService($config), $offers, new SessionLockPolicy($config), $clock, $this->supplierAccess());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/auth/me')
             ->withAttribute(AuthMiddleware::ATTR_USER, [
                 'id' => 19, 'name' => 'Synthetic technician', 'email' => 'tech@example.invalid',
@@ -132,6 +174,7 @@ final class MeActionTest extends TestCase
             $offers,
             new SessionLockPolicy($config),
             $clock,
+            $this->supplierAccess(),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/auth/me')
@@ -235,6 +278,7 @@ final class MeActionTest extends TestCase
             $offers,
             new SessionLockPolicy($config),
             $clock,
+            $this->supplierAccess(),
         );
         $request = (new ServerRequestFactory())
             ->createServerRequest('GET', '/api/auth/me')
@@ -314,6 +358,7 @@ final class MeActionTest extends TestCase
             $this->createMock(MfaOfferService::class),
             new SessionLockPolicy($config),
             $clock,
+            $this->supplierAccess(),
         );
         $state = new LicenseState(
             state: LicenseState::ACTIVE,

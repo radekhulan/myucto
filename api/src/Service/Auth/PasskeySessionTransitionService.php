@@ -26,6 +26,7 @@ final class PasskeySessionTransitionService
         private readonly SessionManager $sessions,
         private readonly MfaStepUpService $stepUp,
         private readonly MfaStepUpProofStore $proofs,
+        private readonly \MyInvoice\Service\Auth\Oidc\OidcFlowStore $oidcFlows,
     ) {}
 
     /**
@@ -114,6 +115,8 @@ final class PasskeySessionTransitionService
         string $ip,
         string $userAgent,
         int $userId,
+        ?string $ssoTicket = null,
+        ?string $ssoBrowserBinding = null,
     ): array {
         return $this->completeLoginMode(
             $flowToken,
@@ -122,6 +125,8 @@ final class PasskeySessionTransitionService
             $userAgent,
             $userId,
             false,
+            $ssoTicket,
+            $ssoBrowserBinding,
         );
     }
 
@@ -157,6 +162,8 @@ final class PasskeySessionTransitionService
         string $ip,
         string $userAgent,
         ?int $candidateUserId,
+        ?string $ssoTicket = null,
+        ?string $ssoBrowserBinding = null,
     ): array {
         return $this->completeLoginMode(
             $flowToken,
@@ -165,6 +172,8 @@ final class PasskeySessionTransitionService
             $userAgent,
             $candidateUserId ?? 0,
             true,
+            $ssoTicket,
+            $ssoBrowserBinding,
         );
     }
 
@@ -184,6 +193,8 @@ final class PasskeySessionTransitionService
         string $userAgent,
         int $userId,
         bool $discoverable,
+        ?string $ssoTicket,
+        ?string $ssoBrowserBinding,
     ): array {
         if (!$discoverable && $userId < 1) {
             throw new OneTimeTokenException('Neplatné nebo spotřebované WebAuthn flow.');
@@ -247,6 +258,10 @@ final class PasskeySessionTransitionService
                 throw new PasskeyCounterAnomalyException($stored->id);
             }
             $authContext = SessionAuthContext::strong('passkey', $cutoff->utc, $stored->id);
+            if ($ssoTicket !== null) {
+                $identity = $this->oidcFlows->consumeTicketInTransaction($pdo, $cutoff, $ssoTicket, $ssoBrowserBinding, $userId);
+                $authContext = $authContext->withExternalIdentity($identity['provider'], $identity['external_identity_id']);
+            }
             $session = $this->sessions->createInTransaction(
                 $pdo,
                 $cutoff,

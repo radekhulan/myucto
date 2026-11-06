@@ -122,9 +122,32 @@ klíče i autentikátoru zadáte kód na přihlašovací stránce místo druhéh
 
 ### 101.6.1 Přihlášení přes Microsoft Entra ID (správce)
 
-Přihlášení přes Entra ID nahrazuje heslo i vícefaktorové ověření v MyÚčto.
-MFA vynucuje váš tenant (Conditional Access), MyÚčto se na druhý faktor už
-neptá. Aplikaci v Entra ID si registruje každá instalace sama.
+Přihlášení přes Entra ID výchozně nahrazuje heslo i vícefaktorové ověření
+v MyÚčto. MFA v tomto režimu vynucuje váš tenant (Conditional Access), MyÚčto
+se na druhý faktor už neptá. Aplikaci v Entra ID si registruje každá instalace sama.
+
+Chcete-li po návratu od Microsoftu ověřovat také místní MFA, nastavte v `cfg.php`
+`auth.oidc.providers.entra.skip_mfa` na `false` (v Dockeru
+`MYINVOICE_OIDC_ENTRA_SKIP_MFA=0`). Entra pak nahrazuje jen heslo a následuje
+passkey, TOTP nebo další ověření stejně jako při přihlášení heslem. Má-li být
+místní MFA povinné i pro účty bez zřízeného faktoru, zapněte také
+`auth.require_mfa = true`. Povinné přihlášení přes Entra zůstává vynucené
+v obou režimech. S hodnotou `false` se citlivé operace potvrzují místním
+ověřením; popup Entra se pro ně nenabízí.
+
+Před přepnutím účtům zřiďte místní MFA. Je-li povolený pouze passkey a uživatel
+nemá žádný faktor ani nezná místní heslo, nejprve si nastaví místní heslo přes
+obnovu hesla. Tím pak potvrdí registraci prvního passkey po přihlášení přes Entra.
+
+Výchozí `skip_mfa = true` zachovává důvěru v MFA organizace. Změna platí při
+dalších přihlášeních; potřebujete-li okamžitě odebrat důvěru dosavadním relacím,
+zrušte také aktivní sezení uživatelů.
+
+Povinné firemní SSO platí pro každou cílovou firmu také v portfoliu,
+automatizaci, seznamech firem a operacích mezi firmami. Místní přihlášení
+do jiné firmy nepovolí čtení ani zápis ve firmě vyžadující Entra ID.
+Stejná podmínka platí pro API token podle přihlášení, ze kterého byl vydán.
+Do souhrnů a výběrů se zahrnou jen firmy dostupné aktuálním přihlášením.
 
 1. V Microsoft Entra admin center založte registraci aplikace: *single tenant*,
    platforma **Web**, redirect URI `https://<adresa instalace>/api/auth/oidc/entra/callback`
@@ -143,6 +166,7 @@ neptá. Aplikaci v Entra ID si registruje každá instalace sama.
                    'enabled'   => true,
                    'tenant_id' => '<Directory (tenant) ID>',
                    'client_id' => '<Application (client) ID>',
+                   'skip_mfa'  => true,
                ],
            ],
        ],
@@ -177,12 +201,12 @@ neptá. Aplikaci v Entra ID si registruje každá instalace sama.
 | Firma vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód do firmy nepustí |
 | Instalace vyžaduje Microsoft | Totéž pro všechny firmy a uživatele; nastavení firmy se nepoužije a jde jen zobrazit |
 | Nouzový přístup | Role `instance_admin` se přihlašuje dál heslem a MFA (`auth.oidc.break_glass_roles`) |
-| Citlivé operace | Potvrdíte novým přihlášením u Microsoftu místo hesla |
+| Citlivé operace | Při `skip_mfa = true` je potvrdíte novým přihlášením u Microsoftu místo hesla; při `false` místním ověřením |
 
 Vynucení ve firmě zapnete jen ze sezení přihlášeného přes Microsoft, jinak
 byste si firmu sami zavřeli. Neúplná konfigurace poskytovatele se nezapne a
 ukáže se v Diagnostice. Vynucení pro celou instalaci platí jen pro zapnutého
-poskytovatele, který nese celé přihlášení včetně MFA (Microsoft Entra ID).
+poskytovatele podporujícího firemní SSO (Microsoft Entra ID), a to i při místním MFA.
 Překlep v názvu ani vypnutý poskytovatel nikoho nezamknou. Při výpadku Entra ID
 vypněte přihlášení přes poskytovatele (`MYINVOICE_OIDC_ENABLED=0`), uživatelé se
 pak přihlásí heslem a MFA.

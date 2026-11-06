@@ -146,4 +146,20 @@ final class FirstFactorProvidersTest extends TestCase
             $registry->redirectUri((array) $registry->get('google') !== [] ? $registry->get('google') : throw new \LogicException()),
         );
     }
+
+    public function testEntraCanRequireLocalMfaWithoutDisablingLoginPolicy(): void
+    {
+        $registry = new OidcProviderRegistry(new Config([
+            'app' => ['url' => 'https://ucto.example.test'],
+            'auth' => ['oidc' => ['enabled' => true, 'providers' => ['entra' => [
+                'enabled' => true, 'tenant_id' => FakeOidcIdp::TENANT,
+                'client_id' => FakeOidcIdp::CLIENT, 'client_secret' => 'synthetic-secret',
+                'skip_mfa' => false,
+            ]]]],
+        ]));
+
+        self::assertFalse($registry->get('entra')->isStrong());
+        self::assertTrue($registry->get('entra')->supportsLoginPolicy());
+        self::assertFalse($registry->publicList()[0]['strong']);
+    }
 }

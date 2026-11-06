@@ -99,7 +99,7 @@ final class AutomationFeedMembershipTest extends TestCase
         $action = new AutomationFeedAction($this->feed);
         $bound = fn (string $uri) => (new ServerRequestFactory())->createServerRequest('GET', $uri)
             ->withQueryParams($this->query($uri))
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin', 'is_superadmin' => true])
             ->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')
             ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['scope' => 'read', 'supplier_id' => $this->supplierA])
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplierA);
@@ -125,7 +125,7 @@ final class AutomationFeedMembershipTest extends TestCase
         self::assertSame(0, $history['total']);
 
         $session = (new ServerRequestFactory())->createServerRequest('GET', '/api/automation/counts')
-            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin'])
+            ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 0, 'role' => 'admin', 'is_superadmin' => true])
             ->withAttribute(AuthMiddleware::ATTR_METHOD, 'session');
         $all = json_decode((string) $action->counts($session, new Response())->getBody(), true);
         $ids = array_column($all['per_supplier'], 'supplier_id');

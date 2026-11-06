@@ -124,6 +124,49 @@ final class ClientDomainMcpTest extends TestCase
         self::assertSame([$this->supplier], array_column($companies, 'id'));
     }
 
+    public function testEntraOriginSurvivesConsentExchangeRefreshAndTokenUseOnCustomDomain(): void
+    {
+        $environment = [
+            'MYINVOICE_OIDC_ENABLED' => '1', 'MYINVOICE_OIDC_ENTRA_ENABLED' => '1',
+            'MYINVOICE_OIDC_ENTRA_TENANT_ID' => '11111111-1111-1111-1111-111111111111',
+            'MYINVOICE_OIDC_ENTRA_CLIENT_ID' => '22222222-2222-2222-2222-222222222222',
+            'MYINVOICE_OIDC_ENTRA_CLIENT_SECRET' => 'synthetic-unused',
+        ];
+        $priorEnvironment = [];
+        foreach ($environment as $key => $value) {
+            $priorEnvironment[$key] = getenv($key);
+            putenv($key . '=' . $value);
+        }
+        $statement = $this->pdo->prepare('SELECT login_policy, login_sso_provider FROM supplier WHERE id=?');
+        $statement->execute([$this->supplier]);
+        $priorPolicy = $statement->fetch(\PDO::FETCH_ASSOC);
+        try {
+            $this->pdo->prepare("UPDATE supplier SET login_policy='sso_required', login_sso_provider='entra' WHERE id=?")
+                ->execute([$this->supplier]);
+            $this->pdo->prepare("UPDATE sessions SET auth_method='oidc:entra' WHERE id=?")
+                ->execute([$this->session['token']]);
+            $consent = $this->request('GET', $this->canonical . '/oauth/authorize?' . http_build_query($this->params()), session: true);
+            self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
+
+            $oauth = Bootstrap::buildContainer()->get(McpOAuth::class);
+            $params = $this->params();
+            $code = $oauth->createCode($this->client, $this->user, $this->supplier, $params['redirect_uri'],
+                $params['code_challenge'], 'read', $params['resource'], 'password');
+            self::assertNull($oauth->exchange($code, $this->client, $params['redirect_uri'], str_repeat('a', 64), $params['resource']));
+            $grant = $this->grantFor($params['resource'], $this->supplier, 'read', 'oidc:entra');
+            self::assertSame(200, $this->rpc($grant['access_token'], 'tools/list')->getStatusCode());
+            $refreshed = $oauth->refresh($grant['refresh_token'], $this->client, $params['resource']);
+            self::assertIsArray($refreshed);
+            $result = self::json($this->rpc($refreshed['access_token'], 'tools/call', ['name' => 'whoami']));
+            self::assertArrayHasKey('result', $result);
+            self::assertFalse($result['result']['isError'] ?? false, json_encode($result));
+        } finally {
+            $this->pdo->prepare('UPDATE supplier SET login_policy=?, login_sso_provider=? WHERE id=?')
+                ->execute([$priorPolicy['login_policy'], $priorPolicy['login_sso_provider'], $this->supplier]);
+            foreach ($priorEnvironment as $key => $value) putenv($value === false ? $key : $key . '=' . $value);
+        }
+    }
+
     public function testTokenCannotBeReplayedOnAnotherHostOrPublicApi(): void
     {
         $grant = $this->grant();
@@ -319,11 +362,11 @@ final class ClientDomainMcpTest extends TestCase
         return $this->grantFor($this->origin.'/mcp',$this->supplier);
     }
 
-    private function grantFor(string $resource,?int $supplier,string $scope='read'): array
+    private function grantFor(string $resource,?int $supplier,string $scope='read',?string $issuedAuthMethod=null): array
     {
         $oauth=Bootstrap::buildContainer()->get(McpOAuth::class);
         $p=$this->params();
-        $code=$oauth->createCode($this->client,$this->user,$supplier,$p['redirect_uri'],$p['code_challenge'],$scope,$resource);
+        $code=$oauth->createCode($this->client,$this->user,$supplier,$p['redirect_uri'],$p['code_challenge'],$scope,$resource,$issuedAuthMethod);
         $grant=$oauth->exchange($code,$this->client,$p['redirect_uri'],str_repeat('a',64),$resource);
         self::assertIsArray($grant);
         return $grant;

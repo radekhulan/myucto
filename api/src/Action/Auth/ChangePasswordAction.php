@@ -11,6 +11,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\ApiTokenService;
 use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\PasswordHasher;
+use MyInvoice\Service\Auth\PasswordResetTokens;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -73,13 +74,28 @@ final class ChangePasswordAction
             return Json::error($response, 'validation_failed', $e->getMessage(), 400);
         }
 
-        $this->db->pdo()->prepare(
-            'UPDATE users
-                SET password_hash = ?,
-                    totp_secret = CASE WHEN totp_enabled = 0 THEN NULL ELSE totp_secret END
-              WHERE id = ?'
-        )
-            ->execute([$newHash, $userId]);
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $update = $pdo->prepare(
+                'UPDATE users
+                    SET password_hash = ?,
+                        totp_secret = CASE WHEN totp_enabled = 0 THEN NULL ELSE totp_secret END
+                  WHERE id = ? AND password_hash = ?'
+            );
+            $update->execute([$newHash, $userId, $row['password_hash']]);
+            if ($update->rowCount() !== 1) {
+                $pdo->rollBack();
+                return Json::error($response, 'invalid_current_password', 'Aktuální heslo není správné.', 400);
+            }
+            PasswordResetTokens::invalidateForUserInTransaction($pdo, $userId);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
 
         // Invaliduj všechny ostatní sessions kromě této
         $invalidated = $this->sessions->destroyAllForUser($userId, $token);

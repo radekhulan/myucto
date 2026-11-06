@@ -452,7 +452,7 @@ final class SessionManager
             }
 
             $current = $pdo->prepare(
-                'SELECT id
+                'SELECT id, auth_method, external_identity_id
                    FROM sessions
                   WHERE id = ?
                     AND user_id = ?
@@ -463,8 +463,18 @@ final class SessionManager
                   FOR UPDATE'
             );
             $current->execute([$setupToken, $userId, 'setup', $cutoff->epochSeconds]);
-            if ($current->fetchColumn() === false) {
+            $setupSession = $current->fetch(PDO::FETCH_ASSOC);
+            if ($setupSession === false) {
                 throw new \DomainException('Setup session už není dostupná.');
+            }
+            if (SessionAuthContext::isExternalMethod($setupSession['auth_method'])
+                && (int) ($setupSession['external_identity_id'] ?? 0) > 0
+            ) {
+                $authContext = $authContext->withExternalIdentity(
+                    substr($setupSession['auth_method'], strlen(SessionAuthContext::EXTERNAL_PREFIX)),
+                    (int) $setupSession['external_identity_id'],
+                );
+                $expiresAt = min($expiresAt, $cutoff->epochSeconds + $this->externalSessionLifetimeSeconds());
             }
 
             $revoke = $pdo->prepare(
@@ -478,9 +488,9 @@ final class SessionManager
                 'INSERT INTO sessions
                     (id, user_id, csrf_token, ip, user_agent, device_class, created_at, last_seen, expires_at,
                      auth_method, assurance_level, mfa_verified_at, auth_credential_id,
-                     last_user_activity_at, session_family_id, generation)
+                     last_user_activity_at, session_family_id, generation, external_identity_id)
                  VALUES (?, ?, ?, ?, ?, ?, FROM_UNIXTIME(?), FROM_UNIXTIME(?), FROM_UNIXTIME(?),
-                         ?, ?, ?, ?, ?, ?, 1)'
+                         ?, ?, ?, ?, ?, ?, 1, ?)'
             );
             $insert->execute([
                 $token,
@@ -498,6 +508,7 @@ final class SessionManager
                 $authContext->authCredentialId,
                 $cutoff->utcSql,
                 $familyId,
+                $authContext->externalIdentityId,
             ]);
             if ($insert->rowCount() !== 1) {
                 throw new \RuntimeException('Strong session se nepodařilo vytvořit.');
@@ -541,7 +552,9 @@ final class SessionManager
 
         $stmt = $pdo->prepare(
             "UPDATE sessions
-                SET auth_method = 'password', assurance_level = 'setup',
+                SET auth_method = CASE WHEN external_identity_id IS NOT NULL AND auth_method LIKE 'oidc:%'
+                                       THEN auth_method ELSE 'password' END,
+                    assurance_level = 'setup',
                     mfa_verified_at = NULL, auth_credential_id = NULL
               WHERE id = ? AND user_id = ?
                 AND assurance_level = 'strong'

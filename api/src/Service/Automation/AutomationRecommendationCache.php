@@ -18,9 +18,9 @@ final class AutomationRecommendationCache
         private readonly AutomationRecommendationService $generator,
     ) {}
 
-    public function recommendations(int $userId, bool $isSuperadmin, array $filters = [], ?int $boundSupplierId = null): array
+    public function recommendations(int $userId, bool $isSuperadmin, array $filters = [], ?int $boundSupplierId = null, ?\Psr\Http\Message\ServerRequestInterface $request = null): array
     {
-        $ids = $this->scope($userId, $isSuperadmin, $filters['suppliers'] ?? [], $boundSupplierId);
+        $ids = $this->scope($userId, $isSuperadmin, $filters['suppliers'] ?? [], $boundSupplierId, $request);
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = max(1, min(200, (int) ($filters['per_page'] ?? 50)));
         $result = [
@@ -82,9 +82,9 @@ final class AutomationRecommendationCache
         }
     }
 
-    public function requestRefresh(int $userId, bool $isSuperadmin, array $requested, ?int $boundSupplierId = null): array
+    public function requestRefresh(int $userId, bool $isSuperadmin, array $requested, ?int $boundSupplierId = null, ?\Psr\Http\Message\ServerRequestInterface $request = null): array
     {
-        $ids = $this->scope($userId, $isSuperadmin, $requested, $boundSupplierId);
+        $ids = $this->scope($userId, $isSuperadmin, $requested, $boundSupplierId, $request);
         $stmt = $this->db->pdo()->prepare('INSERT INTO automation_recommendation_snapshots (supplier_id, requested_version)
             VALUES (?, 1) ON DUPLICATE KEY UPDATE requested_version = requested_version + 1');
         foreach ($ids as $id) $stmt->execute([$id]);
@@ -175,9 +175,9 @@ final class AutomationRecommendationCache
         }
     }
 
-    private function scope(int $userId, bool $isSuperadmin, array $requested, ?int $boundSupplierId): array
+    private function scope(int $userId, bool $isSuperadmin, array $requested, ?int $boundSupplierId, ?\Psr\Http\Message\ServerRequestInterface $request): array
     {
-        $allowed = $this->feed->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId);
+        $allowed = $this->feed->allowedSupplierIds($userId, $isSuperadmin, $boundSupplierId, $request);
         return $requested === [] ? $allowed : array_values(array_intersect($allowed, array_map('intval', $requested)));
     }
 }

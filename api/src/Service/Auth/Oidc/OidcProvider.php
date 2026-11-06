@@ -62,4 +62,9 @@ final readonly class OidcProvider
     {
         return $this->assurance === self::STRONG;
     }
+
+    public function supportsLoginPolicy(): bool
+    {
+        return $this->id === 'entra';
+    }
 }

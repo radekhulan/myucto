@@ -184,6 +184,16 @@ PHP);
         self::assertFalse($cfg->get('auth.passwordless_login.enabled'));
     }
 
+    public function testEntraSkipMfaDefaultsOnAndAcceptsEnvironmentOverride(): void
+    {
+        $this->unsetEnv('MYINVOICE_OIDC_ENTRA_SKIP_MFA');
+        self::assertTrue(Config::load($this->tmpDir)->get('auth.oidc.providers.entra.skip_mfa'));
+        $this->setEnv('MYINVOICE_OIDC_ENTRA_SKIP_MFA', '0');
+        self::assertFalse(Config::load($this->tmpDir)->get('auth.oidc.providers.entra.skip_mfa'));
+        $this->setEnv('MYINVOICE_OIDC_ENTRA_SKIP_MFA', 'true');
+        self::assertTrue(Config::load($this->tmpDir)->get('auth.oidc.providers.entra.skip_mfa'));
+    }
+
     public function testInvalidSessionLockEnvironmentOverrideIsPreservedForPolicyValidation(): void
     {
         $this->setEnv('MYINVOICE_SESSION_LOCK_AFTER_MINUTES', '15 minutes');

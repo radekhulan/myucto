@@ -20,7 +20,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(AuthMiddleware::ATTR_USER, [
                 'id' => 10,
@@ -37,7 +37,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([11 => null]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'role_id' => 2, 'role' => ['type' => 'staff']])
             ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['supplier_id' => 12]);
@@ -50,7 +50,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([11 => 7]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'role_id' => 2, 'role' => ['type' => 'staff']])
             ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['supplier_id' => 11]);
@@ -63,7 +63,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([11 => null, 12 => null]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withHeader(SupplierScopeMiddleware::HEADER_NAME, '12')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'role_id' => 2])
@@ -79,7 +79,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([11 => null, 12 => null]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices?supplier_id=12')
             ->withQueryParams(['supplier_id' => '12'])
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'role_id' => 2])
@@ -95,7 +95,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([12 => null]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'role_id' => 2])
             ->withAttribute(TenantDomainMiddleware::ATTR_CONTEXT, $this->domain(11));
@@ -110,7 +110,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(AuthMiddleware::ATTR_USER, [
                 'id' => 10,
@@ -131,7 +131,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([11 => 7]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(AuthMiddleware::ATTR_USER, [
                 'id' => 10,
@@ -152,7 +152,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createMock(UserSupplierRepository::class);
         $memberships->expects(self::never())->method('assignmentsForUser');
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(AuthMiddleware::ATTR_USER, [
                 'id' => 10,
@@ -173,7 +173,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([11 => null, 12 => null]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'role_id' => 2])
             ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['supplier_id' => 12])
@@ -189,7 +189,7 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
     {
         $memberships = $this->createStub(UserSupplierRepository::class);
         $memberships->method('assignmentsForUser')->willReturn([11 => 7]);
-        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships);
+        $resolver = new SupplierAccessResolver($this->createStub(Connection::class), $memberships, $this->loginPolicy());
         $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/invoices')
             ->withHeader(SupplierScopeMiddleware::HEADER_NAME, '11')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 10, 'role_id' => 2])
@@ -200,6 +200,13 @@ final class SupplierAccessResolverDynamicRolesTest extends TestCase
         self::assertFalse($access->denied);
         self::assertSame(11, $access->supplierId);
         self::assertSame(7, $access->roleIdOverride);
+    }
+
+    private function loginPolicy(): \MyInvoice\Service\Auth\LoginPolicyService
+    {
+        $config = new \MyInvoice\Infrastructure\Config\Config([]);
+        return new \MyInvoice\Service\Auth\LoginPolicyService($this->createStub(Connection::class), $config,
+            new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry($config));
     }
 
     private function domain(int $supplierId): TenantDomainContext

@@ -36,6 +36,8 @@ class OidcLoginService
         private readonly MfaStepUpService $stepUp,
         private readonly SessionManager $sessions,
         private readonly ActivityLogger $activity,
+        private readonly \MyInvoice\Service\Auth\SessionLockService $sessionLocks,
+        private readonly \MyInvoice\Service\Auth\SecurityClock $securityClock,
     ) {}
 
     public function provider(string $id): OidcProvider
@@ -167,6 +169,9 @@ class OidcLoginService
         $code = is_string($query['code'] ?? null) ? $query['code'] : '';
         $identity = null;
         try {
+            if ($flow->purpose === OidcFlowStore::PURPOSE_STEP_UP && !$provider->isStrong()) {
+                throw new OidcException(OidcException::PROVIDER_DISABLED, 'Tento poskytovatel ověření citlivé operace neumí.');
+            }
             $tokens = $this->http->exchangeCode($provider, $code, $this->providers->redirectUri($provider), $flow->codeVerifier);
             $identity = $provider->protocol === 'oauth2'
                 ? $this->verifier->seznamIdentity($provider, $this->http->userinfo($provider, (string) $tokens['access_token']))
@@ -268,6 +273,10 @@ class OidcLoginService
         $pdo->beginTransaction();
         try {
             $this->lockUser($userId);
+            $cutoff = $this->securityClock->capture($pdo);
+            if (!$this->sessionLocks->isActiveInTransaction($pdo, $cutoff, (string) $currentSessionToken, $userId)) {
+                throw new OidcException(OidcException::FLOW_INVALID, 'Sezení už není aktivní.');
+            }
             $row = $this->identities->findBySubject($identity);
             if ($row !== null && (int) $row['user_id'] !== $userId) {
                 throw new OidcException(OidcException::ALREADY_LINKED, 'Identita je propojená s jiným účtem.');
@@ -317,8 +326,21 @@ class OidcLoginService
         ) {
             throw new OidcException(OidcException::TOKEN_INVALID, 'Poskytovatel nepotvrdil čerstvé přihlášení.');
         }
-        $token = $this->stepUp->issue($userId, (string) $currentSessionToken, (string) $flow->stepUpOperation, 'oidc');
-        $this->identities->touch((int) $row['id'], $identity);
+        $pdo = $this->db->pdo();
+        $pdo->beginTransaction();
+        try {
+            $this->lockUser($userId);
+            $cutoff = $this->securityClock->capture($pdo);
+            if (!$this->sessionLocks->isActiveInTransaction($pdo, $cutoff, (string) $currentSessionToken, $userId)) {
+                throw new OidcException(OidcException::FLOW_INVALID, 'Sezení už není aktivní.');
+            }
+            $token = $this->stepUp->issueInTransaction($pdo, $cutoff, $userId, (string) $currentSessionToken, (string) $flow->stepUpOperation, 'oidc');
+            $this->identities->touch((int) $row['id'], $identity);
+            $pdo->commit();
+        } catch (\Throwable $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            throw $e;
+        }
         $this->activity->log('auth.oidc_step_up', $userId, 'user', $userId, [
             'provider' => $identity->provider, 'operation' => $flow->stepUpOperation,
         ], $ip, $userAgent);
@@ -335,6 +357,10 @@ class OidcLoginService
         $session = $this->sessions->load($currentSessionToken);
         if ($session === null || (int) $session['user_id'] !== $flow->userId) {
             throw new OidcException(OidcException::FLOW_INVALID, 'Sezení už neplatí.');
+        }
+        $state = $this->sessionLocks->evaluate($currentSessionToken);
+        if (!$state->sessionExists || $state->locked) {
+            throw new OidcException(OidcException::FLOW_INVALID, 'Sezení už není aktivní.');
         }
         return $flow->userId;
     }

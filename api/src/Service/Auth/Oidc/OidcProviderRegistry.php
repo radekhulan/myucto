@@ -140,6 +140,7 @@ final class OidcProviderRegistry
             scope: 'openid profile email',
             tenantId: $tenant,
             allowGuests: (bool) ($s['allow_guests'] ?? false),
+            assurance: (bool) ($s['skip_mfa'] ?? true) ? OidcProvider::STRONG : OidcProvider::FIRST_FACTOR,
         );
     }
 

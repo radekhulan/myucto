@@ -105,7 +105,9 @@ final class CertificateVaultSupplierSharing
             $pdo->beginTransaction();
         }
         try {
-            foreach ($this->candidateSuppliers($request, $ownerUserId) as $supplier) {
+            $candidates = $this->candidateSuppliers($request, $ownerUserId);
+            $this->supplierAccess->preloadSupplierIds(array_column($candidates, 'supplier_id'));
+            foreach ($candidates as $supplier) {
                 $supplierId = $supplier['supplier_id'];
                 $permitted = $this->permittedFor($request, $supplierId);
                 if ($permitted === null) {
@@ -317,7 +319,9 @@ final class CertificateVaultSupplierSharing
             $pdo->beginTransaction();
         }
         try {
-            foreach ($this->candidateSuppliers($request, $ownerUserId) as $membership) {
+            $candidates = $this->candidateSuppliers($request, $ownerUserId);
+            $this->supplierAccess->preloadSupplierIds(array_column($candidates, 'supplier_id'));
+            foreach ($candidates as $membership) {
                 $supplierId = $membership['supplier_id'];
                 if ($supplierId === $sourceSupplierId) {
                     continue;

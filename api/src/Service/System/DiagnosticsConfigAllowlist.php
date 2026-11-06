@@ -56,6 +56,7 @@ final class DiagnosticsConfigAllowlist
         'auth.oidc.providers.entra.tenant_id',
         'auth.oidc.providers.entra.client_id',
         'auth.oidc.providers.entra.allow_guests',
+        'auth.oidc.providers.entra.skip_mfa',
         'auth.oidc.providers.google.enabled',
         'auth.oidc.providers.google.client_id',
         'auth.oidc.providers.google.allowed_hosted_domains',

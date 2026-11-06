@@ -71,7 +71,7 @@ final class CrossSupplierAuthorization
     public function suppliersAllowing(Request $request, array $permissions, AccessLevel $level = AccessLevel::WRITE): array
     {
         $out = [];
-        foreach ($this->candidateIds($request) as $supplierId) {
+        foreach ($this->supplierAccess->filterAllowedSupplierIds($request, $this->candidateIds($request)) as $supplierId) {
             if ($this->allowsIn($request, $supplierId, $permissions, $level)) {
                 $out[] = $supplierId;
             }
@@ -175,6 +175,7 @@ final class CrossSupplierAuthorization
         }
         return (new ServerRequestFactory())
             ->createServerRequest('GET', '/')
+            ->withAttribute(AuthMiddleware::ATTR_METHOD, \MyInvoice\Service\Auth\LoginPolicyService::BACKGROUND_AUTH_METHOD)
             ->withAttribute(AuthMiddleware::ATTR_USER, $user);
     }
 

@@ -233,6 +233,25 @@ final class MfaStepUpService
         );
     }
 
+    public function issueInTransaction(
+        PDO $pdo,
+        SecurityTime $cutoff,
+        int $userId,
+        string $sessionToken,
+        string $operation,
+        string $authMethod,
+        ?int $authCredentialId = null,
+    ): string {
+        if (!$pdo->inTransaction()) throw new \LogicException('Vydání proofu vyžaduje aktivní transakci.');
+        $operation = $this->assertAllowed($userId, $operation, $authMethod);
+        if ($authMethod === 'passkey' && ($authCredentialId === null
+            || $this->credentials->findActiveForUserByIdForUpdate($pdo, $userId, $authCredentialId) === null)
+        ) {
+            throw new StepUpOperationException('Passkey pro step-up není aktivní.');
+        }
+        return $this->proofs->issueInTransaction($pdo, $cutoff, $userId, $sessionToken, $operation, $authMethod, $authCredentialId);
+    }
+
     public function consume(
         string $proofToken,
         int $userId,

@@ -49,6 +49,17 @@ final readonly class SessionAuthContext
         return $authMethod !== null && str_starts_with($authMethod, self::EXTERNAL_PREFIX);
     }
 
+    public function withExternalIdentity(string $provider, int $externalIdentityId): self
+    {
+        return new self(
+            self::EXTERNAL_PREFIX . $provider,
+            $this->assuranceLevel,
+            $this->mfaVerifiedAt,
+            $this->authCredentialId,
+            $externalIdentityId,
+        );
+    }
+
     public static function legacy(): self
     {
         return new self('legacy', 'legacy');

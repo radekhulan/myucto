@@ -75,7 +75,9 @@ final class AiCredentialsBulkApplier
         $user   = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) ($user['id'] ?? 0);
 
-        foreach ($this->candidateIds($request, $userId) as $targetId) {
+        $candidateIds = $this->candidateIds($request, $userId);
+        $this->supplierAccess->preloadSupplierIds($candidateIds);
+        foreach ($candidateIds as $targetId) {
             if ($targetId === $sourceSupplierId) continue;
             // Firma, do které se uživatel v tomhle kontextu nepřepne (zamčená doména,
             // vázaný token), se nevypisuje ani jménem — v přepínači ji taky nevidí.

@@ -218,7 +218,7 @@ final class LoginAction
             (int) $user['id'],
             isset($user['system_key']) ? (string) $user['system_key'] : null,
         );
-        if ($requiredProvider !== null) {
+        if ($requiredProvider !== null && ($ssoTicket['provider'] ?? null) !== $requiredProvider) {
             $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
                 'email' => $email, 'reason' => 'sso_required', 'provider' => $requiredProvider,
             ], $ip, $userAgent);
@@ -271,7 +271,11 @@ final class LoginAction
                 $user,
                 $ip,
                 $userAgent,
-                SessionAuthContext::strong('recovery', $this->clock->now()),
+                $ssoTicket !== null
+                    ? SessionAuthContext::strong('recovery', $this->clock->now())->withExternalIdentity(
+                        $ssoTicket['provider'], $ssoTicket['external_identity_id'],
+                    )
+                    : SessionAuthContext::strong('recovery', $this->clock->now()),
             );
         }
         $passkeysUsable = $this->mfaPolicy->isMethodAllowed('passkey')
@@ -440,13 +444,7 @@ final class LoginAction
         if ($ssoTicket !== null) {
             // Sezení si nese identitu, ze které přihlášení vzniklo, i když ho
             // dokončil TOTP nebo e-mailový kód: odpojení identity ho pak zruší.
-            $authContext = new SessionAuthContext(
-                $authContext->authMethod,
-                $authContext->assuranceLevel,
-                $authContext->mfaVerifiedAt,
-                $authContext->authCredentialId,
-                $ssoTicket['external_identity_id'],
-            );
+            $authContext = $authContext->withExternalIdentity($ssoTicket['provider'], $ssoTicket['external_identity_id']);
             if (!$this->oidcFlows->consumeTicket($ssoTicketRaw)) {
                 return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
             }

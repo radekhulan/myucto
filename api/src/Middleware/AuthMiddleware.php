@@ -172,7 +172,7 @@ final class AuthMiddleware implements MiddlewareInterface
                     || (int) $binding['active'] !== 1
                     || (string) $binding['resource'] !== $resource
                     || ($this->mcpResources !== null && !$this->mcpResources->allowsGrant(
-                        $resource, (int) $tokenRow['user_id'], $tokenRow['supplier_id'], (string) $tokenRow['scope'],
+                        $resource, (int) $tokenRow['user_id'], $tokenRow['supplier_id'], (string) $tokenRow['scope'], $tokenRow['issued_auth_method'] ?? null,
                     ))
                     || ($path !== '/mcp' && !($request->getAttribute('mcp.internal') === true
                         && str_starts_with($path, '/api/')))

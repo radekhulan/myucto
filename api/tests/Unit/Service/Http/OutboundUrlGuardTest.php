@@ -187,12 +187,46 @@ final class OutboundUrlGuardTest extends TestCase
         $this->assertRejected('https://93.184.216.34/attachment.pdf', ['app.fakturoid.cz']);
     }
 
-    public function testAllowlistIsCaseAndDotInsensitive(): void
+    public function testAllowlistIsCaseInsensitive(): void
     {
-        // Porovnání s allowlistem musí být case-insensitive a tolerovat koncovou tečku;
-        // assertSyntax nedělá DNS, takže je test deterministický.
         $this->expectNotToPerformAssertions();
-        $this->guard()->assertSyntax('https://APP.Fakturoid.CZ./x.pdf', ['app.fakturoid.cz']);
+        $this->guard()->assertSyntax('https://APP.Fakturoid.CZ/x.pdf', ['app.fakturoid.cz']);
+    }
+
+    public static function trailingDotUrls(): array
+    {
+        return [
+            'hostname' => ['https://audit-rebind.invalid./document', []],
+            'allowed hostname' => ['https://APP.Fakturoid.CZ./x.pdf', ['app.fakturoid.cz']],
+            'multiple dots' => ['https://audit-rebind.invalid../document', []],
+            'public IPv4' => ['https://93.184.216.34./document', []],
+        ];
+    }
+
+    #[DataProvider('trailingDotUrls')]
+    public function testRejectsTrailingDotInsteadOfChangingPinnedHost(string $url, array $allowedHosts): void
+    {
+        $this->expectException(OutboundRequestException::class);
+        $this->guard()->assertSyntax($url, $allowedHosts);
+    }
+
+    public function testRequestRejectsTrailingDotBeforeDnsOrCurl(): void
+    {
+        try {
+            $this->guard()->request('GET', 'https://audit-rebind.invalid.:1/');
+            self::fail('Host s koncovou tečkou musí být odmítnut před DNS.');
+        } catch (OutboundRequestException $e) {
+            self::assertSame(OutboundRequestException::TARGET_BLOCKED, $e->reason);
+        }
+    }
+
+    public function testPublicIpv6LiteralKeepsItsUrlAndDoesNotRequireDnsPin(): void
+    {
+        $target = $this->guard()->validate('https://[2606:4700:4700::1111]/document');
+        self::assertSame('https://[2606:4700:4700::1111]/document', $target->url);
+        self::assertSame('2606:4700:4700::1111', $target->host);
+        self::assertSame(['2606:4700:4700::1111'], $target->ips);
+        self::assertTrue($target->hostIsIpLiteral);
     }
 
     public function testAssertSyntaxRejectsForeignHost(): void

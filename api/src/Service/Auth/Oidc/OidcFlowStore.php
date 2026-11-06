@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Service\Auth\Oidc;
 
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Auth\OneTimeTokenException;
+use MyInvoice\Service\Auth\SecurityTime;
 use MyInvoice\Service\OAuth\Pkce;
 
 /**
@@ -213,6 +215,39 @@ class OidcFlowStore
         );
         $stmt->execute([hash('sha256', $ticket), self::PURPOSE_TICKET]);
         return $stmt->rowCount() === 1;
+    }
+
+    public function consumeTicketInTransaction(
+        \PDO $pdo,
+        SecurityTime $cutoff,
+        #[\SensitiveParameter] string $ticket,
+        #[\SensitiveParameter] ?string $browserBinding,
+        int $userId,
+    ): array {
+        if (!$pdo->inTransaction() || $pdo !== $this->db->pdo()) {
+            throw new \LogicException('Spotřeba lístku vyžaduje společnou transakci.');
+        }
+        if (preg_match('/^[a-f0-9]{64}$/D', $ticket) !== 1 || !self::isBindingShape($browserBinding)) {
+            throw new OneTimeTokenException('Neplatný lístek přihlášení.');
+        }
+        $stmt = $pdo->prepare(
+            'SELECT f.provider, f.external_identity_id
+               FROM oidc_login_flows f
+               JOIN user_external_identities x
+                 ON x.id = f.external_identity_id AND x.user_id = f.user_id AND x.provider = f.provider
+              WHERE f.id = ? AND f.purpose = ? AND f.user_id = ? AND f.browser_binding = ?
+                AND f.consumed_at IS NULL AND f.expires_at > ?
+              FOR UPDATE'
+        );
+        $stmt->execute([
+            hash('sha256', $ticket), self::PURPOSE_TICKET, $userId,
+            hash('sha256', (string) $browserBinding), $cutoff->utcSql,
+        ]);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false || !$this->consumeTicket($ticket)) {
+            throw new OneTimeTokenException('Neplatný nebo spotřebovaný lístek přihlášení.');
+        }
+        return ['provider' => (string) $row['provider'], 'external_identity_id' => (int) $row['external_identity_id']];
     }
 
     public function purgeExpired(): int

@@ -82,6 +82,7 @@ final class MoneyS3BatchAction extends AbstractMigrationAction
         private readonly MigrationCompanyResolver $companies,
         private readonly UserSupplierRepository $userSuppliers,
         private readonly Connection $db,
+        private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
     ) {
         parent::__construct($jobs, $runs, $logger, $ipMatcher);
     }
@@ -341,16 +342,11 @@ final class MoneyS3BatchAction extends AbstractMigrationAction
     /** @return list<int>|null firmy, ke kterým má uživatel přístup (null = všechny) */
     private function allowedSupplierIds(Request $request): ?array
     {
-        if (RequestAuthorization::isSuperadmin($request)) {
-            return null;
-        }
+        $all = RequestAuthorization::isSuperadmin($request);
         $ids = $this->userSuppliers->allowedSupplierIds(self::userId($request));
-        // Stejně jako přepínač firem: uživatel bez členství je legacy „bez omezení",
-        // klient bez členství nesmí nic (fail-closed).
-        if ($ids === []) {
-            return RequestAuthorization::isClientType($request) ? [] : null;
-        }
-        return $ids;
+        if ($all) $ids = array_map('intval', $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN));
+        $allowed = $this->supplierAccess->filterAllowedSupplierIds($request, $ids);
+        return $all && $allowed === $ids ? null : $allowed;
     }
 
     private function currentGroupId(int $supplierId): ?int

@@ -160,9 +160,11 @@ final class McpOAuthAction
         $choices = [];
         $accessibleCount = 0;
         $canGrantWrite = false;
+        $issuedAuthMethod = ((array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []))['auth_method'] ?? null;
         $available = ($user['is_superadmin'] ?? false) === true
             ? $this->db->pdo()->query('SELECT id AS supplier_id, COALESCE(NULLIF(display_name, \'\'), company_name) AS name FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_ASSOC)
             : $this->memberships->listForUser((int) $user['id']);
+        $this->suppliers->preloadSupplierIds(array_column($available, 'supplier_id'));
         foreach ($available as $choice) {
             $candidateId = (int) $choice['supplier_id'];
             if ($target['supplier_id'] !== null && $target['supplier_id'] !== $candidateId) continue;
@@ -172,11 +174,11 @@ final class McpOAuthAction
                 $accessibleCount++;
                 $role = $this->roles->resolve($candidateRequest);
                 if ($target['supplier_id'] !== null
-                    ? $this->resources->allowsGrant($resource, (int) $user['id'], $candidateId, 'read')
+                    ? $this->resources->allowsGrant($resource, (int) $user['id'], $candidateId, 'read', $issuedAuthMethod)
                     : $this->permissions->allows($role, 'profile.tokens', AccessLevel::READ)) {
                     $choices[] = $choice;
                     $canGrantWrite = $canGrantWrite || ($target['supplier_id'] !== null
-                        ? $this->resources->allowsGrant($resource, (int) $user['id'], $candidateId, 'read_write')
+                        ? $this->resources->allowsGrant($resource, (int) $user['id'], $candidateId, 'read_write', $issuedAuthMethod)
                         : $this->permissions->allows($role, 'profile.tokens', AccessLevel::WRITE));
                 }
             }

@@ -10,6 +10,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\LoginSessionIssuer;
 use MyInvoice\Service\Auth\MfaPolicyService;
 use MyInvoice\Service\Auth\PasswordHasher;
+use MyInvoice\Service\Auth\PasswordResetTokens;
 use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
@@ -85,11 +86,14 @@ final class ResetPasswordAction
                 $pdo->rollBack();
                 return Json::error($response, 'token_already_used', 'Token už není platný.', 410);
             }
+            PasswordResetTokens::invalidateForUserInTransaction($pdo, $userId);
             $pdo->prepare('DELETE FROM trusted_devices WHERE user_id = ?')->execute([$userId]);
             $pdo->prepare('DELETE FROM login_otps WHERE user_id = ?')->execute([$userId]);
             $pdo->commit();
         } catch (\PDOException $e) {
-            $pdo->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
             // Endpoint je anonymní, takže text výjimky ven nesmí: `PDOException`
             // nese SQLSTATE, jméno tabulky i fragment dotazu — a nezávisle na
             // `app.debug`, takže by to teklo i z produkce. Detail patří do logu,

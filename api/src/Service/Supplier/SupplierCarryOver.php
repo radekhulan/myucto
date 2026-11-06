@@ -277,6 +277,7 @@ final class SupplierCarryOver
         $ids = RequestAuthorization::isSuperadmin($request)
             ? array_map('intval', $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN))
             : $this->memberships->allowedSupplierIds($userId);
+        $this->supplierAccess->preloadSupplierIds($ids);
         $ids = array_values(array_filter($ids, fn (int $id): bool => $id !== $excludeId && $this->reachable($request, $id)));
         if ($ids === []) {
             return [];

@@ -85,7 +85,7 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
 
         $access = $this->resolver->resolve($request);
 
-        if ($access->denied) {
+        if ($access->denied && $access->requiredLoginProvider === null) {
             // Self-service cesty (me/logout/change-password/totp…) nesmí denied
             // membership zablokovat — klient bez membershipu (Epic F6, fail-closed)
             // musí umět načíst vlastní účet a odhlásit se. Scope se nepropíše (0).
@@ -104,20 +104,7 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
         // přihlášení, ze kterého byl token vydaný (api_tokens.issued_auth_method),
         // jinak by si člověk z heslového sezení vyrobil token do zakázané firmy.
         if ($access->supplierId > 0) {
-            $authMethod = null;
-            if (RequestAuthorization::isSessionAuth($request)) {
-                $session = (array) $request->getAttribute(AuthMiddleware::ATTR_SESSION, []);
-                $authMethod = isset($session['auth_method']) ? (string) $session['auth_method'] : null;
-            } elseif (RequestAuthorization::isBearerAuth($request)) {
-                $token = (array) $request->getAttribute(AuthMiddleware::ATTR_API_TOKEN, []);
-                $authMethod = isset($token['issued_auth_method']) ? (string) $token['issued_auth_method'] : null;
-            }
-            $roleKey = $user['role_summary']['system_key'] ?? null;
-            if (!$this->loginPolicy->sessionAllowedForSupplier(
-                $access->supplierId,
-                $authMethod,
-                is_string($roleKey) ? $roleKey : null,
-            )) {
+            if (!$this->loginPolicy->requestAllowedForSupplier($request, $access->supplierId)) {
                 if (in_array($path, PermissionMiddleware::PUBLIC_OR_SELF, true)) {
                     return $handler->handle($request->withAttribute(self::ATTR_CURRENT_ID, 0));
                 }

@@ -149,6 +149,7 @@ final class SettingsAction
         private readonly AccountingFrameworkService $accountingFramework,
         private readonly AccountingDecreeService $accountingDecree,
         private readonly SupplierBrandingSettings $brandingSettings,
+        private readonly \MyInvoice\Service\Tenant\SupplierAccessResolver $supplierAccess,
     ) {}
 
     /**
@@ -317,7 +318,11 @@ final class SettingsAction
             return null;
         }
 
-        return $allowed;
+        if ($allowed === [] && RequestAuthorization::isSuperadmin($request)) {
+            $allowed = array_map('intval', $this->db->pdo()->query('SELECT id FROM supplier ORDER BY id')->fetchAll(\PDO::FETCH_COLUMN));
+        }
+        $allowed = $this->supplierAccess->filterAllowedSupplierIds($request, $allowed);
+        return $allowed !== [] ? $allowed : null;
     }
 
     /**
@@ -369,18 +374,9 @@ final class SettingsAction
     /** Epic F0: true = supplier je mimo bound PAT nebo membership. Nebound globální admin vidí vše. */
     private function membershipDenies(Request $request, int $supplierId): bool
     {
-        $boundSupplierId = $this->boundSupplierId($request);
-        if ($boundSupplierId !== null) {
-            return $supplierId !== $boundSupplierId;
-        }
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        if (RequestAuthorization::isSuperadmin($request)) return false;
-        $allowed = $this->userSuppliers->allowedSupplierIds((int) ($user['id'] ?? 0));
-        // Epic F6 (H3): role 'client' je fail-closed — bez membershipu nevidí nic.
-        if (RequestAuthorization::isClientType($request) && $allowed === []) {
-            return true;
-        }
-        return $allowed !== [] && !in_array($supplierId, $allowed, true);
+        if ($supplierId <= 0) return true;
+        $access = $this->supplierAccess->resolve($request->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $supplierId)->withQueryParams([]));
+        return $access->denied || $access->supplierId !== $supplierId;
     }
 
     private function boundSupplierId(Request $request): ?int

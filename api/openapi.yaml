@@ -24,6 +24,11 @@ info:
     k firemním datům přes veřejné API ani při technickém přiřazení firmy.
     Existující token účtu převedeného na tuto roli je zneplatněn.
 
+    Povinné firemní SSO se ověřuje pro každou cílovou firmu, také v agregacích
+    a při operacích mezi firmami. PAT musí pocházet z přihlášení požadovaným
+    poskytovatelem. Souhrny firmy bez odpovídajícího přihlášení vynechají;
+    přímý přístup do aktuální firmy vrací `403 sso_required`.
+
     Token má:
     - **scope** — `read` (GET a výslovně čtecí POST katalogových dávek) nebo `read_write` (všechny povolené operace).
     - **supplier** — pokud je token bound na konkrétního supplier-a, všechny operace
@@ -6844,7 +6849,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Doporučení účtování z dokladů a bankovních pohybů
-      description: Session-only, dynamický RBAC. Čte pouze výsledky předpočítané cronem pro povolené firmy; nikdy nespouští analýzu v HTTP požadavku. Filtry i stránkování běží nad uloženými výsledky. Zahrnuje kontrolu klasifikace již zaúčtovaných přijatých faktur.
+      description: Session-only, dynamický RBAC a přihlašovací politika každé cílové firmy. Čte pouze výsledky předpočítané cronem pro povolené firmy; nikdy nespouští analýzu v HTTP požadavku. Filtry i stránkování běží nad uloženými výsledky. Zahrnuje kontrolu klasifikace již zaúčtovaných přijatých faktur.
       parameters:
         - { in: query, name: suppliers, schema: { type: string }, description: Čárkou oddělená ID firem. }
         - { in: query, name: from, schema: { type: string, format: date } }
@@ -6864,7 +6869,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Sjednocený kokpit účetní automatiky napříč povolenými firmami
-      description: Session-only. Výsledek je vždy omezen dynamickým RBAC uživatele.
+      description: Session-only. Výsledek je omezen dynamickým RBAC a přihlašovací politikou každé zahrnuté firmy.
       parameters:
         - { in: query, name: tab, required: true, schema: { type: string, enum: [auto, pending, needs_input] } }
         - { in: query, name: suppliers, schema: { type: string }, description: Čárkou oddělená ID firem. }
@@ -6891,7 +6896,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Počty položek kokpitu celkem a po firmách
-      description: Session-only, dynamický RBAC.
+      description: Session-only, dynamický RBAC a přihlašovací politika každé zahrnuté firmy.
       parameters:
         - { in: query, name: suppliers, schema: { type: string } }
       responses:
@@ -6944,7 +6949,7 @@ paths:
     get:
       tags: [Accounting]
       summary: Auditní historie rozhodnutí automatiky
-      description: Session-only, dynamický RBAC.
+      description: Session-only, dynamický RBAC a přihlašovací politika každé zahrnuté firmy.
       parameters:
         - { in: query, name: suppliers, schema: { type: string } }
         - { in: query, name: from, schema: { type: string, format: date } }
@@ -11101,8 +11106,10 @@ paths:
       summary: Přehled firem pro účetní kancelář (cross-supplier)
       description: |
         Fáze F (audit 2026-07 P2/M). NENÍ scoped na X-Supplier-Id — agreguje přes
-        firmy z `user_suppliers` přihlášeného uživatele (admin/uživatel bez membership
-        řádků vidí vše). Per firma: nejbližší daňový termín, počty nezaúčtovaných
+        firmy z `user_suppliers` přihlášeného uživatele (superadmin vidí všechny
+        povolené firmy, ostatní bez členství žádnou). U každé firmy se ověřuje
+        požadovaný způsob přihlášení; nevyhovující firmy jsou vynechány.
+        Vázaný token a vlastní doména rozsah dále omezují. Per firma: nejbližší daňový termín, počty nezaúčtovaných
         dokladů / nespárovaných bankovních plateb / konceptů PF, stav účetního období,
         datum posledního importu bankovního výpisu a objem dat (`volume`). Role client
         bez přístupu.
@@ -31341,7 +31348,7 @@ paths:
           $ref: '#/components/responses/Forbidden'
         '404':
           $ref: '#/components/responses/NotFound'
-      description: Firma se vybírá ID v cestě a musí patřit mezi firmy dostupné uživateli.
+      description: Firma se vybírá ID v cestě a musí být dostupná podle členství, vazby tokenu či domény a požadovaného způsobu přihlášení. Nedostupná firma vrací 404.
   /api/v1/automation/recommendations/job:
     get:
       tags:
@@ -34119,7 +34126,8 @@ paths:
       summary: Manager dashboard across authorized companies
       description: Read-only overview, trends, cash flow, bank/cash balances, aging and risks. Available companies are resolved
         server-side using membership and independent company role overrides. Token supplier binding and verified custom domain
-        locks remain authoritative. Requires dashboard.portfolio READ in every included company; client roles are excluded.
+        locks remain authoritative. Requires dashboard.portfolio READ and the required login provider in every included company;
+        companies outside the login policy are omitted. Client roles are excluded.
         Existing commercial portfolio entitlement applies. No supplier selector can expand the scope. Defaults to twelve calendar
         months through today; from/to is inclusive. Native currency values remain available, and converted_czk provides a
         separate CZK projection with explicit missing-rate coverage. Forecast uses the current calendar year and existing
@@ -43492,6 +43500,7 @@ components:
               count: { type: integer }
     PortfolioOverview:
       type: object
+      description: Zahrnuje jen firmy povolené pro aktuální přihlašovací metodu, členství a omezení tokenu či domény.
       required: [companies, total, generated_at]
       properties:
         companies: { type: array, items: { $ref: '#/components/schemas/PortfolioCompany' } }
@@ -45118,6 +45127,7 @@ components:
 
     AutomationRecommendationsPage:
       type: object
+      description: Položky, souhrny a snapshoty obsahují jen firmy dostupné podle aktuálního přihlášení a oprávnění.
       required: [items, summary, total, page, per_page, snapshots]
       properties:
         snapshots:
@@ -45277,6 +45287,7 @@ components:
 
     AutomationFeedPage:
       type: object
+      description: Položky i počet jsou omezeny na firmy dostupné podle aktuálního přihlášení a oprávnění.
       required: [items, total, page, per_page]
       properties:
         items: { type: array, items: { $ref: '#/components/schemas/AutomationFeedItem' } }
@@ -45409,6 +45420,7 @@ components:
 
     AutomationCounts:
       type: object
+      description: Součty zahrnují jen firmy dostupné podle aktuálního přihlášení a oprávnění.
       required: [auto_today, pending, needs_input, per_supplier]
       properties:
         auto_today: { type: integer }
@@ -62255,6 +62267,7 @@ components:
         or elimination of transactions between companies.
     GroupDashboard:
       type: object
+      description: Company lists and totals include only companies allowed by the current authentication method and authorization scope.
       properties:
         section:
           type: string

@@ -84,6 +84,27 @@ final class SessionLockService
         return $this->transition($token, false, true);
     }
 
+    public function isActiveInTransaction(PDO $pdo, SecurityTime $cutoff, string $token, int $userId): bool
+    {
+        if (!$pdo->inTransaction() || $pdo !== $this->db->pdo()) {
+            throw new \LogicException('Kontrola relace vyžaduje společnou transakci.');
+        }
+        $stmt = $pdo->prepare(
+            'SELECT s.last_user_activity_at, s.locked_at, u.session_lock_after_minutes
+               FROM sessions s
+               JOIN users u ON u.id = s.user_id AND u.is_active = 1
+               JOIN roles r ON r.id = u.role_id AND r.is_active = 1
+              WHERE s.id = ? AND s.user_id = ? AND s.expires_at > FROM_UNIXTIME(?)
+                AND s.replaced_at IS NULL AND s.revoked_at IS NULL
+              FOR UPDATE'
+        );
+        $stmt->execute([$token, $userId, $cutoff->epochSeconds]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row === false || $row['locked_at'] !== null) return false;
+        $timeout = $this->policy->effectiveTimeoutSeconds(self::nullableTimeout($row['session_lock_after_minutes'] ?? null));
+        return $timeout === 0 || self::parseUtc((string) $row['last_user_activity_at']) > $cutoff->utc->modify('-' . $timeout . ' seconds');
+    }
+
     private function transition(
         string $token,
         bool $recordActivity,
