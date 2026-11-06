@@ -137,8 +137,7 @@ class LoginPolicyService
 
     public function requestAllowedForSupplier(\Psr\Http\Message\ServerRequestInterface $request, int $supplierId): bool
     {
-        $method = $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD);
-        if ($method === self::BACKGROUND_AUTH_METHOD) return true;
+        if (\MyInvoice\Security\RequestAuthorization::isBackgroundAuth($request)) return true;
         $authMethod = null;
         if (\MyInvoice\Security\RequestAuthorization::isSessionAuth($request)) {
             $session = (array) $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_SESSION, []);

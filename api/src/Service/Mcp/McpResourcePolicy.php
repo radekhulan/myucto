@@ -70,9 +70,8 @@ final class McpResourcePolicy
         $user = $statement->fetch(\PDO::FETCH_ASSOC);
         if (!is_array($user)) return false;
         $user['role_summary'] = ['type' => $user['role_type'], 'system_key' => $user['system_key']];
-        $request = (new ServerRequestFactory())->createServerRequest('GET', $this->canonical())
+        $request = RequestAuthorization::asBearer((new ServerRequestFactory())->createServerRequest('GET', $this->canonical()))
             ->withAttribute(AuthMiddleware::ATTR_USER, $user)
-            ->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')
             ->withAttribute(AuthMiddleware::ATTR_API_TOKEN, ['supplier_id' => $supplierId, 'issued_auth_method' => $issuedAuthMethod]);
         $request = $request->withAttribute('auth.effective_role', $this->roles->resolve($request));
         return RequestAuthorization::canUseMcp($request, $scope === 'read_write' ? AccessLevel::WRITE : AccessLevel::READ);

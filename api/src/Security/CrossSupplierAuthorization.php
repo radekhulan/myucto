@@ -173,10 +173,9 @@ final class CrossSupplierAuthorization
         if ($user === null) {
             return null;
         }
-        return (new ServerRequestFactory())
+        return RequestAuthorization::asBackground((new ServerRequestFactory())
             ->createServerRequest('GET', '/')
-            ->withAttribute(AuthMiddleware::ATTR_METHOD, \MyInvoice\Service\Auth\LoginPolicyService::BACKGROUND_AUTH_METHOD)
-            ->withAttribute(AuthMiddleware::ATTR_USER, $user);
+            ->withAttribute(AuthMiddleware::ATTR_USER, $user));
     }
 
     /**
