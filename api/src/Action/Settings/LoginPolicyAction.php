@@ -30,6 +30,7 @@ final class LoginPolicyAction
         private readonly OidcProviderRegistry $providers,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function show(Request $request, Response $response): Response
@@ -39,12 +40,15 @@ final class LoginPolicyAction
             return Json::error($response, 'supplier_required', 'Vyberte firmu.', 400);
         }
         $row = $this->policy($supplierId);
+        $global = $this->loginPolicy->globalRequiredProvider();
         return Json::ok($response, [
             'login_policy' => $row['login_policy'],
             'login_sso_provider' => $row['login_sso_provider'],
+            // Vynucení pro celou instalaci přebíjí nastavení firmy; firma ho jen ukazuje.
+            'global_sso_provider' => $global,
             'providers' => array_values(array_filter($this->providers->publicList(), static fn (array $p): bool => $p['strong'])),
             'can_manage' => RequestAuthorization::canManageLoginPolicy($request),
-            'users_without_identity' => $this->usersWithoutIdentity($supplierId, $row['login_sso_provider'] ?? 'entra'),
+            'users_without_identity' => $this->usersWithoutIdentity($supplierId, $global ?? $row['login_sso_provider'] ?? 'entra'),
         ]);
     }
 
@@ -56,6 +60,14 @@ final class LoginPolicyAction
         $supplierId = (int) $request->getAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
         if ($supplierId < 1) {
             return Json::error($response, 'supplier_required', 'Vyberte firmu.', 400);
+        }
+        if ($this->loginPolicy->globalRequiredProvider() !== null) {
+            return Json::error(
+                $response,
+                'login_policy_global',
+                'Přihlášení přes poskytovatele identity je vynucené pro celou instalaci, firma ho nemění.',
+                409,
+            );
         }
         $body = (array) ($request->getParsedBody() ?? []);
         $policy = (string) ($body['login_policy'] ?? '');

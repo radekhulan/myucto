@@ -75,6 +75,15 @@ watch(() => suppliers.currentSupplierId, load)
     </div>
 
     <p v-if="loading" class="py-3 text-sm text-neutral-500">{{ t('common.loading') }}</p>
+    <!-- Vynucení pro celou instalaci přebíjí nastavení firmy, firma ho jen ukazuje. -->
+    <div v-else-if="state?.global_sso_provider" class="space-y-2" data-testid="login-policy-global">
+      <p class="rounded-md border border-primary-200 bg-primary-50 px-3 py-2 text-sm text-primary-800">
+        {{ t('sso.policy_global', { provider: state.providers.find(p => p.id === state!.global_sso_provider)?.label ?? state.global_sso_provider }) }}
+      </p>
+      <p v-if="state.users_without_identity > 0" class="rounded-md border border-warning-300 bg-warning-50 px-3 py-2 text-sm text-warning-700">
+        {{ t('sso.policy_users_without_identity', { count: state.users_without_identity }) }}
+      </p>
+    </div>
     <form v-else-if="state" class="space-y-4" @submit.prevent="save">
       <fieldset class="space-y-2" :disabled="!canManage || saving">
         <label class="flex items-start gap-2 text-sm">

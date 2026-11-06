@@ -16,6 +16,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
 import SubmissionPreview from '@/components/documents/SubmissionPreview.vue'
+import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
 
 const { t } = useI18n()
 const supplierStore = useSupplierStore()
@@ -97,25 +98,39 @@ async function load() {
   }
 }
 
-function selectFiles(event: Event) {
-  files.value = Array.from((event.target as HTMLInputElement).files ?? [])
-}
-
 const ALLOWED_EXTENSIONS = ['pdf', 'jpg', 'jpeg', 'png', 'isdoc', 'xml', 'isdocx']
 
-/** Přetažené soubory se přidají k vybraným; nepodporovaný formát se vynechá nahlas. */
-function onDrop(event: DragEvent) {
-  dragOver.value = false
-  if (uploading.value) return
-  const dropped = Array.from(event.dataTransfer?.files ?? [])
-  if (dropped.length === 0) return
-  const accepted = dropped.filter(file => ALLOWED_EXTENSIONS.includes(file.name.split('.').pop()?.toLowerCase() ?? ''))
-  const rejected = dropped.filter(file => !accepted.includes(file))
+/**
+ * Vybrané, přetažené i vyfocené soubory se PŘIDÁVAJÍ k už vybraným. Na telefonu
+ * se vybírá a fotí po jednom, takže přepsání by víc dokladů najednou předat nedovolilo.
+ * Nepodporovaný formát se vynechá nahlas, stejný soubor se nepřidá dvakrát.
+ */
+function addFiles(incoming: File[]) {
+  if (uploading.value || incoming.length === 0) return
+  const accepted = incoming.filter(file => ALLOWED_EXTENSIONS.includes(file.name.split('.').pop()?.toLowerCase() ?? ''))
+  const rejected = incoming.filter(file => !accepted.includes(file))
   if (rejected.length > 0) {
     toast.warning(t('purchase_submissions.drop_rejected', { names: rejected.map(file => file.name).join(', ') }))
   }
   const known = new Set(files.value.map(file => `${file.name}|${file.size}`))
   files.value = [...files.value, ...accepted.filter(file => !known.has(`${file.name}|${file.size}`))]
+}
+
+function selectFiles(event: Event) {
+  const input = event.target as HTMLInputElement
+  addFiles(Array.from(input.files ?? []))
+  // Reset, ať jde přidat další soubory i znovu vybrat týž soubor po odebrání.
+  input.value = ''
+}
+
+function removeFile(file: File) {
+  if (uploading.value) return
+  files.value = files.value.filter(item => item !== file)
+}
+
+function onDrop(event: DragEvent) {
+  dragOver.value = false
+  addFiles(Array.from(event.dataTransfer?.files ?? []))
 }
 
 async function submit() {
@@ -305,6 +320,7 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
           {{ t('purchase_submissions.choose_files') }}
           <input ref="fileInput" type="file" multiple :accept="allowed" class="hidden" @change="selectFiles" />
         </label>
+        <CapturePhotoButton :disabled="uploading" @captured="(f: File) => addFiles([f])" />
         <span v-if="files.length" class="text-sm text-neutral-600">
           {{ t('purchase_submissions.files_selected', { n: files.length }) }}
         </span>
@@ -316,7 +332,14 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
         </button>
       </div>
       <ul v-if="files.length" class="flex flex-wrap gap-2 text-xs text-neutral-600" data-test="portal-selected-files">
-        <li v-for="file in files" :key="`${file.name}|${file.size}`" class="rounded bg-neutral-100 px-2 py-1">{{ file.name }}</li>
+        <li v-for="file in files" :key="`${file.name}|${file.size}`" class="inline-flex items-center gap-1 rounded bg-neutral-100 py-1 pl-2 pr-1">
+          {{ file.name }}
+          <button type="button" class="rounded p-0.5 text-neutral-500 hover:bg-neutral-200 hover:text-danger-600 disabled:opacity-50"
+                  :disabled="uploading" :aria-label="t('purchase_submissions.remove_file', { name: file.name })"
+                  data-test="portal-remove-file" @click="removeFile(file)">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+          </button>
+        </li>
       </ul>
       </div>
     </section>

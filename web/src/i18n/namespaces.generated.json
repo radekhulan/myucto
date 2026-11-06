@@ -259,6 +259,7 @@
       "portal"
     ],
     "portal-purchase-invoice-submissions": [
+      "capture_photo",
       "purchase_invoice",
       "purchase_submissions"
     ],
@@ -333,6 +334,7 @@
     ],
     "invoice-ai-import": [
       "aiGateway",
+      "capture_photo",
       "integrations"
     ],
     "invoice-new": [

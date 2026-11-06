@@ -41,6 +41,7 @@ final class SetupStatusActionTest extends TestCase
             new OverduePolicy(new Config(['invoices' => ['overdue_includes_today' => true]])),
             new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry(new \MyInvoice\Infrastructure\Config\Config([])),
             $this->noNotices(),
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
 
         $response = $action(
@@ -71,6 +72,7 @@ final class SetupStatusActionTest extends TestCase
             new OverduePolicy(new Config([])),
             new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry(new \MyInvoice\Infrastructure\Config\Config([])),
             $this->noNotices(),
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
 
         $response = $action(

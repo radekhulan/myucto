@@ -153,11 +153,18 @@ neptá. Aplikaci v Entra ID si registruje každá instalace sama.
    `MYINVOICE_OIDC_ENTRA_TENANT_ID`, `MYINVOICE_OIDC_ENTRA_CLIENT_ID`,
    `MYINVOICE_OIDC_ENTRA_CLIENT_SECRET`.
 4. Účty uživatelů zakládejte dál v **Nastavení → Uživatelé**. U uživatele
-   v části **Propojené identity** zvolte **Pozvat k přihlášení přes Microsoft**. Uživatel dostane e-mail
+   v části **Propojené identity** zvolte **Pozvat k přihlášení přes Microsoft Entra ID**. Uživatel dostane e-mail
    s odkazem a prvním přihlášením se jeho účet propojí s identitou v Entra ID.
-5. Až budou všichni propojení, přihlaste se sami přes Microsoft a v
-   **Nastavení → Údaje firmy → Přihlášení** zvolte **Jen přes účet organizace**
-   a klikněte na **Uložit přihlášení**.
+5. Až budou všichni propojení, vynuťte přihlášení přes Microsoft Entra ID
+   jedním ze dvou způsobů:
+   - **Pro celou instalaci:** v konfiguraci `'required_provider' => 'entra'`
+     pod `auth.oidc`, v Dockeru `MYINVOICE_OIDC_REQUIRED=entra`. Platí pro všechny
+     firmy včetně nově založených a pro všechny uživatele. Přihlašovací stránka
+     nabídne jen tlačítko Microsoft Entra ID, heslo zůstane schované pro technický
+     účet správce instance.
+   - **Pro jednotlivou firmu:** přihlaste se sami přes Microsoft Entra ID a v
+     **Nastavení → Údaje firmy → Přihlášení** zvolte **Jen přes účet organizace**
+     a klikněte na **Uložit přihlášení**.
 
 | Pravidlo | Chování |
 |---|---|
@@ -168,12 +175,17 @@ neptá. Aplikaci v Entra ID si registruje každá instalace sama.
 | Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin |
 | Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení skončí nejpozději vypršením |
 | Firma vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód do firmy nepustí |
+| Instalace vyžaduje Microsoft | Totéž pro všechny firmy a uživatele; nastavení firmy se nepoužije a jde jen zobrazit |
 | Nouzový přístup | Role `instance_admin` se přihlašuje dál heslem a MFA (`auth.oidc.break_glass_roles`) |
 | Citlivé operace | Potvrdíte novým přihlášením u Microsoftu místo hesla |
 
-Vynucení zapnete jen ze sezení přihlášeného přes Microsoft, jinak byste si
-firmu sami zavřeli. Neúplná konfigurace poskytovatele se nezapne a ukáže se
-v Diagnostice.
+Vynucení ve firmě zapnete jen ze sezení přihlášeného přes Microsoft, jinak
+byste si firmu sami zavřeli. Neúplná konfigurace poskytovatele se nezapne a
+ukáže se v Diagnostice. Vynucení pro celou instalaci platí jen pro zapnutého
+poskytovatele, který nese celé přihlášení včetně MFA (Microsoft Entra ID).
+Překlep v názvu ani vypnutý poskytovatel nikoho nezamknou. Při výpadku Entra ID
+vypněte přihlášení přes poskytovatele (`MYINVOICE_OIDC_ENABLED=0`), uživatelé se
+pak přihlásí heslem a MFA.
 
 ### 101.6.2 Přihlášení přes Google, Apple a Seznam (správce)
 

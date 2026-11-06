@@ -334,6 +334,10 @@ final class Config
                     'enabled' => false,
                     'session_lifetime_hours' => 12,
                     'break_glass_roles' => ['instance_admin'],
+                    // Poskytovatel povinný pro celou instalaci (např. 'entra'). Má
+                    // přednost před nastavením jednotlivých firem a platí i pro firmy
+                    // založené později. Prázdné = vynucení jen po firmách.
+                    'required_provider' => '',
                     'providers' => [
                         'entra' => [
                             'enabled' => false,
@@ -532,6 +536,7 @@ final class Config
             'MYINVOICE_AUTH_PASSWORDLESS_LOGIN' => ['auth.passwordless_login.enabled', 'bool'],
             'MYINVOICE_OIDC_ENABLED'                 => ['auth.oidc.enabled', 'bool'],
             'MYINVOICE_OIDC_SESSION_LIFETIME_HOURS'  => ['auth.oidc.session_lifetime_hours', 'int'],
+            'MYINVOICE_OIDC_REQUIRED'                => ['auth.oidc.required_provider', 'string'],
             'MYINVOICE_OIDC_ENTRA_ENABLED'           => ['auth.oidc.providers.entra.enabled', 'bool'],
             'MYINVOICE_OIDC_ENTRA_LABEL'             => ['auth.oidc.providers.entra.label', 'string'],
             'MYINVOICE_OIDC_ENTRA_TENANT_ID'         => ['auth.oidc.providers.entra.tenant_id', 'string'],
