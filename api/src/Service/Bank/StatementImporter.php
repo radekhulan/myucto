@@ -54,8 +54,8 @@ final class StatementImporter
      *   (lookup podle account_number — folder scan, jednoznačný účet).
      *
      * @return array{statement_id:int, transactions:int, matched:int, duplicate:bool,
-     *               parsed_transactions:int, skipped_duplicates:int, superseded_notices:int,
-     *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int}>}
+     *               parsed_transactions:int, skipped_duplicates:int, skipped_migrated?:int, superseded_notices:int,
+     *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int,until?:string}>}
      */
     public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = [], ?array $parsed = null, ?array $ignoreDecision = null): array
     {
@@ -428,7 +428,8 @@ final class StatementImporter
 
         $identities = $this->transactionIdentities($parsed['transactions'], (string) $h['account_number'], $accountBankCode, $accountCurrency, $statementCurrency, $statementSupplierId);
 
-        $crossSource = $deferProcessing && $statementSupplierId !== null
+        $crossSourceReconciled = $deferProcessing && $statementSupplierId !== null && AuthoritativeTransactionReconciler::coversSource($source);
+        $crossSource = $crossSourceReconciled
             ? (new AuthoritativeTransactionReconciler($pdo))->candidates(
                 $parsed['transactions'], $statementSupplierId, (string) $h['account_number'],
                 (string) $accountBankCode, (string) $statementCurrency, $source,
@@ -526,11 +527,20 @@ final class StatementImporter
             ? $pdo->prepare('SELECT import_fingerprint FROM bank_transactions WHERE id = ?')
             : null;
 
+        // Pohyby GPC a napojené banky párovač porovnal s převzatými jednotlivě a nejistou
+        // shodu předloží k potvrzení; hranice převzetí platí pro výpis v PDF.
+        $migratedUntil = $crossSourceReconciled ? null : $this->migratedUntil($pdo, $statementSupplierId, (string) $h['account_number'], $accountBankCode);
+
         $matched = 0;
         $inserted = 0;
         $skipped = 0;
+        $skippedMigrated = 0;
         $ignoredIds = [];
         foreach ($parsed['transactions'] as $index => $tx) {
+            if ($migratedUntil !== null && substr((string) $tx['posted_at'], 0, 10) <= $migratedUntil) {
+                $skippedMigrated++;
+                continue;
+            }
             ['currency' => $txCurrency, 'fingerprint' => $fingerprint, 'portable_fingerprint' => $portableFingerprint, 'candidates' => $candidates] = $identities[$index];
             $alreadyStored = false;
             $duplicateId = $crossSource[$index] ?? false;
@@ -645,6 +655,20 @@ final class StatementImporter
                 'skipped'  => $skipped,
             ];
         }
+        if ($skippedMigrated > 0) {
+            $warnings[] = [
+                'code'     => 'transactions_skipped_as_migrated',
+                'message'  => sprintf(
+                    'Účet má pohyby do %s převzaté převodem z jiného programu. %d pohybů výpisu do tohoto dne včetně se nezaložilo, v evidenci už jsou; pohyb z toho dne, který převod nepřevzal, doplňte ručně.',
+                    date('j. n. Y', (int) strtotime((string) $migratedUntil)),
+                    $skippedMigrated,
+                ),
+                'parsed'   => $parsedCount,
+                'inserted' => $inserted,
+                'skipped'  => $skippedMigrated,
+                'until'    => $migratedUntil,
+            ];
+        }
         if ($statementSupplierId !== null && $pdo->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql') {
             $rebased = (new ImportedStatementRebase($this->db))->rebase($statementSupplierId, $statementId);
             if ($rebased !== null) {
@@ -671,10 +695,45 @@ final class StatementImporter
             'ignored_transferred'  => $ignoredTransferred,
             'parsed_transactions' => $parsedCount,
             'skipped_duplicates'  => $skipped,
+            'skipped_migrated'    => $skippedMigrated,
             'superseded_notices'  => $processed['superseded'],
             'warnings'            => $warnings,
         ];
         return $deferProcessing ? $result : $this->withProcessingOutcome($result, $failure);
+    }
+
+    /**
+     * Hranice převzetí účtu: datum posledního pohybu, který na účet převzal převod z jiného
+     * programu (výpisy se zdrojem `import`, zapisuje je
+     * {@see \MyInvoice\Service\Migration\Shared\BankStatementImportWriter}). Takový pohyb má
+     * otisk převodu, ne banky, takže ho deduplikace podle otisku u výpisu z banky nepozná
+     * a pohyb by se v evidenci (a v peněžním deníku) zdvojil. Účet se páruje stejně jako
+     * výpisy s účty firmy ({@see \MyInvoice\Repository\CashJournalRepository::matchingStatementIds()}):
+     * číslo účtu přes {@see AccountNumberNormalizer}, rozdílný kód banky shodu vylučuje.
+     */
+    private function migratedUntil(PDO $pdo, ?int $supplierId, string $accountNumber, ?string $bankCode): ?string
+    {
+        if ($supplierId === null || AccountNumberNormalizer::normalize($accountNumber) === '') {
+            return null;
+        }
+        $stmt = $pdo->prepare(
+            "SELECT account_number, bank_code, MAX(statement_date) AS until FROM bank_statements
+              WHERE supplier_id = ? AND source = 'import' AND account_number IS NOT NULL AND account_number <> ''
+              GROUP BY account_number, bank_code"
+        );
+        $stmt->execute([$supplierId]);
+        $until = null;
+        $bankCode = trim((string) $bankCode);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $migratedBank = trim((string) ($row['bank_code'] ?? ''));
+            if ($bankCode !== '' && $migratedBank !== '' && $migratedBank !== $bankCode) {
+                continue;
+            }
+            if ($row['until'] !== null && AccountNumberNormalizer::matchesAny($accountNumber, (string) $row['account_number'])) {
+                $until = max($until ?? '', substr((string) $row['until'], 0, 10));
+            }
+        }
+        return $until;
     }
 
     /**
