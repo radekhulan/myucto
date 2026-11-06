@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import type { PayrollMinimumWagePreview } from '@/api/payroll'
 import PayrollMinimumWagePreviewView from '../PayrollMinimumWagePreview.vue'
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key, te: (key: string) => key.startsWith('payroll.minimum.blockers.hourly_') }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (value: string) => value, formatMoneyMinor: (value: number) => `money:${value}` }))
 function preview(overrides: Partial<PayrollMinimumWagePreview> = {}): PayrollMinimumWagePreview {
   return { complete: true, claim: { ready: true, duration_units: 3, payable_minor: 77700 }, blockers: [], evidence_hash: 'a'.repeat(64), assessment_evidence: { assessment: 'hourly', threshold: { raw_numerator_minor: 100001, raw_denominator: 3, analytical_minor: 33334 }, eligible: { raw_numerator_minor: 100, raw_denominator: 1, analytical_minor: 100 }, ordinary_payable_minor: 100, company_rounding: 'half_up', statutory_floor_rounding: 'ceil', policy_payable_minor: 100, excluded: [{ component_code: 'SYN_EXCLUDED', reason: 'component_excluded', analytical_minor: -999 }], parts: [{ term_id: 1, date_from: '2026-11-01', date_to: '2026-11-30', regular_worked_duration_units: 3, stated_weekly_minutes: 2250, minimum_base40_minor: 13440, minimum_hourly_minor: 14340, analytical_minor: 33334 }] }, ...overrides }
@@ -42,5 +42,12 @@ describe('PayrollMinimumWagePreview', () => {
     const wrapper = mount(PayrollMinimumWagePreviewView, { props: { value: preview({ complete: false, blockers: [{ code: 'conflict', message: 'Syntetický rozpor podkladů', context: {} }] }) } })
     expect(wrapper.get('[data-test="minimum-top-up"]').text()).toContain('unknown')
     expect(wrapper.get('[data-test="minimum-blockers"]').text()).toContain('Syntetický rozpor podkladů')
+  })
+  it('translates known blocker codes and the other-period exclusion instead of showing the server message', () => {
+    const value = preview({ complete: false, blockers: [{ code: 'hourly_minimum_monthly_fund_missing', message: 'Česká zpráva serveru', context: {} }] })
+    value.assessment_evidence.excluded = [{ component_code: 'ODMENA', reason: 'source_period_other', analytical_minor: 5000 }]
+    const wrapper = mount(PayrollMinimumWagePreviewView, { props: { value } })
+    expect(wrapper.get('[data-test="minimum-blockers"]').text()).toBe('payroll.minimum.blockers.hourly_minimum_monthly_fund_missing')
+    expect(wrapper.get('[data-test="minimum-excluded-item"]').text()).toContain('payroll.minimum.excluded_source_period')
   })
 })

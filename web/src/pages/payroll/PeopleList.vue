@@ -1047,7 +1047,8 @@ async function saveNew(personId: number) {
       terms: {
         ...newEmployment.value.terms,
         hourly_rate_minor: hourly ? hourlyRate : null,
-        remuneration_basis: (newEmployment.value.terms.remuneration_basis ?? '').trim() || null,
+        remuneration_basis_kind: hourly ? newEmployment.value.terms.remuneration_basis_kind : null,
+        remuneration_basis: hourly ? (newEmployment.value.terms.remuneration_basis ?? '').trim() || null : null,
       },
     })
     const person = details.value[personId]
@@ -2073,15 +2074,15 @@ onMounted(async () => {
             <input v-model="newEmploymentHourlyRate" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-hourly-rate">
           </label>
           <label v-else class="text-xs text-neutral-600">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="0.01" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-          <label class="text-xs text-neutral-600">
-            {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark v-if="newEmployment.terms.remuneration_type === 'hourly'" />
+          <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark />
             <select v-model="newEmployment.terms.remuneration_basis_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis-kind">
               <option :value="null">{{ t('payroll.people.remuneration.basis_kind_empty') }}</option>
               <option v-for="kind in ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement']" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
             </select>
           </label>
-          <label class="text-xs text-neutral-600">
-            {{ t('payroll.people.remuneration.basis') }} <RequiredMark v-if="newEmployment.terms.remuneration_type === 'hourly'" />
+          <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.basis') }} <RequiredMark />
             <input v-model="newEmployment.terms.remuneration_basis" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis">
             <span class="mt-1 block">{{ t('payroll.people.remuneration.basis_hint') }}</span>
           </label>

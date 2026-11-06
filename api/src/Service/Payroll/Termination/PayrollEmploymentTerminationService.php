@@ -1074,10 +1074,6 @@ final class PayrollEmploymentTerminationService
         ];
     }
 
-    /**
-     * @param array<string,mixed> $employment
-     * @return array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string,net_error?:string}
-     */
     /** @param array<string,mixed> $employment @param array<string,mixed> $input @param array<string,mixed> $average @param array<string,mixed> $plan */
     private function writeFloorProof(int $supplierId, array $employment, array $input, array $average, array $plan): void
     {
@@ -1089,6 +1085,10 @@ final class PayrollEmploymentTerminationService
             ->execute([$supplierId, $employment['id'], $input['id'], $input['period_start'], $snapshot, hash('sha256', $snapshot, true)]);
     }
 
+    /**
+     * @param array<string,mixed> $employment
+     * @return array{year:int,quarter:int,snapshot:?array<string,mixed>,monthly_gross:?int,monthly_net:?int,error:?string,net_error?:string}
+     */
     private function average(int $supplierId, array $employment, bool $lockTerms = true): array
     {
         $end = (string) $employment['end_date'];
