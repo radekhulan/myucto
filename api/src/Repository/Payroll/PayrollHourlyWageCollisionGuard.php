@@ -49,9 +49,12 @@ final class PayrollHourlyWageCollisionGuard
         $ids = array_keys($ids);
         sort($ids, SORT_NUMERIC);
         $in = implode(',', array_fill(0, count($ids), '?'));
-        $stmt = $pdo->prepare("SELECT id FROM payroll_employments WHERE supplier_id = ? AND id IN ($in) ORDER BY id FOR UPDATE");
+        $stmt = $pdo->prepare("SELECT employment.id, employment.code, employee.full_name FROM payroll_employments employment
+            JOIN payroll_employees employee ON employee.supplier_id = employment.supplier_id AND employee.id = employment.employee_id
+            WHERE employment.supplier_id = ? AND employment.id IN ($in) ORDER BY employment.id FOR UPDATE");
         $stmt->execute([$supplierId, ...$ids]);
-        $stmt->fetchAll(PDO::FETCH_COLUMN);
+        $labels = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $label) $labels[(int) $label['id']] = $label;
         $end = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
         $stmt = $pdo->prepare("SELECT employment_id FROM payroll_employment_terms FORCE INDEX (idx_payroll_employment_term_effective)
             WHERE supplier_id = ? AND employment_id IN ($in) AND remuneration_type = 'hourly'
@@ -79,7 +82,22 @@ final class PayrollHourlyWageCollisionGuard
             $base = in_array($component['component_kind'], ['base_wage', 'hourly_wage'], true);
             $conflict = $base && (isset($hourly[$id]) || isset($purposes[$id]['ordinary_base']) || isset($purposes[$id]['achieved_overtime']));
             foreach ($purposes[$id] ?? [] as $purpose => $_) if (($codes[$purpose] ?? null) === $component['code']) $conflict = true;
-            if ($conflict) throw new \MyInvoice\Service\Payroll\PayrollHourlyWageConflictException(sprintf('Vztah %d má vypočtený hodinový nárok pro tuto složku. Ponechte jediný zdroj.', $id));
+            if ($conflict) {
+                $link = '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $id . '&hours=1';
+                throw new \MyInvoice\Service\Payroll\PayrollHourlyWageConflictException(sprintf(
+                    '%s (vztah %s) má pro složku %s za %s vypočtený hodinový nárok z odpracovaných hodin. '
+                        . 'Ponechte jediný zdroj: vstup nezadávejte (neimportujte), nebo nejdřív opravte hodiny a podmínky vztahu '
+                        . 'v Rychlém měsíčním vstupu.',
+                    (string) ($labels[$id]['full_name'] ?? ''),
+                    (string) ($labels[$id]['code'] ?? $id),
+                    (string) $component['code'],
+                    substr($periodStart, 5, 2) . '/' . substr($periodStart, 0, 4),
+                ), [
+                    'employment_id' => $id,
+                    'component_code' => (string) $component['code'],
+                    'link' => $link,
+                ]);
+            }
         }
     }
 }
