@@ -68,11 +68,16 @@ final class PayrollRunSnapshotBuilder
         $this->riskySavingsPolicy = new PayrollRiskySavingsPolicy();
     }
 
+    /**
+     * @param array<int,list<array{code:string,message:string,remediation:string}>> $hourlyMaterializationBlockers
+     *     vztahy, které hodinový materializer v tomtéž příkazu vyřadil kvůli kolizi
+     */
     public function build(
         int $supplierId,
         string $periodStart,
         string $paymentDate,
         ?int $officeId = null,
+        array $hourlyMaterializationBlockers = [],
     ): PayrollRunInputSnapshot {
         if ($supplierId <= 0) {
             throw new \InvalidArgumentException('Firma mzdového běhu není platná.');
@@ -282,15 +287,27 @@ final class PayrollRunSnapshotBuilder
             $employeeId = (int) $row['employee_id'];
             if (array_key_exists($employmentId, $evidenceTerms)) {
                 $preview = $hourlyPreviews[$employmentId] ?? null;
+                $settlementOnly = !isset($hourlyTerms[$employmentId]);
+                // Vztah jen s vypořádáním dřívějších nároků už hodinově odměňovaný není.
+                $hourlyLink = $settlementOnly
+                    ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId
+                    : "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms";
+                foreach ($hourlyMaterializationBlockers[$employmentId] ?? [] as $blocker) {
+                    $validations[] = new PayrollRunValidation('blocker', $blocker['code'], 'employment', $employmentId,
+                        $blocker['message'], $blocker['remediation']);
+                }
                 if ($preview === null) {
                     $validations[] = new PayrollRunValidation('blocker', 'hourly_calculation_missing', 'employment', $employmentId,
-                        'Hodinový výpočet nelze sestavit. Zkontrolujte účinné podmínky a podklady pracovní doby.');
+                        $settlementOnly
+                            ? 'Vypořádání dříve vzniklých nároků na náhradní volno nelze sestavit. Zkontrolujte evidenci jejich čerpání.'
+                            : 'Hodinový výpočet nelze sestavit. Zkontrolujte účinné podmínky a podklady pracovní doby.',
+                        $hourlyLink);
                 } else {
                     foreach ($preview['blockers'] as $blocker) {
                         $validations[] = new PayrollRunValidation('blocker', (string) $blocker['code'], 'employment', $employmentId,
-                            (string) $blocker['message'], "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms");
+                            (string) $blocker['message'], $hourlyLink);
                     }
-                    if ($preview['complete']) {
+                    if ($preview['complete'] && !isset($hourlyMaterializationBlockers[$employmentId])) {
                         $latest = [];
                         foreach ($hourlyFrozen['latest'][$employmentId] ?? [] as $claim) $latest[$claim['purpose']] = $claim;
                         foreach ($preview['claims'] as $claim) {
