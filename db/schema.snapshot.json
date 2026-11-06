@@ -1154,7 +1154,10 @@
         "2250_payroll_hourly_agreement_terms.sql",
         "2251_payroll_hourly_evidence.sql",
         "2252_payroll_holiday_time_off.sql",
-        "2253_payroll_hourly_entitlement_settlement.sql"
+        "2253_payroll_hourly_entitlement_settlement.sql",
+        "2254_payroll_component_minimum_wage.sql",
+        "2255_payroll_standby_floor_proof.sql",
+        "2256_payroll_termination_floor_proof.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -11714,6 +11717,8 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
                 "jmhz_treatment": "enum('included','excluded','manual_review') NOT NULL",
+                "minimum_wage_reason": "varchar(500) NULL DEFAULT NULL",
+                "minimum_wage_treatment": "enum('included','excluded','manual_review') NULL DEFAULT NULL",
                 "name": "varchar(190) NOT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "social_participation_treatment": "enum('included','excluded','manual_review') NOT NULL",
@@ -14785,7 +14790,7 @@
                 "chk_payroll_input_period": "dayofmonth(`period_start`) = 1",
                 "chk_payroll_input_snapshot": "`status` in ('draft','cancelled') or `component_snapshot_json` is not null and `component_snapshot_hash` is not null",
                 "chk_payroll_input_source_period": "`source_period_start` is null or dayofmonth(`source_period_start`) = 1",
-                "chk_payroll_input_source_snapshot": "`recurring_component_id` is not null and `source_kind` = 'recurring' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `recurring_component_id` is null and `source_kind` = 'travel' and `external_id` like 'travel:%' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `recurring_component_id` is null and `source_kind` not in ('recurring','travel') and (`source_snapshot_json` is null and `source_snapshot_hash` is null and (`source_kind` <> 'time' or coalesce(`external_id`,'') not like 'hourly-wage:%') or (`source_kind` = 'manual' and `external_id` like 'quick-monthly:%' or `source_kind` in ('absence','correction') and `external_id` like 'leave:%' or `source_kind` = 'time' and `external_id` like 'hourly-wage:%') and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32)",
+                "chk_payroll_input_source_snapshot": "`recurring_component_id` is not null and `source_kind` = 'recurring' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `recurring_component_id` is null and `source_kind` = 'travel' and `external_id` like 'travel:%' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `recurring_component_id` is null and `source_kind` not in ('recurring','travel') and (`source_snapshot_json` is null and `source_snapshot_hash` is null and (`source_kind` <> 'time' or coalesce(`external_id`,'') not like 'hourly-wage:%') or (`source_kind` = 'manual' and `external_id` like 'quick-monthly:%' or `source_kind` in ('absence','correction') and `external_id` like 'leave:%' or `source_kind` = 'time' and (`external_id` like 'hourly-wage:%' or `external_id` like 'standby:%')) and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32)",
                 "component_snapshot_json": "`component_snapshot_json` is null or json_valid(`component_snapshot_json`)"
             }
         },
@@ -19638,6 +19643,33 @@
                 "source_snapshot_json": "json_valid(`source_snapshot_json`)"
             }
         },
+        "payroll_standby_floor_proofs": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "input_id": "bigint(20) unsigned NOT NULL",
+                "period_start": "date NOT NULL",
+                "source_snapshot_hash": "binary(32) NOT NULL",
+                "source_snapshot_json": "longtext NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_standby_floor_proof_employment": "BTREE (supplier_id, employment_id, period_start)",
+                "uq_standby_floor_proof_input": "UNIQUE BTREE (supplier_id, input_id)"
+            },
+            "foreign_keys": {
+                "fk_standby_floor_proof_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_standby_floor_proof_input": "(supplier_id, input_id) -> payroll_inputs (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "source_snapshot_json": "json_valid(`source_snapshot_json`)"
+            }
+        },
         "payroll_statutory_accumulator_entries": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -20573,6 +20605,33 @@
             "checks": {
                 "chk_payroll_tic_request_completion": "`completed_on` is null and `completion_kind` is null or `completed_on` is not null and `completion_kind` is not null",
                 "chk_payroll_tic_request_due": "`due_on` >= `requested_on`"
+            }
+        },
+        "payroll_termination_floor_proofs": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "input_id": "bigint(20) unsigned NOT NULL",
+                "period_start": "date NOT NULL",
+                "source_snapshot_hash": "binary(32) NOT NULL",
+                "source_snapshot_json": "longtext NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_termination_floor_proof_employment": "BTREE (supplier_id, employment_id, period_start)",
+                "uq_termination_floor_proof_input": "UNIQUE BTREE (supplier_id, input_id)"
+            },
+            "foreign_keys": {
+                "fk_termination_floor_proof_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_termination_floor_proof_input": "(supplier_id, input_id) -> payroll_inputs (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "source_snapshot_json": "json_valid(`source_snapshot_json`)"
             }
         },
         "payroll_time_entries": {
@@ -30149,6 +30208,7 @@
         "trg_property_party_event_no_update": "BEFORE UPDATE ON property_claim_party_events #09e54dae44754623ff06ff29539d3414f985f499",
         "trg_property_party_member_no_delete": "BEFORE DELETE ON property_claim_party_members #09e54dae44754623ff06ff29539d3414f985f499",
         "trg_property_party_member_no_update": "BEFORE UPDATE ON property_claim_party_members #09e54dae44754623ff06ff29539d3414f985f499",
+        "trg_standby_floor_proof_no_update": "BEFORE UPDATE ON payroll_standby_floor_proofs #72ff01a143309e460f66ddea9916227310cfe59c",
         "trg_submission_defect_notice_guard": "BEFORE INSERT ON submission_defect_notices #a86513c4dc1c74e0b4cbe8de9a1bc593f16b17d9",
         "trg_submission_defect_notice_inbox_privacy": "BEFORE INSERT ON submission_defect_notices #8311952e7004cc589badcad747c0804d1de7b8c9",
         "trg_submission_defect_notice_update_guard": "BEFORE UPDATE ON submission_defect_notices #8caf5532dcdb8848b0a4c802df86cd71590a88f0",
@@ -30161,6 +30221,7 @@
         "trg_submission_outbox_inbox_privacy_insert": "BEFORE INSERT ON submission_outbox #2c2e144fc29cb2b25d11b4469a5b5c1f3eba863a",
         "trg_submission_outbox_inbox_privacy_update": "BEFORE UPDATE ON submission_outbox #c7b3bdae7d08c1a563f91ba6b5a23de501fd01de",
         "trg_submission_outbox_update_guard": "BEFORE UPDATE ON submission_outbox #9b79477ba4444eb38bc32b36e0414359f9251b42",
+        "trg_termination_floor_proof_no_update": "BEFORE UPDATE ON payroll_termination_floor_proofs #8875a6dde896cd479f0c4cf0351b9a34fae2097c",
         "trg_xmlzam_dispatch_no_delete": "BEFORE DELETE ON payroll_enforcement_xmlzam_dispatches #d7186cbb5f625245d37fe839408e588e4161275b",
         "trg_xmlzam_dispatch_no_update": "BEFORE UPDATE ON payroll_enforcement_xmlzam_dispatches #6692e91d658a0a3ca622c34c5e7c05cafba1baaa",
         "trg_xmlzam_dispatch_outbox_guard": "BEFORE INSERT ON payroll_enforcement_xmlzam_dispatches #16b10fbba63944b75a0c055c7495cd131ac1ceb4",
