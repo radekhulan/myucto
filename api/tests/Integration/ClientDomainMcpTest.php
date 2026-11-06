@@ -8,6 +8,7 @@ use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\ApiTokenService;
+use MyInvoice\Service\Auth\Oidc\OidcProviderRegistry;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\Mcp\McpInternalRequest;
 use MyInvoice\Service\Mcp\McpOAuth;
@@ -126,7 +127,9 @@ final class ClientDomainMcpTest extends TestCase
 
     public function testEntraOriginSurvivesConsentExchangeRefreshAndTokenUseOnCustomDomain(): void
     {
+        $canonical = (string) preg_replace('#^http://#', 'https://', $this->canonical);
         $environment = [
+            'MYINVOICE_APP_URL' => $canonical,
             'MYINVOICE_OIDC_ENABLED' => '1', 'MYINVOICE_OIDC_ENTRA_ENABLED' => '1',
             'MYINVOICE_OIDC_ENTRA_TENANT_ID' => '11111111-1111-1111-1111-111111111111',
             'MYINVOICE_OIDC_ENTRA_CLIENT_ID' => '22222222-2222-2222-2222-222222222222',
@@ -141,11 +144,13 @@ final class ClientDomainMcpTest extends TestCase
         $statement->execute([$this->supplier]);
         $priorPolicy = $statement->fetch(\PDO::FETCH_ASSOC);
         try {
+            self::assertNotNull(Bootstrap::buildContainer()->get(OidcProviderRegistry::class)->get('entra'),
+                'Entra se zapne jen s https app.url; bez ní povinné SSO firmy neplatí a test by nic neověřil.');
             $this->pdo->prepare("UPDATE supplier SET login_policy='sso_required', login_sso_provider='entra' WHERE id=?")
                 ->execute([$this->supplier]);
             $this->pdo->prepare("UPDATE sessions SET auth_method='oidc:entra' WHERE id=?")
                 ->execute([$this->session['token']]);
-            $consent = $this->request('GET', $this->canonical . '/oauth/authorize?' . http_build_query($this->params()), session: true);
+            $consent = $this->request('GET', $canonical . '/oauth/authorize?' . http_build_query($this->params()), session: true);
             self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
 
             $oauth = Bootstrap::buildContainer()->get(McpOAuth::class);
