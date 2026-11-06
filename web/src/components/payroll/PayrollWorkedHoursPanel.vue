@@ -35,6 +35,11 @@ interface SegmentDraft {
   original: PayrollManualTimeSegment | null
 }
 const current = ref<PayrollWorkedTime>(props.value)
+// Neschválený ruční souhrn server ve výpočtu nebere, uložené hodiny ale účetní vidět musí.
+const displayedWorked = computed(() => current.value.worked_duration_units
+  ?? (current.value.manual_summary?.segments.length
+    ? current.value.manual_summary.segments.reduce((sum, segment) => sum + segment.worked_duration_units, 0)
+    : null))
 const segments = ref<SegmentDraft[]>([])
 const segmentationChanged = ref(false)
 const reason = ref('')
@@ -195,7 +200,7 @@ async function reopen(): Promise<void> {
     <p class="mt-2 text-xs font-medium text-neutral-700" data-test="worked-hours-current">
       {{ t(!current.month?.id ? 'payroll.worked_hours.source_none' : current.month.work_source === 'manual_summary' ? 'payroll.worked_hours.source_manual' : current.month.work_source === 'import_summary' ? 'payroll.worked_hours.source_import' : 'payroll.worked_hours.source_attendance') }} ·
       {{ t(current.month?.status === 'approved' ? 'payroll.worked_hours.approved' : 'payroll.worked_hours.unapproved') }} ·
-      {{ t('payroll.worked_hours.worked') }}: {{ current.worked_duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(current.worked_duration_units) }}
+      {{ t('payroll.worked_hours.worked') }}: {{ displayedWorked === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(displayedWorked) }}
       <span v-if="current.month"> · {{ t('payroll.worked_hours.revision', { number: current.month.revision_no }) }}</span>
     </p>
     <p v-if="!current.jmhz_confirmed" class="mt-2 text-xs text-warning-800" data-test="worked-hours-jmhz-pending">{{ t('payroll.worked_hours.jmhz_pending_hint') }}</p>
