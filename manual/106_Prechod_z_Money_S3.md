@@ -795,10 +795,11 @@ XML a s časem převodu a dodatečné přiznání k takovému období MyÚčto n
 Podání uzamkne doklady firmy do konce posledního podaného období.
 
 **Pokračování v MyÚčtu.** Neuhrazené faktury a ostatní závazky z Money se
-doplácejí v MyÚčtu. Výpisy z banky importujte od dne, který následuje po
-posledním pohybu převzatém z Money. Převzaté pohyby už v evidenci jsou a výpis
-v PDF by je založil podruhé. Výpis GPC a stažení z napojené banky převzaté
-pohyby rozpoznají (kapitola [Banka](29_Banka.md)).
+doplácejí v MyÚčtu. Výpis z banky za období, které převod převzal, převzaté
+pohyby nezdvojí. Výpis GPC a stažení z napojené banky je rozpoznají, výpis
+v PDF přeskočí pohyby účtu do dne posledního pohybu převzatého z Money a ohlásí
+to (kapitola [Banka](29_Banka.md)). Pohyb z toho dne, který v Money nebyl,
+doplňte ručně.
 
 ### 106.10.11 Omezení
 

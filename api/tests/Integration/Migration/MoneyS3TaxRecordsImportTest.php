@@ -331,6 +331,35 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
         self::assertSame('error', $this->preflight($supplierId, $this->taxBackup(SyntheticTaxAgenda::files()))['tax_records_fiscal_year']['level'] ?? null);
     }
 
+    /**
+     * Firma pokračuje v MyÚčtu: výpis v PDF za období, které převod převzal, pohyby z Money
+     * nezdvojí (hranice převzetí = poslední převzatý pohyb účtu), nový pohyb založí.
+     */
+    public function testBankStatementAfterConversionDoesNotDuplicateMovements(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->taxBackup(SyntheticTaxAgenda::files()), new ImportOptions(ImportOptions::MODE_IMPORT));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $pdo = $this->db->pdo();
+        $currency = $pdo->prepare("SELECT id FROM currencies WHERE supplier_id = ? AND code = 'CZK' AND account_number = ? LIMIT 1");
+        $currency->execute([$supplierId, SyntheticTaxAgenda::BANK_ACCOUNT]);
+        $currencyId = (int) $currency->fetchColumn();
+        self::assertGreaterThan(0, $currencyId, 'převod doplní číslo účtu firmy');
+
+        $tx = static fn (string $date, float $amount, string $ref): array => ['posted_at' => $date, 'amount' => $amount, 'currency' => 'CZK',
+            'variable_symbol' => null, 'constant_symbol' => null, 'specific_symbol' => null, 'counterparty_account' => '1000000005',
+            'counterparty_bank' => '0100', 'counterparty_name' => 'Odběratel Beta a.s.', 'description' => 'Platba', 'bank_ref' => $ref];
+        $result = $this->container(\MyInvoice\Service\Bank\StatementImporter::class)->importParsedPdf([
+            'header' => ['account_number' => SyntheticTaxAgenda::BANK_ACCOUNT, 'statement_date' => '2025-03-31', 'statement_number' => '3',
+                'prev_balance' => null, 'curr_balance' => null, 'credit_total' => null, 'debit_total' => null, 'period_kind' => 'period'],
+            'transactions' => [$tx('2025-03-10', 500.0, 'BANKA-1'), $tx('2025-03-20', 700.0, 'BANKA-2')],
+        ], '%PDF-de-hranice-' . $supplierId, 'vypis-2025.pdf', null, $currencyId, $supplierId);
+        $dump = json_encode($result, JSON_UNESCAPED_UNICODE) ?: '';
+        self::assertArrayHasKey('skipped_migrated', $result, 'Výpis v PDF musí přeskočit pohyby převzaté převodem (oprava banky #351). ' . $dump);
+        self::assertSame(1, $result['transactions'], $dump);
+        self::assertSame(1, $result['skipped_migrated']);
+    }
+
     /** @return array<string,int> */
     private function taxCounts(int $supplierId): array
     {
