@@ -22021,7 +22021,9 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '422':
           description: |
-            `validation_failed`: prázdný kód nebo delší než 100 znaků, neplatné datum.
+            `validation_failed`: kód šarže, který není text, je prázdný nebo delší než 100 znaků;
+            datum spotřeby, které není platné datum RRRR-MM-DD (číslo, boolean i prázdný text);
+            datum smaže jen výslovné `null`.
             `tracking_mode_mismatch`: jde o sériové číslo.
           content:
             application/json:

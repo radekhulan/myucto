@@ -59,20 +59,23 @@ final class TrackingUnitRenameService
     {
         $lotCode = null;
         if (array_key_exists('lot_code', $changes)) {
-            $lotCode = is_string($changes['lot_code']) ? trim($changes['lot_code']) : '';
+            if (!is_string($changes['lot_code'])) {
+                throw new StockException('validation_failed', 'Kód šarže musí být text.', 422);
+            }
+            $lotCode = trim($changes['lot_code']);
             if ($lotCode === '' || mb_strlen($lotCode) > 100) {
                 throw new StockException('validation_failed', 'Kód šarže je povinný a smí mít nejvýše 100 znaků.', 422);
             }
         }
         $hasExpiry = array_key_exists('expires_on', $changes);
         $expiresOn = null;
+        // Datum smaže jen výslovné null; číslo, boolean nebo prázdný text se neodmítá mlčky jako smazání.
         if ($hasExpiry && $changes['expires_on'] !== null) {
-            $expiresOn = is_string($changes['expires_on']) ? trim($changes['expires_on']) : '';
-            if ($expiresOn === '') {
-                $expiresOn = null;
-            } elseif (!IsoDate::isValid($expiresOn)) {
-                throw new StockException('validation_failed', 'Datum spotřeby musí být platné datum ve tvaru RRRR-MM-DD.', 422);
+            $raw = $changes['expires_on'];
+            if (!is_string($raw) || !IsoDate::isValid(trim($raw))) {
+                throw new StockException('validation_failed', 'Datum spotřeby musí být platné datum ve tvaru RRRR-MM-DD, nebo null pro smazání data.', 422);
             }
+            $expiresOn = trim($raw);
         }
 
         $pdo = $this->db->pdo();

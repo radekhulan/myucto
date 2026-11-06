@@ -554,6 +554,17 @@ final class TrackingUnitRenameTest extends StockTestCase
         $this->assertError($this->rename($sid, $item, $unitId, ['lot_code' => ['x']]), 422, 'validation_failed');
         $this->assertError($this->rename($sid, $item, $unitId, ['expires_on' => '2026-02-31']), 422, 'validation_failed');
         $this->assertError($this->rename($sid, $item, $unitId, ['expires_on' => 'zítra']), 422, 'validation_failed');
+        // Jiný typ než text datum nesmaže mlčky; smaže ho jen výslovné null.
+        foreach ([20261231, false, true, 0, '', '   ', ['2027-01-01']] as $badExpiry) {
+            $this->assertError($this->rename($sid, $item, $unitId, ['expires_on' => $badExpiry]), 422, 'validation_failed');
+        }
+        // Kód šarže jiného typu než text dostane srozumitelnou hlášku, ne „povinný“.
+        foreach ([12345, false, null, 1.5] as $badLot) {
+            $res = $this->rename($sid, $item, $unitId, ['lot_code' => $badLot]);
+            $this->assertError($res, 422, 'validation_failed');
+            self::assertStringContainsString('musí být text', $this->body($res)['error']['message']);
+        }
+        self::assertSame(self::OLD_EXPIRES, $this->unitRow($unitId)['expires_on'], 'Datum zůstalo.');
         $this->assertError($this->rename($sid, $serialItem, $serialId, ['lot_code' => 'X']), 422, 'tracking_mode_mismatch');
         self::assertSame(self::OLD, $this->unitRow($unitId)['lot_code']);
     }
