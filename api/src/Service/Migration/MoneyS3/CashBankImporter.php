@@ -60,7 +60,7 @@ final class CashBankImporter
                 continue;
             }
             $meta[$code] ??= ['name' => trim((string) ($r['Popis'] ?? '')) ?: $code, 'primary' => (string) ($r['PrimUcet'] ?? ''), 'opening' => null];
-            $meta[$code]['currency'] = self::currency((string) ($r['Mena'] ?? ''));
+            $meta[$code]['currency'] = MoneyS3Currency::code($r['Mena'] ?? null);
             $year = $ctx->yearOf($r);
             if ($year !== null && $firstYear !== null && $year >= $firstYear
                 && ($meta[$code]['opening'] === null || $year < $meta[$code]['opening']['year'])) {
@@ -435,7 +435,7 @@ final class CashBankImporter
                     'bank' => trim((string) ($r['BKod'] ?? '')),
                     'iban' => trim((string) ($r['IBAN'] ?? '')),
                     'primary' => trim((string) ($r['PrimUcet'] ?? '')),
-                    'currency' => self::currency((string) ($r['Mena'] ?? '')),
+                    'currency' => MoneyS3Currency::code($r['Mena'] ?? null),
                     'year' => (int) ($ctx->yearOf($r) ?? 0),
                 ];
             }
@@ -967,7 +967,7 @@ final class CashBankImporter
      */
     public static function cashForeign(array $r): ?array
     {
-        $currency = self::currency((string) ($r['Mena'] ?? ''));
+        $currency = MoneyS3Currency::code($r['Mena'] ?? null);
         if ($currency === 'CZK') {
             return null;
         }
@@ -996,7 +996,7 @@ final class CashBankImporter
      */
     public static function storedForeign(array $r): ?array
     {
-        $currency = self::currency((string) ($r['Mena'] ?? ''));
+        $currency = MoneyS3Currency::code($r['Mena'] ?? null);
         if ($currency === 'CZK') {
             return null;
         }
@@ -1103,12 +1103,5 @@ final class CashBankImporter
     private static function symbolAndDescription(array $r): array
     {
         return BankSymbols::variableSymbolAndDescription(trim((string) ($r['VarSym'] ?? '')), trim((string) ($r['Popis'] ?? '')), false);
-    }
-
-    /** Měna pokladny/účtu z Money (prázdná = domácí). `mb_`: `strtoupper` z „Kč" neudělá „KČ". */
-    private static function currency(string $mena): string
-    {
-        $m = mb_strtoupper(trim($mena));
-        return in_array($m, ['', 'KČ', 'CZK'], true) ? 'CZK' : $m;
     }
 }

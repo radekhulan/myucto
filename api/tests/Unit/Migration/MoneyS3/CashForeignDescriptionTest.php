@@ -28,6 +28,19 @@ final class CashForeignDescriptionTest extends TestCase
         }
     }
 
+    /**
+     * Pokladna a banka poznají korunu stejně jako faktury a deník ({@see \MyInvoice\Service\Migration\MoneyS3\MoneyS3Currency}):
+     * i „Kc" bez háčku, malá písmena a chybějící pole.
+     */
+    public function testStoredForeignUsesSharedCurrencyNormalization(): void
+    {
+        foreach (['Kc', 'KC', 'kč', ' czk '] as $mena) {
+            self::assertNull(CashBankImporter::storedForeign(['Mena' => $mena, 'ValutyKUhr' => 10.0]), $mena);
+        }
+        self::assertNull(CashBankImporter::storedForeign(['ValutyKUhr' => 10.0]));
+        self::assertSame('EUR', CashBankImporter::storedForeign(['Mena' => ' eur ', 'ValutyKUhr' => 10.0])['currency'] ?? null);
+    }
+
     public function testForeignDescription(): void
     {
         self::assertSame('Ubytování (Money: 120,00 EUR, kurz 25,000 Kč)',
