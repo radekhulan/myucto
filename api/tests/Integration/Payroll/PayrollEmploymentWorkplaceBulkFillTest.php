@@ -121,6 +121,24 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
         self::assertSame(['applied' => 0, 'skipped' => 1, 'failed' => 0], $again['counts']);
     }
 
+    /**
+     * Doplnění mění jen pracoviště. Uložený druh činnosti mimo připnutý
+     * číselník (převzatá data) ho dřív shodil jako „failed".
+     */
+    public function testUnchangedLegacyFieldsDoNotBlockTheFill(): void
+    {
+        $employmentId = $this->createEmployment('BULK-LEGACY', true);
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employment_terms SET activity_code = 'ZZ' WHERE supplier_id = ? AND employment_id = ?",
+        )->execute([$this->supplierId, $employmentId]);
+
+        $result = $this->bulk->apply($this->supplierId, '2026-06-01', self::PRAGUE, 'CZ', [$employmentId], $this->userId, null, null);
+
+        self::assertSame(['applied' => 1, 'skipped' => 0, 'failed' => 0], $result['counts'], json_encode($result['failed'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(self::PRAGUE, $this->term($employmentId)['jmhz_workplace_municipality_code']);
+        self::assertSame('ZZ', $this->term($employmentId)['activity_code']);
+    }
+
     public function testFilledButUnverifiedWorkplaceIsNeverOverwritten(): void
     {
         $employmentId = $this->createEmployment('BULK-2', true);
@@ -209,7 +227,7 @@ final class PayrollEmploymentWorkplaceBulkFillTest extends TestCase
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT work_place, jmhz_workplace_municipality_code, jmhz_workplace_country_code,
-                    jmhz_external_codebook_overlay_key
+                    jmhz_external_codebook_overlay_key, activity_code
                FROM payroll_employment_terms
               WHERE supplier_id = ? AND employment_id = ?
               ORDER BY effective_from DESC, id DESC

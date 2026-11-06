@@ -194,6 +194,9 @@ final class PayrollEmploymentWorkplaceBulkFill
                         $this->employments->currentCzIscoCode($supplierId, $employmentId),
                         $this->employments->currentOtherWithholdingEligibility($supplierId, $employmentId),
                         $this->employments->currentRelationType($supplierId, $employmentId),
+                        // Mění se jen pracoviště; ostatní uložená pole nesmí
+                        // doplnění zablokovat číselníkovou kontrolou.
+                        $current,
                     ),
                     (int) $row['row_version'],
                     $userId,
