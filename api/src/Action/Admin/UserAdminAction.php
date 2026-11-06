@@ -525,6 +525,8 @@ final class UserAdminAction
     private function selectSql(): string
     {
         return 'SELECT u.id, u.email, u.name, u.role_id, u.locale, u.is_active, u.created_at, u.last_login_at,
+                       u.totp_enabled,
+                       (SELECT COUNT(*) FROM webauthn_credentials c WHERE c.user_id = u.id AND c.revoked_at IS NULL) AS passkey_count,
                        r.name AS role_name, r.role_type, r.is_active AS role_active, r.system_key
                   FROM users u JOIN roles r ON r.id = u.role_id';
     }
@@ -538,6 +540,7 @@ final class UserAdminAction
                 'is_active' => (bool) $row['role_active'], 'system_key' => $row['system_key']],
             'is_superadmin' => $row['system_key'] === 'superadmin', 'locale' => (string) $row['locale'],
             'is_active' => (bool) $row['is_active'], 'created_at' => $row['created_at'], 'last_login_at' => $row['last_login_at'],
+            'mfa' => ['totp' => (int) $row['totp_enabled'] === 1, 'passkeys' => (int) $row['passkey_count']],
         ];
     }
 

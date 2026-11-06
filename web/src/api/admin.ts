@@ -133,6 +133,7 @@ export interface AdminUser {
   is_active: boolean
   created_at: string
   last_login_at: string | null
+  mfa?: { totp: boolean; passkeys: number }
 }
 
 /** Epic F0 — membership uživatel ↔ firma (user_suppliers). role null = zdědit globální users.role. */

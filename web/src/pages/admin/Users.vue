@@ -300,6 +300,11 @@ onMounted(load)
     <div v-else class="bg-surface border border-neutral-200 rounded-lg overflow-hidden">
       <div v-for="user in users" :key="user.id" class="p-3 border-b border-neutral-100 flex flex-wrap items-center gap-3" :class="{ 'opacity-50': !user.is_active }">
         <div class="min-w-0 flex-1"><div class="font-medium truncate">{{ user.name }}</div><div class="text-xs text-neutral-500 font-mono truncate">{{ user.email }}</div></div>
+        <span v-if="user.mfa" class="flex flex-wrap gap-1" data-field="user-mfa">
+          <span v-if="user.mfa.totp" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700" :title="t('users.mfa_totp_hint')">{{ t('users.mfa_totp') }}</span>
+          <span v-if="user.mfa.passkeys > 0" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700" :title="t('users.mfa_passkeys_hint', { count: user.mfa.passkeys })">{{ t('users.mfa_passkeys', { count: user.mfa.passkeys }) }}</span>
+          <span v-if="!user.mfa.totp && user.mfa.passkeys === 0" class="text-xs px-2 py-1 rounded bg-warning-50 text-warning-700" :title="t('users.mfa_none_hint')">{{ t('users.mfa_none') }}</span>
+        </span>
         <span class="text-xs px-2 py-1 rounded" :class="roleBadge(user.role)">{{ user.role.name }}</span>
         <span v-if="user.is_superadmin || user.role.system_key === 'superadmin'">🔒</span>
         <button :class="btnOutline('primary')" @click="openEdit(user)">{{ t('common.edit') }}</button>
