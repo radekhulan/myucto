@@ -379,9 +379,14 @@ final class StockTrackingRepository
         );
     }
 
-    public function updateInvoiceItemTracking(int $itemRowId, string $json): void
+    /**
+     * Přepíše výběr kusů řádku konceptu faktury. `invoice_items` nemá `supplier_id`, firma i
+     * stav se proto ověřují přes `invoices`: cizí firma ani vystavená faktura se nezmění,
+     * ani kdyby volající poslal id jejího řádku.
+     */
+    public function updateInvoiceItemTracking(int $supplierId, int $itemRowId, string $json): void
     {
-        $this->db->pdo()->prepare('UPDATE invoice_items SET tracking_json = ? WHERE id = ?')->execute([$json, $itemRowId]);
+        $this->db->pdo()->prepare("UPDATE invoice_items ii JOIN invoices i ON i.id = ii.invoice_id SET ii.tracking_json = ? WHERE ii.id = ? AND i.supplier_id = ? AND i.status = 'draft'")->execute([$json, $itemRowId, $supplierId]);
     }
 
     /**

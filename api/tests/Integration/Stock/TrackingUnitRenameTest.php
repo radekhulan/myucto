@@ -514,6 +514,30 @@ final class TrackingUnitRenameTest extends StockTestCase
         self::assertSame(self::OLD, $this->unitRow($unitId)['lot_code']);
     }
 
+    public function testInvoiceItemUpdateChecksSupplierAndDraftStatus(): void
+    {
+        $sid = $this->createSupplier();
+        $other = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $item = $this->lotItem($sid, 'REN-SAFE');
+        $this->receiveLot($sid, $wh, $item, '5', self::OLD, self::OLD_EXPIRES);
+        $selection = [['quantity' => '1', 'lot_code' => self::OLD, 'expires_on' => self::OLD_EXPIRES]];
+        $draft = $this->createInvoice($sid, [$this->line($item, $wh, '1', $selection)]);
+        $issued = $this->createInvoice($sid, [$this->line($item, $wh, '1', $selection)]);
+        $this->forceStatus($issued, 'issued', 'FV' . random_int(10000000, 99999999));
+        $rowId = fn (int $invoiceId): int => (int) $this->storedItems($invoiceId)[0]['id'];
+        $repo = $this->container->get(\MyInvoice\Repository\StockTrackingRepository::class);
+        $draftBefore = $this->rawTracking($draft);
+        $issuedBefore = $this->rawTracking($issued);
+
+        $repo->updateInvoiceItemTracking($other, $rowId($draft), '[]');
+        self::assertSame($draftBefore, $this->rawTracking($draft), 'Řádek jiné firmy se nezmění.');
+        $repo->updateInvoiceItemTracking($sid, $rowId($issued), '[]');
+        self::assertSame($issuedBefore, $this->rawTracking($issued), 'Řádek vystavené faktury se nezmění.');
+        $repo->updateInvoiceItemTracking($sid, $rowId($draft), '[]');
+        self::assertSame('[]', $this->rawTracking($draft), 'Řádek konceptu vlastní firmy se přepíše.');
+    }
+
     public function testServiceDoesNotTouchUnitOfAnotherSupplierOrCard(): void
     {
         $sid = $this->createSupplier();

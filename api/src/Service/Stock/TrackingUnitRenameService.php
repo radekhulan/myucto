@@ -156,7 +156,7 @@ final class TrackingUnitRenameService
         foreach ($draftInvoiceRows as $row) {
             $json = $this->rewriteList($row['json'], ...$args);
             if ($json !== null) {
-                $this->tracking->updateInvoiceItemTracking($row['id'], $json);
+                $this->tracking->updateInvoiceItemTracking($supplierId, $row['id'], $json);
                 $updated['invoices']++;
                 $invoiceIds[$row['invoice_id']] = true;
             }
