@@ -47,6 +47,7 @@ final class InvoiceOtherItemLinkTest extends TestCase
     private int $userId;
     private int $currencyId;
     private int $statementId;
+    private int $sequence = 0;
 
     protected function setUp(): void
     {
@@ -295,7 +296,7 @@ final class InvoiceOtherItemLinkTest extends TestCase
         );
         $client->execute([$this->supplierId, $this->currencyId]);
         $clientId = (int) $this->pdo->lastInsertId();
-        $varsymbol = $row['status'] === 'draft' ? null : self::VS . random_int(10, 99);
+        $varsymbol = $row['status'] === 'draft' ? null : self::VS . str_pad((string) ++$this->sequence, 3, '0', STR_PAD_LEFT);
         $this->pdo->prepare(
             'INSERT INTO invoices
                 (supplier_id, varsymbol, payment_variable_symbol, invoice_type, client_id, issue_date, tax_date, due_date,
