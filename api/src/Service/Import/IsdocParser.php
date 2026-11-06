@@ -595,6 +595,7 @@ final class IsdocParser
             'description'            => $this->text($xpath, 'i:Item/i:Description', $line),
             // Kód položky prodávajícího: podle něj páruje pravidla výnosů vydaných faktur.
             'seller_item_code'       => $this->text($xpath, 'i:Item/i:SellersItemIdentification/i:ID', $line) ?: null,
+            'item_ean'               => $this->text($xpath, 'i:Item/i:CatalogueItemIdentification/i:ID', $line) ?: null,
             'quantity'               => $quantity,
             'duration_minutes'       => $durationMinutes,
             'unit'                   => $unit,
