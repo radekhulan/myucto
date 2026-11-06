@@ -297,7 +297,14 @@ final class InvoicePaymentService
             $pdo->beginTransaction();
         }
         try {
-            $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
+            $locked = $pdo->prepare('SELECT other_item_id FROM invoices WHERE id = ? FOR UPDATE');
+            $locked->execute([$invoiceId]);
+            // Bankovní a pokladní úhrada faktury kryté ostatní pohledávkou patří pohledávce
+            // (migrace 2246); faktura ji jen zrcadlí ({@see InvoiceOtherItemPayments}).
+            $otherItemId = $locked->fetchColumn();
+            if (in_array($opts['source'] ?? '', ['bank', 'cash'], true) && $otherItemId !== null && $otherItemId !== false) {
+                throw new \RuntimeException('Faktura je navázaná na ostatní pohledávku. Úhradu spárujte s pohledávkou, faktura ji převezme.');
+            }
             if (($opts['source'] ?? '') === 'bank') {
                 $amount = $this->settleableBankAmount($pdo, $invoiceId, $amount);
             }
@@ -505,6 +512,11 @@ final class InvoicePaymentService
                 'Platba je navázaná na bankovní transakci. Zruš spárování v detailu výpisu.'
             );
         }
+        if ($payment['source'] === InvoiceOtherItemPayments::SOURCE) {
+            throw new \RuntimeException(
+                'Platba je úhradou navázané ostatní pohledávky. Odpojte úhradu v detailu pohledávky, nebo fakturu od pohledávky odpojte.'
+            );
+        }
         if ($payment['tax_document_invoice_id'] !== null) {
             $pdo = $this->db->pdo();
             $td = $pdo->prepare("SELECT status FROM invoices WHERE id = ?");
@@ -565,14 +577,15 @@ final class InvoicePaymentService
             $pdo->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
             $this->assertNoEetRecord('a.invoice_payment_id IN (SELECT p.id FROM invoice_payments p WHERE p.invoice_id = ?)', [$invoiceId]);
             $this->goPayPending->releaseForInvoice($invoiceId);
-            $payments = $pdo->prepare('SELECT id, supplier_id FROM invoice_payments WHERE invoice_id = ?');
-            $payments->execute([$invoiceId]);
+            // Zrcadlo úhrad ostatní pohledávky zůstává: peníze patří pohledávce, ne faktuře.
+            $payments = $pdo->prepare('SELECT id, supplier_id FROM invoice_payments WHERE invoice_id = ? AND source <> ?');
+            $payments->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
             foreach ($payments->fetchAll(PDO::FETCH_ASSOC) ?: [] as $p) {
                 $this->eetReconciliation->releaseInvoicePayment((int) $p['supplier_id'], (int) $p['id']);
             }
             self::releaseCreditNotes($pdo, 'p.invoice_id = ?', [$invoiceId]);
-            $del = $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ?');
-            $del->execute([$invoiceId]);
+            $del = $pdo->prepare('DELETE FROM invoice_payments WHERE invoice_id = ? AND source <> ?');
+            $del->execute([$invoiceId, InvoiceOtherItemPayments::SOURCE]);
             $count = $del->rowCount();
             $transition = $this->recomputeLocked($pdo, $invoiceId);
             if ($ownsTransaction) {
@@ -708,7 +721,7 @@ final class InvoicePaymentService
      *
      * @return array{became_paid: bool, became_unpaid: bool, remaining: float, paid_total: float}
      */
-    private function recomputeLocked(PDO $pdo, int $invoiceId): array
+    public static function recomputeLocked(PDO $pdo, int $invoiceId): array
     {
         $pdo->prepare(
             'UPDATE invoices i

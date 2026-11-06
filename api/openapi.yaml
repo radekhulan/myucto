@@ -11572,6 +11572,101 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Invoice' }
 
+  /api/v1/invoices/{id}/other-item-candidates:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    get:
+      tags: [InvoiceOps]
+      summary: Ostatní pohledávky, na které lze fakturu navázat
+      description: |
+        Zaúčtované nenavázané ostatní pohledávky firmy ve stejné měně. Řazení: shoda VS
+        (`payment_variable_symbol` nebo `varsymbol` faktury), pak stejný odběratel a částka.
+        Vyžaduje právo `other_items` ke čtení.
+      parameters:
+        - in: query
+          name: q
+          schema: { type: string }
+          description: Hledání v čísle, partnerovi, VS a názvu pohledávky.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  items:
+                    type: array
+                    items:
+                      type: object
+                      description: "Tvar jako `Invoice.other_item_link` a navíc příznaky shody."
+                      properties:
+                        id: { type: integer, format: int64 }
+                        document_no: { type: [string, "null"] }
+                        partner_id: { type: [integer, "null"], format: int64 }
+                        partner_name: { type: [string, "null"] }
+                        variable_symbol: { type: [string, "null"] }
+                        issued_on: { type: string, format: date }
+                        due_on: { type: string, format: date }
+                        amount: { type: number, format: float }
+                        currency: { type: string }
+                        paid_amount: { type: number, format: float }
+                        remaining_amount: { type: number, format: float }
+                        vs_match: { type: boolean }
+                        partner_match: { type: boolean }
+                        amount_match: { type: boolean }
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/invoices/{id}/other-item-link:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+      - in: path
+        name: id
+        required: true
+        schema: { type: integer, format: int64 }
+    post:
+      tags: [InvoiceOps]
+      summary: Naváže fakturu na ostatní pohledávku
+      description: |
+        Jen běžná faktura bez DPH ve stejné měně a částce jako zaúčtovaná ostatní pohledávka,
+        v podvojném účetnictví. Vlastní zaúčtování faktury se stornuje, faktura převezme
+        úhrady pohledávky (zdroj `other_item`). Vyžaduje `accounting.journal.post`, zápis
+        faktur a čtení ostatních položek.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [other_item_id]
+              properties:
+                other_item_id: { type: integer, format: int64 }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '403': { description: Chybí oprávnění }
+        '409': { description: Fakturu nelze navázat (DPH, částka, měna, úhrady, uzavřené období) }
+        '422': { description: Chybí other_item_id }
+    delete:
+      tags: [InvoiceOps]
+      summary: Odpojí fakturu od ostatní pohledávky
+      description: Faktura přijde o úhrady pohledávky a zůstane nezaúčtovaná.
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Invoice' }
+        '403': { description: Chybí oprávnění }
+
   /api/v1/invoices/{id}/advance-drawdown:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'
@@ -47682,6 +47777,29 @@ components:
               issue_date: { type: string, format: date }
               total_amount: { type: number, format: float }
               status: { type: string, enum: [draft, posted] }
+        other_item_id:
+          type: [integer, "null"]
+          format: int64
+          description: "Ostatní pohledávka, jejíž zápis účtuje fakturu. Taková faktura vlastní zápis v deníku nemá a úhrady přebírá z pohledávky (platby se zdrojem `other_item`)."
+        other_item_link:
+          type: [object, "null"]
+          description: "Navázaná ostatní pohledávka. Jen v detailu."
+          properties:
+            id: { type: integer, format: int64 }
+            document_no: { type: [string, "null"] }
+            title: { type: string }
+            partner_name: { type: [string, "null"] }
+            variable_symbol: { type: [string, "null"] }
+            issued_on: { type: string, format: date }
+            amount: { type: number, format: float }
+            currency: { type: string }
+            status: { type: string }
+            journal_entry_id: { type: [integer, "null"], format: int64 }
+            paid_amount: { type: number, format: float }
+            remaining_amount: { type: number, format: float }
+        other_item_suggestion:
+          type: [object, "null"]
+          description: "Jediná zaúčtovaná ostatní pohledávka se shodným VS i částkou, na kterou lze vystavenou nezaplacenou fakturu bez DPH navázat. Tvar jako `other_item_link`. Jen v detailu."
         _warnings:
           type: array
           description: |
@@ -49753,8 +49871,8 @@ components:
         note: { type: [string, "null"] }
         source:
           type: string
-          enum: [manual, mark_paid, bank, legacy, cash, settlement, credit_note]
-          description: "manual = ruční záznam, mark_paid = zkratka „označit zaplaceno“, bank = bankovní párování (GPC i e-mailové avízo), legacy = backfill z dob před evidencí plateb, cash = pokladní doklad, settlement = zápočet proti účtu, credit_note = zápočet navázaného dobropisu (není peněžní tok)"
+          enum: [manual, mark_paid, bank, legacy, cash, settlement, credit_note, other_item]
+          description: "manual = ruční záznam, mark_paid = zkratka „označit zaplaceno“, bank = bankovní párování (GPC i e-mailové avízo), legacy = backfill z dob před evidencí plateb, cash = pokladní doklad, settlement = zápočet proti účtu, credit_note = zápočet navázaného dobropisu (není peněžní tok), other_item = úhrada navázané ostatní pohledávky (peníze i zápis patří pohledávce)"
         bank_transaction_id: { type: [integer, "null"], format: int64, description: "Vazba na bankovní transakci (taková platba se maže přes unmatch ve výpisu)" }
         bank_statement_id: { type: [integer, "null"], format: int64 }
         tax_document_invoice_id: { type: [integer, "null"], format: int64, description: "Daňový doklad k přijaté platbě vystavený k této platbě (jen u záloh)" }

@@ -107,6 +107,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::WRITE],
         ['*', '#^/api/invoices/[0-9]+/book$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Faktura krytá ostatní pohledávkou: výběr čte ostatní položky, vazba mění zaúčtování.
+        ['GET', '#^/api/invoices/[0-9]+/other-item-candidates$#', 'other_items', AccessLevel::READ],
+        ['*', '#^/api/invoices/[0-9]+/other-item-link$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/issue(-final)?$#', 'invoices.issue', AccessLevel::WRITE],
         // Import už vystaveného dokladu zakládá rovnou vystavenou fakturu: vystavení
         // hlídá mapa, založení (`invoices.create`) dohlíží akce.

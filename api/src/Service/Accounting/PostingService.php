@@ -25,6 +25,7 @@ use MyInvoice\Service\Accounting\Product\IssuedDiscountAllocation;
 use MyInvoice\Service\Accounting\Product\ProductPostingDefaults;
 use MyInvoice\Service\Accounting\Revenue\RevenueRuleMatcher;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Service\Invoice\MultiPurposeVoucher;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Property\Charges\Issuance\IssuancePostingBatchContext;
@@ -426,6 +427,16 @@ final class PostingService
                 (new \MyInvoice\Service\Property\Payments\Workflow\PaymentMutationContext($this->db))->acquire($supplierId);
             } else {
                 $periodStatuses = $batchContext->periodStatuses($this->db);
+            }
+            if ($sourceId !== null && $sourceType === 'invoice') {
+                // Fakturu krytou ostatní pohledávkou (migrace 2246) účtuje zápis pohledávky.
+                // Čte se až pod zámkem období, který drží i navázání faktury.
+                $covered = $pdo->prepare('SELECT other_item_id FROM invoices WHERE id = ? AND supplier_id = ? LOCK IN SHARE MODE');
+                $covered->execute([$sourceId, $supplierId]);
+                $coveringItem = $covered->fetchColumn();
+                if ($coveringItem !== false && $coveringItem !== null) {
+                    throw self::coveredByOtherItemException($sourceId);
+                }
             }
             if ($sourceId !== null && in_array($sourceType, ['invoice', 'purchase_invoice'], true)) {
                 $group = (new DocumentPostingGroup($this->db))->active($supplierId, $sourceType, $sourceId, true);
@@ -1015,6 +1026,10 @@ final class PostingService
                       WHERE supplier_id = ? AND {$column} = ? AND reversed_on IS NULL"
                 );
                 $released->execute([$reversalDate, $supplierId, (int) $original['source_id']]);
+                if ($released->rowCount() > 0) {
+                    InvoiceOtherItemPayments::syncForItems($pdo, $supplierId,
+                        InvoiceOtherItemPayments::itemsOfPayment($pdo, $supplierId, $column, (int) $original['source_id']));
+                }
             }
 
             $this->activity->log(
@@ -1403,6 +1418,9 @@ final class PostingService
                 'document_not_postable',
                 'Vydaný doklad #' . $invoiceId . ' typu "' . $invoiceType . '" se do deníku neúčtuje.',
             );
+        }
+        if (($inv['other_item_id'] ?? null) !== null) {
+            throw self::coveredByOtherItemException($invoiceId);
         }
 
         // DDKP (daňový doklad k přijaté platbě, §28/2/d ZDPH) NENÍ běžná faktura:
@@ -3139,6 +3157,16 @@ final class PostingService
         return $this->lockedUntil($supplierId);
     }
 
+    /** Faktura navázaná na ostatní pohledávku vlastní zápis nemá, účtuje ji zápis pohledávky. */
+    public static function coveredByOtherItemException(int $invoiceId): PostingException
+    {
+        return new PostingException(
+            'invoice_covered_by_other_item',
+            'Vydaná faktura #' . $invoiceId . ' je navázaná na ostatní pohledávku, která ji zaúčtovala. Vlastní zápis faktura nemá.',
+            409,
+        );
+    }
+
     /** Odmítnutí zápisu do zamčeného data; text sdílí ostrý zápis i kontrola nanečisto. */
     public static function dateLockedException(string $entryDate, string $lockedUntil): PostingException
     {
@@ -4300,7 +4328,8 @@ final class PostingService
                     " . ($isPurchase ? 'd.vat_deduction, d.vat_deduction_percent' : "'full' AS vat_deduction, 100 AS vat_deduction_percent") . ",
                     " . ($isPurchase ? 'd.tax_deductible' : '1 AS tax_deductible') . ",
                     " . ($isPurchase ? 'd.received_at, d.received_at_source' : 'NULL AS received_at, NULL AS received_at_source') . ",
-                    " . ($isPurchase ? 'NULL AS revenue_rule_key' : 'd.revenue_rule_key') . "
+                    " . ($isPurchase ? 'NULL AS revenue_rule_key' : 'd.revenue_rule_key') . ",
+                    " . ($isPurchase ? 'NULL AS other_item_id' : 'd.other_item_id') . "
                FROM {$table} d
                LEFT JOIN currencies cur ON cur.id = d.currency_id
               WHERE d.id = ? AND d.supplier_id = ?"

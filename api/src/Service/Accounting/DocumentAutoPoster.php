@@ -112,7 +112,8 @@ final class DocumentAutoPoster
         }
         // Zálohová PF, proforma a interní storno se jako předpis neúčtují ZÁMĚRNĚ (účtuje
         // se úhrada zálohy). Pokus o zaúčtování by v historii dokladu skončil jako
-        // accounting.auto_post_failed a účetní by v tom četla chybu, která není.
+        // accounting.auto_post_failed a účetní by v tom četla chybu, která není. Totéž
+        // faktura krytá ostatní pohledávkou, kterou účtuje zápis pohledávky.
         if (!$this->isPostableKind($supplierId, $sourceType, $docId)) {
             return;
         }
@@ -228,20 +229,26 @@ final class DocumentAutoPoster
         return $mode === 'double_entry' && $this->policy->levelFor($supplierId, $operation) === 'auto';
     }
 
-    /** Druh dokladu, který se do deníku účtuje jako předpis (zrcadlo guardů v PostingService). */
+    /**
+     * Druh dokladu, který se do deníku účtuje jako předpis (zrcadlo guardů v PostingService).
+     * Faktura krytá ostatní pohledávkou (migrace 2246) vlastní předpis nemá.
+     */
     private function isPostableKind(int $supplierId, string $sourceType, int $docId): bool
     {
         $stmt = $this->db->pdo()->prepare($sourceType === 'invoice'
-            ? 'SELECT invoice_type FROM invoices WHERE id = ? AND supplier_id = ?'
-            : 'SELECT document_kind FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+            ? 'SELECT invoice_type AS kind, other_item_id FROM invoices WHERE id = ? AND supplier_id = ?'
+            : 'SELECT document_kind AS kind, NULL AS other_item_id FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
         $stmt->execute([$docId, $supplierId]);
-        $kind = $stmt->fetchColumn();
-        if ($kind === false) {
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($row === false) {
             return true; // neexistující doklad ohlásí post() jako dosud
         }
+        if ($row['other_item_id'] !== null) {
+            return false;
+        }
         return $sourceType === 'invoice'
-            ? in_array((string) $kind, PostingService::POSTABLE_ISSUED_INVOICE_TYPES, true)
-            : (string) $kind !== 'advance';
+            ? in_array((string) $row['kind'], PostingService::POSTABLE_ISSUED_INVOICE_TYPES, true)
+            : (string) $row['kind'] !== 'advance';
     }
 
     /** Datum účetního případu z dokladu (DUZP / vystavení). NULL = doklad neexistuje. */

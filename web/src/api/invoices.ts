@@ -99,6 +99,29 @@ export interface AdvanceDrawdownResult {
   invoice: Invoice
 }
 
+export interface InvoiceOtherItem {
+  id: number
+  document_no: string | null
+  title: string
+  partner_name: string | null
+  variable_symbol: string | null
+  issued_on: string
+  amount: number
+  currency: string
+  status: string
+  journal_entry_id: number | null
+  paid_amount: number
+  remaining_amount: number
+}
+
+export interface InvoiceOtherItemCandidate extends InvoiceOtherItem {
+  partner_id: number | null
+  due_on: string
+  vs_match: boolean
+  partner_match: boolean
+  amount_match: boolean
+}
+
 export interface AdvanceCandidate {
   id: number
   varsymbol: string | null
@@ -326,6 +349,11 @@ export interface Invoice {
   has_advance_candidates?: boolean
   // U nepropojené proformy: existují u odběratele nepropojené daňové doklady k propojení?
   has_final_candidates?: boolean
+  /** Ostatní pohledávka, jejíž zápis fakturu účtuje (faktura vlastní zápis nemá). */
+  other_item_id?: number | null
+  other_item_link?: InvoiceOtherItem | null
+  /** Jediná pohledávka se shodným VS i částkou, na kterou lze fakturu navázat. */
+  other_item_suggestion?: InvoiceOtherItem | null
   recurring_template_id: number | null
   advance_paid_amount: number
   discount_percent: number
@@ -1012,6 +1040,14 @@ export const invoicesApi = {
     api.post<Invoice>(`/invoices/${id}/link-advance`, { advance_id: advanceId }).then(r => r.data),
   unlinkAdvance: (id: number) =>
     api.delete<Invoice>(`/invoices/${id}/link-advance`).then(r => r.data),
+  // Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou)
+  otherItemCandidates: (id: number, q = '') =>
+    api.get<{ items: InvoiceOtherItemCandidate[] }>(`/invoices/${id}/other-item-candidates`, { params: q ? { q } : {} })
+      .then(r => r.data.items),
+  linkOtherItem: (id: number, otherItemId: number) =>
+    api.post<Invoice>(`/invoices/${id}/other-item-link`, { other_item_id: otherItemId }).then(r => r.data),
+  unlinkOtherItem: (id: number) =>
+    api.delete<Invoice>(`/invoices/${id}/other-item-link`).then(r => r.data),
   // Postupné čerpání zálohy (koncept faktury odečte část daňového dokladu k záloze)
   advanceDrawdownCandidates: (id: number) =>
     api.get<AdvanceDrawdownCandidate[]>(`/invoices/${id}/advance-drawdown`).then(r => r.data),

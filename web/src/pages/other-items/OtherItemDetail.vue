@@ -396,6 +396,10 @@ onMounted(load)
               </dd>
             </div>
             <div v-if="item.currency !== 'CZK'"><dt class="text-neutral-500">{{ t('other_items.exchange_rate') }}</dt><dd>{{ item.exchange_rate || '–' }}</dd></div>
+            <div v-if="item.linked_invoice" data-test="linked-invoice">
+              <dt class="text-neutral-500">{{ t('other_items.linked_invoice') }}</dt>
+              <dd><RouterLink :to="`/invoices/${item.linked_invoice.id}`" class="font-mono text-primary-700 hover:underline">{{ item.linked_invoice.varsymbol || `#${item.linked_invoice.id}` }}</RouterLink></dd>
+            </div>
             <div class="sm:col-span-2"><dt class="text-neutral-500">{{ t('other_items.note') }}</dt><dd class="whitespace-pre-wrap">{{ item.note || '–' }}</dd></div>
           </dl>
         </section>

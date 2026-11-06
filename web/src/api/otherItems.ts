@@ -95,6 +95,8 @@ export interface OtherItem {
   remaining_payment?: number
   /** Kalendář má splátku rozdělenou na jistinu, úrok a poplatek (jen detail). */
   has_split_installments?: boolean
+  /** Vydaná faktura, kterou zápis pohledávky účtuje (jen detail). */
+  linked_invoice?: { id: number; varsymbol: string | null; status: string } | null
   status: OtherItemStatus | string
   certainty: 'confirmed' | 'scheduled' | 'estimate'
   editable: boolean
