@@ -1804,7 +1804,10 @@ useWindowTitle(
 
       <!-- Soubor připravený k nahrání u nové faktury (nahraje se po prvním uložení) -->
       <div v-if="!isEdit && !submissionId && pendingPdfFile" class="bg-success-50 border border-success-500/40 rounded-lg shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-3 gap-3">
+        <!-- Zalomení jako u originálu na detailu: na telefonu se trojice tlačítek
+             vedle názvu souboru nevejde, bez `flex-wrap` přelezla přes text i přes
+             pravý okraj obrazovky (nahlášeno z mobilu 06.11.2026). -->
+        <div class="flex flex-wrap items-center justify-between px-4 py-3 gap-3">
           <div class="flex items-center gap-3 min-w-0">
             <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
               <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
@@ -1813,18 +1816,18 @@ useWindowTitle(
             </svg>
             <div class="min-w-0">
               <div class="font-medium text-sm truncate">{{ pendingPdfFile.name }}</div>
-              <div class="text-xs text-success-700 flex items-center gap-1">
+              <div class="text-xs text-success-700 flex items-center gap-1 whitespace-nowrap">
                 <svg class="w-3.5 h-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/></svg>
                 {{ t('purchase_invoice.pdf.pending_badge') }}
               </div>
             </div>
           </div>
-          <div class="flex items-center gap-2 flex-wrap shrink-0">
+          <div class="flex items-center gap-2 flex-wrap">
             <button
               v-if="pendingPdfUrl"
               type="button"
               @click="pdfPreview.toggle()"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
@@ -1837,7 +1840,7 @@ useWindowTitle(
               :href="pendingPdfUrl"
               target="_blank"
               rel="noopener"
-              class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               {{ t('purchase_invoice.pdf.open') }}
@@ -1845,7 +1848,7 @@ useWindowTitle(
             <button
               type="button"
               @click="clearPendingPdf"
-              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
               {{ t('common.remove') }}
@@ -1876,15 +1879,15 @@ useWindowTitle(
       <!-- Existující PDF na detail/edit, náhled kreslí DocumentPreviewSplit -->
 
       <div v-if="existingPdf" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
-        <div class="flex items-center justify-between px-4 py-3 border-b border-neutral-100">
-          <div class="flex items-center gap-3">
+        <div class="flex flex-wrap items-center justify-between gap-3 px-4 py-3 border-b border-neutral-100">
+          <div class="flex items-center gap-3 min-w-0">
             <svg class="w-7 h-8 shrink-0" viewBox="0 0 32 36" xmlns="http://www.w3.org/2000/svg">
               <path fill="#dc2626" d="M4 2h16l8 8v22a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/>
               <path fill="#ffffff" opacity="0.35" d="M20 2v8h8z"/>
               <text x="16" y="26" fill="#ffffff" font-family="Arial,Helvetica,sans-serif" font-size="8" font-weight="700" text-anchor="middle" letter-spacing="0.3">PDF</text>
             </svg>
-            <div>
-              <div class="font-medium text-sm">{{ existingPdf.name }}</div>
+            <div class="min-w-0">
+              <div class="font-medium text-sm truncate">{{ existingPdf.name }}</div>
               <div v-if="existingPdf.size > 0" class="text-xs text-neutral-500">{{ Math.round(existingPdf.size / 1024) }} KiB</div>
               <div v-else class="text-xs text-neutral-400 font-mono">{{ existingPdf.hash?.slice(0, 12) }}…</div>
             </div>
@@ -1894,7 +1897,7 @@ useWindowTitle(
               v-if="invoiceId"
               type="button"
               @click="pdfPreviewOpen = !pdfPreviewOpen"
-              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-neutral-300 text-neutral-700 hover:bg-neutral-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/>
@@ -1907,7 +1910,7 @@ useWindowTitle(
               :href="purchaseInvoicesApi.pdfUrl(invoiceId)"
               target="_blank"
               @click="downloadPdfToCompanyFolder($event, invoiceId, form.vendor_invoice_number)"
-              class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-primary-500/40 text-primary-700 hover:bg-primary-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4 text-primary-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 16v1a3 3 0 0 0 3 3h10a3 3 0 0 0 3-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
               {{ t('purchase_invoice.pdf.open') }}
@@ -1915,7 +1918,7 @@ useWindowTitle(
             <button
               type="button"
               @click="onReplacePdf"
-              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5"
+              class="cursor-pointer px-3 h-9 text-sm border border-danger-500/50 text-danger-500 hover:bg-danger-50 rounded-md inline-flex items-center gap-1.5 whitespace-nowrap"
             >
               <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M19 7l-.867 12.142A2 2 0 0 1 16.138 21H7.862a2 2 0 0 1-1.995-1.858L5 7m5 4v6m4-6v6M1 7h22M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>
               {{ t('common.delete') }}
