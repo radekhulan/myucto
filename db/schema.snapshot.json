@@ -1147,6 +1147,7 @@
         "2243_work_report_billing.sql",
         "2244_payroll_import_profile_pamica_sample.sql",
         "2245_session_device_class.sql",
+        "2246_invoice_other_item_link.sql",
         "2249_other_item_settings.sql"
     ],
     "tables": {
@@ -7258,7 +7259,7 @@
                 "invoice_id": "bigint(20) unsigned NOT NULL",
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "paid_on": "date NOT NULL",
-                "source": "enum('manual','mark_paid','bank','legacy','cash','settlement','credit_note') NOT NULL DEFAULT 'manual'",
+                "source": "enum('manual','mark_paid','bank','legacy','cash','settlement','credit_note','other_item') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_document_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "variable_symbol": "varchar(20) NULL DEFAULT NULL"
@@ -7405,6 +7406,7 @@
                 "last_reminder_at": "timestamp NULL DEFAULT NULL",
                 "note_above_items": "text NULL DEFAULT NULL",
                 "note_below_items": "text NULL DEFAULT NULL",
+                "other_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "paid_at": "date NULL DEFAULT NULL",
                 "paid_total": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "parent_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -7481,7 +7483,8 @@
                 "uq_inv_public_token": "UNIQUE BTREE (public_token)",
                 "uq_inv_supplier_varsymbol": "UNIQUE BTREE (supplier_id, varsymbol)",
                 "uq_invoices_fakturoid": "UNIQUE BTREE (supplier_id, fakturoid_id)",
-                "uq_invoices_idoklad": "UNIQUE BTREE (supplier_id, idoklad_id)"
+                "uq_invoices_idoklad": "UNIQUE BTREE (supplier_id, idoklad_id)",
+                "uq_invoices_other_item": "UNIQUE BTREE (other_item_id)"
             },
             "foreign_keys": {
                 "fk_inv_calendar": "(calendar_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
@@ -7494,7 +7497,8 @@
                 "fk_inv_recurring": "(recurring_template_id) -> recurring_invoice_templates (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_inv_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_inv_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "fk_invoices_branding_profile": "(branding_profile_id) -> branding_profiles (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+                "fk_invoices_branding_profile": "(branding_profile_id) -> branding_profiles (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_invoices_other_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
                 "bank_snapshot": "json_valid(`bank_snapshot`)",

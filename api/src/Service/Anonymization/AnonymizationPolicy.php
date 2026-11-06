@@ -436,6 +436,7 @@ final class AnonymizationPolicy
         'other_item_posting_lines' => ['account_code' => 'keep'],
         'other_item_posting_overrides' => ['credit_account_code' => 'keep', 'debit_account_code' => 'keep', 'description_template' => 'text', 'dimensions_json' => 'keep', 'event' => 'keep'],
         'other_item_posting_profiles' => ['credit_account_code' => 'keep', 'debit_account_code' => 'keep', 'description_template' => 'text', 'dimensions_json' => 'keep', 'event' => 'keep'],
+        'other_item_settings' => ['document_folder' => 'keep'],
         'other_item_schedules' => ['template_json' => 'json'],
         'oss_filing_evidence' => ['adjusted_period' => 'keep', 'completeness_json' => 'json', 'consumption_country' => 'keep', 'customer_name' => 'party_name', 'invoice_snapshot_json' => 'json', 'payments_json' => 'json', 'place_evidence_json' => 'json', 'return_currency' => 'keep', 'supply_description' => 'text', 'supply_unit' => 'keep', 'taxable_currency' => 'keep', 'vat_rate_type' => 'keep'],
         'oss_member_state_rates' => ['country' => 'keep', 'note' => 'keep'],

@@ -12,6 +12,7 @@ use MyInvoice\Repository\OtherItemRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionDefaults;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use PDO;
 
 final class OtherItemService
@@ -51,6 +52,7 @@ final class OtherItemService
         $coverage = $this->installmentCoverage($supplierId, $id);
         $item['has_split_installments'] = OtherItemInstallmentCoverage::hasSplit($coverage);
         $item['remaining_payment'] = self::payableOf($item, $coverage);
+        $item['linked_invoice'] = $this->linkedInvoice($supplierId, $id);
         if ($this->isDoubleEntry($supplierId)) {
             $item['posting_overrides'] = (object) $this->postingProfiles->overridesForItem($supplierId, $id);
             $item['posting_rules'] = (object) $this->postingResolver->forItem($supplierId, $item);
@@ -364,6 +366,7 @@ final class OtherItemService
         if ($item['status'] !== 'posted' || (int) $item['journal_entry_id'] !== $entryId) {
             throw new OtherItemException('not_posted', 'Zápis není aktuálním zaúčtováním této položky.', 409);
         }
+        $this->assertNoLinkedInvoice($supplierId, $id);
         $payments = $pdo->prepare('SELECT id FROM other_item_allocations
             WHERE supplier_id = ? AND other_item_id = ? AND reversed_on IS NULL FOR UPDATE');
         $payments->execute([$supplierId, $id]);
@@ -398,6 +401,7 @@ final class OtherItemService
             if ((float) $item['paid_amount'] > 0 || $this->hasActivePayments($supplierId, $id)) {
                 throw new OtherItemException('has_payments', 'Doklad má spárované úhrady. Nejprve je odpojte.', 409);
             }
+            $this->assertNoLinkedInvoice($supplierId, $id);
             // Položka ze zůstatku bez dokladu nemá vlastní zápis, předpis nese řádek převzatého
             // zápisu. Storno ji proto ruší jen od svého dne (saldokonto k dřívějšímu dni ji dál
             // ukazuje) a ten den musí ležet v otevřeném účetním období, stejně jako protizápis.
@@ -496,6 +500,30 @@ final class OtherItemService
             throw $e;
         }
         return $this->get($supplierId, $id);
+    }
+
+    /**
+     * Zápis pohledávky účtuje navázanou fakturu (migrace 2246). Storno nebo smazání
+     * zápisu by fakturu nechalo bez předpisu, proto se nejdřív odpojí faktura.
+     */
+    private function assertNoLinkedInvoice(int $supplierId, int $id): void
+    {
+        $linked = $this->linkedInvoice($supplierId, $id);
+        if ($linked !== null) {
+            throw new OtherItemException('linked_invoice', sprintf(
+                'Ostatní pohledávka účtuje fakturu %s. Nejprve fakturu od pohledávky odpojte.',
+                $linked['varsymbol'] ?? ('#' . $linked['id'])), 409);
+        }
+    }
+
+    /** @return array{id:int,varsymbol:?string,status:string}|null */
+    public function linkedInvoice(int $supplierId, int $id): ?array
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id, varsymbol, status FROM invoices WHERE supplier_id = ? AND other_item_id = ? LIMIT 1');
+        $stmt->execute([$supplierId, $id]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row === false ? null
+            : ['id' => (int) $row['id'], 'varsymbol' => $row['varsymbol'] !== null ? (string) $row['varsymbol'] : null, 'status' => (string) $row['status']];
     }
 
     public function allocations(int $supplierId, int $id): array
@@ -779,6 +807,7 @@ final class OtherItemService
                 $reactivate->execute([$split['installment_id'], $split['principal'], $split['interest'], $split['fee'],
                     (int) $prior['id'], $supplierId]);
                 $this->posting->restampDimensions($supplierId, $sourceType, $sourceId, true);
+                InvoiceOtherItemPayments::syncForItems($pdo, $supplierId, [$id]);
                 if ($ownTx) $pdo->commit();
                 return $this->get($supplierId, $id);
             }
@@ -793,6 +822,7 @@ final class OtherItemService
                 $payment['payment_on'], $userId]);
             // Úhrada přebírá dimenze položky (DimensionDefaults::bankDocuments / forCash).
             $this->posting->restampDimensions($supplierId, $bankId > 0 ? 'bank' : 'cash', $sourceId, true);
+            InvoiceOtherItemPayments::syncForItems($pdo, $supplierId, [$id]);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();
@@ -926,6 +956,7 @@ final class OtherItemService
                     $paymentRow['bank_transaction_id'] !== null ? 'bank' : 'cash',
                     (int) ($paymentRow['bank_transaction_id'] ?? $paymentRow['cash_document_id']), true, $released);
             }
+            InvoiceOtherItemPayments::syncForItems($pdo, $supplierId, [$id]);
             if ($ownTx) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) $pdo->rollBack();

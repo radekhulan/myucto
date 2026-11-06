@@ -506,7 +506,8 @@
     "remaining_payment": "Left to pay incl. interest and fee",
     "remaining_payment_hint": "Sum of unpaid installments. Only the principal reduces the item balance; interest and fee are posted with the payment.",
     "allocation_split": "principal {principal}, interest {interest}, fee {fee}",
-    "allocation_split_hint": "The payment is split by installments: interest first, then the fee and finally the principal."
+    "allocation_split_hint": "The payment is split by installments: interest first, then the fee and finally the principal.",
+    "linked_invoice": "Linked invoice"
   },
   "internal_documents": {
     "title": "Internal documents",
@@ -18107,7 +18108,10 @@
         "advance_unpaid": "The advance is posted when it is paid (314). Match the bank payment with the advance or pay it in cash, not with the final invoice.",
         "advance_posted": "The advance is not posted as a document. Its posting consists of the payment to the advance account and the advance settlement in the final invoice.",
         "relation_advance_payment": "Advance payment",
-        "relation_advance_final": "Settlement in final invoice"
+        "relation_advance_final": "Settlement in final invoice",
+        "relation_other_item": "Other receivable",
+        "open_other_item": "Receivable {item}",
+        "other_item_covered": "The invoice has no entry of its own; the linked other receivable posts it. Corrections are made in the receivable detail."
       },
       "internal_document_badge": "Internal document",
       "internal_document_reversal_badge": "Internal document reversal"
@@ -24069,7 +24073,30 @@
     "bulk_oss_failure_not_attempted": "Documents not attempted: {n}",
     "bulk_oss_failure_pdf_stale": "PDF cache could not be invalidated for {n} documents",
     "bulk_oss_failure_retry_hint": "The unprocessed documents are unchanged and stay selected — once the cause is fixed, run the action again over them only.",
-    "bulk_oss_pdf_stale_hint": "The data is saved, but the stored PDF is stale. Regenerate it before sending the document."
+    "bulk_oss_pdf_stale_hint": "The data is saved, but the stored PDF is stale. Regenerate it before sending the document.",
+    "other_item_link": {
+      "action": "Link to other receivable",
+      "action_tooltip": "The invoice gets no posting of its own; the other receivable posts it and its payments carry over.",
+      "badge": "Other receivable",
+      "linked": "Posted by other receivable",
+      "unlink": "Unlink",
+      "unlink_confirm": "Unlink the invoice from the other receivable? The invoice loses the receivable payments and stays unposted; post it the usual way.",
+      "linked_toast": "The invoice is linked to the other receivable.",
+      "unlinked_toast": "The invoice is unlinked from the other receivable.",
+      "suggestion": "The invoice matches other receivable {item} ({amount}) with the same variable symbol. A linked invoice does not post revenue again and takes over the receivable payments.",
+      "link_suggested": "Link",
+      "choose_other": "Choose another",
+      "modal_title": "Link to other receivable",
+      "modal_hint": "Posted other receivables in the same currency. Only a receivable with the same amount as the invoice can be linked.",
+      "search": "Search number, partner, VS…",
+      "no_candidates": "No posted other receivable to link.",
+      "amount_mismatch": "The receivable amount differs from the invoice amount.",
+      "vs_match": "VS match",
+      "vs": "VS",
+      "paid": "paid",
+      "partially_paid": "partially paid",
+      "unpaid": "unpaid"
+    }
   },
   "status": {
     "draft": "Draft",

@@ -741,6 +741,10 @@ final class Routes
         $app->get    ('/api/invoices/{id:[0-9]+}/final-candidates',   FinalCandidatesAction::class);
         $app->post   ('/api/invoices/{id:[0-9]+}/link-advance',       LinkInvoiceAdvanceAction::class);
         $app->delete ('/api/invoices/{id:[0-9]+}/link-advance',       UnlinkInvoiceAdvanceAction::class);
+        // Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou)
+        $app->get    ('/api/invoices/{id:[0-9]+}/other-item-candidates', [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'candidates']);
+        $app->post   ('/api/invoices/{id:[0-9]+}/other-item-link',       [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'link']);
+        $app->delete ('/api/invoices/{id:[0-9]+}/other-item-link',       [\MyInvoice\Action\Invoice\InvoiceOtherItemLinkAction::class, 'unlink']);
         // Postupné čerpání zálohy konceptem faktury (milníky smlouvy o dílo)
         $app->get    ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'candidates']);
         $app->post   ('/api/invoices/{id:[0-9]+}/advance-drawdown', [\MyInvoice\Action\Invoice\AdvanceDrawdownAction::class, 'apply']);

@@ -417,7 +417,7 @@ final class DeleteInvoiceAction
                             WHERE supplier_id = ? AND id IN ($place) AND booked_at IS NOT NULL)
                  OR EXISTS(SELECT 1 FROM invoices d
                             WHERE d.supplier_id = ? AND d.id IN ($place)
-                              AND " . \MyInvoice\Service\Accounting\DocumentPostingGroup::activePostingExistsSql("'invoice'", 'd.id', 'd.supplier_id') . ')'
+                              AND " . \MyInvoice\Service\Accounting\DocumentPostingGroup::activePostingExistsSql("'invoice'", 'd.id', 'd.supplier_id', true, false) . ')'
         );
         $stmt->execute(array_merge([$supplierId], $invoiceIds, [$supplierId], $invoiceIds));
 

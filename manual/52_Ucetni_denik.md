@@ -192,6 +192,8 @@ Agenda slouží pro nároky a dluhy, které nepatří do faktur, mezd ani daní:
 > [!WARNING]
 > Zdanitelné plnění se sem nezadává. Patří do faktur, aby jeho řádky vstoupily do knihy DPH a výkazů.
 
+**Faktura k už zaúčtované pohledávce.** Prodej se někdy zaúčtuje ostatní pohledávkou už při podpisu smlouvy (například prodej pozemku, 311 / 641) a úhrada se spáruje na ni. Fakturu bez DPH, kterou vystavíte později na stejnou částku, v detailu faktury navažte akcí **Navázat na ostatní pohledávku**. Odpovídá-li faktuře jediná pohledávka se stejným VS i částkou, nabídne ji detail faktury sám. Navázaná faktura nemá vlastní zápis, výnos se podruhé neúčtuje a v sekci Zaúčtování je vidět zápis pohledávky. Úhrady pohledávky se na fakturu převezmou, takže je uhrazená, jakmile je uhrazená pohledávka. Banka ani pokladna navázanou fakturu k párování nenabízí, platba patří pohledávce. Měla-li faktura vlastní zaúčtování, navázání ho stornuje. Po odpojení zůstane faktura nezaúčtovaná a bez úhrad pohledávky a zaúčtujete ji běžně. Storno faktury vazbu zruší. Kniha DPH a výkazy berou fakturu stejně jako dřív.
+
 Podrobnosti jsou v [§ 52.14.14](#521414-ostatni-pohledavky-a-zavazky).
 
 ## 52.13 Když něco nejde

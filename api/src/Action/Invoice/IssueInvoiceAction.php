@@ -72,6 +72,7 @@ final class IssueInvoiceAction
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
         private readonly \MyInvoice\Service\Invoice\InvoicePaymentService $payments,
         private readonly \MyInvoice\Service\WorkReport\WorkReportBillingService $billing,
+        private readonly \MyInvoice\Service\Invoice\InvoiceOtherItemLinkService $otherItemLink,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -453,6 +454,24 @@ final class IssueInvoiceAction
         // Smaž cached draft PDF (Faktura-draft-NN.pdf) — po vystavení má faktura nový
         // varsymbol a snapshoty, takže staré cached PDF už neodpovídá.
         $this->pdfRenderer->invalidate($id, 'invalidate_issue');
+
+        // Koncept navázaný na ostatní pohledávku (migrace 2246): po vystavení převezme její
+        // úhrady a auto-post ho vynechá. Koncept, který podmínky vazby už nesplňuje, se
+        // odpojí a zaúčtuje jako každá faktura. Chyba nesmí shodit vystavení.
+        $otherItemLink = ['status' => 'none'];
+        try {
+            $otherItemLink = $this->otherItemLink->afterIssue($supplierId, $id, isset($user['id']) ? (int) $user['id'] : null);
+        } catch (\Throwable $e) {
+            $this->logger->log('invoice.other_item_link_failed', $user['id'] ?? null, 'invoice', $id, [
+                'error' => $e->getMessage(),
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
+        if ($otherItemLink['status'] === 'unlinked') {
+            $this->logger->log('invoice.other_item_unlinked', $user['id'] ?? null, 'invoice', $id, [
+                'trigger' => 'issue',
+                'reason' => $otherItemLink['reason'] ?? null,
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
 
         // Auto-post hook (A2): má-li firma zapnutý auto_post_invoices a běží v podvojném
         // účetnictví, zaúčtuj vystavenou fakturu hned. Chyba zaúčtování NESMÍ zablokovat

@@ -506,7 +506,8 @@
     "remaining_payment": "Zbývá zaplatit vč. úroku a poplatku",
     "remaining_payment_hint": "Součet nezaplacených splátek. Saldo položky snižuje jen jistina, úrok a poplatek se zaúčtují s úhradou.",
     "allocation_split": "jistina {principal}, úrok {interest}, poplatek {fee}",
-    "allocation_split_hint": "Platba se rozdělí podle splátek: nejdřív úrok, pak poplatek a nakonec jistina."
+    "allocation_split_hint": "Platba se rozdělí podle splátek: nejdřív úrok, pak poplatek a nakonec jistina.",
+    "linked_invoice": "Navázaná faktura"
   },
   "internal_documents": {
     "title": "Interní doklady",
@@ -18107,7 +18108,10 @@
         "advance_unpaid": "Záloha se zaúčtuje při úhradě (314). Spárujte s ní platbu z banky nebo ji uhraďte pokladnou, ne konečnou fakturu.",
         "advance_posted": "Záloha se neúčtuje jako předpis. Její zaúčtování tvoří úhrada na účet zálohy a zúčtování zálohy v konečné faktuře.",
         "relation_advance_payment": "Úhrada zálohy",
-        "relation_advance_final": "Zúčtování v konečné faktuře"
+        "relation_advance_final": "Zúčtování v konečné faktuře",
+        "relation_other_item": "Ostatní pohledávka",
+        "open_other_item": "Pohledávka {item}",
+        "other_item_covered": "Faktura vlastní zápis nemá, účtuje ji zápis navázané ostatní pohledávky. Opravuje se v detailu pohledávky."
       },
       "internal_document_badge": "Interní doklad",
       "internal_document_reversal_badge": "Storno interního dokladu"
@@ -24069,7 +24073,30 @@
     "bulk_oss_failure_not_attempted": "Nezkoušeno dokladů: {n}",
     "bulk_oss_failure_pdf_stale": "Nepodařilo se zneplatnit cache PDF u {n} dokladů",
     "bulk_oss_failure_retry_hint": "Nezpracované doklady zůstaly beze změny a máte je vybrané - po odstranění příčiny spusťte akci znovu jen nad nimi.",
-    "bulk_oss_pdf_stale_hint": "Data jsou zapsaná, ale uložené PDF je staré. Vygenerujte je znovu, než doklad odešlete."
+    "bulk_oss_pdf_stale_hint": "Data jsou zapsaná, ale uložené PDF je staré. Vygenerujte je znovu, než doklad odešlete.",
+    "other_item_link": {
+      "action": "Navázat na ostatní pohledávku",
+      "action_tooltip": "Faktura nebude mít vlastní zaúčtování, účtuje ji ostatní pohledávka a převezme její úhrady.",
+      "badge": "Ostatní pohledávka",
+      "linked": "Fakturu účtuje ostatní pohledávka",
+      "unlink": "Odpojit",
+      "unlink_confirm": "Odpojit fakturu od ostatní pohledávky? Faktura přijde o úhrady pohledávky a zůstane nezaúčtovaná, zaúčtujete ji běžným postupem.",
+      "linked_toast": "Faktura je navázaná na ostatní pohledávku.",
+      "unlinked_toast": "Faktura je odpojená od ostatní pohledávky.",
+      "suggestion": "Faktura odpovídá ostatní pohledávce {item} ({amount}) se stejným VS. Navázaná faktura výnos podruhé neúčtuje a převezme úhrady pohledávky.",
+      "link_suggested": "Navázat",
+      "choose_other": "Vybrat jinou",
+      "modal_title": "Navázat na ostatní pohledávku",
+      "modal_hint": "Zaúčtované ostatní pohledávky ve stejné měně. Navázat lze jen pohledávku se stejnou částkou jako faktura.",
+      "search": "Hledat číslo, partnera, VS…",
+      "no_candidates": "Žádná zaúčtovaná ostatní pohledávka k navázání.",
+      "amount_mismatch": "Částka pohledávky se liší od částky faktury.",
+      "vs_match": "Shoda VS",
+      "vs": "VS",
+      "paid": "uhrazeno",
+      "partially_paid": "částečně uhrazeno",
+      "unpaid": "neuhrazeno"
+    }
   },
   "status": {
     "draft": "Koncept",

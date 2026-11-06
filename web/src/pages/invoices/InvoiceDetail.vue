@@ -57,6 +57,7 @@ import { appIsoDate, overdueDays } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import ItemAccrualFields from '@/components/invoice/ItemAccrualFields.vue'
 import CreditNoteOffsetNotice from '@/components/invoices/CreditNoteOffsetNotice.vue'
+import InvoiceOtherItemLink from '@/components/invoices/InvoiceOtherItemLink.vue'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 import ListNavArrows from '@/components/ui/ListNavArrows.vue'
 import { useListNavigation } from '@/composables/useListNavigation'
@@ -578,6 +579,28 @@ async function deletePayment(p: InvoicePayment) {
 async function onReposted() {
   await load()
   toast.success(t('accounting.repost.done'))
+}
+
+// Faktura krytá ostatní pohledávkou: vazba mění zaúčtování i úhrady faktury.
+const otherItemLinkRef = ref<InstanceType<typeof InvoiceOtherItemLink> | null>(null)
+const canLinkOtherItem = computed(() =>
+  isDoubleEntry.value
+  && auth.canWrite('accounting.journal.post')
+  && auth.canWrite('invoices')
+  && auth.canRead('other_items')
+  && !lockedForMe.value)
+const canOfferOtherItemLink = computed(() =>
+  !!invoice.value
+  && canLinkOtherItem.value
+  && !invoice.value.other_item_id
+  && invoice.value.invoice_type === 'invoice'
+  && invoice.value.status !== 'cancelled'
+  && Math.abs(Number(invoice.value.total_vat ?? 0)) < 0.005)
+
+async function onOtherItemLinkChanged(updated: Invoice) {
+  invoice.value = updated
+  await postingPanelRef.value?.reload()
+  invoicesApi.activity(updated.id).then(a => { activity.value = a }).catch(() => {})
 }
 
 async function loadSignatureProfiles() {
@@ -1865,6 +1888,7 @@ const canPostToJournal = computed(() =>
   !!invoice.value
   && isDoubleEntry.value
   && !invoice.value.locked?.journal_entry_id
+  && !invoice.value.other_item_id
   && invoice.value.status !== 'draft'
   && invoice.value.status !== 'cancelled'
   && auth.canWrite('invoices'))
@@ -2019,6 +2043,9 @@ const invoiceActions = computed<ActionItem[]>(() => {
       title: t('invoice.wr_btn') as string, run: () => { wrModalOpen.value = true } },
     // ── zaúčtování (podvojné účetnictví) — sekundární, ať nekoliduje s primární
     // platební/upomínkovou akcí (pravidlo „1 primární akce dle stavu" výše) ──
+    { key: 'other-item-link', label: t('invoice.other_item_link.action'), icon: 'link', tier: 'secondary', variant: 'primary',
+      show: canOfferOtherItemLink.value, disabled: b,
+      title: t('invoice.other_item_link.action_tooltip') as string, run: () => { void otherItemLinkRef.value?.open() } },
     { key: 'post', label: t('common.post_document'), icon: 'clipboardCheck', tier: 'secondary', variant: 'primary',
       show: canPostToJournal.value, disabled: b, loading: busy.value === 'post', run: postToJournal },
     { key: 'journal', label: t('common.view_in_journal'), icon: 'chart', tier: 'secondary', variant: 'neutral',
@@ -2582,6 +2609,9 @@ useWindowRefresh(async () => {
           </table>
         </div>
       </div>
+      <!-- Faktura krytá ostatní pohledávkou (prodej zaúčtovaný už smlouvou) -->
+      <InvoiceOtherItemLink ref="otherItemLinkRef" :invoice="invoice" :can-link="canLinkOtherItem"
+        @updated="onOtherItemLinkChanged" />
       <!-- Zápočet dobropisu s opravovanou fakturou (issue #140) -->
       <CreditNoteOffsetNotice v-if="!isDraft && hasCreditNoteOffsetContext"
         doc-type="invoice" :doc-id="invoice.id" :is-credit-note="invoice.invoice_type === 'credit_note'"

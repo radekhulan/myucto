@@ -214,12 +214,15 @@ export type JournalPostingSource = JournalDocumentSource | 'bank-transactions'
  * zápis nemá, její zaúčtování tvoří úhrada (314/221, 221/324) a zúčtování v konečné
  * faktuře. Takové zápisy se jen ukazují, přeúčtovávají se u svého dokladu.
  */
-export type JournalEntryRelation = 'own' | 'advance_payment' | 'advance_final'
+export type JournalEntryRelation = 'own' | 'advance_payment' | 'advance_final' | 'other_item'
 
 /** Zápis i s řádky, jak ho vrací /journal/for-document/{source}/{id}. */
 export interface JournalEntryWithLines extends JournalEntry {
   lines: JournalLine[]
   relation?: JournalEntryRelation
+  /** U vztahu `other_item`: ostatní pohledávka, jejíž zápis fakturu účtuje. */
+  other_item_id?: number
+  other_item_document_no?: string | null
 }
 
 /** Jeden navržený řádek kontace — MD/DAL s názvem účtu, ať uživatel nepotvrzuje holá čísla. */
