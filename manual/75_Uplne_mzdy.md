@@ -436,6 +436,11 @@ stopy. Bez převzetí odpovědnosti běh schválit nejde.
 **Výsledek.** Rozpad podle zaměstnanců obsahuje čísla po osobách, **Rozklad
 čisté mzdy**, **Rozklad sociálního a zdravotního pojištění** a **Rozpad daně
 ze závislé činnosti**. Historie je pod odkazem **Zobrazit historii a změny**.
+U hodinově odměňovaných osob **Hodinové nároky na výplatní pásce** uvádějí
+každý vyplácený nárok jednou; rozpis úseků a zaokrouhlení řádku se rozbalí
+pod odkazem **Rozpis výpočtu**. Doložené nulové nároky (0 h, 0 Kč) jsou
+schované pod odkazem **Zobrazit i nulové nároky**. Výplatní páska se tím
+nemění.
 
 **Schválení** uloží výsledek jako závazný, zařadí generování výplatních pásek
 každé zpracované osoby na pozadí, v podvojném účetnictví připraví rozdílový mzdový deník

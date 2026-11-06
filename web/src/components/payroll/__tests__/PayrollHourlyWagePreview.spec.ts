@@ -52,14 +52,43 @@ describe('PayrollHourlyWagePreview', () => {
     expect(wrapper.text()).not.toContain('money:undefined')
     expect(wrapper.get('[data-test="hourly-preview-segment"]').text()).not.toContain('monthly_part')
   })
-  it('limits row blocker detail while keeping all reasons in the expanded panel', () => {
+  it('limits row blocker detail to one summary line and keeps all reasons behind the expander', () => {
     const value = preview({ blockers: [{ code: 'one', message: 'První syntetický podklad', context: {} }, { code: 'two', message: 'Druhý syntetický podklad', context: {} }] })
     const compact = mount(PayrollHourlyWagePreviewView, { props: { value, compact: true } })
-    expect(compact.text()).toContain('První syntetický podklad')
-    expect(compact.text()).not.toContain('Druhý syntetický podklad')
-    expect(compact.text()).toContain('more_blockers')
+    const toggle = compact.get('[data-test="hourly-preview-blockers-toggle"]')
+    expect((toggle.element as HTMLDetailsElement).open).toBe(false)
+    expect(toggle.get('summary').text()).toContain('První syntetický podklad')
+    expect(toggle.get('summary').text()).not.toContain('Druhý syntetický podklad')
+    expect(toggle.get('summary').text()).toContain('more_blockers')
+    expect(compact.get('[data-test="hourly-preview-blockers"]').text()).toContain('Druhý syntetický podklad')
     const expanded = mount(PayrollHourlyWagePreviewView, { props: { value } })
     expect(expanded.text()).toContain('Druhý syntetický podklad')
+  })
+  it('stejnou blokaci hlášenou po úsecích ukáže jen jednou', () => {
+    const repeated = { code: 'hourly_premium_evidence_missing', message: 'Doložte příplatkové vrstvy ke každému úseku pracovní doby.', context: {} }
+    const value = preview({ complete: false, payable_total_minor: null, blockers: [repeated, { ...repeated, context: { segment: 2 } }, { ...repeated, context: { segment: 3 } }, { ...repeated, context: { segment: 4 } }] })
+    const expanded = mount(PayrollHourlyWagePreviewView, { props: { value } })
+    expect(expanded.findAll('[data-test="hourly-preview-blockers"] li')).toHaveLength(1)
+    const compact = mount(PayrollHourlyWagePreviewView, { props: { value, compact: true } })
+    expect(compact.findAll('[data-test="hourly-preview-blockers"] li')).toHaveLength(1)
+    expect(compact.get('summary').text()).not.toContain('more_blockers')
+  })
+  it('doložené nulové nároky schová pod rozbalení, nedoložené nechá vidět', async () => {
+    const value = preview()
+    value.claims.push(
+      { ...value.claims[0]!, purpose: 'premium_holiday', duration_units: 0, payable_minor: 0, analytical_minor: 0, segments: [] },
+      { ...value.claims[0]!, purpose: 'premium_night', ready: false, duration_units: null, payable_minor: null, analytical_minor: null, segments: [] },
+    )
+    const wrapper = mount(PayrollHourlyWagePreviewView, { props: { value } })
+    const claims = wrapper.findAll('[data-test="hourly-preview-claim"]')
+    expect(claims).toHaveLength(2)
+    expect(claims.map(claim => claim.text()).join(' ')).not.toContain('premium_holiday')
+    expect(claims[1]!.text()).toContain('claim_incomplete')
+    const toggle = wrapper.get('[data-test="hourly-preview-zero-toggle"]')
+    expect(toggle.text()).toContain('show_zero_claims')
+    expect(wrapper.find('[data-test="hourly-preview-zero-claim"]').exists()).toBe(false)
+    await toggle.trigger('click')
+    expect(wrapper.get('[data-test="hourly-preview-zero-claim"]').text()).toContain('premium_holiday')
   })
   it('does not assess current minimum for settlement-only historical claims', () => {
     const wrapper = mount(PayrollHourlyWagePreviewView, { props: { value: preview({ settlement_only: true, minimum_wage: minimum() }) } })

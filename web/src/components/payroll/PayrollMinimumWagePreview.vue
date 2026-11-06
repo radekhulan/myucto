@@ -1,9 +1,11 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PayrollMinimumWagePreview } from '@/api/payroll'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { formatPayrollDuration } from '@/pages/payroll/payrollDuration'
-defineProps<{ value: PayrollMinimumWagePreview }>()
+import { uniqueBy } from '@/pages/payroll/payrollFieldFeedback'
+const props = defineProps<{ value: PayrollMinimumWagePreview }>()
 const { t, te } = useI18n()
 function amount(minor: number | null | undefined): string { return minor == null ? t('payroll.worked_hours.unknown') : formatMoneyMinor(minor) }
 function exclusionReason(reason: string): string {
@@ -14,6 +16,8 @@ function blockerText(blocker: { code: string, message: string }): string {
   const key = `payroll.minimum.blockers.${blocker.code}`
   return te(key) ? t(key) : blocker.message
 }
+/** Stejná věta za každý úsek pracovní doby je pro účetní pořád jedna věc k vyřízení. */
+const blockerMessages = computed(() => uniqueBy(props.value.blockers.map(blockerText), message => message))
 </script>
 
 <template>
@@ -36,6 +40,6 @@ function blockerText(blocker: { code: string, message: string }): string {
       <summary class="cursor-pointer font-medium">{{ t('payroll.minimum.parts') }}</summary>
       <p v-for="(part, index) in value.assessment_evidence.parts" :key="index" class="mt-1 text-neutral-600" data-test="minimum-part">{{ formatDate(part.date_from) }} – {{ formatDate(part.date_to) }} · {{ formatPayrollDuration(part.regular_worked_duration_units) }} · {{ t('payroll.minimum.statutory_weekly') }}: {{ part.stated_weekly_minutes === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(part.stated_weekly_minutes * 50) }} · {{ t('payroll.minimum.hourly_rate', { amount: amount(part.minimum_hourly_minor) }) }} · {{ amount(part.analytical_minor) }}</p>
     </details>
-    <ul v-if="value.blockers.length" class="list-disc space-y-1 pl-4 text-warning-700" data-test="minimum-blockers"><li v-for="(blocker, index) in value.blockers" :key="`${blocker.code}-${index}`">{{ blockerText(blocker) }}</li></ul>
+    <ul v-if="blockerMessages.length" class="list-disc space-y-1 pl-4 text-warning-700" data-test="minimum-blockers"><li v-for="message in blockerMessages" :key="message">{{ message }}</li></ul>
   </section>
 </template>

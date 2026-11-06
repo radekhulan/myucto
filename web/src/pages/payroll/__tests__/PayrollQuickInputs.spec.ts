@@ -486,6 +486,58 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.text()).toContain('payroll.quick_inputs.blockers.hourly_remuneration_calculation_unsupported')
   })
 
+  it('hodiny a náhled hodinové mzdy dá do samostatného řádku přes celou šířku, ne do sloupce se jménem', async () => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      worked_time: {
+        month: { id: 1, row_version: 2, revision_no: 1, status: 'open', work_source: 'manual_summary' },
+        manual_summary: null, suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30' }],
+        worked_duration_units: 22500, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false,
+      },
+      hourly_wage_preview: { complete: true, blockers: [], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: 450000, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const hourlyRow = wrapper.get('[data-testid="quick-hourly-row-12"]')
+    expect(hourlyRow.element.tagName).toBe('TR')
+    const cell = hourlyRow.get('td')
+    expect(Number(cell.attributes('colspan'))).toBe(wrapper.findAll('thead th').length)
+    expect(hourlyRow.find('[data-testid="quick-worked-hours-12"]').exists()).toBe(true)
+    expect(hourlyRow.find('[data-test="hourly-wage-preview"]').exists()).toBe(true)
+    const personCell = hourlyRow.element.previousElementSibling!.querySelector('td')!
+    expect(personCell.querySelector('[data-test="hourly-wage-preview"]')).toBeNull()
+    expect(personCell.querySelector('[data-test="worked-hours-summary"]')).toBeNull()
+    expect(wrapper.get('[data-testid="quick-hourly-card-12"]').find('[data-test="hourly-wage-preview"]').exists()).toBe(true)
+  })
+
+  it('měsíční řádek žádný hodinový řádek nemá', async () => {
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="quick-hourly-row-12"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="quick-hourly-card-12"]').exists()).toBe(false)
+  })
+
+  it('blokaci, kterou už říká náhled hodinové mzdy, neopakuje u osoby a stejnou větu ukáže jednou', async () => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      blockers: ['hourly_premium_evidence_missing', 'hourly_time_missing'],
+      hourly_wage_preview: { complete: false, blockers: [
+        { code: 'hourly_premium_evidence_missing', message: 'Doložte příplatkové vrstvy ke každému úseku pracovní doby.', context: {} },
+        { code: 'hourly_premium_evidence_missing', message: 'Doložte příplatkové vrstvy ke každému úseku pracovní doby.', context: { segment: 2 } },
+        { code: 'hourly_premium_evidence_missing', message: 'Doložte příplatkové vrstvy ke každému úseku pracovní doby.', context: { segment: 3 } },
+        { code: 'hourly_time_missing', message: 'Doložte skutečně odpracovanou dobu.', context: {} },
+      ], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: null, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    const hourlyRow = wrapper.get('[data-testid="quick-hourly-row-12"]')
+    const items = hourlyRow.findAll('[data-test="hourly-preview-blockers"] li').map(item => item.text())
+    expect(items).toEqual(['Doložte příplatkové vrstvy ke každému úseku pracovní doby.', 'payroll.hourly_preview.blockers.hourly_time_missing'])
+    const personCell = hourlyRow.element.previousElementSibling!.querySelector('td')!
+    expect(personCell.textContent).not.toContain('Doložte příplatkové vrstvy')
+    expect(personCell.textContent).not.toContain('hourly_time_missing')
+  })
+
   it('zobrazí konkrétní serverovou příčinu hodinové blokace místo kódu překladu', async () => {
     m.load.mockImplementation(async period => ({ period, items: [fixture({
       hourly_remuneration_in_period: true,

@@ -199,8 +199,13 @@ importovaný měsíc zůstává beze změny.
    nesmějí překrývat a musí bez mezer pokrýt celé trvání vztahu v měsíci.
    Dny bez práce zahrňte do úseku s `0`. Rozvržený fond se za skutečně
    odpracované hodiny nedoplňuje.
-4. Uveďte důvod a podklad (nejvýše 450 znaků). Jestliže už měsíc obsahuje
-   docházku nebo souhrn importu, výslovně potvrďte nahrazení zdroje.
+4. Uveďte důvod a podklad (nejvýše 450 znaků). Při prvním zadání souhrnu,
+   kdy měsíc nemá předchozí ruční revizi ani jiný zdroj, je důvod
+   nepovinný; v historii se zápis ukáže jako **Prvotní zadání souhrnu**.
+   Povinný je při opravě uloženého souhrnu a při náhradě zdroje. Jestliže
+   už měsíc obsahuje docházku nebo souhrn importu, výslovně potvrďte
+   nahrazení zdroje. Chybu v hodinách úseku panel ukáže přímo u úseku
+   a vadné pole orámuje.
    Původní evidence zůstane zachovaná, ale její hodiny se k ručnímu
    souhrnu nepřičtou.
 5. Souhrn uložte a klikněte na **Schválit v docházce**. V **Docházce
@@ -229,8 +234,12 @@ doložené ruční posouzení.
 
 ### 79.8.1.2 Výpočet hodinové mzdy a doložení nároků
 
-Náhled v řádku ukazuje celkovou zaokrouhlenou částku a případný důvod
-neúplnosti. Otevřete panel podkladů pro rozpad běžné práce, dosažené mzdy
+Hodiny a náhled hodinové mzdy stojí v samostatném řádku pod jménem
+přes celou šířku tabulky (na mobilu v kartě osoby). Řádek ukazuje
+odpracované hodiny, zdroj a stav, celkovou zaokrouhlenou částku a doplatek
+do minima; důvody neúplnosti jsou v jedné řádce a celý seznam se rozbalí
+kliknutím. Stejná blokace hlášená za více úseků se ukáže jen jednou.
+Měsíčně odměňovaný vztah tento řádek nemá. Otevřete panel podkladů pro rozpad běžné práce, dosažené mzdy
 za přesčas, jednotlivých příplatků a náhrad. Vidíte skutečné hodiny a
 sazby po účinných úsecích; při více sazbách během měsíce se jednotlivé
 úseky nezamění za poslední sazbu. Nároky se zaokrouhlují za měsíc a složku,
@@ -251,7 +260,10 @@ Přímým přepsáním měsíčního základu hodinový výpočet nenahradíte.
 hodinách. Pro ruční souhrn vyplňte v panelu **Podklady příplatků hodinové
 mzdy / odměny** skutečnou dobu noci, víkendu, práce ve svátek a expozice
 ztíženému prostředí včetně počtu vlivů. Prázdné pole znamená neznámé,
-`0` potvrzenou nulovou dobu. U kladné práce ve svátek uveďte skutečné
+`0` potvrzenou nulovou dobu. Tlačítko **V měsíci žádné příplatky** vyplní
+u všech úseků nulu u noci, víkendu a práce ve svátku a potvrdí práci bez
+ztíženého prostředí; podklad pak uložte. Doložené nulové nároky náhled
+schová pod odkaz **Zobrazit i nulové nároky**. U kladné práce ve svátek uveďte skutečné
 sváteční dny a jejich hodiny. U přesčasu nahrazeného volnem obdobně
 doložte skutečné dny přesčasové práce; systém je nerozdělí podle
 kalendáře ani fondu. Je-li zdrojem denní docházka, její příplatkové
@@ -272,9 +284,11 @@ vyberte historický nárok a schválenou nepřítomnost **Placené náhradní
 volno za práci ve svátek**. Volno za přesčas používá samostatnou
 neplacenou nepřítomnost a původní den přesčasové práce. Chybějící
 rozvrh nebo nepřítomnost doplňte v jejich agendách, nikoli odhadem
-dostupných hodin. Každou ze tří skupin výslovně potvrďte; potvrzený
-prázdný seznam znamená žádný nárok nebo nulové čerpání. Bez potvrzení
-zůstává stav neznámý.
+dostupných hodin. Skupinu můžete výslovně potvrdit; potvrzený prázdný
+seznam znamená žádný nárok nebo nulové čerpání. Potvrzení k uložení
+nutné není: nepotvrzenou skupinu posoudí aplikace automaticky při každém
+výpočtu, a vznikne-li v ní nárok, který bez dokladu ocenit nejde, výpočet
+ho uvede jako konkrétní blokaci.
 
 Kde nárok v měsíci objektivně vzniknout nemůže, posoudí nulu aplikace
 sama a panel u skupiny zobrazí **Posouzeno automaticky** s důvodem:
