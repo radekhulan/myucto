@@ -123,6 +123,7 @@
     "payroll_bank",
     "payroll_imports",
     "payroll_travel",
+    "pending_documents",
     "period_filter",
     "permissions",
     "pohoda",
@@ -578,7 +579,10 @@
     ],
     "other-item-new": [
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "other-item-detail": [
       "dimensions",
@@ -588,7 +592,10 @@
     ],
     "other-item-edit": [
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "document-requests": [
       "document_requests"

@@ -159,6 +159,14 @@
     "dismiss": "Nepoužívat"
   },
   "other_items": {
+    "documents_settings": {
+      "title": "Složka dokumentů",
+      "hint": "Soubory nahrané k ostatní pohledávce nebo závazku se uloží do této složky v Dokumentech. {'{'}YYYY{'}'} a {'{'}MM{'}'} se nahradí rokem a měsícem data vystavení.",
+      "folder_label": "Složka",
+      "preview": "Například: {folder}",
+      "reset": "Výchozí složka",
+      "saved": "Složka dokumentů je uložená"
+    },
     "posting": {
       "title": "Účtování",
       "hint": "Kontace vzniku a úhrad. Vlastní kontace položky má přednost před účetním profilem druhu, bez obou platí výchozí účty.",
@@ -14342,6 +14350,12 @@
     "volume_hint_bank_transactions": "Pohyby ze všech bankovních výpisů firmy.",
     "volume_hint_cash_documents": "Zaúčtované a stornované pokladní doklady bez konceptů.",
     "volume_hint_journal_entries": "Všechny zápisy v účetním deníku včetně storen."
+  },
+  "pending_documents": {
+    "folder_hint": "Nové soubory se po uložení nahrají do složky {folder}.",
+    "new_badge": "NOVÝ",
+    "empty": "Kupní smlouvu nebo jiný podklad můžete nahrát nebo připojit už teď, uloží se spolu s dokladem.",
+    "failed": "Doklad je uložený, ale {count} dokumentů se nepodařilo nahrát nebo připojit."
   },
   "linked_documents": {
     "title": "Přílohy",

@@ -3186,6 +3186,8 @@ final class Routes
             $g->get   ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'list']);
             $g->post  ('/other-items',                         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'create']);
             $g->get   ('/other-items/bank-candidates',         [\MyInvoice\Action\Accounting\OtherItemAction::class, 'bankMatchCandidates']);
+            $g->get   ('/other-items/settings',                [\MyInvoice\Action\Accounting\OtherItemSettingsAction::class, 'get']);
+            $g->put   ('/other-items/settings',                [\MyInvoice\Action\Accounting\OtherItemSettingsAction::class, 'update']);
             $g->get   ('/other-items/kinds',                   [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'list']);
             $g->post  ('/other-items/kinds',                   [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'create']);
             $g->put   ('/other-items/kinds/{id:[0-9]+}',       [\MyInvoice\Action\Accounting\OtherItemKindAction::class, 'update']);

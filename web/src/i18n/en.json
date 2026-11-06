@@ -159,6 +159,14 @@
     "dismiss": "Dismiss"
   },
   "other_items": {
+    "documents_settings": {
+      "title": "Documents folder",
+      "hint": "Files uploaded to an other receivable or payable are stored in this folder in Documents. {'{'}YYYY{'}'} and {'{'}MM{'}'} are replaced with the year and month of the issue date.",
+      "folder_label": "Folder",
+      "preview": "For example: {folder}",
+      "reset": "Default folder",
+      "saved": "Documents folder saved"
+    },
     "posting": {
       "title": "Posting",
       "hint": "Posting of origin and payments. The item's own posting takes precedence over the kind's posting profile; without either, default accounts apply.",
@@ -14342,6 +14350,12 @@
     "volume_hint_bank_transactions": "Transactions from all bank statements of the company.",
     "volume_hint_cash_documents": "Posted and reversed cash documents, excluding drafts.",
     "volume_hint_journal_entries": "All journal entries, including reversals."
+  },
+  "pending_documents": {
+    "folder_hint": "New files will be uploaded to {folder} after saving.",
+    "new_badge": "NEW",
+    "empty": "You can upload or attach the purchase contract or another document now, it is saved together with the record.",
+    "failed": "The record is saved, but {count} documents could not be uploaded or attached."
   },
   "linked_documents": {
     "title": "Attachments",

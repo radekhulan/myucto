@@ -1146,7 +1146,8 @@
         "2242_sessions_admin_last_seen.sql",
         "2243_work_report_billing.sql",
         "2244_payroll_import_profile_pamica_sample.sql",
-        "2245_session_device_class.sql"
+        "2245_session_device_class.sql",
+        "2249_other_item_settings.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -10413,6 +10414,24 @@
             "checks": {
                 "template_json": "json_valid(`template_json`)"
             }
+        },
+        "other_item_settings": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "document_folder": "varchar(500) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id)"
+            },
+            "foreign_keys": {
+                "fk_other_item_settings_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "other_items": {
             "type": "BASE TABLE",

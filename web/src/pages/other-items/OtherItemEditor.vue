@@ -17,6 +17,9 @@ import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import OtherItemPostingLines from '@/components/accounting/OtherItemPostingLines.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
+import PendingDocumentsPanel, { commitPendingDocuments, type PendingDocuments } from '@/components/documents/PendingDocumentsPanel.vue'
+import LinkedDocumentsPanel from '@/components/documents/LinkedDocumentsPanel.vue'
+import { OTHER_ITEM_DEFAULT_FOLDER, otherItemSettingsApi, resolveOtherItemFolder } from '@/api/otherItemSettings'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -38,6 +41,9 @@ const kinds = ref<OtherItemKind[]>([])
 /** Druh, který koncept nese z uložení — zůstává ve výběru, i když ho mezitím skryli. */
 const storedKind = ref<string | null>(null)
 const today = appIsoDate()
+const canReadDocuments = computed(() => auth.canRead('documents'))
+const pendingDocuments = ref<PendingDocuments>({ files: [], existing: [] })
+const folderTemplate = ref(OTHER_ITEM_DEFAULT_FOLDER)
 const form = reactive({
   side: (route.query.side === 'receivable' ? 'receivable' : 'payable') as OtherItemSide,
   kind: 'other',
@@ -90,6 +96,8 @@ const accountPlaceholder = computed(() => inheritedAccount.value
 const counterPlaceholder = computed(() => inheritedCounter.value
   ? t('other_items.posting.inherited_placeholder', { account: inheritedCounter.value })
   : t('other_items.choose_account'))
+
+const documentFolderPath = computed(() => resolveOtherItemFolder(folderTemplate.value, form.issued_on))
 
 const canSaveKindProfile = computed(() => auth.canWrite('other_items'))
 const savingSuggestion = ref(false)
@@ -183,6 +191,7 @@ async function load() {
     const requests: Promise<unknown>[] = []
     if (isDoubleEntry.value) requests.push(accountingApi.listAccounts().then(value => { accounts.value = value }))
     requests.push(otherItemKindsApi.list().then(value => { kinds.value = value }))
+    if (canReadDocuments.value) requests.push(otherItemSettingsApi.get().then(value => { folderTemplate.value = value.document_folder }, () => {}))
     if (isEdit.value) requests.push(otherItemsApi.get(editId.value).then(item => {
       if (item.status !== 'draft') {
         void router.replace({ name: 'other-item-detail', params: { id: editId.value } })
@@ -268,6 +277,11 @@ async function save() {
   try {
     const result = isEdit.value ? await otherItemsApi.update(editId.value, payload) : await otherItemsApi.create(payload)
     await docDims.save(isEdit.value ? editId.value : Number(result.id))
+    if (!isEdit.value && (pendingDocuments.value.files.length || pendingDocuments.value.existing.length)) {
+      const { failed } = await commitPendingDocuments(pendingDocuments.value, 'other_item', Number(result.id), documentFolderPath.value)
+      pendingDocuments.value = { files: [], existing: [] }
+      if (failed > 0) toast.error(t('pending_documents.failed', { count: failed }))
+    }
     toast.success(t('common.saved'))
     await router.push({ name: 'other-item-detail', params: { id: result.source_id || result.id } })
   } catch (error: any) {
@@ -376,6 +390,11 @@ onMounted(load)
           {{ t('other_items.single_posting') }}
         </button>
       </section>
+      <template v-if="canReadDocuments">
+        <LinkedDocumentsPanel v-if="isEdit" entity-type="other_item" :entity-id="editId" uploadable
+          :upload-folder-path="documentFolderPath" :title="t('linked_documents.title')" />
+        <PendingDocumentsPanel v-else v-model="pendingDocuments" :folder-path="documentFolderPath" :title="t('linked_documents.title')" />
+      </template>
       <section class="rounded-lg border border-neutral-200 bg-surface p-4">
         <label class="text-sm font-medium">{{ t('other_items.note') }}
           <textarea v-model="form.note" rows="3" maxlength="2000" class="mt-1 block w-full rounded-md border border-neutral-300 bg-surface p-2" />

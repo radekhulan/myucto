@@ -27,7 +27,11 @@ vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplier: m.supplier }),
 }))
 
-vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true }) }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true }) }))
+vi.mock('@/api/otherItemSettings', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/api/otherItemSettings')>()),
+  otherItemSettingsApi: { get: vi.fn().mockResolvedValue({ document_folder: 'Smlouvy/{YYYY}', document_folder_default: 'Ostatní pohledávky a závazky/{YYYY}/{MM}', is_default: false }), update: vi.fn() },
+}))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => ({ error: m.toastError, success: vi.fn() }),
