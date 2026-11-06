@@ -78,6 +78,8 @@ final class InTransitSettingTest extends StockTestCase
     public function testAccountantMayChangeItLikeTheOtherStockSettings(): void
     {
         $sid = $this->createSupplier();
+        // Účetní pracuje jen v přiřazené firmě, stejně jako za SupplierScopeMiddleware.
+        $this->db->pdo()->prepare('INSERT INTO user_suppliers (user_id, supplier_id) VALUES (?, ?)')->execute([$this->userId, $sid]);
 
         // Stejný cílený bypass guard() jako u stock_enabled/stock_auto_issue:
         // je to skladové, ne firemní nastavení.

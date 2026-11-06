@@ -71,15 +71,27 @@ final class SupplierAccessResolver
         return $access;
     }
 
+    /**
+     * Z firem, které volající už povolil podle členství, ponechá jen ty, kam požadavek
+     * pustí i jeho vazba (vlastní doména, token vázaný na firmu) a přihlašovací
+     * politika cílové firmy (povinné SSO).
+     *
+     * Členství se tu znovu nerozhoduje: každý volající má vlastní, otestovaný výklad
+     * (globální správce, klient bez členství), a druhý výklad by ho tiše zúžil.
+     *
+     * @param list<int|string> $supplierIds
+     * @return list<int>
+     */
     public function filterAllowedSupplierIds(Request $request, array $supplierIds): array
     {
         $supplierIds = array_values(array_unique(array_filter(array_map('intval', $supplierIds), static fn (int $id): bool => $id > 0)));
-        $this->preloadSupplierIds($supplierIds);
+        if ($supplierIds === []) return [];
+        $boundSupplierId = \MyInvoice\Security\RequestAuthorization::boundSupplierId($request);
+        $this->loginPolicy->preloadSupplierPolicies($supplierIds);
         $allowed = [];
         foreach ($supplierIds as $id) {
-            $scoped = $request->withHeader(SupplierScopeMiddleware::HEADER_NAME, (string) $id)->withQueryParams([]);
-            $access = $this->resolve($scoped);
-            if (!$access->denied && $access->supplierId === $id) $allowed[] = $id;
+            if ($boundSupplierId !== null && $id !== $boundSupplierId) continue;
+            if ($this->loginPolicy->requestAllowedForSupplier($request, $id)) $allowed[] = $id;
         }
         return $allowed;
     }
