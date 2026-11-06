@@ -2,7 +2,7 @@ import './styles/main.css'
 import { captureInitialDomainLogin } from '@/security/domainLoginContext'
 import { parseWindowFrameBootstrap } from '@/workspace/frameProtocol'
 import { initPwaInstall } from '@/composables/usePwaInstall'
-import { captureSsoFragment, captureSsoLoginTicket } from '@/security/oidc'
+import { captureSsoFragment, captureSsoLoginTicket, relaySsoStepUpPopup } from '@/security/oidc'
 
 // Nasazení nové verze uklidí assety předchozích vydání a záložka se starou verzí pak
 // chunk nedotáhne. Načte se znovu (nový index.html má nové chunky), nejvýš jednou za 30 s.
@@ -16,6 +16,21 @@ window.addEventListener('vite:preloadError', (event) => {
   window.location.reload()
 })
 
+// Okno ověření citlivé operace: jen předá výsledek dialogu, který ho otevřel,
+// a zavře se. Aplikace v něm nestartuje.
+const ssoStepUpPopup = relaySsoStepUpPopup(window.location, window.history)
+if (ssoStepUpPopup) {
+  const lang = (navigator.language || 'cs').toLowerCase().startsWith('cs') ? 'cs' : 'en'
+  document.title = 'MyÚčto'
+  const note = document.createElement('p')
+  note.style.cssText = 'font-family:system-ui,sans-serif;margin:3rem auto;max-width:28rem;text-align:center;color:#374151'
+  note.textContent = lang === 'cs'
+    ? 'Ověření je hotové, můžete pokračovat v původním okně. Toto okno se zavře samo, případně ho zavřete.'
+    : 'Verification is complete, continue in the original window. This window closes by itself, or close it now.'
+  document.body.replaceChildren(note)
+  window.close()
+}
+
 captureInitialDomainLogin(window.location)
 // Návrat od poskytovatele identity nese výsledek ve fragmentu; před startem
 // routeru se přečte a z adresy zmizí.
@@ -24,7 +39,9 @@ captureSsoFragment(window.location, window.history)
 
 const frame = parseWindowFrameBootstrap(window.location.search, window.parent !== window)
 
-if (frame) {
+if (ssoStepUpPopup) {
+  // nic dalšího, okno ověření
+} else if (frame) {
   const { installWindowSupplierScope } = await import('@/workspace/supplierContext')
   installWindowSupplierScope({ windowId: frame.id, supplierId: frame.supplierId })
   const { startWindowFrame } = await import('@/workspace/windowFrame')

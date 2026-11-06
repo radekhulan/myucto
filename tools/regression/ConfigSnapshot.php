@@ -22,6 +22,8 @@ final class ConfigSnapshot
         '9e814cc44989bd9ff1ea7f7add02232761c699e4d35c39d9e6f5d6329e532eb2',
         // auth.oidc spolu s maintenance_notice.*; DB, údaje ani runtime cesty beze změny.
         'da7795bcf5c4d560e9558938d6975d8a801531293dc59ff7ced3b9de163c1f0f',
+        // Výchozí popisek Entra „Microsoft Entra ID"; DB, údaje ani runtime cesty beze změny.
+        '6355a5ddd02f18e73a5b08e9e55986994d6493d345612a98e7b05c66982d2d60',
     ];
 
     private static ?Config $config = null;

@@ -20,6 +20,7 @@ export const SSO_ERROR_CODES = [
   'sso_user_inactive',
   'sso_identity_mismatch',
   'sso_cancelled',
+  'sso_domain_not_allowed',
 ] as const
 
 export type SsoErrorCode = typeof SSO_ERROR_CODES[number]
@@ -95,6 +96,69 @@ export function hasStrongProvider(
   id: string,
 ): boolean {
   return Array.isArray(providers) && providers.some(p => p.id === id && p.strong === true)
+}
+
+// ── Ověření citlivé operace v samostatném okně ───────────────────────────
+
+/**
+ * Ověření účtem organizace běží v novém okně, aby přesměrování nezavřelo
+ * rozdělanou práci (vyplněný dialog) ani panel pracovní plochy. Okno se po
+ * návratu od poskytovatele vrátí na tuto cestu, výsledek pošle přes
+ * BroadcastChannel a zavře se.
+ *
+ * Proč ne `window.opener.postMessage`: web posílá `Cross-Origin-Opener-Policy:
+ * same-origin`, takže přechodem okna na poskytovatele se vazba na opener přetrhne.
+ * BroadcastChannel funguje v rámci originu i bez ní. Zprávu přijme jen dialog,
+ * který okno otevřel: nese jednorázový `nonce` z návratové adresy. Proof je navíc
+ * na serveru vázaný na sezení a operaci.
+ */
+export const SSO_STEP_UP_POPUP_PATH = '/sso/step-up'
+export const SSO_STEP_UP_CHANNEL = 'myucto-sso-step-up'
+
+export interface SsoStepUpMessage {
+  nonce: string
+  token?: string
+  operation?: string
+  error?: string
+}
+
+export function isSsoStepUpNonce(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{32}$/.test(value)
+}
+
+export function newSsoStepUpNonce(): string {
+  const bytes = new Uint8Array(16)
+  crypto.getRandomValues(bytes)
+  return Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('')
+}
+
+/** Zpráva pro dialog z adresy, na kterou se okno vrátilo; mimo návratovou cestu null. */
+export function ssoStepUpPopupMessage(location: Pick<Location, 'pathname' | 'search' | 'hash'>): SsoStepUpMessage | null {
+  if (location.pathname !== SSO_STEP_UP_POPUP_PATH) return null
+  const nonce = new URLSearchParams(location.search).get('n') ?? ''
+  if (!isSsoStepUpNonce(nonce)) return null
+  const fragment = parseSsoFragment(location.hash)
+  if (fragment?.kind === 'step_up') return { nonce, token: fragment.token, operation: fragment.operation }
+  return { nonce, error: fragment?.kind === 'error' ? fragment.code : 'sso_flow_invalid' }
+}
+
+/**
+ * Běží v okně ověření místo startu aplikace: odešle výsledek dialogu, smaže ho
+ * z adresy a okno zavře. Vrací true, když jde o okno ověření.
+ */
+export function relaySsoStepUpPopup(
+  location: Pick<Location, 'pathname' | 'search' | 'hash'>,
+  history: Pick<History, 'replaceState' | 'state'>,
+): boolean {
+  if (location.pathname !== SSO_STEP_UP_POPUP_PATH) return false
+  const message = ssoStepUpPopupMessage(location)
+  history.replaceState(history.state, '', SSO_STEP_UP_POPUP_PATH)
+  if (message !== null && typeof BroadcastChannel !== 'undefined') {
+    const channel = new BroadcastChannel(SSO_STEP_UP_CHANNEL)
+    channel.postMessage(message)
+    channel.close()
+  }
+  return true
 }
 
 // ── Lístek z přihlášení přes poskytovatele, který je jen prvním faktorem ──

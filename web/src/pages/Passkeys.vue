@@ -262,6 +262,12 @@ async function resumeSsoStepUp() {
   }
 }
 
+/** Ověření přes účet organizace v okně: dokončí rozběhnuté odebrání. */
+async function revokeWithSsoProof(proof: string) {
+  const item = list.value.find(candidate => candidate.id === ssoRevokeId.value)
+  if (item) await revoke(item, proof)
+}
+
 onMounted(() => {
   void load().then(resumeSsoStepUp)
   // Politika chodí z /me — po tvrdém reloadu stránky nemusí být ve storu ještě
@@ -314,7 +320,8 @@ onMounted(() => {
         </p>
       </div>
       <SsoStepUpOption v-if="ssoStrongEnabled" operation="passkey.register"
-                       :verified="ssoRegisterProof !== ''" :disabled="busy" />
+                       :verified="ssoRegisterProof !== ''" :disabled="busy"
+                       @verified="(proof: string) => { ssoRegisterProof = proof }" />
       <button type="button" @click="add"
               :disabled="busy || !label.trim() || !passkeySupported || (totpRequired && !totpCodeValid && !recoveryCodeFilled && !ssoRegisterProof)"
               class="h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white rounded-md font-medium">
@@ -353,7 +360,8 @@ onMounted(() => {
       </div>
 
       <SsoStepUpOption v-if="ssoRevokeId !== null" :key="ssoRevokeId"
-                       :operation="`passkey.revoke:${ssoRevokeId}`" :disabled="busy" />
+                       :operation="`passkey.revoke:${ssoRevokeId}`" :disabled="busy"
+                       @verified="(proof: string) => revokeWithSsoProof(proof)" />
 
       <!-- Čím se odebrání potvrzuje. Bez tohohle uživatel netušil, že po něm
            aplikace bude chtít step-up, ani že TOTP kód z pole nahoře je plnohodnotná

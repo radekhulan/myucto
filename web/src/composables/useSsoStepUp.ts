@@ -1,16 +1,18 @@
-import { computed, inject, ref, toValue, type MaybeRefOrGetter } from 'vue'
-import { routeLocationKey } from 'vue-router'
+import { computed, getCurrentScope, onScopeDispose, ref, toValue, type MaybeRefOrGetter } from 'vue'
 import { useAuthStore } from '@/stores/auth'
 import { oidcApi, type ExternalIdentity } from '@/api/oidc'
 import {
   hasStrongProvider,
-  rememberPendingStepUp,
-  ssoReturnPath,
+  newSsoStepUpNonce,
+  SSO_STEP_UP_CHANNEL,
+  SSO_STEP_UP_POPUP_PATH,
   takeSsoStepUpProof,
+  type SsoStepUpMessage,
 } from '@/security/oidc'
-import { navigateFullPage } from '@/workspace/fullPageNavigation'
 
 const PROVIDER = 'entra'
+/** Jak dlouho dialog čeká na výsledek z okna; Entra drží přihlášení řádově minuty. */
+const WAIT_LIMIT_MS = 10 * 60 * 1000
 
 // Propojené identity se načtou nejvýš jednou za sezení stránky; seznam se
 // mění jen v profilu, a ten ho po změně obnoví přes invalidateSsoIdentities().
@@ -39,15 +41,19 @@ export function invalidateSsoIdentities(list?: ExternalIdentity[]): void {
 /**
  * Ověření citlivé operace přes účet organizace (Microsoft Entra ID).
  *
- * Doplňuje passkey a TOTP: vrací stejný proof (`step_up_token`), jen cesta
- * vede přes přesměrování k poskytovateli a zpět na stejnou stránku. Po návratu
- * stránka proof vyzvedne přes `takeProof()` a pokračuje v rozdělané akci.
+ * Doplňuje passkey a TOTP: vrací stejný proof (`step_up_token`). Přihlášení
+ * u poskytovatele běží v novém okně, takže rozdělaný dialog i panel pracovní
+ * plochy zůstanou, jak byly. Výsledek dostane `onVerified`.
  */
-export function useSsoStepUp(operation: string, context: MaybeRefOrGetter<string> = '') {
+export function useSsoStepUp(
+  operation: string,
+  context: MaybeRefOrGetter<string> = '',
+  onVerified?: (token: string) => void,
+) {
   const auth = useAuthStore()
-  // Stránky vložené do jiné obrazovky běží i bez routeru (např. mzdový archiv podání).
-  const route = inject(routeLocationKey, null)
   const busy = ref(false)
+  /** Okno ověření je otevřené a dialog čeká na jeho výsledek. */
+  const waiting = ref(false)
   const error = ref('')
 
   // Ověřit operaci smí jen silný poskytovatel; Google, Apple a Seznam jsou jen první faktor.
@@ -57,28 +63,76 @@ export function useSsoStepUp(operation: string, context: MaybeRefOrGetter<string
 
   if (enabled.value && identities.value === null) void loadIdentities()
 
+  let channel: BroadcastChannel | null = null
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  function stopWaiting(): void {
+    channel?.close()
+    channel = null
+    if (timer !== null) clearTimeout(timer)
+    timer = null
+    waiting.value = false
+  }
+
+  function listen(nonce: string): void {
+    stopWaiting()
+    channel = new BroadcastChannel(SSO_STEP_UP_CHANNEL)
+    channel.onmessage = (event: MessageEvent<SsoStepUpMessage>) => {
+      const data = event.data
+      // Zprávu z okna jiného dialogu (jiný nonce) nebo jiné operace ignoruj.
+      if (data?.nonce !== nonce) return
+      stopWaiting()
+      if (typeof data.error === 'string' && data.error !== '') {
+        error.value = data.error
+      } else if (data.operation === operation && typeof data.token === 'string' && data.token !== '') {
+        onVerified?.(data.token)
+      } else {
+        error.value = 'sso_flow_invalid'
+      }
+    }
+    waiting.value = true
+    timer = setTimeout(stopWaiting, WAIT_LIMIT_MS)
+  }
+
   async function start(): Promise<void> {
     if (!enabled.value || busy.value) return
-    busy.value = true
     error.value = ''
-    const path = ssoReturnPath(route?.fullPath ?? `${window.location.pathname}${window.location.search}`)
+    if (typeof BroadcastChannel === 'undefined') {
+      error.value = 'popup_unsupported'
+      return
+    }
+    // Okno se otevře hned při kliknutí, jinak by ho prohlížeč po čekání na API zablokoval.
+    const popup = window.open('about:blank', '_blank', 'popup=yes,width=520,height=720')
+    if (!popup) {
+      error.value = 'popup_blocked'
+      return
+    }
+    busy.value = true
+    const nonce = newSsoStepUpNonce()
+    listen(nonce)
     try {
-      rememberPendingStepUp(operation, path, Date.now(), toValue(context))
-      const url = await oidcApi.stepUp(PROVIDER, operation, path)
-      navigateFullPage(url)
+      const url = await oidcApi.stepUp(PROVIDER, operation, `${SSO_STEP_UP_POPUP_PATH}?n=${nonce}`)
+      popup.location.href = url
     } catch (e: any) {
-      busy.value = false
+      stopWaiting()
+      popup.close()
       error.value = e?.response?.data?.error?.code ?? 'generic'
+    } finally {
+      busy.value = false
     }
   }
+
+  if (getCurrentScope()) onScopeDispose(stopWaiting)
 
   return {
     enabled,
     available,
     busy,
-    /** Kód chyby zahájení (např. `sso_not_linked`), prázdné = bez chyby. */
+    waiting,
+    /** Kód chyby (např. `sso_not_linked`, `popup_blocked`), prázdné = bez chyby. */
     error,
     start,
+    /** Návrat z dřívějšího ověření přesměrováním celé stránky. */
     takeProof: () => takeSsoStepUpProof(operation, toValue(context)),
   }
 }

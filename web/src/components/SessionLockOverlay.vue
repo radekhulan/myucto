@@ -10,7 +10,6 @@ import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 import { ssoLoginUrl } from '@/security/oidc'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 import SsoProviderLogo from '@/components/security/SsoProviderLogo.vue'
-import { APPLE_BUTTON } from '@/components/security/ssoProviderStyles'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -246,8 +245,7 @@ onUnmounted(() => {
         <button v-for="provider in ssoUnlockProviders" :key="provider.id" type="button" :disabled="security.busy"
                 :data-testid="provider.id === 'entra' ? 'session-unlock-sso' : `session-unlock-sso-${provider.id}`"
                 @click="unlockWithSso(provider.id)"
-                :class="['w-full h-11 rounded-md font-medium inline-flex items-center justify-center gap-2 disabled:opacity-50',
-                         provider.id === 'apple' ? APPLE_BUTTON : 'border border-neutral-300 hover:bg-neutral-50 text-neutral-800']">
+                class="w-full h-11 rounded-md font-medium inline-flex items-center justify-center gap-2 disabled:opacity-50 border border-neutral-300 hover:bg-neutral-50 text-neutral-800">
           <SsoProviderLogo :provider="provider.id" />
           {{ t('sso.unlock_with', { provider: provider.label }) }}
         </button>

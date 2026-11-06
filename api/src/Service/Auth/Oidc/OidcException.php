@@ -21,11 +21,13 @@ final class OidcException extends \RuntimeException
     public const USER_INACTIVE = 'sso_user_inactive';
     public const IDENTITY_MISMATCH = 'sso_identity_mismatch';
     public const CANCELLED = 'sso_cancelled';
+    /** Účet Google není z domény Google Workspace povolené v `allowed_hosted_domains`. */
+    public const DOMAIN_NOT_ALLOWED = 'sso_domain_not_allowed';
 
     public const CODES = [
         self::PROVIDER_DISABLED, self::FLOW_INVALID, self::PROVIDER_ERROR, self::PROVIDER_UNAVAILABLE,
         self::TOKEN_INVALID, self::NOT_LINKED, self::ALREADY_LINKED, self::INVITE_INVALID,
-        self::USER_INACTIVE, self::IDENTITY_MISMATCH, self::CANCELLED,
+        self::USER_INACTIVE, self::IDENTITY_MISMATCH, self::CANCELLED, self::DOMAIN_NOT_ALLOWED,
     ];
 
     /** Účel a návratová adresa spotřebovaného přihlášení, je-li už známé. */

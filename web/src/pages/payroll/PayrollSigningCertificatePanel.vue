@@ -667,6 +667,7 @@ onMounted(async () => {
               :context="`${SSO_SCOPE}:${environment}`"
               :verified="ssoVerified"
               :disabled="passkeyBusy || busy"
+              @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }"
             />
             <template v-if="!stepPasskeyToken">
               <label class="block text-xs text-neutral-600">

@@ -182,7 +182,8 @@ onMounted(async () => {
         {{ status && status.total > 0 ? t('recovery_codes.regenerate') : t('recovery_codes.generate') }}
       </button>
 
-      <SsoStepUpOption v-if="canGenerate" :operation="OPERATION" :disabled="busy" />
+      <SsoStepUpOption v-if="canGenerate" :operation="OPERATION" :disabled="busy"
+        @verified="(proof: string) => generate(proof)" />
 
       <p v-if="!canGenerate" class="text-xs text-warning-700">{{ t('recovery_codes.needs_factor') }}</p>
       <p v-else class="text-xs text-neutral-500">{{ t('recovery_codes.step_up_hint') }}</p>

@@ -318,24 +318,24 @@ watch(tab, next => {
   }
 })
 
+// Po ověření přes účet organizace se secret TOTP vydá rovnou.
+async function totpSetupWithSsoProof(proof: string) {
+  if (!totpStatus.value || totpStatus.value.enabled) return
+  totpBusy.value = true
+  try {
+    totpSetup.value = await authApi.totpSetup({ step_up_token: proof })
+    toast.info(t('sso.step_up_done'))
+  } catch (e: any) {
+    applyTotpSetupError(e)
+  } finally {
+    totpBusy.value = false
+  }
+}
+
 onMounted(() => {
-  // Návrat z ověření přes Microsoft: secret TOTP se vydá rovnou.
   const ssoProof = takeSsoStepUpProof('totp.enable')
   const status = loadTotpStatus()
-  if (ssoProof) {
-    void status.then(async () => {
-      if (!totpStatus.value || totpStatus.value.enabled) return
-      totpBusy.value = true
-      try {
-        totpSetup.value = await authApi.totpSetup({ step_up_token: ssoProof })
-        toast.info(t('sso.step_up_done'))
-      } catch (e: any) {
-        applyTotpSetupError(e)
-      } finally {
-        totpBusy.value = false
-      }
-    })
-  }
+  if (ssoProof) void status.then(() => totpSetupWithSsoProof(ssoProof))
   if (tab.value === 'session-lock') {
     void loadLockPreference()
   }
@@ -343,7 +343,7 @@ onMounted(() => {
 </script>
 
 <template>
-  <div class="max-w-2xl mx-auto">
+  <div class="max-w-4xl mx-auto">
     <div class="mb-4">
       <h1 class="text-2xl font-semibold">{{ t('auth.profile_title') }}</h1>
       <p class="text-sm text-neutral-500 mt-0.5">{{ t('auth.profile_subtitle') }}</p>
@@ -543,7 +543,8 @@ onMounted(() => {
                 class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
           {{ totpBusy ? '…' : (totpRequiresPasskeyStepUp ? t('auth.totp_setup_verify_passkey_btn') : t('auth.totp_setup_btn')) }}
         </button>
-        <SsoStepUpOption v-if="ssoStrongEnabled" operation="totp.enable" :disabled="totpBusy" />
+        <SsoStepUpOption v-if="ssoStrongEnabled" operation="totp.enable" :disabled="totpBusy"
+          @verified="(proof: string) => totpSetupWithSsoProof(proof)" />
       </div>
 
       <div v-if="totpSetup" class="space-y-4 pt-2 border-t border-neutral-200">

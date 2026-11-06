@@ -244,7 +244,8 @@ onMounted(async () => {
         >
           {{ useRecovery ? t('passkeys.use_passkey_instead') : t('passkeys.use_recovery_instead') }}
         </button>
-        <SsoStepUpOption v-if="ssoStrongEnabled" operation="totp.enable" :disabled="busy" />
+        <SsoStepUpOption v-if="ssoStrongEnabled" operation="totp.enable" :disabled="busy"
+          @verified="(proof: string) => setupWithSsoProof(proof)" />
       </div>
 
       <div v-if="setup" class="space-y-4 pt-2 border-t border-neutral-200">

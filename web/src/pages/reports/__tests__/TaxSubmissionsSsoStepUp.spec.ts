@@ -127,8 +127,10 @@ describe('TaxSubmissions.vue — přímé podání ověřené přes Microsoft', 
     vi.restoreAllMocks()
   })
 
-  it('s propojenou identitou nabídne v dialogu podání ověření přes Microsoft a zapamatuje si dialog', async () => {
+  it('s propojenou identitou ověří v dialogu podání přes nové okno a dialog nechá otevřený', async () => {
     m.stepUp.mockResolvedValue('https://login.microsoftonline.com/synthetic')
+    const popup = { location: { href: '' }, close: vi.fn() }
+    const open = vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
     const wrapper = mount(TaxSubmissions)
     await flushPromises()
     const vm = wrapper.vm as any
@@ -140,10 +142,21 @@ describe('TaxSubmissions.vue — přímé podání ověřené přes Microsoft', 
     await option.find('button').trigger('click')
     await flushPromises()
 
-    expect(m.stepUp).toHaveBeenCalledWith('entra', 'epo.certificate', expect.any(String))
-    expect(m.navigate).toHaveBeenCalledWith('https://login.microsoftonline.com/synthetic')
-    const pending = JSON.parse(sessionStorage.getItem('myucto.sso_step_up_pending') ?? '{}')
-    expect(pending).toMatchObject({ operation: 'epo.certificate', context: 'tax-submissions:submit:1103' })
+    expect(m.stepUp).toHaveBeenCalledWith('entra', 'epo.certificate', expect.stringMatching(/^\/sso\/step-up\?n=[0-9a-f]{32}$/))
+    expect(m.navigate).not.toHaveBeenCalled()
+    expect(popup.location.href).toBe('https://login.microsoftonline.com/synthetic')
+
+    const nonce = new URLSearchParams((m.stepUp.mock.calls[0][2] as string).split('?')[1]).get('n')
+    const channel = new BroadcastChannel('myucto-sso-step-up')
+    channel.postMessage({ nonce, token: 'sso-proof', operation: 'epo.certificate' })
+    channel.close()
+    await new Promise(resolve => setTimeout(resolve, 20))
+    await flushPromises()
+
+    expect(vm.submitModalOpen).toBe(true)
+    expect(vm.submitPasskeyToken).toBe('sso-proof')
+    expect(wrapper.find('[data-testid="sso-step-up-verified"]').exists()).toBe(true)
+    open.mockRestore()
   })
 
   it('po návratu otevře týž dialog a proof odešle jako step_up_token', async () => {

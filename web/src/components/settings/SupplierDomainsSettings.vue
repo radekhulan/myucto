@@ -344,7 +344,8 @@ function statusClass(status: SupplierDomain['status']): string {
         <button type="button" :class="btnOutline('neutral')" @click="activation = null"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
       </div>
       <SsoStepUpOption :key="activation.id" class="mt-3" :operation="`domain.activate:${activation.id}`"
-        :disabled="busy === activation.id" />
+        :disabled="busy === activation.id"
+        @verified="(proof: string) => { if (activation) void activateWithProof(activation, proof) }" />
       <p v-if="!canPasskey && !canTotp && !ssoAvailable" class="mt-3 text-sm text-warning-700">{{ t('domains.activate_no_mfa') }}</p>
     </div>
   </section>

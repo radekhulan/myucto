@@ -64,8 +64,13 @@ final class FirstFactorProvidersTest extends TestCase
         $ok = $this->idp->sign($this->idp->googleClaims('1', self::NONCE, ['hd' => 'firma.example']));
         self::assertSame('1', $this->verifier->verify($provider, $ok, self::NONCE)->subject);
 
-        $this->expectException(OidcException::class);
-        $this->verifier->verify($provider, $this->idp->sign($this->idp->googleClaims('2', self::NONCE)), self::NONCE);
+        try {
+            $this->verifier->verify($provider, $this->idp->sign($this->idp->googleClaims('2', self::NONCE)), self::NONCE);
+            self::fail('Účet bez hd musí být odmítnut.');
+        } catch (OidcException $e) {
+            // Vlastní kód: uživatel se právě propojuje, hláška „není propojený" by ho mátla.
+            self::assertSame(OidcException::DOMAIN_NOT_ALLOWED, $e->errorCode);
+        }
     }
 
     public function testGoogleTokenForOtherClientIsRejected(): void

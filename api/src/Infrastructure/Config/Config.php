@@ -337,7 +337,7 @@ final class Config
                     'providers' => [
                         'entra' => [
                             'enabled' => false,
-                            'label' => 'Microsoft',
+                            'label' => 'Microsoft Entra ID',
                             'tenant_id' => '',
                             'client_id' => '',
                             'client_secret' => '',

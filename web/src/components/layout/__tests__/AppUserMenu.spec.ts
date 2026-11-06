@@ -36,6 +36,15 @@ describe('AppUserMenu', () => {
     expect(wrapper.text()).toContain('nav.logout')
   })
 
+  it('se zapnutým přihlášením přes poskytovatele nabídne Propojené účty za přístupovými klíči', () => {
+    signIn('staff')
+    useAuthStore().setupStatus = { sso_providers: [{ id: 'entra' }] } as never
+    const wrapper = mount(AppUserMenu, { props: { link, open: true } })
+    const hrefs = wrapper.findAll('a').map(item => item.attributes('href'))
+    expect(hrefs.indexOf('/profile/password?tab=sso')).toBe(hrefs.indexOf('/profile/password?tab=passkeys') + 1)
+    expect(wrapper.text()).toContain('sso.profile_tab')
+  })
+
   it('kompaktní tlačítko ukáže iniciály a popisek pro čtečky', () => {
     signIn('staff')
     const wrapper = mount(AppUserMenu, { props: { link, compact: true } })

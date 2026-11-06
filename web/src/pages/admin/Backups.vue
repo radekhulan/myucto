@@ -320,7 +320,8 @@ function formatBytes(bytes: number | null): string {
               <p v-else class="text-sm text-warning-700">{{ t('backups.passkey_unsupported') }}</p>
             </div>
             <SsoStepUpOption v-if="ssoVerified || !passkeyToken" operation="backup.password"
-              :verified="ssoVerified" :disabled="passkeyBusy || revealing" />
+              :verified="ssoVerified" :disabled="passkeyBusy || revealing"
+              @verified="(proof: string) => { ssoProof = proof; passkeyToken = proof }" />
             <template v-if="!passkeyToken">
               <label class="block text-sm">
                 {{ t('backups.current_password') }}

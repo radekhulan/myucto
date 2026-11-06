@@ -776,7 +776,8 @@ async function switchSupplier(id: number) {
                 </div>
                 <SsoStepUpOption v-if="carryOverSsoVerified || !carryOverStepPasskeyToken" class="sm:col-span-2"
                   operation="epo.certificate" :context="SSO_CONTEXT"
-                  :verified="carryOverSsoVerified" :disabled="carryOverPasskeyBusy" />
+                  :verified="carryOverSsoVerified" :disabled="carryOverPasskeyBusy"
+                  @verified="(proof: string) => { carryOverStepPasskeyToken = proof; ssoProof = proof }" />
                 <template v-if="!carryOverStepPasskeyToken">
                   <label class="text-xs text-neutral-600">
                     {{ t('settings.certificate_vault_step_up_password') }}

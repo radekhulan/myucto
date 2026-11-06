@@ -1191,7 +1191,8 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
           </div>
           <SsoStepUpOption v-if="ssoVerified(certificateStepPasskeyToken) || !certificateStepPasskeyToken"
             class="sm:col-span-2" operation="epo.certificate" :context="`${SSO_SCOPE}:vault`"
-            :verified="ssoVerified(certificateStepPasskeyToken)" :disabled="certificatePasskeyBusy || certificateBusy" />
+            :verified="ssoVerified(certificateStepPasskeyToken)" :disabled="certificatePasskeyBusy || certificateBusy"
+            @verified="(proof: string) => { certificateStepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!certificateStepPasskeyToken">
             <label class="text-xs text-neutral-600">
               {{ t('settings.certificate_vault_step_up_password') }}
@@ -1614,7 +1615,8 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                   <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
                 </div>
                 <SsoStepUpOption v-if="!signingProfileVaultPasskeyToken" class="mt-3" operation="epo.certificate"
-                  :context="signingProfileSsoContext" :disabled="signingProfileVaultPasskeyBusy || signingProfileSaving" />
+                  :context="signingProfileSsoContext" :disabled="signingProfileVaultPasskeyBusy || signingProfileSaving"
+                  @verified="(proof: string) => { signingProfileVaultPasskeyToken = proof; ssoProof = proof }" />
                 <p v-if="usablePersonalCertificates.length === 0" class="mt-2 text-xs text-warning-700">
                   {{ t('settings.signing_vault_empty_hint') }}
                 </p>

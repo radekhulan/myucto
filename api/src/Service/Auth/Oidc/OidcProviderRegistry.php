@@ -130,7 +130,7 @@ final class OidcProviderRegistry
         $authority = 'https://login.microsoftonline.com/' . $tenant;
         return new OidcProvider(
             id: 'entra',
-            label: $label !== '' ? mb_substr($label, 0, 60) : 'Microsoft',
+            label: $label !== '' ? mb_substr($label, 0, 60) : 'Microsoft Entra ID',
             issuer: $authority . '/v2.0',
             authorizeUrl: $authority . '/oauth2/v2.0/authorize',
             tokenUrl: $authority . '/oauth2/v2.0/token',

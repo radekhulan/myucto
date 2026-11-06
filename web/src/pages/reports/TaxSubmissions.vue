@@ -2730,7 +2730,8 @@ onMounted(async () => {
             </div>
             <SsoStepUpOption v-if="ssoVerified(stepPasskeyToken) || !stepPasskeyToken" class="sm:col-span-2"
               operation="epo.certificate" :context="`${SSO_SCOPE}:credential`"
-              :verified="ssoVerified(stepPasskeyToken)" :disabled="credentialBusy || passkeyBusy !== ''" />
+              :verified="ssoVerified(stepPasskeyToken)" :disabled="credentialBusy || passkeyBusy !== ''"
+              @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
             <template v-if="!stepPasskeyToken">
               <label class="text-xs text-neutral-600">
                 {{ t('reports.submissions.current_password') }}
@@ -2905,7 +2906,8 @@ onMounted(async () => {
           </div>
           <SsoStepUpOption v-if="ssoVerified(recoveryPasskeyToken) || !recoveryPasskeyToken"
             operation="epo.certificate" :context="`${SSO_SCOPE}:recovery:${recoveryMode}:${expandedId}`"
-            :verified="ssoVerified(recoveryPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''" />
+            :verified="ssoVerified(recoveryPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''"
+            @verified="(proof: string) => { recoveryPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!recoveryPasskeyToken">
             <label class="block text-sm">
               {{ t('reports.submissions.current_password') }}
@@ -3013,7 +3015,8 @@ onMounted(async () => {
           </div>
           <SsoStepUpOption v-if="ssoVerified(submitPasskeyToken) || !submitPasskeyToken"
             operation="epo.certificate" :context="`${SSO_SCOPE}:${submitMode}:${expandedId}`"
-            :verified="ssoVerified(submitPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''" />
+            :verified="ssoVerified(submitPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''"
+            @verified="(proof: string) => { submitPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!submitPasskeyToken">
             <label class="block text-sm">
               {{ t('reports.submissions.current_password') }}

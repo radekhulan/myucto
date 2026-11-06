@@ -94,7 +94,9 @@ class IdTokenVerifier
     /**
      * Google: párovací klíč je `sub`. E-mail se bere jen ověřený (`email_verified`);
      * u neověřeného by šlo pozvánku přijmout cizí adresou. Omezení na doménu
-     * Google Workspace se hlídá claimem `hd`, ne doménou e-mailu.
+     * Google Workspace se hlídá claimem `hd`, ne doménou e-mailu. Běžný účet Google
+     * (i s vlastní adresou, třeba na doméně s poštou v Microsoft 365) `hd` nemá,
+     * takže při vyplněném omezení neprojde.
      *
      * @param array<string,mixed> $claims
      */
@@ -107,7 +109,7 @@ class IdTokenVerifier
         if ($provider->allowedHostedDomains !== []) {
             $hd = is_string($claims['hd'] ?? null) ? strtolower($claims['hd']) : '';
             if (!in_array($hd, $provider->allowedHostedDomains, true)) {
-                throw new OidcException(OidcException::NOT_LINKED, 'Účet Google není z povolené domény.');
+                throw new OidcException(OidcException::DOMAIN_NOT_ALLOWED, 'Účet Google není z povolené domény.');
             }
         }
         $verified = ($claims['email_verified'] ?? false) === true || ($claims['email_verified'] ?? null) === 'true';

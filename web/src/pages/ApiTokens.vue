@@ -645,7 +645,8 @@ onMounted(() => {
           <div v-if="passkeyStepUpToken && !hasPasskey" class="text-sm font-medium text-success-600">
             ✓ {{ t('sso.step_up_verified') }}
           </div>
-          <SsoStepUpOption v-else-if="!passkeyStepUpToken" operation="api_token.create" :disabled="createBusy || passkeyBusy" />
+          <SsoStepUpOption v-else-if="!passkeyStepUpToken" operation="api_token.create" :disabled="createBusy || passkeyBusy"
+            @verified="(proof: string) => { passkeyStepUpToken = proof }" />
         </div>
 
         <div v-if="createError"

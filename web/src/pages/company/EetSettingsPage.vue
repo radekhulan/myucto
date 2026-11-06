@@ -1129,7 +1129,8 @@ const th = 'px-3 py-2 text-left font-medium'
           </div>
           <SsoStepUpOption v-if="ssoVerified || !stepPasskeyToken" class="sm:col-span-2"
             operation="epo.certificate" :context="`${SSO_SCOPE}:upload`"
-            :verified="ssoVerified" :disabled="passkeyBusy || certBusy" />
+            :verified="ssoVerified" :disabled="passkeyBusy || certBusy"
+            @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!stepPasskeyToken">
             <label class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_password') }}
@@ -1174,7 +1175,8 @@ const th = 'px-3 py-2 text-left font-medium'
           </div>
           <SsoStepUpOption v-if="ssoVerified || !stepPasskeyToken" class="sm:col-span-2"
             operation="epo.certificate" :context="`${SSO_SCOPE}:deactivate:${deactivateTarget.id}`"
-            :verified="ssoVerified" :disabled="passkeyBusy || certBusy" />
+            :verified="ssoVerified" :disabled="passkeyBusy || certBusy"
+            @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!stepPasskeyToken">
             <label class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_password') }}

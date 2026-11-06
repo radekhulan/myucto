@@ -2,23 +2,23 @@
 /**
  * Profil → Propojené účty: identity u poskytovatelů (OpenID Connect),
  * propojení s poskytovatelem a odpojení. Obojí je citlivá operace (`oidc.link`)
- * a potvrzuje se stejně jako vydání API tokenu: passkey, účtem organizace
- * (jen silný poskytovatel), nebo heslem (+ kód z autentikátoru).
+ * a potvrzuje se passkey, účtem organizace (jen silný poskytovatel, v novém
+ * okně), nebo heslem (+ kód z autentikátoru).
  */
-import { computed, onMounted, ref } from 'vue'
+import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { authApi } from '@/api/auth'
 import { oidcApi, type ExternalIdentity, type ReauthFields } from '@/api/oidc'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
-import { invalidateSsoIdentities } from '@/composables/useSsoStepUp'
+import { invalidateSsoIdentities, useSsoStepUp } from '@/composables/useSsoStepUp'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { ssoReturnPath, takeSsoStepUpProof } from '@/security/oidc'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import SsoProviderLogo from '@/components/security/SsoProviderLogo.vue'
-import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 
 const OPERATION = 'oidc.link'
 
@@ -44,6 +44,11 @@ const passkeySupported = isWebAuthnAvailable()
 const hasPasskey = computed(() => auth.user?.mfa_methods?.includes('passkey') === true
   || (auth.user?.passkey_count ?? 0) > 0)
 const totpEnabled = computed(() => auth.user?.totp_enabled === true)
+// Passkey a účet organizace jsou alternativy k heslu. Oddělovač „nebo zadejte
+// heslo" ukazuje, že stačí jedna z cest. Účet organizace se ověřuje v novém okně,
+// takže rozpracované propojení zůstane.
+const ssoStepUp = useSsoStepUp(OPERATION)
+const hasAlternatives = computed(() => (hasPasskey.value && passkeySupported) || ssoStepUp.available.value)
 
 function stamp(value: string | null): string {
   return value?.replace('T', ' ').slice(0, 16) || '—'
@@ -80,9 +85,20 @@ function linkedProviders(): Set<string> {
   return new Set(list.value.map(identity => identity.provider))
 }
 
-function request(action: PendingAction) {
+const passwordInput = ref<HTMLInputElement | null>(null)
+
+/** Kam se potvrzení vykreslí: odpojení pod řádek účtu, propojení na místě (null). */
+const reauthTarget = computed(() => pending.value?.kind === 'unlink'
+  ? `[data-sso-reauth-slot="${pending.value.identity.id}"]`
+  : null)
+
+async function request(action: PendingAction) {
   error.value = ''
+  notice.value = ''
   pending.value = action
+  await nextTick()
+  passwordInput.value?.focus({ preventScroll: true })
+  passwordInput.value?.closest('[data-testid="sso-reauth"]')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
 }
 
 function cancel() {
@@ -172,6 +188,9 @@ async function confirm() {
       </div>
     </div>
 
+    <!-- Propojení se potvrzuje tady pod tlačítky, odpojení přímo pod řádkem
+         odpojovaného účtu, aby potvrzení nebylo daleko od místa kliknutí. -->
+    <Teleport defer :to="reauthTarget" :disabled="reauthTarget === null">
     <div v-if="pending" class="bg-surface border border-primary-500/40 rounded-lg p-5 shadow-sm space-y-3" data-testid="sso-reauth">
       <p class="text-sm text-neutral-700">
         {{ pending.kind === 'link'
@@ -186,12 +205,18 @@ async function confirm() {
             {{ passkeyBusy ? t('auth.passkey_verifying') : t('sso.verify_passkey') }}
           </button>
         </div>
-        <SsoStepUpOption :operation="OPERATION" :disabled="busy || passkeyBusy" />
+        <SsoStepUpOption :operation="OPERATION" :disabled="busy || passkeyBusy"
+          @verified="(token: string) => { proof = token }" />
+        <div v-if="hasAlternatives" class="flex items-center gap-3 text-xs text-neutral-500" data-testid="sso-reauth-or">
+          <span class="h-px flex-1 bg-neutral-200" aria-hidden="true"></span>
+          {{ t('sso.reauth_or_password') }}
+          <span class="h-px flex-1 bg-neutral-200" aria-hidden="true"></span>
+        </div>
       </template>
       <form class="space-y-3" @submit.prevent="confirm">
         <label v-if="!proof" class="block text-sm">
           <span class="text-neutral-700 font-medium">{{ t('auth.current_password') }}</span>
-          <input v-model="password" type="password" autocomplete="current-password"
+          <input ref="passwordInput" v-model="password" type="password" autocomplete="current-password"
                  class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md" />
         </label>
         <label v-if="totpEnabled && !proof" class="block text-sm">
@@ -211,18 +236,20 @@ async function confirm() {
           </button>
         </div>
       </form>
+      <p v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</p>
     </div>
+    </Teleport>
 
-    <p v-if="error" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</p>
-    <p v-else-if="notice" class="rounded-md bg-primary-50 border border-primary-500/40 px-3 py-2 text-sm text-primary-700">{{ notice }}</p>
+    <p v-if="error && !pending" class="rounded-md bg-danger-50 border border-danger-500/40 px-3 py-2 text-sm text-danger-500">{{ error }}</p>
+    <p v-else-if="notice && !error" class="rounded-md bg-primary-50 border border-primary-500/40 px-3 py-2 text-sm text-primary-700">{{ notice }}</p>
 
     <p v-if="loading" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
     <p v-else-if="list.length === 0" class="rounded-md border border-dashed border-neutral-300 px-4 py-6 text-center text-sm text-neutral-500">
       {{ t('sso.identities_empty') }}
     </p>
     <div v-else class="space-y-3">
-      <div v-for="identity in list" :key="identity.id"
-           class="bg-surface border border-neutral-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-4"
+      <template v-for="identity in list" :key="identity.id">
+      <div class="bg-surface border border-neutral-200 rounded-lg p-4 flex flex-wrap items-center justify-between gap-4"
            data-testid="sso-identity">
         <div class="min-w-0">
           <div class="font-medium inline-flex items-center gap-2">
@@ -241,6 +268,8 @@ async function confirm() {
           {{ t('sso.unlink_button') }}
         </button>
       </div>
+      <div :data-sso-reauth-slot="identity.id" class="empty:hidden"></div>
+      </template>
     </div>
   </div>
 </template>

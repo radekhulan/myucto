@@ -1,20 +1,32 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { btnOutline } from '@/components/ui/buttonStyles'
 import { useSsoStepUp } from '@/composables/useSsoStepUp'
+import { isSsoErrorCode } from '@/security/oidc'
 import MicrosoftLogo from '@/components/security/MicrosoftLogo.vue'
 
 const props = defineProps<{
   operation: string
   disabled?: boolean
-  /** Který dialog stránky ověření zahájil; po návratu ho stránka podle něj otevře. */
+  /** Upřesnění dialogu, ve kterém ověření běží (víc dialogů sdílí operaci). */
   context?: string
-  /** Proof z ověření přes Microsoft už dialog drží. */
+  /** Proof z ověření přes účet organizace už dialog drží. */
   verified?: boolean
 }>()
 
+const emit = defineEmits<{ verified: [token: string] }>()
+
 const { t } = useI18n()
-const sso = useSsoStepUp(props.operation, () => props.context ?? '')
+const sso = useSsoStepUp(props.operation, () => props.context ?? '', token => emit('verified', token))
+
+const errorText = computed(() => {
+  const code = sso.error.value
+  if (code === '') return ''
+  if (code === 'popup_blocked') return t('sso.step_up_popup_blocked')
+  if (code === 'popup_unsupported') return t('sso.step_up_failed')
+  return isSsoErrorCode(code) ? t(`sso.errors.${code}`) : t('sso.step_up_failed')
+})
 </script>
 
 <template>
@@ -29,9 +41,9 @@ const sso = useSsoStepUp(props.operation, () => props.context ?? '')
         {{ sso.busy.value ? t('sso.redirecting') : t('sso.step_up_button') }}
       </button>
     </div>
-    <p class="text-xs text-neutral-500">{{ t('sso.step_up_hint') }}</p>
-    <p v-if="sso.error.value" class="text-sm text-danger-500">
-      {{ sso.error.value === 'sso_not_linked' ? t('sso.errors.sso_not_linked') : t('sso.step_up_failed') }}
+    <p class="text-xs text-neutral-500">
+      {{ sso.waiting.value ? t('sso.step_up_waiting') : t('sso.step_up_hint') }}
     </p>
+    <p v-if="errorText" class="text-sm text-danger-500" data-testid="sso-step-up-error">{{ errorText }}</p>
   </div>
 </template>

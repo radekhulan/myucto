@@ -2,9 +2,11 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   captureSsoFragment,
   parseSsoFragment,
+  relaySsoStepUpPopup,
   rememberPendingStepUp,
   resetSsoState,
   ssoErrorCode,
+  ssoStepUpPopupMessage,
   ssoLoginUrl,
   ssoRequiredLoginPath,
   ssoReturnPath,
@@ -16,6 +18,41 @@ import {
 function fakeLocation(hash: string) {
   return { hash, pathname: '/profile/api-tokens', search: '?x=1' }
 }
+
+describe('okno ověření citlivé operace', () => {
+  const nonce = 'a'.repeat(32)
+
+  it('z návratové adresy sestaví zprávu s proofem, chybou nebo nic', () => {
+    expect(ssoStepUpPopupMessage({ pathname: '/sso/step-up', search: `?n=${nonce}`, hash: '#sso_step_up=p1&sso_operation=api_token.create' }))
+      .toEqual({ nonce, token: 'p1', operation: 'api_token.create' })
+    expect(ssoStepUpPopupMessage({ pathname: '/sso/step-up', search: `?n=${nonce}`, hash: '#sso_error=sso_cancelled' }))
+      .toEqual({ nonce, error: 'sso_cancelled' })
+    expect(ssoStepUpPopupMessage({ pathname: '/sso/step-up', search: '?n=kratky', hash: '#sso_step_up=p1&sso_operation=x' })).toBeNull()
+    expect(ssoStepUpPopupMessage({ pathname: '/profile', search: `?n=${nonce}`, hash: '#sso_step_up=p1&sso_operation=x' })).toBeNull()
+  })
+
+  it('v okně ověření pošle výsledek kanálem a smaže ho z adresy', async () => {
+    const received: unknown[] = []
+    const listener = new BroadcastChannel('myucto-sso-step-up')
+    listener.onmessage = e => received.push(e.data)
+    const replaceState = vi.fn()
+    const handled = relaySsoStepUpPopup(
+      { pathname: '/sso/step-up', search: `?n=${nonce}`, hash: '#sso_step_up=p1&sso_operation=api_token.create' },
+      { state: null, replaceState },
+    )
+    await new Promise(resolve => setTimeout(resolve, 20))
+    listener.close()
+    expect(handled).toBe(true)
+    expect(replaceState).toHaveBeenCalledWith(null, '', '/sso/step-up')
+    expect(received).toEqual([{ nonce, token: 'p1', operation: 'api_token.create' }])
+  })
+
+  it('mimo okno ověření nic nedělá', () => {
+    const replaceState = vi.fn()
+    expect(relaySsoStepUpPopup({ pathname: '/profile/api-tokens', search: '', hash: '#sso_step_up=p1&sso_operation=x' }, { state: null, replaceState })).toBe(false)
+    expect(replaceState).not.toHaveBeenCalled()
+  })
+})
 
 describe('fragment návratu od poskytovatele identity', () => {
   afterEach(() => resetSsoState())

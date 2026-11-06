@@ -1,8 +1,16 @@
 import { config, enableAutoUnmount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 import { afterEach } from 'vitest'
+import { BroadcastChannel as NodeBroadcastChannel } from 'node:worker_threads'
 
 enableAutoUnmount(afterEach)
+
+// jsdom BroadcastChannel nemá; ověření účtem organizace přes něj předává výsledek
+// z okna ověření (prohlížeče ho mají všechny). Node implementace se chová stejně.
+if (typeof globalThis.BroadcastChannel === 'undefined') {
+  Object.defineProperty(globalThis, 'BroadcastChannel', { configurable: true, writable: true, value: NodeBroadcastChannel })
+  if (globalThis !== window) Object.defineProperty(window, 'BroadcastChannel', { configurable: true, writable: true, value: NodeBroadcastChannel })
+}
 
 for (const name of ['confirm', 'prompt'] as const) {
   if (typeof window[name] === 'function') continue
