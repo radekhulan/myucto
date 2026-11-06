@@ -1492,17 +1492,17 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
               <option v-for="kind in remunerationBasisKinds" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
             </select>
           </label>
-          <label :class="[FIELD, 'sm:col-span-2']">
+          <label :class="[FIELD, 'sm:col-span-2 lg:col-span-3']">
             {{ t('payroll.people.remuneration.basis') }} <RequiredMark v-if="hourlyRemuneration" />
             <input v-model="termsForm.remuneration_basis" maxlength="255" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-basis">
             <span :class="HINT">{{ t('payroll.people.remuneration.basis_hint') }} {{ t('payroll.people.remuneration.version_hint') }}</span>
           </label>
-          <p v-if="hourlyRemuneration" class="sm:col-span-2 rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800" data-test="terms-hourly-warning">
+          <p v-if="hourlyRemuneration" class="sm:col-span-2 lg:col-span-3 rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800" data-test="terms-hourly-warning">
             {{ t('payroll.people.remuneration.calculation_evidence') }}
             {{ t('payroll.people.remuneration.rate_distinction') }}
           </p>
 
-          <div v-if="hourlyRemuneration" class="sm:col-span-2 text-xs text-neutral-600" data-test="terms-hourly-minimum">
+          <div v-if="hourlyRemuneration" class="sm:col-span-2 lg:col-span-3 text-xs text-neutral-600" data-test="terms-hourly-minimum">
             <p v-if="minimumLoading">{{ t('common.loading') }}</p>
             <p v-else-if="hourlyMinimum?.minimum_hourly_40h_minor == null" class="text-warning-800" data-test="terms-hourly-minimum-unverified">{{ t('payroll.people.remuneration.minimum_unverified') }}</p>
             <p v-else-if="belowHourlyMinimum" class="rounded-md border border-warning-200 bg-warning-50 p-3 text-warning-800" data-test="terms-hourly-minimum-warning">{{ t('payroll.people.remuneration.minimum_low', { minimum: formatMoneyMinor(hourlyMinimum.minimum_hourly_40h_minor), date: formatDate(minimumEffectiveFrom) }) }}</p>
