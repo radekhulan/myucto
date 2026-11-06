@@ -1146,7 +1146,8 @@
         "2242_sessions_admin_last_seen.sql",
         "2243_work_report_billing.sql",
         "2244_payroll_import_profile_pamica_sample.sql",
-        "2245_session_device_class.sql"
+        "2245_session_device_class.sql",
+        "2246_payroll_hourly_employment_terms.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -13184,6 +13185,7 @@
                 "foreign_legislation_country_code": "char(2) NULL DEFAULT NULL",
                 "health_association_member": "tinyint(1) NOT NULL DEFAULT 0",
                 "health_insurance_participation": "enum('automatic','included','excluded','foreign') NOT NULL DEFAULT 'automatic'",
+                "hourly_rate_minor": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_primary": "tinyint(1) NOT NULL DEFAULT 0",
                 "jmhz_apz_contribution_status": "enum('unverified','no','yes') NOT NULL DEFAULT 'unverified'",
@@ -13219,6 +13221,9 @@
                 "probable_earning_rationale": "varchar(1000) NULL DEFAULT NULL",
                 "probable_hourly_earning_minor": "bigint(20) unsigned NULL DEFAULT NULL",
                 "regular_workplace": "varchar(255) NULL DEFAULT NULL",
+                "remuneration_basis": "varchar(255) NULL DEFAULT NULL",
+                "remuneration_basis_kind": "enum('wage_statement','contract','agreement','internal_regulation','collective_agreement') NULL DEFAULT NULL",
+                "remuneration_type": "enum('monthly','hourly') NULL DEFAULT NULL",
                 "risky_work": "tinyint(1) NOT NULL DEFAULT 0",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "social_employer_rate_category": "enum('ordinary','rescue_and_company_fire_service','risk_employment') NOT NULL DEFAULT 'ordinary'",
@@ -13264,7 +13269,8 @@
                 "chk_payroll_employment_term_rate_category_evidence": "`social_employer_rate_category` = 'ordinary' and `social_employer_rate_category_evidence` is null or `social_employer_rate_category` <> 'ordinary'",
                 "chk_payroll_employment_term_risk_categorization": "`jmhz_risk_categorization_code` is null or `social_employer_rate_category` = 'rescue_and_company_fire_service'",
                 "chk_payroll_employment_term_workload": "`workload_basis_points` between 1 and 10000",
-                "chk_payroll_employment_terms_jmhz_ordinary_profile": "`jmhz_orchard_discount_eligible` in (0,1) and `jmhz_specific_legal_fact_applies` in (0,1) and `jmhz_ozp_employment_support_applies` in (0,1) and `jmhz_deep_mining_work_applies` in (0,1)"
+                "chk_payroll_employment_terms_jmhz_ordinary_profile": "`jmhz_orchard_discount_eligible` in (0,1) and `jmhz_specific_legal_fact_applies` in (0,1) and `jmhz_ozp_employment_support_applies` in (0,1) and `jmhz_deep_mining_work_applies` in (0,1)",
+                "chk_payroll_terms_remuneration": "(`remuneration_type` is null or `remuneration_type` = 'monthly') and `hourly_rate_minor` is null or `remuneration_type` is not null and `remuneration_type` = 'hourly' and `hourly_rate_minor` is not null and `hourly_rate_minor` between 1 and 1000000000 and `monthly_gross_minor` is null and `remuneration_basis_kind` is not null and `remuneration_basis` is not null and char_length(trim(`remuneration_basis`)) > 0"
             }
         },
         "payroll_employments": {
