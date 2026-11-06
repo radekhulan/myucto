@@ -651,6 +651,67 @@ final class TrackingUnitRenameTest extends StockTestCase
         self::assertSame($before, $afterFailure, 'Kmen šarže i všechny kopie jsou bajtově stejné jako před pokusem.');
     }
 
+    public function testRenameLocksDraftInvoiceBeforeTheUnitAndMapsLockTimeoutTo409(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $item = $this->lotItem($sid, 'REN-LOCK');
+        $this->receiveLot($sid, $wh, $item, '5', self::OLD, self::OLD_EXPIRES);
+        $unitId = $this->unitId($sid, $item, self::OLD);
+        $invoiceId = $this->createInvoice($sid, [$this->line($item, $wh, '1', [['quantity' => '1', 'lot_code' => self::OLD, 'expires_on' => self::OLD_EXPIRES]])]);
+        $before = $this->rawTracking($invoiceId);
+
+        // Vystavení faktury zamyká nejdřív řádek faktury a až potom šarži (IssueInvoiceAction).
+        $issuer = $this->otherConnection();
+        $observer = $this->otherConnection();
+        $pdo = $this->db->pdo();
+        $default = (string) $pdo->query('SELECT @@innodb_lock_wait_timeout')->fetchColumn();
+        $issuer->beginTransaction();
+        $issuer->prepare('SELECT id FROM invoices WHERE id = ? FOR UPDATE')->execute([$invoiceId]);
+        // Transakci vlastní test, aby po vypršení čekání zůstaly zámky, které služba stihla získat.
+        $pdo->exec('SET SESSION innodb_lock_wait_timeout = 1');
+        $pdo->beginTransaction();
+        try {
+            try {
+                $this->container->get(\MyInvoice\Service\Stock\TrackingUnitRenameService::class)
+                    ->rename($sid, $item, $unitId, ['lot_code' => self::NEW]);
+                self::fail('Služba má na zámek faktury čekat a po vypršení čekání skončit 409.');
+            } catch (StockException $e) {
+                self::assertSame('lock_conflict', $e->errorCode);
+                self::assertSame(409, $e->httpStatus);
+            }
+            // Šarži služba nezamkla: doklady se zamykají dřív než šarže, stejně jako při vystavení.
+            $observer->exec('SET SESSION innodb_lock_wait_timeout = 1');
+            $observer->beginTransaction();
+            $locked = $observer->prepare('SELECT id FROM stock_tracking_units WHERE id = ? FOR UPDATE');
+            $locked->execute([$unitId]);
+            self::assertSame($unitId, (int) $locked->fetchColumn(), 'Šarži smí zamknout vystavení faktury, služba ji před doklady nedrží.');
+        } finally {
+            $observer->rollBack();
+            $issuer->rollBack();
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            $pdo->exec('SET SESSION innodb_lock_wait_timeout = ' . (int) $default);
+        }
+        self::assertSame($before, $this->rawTracking($invoiceId));
+        self::assertSame(self::OLD, $this->unitRow($unitId)['lot_code']);
+    }
+
+    private function otherConnection(): \PDO
+    {
+        $config = \MyInvoice\Infrastructure\Config\Config::load(dirname(__DIR__, 4));
+        self::assertStringEndsWith('_test', (string) $config->get('db.name'));
+        $pdo = new \PDO(
+            'mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port') . ';dbname=' . $config->get('db.name') . ';charset=utf8mb4',
+            (string) $config->get('db.user'),
+            (string) $config->get('db.pass'),
+            [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION],
+        );
+        $pdo->exec('SET SESSION innodb_lock_wait_timeout = 1');
+        return $pdo;
+    }
+
     public function testPostedLinesAreRewrittenAcrossBatchBoundaries(): void
     {
         foreach ([[2, 5], [2, 4]] as [$batchSize, $movements]) {

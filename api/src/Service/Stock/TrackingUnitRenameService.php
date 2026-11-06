@@ -23,6 +23,12 @@ use MyInvoice\Repository\StockTrackingRepository;
  *  - rozpracovaná expedice (`fulfillment_shipment_items.tracking_snapshot` zásilky `packing`)
  *    a řádky otevřených úloh vychystání.
  *
+ * Pořadí zámků: nejdřív doklady (koncepty faktur, koncepty skladových dokladů), potom
+ * šarže. Stejné pořadí má vystavení faktury (řádek faktury, potom šarže při výdeji) a
+ * zaúčtování skladového dokladu; opačné pořadí by se se souběžným vystavením zaklínilo
+ * (deadlock 1213). Kdyby k zaklínění nebo čekání na zámek (1205) přesto došlo, vrací se 409
+ * s výzvou zkusit to znovu a nic se nezmění.
+ *
  * Nepřepisuje se žádný vystavený doklad: vystavená ani stornovaná faktura (obnovení stornované
  * faktury bere kusy z vrácené výdejky), vystavená zálohová faktura (finální faktura z ní si
  * šarži po opravě vybere znovu), expedovaná zásilka, vratky a log čtečky. Uložené PDF
@@ -85,6 +91,10 @@ final class TrackingUnitRenameService
             if ($ownsTransaction && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
+            // 1213 deadlock, 1205 vypršelo čekání na zámek: souběžné vystavení nebo zaúčtování.
+            if ($e instanceof \PDOException && in_array((int) ($e->errorInfo[1] ?? 0), [1213, 1205], true)) {
+                throw new StockException('lock_conflict', 'Šarži právě upravuje nebo používá jiná operace. Zkuste to prosím znovu.', 409);
+            }
             throw $e;
         }
     }
@@ -92,6 +102,10 @@ final class TrackingUnitRenameService
     /** @return array<string,mixed> */
     private function renameLocked(int $supplierId, int $itemId, int $unitId, ?string $lotCode, bool $hasExpiry, ?string $expiresOn): array
     {
+        // Doklady dřív než šarže (viz pořadí zámků nahoře). Zámky drží do konce transakce,
+        // i když se pak ukáže, že šarže neexistuje nebo se nemění.
+        $draftInvoiceRows = $this->tracking->lockDraftInvoiceTracking($supplierId, $itemId);
+        $draftLineRows = $this->tracking->lockDraftDocumentLineTracking($supplierId, $itemId);
         $unit = $this->tracking->findUnit($supplierId, $itemId, $unitId, true);
         if ($unit === null) {
             throw new StockException('not_found', 'Šarže nenalezena.', 404);
@@ -136,7 +150,7 @@ final class TrackingUnitRenameService
 
         // Koncepty faktur (jejich cache PDF je po opravě zastaralá).
         $invoiceIds = [];
-        foreach ($this->tracking->lockDraftInvoiceTracking($supplierId, $itemId) as $row) {
+        foreach ($draftInvoiceRows as $row) {
             $json = $this->rewriteList($row['json'], ...$args);
             if ($json !== null) {
                 $this->tracking->updateInvoiceItemTracking($row['id'], $json);
@@ -144,7 +158,7 @@ final class TrackingUnitRenameService
                 $invoiceIds[$row['invoice_id']] = true;
             }
         }
-        $updated['stock_drafts'] = $this->rewriteLines($supplierId, $this->tracking->lockDraftDocumentLineTracking($supplierId, $itemId), $args);
+        $updated['stock_drafts'] = $this->rewriteLines($supplierId, $draftLineRows, $args);
         $cursor = 0;
         do {
             $batch = $this->tracking->allocationLineBatch($supplierId, $unitId, $cursor, $this->batchSize);

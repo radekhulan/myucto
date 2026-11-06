@@ -21973,7 +21973,10 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '404': { $ref: '#/components/responses/NotFound' }
         '409':
-          description: Jiná šarže téže karty už má stejný kód a datum spotřeby (`tracking_unit_exists`).
+          description: |
+            `tracking_unit_exists`: jiná šarže téže karty už má stejný kód a datum spotřeby.
+            `lock_conflict`: šarži nebo její doklady právě používá souběžné vystavení nebo
+            zaúčtování (zaklínění, vypršelo čekání na zámek); nic se nezměnilo, zkuste to znovu.
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
