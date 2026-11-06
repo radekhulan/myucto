@@ -178,7 +178,7 @@ final class PayslipHourlyDetail
             if (!is_int($bp)) return null;
             if (!in_array($kind, ['night', 'weekend'], true)) $bp = max($bp, $rate['statutory_rate_bp'] ?? 0);
             return self::money($bp) . ' % ' . (($rate['statutory_basis'] ?? null) === 'minimum' ? 'hodinového minima' : 'průměrného výdělku')
-                . (($segment['factors'] ?? 1) > 1 ? ', ' . $segment['factors'] . ' vlivy' : '');
+                . (($segment['factors'] ?? 1) > 1 ? ', ' . $segment['factors'] . ($segment['factors'] >= 5 ? ' vlivů' : ' vlivy') : '');
         }
         return null;
     }

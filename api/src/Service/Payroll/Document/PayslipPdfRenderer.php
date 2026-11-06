@@ -146,6 +146,10 @@ final class PayslipPdfRenderer
                 ),
             ));
             $this->twig->addFilter(new \Twig\TwigFilter(
+                'payslip_date',
+                static fn (string $date): string => (new \DateTimeImmutable($date))->format('j. n. Y'),
+            ));
+            $this->twig->addFilter(new \Twig\TwigFilter(
                 'minor_money',
                 static function (int $minorUnits): string {
                     $sign = $minorUnits < 0 ? '-' : '';
