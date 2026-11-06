@@ -1043,6 +1043,7 @@
     "processing": "Zpracovávám fotku...",
     "decode_failed": "Fotku se nepodařilo zpracovat. Prohlížeč formát pravděpodobně neumí přečíst (například HEIC).",
     "fallback_hint": "Můžete nahrát původní soubor beze změny, nebo vyfotit znovu.",
+    "fallback_hint_file": "Můžete nahrát původní soubor beze změny, nebo ořez zrušit.",
     "upload": "Nahrát",
     "upload_original": "Nahrát původní soubor",
     "retake": "Vyfotit znovu",
