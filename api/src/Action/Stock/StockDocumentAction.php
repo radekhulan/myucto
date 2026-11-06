@@ -9,11 +9,14 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockDocumentRepository;
 use MyInvoice\Repository\WarehouseRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\StockDocumentPdfRenderer;
 use MyInvoice\Service\Stock\StockDocumentService;
 use MyInvoice\Service\Stock\StockException;
+use MyInvoice\Service\Stock\StockReceiptService;
 use MyInvoice\Service\Stock\StockValuation;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
@@ -45,6 +48,7 @@ final class StockDocumentAction
         private readonly ActivityLogger $logger,
         private readonly IpMatcher $ipMatcher,
         private readonly StockDocumentPdfRenderer $pdfRenderer,
+        private readonly StockReceiptService $receipts,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -102,6 +106,7 @@ final class StockDocumentAction
         }
         $body = (array) ($request->getParsedBody() ?? []);
         try {
+            $this->guardFillIntrastat($request, $supplierId, $body);
             // Ruční zadání: hlídá desetinná místa množství podle jednotky karty (2036).
             $result = $this->service->create($supplierId, $body, $this->userId($request), checkUnitDecimals: true);
             $this->log($request, 'stock.document_created', (int) $result['id'], ['doc_type' => $result['doc_type'] ?? null]);
@@ -123,6 +128,7 @@ final class StockDocumentAction
         $id = (int) $args['id'];
         $body = (array) ($request->getParsedBody() ?? []);
         try {
+            $this->guardFillIntrastat($request, $supplierId, $body, $id);
             $result = $this->service->updateDraft($supplierId, $id, $body, $this->userId($request), checkUnitDecimals: true);
             $this->log($request, 'stock.document_updated', $id, []);
             return Json::ok($response, $result);
@@ -163,9 +169,58 @@ final class StockDocumentAction
         try {
             $result = $this->service->post($supplierId, $id, $this->userId($request));
             $this->log($request, 'stock.document_posted', $id, ['doc_number' => $result['doc_number'] ?? null]);
+            $result['warnings'] = [...($result['warnings'] ?? []), ...$this->fillIntrastatAfterPost($request, $supplierId, $id)];
             return Json::ok($response, $result);
         } catch (\Throwable $e) {
             return $this->mapStockError($response, $e);
+        }
+    }
+
+    /**
+     * Volbu `fill_intrastat` smí nastavit jen ten, kdo smí upravovat karty. Bez práva lze u konceptu
+     * jen ponechat tu, kterou řádek už má se stejným řádkem faktury a stejnou kartou, nebo ji zrušit.
+     *
+     * @param array<string,mixed> $body
+     */
+    private function guardFillIntrastat(Request $request, int $supplierId, array $body, ?int $draftId = null): void
+    {
+        if (RequestAuthorization::allows($request, 'stock.items.write', AccessLevel::WRITE)) {
+            return;
+        }
+        $lines = is_array($body['lines'] ?? null) ? $body['lines'] : [];
+        $chosen = array_filter($lines, static fn (mixed $l): bool => is_array($l) && ($l['fill_intrastat'] ?? false) === true);
+        if ($chosen === []) {
+            return;
+        }
+        $key = static fn (array $l): string => (int) ($l['purchase_invoice_item_id'] ?? 0) . '/' . (int) ($l['stock_item_id'] ?? 0);
+        $current = $draftId === null ? [] : ($this->docs->findWithLines($supplierId, $draftId)['lines'] ?? []);
+        $kept = array_map($key, array_filter($current, static fn (array $l): bool => $l['fill_intrastat'] === true));
+        foreach ($chosen as $line) {
+            if (!in_array($key($line), $kept, true)) {
+                throw new StockException('card_write_forbidden', StockReceiptService::CARD_WRITE_FORBIDDEN, 403);
+            }
+        }
+    }
+
+    /**
+     * Příjemka je už zaúčtovaná a potvrzená, chyba doplnění karty ji nesmí vrátit ani změnit odpověď.
+     *
+     * @return list<string>
+     */
+    private function fillIntrastatAfterPost(Request $request, int $supplierId, int $id): array
+    {
+        try {
+            return $this->receipts->fillIntrastatAfterPost(
+                $supplierId,
+                $id,
+                RequestAuthorization::allows($request, 'stock.items.write', AccessLevel::WRITE),
+                $this->userId($request),
+                $this->ipMatcher->clientIpFromRequest($request->getServerParams()),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            error_log('Doplnění Intrastatu po zaúčtování příjemky #' . $id . ': ' . $e->getMessage());
+            return ['Údaje pro Intrastat se na kartu nepodařilo doplnit, příjemka je zaúčtovaná.'];
         }
     }
 

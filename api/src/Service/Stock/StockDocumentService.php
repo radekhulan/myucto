@@ -760,6 +760,40 @@ final class StockDocumentService
      * @param array<string,mixed> $body
      * @return array{0:array<string,mixed>, 1:list<array<string,mixed>>} [hlavička, řádky]
      */
+    /**
+     * Volba `fill_intrastat` bere hodnoty z řádku přijaté faktury: smí to být jen řádek faktury,
+     * ze které příjemka vznikla, jinak by šlo připojit cizí řádek a jeho údaje zapsat na kartu.
+     *
+     * @param array<string,mixed> $header
+     * @param list<array<string,mixed>> $lines
+     */
+    private function assertIntrastatSourceIsOwnInvoice(int $supplierId, array $header, array $lines): void
+    {
+        $itemIds = [];
+        foreach ($lines as $line) {
+            if ($line['fill_intrastat'] === true) {
+                $itemIds[] = (int) ($line['purchase_invoice_item_id'] ?? 0);
+            }
+        }
+        if ($itemIds === []) {
+            return;
+        }
+        $message = 'Údaje pro Intrastat lze doplnit jen z řádku přijaté faktury, ze které příjemka vznikla.';
+        if ($header['doc_type'] !== 'receipt' || $header['purchase_invoice_id'] === null || in_array(0, $itemIds, true)) {
+            throw new StockException('invalid_document', $message, 422);
+        }
+        $itemIds = array_values(array_unique($itemIds));
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT COUNT(*) FROM purchase_invoice_items pii
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
+              WHERE pi.supplier_id = ? AND pi.id = ? AND pii.id IN (' . implode(',', array_fill(0, count($itemIds), '?')) . ')'
+        );
+        $stmt->execute([$supplierId, $header['purchase_invoice_id'], ...$itemIds]);
+        if ((int) $stmt->fetchColumn() !== count($itemIds)) {
+            throw new StockException('invalid_document', $message, 422, ['purchase_invoice_item_ids' => $itemIds]);
+        }
+    }
+
     private function validateBody(int $supplierId, array $body, bool $blockInactiveItems, bool $checkUnitDecimals = false): array
     {
         $docType = (string) ($body['doc_type'] ?? '');
@@ -889,6 +923,7 @@ final class StockDocumentService
                 'invoice_item_id'          => isset($rl['invoice_item_id']) && (int) $rl['invoice_item_id'] > 0 ? (int) $rl['invoice_item_id'] : null,
                 'purchase_invoice_item_id' => isset($rl['purchase_invoice_item_id']) && (int) $rl['purchase_invoice_item_id'] > 0 ? (int) $rl['purchase_invoice_item_id'] : null,
                 'purchase_order_line_id'   => isset($rl['purchase_order_line_id']) && (int) $rl['purchase_order_line_id'] > 0 ? (int) $rl['purchase_order_line_id'] : null,
+                'fill_intrastat'           => ($rl['fill_intrastat'] ?? false) === true,
                 'source_description'       => self::nullableString($rl['source_description'] ?? null),
                 'source_qty'               => isset($rl['source_qty']) && $rl['source_qty'] !== null && $rl['source_qty'] !== ''
                     ? StockValuation::tToDecimal(StockValuation::qtyToT((string) $rl['source_qty'])) : null,
@@ -929,6 +964,7 @@ final class StockDocumentService
         ];
 
         $this->assertReferencesOwned($supplierId, $header, $lines);
+        $this->assertIntrastatSourceIsOwnInvoice($supplierId, $header, $lines);
 
         return [$header, $lines];
     }

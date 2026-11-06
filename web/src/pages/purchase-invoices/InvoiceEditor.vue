@@ -1615,6 +1615,10 @@ async function submit() {
         accrual_from: it.accrual_from ?? null,
         accrual_to: it.accrual_to ?? null,
         stock_item_id: it.stock_item_id ?? null,
+        seller_item_code: it.seller_item_code ?? null,
+        item_ean: it.item_ean ?? null,
+        intrastat_cn8_code: it.intrastat_cn8_code ?? null,
+        intrastat_country_of_origin: it.intrastat_country_of_origin ?? null,
       })),
     }
     const itemDimsSnapshot = docDims.snapshot(form.value.items)

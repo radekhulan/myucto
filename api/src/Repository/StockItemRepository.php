@@ -922,4 +922,36 @@ final class StockItemRepository
         }
         return $r;
     }
+
+    /**
+     * Doplní Intrastat z dokladu jen tam, kde na kartě chybí; existující hodnota se nikdy nepřepíše.
+     * Neznámou zemi nezapíše: StockItemIntrastatValidator by pak odmítl každé uložení karty.
+     *
+     * @return array<string,array{old:?string,new:string}> co se změnilo, podle sloupce
+     */
+    public function fillMissingIntrastat(int $supplierId, int $id, ?string $cn8Code, ?string $originCountry): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT intrastat_cn8_code, intrastat_country_of_origin, (SELECT iso2 FROM countries WHERE iso2 = ?) AS known_country
+               FROM stock_items WHERE supplier_id = ? AND id = ? FOR UPDATE'
+        );
+        $stmt->execute([$originCountry, $supplierId, $id]);
+        $card = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($card === false) {
+            return [];
+        }
+        $changes = [];
+        foreach (['intrastat_cn8_code' => $cn8Code, 'intrastat_country_of_origin' => $card['known_country']] as $column => $value) {
+            if ($value !== null && (string) $card[$column] === '') {
+                $changes[$column] = ['old' => $card[$column], 'new' => (string) $value];
+            }
+        }
+        if ($changes === []) {
+            return [];
+        }
+        $set = implode(', ', array_map(static fn (string $column): string => $column . ' = ?', array_keys($changes)));
+        $this->db->pdo()->prepare("UPDATE stock_items SET {$set}, row_version = row_version + 1 WHERE supplier_id = ? AND id = ?")
+            ->execute([...array_column($changes, 'new'), $supplierId, $id]);
+        return $changes;
+    }
 }

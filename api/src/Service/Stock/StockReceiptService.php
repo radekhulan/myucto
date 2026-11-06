@@ -6,6 +6,8 @@ namespace MyInvoice\Service\Stock;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockDocumentRepository;
+use MyInvoice\Repository\StockItemRepository;
+use MyInvoice\Service\ActivityLogger;
 use PDO;
 
 /**
@@ -36,6 +38,8 @@ final class StockReceiptService
      *
      * @var array<string,string>
      */
+    public const CARD_WRITE_FORBIDDEN = 'Kód dodavatele ani údaje pro Intrastat nelze na kartu zapsat: nemáte právo upravovat skladové karty.';
+
     private const NOT_RECEIVABLE_MESSAGES = [
         'advance'      => 'Ze zálohové faktury se sklad nepohybuje — příjemku vystav až z vyúčtovací faktury.',
         'tax_document' => 'Z daňového dokladu k záloze se sklad nepohybuje — nese jen DPH, ne zboží.',
@@ -48,6 +52,9 @@ final class StockReceiptService
         private readonly StockDocumentRepository $docs,
         private readonly StockAcquisitionCostService $costs,
         private readonly StockUnitConverter $units,
+        private readonly PurchaseLineStockMatcher $matcher,
+        private readonly ActivityLogger $logger,
+        private readonly StockItemRepository $items,
     ) {}
 
     private static function isNotReceivableKind(string $documentKind): bool
@@ -56,12 +63,17 @@ final class StockReceiptService
     }
 
     /**
-     * Návrh příjemky: řádky PF se stock_item_id (zbývá přijmout, návrh PC),
-     * řádky bez stock_item_id jako kandidáti na vedlejší náklady.
+     * Návrh příjemky: řádky PF s kartou (ručně přiřazenou, nebo spárovanou podle kódu;
+     * zbývá přijmout, návrh PC), řádky bez karty jako kandidáti na vedlejší náklady.
+     * Nespárované řádky s kódem jdou navíc do `unmatched_lines`, ať jim člověk kartu vybere.
      *
      * @return array<string,mixed>
      */
-    public function proposeForPurchaseInvoice(int $supplierId, int $piId): array
+    /**
+     * @param array<int,int> $cardOverrides purchase_invoice_item_id => karta, kterou člověk vybral: návrh
+     *                                      řádku se přepočte podle balení této karty (množství, cena)
+     */
+    public function proposeForPurchaseInvoice(int $supplierId, int $piId, array $cardOverrides = []): array
     {
         $pi = $this->findPurchaseInvoice($supplierId, $piId);
         if ($pi === null) {
@@ -73,6 +85,7 @@ final class StockReceiptService
             return [
                 'purchase_invoice_id' => $piId,
                 'lines'               => [],
+                'unmatched_lines'     => [],
                 'cost_candidates'     => [],
                 'not_receivable_kind' => (string) $pi['document_kind'],
             ];
@@ -82,8 +95,9 @@ final class StockReceiptService
         $received   = $this->docs->receivedQtyByPurchaseInvoiceItem($supplierId, $piId);
 
         $stockLines    = [];
+        $unmatchedLines = [];
         $costCandidates = [];
-        foreach ($this->purchaseInvoiceItems($supplierId, $piId) as $it) {
+        foreach ($this->purchaseInvoiceItems($supplierId, $piId, $cardOverrides) as $it) {
             // Množství řádku v ZÁKLADNÍ jednotce karty (balení 10 KT = 80 ks);
             // příjemka i „zbývá přijmout" se počítají v něm.
             $qty            = (float) $it['base_quantity'];
@@ -96,6 +110,11 @@ final class StockReceiptService
             if ($it['stock_item_id'] !== null && $it['item_type'] !== 'service') {
                 $unitCost = $this->costs->unitCost($costContext, ['quantity' => $it['base_quantity']] + $it);
                 $stockLines[] = [
+                    'seller_item_code'         => $it['seller_item_code'],
+                    'intrastat_cn8_code'       => $it['intrastat_cn8_code'],
+                    'intrastat_country_of_origin' => $it['intrastat_country_of_origin'],
+                    'matched_stock_item_id'    => $it['matched_stock_item_id'],
+                    'match_source'             => $it['match_source'],
                     'purchase_invoice_item_id' => (int) $it['id'],
                     // Příjem z faktury musí zavírat i objednávku, na kterou je řádek
                     // napárovaný — bez toho by zboží zůstalo věčně „na cestě",
@@ -111,6 +130,24 @@ final class StockReceiptService
                     'invoice_unit'             => (string) $it['unit'],
                 ];
             } else {
+                if ($it['stock_item_id'] === null && $remaining > 0 && $it['expense_kind'] !== 'service'
+                    && ($it['seller_item_code'] !== null || $it['item_ean'] !== null)) {
+                    $unmatchedLines[] = [
+                        'purchase_invoice_item_id' => (int) $it['id'],
+                        'purchase_order_line_id'   => $it['purchase_order_line_id'],
+                        'stock_item_id'            => null,
+                        'seller_item_code'         => $it['seller_item_code'],
+                        'intrastat_cn8_code'       => $it['intrastat_cn8_code'],
+                        'intrastat_country_of_origin' => $it['intrastat_country_of_origin'],
+                        'matched_stock_item_id'    => $it['matched_stock_item_id'],
+                        'match_source'             => $it['match_source'],
+                        'description'              => (string) $it['description'],
+                        'quantity'                 => number_format($qty, 3, '.', ''),
+                        'already_received'         => number_format($alreadyReceived, 3, '.', ''),
+                        'remaining_qty'            => number_format($remaining, 3, '.', ''),
+                        'unit_cost'                => number_format($this->costs->unitCost($costContext, ['quantity' => $it['base_quantity']] + $it), 6, '.', ''),
+                    ];
+                }
                 $base = $this->costs->amount($costContext, $it);
                 $costCandidates[] = [
                     'purchase_invoice_item_id' => (int) $it['id'],
@@ -130,6 +167,7 @@ final class StockReceiptService
                 'exchange_rate'         => $pi['exchange_rate'],
             ],
             'lines'                    => $stockLines,
+            'unmatched_lines'          => $unmatchedLines,
             'cost_candidates'          => $costCandidates,
             // B6: existuje posted příjemka k této PF, jejíž zdrojový řádek PF byl
             // od té doby přepsán (SetPurchaseInvoiceItemsAction je replace-all,
@@ -143,12 +181,16 @@ final class StockReceiptService
      * rozpuštění vedlejších nákladů (A8, jen draft). Post provádí uživatel ručně
      * z editoru dokladu ({@see StockDocumentService::post()}).
      *
+     * Zapamatování kódu dodavatele (`lines[].remember_seller_code` = true) je zápis do karty, volba
+     * `lines[].fill_intrastat` = true ho chystá: bez práva `stock.items.write` ($canWriteCards) se
+     * celý požadavek odmítne a nic nevznikne.
+     *
      * @param array<string,mixed> $body {warehouse_id, doc_date, description?, lines:list, landed_costs?:list}
      * @return array<string,mixed>
      */
-    public function createReceipt(int $supplierId, int $piId, array $body, ?int $userId): array
+    public function createReceipt(int $supplierId, int $piId, array $body, ?int $userId, bool $canWriteCards = false, ?string $ip = null, ?string $userAgent = null): array
     {
-        return $this->runInTransaction(function () use ($supplierId, $piId, $body, $userId): array {
+        return $this->runInTransaction(function () use ($supplierId, $piId, $body, $userId, $canWriteCards, $ip, $userAgent): array {
             $pi = $this->findPurchaseInvoice($supplierId, $piId);
             if ($pi === null) {
                 throw new StockException('not_found', 'Přijatá faktura nenalezena.', 404);
@@ -177,8 +219,18 @@ final class StockReceiptService
             $costContext = $this->costs->context($supplierId, $pi);
             $piItemsById = $this->purchaseInvoiceItemsById($supplierId, $piId);
             $received    = $this->docs->receivedQtyByPurchaseInvoiceItem($supplierId, $piId);
+            $earlierCards = $this->docs->receiptCardsByPurchaseInvoiceItem($supplierId, $piId);
+
+            if (!$canWriteCards) {
+                foreach ($rawLines as $rl) {
+                    if (is_array($rl) && (($rl['remember_seller_code'] ?? false) === true || ($rl['fill_intrastat'] ?? false) === true)) {
+                        throw new StockException('card_write_forbidden', self::CARD_WRITE_FORBIDDEN, 403);
+                    }
+                }
+            }
 
             $docLines = [];
+            $rememberCodes = [];
             foreach ($rawLines as $rl) {
                 if (!is_array($rl)) {
                     continue;
@@ -195,6 +247,19 @@ final class StockReceiptService
                     throw new StockException('invalid_document', 'Řádek musí mít přiřazenou skladovou kartu.', 422, [
                         'purchase_invoice_item_id' => $piItemId,
                     ]);
+                }
+                // Přijaté množství je v jednotce karty dřívější příjemky: na jinou kartu by se sčítaly různé jednotky.
+                $otherCards = array_values(array_diff($earlierCards[$piItemId] ?? [], [$stockItemId]));
+                if ($otherCards !== []) {
+                    throw new StockException('receipt_card_mismatch', 'Řádek faktury už má příjemku na jinou skladovou kartu. Zbytek přijměte na stejnou kartu.', 409, [
+                        'purchase_invoice_item_id' => $piItemId,
+                        'stock_item_ids'           => $otherCards,
+                    ]);
+                }
+                // Balení přepočti podle odeslané karty, ne podle karty z faktury nebo z návrhu párování.
+                if ($stockItemId !== (int) ($piItem['stock_item_id'] ?? $piItem['matched_stock_item_id'] ?? 0)) {
+                    $ratio = $this->units->ratios($supplierId, [['stock_item_id' => $stockItemId, 'unit' => $piItem['unit']]])[0];
+                    $piItem['base_quantity'] = StockUnitConverter::applyRatio((string) $piItem['quantity'], $ratio['numerator'], $ratio['denominator']);
                 }
 
                 $qty = (float) ($rl['quantity'] ?? $rl['qty'] ?? 0);
@@ -221,6 +286,10 @@ final class StockReceiptService
                     $unitCost = $this->costs->unitCost($costContext, ['quantity' => $piItem['base_quantity']] + $piItem);
                 }
 
+                if (($rl['remember_seller_code'] ?? false) === true && $piItem['seller_item_code'] !== null) {
+                    $rememberCodes[] = [$stockItemId, (string) $piItem['seller_item_code'], $piItemId];
+                }
+
                 $docLines[] = [
                     'stock_item_id'            => $stockItemId,
                     'qty'                      => number_format($qty, 3, '.', ''),
@@ -228,9 +297,23 @@ final class StockReceiptService
                     'extra_cost'               => '0',
                     'purchase_invoice_item_id' => $piItemId,
                     'purchase_order_line_id'   => $piItem['purchase_order_line_id'] ?? null,
+                    'fill_intrastat'           => ($rl['fill_intrastat'] ?? false) === true,
                     'source_description'       => (string) $piItem['description'],
                     'source_qty'               => (string) $piItem['base_quantity'],
                 ];
+            }
+
+            // Jeden kód patří jedné kartě: dvě různé karty v jednom požadavku by tiše přepsal poslední řádek.
+            $cardByCode = [];
+            foreach ($rememberCodes as [$stockItemId, $code]) {
+                $codeKey = mb_strtolower($code);
+                if (isset($cardByCode[$codeKey]) && $cardByCode[$codeKey] !== $stockItemId) {
+                    throw new StockException('invalid_document', 'Stejný kód dodavatele nelze uložit ke dvěma různým kartám.', 422, [
+                        'seller_item_code' => $code,
+                        'stock_item_ids'   => [$cardByCode[$codeKey], $stockItemId],
+                    ]);
+                }
+                $cardByCode[$codeKey] = $stockItemId;
             }
 
             $description = trim((string) ($body['description'] ?? ''));
@@ -251,7 +334,19 @@ final class StockReceiptService
 
             $this->costs->applyLandedCosts($supplierId, (int) $draft['id'], $docDate, is_array($body['landed_costs'] ?? null) ? $body['landed_costs'] : []);
 
-            return $this->docs->findWithLines($supplierId, (int) $draft['id']) ?? $draft;
+            // Až po založení dokladu: ten ověřil, že karty patří téhle firmě.
+            foreach ($rememberCodes as [$stockItemId, $code, $piItemId]) {
+                $before = $this->matcher->remember($supplierId, (int) $pi['vendor_id'], $stockItemId, $code, (string) $pi['currency_code']);
+                $this->logger->log('stock.item_vendor_code_remembered', $userId, 'stock_item', $stockItemId, $before + [
+                    'vendor_id'                => (int) $pi['vendor_id'],
+                    'new_vendor_sku'           => $code,
+                    'purchase_invoice_item_id' => $piItemId,
+                    'stock_document_id'        => (int) $draft['id'],
+                ], $ip, $userAgent, $supplierId);
+            }
+
+            $result = $this->docs->findWithLines($supplierId, (int) $draft['id']) ?? $draft;
+            return $result;
         });
     }
 
@@ -263,11 +358,60 @@ final class StockReceiptService
 
     // ── čtení PF (přímý SQL, tenant-scoped, jen SELECT) ─────────────────────────
 
+    /**
+     * Po zaúčtování příjemky doplní na karty Intrastat ze zdrojových řádků přijaté faktury,
+     * jen u řádků s výslovnou volbou `fill_intrastat`. Hodnoty pocházejí z dokladu, proto bez
+     * práva `stock.items.write` ($canWriteCards) se nic nezapíše a vrátí se varování.
+     *
+     * @return list<string> varování pro uživatele
+     */
+    public function fillIntrastatAfterPost(int $supplierId, int $documentId, bool $canWriteCards, ?int $userId, ?string $ip = null, ?string $userAgent = null): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT l.stock_item_id, l.purchase_invoice_item_id, pii.intrastat_cn8_code, pii.intrastat_country_of_origin
+               FROM stock_document_lines l
+               JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+               JOIN purchase_invoice_items pii ON pii.id = l.purchase_invoice_item_id
+               JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id AND pi.supplier_id = l.supplier_id
+                AND pi.id = d.purchase_invoice_id
+              WHERE l.supplier_id = ? AND l.document_id = ? AND l.fill_intrastat = 1
+                AND d.doc_type = 'receipt' AND d.status = 'posted'
+                AND (pii.intrastat_cn8_code IS NOT NULL OR pii.intrastat_country_of_origin IS NOT NULL)
+              ORDER BY l.line_no"
+        );
+        $stmt->execute([$supplierId, $documentId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        if ($rows === []) {
+            return [];
+        }
+        if (!$canWriteCards) {
+            return ['Údaje pro Intrastat se na kartu nedoplnily: nemáte právo upravovat skladové karty.'];
+        }
+        $this->runInTransaction(function () use ($rows, $supplierId, $documentId, $userId, $ip, $userAgent): void {
+            foreach ($rows as $row) {
+                $changes = $this->items->fillMissingIntrastat(
+                    $supplierId,
+                    (int) $row['stock_item_id'],
+                    $row['intrastat_cn8_code'],
+                    $row['intrastat_country_of_origin'],
+                );
+                if ($changes !== []) {
+                    $this->logger->log('stock.item_intrastat_filled', $userId, 'stock_item', (int) $row['stock_item_id'], [
+                        'changes'                  => $changes,
+                        'purchase_invoice_item_id' => (int) $row['purchase_invoice_item_id'],
+                        'stock_document_id'        => $documentId,
+                    ], $ip, $userAgent, $supplierId);
+                }
+            }
+        });
+        return [];
+    }
+
     /** @return array<string,mixed>|null */
     private function findPurchaseInvoice(int $supplierId, int $piId): ?array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT pi.id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
+            'SELECT pi.id, pi.vendor_id, pi.varsymbol, pi.vendor_invoice_number, pi.document_kind,
                     pi.currency_id, pi.exchange_rate, pi.tax_date, pi.issue_date,
                     c.code AS currency_code, cl.company_name AS vendor_name
                FROM purchase_invoices pi
@@ -281,11 +425,14 @@ final class StockReceiptService
     }
 
     /** @return list<array<string,mixed>> */
-    private function purchaseInvoiceItems(int $supplierId, int $piId): array
+    /** @param array<int,int> $cardOverrides purchase_invoice_item_id => vybraná karta */
+    private function purchaseInvoiceItems(int $supplierId, int $piId, array $cardOverrides = []): array
     {
         $stmt = $this->db->pdo()->prepare(
             'SELECT pii.id, pii.stock_item_id, pii.purchase_order_line_id, pii.description,
-                    pii.quantity, pii.unit, pii.total_without_vat, pii.total_with_vat, si.item_type
+                    pii.quantity, pii.unit, pii.total_without_vat, pii.total_with_vat, si.item_type,
+                    pii.seller_item_code, pii.item_ean, pii.expense_kind, pi.vendor_id,
+                    pii.intrastat_cn8_code, pii.intrastat_country_of_origin
                FROM purchase_invoice_items pii
                JOIN purchase_invoices pi ON pi.id = pii.purchase_invoice_id
           LEFT JOIN stock_items si ON si.id = pii.stock_item_id AND si.supplier_id = pi.supplier_id
@@ -294,17 +441,32 @@ final class StockReceiptService
         );
         $stmt->execute([$supplierId, $piId]);
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        // Párování se počítá při čtení a na řádek faktury se nezapisuje: nemění účtování
+        // dokladu a řádek se spáruje i podle karty nebo kódu doplněného až po importu.
+        $matches = $rows === [] ? [] : $this->matcher->match($supplierId, (int) $rows[0]['vendor_id'], $rows);
+        foreach ($rows as $index => &$r) {
+            $r['matched_stock_item_id'] = $matches[$index]['stock_item_id'] ?? null;
+            $r['match_source'] = $matches[$index]['source'] ?? null;
+            // Návrh (kód karty, kód jako EAN) se sám nepoužije, kartu potvrdí člověk nebo volající.
+            if ($matches[$index]['auto'] ?? false) {
+                $r['stock_item_id'] ??= $r['matched_stock_item_id'];
+            }
+            if (isset($cardOverrides[(int) $r['id']])) {
+                $r['stock_item_id'] = $cardOverrides[(int) $r['id']];
+            }
+        }
+        unset($r);
         // Balení (issue #17): `base_quantity` = množství v základní jednotce karty
         // přes StockUnitConverter; řádek bez karty zůstává 1:1.
         $ratios = $this->units->ratios($supplierId, array_map(
-            static fn (array $r): array => ['stock_item_id' => (int) ($r['stock_item_id'] ?? 0), 'unit' => $r['unit']],
+            static fn (array $r): array => ['stock_item_id' => (int) ($r['stock_item_id'] ?? $r['matched_stock_item_id'] ?? 0), 'unit' => $r['unit']],
             $rows,
         ));
         foreach ($rows as $index => &$r) {
             $r['id']            = (int) $r['id'];
             $r['stock_item_id'] = $r['stock_item_id'] !== null ? (int) $r['stock_item_id'] : null;
             $r['purchase_order_line_id'] = $r['purchase_order_line_id'] !== null ? (int) $r['purchase_order_line_id'] : null;
-            $r['base_quantity'] = $r['stock_item_id'] !== null
+            $r['base_quantity'] = ($r['stock_item_id'] ?? $r['matched_stock_item_id']) !== null
                 ? StockUnitConverter::applyRatio((string) $r['quantity'], $ratios[$index]['numerator'], $ratios[$index]['denominator'])
                 : (string) $r['quantity'];
         }
