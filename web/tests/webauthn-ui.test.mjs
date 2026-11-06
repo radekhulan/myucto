@@ -285,7 +285,7 @@ test('the second-factor step hides the passwordless passkey entry point', async 
   )
   assert.match(
     login,
-    /v-if="auth\.setupStatus\?\.passwordless_login_enabled && !secondFactorPending(?: && !ssoTicket)?"/,
+    /v-if="auth\.setupStatus\?\.passwordless_login_enabled(?: && passwordLoginVisible)? && !secondFactorPending(?: && !ssoTicket)?"/,
   )
 })
 
