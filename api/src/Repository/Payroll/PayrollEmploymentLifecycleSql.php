@@ -42,7 +42,8 @@ final class PayrollEmploymentLifecycleSql
 
     private static function effectiveMonthlyGrossAt(string $effectiveOnSql): string
     {
-        return 'NULLIF(COALESCE(
+        // Hodinová verze se značí -1; CAST drží celočíselný typ jako u měsíční mzdy.
+        return 'CAST(NULLIF(COALESCE(
                     (
                         SELECT CASE WHEN salary_term.remuneration_type = "hourly" THEN -1
                                     ELSE salary_term.monthly_gross_minor END
@@ -58,6 +59,6 @@ final class PayrollEmploymentLifecycleSql
                          LIMIT 1
                     ),
                     employment.monthly_gross_minor
-                ), -1)';
+                ), -1) AS SIGNED)';
     }
 }

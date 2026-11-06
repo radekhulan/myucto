@@ -175,6 +175,57 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
         self::assertNull($monthly['terms'][0]['hourly_rate_minor']);
     }
 
+    public function testExplicitRemunerationCannotReturnToLegacyMode(): void
+    {
+        $employment = $this->activeEmployment();
+        $hourly = $this->call('addTerms', $employment, ['row_version' => $employment['row_version'], 'effective_from' => '2026-03-01',
+            'remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000,
+            'remuneration_basis_kind' => 'wage_statement', 'remuneration_basis' => 'Syntetický výměr']);
+        $legacy = ['remuneration_type' => null, 'hourly_rate_minor' => null, 'remuneration_basis_kind' => null, 'remuneration_basis' => null];
+        foreach (['addTerms' => ['effective_from' => '2026-04-01', 'monthly_gross_minor' => 3000000],
+            'correctTerms' => ['change_reason' => 'Syntetická oprava', 'monthly_gross_minor' => 3000000]] as $method => $body) {
+            $response = $this->action->{$method}($this->request('PUT', '/terms', ['row_version' => $hourly['row_version'], ...$legacy, ...$body]),
+                new Response(), ['id' => (string) $employment['id']]);
+            self::assertSame(422, $response->getStatusCode(), $method . ': ' . (string) $response->getBody());
+            self::assertStringContainsString('dosavadní režim', (string) $response->getBody());
+        }
+        $monthly = $this->call('addTerms', $hourly, ['row_version' => $hourly['row_version'], 'effective_from' => '2026-04-01',
+            'remuneration_type' => 'monthly', 'hourly_rate_minor' => null, 'monthly_gross_minor' => 3000000]);
+        $response = $this->action->addTerms($this->request('PUT', '/terms', ['row_version' => $monthly['row_version'], ...$legacy,
+            'effective_from' => '2026-05-01', 'monthly_gross_minor' => 3000000]), new Response(), ['id' => (string) $employment['id']]);
+        self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+    }
+
+    public function testFirstTermsOfMidMonthStartCanBeHourlyFromStart(): void
+    {
+        $response = $this->action->create($this->request('POST', "/api/payroll/people/{$this->employeeId}/employments", [
+            'code' => 'SYN-HOD-STRED',
+            'relation_type' => 'employment',
+            'terms' => [
+                'office_id' => $this->officeId, 'effective_from' => '2026-03-16', 'contract_signed_on' => '2026-03-02',
+                'planned_start_on' => '2026-03-16', 'actual_start_on' => null, 'fixed_term_end_on' => null,
+                'weekly_hours' => '40', 'workload_basis_points' => 10000, 'work_place' => 'Praha', 'regular_workplace' => 'Praha',
+                'jmhz_apz_contribution_status' => 'unverified', 'jmhz_functional_benefits_status' => 'unverified',
+                'jmhz_temporary_assignment_status' => 'unverified', 'cz_isco_code' => '43111', 'activity_code' => '1',
+                'jmhz_relationship_detail_code' => '1', 'social_insurance_participation' => 'automatic',
+                'health_insurance_participation' => 'automatic', 'tax_regime' => 'advance', 'tax_declaration_signed' => true,
+                'is_primary' => true, 'change_reason' => 'Syntetické podmínky',
+                'remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000,
+                'remuneration_basis_kind' => 'contract', 'remuneration_basis' => 'Syntetická smlouva',
+            ],
+        ]), new Response(), ['id' => (string) $this->employeeId]);
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $employment = $this->json($response)['employment'];
+        self::assertSame('hourly', $employment['terms'][0]['remuneration_type']);
+        self::assertSame('2026-03-16', $employment['terms'][0]['effective_from']);
+        $employment = $this->transition($employment, 'preregistered', '2026-03-16');
+        $employment = $this->transition($employment, 'active', '2026-03-16');
+        $corrected = $this->call('correctTerms', $employment, ['row_version' => $employment['row_version'],
+            'hourly_rate_minor' => 21000, 'change_reason' => 'Syntetická oprava sazby']);
+        self::assertSame(21000, $corrected['terms'][0]['hourly_rate_minor']);
+        self::assertSame('2026-03-16', $corrected['terms'][0]['effective_from']);
+    }
+
     public function testLegacyToExplicitMonthlyCanStartMidMonth(): void
     {
         $employment = $this->activeEmployment();
@@ -273,7 +324,7 @@ final class PayrollEmploymentTermsPartialUpdateTest extends TestCase
                FROM payroll_employments employment WHERE supplier_id = ? AND id = ?',
         );
         $salary->execute(['2026-02-28', '2026-02-28', $this->supplierId, $employment['id']]);
-        self::assertSame(4000000, (int) $salary->fetchColumn());
+        self::assertSame(4000000, $salary->fetchColumn());
         $salary->execute(['2026-03-01', '2026-03-01', $this->supplierId, $employment['id']]);
         self::assertNull($salary->fetchColumn());
 

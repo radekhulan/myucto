@@ -665,15 +665,19 @@ describe('EmploymentCard', () => {
     expect(payrollApi.correctEmploymentTerms).toHaveBeenCalledWith(10, 1, expect.objectContaining({ remuneration_type: 'monthly', monthly_gross_minor: null }))
   })
 
-  it('při návratu z hodinového na legacy režim nenutí sjednat měsíční částku', async () => {
-    const stored = employment()
-    Object.assign(stored.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis_kind: 'agreement', remuneration_basis: 'Syntetická dohoda' })
-    vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue(stored)
-    const wrapper = await mountCard(stored)
-    const select = wrapper.get('[data-test="terms-remuneration-type"]')
-    await select.setValue('')
-    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
-    expect(payrollApi.addEmploymentTerms).toHaveBeenCalledWith(10, 1, expect.objectContaining({ remuneration_type: null, hourly_rate_minor: null, monthly_gross_minor: null }))
+  it('z výslovného režimu nenabízí návrat na dosavadní režim bez určení', async () => {
+    for (const mode of ['hourly', 'monthly'] as const) {
+      const stored = employment()
+      Object.assign(stored.terms[0]!, mode === 'hourly'
+        ? { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis_kind: 'agreement', remuneration_basis: 'Syntetická dohoda' }
+        : { remuneration_type: 'monthly' })
+      const wrapper = await mountCard(stored)
+      const select = wrapper.get('[data-test="terms-remuneration-type"]')
+      expect(select.text()).not.toContain('payroll.people.remuneration.legacy')
+      expect(select.findAll('option').map(option => option.attributes('value'))).toContain('monthly')
+    }
+    const legacy = await mountCard(employment())
+    expect(legacy.get('[data-test="terms-remuneration-type"]').text()).toContain('payroll.people.remuneration.legacy')
   })
 
   it('u legacy dohody zachová NULL režim a nesjednanou částku; sazbu neodvozuje z pravděpodobného výdělku', async () => {

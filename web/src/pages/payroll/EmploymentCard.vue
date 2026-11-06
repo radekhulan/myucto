@@ -1462,7 +1462,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           <label :class="FIELD">
             {{ t('payroll.people.remuneration.type') }}
             <select v-model="termsForm.remuneration_type" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-type">
-              <option :value="null">{{ t('payroll.people.remuneration.legacy') }}</option>
+              <option v-if="currentTerms?.remuneration_type == null" :value="null">{{ t('payroll.people.remuneration.legacy') }}</option>
               <option value="monthly">{{ t(`payroll.people.remuneration.monthly_${remunerationNoun}`) }}</option>
               <option v-if="supportsHourly" value="hourly">{{ t(`payroll.people.remuneration.hourly_${remunerationNoun}`) }}</option>
             </select>

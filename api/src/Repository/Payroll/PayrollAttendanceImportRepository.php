@@ -168,7 +168,7 @@ final class PayrollAttendanceImportRepository
      * začínat až po ní.
      *
      * @param list<int> $employmentIds
-     * @return array<int,array{terms_id:int,effective_from:string,effective_to:?string,monthly_gross_minor:?int,is_latest:bool,employment_status:string}>
+     * @return array<int,array{terms_id:int,effective_from:string,effective_to:?string,monthly_gross_minor:?int,is_latest:bool,employment_status:string,hourly_in_period:bool}>
      */
     public function termsAt(int $supplierId, array $employmentIds, string $periodStart, string $periodEnd): array
     {
@@ -181,6 +181,9 @@ final class PayrollAttendanceImportRepository
             "WITH ranked AS (
                 SELECT terms.id, terms.employment_id, terms.effective_from, terms.effective_to,
                        terms.monthly_gross_minor, terms.remuneration_type,
+                       MAX(CASE WHEN terms.remuneration_type = 'hourly' AND terms.effective_from <= ?
+                                 AND (terms.effective_to IS NULL OR terms.effective_to >= ?) THEN 1 ELSE 0 END)
+                           OVER (PARTITION BY terms.employment_id) AS hourly_in_period,
                        ROW_NUMBER() OVER (
                            PARTITION BY terms.employment_id
                            ORDER BY terms.effective_from DESC, terms.id DESC
@@ -191,7 +194,7 @@ final class PayrollAttendanceImportRepository
              SELECT ranked.id, ranked.employment_id, ranked.effective_from, ranked.effective_to,
                     CASE WHEN ranked.remuneration_type = 'hourly' THEN NULL
                          ELSE COALESCE(ranked.monthly_gross_minor, employment.monthly_gross_minor) END AS monthly_gross_minor,
-                    ranked.recency, employment.status
+                    ranked.recency, ranked.hourly_in_period, employment.status
                FROM ranked
                JOIN payroll_employments employment
                  ON employment.supplier_id = ? AND employment.id = ranked.employment_id
@@ -202,7 +205,7 @@ final class PayrollAttendanceImportRepository
                        CASE WHEN ranked.effective_from <= ? THEN ranked.effective_from END DESC,
                        ranked.effective_from, ranked.id"
         );
-        $stmt->execute([$supplierId, ...$employmentIds, $supplierId, $periodEnd, $periodStart, $periodStart, $periodStart]);
+        $stmt->execute([$periodEnd, $periodStart, $supplierId, ...$employmentIds, $supplierId, $periodEnd, $periodStart, $periodStart, $periodStart]);
         $result = [];
         foreach (PayrollTimeValue::rows($stmt->fetchAll(PDO::FETCH_ASSOC), 'attendance_terms') as $row) {
             $employmentId = PayrollTimeValue::int($row['employment_id'] ?? null, 'employment_id');
@@ -218,6 +221,7 @@ final class PayrollAttendanceImportRepository
                     : PayrollTimeValue::int($row['monthly_gross_minor'], 'monthly_gross_minor'),
                 'is_latest' => PayrollTimeValue::int($row['recency'] ?? null, 'recency') === 1,
                 'employment_status' => (string) ($row['status'] ?? ''),
+                'hourly_in_period' => (int) $row['hourly_in_period'] === 1,
             ];
         }
 
