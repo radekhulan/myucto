@@ -40026,6 +40026,11 @@
   "nonprofitMembership": {
     "rateRetryOptions": "Reload accounts and dimensions",
     "ratePartialList": "Search covers loaded rates only. Use the button to load more.",
+    "rateNoResults": "No results",
+    "rateClear": "Clear selection",
+    "rateReloadEditor": "Load current rate",
+    "rateConfirmReload": "Replace form with current rate",
+    "rateReloadWarning": "Loading the current rate will replace your unsaved changes. Continue?",
     "ratesTitle": "Membership contribution rates",
     "ratesHelp": "A rate fills in the charge. You can edit its amount, accounts, period and classification before previewing.",
     "rateChoose": "Contribution rate",

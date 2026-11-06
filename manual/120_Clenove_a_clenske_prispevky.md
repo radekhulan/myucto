@@ -22,7 +22,7 @@ U nového předpisu vyberte sazbu a zvolte **Použít sazbu**. Výchozí délka 
 
 Sazba smí předvyplnit všechny tři účetní dimenze, pokud je v ní firma výslovně nastavila. Ve formuláři zůstávají viditelné a upravitelné a náhled je ověří stejně jako ruční volbu. Z výnosového účtu se dimenze automaticky neodvozují.
 
-Změna sazby nepřepisuje rozepsaný ani zaúčtovaný předpis. Pro změnu rozepsaného předpisu sazbu znovu výslovně použijte. Dřívější předpisy drží skutečně potvrzené částky a účetní podklady. Nepoužívanou sazbu vyřaďte vypnutím **Nabízet pro nové předpisy**; zůstane dohledatelná přes **Zobrazit i vyřazené sazby**. Současnou změnu stejné sazby z jiného okna je třeba nejdřív znovu načíst.
+Změna sazby nepřepisuje rozepsaný ani zaúčtovaný předpis. Pro změnu rozepsaného předpisu sazbu znovu výslovně použijte. Dřívější předpisy drží skutečně potvrzené částky a účetní podklady. Nepoužívanou sazbu vyřaďte vypnutím **Nabízet pro nové předpisy**; zůstane dohledatelná přes **Zobrazit i vyřazené sazby**. Při současné změně stejné sazby z jiného okna použijte v editoru **Načíst aktuální sazbu**. Před přepsáním neuložených změn dostanete upozornění; obnovení samotného katalogu editor nepřepíše.
 
 ### Zadání a potvrzení
 

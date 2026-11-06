@@ -17,7 +17,7 @@ const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'dis
   onChange: (e: Event) => { const option = (p.options as {value: string | number}[]).find(x => String(x.value) === (e.target as HTMLSelectElement).value); emit('update:modelValue', option?.value ?? null) },
 }, [h('option', {value: ''}), ...(p.options as {value: string | number; label: string}[]).map(x => h('option', {value: x.value}, x.label))]) })
 const rate: MembershipRate = { id: 1, supplier_id: 5, name: 'Synthetic standard', amount: '500.00', receivable_account: '315', revenue_account: '684.020', title_key: 'synthetic', period_months: 12, title_reference: 'Synthetic resolution', evidence: 'Synthetic evidence', classification: null, is_active: true, row_version: 1 }
-function mounted(props = {}) { return mount(Rates, { props: {supplier: 5, canManage: true, selectable: true, ...props}, global: { plugins: [createI18n({legacy: false, locale: 'cs', messages: {cs, en}})], stubs: {ActionBar, SearchableSelect} } }) }
+function mounted(props = {}) { return mount(Rates, { attachTo: document.body, props: {supplier: 5, canManage: true, selectable: true, ...props}, global: { plugins: [createI18n({legacy: false, locale: 'cs', messages: {cs, en}})], stubs: {ActionBar, SearchableSelect} } }) }
 beforeEach(() => {
   vi.clearAllMocks()
   api.rates.mockResolvedValue({items: [rate], next_after_id: null})
@@ -26,6 +26,48 @@ beforeEach(() => {
   chart.listAccounts.mockResolvedValue([{id: 1, supplier_id: 5, account_code: '315', name: 'Synthetic receivable', account_type: 'asset', is_active: true, is_synthetic: false}, {id: 2, supplier_id: 5, account_code: '684.020', name: 'Synthetic revenue', account_type: 'revenue', is_active: true, is_synthetic: false}])
 })
 describe('sazby členských příspěvků', () => {
+  it('renders empty search and clear selection labels in English', async () => {
+    const w = mount(Rates, {props: {supplier: 5, canManage: true}, global: {
+      plugins: [createI18n({legacy: false, locale: 'en', messages: {cs, en}})], stubs: {ActionBar, WorkspaceTeleport: {template: '<div><slot /></div>'}},
+    }})
+    await flushPromises()
+    const input = w.get('[data-field="rate-select"] input')
+    await input.trigger('focus'); await input.setValue('synthetic missing search')
+    expect(w.text()).toContain('No results')
+    expect(w.text()).not.toContain('Žádné výsledky')
+    await input.setValue('Synthetic standard')
+    await w.get('[role="option"]').trigger('click'); await flushPromises()
+    expect(w.find('button[aria-label="Clear selection"]').exists()).toBe(true)
+    w.unmount()
+  })
+  it('reloads a conflicted editor only after acknowledging replacement of its draft', async () => {
+    api.updateRate.mockRejectedValueOnce(new Error('Synthetic version conflict'))
+    const w = mounted(); await flushPromises()
+    await w.get('[data-field="rate-select"]').setValue('1')
+    await w.get('[data-action="edit-rate"]').trigger('click'); await flushPromises()
+    await w.get('[data-field="rate-name"]').setValue('Synthetic draft')
+    await w.get('[data-action="save-rate"]').trigger('click'); await flushPromises()
+    api.rate.mockResolvedValue({...rate, name: 'Synthetic current', row_version: 2})
+    await w.get('[data-action="reload-rate-editor"]').trigger('click'); await flushPromises()
+    expect(w.find('[data-action="cancel-rate"]').exists()).toBe(false)
+    expect(document.activeElement).toBe(w.get('[data-action="cancel-rate-reload"]').element)
+    await w.get('[data-action="cancel-rate-reload"]').trigger('click'); await flushPromises()
+    expect(document.activeElement).toBe(w.get('[data-action="reload-rate-editor"]').element)
+    await w.get('[data-action="reload-rate-editor"]').trigger('click'); await flushPromises()
+    expect((w.get('[data-field="rate-name"]').element as HTMLInputElement).value).toBe('Synthetic draft')
+    await w.get('[data-action="confirm-rate-reload"]').trigger('click'); await flushPromises()
+    expect((w.get('[data-field="rate-name"]').element as HTMLInputElement).value).toBe('Synthetic current')
+    expect(document.activeElement).toBe(w.get('[data-field="rate-name"]').element)
+    api.updateRate.mockResolvedValue({...rate, row_version: 3})
+    await w.get('[data-action="save-rate"]').trigger('click'); await flushPromises()
+    expect(api.updateRate.mock.calls[1]?.[2].row_version).toBe(2)
+    w.unmount()
+  })
+  it('hides manual entry when the parent requires a rate', async () => {
+    const w = mounted({allowManual: false}); await flushPromises()
+    expect(w.find('[data-action="manual-rate"]').exists()).toBe(false)
+    w.unmount()
+  })
   it.each(['create', 'update'])('keeps a successful %s response when its cached panel reactivates during saving', async path => {
     let complete!: (value: MembershipRate) => void
     const pending = new Promise<MembershipRate>(resolve => { complete = resolve })

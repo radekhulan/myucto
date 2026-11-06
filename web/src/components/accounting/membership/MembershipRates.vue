@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
@@ -14,7 +14,7 @@ import { amountDecimal, errorBox, errorMessage } from './membershipFormat'
 import { notifyMembershipRatesChanged, onMembershipRatesChanged } from './membershipRateChanges'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 
-const props = defineProps<{ supplier: number; canManage: boolean; selectable?: boolean; disabled?: boolean }>()
+const props = withDefaults(defineProps<{ supplier: number; canManage: boolean; selectable?: boolean; disabled?: boolean; allowManual?: boolean }>(), {allowManual: true})
 const emit = defineEmits<{ selected: [rate: MembershipRate | null] }>()
 const { t, te } = useI18n()
 const items = ref<MembershipRate[]>([]), next = ref<number | null>(null), selected = ref<number | null>(null)
@@ -23,6 +23,8 @@ const error = ref(''), notice = ref(''), editor = ref<HTMLFormElement | null>(nu
 const accounts = ref<ChartAccount[]>([]), dimensions = ref<DimensionOverview | null>(null)
 const editId = ref<number | null>(null), withDimensions = ref(false)
 const editorLoading = ref(false)
+const reloadEditorAcknowledgement = ref(false)
+const reloadTrigger = ref<HTMLButtonElement | null>(null), reloadCancel = ref<HTMLButtonElement | null>(null), nameInput = ref<HTMLInputElement | null>(null)
 const editorError = ref(''), editorReady = ref(false)
 const blank = (): MembershipRateInput => ({ name: '', amount: '', receivable_account: '', revenue_account: '', title_key: '', period_months: 0, title_reference: '', evidence: '', classification: null, is_active: true, row_version: 0 })
 const form = reactive(blank())
@@ -62,12 +64,44 @@ async function load(append = false) {
 
 async function openEditor(rate?: MembershipRate) {
   if (editing.value || saving.value || props.disabled) return
+  reloadEditorAcknowledgement.value = false
   editId.value = rate?.id ?? null
   Object.assign(form, blank(), rate ? { ...rate } : {})
   withDimensions.value = !!rate?.classification
   for (const axis of axes) selection[`${axis}_value_id`] = rate?.classification?.[`${axis}_value_id`] ?? null
   editing.value = true; error.value = ''; notice.value = ''
   await loadEditorOptions()
+}
+
+async function reloadEditor() {
+  if (editId.value === null || saving.value || editorLoading.value || props.disabled) return
+  const id = editId.value, supplier = props.supplier, ticket = ++editorGeneration
+  let reloaded = false
+  editorLoading.value = true; editorError.value = ''
+  try {
+    const current = await membershipApi.rate(supplier, id)
+    if (!alive || ticket !== editorGeneration || supplier !== props.supplier || !editing.value || editId.value !== id) return
+    Object.assign(form, blank(), current)
+    withDimensions.value = !!current.classification
+    for (const axis of axes) selection[`${axis}_value_id`] = current.classification?.[`${axis}_value_id`] ?? null
+    reloadEditorAcknowledgement.value = false; error.value = ''; reloaded = true
+  } catch (e) { if (alive && ticket === editorGeneration) editorError.value = errorMessage(e) || t('nonprofitMembership.error') }
+  finally {
+    if (alive && ticket === editorGeneration) {
+      editorLoading.value = false
+      await nextTick()
+      if (reloaded) nameInput.value?.focus()
+    }
+  }
+}
+
+async function askEditorReload() {
+  reloadEditorAcknowledgement.value = true
+  await nextTick(); reloadCancel.value?.focus()
+}
+async function cancelEditorReload() {
+  reloadEditorAcknowledgement.value = false
+  await nextTick(); reloadTrigger.value?.focus()
 }
 
 async function loadEditorOptions() {
@@ -112,7 +146,7 @@ async function save() {
 
 const actions = computed<ActionItem[]>(() => [
   { key: 'use-rate', label: t('nonprofitMembership.rateUse'), icon: 'check', tier: 'primary', variant: 'primary', show: props.selectable, disabled: props.disabled || loading.value || !!error.value || !chosen.value?.is_active, run: () => emit('selected', chosen.value ?? null) },
-  { key: 'manual-rate', label: t('nonprofitMembership.rateManual'), icon: 'edit', show: props.selectable, disabled: props.disabled, run: () => { selected.value = null; emit('selected', null) } },
+  { key: 'manual-rate', label: t('nonprofitMembership.rateManual'), icon: 'edit', show: props.selectable && props.allowManual, disabled: props.disabled, run: () => { selected.value = null; emit('selected', null) } },
   { key: 'new-rate', label: t('nonprofitMembership.rateNew'), icon: 'plus', show: props.canManage && !editing.value, disabled: props.disabled || saving.value, run: () => { void openEditor() } },
   { key: 'edit-rate', label: t('nonprofitMembership.rateEdit'), icon: 'edit', show: props.canManage && !editing.value, disabled: props.disabled || saving.value || !chosen.value, run: () => { if (chosen.value) void openEditor(chosen.value) } },
   { key: 'reload-rates', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || saving.value, run: () => { void load() } },
@@ -145,7 +179,7 @@ onBeforeUnmount(() => { alive = false; generation++; editorGeneration++; saveGen
     <p v-if="error" role="alert" :class="errorBox">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-700">{{ notice }}</p>
     <p v-if="loading" role="status" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
-    <label :class="formLabel">{{ t('nonprofitMembership.rateChoose') }}<SearchableSelect :key="loading ? 'loading' : 'ready'" :model-value="selected" :options="rateOptions" :disabled="disabled || saving || loading" data-field="rate-select" @update:model-value="chooseRate" /></label>
+    <label :class="formLabel">{{ t('nonprofitMembership.rateChoose') }}<SearchableSelect :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" :key="loading ? 'loading' : 'ready'" :model-value="selected" :options="rateOptions" :disabled="disabled || saving || loading" data-field="rate-select" @update:model-value="chooseRate" /></label>
     <div v-if="next !== null" class="flex flex-wrap items-center gap-3 text-sm">
       <p class="text-neutral-500">{{ t('nonprofitMembership.ratePartialList') }}</p>
       <button type="button" :class="btnOutline('neutral')" :disabled="loading || saving" data-action="more-rates" @click="load(true)"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitMembership.rateMore') }}</button>
@@ -156,21 +190,29 @@ onBeforeUnmount(() => { alive = false; generation++; editorGeneration++; saveGen
     <form v-if="editing" ref="editor" class="space-y-3 border-t pt-3" data-section="rate-editor" @submit.prevent="save">
       <p v-if="editorLoading" role="status" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
       <p v-if="editorError" role="alert" :class="errorBox" data-section="rate-editor-error">{{ editorError }}</p>
+      <p v-if="reloadEditorAcknowledgement" role="alert" class="text-sm text-warning-700">{{ t('nonprofitMembership.rateReloadWarning') }}</p>
       <fieldset :disabled="saving || disabled || editorLoading" class="grid gap-3 sm:grid-cols-2">
-        <label :class="formLabel">{{ t('nonprofitMembership.rateName') }}<input v-model="form.name" :class="field" required maxlength="160" data-field="rate-name" /></label>
+        <label :class="formLabel">{{ t('nonprofitMembership.rateName') }}<input ref="nameInput" v-model="form.name" :class="field" required maxlength="160" data-field="rate-name" /></label>
         <label :class="formLabel">{{ t('nonprofitMembership.amount') }}<input v-model="form.amount" :class="field" required inputmode="decimal" data-field="rate-amount" /></label>
-        <label :class="formLabel">{{ t('nonprofitMembership.receivableAccount') }}<SearchableSelect v-model="form.receivable_account" :options="accountOptions('asset')" data-field="rate-receivable" /></label>
-        <label :class="formLabel">{{ t('nonprofitMembership.revenueAccount') }}<SearchableSelect v-model="form.revenue_account" :options="accountOptions('revenue')" data-field="rate-revenue" /></label>
+        <label :class="formLabel">{{ t('nonprofitMembership.receivableAccount') }}<SearchableSelect :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" v-model="form.receivable_account" :options="accountOptions('asset')" data-field="rate-receivable" /></label>
+        <label :class="formLabel">{{ t('nonprofitMembership.revenueAccount') }}<SearchableSelect :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" v-model="form.revenue_account" :options="accountOptions('revenue')" data-field="rate-revenue" /></label>
         <label :class="formLabel">{{ t('nonprofitMembership.titleKey') }}<input v-model="form.title_key" :class="field" required maxlength="80" pattern="[A-Za-z0-9][A-Za-z0-9_.:\-]{0,79}" data-field="rate-title" /></label>
         <label :class="formLabel">{{ t('nonprofitMembership.ratePeriod') }}<select v-model="form.period_months" :class="field" data-field="rate-months"><option v-for="months in [0, 1, 3, 6, 12]" :key="months" :value="months">{{ t(`nonprofitMembership.rateMonths${months}`) }}</option></select></label>
         <p class="text-sm text-neutral-500 sm:col-span-2">{{ t('nonprofitMembership.ratePeriodHelp') }}</p>
         <label :class="formLabel">{{ t('nonprofitMembership.titleReference') }}<textarea v-model="form.title_reference" :class="textarea" required maxlength="2000" data-field="rate-reference" /></label>
         <label :class="formLabel">{{ t('nonprofitMembership.evidence') }}<textarea v-model="form.evidence" :class="textarea" required maxlength="2000" data-field="rate-evidence" /></label>
         <label class="flex items-center gap-2 text-sm sm:col-span-2"><input v-model="withDimensions" type="checkbox" data-field="rate-with-dimensions" />{{ t('nonprofitMembership.rateDimensions') }}</label>
-        <template v-if="withDimensions"><label v-for="axis in axes" :key="axis" :class="formLabel">{{ t(`nonprofitMembership.${axis === 'activity' ? 'classificationActivity' : axis === 'activity_kind' ? 'classificationKind' : 'classificationTaxRegime'}`) }}<SearchableSelect v-model="selection[`${axis}_value_id`]" :options="axisOptions(axis)" :data-field="`rate-${axis}`" /></label></template>
+        <template v-if="withDimensions"><label v-for="axis in axes" :key="axis" :class="formLabel">{{ t(`nonprofitMembership.${axis === 'activity' ? 'classificationActivity' : axis === 'activity_kind' ? 'classificationKind' : 'classificationTaxRegime'}`) }}<SearchableSelect :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" v-model="selection[`${axis}_value_id`]" :options="axisOptions(axis)" :data-field="`rate-${axis}`" /></label></template>
         <label class="flex items-center gap-2 text-sm sm:col-span-2"><input v-model="form.is_active" type="checkbox" data-field="rate-active" />{{ t('nonprofitMembership.rateActive') }}</label>
       </fieldset>
-      <ActionBar :actions="editActions" />
+      <div v-if="editId !== null" class="flex flex-wrap gap-2">
+        <button v-show="!reloadEditorAcknowledgement" ref="reloadTrigger" type="button" :class="btnOutline('neutral')" :disabled="editorLoading || saving || disabled" data-action="reload-rate-editor" @click="askEditorReload"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('nonprofitMembership.rateReloadEditor') }}</button>
+        <template v-if="reloadEditorAcknowledgement">
+          <button ref="reloadCancel" type="button" :class="btnOutline('neutral')" :disabled="editorLoading || saving" data-action="cancel-rate-reload" @click="cancelEditorReload"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
+          <button type="button" :class="btnOutline('warning')" :disabled="editorLoading || saving || disabled" data-action="confirm-rate-reload" @click="reloadEditor"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.cycle" /></svg>{{ t('nonprofitMembership.rateConfirmReload') }}</button>
+        </template>
+      </div>
+      <ActionBar v-if="!reloadEditorAcknowledgement" :actions="editActions" />
     </form>
   </section>
 </template>

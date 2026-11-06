@@ -39711,6 +39711,11 @@
   "nonprofitMembership": {
     "rateRetryOptions": "Znovu načíst účty a dimenze",
     "ratePartialList": "Hledáte jen v načtených sazbách. Další sazby načtete tlačítkem vedle.",
+    "rateNoResults": "Žádné výsledky",
+    "rateClear": "Zrušit výběr",
+    "rateReloadEditor": "Načíst aktuální sazbu",
+    "rateConfirmReload": "Přepsat formulář aktuální sazbou",
+    "rateReloadWarning": "Načtení aktuální sazby přepíše vaše neuložené změny. Pokračovat?",
     "ratesTitle": "Sazby členských příspěvků",
     "ratesHelp": "Sazba předvyplní předpis. Částku, účty, období i členění můžete před náhledem změnit.",
     "rateChoose": "Sazba příspěvku",
