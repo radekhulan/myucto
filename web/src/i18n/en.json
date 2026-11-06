@@ -13907,6 +13907,7 @@
         "calendar": "Find the employment calendar",
         "entries": "Review attendance for this employment",
         "imports": "Open attendance imports",
+        "manual_hours": "Open worked hours evidence",
         "average": "Complete this employment’s average earnings",
         "takeover": "Open payroll takeover review",
         "eldp_form": "Edit the record sheet form",
@@ -13983,6 +13984,10 @@
           "work_source": "The month takes attendance from an import summary but also has time entries. Two sources of the same time are never merged.",
           "import_missing": "The month takes attendance from an import summary, but its current revision has none (typically after the month was reopened).",
           "import_values": "The attendance import summary has no worked hours, or its overtime exceeds the worked hours.",
+          "manual_missing": "The month uses a manual summary, but it has no worked time segments.",
+          "manual_values": "A manual summary segment has an invalid date, worked time, overtime or number of worked days.",
+          "manual_overlap": "Date ranges of manual summary segments overlap.",
+          "manual_days": "The number of worked days in a manual summary segment exceeds its number of calendar days.",
           "unknown": "The working time summary could not be verified. Support must investigate."
         },
         "steps": {
@@ -13996,6 +14001,10 @@
           "work_source": "Decide which attendance source applies to the month. If the imported data is right, remove the wrongly recorded time entries; if the entries are right, do not use the import summary for this month. Refresh the summary afterwards.",
           "import_missing": "Open Attendance imports and apply this month’s batch again with the summary written to working months. Then refresh the summary and approve the month.",
           "import_values": "Correct the data in the attendance system (worked hours and overtime) and import it again. Overtime is part of the worked time and must not exceed it.",
+          "manual_missing": "Open worked hours evidence for this employment and month. Add segments based on documented worked time, give a reason and save the summary. Then refresh attendance and reopen month approval.",
+          "manual_values": "Open worked hours evidence and correct the segments using the actual supporting records. Dates must fall within the selected month, the end must not precede the start, and overtime must not exceed worked time. Worked days must match the stated time. Save the correction with a reason and refresh attendance.",
+          "manual_overlap": "Open worked hours evidence and compare the segment dates. Split them into non-overlapping parts according to the actual records so that the same time is not counted twice. Save the correction with a reason and refresh attendance.",
+          "manual_days": "Open worked hours evidence and correct the number of worked days using the actual records. Each segment may have at most as many worked days as calendar days. Save the correction with a reason and refresh attendance.",
           "unknown": "Contact support with the month, employment and technical details below. Do not confirm substitute values just to complete the report."
         }
       },

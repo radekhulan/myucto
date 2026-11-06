@@ -172,17 +172,23 @@ export const workSummaryRemediationCodes: Record<string, string> = {
   import_worked_hours_missing: 'import_values',
   import_overtime_invalid: 'import_values',
   import_overtime_exceeds_worked: 'import_values',
+  manual_summary_missing: 'manual_missing',
+  manual_segment_invalid: 'manual_values',
+  manual_segments_overlap: 'manual_overlap',
+  manual_worked_days_invalid: 'manual_days',
 }
 
 export function workSummaryRemediation(code: string, employmentId: number, period: string) {
   const kind = Object.hasOwn(workSummaryRemediationCodes, code) ? workSummaryRemediationCodes[code]! : 'unknown'
   const support = kind === 'unknown' || kind === 'integrity'
   const imports = kind === 'import_missing' || kind === 'import_values'
+  const manual = ['manual_missing', 'manual_values', 'manual_overlap', 'manual_days'].includes(kind)
   const path = kind === 'terms'
     ? `/payroll/people?employment=${employmentId}&panel=employment_terms&field=weekly_hours`
     : kind === 'absence' ? `/payroll/absences?employment=${employmentId}&tab=absences&period=${encodeURIComponent(period.slice(0, 7))}`
-      : support ? '/admin/support' : imports ? '/payroll/imports' : null
-  const action = kind === 'terms' ? 'terms' : kind === 'absence' ? 'absences' : support ? 'support' : imports ? 'imports' : kind === 'calendar' ? 'calendar' : 'entries'
+      : manual ? `/payroll/quick-inputs?employment=${employmentId}&period=${encodeURIComponent(period.slice(0, 7))}&hours=1`
+        : support ? '/admin/support' : imports ? '/payroll/imports' : null
+  const action = kind === 'terms' ? 'terms' : kind === 'absence' ? 'absences' : manual ? 'manual_hours' : support ? 'support' : imports ? 'imports' : kind === 'calendar' ? 'calendar' : 'entries'
   return { problemKey: `payroll.remediation.work.problems.${kind}`, stepKey: `payroll.remediation.work.steps.${kind}`, path, actionKey: `payroll.remediation.actions.${action}`, localTarget: kind === 'calendar' ? 'calendar' : 'entries' }
 }
 

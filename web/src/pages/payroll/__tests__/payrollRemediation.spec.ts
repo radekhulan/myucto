@@ -70,6 +70,19 @@ describe('mzdové úkony mají konkrétní nápravu', () => {
     expect(workSummaryRemediation('future_code', 12, '2025-03').path).toBe('/admin/support')
   })
 
+  it.each([
+    ['manual_summary_missing', 'manual_missing'],
+    ['manual_segment_invalid', 'manual_values'],
+    ['manual_segments_overlap', 'manual_overlap'],
+    ['manual_worked_days_invalid', 'manual_days'],
+  ])('otevírá podklady hodin správného vztahu a měsíce pro %s', (code, kind) => {
+    const guidance = workSummaryRemediation(code, 44, '2026-11-01')
+    expect(guidance.path).toBe('/payroll/quick-inputs?employment=44&period=2026-11&hours=1')
+    expect(guidance.actionKey).toBe('payroll.remediation.actions.manual_hours')
+    expect(guidance.problemKey).toBe(`payroll.remediation.work.problems.${kind}`)
+    expect(guidance.stepKey).toBe(`payroll.remediation.work.steps.${kind}`)
+  })
+
   it('rozlišuje nápravu převzatého měsíce od nápravy mzdy v MyÚčtu', () => {
     // Chybějící údaj převzatého měsíce se doplňuje v Kontrole převodu mezd;
     // ve mzdách MyÚčta by nebylo co opravovat, ten měsíc modul nepočítal.

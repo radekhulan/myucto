@@ -13907,6 +13907,7 @@
         "calendar": "Najít pracovní kalendář vztahu",
         "entries": "Zkontrolovat docházku vztahu",
         "imports": "Otevřít importy docházky",
+        "manual_hours": "Otevřít podklady hodin",
         "average": "Doplnit průměr tohoto vztahu",
         "takeover": "Otevřít kontrolu převodu mezd",
         "eldp_form": "Upravit formulář evidenčního listu",
@@ -13983,6 +13984,10 @@
           "work_source": "Měsíc bere docházku ze souhrnu importu, ale má i časové záznamy. Dva zdroje téže doby se neslučují.",
           "import_missing": "Měsíc bere docházku ze souhrnu importu, ale jeho aktuální revize žádný souhrn nemá (typicky po znovuotevření měsíce).",
           "import_values": "Souhrn z importu docházky neuvádí odpracované hodiny nebo uvádí přesčas, který odpracované hodiny převyšuje.",
+          "manual_missing": "Měsíc používá ruční souhrn, ale chybí v něm úseky odpracované doby.",
+          "manual_values": "Některý úsek ručního souhrnu má neplatné datum, odpracovanou dobu, přesčas nebo počet odpracovaných dnů.",
+          "manual_overlap": "Období úseků ručního souhrnu se překrývají.",
+          "manual_days": "Počet odpracovaných dnů v úseku ručního souhrnu převyšuje počet kalendářních dnů tohoto úseku.",
           "unknown": "Souhrn pracovní doby nelze ověřit. Příčinu musí posoudit podpora."
         },
         "steps": {
@@ -13996,6 +14001,10 @@
           "work_source": "Rozhodněte, který zdroj docházky pro měsíc platí. Platí-li podklady z importu, odstraňte chybně zapsané časové záznamy; platí-li záznamy, souhrn z importu pro tento měsíc nepoužívejte. Poté obnovte souhrn.",
           "import_missing": "Otevřete Importy docházky a použijte dávku za tento měsíc znovu se zápisem souhrnu do pracovních měsíců. Poté obnovte souhrn a měsíc schvalte.",
           "import_values": "Opravte podklady v docházkovém systému (odpracované hodiny a přesčas) a importujte je znovu. Přesčas je částí odpracované doby, nesmí ji převyšovat.",
+          "manual_missing": "Otevřete podklady hodin tohoto vztahu a měsíce. Doplňte úseky podle doložené odpracované doby, uveďte důvod a souhrn uložte. Poté obnovte docházku a znovu otevřete schválení měsíce.",
+          "manual_values": "Otevřete podklady hodin a opravte úseky podle skutečných podkladů. Data musí patřit do vybraného měsíce, konec nesmí předcházet začátku a přesčas nesmí převýšit odpracovanou dobu. Odpracované dny musí odpovídat uvedené době. Uložte opravu s důvodem a obnovte docházku.",
+          "manual_overlap": "Otevřete podklady hodin a porovnejte data úseků. Rozdělte je na nepřekrývající se části podle skutečnosti, aby se tatáž doba nezapočítala dvakrát. Uložte opravu s důvodem a obnovte docházku.",
+          "manual_days": "Otevřete podklady hodin a opravte počet odpracovaných dnů podle skutečných podkladů. V každém úseku smí být nejvýše tolik odpracovaných dnů, kolik má úsek kalendářních dnů. Uložte opravu s důvodem a obnovte docházku.",
           "unknown": "Kontaktujte podporu s uvedeným měsícem, pracovním vztahem a technickými podrobnostmi níže. Nepotvrzujte náhradní hodnoty jen kvůli dokončení hlášení."
         }
       },
