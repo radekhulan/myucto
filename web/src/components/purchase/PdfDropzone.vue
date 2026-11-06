@@ -2,7 +2,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
-import { isPhotoFile } from '@/composables/usePhotoCapture'
+import { usePhotoCropQueue } from '@/composables/usePhotoCropQueue'
 
 const props = withDefaults(defineProps<{
   uploading?: boolean
@@ -46,14 +46,8 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const isDragging = ref(false)
 const fileInput = ref<HTMLInputElement | null>(null)
-/** Fotky z výběru čekající na ořez, zpracovávají se po jedné. */
-const cropQueue = ref<File[]>([])
-const cropIndex = ref(0)
-const cropResults = ref<File[]>([])
-/** Celý přijatý výběr; výřezy se do něj vrátí na svá místa a vydá se najednou. */
-let pendingSelection: File[] = []
-
-const cropCurrent = computed<File | null>(() => cropQueue.value[cropIndex.value] ?? null)
+/** Výběr se vydá teprve po ořezu, aby PDF a fotky z jednoho dropu šly pohromadě. */
+const crop = usePhotoCropQueue(emitSelection)
 
 function onDragEnter(e: DragEvent) {
   e.preventDefault()
@@ -97,48 +91,14 @@ function handleSelection(selected: File[]): void {
   const candidates = props.multiple ? selected : selected.slice(0, 1)
   const accepted = candidates.filter(file => validate(file))
   if (accepted.length === 0) return
-
-  const photos = props.cropPhotos ? accepted.filter(isPhotoFile) : []
-  if (photos.length === 0) {
-    emitSelection(accepted)
-    return
-  }
-  // Výběr se vydá teprve po ořezu, aby PDF a fotky z jednoho dropu šly pohromadě.
-  pendingSelection = accepted
-  cropQueue.value = photos
-  cropIndex.value = 0
-  cropResults.value = []
+  if (props.cropPhotos) crop.start(accepted)
+  else emitSelection(accepted)
 }
 
 function emitSelection(files: File[]): void {
   if (files.length === 0) return
   if (props.multiple) emit('files-dropped', files)
   else emit('file-dropped', files[0])
-}
-
-/** Hotová fotka; po poslední se výřezy vrátí na svá místa v původním výběru. */
-function onCropDone(file: File): void {
-  cropResults.value = [...cropResults.value, file]
-  if (cropIndex.value + 1 < cropQueue.value.length) {
-    cropIndex.value += 1
-    return
-  }
-  const queue = [...cropResults.value]
-  const merged = pendingSelection.map(file => (isPhotoFile(file) ? queue.shift() ?? file : file))
-  resetCrop()
-  emitSelection(merged)
-}
-
-/** Zrušení ořezu zahodí celý výběr — uživatel chtěl začít znovu, ne nahrát rozdělanou dávku. */
-function onCropCancel(): void {
-  resetCrop()
-}
-
-function resetCrop(): void {
-  pendingSelection = []
-  cropQueue.value = []
-  cropIndex.value = 0
-  cropResults.value = []
 }
 
 /** Klient-side validace; server samozřejmě udělá magic-bytes check znovu. */
@@ -220,8 +180,8 @@ const cls = computed(() => {
         : 'purchase_invoice.pdf.max_size_hint') }}</p>
     </div>
 
-    <PhotoCropDialog v-if="cropCurrent" :key="cropIndex" :file="cropCurrent" from-file
-      :step="cropIndex + 1" :steps="cropQueue.length"
-      @done="onCropDone" @cancel="onCropCancel" />
+    <PhotoCropDialog v-if="crop.current.value" :key="crop.step.value" :file="crop.current.value" from-file
+      :step="crop.step.value" :steps="crop.steps.value" :skip-count="crop.remaining.value"
+      @done="crop.done" @skip-rest="crop.skipRest" @cancel="crop.cancel" />
   </div>
 </template>

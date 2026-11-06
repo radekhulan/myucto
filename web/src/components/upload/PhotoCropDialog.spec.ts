@@ -44,7 +44,7 @@ function source() {
   }
 }
 
-async function mountDialog(props: { file: File; fromFile?: boolean; allowRetake?: boolean }) {
+async function mountDialog(props: { file: File; fromFile?: boolean; allowRetake?: boolean; steps?: number; skipCount?: number }) {
   const wrapper = mount(PhotoCropDialog, { props, global: { stubs: { Modal: ModalStub } } })
   await flushPromises()
   return wrapper
@@ -114,5 +114,19 @@ describe('PhotoCropDialog', () => {
     expect(photoMocks.compressPhoto).toHaveBeenCalledTimes(1)
     expect(photoMocks.compressPhoto.mock.calls[0][1]).toEqual({ name: undefined })
     expect(wrapper.emitted('done')).toEqual([[compressed]])
+  })
+
+  it('v dávce nabídne přeskočení ořezu u ostatních fotek, u jediné fotky ne', async () => {
+    const file = new File(['photo'], 'a.jpg', { type: 'image/jpeg' })
+    const batch = await mountDialog({ file, fromFile: true, steps: 3, skipCount: 2 })
+    const skip = batch.get('[data-testid="capture-photo-skip-rest"]')
+    expect(skip.text()).toContain('capture_photo.skip_rest')
+
+    await skip.trigger('click')
+    expect(batch.emitted('skip-rest')).toHaveLength(1)
+    expect(batch.emitted('done')).toBeUndefined()
+
+    const single = await mountDialog({ file, fromFile: true, steps: 1, skipCount: 1 })
+    expect(single.find('[data-testid="capture-photo-skip-rest"]').exists()).toBe(false)
   })
 })

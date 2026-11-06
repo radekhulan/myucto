@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { defineComponent } from 'vue'
 
@@ -19,8 +19,9 @@ const CropStub = defineComponent({
     fromFile: { type: Boolean, default: false },
     step: { type: Number, default: 1 },
     steps: { type: Number, default: 1 },
+    skipCount: { type: Number, default: 0 },
   },
-  emits: ['done', 'cancel', 'retake'],
+  emits: ['done', 'cancel', 'retake', 'skip-rest'],
   template: '<div data-test="crop-stub" />',
 })
 
@@ -163,5 +164,58 @@ describe('PdfDropzone', () => {
 
     expect(wrapper.emitted('files-dropped')).toBeUndefined()
     expect(wrapper.find('[data-test="crop-stub"]').exists()).toBe(false)
+  })
+
+  describe('dávka fotek', () => {
+    afterEach(() => {
+      vi.unstubAllGlobals()
+    })
+
+    function touchDevice(): void {
+      vi.stubGlobal('matchMedia', (query: string) => ({ matches: query === '(pointer: coarse)', media: query }))
+    }
+
+    it('„Přeskočit ořez u ostatních“ vydá zbytek fronty v originále bez dialogu', async () => {
+      const wrapper = mount(PdfDropzone, { props: { cropPhotos: true, multiple: true }, ...withCropStub })
+      const first = photo('a.jpg')
+      const pdf = new File(['%PDF-1.7'], 'b.pdf', { type: 'application/pdf' })
+      const second = photo('c.jpg')
+      const third = photo('d.jpg')
+
+      await wrapper.trigger('drop', { dataTransfer: { files: [first, pdf, second, third] } })
+      expect(wrapper.findComponent(CropStub).props('skipCount')).toBe(3)
+
+      const firstCropped = new File(['x'], 'a.jpg', { type: 'image/jpeg' })
+      wrapper.findComponent(CropStub).vm.$emit('done', firstCropped)
+      await wrapper.vm.$nextTick()
+      const secondCrop = wrapper.findComponent(CropStub)
+      expect(secondCrop.props('skipCount')).toBe(2)
+
+      secondCrop.vm.$emit('skip-rest')
+      await wrapper.vm.$nextTick()
+
+      expect(wrapper.emitted('files-dropped')).toEqual([[[firstCropped, pdf, second, third]]])
+      expect(wrapper.find('[data-test="crop-stub"]').exists()).toBe(false)
+    })
+
+    it('na desktopu dávku víc než tří fotek vydá v originále, ořez nenabídne', async () => {
+      const wrapper = mount(PdfDropzone, { props: { cropPhotos: true, multiple: true }, ...withCropStub })
+      const files = [photo('a.jpg'), new File(['%PDF-1.7'], 'b.pdf', { type: 'application/pdf' }), photo('c.jpg'), photo('d.png'), photo('e.jpg')]
+
+      await wrapper.trigger('drop', { dataTransfer: { files } })
+
+      expect(wrapper.emitted('files-dropped')).toEqual([[files]])
+      expect(wrapper.find('[data-test="crop-stub"]').exists()).toBe(false)
+    })
+
+    it('na telefonu a tabletu nabídne ořez i u dávky víc než tří fotek', async () => {
+      touchDevice()
+      const wrapper = mount(PdfDropzone, { props: { cropPhotos: true, multiple: true }, ...withCropStub })
+
+      await wrapper.trigger('drop', { dataTransfer: { files: [photo('a.jpg'), photo('c.jpg'), photo('d.jpg'), photo('e.jpg')] } })
+
+      expect(wrapper.emitted('files-dropped')).toBeUndefined()
+      expect(wrapper.findComponent(CropStub).props('steps')).toBe(4)
+    })
   })
 })

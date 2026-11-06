@@ -43,13 +43,17 @@ const props = withDefaults(defineProps<{
   /** Pořadí fotky v dávce; s `steps > 1` se ukáže v titulku. */
   step?: number
   steps?: number
-}>(), { fromFile: false, allowRetake: false, step: 1, steps: 1 })
+  /** Kolik fotek dávky (včetně této) jde akcí „Přeskočit ořez u ostatních“ v originále; 0 = akce se nenabízí. */
+  skipCount?: number
+}>(), { fromFile: false, allowRetake: false, step: 1, steps: 1, skipCount: 0 })
 
 const emit = defineEmits<{
   /** Hotová fotka — ořezaná, celá, nebo originál, když ořez nešel. */
   done: [file: File]
   cancel: []
   retake: []
+  /** Tato a další fotky dávky jdou v originále, bez dialogu. */
+  'skip-rest': []
 }>()
 
 const PREVIEW_MAX_SIDE = 1000
@@ -354,6 +358,11 @@ function uploadOriginal() {
         <button type="button" :class="btnOutline('neutral')" @click="emit('cancel')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
           {{ t('capture_photo.cancel') }}
+        </button>
+        <button v-if="steps > 1 && skipCount > 0" type="button" :class="btnOutline('neutral')" :disabled="busy"
+          data-testid="capture-photo-skip-rest" @click="emit('skip-rest')">
+          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 5l7 7-7 7M5 5l7 7-7 7" /></svg>
+          {{ t('capture_photo.skip_rest', { n: skipCount }) }}
         </button>
         <button v-if="allowRetake" type="button" :class="btnOutline('warning')" :disabled="busy" @click="emit('retake')">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h5M20 20v-5h-5M5.6 15A8 8 0 0018.4 9M18.4 9A8 8 0 005.6 15" /></svg>
