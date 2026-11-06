@@ -16,7 +16,7 @@ const CropStub = defineComponent({
   name: 'PhotoCropDialog',
   props: {
     file: { type: Object, required: true },
-    keepName: { type: Boolean, default: false },
+    fromFile: { type: Boolean, default: false },
     step: { type: Number, default: 1 },
     steps: { type: Number, default: 1 },
   },
@@ -106,7 +106,7 @@ describe('PdfDropzone', () => {
 
     const crop = wrapper.findComponent(CropStub)
     expect((crop.props('file') as File).name).toBe('FA-2026-114.heic')
-    expect(crop.props('keepName')).toBe(true)
+    expect(crop.props('fromFile')).toBe(true)
 
     const cropped = new File(['cropped'], 'FA-2026-114.jpg', { type: 'image/jpeg' })
     crop.vm.$emit('done', cropped)

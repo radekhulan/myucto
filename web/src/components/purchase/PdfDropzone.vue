@@ -220,7 +220,7 @@ const cls = computed(() => {
         : 'purchase_invoice.pdf.max_size_hint') }}</p>
     </div>
 
-    <PhotoCropDialog v-if="cropCurrent" :key="cropIndex" :file="cropCurrent" keep-name
+    <PhotoCropDialog v-if="cropCurrent" :key="cropIndex" :file="cropCurrent" from-file
       :step="cropIndex + 1" :steps="cropQueue.length"
       @done="onCropDone" @cancel="onCropCancel" />
   </div>

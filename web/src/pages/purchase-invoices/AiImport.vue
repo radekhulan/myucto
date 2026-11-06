@@ -599,7 +599,7 @@ watch(() => suppliers.currentSupplierId, () => {
     </div>
     <MergeDocumentsPanel v-if="canExtract && aiConfigured" :disabled="!canStartExtraction"
       :busy="aiExtracting || aiBatchRunning" @import="importMerged" />
-    <PhotoCropDialog v-if="cropCurrent" :key="cropIndex" :file="cropCurrent" keep-name
+    <PhotoCropDialog v-if="cropCurrent" :key="cropIndex" :file="cropCurrent" from-file
       :step="cropIndex + 1" :steps="cropQueue.length"
       @done="onCropDone" @cancel="resetCrop" />
     <ExtractionReviewModal v-if="reviewIds" :invoice-ids="reviewIds" :only-flagged="!auth.isClientRole" @close="reviewIds = null" />

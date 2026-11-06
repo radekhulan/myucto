@@ -31,16 +31,19 @@ import {
 const props = withDefaults(defineProps<{
   file: File
   /**
-   * Zachovat základ názvu souboru (fotka ze souborů). Fotka z fotoaparátu žádný
-   * použitelný název nemá, tam zůstává časová značka `foto-YYYYMMDD-HHMMSS.jpg`.
+   * Fotka vybraná ze souborů: výřez zachová základ názvu souboru a bez ořezu jde
+   * dál originál beze změny — zmenšení na `PHOTO_MAX_SIDE` by sken nebo fotku
+   * z PC připravilo o rozlišení, které server pro vytěžení drží. Fotka
+   * z fotoaparátu žádný použitelný název nemá, tam zůstává časová značka
+   * `foto-YYYYMMDD-HHMMSS.jpg` a celá fotka se zmenší.
    */
-  keepName?: boolean
+  fromFile?: boolean
   /** Nabídnout „Vyfotit znovu“ — jen tam, odkud se fotoaparát otevírá. */
   allowRetake?: boolean
   /** Pořadí fotky v dávce; s `steps > 1` se ukáže v titulku. */
   step?: number
   steps?: number
-}>(), { keepName: false, allowRetake: false, step: 1, steps: 1 })
+}>(), { fromFile: false, allowRetake: false, step: 1, steps: 1 })
 
 const emit = defineEmits<{
   /** Hotová fotka — ořezaná, celá, nebo originál, když ořez nešel. */
@@ -96,7 +99,7 @@ const title = computed(() => props.steps > 1
   ? `${t('capture_photo.title')} (${props.step}/${props.steps})`
   : t('capture_photo.title'))
 /** Název výstupu; `undefined` = časová značka z {@link compressPhoto}. */
-const outputName = computed(() => (props.keepName ? photoFileNameFrom(props.file.name) : undefined))
+const outputName = computed(() => (props.fromFile ? photoFileNameFrom(props.file.name) : undefined))
 
 const frameStyle = computed(() => ({
   aspectRatio: String(aspect.value),
@@ -270,7 +273,10 @@ function nextPaint(): Promise<void> {
   })
 }
 
-/** Narovnaný výřez dokladu, nebo celá fotka; chyba narovnání spadne na celou fotku. */
+/**
+ * Narovnaný výřez dokladu, nebo celá fotka; chyba narovnání spadne na celou fotku.
+ * Celá fotka ze souborů (`fromFile`) jde v originále.
+ */
 async function buildFile(src: PhotoSource): Promise<File> {
   if (cropOn.value && src.pixels) {
     try {
@@ -281,6 +287,7 @@ async function buildFile(src: PhotoSource): Promise<File> {
       return await compressPhoto(pixelsSource(warped), { maxSide: CROPPED_MAX_SIDE, name: outputName.value })
     } catch { /* celá fotka níže */ }
   }
+  if (props.fromFile) return props.file
   return compressPhoto(src, { name: outputName.value })
 }
 
