@@ -91,8 +91,9 @@ V hodinových podkladech propojte schválenou nepřítomnost s doloženým
 nárokem za původní práci ve svátek a zadejte přesnou dobu čerpání;
 náhradu určí hodinový výpočet z příslušného průměru. Původní druh
 **Náhradní volno za přesčas** zůstává neplacený a nesmí se s placeným
-svátečním volnem zaměnit. Úplné návazné výkaznictví hodinových nároků
-zůstává neověřené a blokuje schválení dotčeného běhu.
+svátečním volnem zaměnit. Pracovní souhrn JMHZ obsahuje toto placené
+volno samostatně; zároveň je již zahrnuto v neodpracovaných a placených
+hodinách. Nepřičítejte je do úhrnů podruhé.
 
 > [!WARNING]
 > Nepřítomnost nezadávejte zároveň v docházce i tady. Schválenou nepřítomnost

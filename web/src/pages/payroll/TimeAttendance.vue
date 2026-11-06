@@ -259,6 +259,7 @@ const approvalRareAbsences = ref<Record<string, string>>({
   unpaid_leave: '',
   unexcused: '',
   compensatory_time_off: '',
+  holiday_time_off: '',
 })
 /*
  * Pracovní volno bez náhrady mzdy (výkon veřejné funkce, neplacená překážka)
@@ -276,6 +277,7 @@ const RARE_ABSENCE_BLOCKS = [
   },
   { key: 'unexcused', absenceTypes: ['unexcused'], suggestion: 'unexcused_hours' },
   { key: 'compensatory_time_off', absenceTypes: ['compensatory_time_off'], suggestion: 'compensatory_time_off_hours' },
+  { key: 'holiday_time_off', absenceTypes: ['holiday_compensatory_time_off'], suggestion: 'holiday_time_off_hours' },
 ] as const
 const approvalNote = ref('')
 const reopenItem = ref<PayrollTimeOverviewItem | null>(null)
@@ -1001,10 +1003,17 @@ function fillWorkedAsAgreed() {
  * nepřítomnosti, které v měsíci skutečně jsou. Firma bez rodičovské ani
  * neplaceného volna tak nevidí o pole víc než dřív.
  */
+function supportsHolidayTimeOff(preview: PayrollTimeOverviewItem['jmhz_work_summary']['preview'] | undefined): boolean {
+  return preview !== null && preview !== undefined
+    && ['jmhz-work-month.v11', 'jmhz-work-month.v12'].includes(preview.derivation_version)
+    && Object.hasOwn(preview.suggestions, 'holiday_time_off_hours')
+}
+
 const visibleRareAbsenceBlocks = computed(() => {
   const types = approvalItem.value?.jmhz_work_summary.preview?.absence_types ?? []
   return RARE_ABSENCE_BLOCKS.filter(block =>
-    block.absenceTypes.some(type => types.includes(type)))
+    (block.key !== 'holiday_time_off' || supportsHolidayTimeOff(approvalItem.value?.jmhz_work_summary.preview))
+    && block.absenceTypes.some(type => types.includes(type)))
 })
 
 function clearConditionalValues() {
@@ -1476,6 +1485,9 @@ async function approve() {
         unpaid_leave_hours: optionalHours(approvalRareAbsences.value.unpaid_leave),
         unexcused_hours: optionalHours(approvalRareAbsences.value.unexcused),
         compensatory_time_off_hours: optionalHours(approvalRareAbsences.value.compensatory_time_off),
+        ...(supportsHolidayTimeOff(item.jmhz_work_summary.preview)
+          ? { holiday_time_off_hours: optionalHours(approvalRareAbsences.value.holiday_time_off) }
+          : {}),
         confirmation_note: approvalNote.value.trim(),
       },
     })
@@ -1739,6 +1751,7 @@ async function approveSelected() {
           unpaid_leave_hours: null,
           unexcused_hours: null,
           compensatory_time_off_hours: null,
+          ...(supportsHolidayTimeOff(preview) ? { holiday_time_off_hours: null } : {}),
           confirmation_note: note,
         },
       })

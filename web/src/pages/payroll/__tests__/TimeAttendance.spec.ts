@@ -1183,6 +1183,88 @@ describe('TimeAttendance', () => {
         }),
       }),
     )
+    expect(m.approveTimeMonth.mock.calls.at(-1)?.[1].jmhz_work_summary).not.toHaveProperty('holiday_time_off_hours')
+  })
+  it.each(['jmhz-work-month.v11', 'jmhz-work-month.v12'])('confirms paid holiday time off for %s without adding it to totals again', async (version) => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 34, full_name: 'Osoba na rodičovské', code: 'ZAM-45' },
+        month: { status: 'open', row_version: 6 },
+        calendar: null,
+        summary: {
+          fund_minutes: 10_560,
+          planned_minutes: 10_080,
+          actual_minutes: 9_600,
+          difference_minutes: -480,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: version,
+            source_snapshot_sha256: 'd'.repeat(64),
+            suggestions: {
+              standard_fund_hours: '168',
+              agreed_fund_hours: '176',
+              weekly_work_hours: '40.00',
+              evidence_days: 30,
+              worked_hours: '160',
+              unworked_hours_occurred: true,
+              work_obstacles_occurred: false,
+              unworked_total_hours: '16',
+              unworked_paid_hours: null,
+              dpn_without_employer_compensation_hours: null,
+              dpn_with_employer_compensation_hours: null,
+              vacation_hours: null,
+              care_hours: null,
+              employee_obstacle_paid_hours: null,
+              employer_obstacle_hours: null,
+              maternity_hours: null,
+              paternity_hours: null,
+              parental_hours: null,
+              holiday_time_off_hours: '16',
+              unpaid_leave_hours: null,
+              unexcused_hours: null,
+              compensatory_time_off_hours: null,
+            },
+            issues: [],
+            requires_unworked_hours_followup: true,
+            absence_types: ['holiday_compensatory_time_off'],
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+
+    expect((wrapper.get('[data-test="jmhz-holiday_time_off"]').element as HTMLInputElement)
+      .value).toBe('16')
+    for (const absent of ['maternity', 'paternity', 'unpaid_leave', 'unexcused']) {
+      expect(wrapper.find(`[data-test="jmhz-${absent}"]`).exists()).toBe(false)
+    }
+
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenCalledWith(expect.any(String),
+      expect.objectContaining({
+        employment_id: 34,
+        jmhz_work_summary: expect.objectContaining({
+          unworked_hours_occurred: true,
+          unworked_total_hours: '16',
+          holiday_time_off_hours: '16',
+          unpaid_leave_hours: null,
+          maternity_hours: null,
+        }),
+      }),
+    )
   })
   it('ukáže svátky v jinak pracovní dny, které server přičte k neodpracovaným hodinám', async () => {
     m.timeMonth.mockResolvedValue({

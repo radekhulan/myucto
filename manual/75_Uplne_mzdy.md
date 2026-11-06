@@ -18,8 +18,9 @@ nároků, zaokrouhlené částky a konkrétní chybějící podklady. Podporuje 
 sazeb i změnu způsobu odměňování během měsíce, pokud lze dobu jednoznačně
 rozdělit. Součástí je posouzení minima a případný doplatek podle
 [doloženého režimu a započitatelných složek](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
-Neúplné podklady minima mají konkrétní důvod blokace. Návazné
-výkaznictví zatím není dokončené a stále brání schválení běhu.
+Neúplné podklady minima mají konkrétní důvod blokace. Po schválení
+běhu se hodinové nároky přenášejí do výplatní pásky a navazujících
+výstupů ze zmrazené revize, bez přepočtu podle pozdějších sazeb.
 Původní vztahy zůstávají v neurčeném režimu a jejich zpracování se nemění.
 Hodinový režim se volí výslovně pro konkrétní vztah; hotová importovaná
 částka sama tento režim nezapíná.

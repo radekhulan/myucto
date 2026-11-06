@@ -293,8 +293,8 @@ zůstává viditelný. Historie ukazuje autora, čas a důvod změny.
 Je-li některý nárok neúplný, náhled ho označí a jeho částku neodhadne.
 Již doložený základ může zůstat zobrazený, celková částka ale zůstane
 neznámá. Výpočet obsahuje také posouzení minima a případný doplatek
-podle následující části. Navazující zákonné výstupy zatím nejsou
-dokončené a tato ochrana stále blokuje schválení hodinového běhu.
+podle následující části. Schválení vyžaduje vyřešení konkrétních chyb
+podkladů; úplné nároky se uloží do revize běhu a návazných výstupů.
 
 ### 79.8.1.3 Minimální mzda a doplatek
 
@@ -349,8 +349,9 @@ vstup doplatku; nepřepisujte jej další ruční částkou. U vypořádání
 pouze historických hodinových nároků se minimum aktuální práce
 neposuzuje a nevytváří se fiktivní nulová docházka.
 
-Dokončené minimum nezaručuje dokončené zákonné výstupy. Schválení
-hodinového běhu stále čeká na jejich ověřené dokončení.
+Před schválením zkontrolujte také pracovní souhrn JMHZ a ostatní
+kontroly běhu. Samotné dokončené minimum nenahrazuje kontrolu podkladů
+příplatků, náhrad ani výkazů.
 
 ### 79.8.2 Krácení měsíční mzdy o absence
 

@@ -98,7 +98,8 @@ doložené nároky. Vypočtený hodinový základ se nepodsouvá jako sjednaná
 měsíční částka procentnímu předpisu. Vstupy spravované hodinovým
 výpočtem neopisujte druhou ruční položkou; oprava patří do hodin, sazby
 nebo příslušného podkladu. Výpočet připravuje také doložený doplatek
-do minimální mzdy. Dokončení výkaznictví stále blokuje schválení běhu.
+do minimální mzdy. Schválení vyžaduje úplné podklady a vyřešené
+konkrétní kontroly běhu; výplatní páska přebírá uložený rozpis nároků.
 
 1. Otevřete záložku **Pravidelné předpisy** a klikněte na **Nový předpis**.
 2. Vyberte zaměstnance, vztah a složku.

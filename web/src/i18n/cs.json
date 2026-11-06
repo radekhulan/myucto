@@ -2462,6 +2462,16 @@
       "add_premium": "Přidat zahrnutý příplatek dohody",
       "invalid": "Doplňte požadované rozsahy a podklady zahrnutí ve mzdě / odměně nebo posouzení minimální mzdy."
     },
+    "payslip_hourly": {
+      "cumulative": "Opravená revize zobrazuje celkový přepočet včetně dříve zúčtovaných složek. Tento součet není dodatečná výplata; nynější změny jsou u příslušných řádků označené jako rozdíl.",
+      "hours_delta": "Rozdíl skutečně odpracované doby pro tuto opravu: {hours}. Nula znamená opravu částky bez změny odpracované doby.",
+      "minimum_segments": "Úseky dokládají hranici minimální mzdy; jejich částky nejsou jednotlivé vyplacené doplatky.",
+      "segment_rounding": "Vyrovnání zobrazených zaokrouhlených úseků: {amount}.",
+      "title": "Hodinové nároky na výplatní pásce",
+      "frozen": "Rozpis z uložené revize běhu. Pozdější změny sazeb ani podkladů jej nepřepočítávají.",
+      "delta": "Celý nárok {full}, dříve zúčtováno {previous}, nynější rozdíl {delta}. Množství celého nároku není počet nových hodin.",
+      "rounding": "Uložený rozdíl zaokrouhlení: {amount}."
+    },
     "hourly_preview": {
       "claim_incomplete": "Nárok není úplně doložen",
       "overtime_time_off": "Nárok na náhradní volno za přesčas",
@@ -2524,7 +2534,7 @@
         "unapproved": "Neschváleno",
         "revision": "Revize {number}",
         "open": "Podklady hodin",
-        "scope_hint": "Hodiny se evidují odděleně od peněžních vstupů. Výpočet hodinové mzdy zatím není podporován.",
+        "scope_hint": "Schválené hodiny jsou podkladem hodinového výpočtu. Mzdu, příplatky a minimum zkontrolujte v náhledu; hotové nároky vytvářejí spravované mzdové vstupy.",
         "input_hint": "Zadejte hodiny jako 7:30 nebo 7,500 (nejvýše tři desetinná místa). Prázdné odpracované hodiny znamenají chybějící podklad, 0 je potvrzená nula. Prázdný přesčas nebo počet dnů zůstane nezjištěný. Fond kalendáře se nepřebírá jako odpracovaná doba.",
         "jmhz_pending": "Souhrn JMHZ nepotvrzen",
         "jmhz_pending_hint": "Schválení hodin samo nepotvrzuje pracovní souhrn JMHZ. Před uzamčením mzdového běhu jej doplňte v docházce; schválený měsíc je nejdřív nutné znovuotevřít s důvodem.",
@@ -4720,7 +4730,7 @@
       "search_empty": "V tomto měsíci žádný pracovní vztah neodpovídá hledání „{q}“.",
       "search_clear": "Zrušit hledání",
       "blockers": {
-        "hourly_remuneration_calculation_unsupported": "Náhled vypočítá mzdu z doložených hodin včetně kontroly minimální mzdy; schválení běhu zatím vyžaduje dokončení výkaznictví.",
+        "hourly_remuneration_calculation_unsupported": "Tato uložená revize obsahuje blokaci hodinového zpracování. Zkontrolujte její konkrétní podklady a připravte novou revizi běhu.",
         "base_conflict": "Základní mzda je zadána duplicitně rychlým i jiným vstupem.",
         "base_managed_elsewhere": "Základní mzdu spravuje jiný měsíční nebo pravidelný vstup.",
         "base_recurring_manual_review": "Pravidelný předpis základní mzdy vyžaduje ruční kontrolu.",
@@ -5894,6 +5904,7 @@
         "unpaid_leave": "Neplacené volno",
         "unexcused": "Neomluvená absence",
         "compensatory_time_off": "Náhradní volno za přesčas",
+        "holiday_time_off": "Placené náhradní volno za práci ve svátek",
         "required_missing": "Vyplňte „{field}“ - bez toho souhrn pracovní doby nevznikne.",
         "conditional_missing": "Odpovězte na obě otázky výše.",
         "issues_blocked": "Nejdřív vyřešte nálezy vypsané výše. S nimi souhrn pracovní doby neuložíme.",

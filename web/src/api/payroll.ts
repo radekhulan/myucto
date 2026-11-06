@@ -1496,6 +1496,8 @@ export interface PayrollJmhzWorkSummaryPreview {
     unexcused_hours: string | null
     /** Náhradní volno za přesčas: jen do úhrnu 10275, mzda za ně nepřísluší. */
     compensatory_time_off_hours: string | null
+    /** Placené sváteční volno, pouze souhrny v11/v12. */
+    holiday_time_off_hours?: string | null
   }
   issues: Array<{ code: string; message: string }>
   /*
@@ -1536,6 +1538,7 @@ export interface PayrollJmhzWorkSummaryRevision {
   unpaid_leave_millihours: number | null
   unexcused_millihours: number | null
   compensatory_time_off_millihours: number | null
+  holiday_time_off_millihours?: number | null
   approved_at: string
 }
 
@@ -1561,6 +1564,7 @@ export interface PayrollJmhzWorkSummaryApproval {
   unpaid_leave_hours: string | null
   unexcused_hours: string | null
   compensatory_time_off_hours: string | null
+  holiday_time_off_hours?: string | null
   confirmation_note?: string
 }
 
@@ -7428,8 +7432,72 @@ export interface PayrollIncomeTaxResult {
   ruleset_hash: string
 }
 
+/** Zmrazený rozpis pásky; starší revize nemají hodinový detail. */
+export interface PayrollPayslipIncomeLine {
+  label: string
+  amount_minor_units: number
+  hourly_detail?: {
+    claim_id: number
+    purpose: string
+    work_period_start: string
+    sequence_no: number
+    display_basis: 'full_claim' | 'delta'
+    quantity_duration_units: number | null
+    quantity_text: string | null
+    rate_minor: number | null
+    full_payable_minor: number
+    previous_payable_minor: number
+    delta_amount_minor: number
+    worked_duration_delta_units: number
+  }
+}
+
+export interface PayrollPayslipHourlyClaim {
+  component_code?: string
+  sequence_no?: number
+  quantity_text?: string
+  previous_payable_minor?: number
+  delta_amount_minor?: number
+  worked_duration_delta_units?: number
+  segment_display_adjustment_minor?: number | null
+  segment_role?: 'minimum_threshold' | 'claim'
+  minimum_assessment?: PayrollMinimumWagePreview['assessment_evidence'] | null
+  employment_id: number
+  claim_id: number
+  purpose: string
+  label: string
+  work_period_start: string
+  full_duration_units: number
+  full_worked_duration_units: number
+  raw_numerator_minor: number
+  raw_denominator: number
+  analytical_minor: number
+  payable_minor: number
+  rounding_adjustment_minor: number
+  segments: Array<{
+    date_from: string
+    date_to: string
+    term_id?: number | null
+    duration_units: number
+    quantity_text: string | null
+    rate_minor: number | null
+    monthly_gross_minor?: number | null
+    rate_label?: string | null
+    raw_numerator_minor: number
+    raw_denominator: number
+    analytical_minor: number
+  }>
+}
+
+export interface PayrollPayslipDocument {
+  schema_version: string
+  income_lines: PayrollPayslipIncomeLine[]
+  hourly_claims?: PayrollPayslipHourlyClaim[]
+}
+
 export interface PayrollRunResultPerson {
   employee_id: number
+  payslip_document?: PayrollPayslipDocument
   statutory?: {
     person_reference: string
     status: 'calculated' | 'manual_review' | 'error'

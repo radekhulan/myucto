@@ -472,6 +472,18 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.text()).toContain('payroll.quick_inputs.blockers.hourly_remuneration_calculation_unsupported')
   })
 
+  it('zobrazí konkrétní serverovou příčinu hodinové blokace místo kódu překladu', async () => {
+    m.load.mockImplementation(async period => ({ period, items: [fixture({
+      hourly_remuneration_in_period: true,
+      blockers: ['hourly_specific_evidence_missing'],
+      hourly_wage_preview: { complete: false, blockers: [{ code: 'hourly_specific_evidence_missing', message: 'Doložte přesný podklad nároku.', context: {} }], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: null, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.text()).toContain('Doložte přesný podklad nároku.')
+    expect(wrapper.text()).not.toContain('payroll.quick_inputs.blockers.hourly_specific_evidence_missing')
+  })
+
   it('keeps hour mode unavailable without an average and sends employment concurrency version', async () => {
     const wrapper = mountPage()
     await flushPromises()

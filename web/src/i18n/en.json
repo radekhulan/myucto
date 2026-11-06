@@ -2462,6 +2462,16 @@
       "add_premium": "Add included agreement premium",
       "invalid": "Complete the required scope and evidence for wage / remuneration inclusion or minimum wage assessment."
     },
+    "payslip_hourly": {
+      "cumulative": "The corrected revision shows the cumulative recalculation, including previously settled components. This total is not an additional payment; current changes are marked as differences on the relevant lines.",
+      "hours_delta": "Change in actual worked time for this correction: {hours}. Zero means an amount correction without a change in worked time.",
+      "minimum_segments": "These segments document the minimum wage threshold; their amounts are not individually paid top-ups.",
+      "segment_rounding": "Adjustment between displayed rounded segments: {amount}.",
+      "title": "Hourly claims on the payslip",
+      "frozen": "Breakdown from the saved payroll revision. Later rate or evidence changes do not recalculate it.",
+      "delta": "Full claim {full}, previously settled {previous}, current difference {delta}. The full claim quantity is not a count of new hours.",
+      "rounding": "Saved rounding adjustment: {amount}."
+    },
     "hourly_preview": {
       "claim_incomplete": "Entitlement evidence is incomplete",
       "overtime_time_off": "Overtime compensatory time off entitlement",
@@ -2524,7 +2534,7 @@
         "unapproved": "Not approved",
         "revision": "Revision {number}",
         "open": "Hours evidence",
-        "scope_hint": "Hours are recorded separately from monetary inputs. Hourly payroll calculation is not yet supported.",
+        "scope_hint": "Approved hours provide evidence for hourly payroll calculation. Check pay, premiums and the minimum in the preview; completed claims create managed payroll inputs.",
         "input_hint": "Enter hours as 7:30 or 7.500 (up to three decimal places). Blank worked hours mean missing evidence; 0 is a confirmed zero. Blank overtime or days worked remain unknown. Calendar hours are never assumed to have been worked.",
         "jmhz_pending": "JMHZ work summary not confirmed",
         "jmhz_pending_hint": "Approving hours does not confirm the JMHZ work summary. Complete it in attendance before locking payroll inputs; an approved month must first be reopened with a reason.",
@@ -4720,7 +4730,7 @@
       "search_empty": "No employment in this month matches “{q}”.",
       "search_clear": "Clear search",
       "blockers": {
-        "hourly_remuneration_calculation_unsupported": "The preview calculates pay from documented hours, including the minimum wage check; approving the payroll run still requires completion of reporting.",
+        "hourly_remuneration_calculation_unsupported": "This saved revision contains an hourly processing blocker. Check its specific evidence and prepare a new payroll revision.",
         "base_conflict": "Base pay is duplicated in the quick form and another input.",
         "base_managed_elsewhere": "Base pay is managed by another monthly or recurring input.",
         "base_recurring_manual_review": "The recurring base-pay assignment requires manual review.",
@@ -5894,6 +5904,7 @@
         "unpaid_leave": "Unpaid leave",
         "unexcused": "Unexcused absence",
         "compensatory_time_off": "Compensatory time off for overtime",
+        "holiday_time_off": "Paid compensatory time off for holiday work",
         "required_missing": "Fill in “{field}” — without it the working-time summary cannot be created.",
         "conditional_missing": "Answer both questions above.",
         "issues_blocked": "Resolve the issues listed above first. The working-time summary cannot be saved with them.",

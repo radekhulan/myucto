@@ -961,6 +961,11 @@ function managedDisplay(row: UiRow, kind: 'base' | 'overtime' | 'bonus'): string
  */
 const MANAGED_BLOCKER_SUFFIX = '_managed_elsewhere'
 
+function blockerMessage(row: UiRow, code: string): string {
+  return row.hourly_wage_preview?.blockers.find(blocker => blocker.code === code)?.message
+    ?? t(`payroll.quick_inputs.blockers.${code}`)
+}
+
 function personBlockers(row: UiRow): string[] {
   return row.blockers.filter(blocker => !blocker.endsWith(MANAGED_BLOCKER_SUFFIX))
 }
@@ -2170,7 +2175,7 @@ onMounted(() => {
                   <PayrollWorkedHoursSummary v-if="row.worked_time && (hasHourlyEvidence(row) || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
                   <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
                   <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
-                    {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
+                    {{ blockerMessage(row, blocker) }}
                   </p>
                 </td>
                 <td v-if="tbl.isVisible('income_amount')" class="px-3 py-2">
@@ -2670,7 +2675,7 @@ onMounted(() => {
             <PayrollWorkedHoursSummary v-if="row.worked_time && (hasHourlyEvidence(row) || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
             <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
             <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-2 text-xs text-warning-700">
-              {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
+              {{ blockerMessage(row, blocker) }}
             </p>
             <!--
               Na mobilu `title` nejde vyvolat, takže stav pole nese vedle ikony

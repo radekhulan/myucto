@@ -258,7 +258,8 @@ vrstvy se dokládají samostatně. V zásadách lze doložit také režim
 hodinový je výchozí, měsíční pouze pro pracovní poměr s předchozím
 rozhodnutím a platností. Jiná stanovená týdenní doba vyžaduje vlastní
 podklad a není totožná s kratším sjednaným úvazkem. Výpočet obsahuje
-minimum i doplatek; dokončení výkaznictví stále blokuje schválení běhu.
+minimum i doplatek. Schválený běh uchová rozpis sazeb, hodin a nároků
+pro výplatní pásku; pozdější změna podmínek jej nepřepočítá.
 Rychlý vstup ani pravidelné složky místo sazby nepoužijí dřívější měsíční mzdu.
 Dosavadní ruční a importované hotové částky bez přepnutí vztahu na nový
 hodinový způsob odměňování zůstávají podporované.

@@ -18,6 +18,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
+import PayrollPayslipHourlyBreakdown from '@/components/payroll/PayrollPayslipHourlyBreakdown.vue'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
@@ -2401,6 +2402,12 @@ onMounted(load)
             </div>
           </div>
         </section>
+
+        <PayrollPayslipHourlyBreakdown
+          v-if="breakdowns[run.id]?.length"
+          :people="breakdowns[run.id]"
+          :person-names="personNames"
+        />
 
         <PayrollIncomeTaxBreakdown
           v-if="breakdowns[run.id]?.length"

@@ -25,6 +25,21 @@ Kapitolu otevřete, když:
 | po spárování plateb a odeslání podání | Uzavřít měsíc | karta běhu, tlačítko **Uzavřít** |
 | když se ve schváleném měsíci najde chyba | Opravná revize | karta běhu, postup v [§ 80.5](#805-krok-za-krokem-oprava-schvaleneho-mesice) |
 
+V rozbaleném detailu vypočteného běhu najdete **Hodinové nároky na
+výplatní pásce**. Vyberte osobu a rozbalte nárok. Uvidíte uložené
+množství, sazby po účinných úsecích, analytické částky a zaokrouhlení.
+Příplatky ukazují doložené procento či základ; smluvní základní sazba
+se za sazbu příplatku nevydává. U doplatku minima úseky dokládají
+hranici, nikoli jednotlivé vyplacené doplatky.
+
+Opravená revize je celkový přepočet včetně dříve zúčtovaných složek;
+její součet není dodatečná výplata. Při opravě páska odlišuje celý
+nárok, již zúčtovanou částku a nynější rozdíl. Detail samostatně ukáže
+také změnu skutečně odpracované doby, včetně záporné opravy nebo nuly. Množství původního nároku nepovažujte za nové odpracované
+hodiny. Výplatní páska i detail přebírají stejnou zmrazenou revizi;
+pozdější změna sazeb je nepřepočítá. Starší revize bez tohoto rozpisu
+jej zpětně nedopočítávají.
+
 ## 80.2 Než začnete
 
 Hodinový výpočet připravuje nároky z přesných schválených hodin, účinných
@@ -37,9 +52,8 @@ Výpočet obsahuje posouzení minimální mzdy a případný doplatek.
 Neurčené započtení vlastní složky, chybějící rozhodnutí pro měsíční
 posouzení nebo rozporná stanovená doba mají konkrétní blokaci v
 [náhledu minima](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
-Úspěšný náhled ještě neznamená úplně podporovaný běh: dokončení
-navazujících zákonných výstupů stále brání jeho schválení. Samotným
-zadáním hotové částky tuto kontrolu nenahradíte. Snímek uchovává sazby, vybranou revizi hodin
+Schválení vyžaduje úplné podklady a vyřešené konkrétní kontroly běhu.
+Samotným zadáním hotové částky chybějící podklady nenahradíte. Snímek uchovává sazby, vybranou revizi hodin
 a další podklady nároků; pozdější změnu ohlásí jako změnu podkladů
 a již uzavřenou revizi nepřepíše.
 

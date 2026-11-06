@@ -498,3 +498,11 @@ v seznamu zaměstnanců ([§ 86](86_Zamestnanci.md)), včetně zobrazení
 - [Zaměstnanci](86_Zamestnanci.md): pracovní vztah, kalendář a zásady
   příplatků.
 - [Nastavení mezd](90_Nastaveni_mezd.md): firemní sazby příplatků.
+
+Placené náhradní volno za práci ve svátek je v potvrzení pracovního
+souhrnu JMHZ samostatné pole, pokud je tato nepřítomnost v měsíci
+skutečně evidovaná a podklad ji podporuje. Zkontrolujte předvyplněné
+hodiny; jsou již součástí neodpracovaných i placených hodin a do
+úhrnů se nepřičítají podruhé. Nezaměňujte je s neplaceným náhradním
+volnem za přesčas. Historické souhrny bez tohoto údaje se zpětně
+nedoplňují.
