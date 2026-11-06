@@ -824,7 +824,7 @@ final class PayrollAbsenceAction
             );
             $floorResolver = new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db);
             $floorIntervals = $floorResolver->forMany($this->currentSupplierId($request), [$data['employment_id']], $applicationDate, $applicationDate);
-            $result = $floorResolver::applyToResult($result, $floorIntervals[$data['employment_id']] ?? [], $applicationDate);
+            $floorResolver::assertFloorKnown($floorIntervals[$data['employment_id']] ?? [], $applicationDate, $result->averageHourlyMinor);
             $ruleset = $this->rulesets->forDate(
                 PayrollRulesetDomain::CompensationAverages,
                 $applicationDate,

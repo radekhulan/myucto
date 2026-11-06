@@ -13,8 +13,7 @@ final class PayrollHourlyAverageFloorResolverTest extends TestCase
 {
     public function testLegacyResultAndSuggestionRemainIdentical(): void
     {
-        $result = new AverageEarningResult('actual', 13440, 'supported', ['legacy' => 1]);
-        self::assertSame($result, Resolver::applyToResult($result, [], '2026-07-01'));
+        Resolver::assertFloorKnown([], '2026-07-01', 13440);
         $suggestion = ['ready' => true, 'input_version' => str_repeat('a', 64)];
         self::assertSame($suggestion, Resolver::applyToSuggestion($suggestion, [], '2026-07-01'));
         self::assertSame(['hourly_minor' => 13440, 'hourly_proof' => null], Resolver::apply([$this->floor()], '2026-06-30', 13440));
@@ -29,9 +28,9 @@ final class PayrollHourlyAverageFloorResolverTest extends TestCase
         self::assertSame(13440, $later['hourly_proof']['raw_average_hourly_minor']);
         self::assertSame('2026-07-16', $later['hourly_proof']['application_date']);
         self::assertSame(20000, Resolver::apply($rows, '2026-07-16', 20000)['hourly_minor']);
-        $result = Resolver::applyToResult(new AverageEarningResult('actual', 13440, 'supported', ['x' => 1]), $rows, '2026-07-16');
-        self::assertSame(14340, $result->averageHourlyMinor);
-        self::assertSame(14340, $result->trace['hourly_minimum_proof']['average_hourly_minor']);
+        Resolver::assertFloorKnown($rows, '2026-07-16', 13440);
+        $this->expectException(\InvalidArgumentException::class);
+        Resolver::assertFloorKnown([[...$this->floor(), 'minimum_hourly_minor' => null]], '2026-07-16', 13440);
     }
 
     public function testMissingOrOverlappingHourlyProofFailsClosed(): void
@@ -46,13 +45,14 @@ final class PayrollHourlyAverageFloorResolverTest extends TestCase
         }
     }
 
-    public function testHourlyProbableProposalIncludesFloorInOptimisticVersion(): void
+    public function testHourlyProbableProposalKeepsRawEarningAndIncludesFloorInOptimisticVersion(): void
     {
         $proposal = ['ready' => true, 'blockers' => [], 'input_version' => str_repeat('a', 64), 'probable_hourly_minor' => 13000, 'probable_rationale' => 'Syntetický podklad'];
         $raised = Resolver::applyToSuggestion($proposal, [$this->floor()], '2026-07-01');
-        self::assertSame(14340, $raised['probable_hourly_minor']);
+        // Minimum se přidává až ke dni použití průměru, schválený údaj zůstává surový.
+        self::assertSame(13000, $raised['probable_hourly_minor']);
+        self::assertSame('Syntetický podklad', $raised['probable_rationale']);
         self::assertNotSame($proposal['input_version'], $raised['input_version']);
-        self::assertSame(13000, $raised['hourly_minimum_proof']['raw_average_hourly_minor']);
         $blocked = Resolver::applyToSuggestion($proposal, [[...$this->floor(), 'minimum_hourly_minor' => null]], '2026-07-01');
         self::assertFalse($blocked['ready']);
         self::assertContains('hourly_average_minimum_missing', $blocked['blockers']);

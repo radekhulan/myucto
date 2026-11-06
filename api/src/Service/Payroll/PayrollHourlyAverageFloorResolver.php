@@ -63,21 +63,17 @@ final class PayrollHourlyAverageFloorResolver
             'raw_average_hourly_minor' => $approvedHourlyMinor, 'average_hourly_minor' => $hourly]];
     }
 
-    /** Původní objekt vracíme beze změny, pokud se nové hodinové pravidlo neuplatní. */
-    public static function applyToResult(AverageEarningResult $result, array $intervals, string $date): AverageEarningResult
+    /**
+     * Schválený průměr hodinového úseku se ukládá surový; minimum se k němu
+     * přidá až ke dni použití ({@see self::apply()}). Při schválení se jen
+     * ověří, že minimum ke dni účinnosti průměru jde určit.
+     */
+    public static function assertFloorKnown(array $intervals, string $date, int $averageHourlyMinor): void
     {
-        $applied = self::apply($intervals, $date, $result->averageHourlyMinor);
-        if ($applied['hourly_proof'] === null) return $result;
-        $proof = $applied['hourly_proof'];
-        return new AverageEarningResult($result->sourceKind, $applied['hourly_minor'], $result->supportStatus,
-            [...$result->trace, 'average_hourly_minor' => $applied['hourly_minor'], 'hourly_minimum_proof' => $proof,
-                'minimum_wage_hourly_minor' => $proof['minimum_hourly_minor'],
-                'minimum_wage_weekly_minutes' => $proof['stated_weekly_minutes'],
-                'minimum_wage_ruleset_id' => $proof['ruleset_id'],
-                'minimum_wage_floor_applied' => ($result->trace['raw_hourly_minor'] ?? $result->averageHourlyMinor) < $proof['minimum_hourly_minor']]);
+        self::apply($intervals, $date, $averageHourlyMinor);
     }
 
-    /** Návrh i jeho optimistická verze zahrnují nové minimum pouze v hodinovém úseku. */
+    /** Optimistická verze návrhu zahrnuje hodinové úseky; pravděpodobný výdělek zůstává surový. */
     public static function applyToSuggestion(array $suggestion, array $intervals, string $date): array
     {
         $current = array_values(array_filter($intervals, static fn(array $row): bool => $row['date_from'] <= $date && $row['date_to'] >= $date));
@@ -88,12 +84,7 @@ final class PayrollHourlyAverageFloorResolver
         ]));
         try {
             $probable = $suggestion['probable_hourly_minor'] ?? null;
-            $applied = self::apply($current, $date, is_int($probable) && $probable > 0 ? $probable : 1);
-            if (is_int($probable) && $probable > 0) {
-                $suggestion['probable_hourly_minor'] = $applied['hourly_minor'];
-                $suggestion['hourly_minimum_proof'] = $applied['hourly_proof'];
-                if ($applied['hourly_minor'] > $probable) $suggestion['probable_rationale'] .= ' Uplatněna zákonná spodní mez průměru podle stanovené týdenní doby.';
-            }
+            self::apply($current, $date, is_int($probable) && $probable > 0 ? $probable : 1);
         } catch (\InvalidArgumentException) {
             $suggestion['ready'] = false;
             $suggestion['blockers'][] = 'hourly_average_minimum_missing';

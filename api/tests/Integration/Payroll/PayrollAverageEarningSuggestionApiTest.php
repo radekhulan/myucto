@@ -208,18 +208,18 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             ->execute([$this->supplierId, $this->employmentId]);
         $suggestion = $this->suggest(2026, 2);
         self::assertTrue($suggestion['ready'], json_encode($suggestion['blockers']));
-        self::assertSame(14340, $suggestion['probable_hourly_minor']);
-        self::assertSame(2250, $suggestion['hourly_minimum_proof']['stated_weekly_minutes']);
+        // Uložený průměr nenese hodinové minimum 37,5h týdne (143,40 Kč); to se přidá ke dni použití.
+        self::assertSame(13000, $suggestion['probable_hourly_minor']);
+        self::assertSame(2250, $suggestion['hourly_minimum_intervals'][0]['stated_weekly_minutes']);
         $created = $this->call('createAutomaticAverages', 'POST', ['year' => 2026, 'quarter' => 2,
             'items' => [['employment_id' => $this->employmentId, 'input_version' => $suggestion['input_version']]]]);
         self::assertSame(201, $created['status'], json_encode($created['body']));
-        self::assertSame(14340, $created['body']['averages'][0]['average_hourly_minor']);
-        self::assertSame(14340, $created['body']['averages'][0]['input_trace']['hourly_minimum_proof']['minimum_hourly_minor']);
+        self::assertSame(13440, $created['body']['averages'][0]['average_hourly_minor']);
+        self::assertArrayNotHasKey('hourly_minimum_proof', $created['body']['averages'][0]['input_trace']);
         $body = [...$this->averageBody(2026, 3), 'gross_earnings_minor' => 1000000];
         $manual = $this->call('createAverage', 'POST', $body);
         self::assertSame(201, $manual['status'], json_encode($manual['body']));
-        self::assertSame(14340, $manual['body']['snapshot']['average_hourly_minor']);
-        self::assertSame(14340, $manual['body']['snapshot']['input_trace']['minimum_wage_hourly_minor']);
+        self::assertLessThan(14340, $manual['body']['snapshot']['average_hourly_minor']);
         $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET weekly_hours = NULL WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
         self::assertSame(422, $this->call('createAverage', 'POST', [...$this->averageBody(2026, 4), 'gross_earnings_minor' => 1000000])['status']);
     }

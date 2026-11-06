@@ -245,7 +245,7 @@ final class AverageEarningBatchService
             null,
             $units,
         );
-        $calculated = \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::applyToResult($calculated, $hourlyFloorIntervals, $applicationStart);
+        \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::assertFloorKnown($hourlyFloorIntervals, $applicationStart, $calculated->averageHourlyMinor);
         $trace = $calculated->trace;
         $trace['automatic'] = 'bulk';
         $trace['input_version'] = (string) $suggestion['input_version'];
