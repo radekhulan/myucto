@@ -72,7 +72,69 @@ final class PayrollHourlyEntitlementContextLoaderTest extends TestCase
         $changed = $this->context($id)[0];
         self::assertNull($changed['premium_segments']);
         self::assertNotNull($changed['evidence_source']);
-        self::assertNull($changed['nonworked_holidays']);
+        // Červen nemá svátek, nulu proto posoudí server sám; ruční příplatky ne.
+        self::assertSame([], $changed['nonworked_holidays']);
+        self::assertSame('no_holiday_on_hourly_day', $changed['automatic_assessment']['rules']['nonworked_holidays']);
+    }
+
+    public function testOrdinaryAttendanceMonthIsCompleteWithoutSavedEvidence(): void
+    {
+        $id = $this->attendanceEmployment('2026-06-01', 'employment');
+        [$context, $terms, $source] = $this->context($id);
+        self::assertNull($context['evidence_source']);
+        self::assertSame([], $context['nonworked_holidays']);
+        self::assertSame([], $context['holiday_time_off_grants']);
+        self::assertSame([], $context['overtime_time_off_allocations']);
+        self::assertSame(['rule_version' => PayrollHourlyEntitlementContextLoader::AUTOMATIC_RULES, 'rules' => [
+            'nonworked_holidays' => 'no_holiday_on_hourly_day', 'holiday_time_off_grants' => 'no_holiday_time_off_entitlement',
+            'overtime_time_off_allocations' => 'no_overtime_time_off_entitlement']], $context['automatic_assessment']);
+        $result = (new PayrollHourlyWageCalculator())->calculate(new PayrollHourlyWageContext($id, '2026-06-01', 'employment', $terms, $context['work_segments'], $source, entitlementContext: $context));
+        self::assertTrue($result->complete, json_encode($result->blockers));
+        self::assertSame(160000, array_sum(array_column($result->claims, 'payable_minor')));
+    }
+
+    public function testHolidayOnScheduledDayStillNeedsExplicitAssessment(): void
+    {
+        $id = $this->attendanceEmployment('2026-07-01', 'employment', shiftOn: '2026-07-06');
+        [$context, $terms, $source] = $this->context($id, '2026-07-01');
+        self::assertNull($context['nonworked_holidays']);
+        self::assertSame([], $context['holiday_time_off_grants']);
+        self::assertArrayNotHasKey('nonworked_holidays', $context['automatic_assessment']['rules']);
+        $result = (new PayrollHourlyWageCalculator())->calculate(new PayrollHourlyWageContext($id, '2026-07-01', 'employment', $terms, $context['work_segments'], $source, entitlementContext: $context));
+        self::assertFalse($result->complete);
+        self::assertContains('hourly_holiday_evidence_missing', array_column($result->blockers, 'code'));
+    }
+
+    public function testAgreementNeverReceivesNonworkedHolidayCompensation(): void
+    {
+        $id = $this->attendanceEmployment('2026-07-01', 'dpp', shiftOn: '2026-07-06');
+        [$context, $terms, $source] = $this->context($id, '2026-07-01');
+        self::assertSame([], $context['nonworked_holidays']);
+        self::assertSame('agreement_not_entitled', $context['automatic_assessment']['rules']['nonworked_holidays']);
+        $result = (new PayrollHourlyWageCalculator())->calculate(new PayrollHourlyWageContext($id, '2026-07-01', 'dpp', $terms, $context['work_segments'], $source, entitlementContext: $context));
+        self::assertTrue($result->complete, json_encode($result->blockers));
+        self::assertNotContains('NAHRADA_MZDY_SVATEK', array_column($result->claims, 'component_code'));
+        $options = (new PayrollHourlyEntitlementContextLoader($this->db))->evidenceOptions($this->supplier, $id, '2026-07-01');
+        self::assertSame([], $options['nonworked_holidays']);
+        $this->expectException(\InvalidArgumentException::class);
+        (new PayrollHourlyEntitlementContextLoader($this->db))->validateSelections($this->supplier, $id, '2026-07-01',
+            ['nonworked_holidays' => [['date' => '2026-07-06', 'duration_units' => 24000]], 'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => []], $source);
+    }
+
+    public function testApprovingAttendanceKeepsSavedEvidenceCurrent(): void
+    {
+        $id = $this->attendanceEmployment('2026-07-01', 'employment', shiftOn: '2026-07-06', approved: false);
+        [, , $source] = $this->context($id, '2026-07-01');
+        (new PayrollHourlyEvidenceRepository($this->db))->save($this->supplier, $id, '2026-07-01', ['row_version' => 0, 'work_source_hash' => PayrollHourlyEvidenceRepository::bindingHash($source),
+            'premium_segments' => [], 'nonworked_holidays' => [], 'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => []], $this->user, static fn() => null);
+        $this->db->pdo()->prepare('UPDATE payroll_time_entries SET status = "approved", approved_at = NOW() WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplier, $id]);
+        $this->db->pdo()->prepare('UPDATE payroll_time_months SET status = "approved", approved_at = NOW(), row_version = row_version + 1 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplier, $id]);
+        [$context] = $this->context($id, '2026-07-01');
+        self::assertNotNull($context['evidence_source']);
+        self::assertSame([], $context['nonworked_holidays']);
+        self::assertArrayNotHasKey('automatic_assessment', $context);
+        $history = (new PayrollHourlyEvidenceRepository($this->db))->history($this->supplier, $id, '2026-07-01', 0)['history'];
+        self::assertNull($history[0]['reason']);
     }
 
     public function testBatchQueryCountDoesNotGrowPerEmploymentAndTenantScopeIsRespected(): void
@@ -150,11 +212,34 @@ final class PayrollHourlyEntitlementContextLoaderTest extends TestCase
         self::assertSame(2150400, $preview['payable_total_minor']);
     }
 
-    private function context(int $id): array
+    private function context(int $id, string $period = '2026-06-01'): array
     {
-        $terms = (new PayrollRunSnapshotBatchLoader($this->db))->hourlyRemunerationTerms($this->supplier, [$id], '2026-06-01', '2026-06-30');
-        $sources = (new PayrollWorkedTimeEvidence($this->db))->loadMany($this->supplier, [$id], '2026-06-01');
-        return [(new PayrollHourlyEntitlementContextLoader($this->db))->forMany($this->supplier, '2026-06-01', [], $terms, $sources)[$id], $terms[$id], $sources[$id]];
+        $end = (new \DateTimeImmutable($period))->modify('last day of this month')->format('Y-m-d');
+        $terms = (new PayrollRunSnapshotBatchLoader($this->db))->hourlyRemunerationTerms($this->supplier, [$id], $period, $end);
+        $sources = (new PayrollWorkedTimeEvidence($this->db))->loadMany($this->supplier, [$id], $period);
+        $type = (string) $this->db->pdo()->query('SELECT relation_type FROM payroll_employments WHERE id = ' . $id)->fetchColumn();
+        return [(new PayrollHourlyEntitlementContextLoader($this->db))->forMany($this->supplier, $period, [['employment_id' => $id, 'relation_type' => $type]], $terms, $sources)[$id], $terms[$id], $sources[$id]];
+    }
+
+    /** Hodinový vztah s docházkou: jeden osmihodinový den, volitelně směna ve svátek. */
+    private function attendanceEmployment(string $period, string $type, ?string $shiftOn = null, bool $approved = true): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO payroll_employees (supplier_id, full_name, taxpayer_type, is_active) VALUES (?, "Syntetická docházka", "employee", 1)')->execute([$this->supplier]);
+        $person = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, start_date) VALUES (?, ?, ?, ?, "active", "2026-01-01")')->execute([$this->supplier, $person, 'SYN-ATT-' . $person, $type]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "contract", "Syntetické podmínky")')->execute([$this->supplier, $id]);
+        $status = $approved ? 'approved' : 'open';
+        $pdo->prepare('INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source, status, approved_at) VALUES (?, ?, ?, "entries", ?, ?)')->execute([$this->supplier, $id, $period, $status, $approved ? date('Y-m-d H:i:s') : null]);
+        $day = substr($period, 0, 8) . '02';
+        $pdo->prepare('INSERT INTO payroll_time_entries (supplier_id, employment_id, series_key, revision_no, category, starts_at_utc, ends_at_utc, timezone_name, break_minutes, source_kind, source_hash, status, approved_at) VALUES (?, ?, ?, 1, "regular", ?, ?, "Europe/Prague", 0, "manual", ?, ?, ?)')
+            ->execute([$this->supplier, $id, bin2hex(random_bytes(16)), $day . ' 06:00:00', $day . ' 14:00:00', hash('sha256', 'entry-' . $id, true), $approved ? 'approved' : 'draft', $approved ? date('Y-m-d H:i:s') : null]);
+        if ($shiftOn !== null) {
+            $pdo->prepare('INSERT INTO payroll_shifts (supplier_id, employment_id, series_key, starts_at_utc, ends_at_utc, timezone_name, status, published_at) VALUES (?, ?, ?, ?, ?, "Europe/Prague", "published", NOW())')
+                ->execute([$this->supplier, $id, bin2hex(random_bytes(16)), $shiftOn . ' 06:00:00', $shiftOn . ' 14:00:00']);
+        }
+        return $id;
     }
 
     private function questions(): int { return (int) $this->db->pdo()->query("SHOW SESSION STATUS LIKE 'Questions'")->fetch()['Value']; }

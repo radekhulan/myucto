@@ -2669,6 +2669,8 @@ export interface PayrollHourlyEvidence extends PayrollHourlyHolidayEvidence {
   premium_segments: PayrollHourlyPremiumSegment[]
 }
 
+export type PayrollHourlyAutomaticKey = 'nonworked_holidays' | 'holiday_time_off_grants' | 'overtime_time_off_allocations'
+
 export interface PayrollHourlyEvidenceResponse {
   work_source: PayrollTimeWorkSource | 'settlement_only'
   options: {
@@ -2684,7 +2686,9 @@ export interface PayrollHourlyEvidenceResponse {
   work_source_hash: string
   segments_suggested: Array<{ date_from: string; date_to: string; overtime_duration_units: number | null; overtime_mode: PayrollSurchargeCompensationMode }>
   evidence: PayrollHourlyEvidence | null
-  history: Array<{ id: number; revision_no: number; reason: string; created_by_name: string | null; created_at: string }>
+  /** Části, u nichž nárok v měsíci objektivně nevzniká; server je posoudí jako výslovnou nulu. */
+  automatic_assessment?: Partial<Record<PayrollHourlyAutomaticKey, string>> | []
+  history: Array<{ id: number; revision_no: number; reason: string | null; created_by_name: string | null; created_at: string }>
   history_offset: number
   history_has_more: boolean
 }
@@ -10036,7 +10040,7 @@ export const payrollApi = {
   saveHourlyEvidence: (employmentId: number, payload: PayrollHourlyHolidayEvidence & {
     period: string
     row_version: number
-    reason: string
+    reason?: string
     work_source_hash: string
     premium_segments: PayrollHourlyPremiumSegment[]
   }) => api.post<PayrollHourlyEvidenceResponse>(`/payroll/employments/${employmentId}/hourly-evidence`, payload).then(response => response.data),

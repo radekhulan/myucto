@@ -779,21 +779,23 @@ final class PayrollRunCommandService
                     && $commandAvailable
                     && $revision !== null)
             ) {
+                $hourlyBlockers = [];
                 if ($commandAvailable && $this->hourlyWages !== null) {
-                    $this->hourlyWages->materialize(
+                    $hourlyBlockers = $this->hourlyWages->materialize(
                         $supplierId,
                         $runId,
                         (string) $run['period_start'],
                         $run['office_id'] === null ? null : (int) $run['office_id'],
                         $actorUserId,
                         $keyHashBinary,
-                    );
+                    )['blockers'];
                 }
                 $snapshot = $this->snapshotBuilder->build(
                     $supplierId,
                     (string) $run['period_start'],
                     (string) $run['payment_date'],
                     $run['office_id'] === null ? null : (int) $run['office_id'],
+                    $hourlyBlockers,
                 );
                 if ($reopenAsCorrection || $refreshAsCorrection) {
                     $snapshot = $this->calculationPipeline

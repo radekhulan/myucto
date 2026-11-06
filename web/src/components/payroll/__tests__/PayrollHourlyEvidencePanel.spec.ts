@@ -5,7 +5,7 @@ import PayrollHourlyEvidencePanel from '../PayrollHourlyEvidencePanel.vue'
 const m = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn() }))
 vi.mock('@/api/payroll', () => ({ payrollApi: { hourlyEvidence: m.get, saveHourlyEvidence: m.save } }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
-vi.mock('@/composables/useFormat', () => ({ formatDateTime: (value: string) => value }))
+vi.mock('@/composables/useFormat', () => ({ formatDateTime: (value: string) => value, formatDate: (value: string) => `D(${value})` }))
 const response = (): PayrollHourlyEvidenceResponse => ({ period: '2026-11', employment_id: 12, work_source: 'manual_summary', options: { nonworked_holidays: [], holiday_time_off_entitlements: [], overtime_time_off_entitlements: [], time_off_absences: [] }, can_write: true, row_version: 3, work_source_hash: 'b'.repeat(64), segments_suggested: [{ date_from: '2026-11-01', date_to: '2026-11-30', overtime_duration_units: 0, overtime_mode: 'surcharge' }], evidence: null, history: [], history_offset: 0, history_has_more: false })
 function panel(canWrite = true) { return mount(PayrollHourlyEvidencePanel, { props: { employmentId: 12, period: '2026-11', canWrite } }) }
 async function confirmAll(wrapper: ReturnType<typeof panel>) {
@@ -16,7 +16,7 @@ describe('PayrollHourlyEvidencePanel', () => {
   it('uses server scope and optimistic identity, retaining unknown separately from zero', async () => {
     const wrapper = panel(); await flushPromises()
     expect(m.get).toHaveBeenCalledWith(12, '2026-11', 0)
-    expect(wrapper.get('[data-test="hourly-evidence-segment"]').text()).toContain('2026-11-01')
+    expect(wrapper.get('[data-test="hourly-evidence-segment"]').text()).toContain('D(2026-11-01) – D(2026-11-30)')
     await wrapper.get('[data-test="hourly-evidence-night-0"]').setValue('0')
     await wrapper.get('[data-test="hourly-evidence-weekend-0"]').setValue('0,001')
     await wrapper.get('[data-test="hourly-evidence-difficulty-0"]').setValue(true)
@@ -89,6 +89,43 @@ describe('PayrollHourlyEvidencePanel', () => {
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(m.save).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="hourly-evidence-error"]').text()).toContain('confirm_holidays')
+  })
+  it('saves a first revision without reason and without confirming automatically assessed zeros', async () => {
+    m.get.mockResolvedValue({ ...response(), row_version: 0, automatic_assessment: { nonworked_holidays: 'no_holiday_on_hourly_day', holiday_time_off_grants: 'no_holiday_time_off_entitlement', overtime_time_off_allocations: 'no_overtime_time_off_entitlement' } })
+    const wrapper = panel(); await flushPromises()
+    expect(wrapper.find('[data-test="hourly-evidence-confirm-holidays"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="hourly-evidence-automatic-holidays"]').text()).toBe('payroll.hourly_evidence.automatic')
+    expect(wrapper.find('[data-test="hourly-evidence-reason-optional"]').exists()).toBe(true)
+    await wrapper.get('[data-test="hourly-evidence-night-0"]').setValue('0')
+    await wrapper.get('[data-test="hourly-evidence-weekend-0"]').setValue('0')
+    await wrapper.get('[data-test="hourly-evidence-holiday-0"]').setValue('0')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).toHaveBeenCalledOnce()
+    expect(m.save.mock.calls[0][1]).not.toHaveProperty('reason')
+    expect(m.save.mock.calls[0][1]).toMatchObject({ row_version: 0, nonworked_holidays: [], holiday_time_off_grants: [], overtime_time_off_allocations: [] })
+  })
+  it('keeps explicit assessment where an entitlement can arise and requires reason when overwriting', async () => {
+    m.get.mockResolvedValue({ ...response(), automatic_assessment: { holiday_time_off_grants: 'no_holiday_time_off_entitlement', overtime_time_off_allocations: 'no_overtime_time_off_entitlement' } })
+    const wrapper = panel(); await flushPromises()
+    expect(wrapper.find('[data-test="hourly-evidence-confirm-holidays"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="hourly-evidence-reason-optional"]').exists()).toBe(false)
+    await wrapper.get('[data-test="hourly-evidence-confirm-holidays"]').setValue(true)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="hourly-evidence-error"]').text()).toContain('reason_required')
+  })
+  it('shows evidence options with application dates and without internal identifiers', async () => {
+    m.get.mockResolvedValue({ ...response(), options: { nonworked_holidays: [], overtime_time_off_entitlements: [],
+      holiday_time_off_entitlements: [{ entitlement_id: 7123, entitlement_revision: 2, work_date: '2026-09-28', due_on: '2026-12-31', available_duration_units: 3000 }],
+      time_off_absences: [{ absence_id: 9456, date: '2026-11-04', available_duration_units: 3000, kind: 'holiday' }] } })
+    const wrapper = panel(); await flushPromises()
+    await wrapper.get('[data-test="hourly-evidence-confirm-grants"]').setValue(true)
+    await wrapper.get('[data-test="hourly-evidence-add-grant"]').trigger('click')
+    const text = wrapper.get('[data-test="hourly-evidence-grant-row"]').text()
+    expect(text).toContain('D(2026-09-28)')
+    expect(text).toContain('D(2026-11-04)')
+    expect(text).not.toContain('#')
+    expect(text).not.toContain('2026-12-31 ')
   })
   it('honours the server lock even with local write permission', async () => {
     m.get.mockResolvedValue({ ...response(), can_write: false })

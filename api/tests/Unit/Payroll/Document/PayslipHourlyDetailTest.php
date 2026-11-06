@@ -164,6 +164,42 @@ final class PayslipHourlyDetailTest extends TestCase
         PayslipHourlyDetail::claim($source, 101, 'Základ');
     }
 
+    public function testHourlyPageUsesPayslipDateAndCurrencyFormat(): void
+    {
+        $html = (new PayslipPdfRenderer())->renderHtml(Fixture::document());
+        $hourly = substr($html, (int) strpos($html, 'Rozpis hodinových nároků'));
+        self::assertStringContainsString('1. 7. 2026 – 31. 7. 2026', $hourly);
+        self::assertStringContainsString('· 2026-07</div>', $hourly);
+        self::assertStringNotContainsString('2026-07-01', $hourly);
+        self::assertStringNotContainsString(' Kč', $hourly);
+        self::assertStringContainsString(' CZK', $hourly);
+        self::assertStringContainsString('187,50 CZK/h', $html);
+    }
+
+    public function testDifficultEnvironmentFactorsAreDeclined(): void
+    {
+        $label = static function (int $factors): ?string {
+            $source = Fixture::source(3000, 5000);
+            $source['purpose'] = $source['full_claim']['purpose'] = 'premium_difficult_environment';
+            $source['full_claim']['segments'][0] += ['policy_version_id' => 7, 'factors' => $factors];
+            $source['calculation_context']['policy_versions'] = [['id' => 7, 'date_from' => '2026-07-01', 'date_to' => '2026-07-31',
+                'rates' => ['difficult_environment' => ['statutory_basis' => 'minimum', 'statutory_rate_bp' => 1000, 'agreed_rate_bp' => null]]]];
+            return PayslipHourlyDetail::claim($source, 101, 'Ztížené prostředí')['segments'][0]['rate_label'];
+        };
+        self::assertSame('10,00 % hodinového minima, 3 vlivy', $label(3));
+        self::assertSame('10,00 % hodinového minima, 5 vlivů', $label(5));
+    }
+
+    public function testConfirmedZeroAgreementHasNoEmptyHourlyPage(): void
+    {
+        $document = SyntheticPayslipFixture::document();
+        $zero = Fixture::source(0, 20000);
+        $document = new \MyInvoice\Service\Payroll\Document\PayslipDocumentData(...[...get_object_vars($document), 'hourlyClaims' => [PayslipHourlyDetail::claim($zero, 101, 'Odměna z dohody')]]);
+        $html = (new PayslipPdfRenderer())->renderHtml($document);
+        self::assertStringNotContainsString('<pagebreak', $html);
+        self::assertStringNotContainsString('Rozpis hodinových nároků', $html);
+    }
+
     public function testLegacyRendererVersionIsUnchangedAndHourlyIsDistinct(): void
     {
         self::assertSame('mz-16-payslip-v4', PayslipPdfRenderer::versionFor(SyntheticPayslipFixture::document()));
