@@ -26,6 +26,8 @@ final class ConfigSnapshot
         '6355a5ddd02f18e73a5b08e9e55986994d6493d345612a98e7b05c66982d2d60',
         // auth.oidc.required_provider (vynucení pro celou instalaci); DB, údaje ani runtime cesty beze změny.
         '1d329cb9d45b01d670f2213f693628aae5045b443304f68cba3a0f5de2fb8c90',
+        // auth.oidc.providers.entra.skip_mfa a jeho ENV; DB, údaje ani runtime cesty beze změny.
+        '379afca8f93768980d6b6ed1a16a24d928adc410b90eb10edc04204dab761c27',
     ];
 
     private static ?Config $config = null;
