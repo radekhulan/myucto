@@ -325,6 +325,42 @@ final class JmhzExternalCodebookCatalog
         }
     }
 
+    /**
+     * Věta pro účetní, proč pracoviště za měsíc neprošlo CISOB: neplatný kód
+     * obce, nebo místo výkonu práce jiné než úřední název. `null` = příčinu
+     * neznáme konkrétně (chybí kód, číselník měsíc nepokrývá) a stačí obecné
+     * vysvětlení nálezu `jmhz_workplace_codebooks_unverified`.
+     */
+    public function workplaceMismatchMessage(?string $municipalityCode, ?string $workPlace, string $periodStart): ?string
+    {
+        $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        if ($municipalityCode === null || $municipalityCode === ''
+            || !$this->coversDate($periodStart) || !$this->coversDate($periodEnd)
+        ) {
+            return null;
+        }
+        $official = $this->findMunicipality($municipalityCode, $periodStart)['label'] ?? null;
+        if (!is_string($official)) {
+            return sprintf(
+                'Kód obce pracoviště %s není v číselníku CISOB platný pro vykazovaný měsíc. '
+                    . 'Na kartě pracovního vztahu vyberte obec našeptávačem znovu, uložte a obnovte podklady mzdového běhu.',
+                $municipalityCode,
+            );
+        }
+        if ($workPlace !== null && !hash_equals($official, $workPlace)) {
+            return sprintf(
+                'Místo výkonu práce „%s" neodpovídá úřednímu názvu obce „%s" (kód %s) v číselníku CISOB. '
+                    . 'Na kartě pracovního vztahu ho opravte na „%s", uložte a obnovte podklady mzdového běhu.',
+                $workPlace,
+                $official,
+                $municipalityCode,
+                $official,
+            );
+        }
+
+        return null;
+    }
+
     /** @param array{manifest_sha256:string,payload:array<string,mixed>} $manifest */
     public static function validateManifest(array $manifest, bool $requirePinnedHash = false): void
     {

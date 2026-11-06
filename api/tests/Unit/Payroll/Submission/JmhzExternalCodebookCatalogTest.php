@@ -181,6 +181,22 @@ final class JmhzExternalCodebookCatalogTest extends TestCase
         JmhzExternalCodebookCatalog::validateManifest($manifest, true);
     }
 
+    /** Nález neověřeného pracoviště řekne konkrétní nesoulad a úřední název. */
+    public function testWorkplaceMismatchMessageNamesTheOfficialMunicipality(): void
+    {
+        $catalog = $this->catalog();
+
+        $message = $catalog->workplaceMismatchMessage('554782', 'Praha', '2026-10-01');
+        self::assertIsString($message);
+        self::assertStringContainsString('Místo výkonu práce „Praha"', $message);
+        self::assertStringContainsString('opravte na „Hlavní město Praha"', $message);
+        self::assertStringContainsString('Kód obce pracoviště 999999', (string) $catalog->workplaceMismatchMessage('999999', 'Praha', '2026-10-01'));
+        self::assertNull($catalog->workplaceMismatchMessage('554782', 'Hlavní město Praha', '2026-10-01'));
+        // Měsíc mimo pokrytí číselníku: příčina je mezera číselníku, ne název.
+        self::assertNull($catalog->workplaceMismatchMessage('554782', 'Praha', '2027-01-01'));
+        self::assertNull($catalog->workplaceMismatchMessage(null, 'Praha', '2026-10-01'));
+    }
+
     private function catalog(): JmhzExternalCodebookCatalog
     {
         return new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog());

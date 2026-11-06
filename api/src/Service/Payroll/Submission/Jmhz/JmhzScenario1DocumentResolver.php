@@ -96,6 +96,8 @@ final class JmhzScenario1DocumentResolver
 
     private ?JmhzScenario1Xml2027Serializer $probeSerializer2027 = null;
 
+    private ?JmhzExternalCodebookCatalog $externalCodebooks = null;
+
     private const NEGATIVE_INCOME_REPORTED_AS_ZERO = [
         '10286',
         '10328',
@@ -270,7 +272,7 @@ final class JmhzScenario1DocumentResolver
             }
             foreach ($scopedReadinessIssues as $issue) {
                 $attributeIds = $issue['attribute_ids'] ?? [];
-                $blockers[] = $this->blocker(
+                $blocker = $this->blocker(
                     is_string($issue['code'] ?? null)
                         ? $issue['code']
                         : 'jmhz_preparation_issue_invalid',
@@ -283,6 +285,17 @@ final class JmhzScenario1DocumentResolver
                     is_array($attributeIds) && array_is_list($attributeIds)
                         ? array_values(array_filter($attributeIds, 'is_string'))
                         : [],
+                );
+                $workplaceMessage = $blocker->code === 'jmhz_workplace_codebooks_unverified'
+                    && $blocker->entityType === 'employment' && $blocker->entityId !== null
+                    ? $this->workplaceMismatchMessage($people, $blocker->entityId, $preparation->periodStart)
+                    : null;
+                $blockers[] = $workplaceMessage === null ? $blocker : new JmhzScenario1Blocker(
+                    $blocker->code,
+                    $blocker->entityType,
+                    $blocker->entityId,
+                    $blocker->attributeIds,
+                    $workplaceMessage,
                 );
             }
         }
@@ -1379,6 +1392,35 @@ final class JmhzScenario1DocumentResolver
         }
 
         return $found;
+    }
+
+    /**
+     * Konkrétní nesoulad pracoviště zmrazených podmínek s CISOB. Obecné
+     * „chybí ověřené číselníkové údaje" účetní neřekne, že stačí opravit
+     * název obce na úřední — a místo výkonu práce se ukládá i s holým
+     * „Praha" (uložení ho jen varuje).
+     *
+     * @param list<array<string,mixed>> $people
+     */
+    private function workplaceMismatchMessage(array $people, int $employmentId, string $periodStart): ?string
+    {
+        foreach ($people as $person) {
+            foreach ($this->rows($person['employments'] ?? null) as $employment) {
+                if (($employment['employment_id'] ?? null) !== $employmentId) {
+                    continue;
+                }
+                $term = $this->object($employment['term'] ?? null);
+                $this->externalCodebooks ??= new JmhzExternalCodebookCatalog(new JmhzSpecPackageCatalog());
+
+                return $this->externalCodebooks->workplaceMismatchMessage(
+                    is_string($term['jmhz_workplace_municipality_code'] ?? null) ? $term['jmhz_workplace_municipality_code'] : null,
+                    is_string($term['work_place'] ?? null) ? $term['work_place'] : null,
+                    $periodStart,
+                );
+            }
+        }
+
+        return null;
     }
 
     private function probeSerializer(): JmhzScenario1XmlSerializer
