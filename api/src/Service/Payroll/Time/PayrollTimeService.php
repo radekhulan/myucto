@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time;
 
-use MyInvoice\Http\IsoDate;
 use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeConflictException;
 use MyInvoice\Repository\Payroll\PayrollTimeLockedException;
@@ -17,13 +16,19 @@ use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 
 final class PayrollTimeService
 {
+    /**
+     * Důvod se v událostech měsíce ukládá i s popisem změny zdroje
+     * (nejvýše 39 znaků) a sloupec má 500 znaků; ořez by text tiše ztratil.
+     */
+    public const SOURCE_REASON_MAX_LENGTH = 450;
+
     /** @param array<string,mixed> $input @return array<string,mixed> */
     public function saveManualSummary(int $supplierId, string $period, array $input, ?int $userId): array
     {
         [$periodStart, $periodEnd] = $this->periodBounds($period);
         $reason = $input['reason'] ?? null;
-        if (!is_string($reason) || trim($reason) === '' || mb_strlen(trim($reason)) > 500) {
-            throw new \InvalidArgumentException('Uveďte důvod zadání hodin (nejvýše 500 znaků).');
+        if (!is_string($reason) || trim($reason) === '' || mb_strlen(trim($reason)) > self::SOURCE_REASON_MAX_LENGTH) {
+            throw new \InvalidArgumentException('Uveďte důvod zadání hodin (nejvýše ' . self::SOURCE_REASON_MAX_LENGTH . ' znaků).');
         }
         $replace = $input['replace_source'] ?? false;
         if (!is_bool($replace)) {
@@ -40,7 +45,7 @@ final class PayrollTimeService
             }
             $from = $segment['date_from'] ?? null;
             $to = $segment['date_to'] ?? null;
-            if (!is_string($from) || !IsoDate::isValid($from) || !is_string($to) || !IsoDate::isValid($to)
+            if (!self::strictDate($from) || !self::strictDate($to)
                 || $from < $periodStart || $to >= $periodEnd || $to < $from) {
                 throw new \InvalidArgumentException('Úsek musí být platný a celý ležet ve zvoleném měsíci.');
             }
@@ -74,8 +79,8 @@ final class PayrollTimeService
     {
         [$periodStart] = $this->periodBounds($period);
         $reason = $input['reason'] ?? null;
-        if (!is_string($reason) || trim($reason) === '' || mb_strlen(trim($reason)) > 500 || ($input['replace_source'] ?? null) !== true) {
-            throw new \InvalidArgumentException('Změna zdroje vyžaduje potvrzení a důvod (nejvýše 500 znaků).');
+        if (!is_string($reason) || trim($reason) === '' || mb_strlen(trim($reason)) > self::SOURCE_REASON_MAX_LENGTH || ($input['replace_source'] ?? null) !== true) {
+            throw new \InvalidArgumentException('Změna zdroje vyžaduje potvrzení a důvod (nejvýše ' . self::SOURCE_REASON_MAX_LENGTH . ' znaků).');
         }
         $source = $input['source'] ?? 'entries';
         if (!in_array($source, ['entries', 'import_summary'], true)) {
@@ -83,6 +88,17 @@ final class PayrollTimeService
         }
         return $this->repository->restoreEntries($supplierId, $this->positiveInt($input, 'employment_id'), $periodStart, $this->nonNegativeInt($input, 'row_version'), trim($reason), $source, $userId);
     }
+
+    /** Přesně YYYY-MM-DD; regex se `$` by propustil i datum s koncovým odřádkováním. */
+    private static function strictDate(mixed $value): bool
+    {
+        if (!is_string($value)) {
+            return false;
+        }
+        $parsed = \DateTimeImmutable::createFromFormat('!Y-m-d', $value);
+        return $parsed !== false && $parsed->format('Y-m-d') === $value;
+    }
+
     public const LIST_DEFAULT_LIMIT = 25;
     public const LIST_MAX_LIMIT = 200;
 
@@ -226,6 +242,14 @@ final class PayrollTimeService
         $periodLastDay = (new \DateTimeImmutable($periodEnd))
             ->modify('-1 day')
             ->format('Y-m-d');
+        $hourlyRanges = $this->repository->hourlyRemunerationRanges($supplierId, $employmentIds, $periodStart, $periodLastDay);
+        $manualIds = [];
+        foreach ($employmentIds as $id) {
+            if (($states[$id]['work_source'] ?? 'entries') === 'manual_summary' && ($states[$id]['status'] ?? null) === 'open') {
+                $manualIds[] = $id;
+            }
+        }
+        $manualEvidence = $manualIds === [] ? [] : $this->jmhzWorkSummary->manualSummaryEvidence($supplierId, $manualIds, $periodStart);
         $overtimeLimits = $this->overtimeLimits->assessMany(
             $supplierId,
             $employmentIds,
@@ -287,7 +311,8 @@ final class PayrollTimeService
                 'reopen_reason' => null,
             ];
             $manualSummary = $manualSummaries[$employmentId][$periodStart] ?? null;
-            $selectedSummary = $this->selectedWorkSummary($state, $manualSummary, $importSummaries[$employmentId][$periodStart] ?? null, $periodStart, $actualMinutes, $plannedMinutes, $categories);
+            $hourly = isset($hourlyRanges[$employmentId]);
+            $selectedSummary = $this->selectedWorkSummary($state, $manualSummary, $importSummaries[$employmentId][$periodStart] ?? null, $periodStart, $actualMinutes, $plannedMinutes, $categories, $hourly);
             $jmhzRevision = $this->repository->jmhzWorkSummaryRevision(
                 $supplierId,
                 $employmentId,
@@ -310,6 +335,7 @@ final class PayrollTimeService
                                 $supplierId,
                                 $employmentId,
                                 $periodStart,
+                                manualEvidence: $manualEvidence,
                             ),
                         )
                         : null,
@@ -333,6 +359,7 @@ final class PayrollTimeService
                 'shifts' => $employmentShifts,
                 'entries' => $employmentEntries,
                 'manual_summary' => $manualSummary,
+                'hourly_remuneration_in_period' => $hourly,
             ];
             $items[] = $item;
         }
@@ -486,10 +513,12 @@ final class PayrollTimeService
     }
 
     /** @param array<string,mixed> $state @param ?array<string,mixed> $manualSummary @param ?array<string,mixed> $importSummary @param array<string,int> $categories @return array<string,mixed> */
-    private function selectedWorkSummary(array $state, ?array $manualSummary, ?array $importSummary, string $periodStart, int $entryMinutes, int $plannedMinutes, array $categories): array
+    private function selectedWorkSummary(array $state, ?array $manualSummary, ?array $importSummary, string $periodStart, int $entryMinutes, int $plannedMinutes, array $categories, bool $hourly): array
     {
         $source = $state['work_source'] ?? 'entries';
-        if ($source === 'manual_summary' || $source === 'import_summary') {
+        // Měsíčně odměňovaný vztah vidí importovaný měsíc beze změny; hodiny
+        // ze souhrnu importu slouží jen hodinovému výpočtu.
+        if ($source === 'manual_summary' || ($source === 'import_summary' && $hourly)) {
             $worked = $source === 'manual_summary'
                 ? PayrollWorkedTimeSource::fromManualSummary($manualSummary, $periodStart)
                 : PayrollWorkedTimeSource::fromImportSummary($importSummary);
@@ -558,11 +587,15 @@ final class PayrollTimeService
         $periodStarts = array_map(static fn (string $period): string => $period . '-01', $page);
         $selectedManual = $this->repository->selectedManualSummaries($supplierId, [$employmentId], $periodStarts)[$employmentId] ?? [];
         $selectedImport = $this->repository->selectedImportSummaries($supplierId, [$employmentId], $periodStarts)[$employmentId] ?? [];
+        $hourlyRanges = $periodStarts === [] ? [] : $this->repository->hourlyRemunerationRanges(
+            $supplierId, [$employmentId], min($periodStarts),
+            (new \DateTimeImmutable(max($periodStarts)))->modify('last day of this month')->format('Y-m-d'),
+        )[$employmentId] ?? [];
         $manualSummaryOffset = max(0, $manualSummaryOffset);
         $manualHistory = $this->repository->manualSummaryHistory($supplierId, $employmentId, $periodStarts, $manualSummaryOffset);
         $items = [];
         foreach ($page as $period) {
-            $item = $this->historyMonth($supplierId, $employmentId, $period, $selectedManual[$period . '-01'] ?? null, $selectedImport[$period . '-01'] ?? null);
+            $item = $this->historyMonth($supplierId, $employmentId, $period, $selectedManual[$period . '-01'] ?? null, $selectedImport[$period . '-01'] ?? null, self::rangesOverlapMonth($hourlyRanges, $period . '-01'));
             $history = $manualHistory[$period . '-01'] ?? [];
             $item['manual_summary_history_truncated'] = count($history) > 20;
             $item['manual_summary_history_offset'] = $manualSummaryOffset;
@@ -581,7 +614,19 @@ final class PayrollTimeService
     }
 
     /** @return array<string,mixed> */
-    private function historyMonth(int $supplierId, int $employmentId, string $period, ?array $manualSummary, ?array $importSummary): array
+    /** @param list<array{effective_from:string,effective_to:?string}> $ranges */
+    private static function rangesOverlapMonth(array $ranges, string $periodStart): bool
+    {
+        $last = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        foreach ($ranges as $range) {
+            if ($range['effective_from'] <= $last && ($range['effective_to'] === null || $range['effective_to'] >= $periodStart)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function historyMonth(int $supplierId, int $employmentId, string $period, ?array $manualSummary, ?array $importSummary, bool $hourly): array
     {
         [$periodStart, $periodEnd, $startsAtUtc, $endsAtUtc] = $this->periodBounds($period);
         [$fundMinutes, $calendarDto] = $this->fundMinutesForMonth(
@@ -623,7 +668,7 @@ final class PayrollTimeService
             'summary' => [
                 'fund_minutes' => $fundMinutes,
                 'planned_minutes' => $plannedMinutes,
-                ...$this->selectedWorkSummary($state, $manualSummary, $importSummary, $periodStart, $actualMinutes, $plannedMinutes, $categories),
+                ...$this->selectedWorkSummary($state, $manualSummary, $importSummary, $periodStart, $actualMinutes, $plannedMinutes, $categories, $hourly),
                 // „Má kalendář?" se tu pozná z téhož dotazu, který počítá fond
                 // (`calendars()`), zatímco přehled na to má hromadný dotaz přes
                 // celou stránku (`employmentIdsWithCalendar()`). Podmínka je
@@ -637,6 +682,7 @@ final class PayrollTimeService
             'shift_count' => count($employmentShifts),
             'entry_count' => count($employmentEntries),
             'manual_summary' => $manualSummary,
+            'hourly_remuneration_in_period' => $hourly,
         ];
     }
 

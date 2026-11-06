@@ -105,7 +105,7 @@ final class PayrollTimeApiTest extends TestCase
 
     public function testManualSummaryCanPersistVersionTenJmhzWithoutInventedDays(): void
     {
-        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points) VALUES (?, ?, "2026-01-01", "2026-01-01", 40, 10000)')
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", 40, 10000, "hourly", 20000, "wage_statement", "Syntetický výměr")')
             ->execute([$this->supplierId, $this->employmentId]);
         $calendar = $this->action->calendar($this->request('PUT', '/api/payroll/time/calendars/' . $this->employmentId)
             ->withParsedBody($this->calendarPayload()), new Response(), ['employmentId' => (string) $this->employmentId]);
@@ -378,7 +378,7 @@ final class PayrollTimeApiTest extends TestCase
 
     public function testManualSummaryReplacesAttendanceWithAuditAndKeepsVersions(): void
     {
-        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
             ->execute([$this->supplierId, $this->employmentId]);
         $entry = $this->saveEntry(monthVersion: 0);
         self::assertSame(201, $entry->getStatusCode());
@@ -470,7 +470,7 @@ final class PayrollTimeApiTest extends TestCase
 
     public function testManualSummaryNeedsNoAttendanceAndEnforcesTenantVersionAndSession(): void
     {
-        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
             ->execute([$this->supplierId, $this->employmentId]);
         $payload = [
             'employment_id' => $this->employmentId, 'row_version' => 0,
@@ -493,7 +493,7 @@ final class PayrollTimeApiTest extends TestCase
 
     public function testManualSummaryPermissionsSeparateWriteApproveAndReopen(): void
     {
-        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
             ->execute([$this->supplierId, $this->employmentId]);
         $role = static fn (array $permissions): EffectiveRole => new EffectiveRole(0, 'Test', 'staff', true, $permissions);
         $payload = ['employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => 'Podklad', 'replace_source' => false,
@@ -521,7 +521,7 @@ final class PayrollTimeApiTest extends TestCase
 
     public function testManualSummaryHistoryCanPagePastTwentyRevisions(): void
     {
-        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
             ->execute([$this->supplierId, $this->employmentId]);
         $version = 0;
         for ($i = 1; $i <= 22; ++$i) {
@@ -548,6 +548,69 @@ final class PayrollTimeApiTest extends TestCase
         self::assertCount(2, $secondItem['manual_summary_history']);
         self::assertFalse($secondItem['manual_summary_history_truncated']);
         self::assertSame(1, $secondItem['manual_summary_history'][1]['segments'][0]['worked_duration_units']);
+    }
+
+    public function testMonthlyEmploymentCannotUseManualSummaryOrChangeSource(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-01-01", "2026-01-01", 4200000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $saved = $this->action->saveManualSummary($this->request('POST', '/api/payroll/time/months/2026-05/manual-summary')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => 'Syntetický podklad', 'replace_source' => true,
+            'segments' => [['date_from' => '2026-05-01', 'date_to' => '2026-05-31', 'worked_duration_units' => 3000, 'overtime_duration_units' => null, 'worked_days' => null]],
+        ]), new Response(), ['period' => '2026-05']);
+        self::assertSame(422, $saved->getStatusCode(), (string) $saved->getBody());
+        self::assertStringContainsString('hodinovým odměňováním', (string) $saved->getBody());
+        $restore = $this->action->restoreEntries($this->request('POST', '/api/payroll/time/months/2026-05/work-source')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => 'Syntetický import', 'replace_source' => true, 'source' => 'import_summary',
+        ]), new Response(), ['period' => '2026-05']);
+        self::assertSame(422, $restore->getStatusCode(), (string) $restore->getBody());
+        self::assertSame(0, $this->countRows('payroll_time_months'));
+    }
+
+    public function testManualSummaryRejectsGapsMalformedDatesAndOverlongReason(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $path = '/api/payroll/time/months/2026-05/manual-summary';
+        $segment = static fn (string $from, string $to, int $units): array => ['date_from' => $from, 'date_to' => $to, 'worked_duration_units' => $units, 'overtime_duration_units' => null, 'worked_days' => null];
+        $payload = ['employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => 'Syntetický podklad', 'replace_source' => false,
+            'segments' => [$segment('2026-05-01', '2026-05-15', 3000), $segment('2026-05-18', '2026-05-31', 3000)]];
+        $gap = $this->action->saveManualSummary($this->request('POST', $path)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(422, $gap->getStatusCode(), (string) $gap->getBody());
+        self::assertStringContainsString('bez mezer', (string) $gap->getBody());
+        $payload['segments'] = [$segment('2026-05-01', "2026-05-31\n", 3000)];
+        $malformed = $this->action->saveManualSummary($this->request('POST', $path)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(422, $malformed->getStatusCode(), (string) $malformed->getBody());
+        self::assertStringContainsString('celý ležet ve zvoleném měsíci', (string) $malformed->getBody());
+        $payload['segments'] = [$segment('2026-05-01', '2026-05-31', 3000)];
+        $payload['reason'] = str_repeat('ř', 451);
+        $tooLong = $this->action->saveManualSummary($this->request('POST', $path)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(422, $tooLong->getStatusCode(), (string) $tooLong->getBody());
+        self::assertSame(0, $this->countRows('payroll_time_month_manual_summaries'));
+
+        $entry = $this->saveEntry(monthVersion: 0);
+        self::assertSame(201, $entry->getStatusCode(), (string) $entry->getBody());
+        $payload['reason'] = str_repeat('ř', 449) . 'Z';
+        $payload['replace_source'] = true;
+        $payload['row_version'] = (int) $this->json($entry)['month']['row_version'];
+        $saved = $this->action->saveManualSummary($this->request('POST', $path)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $event = $this->db->pdo()->prepare('SELECT reason FROM payroll_time_month_events WHERE supplier_id = ? AND action = "changed" ORDER BY id DESC LIMIT 1');
+        $event->execute([$this->supplierId]);
+        self::assertStringEndsWith('řZ', (string) $event->fetchColumn());
+    }
+
+    public function testRestoringCurrentSourceIsNoOp(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", "hourly", 20000, "wage_statement", "Syntetický výměr")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $restore = $this->action->restoreEntries($this->request('POST', '/api/payroll/time/months/2026-05/work-source')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => 'Syntetický návrat', 'replace_source' => true, 'source' => 'entries',
+        ]), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $restore->getStatusCode(), (string) $restore->getBody());
+        self::assertFalse($this->json($restore)['changed']);
+        self::assertSame(0, $this->countRows('payroll_time_months'));
+        self::assertSame(0, $this->countRows('payroll_time_month_events'));
     }
 
     public function testApprovalCanFreezeExactJmhzCoreWorkSummary(): void

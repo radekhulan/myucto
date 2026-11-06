@@ -725,7 +725,9 @@ final class PayrollTimeAction
         if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
         try {
             $result = $this->time->restoreEntries($this->currentSupplierId($request), $this->routePeriod($args), $this->input($request), $this->userId($request));
-            $this->auditMonth($request, 'payroll.time.source_changed', $result['month']);
+            if ($result['changed']) {
+                $this->auditMonth($request, 'payroll.time.source_changed', $result['month']);
+            }
             return Json::ok($response, $result);
         } catch (PayrollTimeConflictException $e) {
             return $this->conflict($response, $e);

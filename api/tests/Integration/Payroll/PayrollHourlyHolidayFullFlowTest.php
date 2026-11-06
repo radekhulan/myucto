@@ -245,6 +245,7 @@ final class PayrollHourlyHolidayFullFlowTest extends TestCase
                 $time->saveManualSummary($this->supplierId, $id, '2026-06-01', 0, 'Doložené hodiny dohody', false, [
                     ['date_from' => '2026-06-01', 'date_to' => '2026-06-05', 'worked_duration_units' => 156000, 'overtime_duration_units' => 0, 'worked_days' => 5],
                     ['date_from' => '2026-06-06', 'date_to' => '2026-06-06', 'worked_duration_units' => 24000, 'overtime_duration_units' => 0, 'worked_days' => 1],
+                    ['date_from' => '2026-06-07', 'date_to' => '2026-06-30', 'worked_duration_units' => 0, 'overtime_duration_units' => 0, 'worked_days' => 0],
                 ], $this->actors[0]);
                 $month = $time->monthState($this->supplierId, $id, '2026-06-01');
                 $time->approveMonth($this->supplierId, $id, '2026-06-01', (int) $month['row_version'], null, $this->actors[0]);
@@ -254,6 +255,7 @@ final class PayrollHourlyHolidayFullFlowTest extends TestCase
                     'premium_segments' => [
                         ['date_from' => '2026-06-01', 'date_to' => '2026-06-05', 'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => 0, 'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => []],
                         ['date_from' => '2026-06-06', 'date_to' => '2026-06-06', 'night_duration_units' => 0, 'weekend_duration_units' => 24000, 'holiday_work_duration_units' => 0, 'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => []],
+                        ['date_from' => '2026-06-07', 'date_to' => '2026-06-30', 'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => 0, 'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => []],
                     ], 'nonworked_holidays' => [], 'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => [],
                 ], $this->actors[0]);
             }
@@ -310,8 +312,16 @@ final class PayrollHourlyHolidayFullFlowTest extends TestCase
     {
         $time = $this->container->get(PayrollTimeRepository::class);
         $month = $time->monthState($this->supplierId, $id, $period);
-        $time->saveManualSummary($this->supplierId, $id, $period, (int) ($month['row_version'] ?? 0), 'Synteticky doložená skutečná doba', false,
-            [['date_from' => $day ?? $period, 'date_to' => $day ?? date('Y-m-t', strtotime($period)), 'worked_duration_units' => $units, 'overtime_duration_units' => 0, 'worked_days' => $units === 0 ? 0 : ($day !== null ? 1 : null)]], $this->actors[0]);
+        $last = date('Y-m-t', strtotime($period));
+        $segments = [['date_from' => $day ?? $period, 'date_to' => $day ?? $last, 'worked_duration_units' => $units, 'overtime_duration_units' => 0, 'worked_days' => $units === 0 ? 0 : ($day !== null ? 1 : null)]];
+        // Úseky musí pokrýt celý měsíc; ostatní dny jsou doložená nula.
+        if ($day !== null && $day > $period) {
+            array_unshift($segments, ['date_from' => $period, 'date_to' => date('Y-m-d', strtotime($day . ' -1 day')), 'worked_duration_units' => 0, 'overtime_duration_units' => 0, 'worked_days' => 0]);
+        }
+        if ($day !== null && $day < $last) {
+            $segments[] = ['date_from' => date('Y-m-d', strtotime($day . ' +1 day')), 'date_to' => $last, 'worked_duration_units' => 0, 'overtime_duration_units' => 0, 'worked_days' => 0];
+        }
+        $time->saveManualSummary($this->supplierId, $id, $period, (int) ($month['row_version'] ?? 0), 'Synteticky doložená skutečná doba', false, $segments, $this->actors[0]);
         $month = $time->monthState($this->supplierId, $id, $period);
         $time->approveMonth($this->supplierId, $id, $period, (int) $month['row_version'], null, $this->actors[0]);
     }
@@ -319,11 +329,16 @@ final class PayrollHourlyHolidayFullFlowTest extends TestCase
     private function saveEvidence(PayrollHourlyEvidenceService $service, int $id, string $period, int $holidayUnits, array $days, array $grants): void
     {
         $view = $service->view($this->supplierId, $id, $period);
-        $segment = $view['segments_suggested'][0];
+        $layers = [];
+        foreach ($view['segments_suggested'] as $index => $segment) {
+            $own = array_values(array_filter($days, static fn (array $day): bool => $day['date'] >= $segment['date_from'] && $day['date'] <= $segment['date_to']));
+            $layers[] = ['date_from' => $segment['date_from'], 'date_to' => $segment['date_to'],
+                'night_duration_units' => 0, 'weekend_duration_units' => 0,
+                'holiday_work_duration_units' => $own !== [] || ($days === [] && $index === 0) ? $holidayUnits : 0,
+                'difficult_exposures' => [], 'holiday_work_days' => $own, 'overtime_work_days' => []];
+        }
         $service->save($this->supplierId, $id, $period, ['row_version' => $view['row_version'], 'reason' => 'Syntetické doložení svátku a volna', 'work_source_hash' => $view['work_source_hash'],
-            'premium_segments' => [['date_from' => $segment['date_from'], 'date_to' => $segment['date_to'],
-                'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => $holidayUnits,
-                'difficult_exposures' => [], 'holiday_work_days' => $days, 'overtime_work_days' => []]],
+            'premium_segments' => $layers,
             'nonworked_holidays' => [], 'holiday_time_off_grants' => $grants, 'overtime_time_off_allocations' => []], $this->actors[0]);
     }
 

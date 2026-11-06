@@ -28054,7 +28054,7 @@ paths:
         `difficulty_factor_count` se zdědí jen při nezměněné kategorii a explicitní `null` ho
         vymaže. Povinné zůstávají vždy `employment_id`, `row_version` a `month_row_version`. Nový
         záznam bez `supersedes_id` vyžaduje plnou sadu polí jako dosud.
-        Je-li vybraným zdrojem měsíce ruční souhrn, zápis denní docházky je blokovaný;
+        Je-li vybraným zdrojem měsíce ruční souhrn, zápis denní docházky je blokovaný (422);
         zdroj musí nejprve výslovně změnit oprávněný uživatel v aplikaci.
       requestBody:
         required: true
@@ -28073,7 +28073,7 @@ paths:
                   entry: { $ref: '#/components/schemas/PayrollTimeEntry' }
                   month: { type: object, additionalProperties: true }
         '403': { $ref: '#/components/responses/InsufficientScope' }
-        '409': { description: Docházka je uzamčená, došlo ke konfliktu verze nebo je vybraným zdrojem měsíce ruční souhrn, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: Docházka je uzamčená nebo došlo ke konfliktu verze, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/payroll/time/absences:

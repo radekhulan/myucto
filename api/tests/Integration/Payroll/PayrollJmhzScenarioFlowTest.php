@@ -318,6 +318,13 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         $person = $this->hire('Jitka Sváteční', 'female', '1987-06-05');
         $this->ensureRegularCalendar($person['employment_id']);
         $this->seedPaidHolidayTimeOffForReporting($person['employment_id']);
+        // Ruční souhrn vzniká jen u hodinových podmínek; měsíční mzda k němu
+        // přijde pozdější změnou podmínek.
+        $terms = $this->db->pdo()->prepare('SELECT remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis, monthly_gross_minor FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?');
+        $terms->execute([$this->supplierId, $person['employment_id']]);
+        $monthlyTerms = $terms->fetch(\PDO::FETCH_ASSOC);
+        $updateTerms = $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = ?, hourly_rate_minor = ?, remuneration_basis_kind = ?, remuneration_basis = ?, monthly_gross_minor = ? WHERE supplier_id = ? AND employment_id = ?');
+        $updateTerms->execute(['hourly', 20000, 'wage_statement', 'Syntetický výměr', null, $this->supplierId, $person['employment_id']]);
         $saved = $this->time->saveManualSummary($this->request('POST', '/api/payroll/time/months/2026-07/manual-summary')->withParsedBody([
             'employment_id' => $person['employment_id'], 'row_version' => $this->timeMonthRowVersion($person['employment_id'], self::PERIOD),
             'reason' => 'Syntetický doložený měsíční podklad', 'replace_source' => false,
@@ -325,6 +332,7 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
                 'overtime_duration_units' => 0, 'worked_days' => null]],
         ]), new Response(), ['period' => self::PERIOD]);
         self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $updateTerms->execute([...array_values($monthlyTerms), $this->supplierId, $person['employment_id']]);
         $item = $this->timeMonthItem($person['employment_id'], self::PERIOD);
         $preview = $item['jmhz_work_summary']['preview'];
         self::assertSame('jmhz-work-month.v12', $preview['derivation_version']);
