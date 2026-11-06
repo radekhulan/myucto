@@ -184,6 +184,37 @@ přihlášení. Jednotlivé relace lze označit a hromadně ukončit; **Vybrat v
 API tokeny ani MCP připojení přehled nezobrazuje a tlačítko **Ukončit relaci** je neodvolává. Přihlášení technických
 účtů správce instance v přehledu nejsou a superadmin je odtud ukončit nemůže.
 
+**Správa relací ze serveru (CLI).** Správce s přístupem k serveru a konfiguraci aplikace může
+relace vypsat nebo ukončit i bez přihlášení do aplikace. CLI spravuje také přihlášení superadminů,
+technických správců instance a neaktivních účtů. Zobrazuje pouze časově platné, neodvolané aktuální
+generace, nikoli autentizační nebo CSRF tokeny. Výstupní ID označuje rodinu relace.
+
+```bash
+php api/bin/user-sessions.php list
+php api/bin/user-sessions.php list --email=uzivatel@example.test --json
+php api/bin/user-sessions.php terminate --id=ID_RELACE
+php api/bin/user-sessions.php terminate --email=uzivatel@example.test --yes
+php api/bin/user-sessions.php terminate --all --yes
+```
+
+Příkazy se spouštějí z kořene instalace pomocí PHP CLI, stejně na Linuxu i Windows.
+`list` vrací nejvýše 50 přihlášení, seřazených podle posledního kontaktu. Pro další stránku použijte
+vypsaný `--cursor`; při filtrování zachovejte `--email`. JSON obsahuje pole `data` a `next_cursor`.
+Poslední kontakt se stejně jako ve webovém přehledu zapisuje nejvýše jednou za pět minut.
+
+`terminate` vyžaduje právě jeden výběr: `--id`, `--email`, nebo `--all`. Bez `--yes` jde pouze o
+náhled počtu odpovídajících relací. `--id` ukončí jednu rodinu včetně rotovaných generací;
+`--email` všechny odpovídající relace uživatele; `--all` všechny odpovídající relace celé instalace
+včetně správců. Nové přihlášení během operace nemusí být do výběru zahrnuto. API tokeny a MCP připojení
+se tím neruší. Uživatel se musí znovu přihlásit při příštím požadavku.
+
+Hromadné operace běží po nejvýše 50 rodinách: každá dávka a její audit jsou atomické. Při chybě
+zůstávají předchozí dokončené dávky odvolané, chybná dávka se vrátí a příkaz lze zopakovat.
+Audit `auth.sessions_revoked` obsahuje zdroj `cli:user-sessions`, serverového operátora, hostitele,
+počet a bezpečná ID rodin. Náhled do auditu nezapisuje. `--json` funguje i u ukončení; náhled vrací
+`matched`, skutečné ukončení navíc `terminated` a `executed: true`. Návratové kódy jsou 0 pro úspěch,
+1 pro provozní chybu, 2 pro neplatné argumenty a 3 pro nenalezený účet nebo relaci.
+
 **Počet současně přihlášených zařízení.** Licence může omezit, kolik relací smí mít jeden uživatel současně, zvlášť
 v prohlížeči počítače a zvlášť na mobilním zařízení (telefon, tablet, mobilní aplikace). Standardně je to jedna relace
 v prohlížeči a jedna na mobilu. Nové přihlášení nad tento počet ukončí nejstarší relaci stejného druhu a odhlášené

@@ -7,7 +7,7 @@ namespace MyInvoice\Repository;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 
-/** Provozní přehled platných relací bez autentizačních a CSRF tokenů. */
+/** Provozní přehled relací bez autentizačních a CSRF tokenů. includeAllAccounts je jen pro serverový CLI. */
 final class UserSessionRepository
 {
     private const PROJECTION = 'LOWER(HEX(s.session_family_id)) AS id, u.id AS user_id, u.name, u.email,
@@ -22,33 +22,45 @@ final class UserSessionRepository
 
     public function __construct(private readonly Connection $db) {}
 
-    public function page(string $beforeSeen, string $beforeFamily, int $limit, string $currentFamily): array
+    public function page(string $beforeSeen, string $beforeFamily, int $limit, string $currentFamily, ?int $userId = null, bool $includeAllAccounts = false): array
     {
         // Celoinstanční přehled vychází z indexu aktuálních generací podle kontaktu.
         // Kurzor zachovává sestupné pořadí i mezi stránkami a shodnými časy.
+        $scope = $includeAllAccounts ? '1 = 1' : self::MANAGEABLE_USER;
         $stmt = $this->db->pdo()->prepare(
             'SELECT ' . self::PROJECTION . '
                FROM sessions s JOIN users u ON u.id = s.user_id
               WHERE s.revoked_at IS NULL AND s.replaced_at IS NULL
-                AND s.expires_at > CURRENT_TIMESTAMP(6) AND ' . self::MANAGEABLE_USER . '
-                AND s.session_family_id <> UNHEX(?)
+                AND s.expires_at > CURRENT_TIMESTAMP(6) AND ' . $scope . '
+                ' . ($userId === null ? '' : 'AND s.user_id = ?') . '
+                ' . ($currentFamily === '' ? '' : 'AND s.session_family_id <> UNHEX(?)') . '
                 AND (s.last_seen < FROM_UNIXTIME(?) OR (s.last_seen = FROM_UNIXTIME(?) AND s.session_family_id < UNHEX(?)))
               ORDER BY s.last_seen DESC, s.session_family_id DESC LIMIT ' . ($limit + 1)
         );
-        $stmt->execute([$currentFamily, $beforeSeen, $beforeSeen, $beforeFamily]);
+        $stmt->execute([...($userId === null ? [] : [$userId]), ...($currentFamily === '' ? [] : [$currentFamily]), $beforeSeen, $beforeSeen, $beforeFamily]);
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
     /** Vlastní relace je připnutá mimo kurzor, aby zůstala první na každé stránce. */
-    public function current(string $family): ?array
+    public function current(string $family, bool $includeAllAccounts = false): ?array
     {
+        $scope = $includeAllAccounts ? '1 = 1' : self::MANAGEABLE_USER;
         $stmt = $this->db->pdo()->prepare('SELECT ' . self::PROJECTION . '
             FROM sessions s JOIN users u ON u.id = s.user_id
             WHERE s.session_family_id = UNHEX(?) AND s.revoked_at IS NULL AND s.replaced_at IS NULL
-              AND s.expires_at > CURRENT_TIMESTAMP(6) AND ' . self::MANAGEABLE_USER . '
+              AND s.expires_at > CURRENT_TIMESTAMP(6) AND ' . $scope . '
             ORDER BY s.generation DESC LIMIT 1');
         $stmt->execute([$family]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /** Serverový CLI může spravovat i technické a neaktivní účty; HTTP přístup tím nezískávají. */
+    public function userIdByEmail(string $email): ?int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT id FROM users WHERE email = ?');
+        $stmt->execute([$email]);
+        $id = $stmt->fetchColumn();
+        return $id === false ? null : (int) $id;
     }
 
     /** Token zůstává jen uvnitř backendu pro společnou revokaci lineage. */
@@ -58,15 +70,17 @@ final class UserSessionRepository
     }
 
     /** @param list<string> $families */
-    public function revocableMany(array $families): array
+    public function revocableMany(array $families, bool $includeAllAccounts = false): array
     {
+        if ($families === []) return [];
+        $scope = $includeAllAccounts ? '1 = 1' : self::MANAGEABLE_USER;
         $placeholders = implode(',', array_fill(0, count($families), 'UNHEX(?)'));
         $stmt = $this->db->pdo()->prepare(
             'SELECT s.id AS token, s.user_id, LOWER(HEX(s.session_family_id)) AS family
                FROM sessions s JOIN users u ON u.id = s.user_id
               WHERE s.session_family_id IN (' . $placeholders . ') AND s.revoked_at IS NULL
                 AND s.replaced_at IS NULL AND s.expires_at > CURRENT_TIMESTAMP(6)
-                AND ' . self::MANAGEABLE_USER . '
+                AND ' . $scope . '
               ORDER BY s.generation DESC'
         );
         $stmt->execute($families);
