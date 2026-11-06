@@ -1118,8 +1118,8 @@ final class InvoiceImporter
     /** Cizí měna dokladu Money (`Mena`), prázdné = Kč. @param array<string,mixed> $r */
     private static function currency(array $r): string
     {
-        $currency = strtoupper(trim((string) ($r['Mena'] ?? '')));
-        return in_array($currency, ['', 'CZK', 'KČ', 'KC'], true) ? '' : $currency;
+        $currency = MoneyS3Currency::code($r['Mena'] ?? null);
+        return $currency === 'CZK' ? '' : $currency;
     }
 
     private function rateId(float $rate, string $date): int

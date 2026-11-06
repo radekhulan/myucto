@@ -380,8 +380,7 @@ final class MoneyS3Reconciler
                     continue;
                 }
                 if ($table === 'BankKnih') {
-                    $currency = strtoupper(trim((string) ($r['Mena'] ?? '')));
-                    if ($currency !== '' && !in_array($currency, ['CZK', 'KČ', 'KC'], true)) {
+                    if (!MoneyS3Currency::isCzk($r['Mena'] ?? null)) {
                         continue;
                     }
                     $add($doc, CashBankImporter::transactionAmount($r, 'CZK')[0]);

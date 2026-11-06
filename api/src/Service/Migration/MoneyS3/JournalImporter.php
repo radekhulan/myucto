@@ -397,8 +397,8 @@ final class JournalImporter
      */
     public static function rowForeign(array $r): ?array
     {
-        $mena = strtoupper(trim((string) ($r['Mena'] ?? '')));
-        if (in_array($mena, ['', 'KČ', 'CZK'], true)) {
+        $mena = MoneyS3Currency::code($r['Mena'] ?? null);
+        if ($mena === 'CZK') {
             return null;
         }
         $czk = abs(round((float) ($r['Castka'] ?? 0), 2));
@@ -519,12 +519,12 @@ final class JournalImporter
         $collect = static function (iterable $rows, bool $ownYear) use (&$byAccount, $ctx): void {
             foreach ($rows as $r) {
                 $code = AccountCode::fromMoney((string) ($r['PrimUcet'] ?? ''));
-                $mena = strtoupper(trim((string) ($r['Mena'] ?? '')));
+                $mena = MoneyS3Currency::code($r['Mena'] ?? null);
                 $accountId = $code !== null ? ($ctx->accountIds[$code] ?? null) : null;
                 if ($accountId === null || !in_array(strtoupper(trim((string) ($r['UcPokl'] ?? ''))), ['P', 'U'], true)) {
                     continue;
                 }
-                if (in_array($mena, ['', 'KČ', 'CZK'], true)) {
+                if ($mena === 'CZK') {
                     if ($ownYear) {
                         $byAccount[$accountId] = null;
                     }

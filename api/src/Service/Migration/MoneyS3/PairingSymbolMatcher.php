@@ -1209,8 +1209,7 @@ final class PairingSymbolMatcher
             if ($kind === 'doc' && $doc[1] === null) {
                 continue;
             }
-            $mena = mb_strtoupper(trim((string) ($r['Mena'] ?? '')));
-            $mena = in_array($mena, ['', 'KČ', 'KC', 'CZK'], true) ? 'CZK' : $mena;
+            $mena = MoneyS3Currency::code($r['Mena'] ?? null);
             $foreign = $mena === 'CZK' ? 0.0 : abs((float) ($r['CastkaCM'] ?? 0));
             foreach ([[$effect['debit'], $effect['amount'], $effect['credit']], [$effect['credit'], -$effect['amount'], $effect['debit']]] as [$account, $delta, $counter]) {
                 if (preg_match('/^3[12]/', $account) !== 1) {
