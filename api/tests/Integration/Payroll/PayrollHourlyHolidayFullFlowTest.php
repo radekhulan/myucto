@@ -104,8 +104,47 @@ final class PayrollHourlyHolidayFullFlowTest extends TestCase
         self::assertSame('8 h', $claim['quantity_text']);
     }
 
+    public function testHourlyVacationFlowsToWagesAndNextQuarterAverage(): void
+    {
+        $office = $this->createOffice();
+        $this->configureSocialInsuranceOutput($office);
+        $this->configureHealthInsuranceOutput();
+        $this->configureIncomeTaxOutput();
+        $person = $this->createEmployment($office, 'Syntetická Dovolená', 1, 'hpp', 'employment', 40, 10000, periodStart: '2026-06-01');
+        $id = $person['employment_id'];
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 20000, monthly_gross_minor = NULL, remuneration_basis_kind = "contract", remuneration_basis = "Syntetická smlouva" WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $id]);
+        $this->ensureRegularCalendar($id);
+        $this->publishShifts($id, ['2026-06-10', '2026-06-11', '2026-06-12']);
+        $this->container->get(\MyInvoice\Repository\AccountingModeRepository::class)->record($this->supplierId, '2026-01-01', 'double_entry');
+        $pdo->prepare('INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status) VALUES (?, 2026, "2026-01-01", "2026-12-31", "open")')->execute([$this->supplierId]);
+        $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $average = $this->average200($id, 20500);
+        $this->createApprovedAbsence($id, 'vacation', '2026-06-10', '2026-06-12', $average, ['partial_last_minutes' => 120]);
+        $time = $this->container->get(PayrollTimeRepository::class);
+        $time->saveManualSummary($this->supplierId, $id, '2026-06-01', 0, 'Syntetické skutečně odpracované hodiny', false, [[
+            'date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'worked_duration_units' => 450000,
+            'overtime_duration_units' => 0, 'worked_days' => 20,
+        ]], $this->actors[0]);
+        $month = $time->monthState($this->supplierId, $id, '2026-06-01');
+        $time->approveMonth($this->supplierId, $id, '2026-06-01', (int) $month['row_version'], null, $this->actors[0]);
+        $this->saveEvidence($this->container->get(PayrollHourlyEvidenceService::class), $id, '2026-06-01', 0, [], []);
+        $run = $this->runPayrollMonth('2026-06-01', '2026-07-10', $office, 'hourly-vacation');
+        self::assertSame([], $run['blockers'], json_encode($run['blockers']));
+        self::assertSame([], $run['warnings'], json_encode($run['warnings']));
+        self::assertNotNull($run['approved']);
+        self::assertSame(3000000, $this->amount($id, '2026-06-01', 'MZDA_HODINOVA_ZAKLAD'));
+        self::assertSame(369000, $this->amount($id, '2026-06-01', 'NAHRADA_MZDY_DOVOLENA'));
+        self::assertSame(3369000, $run['approved']->revision['result_snapshot']['totals']['source_amount_minor']);
+        $suggestion = $this->container->get(\MyInvoice\Service\Payroll\Absence\AverageEarningDerivationService::class)->suggest($this->supplierId, $id, 2026, 3);
+        $june = $suggestion['months'][2];
+        self::assertSame('2026-06-01', $june['period_start']);
+        self::assertSame(3000000, $june['gross_earnings_minor']);
+        self::assertSame(450000, $june['worked_duration_units']);
+    }
+
     #[\PHPUnit\Framework\Attributes\DataProvider('hourlyAgreementCases')]
-    public function testHourlyAgreementsUseActualIncomeForInsurance(string $type, int $rate, int $units, int $expectedPerRelation, int $relations, bool $insured): void
+    public function testHourlyAgreementsUseActualIncomeForInsurance(string $type, array $relations, int $expectedGross, bool $insured, bool $weekend): void
     {
         $office = $this->createOffice();
         $this->configureSocialInsuranceOutput($office);
@@ -116,52 +155,81 @@ final class PayrollHourlyHolidayFullFlowTest extends TestCase
         $pdo->prepare('INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status) VALUES (?, 2026, "2026-01-01", "2026-12-31", "open")')->execute([$this->supplierId]);
         $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
         $primary = null;
-        for ($index = 0; $index < $relations; ++$index) {
+        $expected = [];
+        foreach ($relations as $index => $relation) {
             $person = $this->createEmployment($office, 'Syntetická Dohoda', $index + 1, $type, $type, 20, 5000,
                 periodStart: '2026-06-01', existingEmployeeId: $primary);
             $primary ??= $person['employee_id'];
             $id = $person['employment_id'];
-            $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = ?, monthly_gross_minor = NULL, remuneration_basis_kind = "agreement", remuneration_basis = "Syntetická dohoda" WHERE supplier_id = ? AND employment_id = ?')->execute([$rate, $this->supplierId, $id]);
-            $this->manualMonth($id, '2026-06-01', $units);
-            $this->saveEvidence($this->container->get(PayrollHourlyEvidenceService::class), $id, '2026-06-01', 0, [], []);
+            $expected[$id] = $relation['base'] + ($weekend ? 18400 : 0);
+            $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = ?, monthly_gross_minor = NULL, remuneration_basis_kind = "agreement", remuneration_basis = "Syntetická dohoda" WHERE supplier_id = ? AND employment_id = ?')->execute([$relation['rate'], $this->supplierId, $id]);
+            $evidence = $this->container->get(PayrollHourlyEvidenceService::class);
+            if (!$weekend) {
+                $this->manualMonth($id, '2026-06-01', $relation['units']);
+                $this->saveEvidence($evidence, $id, '2026-06-01', 0, [], []);
+            } else {
+                // Doložených 52 hodin mimo víkend a 8 hodin v sobotu 6. června.
+                $this->average200($id, 23000);
+                $time = $this->container->get(PayrollTimeRepository::class);
+                $time->saveManualSummary($this->supplierId, $id, '2026-06-01', 0, 'Doložené hodiny dohody', false, [
+                    ['date_from' => '2026-06-01', 'date_to' => '2026-06-05', 'worked_duration_units' => 156000, 'overtime_duration_units' => 0, 'worked_days' => 5],
+                    ['date_from' => '2026-06-06', 'date_to' => '2026-06-06', 'worked_duration_units' => 24000, 'overtime_duration_units' => 0, 'worked_days' => 1],
+                ], $this->actors[0]);
+                $month = $time->monthState($this->supplierId, $id, '2026-06-01');
+                $time->approveMonth($this->supplierId, $id, '2026-06-01', (int) $month['row_version'], null, $this->actors[0]);
+                $view = $evidence->view($this->supplierId, $id, '2026-06-01');
+                $evidence->save($this->supplierId, $id, '2026-06-01', [
+                    'row_version' => $view['row_version'], 'reason' => 'Synteticky doložená sobotní práce', 'work_source_hash' => $view['work_source_hash'],
+                    'premium_segments' => [
+                        ['date_from' => '2026-06-01', 'date_to' => '2026-06-05', 'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => 0, 'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => []],
+                        ['date_from' => '2026-06-06', 'date_to' => '2026-06-06', 'night_duration_units' => 0, 'weekend_duration_units' => 24000, 'holiday_work_duration_units' => 0, 'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => []],
+                    ], 'nonworked_holidays' => [], 'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => [],
+                ], $this->actors[0]);
+            }
         }
         $run = $this->runPayrollMonth('2026-06-01', '2026-07-10', $office, 'hourly-agreement');
         self::assertSame([], $run['blockers'], json_encode($run['blockers']));
         self::assertSame([], $run['warnings'], json_encode($run['warnings']));
         self::assertNotNull($run['approved']);
         $result = $run['approved']->revision['result_snapshot'];
-        self::assertSame($expectedPerRelation * $relations, $result['totals']['source_amount_minor']);
+        self::assertSame($expectedGross, $result['totals']['source_amount_minor']);
         $social = $result['statutory']['people'][0]['social_insurance']['relationships'];
-        self::assertCount($relations, $social);
+        self::assertCount(count($relations), $social);
         foreach ($social as $row) {
-            self::assertSame($expectedPerRelation, $row['assessment_base_minor_units']);
+            $id = (int) substr((string) $row['relationship_id'], strlen('employment:'));
+            self::assertArrayHasKey($id, $expected);
+            self::assertSame($expected[$id], $row['assessment_base_minor_units']);
             self::assertSame($insured ? 'participates' : 'does_not_participate', $row['participation']['status']);
-            self::assertSame($insured ? $expectedPerRelation : 0, $row['capped_assessment_base_minor_units']);
-            if ($type === 'dpp') self::assertSame($expectedPerRelation * $relations, $row['participation']['group_income_minor_units']);
+            self::assertSame($insured ? $expected[$id] : 0, $row['capped_assessment_base_minor_units']);
+            if ($type === 'dpp') self::assertSame($expectedGross, $row['participation']['group_income_minor_units']);
+            if ($weekend) {
+                self::assertSame(1320000, $this->amount($id, '2026-06-01', 'MZDA_HODINOVA_ZAKLAD'));
+                self::assertSame(18400, $this->amount($id, '2026-06-01', 'PRIPLATEK_VIKEND'));
+            }
         }
     }
 
     public static function hourlyAgreementCases(): array
     {
         return [
-            'DPP pod limitem' => ['dpp', 20000, 150000, 1000000, 1, false],
-            'DPP nad limitem' => ['dpp', 20000, 195000, 1300000, 1, true],
-            'dvě DPP stejného zaměstnance' => ['dpp', 20000, 189000, 1260000, 2, true],
-            'DPČ' => ['dpc', 16730, 240000, 1338400, 1, true],
+            'E1 DPP 250 × 40 h pod limitem' => ['dpp', [['rate' => 25000, 'units' => 120000, 'base' => 1000000]], 1000000, false, false],
+            'E2 DPP 250 × 52 h nad limitem' => ['dpp', [['rate' => 25000, 'units' => 156000, 'base' => 1300000]], 1300000, true, false],
+            'E3 dvě DPP 6000 + 6600 Kč' => ['dpp', [['rate' => 20000, 'units' => 90000, 'base' => 600000], ['rate' => 30000, 'units' => 66000, 'base' => 660000]], 1260000, true, false],
+            'E4 DPČ 220 × 60 h a sobotní příplatek' => ['dpc', [['rate' => 22000, 'units' => 180000, 'base' => 1320000]], 1338400, true, true],
         ];
     }
 
-    private function average200(int $id): int
+    private function average200(int $id, int $hourly = 20000): int
     {
         $response = $this->absences->createAverage($this->request('POST', '/api/payroll/absences/average')->withParsedBody([
             'employment_id' => $id, 'applicable_year' => 2026, 'applicable_quarter' => 2,
-            'decisive_from' => '2026-01-01', 'decisive_to' => '2026-03-31', 'gross_earnings_minor' => 3200000,
+            'decisive_from' => '2026-01-01', 'decisive_to' => '2026-03-31', 'gross_earnings_minor' => $hourly * 160,
             'longer_period_allocated_minor' => 0, 'worked_minutes' => 9600, 'worked_days' => 60,
             'probable_hourly_minor' => null, 'rationale' => null,
         ]), new Response());
         self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
         $average = $this->json($response)['snapshot'];
-        self::assertSame(20000, $average['average_hourly_minor']);
+        self::assertSame($hourly, $average['average_hourly_minor']);
         $approved = $this->absences->approveAverage($this->request('POST', '/api/payroll/absences/average/approve')->withParsedBody(['row_version' => $average['row_version']]), new Response(), ['id' => (string) $average['id']]);
         self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
         return (int) $average['id'];
@@ -172,7 +240,7 @@ final class PayrollHourlyHolidayFullFlowTest extends TestCase
         $time = $this->container->get(PayrollTimeRepository::class);
         $month = $time->monthState($this->supplierId, $id, $period);
         $time->saveManualSummary($this->supplierId, $id, $period, (int) ($month['row_version'] ?? 0), 'Synteticky doložená skutečná doba', false,
-            [['date_from' => $day ?? $period, 'date_to' => $day ?? date('Y-m-t', strtotime($period)), 'worked_duration_units' => $units, 'overtime_duration_units' => 0, 'worked_days' => $units > 0 ? 1 : 0]], $this->actors[0]);
+            [['date_from' => $day ?? $period, 'date_to' => $day ?? date('Y-m-t', strtotime($period)), 'worked_duration_units' => $units, 'overtime_duration_units' => 0, 'worked_days' => $units === 0 ? 0 : ($day !== null ? 1 : null)]], $this->actors[0]);
         $month = $time->monthState($this->supplierId, $id, $period);
         $time->approveMonth($this->supplierId, $id, $period, (int) $month['row_version'], null, $this->actors[0]);
     }
