@@ -14209,6 +14209,7 @@
     "choose_files": "Vybrat soubory",
     "drop_hint": "Přetáhněte sem doklady (PDF, JPG, PNG, ISDOC, XML), nebo je vyberte tlačítkem.",
     "drop_rejected": "Některé soubory nemají podporovaný formát a vynechali jsme je: {names}",
+    "remove_file": "Odebrat {name}",
     "files_selected": "Vybráno souborů: {n}",
     "uploading": "Předávám…",
     "submit_action": "Předat účetní",

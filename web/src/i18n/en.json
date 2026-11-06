@@ -14209,6 +14209,7 @@
     "choose_files": "Choose files",
     "drop_hint": "Drop documents here (PDF, JPG, PNG, ISDOC, XML) or pick them with the button.",
     "drop_rejected": "Some files have an unsupported format and were skipped: {names}",
+    "remove_file": "Remove {name}",
     "files_selected": "Files selected: {n}",
     "uploading": "Sending…",
     "submit_action": "Send to accountant",
