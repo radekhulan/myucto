@@ -1547,6 +1547,25 @@ final class SyntheticAgenda
     }
 
     /**
+     * Agenda, ve které Money u korunové pokladny a bankovních účtů (`SzUcPokl`) vede měnu
+     * jako „Kč" místo prázdného pole, stejně jako ji píše do peněžního deníku.
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithCurrencyWrittenAsKc(): array
+    {
+        $files = self::files();
+        foreach (['ROK.001', 'ROK.002'] as $dir) {
+            $rows = array_map(
+                static fn (array $r): array => ['Mena' => 'Kč'] + $r,
+                iterator_to_array(Ms3Table::fromString($files[$dir . '/SzUcPokl.DAT'], 'SZUCPOKL')->rows(), false),
+            );
+            $files[$dir . '/SzUcPokl.DAT'] = Ms3FixtureWriter::table(self::REGISTER_FIELDS, $rows);
+        }
+        return $files;
+    }
+
+    /**
      * Agenda vedená v Money jako daňová evidence: rok má místo účetního deníku peněžní deník
      * (`UcPenDen`, dva živé a jeden smazaný řádek) a `UcDenik` je prázdná tabulka.
      * `$doubleEntryFrom2025` = firma v roce 2025 přešla na podvojné účetnictví, deník 2025 zůstává.

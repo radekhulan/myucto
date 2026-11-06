@@ -234,6 +234,26 @@ final class MoneyS3ImportTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Money může u korunové pokladny a účtu vést měnu jako „Kč". `strtoupper` z „Kč" neudělá
+     * „KČ", takže by se pokladna i účet vzaly jako valutové v měně „Kč". Zůstanou korunové.
+     */
+    public function testCurrencyWrittenAsKcStaysCzk(): void
+    {
+        $supplierId = $this->supplier();
+        SyntheticAgenda::writeLzFiles($this->tmp . '/kc.lz', SyntheticAgenda::filesWithCurrencyWrittenAsKc());
+        $backup = Ms3Backup::extract($this->tmp . '/kc.lz', $this->tmp . '/kc');
+        $protocol = $this->importer->run($supplierId, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT, true));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+
+        self::assertGreaterThan(0, $this->rowCount('cash_registers', $supplierId));
+        self::assertSame(0, $this->rowCount('cash_registers', $supplierId, "currency_code <> 'CZK'"));
+        self::assertGreaterThan(0, $this->rowCount('bank_statements', $supplierId));
+        self::assertSame(0, $this->rowCount('bank_statements', $supplierId, "currency <> 'CZK'"));
+        self::assertSame(0, $this->rowCount('supplier_bank_accounts', $supplierId, "currency <> 'CZK'"));
+        self::assertSame(0, $this->rowCount('journal_entry_lines', $supplierId, 'currency_code IS NOT NULL'));
+    }
+
+    /**
      * Valutové pokladny z Money vzniknou ve své měně, doklady nesou kurz a částku ve valutě
      * (korunová částka z Money) a řádky deníku na účtu pokladny měnu - jinak uzávěrka
      * pokladnu kurzově nepřecení. Počáteční stav nese měnu jen v prvním roce účtu.

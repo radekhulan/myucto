@@ -113,7 +113,7 @@ final class MoneyS3ImportJobService extends AbstractImportJobService
                 'backup_sha256' => $meta['sha256'] ?? null,
             ], $userId > 0 ? $userId : null);
 
-            $steps = MoneyS3Importer::stepKeys();
+            $steps = MoneyS3Importer::stepKeys(AgendaInfo::isComplete($agenda) && AgendaInfo::fromArray($agenda)->taxRecordsOnly());
             $this->jobs->updateProgress($jobId, [
                 'total_items' => count($steps),
                 'processed' => 0,
