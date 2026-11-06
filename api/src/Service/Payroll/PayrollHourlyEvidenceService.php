@@ -26,10 +26,21 @@ final class PayrollHourlyEvidenceService
         $source = $this->context->sourceForEvidence($supplierId, $employmentId, $periodStart, $source);
         $evidence = $this->repository->latestMany($supplierId, [$employmentId], $periodStart)[$employmentId] ?? null;
         $writable = $source !== null && in_array($source['work_source'], ['manual_summary', 'entries', 'settlement_only'], true);
+        // Pojistky zápisu (roční uzávěrka) se smí ptát jen uvnitř transakce; náhled
+        // si ji proto otevře jen na dotaz a nic nezapíše.
+        $pdo = $this->db->pdo();
+        $ownTransaction = !$pdo->inTransaction();
+        if ($ownTransaction) {
+            $pdo->beginTransaction();
+        }
         try {
             $this->repository->assertWritable($supplierId, $employmentId, $periodStart);
         } catch (PayrollRunClosedException|PayrollYearClosedException|PayrollTimeLockedException) {
             $writable = false;
+        } finally {
+            if ($ownTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
         }
         $suggested = [];
         $end = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
