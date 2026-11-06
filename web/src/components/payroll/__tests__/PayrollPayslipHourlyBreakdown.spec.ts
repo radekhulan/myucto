@@ -41,6 +41,7 @@ describe('PayrollPayslipHourlyBreakdown', () => {
       { ...base, claim_id: 9, purpose: 'premium_night', label: 'Příplatek za noc', payable_minor: 4500, full_duration_units: 300, segments: [] },
       { ...base, claim_id: 10, purpose: 'holiday_time_off_compensation', label: 'Náhrada za volno za práci ve svátek', payable_minor: 0, full_duration_units: 0, analytical_minor: 0, segments: [] },
       { ...base, claim_id: 11, purpose: 'premium_weekend', label: 'Příplatek za víkend', payable_minor: 0, full_duration_units: 0, analytical_minor: 0, segments: [] },
+      { ...base, claim_id: 12, purpose: 'minimum_wage_top_up', label: 'Doplatek do minimální mzdy', payable_minor: 0, full_duration_units: 60000, analytical_minor: 0, segments: [] },
     )
     const wrapper = mount(PayrollPayslipHourlyBreakdown, { props: { people: [data] } })
     expect(wrapper.findAll('[data-test="payslip-hourly-line"]')).toHaveLength(1)
@@ -49,11 +50,11 @@ describe('PayrollPayslipHourlyBreakdown', () => {
     expect(claims[0]!.text()).toContain('Příplatek za noc')
     expect(wrapper.text()).not.toContain('Zmrazený základ')
     const toggle = wrapper.get('[data-test="payslip-hourly-zero-toggle"]')
-    expect(toggle.text()).toContain('payroll.payslip_hourly.show_zero_claims{"count":2}')
+    expect(toggle.text()).toContain('payroll.payslip_hourly.show_zero_claims{"count":3}')
     expect(wrapper.find('[data-test="payslip-hourly-zero-claim"]').exists()).toBe(false)
     await toggle.trigger('click')
     const zero = wrapper.findAll('[data-test="payslip-hourly-zero-claim"]')
-    expect(zero).toHaveLength(2)
+    expect(zero).toHaveLength(3)
     expect(zero[0]!.text()).toContain('Náhrada za volno za práci ve svátek')
   })
 

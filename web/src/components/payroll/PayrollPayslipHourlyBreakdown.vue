@@ -34,7 +34,8 @@ function lineClaim(claimId: number): PayrollPayslipHourlyClaim | null {
   return claimsById.value.get(claimId) ?? null
 }
 function zeroClaim(claim: PayrollPayslipHourlyClaim): boolean {
-  return claim.payable_minor === 0 && claim.full_duration_units === 0 && (claim.delta_amount_minor ?? 0) === 0
+  // Nulový je nárok bez peněz; doplatek do minima nese hodiny celého měsíce i při nule.
+  return claim.payable_minor === 0 && (claim.delta_amount_minor ?? 0) === 0
 }
 const otherClaims = computed(() => (selected.value?.hourly_claims ?? []).filter(claim => !lineClaimIds.value.has(claim.claim_id)))
 const visibleClaims = computed(() => otherClaims.value.filter(claim => !zeroClaim(claim)))
