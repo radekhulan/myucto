@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit\Payroll\Run;
 
+use MyInvoice\Service\Payroll\Run\PayrollRunIssueGuidance;
 use MyInvoice\Service\Payroll\Run\PayrollRunReadinessImpact;
 use PHPUnit\Framework\TestCase;
 
@@ -120,5 +121,17 @@ final class PayrollRunReadinessImpactTest extends TestCase
 
         self::assertSame(PayrollRunReadinessImpact::SCOPE_SETUP, $described['scope']);
         self::assertSame(PayrollRunReadinessImpact::IMPACT_ANYTIME, $described['impact']);
+    }
+
+    /** Neověřitelný roční limit DPP z ručního podkladu je varování s cestou k hodinám. */
+    public function testDppAnnualHoursManualReviewIsClassifiedWarning(): void
+    {
+        $described = PayrollRunReadinessImpact::describe('dpp_annual_hours_manual_review_required');
+
+        self::assertSame('warning', $described['severity']);
+        self::assertSame(PayrollRunReadinessImpact::SCOPE_MONTHLY, $described['scope']);
+        $guidance = PayrollRunIssueGuidance::describe('dpp_annual_hours_manual_review_required');
+        self::assertSame('/payroll/time', $guidance['remediation_path']);
+        self::assertStringContainsString('§ 75', $guidance['message']);
     }
 }

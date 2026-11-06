@@ -5,14 +5,18 @@ import PayrollWorkedHoursPanel from '../PayrollWorkedHoursPanel.vue'
 
 const mocks = vi.hoisted(() => ({ save: vi.fn(), approve: vi.fn(), reopen: vi.fn(), restore: vi.fn(), history: vi.fn() }))
 vi.mock('@/api/payroll', () => ({ payrollApi: { saveManualTimeSummary: mocks.save, approveTimeMonth: mocks.approve, reopenTimeMonth: mocks.reopen, restoreTimeWorkSource: mocks.restore, timeHistory: mocks.history } }))
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => values ? `${key}${JSON.stringify(values)}` : key }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (value: string) => value, formatDateTime: (value: string) => value }))
 
+const evidenceMounts = { count: 0 }
 function evidence(overrides: Partial<PayrollWorkedTime> = {}): PayrollWorkedTime {
   return { month: null, manual_summary: null, suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-15' }, { date_from: '2026-11-16', date_to: '2026-11-30' }], worked_duration_units: null, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false, ...overrides }
 }
 function panel(value = evidence(), props: Record<string, unknown> = {}) {
-  return mount(PayrollWorkedHoursPanel, { props: { employmentId: 12, fullName: 'Syntetická Osoba', period: '2026-11', value, closed: false, canWrite: true, canApprove: true, canReopen: true, ...props }, global: { stubs: { RouterLink: { props: ['to'], template: '<a><slot /></a>' } } } })
+  return mount(PayrollWorkedHoursPanel, { props: { employmentId: 12, fullName: 'Syntetická Osoba', period: '2026-11', value, closed: false, canWrite: true, canApprove: true, canReopen: true, ...props }, global: { stubs: {
+    RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+    PayrollHourlyEvidencePanel: { props: ['employmentId'], setup() { evidenceMounts.count += 1 }, template: '<div data-test="hourly-evidence-stub" />' },
+  } } })
 }
 async function fill(wrapper: ReturnType<typeof panel>, first = '0:01', second = '0,001') {
   await wrapper.get('[data-test="worked-hours-duration-0"]').setValue(first)
@@ -41,7 +45,7 @@ describe('PayrollWorkedHoursPanel', () => {
     expect(mocks.save).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="worked-hours-error"]').text()).toContain('duration_invalid')
   })
-  it('uloží přesně minutu a tisícinu, neodvozuje dny a schválí hodiny bez JMHZ či kalendáře', async () => {
+  it('uloží přesně minutu a tisícinu, neodvozuje dny a schválení vede do docházky se souhrnem JMHZ', async () => {
     const wrapper = panel()
     await fill(wrapper)
     await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
@@ -51,12 +55,28 @@ describe('PayrollWorkedHoursPanel', () => {
       { date_from: '2026-11-16', date_to: '2026-11-30', worked_duration_units: 3, overtime_duration_units: null, worked_days: null },
     ] }))
     expect(wrapper.get('[data-test="worked-hours-current"]').text()).toContain('0:01:03.6')
-    await wrapper.get('[data-test="worked-hours-approve"]').trigger('click')
+    const approve = wrapper.get('[data-test="worked-hours-approve"]')
+    expect(JSON.parse(approve.attributes('data-to')!)).toEqual({ name: 'payroll-time', query: { period: '2026-11', employment: '12', confirm_jmhz: '1' } })
+    await approve.trigger('click')
     await flushPromises()
-    expect(mocks.approve).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 1 })
+    expect(mocks.approve).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="worked-hours-jmhz-pending"]').text()).toContain('jmhz_pending_hint')
-    expect(wrapper.find('[data-test="worked-hours-duration-0"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-test="worked-hours-saved-segments"]')).toHaveLength(1)
+  })
+  it('u desetinného zápisu ukáže převod na hodiny a minuty, aby se 7.30 nespletlo se 7:30', async () => {
+    const wrapper = panel()
+    await wrapper.get('[data-test="worked-hours-duration-0"]').setValue('7.30')
+    expect(wrapper.get('[data-test="worked-hours-duration-preview-0"]').text()).toContain('"value":"7:18"')
+    await wrapper.get('[data-test="worked-hours-duration-0"]').setValue('7:30')
+    expect(wrapper.find('[data-test="worked-hours-duration-preview-0"]').exists()).toBe(false)
+  })
+  it('po uložení hodin znovu načte evidenci příplatků s novým otiskem zdroje', async () => {
+    evidenceMounts.count = 0
+    const wrapper = panel(evidence(), { hourlyEnabled: true, canReadEvidence: true })
+    expect(evidenceMounts.count).toBe(1)
+    await fill(wrapper)
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    await flushPromises()
+    expect(evidenceMounts.count).toBe(2)
   })
   it('potvrzenou nulu odliší od nezjištěného přesčasu a dnů', async () => {
     const wrapper = panel()

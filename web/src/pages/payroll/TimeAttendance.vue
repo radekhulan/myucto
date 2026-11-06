@@ -305,13 +305,19 @@ const selected = computed(() =>
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
 const visibleItems = computed(() => overview.value?.items ?? [])
 
-function timeSource(item: Pick<PayrollTimeOverviewItem, 'summary' | 'month'>) {
+type TimeSourceItem = Pick<PayrollTimeOverviewItem, 'summary' | 'month' | 'hourly_remuneration_in_period'>
+function timeSource(item: TimeSourceItem) {
   return item.summary.work_source ?? item.month.work_source ?? 'entries'
 }
-function usesDailyEntries(item: Pick<PayrollTimeOverviewItem, 'summary' | 'month'>): boolean {
-  return timeSource(item) === 'entries'
+/*
+ * Importovaný měsíc měsíčně odměňovaného vztahu zůstává v docházce beze
+ * změny; souhrn importu jako vybraný zdroj hodin platí jen pro hodinový výpočet.
+ */
+function usesDailyEntries(item: TimeSourceItem): boolean {
+  const source = timeSource(item)
+  return source === 'entries' || (source === 'import_summary' && item.hourly_remuneration_in_period !== true)
 }
-function workedTimeLabel(item: Pick<PayrollTimeOverviewItem, 'summary' | 'month'>): string {
+function workedTimeLabel(item: TimeSourceItem): string {
   if (item.summary.worked_duration_units != null) return formatPayrollDuration(item.summary.worked_duration_units)
   if (!usesDailyEntries(item) || item.summary.actual_minutes === null) return t('payroll.worked_hours.unknown')
   return formatPayrollMinutes(item.summary.actual_minutes)

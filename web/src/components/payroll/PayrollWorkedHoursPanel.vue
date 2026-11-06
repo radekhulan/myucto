@@ -6,7 +6,7 @@ import { payrollApi, type PayrollManualTimeSegment, type PayrollManualTimeSummar
 import PayrollHourlyEvidencePanel from './PayrollHourlyEvidencePanel.vue'
 import PayrollHourlyWagePreviewView from './PayrollHourlyWagePreview.vue'
 import { apiErrorMessage } from '@/api/errors'
-import { formatPayrollDuration, parsePayrollDurationDraft } from '@/pages/payroll/payrollDuration'
+import { formatPayrollDuration, parsePayrollDuration, parsePayrollDurationDraft } from '@/pages/payroll/payrollDuration'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 
@@ -59,6 +59,19 @@ const approvalAvailable = computed(() => props.canApprove && !props.closed && cu
 const reopenAvailable = computed(() => props.canReopen && !props.closed && current.value.month?.status === 'approved')
 const dirty = computed(() => JSON.stringify([segments.value, reason.value, replaceSource.value]) !== baseline.value)
 const attendanceLink = computed(() => ({ name: 'payroll-time', query: { period: props.period, employment: String(props.employmentId), confirm_jmhz: '1' } }))
+// Evidence příplatků se váže na otisk zdroje hodin; po změně hodin se musí načíst znovu.
+const evidenceKey = computed(() => `${current.value.month?.revision_no ?? 0}:${current.value.month?.row_version ?? 0}:${current.value.manual_summary?.content_sha256 ?? ''}`)
+const REASON_MAX_LENGTH = 450
+
+/** Desetinný zápis (7.30 = 7,3 h) se snadno splete s H:MM, proto se ukazuje převod. */
+function durationPreview(raw: string): string | null {
+  const value = raw.trim()
+  if (value === '' || value.includes(':')) return null
+  const units = parsePayrollDuration(value)
+  if (units === null) return null
+  const minutes = units % 50 === 0 ? formatPayrollDuration(units) : null
+  return minutes === null ? null : t('payroll.worked_hours.duration_preview', { value: minutes })
+}
 
 function hydrate(value: PayrollWorkedTime): void {
   current.value = value
@@ -138,18 +151,6 @@ async function save(): Promise<void> {
   finally { busy.value = false }
 }
 
-async function approve(): Promise<void> {
-  if (!approvalAvailable.value || busy.value || dirty.value) return
-  busy.value = true
-  error.value = ''
-  try {
-    const month = await payrollApi.approveTimeMonth(props.period, { employment_id: props.employmentId, row_version: current.value.month!.row_version })
-    hydrate({ ...current.value, month: { ...month, work_source: 'manual_summary' }, jmhz_confirmed: false })
-    emit('updated')
-  } catch (failure) { error.value = apiErrorMessage(failure, t('payroll.worked_hours.approve_failed')) }
-  finally { busy.value = false }
-}
-
 async function restore(): Promise<void> {
   if (!editable.value || busy.value || !current.value.month || current.value.month.work_source === 'entries') return
   if (!restoreReason.value.trim()) { error.value = t('payroll.worked_hours.reason_required'); return }
@@ -188,7 +189,7 @@ async function reopen(): Promise<void> {
       <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" :disabled="busy" @click="emit('close')"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.x" /></svg>{{ t('common.close') }}</button>
     </div>
     <PayrollHourlyWagePreviewView v-if="hourlyPreview" :value="hourlyPreview" />
-    <PayrollHourlyEvidencePanel v-if="hourlyEnabled && canReadEvidence" :employment-id="employmentId" :period="period" :can-write="canWrite && !closed" @updated="emit('updated')" />
+    <PayrollHourlyEvidencePanel v-if="hourlyEnabled && canReadEvidence" :key="evidenceKey" :employment-id="employmentId" :period="period" :can-write="canWrite && !closed" @updated="emit('updated')" />
     <template v-if="!settlementOnly">
     <p class="mt-2 text-xs text-neutral-600">{{ t('payroll.worked_hours.scope_hint') }}</p>
     <p class="mt-2 text-xs font-medium text-neutral-700" data-test="worked-hours-current">
@@ -224,9 +225,11 @@ async function reopen(): Promise<void> {
         <div class="mt-2 grid gap-3 sm:grid-cols-3">
           <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.worked') }}
             <input v-model="segment.worked" inputmode="decimal" :class="inputClass" :disabled="busy" :data-test="`worked-hours-duration-${index}`">
+            <span v-if="durationPreview(segment.worked)" class="mt-1 block text-neutral-500" :data-test="`worked-hours-duration-preview-${index}`">{{ durationPreview(segment.worked) }}</span>
           </label>
           <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.overtime') }}
             <input v-model="segment.overtime" inputmode="decimal" :class="inputClass" :disabled="busy" :data-test="`worked-hours-overtime-${index}`">
+            <span v-if="durationPreview(segment.overtime)" class="mt-1 block text-neutral-500">{{ durationPreview(segment.overtime) }}</span>
           </label>
           <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.days') }}
             <input v-model="segment.days" inputmode="numeric" :class="inputClass" :disabled="busy" :data-test="`worked-hours-days-${index}`">
@@ -235,7 +238,7 @@ async function reopen(): Promise<void> {
       </div>
       <label v-if="replacementRequired" class="flex items-start gap-2 text-xs text-warning-800"><input v-model="replaceSource" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-warning-600" :disabled="busy" data-test="worked-hours-replace">{{ t('payroll.worked_hours.replace_hint') }}</label>
       <label class="block text-xs text-neutral-600">{{ t('payroll.worked_hours.reason') }}
-        <input v-model="reason" maxlength="500" :class="inputClass" :disabled="busy" data-test="worked-hours-reason">
+        <input v-model="reason" :maxlength="REASON_MAX_LENGTH" :class="inputClass" :disabled="busy" data-test="worked-hours-reason">
       </label>
       <button type="button" :class="[btnFilledSm('primary'), 'whitespace-nowrap']" :disabled="busy" data-test="worked-hours-save" @click="save"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('payroll.worked_hours.save') }}</button>
     </div>
@@ -247,13 +250,13 @@ async function reopen(): Promise<void> {
             <option v-for="source in (current.available_sources ?? ['entries']).filter(source => source !== current.month?.work_source)" :key="source" :value="source">{{ t(source === 'import_summary' ? 'payroll.worked_hours.source_import' : 'payroll.worked_hours.source_attendance') }}</option>
           </select>
         </label>
-        <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.reason') }}<input v-model="restoreReason" maxlength="500" :class="inputClass" :disabled="busy" data-test="worked-hours-restore-reason"></label>
+        <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.reason') }}<input v-model="restoreReason" :maxlength="REASON_MAX_LENGTH" :class="inputClass" :disabled="busy" data-test="worked-hours-restore-reason"></label>
       </div>
       <label class="mt-2 flex items-start gap-2 text-xs text-warning-800"><input v-model="restoreConfirmed" type="checkbox" :disabled="busy" class="mt-0.5 rounded border-neutral-300 text-warning-600" data-test="worked-hours-restore-confirm">{{ t('payroll.worked_hours.restore_hint') }}</label>
       <button type="button" :class="[btnOutlineSm('warning'), 'mt-2 whitespace-nowrap']" :disabled="busy" data-test="worked-hours-restore" @click="restore"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.uturn" /></svg>{{ t('payroll.worked_hours.restore') }}</button>
     </details>
     <div v-if="approvalAvailable" class="mt-3 flex flex-wrap items-center gap-2">
-      <button type="button" :class="[btnFilledSm('success'), 'whitespace-nowrap']" :disabled="busy || dirty" data-test="worked-hours-approve" @click="approve"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('payroll.worked_hours.approve') }}</button>
+      <RouterLink :to="attendanceLink" :class="[btnFilledSm('success'), 'whitespace-nowrap', busy || dirty ? 'pointer-events-none opacity-50' : '']" :aria-disabled="busy || dirty" data-test="worked-hours-approve"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('payroll.worked_hours.approve') }}</RouterLink>
       <p class="text-xs text-neutral-500">{{ t('payroll.worked_hours.approve_hint') }}</p>
     </div>
     <div v-if="reopenAvailable" class="mt-3 flex flex-wrap items-end gap-2">

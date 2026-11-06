@@ -7,10 +7,11 @@ namespace MyInvoice\Service\Payroll\Employment;
 /** Společné hranice hodinového odměňování a připravenosti mzdového běhu. */
 final class PayrollHourlyRemuneration
 {
-    public const BLOCKER = 'hourly_remuneration_calculation_unsupported';
+    public const MESSAGE = 'Vztah má v tomto měsíci sjednané hodinové odměňování, proto mu nelze zadat měsíční základní mzdu. '
+        . 'Mzdu tvoří hodinový výpočet z doložených hodin včetně kontroly minimální mzdy.';
 
-    public const MESSAGE = 'Vztah má v tomto měsíci sjednané hodinové odměňování. '
-        . 'Náhled vypočítá mzdu z doložených hodin včetně kontroly minimální mzdy; schválení běhu zatím vyžaduje dokončení výkaznictví.';
+    public const PERCENT_OF_WAGE_MESSAGE = 'Vztah má v tomto měsíci sjednané hodinové odměňování, takže předpis „procento ze mzdy“ '
+        . 'nemá měsíční mzdu, ze které by počítal. Určete základ složky a její částku zadejte ručně.';
 
     /**
      * Překryv kterékoliv hodinové revize s obdobím, nikoli jen stav na konci měsíce.
@@ -26,6 +27,15 @@ final class PayrollHourlyRemuneration
                AND hourly_term.effective_from <= ?
                AND (hourly_term.effective_to IS NULL OR hourly_term.effective_to >= ?)
         )';
+    }
+
+    /** @param array<string,mixed> $row */
+    public static function monthlyComponentMessage(array $row): string
+    {
+        return ($row['component_kind'] ?? null) !== 'base_wage'
+            && ($row['calculation_kind'] ?? null) === 'employment_gross_basis_points'
+                ? self::PERCENT_OF_WAGE_MESSAGE
+                : self::MESSAGE;
     }
 
     /** @param array<string,mixed> $row */

@@ -116,7 +116,7 @@ const MAX_OVERTIME_HOURS_MILLI = 1_000_000
  * vždycky překlep, ne směna.
  */
 const MAX_SURCHARGE_HOURS_MILLI = 744_000
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
@@ -961,9 +961,13 @@ function managedDisplay(row: UiRow, kind: 'base' | 'overtime' | 'bonus'): string
  */
 const MANAGED_BLOCKER_SUFFIX = '_managed_elsewhere'
 
+/** Text blokace podle kódu v jazyce aplikace; serverová zpráva je jen záloha. */
 function blockerMessage(row: UiRow, code: string): string {
-  return row.hourly_wage_preview?.blockers.find(blocker => blocker.code === code)?.message
-    ?? t(`payroll.quick_inputs.blockers.${code}`)
+  const own = `payroll.quick_inputs.blockers.${code}`
+  if (te(own)) return t(own)
+  const hourly = `payroll.hourly_preview.blockers.${code}`
+  if (te(hourly)) return t(hourly)
+  return row.hourly_wage_preview?.blockers.find(blocker => blocker.code === code)?.message ?? t(own)
 }
 
 function personBlockers(row: UiRow): string[] {
@@ -1315,7 +1319,7 @@ async function load(): Promise<void> {
       || month.period !== requestedPeriod) return
     rows.value = month.items.map(applyPending)
     if (payrollQueryValue(route.query, 'hours') === '1' && focusEmploymentId.value !== null) {
-      const focused = rows.value.find(row => row.employment_id === focusEmploymentId.value && row.worked_time)
+      const focused = rows.value.find(row => row.employment_id === focusEmploymentId.value && row.worked_time && hasHourlyEvidence(row))
       if (focused) {
         workedEmploymentId.value = focused.employment_id
         const { hours: _hours, ...query } = route.query
@@ -2057,7 +2061,7 @@ onMounted(() => {
           jménem (`sticky left-0`). Svislý strop tu být nesmí: stránka má jediný
           posuvník, ne tabulku skrolující uvnitř sebe pod vlastní patičkou.
         -->
-        <div v-if="activeWorkedRow?.worked_time" ref="workedPanel">
+        <div v-if="activeWorkedRow?.worked_time && hasHourlyEvidence(activeWorkedRow)" ref="workedPanel">
           <PayrollWorkedHoursPanel
             :key="`${period}:${activeWorkedRow.employment_id}`"
             :employment-id="activeWorkedRow.employment_id"
@@ -2172,7 +2176,7 @@ onMounted(() => {
                     </span>
                   </div>
                   <p v-if="personMeta(row)" class="mt-0.5 break-words text-xs text-neutral-500">{{ personMeta(row) }}</p>
-                  <PayrollWorkedHoursSummary v-if="row.worked_time && (hasHourlyEvidence(row) || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
+                  <PayrollWorkedHoursSummary v-if="row.worked_time && hasHourlyEvidence(row)" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
                   <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
                   <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
                     {{ blockerMessage(row, blocker) }}
@@ -2672,7 +2676,7 @@ onMounted(() => {
                 </p>
               </div>
             </div>
-            <PayrollWorkedHoursSummary v-if="row.worked_time && (hasHourlyEvidence(row) || (row.worked_time.month && row.worked_time.month.work_source !== 'entries'))" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
+            <PayrollWorkedHoursSummary v-if="row.worked_time && hasHourlyEvidence(row)" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
             <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
             <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-2 text-xs text-warning-700">
               {{ blockerMessage(row, blocker) }}

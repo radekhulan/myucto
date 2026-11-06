@@ -100,10 +100,12 @@ importem nesčítají. Nahrazení zdroje vyžaduje výslovné potvrzení a důvo
 schválený měsíc je nutné nejprve znovu otevřít. Schválení ručního souhrnu
 hodin samo nepotvrzuje všechny údaje pro JMHZ.
 
-Přehled měsíce i historie ukazují hodiny vybraného zdroje. Při použití
-souhrnu se původní denní zápisy zobrazují odděleně jako nepoužité;
-denní mřížka je uzamčená. Chcete-li je znovu použít, změňte výslovně
-zdroj podkladů. Doba, kterou nelze přesně vyjádřit celými minutami,
+Ruční souhrn a změnu zdroje lze použít jen u vztahu s hodinovým
+odměňováním v daném měsíci. Přehled měsíce i historie ukazují hodiny
+vybraného zdroje. Při použití souhrnu se původní denní zápisy zobrazují
+odděleně jako nepoužité; denní mřížka je uzamčená. Chcete-li je znovu
+použít, změňte výslovně zdroj podkladů. Importovaný měsíc měsíčně
+odměňovaného vztahu se v přehledu i mřížce zobrazuje jako dosud. Doba, kterou nelze přesně vyjádřit celými minutami,
 se zachová v přesném zápisu a nepřepočítává se na zaokrouhlené minuty.
 
 1. V `Mzdy → Docházka a směny` klikněte na **Import**.

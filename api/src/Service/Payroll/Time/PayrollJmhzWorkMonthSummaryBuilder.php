@@ -391,18 +391,37 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         return (string) self::minutesSuggestion($minutes);
     }
 
-    /** @return array<string,mixed> */
+    /**
+     * Ruční souhrny stránky jedním průchodem pro {@see preview()}; tvar je
+     * týž jako při čtení po jednom, takže otisk zdroje se nezmění.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,array<string,mixed>>
+     */
+    public function manualSummaryEvidence(int $supplierId, array $employmentIds, string $periodStart): array
+    {
+        return (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, $employmentIds, $periodStart);
+    }
+
+    /**
+     * @param array<int,array<string,mixed>>|null $manualEvidence předem načtené
+     *        {@see manualSummaryEvidence()}; při zamykání zdrojů se nepoužije
+     * @return array<string,mixed>
+     */
     public function preview(
         int $supplierId,
         int $employmentId,
         string $periodStart,
         bool $lockSources = false,
+        ?array $manualEvidence = null,
     ): array
     {
         $period = self::period($periodStart);
         $importSource = $this->importSource($supplierId, $employmentId, $periodStart, $lockSources);
         if ($importSource['work_source'] === 'manual_summary') {
-            $evidence = (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, [$employmentId], $periodStart, $lockSources);
+            $evidence = !$lockSources && $manualEvidence !== null && isset($manualEvidence[$employmentId])
+                ? $manualEvidence
+                : (new PayrollWorkedTimeEvidence($this->db))->loadMany($supplierId, [$employmentId], $periodStart, $lockSources);
             return $this->previewFromImportSummary(
                 $supplierId, $employmentId, $periodStart,
                 $evidence[$employmentId]['manual_summary'] ?? null, $lockSources, true,

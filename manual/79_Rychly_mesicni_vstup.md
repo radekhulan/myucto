@@ -181,34 +181,41 @@ pracovní vztah a schválené ani uzamčené vstupy nikdy nepřepisuje.
 
 ### 79.8.1.1 Doložené odpracované hodiny
 
-U hodinově odměňovaného vztahu nebo vztahu s již vybraným souhrnem otevřete
-podklad odpracované doby přímo z jeho řádku. Panel ukazuje vybraný zdroj a stav měsíce. Můžete použít
+U vztahu s hodinovým odměňováním v daném měsíci otevřete podklad odpracované
+doby přímo z jeho řádku. Panel ukazuje vybraný zdroj a stav měsíce. Můžete použít
 docházku, souhrn importu nebo doložený ruční souhrn; vždy platí jediný zdroj
-pro celý pracovní vztah a měsíc.
+pro celý pracovní vztah a měsíc. Měsíčně odměňovaný vztah panel nemá a jeho
+importovaný měsíc zůstává beze změny.
 
 1. Zadejte dobu jako **H:MM** nebo desetinné hodiny, například `7:30`,
-   `7,5` či `7.5`. Desetinný zápis má nejvýše tři místa. Prázdné pole
-   není nula; neodpracovaný měsíc potvrďte výslovným `0`.
+   `7,5` či `7.5`. Desetinný zápis má nejvýše tři místa a pod polem se
+   ukáže převod na hodiny a minuty (`7.30` je 7,3 h, tedy 7:18, ne 7:30).
+   Prázdné pole není nula; neodpracovaný měsíc potvrďte výslovným `0`.
 2. **Skutečně odpracováno (včetně přesčasu)** zahrnuje i přesčas. Údaj **Z toho přesčas** jej
    pouze rozlišuje a k celku se znovu nepřičítá. Neznámý přesčas ani počet
    odpracovaných dnů nevyplňujte nulou.
 3. Při změně podmínek v měsíci vyplňte hodiny zvlášť pro jednotlivé úseky.
    Úsek musí ležet v trvání vztahu a jedné účinné verzi podmínek; úseky se
-   nesmějí překrývat. Rozvržený fond se za skutečně odpracované hodiny
-   nedoplňuje.
-4. Uveďte důvod a podklad. Jestliže už měsíc obsahuje docházku nebo souhrn
-   importu, výslovně potvrďte nahrazení zdroje. Původní evidence zůstane
-   zachovaná, ale její hodiny se k ručnímu souhrnu nepřičtou.
-5. Souhrn uložte a schvalte. Zápis vyžaduje právo zapisovat docházku,
-   schválení právo schvalovat docházku. Schválený měsíc před opravou
-   znovu otevřete s důvodem; potřebujete právo znovuotevření. Každá změna
-   uchová původní revizi.
+   nesmějí překrývat a musí bez mezer pokrýt celé trvání vztahu v měsíci.
+   Dny bez práce zahrňte do úseku s `0`. Rozvržený fond se za skutečně
+   odpracované hodiny nedoplňuje.
+4. Uveďte důvod a podklad (nejvýše 450 znaků). Jestliže už měsíc obsahuje
+   docházku nebo souhrn importu, výslovně potvrďte nahrazení zdroje.
+   Původní evidence zůstane zachovaná, ale její hodiny se k ručnímu
+   souhrnu nepřičtou.
+5. Souhrn uložte a klikněte na **Schválit v docházce**. V **Docházce
+   a směnách** se otevře schválení měsíce spolu s pracovním souhrnem JMHZ.
+   Zápis vyžaduje právo zapisovat docházku, schválení právo schvalovat
+   docházku. Schválený měsíc před opravou znovu otevřete s důvodem;
+   potřebujete právo znovuotevření. Každá změna uchová původní revizi.
 
-Schválení samotných hodin nepotvrzuje úplnost pracovního měsíce pro JMHZ
-ani nevytváří příplatky. Výkazové údaje doplňte v **Docházce a směnách**;
-již schválený měsíc nejprve znovu otevřete a pak schvalte s úplným souhrnem.
-Pokud existují vypočtené příplatky nebo pohotovost z původního zdroje,
-změnu zdroje nejprve vyřešte opravou těchto vstupů.
+Schválení samotných hodin nevytváří příplatky. Pokud existují vypočtené
+příplatky nebo pohotovost z původního zdroje, změnu zdroje nejprve vyřešte
+opravou těchto vstupů. Má-li měsíc ze souhrnu importu nestornované mzdové
+vstupy z téhož importu docházky (náhrady nebo částky), zdroj hodin nelze
+změnit, dokud je v Mzdových vstupech nestornujete; jinak by se vyplatily
+vedle hodin z nového zdroje. Souhrn importu nelze obnovit, pokud měsíc mezitím
+dostal denní záznamy docházky.
 
 Měsíční souhrn nedokládá rozložení práce do konkrétních směn a týdnů.
 Kontroly, kterým takový rozpad chybí, si vyžádají ruční posouzení;

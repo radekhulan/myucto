@@ -815,11 +815,19 @@ final class PayrollRunPersistenceTest extends TestCase
         $time = $this->container->get(\MyInvoice\Repository\Payroll\PayrollTimeRepository::class);
         $builder = $this->container->get(PayrollRunSnapshotBuilder::class);
         $original = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
+        // Ruční souhrn vzniká jen u hodinových podmínek; měsíční vztah k němu
+        // přijde pozdější změnou podmínek.
+        $terms = $this->db->pdo()->prepare('SELECT remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis, monthly_gross_minor FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?');
+        $terms->execute([$this->supplierId, $this->employmentId]);
+        $monthlyTerms = $terms->fetch(\PDO::FETCH_ASSOC);
+        $updateTerms = $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = ?, hourly_rate_minor = ?, remuneration_basis_kind = ?, remuneration_basis = ?, monthly_gross_minor = ? WHERE supplier_id = ? AND employment_id = ?');
+        $updateTerms->execute(['hourly', 20000, 'wage_statement', 'Syntetický výměr', null, $this->supplierId, $this->employmentId]);
         $saved = $time->saveManualSummary($this->supplierId, $this->employmentId, '2026-06-01', 0,
             'Syntetický ručně doložený měsíc', false, [[
                 'date_from' => '2026-06-01', 'date_to' => '2026-06-30',
                 'worked_duration_units' => 3000, 'overtime_duration_units' => null, 'worked_days' => null,
             ]], $this->actors[0]);
+        $updateTerms->execute([...array_values($monthlyTerms), $this->supplierId, $this->employmentId]);
         $approved = $time->approveMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $saved['month']['row_version'], null, $this->actors[0]);
         $snapshot = $builder->build($this->supplierId, '2026-06-01', '2026-07-15');
         $employment = $snapshot->data['people'][0]['employments'][0];

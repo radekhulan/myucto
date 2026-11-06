@@ -6,7 +6,12 @@ import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { formatPayrollDuration } from '@/pages/payroll/payrollDuration'
 
 defineProps<{ value: PayrollHourlyWagePreview; compact?: boolean }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
+/** Text blokace podle kódu v jazyce aplikace; serverová zpráva je jen záloha. */
+function blockerMessage(blocker: { code: string; message: string }): string {
+  const key = `payroll.hourly_preview.blockers.${blocker.code}`
+  return te(key) ? t(key) : blocker.message
+}
 const purposes: Record<string, string> = {
   minimum_wage_top_up: 'minimum_wage_top_up',
   ordinary_base: 'ordinary_base', achieved_overtime: 'achieved_overtime', premium_overtime: 'premium_overtime',
@@ -53,7 +58,7 @@ function purposeLabel(purpose: string): string {
       <p class="mt-2 text-neutral-500">{{ t(value.rounding === 'ceil' ? 'payroll.hourly_preview.rounding_ceil' : 'payroll.hourly_preview.rounding_half_up') }}</p>
     </template>
     <ul v-if="value.blockers.length" class="mt-2 list-disc space-y-1 pl-4 text-warning-700" data-test="hourly-preview-blockers">
-      <li v-for="(blocker, index) in compact ? value.blockers.slice(0, 1) : value.blockers" :key="`${blocker.code}-${index}`">{{ blocker.message }}</li>
+      <li v-for="(blocker, index) in compact ? value.blockers.slice(0, 1) : value.blockers" :key="`${blocker.code}-${index}`">{{ blockerMessage(blocker) }}</li>
     </ul>
     <p v-if="compact && value.blockers.length > 1" class="mt-1 text-warning-700">{{ t('payroll.hourly_preview.more_blockers', { count: value.blockers.length - 1 }) }}</p>
   </section>

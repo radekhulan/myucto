@@ -94,6 +94,8 @@ final class PayrollRunReadinessImpact
         // § 75 ZP — roční limit DPP 300 h včetně převzatých hodin. Výpočet běží,
         // ale smluvní vztah se musí upravit.
         'dpp_annual_hours_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
+        // Ruční podklad DPP bez schválených hodin; roční limit § 75 ZP nelze ověřit.
+        'dpp_annual_hours_manual_review_required' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         // § 76 odst. 2 ZP — průměr DPČ nad polovinu stanovené týdenní doby.
         'dpc_weekly_average_exceeded' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
         'dpc_weekly_average_manual_review_required' => [self::IMPACT_REVISION, self::SCOPE_MONTHLY],
