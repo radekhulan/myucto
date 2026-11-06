@@ -41,6 +41,23 @@ final class PayrollHourlyWagePreview
         return $this->fromSources($supplierId, $periodStart, $employments, $terms, $hourlyTerms, $sources, $entitlementContexts, $monthlyParts);
     }
 
+    /**
+     * Stejná blokace z více úseků (např. „Doložte příplatkové vrstvy…" za
+     * každý úsek pracovní doby) se ukáže jednou; kontext zůstává u první.
+     *
+     * @param list<array<string,mixed>> $blockers
+     * @return list<array<string,mixed>>
+     */
+    private static function uniqueBlockers(array $blockers): array
+    {
+        $unique = [];
+        foreach ($blockers as $blocker) {
+            $unique[($blocker['code'] ?? '') . '|' . ($blocker['message'] ?? '')] ??= $blocker;
+        }
+
+        return array_values($unique);
+    }
+
     /** Výpočet nad již dávkově načtenými podklady snapshotu, bez jejich opětovného čtení. */
     public function fromSources(int $supplierId, string $periodStart, array $employments, array $terms, array $hourlyTerms,
         array $sources, array $entitlementContexts, array $monthlyParts): array
@@ -121,7 +138,7 @@ final class PayrollHourlyWagePreview
             $result[$id] = [
                 'settlement_only' => $context->settlementOnly,
                 'complete' => $complete,
-                'blockers' => $blockers,
+                'blockers' => self::uniqueBlockers($blockers),
                 'rounding' => $rounding->value,
                 'evidence_hash' => $evidenceHash,
                 'claims' => $claims,

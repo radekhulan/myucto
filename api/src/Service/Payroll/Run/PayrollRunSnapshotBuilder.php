@@ -305,7 +305,7 @@ final class PayrollRunSnapshotBuilder
                 } else {
                     foreach ($preview['blockers'] as $blocker) {
                         $validations[] = new PayrollRunValidation('blocker', (string) $blocker['code'], 'employment', $employmentId,
-                            (string) $blocker['message'], $hourlyLink);
+                            (string) $blocker['message'], self::hourlyBlockerLink((string) $blocker['code'], $periodStart, $employmentId, $hourlyLink));
                     }
                     if ($preview['complete'] && !isset($hourlyMaterializationBlockers[$employmentId])) {
                         $latest = [];
@@ -535,7 +535,15 @@ final class PayrollRunSnapshotBuilder
                 \MyInvoice\Repository\Payroll\PayrollDeferredIncomeRepository::TYPES_WITHOUT_INCOME,
                 true,
             );
-            if ($inputs === [] && !$deferredWithoutIncome) {
+            // Hodinová mzda vznikne jako vstup až zamčením podkladů. Před zahájením
+            // běhu proto vztah s úplným náhledem a nenulovým nárokem „bez vstupu"
+            // není; nezmrazený nárok po zamčení hlídá `hourly_claims_not_materialized`.
+            $hourlyPreview = $hourlyPreviews[$employmentId] ?? null;
+            $hourlyWagePending = is_array($hourlyPreview)
+                && ($hourlyPreview['complete'] ?? false) === true
+                && ($hourlyPreview['settlement_only'] ?? true) === false
+                && (int) ($hourlyPreview['payable_total_minor'] ?? 0) > 0;
+            if ($inputs === [] && !$deferredWithoutIncome && !$hourlyWagePending) {
                 // Vztah bez složky je většinou chyba zadání (zapomenutá mzda).
                 // Výjimku (override) tu NEnabízíme: když měsíc bez vstupu
                 // nevysvětluje schválená nepřítomnost, zastaví vztah zákonný
@@ -1893,6 +1901,18 @@ final class PayrollRunSnapshotBuilder
             ($row['monthly_gross_minor'] ?? null) === null ? null : (int) $row['monthly_gross_minor'],
             PayrollExpectedParticipation::smallScaleThreshold($this->rulesets, $periodEnd),
         );
+    }
+
+    /**
+     * Blokace hodin a doložení příplatků se opravují v panelu hodin Rychlého
+     * měsíčního vstupu, ne v podmínkách vztahu.
+     */
+    private static function hourlyBlockerLink(string $code, string $periodStart, int $employmentId, string $fallback): string
+    {
+        return str_starts_with($code, 'hourly_time_')
+            || in_array($code, ['hourly_premium_evidence_missing', 'hourly_premium_partition_missing'], true)
+            ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId . '&hours=1'
+            : $fallback;
     }
 
     /** @param array<string,mixed> $data */
