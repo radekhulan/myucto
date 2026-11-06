@@ -28,6 +28,77 @@ final class PayrollHourlyHolidayFullFlowTest extends TestCase
     }
     protected function tearDown(): void { $this->tearDownPayrollFullFlow(); }
 
+    public function testMonthlyToHourlyChangeMidMonthFlowsThroughApprovalAndPayslip(): void
+    {
+        $office = $this->createOffice();
+        $this->configureSocialInsuranceOutput($office);
+        $this->configureHealthInsuranceOutput();
+        $this->configureIncomeTaxOutput();
+        $person = $this->createEmployment($office, 'Syntetická Změna Odměňování', 1, 'hpp', 'employment', 40, 10000);
+        $id = $person['employment_id'];
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "monthly", monthly_gross_minor = 4200000,
+            remuneration_basis_kind = "contract", remuneration_basis = "Syntetická měsíční smlouva", effective_to = "2026-06-15"
+            WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $id]);
+        $monthlyTermId = (int) $this->scalar('SELECT id FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?', [$this->supplierId, $id]);
+        $pdo->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, office_id, effective_from, planned_start_on, actual_start_on,
+             weekly_hours, workload_basis_points, social_insurance_participation, health_insurance_participation,
+             tax_regime, tax_declaration_signed, is_primary, remuneration_type, hourly_rate_minor,
+             remuneration_basis_kind, remuneration_basis)
+            SELECT supplier_id, employment_id, office_id, "2026-06-16", planned_start_on, actual_start_on,
+                   weekly_hours, workload_basis_points, social_insurance_participation, health_insurance_participation,
+                   tax_regime, tax_declaration_signed, is_primary, "hourly", 20000, "contract", "Syntetická hodinová smlouva"
+            FROM payroll_employment_terms WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $monthlyTermId]);
+        $hourlyTermId = (int) $pdo->lastInsertId();
+        $this->ensureRegularCalendar($id);
+        $this->average200($id);
+        $this->container->get(\MyInvoice\Repository\AccountingModeRepository::class)->record($this->supplierId, '2026-01-01', 'double_entry');
+        $pdo->prepare('INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status) VALUES (?, 2026, "2026-01-01", "2026-12-31", "open")')->execute([$this->supplierId]);
+        $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $time = $this->container->get(PayrollTimeRepository::class);
+        $time->saveManualSummary($this->supplierId, $id, '2026-06-01', 0, 'Synteticky doložená práce před změnou a po změně mzdy', false, [
+            ['date_from' => '2026-06-01', 'date_to' => '2026-06-15', 'worked_duration_units' => 264000, 'overtime_duration_units' => 0, 'worked_days' => 11],
+            ['date_from' => '2026-06-16', 'date_to' => '2026-06-30', 'worked_duration_units' => 264000, 'overtime_duration_units' => 0, 'worked_days' => 11],
+        ], $this->actors[0]);
+        $month = $time->monthState($this->supplierId, $id, '2026-06-01');
+        $time->approveMonth($this->supplierId, $id, '2026-06-01', (int) $month['row_version'], null, $this->actors[0]);
+        $evidence = $this->container->get(PayrollHourlyEvidenceService::class);
+        $view = $evidence->view($this->supplierId, $id, '2026-06-01');
+        $evidence->save($this->supplierId, $id, '2026-06-01', [
+            'row_version' => $view['row_version'], 'reason' => 'Synteticky doložená práce bez příplatků', 'work_source_hash' => $view['work_source_hash'],
+            'premium_segments' => array_map(static fn(array $segment): array => [
+                'date_from' => $segment['date_from'], 'date_to' => $segment['date_to'],
+                'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => 0,
+                'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => [],
+            ], $view['segments_suggested']),
+            'nonworked_holidays' => [], 'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => [],
+        ], $this->actors[0]);
+
+        $run = $this->runPayrollMonth('2026-06-01', '2026-07-10', $office, 'mixed-monthly-hourly');
+        self::assertSame([], $run['blockers'], json_encode($run['blockers']));
+        self::assertSame([], $run['warnings'], json_encode($run['warnings']));
+        self::assertNotNull($run['approved']);
+        self::assertSame('approved', $run['approved']->run['status']);
+        self::assertSame(3860000, $this->amount($id, '2026-06-01', 'MZDA_HODINOVA_ZAKLAD'));
+        $result = $run['approved']->revision['result_snapshot'];
+        self::assertSame(3860000, $result['totals']['source_amount_minor']);
+        $document = $result['people'][0]['payslip_document'];
+        self::assertSame('payroll-payslip-document.v3', $document['schema_version']);
+        $ordinary = array_values(array_filter($document['hourly_claims'], static fn(array $claim): bool => $claim['purpose'] === 'ordinary_base'));
+        self::assertCount(1, $ordinary);
+        self::assertSame(3860000, $ordinary[0]['payable_minor']);
+        self::assertSame('176 h', $ordinary[0]['quantity_text']);
+        $parts = array_column($ordinary[0]['segments'], null, 'term_id');
+        self::assertCount(2, $parts);
+        self::assertSame(2100000, $parts[$monthlyTermId]['analytical_minor']);
+        self::assertSame(4200000, $parts[$monthlyTermId]['monthly_gross_minor']);
+        self::assertSame('88 h', $parts[$monthlyTermId]['quantity_text']);
+        self::assertSame(1760000, $parts[$hourlyTermId]['analytical_minor']);
+        self::assertSame(20000, $parts[$hourlyTermId]['rate_minor']);
+        self::assertSame('88 h', $parts[$hourlyTermId]['quantity_text']);
+    }
+
     public function testApprovedHolidayWorkThenPaidTimeOffKeepsOriginalRevisionImmutable(): void
     {
         $office = $this->createOffice();
