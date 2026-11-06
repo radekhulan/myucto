@@ -24,7 +24,7 @@ use PDO;
 final class PayrollHourlyEntitlementContextLoader
 {
     public const AUTOMATIC_RULES = 'hourly-automatic-zero.v2';
-    private const SELECTION_KEYS = ['nonworked_holidays', 'holiday_time_off_grants', 'overtime_time_off_allocations'];
+    public const SELECTION_KEYS = ['nonworked_holidays', 'holiday_time_off_grants', 'overtime_time_off_allocations'];
 
     public function __construct(private readonly Connection $db) {}
 

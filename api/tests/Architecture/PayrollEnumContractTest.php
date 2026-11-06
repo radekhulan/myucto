@@ -74,6 +74,9 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Skupiny hodinové evidence, které server umí posoudit automatickou nulou
+        'payroll.ts::PayrollHourlyAutomaticKey'
+            => 'const:MyInvoice\Service\Payroll\PayrollHourlyEntitlementContextLoader::SELECTION_KEYS',
         // Zaokrouhlení krácené mzdy a náhrad v nastavení zaměstnavatele
         'payroll.ts::PayrollWageRounding'
             => 'enum:MyInvoice\Service\Payroll\Calculation\PayrollWageRounding',
