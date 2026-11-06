@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollAbsenceAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -44,7 +43,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             $this->markTestSkipped('cfg.php neexistuje — test vyžaduje DB.');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
         } catch (\Throwable $e) {
@@ -288,7 +287,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
      */
     public function testReadinessProbeReportsMissingAverageWithEmployeeName(): void
     {
-        $probe = Bootstrap::buildContainer()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
+        $probe = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
         $entry = static fn (int $employmentId, ?array $average): array => [
             'employment' => ['id' => $employmentId],
             'inputs' => [['amount_minor' => 100_000]],
@@ -328,7 +327,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
      */
     public function testReadinessProbeSkipsMissingAverageWhenScenarioHasNoSuchField(): void
     {
-        $probe = Bootstrap::buildContainer()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
+        $probe = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(\MyInvoice\Service\Payroll\Run\PayrollRunJmhzReadinessProbe::class);
         $snapshot = fn (string $activityCode, ?string $detailCode): array => ['people' => [[
             'employee' => ['id' => $this->employeeId],
             'employments' => [[

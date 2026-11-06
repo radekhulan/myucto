@@ -281,7 +281,8 @@ function junitLogPaths(mixed $path, string $invocationDirectory): array
         ? substr($parallel, 0, -4) . '.http.xml'
         : $parallel . '.http.xml';
     $http = reportOutputPath($http, $invocationDirectory, '--log-junit');
-    return ['parallel' => $parallel, 'http' => $http];
+    $rerun = preg_match('/\.xml$/i', $parallel) === 1 ? substr($parallel, 0, -4) . '.rerun.xml' : $parallel . '.rerun.xml';
+    return ['parallel' => $parallel, 'http' => $http, 'rerun' => $rerun];
 }
 
 /**
@@ -366,18 +367,54 @@ function failedTestClasses(string $junitPath): array
     return array_keys($classes);
 }
 
+/** @return array{shard:?string,arguments:list<string>,full_suite:bool,http_tail:bool} */
+function parallelTestSelection(bool $application, ?string $suite, mixed $shardValue = null): array
+{
+    $shard = null;
+    $current = null;
+    if ($shardValue !== null) {
+        if (!is_string($shardValue) || preg_match('/^([1-9][0-9]*)\/([1-9][0-9]*)$/D', $shardValue, $parts) !== 1) {
+            throw new InvalidArgumentException('--shard vyžaduje K/N s celými čísly 1 <= K <= N a N >= 2.');
+        }
+        $current = filter_var($parts[1], FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        $total = filter_var($parts[2], FILTER_VALIDATE_INT, ['options' => ['min_range' => 2]]);
+        if ($current === false || $total === false || $current > $total) {
+            throw new InvalidArgumentException('--shard vyžaduje K/N s celými čísly 1 <= K <= N a N >= 2.');
+        }
+        if (!$application && $suite !== 'Application') {
+            throw new InvalidArgumentException('--shard lze použít pouze s --application nebo --testsuite=Application.');
+        }
+        $shard = $current . '/' . $total;
+    }
+
+    return [
+        'shard' => $shard,
+        'arguments' => $shard === null ? [] : ['--shard=' . $shard, '--shard-test-distribution=round-robin'],
+        'full_suite' => $shard === null && !$application && ($suite === null || $suite === ''),
+        'http_tail' => ($current === null || $current === 1)
+            && ($application || $suite === null || $suite === '' || in_array($suite, ['Application', 'Integration', 'AuditCore'], true)),
+    ];
+}
+
 if (defined('MYINVOICE_PARALLEL_RUNNER_FUNCTIONS_ONLY')) {
     return;
 }
 
 require_once dirname(__DIR__) . '/tests/Support/ParallelRuntime.php';
 
-$options = getopt('', ['processes::', 'source::', 'keep-databases', 'testsuite::', 'application', 'timings::', 'log-junit::', 'rerun-failures', 'green-check', 'audit-check']);
+$options = getopt('', ['processes::', 'source::', 'keep-databases', 'testsuite::', 'application', 'timings::', 'log-junit::', 'shard::', 'rerun-failures', 'green-check', 'audit-check']);
+if (in_array('--shard=', $_SERVER['argv'], true)) {
+    $options['shard'] = '';
+}
 if (in_array('--help', $_SERVER['argv'], true) || in_array('-h', $_SERVER['argv'], true)) {
-    fwrite(STDOUT, "Použití: php api/bin/test-parallel.php [--processes=N] [--source=DB] [--keep-databases] [--timings=PATH] [--log-junit=PATH] [--rerun-failures] [--testsuite=Application|Architecture|Invariants|AuditCore|--application]\n"
+    fwrite(STDOUT, "Použití: php api/bin/test-parallel.php [--processes=N] [--source=DB] [--keep-databases] [--timings=PATH] [--log-junit=PATH] [--rerun-failures] [--shard=K/N] [--testsuite=Application|Architecture|Invariants|AuditCore|--application]\n"
         . "        php api/bin/test-parallel.php --green-check   (exit 0 = plná sada už prošla nad stejným kódem)\n"
         . "        php api/bin/test-parallel.php --audit-check   (výsledek AuditCore z plné sady nad stejným kódem: 0 = bez pádů, 2 = padlo, 1 = běh chybí)\n");
     exit(0);
+}
+
+if (array_key_exists('shard', $options) && (array_key_exists('green-check', $options) || array_key_exists('audit-check', $options))) {
+    fail('--shard nelze kombinovat s --green-check ani --audit-check.');
 }
 
 // AuditCore je podmnožina plné sady. Proběhla-li plná sada nad stejným kódem, její výsledek
@@ -431,7 +468,12 @@ if (is_string($suite) && $suite !== '' && !in_array($suite, ['Application', 'Arc
     fail('--testsuite podporuje jen Application, Architecture, Invariants nebo AuditCore.');
 }
 $rerunFailures = array_key_exists('rerun-failures', $options);
-$fullSuite = !$application && ($suite === null || $suite === '');
+try {
+    $selection = parallelTestSelection($application, $suite, $options['shard'] ?? null);
+} catch (InvalidArgumentException $error) {
+    fail($error->getMessage());
+}
+$fullSuite = $selection['full_suite'];
 // Otisk se bere PŘED během: změna kódu během testů nesmí dostat zelené razítko.
 $fingerprint = $fullSuite ? treeFingerprint(dirname(__DIR__, 2)) : null;
 
@@ -469,8 +511,8 @@ $defaultProcesses = $availableProcessors > 0
     ? min(8, max(2, (int) floor($availableProcessors * 0.75)))
     : 4;
 $processes = (int) ($options['processes'] ?? $defaultProcesses);
-if ($processes < 2 || $processes > 8) {
-    fail('--processes musí být mezi 2 a 8.');
+if ($processes < 2 || $processes > 16) {
+    fail('--processes musí být mezi 2 a 16.');
 }
 
 $runId = bin2hex(random_bytes(6));
@@ -518,6 +560,9 @@ $parallelEnvironment = array_replace($environment, [
 $parallelConfig = $apiDir . ($suite === 'AuditCore' ? '/phpunit-audit.xml' : '/phpunit-parallel.xml');
 
 $timings = ['run_id' => $runId, 'processes' => $processes, 'phases' => []];
+if ($selection['shard'] !== null) {
+    $timings['shard'] = $selection['shard'];
+}
 $started = hrtime(true);
 $phase = static function (string $name, callable $action) use (&$timings): mixed {
     $start = hrtime(true);
@@ -538,9 +583,9 @@ try {
     if ($phase('source_bootstrap', fn () => runProcess(
         [
             PHP_BINARY,
-            $apiDir . '/vendor/phpunit/phpunit/phpunit',
-            '--configuration=' . $parallelConfig,
-            '--list-suites',
+            '-d', 'memory_limit=1G',
+            '-r', 'require $argv[1];',
+            $apiDir . '/tests/bootstrap.php',
         ],
         $apiDir,
         $sourceEnvironment,
@@ -560,6 +605,8 @@ try {
         $paraTest,
         '--configuration=' . $parallelConfig,
         '--processes=' . $processes,
+        '--order-by=duration-descending',
+        ...$selection['arguments'],
         '--exclude-group=http-integration',
         '--colors=auto',
     ];
@@ -593,6 +640,7 @@ try {
             $exitCode = $phase('rerun_failures', fn () => runProcess(
                 [PHP_BINARY, $apiDir . '/vendor/phpunit/phpunit/phpunit', '--configuration=' . $parallelConfig,
                  '--exclude-group=http-integration', '--colors=auto', '--filter=' . $filter,
+                 ...($junitPaths !== [] ? ['--log-junit=' . $junitPaths['rerun']] : []),
                  ...($application ? ['--testsuite=Application'] : (is_string($suite) && $suite !== '' ? ['--testsuite=' . $suite] : []))],
                 $apiDir,
                 $rerunEnvironment,
@@ -607,7 +655,7 @@ try {
 
     // Black-box HTTP testy nelze sdílet mezi workery: běžící server má jednu DB.
     // Spouštějí se proto až po ParaTestu nad původní izolovanou testovací DB.
-    if ($exitCode === 0 && ($application || $suite === null || $suite === '' || $suite === 'Integration' || $suite === 'AuditCore')) {
+    if ($exitCode === 0 && $selection['http_tail']) {
         $httpEnvironment = array_replace($environment, ['MYINVOICE_DB_NAME' => $source]);
         unset($httpEnvironment['MYINVOICE_PARALLEL_DB_PREFIX']);
         $exitCode = $phase('http_tail', fn () => runProcess(

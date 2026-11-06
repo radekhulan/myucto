@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use DateTimeImmutable;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentBatchRepository;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementBlocker;
@@ -49,7 +48,7 @@ final class PayrollAnnualSettlementBatchQueueTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $performer = $this->performer();
         $this->queue = new PayrollAnnualDocumentBatchQueueService(

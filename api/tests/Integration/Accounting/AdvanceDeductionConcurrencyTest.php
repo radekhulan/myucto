@@ -68,8 +68,10 @@ final class AdvanceDeductionConcurrencyTest extends TestCase
             'ADV_WORKER_READY' => $ready,
         ];
         $process = proc_open([PHP_BINARY, dirname(__DIR__, 2) . '/Support/AdvanceDeductionLockWorker.php'],
-            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']], $pipes, null, $env);
         self::assertIsResource($process);
+        fclose($pipes[0]);
+        unset($pipes[0]);
         try {
             $deadline = microtime(true) + 20;
             while (!is_file($ready) && microtime(true) < $deadline) {

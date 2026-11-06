@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Unit;
 
-use MyInvoice\Tests\Integration\Property\ReceivableLifecycleTest;
+use MyInvoice\Tests\Support\CloneSandbox;
 use PDO;
 use PDOException;
 use PHPUnit\Framework\TestCase;
@@ -48,14 +48,37 @@ final class ReceivableLifecycleCleanupTest extends TestCase
         self::assertCount(5, $pdo->statements);
     }
 
+    public function testUnownedSchemaCannotBeDropped(): void
+    {
+        $pdo = new LifecycleDropPdo([]);
+        try {
+            CloneSandbox::dropOrRelease($pdo, 'myucto_s5_lifecycle_0123456789_test', []);
+            self::fail('Úklid nesmí zahodit nevlastněnou databázi.');
+        } catch (\LogicException) {
+            self::assertSame([], $pdo->statements);
+        }
+    }
+
+    public function testOwnedNonTestSchemaCannotBeDropped(): void
+    {
+        $pdo = new LifecycleDropPdo([]);
+        try {
+            CloneSandbox::dropOrRelease($pdo, 'myucto_s5_lifecycle_0123456789', ['myucto_s5_lifecycle_0123456789']);
+            self::fail('Úklid nesmí zahodit databázi bez testovacího suffixu.');
+        } catch (\LogicException) {
+            self::assertSame([], $pdo->statements);
+        }
+    }
+
     private static function cleanup(PDO $server, bool $copy): void
     {
-        $test = new ReceivableLifecycleTest('testFullAnonymizationPreservesPaymentsLegalHistoryAndRetryWithoutPrivateText');
-        foreach (['server' => $server, 'ownedSchema' => 'myucto_s5_lifecycle_0123456789_test',
-            'targetSchema' => $copy ? 'myucto_s5_lifecycle_0123456789_test_copy_test' : null] as $name => $value) {
-            (new \ReflectionProperty($test, $name))->setValue($test, $value);
+        $schemas = array_filter([
+            $copy ? 'myucto_s5_lifecycle_0123456789_test_copy_test' : null,
+            'myucto_s5_lifecycle_0123456789_test',
+        ]);
+        foreach ($schemas as $schema) {
+            CloneSandbox::dropOrRelease($server, $schema, $schemas);
         }
-        (new \ReflectionMethod($test, 'tearDown'))->invoke($test);
     }
 
     private static function dropError(int $vendor, string $message): PDOException

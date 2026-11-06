@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollEmploymentRepository;
 use MyInvoice\Service\Payroll\Migration\PayrollTakeoverCoverage;
@@ -34,7 +33,7 @@ final class PayrollTakeoverEstimatedStartTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $coverage = $container->get(PayrollTakeoverCoverage::class);
         $employments = $container->get(PayrollEmploymentRepository::class);

@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use PDO;
 use PHPUnit\Framework\Attributes\Group;
@@ -35,7 +34,7 @@ final class PayrollTransportAttemptAppendOnlyTest extends TestCase
             $this->markTestSkipped('cfg.php missing');
         }
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             if ($container === null) {
                 $this->markTestSkipped('Container not available');
             }

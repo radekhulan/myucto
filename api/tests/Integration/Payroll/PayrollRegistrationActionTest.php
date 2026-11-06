@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use MyInvoice\Action\Payroll\PayrollRegistrationAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -95,7 +94,7 @@ final class PayrollRegistrationActionTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $db);
         $this->db = $db;
@@ -279,7 +278,7 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         self::assertSame(201, $eventResponse->getStatusCode(), (string) $eventResponse->getBody());
         $event = $this->json($eventResponse);
-        $events = Bootstrap::buildContainer()->get(PayrollRegistrationEventService::class);
+        $events = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollRegistrationEventService::class);
         self::assertInstanceOf(PayrollRegistrationEventService::class, $events);
         $snapshot = $events->load(
             $this->supplierId,
@@ -905,7 +904,7 @@ final class PayrollRegistrationActionTest extends TestCase
             str_repeat('f', 64),
         ]);
         $secondPartId = (int) $this->db->pdo()->lastInsertId();
-        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        $submissions = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
         $submitted = $submissions->transition(
             $this->supplierId,
@@ -1026,7 +1025,7 @@ final class PayrollRegistrationActionTest extends TestCase
         ]);
         $secondPartId = (int) $this->db->pdo()->lastInsertId();
         $firstPartId = (int) $prepared['part_id'];
-        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        $submissions = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
         $submitted = $submissions->transition(
             $this->supplierId,
@@ -2796,7 +2795,7 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         self::assertSame(201, $preparedResponse->getStatusCode(), (string) $preparedResponse->getBody());
         $prepared = $this->json($preparedResponse);
-        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        $submissions = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
         $submitted = $submissions->transition(
             $this->supplierId,
@@ -3124,7 +3123,7 @@ final class PayrollRegistrationActionTest extends TestCase
         ));
         self::assertSame('REGZEC25', $prepared['agenda_code']);
         $correlation = 'B0000000000000000000000000000001';
-        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        $submissions = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
         $submitted = $submissions->transition(
             $this->supplierId,
@@ -4429,7 +4428,7 @@ final class PayrollRegistrationActionTest extends TestCase
               WHERE supplier_id = ? AND id = ?'
         )->execute([self::START_ON, $this->supplierId, $this->employmentId]);
         $this->seedRegistrationEventPrerequisites('1', '1', self::START_ON, null, null, true);
-        $termination = Bootstrap::buildContainer()->get(
+        $termination = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(
             \MyInvoice\Service\Payroll\Termination\PayrollEmploymentTerminationService::class,
         );
         $termination->save($this->supplierId, $this->employmentId, [
@@ -4600,7 +4599,7 @@ final class PayrollRegistrationActionTest extends TestCase
     /** @param array<string,mixed> $prepared */
     private function acceptWithTrustedReceipt(array $prepared): void
     {
-        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        $submissions = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
         $correlation = 'synthetic-a3-correlation:' . $this->employmentId;
         $submitted = $submissions->transition(
@@ -6804,7 +6803,7 @@ final class PayrollRegistrationActionTest extends TestCase
         self::assertSame('ready', $prepared['status']);
         $correlationReference =
             'synthetic-a2-provenance-correlation:' . $this->employmentId;
-        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        $submissions = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
         $submitted = $submissions->transition(
             $this->supplierId,
@@ -6911,7 +6910,7 @@ final class PayrollRegistrationActionTest extends TestCase
         $statement->execute([$this->supplierId, $submissionId]);
         $artifactId = (int) $statement->fetchColumn();
         self::assertGreaterThan(0, $artifactId);
-        $submissions = Bootstrap::buildContainer()
+        $submissions = \MyInvoice\Tests\Support\PayrollTestContainer::build()
             ->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
 
@@ -6950,7 +6949,7 @@ final class PayrollRegistrationActionTest extends TestCase
         );
         $guid = $match[1];
         $correlation = 'synthetic-p1-correlation:' . $this->employmentId;
-        $submissions = Bootstrap::buildContainer()->get(PayrollSubmissionService::class);
+        $submissions = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(PayrollSubmissionService::class);
         self::assertInstanceOf(PayrollSubmissionService::class, $submissions);
         $submitted = $submissions->transition(
             $this->supplierId,

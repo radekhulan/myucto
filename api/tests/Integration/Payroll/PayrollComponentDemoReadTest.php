@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use DI\Container;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
@@ -56,7 +55,7 @@ final class PayrollComponentDemoReadTest extends TestCase
     /** @return array{0:PayrollComponentRepository,1:int} */
     private function setUpWith(bool $demo): array
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         self::assertInstanceOf(Container::class, $container);
         $container->set(DemoMode::class, new DemoMode(new Config(['demo' => ['enabled' => $demo]])));
         $db = $container->get(Connection::class);

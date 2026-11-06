@@ -12,7 +12,6 @@ use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Middleware;
 use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response;
-use MyInvoice\Bootstrap;
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchOutcome;
 use MyInvoice\Service\Payroll\Submission\Jmhz\Transport\JmhzDispatchService;
@@ -112,7 +111,7 @@ final class JmhzSubmissionBridgeServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $config = $container->get(Config::class);
         if (!$db instanceof Connection || !$config instanceof Config) {

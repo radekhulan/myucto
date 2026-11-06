@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollOperationalReconciliationRepository;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -27,7 +26,7 @@ final class PayrollOperationalReconciliationRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         if (!$this->db->hasTable('payroll_operational_reconciliation_issues')) {
             $this->markTestSkipped('Chybí migrace MZ-27 reconciliation.');

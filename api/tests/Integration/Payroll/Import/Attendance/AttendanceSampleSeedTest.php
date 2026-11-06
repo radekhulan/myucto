@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 
 use DI\Container;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollImportProfileRepository;
@@ -40,7 +39,7 @@ final class AttendanceSampleSeedTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $container->get(Connection::class);
         $service = $container->get(AttendanceImportService::class);
         $profiles = $container->get(PayrollImportProfileRepository::class);
@@ -186,7 +185,7 @@ final class AttendanceSampleSeedTest extends TestCase
             static fn (array $rule): bool => $rule['meaning'] !== 'net_other_deduction',
         ));
         $myucto = $this->insertSample(AttendanceMyUctoSampleProfile::NAME, $staleMyUcto, AttendanceMyUctoSampleProfile::components(), 0, 'myucto');
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         self::assertInstanceOf(Container::class, $container);
         $container->set(DemoMode::class, new DemoMode(new Config(['demo' => ['enabled' => true]])));
         $service = $container->get(AttendanceImportService::class);

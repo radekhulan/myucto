@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { useBankTransactionActions } from '../useBankTransactionActions'
 import BankMatchModal from '@/components/bank/BankMatchModal.vue'
@@ -38,6 +38,10 @@ beforeEach(() => {
   mocks.bank.splitSuggestions.mockResolvedValue({ suggestions: [], window: 7, max: 5 })
   mocks.otherItems.bankCandidates.mockResolvedValue([other])
   mocks.otherItems.matchBankTransaction.mockResolvedValue({ id: 9 })
+})
+
+afterEach(() => {
+  vi.useRealTimers()
 })
 
 describe('ostatní pohledávky a závazky v dialogu Spárovat', () => {
@@ -89,6 +93,7 @@ describe('ostatní pohledávky a závazky v dialogu Spárovat', () => {
   })
 
   it('varování o širším okně faktur neukazuje, když našlo jen ostatní položky', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     mocks.bank.matchCandidates.mockResolvedValue({ candidates: [], fallback: true })
     const actions = useBankTransactionActions({ reload: mocks.reload })
     actions.startMatch(tx)
@@ -98,7 +103,7 @@ describe('ostatní pohledávky a závazky v dialogu Spárovat', () => {
 
     mocks.bank.matchCandidates.mockResolvedValue({ candidates: [invoice], fallback: true })
     actions.matchSearch.value = 'FV'
-    await new Promise(resolve => setTimeout(resolve, 350))
+    await vi.advanceTimersByTimeAsync(350)
     await flushPromises()
     expect(actions.candidatesFallback.value).toBe(true)
   })

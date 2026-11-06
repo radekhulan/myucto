@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentRepository;
@@ -34,7 +33,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testStorageCleanupLockSerializesAnotherSupplierWriter(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $config = $container->get(Config::class);
         $service = $container->get(AnnualTaxCertificateService::class);
@@ -70,7 +69,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testBuildsAndArchivesBothImmutable2026Certificates(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $renderer = $container->get(AnnualTaxCertificatePdfRenderer::class);
@@ -337,7 +336,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testBuildsDocumentedChildrenDisabilityAndAnnualSettlement(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $settlementBuilder = $container->get(AnnualSettlementSnapshotBuilder::class);
@@ -423,7 +422,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
      */
     public function testCarriedMonthsCarryDeclarationChildrenAndDisability(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $openings = $container->get(PayrollOpeningBalanceService::class);
@@ -537,7 +536,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testBuildsNonresidentAdvanceCertificateFromFrozenInsurance(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -575,7 +574,7 @@ final class AnnualTaxCertificateSnapshotBuilderIntegrationTest extends TestCase
 
     public function testRefusedAnnualSettlementLeavesRowThirteenEmpty(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $builder = $container->get(AnnualTaxCertificateSnapshotBuilder::class);
         $annualRevisions = $container->get(PayrollAnnualDocumentRepository::class);

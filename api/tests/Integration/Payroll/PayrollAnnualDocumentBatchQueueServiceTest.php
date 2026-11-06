@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualDocumentBatchRepository;
 use MyInvoice\Service\Payroll\AnnualSettlement\AnnualSettlementPerformer;
@@ -37,7 +36,7 @@ final class PayrollAnnualDocumentBatchQueueServiceTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->queue = $container->get(PayrollAnnualDocumentBatchQueueService::class);
         $this->batches = $container->get(PayrollAnnualDocumentBatchRepository::class);
@@ -277,7 +276,7 @@ final class PayrollAnnualDocumentBatchQueueServiceTest extends TestCase
     public function testPersonWithoutIncomeOfTheKindIsSkippedNotFailedOrRetried(): void
     {
         [$employeeId] = $this->approvedYear(2026, 1);
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $generator = new class implements AnnualTaxCertificateGenerator {
             public int $calls = 0;
 

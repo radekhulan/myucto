@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Document\AnnualTaxCertificatePaymentEvidenceProvider;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
@@ -246,7 +245,7 @@ final class AnnualTaxCertificatePaymentEvidenceProviderTest extends TestCase
         string $actualPaymentDate,
         int $liabilityAmountMinor,
     ): array {
-        $connection = Bootstrap::buildContainer()->get(Connection::class);
+        $connection = \MyInvoice\Tests\Support\PayrollTestContainer::build()->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         if (!$connection->hasTable('payroll_payment_matches')) {
             $this->markTestSkipped('Migrace platební evidence mezd neproběhla.');

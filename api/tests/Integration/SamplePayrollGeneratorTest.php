@@ -34,7 +34,7 @@ final class SamplePayrollGeneratorTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->pdo = $this->container->get(Connection::class)->pdo();
         $this->pdo->beginTransaction();
         $source = (int) $this->pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();

@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use DomainException;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Payment\PayrollBankEvidenceGuard;
 use MyInvoice\Service\Payroll\Payment\PayrollPaymentEvidenceReference;
@@ -37,7 +36,7 @@ final class PayrollPaymentReconciliationServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $service = $container->get(PayrollPaymentReconciliationService::class);

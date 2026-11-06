@@ -67,7 +67,10 @@ final class PropertyCloneScrubberTest extends TestCase
         $pdo = $target->pdo();
         $scrubber = new TextScrubber(new Pseudonymizer(str_repeat('synthetic-property-', 3)));
         $helper = new PropertyCloneScrubber($pdo, $scrubber);
-        $oldRows = $pdo->query('SELECT id, state_json FROM property_revisions ORDER BY id')->fetchAll(PDO::FETCH_KEY_PAIR);
+        $revisions = $pdo->prepare('SELECT id, state_json FROM property_revisions WHERE supplier_id = ? ORDER BY id');
+        $revisions->execute([$supplier]);
+        $oldRows = $revisions->fetchAll(PDO::FETCH_KEY_PAIR);
+        self::assertCount(5, $oldRows);
         $firstId = (int) array_key_first($oldRows);
         $corrupt = json_decode($oldRows[$firstId], true, flags: JSON_THROW_ON_ERROR);
         $corrupt['name'] = 'Corrupted legal snapshot';
@@ -76,7 +79,10 @@ final class PropertyCloneScrubberTest extends TestCase
         $this->fails(fn () => $helper->run(), 'canonical hash mismatch');
         self::assertSame($before, $this->fingerprint($pdo), 'Failure rolls back prior profile transformations.');
         $pdo->prepare('UPDATE property_revisions SET state_json = ? WHERE id = ?')->execute([$oldRows[$firstId], $firstId]);
-        $group = $pdo->query('SELECT id, title_ref FROM property_revision_groups ORDER BY id LIMIT 1')->fetch(PDO::FETCH_ASSOC);
+        $groups = $pdo->prepare('SELECT id, title_ref FROM property_revision_groups WHERE supplier_id = ? ORDER BY id LIMIT 1');
+        $groups->execute([$supplier]);
+        $group = $groups->fetch(PDO::FETCH_ASSOC);
+        self::assertIsArray($group);
         $pdo->prepare('UPDATE property_revision_groups SET title_ref = ? WHERE id = ?')->execute(['Unrelated changed deed', $group['id']]);
         $before = $this->fingerprint($pdo);
         $this->fails(fn () => $helper->run(), 'materialization differs');
@@ -87,7 +93,11 @@ final class PropertyCloneScrubberTest extends TestCase
         self::assertTrue($pdo->inTransaction());
         $pdo->rollBack();
         $helper->run();
-        foreach ($pdo->query('SELECT state_json, state_hash FROM property_revisions')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $revisions = $pdo->prepare('SELECT state_json, state_hash FROM property_revisions WHERE supplier_id = ? ORDER BY id');
+        $revisions->execute([$supplier]);
+        $rows = $revisions->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(5, $rows);
+        foreach ($rows as $row) {
             self::assertStringNotContainsString('registry-person@example.test', $row['state_json']);
             self::assertSame(PropertyInput::hash(json_decode($row['state_json'], true, flags: JSON_THROW_ON_ERROR)), $row['state_hash']);
         }
@@ -140,7 +150,11 @@ final class PropertyCloneScrubberTest extends TestCase
         $sourceHash = $this->fingerprint($source->pdo());
         $this->schemas[1] = CloneSandbox::anonymized($this->server, $this->config, $this->schemas[0], 'synthetic-property-service');
         $target = $this->connect($this->schemas[1]);
-        foreach ($target->pdo()->query('SELECT state_json,state_hash FROM property_revisions')->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $revisions = $target->pdo()->prepare('SELECT state_json, state_hash FROM property_revisions WHERE supplier_id = ? ORDER BY id');
+        $revisions->execute([$supplier]);
+        $rows = $revisions->fetchAll(PDO::FETCH_ASSOC);
+        self::assertCount(5, $rows);
+        foreach ($rows as $row) {
             self::assertStringNotContainsString('registry-person@example.test', $row['state_json']);
             self::assertSame(PropertyInput::hash(json_decode($row['state_json'], true, flags: JSON_THROW_ON_ERROR)), $row['state_hash']);
         }

@@ -6,7 +6,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 
 use DI\Container;
 use MyInvoice\Action\Payroll\PayrollComponentJmhzMappingsAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
@@ -72,7 +71,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->container = $container;
         $db = $container->get(Connection::class);
         $components = $container->get(PayrollComponentRepository::class);

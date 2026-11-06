@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll\Import\Attendance;
 
 use MyInvoice\Action\Payroll\PayrollAttendanceImportAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -53,7 +52,7 @@ final class AttendanceImportServiceTest extends TestCase
 
     protected function setUp(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $service = $this->container->get(AttendanceImportService::class);
         if (!$db instanceof Connection || !$service instanceof AttendanceImportService) {

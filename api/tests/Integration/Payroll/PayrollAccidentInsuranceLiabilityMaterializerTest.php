@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Repository\Payroll\PayrollAccidentInsuranceRateRepository;
@@ -41,7 +40,7 @@ final class PayrollAccidentInsuranceLiabilityMaterializerTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $sensitiveData = $container->get(PayrollSensitiveData::class);
         self::assertInstanceOf(Connection::class, $connection);

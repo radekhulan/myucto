@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use DateTimeImmutable;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollAnnualSettlementRepository;
 use MyInvoice\Repository\Payroll\PayrollEmployeeDeletionRepository;
@@ -59,7 +58,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testCompleteYearProducesOneSettlementAndLeavesMonthsUntouched(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
         $snapshots = $container->get(AnnualSettlementSnapshotBuilder::class);
@@ -290,7 +289,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testExternalCertificateRoundTripsAndOnlyCountsWhenComplete(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
         $snapshots = $container->get(AnnualSettlementSnapshotBuilder::class);
@@ -470,7 +469,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
     /** Zaměstnanec bez podepsaného prohlášení — zúčtování se neprovede a řekne proč. */
     public function testUnsignedDeclarationRefusesWithAReason(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -525,7 +524,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testEmployeeWhoMustFileTaxReturnIsRefused(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -578,7 +577,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testYearWithoutRequestsListsEmployeesWithUnknownState(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $settlements = $container->get(PayrollAnnualSettlementRepository::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -620,7 +619,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
 
     public function testAnnualSettlementCatchesUpTwoMonthsBelowMonthlyBonusThreshold(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -713,7 +712,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testTakenOverChildBenefitWithoutClaimBlocksTheSettlement(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -781,7 +780,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
 
     public function testChildIdentityMonthsAndOtherCaregiverAreFrozenForJmhz(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
         $snapshots = $container->get(AnnualSettlementSnapshotBuilder::class);
@@ -937,7 +936,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testAnnualClaimsRoundTripAndValidation(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $claims = $container->get(AnnualSettlementClaimsService::class);
         $sensitive = $container->get(PayrollSensitiveData::class);
@@ -1070,7 +1069,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testPreschoolClaimsRoundTripValidationAndDeletion(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $claims = $container->get(AnnualSettlementClaimsService::class);
         $deletion = $container->get(PayrollEmployeeDeletionRepository::class);
@@ -1190,7 +1189,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testAnnualClaimsFeedTheAssessmentAndInconsistencyBlocks(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $service = $container->get(AnnualTaxSettlementService::class);
         $claims = $container->get(AnnualSettlementClaimsService::class);
@@ -1297,7 +1296,7 @@ final class AnnualSettlementIntegrationTest extends TestCase
      */
     public function testDeletingEmployeeRemovesAnnualClaims(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         $claims = $container->get(AnnualSettlementClaimsService::class);
         $deletion = $container->get(PayrollEmployeeDeletionRepository::class);

@@ -74,7 +74,7 @@ trait PayrollFullFlowTrait
 
     private function bootPayrollFullFlow(): void
     {
-        $this->container = Bootstrap::buildContainer();
+        $this->container = PayrollTestContainer::build();
         $db = $this->container->get(Connection::class);
         $absences = $this->container->get(PayrollAbsenceAction::class);
         $time = $this->container->get(PayrollTimeAction::class);

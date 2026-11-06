@@ -115,13 +115,14 @@ final class PayrollJmhzPreparationSourceV4MigrationRuntimeTest extends TestCase
         $pipes = [];
         $process = proc_open(
             $command,
-            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
             $pipes,
             $this->rootDir,
             $environment,
             ['bypass_shell' => true],
         );
         self::assertIsResource($process);
+        fclose($pipes[0]);
         $stdout = stream_get_contents($pipes[1]);
         $stderr = stream_get_contents($pipes[2]);
         fclose($pipes[1]);

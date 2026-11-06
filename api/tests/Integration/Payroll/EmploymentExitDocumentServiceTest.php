@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDocumentRepository;
 use MyInvoice\Service\Payroll\Document\AverageEarningsMonthlyConverter;
@@ -40,7 +39,7 @@ final class EmploymentExitDocumentServiceTest extends TestCase
             . bin2hex(random_bytes(6));
         putenv('MYINVOICE_DATA_DIR=' . $this->dataDir);
 
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->service = $container->get(EmploymentExitDocumentService::class);
         $this->documents = $container->get(PayrollDocumentRepository::class);

@@ -189,7 +189,11 @@ final class Connection
         // připnuté konce řádků v .gitattributes — prostředí nesmí měnit chování.
         // Sada odpovídá výchozímu sql_mode MariaDB; ONLY_FULL_GROUP_BY se vědomě
         // nepřidává, není ve výchozím režimu a shodil by existující agregační dotazy.
-        $pdo->exec("SET SESSION sql_mode = '" . self::SQL_MODE . "'");
+        $session = "SET SESSION sql_mode = '" . self::SQL_MODE . "'";
+        if (self::sharedTestConnectionsApply($name)) {
+            $session .= ", transaction_isolation = 'REPEATABLE-READ', innodb_snapshot_isolation = 1";
+        }
+        $pdo->exec($session);
         $this->applySessionTimeZone($pdo);
 
         if ($shareable) {
@@ -273,7 +277,8 @@ final class Connection
                 }
                 $pdo->exec(
                     "SET SESSION foreign_key_checks = 1, unique_checks = 1, innodb_lock_wait_timeout = DEFAULT,"
-                    . " sql_mode = '" . self::SQL_MODE . "'"
+                    . " sql_mode = '" . self::SQL_MODE . "',"
+                    . " transaction_isolation = 'REPEATABLE-READ', innodb_snapshot_isolation = 1"
                 );
                 $pdo->query('SELECT RELEASE_ALL_LOCKS()');
                 // Test s vlastní třídou příkazů trvale vypnul sledování transakcí;

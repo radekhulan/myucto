@@ -8,7 +8,6 @@ use GuzzleHttp\Client;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\HandlerStack;
 use GuzzleHttp\Psr7\Response;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDiscountIntentRepository;
 use MyInvoice\Repository\Payroll\PayrollSigningProfileRepository;
@@ -63,7 +62,7 @@ final class PayrollCsszFormReceiptFlowTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->container = $container;
         $connection = $container->get(Connection::class);
         $encryption = $container->get(SecretEncryption::class);

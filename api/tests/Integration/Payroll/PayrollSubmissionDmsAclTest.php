@@ -7,7 +7,6 @@ namespace MyInvoice\Tests\Integration\Payroll;
 use MyInvoice\Action\Document\DocumentFileAction;
 use MyInvoice\Action\Document\DocumentsAction;
 use MyInvoice\Action\Document\FoldersAction;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
@@ -41,7 +40,7 @@ final class PayrollSubmissionDmsAclTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         if ($container === null) {
             throw new \RuntimeException('DI kontejner není dostupný.');
         }

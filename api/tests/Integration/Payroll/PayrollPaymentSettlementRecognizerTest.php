@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Payroll;
 
 use DomainException;
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollDeadlineOverviewRepository;
 use MyInvoice\Repository\Payroll\PayrollPaymentSettlementSignalRepository;
@@ -55,7 +54,7 @@ final class PayrollPaymentSettlementRecognizerTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $connection = $container->get(Connection::class);
         self::assertInstanceOf(Connection::class, $connection);
         $recognizer = $container->get(PayrollPaymentSettlementRecognizer::class);

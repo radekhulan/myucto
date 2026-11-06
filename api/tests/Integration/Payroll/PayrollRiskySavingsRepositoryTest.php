@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollRiskySavingsConflictException;
 use MyInvoice\Repository\Payroll\PayrollRiskySavingsRepository;
@@ -29,7 +28,7 @@ final class PayrollRiskySavingsRepositoryTest extends TestCase
 
     protected function setUp(): void
     {
-        $container = Bootstrap::buildContainer();
+        $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
         $this->db = $container->get(Connection::class);
         $this->repository = $container->get(PayrollRiskySavingsRepository::class);
         $pdo = $this->db->pdo();

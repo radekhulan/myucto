@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration\Payroll;
 
-use MyInvoice\Bootstrap;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzExternalSubmissionStore;
 use MyInvoice\Service\Payroll\Import\Jmhz\JmhzReportForm;
@@ -43,7 +42,7 @@ final class PayrollTakeoverJmhzFormCheckTest extends TestCase
     protected function setUp(): void
     {
         try {
-            $container = Bootstrap::buildContainer();
+            $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->store = $container->get(JmhzExternalSubmissionStore::class);
             $this->writer = $container->get(PayrollMigrationReferenceTotalsWriter::class);
