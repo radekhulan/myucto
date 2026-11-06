@@ -123,19 +123,20 @@ async function save() {
       }) : null
       return { date_from: segment.from, date_to: segment.to, night_duration_units: optionalDuration(segment.night, segment.original?.night_duration_units), weekend_duration_units: optionalDuration(segment.weekend, segment.original?.weekend_duration_units), holiday_work_duration_units: holiday, holiday_work_days: days, overtime_work_days: overtimeDays, difficult_exposures: exposures }
     })
+    // Automaticky posouzená skupina se neukládá jako nula, aby ji server vyhodnotil při každém výpočtu.
     const holidayPayload: PayrollHourlyHolidayEvidence = {
-      nonworked_holidays: holidays.value.map(item => {
+      nonworked_holidays: isAutomatic('nonworked_holidays') ? null : holidays.value.map(item => {
         const option = state.value!.options.nonworked_holidays.find(option => option.date === item.date)
         if (option?.valid === false) throw new Error(option.reason || t('payroll.hourly_evidence.allocation_invalid'))
         return { date: item.date, duration_units: requiredUnits(item.hours, item.original, option?.available_duration_units) }
       }),
-      holiday_time_off_grants: grants.value.map(item => {
+      holiday_time_off_grants: isAutomatic('holiday_time_off_grants') ? null : grants.value.map(item => {
         const option = state.value!.options.holiday_time_off_entitlements.find(option => String(option.entitlement_id) === item.entitlement)
         const absence = absenceOptions('holiday').find(absence => absenceKey(absence.absence_id, absence.date) === item.absence)
         if (!option || !absence || option.valid === false || absence.valid === false) throw new Error(t('payroll.hourly_evidence.allocation_invalid'))
         return { entitlement_id: option.entitlement_id, entitlement_revision: option.entitlement_revision, granted_on: absence.date, absence_id: absence.absence_id, duration_units: requiredUnits(item.hours, item.original, Math.min(option.available_duration_units, absence.available_duration_units)) }
       }),
-      overtime_time_off_allocations: overtimeAllocations.value.map(item => {
+      overtime_time_off_allocations: isAutomatic('overtime_time_off_allocations') ? null : overtimeAllocations.value.map(item => {
         const option = state.value!.options.overtime_time_off_entitlements?.find(option => option.work_date === item.workDate)
         const absence = absenceOptions('overtime').find(absence => absenceKey(absence.absence_id, absence.date) === item.absence)
         if (!option || !absence || option.valid === false || absence.valid === false || !item.reference.trim()) throw new Error(t('payroll.hourly_evidence.allocation_invalid'))

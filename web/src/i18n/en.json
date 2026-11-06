@@ -2468,7 +2468,7 @@
       "automatic": "Assessed automatically as no entitlement: {rule}.",
       "automatic_rules": {
         "no_holiday_on_hourly_day": "no public holiday falls on an hourly paid day this month",
-        "no_shift_on_holiday": "no public holiday falls on a scheduled shift",
+        "no_shift_on_holiday": "no public holiday falls on a scheduled shift or on a working day of the weekly schedule",
         "agreement_not_entitled": "agreements are not entitled to wage compensation for an unworked public holiday",
         "no_holiday_time_off_entitlement": "no outstanding entitlement or absence for time off in lieu of a public holiday",
         "no_overtime_time_off_entitlement": "no outstanding entitlement or absence for time off in lieu of overtime"

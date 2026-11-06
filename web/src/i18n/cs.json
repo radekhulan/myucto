@@ -2468,7 +2468,7 @@
       "automatic": "Posouzeno automaticky jako nulový nárok: {rule}.",
       "automatic_rules": {
         "no_holiday_on_hourly_day": "v měsíci není svátek s hodinovou mzdou",
-        "no_shift_on_holiday": "žádný svátek nepadá na rozvrženou směnu",
+        "no_shift_on_holiday": "žádný svátek nepadá na rozvrženou směnu ani na pracovní den týdenního rozvrhu",
         "agreement_not_entitled": "dohodám náhrada mzdy za neodpracovaný svátek nepřísluší",
         "no_holiday_time_off_entitlement": "vztah nemá nevyčerpaný nárok ani nepřítomnost náhradního volna za svátek",
         "no_overtime_time_off_entitlement": "vztah nemá nevyčerpaný nárok ani nepřítomnost náhradního volna za přesčas"

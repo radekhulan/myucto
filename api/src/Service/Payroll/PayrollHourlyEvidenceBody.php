@@ -52,16 +52,18 @@ final class PayrollHourlyEvidenceBody
             }
             $premiums[] = $item;
         }
+        // Neuvedená skupina (null) se posuzuje automaticky při každém výpočtu.
+        $assessed = static fn(string $key): bool => ($input[$key] ?? null) !== null;
         $nonworked = [];
         $seen = [];
-        foreach (self::rows($input, 'nonworked_holidays', 31) as $row) {
+        foreach ($assessed('nonworked_holidays') ? self::rows($input, 'nonworked_holidays', 31) : [] as $row) {
             $date = self::date($row['date'] ?? null, $periodStart, $last);
             if (isset($seen[$date])) throw new \InvalidArgumentException('Neodpracovaný svátek je uveden vícekrát.');
             $seen[$date] = true;
             $nonworked[] = ['date' => $date, 'duration_units' => self::integer($row['duration_units'] ?? null, 1, 72_000)];
         }
         $grants = [];
-        foreach (self::rows($input, 'holiday_time_off_grants', 124) as $row) {
+        foreach ($assessed('holiday_time_off_grants') ? self::rows($input, 'holiday_time_off_grants', 124) : [] as $row) {
             $grants[] = ['entitlement_id' => self::integer($row['entitlement_id'] ?? null, 1, PHP_INT_MAX),
                 'entitlement_revision' => self::integer($row['entitlement_revision'] ?? null, 1, PHP_INT_MAX),
                 'granted_on' => self::date($row['granted_on'] ?? null, $periodStart, $last),
@@ -69,15 +71,16 @@ final class PayrollHourlyEvidenceBody
                 'absence_id' => self::integer($row['absence_id'] ?? null, 1, PHP_INT_MAX)];
         }
         $allocations = [];
-        foreach (self::rows($input, 'overtime_time_off_allocations', 124) as $row) {
+        foreach ($assessed('overtime_time_off_allocations') ? self::rows($input, 'overtime_time_off_allocations', 124) : [] as $row) {
             $granted = self::date($row['granted_on'] ?? null, $periodStart, $last);
             $allocations[] = ['work_date' => self::date($row['work_date'] ?? null, '1900-01-01', $granted),
                 'granted_on' => $granted, 'duration_units' => self::integer($row['duration_units'] ?? null, 1, 72_000),
                 'absence_id' => self::integer($row['absence_id'] ?? null, 1, PHP_INT_MAX),
                 'reference' => self::text($row['reference'] ?? null)];
         }
-        return ['premium_segments' => $premiums, 'nonworked_holidays' => $nonworked,
-            'holiday_time_off_grants' => $grants, 'overtime_time_off_allocations' => $allocations];
+        return ['premium_segments' => $premiums, 'nonworked_holidays' => $assessed('nonworked_holidays') ? $nonworked : null,
+            'holiday_time_off_grants' => $assessed('holiday_time_off_grants') ? $grants : null,
+            'overtime_time_off_allocations' => $assessed('overtime_time_off_allocations') ? $allocations : null];
     }
 
     public static function integer(mixed $value, int $minimum = 0, int $maximum = 2_232_000): int

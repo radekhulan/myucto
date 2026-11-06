@@ -2656,10 +2656,11 @@ export interface PayrollHourlyPremiumSegment {
   difficult_exposures: Array<{ duration_units: number; factors: number }> | null
 }
 
+/** null = skupina se nepotvrzuje ručně, server ji posuzuje automaticky při každém výpočtu. */
 export interface PayrollHourlyHolidayEvidence {
-  nonworked_holidays: Array<{ date: string; duration_units: number }>
-  holiday_time_off_grants: Array<{ entitlement_id: number; entitlement_revision: number; granted_on: string; duration_units: number; absence_id: number }>
-  overtime_time_off_allocations: Array<{ work_date: string; granted_on: string; duration_units: number; absence_id: number; reference: string }>
+  nonworked_holidays: Array<{ date: string; duration_units: number }> | null
+  holiday_time_off_grants: Array<{ entitlement_id: number; entitlement_revision: number; granted_on: string; duration_units: number; absence_id: number }> | null
+  overtime_time_off_allocations: Array<{ work_date: string; granted_on: string; duration_units: number; absence_id: number; reference: string }> | null
 }
 
 export interface PayrollHourlyEvidence extends PayrollHourlyHolidayEvidence {

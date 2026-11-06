@@ -36,6 +36,17 @@ final class PayrollHourlyEvidenceBodyTest extends TestCase
             'duration_units' => 53, 'absence_id' => 8], $result['holiday_time_off_grants'][0]);
     }
 
+    public function testUnconfirmedGroupStaysUnknownForAutomaticAssessment(): void
+    {
+        $body = self::body();
+        unset($body['nonworked_holidays']);
+        $body['overtime_time_off_allocations'] = null;
+        $result = PayrollHourlyEvidenceBody::normalize($body, '2026-06-01');
+        self::assertNull($result['nonworked_holidays']);
+        self::assertNull($result['overtime_time_off_allocations']);
+        self::assertSame([], $result['holiday_time_off_grants']);
+    }
+
     #[DataProvider('invalidBodies')]
     public function testRejectsInvalidOrAmbiguousEvidence(array $body): void
     {
@@ -46,8 +57,8 @@ final class PayrollHourlyEvidenceBodyTest extends TestCase
     public static function invalidBodies(): iterable
     {
         $body = self::body();
-        unset($body['nonworked_holidays']);
-        yield 'nepotvrzená absence nároků' => [$body];
+        $body['nonworked_holidays'] = 'nic';
+        yield 'neplatný seznam nároků' => [$body];
         $body = self::body();
         $body['premium_segments'][0]['date_to'] = '2026-06-31';
         yield 'neexistující den' => [$body];

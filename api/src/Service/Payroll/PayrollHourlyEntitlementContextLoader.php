@@ -23,7 +23,8 @@ use PDO;
 /** Dávkové zmrazení skutečných podkladů; klient nikdy neurčuje zůstatky ani sazby. */
 final class PayrollHourlyEntitlementContextLoader
 {
-    public const AUTOMATIC_RULES = 'hourly-automatic-zero.v1';
+    public const AUTOMATIC_RULES = 'hourly-automatic-zero.v2';
+    private const SELECTION_KEYS = ['nonworked_holidays', 'holiday_time_off_grants', 'overtime_time_off_allocations'];
 
     public function __construct(private readonly Connection $db) {}
 
@@ -94,27 +95,30 @@ final class PayrollHourlyEntitlementContextLoader
                 'settlement_source' => ($source['work_source'] ?? null) === 'settlement_only' ? $source : null,
                 'ledger_source_sha256' => self::hash($ledger[$id]),
                 'schedule_source' => $data[$id]['shifts'], 'absence_source' => $data[$id]['absences'],
-                'premium_segments' => $current ? $saved['premium_segments'] : null,
-                'nonworked_holidays' => $current ? [] : null, 'holiday_time_off_grants' => $current ? [] : null,
-                'overtime_time_off_allocations' => $current ? [] : null,
+                'calendar_source' => $data[$id]['calendars'],
+                'premium_segments' => $current ? self::zeroIdleSegments($saved['premium_segments'], $segments) : null,
+                'nonworked_holidays' => null, 'holiday_time_off_grants' => null, 'overtime_time_off_allocations' => null,
             ];
-            if (!$current) {
-                // Kde nárok objektivně vzniknout nemůže, posoudí server výslovnou nulu sám.
-                $automatic = self::automaticZeros($termsByEmployment[$id], $employmentTypes[$id] ?? '', $periodStart, $end, $calendar, $data[$id], $ledger[$id]);
-                foreach ($automatic as $key => $_) $context[$key] = [];
-                if ($automatic !== []) $context['automatic_assessment'] = ['rule_version' => self::AUTOMATIC_RULES, 'rules' => $automatic];
-            }
             if (($source['work_source'] ?? null) === 'entries') {
                 $context['premium_segments'] = PayrollHourlyNativePremiums::project($source['time_entries'], $segments, $policy, $rules, $periodStart, $end, $calendar);
                 // Docházka doloží příplatky, další nároky vyžadují výslovné potvrzení účetní.
             }
             if ($current) {
                 try {
-                    $context = [...$context, ...self::selectionProofs($saved, $source, $data[$id], $ledger[$id], $calendar, $termsByEmployment[$id], $averages[$id] ?? null)];
+                    // Neuložená (null) skupina zůstává k automatickému posouzení při každém výpočtu.
+                    foreach (self::selectionProofs($saved, $source, $data[$id], $ledger[$id], $calendar, $termsByEmployment[$id], $averages[$id] ?? null) as $key => $rows) {
+                        $context[$key] = is_array($saved[$key] ?? null) ? $rows : null;
+                    }
                 } catch (\InvalidArgumentException $e) {
                     $context['selection_error'] = $e->getMessage();
-                    $context['nonworked_holidays'] = $context['holiday_time_off_grants'] = $context['overtime_time_off_allocations'] = null;
                 }
+            }
+            if (!isset($context['selection_error'])) {
+                // Kde nárok objektivně vzniknout nemůže, posoudí server výslovnou nulu sám.
+                $automatic = array_intersect_key(self::automaticZeros($termsByEmployment[$id], $employmentTypes[$id] ?? '', $periodStart, $end, $calendar, $data[$id], $ledger[$id]),
+                    array_filter(array_intersect_key($context, array_flip(self::SELECTION_KEYS)), static fn(mixed $value): bool => $value === null));
+                foreach ($automatic as $key => $_) $context[$key] = [];
+                if ($automatic !== []) $context['automatic_assessment'] = ['rule_version' => self::AUTOMATIC_RULES, 'rules' => $automatic];
             }
             if ($registry->degradedReason() !== null || $rules->version->effectiveTo < $end) $context['ruleset'] = null;
             $result[$id] = $context;
@@ -145,10 +149,11 @@ final class PayrollHourlyEntitlementContextLoader
     /**
      * Části evidence, u nichž nárok v měsíci objektivně vzniknout nemůže.
      * Náhrada za neodpracovaný svátek (§ 115 odst. 3 ZP) dohodám nepřísluší;
-     * jinak se nula posoudí, jen když žádný svátek nepadá na rozvržený den.
+     * jinak se nula posoudí, jen když žádný svátek nepadá na rozvrženou směnu
+     * ani na pracovní den pravidelného týdenního rozvrhu.
      *
      * @param list<array<string,mixed>> $terms
-     * @param array{shifts:list<array<string,mixed>>,absences:list<array<string,mixed>>} $data
+     * @param array{shifts:list<array<string,mixed>>,absences:list<array<string,mixed>>,calendars?:list<array<string,mixed>>} $data
      * @param array{entitlements:list<array<string,mixed>>} $ledger
      * @return array<string,string> klíč evidence => použité pravidlo
      */
@@ -162,12 +167,17 @@ final class PayrollHourlyEntitlementContextLoader
             if ($holidays === []) {
                 $result['nonworked_holidays'] = 'no_holiday_on_hourly_day';
             } elseif ($data['shifts'] !== []) {
-                $scheduled = false;
-                foreach ($data['shifts'] as $shift) {
-                    [$start, $shiftEnd] = PayrollHourlyScheduleProof::bounds($shift);
-                    foreach ($holidays as $date) if ($start->format('Y-m-d') <= $date && $shiftEnd->modify('-1 second')->format('Y-m-d') >= $date) $scheduled = true;
+                try {
+                    $scheduled = false;
+                    foreach ($data['shifts'] as $shift) {
+                        [$start, $shiftEnd] = PayrollHourlyScheduleProof::bounds($shift);
+                        foreach ($holidays as $date) if ($start->format('Y-m-d') <= $date && $shiftEnd->modify('-1 second')->format('Y-m-d') >= $date) $scheduled = true;
+                    }
+                    // § 115 odst. 3 ZP: rozhoduje i obvyklý pracovní den, ne jen rozpis směn.
+                    if (!$scheduled && self::idleInWeekPattern($data['calendars'] ?? [], $holidays)) $result['nonworked_holidays'] = 'no_shift_on_holiday';
+                } catch (\InvalidArgumentException) {
+                    // Vadná směna nedokládá volný svátek; posouzení zůstává na účetní.
                 }
-                if (!$scheduled) $result['nonworked_holidays'] = 'no_shift_on_holiday';
             }
         }
         $available = static fn(string $kind): bool => array_filter($ledger['entitlements'] ?? [], static fn(array $row): bool => $row['kind'] === $kind && $row['available_duration_units'] > 0) !== [];
@@ -180,10 +190,10 @@ final class PayrollHourlyEntitlementContextLoader
     /** Výběry nevyžadují průměr; jejich platnost je samostatná od ocenění náhrady. */
     public function validateSelections(int $supplierId, int $employmentId, string $periodStart, array $payload, array $source): void
     {
-        if ($payload['nonworked_holidays'] !== [] && in_array($this->relationType($supplierId, $employmentId), ['dpp', 'dpc'], true)) {
+        if (($payload['nonworked_holidays'] ?? []) !== [] && in_array($this->relationType($supplierId, $employmentId), ['dpp', 'dpc'], true)) {
             throw new \InvalidArgumentException('Náhrada mzdy za neodpracovaný svátek se u dohod o pracích konaných mimo pracovní poměr neposkytuje.');
         }
-        if ($payload['nonworked_holidays'] === [] && $payload['holiday_time_off_grants'] === [] && $payload['overtime_time_off_allocations'] === []) return;
+        if (($payload['nonworked_holidays'] ?? []) === [] && ($payload['holiday_time_off_grants'] ?? []) === [] && ($payload['overtime_time_off_allocations'] ?? []) === []) return;
         $ledger = (new PayrollHourlyEntitlementLedger($this->db))->loadMany($supplierId, [$employmentId], substr($periodStart, 0, 4) . '-01-01', self::end($periodStart), $periodStart, true);
         $data = $this->proofData($supplierId, [$employmentId], $periodStart, true);
         self::selectionProofs($payload, $source, $data[$employmentId], $ledger[$employmentId], self::calendar($periodStart, $ledger), $this->terms($supplierId, $employmentId, $periodStart), null);
@@ -237,7 +247,7 @@ final class PayrollHourlyEntitlementContextLoader
         $usedDay = $usedEntitlement = [];
         $entitlements = array_column($ledger['entitlements'], null, 'id');
         $absences = array_column($data['absences'], null, 'id');
-        foreach ($result as $key => $_) foreach ($payload[$key] as $row) {
+        foreach ($result as $key => $_) foreach ($payload[$key] ?? [] as $row) {
             $date = $row['date'] ?? $row['granted_on'];
             $absenceId = $row['absence_id'] ?? null;
             if ($absenceId !== null) {
@@ -398,7 +408,7 @@ final class PayrollHourlyEntitlementContextLoader
     private function proofData(int $supplierId, array $ids, string $periodStart, bool $lock = false): array
     {
         $in = implode(',', array_fill(0, count($ids), '?'));
-        $result = array_fill_keys($ids, ['shifts' => [], 'absences' => []]);
+        $result = array_fill_keys($ids, ['shifts' => [], 'absences' => [], 'calendars' => []]);
         $from = (new \DateTimeImmutable($periodStart))->modify('-2 days')->format('Y-m-d H:i:s');
         $until = (new \DateTimeImmutable($periodStart))->modify('first day of next month')->modify('+2 days')->format('Y-m-d H:i:s');
         $stmt = $this->db->pdo()->prepare("SELECT * FROM payroll_shifts FORCE INDEX (idx_payroll_shift_month) WHERE supplier_id = ? AND employment_id IN ($in) AND starts_at_utc >= ? AND starts_at_utc < ? AND status <> 'superseded' ORDER BY employment_id, starts_at_utc, id" . ($lock ? ' FOR UPDATE' : ''));
@@ -407,7 +417,60 @@ final class PayrollHourlyEntitlementContextLoader
         $stmt = $this->db->pdo()->prepare("SELECT * FROM payroll_absences FORCE INDEX (idx_payroll_absence_period) WHERE supplier_id = ? AND employment_id IN ($in) AND date_from <= ? AND date_to >= ? AND status = 'approved' ORDER BY employment_id, date_from, id" . ($lock ? ' FOR UPDATE' : ''));
         $stmt->execute([$supplierId, ...$ids, self::end($periodStart), $periodStart]);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) $result[(int) $row['employment_id']]['absences'][] = $row;
+        $stmt = $this->db->pdo()->prepare("SELECT calendar.id, calendar.employment_id, calendar.schedule_type, calendar.week_pattern, calendar.valid_from, calendar.valid_to, calendar.row_version,
+                (SELECT JSON_ARRAYAGG(JSON_OBJECT('day_date', day_row.day_date, 'day_kind', day_row.day_kind, 'planned_minutes', day_row.planned_minutes))
+                   FROM payroll_calendar_days day_row WHERE day_row.supplier_id = calendar.supplier_id AND day_row.calendar_id = calendar.id
+                    AND day_row.day_date >= ? AND day_row.day_date <= ?) AS days_json
+            FROM payroll_work_calendars calendar FORCE INDEX (idx_payroll_calendar_effective)
+            WHERE calendar.supplier_id = ? AND calendar.employment_id IN ($in) AND calendar.valid_from <= ? AND (calendar.valid_to IS NULL OR calendar.valid_to >= ?)
+            ORDER BY calendar.employment_id, calendar.valid_from, calendar.id" . ($lock ? ' FOR UPDATE' : ''));
+        $stmt->execute([$periodStart, self::end($periodStart), $supplierId, ...$ids, self::end($periodStart), $periodStart]);
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $days = $row['days_json'] === null ? [] : json_decode((string) $row['days_json'], true, flags: JSON_THROW_ON_ERROR);
+            unset($row['days_json']);
+            usort($days, static fn(array $a, array $b): int => $a['day_date'] <=> $b['day_date']);
+            $result[(int) $row['employment_id']]['calendars'][] = [...$row, 'days' => $days];
+        }
         return $result;
+    }
+
+    /**
+     * Svátek připadá mimo obvyklý pracovní den jen tehdy, když ho jednoznačně
+     * pokrývá pravidelný týdenní rozvrh s nulovou dobou a bez výjimky dne.
+     *
+     * @param list<array<string,mixed>> $calendars @param list<string> $dates
+     */
+    private static function idleInWeekPattern(array $calendars, array $dates): bool
+    {
+        foreach ($dates as $date) {
+            $matching = array_values(array_filter($calendars, static fn(array $row): bool => $row['valid_from'] <= $date && ($row['valid_to'] === null || $row['valid_to'] >= $date)));
+            if (count($matching) !== 1 || $matching[0]['schedule_type'] !== 'regular') return false;
+            $pattern = json_decode((string) $matching[0]['week_pattern'], true);
+            $weekday = (new \DateTimeImmutable($date))->format('N');
+            $planned = is_array($pattern) ? ($pattern[$weekday] ?? $pattern[(int) $weekday] ?? null) : null;
+            if (!is_int($planned) || $planned > 0) return false;
+            foreach ($matching[0]['days'] as $day) if ($day['day_date'] === $date && ($day['day_kind'] === 'workday' || (int) $day['planned_minutes'] > 0)) return false;
+        }
+        return true;
+    }
+
+    /**
+     * Úsek bez odpracované doby příplatek objektivně nevytvoří; jeho chybějící
+     * vrstvy server doplní nulou místo požadavku na výslovné nuly.
+     *
+     * @param list<array<string,mixed>> $premiums @param list<array<string,mixed>> $segments
+     * @return list<array<string,mixed>>
+     */
+    private static function zeroIdleSegments(array $premiums, array $segments): array
+    {
+        foreach ($premiums as &$row) {
+            $idle = array_filter($segments, static fn(array $segment): bool => $segment['date_from'] === $row['date_from'] && $segment['date_to'] === $row['date_to'] && ($segment['worked_duration_units'] ?? null) === 0);
+            if ($idle === []) continue;
+            foreach (['night_duration_units', 'weekend_duration_units', 'holiday_work_duration_units'] as $key) $row[$key] ??= 0;
+            $row['difficult_exposures'] ??= [];
+        }
+        unset($row);
+        return $premiums;
     }
 
     private function averages(int $supplierId, array $ids, string $periodStart, bool $lock): array

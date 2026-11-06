@@ -102,7 +102,7 @@ describe('PayrollHourlyEvidencePanel', () => {
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(m.save).toHaveBeenCalledOnce()
     expect(m.save.mock.calls[0][1]).not.toHaveProperty('reason')
-    expect(m.save.mock.calls[0][1]).toMatchObject({ row_version: 0, nonworked_holidays: [], holiday_time_off_grants: [], overtime_time_off_allocations: [] })
+    expect(m.save.mock.calls[0][1]).toMatchObject({ row_version: 0, nonworked_holidays: null, holiday_time_off_grants: null, overtime_time_off_allocations: null })
   })
   it('keeps explicit assessment where an entitlement can arise and requires reason when overwriting', async () => {
     m.get.mockResolvedValue({ ...response(), automatic_assessment: { holiday_time_off_grants: 'no_holiday_time_off_entitlement', overtime_time_off_allocations: 'no_overtime_time_off_entitlement' } })
@@ -113,6 +113,9 @@ describe('PayrollHourlyEvidencePanel', () => {
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(m.save).not.toHaveBeenCalled()
     expect(wrapper.get('[data-test="hourly-evidence-error"]').text()).toContain('reason_required')
+    await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Doplnění podkladu')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save.mock.calls[0][1]).toMatchObject({ nonworked_holidays: [], holiday_time_off_grants: null, overtime_time_off_allocations: null })
   })
   it('shows evidence options with application dates and without internal identifiers', async () => {
     m.get.mockResolvedValue({ ...response(), options: { nonworked_holidays: [], overtime_time_off_entitlements: [],

@@ -279,13 +279,20 @@ zůstává stav neznámý.
 Kde nárok v měsíci objektivně vzniknout nemůže, posoudí nulu aplikace
 sama a panel u skupiny zobrazí **Posouzeno automaticky** s důvodem:
 v měsíci není svátek s hodinovou mzdou nebo žádný svátek nepadá na
-rozvrženou směnu, případně vztah nemá nevyčerpaný nárok ani schválenou
-nepřítomnost náhradního volna. Dohodám o provedení práce a o pracovní
+rozvrženou směnu ani na pracovní den pravidelného týdenního rozvrhu
+v pracovním kalendáři vztahu, případně vztah nemá nevyčerpaný nárok ani
+schválenou nepřítomnost náhradního volna. Bez rozpisu směn, bez
+pravidelného týdenního rozvrhu nebo při vadném záznamu směny posuďte
+neodpracovaný svátek výslovně. Dohodám o provedení práce a o pracovní
 činnosti náhrada mzdy za neodpracovaný svátek nepřísluší, takže ji
 aplikace nenabízí ani nepožaduje. Běžný měsíc s denní docházkou bez
 svátku a bez starších nároků proto nepotřebuje žádné ruční potvrzení.
-Ruční souhrn hodin dál vyžaduje doložení příplatkových vrstev. Posouzení
-se zapíše do podkladu výpočtu včetně použitého pravidla.
+Ruční souhrn hodin dál vyžaduje doložení příplatkových vrstev; u úseku
+s nulovou odpracovanou dobou je aplikace doplní nulou sama. Automatické
+posouzení se neukládá jako pevná nula: vyhodnotí se znovu při každém
+výpočtu, takže pozdější nárok (například dodatečně schválené náhradní
+volno) vyžádá výslovné posouzení. Posouzení se zapíše do podkladu výpočtu
+včetně použitého pravidla.
 
 Historický hodinový nárok lze doložit a vypořádat i v pozdějším měsíci,
 kdy už vztah přešel na měsíční mzdu. Panel pak nese nadpis **Náhled
