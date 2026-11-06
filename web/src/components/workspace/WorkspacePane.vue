@@ -4,7 +4,7 @@ import type { Router } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
 import { useWorkspaceStore, type PaneId } from '@/stores/workspace'
-import { paneForCtrlClick, internalRouteFromAnchor, internalRouteFromElement } from '@/workspace/panelLinks'
+import { paneForCtrlClick, internalRouteFromAnchor, internalRouteFromElement, prepareExternalAnchorNavigation } from '@/workspace/panelLinks'
 import { getPaneRuntime, registerPaneRuntime } from '@/workspace/runtimeRegistry'
 import { getWindowManager } from '@/workspace/windowRegistry'
 
@@ -38,6 +38,7 @@ async function navigate(to: Parameters<Router['push']>[0]): Promise<void> {
 }
 
 function openLink(event: MouseEvent): void {
+  if (prepareExternalAnchorNavigation(event)) return
   if (event.button !== 0 || event.metaKey || event.shiftKey || event.altKey) return
   if (!(event.target instanceof Element)) return
   const target = internalRouteFromElement(event.target)

@@ -314,6 +314,8 @@ Najednou může být otevřeno nejvýše 20 oken. Při otevření dvacátého pr
 
 Každé okno si pamatuje vlastní firmu. Výběr okna jiné firmy automaticky přepne aktivní firmu; rozpracovaná okna předchozí firmy zůstanou v přepínači. Zobrazované panely patří vždy aktivní firmě. Ruční přepnutí firmy obnoví její poslední otevřené okno, případně Homepage, pokud ještě žádné nemá. Prakticky lze například ponechat seznam přijatých faktur v prvním panelu, otevřít detail dokladu ve druhém a účetní deník ve třetím. **Ctrl+klik** na interní odkaz uvnitř panelu jej otevře v prvním prázdném panelu napravo a tento panel aktivuje. Po zaplnění všech panelů napravo se další odkaz otevře v bezprostředním panelu **+1**. Ctrl+klik v posledním panelu, Cmd+klik a prostřední tlačítko myši zachovávají běžné otevření nové záložky prohlížeče.
 
+Externí webové odkazy bez výslovně nastaveného cíle se běžným kliknutím otevírají v nové kartě prohlížeče. Objednávka doplňku, web podpory nebo externí dokumentace tak zůstávají mimo pracovní panel a rozpracovaná stránka MyÚčta se zachová.
+
 **Shift+klik** na interní odkaz nebo navigovatelný řádek otevře cíl v bezprostředním
 panelu napravo a aktivuje jej. Funguje také na odkazy v hlavním menu; jejich cílový
 panel se určuje podle právě aktivního panelu. Pokud pravý panel ještě nemáte,

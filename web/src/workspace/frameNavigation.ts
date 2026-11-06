@@ -1,6 +1,6 @@
 import { nextTick } from 'vue'
 import type { Router, RouteLocationRaw } from 'vue-router'
-import { internalRouteFromElement } from './panelLinks'
+import { internalRouteFromElement, prepareExternalAnchorNavigation } from './panelLinks'
 
 export function installFrameNavigation(router: Router, traverse: (direction: -1 | 1) => void, resetScroll: () => void): void {
   const history = router.options.history
@@ -34,6 +34,7 @@ export function internalAnchorNavigation(
   canOpenRight: boolean,
   canOpenRightWithSplit = false,
 ): { to: RouteLocationRaw; newPane?: boolean; placement?: 'beside' | 'right' } | null {
+  if (prepareExternalAnchorNavigation(event)) return null
   if (event.defaultPrevented || event.button !== 0 || event.altKey || event.metaKey) return null
   if (event.shiftKey && (event.ctrlKey || !canOpenRightWithSplit)) return null
   const newPane = event.ctrlKey
