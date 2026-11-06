@@ -118,7 +118,7 @@ vi.mock('@/pages/payroll/EmploymentTerminationPanel.vue', () => ({
   default: { name: 'EmploymentTerminationPanel', props: ['employmentId', 'canWrite'], emits: ['loaded'], template: '<div />' },
 }))
 
-const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn() }))
+const toastMocks = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), info: vi.fn(), warning: vi.fn() }))
 
 vi.mock('@/composables/useToast', () => ({
   useToast: () => toastMocks,
@@ -602,7 +602,7 @@ describe('EmploymentCard', () => {
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
     await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetická smlouva')
-    await wrapper.get('[data-test="terms-remuneration-basis-kind"]').findAll('option')[0]!.setSelected()
+    await wrapper.get('[data-test="terms-remuneration-basis-kind"]').setValue('')
     await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     const kind = wrapper.get('[data-test="terms-remuneration-basis-kind"]')
     expect(kind.classes()).toContain('border-danger-500')
@@ -686,7 +686,7 @@ describe('EmploymentCard', () => {
   })
 
   it('varování z uložení ukáže žlutě u pole i souhrnně a hlásí, že uložení proběhlo', async () => {
-    toastMocks.warning = vi.fn()
+    toastMocks.warning.mockClear()
     toastMocks.success.mockClear()
     vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({
       employment: employment(),
@@ -752,7 +752,7 @@ describe('EmploymentCard', () => {
     expect(wrapper.get('[data-test="terms-save-error"]').text()).toContain('payroll.people.remuneration.basis_required')
     expect(payrollApi.correctEmploymentTerms).not.toHaveBeenCalled()
     await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetický mzdový výměr')
-    await wrapper.get('[data-test="terms-remuneration-basis-kind"]').findAll('option')[0]!.setSelected()
+    await wrapper.get('[data-test="terms-remuneration-basis-kind"]').setValue('')
     await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
     expect(wrapper.get('[data-test="terms-save-error"]').text()).toContain('payroll.people.remuneration.basis_kind_required')
     await wrapper.get('[data-test="terms-remuneration-basis-kind"]').setValue('wage_statement')
