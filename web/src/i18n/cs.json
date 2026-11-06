@@ -16227,6 +16227,8 @@
       "lots_search": "Hledat v kódech šarží",
       "lots_none_found": "Žádná šarže neodpovídá hledání.",
       "lots_more": "Načíst další šarže (zobrazeno {shown} z {total})",
+      "lots_load_error": "Šarže karty se nepodařilo načíst: {message}",
+      "lots_retry": "Zkusit znovu",
       "lot_code_required": "Kód šarže je povinný.",
       "expires_on": "Datum spotřeby",
       "empty": "Karta zatím nemá žádnou sledovanou zásobu.",

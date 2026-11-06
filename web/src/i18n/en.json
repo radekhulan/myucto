@@ -16227,6 +16227,8 @@
       "lots_search": "Search lot codes",
       "lots_none_found": "No lot matches the search.",
       "lots_more": "Load more lots (showing {shown} of {total})",
+      "lots_load_error": "The lots of the item could not be loaded: {message}",
+      "lots_retry": "Try again",
       "lot_code_required": "The lot code is required.",
       "expires_on": "Expiry date",
       "empty": "This item has no tracked stock yet.",

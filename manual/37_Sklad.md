@@ -1138,13 +1138,24 @@ Překlep v kódu šarže nebo v datu spotřeby opravíte na úpravě skladové k
 (`Sklad → Skladové karty`, tlačítko **Upravit**, právo **Spravovat skladové karty**).
 V rámečku **Šarže karty** pod polem **Sledování zásoby** přepíšete kód nebo datum
 spotřeby přímo v poli, jako ostatní údaje karty, a uložíte běžným **Uložit**.
-Rámeček ukazuje i šarže s nulovým stavem. Karta se uloží první a pak změněné šarže.
-Šarže, kterou systém odmítne, zůstane v poli označená hláškou a po opravě ji uložíte
-znovu. Stejnou opravu umí REST API
-(`PUT /api/v1/stock/items/{id}/tracking-units/{unitId}`). Opravit jde jen šarži,
+Rámeček ukazuje i šarže s nulovým stavem. Šarže se načítají po padesáti: má-li karta
+víc než deset šarží, objeví se nad seznamem hledání v kódu a pod ním tlačítko
+**Načíst další šarže**. Rozepsané změny zůstanou i po novém hledání a uloží se
+společně. Nepodaří-li se šarže načíst, rámeček ukáže chybu a tlačítko
+**Zkusit znovu**. Karta se uloží první a pak změněné šarže.
+Šarže, kterou systém odmítne, zůstane v poli označená hláškou (u kódu i u data)
+a po opravě ji uložíte znovu. Stejnou opravu umí REST API
+(`PUT /api/v1/stock/items/{id}/tracking-units/{unitId}`, seznam šarží po stránkách
+vrací `GET /api/v1/stock/items/{id}/tracking-units`). Opravit jde jen šarži,
 ne sériové číslo, a šarže se nesloučí: šarže, která by měla stejný kód a datum
 spotřeby jako jiná šarže téže karty, se odmítne (porovnání nerozlišuje velikost
 písmen ani diakritiku).
+
+Kódy dvou šarží nejde prohodit jedním uložením (A na B a B na A): první uložená by
+dostala kód, který ještě drží druhá, a systém ji odmítne jako duplicitu (409).
+Prohoďte je přes pomocný kód: A přejmenujte na dočasný kód, B na A a dočasný kód
+na B. Kdyby se oprava potkala s vystavením faktury nebo zaúčtováním dokladu téže
+karty, systém ji odmítne hláškou **Zkuste to prosím znovu** a nic se nezmění.
 
 Pohyby šarže zůstávají a nový kód a datum se propíšou do rozpracovaných dokladů
 této karty:
@@ -1155,8 +1166,8 @@ této karty:
 - rozpracované expedice.
 
 Dobropis k vystavené faktuře a obnovení stornované faktury vezmou opravenou
-šarži samy: vrací nebo znovu vydávají kusy, které výdejka faktury skutečně
-vydala. Oprava se zapisuje do historie změn.
+šarži samy: vrací nebo znovu vydávají kusy, které výdejky faktury skutečně
+vydaly (i když byla faktura vydaná po částech, každou zásilkou zvlášť). Oprava se zapisuje do historie změn.
 
 Beze změny zůstávají vystavené a stornované faktury, vystavené zálohové faktury,
 expedované zásilky a jejich vratky. U vystavené faktury a zálohové faktury zůstává
