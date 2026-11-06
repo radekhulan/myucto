@@ -10,6 +10,7 @@ import { formatDate, formatMoney } from '@/composables/useFormat'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import OtherItemKindsModal from '@/components/accounting/OtherItemKindsModal.vue'
+import OtherItemDocumentSettingsModal from '@/components/accounting/OtherItemDocumentSettingsModal.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 import SortableTh from '@/components/ui/SortableTh.vue'
 import type { SortPref } from '@/api/preferences'
@@ -29,6 +30,7 @@ const sort = ref<SortPref | null>(null)
 useFillViewportHeight(listBox)
 const removingId = ref<number | null>(null)
 const showKinds = ref(route.query.kinds === '1')
+const showDocumentSettings = ref(false)
 const items = ref<OtherItem[]>([])
 const sources = ref<OtherItem[]>([])
 const total = ref(0)
@@ -90,6 +92,8 @@ const actions = computed<ActionItem[]>(() => [
   { key: 'new', label: t('other_items.new'), icon: 'plus', tier: 'primary', variant: 'primary',
     show: auth.canWrite('other_items'), to: { name: 'other-item-new', query: side.value ? { side: side.value } : {} } },
   { key: 'kinds', label: t('other_items.kinds.title'), icon: 'tag', variant: 'neutral', run: () => { showKinds.value = true } },
+  { key: 'documents', label: t('other_items.documents_settings.title'), icon: 'folderOpen', variant: 'neutral',
+    show: auth.canRead('documents'), run: () => { showDocumentSettings.value = true } },
 ])
 
 function internalSourceUrl(item: OtherItem): string | null {
@@ -374,5 +378,6 @@ onMounted(() => { void load(); void loadKinds() })
       </section>
     </template>
     <OtherItemKindsModal v-if="showKinds" @close="showKinds = false" @changed="onKindsChanged" />
+    <OtherItemDocumentSettingsModal v-if="showDocumentSettings" @close="showDocumentSettings = false" />
   </div>
 </template>

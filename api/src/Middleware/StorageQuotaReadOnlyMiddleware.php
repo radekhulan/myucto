@@ -80,6 +80,7 @@ final class StorageQuotaReadOnlyMiddleware implements MiddlewareInterface
         '/api/auth/domain-login/exchange',
         '/api/auth/mfa/step-up/totp',
         '/api/auth/mfa/step-up/recovery',
+        '/api/auth/oidc/apple/callback',
     ];
 
     /**

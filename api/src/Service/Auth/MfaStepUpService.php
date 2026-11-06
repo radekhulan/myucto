@@ -37,13 +37,25 @@ final class MfaStepUpService
      */
     public const OPERATION_BACKUP_PASSWORD = 'backup.password';
 
+    /**
+     * Propojení nebo odpojení identity u poskytovatele. Přidává (nebo bere)
+     * účtu cestu dovnitř, proto stejné ověření jako registrace passkey.
+     */
+    public const OPERATION_OIDC_LINK = 'oidc.link';
+
     public static function domainActivationOperation(int $domainId): string
     {
         if ($domainId < 1) throw new \InvalidArgumentException('Neplatné ID domény.');
         return 'domain.activate:' . $domainId;
     }
 
-    private const METHODS = ['passkey', 'totp', 'recovery'];
+    /**
+     * `oidc` = čerstvé přihlášení u poskytovatele identity s `prompt=login`
+     * (OidcLoginService). U poskytovatele, kterému instalace svěřuje celé
+     * přihlášení včetně MFA, je to rovnocenné passkey. Neprochází
+     * `allowed_mfa_methods`, ten seznam se týká místních faktorů.
+     */
+    private const METHODS = ['passkey', 'totp', 'recovery', 'oidc'];
 
     /**
      * Co smí autorizovat ZÁLOŽNÍ KÓD. Úmyslně užší množina než u skutečných faktorů:
@@ -83,6 +95,7 @@ final class MfaStepUpService
             && $operation !== self::OPERATION_EPO_CERTIFICATE
             && $operation !== self::OPERATION_RECOVERY_CODES
             && $operation !== self::OPERATION_BACKUP_PASSWORD
+            && $operation !== self::OPERATION_OIDC_LINK
             && !$isPasskeyRevoke
             && !$isDomainActivation
         ) {
@@ -116,6 +129,14 @@ final class MfaStepUpService
         // (`allowed_mfa_methods = ['passkey']` + ztracený klíč). Rozsah operací mu
         // omezuje RECOVERY_OPERATIONS výš.
         if ($authMethod === 'recovery') {
+            return $operation;
+        }
+        if ($authMethod === 'oidc') {
+            if (($operation === self::OPERATION_PASSKEY_REGISTER && !$this->policy->isMethodAllowed('passkey'))
+                || ($operation === self::OPERATION_TOTP_ENABLE && !$this->policy->isMethodAllowed('totp'))
+            ) {
+                throw new StepUpOperationException('Tato metoda není pro operaci povolená.');
+            }
             return $operation;
         }
 

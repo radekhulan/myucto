@@ -21,6 +21,11 @@ final class RoutePermissionMap
         '/api/auth/webauthn/login/options', '/api/auth/webauthn/login/verify',
         '/api/auth/forgot', '/api/auth/reset', '/api/auth/domain-context',
         '/api/auth/domain-login/start', '/api/auth/domain-login/exchange', '/api/csrf-token',
+        // Přihlášení u poskytovatele identity: navigace prohlížeče bez session.
+        '/api/auth/oidc/entra/login', '/api/auth/oidc/entra/callback',
+        '/api/auth/oidc/google/login', '/api/auth/oidc/google/callback',
+        '/api/auth/oidc/apple/login', '/api/auth/oidc/apple/callback',
+        '/api/auth/oidc/seznam/login', '/api/auth/oidc/seznam/callback',
         // ⚠️ „Public" jen ve smyslu BEZ SESSION. Doručení licence do spravované
         // instalace volá licenční server, který se sem přihlásit nemá čím;
         // autentizace je Ed25519 podpis obálky ověřený zabudovaným veřejným
@@ -55,6 +60,9 @@ final class RoutePermissionMap
         '/api/auth/domain-login/authorize',
         '/api/mcp/settings', '/api/mcp/grants',
         '/api/auth/session/unlock/options', '/api/auth/session/unlock/verify',
+        // Vlastní propojení s poskytovatelem identity a ověření přes něj.
+        '/api/auth/oidc/identities', '/api/auth/oidc/entra/link', '/api/auth/oidc/entra/step-up',
+        '/api/auth/oidc/google/link', '/api/auth/oidc/apple/link', '/api/auth/oidc/seznam/link',
     ];
 
     /**
@@ -107,6 +115,9 @@ final class RoutePermissionMap
         ['GET', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::READ],
         ['*', '#^/api/invoices/[0-9]+/stock-documents(/|$)#', 'stock', AccessLevel::WRITE],
         ['*', '#^/api/invoices/[0-9]+/book$#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Faktura krytá ostatní pohledávkou: výběr čte ostatní položky, vazba mění zaúčtování.
+        ['GET', '#^/api/invoices/[0-9]+/other-item-candidates$#', 'other_items', AccessLevel::READ],
+        ['*', '#^/api/invoices/[0-9]+/other-item-link$#', 'accounting.journal.post', AccessLevel::WRITE],
         ['POST', '#^/api/invoices/[0-9]+/issue(-final)?$#', 'invoices.issue', AccessLevel::WRITE],
         // Import už vystaveného dokladu zakládá rovnou vystavenou fakturu: vystavení
         // hlídá mapa, založení (`invoices.create`) dohlíží akce.
@@ -1130,7 +1141,9 @@ final class RoutePermissionMap
         // Správa vlastních přístupových klíčů (přejmenování, smazání, zkušební ověření)
         // je self-service — vazba na přihlášeného uživatele se kontroluje až v akci
         // podle ID klíče.
-        if (preg_match('#^/api/auth/webauthn/credentials/[0-9]+(/test/(options|verify))?$#', $path) === 1) {
+        if (preg_match('#^/api/auth/webauthn/credentials/[0-9]+(/test/(options|verify))?$#', $path) === 1
+            || preg_match('#^/api/auth/oidc/identities/[0-9]+$#D', $path) === 1
+        ) {
             return new RoutePermission(self::SELF_SERVICE);
         }
         if ($path === '/api/auth/setup-sample') {

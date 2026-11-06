@@ -63,6 +63,10 @@ final class UnmarkPaidAction
         if ($invoice['status'] !== 'paid') {
             return Json::error($response, 'invalid_state', 'Lze vrátit zpět jen zaplacenou fakturu.', 409);
         }
+        if (!empty($invoice['other_item_id'])) {
+            return Json::error($response, 'other_item_linked',
+                'Faktura je uhrazená úhradami navázané ostatní pohledávky. Úhradu odpojte v detailu pohledávky, nebo fakturu od pohledávky odpojte.', 409);
+        }
 
         // Zámek dokladu (Epic F6): unmark-paid mění účetní fakt — v zavřeném období
         // jen admin s ?force=1 (klient sem přes admin-only check výše nedojde).

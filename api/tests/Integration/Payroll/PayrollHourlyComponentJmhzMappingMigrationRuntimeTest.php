@@ -59,8 +59,8 @@ final class PayrollHourlyComponentJmhzMappingMigrationRuntimeTest extends TestCa
     ];
 
     private const BACKFILLS = [
-        '2252_payroll_holiday_time_off.sql',
-        '2254_payroll_component_minimum_wage.sql',
+        '2256_payroll_holiday_time_off.sql',
+        '2258_payroll_component_minimum_wage.sql',
     ];
 
     public function testBackfillAddsOnlyMissingMappingsAndKeepsAccountantChoices(): void

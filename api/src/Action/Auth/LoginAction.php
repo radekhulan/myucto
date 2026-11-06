@@ -13,6 +13,7 @@ use MyInvoice\Service\Auth\BruteForceGuard;
 use MyInvoice\Service\Auth\EmailOtpService;
 use MyInvoice\Service\Auth\LoginSessionIssuer;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\Oidc\OidcFlowStore;
 use MyInvoice\Service\Auth\PasskeyService;
 use MyInvoice\Service\Auth\PasswordHasher;
 use MyInvoice\Service\Auth\SecretEncryption;
@@ -48,6 +49,8 @@ final class LoginAction
         private readonly LoginSessionIssuer $loginIssuer,
         private readonly ClockInterface $clock,
         private readonly \MyInvoice\Service\Auth\MfaRecoveryCodeService $recoveryCodes,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
+        private readonly OidcFlowStore $oidcFlows,
     ) {}
 
     public function passkeyOptions(Request $request, Response $response): Response
@@ -125,7 +128,26 @@ final class LoginAction
         $ip        = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
         $userAgent = $request->getHeaderLine('User-Agent');
 
-        if ($email === '' || $password === '') {
+        // Lístek z přihlášení u poskytovatele, který nahrazuje jen heslo (Google,
+        // Apple, Seznam). Platí místo e-mailu a hesla; zbytek přihlášení (druhý
+        // faktor, vynucené MFA, politika firmy) běží stejně jako po hesle.
+        $ssoTicketRaw = isset($body['sso_ticket']) ? trim((string) $body['sso_ticket']) : '';
+        $ssoTicket = null;
+        if ($ssoTicketRaw !== '') {
+            $binding = $request->getCookieParams()[OidcFlowStore::bindingCookieName(
+                (string) $this->config->get('session.cookie_name', '__Host-myinvoice_session'),
+            )] ?? null;
+            $ssoTicket = $this->oidcFlows->peekTicket($ssoTicketRaw, is_string($binding) ? $binding : null);
+            if ($ssoTicket === null) {
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
+            $emailStmt = $this->db->pdo()->prepare('SELECT email FROM users WHERE id = ? LIMIT 1');
+            $emailStmt->execute([$ssoTicket['user_id']]);
+            $email = (string) ($emailStmt->fetchColumn() ?: '');
+            $password = '';
+        }
+
+        if ($email === '' || ($password === '' && $ssoTicket === null)) {
             return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
         }
 
@@ -148,7 +170,8 @@ final class LoginAction
 
         // Turnstile vždy aktivní — Cloudflare sám rozhoduje (auto-pass nebo interactive challenge).
         // No-op pokud captcha.provider != 'turnstile' nebo chybí secret_key (TurnstileVerifier).
-        if (!$this->turnstile->verify($turnstileToken ?? '', $ip, 'login')) {
+        // Lidskost už ověřil poskytovatel identity; lístek se navíc nedá hádat.
+        if ($ssoTicket === null && !$this->turnstile->verify($turnstileToken ?? '', $ip, 'login')) {
             $this->logger->log('auth.captcha_failed', null, null, null, [
                 'email' => $email, 'ip' => $ip,
             ], $ip, $userAgent);
@@ -178,12 +201,34 @@ final class LoginAction
             return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
         }
 
-        if (!$this->hasher->verify($password, (string) $user['password_hash'])) {
+        if ($ssoTicket !== null && (int) $user['id'] !== $ssoTicket['user_id']) {
+            return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+        }
+        if ($ssoTicket === null && !$this->hasher->verify($password, (string) $user['password_hash'])) {
             $this->bf->recordFailure($email, $ip);
             $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
                 'email' => $email, 'reason' => 'wrong_password',
             ], $ip, $userAgent);
             return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
+        }
+
+        // Až po ověření hesla, aby odpověď neprozradila, kdo má vynucené přihlášení
+        // u poskytovatele. Platí i pro záložní kód níž.
+        $requiredProvider = $this->loginPolicy->requiredProviderForUser(
+            (int) $user['id'],
+            isset($user['system_key']) ? (string) $user['system_key'] : null,
+        );
+        if ($requiredProvider !== null) {
+            $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
+                'email' => $email, 'reason' => 'sso_required', 'provider' => $requiredProvider,
+            ], $ip, $userAgent);
+            return Json::error(
+                $response,
+                'sso_required',
+                'Váš účet se přihlašuje přes poskytovatele identity organizace.',
+                403,
+                ['provider' => $requiredProvider],
+            );
         }
 
         $totpActive = (int) $user['totp_enabled'] === 1 && !empty($user['totp_secret']);
@@ -218,6 +263,9 @@ final class LoginAction
             // ve faktorech udělal, a `basic` session by ho při povinném MFA uvěznila
             // v enrollmentu, kde ztracený klíč odebrat nejde. Jednorázovost kódu,
             // zámek pokusů a auditní stopa jsou to, co tuhle výjimku drží v mezích.
+            if ($ssoTicket !== null && !$this->oidcFlows->consumeTicket($ssoTicketRaw)) {
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
             return $this->loginIssuer->issue(
                 $response,
                 $user,
@@ -280,7 +328,13 @@ final class LoginAction
         // instalace (jinak by se uživatelům bez TOTP náhle vyžadoval e-mailový kód).
         $emailOtpOn     = (bool) $this->config->get('auth.email_otp.enabled', false);
         $issueTrustedTd = false;  // vystavit trusted-device cookie po úspěšném loginu?
-        $authContext = SessionAuthContext::basic('password');
+        $authContext = $ssoTicket !== null
+            ? new SessionAuthContext(
+                SessionAuthContext::EXTERNAL_PREFIX . $ssoTicket['provider'],
+                'basic',
+                externalIdentityId: $ssoTicket['external_identity_id'],
+            )
+            : SessionAuthContext::basic('password');
 
         // Uživatele s passkey nesmí prosté heslo pustit dovnitř jen proto, že se
         // WebAuthn stal nedostupným (rozbité app.url) nebo že správce metodu
@@ -383,6 +437,21 @@ final class LoginAction
         }
 
         $this->rehashPasswordIfNeeded($user, $password);
+        if ($ssoTicket !== null) {
+            // Sezení si nese identitu, ze které přihlášení vzniklo, i když ho
+            // dokončil TOTP nebo e-mailový kód: odpojení identity ho pak zruší.
+            $authContext = new SessionAuthContext(
+                $authContext->authMethod,
+                $authContext->assuranceLevel,
+                $authContext->mfaVerifiedAt,
+                $authContext->authCredentialId,
+                $ssoTicket['external_identity_id'],
+            );
+            if (!$this->oidcFlows->consumeTicket($ssoTicketRaw)) {
+                return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
+            }
+            $this->revokePresentedSession($request, (int) $user['id']);
+        }
         return $this->loginIssuer->issue(
             $response,
             $user,
@@ -390,6 +459,8 @@ final class LoginAction
             $userAgent,
             $authContext,
             $issueTrustedTd,
+            // Lístek je rovnocenný ověřenému heslu: bez enrollment tokenu by uživatel
+            // jen s Googlem při povinném MFA nezřídil první faktor a zůstal v setupu.
             (string) $user['password_hash'],
         );
     }
@@ -412,10 +483,37 @@ final class LoginAction
     }
 
     /**
+     * Přihlášení přes poskytovatele nahrazuje sezení, se kterým prohlížeč přišel
+     * (typicky zamčené, odemknuté přes Google či Apple). Stejně jako návrat od
+     * Entra ID (OidcAction::callback) se zruší celá jeho lineage, jen pro téhož
+     * uživatele; cizí sezení zůstane na pokoji.
+     */
+    private function revokePresentedSession(Request $request, int $userId): void
+    {
+        $token = $request->getCookieParams()[(string) $this->config->get('session.cookie_name', '__Host-myinvoice_session')] ?? null;
+        if (!is_string($token) || preg_match('/^[a-f0-9]{64}$/D', $token) !== 1) {
+            return;
+        }
+        $family = $this->db->pdo()->prepare('SELECT session_family_id FROM sessions WHERE id = ? AND user_id = ? LIMIT 1');
+        $family->execute([$token, $userId]);
+        $familyId = $family->fetchColumn();
+        if (!is_string($familyId) || $familyId === '') {
+            return;
+        }
+        $this->db->pdo()->prepare(
+            'UPDATE sessions SET revoked_at = COALESCE(revoked_at, UTC_TIMESTAMP(6))
+              WHERE session_family_id = ? AND user_id = ?'
+        )->execute([$familyId, $userId]);
+    }
+
+    /**
      * @param array<string,mixed> $user
      */
     private function rehashPasswordIfNeeded(array &$user, string $password): void
     {
+        if ($password === '') {
+            return;
+        }
         if (!$this->hasher->needsRehash((string) $user['password_hash'])) {
             return;
         }

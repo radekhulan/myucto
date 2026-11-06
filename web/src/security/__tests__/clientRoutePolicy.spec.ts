@@ -538,6 +538,7 @@ describe('sdílená klientská plocha vlastní domény', () => {
       '/profile/password?tab=passkeys',
       '/profile/password?tab=session-lock',
       '/profile/password?tab=shortcuts',
+      '/profile/password?tab=sso',
       '/profile/password?tab=totp',
     ])
     for (const path of profileMenuPaths) {

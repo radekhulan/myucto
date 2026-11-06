@@ -138,7 +138,7 @@ final class DocumentBackfill
         $cancelled = false;
         $processed = 0;
         $existsStmt = $pdo->prepare(
-            'SELECT ' . DocumentPostingGroup::activePostingExistsSql('?', '?', '?', false)
+            'SELECT ' . DocumentPostingGroup::activePostingExistsSql('?', '?', '?', false, false)
         );
         $ensuredYears = [];
         // Kontrola nanečisto nic nezapisuje, takže na zámek k datu by jinak nenarazila
@@ -352,7 +352,9 @@ final class DocumentBackfill
             throw new \InvalidArgumentException('Neplatný alias.');
         }
         return match ($sourceType) {
+            // Fakturu krytou ostatní pohledávkou (migrace 2246) účtuje zápis pohledávky.
             'invoice' => "{$alias}.status NOT IN ('draft','cancelled')
+                AND {$alias}.other_item_id IS NULL
                 AND {$alias}.invoice_type IN ('" . implode("','", PostingService::POSTABLE_ISSUED_INVOICE_TYPES) . "')
                 AND " . OpeningBalanceDocuments::notInOpeningSql('invoice', $alias),
             'purchase_invoice' => "{$alias}.status IN ('received','booked','paid')

@@ -12,6 +12,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { btnIconSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import type { SidePreviewPlacement } from '@/composables/useSidePreview'
+import PdfFrame from './PdfFrame.vue'
 
 const props = defineProps<{
   /** URL náhledu — musí být inline varianta, jinak prohlížeč embed zablokuje. */
@@ -42,27 +43,10 @@ const PLACEMENTS: Array<{ value: SidePreviewPlacement; label: string; icon: stri
   { value: 'below', label: 'common.preview_place_below', icon: 'M3 5h18v14H3V5zm0 8h18' },
 ]
 
-const isBlob = computed(() => !!props.src?.startsWith('blob:'))
 const kind = computed<'pdf' | 'image' | 'none'>(() => {
   if (!props.src) return 'none'
   const type = props.docType ?? 'pdf'
   return type === 'pdf' || type === 'image' ? type : 'none'
-})
-
-/**
- * `#view=FitH` říká prohlížečové čtečce, ať stránku roztáhne na šířku rámu.
- *
- * Why: bez toho si čtečka drží výchozí zoom, takže se doklad vykreslil zhruba
- * na půl šířky sloupce a zbytek zabrala její šedá plocha — náhled vedle
- * dokladu pak byl menší než ten pod ním, přesně naopak, než k čemu je.
- *
- * Fragment se přidává jen když si ho URL nenese sama; vlastní fragment
- * (třeba `#page=3`) má přednost, protože ho tam někdo dal schválně. Soubor
- * z paměti prohlížeče (`blob:`) fragment nesnese, Chrome ho odmítne.
- */
-const framedSrc = computed(() => {
-  if (!props.src) return null
-  return props.src.includes('#') || isBlob.value ? props.src : `${props.src}#view=FitH`
 })
 </script>
 
@@ -111,25 +95,13 @@ const framedSrc = computed(() => {
         </button>
       </div>
     </div>
-    <!-- Soubor z paměti přes <embed>: Chrome odmítá blob PDF v <iframe> jako „local resource". -->
-    <embed
-      v-if="kind === 'pdf' && isBlob"
-      :key="framedSrc!"
-      :src="framedSrc!"
-      type="application/pdf"
+    <PdfFrame
+      v-if="kind === 'pdf'"
+      :src="src!"
       class="flex-1 min-h-0 w-full border-0 bg-neutral-100"
       :class="{ 'pointer-events-none': resizing }"
       :title="fileName || t('common.preview_side_title')"
     />
-    <!-- `:key`: změna `src` stejného rámu by přidávala záznamy do historie prohlížeče. -->
-    <iframe
-      v-else-if="kind === 'pdf'"
-      :key="framedSrc!"
-      :src="framedSrc!"
-      class="flex-1 min-h-0 w-full border-0 bg-neutral-100"
-      :class="{ 'pointer-events-none': resizing }"
-      :title="fileName || t('common.preview_side_title')"
-    ></iframe>
     <div v-else-if="kind === 'image'" class="flex-1 min-h-0 overflow-auto bg-neutral-100 p-2">
       <img :key="src!" :src="src!" :alt="fileName || t('common.preview_side_title')" class="w-full object-contain" />
     </div>

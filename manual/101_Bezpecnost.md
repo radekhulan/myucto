@@ -120,6 +120,105 @@ klíče i autentikátoru zadáte kód na přihlašovací stránce místo druhéh
 **Jak poznáte, že je hotovo:** Nový uživatel po přihlášení heslem vidí
 `/setup-mfa` a do aplikace se dostane až po registraci klíče nebo zapnutí TOTP.
 
+### 101.6.1 Přihlášení přes Microsoft Entra ID (správce)
+
+Přihlášení přes Entra ID nahrazuje heslo i vícefaktorové ověření v MyÚčto.
+MFA vynucuje váš tenant (Conditional Access), MyÚčto se na druhý faktor už
+neptá. Aplikaci v Entra ID si registruje každá instalace sama.
+
+1. V Microsoft Entra admin center založte registraci aplikace: *single tenant*,
+   platforma **Web**, redirect URI `https://<adresa instalace>/api/auth/oidc/entra/callback`
+   (musí odpovídat `app.url`). Implicitní tokeny nechte vypnuté, oprávnění
+   stačí `openid`, `profile`, `email`. Vytvořte tajný klíč klienta.
+2. V Enterprise application zapněte **Assignment required** a přiřaďte
+   uživatele nebo skupinu, kteří se smí přihlásit.
+3. Nastavte instalaci (tajemství patří do proměnné prostředí, ne do souboru):
+
+   ```php
+   'auth' => [
+       'oidc' => [
+           'enabled' => true,
+           'providers' => [
+               'entra' => [
+                   'enabled'   => true,
+                   'tenant_id' => '<Directory (tenant) ID>',
+                   'client_id' => '<Application (client) ID>',
+               ],
+           ],
+       ],
+   ],
+   ```
+
+   V Dockeru: `MYINVOICE_OIDC_ENABLED=1`, `MYINVOICE_OIDC_ENTRA_ENABLED=1`,
+   `MYINVOICE_OIDC_ENTRA_TENANT_ID`, `MYINVOICE_OIDC_ENTRA_CLIENT_ID`,
+   `MYINVOICE_OIDC_ENTRA_CLIENT_SECRET`.
+4. Účty uživatelů zakládejte dál v **Nastavení → Uživatelé**. U uživatele
+   v části **Propojené identity** zvolte **Pozvat k přihlášení přes Microsoft Entra ID**. Uživatel dostane e-mail
+   s odkazem a prvním přihlášením se jeho účet propojí s identitou v Entra ID.
+5. Až budou všichni propojení, vynuťte přihlášení přes Microsoft Entra ID
+   jedním ze dvou způsobů:
+   - **Pro celou instalaci:** v konfiguraci `'required_provider' => 'entra'`
+     pod `auth.oidc`, v Dockeru `MYINVOICE_OIDC_REQUIRED=entra`. Platí pro všechny
+     firmy včetně nově založených a pro všechny uživatele. Přihlašovací stránka
+     nabídne jen tlačítko Microsoft Entra ID, heslo zůstane schované pro technický
+     účet správce instance.
+   - **Pro jednotlivou firmu:** přihlaste se sami přes Microsoft Entra ID a v
+     **Nastavení → Údaje firmy → Přihlášení** zvolte **Jen přes účet organizace**
+     a klikněte na **Uložit přihlášení**.
+
+| Pravidlo | Chování |
+|---|---|
+| Párování účtu | Podle ID objektu (`oid`) a tenantu (`tid`), nikdy jen podle e-mailu |
+| Pozvánka | Platí 3 dny, jednou; přijme ji jen účet se stejnou e-mailovou adresou jako pozvaný uživatel |
+| Neznámá identita | Přihlášení se odmítne, účet se nezakládá |
+| Hosté B2B | Smí se přihlásit jen s `allow_guests = true` (ENV `MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS=1`) a přiřazením k aplikaci |
+| Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin |
+| Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení skončí nejpozději vypršením |
+| Firma vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód do firmy nepustí |
+| Instalace vyžaduje Microsoft | Totéž pro všechny firmy a uživatele; nastavení firmy se nepoužije a jde jen zobrazit |
+| Nouzový přístup | Role `instance_admin` se přihlašuje dál heslem a MFA (`auth.oidc.break_glass_roles`) |
+| Citlivé operace | Potvrdíte novým přihlášením u Microsoftu místo hesla |
+
+Vynucení ve firmě zapnete jen ze sezení přihlášeného přes Microsoft, jinak
+byste si firmu sami zavřeli. Neúplná konfigurace poskytovatele se nezapne a
+ukáže se v Diagnostice. Vynucení pro celou instalaci platí jen pro zapnutého
+poskytovatele, který nese celé přihlášení včetně MFA (Microsoft Entra ID).
+Překlep v názvu ani vypnutý poskytovatel nikoho nezamknou. Při výpadku Entra ID
+vypněte přihlášení přes poskytovatele (`MYINVOICE_OIDC_ENABLED=0`), uživatelé se
+pak přihlásí heslem a MFA.
+
+### 101.6.2 Přihlášení přes Google, Apple a Seznam (správce)
+
+Google, Apple a Seznam nahrazují jen heslo. Má-li uživatel přístupový klíč
+nebo TOTP, ověří ho po návratu od poskytovatele stejně jako po hesle, a při
+`auth.require_mfa` se bez silného faktoru do aplikace nedostane. Citlivé
+operace přes tyto poskytovatele potvrdit nejde a firma je nemůže vynutit.
+Účty se nezakládají; uživatel se propojí pozvánkou nebo v profilu.
+
+Návratová adresa je u všech `https://<adresa instalace>/api/auth/oidc/<poskytovatel>/callback`
+(`google`, `apple`, `seznam`) a musí odpovídat `app.url`.
+
+| Poskytovatel | Kde zaregistrovat | Do konfigurace |
+|---|---|---|
+| Google | Google Cloud Console → APIs & Services → Credentials → OAuth client ID, typ *Web application*, Authorized redirect URI dle výše; OAuth consent screen s rozsahy `openid`, `email`, `profile` | `client_id`, `client_secret`; volitelně `allowed_hosted_domains` (jen účty Google Workspace těchto domén) |
+| Apple | Apple Developer → Identifiers: App ID se *Sign in with Apple* a Services ID (to je `client_id` webu) s doménou instalace a Return URL dle výše; Keys: klíč se *Sign in with Apple* (.p8) | `team_id`, `key_id`, `services_id`, `private_key` (obsah .p8) nebo `private_key_file` mimo webroot |
+| Seznam | vyvojari.seznam.cz → registrace OAuth aplikace s návratovou adresou dle výše | `client_id`, `client_secret` |
+
+V Dockeru: `MYINVOICE_OIDC_GOOGLE_ENABLED`, `MYINVOICE_OIDC_GOOGLE_CLIENT_ID`,
+`MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET`, `MYINVOICE_OIDC_GOOGLE_HOSTED_DOMAINS`,
+`MYINVOICE_OIDC_APPLE_ENABLED`, `MYINVOICE_OIDC_APPLE_TEAM_ID`, `MYINVOICE_OIDC_APPLE_KEY_ID`,
+`MYINVOICE_OIDC_APPLE_SERVICES_ID`, `MYINVOICE_OIDC_APPLE_PRIVATE_KEY`,
+`MYINVOICE_OIDC_SEZNAM_ENABLED`, `MYINVOICE_OIDC_SEZNAM_CLIENT_ID`,
+`MYINVOICE_OIDC_SEZNAM_CLIENT_SECRET`. Vždy také `MYINVOICE_OIDC_ENABLED=1`.
+
+| Pravidlo | Chování |
+|---|---|
+| Párování účtu | Google a Apple podle `sub`, Seznam podle `advert_user_id`; nikdy podle e-mailu |
+| E-mail z Googlu | Použije se jen ověřený; neověřený pozvánku nepřijme |
+| Apple a skrytý e-mail | Adresa `…@privaterelay.appleid.com` pozvánku nepřijme, propojte účet z profilu |
+| Druhý faktor | Po návratu se ověří passkey, TOTP nebo e-mailový kód stejně jako po hesle |
+| Firma vyžaduje Microsoft | Přihlášení přes Google, Apple ani Seznam do firmy nepustí |
+
 ## 101.7 Krok za krokem: omezení přístupu IP allowlistem (správce)
 
 1. Do `cfg.php` zapište povolené IP adresy a rozsahy (příklad je v

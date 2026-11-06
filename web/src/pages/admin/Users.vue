@@ -7,11 +7,14 @@ import { useToast } from '@/composables/useToast'
 import { useAuthStore } from '@/stores/auth'
 import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
+import UserExternalIdentitiesAdmin from '@/components/settings/UserExternalIdentitiesAdmin.vue'
 import ActiveSessions from '@/components/security/ActiveSessions.vue'
 
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
+// Identity cizích účtů spravuje jen superadmin (canManageExternalIdentities).
+const ssoEnabled = computed(() => auth.isSuperadmin && (auth.setupStatus?.sso_providers ?? []).length > 0)
 
 /**
  * Limit aktivních účtů je varování: správce může stále založit účet
@@ -297,6 +300,11 @@ onMounted(load)
     <div v-else class="bg-surface border border-neutral-200 rounded-lg overflow-hidden">
       <div v-for="user in users" :key="user.id" class="p-3 border-b border-neutral-100 flex flex-wrap items-center gap-3" :class="{ 'opacity-50': !user.is_active }">
         <div class="min-w-0 flex-1"><div class="font-medium truncate">{{ user.name }}</div><div class="text-xs text-neutral-500 font-mono truncate">{{ user.email }}</div></div>
+        <span v-if="user.mfa" class="flex flex-wrap gap-1" data-field="user-mfa">
+          <span v-if="user.mfa.totp" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700" :title="t('users.mfa_totp_hint')">{{ t('users.mfa_totp') }}</span>
+          <span v-if="user.mfa.passkeys > 0" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700" :title="t('users.mfa_passkeys_hint', { count: user.mfa.passkeys })">{{ t('users.mfa_passkeys', { count: user.mfa.passkeys }) }}</span>
+          <span v-if="!user.mfa.totp && user.mfa.passkeys === 0" class="text-xs px-2 py-1 rounded bg-warning-50 text-warning-700" :title="t('users.mfa_none_hint')">{{ t('users.mfa_none') }}</span>
+        </span>
         <span class="text-xs px-2 py-1 rounded" :class="roleBadge(user.role)">{{ user.role.name }}</span>
         <span v-if="user.is_superadmin || user.role.system_key === 'superadmin'">🔒</span>
         <button :class="btnOutline('primary')" @click="openEdit(user)">{{ t('common.edit') }}</button>
@@ -336,6 +344,8 @@ onMounted(load)
           </button>
           <p v-if="linkSent" class="mt-1 text-xs text-success-700">{{ t('users.password_link_sent') }}</p>
         </div>
+
+        <UserExternalIdentitiesAdmin v-if="form.id !== null && ssoEnabled" :user-id="form.id" :email="form.email" />
 
         <section v-if="!selectedIsSuperadmin" class="border-t border-neutral-200 pt-4 space-y-3">
           <div><h3 class="font-medium">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope' : 'users.suppliers_title') }}<RequiredMark v-if="!selectedIsInstanceAdmin" /></h3><p class="text-xs text-neutral-500">{{ t(selectedIsInstanceAdmin ? 'instance_admin.technical_scope_hint' : 'users.suppliers_hint') }}</p></div>

@@ -26,6 +26,7 @@
         "chillerlan/php-qrcode": "^6.0.1",
         "dragonofmercy/phppdf": "^1.12.4",
         "enshrined/svg-sanitize": "^1.0",
+        "firebase/php-jwt": "7.0",
         "guzzlehttp/guzzle": "^8.2",
         "halaxa/json-machine": "1.2.6",
         "monolog/monolog": "^3.12.1",

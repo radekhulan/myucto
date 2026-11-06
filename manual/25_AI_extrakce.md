@@ -165,7 +165,7 @@ V editoru faktury jsou tytéž položky orámované červeně a návrh AI je u v
 ## 25.6 Krok za krokem: importovat vydané faktury z PDF
 
 1. Otevřete `Prodej → AI import`. Položku vidí uživatel, který smí vytvářet vydané faktury.
-2. Přetáhněte PDF, obrázek, ISDOC nebo ISDOCX. Při přetažení více souborů vznikne dávka, zpracuje se postupně po jednom.
+2. Vyberte nebo přetáhněte PDF, obrázek, ISDOC nebo ISDOCX, nebo na telefonu a tabletu klikněte na **Vyfotit**. Při více souborech vznikne dávka, zpracuje se postupně po jednom.
    Pro jednotlivý import i dávku lze dočasně vybrat jiný model z whitelistu aktivního poskytovatele.
 3. Po úspěchu klikněte na odkaz do editoru.
 4. Ověřte odběratele, typ dokladu, DUZP, splatnost, režim cen s/bez DPH, sazby a text položek.

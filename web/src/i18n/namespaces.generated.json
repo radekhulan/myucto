@@ -29,6 +29,7 @@
     "search",
     "securitiesDebt",
     "session_lock",
+    "sso",
     "status",
     "supplier",
     "support",
@@ -123,6 +124,7 @@
     "payroll_bank",
     "payroll_imports",
     "payroll_travel",
+    "pending_documents",
     "period_filter",
     "permissions",
     "pohoda",
@@ -257,6 +259,7 @@
       "portal"
     ],
     "portal-purchase-invoice-submissions": [
+      "capture_photo",
       "purchase_invoice",
       "purchase_submissions"
     ],
@@ -331,6 +334,7 @@
     ],
     "invoice-ai-import": [
       "aiGateway",
+      "capture_photo",
       "integrations"
     ],
     "invoice-new": [
@@ -578,7 +582,10 @@
     ],
     "other-item-new": [
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "other-item-detail": [
       "dimensions",
@@ -588,7 +595,10 @@
     ],
     "other-item-edit": [
       "dimensions",
-      "other_items"
+      "documents",
+      "linked_documents",
+      "other_items",
+      "pending_documents"
     ],
     "document-requests": [
       "document_requests"

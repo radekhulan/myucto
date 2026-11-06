@@ -733,6 +733,7 @@ final class CashDocumentService
                     AND i.invoice_type NOT IN ('payment_calendar','rent_calendar','advance_calendar')
                     AND cur.code = 'CZK'
                     AND (i.amount_to_pay - i.paid_total) > 0.005
+                    AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i') . "
                     AND (i.varsymbol LIKE ? OR c.company_name LIKE ?)
                   ORDER BY i.issue_date DESC, i.id DESC
                   LIMIT " . $limit
@@ -1571,7 +1572,7 @@ final class CashDocumentService
         // (create/post), zámek se drží do jejího konce.
         $this->lockRow('invoices', $invoiceId, $supplierId);
         $stmt = $this->db->pdo()->prepare(
-            'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, cur.code AS currency
+            'SELECT i.status, i.invoice_type, i.amount_to_pay, i.paid_total, i.other_item_id, cur.code AS currency
                FROM invoices i JOIN currencies cur ON cur.id = i.currency_id
               WHERE i.id = ? AND i.supplier_id = ?'
         );
@@ -1579,6 +1580,11 @@ final class CashDocumentService
         $inv = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($inv === false) {
             throw new CashException('invoice_not_found', 'Vydaná faktura nenalezena.', 404);
+        }
+        // Úhrada faktury kryté ostatní pohledávkou patří pohledávce (migrace 2246).
+        if ($inv['other_item_id'] !== null) {
+            throw new CashException('invoice_covered_by_other_item',
+                'Faktura je navázaná na ostatní pohledávku. Pokladní doklad přiřaďte pohledávce, faktura úhradu převezme.', 409);
         }
         // Proforma (zálohová) se hotově hradit SMÍ (B5 — inkaso zálohy 211/324); jen
         // draft/cancelled zůstávají zakázané.

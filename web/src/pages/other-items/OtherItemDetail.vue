@@ -4,6 +4,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { otherItemsApi, type OtherItem, type OtherItemAllocation, type OtherItemPaymentCandidate, type OtherItemPostingLine } from '@/api/otherItems'
 import { otherItemKindLabel } from '@/utils/otherItemKind'
+import { OTHER_ITEM_DEFAULT_FOLDER, otherItemSettingsApi, resolveOtherItemFolder } from '@/api/otherItemSettings'
 import { accountingApi, type ChartAccount } from '@/api/accounting'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -57,12 +58,9 @@ const canAllocate = computed(() => auth.canWrite('other_items') && (canManageBan
   && (item.value?.status === 'posted' || item.value?.status === 'confirmed') && payableAmount.value > 0)
 const canRepost = computed(() => isDoubleEntry.value && item.value?.status === 'posted' && !!item.value?.journal_entry_id
   && auth.canWrite('other_items') && auth.canWrite('accounting.journal.post'))
-const documentFolderPath = computed(() => {
-  const issuedOn = item.value?.issued_on || ''
-  return /^\d{4}-\d{2}-\d{2}$/.test(issuedOn)
-    ? `Ostatní pohledávky a závazky/${issuedOn.slice(0, 4)}/${issuedOn.slice(5, 7)}`
-    : undefined
-})
+const folderTemplate = ref(OTHER_ITEM_DEFAULT_FOLDER)
+const documentFolderPath = computed(() => resolveOtherItemFolder(folderTemplate.value, item.value?.issued_on))
+if (auth.canRead('documents')) otherItemSettingsApi.get().then(s => { folderTemplate.value = s.document_folder }, () => {})
 const repostAccountChoices = computed(() => repostAccounts.value.filter(account => account.is_active).sort((a, b) => a.account_code.localeCompare(b.account_code)))
 const repostBalanceAccounts = computed(() => repostAccountChoices.value.filter(account =>
   account.account_type === (item.value?.side === 'receivable' ? 'asset' : 'liability'),
@@ -396,6 +394,10 @@ onMounted(load)
               </dd>
             </div>
             <div v-if="item.currency !== 'CZK'"><dt class="text-neutral-500">{{ t('other_items.exchange_rate') }}</dt><dd>{{ item.exchange_rate || '–' }}</dd></div>
+            <div v-if="item.linked_invoice" data-test="linked-invoice">
+              <dt class="text-neutral-500">{{ t('other_items.linked_invoice') }}</dt>
+              <dd><RouterLink :to="`/invoices/${item.linked_invoice.id}`" class="font-mono text-primary-700 hover:underline">{{ item.linked_invoice.varsymbol || `#${item.linked_invoice.id}` }}</RouterLink></dd>
+            </div>
             <div class="sm:col-span-2"><dt class="text-neutral-500">{{ t('other_items.note') }}</dt><dd class="whitespace-pre-wrap">{{ item.note || '–' }}</dd></div>
           </dl>
         </section>

@@ -33,8 +33,8 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         '1926_payroll_standby_rate.sql',
         '1931_payroll_component_vacation_settlement_mapping.sql',
         '1983_payroll_component_meal_allowance_taxable_mapping.sql',
-        '2252_payroll_holiday_time_off.sql',
-        '2254_payroll_component_minimum_wage.sql',
+        '2256_payroll_holiday_time_off.sql',
+        '2258_payroll_component_minimum_wage.sql',
     ];
 
     /**

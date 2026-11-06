@@ -10,6 +10,7 @@ use MyInvoice\Repository\ClientBankAccountRepository;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\FinalFromProformaCreator;
 use MyInvoice\Service\Invoice\ProformaPaymentDocuments;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Service\Invoice\InvoicePaymentService;
 use MyInvoice\Service\Invoice\PaymentTaxDocumentCreator;
 use MyInvoice\Service\Invoice\RefundDocument;
@@ -855,6 +856,7 @@ final class StatementMatcher
                    AND {$candidateSql}
                    AND i.status IN ('issued', 'sent', 'reminded', 'paid')
                    AND i.invoice_type IN ('invoice', 'proforma')
+                   AND " . InvoiceOtherItemPayments::notLinkedSql('i') . "
                  ORDER BY vs_match_rank DESC, i.id LIMIT 100";
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$vs, $vs, $vsKey, $supplierId, ...$candidateParams]);

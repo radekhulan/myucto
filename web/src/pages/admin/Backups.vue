@@ -11,6 +11,8 @@ import { formatDateTime } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
+import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { takeSsoStepUpProof } from '@/security/oidc'
 
 /**
  * Historie automatických záloh ke stažení z prohlížeče.
@@ -39,6 +41,9 @@ const totpCode = ref('')
 const passkeyToken = ref('')
 const passkeyBusy = ref(false)
 const passkeySupported = isWebAuthnAvailable()
+// Proof z ověření přes Microsoft jde stejným polem jako passkey proof.
+const ssoProof = ref('')
+const ssoVerified = computed(() => passkeyToken.value !== '' && passkeyToken.value === ssoProof.value)
 
 const hasPasskey = computed(() =>
   auth.user?.mfa_methods?.includes('passkey') === true
@@ -58,7 +63,16 @@ async function load() {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  const proof = takeSsoStepUpProof('backup.password')
+  if (proof) {
+    openPasswordModal()
+    ssoProof.value = proof
+    passkeyToken.value = proof
+    toast.info(t('sso.step_up_done'))
+  }
+})
 
 async function download(file: BackupFile) {
   downloading.value = file.name
@@ -289,7 +303,7 @@ function formatBytes(bytes: number | null): string {
 
         <template v-else>
           <div class="p-5 space-y-4">
-            <div v-if="hasPasskey" class="flex flex-wrap items-center gap-3">
+            <div v-if="hasPasskey && !ssoVerified" class="flex flex-wrap items-center gap-3">
               <div v-if="passkeyToken" class="text-sm font-medium text-success-600">
                 ✓ {{ t('backups.passkey_verified') }}
               </div>
@@ -305,6 +319,9 @@ function formatBytes(bytes: number | null): string {
               </template>
               <p v-else class="text-sm text-warning-700">{{ t('backups.passkey_unsupported') }}</p>
             </div>
+            <SsoStepUpOption v-if="ssoVerified || !passkeyToken" operation="backup.password"
+              :verified="ssoVerified" :disabled="passkeyBusy || revealing"
+              @verified="(proof: string) => { ssoProof = proof; passkeyToken = proof }" />
             <template v-if="!passkeyToken">
               <label class="block text-sm">
                 {{ t('backups.current_password') }}

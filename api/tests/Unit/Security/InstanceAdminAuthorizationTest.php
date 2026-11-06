@@ -54,7 +54,7 @@ final class InstanceAdminAuthorizationTest extends TestCase
         ];
         foreach ($cases as [$method, $path]) {
             $request = $this->request($method, $path);
-            $scope = new SupplierScopeMiddleware($this->supplierResolver(), new ResponseFactory());
+            $scope = new SupplierScopeMiddleware($this->supplierResolver(), new ResponseFactory(), $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class));
             self::assertSame(204, $scope->process($request, $this->handler(true))->getStatusCode(), $path);
             self::assertSame(204, $this->middleware()->process($request, $this->handler())->getStatusCode(), $path);
         }
@@ -76,7 +76,7 @@ final class InstanceAdminAuthorizationTest extends TestCase
             self::assertFalse(InstanceAdminRoutePolicy::allows($method, $path), "$method $path");
             $request = $this->request($method, $path);
             self::assertSame(403, $this->middleware()->process($request, $this->handler())->getStatusCode(), $path);
-            $scope = new SupplierScopeMiddleware($this->supplierResolver(), new ResponseFactory());
+            $scope = new SupplierScopeMiddleware($this->supplierResolver(), new ResponseFactory(), $this->createMock(\MyInvoice\Service\Auth\LoginPolicyService::class));
             self::assertSame(403, $scope->process($request, $this->handler())->getStatusCode(), $path);
         }
     }

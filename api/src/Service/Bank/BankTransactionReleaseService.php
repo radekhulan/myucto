@@ -194,10 +194,15 @@ final class BankTransactionReleaseService
         // (PostingService::reverse), bez zápisu (daňová evidence, položka bez účtu) se storno
         // zapíše tady. Stornované přiřazení automatika znovu nepřiřadí, ručně jde obnovit
         // jen k původní položce.
-        $pdo->prepare(
+        $releasedItems = $pdo->prepare(
             'UPDATE other_item_allocations SET reversed_on = CURDATE()
               WHERE supplier_id = ? AND bank_transaction_id = ? AND reversed_on IS NULL'
-        )->execute([$supplierId, $txId]);
+        );
+        $releasedItems->execute([$supplierId, $txId]);
+        if ($releasedItems->rowCount() > 0) {
+            \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::syncForItems($pdo, $supplierId,
+                \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::itemsOfPayment($pdo, $supplierId, 'bank_transaction_id', $txId));
+        }
 
         $purchaseStmt = $pdo->prepare(
             'SELECT purchase_invoice_id FROM payment_matches

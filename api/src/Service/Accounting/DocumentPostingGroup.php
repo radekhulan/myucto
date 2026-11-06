@@ -36,19 +36,32 @@ final class DocumentPostingGroup
      * se jako dřív počítá i nezaúčtovaný koncept. Obě větve jdou po indexu
      * idx_je_supplier_source a uq_jdp_doc_entry.
      *
+     * Vydanou fakturu navázanou na ostatní pohledávku (migrace 2246) účtuje živý zápis
+     * pohledávky; bez $otherItemCover se počítá jen vlastní zápis faktury. Větev jde po
+     * primárních klíčích faktury, pohledávky a zápisu. S ní se každý argument v SQL
+     * objeví dvakrát, volající s pozičními parametry ji proto vypíná.
+     *
      * Argumenty jsou SQL výrazy volajícího (sloupec vnějšího dotazu nebo literál),
      * nikdy uživatelský vstup.
      */
-    public static function activePostingExistsSql(string $docTypeSql, string $docIdSql, string $supplierIdSql, bool $postedOnly = true): string
+    public static function activePostingExistsSql(string $docTypeSql, string $docIdSql, string $supplierIdSql, bool $postedOnly = true, bool $otherItemCover = true): string
     {
         $posted = static fn (string $alias): string => $postedOnly ? " AND {$alias}.posted_at IS NOT NULL" : '';
+        $cover = $otherItemCover
+            ? "
+             OR ({$docTypeSql} = 'invoice' AND EXISTS (SELECT 1 FROM invoices dpg_inv
+                  JOIN other_items dpg_oi ON dpg_oi.supplier_id = dpg_inv.supplier_id AND dpg_oi.id = dpg_inv.other_item_id
+                  JOIN journal_entries dpg_oie ON dpg_oie.supplier_id = dpg_oi.supplier_id AND dpg_oie.id = dpg_oi.journal_entry_id
+                  WHERE dpg_inv.supplier_id = {$supplierIdSql} AND dpg_inv.id = {$docIdSql}
+                    AND dpg_oie.reversed_by IS NULL{$posted('dpg_oie')}))"
+            : '';
         return "(EXISTS (SELECT 1 FROM journal_entries dpg_direct FORCE INDEX (idx_je_supplier_source)
                   WHERE dpg_direct.supplier_id = {$supplierIdSql} AND dpg_direct.source_type = {$docTypeSql}
                     AND dpg_direct.source_id = {$docIdSql} AND dpg_direct.reversed_by IS NULL{$posted('dpg_direct')})
              OR EXISTS (SELECT 1 FROM journal_document_postings dpg_jdp FORCE INDEX (uq_jdp_doc_entry)
                   JOIN journal_entries dpg_owned ON dpg_owned.supplier_id = dpg_jdp.supplier_id AND dpg_owned.id = dpg_jdp.entry_id
                   WHERE dpg_jdp.supplier_id = {$supplierIdSql} AND dpg_jdp.doc_type = {$docTypeSql}
-                    AND dpg_jdp.doc_id = {$docIdSql} AND dpg_owned.reversed_by IS NULL{$posted('dpg_owned')}))";
+                    AND dpg_jdp.doc_id = {$docIdSql} AND dpg_owned.reversed_by IS NULL{$posted('dpg_owned')}){$cover})";
     }
 
     /**

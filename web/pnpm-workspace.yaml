@@ -3,6 +3,7 @@ minimumReleaseAgeExclude:
   - vue-tsc@3.3.1
   - vite@8.0.16
   - '@types/node@26.6.2'
+  - pdfjs-dist@6.5.438
 # pnpm 10+ blokuje postinstall scripty od deps (supply-chain ochrana).
 # Tento whitelist povoluje vue-demi, který má neškodný postinstall pro detekci Vue verze (Vue 2 vs 3).
 # Více: https://pnpm.io/settings#onlybuiltdependencies

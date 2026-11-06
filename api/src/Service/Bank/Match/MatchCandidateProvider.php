@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Bank\BankMessageNormalizer;
 use MyInvoice\Service\Bank\FxPaymentSettlement;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
+use MyInvoice\Service\Invoice\InvoiceOtherItemPayments;
 use MyInvoice\Support\Sql\PurchaseSettledExpr;
 use PDO;
 
@@ -131,7 +132,8 @@ final class MatchCandidateProvider
                    FROM invoices i
                    JOIN currencies cur ON cur.id = i.currency_id
                    JOIN clients c ON c.id = i.client_id AND c.supplier_id = i.supplier_id
-                  WHERE i.supplier_id = ? AND i.invoice_type IN ('invoice','proforma')";
+                  WHERE i.supplier_id = ? AND i.invoice_type IN ('invoice','proforma')
+                    AND " . InvoiceOtherItemPayments::notLinkedSql('i');
         $branches = [];
         $params = [];
         foreach (self::ISSUED_OPEN_STATUSES as $status) {
@@ -191,6 +193,7 @@ final class MatchCandidateProvider
               WHERE i.supplier_id = ?
                 AND i.status IN ('issued','sent','reminded')
                 AND i.invoice_type IN ('invoice','proforma')
+                AND " . InvoiceOtherItemPayments::notLinkedSql('i') . "
                 AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)
               ORDER BY ABS(DATEDIFF(i.due_date, ?)), i.id DESC LIMIT 300"
         );

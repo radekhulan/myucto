@@ -33,7 +33,9 @@ final class SetupStatusAction
         // v /api/health.
         private readonly ManagedModeGuard $managed,
         private readonly OverduePolicy $overduePolicy,
+        private readonly \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry $oidcProviders,
         private readonly MaintenanceNoticeService $maintenanceNotices,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -60,6 +62,11 @@ final class SetupStatusAction
                 (bool) $this->config->get('auth.passwordless_login.enabled', false)
                 && $this->passkeys->isAvailable()
                 && $this->mfaPolicy->isMethodAllowed('passkey'),
+            // Tlačítka přihlášení u poskytovatelů identity; bez zapnutého OIDC prázdné.
+            'sso_providers' => $this->oidcProviders->isEnabled() ? $this->oidcProviders->publicList() : [],
+            // Poskytovatel povinný pro celou instalaci: přihlašovací stránka pak
+            // heslo nabízí jen technickému účtu správce instance.
+            'sso_required_provider' => $this->loginPolicy->globalRequiredProvider(),
             'captcha'     => [
                 'provider'   => $this->config->get('captcha.provider', 'none'),
                 'site_key'   => $this->config->get('captcha.site_key', ''),

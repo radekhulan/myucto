@@ -17,7 +17,15 @@ final class ConfigSnapshot
     private const SOURCE_SIGNATURES = [
         'ba96ba9d57b895a5f31f66c83785248dc3a9cbff345f0edefaead0f472916105',
         '58f8c23bc5640b01812ebedd5793d5e66c56fe41bffd377b122c7fdd7e985bd5',
+        // Výchozí hodnoty a ENV pro auth.oidc; DB, údaje ani runtime cesty beze změny.
+        'a5754f37fffb4c39253cecabadf8f730409abc79048598edb4eff9a5a00a9cb6',
         '9e814cc44989bd9ff1ea7f7add02232761c699e4d35c39d9e6f5d6329e532eb2',
+        // auth.oidc spolu s maintenance_notice.*; DB, údaje ani runtime cesty beze změny.
+        'da7795bcf5c4d560e9558938d6975d8a801531293dc59ff7ced3b9de163c1f0f',
+        // Výchozí popisek Entra „Microsoft Entra ID"; DB, údaje ani runtime cesty beze změny.
+        '6355a5ddd02f18e73a5b08e9e55986994d6493d345612a98e7b05c66982d2d60',
+        // auth.oidc.required_provider (vynucení pro celou instalaci); DB, údaje ani runtime cesty beze změny.
+        '1d329cb9d45b01d670f2213f693628aae5045b443304f68cba3a0f5de2fb8c90',
     ];
 
     private static ?Config $config = null;

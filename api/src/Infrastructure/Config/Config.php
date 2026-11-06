@@ -327,6 +327,50 @@ final class Config
                 'passwordless_login'  => [
                     'enabled' => false,
                 ],
+                // Přihlášení přes poskytovatele identity (OpenID Connect). Registrace
+                // aplikace u poskytovatele je vždy vlastní pro každou instalaci, proto
+                // je všechno vypnuté a bez hodnot. Viz OidcProviderRegistry.
+                'oidc' => [
+                    'enabled' => false,
+                    'session_lifetime_hours' => 12,
+                    'break_glass_roles' => ['instance_admin'],
+                    // Poskytovatel povinný pro celou instalaci (např. 'entra'). Má
+                    // přednost před nastavením jednotlivých firem a platí i pro firmy
+                    // založené později. Prázdné = vynucení jen po firmách.
+                    'required_provider' => '',
+                    'providers' => [
+                        'entra' => [
+                            'enabled' => false,
+                            'label' => 'Microsoft Entra ID',
+                            'tenant_id' => '',
+                            'client_id' => '',
+                            'client_secret' => '',
+                            'allow_guests' => false,
+                        ],
+                        'google' => [
+                            'enabled' => false,
+                            'label' => 'Google',
+                            'client_id' => '',
+                            'client_secret' => '',
+                            'allowed_hosted_domains' => [],
+                        ],
+                        'apple' => [
+                            'enabled' => false,
+                            'label' => 'Apple',
+                            'team_id' => '',
+                            'key_id' => '',
+                            'services_id' => '',
+                            'private_key' => '',
+                            'private_key_file' => '',
+                        ],
+                        'seznam' => [
+                            'enabled' => false,
+                            'label' => 'Seznam',
+                            'client_id' => '',
+                            'client_secret' => '',
+                        ],
+                    ],
+                ],
             ],
             'app' => [
                 'name'   => 'MyÚčto.cz',
@@ -490,6 +534,28 @@ final class Config
             'MYINVOICE_AUTH_REQUIRE_MFA'     => ['auth.require_mfa', 'bool'],
             'MYINVOICE_AUTH_MFA_METHODS'     => ['auth.allowed_mfa_methods', 'csv'],
             'MYINVOICE_AUTH_PASSWORDLESS_LOGIN' => ['auth.passwordless_login.enabled', 'bool'],
+            'MYINVOICE_OIDC_ENABLED'                 => ['auth.oidc.enabled', 'bool'],
+            'MYINVOICE_OIDC_SESSION_LIFETIME_HOURS'  => ['auth.oidc.session_lifetime_hours', 'int'],
+            'MYINVOICE_OIDC_REQUIRED'                => ['auth.oidc.required_provider', 'string'],
+            'MYINVOICE_OIDC_ENTRA_ENABLED'           => ['auth.oidc.providers.entra.enabled', 'bool'],
+            'MYINVOICE_OIDC_ENTRA_LABEL'             => ['auth.oidc.providers.entra.label', 'string'],
+            'MYINVOICE_OIDC_ENTRA_TENANT_ID'         => ['auth.oidc.providers.entra.tenant_id', 'string'],
+            'MYINVOICE_OIDC_ENTRA_CLIENT_ID'         => ['auth.oidc.providers.entra.client_id', 'string'],
+            'MYINVOICE_OIDC_ENTRA_CLIENT_SECRET'     => ['auth.oidc.providers.entra.client_secret', 'string'],
+            'MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS'      => ['auth.oidc.providers.entra.allow_guests', 'bool'],
+            'MYINVOICE_OIDC_GOOGLE_ENABLED'          => ['auth.oidc.providers.google.enabled', 'bool'],
+            'MYINVOICE_OIDC_GOOGLE_CLIENT_ID'        => ['auth.oidc.providers.google.client_id', 'string'],
+            'MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET'    => ['auth.oidc.providers.google.client_secret', 'string'],
+            'MYINVOICE_OIDC_GOOGLE_HOSTED_DOMAINS'   => ['auth.oidc.providers.google.allowed_hosted_domains', 'csv'],
+            'MYINVOICE_OIDC_APPLE_ENABLED'           => ['auth.oidc.providers.apple.enabled', 'bool'],
+            'MYINVOICE_OIDC_APPLE_TEAM_ID'           => ['auth.oidc.providers.apple.team_id', 'string'],
+            'MYINVOICE_OIDC_APPLE_KEY_ID'            => ['auth.oidc.providers.apple.key_id', 'string'],
+            'MYINVOICE_OIDC_APPLE_SERVICES_ID'       => ['auth.oidc.providers.apple.services_id', 'string'],
+            'MYINVOICE_OIDC_APPLE_PRIVATE_KEY'       => ['auth.oidc.providers.apple.private_key', 'string'],
+            'MYINVOICE_OIDC_APPLE_PRIVATE_KEY_FILE'  => ['auth.oidc.providers.apple.private_key_file', 'string'],
+            'MYINVOICE_OIDC_SEZNAM_ENABLED'          => ['auth.oidc.providers.seznam.enabled', 'bool'],
+            'MYINVOICE_OIDC_SEZNAM_CLIENT_ID'        => ['auth.oidc.providers.seznam.client_id', 'string'],
+            'MYINVOICE_OIDC_SEZNAM_CLIENT_SECRET'    => ['auth.oidc.providers.seznam.client_secret', 'string'],
             'MYINVOICE_DEMO_ENABLED'         => ['demo.enabled', 'bool'],
             'MYINVOICE_EPO_TEST'             => ['epo_test', 'bool'],
             'MYINVOICE_EPO_TEST_RECEIPT_SIGNER_FINGERPRINTS_SHA256'

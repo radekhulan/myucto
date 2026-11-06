@@ -1,6 +1,6 @@
 {
     "format": 1,
-    "database_collation": "utf8mb4_czech_ci",
+    "database_collation": "utf8mb4_unicode_ci",
     "migrations": [
         "0001_init.sql",
         "0002_work_report_approval.sql",
@@ -1134,9 +1134,13 @@
         "2230_journal_lines_cost_center_index.sql",
         "2231_unit_prices_six_decimals.sql",
         "2232_currencies_foreign_bank_code.sql",
+        "2232_oidc_external_identities.sql",
+        "2233_api_token_issued_auth_method.sql",
         "2233_dimension_defaults_bank_account.sql",
         "2234_bank_posting_rule_dimensions.sql",
+        "2234_oidc_login_tickets.sql",
         "2235_cash_register_foreign_opening.sql",
+        "2235_domain_login_external_identity.sql",
         "2236_invoice_defaults_role_permission.sql",
         "2237_other_item_payment_matching.sql",
         "2238_other_item_posting_profiles.sql",
@@ -1147,18 +1151,20 @@
         "2243_work_report_billing.sql",
         "2244_payroll_import_profile_pamica_sample.sql",
         "2245_session_device_class.sql",
-        "2246_payroll_hourly_employment_terms.sql",
-        "2247_payroll_manual_work_summary.sql",
-        "2248_payroll_hourly_wage_claims.sql",
-        "2249_payroll_average_exact_worked_time.sql",
-        "2250_payroll_hourly_agreement_terms.sql",
-        "2251_payroll_hourly_evidence.sql",
-        "2252_payroll_holiday_time_off.sql",
-        "2253_payroll_hourly_entitlement_settlement.sql",
-        "2254_payroll_component_minimum_wage.sql",
-        "2255_payroll_standby_floor_proof.sql",
-        "2256_payroll_termination_floor_proof.sql",
-        "2257_payroll_jmhz_holiday_time_off.sql"
+        "2246_invoice_other_item_link.sql",
+        "2249_other_item_settings.sql",
+        "2250_payroll_hourly_employment_terms.sql",
+        "2251_payroll_manual_work_summary.sql",
+        "2252_payroll_hourly_wage_claims.sql",
+        "2253_payroll_average_exact_worked_time.sql",
+        "2254_payroll_hourly_agreement_terms.sql",
+        "2255_payroll_hourly_evidence.sql",
+        "2256_payroll_holiday_time_off.sql",
+        "2257_payroll_hourly_entitlement_settlement.sql",
+        "2258_payroll_component_minimum_wage.sql",
+        "2259_payroll_standby_floor_proof.sql",
+        "2260_payroll_termination_floor_proof.sql",
+        "2261_payroll_jmhz_holiday_time_off.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -2453,6 +2459,7 @@
                 "eet_external_by_default": "tinyint(1) NOT NULL DEFAULT 0",
                 "expires_at": "datetime NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "issued_auth_method": "varchar(32) NULL DEFAULT NULL COLLATE ascii_bin",
                 "last_used_at": "datetime NULL DEFAULT NULL",
                 "last_used_ip": "varbinary(16) NULL DEFAULT NULL",
                 "name": "varchar(100) NOT NULL",
@@ -7269,7 +7276,7 @@
                 "invoice_id": "bigint(20) unsigned NOT NULL",
                 "note": "varchar(255) NULL DEFAULT NULL",
                 "paid_on": "date NOT NULL",
-                "source": "enum('manual','mark_paid','bank','legacy','cash','settlement','credit_note') NOT NULL DEFAULT 'manual'",
+                "source": "enum('manual','mark_paid','bank','legacy','cash','settlement','credit_note','other_item') NOT NULL DEFAULT 'manual'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "tax_document_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "variable_symbol": "varchar(20) NULL DEFAULT NULL"
@@ -7416,6 +7423,7 @@
                 "last_reminder_at": "timestamp NULL DEFAULT NULL",
                 "note_above_items": "text NULL DEFAULT NULL",
                 "note_below_items": "text NULL DEFAULT NULL",
+                "other_item_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "paid_at": "date NULL DEFAULT NULL",
                 "paid_total": "decimal(12,2) NOT NULL DEFAULT 0.00",
                 "parent_invoice_id": "bigint(20) unsigned NULL DEFAULT NULL",
@@ -7492,7 +7500,8 @@
                 "uq_inv_public_token": "UNIQUE BTREE (public_token)",
                 "uq_inv_supplier_varsymbol": "UNIQUE BTREE (supplier_id, varsymbol)",
                 "uq_invoices_fakturoid": "UNIQUE BTREE (supplier_id, fakturoid_id)",
-                "uq_invoices_idoklad": "UNIQUE BTREE (supplier_id, idoklad_id)"
+                "uq_invoices_idoklad": "UNIQUE BTREE (supplier_id, idoklad_id)",
+                "uq_invoices_other_item": "UNIQUE BTREE (other_item_id)"
             },
             "foreign_keys": {
                 "fk_inv_calendar": "(calendar_id) -> invoices (id) ON UPDATE RESTRICT ON DELETE CASCADE",
@@ -7505,7 +7514,8 @@
                 "fk_inv_recurring": "(recurring_template_id) -> recurring_invoice_templates (id) ON UPDATE RESTRICT ON DELETE SET NULL",
                 "fk_inv_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "fk_inv_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
-                "fk_invoices_branding_profile": "(branding_profile_id) -> branding_profiles (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+                "fk_invoices_branding_profile": "(branding_profile_id) -> branding_profiles (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_invoices_other_item": "(other_item_id) -> other_items (id) ON UPDATE RESTRICT ON DELETE SET NULL"
             },
             "checks": {
                 "bank_snapshot": "json_valid(`bank_snapshot`)",
@@ -8421,6 +8431,7 @@
                 "code_hash": "char(64) NOT NULL",
                 "created_at": "datetime NOT NULL DEFAULT current_timestamp()",
                 "expires_at": "datetime NOT NULL",
+                "issued_auth_method": "varchar(32) NULL DEFAULT NULL COLLATE ascii_bin",
                 "redirect_uri": "varchar(2048) NOT NULL",
                 "resource": "varchar(2048) NOT NULL",
                 "scope": "enum('read','read_write') NOT NULL",
@@ -10067,6 +10078,58 @@
             },
             "checks": []
         },
+        "oidc_link_invites": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "expires_at": "datetime(6) NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "provider": "varchar(32) NOT NULL COLLATE ascii_bin",
+                "token_hash": "char(64) NOT NULL COLLATE ascii_bin",
+                "used_at": "datetime(6) NULL DEFAULT NULL",
+                "user_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_oidc_invite_user": "BTREE (user_id, provider)",
+                "uq_oidc_invite_token": "UNIQUE BTREE (token_hash)"
+            },
+            "foreign_keys": {
+                "fk_oidc_invite_user": "(user_id) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
+        },
+        "oidc_login_flows": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "browser_binding": "char(64) NOT NULL COLLATE ascii_bin",
+                "code_verifier": "varchar(128) NOT NULL COLLATE ascii_bin",
+                "consumed_at": "datetime(6) NULL DEFAULT NULL",
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "expires_at": "datetime(6) NOT NULL",
+                "external_identity_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "id": "char(64) NOT NULL COLLATE ascii_bin",
+                "invite_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "nonce": "char(64) NOT NULL COLLATE ascii_bin",
+                "provider": "varchar(32) NOT NULL COLLATE ascii_bin",
+                "purpose": "varchar(16) NOT NULL COLLATE ascii_bin",
+                "return_to": "varchar(512) NULL DEFAULT NULL",
+                "session_id_hash": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "step_up_operation": "varchar(190) NULL DEFAULT NULL COLLATE ascii_bin",
+                "user_id": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_oidc_flows_expires": "BTREE (expires_at)"
+            },
+            "foreign_keys": [],
+            "checks": []
+        },
         "oss_filing_evidence": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -10425,6 +10488,24 @@
             "checks": {
                 "template_json": "json_valid(`template_json`)"
             }
+        },
+        "other_item_settings": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "document_folder": "varchar(500) NULL DEFAULT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
+                "updated_by": "bigint(20) unsigned NULL DEFAULT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id)"
+            },
+            "foreign_keys": {
+                "fk_other_item_settings_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "other_items": {
             "type": "BASE TABLE",
@@ -24128,6 +24209,7 @@
                 "csrf_token": "char(64) NOT NULL",
                 "device_class": "enum('browser','mobile') NULL DEFAULT NULL",
                 "expires_at": "timestamp NOT NULL",
+                "external_identity_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "generation": "int(10) unsigned NOT NULL DEFAULT 1",
                 "id": "char(64) NOT NULL",
                 "ip": "varbinary(16) NOT NULL",
@@ -24152,6 +24234,7 @@
                 "idx_sessions_admin_last_seen": "BTREE (revoked_at, replaced_at, last_seen, session_family_id, expires_at)",
                 "idx_sessions_family_revocation": "BTREE (session_family_id, revoked_at)",
                 "idx_sessions_user_revocation": "BTREE (user_id, revoked_at, expires_at)",
+                "ix_sessions_external_identity": "BTREE (external_identity_id)",
                 "uq_sessions_family_generation": "UNIQUE BTREE (session_family_id, generation)"
             },
             "foreign_keys": {
@@ -26627,6 +26710,8 @@
                 "is_identified": "tinyint(1) NOT NULL DEFAULT 0",
                 "is_vat_payer": "tinyint(1) NOT NULL DEFAULT 1",
                 "legal_form": "varchar(3) NULL DEFAULT NULL",
+                "login_policy": "enum('any','sso_required') NOT NULL DEFAULT 'any'",
+                "login_sso_provider": "varchar(32) NULL DEFAULT NULL COLLATE ascii_bin",
                 "logo_path": "varchar(255) NULL DEFAULT NULL",
                 "ollama_api_key_enc": "varbinary(512) NULL DEFAULT NULL",
                 "ollama_base_url": "varchar(255) NULL DEFAULT NULL",
@@ -26830,6 +26915,7 @@
                 "created_ip": "varbinary(16) NULL DEFAULT NULL",
                 "created_user_agent": "varchar(255) NULL DEFAULT NULL",
                 "expires_at": "timestamp(6) NOT NULL",
+                "external_identity_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "mfa_verified_at": "timestamp(6) NULL DEFAULT NULL",
                 "pkce_challenge": "char(43) NOT NULL COLLATE ascii_bin",
@@ -28983,6 +29069,33 @@
             "checks": {
                 "quantity_decimals": "`quantity_decimals` is null or `quantity_decimals` <= 3"
             }
+        },
+        "user_external_identities": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "display_name": "varchar(190) NULL DEFAULT NULL",
+                "email_at_link": "varchar(190) NULL DEFAULT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "issuer": "varchar(255) NOT NULL COLLATE ascii_bin",
+                "last_used_at": "datetime(6) NULL DEFAULT NULL",
+                "linked_by": "enum('self','admin','invite') NOT NULL",
+                "provider": "varchar(32) NOT NULL COLLATE ascii_bin",
+                "subject": "varchar(255) NOT NULL COLLATE ascii_bin",
+                "tenant_id": "varchar(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "user_id": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "ix_external_identity_user": "BTREE (user_id, provider)",
+                "uq_external_identity": "UNIQUE BTREE (provider, issuer, subject)"
+            },
+            "foreign_keys": {
+                "fk_external_identity_user": "(user_id) -> users (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": []
         },
         "user_favorites": {
             "type": "BASE TABLE",

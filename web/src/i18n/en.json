@@ -159,6 +159,14 @@
     "dismiss": "Dismiss"
   },
   "other_items": {
+    "documents_settings": {
+      "title": "Documents folder",
+      "hint": "Files uploaded to an other receivable or payable are stored in this folder in Documents. {'{'}YYYY{'}'} and {'{'}MM{'}'} are replaced with the year and month of the issue date.",
+      "folder_label": "Folder",
+      "preview": "For example: {folder}",
+      "reset": "Default folder",
+      "saved": "Documents folder saved"
+    },
     "posting": {
       "title": "Posting",
       "hint": "Posting of origin and payments. The item's own posting takes precedence over the kind's posting profile; without either, default accounts apply.",
@@ -498,7 +506,8 @@
     "remaining_payment": "Left to pay incl. interest and fee",
     "remaining_payment_hint": "Sum of unpaid installments. Only the principal reduces the item balance; interest and fee are posted with the payment.",
     "allocation_split": "principal {principal}, interest {interest}, fee {fee}",
-    "allocation_split_hint": "The payment is split by installments: interest first, then the fee and finally the principal."
+    "allocation_split_hint": "The payment is split by installments: interest first, then the fee and finally the principal.",
+    "linked_invoice": "Linked invoice"
   },
   "internal_documents": {
     "title": "Internal documents",
@@ -14448,6 +14457,7 @@
     "choose_files": "Choose files",
     "drop_hint": "Drop documents here (PDF, JPG, PNG, ISDOC, XML) or pick them with the button.",
     "drop_rejected": "Some files have an unsupported format and were skipped: {names}",
+    "remove_file": "Remove {name}",
     "files_selected": "Files selected: {n}",
     "uploading": "Sending…",
     "submit_action": "Send to accountant",
@@ -14590,6 +14600,12 @@
     "volume_hint_bank_transactions": "Transactions from all bank statements of the company.",
     "volume_hint_cash_documents": "Posted and reversed cash documents, excluding drafts.",
     "volume_hint_journal_entries": "All journal entries, including reversals."
+  },
+  "pending_documents": {
+    "folder_hint": "New files will be uploaded to {folder} after saving.",
+    "new_badge": "NEW",
+    "empty": "You can upload or attach the purchase contract or another document now, it is saved together with the record.",
+    "failed": "The record is saved, but {count} documents could not be uploaded or attached."
   },
   "linked_documents": {
     "title": "Attachments",
@@ -18341,7 +18357,10 @@
         "advance_unpaid": "The advance is posted when it is paid (314). Match the bank payment with the advance or pay it in cash, not with the final invoice.",
         "advance_posted": "The advance is not posted as a document. Its posting consists of the payment to the advance account and the advance settlement in the final invoice.",
         "relation_advance_payment": "Advance payment",
-        "relation_advance_final": "Settlement in final invoice"
+        "relation_advance_final": "Settlement in final invoice",
+        "relation_other_item": "Other receivable",
+        "open_other_item": "Receivable {item}",
+        "other_item_covered": "The invoice has no entry of its own; the linked other receivable posts it. Corrections are made in the receivable detail."
       },
       "internal_document_badge": "Internal document",
       "internal_document_reversal_badge": "Internal document reversal"
@@ -22693,6 +22712,77 @@
     "result_backup": "Backup of overwritten files",
     "how_native_manual": "If the automatic path is unavailable (missing permissions, PHP CLI or disk space), deploy the same bundle manually:"
   },
+  "sso": {
+    "login_with": "Sign in with {provider}",
+    "required_notice": "Your account signs in through your organisation (Microsoft Entra ID). Continue with the button below.",
+    "unlock_with": "Unlock with {provider}",
+    "ticket_notice": "You are signing in with {provider}.",
+    "ticket_cancel": "Sign in another way",
+    "redirecting": "Redirecting…",
+    "step_up_button": "Verify with Microsoft Entra ID",
+    "step_up_hint": "Instead of the password you can verify with your organisation account. A new window opens and your work here stays as it is.",
+    "step_up_waiting": "Finish the verification in the opened window. If you closed it, click the button again.",
+    "step_up_popup_blocked": "The browser blocked the verification window. Allow pop-ups for this site and try again.",
+    "step_up_failed": "Could not start verification with Microsoft Entra ID.",
+    "step_up_done": "Verified with Microsoft Entra ID, please continue.",
+    "step_up_verified": "Verified with Microsoft Entra ID",
+    "linked_toast": "The account is linked.",
+    "unlinked_toast": "The link has been removed.",
+    "profile_tab": "Linked accounts",
+    "profile_title": "Linked accounts",
+    "profile_description": "Once linked, you sign in with your account at the chosen provider. For a Microsoft Entra ID work account, verification including two-factor is managed by your organisation. For other providers the application still asks for your second factor if you have one set up.",
+    "link_button": "Link with {provider}",
+    "confirm_link": "Continue to link",
+    "unlink_button": "Unlink",
+    "unlink_blocked": "The link cannot be removed, your company requires signing in with an organisation account.",
+    "reauth_link": "Confirm it is you before linking with {provider}.",
+    "reauth_unlink": "Confirm it is you before unlinking from {provider}.",
+    "reauth_required": "Verify with a passkey, your organisation account or your password.",
+    "reauth_or_password": "or enter your password",
+    "global_admin_password_login": "Technical instance administrator account? Sign in with password",
+    "policy_global": "Sign-in with {provider} is required for the whole installation, for all companies including newly created ones. Only the technical instance administrator account signs in with a password.",
+    "verify_passkey": "Verify with passkey",
+    "passkey_failed": "Passkey verification failed.",
+    "identities_empty": "No account is linked yet.",
+    "identities_load_failed": "Could not load linked accounts.",
+    "linked_at": "Linked",
+    "last_used": "Last used",
+    "policy_title": "Sign-in",
+    "policy_intro": "Choose how members of this company sign in.",
+    "policy_any": "Any allowed method",
+    "policy_any_hint": "Password, passkey and organisation account.",
+    "policy_required": "Organisation account only",
+    "policy_required_hint": "Neither a password nor a passkey gets into the company. It can only be enabled after signing in with the organisation account.",
+    "policy_provider": "Identity provider",
+    "policy_users_without_identity": "Company members without a linked organisation account: {count}. Once enabled, they cannot sign in until they link their account.",
+    "policy_read_only": "Only a company administrator can change sign-in settings.",
+    "policy_save": "Save sign-in settings",
+    "policy_saved": "Sign-in settings saved.",
+    "policy_load_failed": "Could not load sign-in settings.",
+    "policy_session_required": "Sign in with the organisation account before enforcing it, otherwise you would lock yourself out of the company.",
+    "admin_title": "Linked identities",
+    "admin_hint": "Identity provider accounts the user signs in with. The invitation arrives by e-mail and links the account after sign-in.",
+    "admin_invite": "Invite to sign in with {provider}",
+    "admin_invite_sent": "Invitation sent to {email}.",
+    "admin_invite_mail_failed": "Could not send the invitation. Check the outgoing mail settings.",
+    "admin_invite_inactive": "Invitations are not sent to deactivated users.",
+    "admin_unlink_confirm": "Remove the {provider} link from account {email}?",
+    "errors": {
+      "generic": "Signing in with the identity provider failed.",
+      "sso_disabled": "Signing in with this provider is not enabled in this installation.",
+      "sso_flow_invalid": "The sign-in expired or was opened in a different browser. Please try again.",
+      "sso_provider_error": "The identity provider rejected the sign-in.",
+      "sso_provider_unavailable": "The identity provider is currently unavailable. Please try again shortly.",
+      "sso_token_invalid": "The identity provider's response could not be verified.",
+      "sso_not_linked": "This account is not linked to any account in the application. Sign in with your password and link it in your profile, or ask your administrator for an invitation.",
+      "sso_already_linked": "This account is already linked to another user.",
+      "sso_invite_invalid": "The invitation is invalid or has expired. Ask your administrator for a new one.",
+      "sso_user_inactive": "The application account is deactivated.",
+      "sso_identity_mismatch": "You signed in with a different account than the one invited or linked.",
+      "sso_cancelled": "The sign-in was cancelled.",
+      "sso_domain_not_allowed": "This Google account is not from an organisation domain allowed in this installation. Sign in with your Google Workspace work account."
+    }
+  },
   "session_lock": {
     "title": "Application locked",
     "message": "You need to verify your identity again after a period of inactivity.",
@@ -23118,6 +23208,10 @@
     "confirm": "Confirm",
     "close": "Close",
     "preview_side_title": "Original preview",
+    "pdf_preview_loading": "Loading PDF preview…",
+    "pdf_preview_failed": "The PDF preview could not be displayed.",
+    "pdf_preview_open": "Open PDF",
+    "pdf_preview_truncated": "Showing {shown} of {total} pages.",
     "preview_side_close": "Close preview",
     "preview_side_empty": "The document has no original attached.",
     "preview_side_show": "Show original",
@@ -24303,7 +24397,30 @@
     "bulk_oss_failure_not_attempted": "Documents not attempted: {n}",
     "bulk_oss_failure_pdf_stale": "PDF cache could not be invalidated for {n} documents",
     "bulk_oss_failure_retry_hint": "The unprocessed documents are unchanged and stay selected — once the cause is fixed, run the action again over them only.",
-    "bulk_oss_pdf_stale_hint": "The data is saved, but the stored PDF is stale. Regenerate it before sending the document."
+    "bulk_oss_pdf_stale_hint": "The data is saved, but the stored PDF is stale. Regenerate it before sending the document.",
+    "other_item_link": {
+      "action": "Link to other receivable",
+      "action_tooltip": "The invoice gets no posting of its own; the other receivable posts it and its payments carry over.",
+      "badge": "Other receivable",
+      "linked": "Posted by other receivable",
+      "unlink": "Unlink",
+      "unlink_confirm": "Unlink the invoice from the other receivable? The invoice loses the receivable payments and stays unposted; post it the usual way.",
+      "linked_toast": "The invoice is linked to the other receivable.",
+      "unlinked_toast": "The invoice is unlinked from the other receivable.",
+      "suggestion": "The invoice matches other receivable {item} ({amount}) with the same variable symbol. A linked invoice does not post revenue again and takes over the receivable payments.",
+      "link_suggested": "Link",
+      "choose_other": "Choose another",
+      "modal_title": "Link to other receivable",
+      "modal_hint": "Posted other receivables in the same currency. Only a receivable with the same amount as the invoice can be linked.",
+      "search": "Search number, partner, VS…",
+      "no_candidates": "No posted other receivable to link.",
+      "amount_mismatch": "The receivable amount differs from the invoice amount.",
+      "vs_match": "VS match",
+      "vs": "VS",
+      "paid": "paid",
+      "partially_paid": "partially paid",
+      "unpaid": "unpaid"
+    }
   },
   "status": {
     "draft": "Draft",
@@ -27650,6 +27767,12 @@
     "password_change_hint": "(leave empty to keep)",
     "password_min": "Min. 12 characters.",
     "is_last_admin_lock": "Only admin — cannot be deactivated",
+    "mfa_none": "No 2FA",
+    "mfa_none_hint": "The user has neither an authenticator app nor a passkey. Sign-in is protected only by the e-mail code, if enabled.",
+    "mfa_totp": "TOTP",
+    "mfa_totp_hint": "Authenticator app (TOTP)",
+    "mfa_passkeys": "Passkey ({count})",
+    "mfa_passkeys_hint": "Active passkeys: {count}",
     "last_admin_alert": "Cannot deactivate the last active admin. Promote another user to admin first.",
     "last_admin_form": "This is the last active admin — cannot remove admin role or deactivate. Promote another user first.",
     "deactivate_confirm": "Deactivate user {email}?",
@@ -27688,6 +27811,7 @@
       "document_request_reminder": "Missing document reminder",
       "purchase_invoice_approval": "Received document approval (cost centre manager)",
       "user_invite": "New user invitation",
+      "user_sso_invite": "Invitation to sign in with your organisation account",
       "payroll_document_secure_link": "Secure link to payroll document",
       "payroll_document_access_code": "Verification code for payroll document"
     },
@@ -32014,6 +32138,11 @@
             "fix": "Check that the cron service (Linux) or Task Scheduler (Windows) is running and that the jobs run under an account allowed to write into log/ and storage/. The Scheduled jobs page has instructions with this server's paths."
           }
         }
+      },
+      "oidc_config": {
+        "label": "Sign-in via identity provider",
+        "impact": "An incompletely configured provider is not enabled and its button is missing. Without the __Host- prefix on the session cookie a sibling subdomain can force a sign-in into a foreign account.",
+        "fix": "Fill in the provider values named in the error (auth.oidc.providers) and keep session.cookie_name with the __Host- prefix."
       },
       "app_debug": {
         "label": "Debug mode",

@@ -23,6 +23,7 @@ use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\AdvanceCycleLock;
 use MyInvoice\Service\Invoice\InvoiceCalendar;
 use MyInvoice\Service\Invoice\InvoiceIssuer;
+use MyInvoice\Service\Invoice\InvoiceOtherItemLinkService;
 use MyInvoice\Service\Invoice\InvoiceCalculator;
 use MyInvoice\Service\Invoice\LineDiscount;
 use MyInvoice\Service\IpMatcher;
@@ -248,6 +249,10 @@ final class CancelInvoiceAction
             // dobropis nic nesnižuje a stornovaná faktura nemá co započíst.
             $this->creditNoteOffsets->revertForDocument($supplierId, 'invoice', (int) $invoice['id']);
 
+            // Vazba na ostatní pohledávku (migrace 2246) padá se stornem i se zrcadlenými
+            // úhradami; pohledávka a její úhrady zůstávají. Obnovení storna ji nevrací.
+            $detachedOtherItem = InvoiceOtherItemLinkService::detachForCancel($pdo, $supplierId, (int) $invoice['id']);
+
             // 1. Vytvoř cancellation záznam (interní, bez varsymbolu)
             $stmt = $pdo->prepare(
                 'INSERT INTO invoices
@@ -350,6 +355,12 @@ final class CancelInvoiceAction
             'cancellation_id' => $cancellationId,
             'reason' => $reason,
         ], $ip, $request->getHeaderLine('User-Agent'));
+        if ($detachedOtherItem !== null) {
+            $this->logger->log('invoice.other_item_unlinked', $userId, 'invoice', $invoice['id'], [
+                'other_item_id' => $detachedOtherItem,
+                'trigger' => 'cancel',
+            ], $ip, $request->getHeaderLine('User-Agent'));
+        }
 
         // Prodej majetku (1177): stornovaná faktura prodej neuskutečnila → karty navázané na
         // její řádky se vrací do užívání. Mimo transakci storna a s polykáním chyb (AssetService

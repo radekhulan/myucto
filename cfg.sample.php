@@ -261,6 +261,54 @@ return [
             'trusted_device_days'     => 30,    // „zapamatovat toto zařízení" na kolik dní
             'trusted_cookie_name'     => '__Host-myinvoice_td', // pro HTTP dev změnit (viz session.cookie_name)
         ],
+
+        // Přihlášení přes poskytovatele identity (OpenID Connect). Aplikaci si u
+        // poskytovatele registruje každá instalace sama, návratová adresa je vždy
+        // {app.url}/api/auth/oidc/<poskytovatel>/callback (app.url musí být https).
+        // Účty v MyÚčto zakládá dál správce; s identitou se propojí pozvánkou
+        // (Nastavení → Uživatelé) nebo z profilu. Podle e-mailu se nepropojuje nikdy.
+        //
+        // Microsoft Entra ID nahrazuje celé přihlášení včetně MFA (MFA vynucuje
+        // tenant, typicky Conditional Access). Firma může v Nastavení → Přihlášení
+        // vyžadovat přihlášení výhradně přes Entra; heslo a passkey tam pak neplatí.
+        // Tajemství patří do ENV (MYINVOICE_OIDC_ENTRA_CLIENT_SECRET), ne sem.
+        'oidc' => [
+            'enabled'                => false,
+            'session_lifetime_hours' => 12,   // sezení z poskytovatele platí kratší dobu (zablokovaný uživatel)
+            'break_glass_roles'      => ['instance_admin'], // smí vždy heslo + MFA
+            'providers' => [
+                'entra' => [
+                    'enabled'       => false,
+                    'label'         => 'Microsoft',
+                    'tenant_id'     => '', // Directory (tenant) ID, GUID; ne common/organizations
+                    'client_id'     => '', // Application (client) ID
+                    'client_secret' => '', // ENV MYINVOICE_OIDC_ENTRA_CLIENT_SECRET
+                    'allow_guests'  => false, // true = smí i hosté B2B tenantu
+                ],
+                // Google, Apple a Seznam nahrazují jen heslo. Druhý faktor (passkey,
+                // TOTP) se po návratu ověří v MyÚčto stejně jako po hesle, citlivé
+                // operace je potvrdit nemohou a firma je nemůže vynutit.
+                'google' => [
+                    'enabled'       => false,
+                    'client_id'     => '', // …apps.googleusercontent.com
+                    'client_secret' => '', // ENV MYINVOICE_OIDC_GOOGLE_CLIENT_SECRET
+                    'allowed_hosted_domains' => [], // jen účty Google Workspace těchto domén
+                ],
+                'apple' => [
+                    'enabled'          => false,
+                    'team_id'          => '', // Team ID (10 znaků)
+                    'key_id'           => '', // Key ID klíče Sign in with Apple
+                    'services_id'      => '', // Services ID = client_id webu
+                    'private_key'      => '', // obsah .p8, ENV MYINVOICE_OIDC_APPLE_PRIVATE_KEY
+                    'private_key_file' => '', // nebo cesta k .p8 mimo webroot
+                ],
+                'seznam' => [
+                    'enabled'       => false,
+                    'client_id'     => '',
+                    'client_secret' => '', // ENV MYINVOICE_OIDC_SEZNAM_CLIENT_SECRET
+                ],
+            ],
+        ],
     ],
     'smtp' => [
         // Connection

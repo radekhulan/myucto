@@ -159,6 +159,14 @@
     "dismiss": "Nepoužívat"
   },
   "other_items": {
+    "documents_settings": {
+      "title": "Složka dokumentů",
+      "hint": "Soubory nahrané k ostatní pohledávce nebo závazku se uloží do této složky v Dokumentech. {'{'}YYYY{'}'} a {'{'}MM{'}'} se nahradí rokem a měsícem data vystavení.",
+      "folder_label": "Složka",
+      "preview": "Například: {folder}",
+      "reset": "Výchozí složka",
+      "saved": "Složka dokumentů je uložená"
+    },
     "posting": {
       "title": "Účtování",
       "hint": "Kontace vzniku a úhrad. Vlastní kontace položky má přednost před účetním profilem druhu, bez obou platí výchozí účty.",
@@ -498,7 +506,8 @@
     "remaining_payment": "Zbývá zaplatit vč. úroku a poplatku",
     "remaining_payment_hint": "Součet nezaplacených splátek. Saldo položky snižuje jen jistina, úrok a poplatek se zaúčtují s úhradou.",
     "allocation_split": "jistina {principal}, úrok {interest}, poplatek {fee}",
-    "allocation_split_hint": "Platba se rozdělí podle splátek: nejdřív úrok, pak poplatek a nakonec jistina."
+    "allocation_split_hint": "Platba se rozdělí podle splátek: nejdřív úrok, pak poplatek a nakonec jistina.",
+    "linked_invoice": "Navázaná faktura"
   },
   "internal_documents": {
     "title": "Interní doklady",
@@ -14448,6 +14457,7 @@
     "choose_files": "Vybrat soubory",
     "drop_hint": "Přetáhněte sem doklady (PDF, JPG, PNG, ISDOC, XML), nebo je vyberte tlačítkem.",
     "drop_rejected": "Některé soubory nemají podporovaný formát a vynechali jsme je: {names}",
+    "remove_file": "Odebrat {name}",
     "files_selected": "Vybráno souborů: {n}",
     "uploading": "Předávám…",
     "submit_action": "Předat účetní",
@@ -14590,6 +14600,12 @@
     "volume_hint_bank_transactions": "Pohyby ze všech bankovních výpisů firmy.",
     "volume_hint_cash_documents": "Zaúčtované a stornované pokladní doklady bez konceptů.",
     "volume_hint_journal_entries": "Všechny zápisy v účetním deníku včetně storen."
+  },
+  "pending_documents": {
+    "folder_hint": "Nové soubory se po uložení nahrají do složky {folder}.",
+    "new_badge": "NOVÝ",
+    "empty": "Kupní smlouvu nebo jiný podklad můžete nahrát nebo připojit už teď, uloží se spolu s dokladem.",
+    "failed": "Doklad je uložený, ale {count} dokumentů se nepodařilo nahrát nebo připojit."
   },
   "linked_documents": {
     "title": "Přílohy",
@@ -18341,7 +18357,10 @@
         "advance_unpaid": "Záloha se zaúčtuje při úhradě (314). Spárujte s ní platbu z banky nebo ji uhraďte pokladnou, ne konečnou fakturu.",
         "advance_posted": "Záloha se neúčtuje jako předpis. Její zaúčtování tvoří úhrada na účet zálohy a zúčtování zálohy v konečné faktuře.",
         "relation_advance_payment": "Úhrada zálohy",
-        "relation_advance_final": "Zúčtování v konečné faktuře"
+        "relation_advance_final": "Zúčtování v konečné faktuře",
+        "relation_other_item": "Ostatní pohledávka",
+        "open_other_item": "Pohledávka {item}",
+        "other_item_covered": "Faktura vlastní zápis nemá, účtuje ji zápis navázané ostatní pohledávky. Opravuje se v detailu pohledávky."
       },
       "internal_document_badge": "Interní doklad",
       "internal_document_reversal_badge": "Storno interního dokladu"
@@ -22693,6 +22712,77 @@
     "result_backup": "Záloha přepsaných souborů",
     "how_native_manual": "Když automatická cesta nejde (chybí práva, PHP CLI nebo místo na disku), stejný bundle nasadíte ručně:"
   },
+  "sso": {
+    "login_with": "Přihlásit se přes {provider}",
+    "required_notice": "Váš účet se přihlašuje přes účet organizace (Microsoft Entra ID). Pokračujte tlačítkem níže.",
+    "unlock_with": "Odemknout přes {provider}",
+    "ticket_notice": "Přihlašujete se přes {provider}.",
+    "ticket_cancel": "Přihlásit se jinak",
+    "redirecting": "Přesměrovávám…",
+    "step_up_button": "Ověřit přes Microsoft Entra ID",
+    "step_up_hint": "Místo hesla se můžete ověřit účtem organizace. Otevře se nové okno, rozdělaná práce tady zůstane.",
+    "step_up_waiting": "Dokončete ověření v otevřeném okně. Když ho zavřete, klikněte na tlačítko znovu.",
+    "step_up_popup_blocked": "Prohlížeč zablokoval okno ověření. Povolte pro tento web vyskakovací okna a zkuste to znovu.",
+    "step_up_failed": "Ověření přes Microsoft Entra ID se nepodařilo zahájit.",
+    "step_up_done": "Ověřeno přes Microsoft Entra ID, pokračujte.",
+    "step_up_verified": "Ověřeno přes Microsoft Entra ID",
+    "linked_toast": "Účet je propojený.",
+    "unlinked_toast": "Propojení bylo zrušeno.",
+    "profile_tab": "Propojené účty",
+    "profile_title": "Propojené účty",
+    "profile_description": "Po propojení se přihlásíte účtem u vybraného poskytovatele. U pracovního účtu Microsoft Entra ID řídí ověření včetně dvoufázového vaše organizace. U ostatních poskytovatelů aplikace dál vyžaduje druhý faktor, pokud ho máte nastavený.",
+    "link_button": "Propojit s {provider}",
+    "confirm_link": "Pokračovat k propojení",
+    "unlink_button": "Odpojit",
+    "unlink_blocked": "Propojení nelze zrušit, firma vyžaduje přihlášení přes účet organizace.",
+    "reauth_link": "Před propojením s {provider} potvrďte, že jste to vy.",
+    "reauth_unlink": "Před odpojením od {provider} potvrďte, že jste to vy.",
+    "reauth_required": "Ověřte se přístupovým klíčem, účtem organizace nebo heslem.",
+    "reauth_or_password": "nebo zadejte heslo",
+    "global_admin_password_login": "Technický účet správce instance? Přihlásit se heslem",
+    "policy_global": "Přihlášení přes {provider} je vynucené pro celou instalaci, pro všechny firmy včetně nově založených. Heslem se přihlásí jen technický účet správce instance.",
+    "verify_passkey": "Ověřit přístupovým klíčem",
+    "passkey_failed": "Ověření přístupovým klíčem se nepodařilo.",
+    "identities_empty": "Žádný účet zatím není propojený.",
+    "identities_load_failed": "Propojené účty se nepodařilo načíst.",
+    "linked_at": "Propojeno",
+    "last_used": "Naposledy použito",
+    "policy_title": "Přihlášení",
+    "policy_intro": "Určete, jak se členové této firmy přihlašují.",
+    "policy_any": "Libovolným povoleným způsobem",
+    "policy_any_hint": "Heslo, přístupový klíč i účet organizace.",
+    "policy_required": "Jen přes účet organizace",
+    "policy_required_hint": "Heslo ani přístupový klíč do firmy nepustí. Zapnout to lze jen po přihlášení přes účet organizace.",
+    "policy_provider": "Poskytovatel identity",
+    "policy_users_without_identity": "Počet členů firmy bez propojeného účtu organizace: {count}. Po zapnutí se nepřihlásí, dokud účet nepropojí.",
+    "policy_read_only": "Přihlášení firmy nastavuje jen správce firmy.",
+    "policy_save": "Uložit přihlášení",
+    "policy_saved": "Nastavení přihlášení je uložené.",
+    "policy_load_failed": "Nastavení přihlášení se nepodařilo načíst.",
+    "policy_session_required": "Vynucení zapněte až po přihlášení přes účet organizace, jinak byste si přístup do firmy zavřeli.",
+    "admin_title": "Propojené identity",
+    "admin_hint": "Účty u poskytovatelů identity, kterými se uživatel přihlašuje. Pozvánka mu přijde e-mailem a propojí účet po přihlášení.",
+    "admin_invite": "Pozvat k přihlášení přes {provider}",
+    "admin_invite_sent": "Pozvánka odešla na {email}.",
+    "admin_invite_mail_failed": "Pozvánku se nepodařilo odeslat. Zkontrolujte nastavení odchozí pošty.",
+    "admin_invite_inactive": "Deaktivovanému uživateli pozvánku neposíláme.",
+    "admin_unlink_confirm": "Zrušit propojení {provider} u účtu {email}?",
+    "errors": {
+      "generic": "Přihlášení přes poskytovatele identity se nepodařilo.",
+      "sso_disabled": "Přihlášení přes tohoto poskytovatele není v této instalaci zapnuté.",
+      "sso_flow_invalid": "Přihlášení vypršelo nebo bylo otevřené v jiném prohlížeči. Zkuste to znovu.",
+      "sso_provider_error": "Poskytovatel identity přihlášení odmítl.",
+      "sso_provider_unavailable": "Poskytovatel identity je teď nedostupný. Zkuste to za chvíli.",
+      "sso_token_invalid": "Odpověď poskytovatele identity se nepodařilo ověřit.",
+      "sso_not_linked": "Tento účet není propojený s žádným účtem v aplikaci. Po přihlášení heslem ho propojte v profilu, nebo požádejte správce o pozvánku.",
+      "sso_already_linked": "Tento účet je už propojený s jiným uživatelem.",
+      "sso_invite_invalid": "Pozvánka je neplatná nebo vypršela. Požádejte správce o novou.",
+      "sso_user_inactive": "Účet v aplikaci je deaktivovaný.",
+      "sso_identity_mismatch": "Přihlásili jste se jiným účtem, než pro který je pozvánka nebo propojení.",
+      "sso_cancelled": "Přihlášení bylo zrušeno.",
+      "sso_domain_not_allowed": "Účet Google není z domény organizace, kterou tato instalace povoluje. Přihlaste se pracovním účtem Google Workspace."
+    }
+  },
   "session_lock": {
     "title": "Aplikace je zamčená",
     "message": "Kvůli nečinnosti je potřeba znovu ověřit vaši totožnost.",
@@ -23118,6 +23208,10 @@
     "confirm": "Potvrdit",
     "close": "Zavřít",
     "preview_side_title": "Náhled originálu",
+    "pdf_preview_loading": "Načítám náhled PDF…",
+    "pdf_preview_failed": "Náhled PDF se nepodařilo zobrazit.",
+    "pdf_preview_open": "Otevřít PDF",
+    "pdf_preview_truncated": "Zobrazeno {shown} z {total} stran.",
     "preview_side_close": "Zavřít náhled",
     "preview_side_empty": "Doklad nemá přiložený originál.",
     "preview_side_show": "Zobrazit originál",
@@ -24303,7 +24397,30 @@
     "bulk_oss_failure_not_attempted": "Nezkoušeno dokladů: {n}",
     "bulk_oss_failure_pdf_stale": "Nepodařilo se zneplatnit cache PDF u {n} dokladů",
     "bulk_oss_failure_retry_hint": "Nezpracované doklady zůstaly beze změny a máte je vybrané - po odstranění příčiny spusťte akci znovu jen nad nimi.",
-    "bulk_oss_pdf_stale_hint": "Data jsou zapsaná, ale uložené PDF je staré. Vygenerujte je znovu, než doklad odešlete."
+    "bulk_oss_pdf_stale_hint": "Data jsou zapsaná, ale uložené PDF je staré. Vygenerujte je znovu, než doklad odešlete.",
+    "other_item_link": {
+      "action": "Navázat na ostatní pohledávku",
+      "action_tooltip": "Faktura nebude mít vlastní zaúčtování, účtuje ji ostatní pohledávka a převezme její úhrady.",
+      "badge": "Ostatní pohledávka",
+      "linked": "Fakturu účtuje ostatní pohledávka",
+      "unlink": "Odpojit",
+      "unlink_confirm": "Odpojit fakturu od ostatní pohledávky? Faktura přijde o úhrady pohledávky a zůstane nezaúčtovaná, zaúčtujete ji běžným postupem.",
+      "linked_toast": "Faktura je navázaná na ostatní pohledávku.",
+      "unlinked_toast": "Faktura je odpojená od ostatní pohledávky.",
+      "suggestion": "Faktura odpovídá ostatní pohledávce {item} ({amount}) se stejným VS. Navázaná faktura výnos podruhé neúčtuje a převezme úhrady pohledávky.",
+      "link_suggested": "Navázat",
+      "choose_other": "Vybrat jinou",
+      "modal_title": "Navázat na ostatní pohledávku",
+      "modal_hint": "Zaúčtované ostatní pohledávky ve stejné měně. Navázat lze jen pohledávku se stejnou částkou jako faktura.",
+      "search": "Hledat číslo, partnera, VS…",
+      "no_candidates": "Žádná zaúčtovaná ostatní pohledávka k navázání.",
+      "amount_mismatch": "Částka pohledávky se liší od částky faktury.",
+      "vs_match": "Shoda VS",
+      "vs": "VS",
+      "paid": "uhrazeno",
+      "partially_paid": "částečně uhrazeno",
+      "unpaid": "neuhrazeno"
+    }
   },
   "status": {
     "draft": "Koncept",
@@ -27650,6 +27767,12 @@
     "password_change_hint": "(nechte prázdné, pokud neměníte)",
     "password_min": "Min. 12 znaků.",
     "is_last_admin_lock": "Jediný admin - nelze deaktivovat",
+    "mfa_none": "Bez 2FA",
+    "mfa_none_hint": "Uživatel nemá nastavenou aplikaci ani passkey. Přihlášení může chránit jen e-mailový kód, je-li zapnutý.",
+    "mfa_totp": "TOTP",
+    "mfa_totp_hint": "Ověřovací aplikace (TOTP)",
+    "mfa_passkeys": "Passkey ({count})",
+    "mfa_passkeys_hint": "Aktivní passkeys: {count}",
     "last_admin_alert": "Nelze deaktivovat posledního aktivního admina. Nejprve povýš jiného uživatele na admin roli.",
     "last_admin_form": "Toto je poslední aktivní admin - nelze odebrat admin roli ani deaktivovat. Nejprve povýš jiného uživatele.",
     "deactivate_confirm": "Deaktivovat uživatele {email}?",
@@ -27688,6 +27811,7 @@
       "document_request_reminder": "Připomínka chybějícího dokladu",
       "purchase_invoice_approval": "Schválení přijatého dokladu (manažer střediska)",
       "user_invite": "Pozvánka nového uživatele",
+      "user_sso_invite": "Pozvánka k přihlášení účtem organizace",
       "payroll_document_secure_link": "Zabezpečený odkaz na mzdový dokument",
       "payroll_document_access_code": "Ověřovací kód pro mzdový dokument"
     },
@@ -32014,6 +32138,11 @@
             "fix": "Zkontrolujte, že běží služba cron (Linux) nebo Task Scheduler (Windows) a že jsou úlohy naplánované pod účtem s právem zápisu do log/ a storage/. Návod s cestami tohoto serveru je na stránce Plánované úlohy."
           }
         }
+      },
+      "oidc_config": {
+        "label": "Přihlášení přes poskytovatele identity",
+        "impact": "Neúplně nastavený poskytovatel se nezapne a jeho tlačítko chybí. Bez prefixu __Host- u session cookie může sesterská subdoména vnutit prohlížeči přihlášení do cizího účtu.",
+        "fix": "Doplňte chybějící hodnoty poskytovatele podle chyby (auth.oidc.providers) a ponechte session.cookie_name s prefixem __Host-."
       },
       "app_debug": {
         "label": "Ladicí režim",

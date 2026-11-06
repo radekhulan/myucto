@@ -2534,6 +2534,7 @@ final class BankStatementAction
                     WHERE i.supplier_id = ?
                       AND i.status IN ('issued','sent','reminded','paid')
                       AND i.invoice_type IN ('invoice','proforma','credit_note')
+                      AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i') . "
                       AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";
 
         $purchase = "SELECT 'purchase_invoice' AS mtype, p.id,
@@ -2750,7 +2751,8 @@ final class BankStatementAction
                  WHERE i.supplier_id = ?
                    AND i.client_id IS NOT NULL
                    AND i.status IN ('issued','sent','reminded','paid')
-                   AND i.invoice_type IN ('invoice','proforma')";
+                   AND i.invoice_type IN ('invoice','proforma')
+                   AND " . \MyInvoice\Service\Invoice\InvoiceOtherItemPayments::notLinkedSql('i');
         $params = [$sid];
         if ($useWindow) {
             $sql .= " AND (ABS(DATEDIFF(i.due_date, ?)) <= ? OR ABS(DATEDIFF(i.issue_date, ?)) <= ?)";

@@ -16,6 +16,7 @@ import { ICONS, btnFilled, btnFilledSm, btnOutline, btnOutlineSm } from '@/compo
 import ApprovalStatusBadge from '@/components/purchase/ApprovalStatusBadge.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
+import PdfFrame from '@/components/documents/PdfFrame.vue'
 
 /**
  * Schvalovací schránka (F6): doklady, které čekají na rozhodnutí odpovědné osoby střediska.
@@ -262,7 +263,7 @@ async function confirmReject(): Promise<void> {
               </tr>
               <tr v-if="previewId === row.id">
                 <td :colspan="scope === 'all' || tab === 'decided' ? 8 : 7" class="p-0 bg-neutral-50">
-                  <iframe :src="pdfSrc(row)" :title="t('purchase_approval.action.preview')" class="w-full h-[70vh] border-0" />
+                  <PdfFrame :src="pdfSrc(row)" :title="t('purchase_approval.action.preview')" class="block w-full h-[70vh] border-0" />
                 </td>
               </tr>
             </template>
