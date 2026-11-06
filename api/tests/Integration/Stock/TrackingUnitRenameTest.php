@@ -574,6 +574,7 @@ final class TrackingUnitRenameTest extends StockTestCase
     public function testClientRoleRoutePolicyDoesNotAllowTheNewPut(): void
     {
         self::assertFalse(ClientStockRoutePolicy::allows('PUT', '/api/stock/items/5/tracking-units/9', 'stock.items.write'));
+        self::assertFalse(ClientStockRoutePolicy::allows('GET', '/api/stock/items/5/tracking-units', 'stock'));
         self::assertTrue(ClientStockRoutePolicy::allows('GET', '/api/stock/items/5/tracking', 'stock'), 'Čtení šarží klientovi zůstává.');
     }
 
@@ -737,6 +738,55 @@ final class TrackingUnitRenameTest extends StockTestCase
             $stale->execute([$sid]);
             self::assertSame(0, (int) $stale->fetchColumn(), 'Žádný řádek nezůstal se starým kódem.');
         }
+    }
+
+    // ── seznam šarží pro editor karty ───────────────────────────────────────
+
+    public function testLotUnitsListIsPagedSearchableAndIncludesZeroStockLots(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $item = $this->lotItem($sid, 'REN-LIST');
+        foreach (['A-01', 'A-02', 'A-03', 'A-04', 'A-05', 'X_Y', 'P%Q'] as $lot) {
+            $this->receiveLot($sid, $wh, $item, '1', $lot, $lot === 'A-02' ? '2027-05-01' : null);
+        }
+        $this->receiveLot($sid, $wh, $item, '1', 'ZERO', null);
+        $issue = $this->documents->create($sid, [
+            'doc_type' => 'issue', 'origin' => 'manual', 'warehouse_id' => $wh, 'doc_date' => '2099-02-01',
+            'description' => 'Výdej celé šarže',
+            'lines' => [['stock_item_id' => $item, 'qty' => '1.000', 'tracking_allocations' => [['quantity' => '1', 'lot_code' => 'ZERO']]]],
+        ], $this->userId);
+        $this->documents->post($sid, (int) $issue['id'], $this->userId);
+        $serialItem = $this->item($sid, 'REN-LIST-S');
+        $this->db->pdo()->prepare("UPDATE stock_items SET tracking_mode = 'serial' WHERE supplier_id = ? AND id = ?")->execute([$sid, $serialItem]);
+        $this->receiveSerial($sid, $wh, $serialItem, 'SN-1');
+
+        $list = fn (int $itemId, array $query, int $supplier = 0): array => $this->body($this->container->get(StockTrackingAction::class)->units(
+            $this->request($supplier ?: $sid)->withQueryParams($query), new Psr7Response(), ['id' => (string) $itemId],
+        ));
+
+        $first = $list($item, ['per_page' => 5]);
+        self::assertSame(['id', 'lot_code', 'expires_on'], array_keys($first['data'][0]), 'Jen kmen šarže, bez pohybů a historie.');
+        self::assertSame(['A-01', 'A-02', 'A-03', 'A-04', 'A-05'], array_column($first['data'], 'lot_code'));
+        self::assertSame('2027-05-01', $first['data'][1]['expires_on']);
+        self::assertSame(['total' => 8, 'page' => 1, 'per_page' => 5, 'pages' => 2], $first['meta']);
+        $second = $list($item, ['per_page' => 5, 'page' => 2]);
+        self::assertCount(3, $second['data']);
+        self::assertContains('ZERO', array_column($second['data'], 'lot_code'), 'Šarže s nulovým stavem je v seznamu.');
+        self::assertSame($this->unitId($sid, $item, 'A-01'), $first['data'][0]['id']);
+
+        self::assertSame(['A-03'], array_column($list($item, ['q' => 'a-03'])['data'], 'lot_code'), 'Hledání nerozlišuje velikost písmen.');
+        self::assertSame(5, $list($item, ['q' => 'A-'])['meta']['total']);
+        self::assertSame(['X_Y'], array_column($list($item, ['q' => '_'])['data'], 'lot_code'), 'Podtržítko se nehledá jako zástupný znak.');
+        self::assertSame(['P%Q'], array_column($list($item, ['q' => '%'])['data'], 'lot_code'), 'Procento se nehledá jako zástupný znak.');
+        self::assertSame([], $list($item, ['q' => 'neni'])['data']);
+
+        self::assertSame([], $list($serialItem, [])['data'], 'Sériová čísla se nevracejí.');
+        $foreign = $this->createSupplier();
+        $res = $this->container->get(StockTrackingAction::class)->units(
+            $this->request($foreign), new Psr7Response(), ['id' => (string) $item],
+        );
+        $this->assertError($res, 404, 'not_found');
     }
 
     // ── pomocníci ───────────────────────────────────────────────────────────

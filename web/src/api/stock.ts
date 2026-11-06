@@ -587,6 +587,13 @@ export interface StockTrackingUnitPayload {
   expires_on?: string | null
 }
 
+/** Šarže karty v seznamu k opravě (kmen šarže bez pohybů). */
+export interface StockTrackingLotUnit {
+  id: number
+  lot_code: string
+  expires_on: string | null
+}
+
 export interface StockTrackingUnitResult {
   unit: { id: number; lot_code: string; expires_on: string | null }
   updated: { invoices: number; stock_drafts: number; stock_posted: number; fulfillment: number }
@@ -1177,6 +1184,11 @@ export const stockApi = {
   trackingChoices: (id: number, params: { warehouse_id?: number | null; invoice_id?: number | null }) =>
     api.get<StockTrackingChoices>(`/stock/items/${id}/tracking-choices`, {
       params: { warehouse_id: params.warehouse_id ?? undefined, invoice_id: params.invoice_id ?? undefined },
+    }).then(r => r.data),
+  /** Šarže karty po stránkách (lehké, bez historie pohybů), volitelně hledání v kódu. */
+  listTrackingUnits: (itemId: number, params: { q?: string; page?: number; per_page?: number } = {}) =>
+    api.get<{ data: StockTrackingLotUnit[]; meta: StockPageMeta }>(`/stock/items/${itemId}/tracking-units`, {
+      params: { q: params.q || undefined, page: params.page ?? undefined, per_page: params.per_page ?? undefined },
     }).then(r => r.data),
   /** Oprava šarže na kartě; nový text se propíše do konceptů a zaúčtovaných skladových dokladů. */
   updateTrackingUnit: (itemId: number, unitId: number, payload: StockTrackingUnitPayload) =>

@@ -948,6 +948,13 @@ function validatePriceLevels(): string | null {
 }
 
 const trackingLots = useTrackingLots(() => itemId.value ?? 0)
+const lotSearch = ref('')
+let lotSearchTimer: ReturnType<typeof setTimeout> | undefined
+/** Hledání v kódech šarží se spouští po chvíli od posledního písmena; změněné šarže zůstávají v paměti. */
+function onLotSearch() {
+  clearTimeout(lotSearchTimer)
+  lotSearchTimer = setTimeout(() => { void trackingLots.load(lotSearch.value) }, 300)
+}
 
 /**
  * Balení a zákaznické ceny mají vlastní endpointy. Když se nenačtou, editor
@@ -1311,6 +1318,7 @@ onMounted(() => {
 onBeforeUnmount(() => {
   window.removeEventListener('beforeunload', onBeforeUnload)
   window.removeEventListener('resize', showActiveTab)
+  clearTimeout(lotSearchTimer)
 })
 
 /**
@@ -1598,7 +1606,11 @@ function onImgError(e: Event) {
               <h3 class="text-sm font-semibold text-neutral-800">{{ t('stock.tracking.lots_title') }}</h3>
               <p class="text-xs text-neutral-500 mt-0.5">{{ t('stock.tracking.lots_hint') }}</p>
             </div>
-            <p v-if="trackingLots.rows.value.length === 0" class="text-xs text-neutral-500">{{ t('stock.tracking.lots_empty') }}</p>
+            <input v-if="trackingLots.total.value > 10 || lotSearch !== ''" v-model="lotSearch" type="search" maxlength="100" data-test="lot-search"
+              :placeholder="t('stock.tracking.lots_search')" :aria-label="t('stock.tracking.lots_search')"
+              class="w-full sm:w-72 h-10 px-3 border border-neutral-300 rounded-md focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none"
+              @input="onLotSearch" />
+            <p v-if="trackingLots.rows.value.length === 0" class="text-xs text-neutral-500">{{ lotSearch !== '' ? t('stock.tracking.lots_none_found') : t('stock.tracking.lots_empty') }}</p>
             <div v-for="row in trackingLots.rows.value" :key="`lot-${row.id}`" data-test="lot-row">
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -1614,6 +1626,10 @@ function onImgError(e: Event) {
               </div>
               <p v-if="row.error" class="text-xs text-danger-600 mt-1" role="alert" data-test="lot-error">{{ row.error }}</p>
             </div>
+            <button v-if="trackingLots.hasMore.value" type="button" data-test="lots-more"
+              class="h-9 px-3 text-sm border border-neutral-300 rounded-md hover:bg-neutral-50" @click="trackingLots.loadMore()">
+              {{ t('stock.tracking.lots_more', { shown: trackingLots.rows.value.length, total: trackingLots.total.value }) }}
+            </button>
           </div>
 
           <!-- Balení (nadřazené jednotky) u základní jednotky, ukládá se společným Uložit -->

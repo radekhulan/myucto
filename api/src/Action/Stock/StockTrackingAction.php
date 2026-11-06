@@ -16,6 +16,7 @@ use MyInvoice\Service\Pdf\InvoicePdfRenderer;
 use MyInvoice\Service\Stock\ExactUnitConversion;
 use MyInvoice\Service\Stock\StockException;
 use MyInvoice\Service\Stock\TrackingUnitRenameService;
+use MyInvoice\Support\Pagination;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -152,6 +153,23 @@ final class StockTrackingAction
             if ($this->db->pdo()->inTransaction()) $this->db->pdo()->rollBack();
             throw $e;
         }
+    }
+
+    /**
+     * Šarže karty po stránkách (id, kód, datum spotřeby), volitelně hledání v kódu.
+     * Lehká alternativa k `item()`, který vrací i celou historii pohybů.
+     */
+    public function units(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) return $err;
+        $item = $this->tracking->item($supplierId, (int) $args['id']);
+        if ($item === null) return Json::error($response, 'not_found', 'Skladová karta nenalezena.', 404);
+        $query = $request->getQueryParams();
+        $search = isset($query['q']) && is_string($query['q']) ? mb_substr(trim($query['q']), 0, 100) : null;
+        $p = Pagination::fromQuery($query, 50);
+        [$rows, $total] = $this->tracking->lotUnitsPaged($supplierId, (int) $item['id'], $search, $p['per_page'], $p['offset']);
+        return Json::ok($response, Pagination::envelope($rows, $total, $p['page'], $p['per_page']));
     }
 
     /**

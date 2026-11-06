@@ -326,6 +326,35 @@ final class StockTrackingRepository
         return $out;
     }
 
+    /**
+     * Šarže karty (bez sériových čísel) po stránkách, pro editor karty: jen kmen šarže
+     * (id, kód, datum spotřeby), bez pohybů a historie, takže cena dotazu nezávisí na počtu
+     * pohybů. Pořadí podle `tracking_key` (`lot:KÓD|DATUM`) jde po indexu identity šarže.
+     * `$search` hledá podmnožinu kódu bez ohledu na velikost písmen a diakritiku.
+     *
+     * @return array{0:list<array{id:int, lot_code:string, expires_on:?string}>, 1:int} řádky stránky a celkový počet
+     */
+    public function lotUnitsPaged(int $supplierId, int $itemId, ?string $search, int $limit, int $offset): array
+    {
+        $where = "supplier_id = ? AND stock_item_id = ? AND tracking_type = 'lot'";
+        $params = [$supplierId, $itemId];
+        if ($search !== null && $search !== '') {
+            $where .= " AND lot_code LIKE ? ESCAPE '|'";
+            $params[] = '%' . strtr($search, ['|' => '||', '%' => '|%', '_' => '|_']) . '%';
+        }
+        $pdo = $this->db->pdo();
+        $count = $pdo->prepare("SELECT COUNT(*) FROM stock_tracking_units WHERE $where");
+        $count->execute($params);
+        $stmt = $pdo->prepare("SELECT id, lot_code, expires_on FROM stock_tracking_units WHERE $where ORDER BY tracking_key LIMIT " . max(1, $limit) . ' OFFSET ' . max(0, $offset));
+        $stmt->execute($params);
+        $rows = array_map(static fn (array $row): array => [
+            'id' => (int) $row['id'],
+            'lot_code' => (string) $row['lot_code'],
+            'expires_on' => $row['expires_on'] === null ? null : (string) $row['expires_on'],
+        ], $stmt->fetchAll(PDO::FETCH_ASSOC));
+        return [$rows, (int) $count->fetchColumn()];
+    }
+
     /** Oprava kódu a expirace šarže; klíč odvozuje volající ({@see \MyInvoice\Service\Stock\TrackingAllocationService::trackingKey()}). */
     public function updateUnitIdentity(int $supplierId, int $itemId, int $unitId, string $key, string $lot, ?string $expires): void
     {
