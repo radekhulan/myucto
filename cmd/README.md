@@ -62,6 +62,7 @@ má vždy přednost před oběma.
 | `cron-scan-purchase-inbox.{cmd,sh}` | Import nových přijatých dokladů z nastaveného inbox adresáře |
 | `cron-payment-thanks.{cmd,sh}` | Každou minutu zpracuje poděkování za potvrzené úhrady a odložené e-maily; během otevřené účetní transakce se nic neodesílá |
 | `cron-send-reminders.{cmd,sh}` | Odeslání upomínkových e-mailů na faktury po splatnosti (`--days=N`, `--cooldown=N`, `--dry-run`) |
+| `cron-scheduled-pohoda-export.{cmd,sh}` | Plánovaný export vydaných dokladů do Pohody e-mailem účetní (nastavení: Export → Automatický export do Pohody; `--dry-run`) |
 | `cron-send-approval-reminders.{cmd,sh}` | Upomínky zákazníkům, kteří neschválili výkaz víceprací (`--days=N`, `--dry-run`) |
 | `cron-purchase-approval-reminders.{cmd,sh}` | Připomínky schvalovatelům přijatých dokladů (schvalování manažerem střediska; `--days=N`, `--dry-run`) |
 | `cron-document-request-reminders.{cmd,sh}` | Upomínky na nevyřízené požadavky na dodání dokladů |
@@ -157,6 +158,7 @@ při přidání nové citlivé cesty rozšiř seznam v něm i tady.
 | `cron-scan-purchase-inbox` | každých 10 minut | `*/10 * * * *` |
 | `cron-payment-thanks` | každou minutu | `* * * * *` |
 | `cron-send-reminders` | 1× denně (pracovní dny) | 09:00, Po–Pá |
+| `cron-scheduled-pohoda-export` | 1× denně | 06:30 |
 | `cron-send-approval-reminders` | 1× denně (pracovní dny) | 09:15, Po–Pá |
 | `cron-purchase-approval-reminders` | 1× denně (pracovní dny) | 09:20, Po–Pá |
 | `cron-document-request-reminders` | 1× denně (pracovní dny) | 09:30, Po–Pá |
@@ -256,6 +258,7 @@ schtasks /create /tn "MyUcto BankEmailNotices" /tr "C:\inetpub\wwwroot\myucto.cz
 schtasks /create /tn "MyUcto PurchaseInbox" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scan-purchase-inbox.cmd" /sc minute /mo 10 /ru SYSTEM
 schtasks /create /tn "MyUcto PaymentThanks" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-payment-thanks.cmd" /sc minute /mo 1 /ru SYSTEM
 schtasks /create /tn "MyUcto Reminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:00 /ru SYSTEM
+schtasks /create /tn "MyUcto PohodaExport" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-scheduled-pohoda-export.cmd" /sc daily /st 06:30 /ru SYSTEM
 schtasks /create /tn "MyUcto ApprovalReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-send-approval-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:15 /ru SYSTEM
 schtasks /create /tn "MyUcto PurchaseApprovalReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-purchase-approval-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:20 /ru SYSTEM
 schtasks /create /tn "MyUcto DocumentRequestReminders" /tr "C:\inetpub\wwwroot\myucto.cz\cmd\cron-document-request-reminders.cmd" /sc weekly /d MON,TUE,WED,THU,FRI /st 09:30 /ru SYSTEM
@@ -331,6 +334,7 @@ Edituj `crontab -e` (nebo `/etc/cron.d/myucto`):
 */10 *  *   *   *    /var/www/myucto.cz/cmd/cron-scan-purchase-inbox.sh
  *  *  *   *   *    /var/www/myucto.cz/cmd/cron-payment-thanks.sh
  0  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-reminders.sh
+ 30  6  *   *   *    /var/www/myucto.cz/cmd/cron-scheduled-pohoda-export.sh
  15  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-send-approval-reminders.sh
  20  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-purchase-approval-reminders.sh
  30  9  *   *   1-5  /var/www/myucto.cz/cmd/cron-document-request-reminders.sh

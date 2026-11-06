@@ -1473,6 +1473,8 @@ final class SettingsAction
             }
             $pdo->exec('SET FOREIGN_KEY_CHECKS = 0');
             try {
+                // Otisky dokladů exportu do Pohody visí na běhu; při vypnuté kontrole FK by je kaskáda nesmazala.
+                $pdo->prepare('DELETE d FROM scheduled_pohoda_export_doc d JOIN scheduled_pohoda_export_run r ON r.id = d.run_id WHERE r.supplier_id = ?')->execute([$id]);
                 foreach ([
                     'invoice_counters',
                     'purchase_invoice_counters',
@@ -1490,6 +1492,8 @@ final class SettingsAction
                     'document_tags',
                     'activity_log',
                     'currencies',
+                    'scheduled_pohoda_export',
+                    'scheduled_pohoda_export_run',
                 ] as $cfgTable) {
                     $pdo->prepare("DELETE FROM `$cfgTable` WHERE supplier_id = ?")->execute([$id]);
                 }

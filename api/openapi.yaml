@@ -26871,6 +26871,35 @@ paths:
         '200': { description: OK, content: { application/json: { schema: { $ref: '#/components/schemas/TaxEvidenceAnnualClosing' } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/reports/pohoda-schedule:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    get:
+      tags: [Reports]
+      summary: Plánovaný export do Pohody — nastavení a poslední běhy
+      responses:
+        '200': { description: 'config (enabled, run_day, include_credit_notes, recipient_email, start_month), runs po měsících (period_label, status ok|queued|error, doc_count, attempts, changed_after) a problem (poslední selhání měsíce bez úspěšného běhu). Příjemce a texty chyb jen s právem číst nastavení firmy. Právo: utilities.export' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Reports]
+      summary: Uložení nastavení plánovaného exportu do Pohody
+      description: Vyžaduje právo settings.company.write (mění se příjemce účetních dat). Změna se zapisuje do protokolu aktivit se starým i novým nastavením.
+      responses:
+        '200': { description: 'Uložené nastavení' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
+  /api/v1/reports/pohoda-schedule/run:
+    parameters:
+      - $ref: '#/components/parameters/SupplierIdHeader'
+    post:
+      tags: [Reports]
+      summary: Spustit export do Pohody teď za měsíc (month=YYYY-MM)
+      description: Jen uzavřený měsíc (jinak 422). Pokud už pro měsíc úspěšný nebo ve frontě čekající běh existuje, vyžaduje `confirm_repeat=true`, jinak 409 `already_exported`. Běží-li export téhož měsíce, 409 `busy`.
+      responses:
+        '200': { description: 'Výsledek běhu (status ok|queued|error, doc_count, error)' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Měsíc už byl exportován' }
+        '422': { $ref: '#/components/responses/ValidationFailed' }
   /api/v1/reports/monthly-export/preview:
     parameters:
       - $ref: '#/components/parameters/SupplierIdHeader'

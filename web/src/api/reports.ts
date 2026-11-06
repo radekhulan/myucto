@@ -1079,3 +1079,36 @@ export const reportsApi = {
     return `/api/reports/dphdp3?${params.toString()}`
   },
 }
+
+export interface PohodaScheduleConfig {
+  enabled: boolean
+  run_day: number
+  include_credit_notes: boolean
+  recipient_email: string
+}
+
+export interface PohodaScheduleRun {
+  id: number
+  period_label: string
+  trigger_by: 'cron' | 'manual'
+  status: 'ok' | 'queued' | 'error'
+  doc_count: number
+  attempts: number
+  error: string | null
+  created_at: string
+  changed_after: number
+}
+
+export interface PohodaScheduleProblem {
+  period_label: string
+  error: string | null
+  attempts: number
+  created_at: string
+}
+
+export const pohodaScheduleApi = {
+  get: () => api.get<{ config: PohodaScheduleConfig; runs: PohodaScheduleRun[]; problem: PohodaScheduleProblem | null }>('/reports/pohoda-schedule').then(r => r.data),
+  save: (config: PohodaScheduleConfig) => api.put('/reports/pohoda-schedule', config).then(r => r.data),
+  run: (month: string, confirmRepeat = false) =>
+    api.post<{ status: string; doc_count: number; error?: string | null }>('/reports/pohoda-schedule/run', { month, confirm_repeat: confirmRepeat }).then(r => r.data),
+}

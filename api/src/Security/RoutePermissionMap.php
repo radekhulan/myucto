@@ -890,6 +890,11 @@ final class RoutePermissionMap
         ['GET', '#^/api/reports/submissions/[0-9]+/artifacts/[0-9]+/download$#', 'reports.export', AccessLevel::READ],
         ['GET', '#^/api/reports/submissions(/|$)#', 'reports', AccessLevel::READ],
         ['*', '#^/api/reports/submissions(/|$)#', 'reports.submit', AccessLevel::WRITE],
+        // Plánovaný export do Pohody: čtení a „spustit teď“ patří k exportům (stejné právo jako ruční export
+        // na stránce Export), změna nastavení a příjemce = kam odchází účetní data, tedy správa firmy.
+        ['PUT', '#^/api/reports/pohoda-schedule$#', 'settings.company.write', AccessLevel::WRITE],
+        ['GET', '#^/api/reports/pohoda-schedule(/|$)#', 'utilities.export', AccessLevel::READ],
+        ['*', '#^/api/reports/pohoda-schedule(/|$)#', 'utilities.export', AccessLevel::WRITE],
         ['GET', '#^/api/reports/monthly-export(/|$)#', 'reports.export', AccessLevel::READ],
         ['*', '#^/api/reports/monthly-export(/|$)#', 'reports.export', AccessLevel::WRITE],
         ['GET', '#^/api/reports/closing-package(/|$)#', 'reports.export', AccessLevel::READ],
