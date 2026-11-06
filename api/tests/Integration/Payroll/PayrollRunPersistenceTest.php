@@ -263,6 +263,32 @@ final class PayrollRunPersistenceTest extends TestCase
 
     }
 
+    public function testCustomComponentWithReservedCodeBlocksOnlyHourlyCalculation(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_inputs SET status = "cancelled" WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $this->inputId]);
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 20000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetická smlouva", weekly_hours = 40, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $time = $this->container->get(\MyInvoice\Repository\Payroll\PayrollTimeRepository::class);
+        $time->saveManualSummary($this->supplierId, $this->employmentId, '2026-06-01', 0, 'Doložených 160 hodin', false,
+            [['date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'worked_duration_units' => 480000, 'overtime_duration_units' => 0, 'worked_days' => 20]], $this->actors[0]);
+        $month = $time->monthState($this->supplierId, $this->employmentId, '2026-06-01');
+        $time->approveMonth($this->supplierId, $this->employmentId, '2026-06-01', (int) $month['row_version'], null, $this->actors[0]);
+        $source = (new \MyInvoice\Service\Payroll\Time\PayrollWorkedTimeEvidence($this->db))->loadMany($this->supplierId, [$this->employmentId], '2026-06-01')[$this->employmentId];
+        $body = ['row_version' => 0, 'reason' => 'Výslovně bez dalších nároků', 'work_source_hash' => \MyInvoice\Repository\Payroll\PayrollHourlyEvidenceRepository::bindingHash($source),
+            'premium_segments' => [['date_from' => '2026-06-01', 'date_to' => '2026-06-30', 'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => 0, 'difficult_exposures' => [], 'holiday_work_days' => [], 'overtime_work_days' => []]],
+            'nonworked_holidays' => [], 'holiday_time_off_grants' => [], 'overtime_time_off_allocations' => []];
+        (new \MyInvoice\Repository\Payroll\PayrollHourlyEvidenceRepository($this->db))->save($this->supplierId, $this->employmentId, '2026-06-01', $body, $this->actors[0], static fn() => null);
+        $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class)->ensureDefaults($this->supplierId);
+        $previewRows = $this->container->get(PayrollRunSnapshotBuilder::class)->employmentRows($this->supplierId, '2026-06-01', '2026-06-30', null);
+        $preview = fn (): array => (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->forMany($this->supplierId, '2026-06-01', $previewRows)[$this->employmentId];
+        self::assertTrue($preview()['complete'], json_encode($preview()['blockers'], JSON_THROW_ON_ERROR));
+        // Firma vede stejnojmennou vlastní složku s jiným zacházením.
+        $pdo->prepare('UPDATE payroll_component_definitions SET social_treatment = "excluded" WHERE supplier_id = ? AND code = "MZDA_HODINOVA_ZAKLAD"')->execute([$this->supplierId]);
+        $blocked = $preview();
+        self::assertFalse($blocked['complete']);
+        self::assertContains('hourly_component_definition_invalid', array_column($blocked['blockers'], 'code'));
+    }
+
     public function testHourlyCorrectionFreezesDifferenceAndPreservesOriginalRevision(): void
     {
         $pdo = $this->db->pdo();
@@ -383,7 +409,9 @@ final class PayrollRunPersistenceTest extends TestCase
         $items = $loader->forMany($this->supplierId, [$this->employmentId], '2026-06-01')[$this->employmentId];
         $byId = [];
         foreach ($items as $item) $byId[$item['input_ids'][0]] = $item;
-        self::assertSame('manual_review', $byId[$this->inputId]['minimum_wage_treatment']);
+        // Plnění za jiný měsíc se do posouzení minima výkonu práce nezapočítá a neblokuje.
+        self::assertSame('excluded', $byId[$this->inputId]['minimum_wage_treatment']);
+        self::assertSame('source_period_other', $byId[$this->inputId]['exclusion_reason']);
         self::assertSame('included', $byId[(int) $row['id']]['minimum_wage_treatment']);
         self::assertSame('Syntetický podklad', $byId[(int) $row['id']]['classification_reason']);
         self::assertSame([], $loader->forMany($this->otherSupplierId, [$this->employmentId], '2026-06-01')[$this->employmentId]);
@@ -423,8 +451,10 @@ final class PayrollRunPersistenceTest extends TestCase
             self::assertSame('approved', $input['status']);
         }
         $component = $this->db->pdo()->prepare('SELECT id FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
-        $component->execute([$this->supplierId, 'MZDA_HODINOVA_ZAKLAD']);
+        $component->execute([$this->supplierId, 'NAHRADA_MZDY_VOLNO_ZA_SVATEK']);
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 20000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetické podmínky" WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
         $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('U hodinového vztahu');
         $inputs->create($this->supplierId, ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
             'component_id' => (int) $component->fetchColumn(), 'period_start' => '2026-06-01', 'source_period_start' => null,
             'amount_minor' => 1, 'quantity_milliunits' => null, 'source_kind' => 'time', 'external_id' => 'spoof'], $this->actors[0]);
@@ -508,6 +538,16 @@ final class PayrollRunPersistenceTest extends TestCase
         $proof = CanonicalJson::encode(['end_date' => '2026-06-30', 'amount_minor' => 107600, 'hourly_average_floor' => ['average_hourly_minor' => 14340]]);
         $pdo->prepare('INSERT INTO payroll_termination_floor_proofs (supplier_id, employment_id, input_id, period_start, source_snapshot_json, source_snapshot_hash) VALUES (?, ?, ?, "2026-06-01", ?, ?)')->execute([$this->supplierId, $this->employmentId, $inputId, $proof, hash('sha256', $proof, true)]);
         self::assertNotContains('hourly_average_minimum_evidence_missing', $codes($builder->build($this->supplierId, '2026-06-01', '2026-07-15')));
+    }
+
+    public function testMonthlySeveranceWithoutEndDateGetsNoHourlyMinimumBlocker(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employments SET end_date = NULL WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $inputId = $this->approvedInput(107600, 'ODSTUPNE', 'manual');
+        $pdo->prepare('UPDATE payroll_inputs SET external_id = ? WHERE supplier_id = ? AND id = ?')->execute(['termination:severance:' . $this->employmentId, $this->supplierId, $inputId]);
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-06-01', '2026-07-15');
+        self::assertNotContains('hourly_average_minimum_evidence_missing', array_map(static fn($v): string => $v->code, $snapshot->validations));
     }
 
     public function testExternalStandbyPrefixCannotImpersonateFloorProof(): void
@@ -749,6 +789,12 @@ final class PayrollRunPersistenceTest extends TestCase
         $blocked = $service->forMany($this->supplierId, '2026-06-01', $employment, $terms);
         self::assertSame('unavailable', $blocked[$this->employmentId]['source']['status']);
         self::assertSame([], $blocked[$this->employmentId]['parts']);
+        // Fond pro měsíční posouzení minima na absenci nezávisí; měsíční část dál chybí.
+        $terms[$this->employmentId][0]['weekly_hours'] = '40';
+        $minimum = $service->forMany($this->supplierId, '2026-06-01', $employment, $terms, false, [$this->employmentId]);
+        self::assertSame([], $minimum[$this->employmentId]['parts']);
+        self::assertTrue($minimum[$this->employmentId]['source']['minimum_fund_usable']);
+        self::assertSame(528000, $minimum[$this->employmentId]['source']['full_fund_duration_units']);
     }
 
     public function testHourlyDpcAndSmallScaleKeepAgreedIncomeUnknownInsteadOfStaleMonthlyProjection(): void

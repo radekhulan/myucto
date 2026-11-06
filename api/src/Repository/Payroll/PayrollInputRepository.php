@@ -1026,12 +1026,9 @@ final class PayrollInputRepository
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $code = (string) $row['code'];
             if (isset($components[$code])) throw new \InvalidArgumentException('Mzdová složka nemá jednoznačnou účinnou verzi.');
-            $expectedKind = in_array($code, ['MZDA_HODINOVA_ZAKLAD', 'MZDA_DOSAZENA_PRESCAS', 'DOPLATEK_MINIMALNI_MZDA'], true) ? 'hourly_wage'
-                : (str_starts_with($code, 'PRIPLATEK_') ? 'premium' : 'compensation');
-            if ($row['component_kind'] !== $expectedKind || $row['annual_limit_minor'] !== null || $row['exemption_basket'] !== null) {
+            if (!\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isUsableDefinition($row)) {
                 throw new \InvalidArgumentException('Chráněná složka hodinové mzdy nemá platnou klasifikaci.');
             }
-            \MyInvoice\Service\Payroll\PayrollHourlyWageComponents::assertReservedClassification($row);
             $components[$code] = $row;
         }
         $values = [];
@@ -2680,8 +2677,8 @@ final class PayrollInputRepository
                 'Pracovní vztah je archivovaný nebo nenastoupil; mzdový vstup na něj založit nelze.'
             );
         }
-        if (\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isReserved((string) $row['code'])) {
-            throw new \InvalidArgumentException('Tato složka vzniká pouze výpočtem hodinové mzdy a nelze ji zadat ručně ani importem.');
+        if ((new PayrollHourlyWageCollisionGuard($this->db))->reservedForCalculation($supplierId, (int) $data['employment_id'], (string) $data['period_start'], (string) $row['code'])) {
+            throw new \InvalidArgumentException('U hodinového vztahu tato složka vzniká pouze výpočtem hodinové mzdy a nelze ji zadat ručně ani importem.');
         }
         if (in_array((string) $row['code'], self::ABSENCE_ONLY_CODES, true)
             && !in_array((string) ($data['source_kind'] ?? ''), ['absence', 'correction'], true)

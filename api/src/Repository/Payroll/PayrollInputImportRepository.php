@@ -41,6 +41,11 @@ final class PayrollInputImportRepository
         ];
     }
 
+    public function reservedForHourlyCalculation(int $supplierId, int $employmentId, string $periodStart, string $componentCode): bool
+    {
+        return (new PayrollHourlyWageCollisionGuard($this->db))->reservedForCalculation($supplierId, $employmentId, $periodStart, $componentCode);
+    }
+
     /** @return array<string,mixed>|null */
     public function resolveComponent(
         int $supplierId,

@@ -9,6 +9,7 @@ use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentMinimumWage;
+use MyInvoice\Service\Payroll\PayrollHourlyWageComponents;
 use PDO;
 use PDOException;
 
@@ -320,9 +321,24 @@ final class PayrollComponentRepository
         // Firma, která má všechny výchozí verze, nepotřebuje desítky INSERT IGNORE na každé
         // čtení číselníku (převod mezd ho čte u každé osoby a měsíce). Jediný dotaz to ověří;
         // chybí-li cokoli, proběhne doplnění celé jako dřív.
-        if ($this->defaultsPresent($supplierId, $versions)) {
+        [$present, $expected] = $this->defaultsPresent($supplierId, $versions);
+        if ($present === $expected) {
             $this->seedDefaultJmhzMappings($supplierId);
             return;
+        }
+        // Vlastní složku zákazníka s kódem, který si nově vyhradil hodinový výpočet,
+        // číselník nepřekryje souběžnou výchozí verzí; výpočet pak hlásí střet sám.
+        $customReserved = $this->customReservedCodes($supplierId, $versions);
+        if ($customReserved !== []) {
+            foreach ($versions as $version) {
+                foreach ($version['rows'] as $row) {
+                    if (isset($customReserved[$row['code']])) $expected--;
+                }
+            }
+            if ($present === $expected) {
+                $this->seedDefaultJmhzMappings($supplierId);
+                return;
+            }
         }
         $insert = $this->db->pdo()->prepare(
             'INSERT IGNORE INTO payroll_component_definitions
@@ -344,6 +360,9 @@ final class PayrollComponentRepository
         );
         foreach ($versions as $index => $version) {
             foreach ($version['rows'] as $row) {
+                if (isset($customReserved[$row['code']])) {
+                    continue;
+                }
                 if ($index > 0) {
                     $closePrevious->execute([
                         $version['valid_from'],
@@ -376,11 +395,12 @@ final class PayrollComponentRepository
     }
 
     /**
-     * Má firma každou výchozí verzi složky (kód + účinnost)?
+     * Kolik výchozích verzí složek (kód + účinnost) firma má a kolik jich je.
      *
      * @param list<array{valid_from:string,rows:list<array<string,mixed>>}> $versions
+     * @return array{0:int,1:int}
      */
-    private function defaultsPresent(int $supplierId, array $versions): bool
+    private function defaultsPresent(int $supplierId, array $versions): array
     {
         $pairs = [];
         $params = [$supplierId];
@@ -392,7 +412,7 @@ final class PayrollComponentRepository
             }
         }
         if ($pairs === []) {
-            return true;
+            return [0, 0];
         }
         $stmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM payroll_component_definitions
@@ -400,7 +420,47 @@ final class PayrollComponentRepository
         );
         $stmt->execute($params);
 
-        return (int) $stmt->fetchColumn() === count($pairs);
+        return [(int) $stmt->fetchColumn(), count($pairs)];
+    }
+
+    /**
+     * Rezervované kódy hodinového výpočtu, které firma vede jako vlastní složku:
+     * má jejich verzi, ale žádnou s účinností výchozího číselníku.
+     *
+     * @param list<array{valid_from:string,rows:list<array<string,mixed>>}> $versions
+     * @return array<string,true>
+     */
+    private function customReservedCodes(int $supplierId, array $versions): array
+    {
+        $defaultDates = [];
+        foreach ($versions as $version) {
+            foreach ($version['rows'] as $row) {
+                if (PayrollHourlyWageComponents::isReserved((string) $row['code'])) {
+                    $defaultDates[(string) $row['code']][$version['valid_from']] = true;
+                }
+            }
+        }
+        if ($defaultDates === []) {
+            return [];
+        }
+        $in = implode(', ', array_fill(0, count($defaultDates), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT code, valid_from FROM payroll_component_definitions
+              WHERE supplier_id = ? AND code IN ({$in})"
+        );
+        $stmt->execute([$supplierId, ...array_keys($defaultDates)]);
+        $custom = [];
+        $standard = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = (string) $row['code'];
+            if (isset($defaultDates[$code][(string) $row['valid_from']])) {
+                $standard[$code] = true;
+            } else {
+                $custom[$code] = true;
+            }
+        }
+
+        return array_diff_key($custom, $standard);
     }
 
     /**

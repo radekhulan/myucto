@@ -326,6 +326,14 @@ proč se určitý příjem do minima nepočítá. Podklady po účinných úsec�
 ukazují skutečně odpracovanou běžnou dobu, stanovenou týdenní dobu
 a účinné minimum. Částky určuje server, náhled není další ruční vstup.
 
+Složky `MZDA_HODINOVA_ZAKLAD`, `MZDA_DOSAZENA_PRESCAS`,
+`NAHRADA_MZDY_VOLNO_ZA_SVATEK` a `DOPLATEK_MINIMALNI_MZDA` vznikají u vztahu
+s hodinovými podmínkami v daném měsíci jen tímto výpočtem, ručně ani importem
+je zadat nejde. U ostatních vztahů jsou to běžné složky jako dřív. Vede-li
+firma pod stejným kódem vlastní složku s jiným zacházením, hodinový výpočet
+se zastaví s chybou a vlastní složku je potřeba v číselníku upravit nebo
+ukončit.
+
 **Hodinové posouzení je výchozí.** Používá přesnou dobu běžné práce
 bez přesčasu. Kratší sjednaný úvazek nesnižuje hodinové minimum.
 Je-li doložená kratší zákonná stanovená týdenní doba, může být
@@ -334,6 +342,9 @@ V **Zásadách příplatků** na kartě vztahu lze stanovenou týdenní dobu
 doložit v části minima. Zadejte ji v hodinách s přesností na celé
 minuty a uveďte podklad; prázdné pole použije zákonný výchozí režim
 serveru. Pole se samo nepředvyplňuje sjednaným kratším úvazkem.
+Bez doložení se jako stanovená bere doba ze sjednání a úvazku jen v rozsahu
+37,5 až 40 hodin; kratší sjednaná doba (například 20 hodin při úvazku
+100 %) je kratší úvazek a minimum se počítá ze 40 hodin.
 
 **Měsíční posouzení** lze zvolit jen u pracovního poměru, také u
 zaměstnání malého rozsahu. Potřebuje označení sjednání a doklad

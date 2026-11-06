@@ -49,6 +49,7 @@ final class PayrollHourlyWagePreview
         $rounding = PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId);
         $calculator = new PayrollHourlyWageCalculator();
         $result = [];
+        $componentProblems = null;
         foreach ($employments as $employment) {
             $id = (int) $employment['employment_id'];
             if (!isset($terms[$id])) continue;
@@ -97,6 +98,16 @@ final class PayrollHourlyWagePreview
                 $blockers = [...$blockers, ...$minimumBlockers];
                 $complete = $complete && $minimum['complete'];
                 $evidenceHash = hash('sha256', CanonicalJson::encode(['hourly_wage' => $calculated->evidenceHash, 'minimum_wage' => $assessment->evidenceHash]));
+            }
+            foreach ($claims as $claim) {
+                $code = (string) ($claim['component_code'] ?? '');
+                if (in_array($claim['payable_minor'] ?? null, [null, 0], true)) continue;
+                $componentProblems ??= PayrollHourlyWageComponents::definitionProblems($this->db->pdo(), $supplierId, $periodStart);
+                if (!isset($componentProblems[$code])) continue;
+                $blockers[] = ['code' => 'hourly_component_definition_invalid',
+                    'message' => sprintf('Mzdová složka %s je ve firmě vedená jako vlastní nebo nemá v měsíci jednoznačnou verzi s klasifikací hodinové mzdy. Upravte nebo ukončete vlastní složku v číselníku.', $code),
+                    'context' => ['component_code' => $code, 'reason' => $componentProblems[$code]]];
+                $complete = false;
             }
             $total = null;
             if ($complete) {

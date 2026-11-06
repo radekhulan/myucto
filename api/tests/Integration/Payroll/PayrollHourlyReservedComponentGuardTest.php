@@ -21,6 +21,7 @@ final class PayrollHourlyReservedComponentGuardTest extends TestCase
 
     private Connection $db;
     private PayrollInputRepository $inputs;
+    private PayrollComponentRepository $components;
     private int $supplierId;
     private int $employeeId;
     private int $employmentId;
@@ -42,7 +43,8 @@ final class PayrollHourlyReservedComponentGuardTest extends TestCase
         $this->employeeId = (int) $pdo->lastInsertId();
         $pdo->prepare('INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, start_date) VALUES (?, ?, "SYN-CLASSIFICATION", "employment", "active", "2026-01-01")')->execute([$this->supplierId, $this->employeeId]);
         $this->employmentId = (int) $pdo->lastInsertId();
-        $container->get(PayrollComponentRepository::class)->ensureDefaults($this->supplierId);
+        $this->components = $container->get(PayrollComponentRepository::class);
+        $this->components->ensureDefaults($this->supplierId);
     }
 
     protected function tearDown(): void
@@ -116,6 +118,45 @@ final class PayrollHourlyReservedComponentGuardTest extends TestCase
         self::assertSame('Vlastní syntetický název', $this->componentRow($id)['name']);
         self::assertSame('one_off', $this->componentRow($id)['frequency_kind']);
         self::assertSame('excluded', $this->componentRow($premiumId)['statistics_treatment']);
+    }
+
+    public function testReservedCodeIsManualInputOnlyOutsideHourlyRemuneration(): void
+    {
+        $pdo = $this->db->pdo();
+        $data = ['employee_id' => $this->employeeId, 'employment_id' => $this->employmentId,
+            'component_id' => $this->componentId(PayrollHourlyWageComponents::HOLIDAY_TIME_OFF), 'period_start' => '2026-06-01',
+            'source_period_start' => null, 'amount_minor' => 50000, 'quantity_milliunits' => null, 'source_kind' => 'manual', 'external_id' => null];
+        $created = $this->inputs->create($this->supplierId, $data, $this->userId);
+        self::assertSame('draft', $created['status']);
+
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis, weekly_hours, workload_basis_points) VALUES (?, ?, "2026-06-01", "2026-01-01", "hourly", 20000, "contract", "Syntetické podmínky", 40, 10000)')->execute([$this->supplierId, $this->employmentId]);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('U hodinového vztahu');
+        $this->inputs->create($this->supplierId, $data, $this->userId);
+    }
+
+    public function testDefaultsDoNotOverlayCustomComponentWithReservedCode(): void
+    {
+        $pdo = $this->db->pdo();
+        $source = (int) $pdo->query('SELECT id FROM supplier ORDER BY id LIMIT 1')->fetchColumn();
+        $supplierId = $this->createIsolatedSupplier($pdo, $source);
+        $pdo->prepare('INSERT INTO payroll_component_definitions (supplier_id, code, name, component_kind, value_kind, frequency_kind, tax_treatment, social_participation_treatment, social_treatment, health_participation_treatment, health_treatment, average_earning_treatment, enforcement_treatment, jmhz_treatment, statistics_treatment, valid_from) VALUES (?, ?, "Vlastní syntetický doplatek", "bonus", "monetary", "one_off", "included", "included", "included", "included", "included", "included", "included", "included", "included", "2025-01-01")')
+            ->execute([$supplierId, PayrollHourlyWageComponents::MINIMUM_TOP_UP]);
+        $customId = (int) $pdo->lastInsertId();
+        $this->components->ensureDefaults($supplierId);
+        $this->components->ensureDefaults($supplierId);
+
+        $rows = $pdo->prepare('SELECT id, valid_to FROM payroll_component_definitions WHERE supplier_id = ? AND code = ?');
+        $rows->execute([$supplierId, PayrollHourlyWageComponents::MINIMUM_TOP_UP]);
+        self::assertSame([['id' => $customId, 'valid_to' => null]], array_map(static fn (array $row): array => ['id' => (int) $row['id'], 'valid_to' => $row['valid_to']], $rows->fetchAll(PDO::FETCH_ASSOC)));
+        $rows->execute([$supplierId, PayrollHourlyWageComponents::ORDINARY_BASE]);
+        self::assertCount(1, $rows->fetchAll(PDO::FETCH_ASSOC), 'Ostatní výchozí složky vzniknou jako dřív.');
+        $mapping = $pdo->prepare('SELECT target_attribute_id FROM payroll_component_jmhz_mappings WHERE supplier_id = ? AND component_definition_id = ?');
+        $mapping->execute([$supplierId, $customId]);
+        self::assertNotSame('10329', $mapping->fetchColumn(), 'Vlastní složka jiného druhu nedostane zařazení podle vyhrazeného kódu.');
+        self::assertSame(['DOPLATEK_MINIMALNI_MZDA' => 'classification'], array_intersect_key(
+            PayrollHourlyWageComponents::definitionProblems($pdo, $supplierId, '2026-06-01'), [PayrollHourlyWageComponents::MINIMUM_TOP_UP => true]));
+        self::assertSame([], PayrollHourlyWageComponents::definitionProblems($pdo, $this->supplierId, '2026-06-01'));
     }
 
     private function componentId(string $code): int

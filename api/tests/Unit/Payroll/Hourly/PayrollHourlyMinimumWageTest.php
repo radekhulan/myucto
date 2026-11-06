@@ -116,6 +116,24 @@ final class PayrollHourlyMinimumWageTest extends TestCase
         self::assertSame(-500, $result->assessmentEvidence['excluded'][0]['analytical_minor']);
     }
 
+    public function testMissingMonthlyFundHasItsOwnBlocker(): void
+    {
+        $proof = ['reference' => 'Syntetické předchozí určení', 'decided_on' => '2026-06-30', 'valid_from' => '2026-07-01', 'valid_to' => null];
+        $result = $this->calculate(parts: [[...$this->part(), 'regular_worked_duration_units' => 240000, 'contractual_weekly_duration_units' => 60000, 'minimum_monthly_minor' => 2240000]], assessment: 'monthly', proof: $proof);
+        self::assertFalse($result->complete);
+        self::assertSame('hourly_minimum_monthly_fund_missing', $result->blockers[0]['code'], json_encode($result->blockers));
+    }
+
+    public function testEarningForAnotherPeriodIsExcludedWithItsReason(): void
+    {
+        $base = $this->calculate(ordinary: 12000);
+        $result = $this->calculate(ordinary: 12000, other: [['amount_minor' => 50000, 'minimum_wage_treatment' => 'excluded',
+            'exclusion_reason' => 'source_period_other', 'component_code' => 'ODMENA', 'source_period_start' => '2026-06-01']]);
+        self::assertTrue($result->complete, json_encode($result->blockers));
+        self::assertSame($base->claim['payable_minor'], $result->claim['payable_minor']);
+        self::assertSame('source_period_other', $result->assessmentEvidence['excluded'][0]['reason']);
+    }
+
     public function testExplicitHourlyZeroNeedsNeitherFloorNorStandardButPositiveAndUnknownTimeDo(): void
     {
         $part = [...$this->part(), 'regular_worked_duration_units' => 0, 'minimum_base40_minor' => null, 'stated_weekly_minutes' => null];

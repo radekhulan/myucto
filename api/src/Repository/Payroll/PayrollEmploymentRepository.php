@@ -2096,6 +2096,9 @@ final class PayrollEmploymentRepository
     /** @param array<string,mixed>|null $previous @param array<string,mixed> $data */
     private function assertMonthlyTransition(?array $previous, array $data, bool $replace, ?int $monthlyGross): void
     {
+        if (($previous['remuneration_type'] ?? null) !== null && $data['remuneration_type'] === null) {
+            throw new \InvalidArgumentException('Výslovně určený způsob odměňování nelze vrátit na dosavadní režim. Zvolte měsíční nebo hodinové odměňování.');
+        }
         if (($previous['remuneration_type'] ?? 'monthly') === 'hourly'
             && $data['remuneration_type'] === 'monthly'
             && (!$replace || $monthlyGross === null)

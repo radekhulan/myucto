@@ -237,7 +237,9 @@ U DPP a DPČ jde o hodinovou odměnu. Sjednaná sazba není průměrným ani
 pravděpodobným hodinovým výdělkem.
 
 Volba **Dosavadní režim (bez výslovného určení)** zachovává původní zpracování, například dohodu
-bez sjednané měsíční částky. Změnu sazby i přechod mezi měsíčním
+bez sjednané měsíční částky. Nabízí se jen vztahu, jehož poslední verze podmínek
+způsob odměňování výslovně neurčuje; z měsíčního nebo hodinového odměňování se
+na ni vrátit nelze. Změnu sazby i přechod mezi měsíčním
 a hodinovým odměňováním můžete uložit novou verzí s účinností během
 měsíce. Výpočet vyžaduje jednoznačné rozdělení skutečné práce podle
 účinných sazeb a podklad pro měsíční část; chybějící rozvrh či rozpad

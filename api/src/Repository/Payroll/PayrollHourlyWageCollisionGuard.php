@@ -12,6 +12,21 @@ final class PayrollHourlyWageCollisionGuard
 {
     public function __construct(private readonly Connection $db) {}
 
+    /**
+     * Rezervované složky hodinového výpočtu patří výpočtu jen tam, kde vztah má
+     * v měsíci hodinové podmínky; jinde zůstávají běžnou (i vlastní) složkou.
+     */
+    public function reservedForCalculation(int $supplierId, int $employmentId, string $periodStart, string $componentCode): bool
+    {
+        if (!\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isReserved($componentCode)) return false;
+        $end = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $stmt = $this->db->pdo()->prepare("SELECT 1 FROM payroll_employment_terms FORCE INDEX (idx_payroll_employment_term_effective)
+            WHERE supplier_id = ? AND employment_id = ? AND remuneration_type = 'hourly'
+              AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?) LIMIT 1");
+        $stmt->execute([$supplierId, $employmentId, $end, $periodStart]);
+        return $stmt->fetchColumn() !== false;
+    }
+
     /** @param list<array{employment_id:int,component_id:int}> $rows */
     public function externalInputs(int $supplierId, string $periodStart, array $rows): void
     {

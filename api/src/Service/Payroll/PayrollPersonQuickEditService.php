@@ -152,22 +152,26 @@ final class PayrollPersonQuickEditService
     {
         $id = $this->version($input['id'] ?? null, false);
         $rowVersion = $this->version($input['row_version'] ?? null, false);
+        $termsBody = $this->object($input['terms'] ?? null, 'employment.terms');
+        $current = $this->employments->currentTerms($supplierId, $id)
+            ?? throw new \DomainException('Pracovní vztah nemá verzi sjednaných podmínek.');
+        $hourly = ($current['remuneration_type'] ?? null) === 'hourly';
         $replaceMonthlyGross = array_key_exists('monthly_gross_minor', $input);
+        if ($hourly && $replaceMonthlyGross) {
+            throw new \InvalidArgumentException('U hodinového vztahu nelze měnit měsíční mzdu. Sazbu upravte na kartě vztahu.');
+        }
+        if (!$hourly && !$replaceMonthlyGross) {
+            throw new \InvalidArgumentException('employment.monthly_gross_minor je povinné.');
+        }
         $monthlyGross = $input['monthly_gross_minor'] ?? null;
         if ($monthlyGross !== null && (!is_int($monthlyGross) || $monthlyGross < 0)) {
             throw new \InvalidArgumentException(
                 'Pravidelná hrubá mzda musí být nezáporná částka v haléřích.',
             );
         }
-        $termsBody = $this->object($input['terms'] ?? null, 'employment.terms');
-        $current = $this->employments->currentTerms($supplierId, $id)
-            ?? throw new \DomainException('Pracovní vztah nemá verzi sjednaných podmínek.');
         // Rychlá editace způsob odměňování nenabízí; změna patří na kartu vztahu.
         foreach (PayrollEmploymentTermsBody::REMUNERATION_KEYS as $key) {
             $termsBody[$key] = $current[$key];
-        }
-        if (($current['remuneration_type'] ?? null) === 'hourly' && $replaceMonthlyGross) {
-            throw new \InvalidArgumentException('U hodinového vztahu nelze měnit měsíční mzdu. Sazbu upravte na kartě vztahu.');
         }
         $terms = $this->employmentValidator->terms(
             $termsBody,
@@ -177,7 +181,6 @@ final class PayrollPersonQuickEditService
             // Zařazení pro srážkovou daň rychlá editace vůbec nenabízí, takže
             // ho nesmí přepsat na „neurčeno" — přebírá se uložené.
             $this->employments->currentOtherWithholdingEligibility($supplierId, $id),
-            $this->employments->currentRelationType($supplierId, $id),
         );
 
         return [
