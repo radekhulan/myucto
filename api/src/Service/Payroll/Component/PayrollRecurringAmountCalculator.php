@@ -29,7 +29,7 @@ final class PayrollRecurringAmountCalculator
         }
 
         if (PayrollHourlyRemuneration::blocksMonthlyComponent($recurring)) {
-            return $this->manualReview(PayrollHourlyRemuneration::MESSAGE);
+            return $this->manualReview(PayrollHourlyRemuneration::monthlyComponentMessage($recurring));
         }
         $calculation = $this->string($recurring, 'calculation_kind');
         if ($calculation === 'manual_review') {
