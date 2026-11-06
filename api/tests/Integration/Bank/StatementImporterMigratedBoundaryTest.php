@@ -149,12 +149,53 @@ final class StatementImporterMigratedBoundaryTest extends TestCase
     }
 
     /**
+     * Výpis v PDF starší než první převzatý pohyb nese pohyby, které převod nepřevzal
+     * (převod začal později). Přeskočit se smí jen pohyby z období převzetí.
+     */
+    public function testMovementsBeforeFirstMigratedMovementAreCreated(): void
+    {
+        $account = self::ACCOUNT_PREFIX . '6';
+        $currencyId = $this->registerCurrency($account);
+        $this->migrated($account, self::BANK_CODE, '2099-03-10');
+        $this->migrated($account, self::BANK_CODE, '2099-03-31');
+
+        $r = $this->importPdf($account, $currencyId, ['2099-01-15', '2099-03-20', '2099-04-05']);
+
+        self::assertSame(2, $r['transactions'], json_encode($r, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame(1, $r['skipped_migrated']);
+        $warning = array_column($r['warnings'], null, 'code')['transactions_skipped_as_migrated'] ?? null;
+        self::assertNotNull($warning);
+        self::assertSame('2099-03-10', $warning['since']);
+        self::assertSame('2099-03-31', $warning['until']);
+        self::assertSame(['2099-01-15', '2099-03-10', '2099-03-31', '2099-04-05'], $this->postedDates($account));
+    }
+
+    /**
+     * Měnové účty se stejným číslem (#167) mají každý vlastní převzetí. Převod účtu v CZK
+     * nesmí zahodit pohyby výpisu účtu v USD, ke kterým převod nic nepřevzal.
+     */
+    public function testOtherCurrencyOnSharedAccountNumberIsNotAffected(): void
+    {
+        $account = self::ACCOUNT_PREFIX . '7';
+        $this->registerCurrency($account);
+        $usdId = $this->registerCurrency($account, 'USD');
+        $this->migrated($account, self::BANK_CODE, '2099-01-05');
+        $this->migrated($account, self::BANK_CODE, '2099-12-31');
+
+        $r = $this->importPdf($account, $usdId, ['2099-06-10', '2099-06-20'], 'USD');
+
+        self::assertSame(2, $r['transactions'], json_encode($r, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame(0, $r['skipped_migrated']);
+        self::assertNotContains('transactions_skipped_as_migrated', array_column($r['warnings'], 'code'));
+    }
+
+    /**
      * @param list<string> $dates
      * @return array<string,mixed>
      */
-    private function importPdf(string $account, int $currencyId, array $dates): array
+    private function importPdf(string $account, int $currencyId, array $dates, string $currency = 'CZK'): array
     {
-        return $this->importer->importParsedPdf($this->statement($account, $dates), '%PDF-hranice-' . $account, 'TEST-HRANICE.pdf', null, $currencyId, $this->supplierId);
+        return $this->importer->importParsedPdf($this->statement($account, $dates, $currency), '%PDF-hranice-' . $account . '-' . $currency, 'TEST-HRANICE.pdf', null, $currencyId, $this->supplierId);
     }
 
     /** Převzatý výpis s jedním pohybem v daný den, jak ho zapíše převod. */
@@ -174,7 +215,7 @@ final class StatementImporterMigratedBoundaryTest extends TestCase
      * @param list<string> $dates
      * @return array{header:array<string,mixed>,transactions:list<array<string,mixed>>}
      */
-    private function statement(string $account, array $dates): array
+    private function statement(string $account, array $dates, string $currency = 'CZK'): array
     {
         return [
             'header' => [
@@ -182,7 +223,7 @@ final class StatementImporterMigratedBoundaryTest extends TestCase
                 'prev_balance' => null, 'curr_balance' => null, 'credit_total' => null, 'debit_total' => null,
             ],
             'transactions' => array_map(static fn (string $date, int $i): array => [
-                'posted_at' => $date, 'amount' => 1500.00, 'currency' => 'CZK', 'variable_symbol' => self::VS,
+                'posted_at' => $date, 'amount' => 1500.00, 'currency' => $currency, 'variable_symbol' => self::VS,
                 'constant_symbol' => null, 'specific_symbol' => null, 'counterparty_account' => '1000000005',
                 'counterparty_bank' => '0100', 'counterparty_name' => 'Odběratel Beta a.s.', 'description' => 'Platba',
                 'bank_ref' => 'HR' . $i . str_replace('-', '', $date),
@@ -201,13 +242,13 @@ final class StatementImporterMigratedBoundaryTest extends TestCase
         return array_map('strval', $stmt->fetchAll(\PDO::FETCH_COLUMN));
     }
 
-    private function registerCurrency(string $account): int
+    private function registerCurrency(string $account, string $code = 'CZK'): int
     {
         $this->db->pdo()->prepare(
             'INSERT INTO currencies
                 (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default, account_number, bank_code)
-             VALUES (?, "CZK", ?, "CZK", "CZK", "CZK", 2, 0, 0, ?, ?)'
-        )->execute([$this->supplierId, 'TEST HRANICE /' . $account, $account, self::BANK_CODE]);
+             VALUES (?, ?, ?, ?, ?, ?, 2, 0, 0, ?, ?)'
+        )->execute([$this->supplierId, $code, 'TEST HRANICE /' . $account, $code, $code, $code, $account, self::BANK_CODE]);
         $id = (int) $this->db->pdo()->lastInsertId();
         $this->currencyIds[] = $id;
         return $id;

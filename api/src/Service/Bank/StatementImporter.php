@@ -55,7 +55,7 @@ final class StatementImporter
      *
      * @return array{statement_id:int, transactions:int, matched:int, duplicate:bool,
      *               parsed_transactions:int, skipped_duplicates:int, skipped_migrated?:int, superseded_notices:int,
-     *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int,until?:string}>}
+     *               warnings:list<array{code:string,message:string,parsed?:int,inserted?:int,skipped?:int,since?:string,until?:string}>}
      */
     public function import(string $content, string $fileName, ?int $userId, ?int $currencyId = null, array $reconciliationConfirmations = [], ?array $parsed = null, ?array $ignoreDecision = null): array
     {
@@ -529,7 +529,8 @@ final class StatementImporter
 
         // Pohyby GPC a napojené banky párovač porovnal s převzatými jednotlivě a nejistou
         // shodu předloží k potvrzení; hranice převzetí platí pro výpis v PDF.
-        $migratedUntil = $crossSourceReconciled ? null : $this->migratedUntil($pdo, $statementSupplierId, (string) $h['account_number'], $accountBankCode);
+        $migrated = $crossSourceReconciled ? null : $this->migratedRange($pdo, $statementSupplierId, (string) $h['account_number'], $accountBankCode, $statementCurrency);
+        $migratedUntil = $migrated['until'] ?? null;
 
         $matched = 0;
         $inserted = 0;
@@ -537,7 +538,8 @@ final class StatementImporter
         $skippedMigrated = 0;
         $ignoredIds = [];
         foreach ($parsed['transactions'] as $index => $tx) {
-            if ($migratedUntil !== null && substr((string) $tx['posted_at'], 0, 10) <= $migratedUntil) {
+            $postedOn = substr((string) $tx['posted_at'], 0, 10);
+            if ($migrated !== null && $postedOn >= $migrated['since'] && $postedOn <= $migrated['until']) {
                 $skippedMigrated++;
                 continue;
             }
@@ -659,13 +661,15 @@ final class StatementImporter
             $warnings[] = [
                 'code'     => 'transactions_skipped_as_migrated',
                 'message'  => sprintf(
-                    'Účet má pohyby do %s převzaté převodem z jiného programu. %d pohybů výpisu do tohoto dne včetně se nezaložilo, v evidenci už jsou; pohyb z toho dne, který převod nepřevzal, doplňte ručně.',
+                    'Účet má pohyby od %s do %s převzaté převodem z jiného programu. %d pohybů výpisu z tohoto období se nezaložilo, v evidenci už jsou; pohyb z prvního nebo posledního dne, který převod nepřevzal, doplňte ručně.',
+                    date('j. n. Y', (int) strtotime((string) $migrated['since'])),
                     date('j. n. Y', (int) strtotime((string) $migratedUntil)),
                     $skippedMigrated,
                 ),
                 'parsed'   => $parsedCount,
                 'inserted' => $inserted,
                 'skipped'  => $skippedMigrated,
+                'since'    => $migrated['since'],
                 'until'    => $migratedUntil,
             ];
         }
@@ -703,37 +707,54 @@ final class StatementImporter
     }
 
     /**
-     * Hranice převzetí účtu: datum posledního pohybu, který na účet převzal převod z jiného
-     * programu (výpisy se zdrojem `import`, zapisuje je
+     * Období převzetí účtu: od prvního převzatého pohybu do data posledního výpisu, který na
+     * účet převzal převod z jiného programu (výpisy se zdrojem `import`, zapisuje je
      * {@see \MyInvoice\Service\Migration\Shared\BankStatementImportWriter}). Takový pohyb má
      * otisk převodu, ne banky, takže ho deduplikace podle otisku u výpisu z banky nepozná
      * a pohyb by se v evidenci (a v peněžním deníku) zdvojil. Účet se páruje stejně jako
      * výpisy s účty firmy ({@see \MyInvoice\Repository\CashJournalRepository::matchingStatementIds()}):
      * číslo účtu přes {@see AccountNumberNormalizer}, rozdílný kód banky shodu vylučuje.
+     * Měnové účty se stejným číslem (#167) mají každý svoje převzetí, rozhoduje i měna.
+     * Výpis bez převzatých pohybů (jen počáteční stav) období nevymezuje, nic nezdvojí.
+     *
+     * Na rozdíl od {@see \MyInvoice\Repository\BankConnectionRepository::takenOverThrough()}
+     * (jen konec převzetí pro začátek automatického stažení) potřebuje výpis v PDF i začátek:
+     * starší výpis, než převod převzal, nese pohyby, které v evidenci nejsou.
+     *
+     * @return array{since:string,until:string}|null
      */
-    private function migratedUntil(PDO $pdo, ?int $supplierId, string $accountNumber, ?string $bankCode): ?string
+    private function migratedRange(PDO $pdo, ?int $supplierId, string $accountNumber, ?string $bankCode, ?string $currency): ?array
     {
         if ($supplierId === null || AccountNumberNormalizer::normalize($accountNumber) === '') {
             return null;
         }
+        $currency = trim((string) $currency);
         $stmt = $pdo->prepare(
-            "SELECT account_number, bank_code, MAX(statement_date) AS until FROM bank_statements
-              WHERE supplier_id = ? AND source = 'import' AND account_number IS NOT NULL AND account_number <> ''
-              GROUP BY account_number, bank_code"
+            "SELECT bs.account_number, bs.bank_code, MIN(bt.posted_at) AS since, MAX(bs.statement_date) AS until
+               FROM bank_statements bs
+               JOIN bank_transactions bt ON bt.statement_id = bs.id
+              WHERE bs.supplier_id = ? AND bs.source = 'import' AND bs.account_number IS NOT NULL AND bs.account_number <> ''"
+            . ($currency !== '' ? ' AND bs.currency = ?' : '') . '
+              GROUP BY bs.account_number, bs.bank_code'
         );
-        $stmt->execute([$supplierId]);
-        $until = null;
+        $stmt->execute($currency !== '' ? [$supplierId, $currency] : [$supplierId]);
+        $range = null;
         $bankCode = trim((string) $bankCode);
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $migratedBank = trim((string) ($row['bank_code'] ?? ''));
             if ($bankCode !== '' && $migratedBank !== '' && $migratedBank !== $bankCode) {
                 continue;
             }
-            if ($row['until'] !== null && AccountNumberNormalizer::matchesAny($accountNumber, (string) $row['account_number'])) {
-                $until = max($until ?? '', substr((string) $row['until'], 0, 10));
+            if ($row['since'] !== null && $row['until'] !== null && AccountNumberNormalizer::matchesAny($accountNumber, (string) $row['account_number'])) {
+                $since = substr((string) $row['since'], 0, 10);
+                $until = substr((string) $row['until'], 0, 10);
+                $range = [
+                    'since' => $range === null ? $since : min($range['since'], $since),
+                    'until' => $range === null ? $until : max($range['until'], $until),
+                ];
             }
         }
-        return $until;
+        return $range;
     }
 
     /**

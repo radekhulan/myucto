@@ -49561,6 +49561,7 @@ components:
             a `statement_id` míří na původní výpis.
         parsed_transactions: { type: integer, description: Počet pohybů nalezených v souboru. }
         skipped_duplicates: { type: integer, description: Pohyby přeskočené jako již evidované. }
+        skipped_migrated: { type: integer, description: "Pohyby výpisu v PDF z období, které na účet převzal převod z jiného programu (varování `transactions_skipped_as_migrated`)." }
         superseded_notices:
           type: integer
           description: |
@@ -49579,12 +49580,14 @@ components:
           items:
             type: object
             properties:
-              code: { type: string, enum: [transactions_skipped_as_duplicate, processing_failed] }
+              code: { type: string, enum: [transactions_skipped_as_duplicate, transactions_skipped_as_migrated, processing_failed, imported_balances_rebased] }
               message: { type: string }
               error: { type: string, description: "Jen u `processing_failed`: text chyby, kterou zpracování skončilo." }
               parsed: { type: integer }
               inserted: { type: integer }
               skipped: { type: integer }
+              since: { type: string, format: date, description: "Jen u `transactions_skipped_as_migrated`: první den převzatých pohybů účtu." }
+              until: { type: string, format: date, description: "Jen u `transactions_skipped_as_migrated`: poslední den převzetí účtu." }
 
     BankPostingSummary:
       type: [object, "null"]
