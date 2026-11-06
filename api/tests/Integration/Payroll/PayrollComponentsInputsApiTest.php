@@ -260,7 +260,9 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'CESTOVNI_NAHRADA_NADLIMIT',
             'CESTOVNI_NAHRADA_ZALOHA',
             'DOPLATEK_MZDY',
+            'MZDA_DOSAZENA_PRESCAS',
             'MZDA_HODINOVA',
+            'MZDA_HODINOVA_ZAKLAD',
             'MZDA_MESICNI',
             'MZDA_UKOLOVA',
             'NAHRADA_271CA',
@@ -272,6 +274,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC',
             'NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL',
             'NAHRADA_MZDY_SVATEK',
+            'NAHRADA_MZDY_VOLNO_ZA_SVATEK',
             // Nezdaněná náhrada výdajů převzatá z jiného programu (PAMICA J03).
             'NAHRADA_VYDAJU_PREVZATA',
             'NEPENEZNI_PRIJEM',
