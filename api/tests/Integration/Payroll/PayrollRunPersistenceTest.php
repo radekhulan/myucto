@@ -510,6 +510,16 @@ final class PayrollRunPersistenceTest extends TestCase
         self::assertNotContains('hourly_average_minimum_evidence_missing', $codes($builder->build($this->supplierId, '2026-06-01', '2026-07-15')));
     }
 
+    public function testMonthlySeveranceWithoutEndDateGetsNoHourlyMinimumBlocker(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employments SET end_date = NULL WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $inputId = $this->approvedInput(107600, 'ODSTUPNE', 'manual');
+        $pdo->prepare('UPDATE payroll_inputs SET external_id = ? WHERE supplier_id = ? AND id = ?')->execute(['termination:severance:' . $this->employmentId, $this->supplierId, $inputId]);
+        $snapshot = $this->container->get(PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-06-01', '2026-07-15');
+        self::assertNotContains('hourly_average_minimum_evidence_missing', array_map(static fn($v): string => $v->code, $snapshot->validations));
+    }
+
     public function testExternalStandbyPrefixCannotImpersonateFloorProof(): void
     {
         $components = $this->container->get(\MyInvoice\Repository\Payroll\PayrollComponentRepository::class);

@@ -81,11 +81,11 @@ final class PayrollHourlyAverageInputGuard
                 if (!$candidate['termination']) continue;
                 $date = $terminationDates[$candidate['employment_id']] ?? '';
                 $candidate['floors'] = array_values(array_filter($terminationFloors[$candidate['employment_id']] ?? [], static fn(array $floor): bool => $floor['date_from'] <= $date && $floor['date_to'] >= $date));
-                // Běžný měsíční nárok ponechává původní snapshot beze změny.
-                if ($candidate['floors'] === []) unset($candidates[$id]);
             }
             unset($candidate);
         }
+        // Běžný měsíční nárok (i bez data skončení) ponechává původní snapshot beze změny.
+        foreach ($candidates as $id => $candidate) if ($candidate['termination'] && $candidate['floors'] === []) unset($candidates[$id]);
         $settledStandby = [];
         foreach ($standbyInputs as $employmentId => $amounts) {
             $latestId = max(array_keys($amounts));
