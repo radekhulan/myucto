@@ -589,6 +589,28 @@ describe('EmploymentCard', () => {
     expect(payrollApi.addEmploymentTerms).not.toHaveBeenCalled()
   })
 
+  it.each(['dpp', 'dpc'] as const)('u %s předvyplní po přepnutí na hodinovou odměnu podklad dohoda', async (relation) => {
+    const stored = employment()
+    stored.relation_type = relation
+    const wrapper = await mountCard(stored)
+    await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+    expect((wrapper.get('[data-test="terms-remuneration-basis-kind"]').element as HTMLSelectElement).value).toBe('agreement')
+  })
+
+  it('chybějící druh podkladu zvýrazní přímo u pole', async () => {
+    const wrapper = await mountCard()
+    await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+    await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
+    await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetická smlouva')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    const kind = wrapper.get('[data-test="terms-remuneration-basis-kind"]')
+    expect(kind.classes()).toContain('border-danger-500')
+    expect(kind.attributes('aria-invalid')).toBe('true')
+    expect(kind.element.parentElement?.textContent).toContain('payroll.people.remuneration.basis_kind_required')
+    await kind.setValue('contract')
+    expect(wrapper.get('[data-test="terms-remuneration-basis-kind"]').classes()).not.toContain('border-danger-500')
+  })
+
   it.each(['', '0', '-1', '180.555', '10000000.01', 'nesjednáno'])('odmítne neplatnou hodinovou sazbu %s před uložením', async (rate) => {
     const wrapper = await mountCard()
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')

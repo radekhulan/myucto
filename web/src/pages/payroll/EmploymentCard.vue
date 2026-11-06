@@ -412,6 +412,32 @@ watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, termsFor
   saveMode.value = 'version'
 })
 
+// Odměnu z DPP a DPČ sjednává vždy dohoda (§ 75, § 76 ZP), druh podkladu je tedy jasný.
+watch(() => termsForm.value?.remuneration_type, (type) => {
+  const form = termsForm.value
+  if (form && type === 'hourly' && !form.remuneration_basis_kind && ['dpp', 'dpc'].includes(props.employment.relation_type)) {
+    form.remuneration_basis_kind = 'agreement'
+  }
+})
+
+/** Pole, kvůli kterému uložení neprošlo; zvýrazní se a stránka na něj najede. */
+type RemunerationField = 'hourly-rate' | 'remuneration-basis' | 'monthly-gross' | 'remuneration-basis-kind'
+const invalidField = ref<RemunerationField | null>(null)
+watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, grossInput.value, termsForm.value?.remuneration_basis_kind, termsForm.value?.remuneration_basis], () => {
+  invalidField.value = null
+})
+
+function rejectField(field: RemunerationField, message: string): false {
+  saveError.value = message
+  invalidField.value = field
+  void nextTick(() => {
+    const element = document.querySelector<HTMLElement>(`[data-test="terms-${field}"]`)
+    element?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    element?.focus({ preventScroll: true })
+  })
+  return false
+}
+
 // Minimum se čte až pro hodinový vztah a skutečné datum ukládané verze.
 // Opožděná odpověď pro jiný den nesmí přepsat právě zvolený rok/podmínky.
 watch([hourlyRemuneration, minimumEffectiveFrom], async ([hourly, effectiveFrom]) => {
@@ -700,20 +726,16 @@ async function save(): Promise<boolean> {
   const gross = hourlyRemuneration.value ? null : inputToMinor(grossInput.value)
   const hourlyRate = hourlyRemuneration.value ? inputToMinor(hourlyRateInput.value) : null
   if (hourlyRemuneration.value && (!supportsHourly.value || hourlyRate === null || !Number.isFinite(hourlyRate) || hourlyRate <= 0 || hourlyRate > 1_000_000_000)) {
-    saveError.value = t('payroll.people.remuneration.hourly_invalid')
-    return false
+    return rejectField('hourly-rate', t('payroll.people.remuneration.hourly_invalid'))
   }
   if (hourlyRemuneration.value && !(form.remuneration_basis ?? '').trim()) {
-    saveError.value = t('payroll.people.remuneration.basis_required')
-    return false
+    return rejectField('remuneration-basis', t('payroll.people.remuneration.basis_required'))
   }
   if (form.remuneration_type === 'monthly' && currentTerms.value?.remuneration_type === 'hourly' && gross === null) {
-    saveError.value = t('payroll.people.remuneration.monthly_required')
-    return false
+    return rejectField('monthly-gross', t('payroll.people.remuneration.monthly_required'))
   }
   if (hourlyRemuneration.value && !form.remuneration_basis_kind) {
-    saveError.value = t('payroll.people.remuneration.basis_kind_required')
-    return false
+    return rejectField('remuneration-basis-kind', t('payroll.people.remuneration.basis_kind_required'))
   }
   if (Number.isNaN(gross)) {
     saveError.value = t('payroll.people.gross_invalid')
@@ -1469,7 +1491,8 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           </label>
           <label v-if="hourlyRemuneration" :class="FIELD">
             {{ t('payroll.people.remuneration.hourly_rate') }} <RequiredMark />
-            <input v-model="hourlyRateInput" inputmode="decimal" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-hourly-rate">
+            <input v-model="hourlyRateInput" inputmode="decimal" :disabled="!canEditTerms || busy" :class="[INPUT, invalidField === 'hourly-rate' ? 'border-danger-500' : '']" :aria-invalid="invalidField === 'hourly-rate'" data-test="terms-hourly-rate">
+            <span v-if="invalidField === 'hourly-rate'" class="mt-1 block text-xs text-danger-600">{{ saveError }}</span>
           </label>
           <label v-else :class="FIELD">
             {{ t(`payroll.people.remuneration.monthly_${remunerationNoun}`) }}
@@ -1478,23 +1501,27 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 v-model="grossInput"
                 inputmode="decimal"
                 :disabled="!canEditTerms || busy"
-                :class="[INPUT, 'pr-10']"
+                :class="[INPUT, 'pr-10', invalidField === 'monthly-gross' ? 'border-danger-500' : '']"
+                :aria-invalid="invalidField === 'monthly-gross'"
                 data-test="terms-monthly-gross"
               >
               <span class="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-neutral-500">Kč</span>
             </div>
+            <span v-if="invalidField === 'monthly-gross'" class="mt-1 block text-xs text-danger-600">{{ saveError }}</span>
           </label>
 
           <label :class="FIELD">
             {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark v-if="hourlyRemuneration" />
-            <select v-model="termsForm.remuneration_basis_kind" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-basis-kind">
+            <select v-model="termsForm.remuneration_basis_kind" :disabled="!canEditTerms || busy" :class="[INPUT, invalidField === 'remuneration-basis-kind' ? 'border-danger-500' : '']" :aria-invalid="invalidField === 'remuneration-basis-kind'" data-test="terms-remuneration-basis-kind">
               <option :value="null">{{ t('payroll.people.remuneration.basis_kind_empty') }}</option>
               <option v-for="kind in remunerationBasisKinds" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
             </select>
+            <span v-if="invalidField === 'remuneration-basis-kind'" class="mt-1 block text-xs text-danger-600">{{ saveError }}</span>
           </label>
           <label :class="[FIELD, 'sm:col-span-2 lg:col-span-3']">
             {{ t('payroll.people.remuneration.basis') }} <RequiredMark v-if="hourlyRemuneration" />
-            <input v-model="termsForm.remuneration_basis" maxlength="255" :disabled="!canEditTerms || busy" :class="INPUT" data-test="terms-remuneration-basis">
+            <input v-model="termsForm.remuneration_basis" maxlength="255" :disabled="!canEditTerms || busy" :class="[INPUT, invalidField === 'remuneration-basis' ? 'border-danger-500' : '']" :aria-invalid="invalidField === 'remuneration-basis'" data-test="terms-remuneration-basis">
+            <span v-if="invalidField === 'remuneration-basis'" class="mt-1 block text-xs text-danger-600">{{ saveError }}</span>
             <span :class="HINT">{{ t('payroll.people.remuneration.basis_hint') }} {{ t('payroll.people.remuneration.version_hint') }}</span>
           </label>
           <p v-if="hourlyRemuneration" class="sm:col-span-2 lg:col-span-3 rounded-md border border-warning-500/30 bg-warning-50 p-3 text-xs text-warning-800" data-test="terms-hourly-warning">
