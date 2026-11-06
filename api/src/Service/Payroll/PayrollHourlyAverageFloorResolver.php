@@ -17,6 +17,9 @@ use PDO;
 /** § 357 v nové hodinové cestě; původní měsíční průměry a jejich stopy nemění. */
 final class PayrollHourlyAverageFloorResolver
 {
+    /** § 79 odst. 2 písm. a) zákoníku práce: 37,5 h týdně. */
+    private const SHORTEST_STATUTORY_WEEKLY_MINUTES = 2250;
+
     public function __construct(private readonly Connection $db) {}
 
     /** @param list<int> $employmentIds @return array<int,list<array<string,mixed>>> */
@@ -130,18 +133,27 @@ final class PayrollHourlyAverageFloorResolver
                 $minimum = count($matching) === 1 ? ($matching[0]['hourly_terms']['minimum_wage'] ?? null) : null;
                 $stated = self::statedWeeklyMinutes([$term]);
                 $override = $minimum['statutory_weekly_minutes'] ?? null;
-                $conflict = count($matching) > 1 || (!in_array($relation, ['dpp', 'dpc'], true) && $override !== null && $stated !== null && (int) $override !== $stated);
-                // Sjednaný rozsah dohody neurčuje stanovenou týdenní pracovní dobu.
-                $minutes = in_array($relation, ['dpp', 'dpc'], true) ? ($override ?? 2400) : ($conflict ? null : ($override ?? $stated));
-                $hourly = null; $base = null; $monthly = null; $rulesetId = null;
+                $hourly = null; $base = null; $monthly = null; $rulesetId = null; $standard = null;
                 try {
                     $version = $provider->forCalculation(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetDomain::EmploymentThresholds, $date);
                     $rulesetId = $version->id;
                     if ($version->effectiveTo < $last) throw new \UnexpectedValueException('Legislativní pravidla nepokrývají celý úsek pracovní doby.');
                     $base = (int) $version->parameter('minimum_wage.hourly_40h_week')->value;
                     $monthly = (int) $version->parameter('minimum_wage.monthly_40h_week')->value;
-                    if ($minutes !== null) $hourly = \MyInvoice\Service\Payroll\Hourly\MinimumHourlyRate::calculate($base, (int) $minutes);
+                    $standard = (int) $version->parameter('minimum_wage.standard_weekly_minutes')->value;
                 } catch (\LogicException|\UnexpectedValueException|\InvalidArgumentException) {}
+                // Doba pod nejkratší zákonnou stanovenou dobou (§ 79 odst. 2) je kratší
+                // úvazek podle § 80, typicky bez vyplněného podílu úvazku. Stejnou mez
+                // používá návrh fondu JMHZ; jinou stanovenou dobu musí doložit zásady minima.
+                $statedCredible = $stated !== null && $standard !== null && $stated >= self::SHORTEST_STATUTORY_WEEKLY_MINUTES && $stated <= $standard;
+                // Sjednaný rozsah dohody neurčuje stanovenou týdenní pracovní dobu.
+                $agreement = in_array($relation, ['dpp', 'dpc'], true);
+                $conflict = count($matching) > 1 || (!$agreement && $override !== null && $statedCredible && (int) $override !== $stated);
+                $minutes = $conflict && !$agreement ? null
+                    : ($override ?? ($agreement ? $standard : ($stated === null ? null : ($statedCredible ? $stated : $standard))));
+                try {
+                    if ($minutes !== null && $base !== null) $hourly = \MyInvoice\Service\Payroll\Hourly\MinimumHourlyRate::calculate($base, (int) $minutes, (int) $standard);
+                } catch (\InvalidArgumentException) {}
                 $result[] = ['term_id' => (int) $term['id'], 'date_from' => $date, 'date_to' => $last,
                     'stated_weekly_minutes' => $minutes, 'minimum_base40_minor' => $base, 'minimum_monthly_minor' => $monthly,
                     'minimum_hourly_minor' => $hourly, 'remuneration_type' => $term['remuneration_type'] ?? null,

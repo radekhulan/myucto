@@ -73,6 +73,22 @@ final class PayrollHourlyAverageFloorResolverTest extends TestCase
         self::assertSame(13440, $dpp[0]['minimum_hourly_minor']);
     }
 
+    public function testShorterContractWithDefaultWorkloadDoesNotRaiseMinimum(): void
+    {
+        $provider = PayrollRulesetRegistry::defaults();
+        $term = ['id' => 1, 'row_version' => 1, 'effective_from' => '2026-01-01', 'effective_to' => null,
+            'remuneration_type' => 'hourly', 'weekly_hours' => '20.00', 'workload_basis_points' => 10000];
+        $rows = Resolver::segments([$term], [], '2026-07-01', '2026-07-31', 'employment', $provider);
+        self::assertSame(13440, $rows[0]['minimum_hourly_minor']);
+        self::assertSame(2400, $rows[0]['stated_weekly_minutes']);
+        self::assertFalse($rows[0]['weekly_hours_conflict']);
+        $policy = ['valid_from' => '2026-01-01', 'valid_to' => null, 'hourly_terms' => ['minimum_wage' => [
+            'assessment' => 'hourly', 'statutory_weekly_minutes' => 2250, 'statutory_weekly_reference' => 'Syntetický rozvrh', 'advance_proof' => null]]];
+        $documented = Resolver::segments([$term], [$policy], '2026-07-01', '2026-07-31', 'employment', $provider);
+        self::assertSame(14340, $documented[0]['minimum_hourly_minor']);
+        self::assertFalse($documented[0]['weekly_hours_conflict']);
+    }
+
     public function testRuntimeDateRangeIsPartitionedAtRulesetYearBoundary(): void
     {
         $term = ['id' => 1, 'row_version' => 1, 'effective_from' => '2025-01-01', 'effective_to' => null,

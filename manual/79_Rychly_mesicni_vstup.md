@@ -321,6 +321,9 @@ V **Zásadách příplatků** na kartě vztahu lze stanovenou týdenní dobu
 doložit v části minima. Zadejte ji v hodinách s přesností na celé
 minuty a uveďte podklad; prázdné pole použije zákonný výchozí režim
 serveru. Pole se samo nepředvyplňuje sjednaným kratším úvazkem.
+Bez doložení se jako stanovená bere doba ze sjednání a úvazku jen v rozsahu
+37,5 až 40 hodin; kratší sjednaná doba (například 20 hodin při úvazku
+100 %) je kratší úvazek a minimum se počítá ze 40 hodin.
 
 **Měsíční posouzení** lze zvolit jen u pracovního poměru, také u
 zaměstnání malého rozsahu. Potřebuje označení sjednání a doklad
