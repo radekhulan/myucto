@@ -89,7 +89,7 @@ final class TaxRecordsPlanTest extends TestCase
         self::assertStringStartsWith('Rok 2025 (adresář ROK.001): ', $byCode['cashbook_orphan']['message']);
     }
 
-    /** Vazba na doklad, který v záloze není, neznámý pohyb a pohyb v cizí měně. */
+    /** Vazba na doklad, který v záloze není, neznámý pohyb a bankovní pohyb v cizí měně. */
     public function testUnknownMovementOrphanLinkAndForeignCurrencyAreErrors(): void
     {
         $files = SyntheticTaxAgenda::with(SyntheticTaxAgenda::files(), 'ROK.001/UcPenDen.DAT', SyntheticTaxAgenda::CASHBOOK_FIELDS,
@@ -101,6 +101,28 @@ final class TaxRecordsPlanTest extends TestCase
             }, $rows));
 
         self::assertSame(['cashbook_link_orphan' => 'error', 'cashbook_movement_unknown' => 'error', 'cashbook_foreign_currency' => 'error'], self::codes($this->check($files)));
+    }
+
+    /**
+     * Valutová pokladna: pokladní pohyb peněžního deníku smí nést měnu a kurz, jeho korunovou
+     * částku hlídá shoda s dokladem. Počáteční stav pokladny ve valutě se s korunovými pohyby
+     * nesrovnává (stav 2025 140 EUR proti 100 EUR + 1 000 Kč by hlásil falešný rozdíl).
+     */
+    public function testForeignCashRegisterWithCzkAmountsPasses(): void
+    {
+        self::assertSame([], $this->check(SyntheticTaxAgenda::filesWithForeignCashRegister())['issues']);
+    }
+
+    /**
+     * Doklad valutové pokladny bez korunové částky převod nepřepočítává ani nepřeskočí jako
+     * nulový: zastaví ho s číslem dokladu.
+     */
+    public function testForeignCashDocumentWithoutCzkAmountIsError(): void
+    {
+        $check = $this->check(SyntheticTaxAgenda::filesWithForeignCashRegister(true));
+        self::assertSame(['cash_foreign_without_czk' => 'error'], self::codes($check));
+        self::assertSame(['year' => 2025, 'dir' => 'ROK.001', 'count' => 1, 'examples' => ['PV25007']], $check['issues'][0]['context']);
+        self::assertStringStartsWith('Rok 2025 (adresář ROK.001): pokladní doklady ve valutě nemají částku v Kč', $check['issues'][0]['message']);
     }
 
     /** Sloupec peněžního deníku, který převod nezná, se nezařadí odhadem. */

@@ -176,6 +176,46 @@ final class MoneyS3TaxRecordsImportTest extends MoneyS3ImportTestCase
     }
 
     /**
+     * Valutová pokladna Money: daňová evidence vede pokladny jen v Kč (valutovou pokladnu
+     * aplikace v daňové evidenci nezaloží), převod ji proto založí jako korunovou. Doklady
+     * převezme v Kč přesně podle Money, valutu uvede v popisu a nic nepřepočítává. Doklad
+     * bez korunové částky zastaví kontrola před převodem s číslem dokladu.
+     */
+    public function testForeignCashRegisterIsConvertedInCzk(): void
+    {
+        $supplierId = $this->supplier();
+        $protocol = $this->importer->run($supplierId, $this->userId, $this->taxBackup(SyntheticTaxAgenda::filesWithForeignCashRegister()),
+            new ImportOptions(ImportOptions::MODE_IMPORT));
+        self::assertFalse($protocol->hasErrors(), $this->explain($protocol));
+        $result = $protocol->toArray();
+        $warnings = array_values(array_filter(array_merge(...array_column($result['steps'], 'messages')),
+            static fn (array $m): bool => $m['level'] === 'warning'));
+        self::assertSame(['register_currency_tax_records'], array_column($warnings, 'code'), $this->explain($protocol));
+        self::assertStringStartsWith('Pokladna POE je v Money vedená v EUR. Daňová evidence vede pokladny jen v Kč', $warnings[0]['text']);
+
+        self::assertSame(2, $this->rowCount('cash_registers', $supplierId));
+        self::assertSame(0, $this->rowCount('cash_registers', $supplierId, "currency_code <> 'CZK'"));
+        $docs = $this->db->pdo()->prepare('SELECT doc_number, total_amount, currency_code, amount_foreign, description FROM cash_documents
+            WHERE supplier_id = ? AND doc_number IN (?, ?) ORDER BY doc_number');
+        $docs->execute([$supplierId, 'PP24007', 'PV25007']);
+        self::assertSame([
+            ['doc_number' => 'PP24007', 'total_amount' => '1000.00', 'currency_code' => 'CZK', 'amount_foreign' => null,
+                'description' => 'Vklad valut (Money: 40,00 EUR, kurz 25,000 Kč)'],
+            ['doc_number' => 'PV25007', 'total_amount' => '3000.00', 'currency_code' => 'CZK', 'amount_foreign' => null,
+                'description' => 'Ubytování (Money: 120,00 EUR, kurz 25,000 Kč)'],
+        ], $docs->fetchAll(\PDO::FETCH_ASSOC));
+        self::assertSame([true, true], array_column($result['tax_records_reconciliation'], 'ok'), $this->explain($protocol));
+
+        $refused = $this->supplier();
+        $backup = $this->taxBackup(SyntheticTaxAgenda::filesWithForeignCashRegister(true));
+        $preflight = $this->preflight($refused, $backup);
+        self::assertSame('error', $preflight['cash_foreign_without_czk']['level'] ?? null, json_encode($preflight, JSON_UNESCAPED_UNICODE) ?: '');
+        self::assertSame(['PV25007'], $preflight['cash_foreign_without_czk']['context']['examples']);
+        self::assertTrue($this->importer->run($refused, $this->userId, $backup, new ImportOptions(ImportOptions::MODE_IMPORT))->hasErrors());
+        self::assertSame(0, $this->rowCount('cash_documents', $refused));
+    }
+
+    /**
      * Nulový doklad Money (přeúčtování DPH zálohy při vyúčtování) MyÚčto nepřebírá: rozdíl
      * daňové části úhrad dokladu rekonciliace ukáže u konkrétního dokladu jako rozdíl
      * k přijetí. Bez přijetí převod skončí chybou, s přijetím projde s upozorněním.

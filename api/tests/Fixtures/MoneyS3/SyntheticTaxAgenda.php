@@ -399,6 +399,35 @@ final class SyntheticTaxAgenda
     }
 
     /**
+     * Agenda s valutovou pokladnou POE (EUR): počáteční stav pokladny Money vede ve valutě
+     * (100 EUR, 2025 140 EUR), doklady nesou korunovou částku `Celkem` vedle valuty
+     * (`ValutyKUhr`, `Kurs`) a peněžní deník měnu a kurz s korunovou `Castka`. 2024 vklad
+     * 40 EUR (1 000 Kč), 2025 výdaj PV25007 120 EUR (3 000 Kč) bez faktury.
+     * `$missingCzk` = výdaj 2025 bez korunové částky (Money ho nepřepočítalo).
+     *
+     * @return array<string,string>
+     */
+    public static function filesWithForeignCashRegister(bool $missingCzk = false): array
+    {
+        $cashFields = array_merge(self::CASH_FIELDS, [['Mena', 'C', 3], ['Kurs', 'E', 10], ['PocetJedn', 'L', 4], ['ValutyKUhr', 'E', 10], ['ValutyZak0', 'E', 10]]);
+        $files = self::files();
+        foreach (['ROK.002' => [2024, 100.0, 4, 'PP24007', 0, 'P510', 'Vklad valut', 1000.0, 40.0, 'PP_510'],
+            'ROK.001' => [2025, 140.0, 3, 'PV25007', 1, 'V106', 'Ubytování', $missingCzk ? 0.0 : 3000.0, 120.0, 'VP_106']]
+            as $dir => [$year, $opening, $number, $doc, $out, $rule, $text, $czk, $foreign, $movement]) {
+            $date = "{$year}-05-14";
+            $files = self::with($files, "{$dir}/SzUcPokl.DAT", self::ACCOUNT_FIELDS, static fn (array $rows): array => [...$rows,
+                ['Zkrat' => 'POE', 'Popis' => 'Pokladna EUR', 'UcPokl' => 'P', 'PocStav' => $opening, 'Mena' => 'EUR']]);
+            $files = self::with($files, "{$dir}/PoklKnih.DAT", $cashFields, static fn (array $rows): array => [...$rows,
+                ['Cislo' => $number, 'Doklad' => $doc, 'Pokl' => 'POE', 'Vydej' => $out, 'PrKont' => $rule, 'DatVyst' => $date, 'DatUcPr' => $date,
+                    'Popis' => $text, 'Celkem' => $czk, 'Mena' => 'EUR', 'Kurs' => 25.0, 'PocetJedn' => 1, 'ValutyKUhr' => $foreign]]);
+            $files = self::with($files, "{$dir}/UcPenDen.DAT", self::CASHBOOK_FIELDS, static fn (array $rows): array => [...$rows,
+                ['Cislo' => 50 + $number, 'Datum' => $date, 'Zdroj' => 'PK', 'ZRadek' => $number, 'Doklad' => $doc, 'Popis' => $text,
+                    'Typ' => $out === 1 ? 'V' : 'P', 'Pohyb' => $movement, 'Castka' => $czk, 'Mena' => 'EUR', 'Kurz' => 25.0]]);
+        }
+        return $files;
+    }
+
+    /**
      * Řádky tabulky ze souborů agendy (všechna pole, jak je přečte převod).
      *
      * @param array<string,string> $files

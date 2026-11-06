@@ -16,7 +16,9 @@ namespace MyInvoice\Service\Migration\MoneyS3;
  *   - interní doklad deník mít nemusí (zápočet bez peněz); má-li ho, sedí aspoň částka,
  *   - vazba řádku vede na doklad v roce `URok`,
  *   - pohyb i jeho sloupec peněžního deníku převod zná ({@see Ms3CashBook::COLUMN_BUCKETS}),
- *   - deník je v korunách (cizí měny převod daňové evidence nepřebírá),
+ *   - deník je v korunách; měnu a kurz smí mít jen pohyb valutové pokladny, převod ho vede
+ *     v Kč (banku a interní doklady v cizí měně převod daňové evidence nepřebírá),
+ *   - doklad valutové pokladny nese korunovou částku (převod ji nepřepočítává z valuty),
  *   - počáteční stav účtu a pokladny navazuje na stav konce předchozího roku,
  *   - agenda nemá majetek ani mzdy, které převod daňové evidence zatím nepřebírá.
  *
@@ -90,10 +92,15 @@ final class TaxRecordsPlan
                 if ($t === null || !$t->hasData()) {
                     continue;
                 }
-                foreach ($t->rows(array_values(array_filter(['Cislo', 'Doklad', 'Vydej', 'Celkem', $accountField]))) as $r) {
+                $fields = array_values(array_filter(['Cislo', 'Doklad', 'Vydej', 'Celkem', $accountField]));
+                if ($source === 'PK') {
+                    array_push($fields, 'Mena', 'Kurs', 'PocetJedn', 'ValutyKUhr', 'ValutyZak0');
+                }
+                foreach ($t->rows($fields) as $r) {
                     $amount = round((float) ($r['Celkem'] ?? 0), 2);
                     $signed = ((int) ($r['Vydej'] ?? 0)) === 1 ? -$amount : $amount;
-                    $documents[Ms3CashBook::key($source, (int) ($r['Cislo'] ?? 0))] = ['source' => $source, 'document_no' => trim((string) ($r['Doklad'] ?? '')), 'amount' => $signed];
+                    $documents[Ms3CashBook::key($source, (int) ($r['Cislo'] ?? 0))] = ['source' => $source, 'document_no' => trim((string) ($r['Doklad'] ?? '')), 'amount' => $signed,
+                        'foreign_without_czk' => $source === 'PK' && $amount === 0.0 && (CashBankImporter::storedForeign($r)['amount'] ?? null) !== null];
                     if ($accountField !== null) {
                         $account = trim((string) ($r[$accountField] ?? ''));
                         $balances[$account] = round(($balances[$account] ?? 0.0) + $signed, 2);
@@ -106,6 +113,10 @@ final class TaxRecordsPlan
                 $problems[$code][] = $documentNo;
             };
             foreach ($documents as $key => $doc) {
+                if ($doc['foreign_without_czk']) {
+                    // Jako nulový doklad by se tiše přeskočil; přepočet z valuty převod nedělá.
+                    $note('cash_foreign_without_czk', $doc['document_no']);
+                }
                 $movement = $book->movements[$key] ?? null;
                 if ($movement === null) {
                     if ($doc['source'] !== 'ID' && abs($doc['amount']) >= 0.005) {
@@ -126,8 +137,11 @@ final class TaxRecordsPlan
                 if (!isset($documents[$key])) {
                     $note('cashbook_orphan', $movement['document_no']);
                 }
-                $currency = mb_strtoupper($movement['currency']);
-                if (!in_array($currency, ['', 'KČ', 'CZK'], true) || ($movement['rate'] !== 0.0 && abs($movement['rate'] - 1.0) > 1e-9)) {
+                // Pohyb valutové pokladny nese měnu a kurz s korunovou částkou, kterou hlídá shoda
+                // s dokladem (`cashbook_projection_mismatch`); pokladnu převod vede v Kč
+                // ({@see CashBankImporter::importCash()}).
+                if ($movement['source'] !== 'PK'
+                    && (!self::isCzk($movement['currency']) || ($movement['rate'] !== 0.0 && abs($movement['rate'] - 1.0) > 1e-9))) {
                     $note('cashbook_foreign_currency', $movement['document_no']);
                 }
                 $linked = [];
@@ -159,7 +173,8 @@ final class TaxRecordsPlan
                 'cashbook_link_orphan' => ['error', 'řádky peněžního deníku odkazují na uhrazený doklad, který v záloze není'],
                 'cashbook_movement_unknown' => ['error', 'peněžní deník používá typ pohybu, který číselník pohybů Money nemá'],
                 'cashbook_column_unknown' => ['error', 'typ pohybu patří do sloupce peněžního deníku, který převod nezná'],
-                'cashbook_foreign_currency' => ['error', 'peněžní deník obsahuje pohyby v cizí měně, které převod daňové evidence nepřebírá'],
+                'cashbook_foreign_currency' => ['error', 'peněžní deník obsahuje bankovní nebo interní pohyby v cizí měně, které převod daňové evidence nepřebírá'],
+                'cash_foreign_without_czk' => ['error', 'pokladní doklady ve valutě nemají částku v Kč a převod je nepřepočítává'],
             ];
             foreach ($messages as $code => [$level, $text]) {
                 if (!isset($problems[$code])) {
@@ -195,7 +210,9 @@ final class TaxRecordsPlan
                 continue;
             }
             foreach ($next['accounts'] as $code => $account) {
-                if (!isset($prev['accounts'][$code])) {
+                // Valutovou pokladnu vede Money ve valutě (počáteční stav), doklady v Kč: stavy
+                // nejdou srovnat. V MyÚčtu je pokladna korunová.
+                if (!isset($prev['accounts'][$code]) || !self::isCzk($account['currency'])) {
                     continue;
                 }
                 $expected = round($prev['accounts'][$code]['opening'] + ($prev['balances'][$code] ?? 0.0), 2);
@@ -211,6 +228,11 @@ final class TaxRecordsPlan
         }
 
         return ['years' => $years, 'issues' => $issues];
+    }
+
+    private static function isCzk(string $currency): bool
+    {
+        return in_array(mb_strtoupper(trim($currency)), ['', 'KČ', 'CZK'], true);
     }
 
     private static function money(float $amount): string

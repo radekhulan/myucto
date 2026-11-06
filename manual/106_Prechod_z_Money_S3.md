@@ -721,7 +721,9 @@ stavů účtů a pokladen a vypíše souhrn každého roku. Převod zastaví, kd
 - peněžní deník nesedí s bankovním nebo pokladním dokladem, má řádek bez
   dokladu nebo odkazuje na uhrazený doklad, který v záloze není,
 - peněžní deník používá typ pohybu nebo sloupec, který převod nezná, nebo
-  obsahuje pohyb v cizí měně,
+  obsahuje bankovní nebo interní pohyb v cizí měně,
+- pokladní doklad ve valutě nemá v Money částku v Kč (hláška uvede čísla
+  dokladů),
 - agenda má v Money majetek nebo mzdy,
 - firma v MyÚčtu vede převáděné roky jako podvojné účetnictví,
 - převáděné roky už v MyÚčtu obsahují doklady, bankovní pohyby nebo pokladní
@@ -777,6 +779,14 @@ odpovídá Money.
 Zápočet ostatní pohledávky proti ostatnímu závazku daňová evidence MyÚčta
 nemá: doklady zůstanou neuhrazené a převod to ohlásí.
 
+**Valutová pokladna.** Daňová evidence vede pokladny jen v korunách, peněžní
+deník Money je v korunách také. Pokladnu, kterou Money vede v cizí měně,
+převod založí jako korunovou a protokol to ohlásí. Pokladní doklady převezme
+v korunách přesně podle Money, valutu nepřepočítává. Částku ve valutě a kurz,
+jak je Money uložilo, uvede v popisu dokladu, například
+*Ubytování (Money: 120,00 EUR, kurz 25,000 Kč)*. Zůstatek pokladny ve valutě
+se nepřevádí.
+
 **Podaná přiznání DPH.** Se zapnutou volbou **Zapsat podaná přiznání DPH
 a uzamknout převzaté období** převod zapíše přiznání DPH a kontrolní hlášení,
 která Money eviduje jako podaná, jako podaná mimo MyÚčto. Za období se zapíše
@@ -793,7 +803,8 @@ pohyby rozpoznají (kapitola [Banka](29_Banka.md)).
 ### 106.10.11 Omezení
 
 - Daňovou evidenci převod převede jen u agendy vedené jako daňová evidence ve
-  všech letech, v korunách a bez majetku a mezd. Rok, který Money vede jako
+  všech letech a bez majetku a mezd. Bankovní účty musí být v korunách,
+  valutovou pokladnu převod převede jako korunovou. Rok, který Money vede jako
   daňovou evidenci v agendě, která vede i podvojné účetnictví, převod vynechá
   i s jeho doklady a náhled ho vypíše v upozornění.
 - Převod nikdy nezapíše podvojné účetnictví pro rok, který Money vede jako
