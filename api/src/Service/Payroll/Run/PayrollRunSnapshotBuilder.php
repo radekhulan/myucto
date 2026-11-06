@@ -23,7 +23,6 @@ use MyInvoice\Service\Payroll\Employment\PayrollRelationType;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\PayrollPredecessorObligationScope;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
-use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
 use MyInvoice\Service\Payroll\HealthInsurance\PayrollExpectedHealthParticipation;
 use MyInvoice\Service\Payroll\SocialInsurance\PayrollExpectedParticipation;
@@ -211,6 +210,9 @@ final class PayrollRunSnapshotBuilder
             $periodEnd,
         );
         $inputRows = $this->batch->inputs($supplierId, $employmentIds, $periodStart);
+        $hourlyFrozen = $this->batch->hourlyFrozenClaims($supplierId, array_keys($evidenceTerms), $periodStart);
+        $hourlyPreviews = $evidenceTerms === [] ? [] : (new \MyInvoice\Service\Payroll\PayrollHourlyWagePreview($this->db))->fromSources(
+            $supplierId, $periodStart, $employments, $evidenceTerms, $hourlyTerms, $workedTimeEvidence, $hourlyContexts, $monthlyParts);
         $hourlyAverageCheck = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageInputGuard($this->db))->invalidInputs($supplierId, $periodStart, $inputRows, $hourlyContexts);
         $dimensionRows = $this->batch->employmentDimensions(
             $supplierId,
@@ -278,15 +280,31 @@ final class PayrollRunSnapshotBuilder
         foreach ($employments as $row) {
             $employmentId = (int) $row['employment_id'];
             $employeeId = (int) $row['employee_id'];
-            if (($hourlyTerms[$employmentId] ?? []) !== [] || array_key_exists($employmentId, $settlementTerms)) {
-                $validations[] = new PayrollRunValidation(
-                    'blocker',
-                    PayrollHourlyRemuneration::BLOCKER,
-                    'employment',
-                    $employmentId,
-                    PayrollHourlyRemuneration::MESSAGE,
-                    "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
-                );
+            if (array_key_exists($employmentId, $evidenceTerms)) {
+                $preview = $hourlyPreviews[$employmentId] ?? null;
+                if ($preview === null) {
+                    $validations[] = new PayrollRunValidation('blocker', 'hourly_calculation_missing', 'employment', $employmentId,
+                        'Hodinový výpočet nelze sestavit. Zkontrolujte účinné podmínky a podklady pracovní doby.');
+                } else {
+                    foreach ($preview['blockers'] as $blocker) {
+                        $validations[] = new PayrollRunValidation('blocker', (string) $blocker['code'], 'employment', $employmentId,
+                            (string) $blocker['message'], "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms");
+                    }
+                    if ($preview['complete']) {
+                        $latest = [];
+                        foreach ($hourlyFrozen['latest'][$employmentId] ?? [] as $claim) $latest[$claim['purpose']] = $claim;
+                        foreach ($preview['claims'] as $claim) {
+                            $frozen = $latest[$claim['purpose']] ?? null;
+                            if (!is_array($frozen) || $frozen['evidence_hash'] !== $preview['evidence_hash']
+                                || ($frozen['full_claim']['payable_minor'] ?? null) !== ($claim['payable_minor'] ?? null)
+                                || ($frozen['full_claim']['worked_duration_units'] ?? null) !== ($claim['worked_duration_units'] ?? null)) {
+                                $validations[] = new PayrollRunValidation('blocker', 'hourly_claims_not_materialized', 'employment', $employmentId,
+                                    'Úplný hodinový výpočet ještě není zmrazený. Zamkněte nebo obnovte podklady mzdového běhu.');
+                                break;
+                            }
+                        }
+                    }
+                }
             }
             if ($row['term_id'] === null) {
                 $validations[] = new PayrollRunValidation(
@@ -447,7 +465,17 @@ final class PayrollRunSnapshotBuilder
                     "/payroll/absences?employment={$employmentId}&period=" . substr($periodStart, 0, 7),
                 );
             }
-            $inputs = $this->inputs($inputRows[$employmentId] ?? []);
+            $inputs = $this->inputs($inputRows[$employmentId] ?? [], $hourlyFrozen['inputs']);
+            foreach ($hourlyFrozen['invalid'][$employmentId] ?? [] as $invalidClaim) {
+                $validations[] = new PayrollRunValidation('blocker', 'hourly_claim_provenance_invalid', 'employment', $employmentId,
+                    'Hodinový nárok nemá platný zmrazený podklad. Obnovte podklady mzdového běhu.');
+            }
+            foreach ($inputRows[$employmentId] ?? [] as $inputRow) {
+                if (($inputRow['source_kind'] ?? null) === 'time' && str_starts_with((string) ($inputRow['external_id'] ?? ''), 'hourly-wage:') && !isset($hourlyFrozen['inputs'][(int) $inputRow['id']])) {
+                    $validations[] = new PayrollRunValidation('blocker', 'hourly_claim_provenance_invalid', 'employment', $employmentId,
+                        'Hodinový mzdový vstup nemá doloženou vazbu na výpočet. Obnovte podklady mzdového běhu.');
+                }
+            }
             foreach ($hourlyAverageCheck['invalid'][$employmentId] ?? [] as $invalidInputId) {
                 $validations[] = new PayrollRunValidation('blocker', 'hourly_average_minimum_evidence_missing', 'employment', $employmentId,
                     'Náhrada nebo pohotovost nemá doložený průměr alespoň v účinném hodinovém minimu. Opravte průměr a znovu vytvořte podklad.',
@@ -732,6 +760,7 @@ final class PayrollRunSnapshotBuilder
                         : (bool) $row['term_is_primary'],
                 ],
                 'term' => $termSnapshot,
+                ...(!isset($hourlyFrozen['latest'][$employmentId]) ? [] : ['hourly_wage_claims' => $hourlyFrozen['latest'][$employmentId]]),
                 ...(!isset($hourlyAverageCheck['source'][$employmentId]) ? [] : ['hourly_average_input_sources' => $hourlyAverageCheck['source'][$employmentId]]),
                 ...(($hourlyTerms[$employmentId] ?? []) === [] ? [] : [
                     'hourly_remuneration_terms' => $hourlyTerms[$employmentId],
@@ -951,6 +980,8 @@ final class PayrollRunSnapshotBuilder
         $settlementTerms = $this->batch->remunerationTerms($supplierId, $settlementIds, $periodStart, $periodEnd);
         foreach ($settlementIds as $id) $settlementTerms[$id] ??= [];
         $evidenceTerms = $hourlyTerms + $settlementTerms;
+        $hourlyFrozen = $this->batch->hourlyFrozenClaims($supplierId, array_keys($evidenceTerms), $periodStart);
+        foreach ($allEmployments as $employmentId) $inputs[$employmentId] = $this->inputs($inputRows[$employmentId] ?? [], $hourlyFrozen['inputs']);
         $workedTime = new PayrollWorkedTimeEvidence($this->db);
         $hourlySources = $workedTime->loadMany($supplierId, array_keys($evidenceTerms), $periodStart);
         $hourlyContexts = $evidenceTerms === [] ? [] : (new PayrollHourlyEntitlementContextLoader($this->db))->forMany(
@@ -964,6 +995,7 @@ final class PayrollRunSnapshotBuilder
             'worked_time_evidence' => $hourlySources,
             'hourly_entitlement_context' => $hourlyContexts,
             'hourly_average_input_sources' => $hourlyAverageCheck['source'],
+            'hourly_wage_claims' => $hourlyFrozen['latest'],
             'manual_time_month_state' => $workedTime->manualHistoryStates(
                 $supplierId, array_values(array_diff($allEmployments, array_keys($hourlyTerms))), $periodStart,
             ),
@@ -2373,6 +2405,9 @@ final class PayrollRunSnapshotBuilder
                         PayrollJmhzWorkMonthSummaryBuilder::unpaidHolidayFields(),
                     );
                 }
+                if (in_array($derivationVersion, PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAY_TIME_OFF, true)) {
+                    $conditionalFields = array_merge($conditionalFields, PayrollJmhzWorkMonthSummaryBuilder::holidayTimeOffFields());
+                }
                 foreach ($conditionalFields as $field) {
                     $values[$field] = $row[$field] === null ? null : (int) $row[$field];
                 }
@@ -2446,7 +2481,7 @@ final class PayrollRunSnapshotBuilder
      * @param list<array<string,mixed>> $rows
      * @return list<array<string,mixed>>
      */
-    private function inputs(array $rows): array
+    private function inputs(array $rows, array $hourlyClaims = []): array
     {
         $result = [];
         foreach ($rows as $row) {
@@ -2469,6 +2504,7 @@ final class PayrollRunSnapshotBuilder
                 'component_snapshot_hash' =>
                     strtolower((string) $row['component_snapshot_hash']),
                 'component' => $component,
+                ...(!isset($hourlyClaims[(int) $row['id']]) ? [] : ['hourly_calculation' => $hourlyClaims[(int) $row['id']]]),
             ];
             // Rozpad zákonného koše osvobození (§ 6 odst. 9 ZDP) zmrazený při
             // schválení vstupu. Revize spočtené před migrací 1480 klíče nemají —

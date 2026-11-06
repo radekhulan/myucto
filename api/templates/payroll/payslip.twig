@@ -119,10 +119,13 @@
 {% endif %}
 
 <div class="section">Složky mzdy</div>
+{% if hourly_claims is defined and income_lines|filter(line => line.hourly_detail is defined and line.hourly_detail.display_basis == 'delta')|length > 0 %}
+<p class="statute">Celkový přepočet obsahuje také dříve zúčtované složky. Nové změny jsou označeny jako zúčtovaný rozdíl; souhrn přepočtené mzdy není částkou nového doplatku.</p>
+{% endif %}
 <table class="lines">
     {% for line in income_lines %}
     <tr>
-        <td>{{ line.label }}{% if line.exemption_statute %} <span class="statute">nezdaňuje se podle {{ line.exemption_statute }}{% if line.exempt_part_minor_units != line.amount_minor_units %} v částce {{ line.exempt_part_minor_units|minor_money }} {{ money }}{% endif %}</span>{% endif %}</td>
+        <td>{{ line.label }}{% if line.exemption_statute %} <span class="statute">nezdaňuje se podle {{ line.exemption_statute }}{% if line.exempt_part_minor_units != line.amount_minor_units %} v částce {{ line.exempt_part_minor_units|minor_money }} {{ money }}{% endif %}</span>{% endif %}{% if line.hourly_detail is defined %}<br><span class="statute">{% if line.hourly_detail.display_basis == 'delta' %}Zúčtovaný rozdíl{% else %}Doložené množství{% endif %}{% if line.hourly_detail.quantity_text is not null %}: {{ line.hourly_detail.quantity_text }}{% endif %}{% if line.hourly_detail.rate_minor is not null %} × {{ line.hourly_detail.rate_minor|minor_money }} Kč/h{% endif %}</span>{% endif %}</td>
         <td class="v">{{ line.amount_minor_units|minor_money }} {{ money }}</td>
     </tr>
     {% endfor %}
@@ -226,5 +229,31 @@
     </table>
 </div>
 
+{% if hourly_claims is defined and hourly_claims %}
+<pagebreak />
+<div class="title">Rozpis hodinových nároků</div>
+<div class="employer">{{ employee.display_name }} · {{ period }}</div>
+<p>Úplné nároky za pracovní období. V části Složky mzdy jsou skutečně zúčtované částky, při opravě pouze jejich rozdíl. Částky úseků jsou analytické; nárok se zaokrouhluje jednou za měsíc a druh nároku.</p>
+{% for claim in hourly_claims %}
+{% if claim.payable_minor != 0 or claim.previous_payable_minor != 0 or claim.full_duration_units != 0 %}
+<div class="section">{{ claim.label }} · {{ claim.work_period_start }}</div>
+<table class="lines">
+{% for part in claim.segments %}
+<tr><td>{{ part.date_from }} – {{ part.date_to }}<br>{{ part.quantity_text }}{% if part.rate_minor is not null %} × {{ part.rate_minor|minor_money }} Kč/h{% elseif part.monthly_gross_minor is not null %} · měsíční sazba {{ part.monthly_gross_minor|minor_money }} Kč{% endif %}{% if part.rate_label is not null %}<br><span class="statute">{{ part.rate_label }}</span>{% endif %}</td><td class="v">{{ part.analytical_minor|minor_money }} Kč{% if claim.segment_role == 'minimum_threshold' %}<br><span class="statute">zákonné minimum</span>{% endif %}</td></tr>
+{% endfor %}
+{% if claim.segment_display_adjustment_minor is not null and claim.segment_display_adjustment_minor != 0 %}<tr class="muted"><td>Rozdíl zobrazení úseků na haléře</td><td class="v">{{ claim.segment_display_adjustment_minor|minor_money }} Kč</td></tr>{% endif %}
+{% if claim.minimum_assessment is not null and claim.minimum_assessment.threshold is defined and claim.minimum_assessment.eligible is defined %}
+<tr><td>Zákonná hranice minimální mzdy</td><td class="v">{{ claim.minimum_assessment.threshold.analytical_minor|minor_money }} Kč</td></tr>
+<tr><td>Započitatelná dosažená mzda</td><td class="v">{{ claim.minimum_assessment.eligible.analytical_minor|minor_money }} Kč</td></tr>
+{% endif %}
+<tr><td>Přesný nárok zobrazený na haléře</td><td class="v">{{ claim.analytical_minor|minor_money }} Kč</td></tr>
+<tr><td>Korunové zaokrouhlení nároku</td><td class="v">{{ claim.rounding_adjustment_minor|minor_money }} Kč</td></tr>
+<tr class="total"><td>Úplný splatný nárok</td><td class="v">{{ claim.payable_minor|minor_money }} Kč</td></tr>
+<tr><td>Dříve zúčtováno</td><td class="v">{{ claim.previous_payable_minor|minor_money }} Kč</td></tr>
+<tr class="total"><td>Rozdíl této revize</td><td class="v">{{ claim.delta_amount_minor|minor_money }} Kč</td></tr>
+</table>
+{% endif %}
+{% endfor %}
+{% endif %}
 </body>
 </html>

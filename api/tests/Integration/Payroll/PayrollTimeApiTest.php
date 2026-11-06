@@ -376,6 +376,39 @@ final class PayrollTimeApiTest extends TestCase
         );
     }
 
+    public function testManualSummaryCanPersistVersionTenJmhzWithoutInventedDays(): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points) VALUES (?, ?, "2026-01-01", "2026-01-01", 40, 10000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $calendar = $this->action->calendar($this->request('PUT', '/api/payroll/time/calendars/' . $this->employmentId)
+            ->withParsedBody($this->calendarPayload()), new Response(), ['employmentId' => (string) $this->employmentId]);
+        self::assertSame(201, $calendar->getStatusCode(), (string) $calendar->getBody());
+        $saved = $this->action->saveManualSummary($this->request('POST', '/api/payroll/time/months/2026-05/manual-summary')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => 'Syntetický ruční podklad JMHZ', 'replace_source' => false,
+            'segments' => [['date_from' => '2026-05-01', 'date_to' => '2026-05-31', 'worked_duration_units' => 480000,
+                'overtime_duration_units' => null, 'worked_days' => null]],
+        ]), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $overview = $this->action->month($this->request('GET', '/api/payroll/time/month')->withQueryParams([
+            'period' => '2026-05', 'employment_id' => $this->employmentId,
+        ]), new Response());
+        $preview = $this->json($overview)['items'][0]['jmhz_work_summary']['preview'];
+        self::assertSame('jmhz-work-month.v10', $preview['derivation_version']);
+        $approved = $this->action->approve($this->request('POST', '/api/payroll/time/months/2026-05/approve')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => $this->json($saved)['month']['row_version'],
+            'jmhz_work_summary' => ['unworked_hours_occurred' => false, 'work_obstacles_occurred' => false]
+                + $preview['suggestions'] + ['source_snapshot_sha256' => $preview['source_snapshot_sha256']],
+        ]), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        $statement = $this->db->pdo()->prepare('SELECT derivation_version, worked_millihours, worked_days, overtime_millihours FROM payroll_jmhz_work_month_revisions WHERE supplier_id = ? AND employment_id = ?');
+        $statement->execute([$this->supplierId, $this->employmentId]);
+        $revision = $statement->fetch(PDO::FETCH_ASSOC);
+        self::assertSame('jmhz-work-month.v10', $revision['derivation_version']);
+        self::assertSame(160000, (int) $revision['worked_millihours']);
+        self::assertNull($revision['worked_days']);
+        self::assertNull($revision['overtime_millihours']);
+    }
+
     public function testManualSummaryReplacesAttendanceWithAuditAndKeepsVersions(): void
     {
         $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')

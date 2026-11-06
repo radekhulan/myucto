@@ -17,6 +17,17 @@ final class PayrollJmhzWorkMonthSummaryBuilder
 {
     public const DERIVATION_VERSION = 'jmhz-work-month.v9';
     public const MANUAL_SUMMARY_DERIVATION_VERSION = 'jmhz-work-month.v10';
+    public const HOLIDAY_TIME_OFF_DERIVATION_VERSION = 'jmhz-work-month.v11';
+    public const MANUAL_HOLIDAY_TIME_OFF_DERIVATION_VERSION = 'jmhz-work-month.v12';
+
+    /** Placené náhradní volno za svátek (§ 115); staré snímky tento klíč nemají. */
+    public const VERSIONS_WITH_HOLIDAY_TIME_OFF = ['jmhz-work-month.v11', 'jmhz-work-month.v12'];
+
+    /** @return list<string> */
+    public static function holidayTimeOffFields(): array
+    {
+        return ['holiday_time_off_millihours'];
+    }
 
     /**
      * Souhrn měsíce, který bere odpracovanou dobu ze souhrnu importu docházky
@@ -53,7 +64,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     private const HOLIDAY_FIELDS = ['holiday_millihours'];
 
     /** Verze souhrnu, které nesou {@see HOLIDAY_FIELDS}. */
-    public const VERSIONS_WITH_HOLIDAYS = ['jmhz-work-month.v7', 'jmhz-work-month.v8', 'jmhz-work-month.v9', 'jmhz-work-month.v10'];
+    public const VERSIONS_WITH_HOLIDAYS = ['jmhz-work-month.v7', 'jmhz-work-month.v8', 'jmhz-work-month.v9', 'jmhz-work-month.v10', 'jmhz-work-month.v11', 'jmhz-work-month.v12'];
 
     /** @return list<string> */
     public static function holidayFields(): array
@@ -75,7 +86,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     private const UNPAID_HOLIDAY_FIELDS = ['holiday_unpaid_millihours'];
 
     /** Verze souhrnu, které nesou {@see UNPAID_HOLIDAY_FIELDS}. */
-    public const VERSIONS_WITH_UNPAID_HOLIDAYS = ['jmhz-work-month.v9'];
+    public const VERSIONS_WITH_UNPAID_HOLIDAYS = ['jmhz-work-month.v9', 'jmhz-work-month.v11'];
 
     /** @return list<string> */
     public static function unpaidHolidayFields(): array
@@ -100,6 +111,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v8',
         'jmhz-work-month.v9',
         'jmhz-work-month.v10',
+        'jmhz-work-month.v11',
+        'jmhz-work-month.v12',
     ];
 
     /** Provenience souhrnu potvrzeného hromadným schválením dávky importu. */
@@ -203,6 +216,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v8',
         'jmhz-work-month.v9',
         'jmhz-work-month.v10',
+        'jmhz-work-month.v11',
+        'jmhz-work-month.v12',
     ];
 
     /**
@@ -225,6 +240,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v8',
         'jmhz-work-month.v9',
         'jmhz-work-month.v10',
+        'jmhz-work-month.v11',
+        'jmhz-work-month.v12',
     ];
 
     /** @return list<string> */
@@ -267,6 +284,8 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         'jmhz-work-month.v8',
         'jmhz-work-month.v9',
         'jmhz-work-month.v10',
+        'jmhz-work-month.v11',
+        'jmhz-work-month.v12',
     ];
 
     /** @return list<string> */
@@ -465,10 +484,12 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             || self::isAgreement($employment['relation_type'])
                 ? [0, 0]
                 : $this->holidayMinutes($calendars, $evidenceFrom, $evidenceTo, $entries, $absences, $periodStart);
+        $withHolidayTimeOff = in_array('holiday_compensatory_time_off', self::absenceTypes($absences), true);
+        $version = $withHolidayTimeOff ? self::HOLIDAY_TIME_OFF_DERIVATION_VERSION : self::DERIVATION_VERSION;
         $employmentIssues = self::employmentIssues($employment);
         $absenceIssues = self::absenceIssues($absences);
         $source = [
-            'schema_version' => self::DERIVATION_VERSION,
+            'schema_version' => $version,
             'specification' => self::specification(),
             'supplier_id' => $supplierId,
             'employment' => $employment,
@@ -481,7 +502,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         [$durationFrom, $durationTo] = self::employmentInterval($employment, $period, $periodEnd);
 
         return [
-            'derivation_version' => self::DERIVATION_VERSION,
+            'derivation_version' => $version,
             'work_source' => 'entries',
             'relation_type' => $employment['relation_type'],
             'source_snapshot_json' => $sourceJson,
@@ -496,7 +517,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'worked_hours' => self::minutesSuggestion($worked['minutes']),
                 'worked_days' => $worked['days'],
                 'overtime_hours' => self::minutesSuggestion($worked['overtime_minutes']),
-            ] + self::conditionalSuggestions($derivedAbsences),
+            ] + self::conditionalSuggestions($derivedAbsences, $withHolidayTimeOff),
             'issues' => array_merge(
                 $employmentIssues,
                 $calendarIssues,
@@ -566,7 +587,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             ? PayrollWorkedTimeSource::fromManualSummary($summary, $periodStart)
             : PayrollWorkedTimeSource::fromImportSummary($summary);
         $sourceKind = $manual ? PayrollWorkedTimeSource::KIND_MANUAL_SUMMARY : PayrollWorkedTimeSource::KIND_IMPORT_SUMMARY;
-        $version = $manual ? self::MANUAL_SUMMARY_DERIVATION_VERSION : self::IMPORT_SUMMARY_DERIVATION_VERSION;
+        $withHolidayTimeOff = $manual && in_array('holiday_compensatory_time_off', self::absenceTypes($absences), true);
+        $version = $manual
+            ? ($withHolidayTimeOff ? self::MANUAL_HOLIDAY_TIME_OFF_DERIVATION_VERSION : self::MANUAL_SUMMARY_DERIVATION_VERSION)
+            : self::IMPORT_SUMMARY_DERIVATION_VERSION;
         $projectedWorked = $manual && $worked['worked_duration_units'] !== null
             ? PayrollDuration::roundedMillihours($worked['worked_duration_units']) : $worked['worked_millihours'];
         $projectedOvertime = $manual && $worked['overtime_duration_units'] !== null
@@ -601,6 +625,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         $conditional = self::importConditionalSuggestions(
             $values,
             $this->datedAbsenceMinutes($supplierId, $employmentId, $periodStart, $periodEnd->format('Y-m-d'), $absences, $calendars),
+            $withHolidayTimeOff,
         );
         if ($manual) {
             // Ruční podklad nese jen odpracovanou dobu. Chybějící druhy
@@ -880,7 +905,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      *        nepřítomností; `null` = nejdou spolehlivě odvodit, nenavrhuje se nic
      * @return array<string,string|bool|null>
      */
-    public static function importConditionalSuggestions(array $values, ?array $datedMinutes = []): array
+    public static function importConditionalSuggestions(array $values, ?array $datedMinutes = [], bool $withHolidayTimeOff = false): array
     {
         $buckets = [
             'unworked_total_hours' => 0,
@@ -898,6 +923,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'unexcused_hours' => 0,
             'compensatory_time_off_hours' => 0,
         ];
+        if ($withHolidayTimeOff) $buckets['holiday_time_off_hours'] = 0;
         if (self::importHoursRequiringDates($values) !== [] || $datedMinutes === null) {
             return array_map(static fn (): null => null, $buckets) + [
                 'unworked_hours_occurred' => null,
@@ -915,14 +941,14 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 continue;
             }
             if (($minutes * 1000) % 60 !== 0 || !array_key_exists($bucket . '_hours', $buckets)) {
-                return self::importConditionalSuggestions([], null);
+                return self::importConditionalSuggestions([], null, $withHolidayTimeOff);
             }
             $buckets[$bucket . '_hours'] += intdiv($minutes * 1000, 60);
             $dated += intdiv($minutes * 1000, 60);
         }
         $obstacles = $buckets['employee_obstacle_paid_hours'] + $buckets['employer_obstacle_hours'];
         $buckets['unworked_paid_hours'] = $buckets['vacation_hours'] + $obstacles
-            + $buckets['dpn_with_employer_compensation_hours'];
+            + $buckets['dpn_with_employer_compensation_hours'] + ($buckets['holiday_time_off_hours'] ?? 0);
         $buckets['unworked_total_hours'] = $buckets['vacation_hours'] + $obstacles + $dated;
 
         return array_map(
@@ -1080,7 +1106,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
      * @param array{supported:bool,minutes:array<string,int>,total:int,paid:int} $derived
      * @return array<string,string|bool|null>
      */
-    public static function conditionalSuggestions(array $derived): array
+    public static function conditionalSuggestions(array $derived, bool $withHolidayTimeOff = false): array
     {
         $blocks = [
             'unworked_total_hours' => $derived['total'],
@@ -1100,6 +1126,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             'unexcused_hours' => $derived['minutes']['unexcused'],
             'compensatory_time_off_hours' => $derived['minutes']['compensatory_time_off'],
         ];
+        if ($withHolidayTimeOff) $blocks['holiday_time_off_hours'] = $derived['minutes']['holiday_time_off'] ?? 0;
         $suggestions = [];
         $expressible = true;
         foreach ($blocks as $field => $minutes) {
@@ -1137,10 +1164,11 @@ final class PayrollJmhzWorkMonthSummaryBuilder
     public function confirm(array $preview, array $input, ?string $confirmationKind = null): array
     {
         $version = $preview['derivation_version'] ?? self::DERIVATION_VERSION;
-        if (!in_array($version, [self::DERIVATION_VERSION, self::IMPORT_SUMMARY_DERIVATION_VERSION, self::MANUAL_SUMMARY_DERIVATION_VERSION], true)) {
+        if (!in_array($version, [self::DERIVATION_VERSION, self::IMPORT_SUMMARY_DERIVATION_VERSION, self::MANUAL_SUMMARY_DERIVATION_VERSION, ...self::VERSIONS_WITH_HOLIDAY_TIME_OFF], true)) {
             throw new \InvalidArgumentException('Náhled pracovního souhrnu má nepodporovanou verzi.');
         }
-        $manualSource = $version === self::MANUAL_SUMMARY_DERIVATION_VERSION;
+        $manualSource = in_array($version, [self::MANUAL_SUMMARY_DERIVATION_VERSION, self::MANUAL_HOLIDAY_TIME_OFF_DERIVATION_VERSION], true);
+        $withHolidayTimeOff = in_array($version, self::VERSIONS_WITH_HOLIDAY_TIME_OFF, true);
         $importSource = $version === self::IMPORT_SUMMARY_DERIVATION_VERSION;
         $summarySource = $importSource || $manualSource;
         if ($confirmationKind !== null
@@ -1320,6 +1348,13 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                 'compensatory_time_off_hours',
             ),
         ];
+        if ($withHolidayTimeOff) {
+            $conditionalValues['holiday_time_off_millihours'] = self::nullableScaledDecimal(
+                $input['holiday_time_off_hours'] ?? null, 'holiday_time_off_hours',
+            );
+        } elseif (($input['holiday_time_off_hours'] ?? null) !== null) {
+            throw new \InvalidArgumentException('Pracovní souhrn této verze nepodporuje placené náhradní volno za svátek.');
+        }
         self::validateConditionalValues(
             $unworkedHoursOccurred,
             $workObstaclesOccurred,
@@ -1442,6 +1477,10 @@ final class PayrollJmhzWorkMonthSummaryBuilder
         ];
         if (in_array($version, self::VERSIONS_WITH_UNPAID_HOLIDAYS, true)) {
             $provenance['holidays_unpaid'] = $unpaidHoliday > 0 ? 'work_calendar_added_to_10275' : 'none';
+        }
+        if ($withHolidayTimeOff) {
+            $provenance['local_evidence']['holiday_time_off_millihours'] = $unworkedHoursOccurred
+                ? 'explicit_confirmation' : 'not_applicable_by_IN07';
         }
         if ($importSource) {
             /*
@@ -1928,6 +1967,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             $planned = (int) ($matching[0]['week_pattern'][$weekday]
                 ?? $matching[0]['week_pattern'][(int) $weekday]
                 ?? 0);
+            $paidTimeOff = 0;
             foreach ($absences as $absence) {
                 $type = (string) ($absence['absence_type'] ?? '');
                 if ((string) $absence['date_from'] > $iso || (string) $absence['date_to'] < $iso) {
@@ -1937,6 +1977,19 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                     // Svátek uvnitř nemoci nese hodinový blok nemoci.
                     continue 2;
                 }
+                if ($type === 'holiday_compensatory_time_off') {
+                    // Nový placený titul už nese vlastní hodiny v 10275/10276.
+                    // U částečného volna zbývá svátek jen za nepokrytou část dne.
+                    $covered = $planned;
+                    if ($absence['date_from'] === $iso && ($absence['partial_first_minutes'] ?? null) !== null) {
+                        $covered = min($covered, (int) $absence['partial_first_minutes']);
+                    }
+                    if ($absence['date_to'] === $iso && ($absence['partial_last_minutes'] ?? null) !== null) {
+                        $covered = min($covered, (int) $absence['partial_last_minutes']);
+                    }
+                    $paidTimeOff += $covered;
+                    continue;
+                }
                 if (PayrollWageReplacementTitle::holidayCutsMonthlyWage($type)) {
                     // Mzda za svátek se neposkytuje: neodpracovaná hodina bez náhrady
                     // (10275 ano, 10276 ne).
@@ -1944,7 +1997,7 @@ final class PayrollJmhzWorkMonthSummaryBuilder
                     continue 2;
                 }
             }
-            $minutes += $planned;
+            $minutes += max(0, $planned - $paidTimeOff);
         }
 
         return [$minutes, $unpaid];
@@ -2130,6 +2183,16 @@ final class PayrollJmhzWorkMonthSummaryBuilder
             self::LOCAL_EVIDENCE_FIELDS,
             self::COMPENSATORY_TIME_OFF_FIELDS,
         );
+        if (array_key_exists('holiday_time_off_millihours', $values)) {
+            $unworkedFields[] = 'holiday_time_off_millihours';
+            $holidayTimeOff = $values['holiday_time_off_millihours'];
+            if ($holidayTimeOff !== null && ($values['unworked_paid_millihours'] === null
+                || $values['unworked_total_millihours'] === null
+                || $values['unworked_paid_millihours'] < $holidayTimeOff
+                || ($values['unworked_total_millihours'] ?? 0) < $holidayTimeOff)) {
+                throw new \InvalidArgumentException('Placené náhradní volno za svátek musí být zahrnuté v úhrnu neodpracovaných i placených hodin.');
+            }
+        }
         if (!$unworkedHoursOccurred) {
             foreach ($unworkedFields as $field) {
                 if ($values[$field] !== null) {

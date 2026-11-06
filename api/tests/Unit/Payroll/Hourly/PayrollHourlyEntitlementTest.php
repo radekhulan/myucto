@@ -331,6 +331,8 @@ final class PayrollHourlyEntitlementTest extends TestCase
         self::assertTrue($result->complete, json_encode($result->blockers));
         self::assertSame(14400, $this->claim($result, 'holiday_nonworked_compensation')['payable_minor']);
         self::assertSame(14400, $this->claim($result, 'holiday_time_off_compensation')['payable_minor']);
+        self::assertSame(14340, $this->claim($result, 'holiday_nonworked_compensation')['segments'][0]['applied_average_hourly_minor']);
+        self::assertSame(14340, $this->claim($result, 'holiday_time_off_compensation')['segments'][0]['applied_average_hourly_minor']);
         $evidence['minimum_floor_segments'] = [];
         self::assertFalse((new PayrollHourlyWageCalculator())->calculate($this->context($evidence))->complete);
     }

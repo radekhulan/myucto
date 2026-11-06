@@ -295,7 +295,9 @@ final class PayrollJmhzAbsenceHoursDeriver
                     $last = (string) $absence['date_to'];
                     $caps[$last] = min($caps[$last] ?? PHP_INT_MAX, (int) $absence['partial_last_minutes']);
                 }
-                $buckets[$bucket] += $sum($bounds['from'], $bounds['to'], false, $caps);
+                // Placené sváteční volno může pokrýt rozvrženou směnu i ve svátek;
+                // souhrn potom tutéž dobu vyřadí z automatického svátečního bloku.
+                $buckets[$bucket] += $sum($bounds['from'], $bounds['to'], $bucket === 'holiday_time_off', $caps);
                 continue;
             }
             // Navazující část dlouhé nemoci (pokračování z předchozího měsíce) vlastní

@@ -1064,7 +1064,11 @@ final class PayrollQuickInputRepository
             );
             $item['worked_time'] = $workedTime[$employmentId];
             $preview = $hourlyPreviews[$employmentId] ?? null;
-            if ($preview !== null) unset($preview['_source_snapshot']);
+            if ($preview !== null) {
+                unset($preview['_source_snapshot']);
+                foreach ($preview['blockers'] as $blocker) $item['blockers'][] = (string) $blocker['code'];
+                $item['blockers'] = array_values(array_unique($item['blockers']));
+            }
             $item['hourly_wage_preview'] = $preview;
             $items[] = $item;
         }
@@ -1714,7 +1718,7 @@ final class PayrollQuickInputRepository
             $managedAmounts[$kind->value] = 0;
         }
         $hourlyRemuneration = (bool) ($employment['hourly_remuneration_in_period'] ?? false);
-        $blockers = $hourlyRemuneration ? [PayrollHourlyRemuneration::BLOCKER] : [];
+        $blockers = [];
         /** @var array<string,bool> $fromAttendance */
         $fromAttendance = [];
         $other = 0;

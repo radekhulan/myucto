@@ -148,6 +148,7 @@ final class PayrollRunSnapshotBatchLoader
                     summary.compensatory_time_off_millihours,
                     summary.holiday_millihours,
                     summary.holiday_unpaid_millihours,
+                    summary.holiday_time_off_millihours,
                     summary.confirmation_note,
                     summary.provenance_json,
                     summary.summary_sha256,
@@ -272,6 +273,65 @@ final class PayrollRunSnapshotBatchLoader
         }
 
         return $counts;
+    }
+
+    /**
+     * Neměnné úplné nároky a rozdíly vstupů; spojení přes FK je jediný důkaz původu.
+     * @param list<int> $employmentIds
+     * @return array{inputs:array<int,array<string,mixed>>,latest:array<int,list<array<string,mixed>>>,invalid:array<int,list<int>>}
+     */
+    public function hourlyFrozenClaims(int $supplierId, array $employmentIds, string $periodStart): array
+    {
+        $rows = $this->fetch(
+            'WITH ranked AS (
+                SELECT materialization.*, ROW_NUMBER() OVER (PARTITION BY materialization.claim_id ORDER BY materialization.sequence_no DESC) AS position
+                  FROM payroll_hourly_wage_materializations materialization FORCE INDEX (idx_hourly_wage_materialization_employment)
+                 WHERE materialization.supplier_id = ? AND materialization.employment_id IN (%s) AND materialization.accounting_period_start = ?
+            ) SELECT ranked.*, claim.purpose, claim.claim_source, claim.work_period_start, HEX(ranked.evidence_hash) AS evidence_hex,
+                     HEX(ranked.source_snapshot_hash) AS snapshot_hex, input.status AS input_status,
+                     input.amount_minor AS input_amount, input.component_snapshot_json AS input_component_snapshot, input.source_snapshot_json AS input_snapshot_json,
+                     HEX(input.source_snapshot_hash) AS input_snapshot_hex
+                FROM ranked STRAIGHT_JOIN payroll_hourly_wage_claims claim ON claim.supplier_id = ranked.supplier_id AND claim.id = ranked.claim_id
+                LEFT JOIN payroll_inputs input ON input.supplier_id = ranked.supplier_id AND input.id = ranked.input_id
+               WHERE ranked.position = 1 OR input.status IN ("approved", "locked")
+               ORDER BY ranked.employment_id, claim.purpose, ranked.sequence_no',
+            [$supplierId], $employmentIds, [$periodStart],
+        );
+        $result = ['inputs' => [], 'latest' => [], 'invalid' => []];
+        foreach ($rows as $row) {
+            $id = (int) $row['employment_id'];
+            $snapshot = (string) $row['source_snapshot_json'];
+            $decoded = json_decode($snapshot, true);
+            $claim = is_array($decoded) ? ($decoded['claim'] ?? null) : null;
+            $valid = $row['claim_source'] === 'hourly_calculation'
+                && hash_equals(strtolower((string) $row['snapshot_hex']), hash('sha256', $snapshot))
+                && is_array($claim) && ($claim['purpose'] ?? null) === $row['purpose']
+                && ($claim['ready'] ?? false) === true && ($claim['payable_minor'] ?? null) === (int) $row['full_amount_minor']
+                && ($claim['worked_duration_units'] ?? null) === (int) $row['full_duration_units'];
+            $inputId = $row['input_id'] === null ? null : (int) $row['input_id'];
+            if ($inputId === null) $valid = $valid && (int) $row['delta_amount_minor'] === 0;
+            else {
+                $component = json_decode((string) ($row['input_component_snapshot'] ?? ''), true);
+                $valid = $valid && is_array($component) && ($component['code'] ?? null) === ($claim['component_code'] ?? null)
+                && in_array($row['input_status'], ['approved', 'locked'], true)
+                && (int) $row['input_amount'] === (int) $row['delta_amount_minor']
+                && is_string($row['input_snapshot_json']) && hash_equals($snapshot, $row['input_snapshot_json'])
+                && hash_equals(strtolower((string) $row['input_snapshot_hex']), hash('sha256', $snapshot));
+            }
+            if (!$valid) { $result['invalid'][$id][] = (int) $row['id']; continue; }
+            $dto = ['schema_version' => 'hourly-payslip-source.v1', 'input_id' => $inputId,
+                'claim_id' => (int) $row['claim_id'], 'purpose' => (string) $row['purpose'],
+                'work_period_start' => (string) $row['work_period_start'], 'sequence_no' => (int) $row['sequence_no'],
+                'evidence_hash' => strtolower((string) $row['evidence_hex']), 'full_claim' => $claim,
+                'previous_payable_minor' => (int) $row['full_amount_minor'] - (int) $row['delta_amount_minor'],
+                'previous_worked_duration_units' => (int) $row['full_duration_units'] - (int) $row['duration_delta_units'],
+                'delta_amount_minor' => (int) $row['delta_amount_minor'], 'worked_duration_delta_units' => (int) $row['duration_delta_units'],
+                ...(isset($decoded['entitlement_context']) ? ['calculation_context' => $decoded['entitlement_context']] : []),
+                ...(isset($decoded['minimum_wage']) ? ['minimum_wage' => $decoded['minimum_wage']] : [])];
+            if ($inputId !== null) $result['inputs'][$inputId] = $dto;
+            if ((int) $row['position'] === 1) $result['latest'][$id][] = $dto;
+        }
+        return $result;
     }
 
     /**

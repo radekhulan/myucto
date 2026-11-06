@@ -170,6 +170,7 @@ final class PayslipDocumentSnapshotMapper
 
         [
             'income_lines' => $incomeLines,
+            'hourly_claims' => $hourlyClaims,
             'gross_minor_units' => $grossMinorUnits,
             'cash_minor_units' => $cashMinorUnits,
             'employment_label' => $employmentLabel,
@@ -361,6 +362,7 @@ final class PayslipDocumentSnapshotMapper
             insuranceLiabilityAccount: $insuranceLiability,
             annualSettlementMinorUnits: $annualSettlement,
             incomeDetailStatus: PayslipDocumentData::INCOME_DETAIL_RECORDED,
+            hourlyClaims: $hourlyClaims,
         );
 
         return $this->snapshot($document);
@@ -400,6 +402,7 @@ final class PayslipDocumentSnapshotMapper
         }
 
         $incomeLines = [];
+        $hourlyClaims = [];
         $gross = new Money(0);
         $cash = new Money(0);
         $labels = [];
@@ -439,6 +442,11 @@ final class PayslipDocumentSnapshotMapper
                 }
                 $inputs[$inputId] = $input;
             }
+            foreach ($employmentSnapshot['hourly_wage_claims'] ?? [] as $claimSource) {
+                $claimInput = $inputs[$claimSource['input_id'] ?? 0] ?? [];
+                $hourlyClaims[] = PayslipHourlyDetail::claim($claimSource, $employmentId,
+                    $claimInput['component']['name'] ?? PayslipHourlyDetail::label($claimSource['purpose'] ?? ''));
+            }
             foreach ($this->rows(
                 $employmentResult['inputs'] ?? null,
                 "výsledky vstupů vztahu {$employmentId}",
@@ -473,6 +481,7 @@ final class PayslipDocumentSnapshotMapper
                     $sourceAmount,
                     $split->basis,
                     $split->exemptMinorUnits,
+                    isset($input['hourly_calculation']) ? PayslipHourlyDetail::input($input['hourly_calculation'], $sourceAmount) : null,
                 );
                 $gross = $gross->add(new Money($sourceAmount));
                 $cash = $cash->add(new Money($cashAmount));
@@ -530,6 +539,7 @@ final class PayslipDocumentSnapshotMapper
 
         return [
             'income_lines' => $incomeLines,
+            'hourly_claims' => $hourlyClaims,
             'gross_minor_units' => $gross->minorUnits,
             'cash_minor_units' => $cash->minorUnits,
             'employment_label' => implode(', ', array_values($labels)),
@@ -812,7 +822,8 @@ final class PayslipDocumentSnapshotMapper
     private function snapshot(PayslipDocumentData $document): array
     {
         return [
-            'schema_version' => self::SCHEMA_VERSION,
+            'schema_version' => $document->hourlyClaims === [] ? self::SCHEMA_VERSION : 'payroll-payslip-document.v3',
+            ...($document->hourlyClaims === [] ? [] : ['hourly_claims' => $document->hourlyClaims]),
             'employer_name' => $document->employerName,
             'employer_identification_number' =>
                 $document->employerIdentificationNumber,

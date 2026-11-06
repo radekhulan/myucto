@@ -258,9 +258,10 @@ final class PayrollRunSnapshotBatchLoadTest extends TestCase
             }
         }
         // Podklady politiky, pravidel, rozvrhu a nároků se čtou po dávkách.
+        // Jeden dotaz navíc načte claim ledger a jeden firemní zaokrouhlení.
         // První načtení sdílené cache public_holidays může přidat jeden dotaz.
         self::assertLessThanOrEqual(2, abs($counts[24] - $counts[1]));
-        self::assertLessThanOrEqual(116, $counts[24]);
+        self::assertLessThanOrEqual(120, $counts[24]);
     }
 
     /** Dvakrát postavený snapshot téhož vstupu musí být bajtově týž. */

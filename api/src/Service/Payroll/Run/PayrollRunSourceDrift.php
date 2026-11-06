@@ -56,6 +56,7 @@ final readonly class PayrollRunSourceDrift
         $frozenWorkedTime = [];
         $frozenHourlyContexts = [];
         $frozenAverageSources = [];
+        $frozenHourlyClaims = [];
         $frozenTimeMonths = [];
         $people = is_array($frozenSnapshot['people'] ?? null) ? $frozenSnapshot['people'] : [];
         foreach ($people as $person) {
@@ -75,6 +76,7 @@ final readonly class PayrollRunSourceDrift
                 if (array_key_exists('hourly_settlement_terms', $employment)) {
                     $frozenSettlementTerms[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_settlement_terms'];
                 }
+                if (array_key_exists('hourly_wage_claims', $employment)) $frozenHourlyClaims[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_wage_claims'];
                 if (array_key_exists('hourly_average_input_sources', $employment)) $frozenAverageSources[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_average_input_sources'];
                 if (array_key_exists('hourly_entitlement_context', $employment)) {
                     $frozenHourlyContexts[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_entitlement_context'];
@@ -140,6 +142,10 @@ final readonly class PayrollRunSourceDrift
         }
 
         $workedTimeChanged = 0;
+        if (isset($current['hourly_wage_claims'])) {
+            $ids = array_unique([...array_keys($frozenHourlyClaims), ...array_keys($current['hourly_wage_claims'])]);
+            foreach ($ids as $id) if (isset($frozenEmployments[$id]) && self::fingerprint($frozenHourlyClaims[$id] ?? null) !== self::fingerprint($current['hourly_wage_claims'][$id] ?? null)) ++$workedTimeChanged;
+        }
         if (isset($current['hourly_average_input_sources'])) {
             $ids = array_unique([...array_keys($frozenAverageSources), ...array_keys($current['hourly_average_input_sources'])]);
             foreach ($ids as $id) if (isset($frozenEmployments[$id]) && self::fingerprint($frozenAverageSources[$id] ?? null) !== self::fingerprint($current['hourly_average_input_sources'][$id] ?? null)) ++$workedTimeChanged;

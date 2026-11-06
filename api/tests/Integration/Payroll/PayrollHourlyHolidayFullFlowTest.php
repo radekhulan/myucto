@@ -1,0 +1,204 @@
+<?php
+
+declare(strict_types=1);
+
+namespace MyInvoice\Tests\Integration\Payroll;
+
+use MyInvoice\Repository\Payroll\PayrollComponentJmhzMappingRepository;
+use MyInvoice\Repository\Payroll\PayrollPersonStatutoryEvidenceRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeRepository;
+use MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger;
+use MyInvoice\Service\Payroll\PayrollHourlyEvidenceService;
+use MyInvoice\Tests\Support\PayrollFullFlowTrait;
+use PHPUnit\Framework\Attributes\Group;
+use PHPUnit\Framework\TestCase;
+use Slim\Psr7\Response;
+
+/** Skutečné schválení dvou měsíců: sváteční práce zakládá volno, čerpání placenou náhradu. */
+#[Group('integration')]
+#[Group('payroll-full-flow')]
+final class PayrollHourlyHolidayFullFlowTest extends TestCase
+{
+    use PayrollFullFlowTrait;
+
+    protected function setUp(): void
+    {
+        $this->bootPayrollFullFlow();
+        $this->runs = $this->container->get(\MyInvoice\Service\Payroll\Run\PayrollRunCommandService::class);
+    }
+    protected function tearDown(): void { $this->tearDownPayrollFullFlow(); }
+
+    public function testApprovedHolidayWorkThenPaidTimeOffKeepsOriginalRevisionImmutable(): void
+    {
+        $office = $this->createOffice();
+        $this->configureSocialInsuranceOutput($office);
+        $this->configureHealthInsuranceOutput();
+        $this->configureIncomeTaxOutput();
+        $person = $this->createEmployment($office, 'Syntetické Sváteční Volno', 1, 'hpp', 'employment', 40, 10000, periodStart: '2026-05-01');
+        $id = $person['employment_id'];
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 20000, monthly_gross_minor = NULL,
+            remuneration_basis_kind = "contract", remuneration_basis = "Syntetická hodinová smlouva" WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $id]);
+        $this->ensureRegularCalendar($id);
+        $this->publishShifts($id, ['2026-05-01', '2026-06-10']);
+        $this->container->get(\MyInvoice\Repository\AccountingModeRepository::class)->record($this->supplierId, '2026-01-01', 'double_entry');
+        $pdo->prepare('INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status) VALUES (?, 2026, "2026-01-01", "2026-12-31", "open")')->execute([$this->supplierId]);
+        $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $average = $this->average200($id);
+        $this->manualMonth($id, '2026-05-01', 24000, '2026-05-01');
+        $evidence = $this->container->get(PayrollHourlyEvidenceService::class);
+        $this->saveEvidence($evidence, $id, '2026-05-01', 24000, [['date' => '2026-05-01', 'duration_units' => 24000]], []);
+        $may = $this->runPayrollMonth('2026-05-01', '2026-06-10', $office, 'hourly-holiday-may');
+        self::assertSame([], $may['blockers'], json_encode($may['blockers']));
+        self::assertSame([], $may['warnings'], json_encode($may['warnings']));
+        self::assertNotNull($may['approved']);
+        $mayId = (int) $may['approved']->revision['id'];
+        $mayFrozen = $this->revisionJson($mayId);
+        $ledger = new PayrollHourlyEntitlementLedger($this->db);
+        $entitlements = $ledger->loadMany($this->supplierId, [$id], '2026-01-01', '2026-06-30')[$id]['entitlements'];
+        self::assertCount(1, $entitlements);
+        self::assertSame('holiday', $entitlements[0]['kind']);
+        self::assertSame('2026-05-01', $entitlements[0]['work_date']);
+        self::assertSame(24000, $entitlements[0]['available_duration_units']);
+        self::assertSame(0, $this->amount($id, '2026-05-01', 'PRIPLATEK_SVATEK'));
+        self::assertSame(160000, $this->amount($id, '2026-05-01', 'MZDA_HODINOVA_ZAKLAD'));
+
+        $statutory = $this->container->get(PayrollPersonStatutoryEvidenceRepository::class);
+        $editor = $statutory->editorView($this->supplierId, $person['employee_id'], '2026-06-30');
+        $editor['sections']['health_month_evidence'][] = [
+            'period_start' => '2026-06-01', 'top_up_responsibility' => 'employer_obstacle_verified',
+            'top_up_responsibility_evidence_reference' => 'document:synthetic-obstacle',
+            'selected_top_up_employer_reference' => null, 'selected_top_up_employer_evidence_reference' => null,
+        ];
+        $statutory->save($this->supplierId, $person['employee_id'], $editor, '2026-06-30', $this->actors[0], null, 'hourly-holiday-test');
+        $pdo->prepare('INSERT INTO payroll_enforcement_person_month_evidence (supplier_id, employee_id, period_start,
+            claim_register_evidence_complete, dependants_evidence_complete, spouse_evidence_complete, pension_evidence, updated_by)
+            VALUES (?, ?, "2026-06-01", 1, 1, 1, "none", ?)')->execute([$this->supplierId, $person['employee_id'], $this->actors[0]]);
+        $absence = $this->createApprovedAbsence($id, 'holiday_compensatory_time_off', '2026-06-10', '2026-06-10', $average);
+        self::assertSame('hourly_claim', $absence['compensation_policy']);
+        $this->manualMonth($id, '2026-06-01', 0);
+        $view = $evidence->view($this->supplierId, $id, '2026-06-01');
+        $option = $view['options']['holiday_time_off_entitlements'][0];
+        self::assertSame(24000, $option['available_duration_units']);
+        $this->saveEvidence($evidence, $id, '2026-06-01', 0, [], [[
+            'entitlement_id' => $option['entitlement_id'], 'entitlement_revision' => $option['entitlement_revision'],
+            'granted_on' => '2026-06-10', 'duration_units' => 24000, 'absence_id' => (int) $absence['id'],
+        ]]);
+        $june = $this->runPayrollMonth('2026-06-01', '2026-07-10', $office, 'hourly-holiday-june');
+        self::assertSame([], $june['blockers'], json_encode($june['blockers']));
+        self::assertSame([], $june['warnings'], json_encode($june['warnings']));
+        self::assertNotNull($june['approved']);
+        self::assertSame(160000, $this->amount($id, '2026-06-01', 'NAHRADA_MZDY_VOLNO_ZA_SVATEK'));
+        self::assertSame(0, $this->amount($id, '2026-06-01', 'PRIPLATEK_SVATEK'));
+        $component = $this->componentId('NAHRADA_MZDY_VOLNO_ZA_SVATEK');
+        $mapping = $this->container->get(PayrollComponentJmhzMappingRepository::class)->find($this->supplierId, $component);
+        self::assertSame('10339', (string) $mapping['target_attribute_id']);
+        $final = $ledger->loadMany($this->supplierId, [$id], '2026-01-01', '2026-06-30')[$id]['entitlements'][0];
+        self::assertSame(24000, $final['allocated_duration_units']);
+        self::assertSame(0, $final['available_duration_units']);
+        self::assertSame($mayFrozen, $this->revisionJson($mayId));
+        $document = $june['approved']->revision['result_snapshot']['people'][0]['payslip_document'];
+        self::assertSame('payroll-payslip-document.v3', $document['schema_version']);
+        $claim = array_values(array_filter($document['hourly_claims'], static fn(array $row): bool => $row['purpose'] === 'holiday_time_off_compensation'))[0];
+        self::assertSame(160000, $claim['payable_minor']);
+        self::assertSame('8 h', $claim['quantity_text']);
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('hourlyAgreementCases')]
+    public function testHourlyAgreementsUseActualIncomeForInsurance(string $type, int $rate, int $units, int $expectedPerRelation, int $relations, bool $insured): void
+    {
+        $office = $this->createOffice();
+        $this->configureSocialInsuranceOutput($office);
+        $this->configureHealthInsuranceOutput();
+        $this->configureIncomeTaxOutput();
+        $pdo = $this->db->pdo();
+        $this->container->get(\MyInvoice\Repository\AccountingModeRepository::class)->record($this->supplierId, '2026-01-01', 'double_entry');
+        $pdo->prepare('INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, status) VALUES (?, 2026, "2026-01-01", "2026-12-31", "open")')->execute([$this->supplierId]);
+        $this->container->get(\MyInvoice\Service\Accounting\ChartOfAccountsSeeder::class)->seedForSupplier($this->supplierId);
+        $primary = null;
+        for ($index = 0; $index < $relations; ++$index) {
+            $person = $this->createEmployment($office, 'Syntetická Dohoda', $index + 1, $type, $type, 20, 5000,
+                periodStart: '2026-06-01', existingEmployeeId: $primary);
+            $primary ??= $person['employee_id'];
+            $id = $person['employment_id'];
+            $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = ?, monthly_gross_minor = NULL, remuneration_basis_kind = "agreement", remuneration_basis = "Syntetická dohoda" WHERE supplier_id = ? AND employment_id = ?')->execute([$rate, $this->supplierId, $id]);
+            $this->manualMonth($id, '2026-06-01', $units);
+            $this->saveEvidence($this->container->get(PayrollHourlyEvidenceService::class), $id, '2026-06-01', 0, [], []);
+        }
+        $run = $this->runPayrollMonth('2026-06-01', '2026-07-10', $office, 'hourly-agreement');
+        self::assertSame([], $run['blockers'], json_encode($run['blockers']));
+        self::assertSame([], $run['warnings'], json_encode($run['warnings']));
+        self::assertNotNull($run['approved']);
+        $result = $run['approved']->revision['result_snapshot'];
+        self::assertSame($expectedPerRelation * $relations, $result['totals']['source_amount_minor']);
+        $social = $result['statutory']['people'][0]['social_insurance']['relationships'];
+        self::assertCount($relations, $social);
+        foreach ($social as $row) {
+            self::assertSame($expectedPerRelation, $row['assessment_base_minor_units']);
+            self::assertSame($insured ? 'participates' : 'does_not_participate', $row['participation']['status']);
+            self::assertSame($insured ? $expectedPerRelation : 0, $row['capped_assessment_base_minor_units']);
+            if ($type === 'dpp') self::assertSame($expectedPerRelation * $relations, $row['participation']['group_income_minor_units']);
+        }
+    }
+
+    public static function hourlyAgreementCases(): array
+    {
+        return [
+            'DPP pod limitem' => ['dpp', 20000, 150000, 1000000, 1, false],
+            'DPP nad limitem' => ['dpp', 20000, 195000, 1300000, 1, true],
+            'dvě DPP stejného zaměstnance' => ['dpp', 20000, 189000, 1260000, 2, true],
+            'DPČ' => ['dpc', 16730, 240000, 1338400, 1, true],
+        ];
+    }
+
+    private function average200(int $id): int
+    {
+        $response = $this->absences->createAverage($this->request('POST', '/api/payroll/absences/average')->withParsedBody([
+            'employment_id' => $id, 'applicable_year' => 2026, 'applicable_quarter' => 2,
+            'decisive_from' => '2026-01-01', 'decisive_to' => '2026-03-31', 'gross_earnings_minor' => 3200000,
+            'longer_period_allocated_minor' => 0, 'worked_minutes' => 9600, 'worked_days' => 60,
+            'probable_hourly_minor' => null, 'rationale' => null,
+        ]), new Response());
+        self::assertSame(201, $response->getStatusCode(), (string) $response->getBody());
+        $average = $this->json($response)['snapshot'];
+        self::assertSame(20000, $average['average_hourly_minor']);
+        $approved = $this->absences->approveAverage($this->request('POST', '/api/payroll/absences/average/approve')->withParsedBody(['row_version' => $average['row_version']]), new Response(), ['id' => (string) $average['id']]);
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        return (int) $average['id'];
+    }
+
+    private function manualMonth(int $id, string $period, int $units, ?string $day = null): void
+    {
+        $time = $this->container->get(PayrollTimeRepository::class);
+        $month = $time->monthState($this->supplierId, $id, $period);
+        $time->saveManualSummary($this->supplierId, $id, $period, (int) ($month['row_version'] ?? 0), 'Synteticky doložená skutečná doba', false,
+            [['date_from' => $day ?? $period, 'date_to' => $day ?? date('Y-m-t', strtotime($period)), 'worked_duration_units' => $units, 'overtime_duration_units' => 0, 'worked_days' => $units > 0 ? 1 : 0]], $this->actors[0]);
+        $month = $time->monthState($this->supplierId, $id, $period);
+        $time->approveMonth($this->supplierId, $id, $period, (int) $month['row_version'], null, $this->actors[0]);
+    }
+
+    private function saveEvidence(PayrollHourlyEvidenceService $service, int $id, string $period, int $holidayUnits, array $days, array $grants): void
+    {
+        $view = $service->view($this->supplierId, $id, $period);
+        $segment = $view['segments_suggested'][0];
+        $service->save($this->supplierId, $id, $period, ['row_version' => $view['row_version'], 'reason' => 'Syntetické doložení svátku a volna', 'work_source_hash' => $view['work_source_hash'],
+            'premium_segments' => [['date_from' => $segment['date_from'], 'date_to' => $segment['date_to'],
+                'night_duration_units' => 0, 'weekend_duration_units' => 0, 'holiday_work_duration_units' => $holidayUnits,
+                'difficult_exposures' => [], 'holiday_work_days' => $days, 'overtime_work_days' => []]],
+            'nonworked_holidays' => [], 'holiday_time_off_grants' => $grants, 'overtime_time_off_allocations' => []], $this->actors[0]);
+    }
+
+    private function amount(int $id, string $period, string $code): int
+    {
+        return (int) $this->scalar('SELECT COALESCE(SUM(input.amount_minor),0) FROM payroll_inputs input
+            JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id
+            WHERE input.supplier_id = ? AND input.employment_id = ? AND input.period_start = ? AND input.status IN ("approved","locked") AND component.code = ?', [$this->supplierId, $id, $period, $code]);
+    }
+
+    private function revisionJson(int $id): array
+    {
+        $statement = $this->db->pdo()->prepare('SELECT input_snapshot_json, result_snapshot_json, HEX(input_snapshot_hash) AS input_hash, HEX(result_snapshot_hash) AS result_hash FROM payroll_run_revisions WHERE supplier_id = ? AND id = ?');
+        $statement->execute([$this->supplierId, $id]);
+        return $statement->fetch(\PDO::FETCH_ASSOC);
+    }
+}

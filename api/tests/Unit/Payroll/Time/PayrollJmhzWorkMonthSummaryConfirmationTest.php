@@ -9,6 +9,70 @@ use PHPUnit\Framework\TestCase;
 
 final class PayrollJmhzWorkMonthSummaryConfirmationTest extends TestCase
 {
+    public function testPaidHolidayTimeOffHasVersionedBreakdownWithoutAddingHoursTwice(): void
+    {
+        $builder = (new \ReflectionClass(PayrollJmhzWorkMonthSummaryBuilder::class))->newInstanceWithoutConstructor();
+        foreach (['jmhz-work-month.v11', 'jmhz-work-month.v12'] as $version) {
+            $hash = str_repeat('a', 64);
+            $summary = $builder->confirm([
+                'derivation_version' => $version, 'source_snapshot_sha256' => $hash, 'source_snapshot_json' => '{}',
+                'suggestions' => ['evidence_days' => 31, 'worked_days' => $version === 'jmhz-work-month.v12' ? null : 20, 'overtime_hours' => null],
+            ], [
+                'source_snapshot_sha256' => $hash, 'standard_fund_hours' => '168', 'agreed_fund_hours' => '168',
+                'weekly_work_hours' => '40', 'worked_hours' => '160',
+                'unworked_hours_occurred' => true, 'work_obstacles_occurred' => false,
+                'unworked_total_hours' => '8', 'unworked_paid_hours' => '8', 'holiday_time_off_hours' => '8',
+            ]);
+            self::assertSame(8000, $summary['values']['holiday_time_off_millihours']);
+            self::assertSame(8000, $summary['values']['unworked_total_millihours']);
+            self::assertSame(8000, $summary['values']['unworked_paid_millihours']);
+            self::assertSame('explicit_confirmation', $summary['provenance']['local_evidence']['holiday_time_off_millihours']);
+            if ($version === 'jmhz-work-month.v12') self::assertSame('manual_summary', $summary['provenance']['work_source']);
+        }
+    }
+
+    public function testPaidHolidayTimeOffCannotBypassPaidTotalOrOlderVersion(): void
+    {
+        $builder = (new \ReflectionClass(PayrollJmhzWorkMonthSummaryBuilder::class))->newInstanceWithoutConstructor();
+        foreach (['jmhz-work-month.v10', 'jmhz-work-month.v11'] as $version) {
+            try {
+                $builder->confirm([
+                    'derivation_version' => $version, 'source_snapshot_sha256' => str_repeat('a', 64),
+                    'suggestions' => ['evidence_days' => 31, 'worked_days' => 20, 'overtime_hours' => null],
+                ], [
+                    'source_snapshot_sha256' => str_repeat('a', 64), 'standard_fund_hours' => '168', 'agreed_fund_hours' => '168',
+                    'weekly_work_hours' => '40', 'worked_hours' => '160',
+                    'unworked_hours_occurred' => true, 'work_obstacles_occurred' => false,
+                    'unworked_total_hours' => '8', 'unworked_paid_hours' => '7', 'holiday_time_off_hours' => '8',
+                ]);
+                self::fail('Placený titul bez odpovídajícího souhrnu nesmí projít.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString($version === 'jmhz-work-month.v10' ? 'této verze' : 'úhrnu', $exception->getMessage());
+            }
+        }
+    }
+
+    public function testExplicitZeroPaidHolidayTimeOffRequiresKnownPaidTotalBeforePersistence(): void
+    {
+        $builder = (new \ReflectionClass(PayrollJmhzWorkMonthSummaryBuilder::class))->newInstanceWithoutConstructor();
+        foreach (['jmhz-work-month.v11', 'jmhz-work-month.v12'] as $version) {
+            try {
+                $builder->confirm([
+                    'derivation_version' => $version, 'source_snapshot_sha256' => str_repeat('a', 64), 'source_snapshot_json' => '{}',
+                    'suggestions' => ['evidence_days' => 31, 'worked_days' => 20, 'overtime_hours' => null],
+                ], [
+                    'source_snapshot_sha256' => str_repeat('a', 64), 'standard_fund_hours' => '168', 'agreed_fund_hours' => '168',
+                    'weekly_work_hours' => '40', 'worked_hours' => '160',
+                    'unworked_hours_occurred' => true, 'work_obstacles_occurred' => false,
+                    'unworked_total_hours' => '8', 'unworked_paid_hours' => null, 'holiday_time_off_hours' => '0',
+                ]);
+                self::fail('Neznámý úhrn nesmí projít k databázovému CHECK ani při výslovné nule.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringContainsString('úhrnu', $exception->getMessage());
+            }
+        }
+    }
+
     public function testManualSummaryConfirmsProjectedHoursButDoesNotInventDaysOrOvertime(): void
     {
         $builder = (new \ReflectionClass(PayrollJmhzWorkMonthSummaryBuilder::class))->newInstanceWithoutConstructor();
@@ -28,6 +92,8 @@ final class PayrollJmhzWorkMonthSummaryConfirmationTest extends TestCase
         self::assertSame('manual_summary', $summary['provenance']['work_source']);
         self::assertSame('not_provided_by_manual_summary', $summary['provenance']['attributes']['10267']);
         self::assertSame('manual_source_preserved_export_half_up_to_millihour', $summary['provenance']['decimal_policy']);
+        self::assertArrayNotHasKey('holiday_time_off_millihours', $summary['values']);
+        self::assertArrayNotHasKey('holiday_time_off_millihours', $summary['provenance']['local_evidence']);
     }
 
     public function testConditionalWorkBlocksRejectInvalidInputs(): void

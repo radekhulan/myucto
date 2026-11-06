@@ -71,7 +71,18 @@ final readonly class PayslipDocumentData
          * vynechá, nevypisuje nuly.
          */
         public ?PayslipSupplement $supplement = null,
+        public array $hourlyClaims = [],
     ) {
+        if (!array_is_list($hourlyClaims)) throw new \DomainException('Hodinové nároky pásky nejsou seznam.');
+        $claimIds = [];
+        foreach ($hourlyClaims as $claim) {
+            PayslipHourlyDetail::validate($claim);
+            if (isset($claimIds[$claim['claim_id']])) throw new \DomainException('Hodinový nárok je v pásce vícekrát.');
+            $claimIds[$claim['claim_id']] = true;
+        }
+        foreach ($incomeLines as $line) {
+            if ($line->hourlyDetail !== null && !isset($claimIds[$line->hourlyDetail['claim_id']])) throw new \DomainException('Zúčtovaný hodinový vstup nemá úplný nárok pásky.');
+        }
         $this->assertText($revisionId, 'Revision ID');
         if ($revisionNumber !== null && $revisionNumber <= 0) {
             throw new \InvalidArgumentException('Revision number must be positive.');
@@ -402,6 +413,7 @@ final readonly class PayslipDocumentData
             'total_employer_cost_minor_units' => $this->totalEmployerCostMinorUnits(),
             'net_wage_minor_units' => $this->netWageMinorUnits(),
             'supplement' => $this->supplement?->toTemplateData(),
+            ...($this->hourlyClaims === [] ? [] : ['hourly_claims' => $this->hourlyClaims]),
             'accounting' => [
                 'gross' => $this->grossExpenseAccount . '/' . $this->grossLiabilityAccount,
                 'employer_insurance' => $this->insuranceExpenseAccount . '/' . $this->insuranceLiabilityAccount,

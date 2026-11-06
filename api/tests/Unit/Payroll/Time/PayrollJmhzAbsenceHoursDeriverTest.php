@@ -41,6 +41,14 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
         self::assertSame('8', $suggested['unworked_paid_hours']);
         self::assertNull($suggested['compensatory_time_off_hours']);
         self::assertNull($suggested['employee_obstacle_paid_hours']);
+        self::assertArrayNotHasKey('holiday_time_off_hours', $suggested);
+        $current = PayrollJmhzWorkMonthSummaryBuilder::conditionalSuggestions($derived, true);
+        self::assertSame('8', $current['holiday_time_off_hours']);
+        self::assertSame('8', $current['unworked_paid_hours']);
+        $manual = PayrollJmhzWorkMonthSummaryBuilder::importConditionalSuggestions([], ['holiday_time_off' => 480], true);
+        self::assertSame('8', $manual['holiday_time_off_hours']);
+        self::assertSame('8', $manual['unworked_total_hours']);
+        self::assertSame('8', $manual['unworked_paid_hours']);
     }
 
     public function testVacationFillsTheVacationBlockAndBothSums(): void

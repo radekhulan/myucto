@@ -167,7 +167,7 @@ final class PayrollQuickInputsApiTest extends TestCase
         $item = $this->json($response)['month']['items'][0];
         self::assertTrue($item['hourly_remuneration_in_period']);
         self::assertSame(0, $item['base_amount_minor']);
-        self::assertContains('hourly_remuneration_calculation_unsupported', $item['blockers']);
+        self::assertNotEmpty(array_intersect(['hourly_time_missing', 'hourly_time_not_approved'], $item['blockers']));
         // Zakázaný měsíční základ nesmí znemožnit uložení jiné ruční složky.
         $payload = [
             'period' => '2026-06',

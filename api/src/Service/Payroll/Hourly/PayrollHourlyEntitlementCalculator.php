@@ -335,7 +335,8 @@ final class PayrollHourlyEntitlementCalculator
             $term = $this->termOn($date);
             if (($term['remuneration_type'] ?? null) !== 'hourly') throw new PayrollHourlyCalculationException('hourly_holiday_already_in_monthly_wage', 'Svátek krytý měsíční mzdou nelze zaplatit ještě hodinovou náhradou.');
             $units = $this->scheduleCapacity($row, $date);
-            $this->add('holiday_nonworked_compensation', PayrollExactFraction::product([$this->average(['date_from' => $date, 'date_to' => $date]), $units], [PayrollDuration::UNITS_PER_HOUR]), $units, $row);
+            $rate = $this->average(['date_from' => $date, 'date_to' => $date]);
+            $this->add('holiday_nonworked_compensation', PayrollExactFraction::product([$rate, $units], [PayrollDuration::UNITS_PER_HOUR]), $units, [...$row, 'applied_average_hourly_minor' => $rate]);
         }
     }
 
@@ -362,7 +363,7 @@ final class PayrollHourlyEntitlementCalculator
             self::positive($row['average_snapshot_id'] ?? null);
             $rate = self::positive($row['raw_average_hourly_minor'] ?? $row['average_hourly_minor'] ?? null);
             if (array_key_exists('minimum_floor_segments', $this->evidence)) $rate = max($rate, $this->minimumFloor(['date_from' => $date, 'date_to' => $date]));
-            $this->add('holiday_time_off_compensation', PayrollExactFraction::product([$rate, $units], [PayrollDuration::UNITS_PER_HOUR]), $units, $row);
+            $this->add('holiday_time_off_compensation', PayrollExactFraction::product([$rate, $units], [PayrollDuration::UNITS_PER_HOUR]), $units, [...$row, 'applied_average_hourly_minor' => $rate]);
             $this->entitlements[] = ['kind' => 'holiday_time_off_allocation', 'purpose' => 'holiday_time_off_compensation',
                 'entitlement_id' => $id, 'entitlement_revision' => $row['entitlement_revision'], 'work_date' => $workDate,
                 'granted_on' => $date, 'duration_units' => $units, 'absence_id' => $row['absence_id']];

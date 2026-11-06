@@ -38,6 +38,14 @@ final class PayrollHourlyWagePreview
         $entitlementContexts = (new PayrollHourlyEntitlementContextLoader($this->db))->forMany($supplierId, $periodStart, $employments, $terms, $sources, $lock);
         $minimumFundIds = self::minimumFundIds($entitlementContexts);
         $monthlyParts = (new PayrollHourlyMonthlyParts($this->db))->forMany($supplierId, $periodStart, $employments, $hourlyTerms, $lock, $minimumFundIds);
+        return $this->fromSources($supplierId, $periodStart, $employments, $terms, $hourlyTerms, $sources, $entitlementContexts, $monthlyParts);
+    }
+
+    /** Výpočet nad již dávkově načtenými podklady snapshotu, bez jejich opětovného čtení. */
+    public function fromSources(int $supplierId, string $periodStart, array $employments, array $terms, array $hourlyTerms,
+        array $sources, array $entitlementContexts, array $monthlyParts): array
+    {
+        if ($terms === []) return [];
         $rounding = PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId);
         $calculator = new PayrollHourlyWageCalculator();
         $result = [];

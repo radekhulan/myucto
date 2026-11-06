@@ -27956,7 +27956,7 @@ paths:
     get:
       tags: [Payroll]
       summary: Detail mzdového běhu
-      description: Vrací aktuální revizi, výsledkový snapshot a jednotlivé validační příčiny s entitou a odkazem k nápravě, ale nenabízí žádný stavový příkaz. Více příčin může mít stejný kategorizační kód validace.
+      description: Vrací aktuální revizi, výsledkový snapshot a jednotlivé validační příčiny s entitou a odkazem k nápravě, ale nenabízí žádný stavový příkaz. Více příčin může mít stejný kategorizační kód validace. U hodinových nároků obsahuje people[].payslip_document zmrazený rozpis v3 s množstvím, sazbami a rozdílem opravy. Starší měsíční dokumenty v2 zůstávají beze změny.
       responses:
         '200':
           description: Detail běhu
@@ -27997,7 +27997,7 @@ paths:
     get:
       tags: [Payroll]
       summary: Docházka za měsíc
-      description: Přehled rozlišuje vybraný zdroj pracovního měsíce. Ruční ani importovaný souhrn se nesčítá s původními zápisy; přesná odpracovaná doba je vyjádřena jednotkami 1/3000 hodiny a hodnoty v minutách mohou být null, pokud přesný převod není možný. Původní entries zůstávají v odpovědi jako uchovaná evidence; při jiném work_source se nezapočítávají do summary.
+      description: Přehled rozlišuje vybraný zdroj pracovního měsíce. Ruční ani importovaný souhrn se nesčítá s původními zápisy; přesná odpracovaná doba je vyjádřena jednotkami 1/3000 hodiny a hodnoty v minutách mohou být null, pokud přesný převod není možný. Původní entries zůstávají v odpovědi jako uchovaná evidence; při jiném work_source se nezapočítávají do summary. Placené náhradní volno za svátek má v jmhz_work_summary vlastní technický rozpad pouze ve verzích v11 (intervaly) a v12 (ruční zdroj); je již zahrnuté v úhrnech neodpracovaných a placených hodin.
       parameters:
         - { name: period, in: query, required: true, description: Měsíc YYYY-MM, schema: { type: string, pattern: '^[0-9]{4}-[0-9]{2}$' } }
         - { name: employment_id, in: query, schema: { type: integer, format: int64 } }
@@ -43872,11 +43872,106 @@ components:
         revision_no: { type: [integer, "null"] }
         revision_status: { type: [string, "null"] }
         row_version: { type: integer, minimum: 1 }
-        result_snapshot: { type: [object, "null"], additionalProperties: true }
+        result_snapshot: { $ref: '#/components/schemas/PayrollRunResultSnapshot' }
         source_drift: { $ref: '#/components/schemas/PayrollRunSourceDrift' }
         validations:
           type: array
           items: { $ref: '#/components/schemas/PayrollRunValidation' }
+
+    PayrollRunResultSnapshot:
+      type: [object, "null"]
+      additionalProperties: true
+      properties:
+        people:
+          type: array
+          description: Osobní rozpad vrací detail běhu, seznam běhů jej nenačítá.
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              employee_id: { type: integer, format: int64 }
+              payslip_document: { $ref: '#/components/schemas/PayrollPayslipDocument' }
+
+    PayrollPayslipDocument:
+      type: object
+      additionalProperties: true
+      description: Neměnný podklad pásky. Verze v3 přidává hodinový rozpis; historická v2 tyto klíče neobsahuje. Úplný nárok se nesčítá s jeho zúčtovaným rozdílem.
+      properties:
+        schema_version: { type: string, enum: [payroll-payslip-document.v1, payroll-payslip-document.v2, payroll-payslip-document.v3] }
+        income_lines:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              label: { type: string }
+              amount_minor_units: { type: integer, description: Skutečně zúčtovaná částka v haléřích, u opravy podepsaný rozdíl. }
+              hourly_detail: { $ref: '#/components/schemas/PayrollPayslipHourlyInput' }
+        hourly_claims:
+          type: array
+          description: Úplné zmrazené nároky, včetně změn doby bez nového peněžního vstupu. Pouze v3.
+          items: { $ref: '#/components/schemas/PayrollPayslipHourlyClaim' }
+
+    PayrollPayslipHourlyInput:
+      type: object
+      additionalProperties: true
+      required: [claim_id, purpose, work_period_start, sequence_no, display_basis, quantity_duration_units, quantity_text, rate_minor, full_payable_minor, previous_payable_minor, delta_amount_minor, worked_duration_delta_units]
+      properties:
+        claim_id: { type: integer, minimum: 1 }
+        purpose: { type: string }
+        work_period_start: { type: string, format: date }
+        sequence_no: { type: integer, minimum: 1 }
+        display_basis: { type: string, enum: [full_claim, delta] }
+        quantity_duration_units: { type: [integer, "null"], description: Přesné množství v jednotkách 1/3000 hodiny; oprava základní mzdy nese podepsaný rozdíl. Null označuje nedoložené množství, zejména u oprav příplatků. }
+        quantity_text: { type: [string, "null"], description: Přesný zmrazený popis množství, bez zaokrouhlení na dvě desetinná místa. }
+        rate_minor: { type: [integer, "null"], description: Doložená jediná sazba základu v haléřích za hodinu. U oprav, více sazeb a příplatků null; základní sazba nikdy nenahrazuje sazbu příplatku. }
+        full_payable_minor: { type: integer, minimum: 0 }
+        previous_payable_minor: { type: integer, minimum: 0 }
+        delta_amount_minor: { type: integer }
+        worked_duration_delta_units: { type: integer }
+
+    PayrollPayslipHourlyClaim:
+      type: object
+      additionalProperties: true
+      properties:
+        employment_id: { type: integer, format: int64 }
+        claim_id: { type: integer, minimum: 1 }
+        purpose: { type: string }
+        label: { type: string }
+        component_code: { type: string }
+        work_period_start: { type: string, format: date }
+        sequence_no: { type: integer, minimum: 1 }
+        full_duration_units: { type: integer, minimum: 0 }
+        full_worked_duration_units: { type: integer, minimum: 0 }
+        quantity_text: { type: string }
+        raw_numerator_minor: { type: integer, minimum: 0 }
+        raw_denominator: { type: integer, minimum: 1 }
+        analytical_minor: { type: integer, minimum: 0, description: Přesný nárok promítnutý na haléře pouze pro zobrazení. }
+        payable_minor: { type: integer, minimum: 0, description: Splatný úhrn po jediném zaokrouhlení měsíce a složky. }
+        rounding_adjustment_minor: { type: integer }
+        segment_display_adjustment_minor: { type: [integer, "null"] }
+        previous_payable_minor: { type: integer, minimum: 0 }
+        delta_amount_minor: { type: integer }
+        worked_duration_delta_units: { type: integer }
+        segment_role: { type: string, enum: [claim, minimum_threshold] }
+        minimum_assessment: { type: [object, "null"], additionalProperties: true }
+        segments:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+            properties:
+              date_from: { type: string, format: date }
+              date_to: { type: string, format: date }
+              term_id: { type: [integer, "null"] }
+              duration_units: { type: integer, minimum: 0 }
+              quantity_text: { type: string }
+              rate_minor: { type: [integer, "null"] }
+              rate_label: { type: [string, "null"], description: Doložený základ a procento nebo pevná sazba příplatku; nevypočítává se průměrná smíšená sazba. }
+              monthly_gross_minor: { type: [integer, "null"] }
+              raw_numerator_minor: { type: integer, minimum: 0 }
+              raw_denominator: { type: integer, minimum: 1 }
+              analytical_minor: { type: integer, minimum: 0 }
 
     PayrollRunSourceDrift:
       type: [object, "null"]
@@ -44019,12 +44114,43 @@ components:
               month: { $ref: '#/components/schemas/PayrollTimeMonthState' }
               summary: { $ref: '#/components/schemas/PayrollTimeSummary' }
               manual_summary: { $ref: '#/components/schemas/PayrollManualTimeSummary' }
+              jmhz_work_summary: { $ref: '#/components/schemas/PayrollJmhzWorkSummary' }
               overtime_limits: { $ref: '#/components/schemas/PayrollOvertimeLimits' }
         total: { type: integer, minimum: 0 }
         limit: { type: integer, minimum: 1 }
         offset: { type: integer, minimum: 0 }
         payroll_start_period: { $ref: '#/components/schemas/PayrollStartPeriod' }
         historical: { $ref: '#/components/schemas/PayrollHistoricalPeriodFlag' }
+
+    PayrollJmhzWorkSummary:
+      type: [object, "null"]
+      additionalProperties: true
+      description: Náhled a schválená neměnná revize pracovního souhrnu pro JMHZ.
+      properties:
+        preview:
+          type: [object, "null"]
+          additionalProperties: true
+          properties:
+            derivation_version: { type: string }
+            source_snapshot_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+            suggestions:
+              type: object
+              additionalProperties: true
+              properties:
+                holiday_time_off_hours:
+                  type: [string, "null"]
+                  description: Hodiny placeného náhradního volna za svátek. Pouze v11/v12; null znamená nenavrženou hodnotu. Starší verze klíč neobsahují.
+        current_revision:
+          type: [object, "null"]
+          additionalProperties: true
+          properties:
+            derivation_version: { type: string }
+            summary_sha256: { type: string, pattern: '^[0-9a-f]{64}$' }
+            holiday_time_off_millihours:
+              type: [integer, "null"]
+              minimum: 0
+              maximum: 99999999
+              description: Potvrzený technický rozpad v tisícinách hodiny, pouze v11/v12. Je součástí 10275 a 10276, bez vlastního atributu XML. U starších revizí se klíč nepřidává.
 
     PayrollTimeHistory:
       type: object

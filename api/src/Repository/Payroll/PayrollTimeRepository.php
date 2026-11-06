@@ -419,7 +419,7 @@ final class PayrollTimeRepository
                     summary.dpn_with_employer_compensation_millihours,
                     summary.vacation_millihours, summary.care_millihours,
                     summary.employee_obstacle_paid_millihours,
-                    summary.employer_obstacle_millihours, summary.confirmation_note,
+                    summary.employer_obstacle_millihours, summary.holiday_time_off_millihours, summary.confirmation_note,
                     summary.provenance_json, summary.summary_sha256,
                     summary.approved_by, summary.approved_at
                FROM payroll_jmhz_work_month_revisions summary
@@ -457,6 +457,11 @@ final class PayrollTimeRepository
             'approved_by',
         ] as $field) {
             $row[$field] = $row[$field] === null ? null : (int) $row[$field];
+        }
+        if (in_array($row['derivation_version'], PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAY_TIME_OFF, true)) {
+            $row['holiday_time_off_millihours'] = $row['holiday_time_off_millihours'] === null ? null : (int) $row['holiday_time_off_millihours'];
+        } else {
+            unset($row['holiday_time_off_millihours']);
         }
         $provenance = json_decode((string) $row['provenance_json'], true, flags: JSON_THROW_ON_ERROR);
         if (!is_array($provenance)) {
@@ -2257,9 +2262,9 @@ final class PayrollTimeRepository
                  maternity_millihours, paternity_millihours, parental_millihours,
                  unpaid_leave_millihours, unexcused_millihours,
                  compensatory_time_off_millihours, holiday_millihours, holiday_unpaid_millihours,
-                 confirmation_note, provenance_json, summary_sha256,
+                 holiday_time_off_millihours, confirmation_note, provenance_json, summary_sha256,
                  approved_by, approved_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
         $specification = PayrollTimeValue::row(
             $summary['specification'] ?? null,
@@ -2329,6 +2334,7 @@ final class PayrollTimeRepository
             $values['holiday_millihours'] ?? null,
             // Svátky uvnitř nepřítomnosti bez mzdy nese až v9.
             $values['holiday_unpaid_millihours'] ?? null,
+            $values['holiday_time_off_millihours'] ?? null,
             PayrollTimeValue::string(
                 $summary['confirmation_note'] ?? null,
                 'confirmation_note',
