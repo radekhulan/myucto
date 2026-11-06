@@ -295,8 +295,8 @@ final class PayrollHourlyEntitlementTest extends TestCase
         $evidence = $this->evidence($segments);
         $evidence['average_earning']['hourly_minor'] = 10000;
         $evidence['minimum_floor_segments'] = [
-            ['date_from' => '2026-07-01', 'date_to' => '2026-07-15', 'minimum_hourly_minor' => 13440],
-            ['date_from' => '2026-07-16', 'date_to' => '2026-07-31', 'minimum_hourly_minor' => 14340],
+            ['date_from' => '2026-07-01', 'date_to' => '2026-07-15', 'minimum_hourly_minor' => 13440, 'minimum_base40_minor' => 13440],
+            ['date_from' => '2026-07-16', 'date_to' => '2026-07-31', 'minimum_hourly_minor' => 14340, 'minimum_base40_minor' => 13440],
         ];
         foreach ($evidence['premium_segments'] as &$row) {
             $row['night_duration_units'] = 3000;
@@ -306,7 +306,8 @@ final class PayrollHourlyEntitlementTest extends TestCase
         $result = (new PayrollHourlyWageCalculator())->calculate($this->context($evidence, $segments));
         self::assertTrue($result->complete, json_encode($result->blockers));
         self::assertSame(2800, $this->claim($result, 'premium_night')['payable_minor']);
-        self::assertSame(2800, $this->claim($result, 'premium_difficult_environment')['payable_minor']);
+        // § 118 ZP: ztížené prostředí ze základní sazby pro 40 h, ne z přepočtu na kratší týden.
+        self::assertSame(2688, $this->claim($result, 'premium_difficult_environment')['analytical_minor']);
         self::assertSame(2778, $this->claim($result, 'premium_night')['analytical_minor']);
         // Jeden nerozdělený podklad nesmí přebrat minimum z poslední verze.
         $crossing = $this->evidence();
