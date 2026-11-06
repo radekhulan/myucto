@@ -27,6 +27,7 @@ import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePic
 import PayrollInputHistory from '@/components/payroll/PayrollInputHistory.vue'
 import PayrollWorkedHoursSummary from '@/components/payroll/PayrollWorkedHoursSummary.vue'
 import PayrollHourlyWagePreview from '@/components/payroll/PayrollHourlyWagePreview.vue'
+import { uniqueBy } from './payrollFieldFeedback'
 import PayrollWorkedHoursPanel from '@/components/payroll/PayrollWorkedHoursPanel.vue'
 import {
   payrollPeriodRange,
@@ -666,6 +667,11 @@ const selectedComponentColumns = computed(() => componentColumns.value
   .filter(column => tbl.isDynamicShown(componentColumnKey(column.code), false)))
 const visibleSurchargeKinds = computed(() => surchargesVisible.value ? selectedSurchargeKinds.value : [])
 const visibleComponentColumns = computed(() => surchargesVisible.value ? selectedComponentColumns.value : [])
+/** Počet sloupců tabulky — hodinový řádek pod osobou je roztažený přes všechny. */
+const desktopColumnCount = computed(() =>
+  (['person', 'income_amount', 'overtime', 'bonus_amount', 'gross_preview'] as const).filter(key => tbl.isVisible(key)).length
+  + visibleSurchargeKinds.value.length
+  + visibleComponentColumns.value.length)
 const selectedColumnKeys = computed(() => [
   ...selectedSurchargeKinds.value.map(surchargeColumnKey),
   ...selectedComponentColumns.value.map(column => componentColumnKey(column.code)),
@@ -970,8 +976,22 @@ function blockerMessage(row: UiRow, code: string): string {
   return row.hourly_wage_preview?.blockers.find(blocker => blocker.code === code)?.message ?? t(own)
 }
 
+/*
+ * Blokace řádku bez spravovaných polí a bez těch, které už říká náhled
+ * hodinové mzdy v řádku pod osobou. Stejná věta pod různými kódy se ukáže
+ * jen jednou — dřív stála „Doložte příplatkové vrstvy" u člověka čtyřikrát.
+ */
 function personBlockers(row: UiRow): string[] {
-  return row.blockers.filter(blocker => !blocker.endsWith(MANAGED_BLOCKER_SUFFIX))
+  const shownInPreview = new Set((row.hourly_wage_preview?.blockers ?? []).map(blocker => blockerMessage(row, blocker.code)))
+  return uniqueBy(
+    row.blockers.filter(blocker => !blocker.endsWith(MANAGED_BLOCKER_SUFFIX) && !(row.hourly_wage_preview && shownInPreview.has(blockerMessage(row, blocker)))),
+    blocker => blockerMessage(row, blocker),
+  )
+}
+
+/** Hodinový vztah má pod osobou vlastní řádek s hodinami a náhledem mzdy. */
+function hasHourlyRow(row: UiRow): boolean {
+  return Boolean((row.worked_time && hasHourlyEvidence(row)) || row.hourly_wage_preview)
 }
 
 function rowManagedElsewhere(row: UiRow): boolean {
@@ -2143,7 +2163,8 @@ onMounted(() => {
               </tr>
             </thead>
             <tbody class="divide-y divide-neutral-100">
-              <tr v-for="row in rows" :key="row.employment_id" class="align-top">
+              <template v-for="row in rows" :key="row.employment_id">
+              <tr class="align-top" :class="hasHourlyRow(row) ? 'border-b-0' : ''">
                 <!--
                   Sloupec s člověkem má pevnou preferovanou šířku a text se
                   v něm láme. Dlouhé jméno nebo kód vztahu jinak roztáhne
@@ -2176,8 +2197,6 @@ onMounted(() => {
                     </span>
                   </div>
                   <p v-if="personMeta(row)" class="mt-0.5 break-words text-xs text-neutral-500">{{ personMeta(row) }}</p>
-                  <PayrollWorkedHoursSummary v-if="row.worked_time && hasHourlyEvidence(row)" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
-                  <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
                   <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
                     {{ blockerMessage(row, blocker) }}
                   </p>
@@ -2599,6 +2618,21 @@ onMounted(() => {
                   </p>
                 </td>
               </tr>
+              <!--
+                Hodiny a náhled hodinové mzdy v samostatném řádku přes celou
+                šířku. V úzkém sloupci se jménem z nich byl sloup textu a řádek
+                vysoký jako obrazovka. Obsah drží u levého okraje i při
+                vodorovném posunu tabulky.
+              -->
+              <tr v-if="hasHourlyRow(row)" class="bg-neutral-50/60" :data-testid="`quick-hourly-row-${row.employment_id}`">
+                <td :colspan="desktopColumnCount" class="px-3 pb-2 pt-0">
+                  <div class="sticky left-3 flex max-w-[min(100%,72rem)] flex-wrap items-start gap-x-6 gap-y-2">
+                    <PayrollWorkedHoursSummary v-if="row.worked_time && hasHourlyEvidence(row)" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" inline :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
+                    <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact class="min-w-0 flex-1" />
+                  </div>
+                </td>
+              </tr>
+              </template>
             </tbody>
             <!--
               Součet za CELÉ období (server), posunutý o rozepsané změny ze
@@ -2676,8 +2710,10 @@ onMounted(() => {
                 </p>
               </div>
             </div>
-            <PayrollWorkedHoursSummary v-if="row.worked_time && hasHourlyEvidence(row)" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
-            <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
+            <div v-if="hasHourlyRow(row)" class="mt-2 space-y-2 rounded-lg border border-neutral-200 bg-neutral-50/60 p-2" :data-testid="`quick-hourly-card-${row.employment_id}`">
+              <PayrollWorkedHoursSummary v-if="row.worked_time && hasHourlyEvidence(row)" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" inline :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
+              <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
+            </div>
             <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-2 text-xs text-warning-700">
               {{ blockerMessage(row, blocker) }}
             </p>

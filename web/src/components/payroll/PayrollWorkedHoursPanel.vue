@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
 import { payrollApi, type PayrollManualTimeSegment, type PayrollManualTimeSummaryRevision, type PayrollWorkedTime, type PayrollHourlyWagePreview } from '@/api/payroll'
@@ -9,6 +9,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { formatPayrollDuration, parsePayrollDuration, parsePayrollDurationDraft } from '@/pages/payroll/payrollDuration'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import RequiredMark from '@/components/ui/RequiredMark.vue'
 
 const props = defineProps<{
   employmentId: number
@@ -60,6 +61,14 @@ const historyError = ref('')
 const inputClass = 'mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm disabled:bg-neutral-100 disabled:text-neutral-500'
 const editable = computed(() => props.canWrite && !props.closed && current.value.month?.status !== 'approved')
 const replacementRequired = computed(() => current.value.month?.id != null && current.value.month.work_source !== 'manual_summary')
+/*
+ * Důvod chce server jen u změny: při nahrazení jiného zdroje hodin a při
+ * přepsání uloženého souhrnu. První zadání bez předchozí revize ho nepotřebuje,
+ * server si doplní výchozí text a historie ho ukáže jako „Prvotní zadání".
+ */
+const reasonRequired = computed(() => replacementRequired.value || current.value.manual_summary !== null)
+/** Chyba konkrétního úseku: hláška stojí u něj a vadné pole se zvýrazní. */
+const segmentError = ref<{ index: number; field: 'worked' | 'overtime' | 'days'; message: string } | null>(null)
 const approvalAvailable = computed(() => props.canApprove && !props.closed && current.value.month?.status === 'open' && current.value.month.work_source === 'manual_summary' && current.value.manual_summary !== null)
 const reopenAvailable = computed(() => props.canReopen && !props.closed && current.value.month?.status === 'approved')
 const dirty = computed(() => JSON.stringify([segments.value, reason.value, replaceSource.value]) !== baseline.value)
@@ -98,6 +107,7 @@ function hydrate(value: PayrollWorkedTime): void {
   restoreReason.value = ''
   restoreConfirmed.value = false
   error.value = ''
+  segmentError.value = null
   history.value = null
   historyOpen.value = false
   historyError.value = ''
@@ -105,6 +115,7 @@ function hydrate(value: PayrollWorkedTime): void {
 }
 hydrate(props.value)
 watch(() => props.value, value => { if (!dirty.value && !busy.value) hydrate(value) })
+watch(segments, () => { segmentError.value = null }, { deep: true })
 
 async function loadHistory(offset = 0): Promise<void> {
   if (historyLoading.value) return
@@ -124,19 +135,29 @@ function toggleHistory(): void {
   if (historyOpen.value && history.value === null) void loadHistory()
 }
 
+function rejectSegment(index: number, field: 'worked' | 'overtime' | 'days', message: string): void {
+  segmentError.value = { index, field, message }
+  void nextTick(() => document.querySelector<HTMLElement>(`[data-test="worked-hours-${field === 'worked' ? 'duration' : field}-${index}"]`)?.focus())
+}
+function segmentInputClass(index: number, field: 'worked' | 'overtime' | 'days'): string[] {
+  return [inputClass, segmentError.value?.index === index && segmentError.value.field === field ? 'border-danger-500' : '']
+}
+
 async function save(): Promise<void> {
   if (!editable.value || busy.value) return
   error.value = ''
-  if (reason.value.trim() === '') { error.value = t('payroll.worked_hours.reason_required'); return }
+  segmentError.value = null
+  if (reasonRequired.value && reason.value.trim() === '') { error.value = t('payroll.worked_hours.reason_required'); return }
   if (replacementRequired.value && !replaceSource.value) { error.value = t('payroll.worked_hours.replace_required'); return }
   const payload: PayrollManualTimeSegment[] = []
-  for (const segment of segments.value) {
+  for (const [index, segment] of segments.value.entries()) {
     const worked = parsePayrollDurationDraft(segment.worked, segment.original?.worked_duration_units)
     const overtime = segment.overtime.trim() === '' ? null : parsePayrollDurationDraft(segment.overtime, segment.original?.overtime_duration_units)
     const days = segment.days.trim() === '' ? null : Number(segment.days)
     const span = (Date.parse(`${segment.date_to}T00:00:00Z`) - Date.parse(`${segment.date_from}T00:00:00Z`)) / 86400000 + 1
-    if (worked === null || worked > span * 24 * 3000 || (segment.overtime.trim() !== '' && overtime === null) || (overtime !== null && worked !== null && overtime > worked)) { error.value = t('payroll.worked_hours.duration_invalid'); return }
-    if (days !== null && (!/^\d+$/.test(segment.days.trim()) || !Number.isSafeInteger(days) || days > span || ((worked === 0) !== (days === 0)))) { error.value = t('payroll.worked_hours.days_invalid'); return }
+    if (worked === null || worked > span * 24 * 3000) { rejectSegment(index, 'worked', t('payroll.worked_hours.duration_invalid')); return }
+    if ((segment.overtime.trim() !== '' && overtime === null) || (overtime !== null && overtime > worked)) { rejectSegment(index, 'overtime', t('payroll.worked_hours.duration_invalid')); return }
+    if (days !== null && (!/^\d+$/.test(segment.days.trim()) || !Number.isSafeInteger(days) || days > span || ((worked === 0) !== (days === 0)))) { rejectSegment(index, 'days', t('payroll.worked_hours.days_invalid')); return }
     payload.push({ date_from: segment.date_from, date_to: segment.date_to, worked_duration_units: worked, overtime_duration_units: overtime, worked_days: days })
   }
   if (payload.length === 0) { error.value = t('payroll.worked_hours.segments_missing'); return }
@@ -144,7 +165,7 @@ async function save(): Promise<void> {
   try {
     const result = await payrollApi.saveManualTimeSummary(props.period, {
       employment_id: props.employmentId, row_version: current.value.month?.row_version ?? 0,
-      reason: reason.value.trim(), replace_source: replacementRequired.value && replaceSource.value, segments: payload,
+      reason: reason.value.trim() === '' ? null : reason.value.trim(), replace_source: replacementRequired.value && replaceSource.value, segments: payload,
     })
     hydrate({ ...current.value, month: { ...result.month, work_source: 'manual_summary' }, manual_summary: result.manual_summary, jmhz_confirmed: false,
       worked_duration_units: payload.reduce((sum, segment) => sum + segment.worked_duration_units, 0),
@@ -214,7 +235,7 @@ async function reopen(): Promise<void> {
         <p>{{ t('payroll.worked_hours.overtime') }}: {{ segment.overtime_duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(segment.overtime_duration_units) }}</p>
         <p>{{ t('payroll.worked_hours.days') }}: {{ segment.worked_days ?? t('payroll.worked_hours.unknown') }}</p>
       </div>
-      <p class="break-words">{{ t('payroll.worked_hours.reason') }}: {{ current.manual_summary.reason }}</p>
+      <p class="break-words">{{ t('payroll.worked_hours.reason') }}: {{ current.manual_summary.reason || t('payroll.worked_hours.initial_reason') }}</p>
     </div>
     <div v-if="editable" class="mt-3 space-y-3">
       <p class="text-xs text-neutral-600">{{ t('payroll.worked_hours.input_hint') }}</p>
@@ -229,21 +250,23 @@ async function reopen(): Promise<void> {
         <p class="text-xs font-medium text-neutral-700">{{ formatDate(segment.date_from) }} — {{ formatDate(segment.date_to) }}</p>
         <div class="mt-2 grid gap-3 sm:grid-cols-3">
           <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.worked') }}
-            <input v-model="segment.worked" inputmode="decimal" :class="inputClass" :disabled="busy" :data-test="`worked-hours-duration-${index}`">
+            <input v-model="segment.worked" inputmode="decimal" :class="segmentInputClass(index, 'worked')" :aria-invalid="segmentError?.index === index && segmentError.field === 'worked'" :disabled="busy" :data-test="`worked-hours-duration-${index}`">
             <span v-if="durationPreview(segment.worked)" class="mt-1 block text-neutral-500" :data-test="`worked-hours-duration-preview-${index}`">{{ durationPreview(segment.worked) }}</span>
           </label>
           <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.overtime') }}
-            <input v-model="segment.overtime" inputmode="decimal" :class="inputClass" :disabled="busy" :data-test="`worked-hours-overtime-${index}`">
+            <input v-model="segment.overtime" inputmode="decimal" :class="segmentInputClass(index, 'overtime')" :aria-invalid="segmentError?.index === index && segmentError.field === 'overtime'" :disabled="busy" :data-test="`worked-hours-overtime-${index}`">
             <span v-if="durationPreview(segment.overtime)" class="mt-1 block text-neutral-500">{{ durationPreview(segment.overtime) }}</span>
           </label>
           <label class="text-xs text-neutral-600">{{ t('payroll.worked_hours.days') }}
-            <input v-model="segment.days" inputmode="numeric" :class="inputClass" :disabled="busy" :data-test="`worked-hours-days-${index}`">
+            <input v-model="segment.days" inputmode="numeric" :class="segmentInputClass(index, 'days')" :aria-invalid="segmentError?.index === index && segmentError.field === 'days'" :disabled="busy" :data-test="`worked-hours-days-${index}`">
           </label>
         </div>
+        <p v-if="segmentError?.index === index" role="alert" class="mt-2 text-xs text-danger-700" :data-test="`worked-hours-segment-error-${index}`">{{ segmentError.message }}</p>
       </div>
       <label v-if="replacementRequired" class="flex items-start gap-2 text-xs text-warning-800"><input v-model="replaceSource" type="checkbox" class="mt-0.5 rounded border-neutral-300 text-warning-600" :disabled="busy" data-test="worked-hours-replace">{{ t('payroll.worked_hours.replace_hint') }}</label>
-      <label class="block text-xs text-neutral-600">{{ t('payroll.worked_hours.reason') }}
+      <label class="block text-xs text-neutral-600">{{ t('payroll.worked_hours.reason') }}<RequiredMark v-if="reasonRequired" />
         <input v-model="reason" :maxlength="REASON_MAX_LENGTH" :class="inputClass" :disabled="busy" data-test="worked-hours-reason">
+        <span v-if="!reasonRequired" class="mt-1 block text-neutral-500" data-test="worked-hours-reason-optional">{{ t('payroll.worked_hours.reason_optional_first') }}</span>
       </label>
       <button type="button" :class="[btnFilledSm('primary'), 'whitespace-nowrap']" :disabled="busy" data-test="worked-hours-save" @click="save"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('payroll.worked_hours.save') }}</button>
     </div>
@@ -277,7 +300,7 @@ async function reopen(): Promise<void> {
         <p v-if="historyTruncated" class="text-xs text-warning-800">{{ t('payroll.worked_hours.history_truncated') }}</p>
         <details v-for="revision in history ?? []" :key="revision.id" class="rounded-lg border border-neutral-200 bg-surface p-3 text-xs" data-test="worked-hours-history-revision">
           <summary class="cursor-pointer font-medium text-neutral-700">{{ t('payroll.worked_hours.revision', { number: revision.time_month_revision_no }) }} · {{ formatDateTime(revision.created_at) }} · {{ revision.created_by_name ?? t('payroll.worked_hours.unknown') }}</summary>
-          <p class="mt-2 break-words">{{ t('payroll.worked_hours.reason') }}: {{ revision.reason }}</p>
+          <p class="mt-2 break-words">{{ t('payroll.worked_hours.reason') }}: {{ revision.reason || t('payroll.worked_hours.initial_reason') }}</p>
           <div v-for="segment in revision.segments" :key="`${segment.date_from}:${segment.date_to}`" class="mt-2 border-t border-neutral-100 pt-2">
             <p>{{ formatDate(segment.date_from) }} — {{ formatDate(segment.date_to) }}</p>
             <p>{{ t('payroll.worked_hours.worked') }}: {{ formatPayrollDuration(segment.worked_duration_units) }}</p>

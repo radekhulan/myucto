@@ -83,12 +83,35 @@ describe('PayrollHourlyEvidencePanel', () => {
     expect(m.save.mock.calls[0][1]).toMatchObject({ premium_segments: [], nonworked_holidays: [{ date: '2026-11-17', duration_units: 3 }], holiday_time_off_grants: [{ entitlement_id: 7, entitlement_revision: 2, granted_on: '2026-11-04', duration_units: 50, absence_id: 9 }], overtime_time_off_allocations: [{ work_date: '2026-10-21', granted_on: '2026-11-05', duration_units: 3, absence_id: 10, reference: 'Syntetická dohoda o volnu' }] })
     expect(m.save.mock.calls[0][1].nonworked_holidays[0]).not.toHaveProperty('scheduled_duration_units')
   })
-  it('requires explicit confirmation before an empty array can mean no entitlement', async () => {
+  it('nepotvrzenou skupinu nevyžaduje a pošle ji jako null k automatickému posouzení', async () => {
     const wrapper = panel(); await flushPromises()
+    expect(wrapper.get('[data-test="hourly-evidence-unconfirmed-holidays"]').text()).toContain('unconfirmed_automatic')
     await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Syntetický podklad')
     await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).toHaveBeenCalledOnce()
+    expect(m.save.mock.calls[0][1]).toMatchObject({ nonworked_holidays: null, holiday_time_off_grants: null, overtime_time_off_allocations: null })
+    expect(wrapper.find('[data-test="hourly-evidence-error"]').exists()).toBe(false)
+  })
+  it('tlačítkem „V měsíci žádné příplatky" vyplní výslovné nuly a potvrdí ztížené prostředí u všech úseků', async () => {
+    m.get.mockResolvedValue({ ...response(), row_version: 0, segments_suggested: [
+      { date_from: '2026-11-01', date_to: '2026-11-15', overtime_duration_units: 0, overtime_mode: 'surcharge' },
+      { date_from: '2026-11-16', date_to: '2026-11-30', overtime_duration_units: 0, overtime_mode: 'surcharge' },
+    ] })
+    const wrapper = panel(); await flushPromises()
+    expect(wrapper.findAll('[data-test="hourly-evidence-segment"]')).toHaveLength(2)
+    await wrapper.get('[data-test="hourly-evidence-no-premiums"]').trigger('click')
     expect(m.save).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-test="hourly-evidence-error"]').text()).toContain('confirm_holidays')
+    for (const index of [0, 1]) {
+      expect(wrapper.get(`[data-test="hourly-evidence-night-${index}"]`).element).toHaveProperty('value', '0')
+      expect(wrapper.get(`[data-test="hourly-evidence-weekend-${index}"]`).element).toHaveProperty('value', '0')
+      expect(wrapper.get(`[data-test="hourly-evidence-holiday-${index}"]`).element).toHaveProperty('value', '0')
+      expect(wrapper.get(`[data-test="hourly-evidence-difficulty-${index}"]`).element).toHaveProperty('checked', true)
+    }
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save.mock.calls[0][1].premium_segments).toEqual([
+      { date_from: '2026-11-01', date_to: '2026-11-15', night_duration_units: 0, weekend_duration_units: 0, holiday_work_duration_units: 0, holiday_work_days: [], overtime_work_days: [], difficult_exposures: [] },
+      { date_from: '2026-11-16', date_to: '2026-11-30', night_duration_units: 0, weekend_duration_units: 0, holiday_work_duration_units: 0, holiday_work_days: [], overtime_work_days: [], difficult_exposures: [] },
+    ])
   })
   it('saves a first revision without reason and without confirming automatically assessed zeros', async () => {
     m.get.mockResolvedValue({ ...response(), row_version: 0, automatic_assessment: { nonworked_holidays: 'no_holiday_on_hourly_day', holiday_time_off_grants: 'no_holiday_time_off_entitlement', overtime_time_off_allocations: 'no_overtime_time_off_entitlement' } })

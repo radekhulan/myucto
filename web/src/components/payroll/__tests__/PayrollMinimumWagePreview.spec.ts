@@ -8,6 +8,11 @@ function preview(overrides: Partial<PayrollMinimumWagePreview> = {}): PayrollMin
   return { complete: true, claim: { ready: true, duration_units: 3, payable_minor: 77700 }, blockers: [], evidence_hash: 'a'.repeat(64), assessment_evidence: { assessment: 'hourly', threshold: { raw_numerator_minor: 100001, raw_denominator: 3, analytical_minor: 33334 }, eligible: { raw_numerator_minor: 100, raw_denominator: 1, analytical_minor: 100 }, ordinary_payable_minor: 100, company_rounding: 'half_up', statutory_floor_rounding: 'ceil', policy_payable_minor: 100, excluded: [{ component_code: 'SYN_EXCLUDED', reason: 'component_excluded', analytical_minor: -999 }], parts: [{ term_id: 1, date_from: '2026-11-01', date_to: '2026-11-30', regular_worked_duration_units: 3, stated_weekly_minutes: 2250, minimum_base40_minor: 13440, minimum_hourly_minor: 14340, analytical_minor: 33334 }] }, ...overrides }
 }
 describe('PayrollMinimumWagePreview', () => {
+  it('stejnou blokaci minima z více úseků vypíše jen jednou', () => {
+    const blocker = { code: 'unknown_code', message: 'Syntetická blokace minima.', context: {} }
+    const wrapper = mount(PayrollMinimumWagePreviewView, { props: { value: preview({ complete: false, blockers: [blocker, { ...blocker, context: { part: 2 } }] }) } })
+    expect(wrapper.findAll('[data-test="minimum-blockers"] li')).toHaveLength(1)
+  })
   it('shows server amounts unchanged, including a negative excluded correction', () => {
     const wrapper = mount(PayrollMinimumWagePreviewView, { props: { value: preview() } })
     expect(wrapper.get('[data-test="minimum-required"]').text()).toBe('money:33334')
