@@ -25040,6 +25040,8 @@
       "imported_balances_rebased": "Balances of {statements} imported statements of this account were shifted by {shift} to match the bank statement. The account opening balance comes to {opening}; the journal does not change, please check the opening balance in accounting.",
       "transactions_skipped_as_duplicate": "The statement had {parsed} transactions, {inserted} were imported. {skipped} matched transactions already on record (overlapping statement) and were not imported — please verify these are genuine duplicates.",
       "transactions_skipped_as_duplicate_batch": "{count} transactions from the uploaded statements were skipped as duplicates of already recorded ones — please verify these are genuine duplicates.",
+      "transactions_skipped_as_migrated": "The account has transactions from {since} to {until} taken over from another program. {skipped} statement transactions from this period were not imported because they are already on record. Add manually any transaction from the first or last day that the takeover did not include.",
+      "transactions_skipped_as_migrated_batch": "{count} transactions from the uploaded statements fall into the period taken over from another program and were not imported because they are already on record. Add manually any transaction from the first or last day of the takeover that it did not include.",
       "processing_failed": "The statement was saved, but matching and posting of its transactions could not be completed. Open the statement and use “Re-match statement”.",
       "processing_failed_batch": "Statements saved without completed matching: {count}. Open them and use “Re-match statement”."
     },
