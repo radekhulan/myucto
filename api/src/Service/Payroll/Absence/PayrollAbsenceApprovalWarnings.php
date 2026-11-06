@@ -36,6 +36,21 @@ final readonly class PayrollAbsenceApprovalWarnings
         }
         $warnings = [];
 
+        $manual = $this->db->pdo()->prepare(
+            "SELECT period_start FROM payroll_time_months FORCE INDEX (uq_payroll_time_month_period)
+              WHERE supplier_id = ? AND employment_id = ? AND period_start >= ? AND period_start <= ?
+                AND work_source = 'manual_summary'",
+        );
+        $manual->execute([$supplierId, $employmentId, substr($from, 0, 7) . '-01', substr($to, 0, 7) . '-01']);
+        $manualPeriods = array_fill_keys($manual->fetchAll(PDO::FETCH_COLUMN), true);
+        if ($manualPeriods !== []) {
+            $warnings[] = [
+                'code' => 'absence_manual_work_time_unverifiable',
+                'message' => 'Ruční měsíční souhrn neuvádí odpracované dny. Souběh nepřítomnosti a práce ověřte podle podkladů.',
+                'path' => '/payroll/time?employment=' . $employmentId . '&period=' . substr($from, 0, 7),
+            ];
+        }
+
         $placeholders = implode(', ', array_fill(0, count(self::WORK_CATEGORIES), '?'));
         $worked = $this->db->pdo()->prepare(
             "SELECT DISTINCT DATE(entry.starts_at_utc) AS day
@@ -50,7 +65,7 @@ final readonly class PayrollAbsenceApprovalWarnings
         $worked->execute([$supplierId, $employmentId, ...self::WORK_CATEGORIES, $from, $to]);
         $days = array_map(
             static fn (string $day): string => (new \DateTimeImmutable($day))->format('j. n.'),
-            $worked->fetchAll(PDO::FETCH_COLUMN),
+            array_values(array_filter($worked->fetchAll(PDO::FETCH_COLUMN), static fn (string $day): bool => !isset($manualPeriods[substr($day, 0, 7) . '-01']))),
         );
         if ($days !== []) {
             $warnings[] = [

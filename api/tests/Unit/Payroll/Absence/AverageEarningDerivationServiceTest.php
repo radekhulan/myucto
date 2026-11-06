@@ -19,6 +19,28 @@ use PHPUnit\Framework\TestCase;
  */
 final class AverageEarningDerivationServiceTest extends TestCase
 {
+    public function testSettledOvertimeMovesExactTimeAcrossQuarterAndChangesInputVersion(): void
+    {
+        $months = [['period_start' => '2026-03-01', 'worked_duration_units' => 480053,
+            'worked_minutes' => null, 'worked_days' => 21, 'gross_earnings_minor' => 3_200_000,
+            'blockers' => [], 'work_summary_sha256' => str_repeat('a', 64)]];
+        self::assertSame($months, Derivation::applyDurationReallocation($months, null));
+        $source = ['periods' => ['2026-03-01' => -53, '2026-04-01' => 53], 'source_hash' => str_repeat('b', 64)];
+        $adjusted = Derivation::applyDurationReallocation($months, $source);
+        self::assertSame(480000, $adjusted[0]['worked_duration_units']);
+        self::assertSame(9600, $adjusted[0]['worked_minutes']);
+        self::assertSame(21, $adjusted[0]['worked_days']);
+        self::assertNotSame(Derivation::combine($months, 21, false)['input_version'], Derivation::combine($adjusted, 21, false)['input_version']);
+        $months[0]['period_start'] = '2026-04-01';
+        $months[0]['worked_duration_units'] = 480000;
+        $months[0]['worked_minutes'] = 9600;
+        $adjusted = Derivation::applyDurationReallocation($months, $source);
+        self::assertSame(480053, $adjusted[0]['worked_duration_units']);
+        self::assertNull($adjusted[0]['worked_minutes']);
+        $source['periods']['2026-04-01'] = -480001;
+        self::assertContains('hourly_overtime_duration_mismatch', Derivation::applyDurationReallocation($months, $source)[0]['blockers']);
+    }
+
     private const MINIMUM_WORKED_DAYS = 21;
 
     public function testDerivesGrossHoursAndDaysFromClosedRun(): void
@@ -545,6 +567,64 @@ final class AverageEarningDerivationServiceTest extends TestCase
         self::assertFalse($combined['ready']);
         self::assertSame(['worked_days_not_provided'], $combined['blockers']);
         self::assertNull($combined['source_kind']);
+    }
+
+    public function testManualEvidenceDoesNotRequireOptionalJmhzAndNeverLosesSubminuteTime(): void
+    {
+        foreach ([480000, 480053] as $units) {
+            $evidence = self::manualEvidence($units, 21);
+            $input = json_decode(self::inputJson(['jmhz_work_summary' => null]), true);
+            $input['worked_time_evidence'] = $evidence;
+            $month = Derivation::monthFromRow($this->row(['input_json' => CanonicalJson::encode($input)]), '2026-01-01');
+            self::assertSame([], $month['blockers']);
+            self::assertSame($units, $month['worked_duration_units']);
+            self::assertSame(21, $month['worked_days']);
+            self::assertSame($units === 480000 ? 9600 : null, $month['worked_minutes']);
+        }
+    }
+
+    public function testQuarterKeepsExactManualTimeWhenMinutesCannotRepresentIt(): void
+    {
+        $month = ['worked_duration_units' => 480053, 'worked_minutes' => null]
+            + $this->readyMonth('2026-01-01', 3_200_000, 9600, 21);
+        $combined = Derivation::combine([$month], self::MINIMUM_WORKED_DAYS, false);
+        self::assertTrue($combined['ready']);
+        self::assertNull($combined['worked_minutes']);
+        self::assertSame(480053, $combined['worked_duration_units']);
+        self::assertSame(3_200_000, $combined['gross_earnings_minor']);
+        $probable = Derivation::probableFromAchievedWage([$month]);
+        self::assertNotNull($probable);
+        self::assertSame(19_998, $probable['hourly_minor']);
+    }
+
+    public function testManualEvidenceRequiresUnchangedHashAndAgreedExportProjection(): void
+    {
+        $evidence = self::manualEvidence(480050, null);
+        $input = json_decode(self::inputJson(['jmhz_work_summary' => ['values' => ['worked_millihours' => 160017]]]), true);
+        $input['worked_time_evidence'] = $evidence;
+        $month = Derivation::monthFromRow($this->row(['input_json' => CanonicalJson::encode($input)]), '2026-01-01');
+        self::assertSame([], $month['blockers']);
+        self::assertNull($month['worked_days']);
+        $input['time_month']['jmhz_work_summary']['values']['worked_millihours'] = 160016;
+        self::assertSame(['work_summary_hours_mismatch'], Derivation::monthFromRow($this->row(['input_json' => CanonicalJson::encode($input)]), '2026-01-01')['blockers']);
+        $input['worked_time_evidence']['manual_summary']['segments'][0]['worked_duration_units'] = 480000;
+        self::assertSame(['work_summary_source_corrupt'], Derivation::monthFromRow($this->row(['input_json' => CanonicalJson::encode($input)]), '2026-01-01')['blockers']);
+    }
+
+    /** @return array<string,mixed> */
+    private static function manualEvidence(int $units, ?int $days): array
+    {
+        $evidence = [
+            'schema_version' => 'payroll-worked-time.v1', 'duration_units_per_hour' => 3000,
+            'work_source' => 'manual_summary', 'status' => 'approved', 'revision_no' => 1,
+            'period_start' => '2026-01-01',
+            'manual_summary' => ['segments' => [[
+                'date_from' => '2026-01-01', 'date_to' => '2026-01-31',
+                'worked_duration_units' => $units, 'overtime_duration_units' => null, 'worked_days' => $days,
+            ]]],
+        ];
+        $evidence['source_sha256'] = hash('sha256', CanonicalJson::encode($evidence));
+        return $evidence;
     }
 
     /** @return array<string,mixed> */

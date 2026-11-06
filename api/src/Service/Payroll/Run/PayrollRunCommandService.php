@@ -22,6 +22,7 @@ use MyInvoice\Repository\Payroll\PayrollRunIdempotencyException;
 use MyInvoice\Repository\Payroll\PayrollRunRepository;
 use MyInvoice\Service\Payroll\PayrollModuleActivationService;
 use MyInvoice\Service\Payroll\PayrollPeriodOwnershipService;
+use MyInvoice\Service\Payroll\PayrollHourlyWageMaterializer;
 use MyInvoice\Service\Payroll\PayrollYearCloseGuard;
 use MyInvoice\Service\Payroll\Document\ApprovedRevisionPayslipBatchService;
 use MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService;
@@ -60,6 +61,7 @@ final class PayrollRunCommandService
             $moduleActivation = null,
         private readonly ?PayrollDocumentBatchQueueService
             $documentQueue = null,
+        private readonly ?PayrollHourlyWageMaterializer $hourlyWages = null,
     ) {
         $this->yearClose = new PayrollYearCloseGuard($db);
         $this->environment = new EnvironmentGuard($db);
@@ -777,11 +779,23 @@ final class PayrollRunCommandService
                     && $commandAvailable
                     && $revision !== null)
             ) {
+                $hourlyBlockers = [];
+                if ($commandAvailable && $this->hourlyWages !== null) {
+                    $hourlyBlockers = $this->hourlyWages->materialize(
+                        $supplierId,
+                        $runId,
+                        (string) $run['period_start'],
+                        $run['office_id'] === null ? null : (int) $run['office_id'],
+                        $actorUserId,
+                        $keyHashBinary,
+                    )['blockers'];
+                }
                 $snapshot = $this->snapshotBuilder->build(
                     $supplierId,
                     (string) $run['period_start'],
                     (string) $run['payment_date'],
                     $run['office_id'] === null ? null : (int) $run['office_id'],
+                    $hourlyBlockers,
                 );
                 if ($reopenAsCorrection || $refreshAsCorrection) {
                     $snapshot = $this->calculationPipeline

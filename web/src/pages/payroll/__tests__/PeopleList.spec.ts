@@ -542,6 +542,42 @@ describe('PeopleList toolbar and shared employee creation', () => {
    * Jméno jsou dvě pole, protože historická identita chce křestní a příjmení
    * zvlášť; celé jméno se z nich složí, takže třetí pole nepřibylo.
    */
+  it('nový hodinový vztah odešle s podkladem a bez měsíční mzdy', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
+    await wrapper.get('[data-test="new-employment-hourly-rate"]').setValue('180,50')
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    expect(m.createEmployment).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="new-employment-form"]').text()).toContain('payroll.people.remuneration.basis_required')
+    await wrapper.get('[data-test="new-employment-remuneration-basis"]').setValue('Syntetická dohoda')
+    await wrapper.get('[data-test="new-employment-remuneration-basis-kind"]').setValue('agreement')
+    await wrapper.get('[data-test="new-employment-form"]').trigger('submit')
+    expect(m.createEmployment).toHaveBeenCalledWith(1, expect.objectContaining({ monthly_gross_minor: null, terms: expect.objectContaining({ remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetická dohoda' }) }))
+  })
+
+  it('podklad sjednání nabízí jen u hodinového režimu nového vztahu', async () => {
+    m.person.mockResolvedValue({ ...person(1, 'Alfa Aktivní', true, false), employments: [] })
+    const wrapper = mountPage()
+    await flushPromises()
+    await wrapper.get('[data-test="edit-employee-1"]').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="action-add-employment"]').trigger('click')
+    await flushPromises()
+    for (const mode of ['', 'monthly']) {
+      await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue(mode)
+      expect(wrapper.find('[data-test="new-employment-remuneration-basis"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="new-employment-remuneration-basis-kind"]').exists()).toBe(false)
+    }
+    await wrapper.get('[data-test="new-employment-remuneration-type"]').setValue('hourly')
+    expect(wrapper.find('[data-test="new-employment-remuneration-basis"]').exists()).toBe(true)
+  })
+
   it('u zakládání osoby značí hvězdičkou jen povinná pole', async () => {
     const wrapper = mountPage()
     await flushPromises()

@@ -38,6 +38,63 @@ final class PayrollRunSnapshotBatchLoader
     public function __construct(private readonly Connection $db) {}
 
     /**
+     * @param list<int> $employmentIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function hourlyRemunerationTerms(
+        int $supplierId,
+        array $employmentIds,
+        string $periodStart,
+        string $periodEnd,
+    ): array {
+        $rows = $this->fetch(
+            'SELECT term.id, term.row_version, term.effective_from, term.effective_to,
+                    term.remuneration_type, term.hourly_rate_minor, term.monthly_gross_minor, term.weekly_hours, term.workload_basis_points, term.remuneration_basis_kind, term.remuneration_basis,
+                    term.employment_id AS ' . self::GROUP_KEY . '
+               FROM payroll_employment_terms term
+              WHERE term.supplier_id = ? AND term.employment_id IN (%s)
+                AND term.effective_from <= ?
+                AND (term.effective_to IS NULL OR term.effective_to >= ?)
+                AND EXISTS (SELECT 1 FROM payroll_employment_terms hourly FORCE INDEX (idx_payroll_employment_term_effective)
+                     WHERE hourly.supplier_id = term.supplier_id AND hourly.employment_id = term.employment_id
+                       AND hourly.remuneration_type = "hourly" AND hourly.effective_from <= ?
+                       AND (hourly.effective_to IS NULL OR hourly.effective_to >= ?))
+              ORDER BY term.effective_from, term.id',
+            [$supplierId],
+            $employmentIds,
+            [$periodEnd, $periodStart, $periodEnd, $periodStart],
+        );
+        foreach ($rows as &$row) {
+            foreach (['id', 'row_version', 'hourly_rate_minor', 'monthly_gross_minor', 'workload_basis_points'] as $field) {
+                $row[$field] = $row[$field] === null ? null : (int) $row[$field];
+            }
+        }
+        unset($row);
+
+        return $this->grouped($rows);
+    }
+
+    /** @param list<int> $employmentIds @return array<int,list<array<string,mixed>>> */
+    public function remunerationTerms(int $supplierId, array $employmentIds, string $periodStart, string $periodEnd): array
+    {
+        $rows = $this->fetch(
+            'SELECT term.id, term.row_version, term.effective_from, term.effective_to,
+                    term.remuneration_type, term.hourly_rate_minor, term.monthly_gross_minor, term.weekly_hours, term.workload_basis_points, term.remuneration_basis_kind, term.remuneration_basis,
+                    term.employment_id AS ' . self::GROUP_KEY . '
+               FROM payroll_employment_terms term
+              WHERE term.supplier_id = ? AND term.employment_id IN (%s)
+                AND term.effective_from <= ? AND (term.effective_to IS NULL OR term.effective_to >= ?)
+              ORDER BY term.effective_from, term.id',
+            [$supplierId], $employmentIds, [$periodEnd, $periodStart],
+        );
+        foreach ($rows as &$row) foreach (['id', 'row_version', 'hourly_rate_minor', 'monthly_gross_minor', 'workload_basis_points'] as $field) {
+            $row[$field] = $row[$field] === null ? null : (int) $row[$field];
+        }
+        unset($row);
+        return $this->grouped($rows);
+    }
+
+    /**
      * Docházkové měsíce podle pracovního vztahu.
      *
      * `payroll_time_months` má UNIQUE (supplier_id, employment_id, period_start),
@@ -91,6 +148,7 @@ final class PayrollRunSnapshotBatchLoader
                     summary.compensatory_time_off_millihours,
                     summary.holiday_millihours,
                     summary.holiday_unpaid_millihours,
+                    summary.holiday_time_off_millihours,
                     summary.confirmation_note,
                     summary.provenance_json,
                     summary.summary_sha256,
@@ -218,6 +276,65 @@ final class PayrollRunSnapshotBatchLoader
     }
 
     /**
+     * Neměnné úplné nároky a rozdíly vstupů; spojení přes FK je jediný důkaz původu.
+     * @param list<int> $employmentIds
+     * @return array{inputs:array<int,array<string,mixed>>,latest:array<int,list<array<string,mixed>>>,invalid:array<int,list<int>>}
+     */
+    public function hourlyFrozenClaims(int $supplierId, array $employmentIds, string $periodStart): array
+    {
+        $rows = $this->fetch(
+            'WITH ranked AS (
+                SELECT materialization.*, ROW_NUMBER() OVER (PARTITION BY materialization.claim_id ORDER BY materialization.sequence_no DESC) AS position
+                  FROM payroll_hourly_wage_materializations materialization FORCE INDEX (idx_hourly_wage_materialization_employment)
+                 WHERE materialization.supplier_id = ? AND materialization.employment_id IN (%s) AND materialization.accounting_period_start = ?
+            ) SELECT ranked.*, claim.purpose, claim.claim_source, claim.work_period_start, HEX(ranked.evidence_hash) AS evidence_hex,
+                     HEX(ranked.source_snapshot_hash) AS snapshot_hex, input.status AS input_status,
+                     input.amount_minor AS input_amount, input.component_snapshot_json AS input_component_snapshot, input.source_snapshot_json AS input_snapshot_json,
+                     HEX(input.source_snapshot_hash) AS input_snapshot_hex
+                FROM ranked STRAIGHT_JOIN payroll_hourly_wage_claims claim ON claim.supplier_id = ranked.supplier_id AND claim.id = ranked.claim_id
+                LEFT JOIN payroll_inputs input ON input.supplier_id = ranked.supplier_id AND input.id = ranked.input_id
+               WHERE ranked.position = 1 OR input.status IN ("approved", "locked")
+               ORDER BY ranked.employment_id, claim.purpose, ranked.sequence_no',
+            [$supplierId], $employmentIds, [$periodStart],
+        );
+        $result = ['inputs' => [], 'latest' => [], 'invalid' => []];
+        foreach ($rows as $row) {
+            $id = (int) $row['employment_id'];
+            $snapshot = (string) $row['source_snapshot_json'];
+            $decoded = json_decode($snapshot, true);
+            $claim = is_array($decoded) ? ($decoded['claim'] ?? null) : null;
+            $valid = $row['claim_source'] === 'hourly_calculation'
+                && hash_equals(strtolower((string) $row['snapshot_hex']), hash('sha256', $snapshot))
+                && is_array($claim) && ($claim['purpose'] ?? null) === $row['purpose']
+                && ($claim['ready'] ?? false) === true && ($claim['payable_minor'] ?? null) === (int) $row['full_amount_minor']
+                && ($claim['worked_duration_units'] ?? null) === (int) $row['full_duration_units'];
+            $inputId = $row['input_id'] === null ? null : (int) $row['input_id'];
+            if ($inputId === null) $valid = $valid && (int) $row['delta_amount_minor'] === 0;
+            else {
+                $component = json_decode((string) ($row['input_component_snapshot'] ?? ''), true);
+                $valid = $valid && is_array($component) && ($component['code'] ?? null) === ($claim['component_code'] ?? null)
+                && in_array($row['input_status'], ['approved', 'locked'], true)
+                && (int) $row['input_amount'] === (int) $row['delta_amount_minor']
+                && is_string($row['input_snapshot_json']) && hash_equals($snapshot, $row['input_snapshot_json'])
+                && hash_equals(strtolower((string) $row['input_snapshot_hex']), hash('sha256', $snapshot));
+            }
+            if (!$valid) { $result['invalid'][$id][] = (int) $row['id']; continue; }
+            $dto = ['schema_version' => 'hourly-payslip-source.v1', 'input_id' => $inputId,
+                'claim_id' => (int) $row['claim_id'], 'purpose' => (string) $row['purpose'],
+                'work_period_start' => (string) $row['work_period_start'], 'sequence_no' => (int) $row['sequence_no'],
+                'evidence_hash' => strtolower((string) $row['evidence_hex']), 'full_claim' => $claim,
+                'previous_payable_minor' => (int) $row['full_amount_minor'] - (int) $row['delta_amount_minor'],
+                'previous_worked_duration_units' => (int) $row['full_duration_units'] - (int) $row['duration_delta_units'],
+                'delta_amount_minor' => (int) $row['delta_amount_minor'], 'worked_duration_delta_units' => (int) $row['duration_delta_units'],
+                ...(isset($decoded['entitlement_context']) ? ['calculation_context' => $decoded['entitlement_context']] : []),
+                ...(isset($decoded['minimum_wage']) ? ['minimum_wage' => $decoded['minimum_wage']] : [])];
+            if ($inputId !== null) $result['inputs'][$inputId] = $dto;
+            if ((int) $row['position'] === 1) $result['latest'][$id][] = $dto;
+        }
+        return $result;
+    }
+
+    /**
      * Schválené mzdové vstupy podle pracovního vztahu.
      *
      * @param list<int> $employmentIds
@@ -229,7 +346,7 @@ final class PayrollRunSnapshotBatchLoader
         string $periodStart,
     ): array {
         return $this->grouped($this->fetch(
-            'SELECT id, amount_minor, quantity_milliunits, source_kind,
+            'SELECT id, amount_minor, quantity_milliunits, source_kind, external_id,
                     source_period_start, component_snapshot_json,
                     HEX(component_snapshot_hash) AS component_snapshot_hash,
                     benefit_basket, benefit_exempt_minor, benefit_taxable_minor,

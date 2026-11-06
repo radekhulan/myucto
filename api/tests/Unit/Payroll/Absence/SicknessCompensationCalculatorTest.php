@@ -11,6 +11,20 @@ use PHPUnit\Framework\TestCase;
 
 final class SicknessCompensationCalculatorTest extends TestCase
 {
+    public function testHourlyMinimumChangeDistributesRoundedTotalByExactEntitlements(): void
+    {
+        $segments = [];
+        foreach ([8 => 13440, 9 => 14340] as $day => $average) {
+            $segments[] = ['shift_id' => null, 'local_date' => sprintf('2026-06-%02d', $day),
+                'planned_minutes' => 480, 'eligible_minutes' => 480, 'average_hourly_minor' => $average,
+                'hourly_minimum_proof' => ['minimum_hourly_minor' => $average]];
+        }
+        $result = $this->calculator()->calculate('2026-06-08', 13440, $segments);
+        self::assertSame(120100, $result->compensationMinor);
+        self::assertSame([58105, 61995], array_column($result->segments, 'compensation_minor'));
+        self::assertSame(14340, $result->segments[1]['hourly_minimum_proof']['minimum_hourly_minor']);
+    }
+
     public function testCompensationIsRoundedUpToWholeCrowns(): void
     {
         $result = $this->calculator()->calculate(

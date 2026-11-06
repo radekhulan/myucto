@@ -51,7 +51,7 @@ class PayrollDocumentService
             $rendered->mimeType,
             $rendered->suggestedFilename,
             $rendered->sourceSnapshotSha256,
-            PayslipPdfRenderer::VERSION,
+            PayslipPdfRenderer::versionFor($data),
             $rendered->rendererVersion,
         );
     }

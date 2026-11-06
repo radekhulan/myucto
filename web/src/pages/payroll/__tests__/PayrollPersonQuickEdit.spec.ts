@@ -400,6 +400,21 @@ describe('PayrollPersonQuickEdit', () => {
     expect(wrapper.get<HTMLInputElement>('[data-test="phone"]').element.value).toBe('')
   })
 
+  it('při změně pracovní doby zachová hodinové odměňování a nedovolí přepsat měsíční mzdu', async () => {
+    const hourly = employment({ monthly_gross_minor: null })
+    Object.assign(hourly.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetický výměr', remuneration_basis_kind: 'wage_statement' })
+    mocks.person.mockResolvedValue({ ...person(), employments: [hourly] })
+    const wrapper = await mountedEditor()
+    expect(wrapper.get('[data-test="monthly-gross"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="hourly-edit-guidance"]').exists()).toBe(true)
+    await wrapper.get('[data-test="weekly-hours"]').setValue('20.00')
+    await wrapper.get('form').trigger('submit')
+    expect(mocks.savePersonQuickEdit).toHaveBeenCalledWith(17, expect.objectContaining({ employment: expect.objectContaining({
+      terms: expect.objectContaining({ remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetický výměr', remuneration_basis_kind: 'wage_statement', weekly_hours: '20.00' }),
+    }) }))
+    expect(mocks.savePersonQuickEdit.mock.calls[0]![1].employment).not.toHaveProperty('monthly_gross_minor')
+  })
+
   it('při změně jen osobního údaje nevytvoří zbytečnou verzi pracovních podmínek', async () => {
     const wrapper = await mountedEditor()
     await wrapper.get('[data-test="first-name"]').setValue('Jana Marie')

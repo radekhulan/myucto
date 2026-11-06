@@ -7,6 +7,7 @@ import {
   payrollApi,
   type PayrollAccountOption,
   type PayrollComponent,
+  type PayrollMinimumWageClassificationRules,
   type PayrollComponentJmhzMappingState,
   type PayrollComponentJmhzTarget,
   type PayrollComponentFrequency,
@@ -422,6 +423,11 @@ const jmhzMappings = ref<Record<number, PayrollComponentJmhzMappingState>>({})
 const jmhzTargetId = ref<string | null>(null)
 const jmhzLoading = ref(true)
 const componentForm = ref<ComponentForm>(newComponentForm())
+const hydratingComponentForm = ref(false)
+function hydrateComponentForm(value: ComponentForm): void {
+  hydratingComponentForm.value = true
+  try { componentForm.value = value } finally { hydratingComponentForm.value = false }
+}
 /** Obsazené kódy pro automatické odvození kódu z názvu (kolize → `_2`, `_3`). */
 const takenComponentCodes = computed(() => components.value
   .filter(item => item.id !== editingComponent.value?.id)
@@ -666,6 +672,8 @@ function newComponentForm(): ComponentForm {
     health_participation_treatment: 'included',
     health_treatment: 'included',
     average_earning_treatment: 'included',
+    minimum_wage_treatment: null,
+    minimum_wage_reason: null,
     enforcement_treatment: 'included',
     jmhz_treatment: 'included',
     statistics_treatment: 'included',
@@ -845,8 +853,9 @@ async function load() {
       // Nečekáme na volitelný katalog JMHZ: běžná správa složek musí zůstat
       // použitelná i při dočasně nedostupném podkladu pro mapování.
       void loadJmhzConfiguration()
-      const catalog = await payrollApi.components()
-      components.value = catalog
+      const catalog = await payrollApi.componentCatalog()
+      components.value = catalog.components
+      minimumClassificationRules.value = catalog.minimum_wage_classification ?? null
     } else if (activeTab.value === 'recurring') {
       const [catalog] = await Promise.all([
         payrollApi.components(),
@@ -986,7 +995,7 @@ async function openNewComponent() {
     return
   }
   editingComponent.value = null
-  componentForm.value = newComponentForm()
+  hydrateComponentForm(newComponentForm())
   componentError.value = ''
   componentEditorOpen.value = true
 }
@@ -999,7 +1008,7 @@ async function editComponent(component: PayrollComponent) {
     return
   }
   editingComponent.value = component
-  componentForm.value = {
+  hydrateComponentForm({
     code: component.code,
     name: component.name,
     component_kind: component.component_kind,
@@ -1011,6 +1020,8 @@ async function editComponent(component: PayrollComponent) {
     health_participation_treatment: component.health_participation_treatment,
     health_treatment: component.health_treatment,
     average_earning_treatment: component.average_earning_treatment,
+    minimum_wage_treatment: component.minimum_wage_treatment,
+    minimum_wage_reason: component.minimum_wage_reason,
     enforcement_treatment: component.enforcement_treatment,
     jmhz_treatment: component.jmhz_treatment,
     statistics_treatment: component.statistics_treatment,
@@ -1022,7 +1033,7 @@ async function editComponent(component: PayrollComponent) {
     valid_from: component.valid_from,
     valid_to: component.valid_to,
     is_active: component.is_active,
-  }
+  })
   componentError.value = ''
   componentEditorOpen.value = true
 }
@@ -1034,10 +1045,35 @@ async function editComponent(component: PayrollComponent) {
  * pole" v něm znamenala projít je všechny očima; pojmenované pole je jedno
  * hledání. Pořadí odpovídá tomu, co uživatel vyplňuje dřív.
  */
+const minimumClassificationRules = ref<PayrollMinimumWageClassificationRules | null>(null)
+const minimumClassificationCurrent = computed(() => editingComponent.value !== null && editingComponent.value.component_kind === componentForm.value.component_kind && editingComponent.value.value_kind === componentForm.value.value_kind)
+const minimumDefaultClassification = computed<PayrollComponentInclusion | null>(() => {
+  const rules = minimumClassificationRules.value
+  const form = componentForm.value
+  if (rules) return form.value_kind === 'non_monetary' ? rules.non_monetary : rules.codes[form.code.trim().toUpperCase()] ?? rules.kinds[form.component_kind] ?? rules.fallback
+  if (!minimumClassificationCurrent.value) return null
+  return editingComponent.value?.minimum_wage_treatment_editable ? 'manual_review' : editingComponent.value?.effective_minimum_wage_treatment ?? 'manual_review'
+})
+const minimumClassificationEditable = computed(() => minimumDefaultClassification.value === 'manual_review' && !(minimumClassificationCurrent.value && editingComponent.value?.minimum_wage_treatment_editable === false))
+const minimumEffectiveClassification = computed(() => minimumClassificationCurrent.value && editingComponent.value?.minimum_wage_treatment_editable === false ? editingComponent.value.effective_minimum_wage_treatment ?? minimumDefaultClassification.value : minimumDefaultClassification.value)
+function setMinimumWageTreatment(value: string | number | null): void {
+  if (value === null) componentForm.value.minimum_wage_treatment = null
+  else if (typeof value === 'string' && inclusionTreatments.includes(value as PayrollComponentInclusion)) componentForm.value.minimum_wage_treatment = value as PayrollComponentInclusion
+}
+watch(() => [componentForm.value.code, componentForm.value.component_kind, componentForm.value.value_kind], () => {
+  if (hydratingComponentForm.value || !componentEditorOpen.value) return
+  if (minimumDefaultClassification.value !== null && minimumDefaultClassification.value !== 'manual_review') {
+    componentForm.value.minimum_wage_treatment = null
+    componentForm.value.minimum_wage_reason = null
+  }
+}, { flush: 'sync' })
+const minimumClassificationReasonRequired = computed(() => minimumClassificationEditable.value && ['included', 'excluded'].includes(componentForm.value.minimum_wage_treatment ?? ''))
+
 const componentMissingField = computed<string | null>(() => {
   const form = componentForm.value
   if (!form.code.trim()) return 'code'
   if (!form.name.trim()) return 'name'
+  if (minimumClassificationReasonRequired.value && !form.minimum_wage_reason?.trim()) return 'minimum_wage_reason'
   const limit = form.annual_limit === '' ? null : parsePayrollAmountToMinor(form.annual_limit)
   if (form.annual_limit !== '' && (limit === null || limit <= 0)) return 'annual_limit'
   // Osvobození bez uvedeného podkladu neprojde mzdovým během — ať to uživatel
@@ -1071,6 +1107,10 @@ function componentPayload(): PayrollComponentPayload | null {
       componentForm.value.health_participation_treatment,
     health_treatment: componentForm.value.health_treatment,
     average_earning_treatment: componentForm.value.average_earning_treatment,
+    ...(minimumClassificationEditable.value ? {
+      minimum_wage_treatment: componentForm.value.minimum_wage_treatment ?? null,
+      minimum_wage_reason: componentForm.value.minimum_wage_reason?.trim() || null,
+    } : !minimumClassificationCurrent.value && editingComponent.value ? { minimum_wage_treatment: null, minimum_wage_reason: null } : {}),
     enforcement_treatment: componentForm.value.enforcement_treatment,
     jmhz_treatment: componentForm.value.jmhz_treatment,
     statistics_treatment: componentForm.value.statistics_treatment,
@@ -1106,7 +1146,9 @@ async function saveComponent() {
     } else {
       await payrollApi.createComponent(payload)
     }
-    components.value = await payrollApi.components()
+    const catalog = await payrollApi.componentCatalog()
+    components.value = catalog.components
+    minimumClassificationRules.value = catalog.minimum_wage_classification ?? null
     setJmhzMappings(await payrollApi.componentJmhzMappings())
     componentEditorOpen.value = false
     toast.success(t('payroll.components.catalog.saved'))
@@ -1995,14 +2037,24 @@ onMounted(load)
               @update:code="componentForm.code = $event.toUpperCase()"
               @update:name="componentForm.name = $event"
             />
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.kind') }}</span><SearchableSelect :model-value="componentForm.component_kind" :options="componentKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.component_kind = $event ?? 'bonus'" /></label>
-            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.value_kind') }}</span><SearchableSelect :model-value="componentForm.value_kind" :options="valueKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.value_kind = $event ?? 'monetary'" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.kind') }}</span><SearchableSelect data-testid="payroll-component-kind" :model-value="componentForm.component_kind" :options="componentKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.component_kind = $event ?? 'bonus'" /></label>
+            <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.value_kind') }}</span><SearchableSelect data-testid="payroll-component-value-kind" :model-value="componentForm.value_kind" :options="valueKindOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.value_kind = $event ?? 'monetary'" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.frequency') }}</span><SearchableSelect :model-value="componentForm.frequency_kind" :options="frequencyOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.frequency_kind = $event ?? 'one_off'" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.tax') }}</span><SearchableSelect :model-value="componentForm.tax_treatment" :options="taxTreatmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="componentForm.tax_treatment = $event ?? 'included'" /></label>
             <label v-for="field in (['social_participation_treatment','social_treatment','health_participation_treatment','health_treatment','average_earning_treatment','enforcement_treatment','jmhz_treatment','statistics_treatment'] as const)" :key="field" class="block">
               <span class="mb-1 block text-xs text-neutral-600">{{ t(`payroll.components.fields.${field}`) }}</span>
               <SearchableSelect :model-value="componentForm[field]" :options="inclusionTreatmentOptions" :clearable="false" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="setInclusionTreatment(field, $event)" />
             </label>
+            <div class="sm:col-span-2 rounded-md border border-neutral-200 p-3" data-testid="payroll-component-minimum">
+              <p class="text-xs font-medium text-neutral-700">{{ t('payroll.minimum.component_treatment') }}</p>
+              <template v-if="minimumClassificationEditable">
+                <SearchableSelect data-testid="payroll-component-minimum-treatment" :model-value="componentForm.minimum_wage_treatment ?? null" :options="inclusionTreatmentOptions" :placeholder="t('payroll.minimum.default_classification')" :no-results-label="t('payroll.components.no_results')" accent="payroll" @update:model-value="setMinimumWageTreatment($event)" />
+                <label class="mt-2 block"><span class="text-xs text-neutral-600">{{ t('payroll.minimum.reason') }}<span v-if="minimumClassificationReasonRequired"> *</span></span><textarea v-model="componentForm.minimum_wage_reason" data-testid="payroll-component-minimum-reason" maxlength="500" rows="2" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" /></label>
+                <p class="mt-1 text-xs text-neutral-500">{{ t('payroll.minimum.classification_hint') }}</p>
+              </template>
+              <p v-else-if="minimumEffectiveClassification !== null" class="mt-1 text-xs text-neutral-600" data-testid="payroll-component-minimum-effective">{{ t(`payroll.components.inclusion.${minimumEffectiveClassification}`) }} · {{ t('payroll.minimum.immutable_classification') }}</p>
+              <p v-else class="mt-1 text-xs text-neutral-500">{{ t('payroll.minimum.classification_after_save') }}</p>
+            </div>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.debit') }}</span><SearchableSelect data-testid="payroll-component-debit" :model-value="componentForm.accounting_debit_code" :options="debitAccountOptions" :selected-option="selectedAccountOption(componentForm.accounting_debit_code)" :placeholder="t('payroll.components.account_placeholder')" :no-results-label="t('payroll.components.no_results')" accent="payroll" input-class="font-mono" @update:model-value="componentForm.accounting_debit_code = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.credit') }}</span><SearchableSelect data-testid="payroll-component-credit" :model-value="componentForm.accounting_credit_code" :options="creditAccountOptions" :selected-option="selectedAccountOption(componentForm.accounting_credit_code)" :placeholder="t('payroll.components.account_placeholder')" :no-results-label="t('payroll.components.no_results')" accent="payroll" input-class="font-mono" @update:model-value="componentForm.accounting_credit_code = $event" /></label>
             <label class="block"><span class="mb-1 block text-xs text-neutral-600">{{ t('payroll.components.fields.annual_limit') }}</span><input v-model="componentForm.annual_limit" inputmode="decimal" class="h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm"><span class="mt-1 block text-[11px] text-neutral-500">{{ t('payroll.components.fields.annual_limit_hint') }}</span></label>
@@ -2196,9 +2248,9 @@ onMounted(load)
             >
               <p class="font-medium">
                 {{ t('payroll.components.inputs.meal_entitlement_summary', {
-                  count: mealEntitlement.count,
-                  qualifying: mealEntitlement.qualifying_count,
-                  second: mealEntitlement.second_contribution_count,
+                  count: mealEntitlement.count ?? t('payroll.worked_hours.unknown'),
+                  qualifying: mealEntitlement.qualifying_count ?? t('payroll.worked_hours.unknown'),
+                  second: mealEntitlement.second_contribution_count ?? t('payroll.worked_hours.unknown'),
                 }) }}
               </p>
               <p class="mt-1">

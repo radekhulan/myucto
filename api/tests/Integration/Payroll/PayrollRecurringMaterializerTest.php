@@ -86,6 +86,45 @@ final class PayrollRecurringMaterializerTest extends TestCase
         }
     }
 
+    public function testMonthlyBaseCannotBeCreatedOrExtendedAcrossAnyHourlyInterval(): void
+    {
+        $componentId = $this->createComponent('SYNTHETIC_BASE', componentKind: 'base_wage');
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, effective_to, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-06-01", "2026-01-01", "2026-06-30", "hourly", 20000, "contract", "Syntetická smlouva")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, remuneration_type, monthly_gross_minor) VALUES (?, ?, "2026-07-01", "2026-01-01", "monthly", 4200000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $repository = $this->container->get(\MyInvoice\Repository\Payroll\PayrollRecurringComponentRepository::class);
+        $data = [
+            'employment_id' => $this->employmentId, 'component_id' => $componentId,
+            'calculation_kind' => 'fixed_amount', 'amount_minor' => 4200000, 'rate_basis_points' => null,
+            'valid_from' => '2026-01-01', 'valid_to' => null, 'allocation_rule' => 'full_month',
+            'maximum_amount_minor' => null, 'note' => null, 'is_active' => true,
+        ];
+        try {
+            $repository->create($this->supplierId, $data, $this->userId);
+            self::fail('Pozdější měsíční podmínky nesmějí schovat hodinový červen.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('překrývá s hodinovým', $e->getMessage());
+        }
+        $data['valid_to'] = '2026-05-31';
+        $saved = $repository->create($this->supplierId, $data, $this->userId);
+        self::assertSame('2026-05-31', $saved['valid_to']);
+        $data['valid_to'] = '2026-06-15';
+        try {
+            $repository->update($this->supplierId, (int) $saved['id'], $data, (int) $saved['row_version'], $this->userId);
+            self::fail('Konečné datum předpisu nesmí obejít kontrolu překryvu.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('překrývá s hodinovým', $e->getMessage());
+        }
+        $data['is_active'] = false;
+        $disabled = $repository->update($this->supplierId, (int) $saved['id'], $data, (int) $saved['row_version'], $this->userId);
+        self::assertFalse($disabled['is_active']);
+        $data['is_active'] = true;
+        $data['valid_from'] = '2026-07-01';
+        $data['valid_to'] = null;
+        self::assertSame('2026-07-01', $repository->create($this->supplierId, $data, $this->userId)['valid_from']);
+    }
+
     /**
      * Pevná měsíční částka na celý měsíc je nejjednodušší předpis, jaký může
      * existovat — a zároveň měřítko toho, že se vůbec něco zakládá. Vstup musí

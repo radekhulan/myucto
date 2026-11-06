@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Payroll\Time\Surcharge;
 use DateTimeImmutable;
 use DateTimeZone;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Service\Payroll\PayrollHourlyAverageSegments;
+use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollSurchargeRepository;
@@ -89,7 +91,14 @@ final class PayrollStandbyInputMaterializer
      */
     public function calculate(int $supplierId, int $employmentId, string $periodStart): array
     {
-        $minutes = $this->standbyMinutes($supplierId, $employmentId, $periodStart);
+        $source = $this->db->pdo()->prepare('SELECT work_source FROM payroll_time_months WHERE supplier_id = ? AND employment_id = ? AND period_start = ?');
+        $source->execute([$supplierId, $employmentId, $periodStart]);
+        if ($source->fetchColumn() === 'manual_summary') {
+            throw PayrollSurchargeException::of('manual_summary_standby_unavailable',
+                'Ruční souhrn pracovní doby nedokládá pohotovost; staré směny nelze použít pro výpočet odměny.');
+        }
+        $segments = $this->standbySegments($supplierId, $employmentId, $periodStart);
+        $minutes = array_sum(array_column($segments, 'minutes'));
         $ruleset = PayrollSurchargeRuleset::forDate($this->rulesets, $periodStart);
         $statutory = PayrollSurchargePolicy::basisPointsOf($ruleset->standbyRate());
         $policy = $this->surcharges->policy($supplierId, $employmentId, $periodStart);
@@ -123,6 +132,9 @@ final class PayrollStandbyInputMaterializer
             );
         }
 
+        $floor = (new PayrollHourlyAverageSegments($this->db))->forEmployment($supplierId, $employmentId, $segments, $average);
+        $weighted = 0;
+        foreach ($segments as $segment) $weighted += $segment['minutes'] * ($floor['averages'][$segment['local_date']] ?? $average);
         return [
             'minutes' => $minutes,
             'rate_basis_points' => $rate,
@@ -130,7 +142,8 @@ final class PayrollStandbyInputMaterializer
             'average_hourly_minor' => $average,
             'amount_minor' => PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId)
                 ->mode()
-                ->roundFraction($minutes * $average * $rate, 60 * 10_000 * 100) * 100,
+                ->roundFraction($weighted * $rate, 60 * 10_000 * 100) * 100,
+            ...(isset($floor['proofs'][$periodStart]) ? ['hourly_average_floor' => $floor['proofs'][$periodStart], 'hourly_average_segments' => $segments] : []),
         ];
     }
 
@@ -138,10 +151,10 @@ final class PayrollStandbyInputMaterializer
     private function reconcile(int $supplierId, int $employmentId, string $periodStart, ?int $userId): array
     {
         $month = $this->timeMonth($supplierId, $employmentId, $periodStart);
-        if (($month['work_source'] ?? 'entries') === 'import_summary') {
+        if (in_array($month['work_source'] ?? 'entries', ['import_summary', 'manual_summary'], true)) {
             // Měsíc ze souhrnu importu nese odměny jako spočítané složky;
             // druhý výpočet ze směn by nárok zaplatil dvakrát.
-            return $this->report($employmentId, $periodStart, null, false, 'import_summary');
+            return $this->report($employmentId, $periodStart, null, false, $month['work_source']);
         }
         $calculation = $this->calculate($supplierId, $employmentId, $periodStart);
         $existing = $this->existingInputs($supplierId, $employmentId, $periodStart);
@@ -156,6 +169,7 @@ final class PayrollStandbyInputMaterializer
         $this->assertInputsNotLocked($supplierId, $employmentId, $periodStart);
         $this->components->ensureDefaults($supplierId);
 
+        $snapshot = isset($calculation['hourly_average_floor']) ? CanonicalJson::encode($calculation) : null;
         $input = $this->inputs->createApproved($supplierId, [
             'employee_id' => $this->employeeId($supplierId, $employmentId),
             'employment_id' => $employmentId,
@@ -166,7 +180,12 @@ final class PayrollStandbyInputMaterializer
             'quantity_milliunits' => null,
             'source_kind' => 'time',
             'external_id' => sprintf('%s%s:%d', self::EXTERNAL_PREFIX, $periodStart, count($existing) + 1),
-        ], $userId);
+            'source_snapshot_json' => $snapshot, 'source_snapshot_hash' => $snapshot === null ? null : hash('sha256', $snapshot, true),
+        ], $userId, false, true);
+        if ($snapshot !== null) {
+            $this->db->pdo()->prepare('INSERT INTO payroll_standby_floor_proofs (supplier_id, employment_id, input_id, period_start, source_snapshot_json, source_snapshot_hash) VALUES (?, ?, ?, ?, ?, ?)')
+                ->execute([$supplierId, $employmentId, $input['id'], $periodStart, $snapshot, hash('sha256', $snapshot, true)]);
+        }
 
         return $this->report($employmentId, $periodStart, $calculation, true, null) + [
             'input_id' => PayrollTimeValue::int($input['id'] ?? null, 'input_id'),
@@ -177,7 +196,7 @@ final class PayrollStandbyInputMaterializer
     /**
      * Minuty pohotovosti z publikovaných směn, jejichž MÍSTNÍ začátek padá do měsíce.
      */
-    private function standbyMinutes(int $supplierId, int $employmentId, string $periodStart): int
+    private function standbySegments(int $supplierId, int $employmentId, string $periodStart): array
     {
         $from = (new DateTimeImmutable($periodStart . ' 00:00:00', new DateTimeZone('UTC')))
             ->modify('-1 day');
@@ -197,16 +216,16 @@ final class PayrollStandbyInputMaterializer
             $to->format('Y-m-d H:i:s'),
         ]);
         $month = substr($periodStart, 0, 7);
-        $minutes = 0;
+        $segments = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
             $local = (new DateTimeImmutable((string) $row['starts_at_utc'], new DateTimeZone('UTC')))
                 ->setTimezone(new DateTimeZone((string) $row['timezone_name']));
             if ($local->format('Y-m') === $month) {
-                $minutes += (int) $row['standby_minutes'];
+                $segments[] = ['local_date' => $local->format('Y-m-d'), 'minutes' => (int) $row['standby_minutes']];
             }
         }
 
-        return $minutes;
+        return $segments;
     }
 
     /** @return array<string,mixed> */
@@ -312,10 +331,11 @@ final class PayrollStandbyInputMaterializer
         return [
             'employment_id' => $employmentId,
             'period_start' => $periodStart,
-            'minutes' => $calculation['minutes'] ?? 0,
+            'minutes' => $skippedReason === 'manual_summary' ? null : ($calculation['minutes'] ?? 0),
             'rate_basis_points' => $calculation['rate_basis_points'] ?? null,
             'rate_source' => $calculation['rate_source'] ?? null,
-            'amount_minor' => $calculation['amount_minor'] ?? 0,
+            'amount_minor' => $skippedReason === 'manual_summary' ? null : ($calculation['amount_minor'] ?? 0),
+            ...($skippedReason === 'manual_summary' ? ['requires_manual_review' => true] : []),
             'written' => $written,
             'skipped_reason' => $skippedReason,
         ];

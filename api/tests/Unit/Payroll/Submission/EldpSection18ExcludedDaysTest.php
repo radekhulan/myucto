@@ -20,6 +20,17 @@ use PHPUnit\Framework\TestCase;
  */
 final class EldpSection18ExcludedDaysTest extends TestCase
 {
+    public function testPaidHolidayTimeOffDoesNotCreateExcludedDaysOrPeriods(): void
+    {
+        $absences = [$this->absence(31, 'holiday_compensatory_time_off', '2026-08-10', '2026-08-12')];
+        $deriver = new EldpExcludedPeriodDeriver();
+        $section18 = $deriver->deriveSection18($absences, '2026-08-01', '2026-08-31');
+        self::assertTrue($section18['derivable']);
+        self::assertSame(0, $section18['total']);
+        $section16 = $deriver->derive($absences, '2026-08-01', '2026-08-31', '2026-08');
+        self::assertSame([], $section16['blockers']);
+        self::assertSame(0, $section16['total']);
+    }
     public function testUnpaidLeaveBecomesExcusedAbsenceDays(): void
     {
         $derived = (new EldpExcludedPeriodDeriver())->deriveSection18(

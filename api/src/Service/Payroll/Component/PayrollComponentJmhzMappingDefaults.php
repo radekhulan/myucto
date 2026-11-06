@@ -61,6 +61,9 @@ final class PayrollComponentJmhzMappingDefaults
         // Tarifní mzdy — základ mzdy bez ohledu na způsob odměňování.
         'MZDA_MESICNI' => '10329',
         'MZDA_HODINOVA' => '10329',
+        'MZDA_HODINOVA_ZAKLAD' => '10329',
+        'MZDA_DOSAZENA_PRESCAS' => '10329',
+        'DOPLATEK_MINIMALNI_MZDA' => '10329',
         'MZDA_UKOLOVA' => '10329',
         // Prémie a odměny nepravidelné.
         'ODMENA' => '10331',
@@ -72,6 +75,7 @@ final class PayrollComponentJmhzMappingDefaults
         'PRIPLATEK_NOCNI' => '10334',
         'PRIPLATEK_VIKEND' => '10335',
         'PRIPLATEK_SVATEK' => '10336',
+        'NAHRADA_MZDY_VOLNO_ZA_SVATEK' => '10339',
         // Příplatek za ztížené pracovní prostředí vlastní detailní uzel v JMHZ
         // nemá, zůstává tedy na sběrném součtu příplatků.
         'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',
@@ -280,7 +284,12 @@ final class PayrollComponentJmhzMappingDefaults
         $params = [$packageId];
         $byCode = [];
         foreach ($table['codes'] as $code => $target) {
-            $byCode[] = 'WHEN ? THEN ?';
+            if (\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isReserved($code)) {
+                $byCode[] = 'WHEN definition.code = ? AND definition.component_kind = ? THEN ?';
+                array_push($params, $code, PayrollComponentDefaults::template($code)['component_kind'], $target);
+                continue;
+            }
+            $byCode[] = 'WHEN definition.code = ? THEN ?';
             array_push($params, $code, $target);
         }
         $byKind = [];
@@ -303,7 +312,7 @@ final class PayrollComponentJmhzMappingDefaults
                   JOIN payroll_jmhz_dictionary_attributes attribute
                     ON attribute.package_id = ?
                    AND attribute.attribute_id = COALESCE(
-                         CASE definition.code ' . implode(' ', $byCode) . ' END,
+                         CASE ' . implode(' ', $byCode) . ' END,
                          CASE ' . implode(' ', $byKind) . ' END
                        )
                  WHERE definition.supplier_id = ?
@@ -329,7 +338,7 @@ final class PayrollComponentJmhzMappingDefaults
         string $taxTreatment,
     ): ?string {
         $byCode = self::DEFAULTS[$code] ?? null;
-        if ($byCode !== null) {
+        if ($byCode !== null && self::codeTargetApplies($code, $componentKind)) {
             return $byCode;
         }
         if ($componentKind === 'bonus') {
@@ -340,6 +349,19 @@ final class PayrollComponentJmhzMappingDefaults
         }
 
         return self::KIND_DEFAULTS[$componentKind] ?? null;
+    }
+
+    /**
+     * Kód, který si nově vyhradil hodinový výpočet, mohla firma dřív použít pro
+     * vlastní složku jiného druhu. Té zůstává výchozí zařazení podle druhu.
+     */
+    private static function codeTargetApplies(string $code, string $componentKind): bool
+    {
+        if (!\MyInvoice\Service\Payroll\PayrollHourlyWageComponents::isReserved($code)) {
+            return true;
+        }
+
+        return PayrollComponentDefaults::template($code)['component_kind'] === $componentKind;
     }
 
     /**

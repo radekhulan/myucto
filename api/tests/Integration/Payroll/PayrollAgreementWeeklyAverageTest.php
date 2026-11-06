@@ -35,6 +35,59 @@ final class PayrollAgreementWeeklyAverageTest extends TestCase
         $this->tearDownPayrollFullFlow();
     }
 
+    public function testApprovedManualFractionCountsWithoutJmhzAndExceedsWeeklyLimitExactly(): void
+    {
+        $agreement = $this->agreement(91, '2026-11-24', '2026-11-01');
+        $this->manualMonth($agreement['employment_id'], 60003);
+        $assessment = $this->service()->assess($this->supplierId, [$agreement['employment_id'] => '2026-11-24'], '2026-11-01')[$agreement['employment_id']];
+        self::assertSame(7, $assessment['days']);
+        self::assertSame(60003, $assessment['worked_duration_units']);
+        self::assertNull($assessment['worked_minutes']);
+        $validations = $this->service()->validations($this->supplierId, [$this->row($agreement, '2026-11-24')], '2026-11-01');
+        self::assertCount(1, $validations);
+        self::assertSame('dpc_weekly_average_exceeded', $validations[0]->code);
+        self::assertStringContainsString('20,001 h', $validations[0]->message);
+    }
+
+    public function testManualMonthDoesNotDuplicateTakenOverHoursBeforeModuleStart(): void
+    {
+        $this->moveModuleStart('2026-12-01');
+        $agreement = $this->agreement(94, '2026-11-24', '2026-11-01');
+        $this->manualMonth($agreement['employment_id'], 60003);
+        $this->takeover($agreement, 11, 60);
+        $assessment = $this->service()->assess($this->supplierId, [$agreement['employment_id'] => '2026-11-24'], '2026-11-01')[$agreement['employment_id']];
+        self::assertSame(60, $assessment['worked_minutes']);
+        self::assertSame(60, $assessment['takeover_minutes']);
+        self::assertArrayNotHasKey('worked_duration_units', $assessment);
+    }
+
+    public function testUnknownManualMonthProducesReviewInsteadOfFalseZeroAverage(): void
+    {
+        $agreement = $this->agreement(92, '2026-11-24', '2026-11-01');
+        $this->manualMonth($agreement['employment_id'], 60003);
+        $this->db->pdo()->prepare("UPDATE payroll_time_months SET status = 'open', revision_no = 2, approved_at = NULL, approved_by = NULL WHERE supplier_id = ? AND employment_id = ? AND period_start = '2026-11-01'")->execute([$this->supplierId, $agreement['employment_id']]);
+        $assessment = $this->service()->assess($this->supplierId, [$agreement['employment_id'] => '2026-11-24'], '2026-11-01')[$agreement['employment_id']];
+        self::assertSame('manual_review_required', $assessment['evidence_status']);
+        self::assertNull($assessment['worked_duration_units']);
+        self::assertNull($assessment['worked_minutes']);
+        self::assertNull($assessment['average_weekly_minutes']);
+        $validations = $this->service()->validations($this->supplierId, [$this->row($agreement, '2026-11-24')], '2026-11-01');
+        self::assertSame('dpc_weekly_average_manual_review_required', $validations[0]->code);
+        self::assertSame('warning', PayrollRunReadinessImpact::describe($validations[0]->code)['severity']);
+    }
+
+    public function testSelectedManualZeroDoesNotAddArchivedJmhzHours(): void
+    {
+        $agreement = $this->agreement(93, '2026-11-01', '2026-11-01');
+        $response = $this->approveTimeMonth($agreement['employment_id'], '2026-11', self::workdays('2026-11'));
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $this->manualMonth($agreement['employment_id'], 0);
+        $assessment = $this->service()->assess($this->supplierId, [$agreement['employment_id'] => '2026-11-01'], '2026-11-01')[$agreement['employment_id']];
+        self::assertSame(0, $assessment['worked_duration_units']);
+        self::assertSame(0, $assessment['worked_minutes']);
+        self::assertSame([], $this->service()->validations($this->supplierId, [$this->row($agreement, '2026-11-01')], '2026-11-01'));
+    }
+
     public function testTakenOverHoursAboveHalfOfTheWeekAreReported(): void
     {
         $this->moveModuleStart('2026-10-01');
@@ -129,6 +182,18 @@ final class PayrollAgreementWeeklyAverageTest extends TestCase
         self::assertSame('warning', $found[0]['severity']);
         self::assertStringContainsString('1. 7. 2026', $found[0]['message']);
         self::assertStringContainsString("employment={$agreement['employment_id']}", (string) $found[0]['remediation_path']);
+    }
+
+    private function manualMonth(int $employmentId, int $units): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare("INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, status, revision_no, work_source, approved_at, approved_by) SELECT ?, ?, '2026-11-01', 'approved', 1, 'manual_summary', NOW(), MIN(id) FROM users ON DUPLICATE KEY UPDATE work_source = 'manual_summary'")->execute([$this->supplierId, $employmentId]);
+        $statement = $pdo->prepare("SELECT id, revision_no FROM payroll_time_months WHERE supplier_id = ? AND employment_id = ? AND period_start = '2026-11-01'");
+        $statement->execute([$this->supplierId, $employmentId]);
+        $month = $statement->fetch(\PDO::FETCH_ASSOC);
+        $pdo->prepare("INSERT INTO payroll_time_month_manual_summaries (supplier_id, time_month_id, time_month_revision_no, employment_id, period_start, content_sha256, reason) VALUES (?, ?, ?, ?, '2026-11-01', REPEAT('a', 64), 'Syntetický ruční výkaz')")->execute([$this->supplierId, $month['id'], $month['revision_no'], $employmentId]);
+        $summary = (int) $pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO payroll_time_month_manual_segments (supplier_id, summary_id, sequence_no, date_from, date_to, worked_duration_units) VALUES (?, ?, 1, '2026-11-24', '2026-11-30', ?)")->execute([$this->supplierId, $summary, $units]);
     }
 
     private function service(): PayrollAgreementWeeklyAverage

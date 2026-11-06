@@ -132,6 +132,25 @@ final class AverageEarningCalculatorTest extends TestCase
         self::assertTrue($result->trace['minimum_wage_floor_applied']);
     }
 
+    public function testExactAverageDoesNotRoundSubminuteDenominator(): void
+    {
+        $result = $this->calculator()->calculateExact('2026-04-01', 4_800_000, 0, 480_053, 21);
+        self::assertSame(29_997, $result->averageHourlyMinor);
+        self::assertSame(480_053, $result->trace['worked_duration_units']);
+        self::assertNull($result->trace['worked_minutes']);
+    }
+
+    public function testLegacyMinuteCallPreservesResultAndTrace(): void
+    {
+        $legacy = $this->calculator()->calculate('2026-04-01', 4_800_000, 0, 9600, 21);
+        $exact = $this->calculator()->calculateExact('2026-04-01', 4_800_000, 0, 480_000, 21);
+        self::assertSame($legacy->averageHourlyMinor, $exact->averageHourlyMinor);
+        $trace = $exact->trace;
+        unset($trace['worked_duration_units']);
+        self::assertSame($legacy->trace, $trace);
+        self::assertArrayNotHasKey('worked_duration_units', $legacy->trace);
+    }
+
     private function calculator(): AverageEarningCalculator
     {
         return new AverageEarningCalculator(CzechPayrollRulesets2026::provider());

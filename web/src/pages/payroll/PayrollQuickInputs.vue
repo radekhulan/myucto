@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel } from './employmentLifecycleUi'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
@@ -25,6 +25,9 @@ import PaginationBar from '@/components/ui/PaginationBar.vue'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
 import PayrollInputHistory from '@/components/payroll/PayrollInputHistory.vue'
+import PayrollWorkedHoursSummary from '@/components/payroll/PayrollWorkedHoursSummary.vue'
+import PayrollHourlyWagePreview from '@/components/payroll/PayrollHourlyWagePreview.vue'
+import PayrollWorkedHoursPanel from '@/components/payroll/PayrollWorkedHoursPanel.vue'
 import {
   payrollPeriodRange,
   payrollPeriodScopeFromQuery,
@@ -34,7 +37,7 @@ import {
 import PayrollQuickFieldState from '@/components/payroll/PayrollQuickFieldState.vue'
 import PayrollQuickColumnMenu from '@/components/payroll/PayrollQuickColumnMenu.vue'
 import type { PayrollQuickColumnGroup } from '@/components/payroll/payrollQuickColumns'
-import { payrollQueryId } from '@/pages/payroll/payrollAgendaLinks'
+import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import ColumnPicker from '@/components/ui/ColumnPicker.vue'
 import DensityToggle from '@/components/ui/DensityToggle.vue'
 import { useTablePrefs, type ColumnDef } from '@/composables/useTablePrefs'
@@ -113,7 +116,7 @@ const MAX_OVERTIME_HOURS_MILLI = 1_000_000
  * vždycky překlep, ne směna.
  */
 const MAX_SURCHARGE_HOURS_MILLI = 744_000
-const { t, locale } = useI18n()
+const { t, te, locale } = useI18n()
 const auth = useAuthStore()
 const toast = useToast()
 const route = useRoute()
@@ -333,6 +336,20 @@ const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
  * `draft_inputs_present` a schvalovat na jiné obrazovce se nemusí nic.
  */
 const canApprove = computed(() => auth.canWrite('payroll.approve'))
+const canWriteTime = computed(() => auth.canWrite('payroll.time.write'))
+function hasHourlyEvidence(row: PayrollQuickInputRow): boolean {
+  return row.hourly_remuneration_in_period === true || row.hourly_wage_preview?.settlement_only === true
+}
+const canReopenTime = computed(() => auth.canWrite('payroll.reopen'))
+const workedEmploymentId = ref<number | null>(null)
+const workedPanel = ref<HTMLElement | null>(null)
+const activeWorkedRow = computed(() => rows.value.find(row => row.employment_id === workedEmploymentId.value) ?? null)
+async function openWorkedHours(row: PayrollQuickInputRow): Promise<void> {
+  workedEmploymentId.value = row.employment_id
+  await nextTick()
+  workedPanel.value?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' })
+}
+watch(period, () => { workedEmploymentId.value = null })
 /*
  * Konflikt s jiným vstupem NEBLOKUJE uložení celé stránky.
  *
@@ -944,6 +961,15 @@ function managedDisplay(row: UiRow, kind: 'base' | 'overtime' | 'bonus'): string
  */
 const MANAGED_BLOCKER_SUFFIX = '_managed_elsewhere'
 
+/** Text blokace podle kódu v jazyce aplikace; serverová zpráva je jen záloha. */
+function blockerMessage(row: UiRow, code: string): string {
+  const own = `payroll.quick_inputs.blockers.${code}`
+  if (te(own)) return t(own)
+  const hourly = `payroll.hourly_preview.blockers.${code}`
+  if (te(hourly)) return t(hourly)
+  return row.hourly_wage_preview?.blockers.find(blocker => blocker.code === code)?.message ?? t(own)
+}
+
 function personBlockers(row: UiRow): string[] {
   return row.blockers.filter(blocker => !blocker.endsWith(MANAGED_BLOCKER_SUFFIX))
 }
@@ -1208,7 +1234,8 @@ const READONLY_VALUE_CLASS = 'inline-flex h-8 items-center justify-end rounded-m
 const SUGGESTED_FIELD_CLASS = 'border-dashed border-warning-500 bg-warning-50'
 
 function baseSuggested(row: UiRow): boolean {
-  return !row.base_managed_elsewhere
+  return !row.hourly_remuneration_in_period
+    && !row.base_managed_elsewhere
     && !row.base_requires_entry
     && row.inputs.base === null
     && row.base_amount_minor > 0
@@ -1291,6 +1318,14 @@ async function load(): Promise<void> {
     if (generation !== loadGeneration || period.value !== requestedPeriod
       || month.period !== requestedPeriod) return
     rows.value = month.items.map(applyPending)
+    if (payrollQueryValue(route.query, 'hours') === '1' && focusEmploymentId.value !== null) {
+      const focused = rows.value.find(row => row.employment_id === focusEmploymentId.value && row.worked_time && hasHourlyEvidence(row))
+      if (focused) {
+        workedEmploymentId.value = focused.employment_id
+        const { hours: _hours, ...query } = route.query
+        void router.replace({ query })
+      }
+    }
     // `total` už je zúžené serverem, takže pager mluví o tom, co tabulka ukazuje.
     total.value = month.total
     componentColumns.value = month.columns ?? []
@@ -1669,6 +1704,7 @@ onMounted(() => {
     <div v-if="!historyMode" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 text-sm text-neutral-700">
       <p>{{ t('payroll.quick_inputs.info') }}</p>
       <p class="mt-1 font-medium text-payroll-800">{{ t('payroll.quick_inputs.gross_preview_hint') }}</p>
+      <p v-if="rows.some(hasHourlyEvidence)" class="mt-1 text-warning-800">{{ t('payroll.hourly_preview.input_totals_hint') }}</p>
     </div>
 
     <div
@@ -2025,6 +2061,25 @@ onMounted(() => {
           jménem (`sticky left-0`). Svislý strop tu být nesmí: stránka má jediný
           posuvník, ne tabulku skrolující uvnitř sebe pod vlastní patičkou.
         -->
+        <div v-if="activeWorkedRow?.worked_time && hasHourlyEvidence(activeWorkedRow)" ref="workedPanel">
+          <PayrollWorkedHoursPanel
+            :key="`${period}:${activeWorkedRow.employment_id}`"
+            :employment-id="activeWorkedRow.employment_id"
+            :full-name="activeWorkedRow.full_name"
+            :period="period"
+            :value="activeWorkedRow.worked_time"
+            :hourly-preview="activeWorkedRow.hourly_wage_preview"
+            :hourly-enabled="hasHourlyEvidence(activeWorkedRow)"
+            :settlement-only="activeWorkedRow.hourly_wage_preview?.settlement_only === true"
+            :can-read-evidence="auth.canRead('payroll')"
+            :closed="rowClosed(activeWorkedRow) || historicalMonth"
+            :can-write="canWriteTime"
+            :can-approve="canApprove"
+            :can-reopen="canReopenTime"
+            @updated="load"
+            @close="workedEmploymentId = null"
+          />
+        </div>
         <div id="quick-surcharge-columns" data-layout="desktop" class="hidden overflow-x-auto lg:block">
           <table v-column-labels="tbl" class="min-w-[1120px] w-full divide-y divide-neutral-200 text-sm" :class="tbl.densityClass.value">
             <thead class="sticky top-0 z-20 bg-surface">
@@ -2121,8 +2176,10 @@ onMounted(() => {
                     </span>
                   </div>
                   <p v-if="personMeta(row)" class="mt-0.5 break-words text-xs text-neutral-500">{{ personMeta(row) }}</p>
+                  <PayrollWorkedHoursSummary v-if="row.worked_time && hasHourlyEvidence(row)" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-${row.employment_id}`" @open="openWorkedHours(row)" />
+                  <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
                   <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-1 text-xs text-warning-700">
-                    {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
+                    {{ blockerMessage(row, blocker) }}
                   </p>
                 </td>
                 <td v-if="tbl.isVisible('income_amount')" class="px-3 py-2">
@@ -2155,7 +2212,7 @@ onMounted(() => {
                       :aria-invalid="baseError(row) !== null"
                       :aria-describedby="baseError(row) ? `quick-base-error-${row.employment_id}` : undefined"
                       :class="[fieldClass(baseError(row), true, true), 'w-32', baseSuggested(row) ? SUGGESTED_FIELD_CLASS : '']"
-                      :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.base)"
+                      :disabled="loading || saving || !canWrite || rowClosed(row) || row.hourly_remuneration_in_period || !editable(row.inputs.base)"
                       @input="markDirty(row)"
                     >
                     <PayrollQuickFieldState
@@ -2530,6 +2587,7 @@ onMounted(() => {
                 </td>
                 <td v-if="tbl.isVisible('gross_preview')" class="px-3 py-2 text-right">
                   <p class="font-semibold tabular-nums text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
+                  <p v-if="hasHourlyEvidence(row)" class="mt-1 text-xs text-neutral-500">{{ t('payroll.hourly_preview.inputs_only') }}</p>
                   <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
                   </p>
@@ -2606,6 +2664,7 @@ onMounted(() => {
               </div>
               <div class="text-right">
                 <strong class="text-payroll-700">{{ formatMoney(grossPreview(row)) }}</strong>
+                <p v-if="hasHourlyEvidence(row)" class="mt-1 text-xs text-neutral-500">{{ t('payroll.hourly_preview.inputs_only') }}</p>
                 <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
                   {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
                 </p>
@@ -2617,8 +2676,10 @@ onMounted(() => {
                 </p>
               </div>
             </div>
+            <PayrollWorkedHoursSummary v-if="row.worked_time && hasHourlyEvidence(row)" :value="row.worked_time" :settlement-only="row.hourly_wage_preview?.settlement_only === true" :data-testid="`quick-worked-hours-mobile-${row.employment_id}`" @open="openWorkedHours(row)" />
+            <PayrollHourlyWagePreview v-if="row.hourly_wage_preview" :value="row.hourly_wage_preview" compact />
             <p v-for="blocker in personBlockers(row)" :key="blocker" class="mt-2 text-xs text-warning-700">
-              {{ t(`payroll.quick_inputs.blockers.${blocker}`) }}
+              {{ blockerMessage(row, blocker) }}
             </p>
             <!--
               Na mobilu `title` nejde vyvolat, takže stav pole nese vedle ikony
@@ -2658,7 +2719,7 @@ onMounted(() => {
                   :aria-labelledby="`quick-income-label-mobile-${row.employment_id}`"
                   :aria-invalid="baseError(row) !== null"
                   :class="[fieldClass(baseError(row)), 'w-full', baseSuggested(row) ? SUGGESTED_FIELD_CLASS : '']"
-                  :disabled="loading || saving || !canWrite || rowClosed(row) || !editable(row.inputs.base)"
+                  :disabled="loading || saving || !canWrite || rowClosed(row) || row.hourly_remuneration_in_period || !editable(row.inputs.base)"
                   @input="markDirty(row)"
                 >
                 <span v-if="baseSuggested(row)" class="mt-1 block text-xs text-warning-700">

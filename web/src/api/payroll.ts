@@ -194,16 +194,18 @@ export interface PayrollPersonEmploymentRef {
   is_primary: boolean
 }
 
-export type PayrollAgreementAnnualHoursStatus = 'ok' | 'approaching' | 'exceeded'
+export type PayrollAgreementAnnualHoursStatus = 'ok' | 'approaching' | 'exceeded' | 'manual_review_required'
 
 /** Roční součet hodin na DPP (SSOT na serveru: PayrollAgreementAnnualHours). */
 export interface PayrollAgreementAnnualHours {
+  total_duration_units?: number | null
+  remaining_duration_units?: number | null
   year: number
-  total_minutes: number
+  total_minutes: number | null
   takeover_minutes: number
   limit_minutes: number
   warning_minutes: number
-  remaining_minutes: number
+  remaining_minutes: number | null
   status: PayrollAgreementAnnualHoursStatus
 }
 
@@ -317,7 +319,14 @@ export interface PayrollEmploymentTaxDeclaration {
   effective_to: string | null
 }
 
+export type PayrollRemunerationType = 'monthly' | 'hourly'
+export type PayrollRemunerationBasisKind = 'wage_statement' | 'contract' | 'agreement' | 'internal_regulation' | 'collective_agreement'
+
 export interface PayrollEmploymentTerms {
+  remuneration_type?: PayrollRemunerationType | null
+  hourly_rate_minor?: number | null
+  remuneration_basis_kind?: PayrollRemunerationBasisKind | null
+  remuneration_basis?: string | null
   id: number
   office_id: number | null
   office_code: string | null
@@ -1249,7 +1258,7 @@ export interface PayrollPersonProfilePayload {
 export interface PayrollPersonQuickEditEmploymentPayload {
   id: number
   row_version: number
-  monthly_gross_minor: number | null
+  monthly_gross_minor?: number | null
   terms: PayrollEmploymentTermsPayload
 }
 
@@ -1371,7 +1380,10 @@ export type PayrollTimeCategory =
   | 'holiday'
   | 'difficult_environment'
 
+export type PayrollTimeWorkSource = 'entries' | 'import_summary' | 'manual_summary'
+
 export interface PayrollTimeMonthState {
+  work_source?: PayrollTimeWorkSource
   id: number | null
   employment_id: number
   period_start: string
@@ -1484,6 +1496,8 @@ export interface PayrollJmhzWorkSummaryPreview {
     unexcused_hours: string | null
     /** Náhradní volno za přesčas: jen do úhrnu 10275, mzda za ně nepřísluší. */
     compensatory_time_off_hours: string | null
+    /** Placené sváteční volno, pouze souhrny v11/v12. */
+    holiday_time_off_hours?: string | null
   }
   issues: Array<{ code: string; message: string }>
   /*
@@ -1524,6 +1538,7 @@ export interface PayrollJmhzWorkSummaryRevision {
   unpaid_leave_millihours: number | null
   unexcused_millihours: number | null
   compensatory_time_off_millihours: number | null
+  holiday_time_off_millihours?: number | null
   approved_at: string
 }
 
@@ -1549,6 +1564,7 @@ export interface PayrollJmhzWorkSummaryApproval {
   unpaid_leave_hours: string | null
   unexcused_hours: string | null
   compensatory_time_off_hours: string | null
+  holiday_time_off_hours?: string | null
   confirmation_note?: string
 }
 
@@ -1560,7 +1576,7 @@ export interface PayrollOvertimeLimitFinding {
   code: string
   severity: 'warning' | 'info'
   message: string
-  actual_minutes: number
+  actual_minutes: number | null
   limit_minutes: number
   scope_from: string
   scope_to: string
@@ -1574,18 +1590,20 @@ export interface PayrollOvertimeLimitFinding {
 export type PayrollOvertimeAveragingBasis = 'statutory' | 'collective_agreement'
 
 export interface PayrollOvertimeLimits {
+  evidence_status?: 'manual_review_required'
+  manual_summary_periods?: string[]
   employment_id: number
   findings: PayrollOvertimeLimitFinding[]
   weeks: Array<{ week_start: string; week_end: string; minutes: number }>
-  ordered_year_minutes: number
+  ordered_year_minutes: number | null
   ordered_year_limit_minutes: number
-  agreed_year_minutes: number
+  agreed_year_minutes: number | null
   averaging_from: string | null
   averaging_to: string | null
   averaging_weeks: number
-  averaging_minutes: number
+  averaging_minutes: number | null
   averaging_limit_minutes: number
-  averaging_compensated_minutes: number
+  averaging_compensated_minutes: number | null
   averaging_basis: PayrollOvertimeAveragingBasis
   averaging_reference: string | null
   prohibited_minutes: Partial<Record<'juvenile' | 'pregnancy' | 'child_under_one' | 'part_time', number>>
@@ -1658,14 +1676,19 @@ export interface PayrollTimeOverviewItem {
     end_date: string | null
     full_name: string
   }
+  manual_summary?: PayrollManualTimeSummary | null
+  /** Vztah má v měsíci hodinové podmínky; jen pak je souhrn importu vybraným zdrojem hodin. */
+  hourly_remuneration_in_period?: boolean
   calendar: PayrollWorkCalendar | null
   month: PayrollTimeMonthState
   summary: {
     fund_minutes: number
     planned_minutes: number
-    actual_minutes: number
-    difference_minutes: number
-    category_minutes: Record<PayrollTimeCategory, number>
+    work_source?: PayrollTimeWorkSource
+    worked_duration_units?: number | null
+    actual_minutes: number | null
+    difference_minutes: number | null
+    category_minutes: Record<PayrollTimeCategory, number> | null
     incomplete: boolean
   }
   jmhz_work_summary: {
@@ -1735,6 +1758,11 @@ export interface PayrollTimeOverview extends PayrollHistoricalPeriodInfo {
  * serveru jedna sada metod, takže se dvě obrazovky téže evidence nerozejdou.
  */
 export interface PayrollTimeHistoryItem {
+  manual_summary?: PayrollManualTimeSummary | null
+  hourly_remuneration_in_period?: boolean
+  manual_summary_history?: PayrollManualTimeSummaryRevision[]
+  manual_summary_history_truncated?: boolean
+  manual_summary_history_offset?: number
   period: string
   month: PayrollTimeMonthState
   summary: PayrollTimeOverviewItem['summary']
@@ -1894,9 +1922,9 @@ export type PayrollExemptionBasis =
 export interface PayrollMealShiftEntitlement {
   period_start: string
   basis: 'shift' | 'calendar_day' | 'mixed'
-  qualifying_count: number
-  second_contribution_count: number
-  count: number
+  qualifying_count: number | null
+  second_contribution_count: number | null
+  count: number | null
   complete: boolean
   missing: string[]
 }
@@ -1929,6 +1957,13 @@ export interface PayrollBenefitBasketUsage {
   } | null
 }
 
+export interface PayrollMinimumWageClassificationRules {
+  non_monetary: PayrollComponentInclusion
+  codes: Record<string, PayrollComponentInclusion>
+  kinds: Partial<Record<PayrollComponentKind, PayrollComponentInclusion>>
+  fallback: PayrollComponentInclusion
+}
+
 export interface PayrollComponent {
   id: number
   supplier_id: number
@@ -1943,6 +1978,10 @@ export interface PayrollComponent {
   health_participation_treatment: PayrollComponentInclusion
   health_treatment: PayrollComponentInclusion
   average_earning_treatment: PayrollComponentInclusion
+  minimum_wage_treatment?: PayrollComponentInclusion | null
+  minimum_wage_reason?: string | null
+  effective_minimum_wage_treatment?: PayrollComponentInclusion
+  minimum_wage_treatment_editable?: boolean
   enforcement_treatment: PayrollComponentInclusion
   jmhz_treatment: PayrollComponentInclusion
   statistics_treatment: PayrollComponentInclusion
@@ -1962,6 +2001,7 @@ export interface PayrollComponent {
 export type PayrollComponentPayload = Omit<
   PayrollComponent,
   'id' | 'supplier_id' | 'row_version' | 'created_at' | 'updated_at'
+  | 'effective_minimum_wage_treatment' | 'minimum_wage_treatment_editable'
 >
 
 export interface PayrollRiskySavingsItem {
@@ -2284,6 +2324,45 @@ interface PayrollSurchargeFixedHourlyFields {
   difficult_environment_fixed_hourly_minor: number | null
 }
 
+export interface PayrollMinimumWagePolicy {
+  assessment: 'hourly' | 'monthly'
+  agreement_reference: string | null
+  statutory_weekly_minutes: number | null
+  statutory_weekly_reference: string | null
+  advance_proof: {
+    reference: string
+    decided_on: string
+    valid_from: string
+    valid_to: string | null
+  } | null
+}
+
+export interface PayrollHourlyPolicyTerms {
+  minimum_wage?: PayrollMinimumWagePolicy | null
+  included_overtime: {
+    agreement_kind: 'contract'
+    agreement_reference: string
+    scope_kind: 'annual_hours' | 'manager_statutory'
+    calendar_year: number
+    annual_limit_duration_units: number
+    manager_proof_reference: string | null
+    opening_used_duration_units: number
+    opening_as_of: string
+    opening_reference: string
+  } | null
+  included_agreement_premiums: Array<{
+    kind: 'night' | 'weekend' | 'difficult_environment'
+    date_from: string
+    date_to: string
+    scope_duration_units: number
+    included_hourly_minor: number
+    agreement_reference: string
+    opening_used_duration_units: number
+    opening_reference: string
+    opening_as_of: string
+  }>
+}
+
 /** Jedna verze sjednané zásady příplatků na pracovním vztahu (migrace 1624). */
 export interface PayrollEmploymentSurchargePolicy
   extends Record<string, unknown>, PayrollSurchargeFixedHourlyFields {
@@ -2301,6 +2380,7 @@ export interface PayrollEmploymentSurchargePolicy
   difficult_environment_rate_bp: number | null
   /** Sjednaná sazba odměny za pracovní pohotovost § 140 ZP (migrace 1926); null = zákonné minimum. */
   standby_rate_bp?: number | null
+  hourly_terms?: PayrollHourlyPolicyTerms | null
   agreement_reference: string | null
   note: string | null
   row_version: number
@@ -2318,6 +2398,7 @@ export interface PayrollEmploymentSurchargePolicyPayload
   weekend_rate_bp: number | null
   difficult_environment_rate_bp: number | null
   standby_rate_bp?: number | null
+  hourly_terms?: PayrollHourlyPolicyTerms | null
   agreement_reference: string | null
   note: string | null
 }
@@ -2340,6 +2421,7 @@ export interface PayrollEmploymentSurchargePolicyUpdatePayload
   weekend_rate_bp: number | null
   difficult_environment_rate_bp: number | null
   standby_rate_bp?: number | null
+  hourly_terms?: PayrollHourlyPolicyTerms | null
   agreement_reference: string | null
   note: string | null
   row_version: number
@@ -2441,7 +2523,7 @@ export interface PayrollQuickSurchargeState {
  * pojištění, jiná placená překážka (§ 199 a § 208 ZP) a neplacená doba.
  */
 export type PayrollWageReplacementTitle = 'vacation' | 'sickness_compensation'
-  | 'state_benefit' | 'paid_obstacle' | 'unpaid'
+  | 'state_benefit' | 'paid_obstacle' | 'unpaid' | 'holiday_time_off'
 
 /** Odkud hodnota v buňce sloupce mzdové složky přišla. */
 export type PayrollQuickComponentSource = 'import' | 'recurring' | 'manual' | 'attendance' | 'surcharge'
@@ -2522,7 +2604,205 @@ export interface PayrollQuickClosedRun {
   period: string
 }
 
+export interface PayrollManualTimeSegment {
+  date_from: string
+  date_to: string
+  worked_duration_units: number
+  overtime_duration_units: number | null
+  worked_days: number | null
+}
+
+export interface PayrollManualTimeSummary {
+  id: number
+  time_month_revision_no: number
+  content_sha256: string
+  reason: string
+  segments: PayrollManualTimeSegment[]
+}
+
+export interface PayrollWorkedTime {
+  available_sources?: Array<Exclude<PayrollTimeWorkSource, 'manual_summary'>>
+  month: (Pick<PayrollTimeMonthState, 'id' | 'status' | 'revision_no' | 'row_version'> & { work_source: PayrollTimeWorkSource }) | null
+  manual_summary: PayrollManualTimeSummary | null
+  suggested_segments: Array<{ date_from: string; date_to: string }>
+  worked_duration_units: number | null
+  overtime_duration_units: number | null
+  worked_days: number | null
+  jmhz_confirmed: boolean
+}
+
+export interface PayrollManualTimeSummaryRevision extends PayrollManualTimeSummary {
+  created_by: number | null
+  created_by_name: string | null
+  created_at: string
+}
+
+export interface PayrollManualTimeSummaryPayload {
+  employment_id: number
+  row_version: number
+  reason: string
+  replace_source: boolean
+  segments: PayrollManualTimeSegment[]
+}
+
+export interface PayrollHourlyPremiumSegment {
+  date_from: string
+  date_to: string
+  night_duration_units: number | null
+  weekend_duration_units: number | null
+  holiday_work_duration_units: number | null
+  holiday_work_days: Array<{ date: string; duration_units: number }>
+  overtime_work_days: Array<{ date: string; duration_units: number }>
+  difficult_exposures: Array<{ duration_units: number; factors: number }> | null
+}
+
+/** null = skupina se nepotvrzuje ručně, server ji posuzuje automaticky při každém výpočtu. */
+export interface PayrollHourlyHolidayEvidence {
+  nonworked_holidays: Array<{ date: string; duration_units: number }> | null
+  holiday_time_off_grants: Array<{ entitlement_id: number; entitlement_revision: number; granted_on: string; duration_units: number; absence_id: number }> | null
+  overtime_time_off_allocations: Array<{ work_date: string; granted_on: string; duration_units: number; absence_id: number; reference: string }> | null
+}
+
+export interface PayrollHourlyEvidence extends PayrollHourlyHolidayEvidence {
+  id: number
+  revision_no: number
+  reason: string
+  premium_segments: PayrollHourlyPremiumSegment[]
+}
+
+export type PayrollHourlyAutomaticKey = 'nonworked_holidays' | 'holiday_time_off_grants' | 'overtime_time_off_allocations'
+
+export interface PayrollHourlyEvidenceResponse {
+  work_source: PayrollTimeWorkSource | 'settlement_only'
+  options: {
+    nonworked_holidays: Array<{ date: string; available_duration_units: number; valid?: boolean; reason?: string }>
+    holiday_time_off_entitlements: Array<{ entitlement_id: number; entitlement_revision: number; work_date: string | null; due_on: string | null; available_duration_units: number; valid?: boolean; reason?: string }>
+    overtime_time_off_entitlements?: Array<{ work_date: string; due_on?: string; available_duration_units: number; valid?: boolean; reason?: string }>
+    time_off_absences: Array<{ absence_id: number; date: string; available_duration_units: number; kind: 'holiday' | 'overtime'; valid?: boolean; reason?: string }>
+  }
+  can_write: boolean
+  period: string
+  employment_id: number
+  row_version: number
+  work_source_hash: string
+  segments_suggested: Array<{ date_from: string; date_to: string; overtime_duration_units: number | null; overtime_mode: PayrollSurchargeCompensationMode }>
+  evidence: PayrollHourlyEvidence | null
+  /** Části, u nichž nárok v měsíci objektivně nevzniká; server je posoudí jako výslovnou nulu. */
+  automatic_assessment?: Partial<Record<PayrollHourlyAutomaticKey, string>> | []
+  history: Array<{ id: number; revision_no: number; reason: string | null; created_by_name: string | null; created_at: string }>
+  history_offset: number
+  history_has_more: boolean
+}
+
+export interface PayrollMinimumWageFraction {
+  raw_numerator_minor: number
+  raw_denominator: number
+  analytical_minor: number
+}
+
+export interface PayrollMinimumWagePreview {
+  complete: boolean
+  claim: { ready: boolean; duration_units: number | null; payable_minor: number | null; [key: string]: unknown }
+  blockers: Array<{ code: string; message: string; context: unknown }>
+  evidence_hash: string
+  assessment_evidence: {
+    assessment: 'hourly' | 'monthly'
+    threshold: PayrollMinimumWageFraction | null
+    eligible: PayrollMinimumWageFraction | null
+    ordinary_payable_minor: number | null
+    company_rounding: PayrollWageRounding
+    statutory_floor_rounding: 'ceil'
+    policy_payable_minor: number | null
+    excluded: Array<{
+      component_id?: number
+      component_version?: number
+      component_code?: string
+      input_ids?: number[]
+      premium_kind?: string
+      reason: string
+      analytical_minor?: number | null
+      [key: string]: unknown
+    }>
+    parts: Array<{
+      term_id: number
+      date_from: string
+      date_to: string
+      regular_worked_duration_units: number
+      stated_weekly_minutes: number | null
+      minimum_base40_minor: number | null
+      minimum_hourly_minor: number | null
+      analytical_minor: number
+      [key: string]: unknown
+    }>
+  }
+}
+
+export interface PayrollHourlyWagePreview {
+  minimum_wage?: PayrollMinimumWagePreview | null
+  settlement_only?: boolean
+  complete: boolean
+  blockers: Array<{ code: string; message: string; context: Record<string, unknown> }>
+  rounding: PayrollWageRounding
+  evidence_hash: string
+  payable_total_minor: number | null
+  included_allocations: Array<{
+    kind: string
+    purpose: string
+    ready: boolean
+    date_from: string
+    date_to: string
+    duration_units: number
+    premium_kind?: string
+  }>
+  entitlements: Array<{
+    kind: string
+    purpose: string
+    ready: boolean
+    work_date: string
+    duration_units: number
+    due_on?: string
+    granted_on?: string
+    entitlement_id?: number
+    entitlement_revision?: number
+    absence_id?: number
+  }>
+  claims: Array<{
+    ready: boolean
+    worked_duration_units: number
+    purpose: string
+    component_code: string
+    duration_units: number | null
+    raw_numerator_minor: number | null
+    raw_denominator: number | null
+    analytical_minor: number | null
+    payable_minor: number | null
+    rounding: PayrollWageRounding
+    segments: Array<{
+      term_id?: number
+      term_row_version?: number | null
+      policy_version_id?: number
+      policy_revision_no?: number
+      date_from?: string
+      date_to?: string
+      date?: string
+      granted_on?: string
+      duration_units?: number
+      regular_worked_duration_units?: number
+      minimum_hourly_minor?: number | null
+      hourly_rate_minor?: number | null
+      monthly_gross_minor?: number | null
+      raw_numerator_minor?: number
+      raw_denominator?: number
+      raw_fraction?: Record<string, unknown>
+      [key: string]: unknown
+    }>
+  }>
+}
+
 export interface PayrollQuickInputRow {
+  hourly_wage_preview?: PayrollHourlyWagePreview | null
+  worked_time?: PayrollWorkedTime | null
+  hourly_remuneration_in_period?: boolean
   employee_id: number
   employment_id: number
   employment_row_version: number
@@ -7160,8 +7440,72 @@ export interface PayrollIncomeTaxResult {
   ruleset_hash: string
 }
 
+/** Zmrazený rozpis pásky; starší revize nemají hodinový detail. */
+export interface PayrollPayslipIncomeLine {
+  label: string
+  amount_minor_units: number
+  hourly_detail?: {
+    claim_id: number
+    purpose: string
+    work_period_start: string
+    sequence_no: number
+    display_basis: 'full_claim' | 'delta'
+    quantity_duration_units: number | null
+    quantity_text: string | null
+    rate_minor: number | null
+    full_payable_minor: number
+    previous_payable_minor: number
+    delta_amount_minor: number
+    worked_duration_delta_units: number
+  }
+}
+
+export interface PayrollPayslipHourlyClaim {
+  component_code?: string
+  sequence_no?: number
+  quantity_text?: string
+  previous_payable_minor?: number
+  delta_amount_minor?: number
+  worked_duration_delta_units?: number
+  segment_display_adjustment_minor?: number | null
+  segment_role?: 'minimum_threshold' | 'claim'
+  minimum_assessment?: PayrollMinimumWagePreview['assessment_evidence'] | null
+  employment_id: number
+  claim_id: number
+  purpose: string
+  label: string
+  work_period_start: string
+  full_duration_units: number
+  full_worked_duration_units: number
+  raw_numerator_minor: number
+  raw_denominator: number
+  analytical_minor: number
+  payable_minor: number
+  rounding_adjustment_minor: number
+  segments: Array<{
+    date_from: string
+    date_to: string
+    term_id?: number | null
+    duration_units: number
+    quantity_text: string | null
+    rate_minor: number | null
+    monthly_gross_minor?: number | null
+    rate_label?: string | null
+    raw_numerator_minor: number
+    raw_denominator: number
+    analytical_minor: number
+  }>
+}
+
+export interface PayrollPayslipDocument {
+  schema_version: string
+  income_lines: PayrollPayslipIncomeLine[]
+  hourly_claims?: PayrollPayslipHourlyClaim[]
+}
+
 export interface PayrollRunResultPerson {
   employee_id: number
+  payslip_document?: PayrollPayslipDocument
   statutory?: {
     person_reference: string
     status: 'calculated' | 'manual_review' | 'error'
@@ -7250,6 +7594,8 @@ export interface PayrollRun {
  * že schválení server odmítne, dokud se podklady neobnoví a běh nepřepočítá.
  */
 export interface PayrollRunSourceDrift {
+  worked_time_changed?: number
+  remuneration_changed: number
   total: number
   inputs_added: number
   inputs_changed: number
@@ -8565,6 +8911,10 @@ export const payrollApi = {
       .then(response => response.data.employment),
   // Mzda smí jet i s novou verzí podmínek — „od září bereš víc" je jedna
   // změna, ne dvě. Klíč je volitelný: kdo ho nepošle, mzdy se nedotkne.
+  remunerationOptions: (effectiveFrom: string) =>
+    api.get<{ minimum_hourly_40h_minor: number | null; ruleset_id: string | null }>(
+      '/payroll/employments/remuneration-options', { params: { effective_from: effectiveFrom } },
+    ).then(response => response.data),
   addEmploymentTerms: (
     employmentId: number,
     rowVersion: number,
@@ -9686,6 +10036,15 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/surcharge-policies`,
       { params: effectiveOn ? { effective_on: effectiveOn } : {} },
     ).then(response => response.data),
+  hourlyEvidence: (employmentId: number, period: string, offset = 0) =>
+    api.get<PayrollHourlyEvidenceResponse>(`/payroll/employments/${employmentId}/hourly-evidence`, { params: { period, offset } }).then(response => response.data),
+  saveHourlyEvidence: (employmentId: number, payload: PayrollHourlyHolidayEvidence & {
+    period: string
+    row_version: number
+    reason?: string
+    work_source_hash: string
+    premium_segments: PayrollHourlyPremiumSegment[]
+  }) => api.post<PayrollHourlyEvidenceResponse>(`/payroll/employments/${employmentId}/hourly-evidence`, payload).then(response => response.data),
   createEmploymentSurchargePolicy: (
     employmentId: number,
     payload: PayrollEmploymentSurchargePolicyPayload,
@@ -10270,7 +10629,7 @@ export const payrollApi = {
    */
   timeHistory: (
     employmentId: number,
-    params?: { from?: string, to?: string, limit?: number, offset?: number },
+    params?: { from?: string, to?: string, limit?: number, offset?: number, manual_summary_offset?: number },
   ) =>
     api.get<PayrollTimeHistory>('/payroll/time/history', {
       params: {
@@ -10279,6 +10638,7 @@ export const payrollApi = {
         ...(params?.to ? { to: params.to } : {}),
         ...(params?.limit ? { limit: params.limit } : {}),
         ...(params?.offset ? { offset: params.offset } : {}),
+        ...(params?.manual_summary_offset !== undefined ? { manual_summary_offset: params.manual_summary_offset } : {}),
       },
     }).then(response => response.data),
   saveTimeCalendar: (employmentId: number, payload: Record<string, unknown>) =>
@@ -10375,6 +10735,13 @@ export const payrollApi = {
   importTime: (payload: { period: string; format: 'csv' | 'xlsx'; original_name: string; content: string }) =>
     api.post<{ import: Record<string, unknown> }>('/payroll/time/imports', payload)
       .then(response => response.data.import),
+  restoreTimeWorkSource: (period: string, payload: {
+    employment_id: number; row_version: number; reason: string; replace_source: true; source: 'entries' | 'import_summary'
+  }) => api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/work-source`, payload).then(response => response.data),
+  saveManualTimeSummary: (period: string, payload: PayrollManualTimeSummaryPayload) =>
+    api.post<{ month: PayrollTimeMonthState; manual_summary: PayrollManualTimeSummary }>(
+      `/payroll/time/months/${period}/manual-summary`, payload,
+    ).then(response => response.data),
   approveTimeMonth: (period: string, payload: {
     employment_id: number
     row_version: number
@@ -10385,6 +10752,10 @@ export const payrollApi = {
   reopenTimeMonth: (period: string, payload: { employment_id: number; row_version: number; reason: string }) =>
     api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/reopen`, payload)
       .then(response => response.data.month),
+  componentCatalog: (effectiveOn?: string) =>
+    api.get<{ components: PayrollComponent[]; minimum_wage_classification?: PayrollMinimumWageClassificationRules }>('/payroll/components', {
+      params: effectiveOn ? { effective_on: effectiveOn } : undefined,
+    }).then(response => response.data),
   components: (effectiveOn?: string) =>
     api.get<{ components: PayrollComponent[] }>('/payroll/components', {
       params: effectiveOn ? { effective_on: effectiveOn } : undefined,

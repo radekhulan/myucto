@@ -10,6 +10,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Middleware\SupplierScopeMiddleware;
 use MyInvoice\Repository\Payroll\PayrollEmploymentLifecycleSql;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\EffectiveRole;
 use MyInvoice\Tests\Support\IsolatedSupplierTrait;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -471,6 +473,21 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(422, $newTermsAttack->getStatusCode());
 
+        foreach (['remuneration_type' => 'hourly', 'hourly_rate_minor' => 20000, 'remuneration_basis_kind' => 'wage_statement', 'remuneration_basis' => 'Syntetický výměr'] as $field => $value) {
+            $response = $this->action->addTerms(
+                $this->request('PUT', "/api/payroll/employments/{$employment['id']}/terms", [
+                    'row_version' => $employment['row_version'],
+                    'effective_from' => '2026-03-01',
+                    'monthly_gross_minor' => 4_600_000,
+                    'change_reason' => 'Neoprávněný zápis',
+                    $field => $value,
+                ], authMethod: 'bearer'),
+                new Response(),
+                ['id' => (string) $employment['id']],
+            );
+            self::assertSame(422, $response->getStatusCode(), $field);
+        }
+
         $correctionAttack = $this->action->correctTerms(
             $this->request(
                 'PATCH',
@@ -586,6 +603,27 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         );
         self::assertSame(403, $bearer->getStatusCode());
         self::assertSame('session_required', $this->json($bearer)['error']['code']);
+    }
+
+    public function testRemunerationOptionsUseRulesetAndRequirePayrollRead(): void
+    {
+        $reader = new EffectiveRole(42, 'Čtení mezd', 'staff', true, ['payroll' => AccessLevel::READ->value]);
+        $request = $this->request('GET', '/api/payroll/employments/remuneration-options')
+            ->withAttribute('auth.effective_role', $reader);
+        $valid = $this->action->remunerationOptions($request->withQueryParams(['effective_from' => '2026-03-01']), new Response());
+        self::assertSame(200, $valid->getStatusCode(), (string) $valid->getBody());
+        self::assertSame(13440, $this->json($valid)['minimum_hourly_40h_minor']);
+        self::assertNotEmpty($this->json($valid)['ruleset_id']);
+        $missing = $this->action->remunerationOptions($request->withQueryParams(['effective_from' => '1900-01-01']), new Response());
+        self::assertSame(200, $missing->getStatusCode());
+        self::assertNull($this->json($missing)['minimum_hourly_40h_minor']);
+        self::assertNull($this->json($missing)['ruleset_id']);
+        $invalid = $this->action->remunerationOptions($request->withQueryParams(['effective_from' => '2026-02-30']), new Response());
+        self::assertSame(422, $invalid->getStatusCode());
+        $denied = $this->action->remunerationOptions($request->withAttribute('auth.effective_role', EffectiveRole::denied())->withQueryParams(['effective_from' => '2026-03-01']), new Response());
+        self::assertSame(403, $denied->getStatusCode());
+        $bearer = $this->action->remunerationOptions($request->withAttribute(AuthMiddleware::ATTR_METHOD, 'bearer')->withQueryParams(['effective_from' => '2026-03-01']), new Response());
+        self::assertSame(403, $bearer->getStatusCode());
     }
 
     private function effectiveSalary(int $employmentId, string $effectiveOn): ?int

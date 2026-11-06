@@ -1,6 +1,6 @@
 {
     "format": 1,
-    "database_collation": "utf8mb4_czech_ci",
+    "database_collation": "utf8mb4_unicode_ci",
     "migrations": [
         "0001_init.sql",
         "0002_work_report_approval.sql",
@@ -1152,7 +1152,19 @@
         "2244_payroll_import_profile_pamica_sample.sql",
         "2245_session_device_class.sql",
         "2246_invoice_other_item_link.sql",
-        "2249_other_item_settings.sql"
+        "2249_other_item_settings.sql",
+        "2250_payroll_hourly_employment_terms.sql",
+        "2251_payroll_manual_work_summary.sql",
+        "2252_payroll_hourly_wage_claims.sql",
+        "2253_payroll_average_exact_worked_time.sql",
+        "2254_payroll_hourly_agreement_terms.sql",
+        "2255_payroll_hourly_evidence.sql",
+        "2256_payroll_holiday_time_off.sql",
+        "2257_payroll_hourly_entitlement_settlement.sql",
+        "2258_payroll_component_minimum_wage.sql",
+        "2259_payroll_standby_floor_proof.sql",
+        "2260_payroll_termination_floor_proof.sql",
+        "2261_payroll_jmhz_holiday_time_off.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -10842,12 +10854,12 @@
             "engine": "InnoDB",
             "collation": "utf8mb4_unicode_ci",
             "columns": {
-                "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other','public_function','employee_obstacle_unpaid','invalid_termination') NOT NULL",
+                "absence_type": "enum('vacation','dpn','quarantine','ocr','long_term_care','ppm','paternity','parental','unpaid_leave','employee_obstacle','employer_obstacle','compensatory_time_off','unexcused','other','public_function','employee_obstacle_unpaid','invalid_termination','holiday_compensatory_time_off') NOT NULL",
                 "average_snapshot_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "childbirth_date": "date NULL DEFAULT NULL",
                 "childbirth_recorded_at": "datetime NULL DEFAULT NULL",
                 "childbirth_recorded_by": "int(10) unsigned NULL DEFAULT NULL",
-                "compensation_policy": "enum('none','average_100','average_custom','dpn','statutory_manual_review') NOT NULL DEFAULT 'statutory_manual_review'",
+                "compensation_policy": "enum('none','average_100','average_custom','dpn','statutory_manual_review','hourly_claim') NOT NULL DEFAULT 'statutory_manual_review'",
                 "compensation_rate_basis_points": "smallint(5) unsigned NULL DEFAULT NULL",
                 "compensation_rate_reason": "varchar(500) NULL DEFAULT NULL",
                 "correction_pending": "tinyint(1) NOT NULL DEFAULT 0",
@@ -11554,7 +11566,8 @@
                 "support_status": "enum('supported','manual_review') NOT NULL DEFAULT 'manual_review'",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
                 "worked_days": "smallint(5) unsigned NOT NULL",
-                "worked_minutes": "int(10) unsigned NOT NULL"
+                "worked_duration_units": "bigint(20) unsigned NULL DEFAULT NULL",
+                "worked_minutes": "int(10) unsigned NULL DEFAULT NULL"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
@@ -11566,7 +11579,8 @@
                 "fk_payroll_average_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
-                "chk_payroll_average_actual_input": "`source_kind` <> 'actual' or `worked_minutes` > 0 and `worked_days` >= 21",
+                "chk_payroll_average_actual_input": "`source_kind` <> 'actual' or `worked_days` >= 21 and (`worked_duration_units` is not null and `worked_duration_units` > 0 or `worked_duration_units` is null and `worked_minutes` is not null and `worked_minutes` > 0)",
+                "chk_payroll_average_duration": "`worked_duration_units` is null and `worked_minutes` is not null or `worked_duration_units` is not null and (`worked_minutes` is null and `worked_duration_units` MOD 50 <> 0 or `worked_minutes` is not null and `worked_duration_units` = `worked_minutes` * 50)",
                 "chk_payroll_average_interval": "`decisive_to` >= `decisive_from`",
                 "chk_payroll_average_probable_rationale": "`source_kind` <> 'probable' or `rationale` is not null and char_length(trim(`rationale`)) > 0",
                 "chk_payroll_average_quarter": "`applicable_quarter` between 1 and 4",
@@ -11785,6 +11799,8 @@
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_active": "tinyint(1) NOT NULL DEFAULT 1",
                 "jmhz_treatment": "enum('included','excluded','manual_review') NOT NULL",
+                "minimum_wage_reason": "varchar(500) NULL DEFAULT NULL",
+                "minimum_wage_treatment": "enum('included','excluded','manual_review') NULL DEFAULT NULL",
                 "name": "varchar(190) NOT NULL",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "social_participation_treatment": "enum('included','excluded','manual_review') NOT NULL",
@@ -13127,6 +13143,7 @@
                 "holiday_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
                 "holiday_mode": "enum('compensatory_time_off','surcharge') NOT NULL DEFAULT 'compensatory_time_off'",
                 "holiday_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
+                "hourly_terms_json": "longtext NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "night_fixed_hourly_minor": "int(10) unsigned NULL DEFAULT NULL",
                 "night_rate_bp": "smallint(5) unsigned NULL DEFAULT NULL",
@@ -13155,6 +13172,7 @@
                 "fk_payroll_surcharge_policy_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
+                "chk_payroll_surcharge_hourly_terms": "`hourly_terms_json` is null or json_valid(`hourly_terms_json`)",
                 "chk_payroll_surcharge_policy_factors": "`difficult_environment_factors` is null or `difficult_environment_factors` >= 1",
                 "chk_payroll_surcharge_policy_fixed_hourly": "(`overtime_fixed_hourly_minor` is null or `overtime_fixed_hourly_minor` between 1 and 100000) and (`holiday_fixed_hourly_minor` is null or `holiday_fixed_hourly_minor` between 1 and 100000) and (`night_fixed_hourly_minor` is null or `night_fixed_hourly_minor` between 1 and 100000) and (`weekend_fixed_hourly_minor` is null or `weekend_fixed_hourly_minor` between 1 and 100000) and (`difficult_environment_fixed_hourly_minor` is null or `difficult_environment_fixed_hourly_minor` between 1 and 100000)",
                 "chk_payroll_surcharge_policy_interval": "`valid_to` is null or `valid_to` >= `valid_from`",
@@ -13265,6 +13283,7 @@
                 "foreign_legislation_country_code": "char(2) NULL DEFAULT NULL",
                 "health_association_member": "tinyint(1) NOT NULL DEFAULT 0",
                 "health_insurance_participation": "enum('automatic','included','excluded','foreign') NOT NULL DEFAULT 'automatic'",
+                "hourly_rate_minor": "bigint(20) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "is_primary": "tinyint(1) NOT NULL DEFAULT 0",
                 "jmhz_apz_contribution_status": "enum('unverified','no','yes') NOT NULL DEFAULT 'unverified'",
@@ -13300,6 +13319,9 @@
                 "probable_earning_rationale": "varchar(1000) NULL DEFAULT NULL",
                 "probable_hourly_earning_minor": "bigint(20) unsigned NULL DEFAULT NULL",
                 "regular_workplace": "varchar(255) NULL DEFAULT NULL",
+                "remuneration_basis": "varchar(255) NULL DEFAULT NULL",
+                "remuneration_basis_kind": "enum('wage_statement','contract','agreement','internal_regulation','collective_agreement') NULL DEFAULT NULL",
+                "remuneration_type": "enum('monthly','hourly') NULL DEFAULT NULL",
                 "risky_work": "tinyint(1) NOT NULL DEFAULT 0",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
                 "social_employer_rate_category": "enum('ordinary','rescue_and_company_fire_service','risk_employment') NOT NULL DEFAULT 'ordinary'",
@@ -13345,7 +13367,8 @@
                 "chk_payroll_employment_term_rate_category_evidence": "`social_employer_rate_category` = 'ordinary' and `social_employer_rate_category_evidence` is null or `social_employer_rate_category` <> 'ordinary'",
                 "chk_payroll_employment_term_risk_categorization": "`jmhz_risk_categorization_code` is null or `social_employer_rate_category` = 'rescue_and_company_fire_service'",
                 "chk_payroll_employment_term_workload": "`workload_basis_points` between 1 and 10000",
-                "chk_payroll_employment_terms_jmhz_ordinary_profile": "`jmhz_orchard_discount_eligible` in (0,1) and `jmhz_specific_legal_fact_applies` in (0,1) and `jmhz_ozp_employment_support_applies` in (0,1) and `jmhz_deep_mining_work_applies` in (0,1)"
+                "chk_payroll_employment_terms_jmhz_ordinary_profile": "`jmhz_orchard_discount_eligible` in (0,1) and `jmhz_specific_legal_fact_applies` in (0,1) and `jmhz_ozp_employment_support_applies` in (0,1) and `jmhz_deep_mining_work_applies` in (0,1)",
+                "chk_payroll_terms_remuneration": "(`remuneration_type` is null or `remuneration_type` = 'monthly') and `hourly_rate_minor` is null or `remuneration_type` is not null and `remuneration_type` = 'hourly' and `hourly_rate_minor` is not null and `hourly_rate_minor` between 1 and 1000000000 and `monthly_gross_minor` is null and `remuneration_basis_kind` is not null and `remuneration_basis` is not null and char_length(trim(`remuneration_basis`)) > 0"
             }
         },
         "payroll_employments": {
@@ -14330,6 +14353,224 @@
                 "manifest_json": "`manifest_json` is null or json_valid(`manifest_json`)"
             }
         },
+        "payroll_hourly_evidence_revisions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "content_sha256": "char(64) NOT NULL COLLATE ascii_bin",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "payload_json": "longtext NOT NULL",
+                "period_start": "date NOT NULL",
+                "reason": "varchar(500) NOT NULL",
+                "revision_no": "int(10) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "work_source_hash": "char(64) NOT NULL COLLATE ascii_bin"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_hourly_evidence_creator": "BTREE (created_by)",
+                "uq_hourly_evidence_id": "UNIQUE BTREE (supplier_id, id)",
+                "uq_hourly_evidence_revision": "UNIQUE BTREE (supplier_id, employment_id, period_start, revision_no)"
+            },
+            "foreign_keys": {
+                "fk_hourly_evidence_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_hourly_evidence_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_hourly_evidence_period": "dayofmonth(`period_start`) = 1",
+                "chk_hourly_evidence_reason": "char_length(trim(`reason`)) > 0",
+                "chk_hourly_evidence_revision": "`revision_no` > 0",
+                "payload_json": "json_valid(`payload_json`)"
+            }
+        },
+        "payroll_hourly_included_consumption": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "accounting_period_start": "date NOT NULL",
+                "command_key_hash": "binary(32) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "duration_units": "bigint(20) unsigned NOT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "kind": "varchar(64) NOT NULL COLLATE ascii_bin",
+                "scope_key": "varchar(255) NOT NULL COLLATE utf8mb4_bin",
+                "source_snapshot_hash": "binary(32) NOT NULL",
+                "source_snapshot_json": "longtext NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_hourly_included_consumption_actor": "BTREE (created_by)",
+                "idx_hourly_included_consumption_command": "BTREE (supplier_id, command_key_hash)",
+                "idx_hourly_included_consumption_period": "BTREE (supplier_id, employment_id, accounting_period_start)",
+                "uq_hourly_included_consumption_id": "UNIQUE BTREE (supplier_id, id)",
+                "uq_hourly_included_consumption_revision": "UNIQUE BTREE (supplier_id, employment_id, scope_key, accounting_period_start, command_key_hash)"
+            },
+            "foreign_keys": {
+                "fk_hourly_included_consumption_actor": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_hourly_included_consumption_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_hourly_included_consumption_period": "dayofmonth(`accounting_period_start`) = 1",
+                "source_snapshot_json": "json_valid(`source_snapshot_json`)"
+            }
+        },
+        "payroll_hourly_time_entitlement_revisions": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "accounting_period_start": "date NOT NULL",
+                "accrued_delta_units": "bigint(20) NOT NULL",
+                "accrued_duration_units": "bigint(20) unsigned NOT NULL",
+                "allocated_delta_units": "bigint(20) NOT NULL",
+                "allocated_duration_units": "bigint(20) unsigned NOT NULL",
+                "command_key_hash": "binary(32) NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "due_on": "date NULL DEFAULT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "entitlement_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "sequence_no": "int(10) unsigned NOT NULL",
+                "settled_delta_units": "bigint(20) NOT NULL DEFAULT 0",
+                "settled_duration_units": "bigint(20) unsigned NOT NULL DEFAULT 0",
+                "source_snapshot_hash": "binary(32) NOT NULL",
+                "source_snapshot_json": "longtext NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_hourly_time_revision_actor": "BTREE (created_by)",
+                "fk_hourly_time_revision_entitlement": "BTREE (supplier_id, entitlement_id, employment_id)",
+                "idx_hourly_time_entitlement_revision_command": "BTREE (supplier_id, command_key_hash)",
+                "idx_hourly_time_entitlement_revision_employment": "BTREE (supplier_id, employment_id, accounting_period_start)",
+                "uq_hourly_time_entitlement_revision": "UNIQUE BTREE (supplier_id, entitlement_id, sequence_no)",
+                "uq_hourly_time_entitlement_revision_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_hourly_time_revision_actor": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_hourly_time_revision_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_hourly_time_revision_entitlement": "(supplier_id, entitlement_id, employment_id) -> payroll_hourly_time_entitlements (supplier_id, id, employment_id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_hourly_time_revision_balance": "`allocated_duration_units` + `settled_duration_units` <= `accrued_duration_units`",
+                "chk_hourly_time_revision_period": "dayofmonth(`accounting_period_start`) = 1",
+                "chk_hourly_time_revision_sequence": "`sequence_no` > 0",
+                "source_snapshot_json": "json_valid(`source_snapshot_json`)"
+            }
+        },
+        "payroll_hourly_time_entitlements": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "entitlement_key": "varchar(190) NOT NULL COLLATE ascii_bin",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "kind": "enum('holiday','overtime') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "work_date": "date NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_hourly_time_entitlement_date": "BTREE (supplier_id, employment_id, work_date)",
+                "uq_hourly_time_entitlement_id": "UNIQUE BTREE (supplier_id, id)",
+                "uq_hourly_time_entitlement_identity": "UNIQUE BTREE (supplier_id, employment_id, entitlement_key)",
+                "uq_hourly_time_entitlement_owner": "UNIQUE BTREE (supplier_id, id, employment_id)"
+            },
+            "foreign_keys": {
+                "fk_hourly_time_entitlement_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": []
+        },
+        "payroll_hourly_wage_claims": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "claim_source": "enum('hourly_calculation','external_amount') NOT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "purpose": "varchar(64) NOT NULL COLLATE ascii_bin",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "work_period_start": "date NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_hourly_wage_claim_creator": "BTREE (created_by)",
+                "uq_hourly_wage_claim_employment": "UNIQUE BTREE (supplier_id, id, employment_id)",
+                "uq_hourly_wage_claim_id": "UNIQUE BTREE (supplier_id, id)",
+                "uq_hourly_wage_claim_scope": "UNIQUE BTREE (supplier_id, employment_id, work_period_start, purpose)"
+            },
+            "foreign_keys": {
+                "fk_hourly_wage_claim_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_hourly_wage_claim_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_hourly_wage_claim_period": "dayofmonth(`work_period_start`) = 1"
+            }
+        },
+        "payroll_hourly_wage_materializations": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "accounting_period_start": "date NOT NULL",
+                "claim_id": "bigint(20) unsigned NOT NULL",
+                "command_key_hash": "binary(32) NULL DEFAULT NULL",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "delta_amount_minor": "bigint(20) NOT NULL",
+                "duration_delta_units": "bigint(20) NOT NULL DEFAULT 0",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "evidence_hash": "binary(32) NOT NULL",
+                "full_amount_minor": "bigint(20) NOT NULL",
+                "full_duration_units": "bigint(20) unsigned NOT NULL DEFAULT 0",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "input_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "run_id": "bigint(20) unsigned NOT NULL",
+                "sequence_no": "int(10) unsigned NOT NULL",
+                "source_snapshot_hash": "binary(32) NOT NULL",
+                "source_snapshot_json": "longtext NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_hourly_wage_materialization_claim": "BTREE (supplier_id, claim_id, employment_id)",
+                "fk_hourly_wage_materialization_creator": "BTREE (created_by)",
+                "idx_hourly_wage_materialization_command": "BTREE (supplier_id, command_key_hash)",
+                "idx_hourly_wage_materialization_employment": "BTREE (supplier_id, employment_id, accounting_period_start)",
+                "idx_hourly_wage_materialization_run": "BTREE (supplier_id, run_id)",
+                "uq_hourly_wage_materialization_id": "UNIQUE BTREE (supplier_id, id)",
+                "uq_hourly_wage_materialization_input": "UNIQUE BTREE (supplier_id, input_id)",
+                "uq_hourly_wage_materialization_sequence": "UNIQUE BTREE (supplier_id, claim_id, sequence_no)"
+            },
+            "foreign_keys": {
+                "fk_hourly_wage_materialization_claim": "(supplier_id, claim_id, employment_id) -> payroll_hourly_wage_claims (supplier_id, id, employment_id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_hourly_wage_materialization_creator": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL",
+                "fk_hourly_wage_materialization_input": "(supplier_id, input_id) -> payroll_inputs (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_hourly_wage_materialization_run": "(supplier_id, run_id) -> payroll_runs (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "chk_hourly_wage_materialization_amount": "`full_amount_minor` >= 0",
+                "chk_hourly_wage_materialization_command": "`command_key_hash` is not null",
+                "chk_hourly_wage_materialization_input": "`delta_amount_minor` = 0 and `input_id` is null or `delta_amount_minor` <> 0 and `input_id` is not null",
+                "chk_hourly_wage_materialization_period": "dayofmonth(`accounting_period_start`) = 1",
+                "chk_hourly_wage_materialization_sequence": "`sequence_no` > 0",
+                "source_snapshot_json": "json_valid(`source_snapshot_json`)"
+            }
+        },
         "payroll_identity_resolution_tasks": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -14631,7 +14872,7 @@
                 "chk_payroll_input_period": "dayofmonth(`period_start`) = 1",
                 "chk_payroll_input_snapshot": "`status` in ('draft','cancelled') or `component_snapshot_json` is not null and `component_snapshot_hash` is not null",
                 "chk_payroll_input_source_period": "`source_period_start` is null or dayofmonth(`source_period_start`) = 1",
-                "chk_payroll_input_source_snapshot": "`recurring_component_id` is not null and `source_kind` = 'recurring' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `recurring_component_id` is null and `source_kind` = 'travel' and `external_id` like 'travel:%' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `recurring_component_id` is null and `source_kind` not in ('recurring','travel') and (`source_snapshot_json` is null and `source_snapshot_hash` is null or `source_kind` = 'manual' and `external_id` like 'quick-monthly:%' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `source_kind` in ('absence','correction') and `external_id` like 'leave:%' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32)",
+                "chk_payroll_input_source_snapshot": "`recurring_component_id` is not null and `source_kind` = 'recurring' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `recurring_component_id` is null and `source_kind` = 'travel' and `external_id` like 'travel:%' and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32 or `recurring_component_id` is null and `source_kind` not in ('recurring','travel') and (`source_snapshot_json` is null and `source_snapshot_hash` is null and (`source_kind` <> 'time' or coalesce(`external_id`,'') not like 'hourly-wage:%') or (`source_kind` = 'manual' and `external_id` like 'quick-monthly:%' or `source_kind` in ('absence','correction') and `external_id` like 'leave:%' or `source_kind` = 'time' and (`external_id` like 'hourly-wage:%' or `external_id` like 'standby:%')) and `source_snapshot_json` is not null and json_valid(`source_snapshot_json`) and `source_snapshot_hash` is not null and octet_length(`source_snapshot_hash`) = 32)",
                 "component_snapshot_json": "`component_snapshot_json` is null or json_valid(`component_snapshot_json`)"
             }
         },
@@ -15851,6 +16092,7 @@
                 "employment_id": "bigint(20) unsigned NOT NULL",
                 "evidence_days": "tinyint(3) unsigned NOT NULL",
                 "holiday_millihours": "int(10) unsigned NULL DEFAULT NULL",
+                "holiday_time_off_millihours": "int(10) unsigned NULL DEFAULT NULL",
                 "holiday_unpaid_millihours": "int(10) unsigned NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "maternity_millihours": "int(10) unsigned NULL DEFAULT NULL",
@@ -15896,14 +16138,15 @@
                 "fk_payroll_jmhz_work_month_time_month": "(supplier_id, time_month_id) -> payroll_time_months (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": {
-                "chk_payroll_jmhz_work_month_absence_evidence": "`derivation_version` not in ('jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `maternity_millihours` is null and `paternity_millihours` is null and `parental_millihours` is null and `unpaid_leave_millihours` is null and `unexcused_millihours` is null or `derivation_version` in ('jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and (`unworked_hours_occurred` = 1 or `maternity_millihours` is null and `paternity_millihours` is null and `parental_millihours` is null and `unpaid_leave_millihours` is null and `unexcused_millihours` is null) and (`maternity_millihours` is null or `maternity_millihours` <= 99999999) and (`paternity_millihours` is null or `paternity_millihours` <= 99999999) and (`parental_millihours` is null or `parental_millihours` <= 99999999) and (`unpaid_leave_millihours` is null or `unpaid_leave_millihours` <= 99999999) and (`unexcused_millihours` is null or `unexcused_millihours` <= 99999999)",
+                "chk_payroll_jmhz_work_month_absence_evidence": "`derivation_version` not in ('jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and `maternity_millihours` is null and `paternity_millihours` is null and `parental_millihours` is null and `unpaid_leave_millihours` is null and `unexcused_millihours` is null or `derivation_version` in ('jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and (`unworked_hours_occurred` = 1 or `maternity_millihours` is null and `paternity_millihours` is null and `parental_millihours` is null and `unpaid_leave_millihours` is null and `unexcused_millihours` is null) and (`maternity_millihours` is null or `maternity_millihours` <= 99999999) and (`paternity_millihours` is null or `paternity_millihours` <= 99999999) and (`parental_millihours` is null or `parental_millihours` <= 99999999) and (`unpaid_leave_millihours` is null or `unpaid_leave_millihours` <= 99999999) and (`unexcused_millihours` is null or `unexcused_millihours` <= 99999999)",
                 "chk_payroll_jmhz_work_month_agreed_fund": "`agreed_fund_millihours` <= 9999999",
-                "chk_payroll_jmhz_work_month_compensatory_time_off": "`derivation_version` not in ('jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `compensatory_time_off_millihours` is null or `derivation_version` in ('jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and (`unworked_hours_occurred` = 1 or `compensatory_time_off_millihours` is null) and (`compensatory_time_off_millihours` is null or `compensatory_time_off_millihours` <= 99999999)",
-                "chk_payroll_jmhz_work_month_conditional_confirmation": "`derivation_version` = 'jmhz-work-month-core.v1' and `conditional_blocks_confirmed` is null and `unworked_hours_occurred` is null and `work_obstacles_occurred` is null and `unworked_total_millihours` is null and `unworked_paid_millihours` is null and `dpn_without_employer_compensation_millihours` is null and `dpn_with_employer_compensation_millihours` is null and `vacation_millihours` is null and `care_millihours` is null and `employee_obstacle_paid_millihours` is null and `employer_obstacle_millihours` is null or `derivation_version` in ('jmhz-work-month.v2','jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `conditional_blocks_confirmed` = 1 and `unworked_hours_occurred` is not null and `unworked_hours_occurred` in (0,1) and `work_obstacles_occurred` is not null and `work_obstacles_occurred` in (0,1)",
+                "chk_payroll_jmhz_work_month_compensatory_time_off": "`derivation_version` not in ('jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and `compensatory_time_off_millihours` is null or `derivation_version` in ('jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and (`unworked_hours_occurred` = 1 or `compensatory_time_off_millihours` is null) and (`compensatory_time_off_millihours` is null or `compensatory_time_off_millihours` <= 99999999)",
+                "chk_payroll_jmhz_work_month_conditional_confirmation": "`derivation_version` = 'jmhz-work-month-core.v1' and `conditional_blocks_confirmed` is null and `unworked_hours_occurred` is null and `work_obstacles_occurred` is null and `unworked_total_millihours` is null and `unworked_paid_millihours` is null and `dpn_without_employer_compensation_millihours` is null and `dpn_with_employer_compensation_millihours` is null and `vacation_millihours` is null and `care_millihours` is null and `employee_obstacle_paid_millihours` is null and `employer_obstacle_millihours` is null or `derivation_version` in ('jmhz-work-month.v2','jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and `conditional_blocks_confirmed` = 1 and `unworked_hours_occurred` is not null and `unworked_hours_occurred` in (0,1) and `work_obstacles_occurred` is not null and `work_obstacles_occurred` in (0,1)",
                 "chk_payroll_jmhz_work_month_conditional_ranges": "(`unworked_total_millihours` is null or `unworked_total_millihours` <= 99999999) and (`unworked_paid_millihours` is null or `unworked_paid_millihours` <= 99999999) and (`dpn_without_employer_compensation_millihours` is null or `dpn_without_employer_compensation_millihours` <= 99999999) and (`dpn_with_employer_compensation_millihours` is null or `dpn_with_employer_compensation_millihours` <= 99999999) and (`vacation_millihours` is null or `vacation_millihours` <= 99999999) and (`care_millihours` is null or `care_millihours` <= 99999999) and (`unworked_paid_millihours` is null or `vacation_millihours` is null or `unworked_paid_millihours` >= `vacation_millihours`) and (`employee_obstacle_paid_millihours` is null or `employee_obstacle_paid_millihours` <= `agreed_fund_millihours`) and (`employer_obstacle_millihours` is null or `employer_obstacle_millihours` <= `agreed_fund_millihours`)",
-                "chk_payroll_jmhz_work_month_control_binding": "`derivation_version` = 'jmhz-work-month-core.v1' and `control_catalog_key` is null and `control_manifest_sha256` is null or `derivation_version` in ('jmhz-work-month.v2','jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `control_catalog_key` is not null and char_length(`control_catalog_key`) > 0 and `control_manifest_sha256` is not null and `control_manifest_sha256` regexp '^[0-9a-f]{64}$'",
+                "chk_payroll_jmhz_work_month_control_binding": "`derivation_version` = 'jmhz-work-month-core.v1' and `control_catalog_key` is null and `control_manifest_sha256` is null or `derivation_version` in ('jmhz-work-month.v2','jmhz-work-month.v3','jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and `control_catalog_key` is not null and char_length(`control_catalog_key`) > 0 and `control_manifest_sha256` is not null and `control_manifest_sha256` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_jmhz_work_month_evidence_days": "`evidence_days` <= dayofmonth(last_day(`period_start`))",
-                "chk_payroll_jmhz_work_month_holidays": "`derivation_version` not in ('jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `holiday_millihours` is null or `derivation_version` in ('jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and (`unworked_hours_occurred` = 1 or `holiday_millihours` is null) and (`holiday_millihours` is null or `holiday_millihours` <= 99999999)",
+                "chk_payroll_jmhz_work_month_holiday_time_off": "`derivation_version` not in ('jmhz-work-month.v11','jmhz-work-month.v12') and `holiday_time_off_millihours` is null or `derivation_version` in ('jmhz-work-month.v11','jmhz-work-month.v12') and (`holiday_time_off_millihours` is null or `holiday_time_off_millihours` <= 99999999 and `unworked_hours_occurred` = 1 and `unworked_total_millihours` is not null and `unworked_paid_millihours` is not null and `unworked_total_millihours` >= `holiday_time_off_millihours` and `unworked_paid_millihours` >= `holiday_time_off_millihours`)",
+                "chk_payroll_jmhz_work_month_holidays": "`derivation_version` not in ('jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and `holiday_millihours` is null or `derivation_version` in ('jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and (`unworked_hours_occurred` = 1 or `holiday_millihours` is null) and (`holiday_millihours` is null or `holiday_millihours` <= 99999999)",
                 "chk_payroll_jmhz_work_month_obstacle_block": "`derivation_version` = 'jmhz-work-month-core.v1' or `work_obstacles_occurred` = 0 and `employee_obstacle_paid_millihours` is null and `employer_obstacle_millihours` is null or `work_obstacles_occurred` = 1 and `unworked_hours_occurred` = 1 and (`employee_obstacle_paid_millihours` is not null or `employer_obstacle_millihours` is not null)",
                 "chk_payroll_jmhz_work_month_period": "dayofmonth(`period_start`) = 1",
                 "chk_payroll_jmhz_work_month_provenance_json": "json_valid(`provenance_json`)",
@@ -15913,11 +16156,11 @@
                 "chk_payroll_jmhz_work_month_spec_hash": "`spec_manifest_sha256` regexp '^[0-9a-f]{64}$'",
                 "chk_payroll_jmhz_work_month_standard_fund": "`standard_fund_millihours` <= 9999999",
                 "chk_payroll_jmhz_work_month_summary_hash": "`summary_sha256` regexp '^[0-9a-f]{64}$'",
-                "chk_payroll_jmhz_work_month_unpaid_holidays": "`derivation_version` <> 'jmhz-work-month.v9' and `holiday_unpaid_millihours` is null or `derivation_version` = 'jmhz-work-month.v9' and (`unworked_hours_occurred` = 1 or `holiday_unpaid_millihours` is null) and (`holiday_unpaid_millihours` is null or `holiday_unpaid_millihours` <= 99999999)",
+                "chk_payroll_jmhz_work_month_unpaid_holidays": "`derivation_version` not in ('jmhz-work-month.v9','jmhz-work-month.v11') and `holiday_unpaid_millihours` is null or `derivation_version` in ('jmhz-work-month.v9','jmhz-work-month.v11') and (`unworked_hours_occurred` = 1 or `holiday_unpaid_millihours` is null) and (`holiday_unpaid_millihours` is null or `holiday_unpaid_millihours` <= 99999999)",
                 "chk_payroll_jmhz_work_month_unworked_block": "`derivation_version` = 'jmhz-work-month-core.v1' or `unworked_hours_occurred` = 0 and `unworked_total_millihours` is null and `unworked_paid_millihours` is null and `dpn_without_employer_compensation_millihours` is null and `dpn_with_employer_compensation_millihours` is null and `vacation_millihours` is null and `care_millihours` is null or `unworked_hours_occurred` = 1 and `unworked_total_millihours` is not null and `unworked_total_millihours` > 0",
                 "chk_payroll_jmhz_work_month_weekly_work": "`weekly_work_centihours` <= 9999999",
                 "chk_payroll_jmhz_work_month_worked": "`worked_millihours` <= 99999999",
-                "chk_payroll_jmhz_work_month_worked_breakdown": "`derivation_version` not in ('jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9') and `worked_days` is null and `overtime_millihours` is null or `derivation_version` in ('jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v7','jmhz-work-month.v9') and `worked_days` is not null and `worked_days` <= 31 and (`overtime_millihours` is null or `overtime_millihours` <= `worked_millihours`) or `derivation_version` in ('jmhz-work-month.v6','jmhz-work-month.v8') and (`worked_days` is null or `worked_days` <= 31) and (`overtime_millihours` is null or `overtime_millihours` <= `worked_millihours`)"
+                "chk_payroll_jmhz_work_month_worked_breakdown": "`derivation_version` not in ('jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v6','jmhz-work-month.v7','jmhz-work-month.v8','jmhz-work-month.v9','jmhz-work-month.v10','jmhz-work-month.v11','jmhz-work-month.v12') and `worked_days` is null and `overtime_millihours` is null or `derivation_version` in ('jmhz-work-month.v4','jmhz-work-month.v5','jmhz-work-month.v7','jmhz-work-month.v9','jmhz-work-month.v11') and `worked_days` is not null and `worked_days` <= 31 and (`overtime_millihours` is null or `overtime_millihours` <= `worked_millihours`) or `derivation_version` in ('jmhz-work-month.v6','jmhz-work-month.v8','jmhz-work-month.v10','jmhz-work-month.v12') and (`worked_days` is null or `worked_days` <= 31) and (`overtime_millihours` is null or `overtime_millihours` <= `worked_millihours`)"
             }
         },
         "payroll_leave_entitlement_snapshots": {
@@ -19484,6 +19727,33 @@
                 "source_snapshot_json": "json_valid(`source_snapshot_json`)"
             }
         },
+        "payroll_standby_floor_proofs": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "input_id": "bigint(20) unsigned NOT NULL",
+                "period_start": "date NOT NULL",
+                "source_snapshot_hash": "binary(32) NOT NULL",
+                "source_snapshot_json": "longtext NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_standby_floor_proof_employment": "BTREE (supplier_id, employment_id, period_start)",
+                "uq_standby_floor_proof_input": "UNIQUE BTREE (supplier_id, input_id)"
+            },
+            "foreign_keys": {
+                "fk_standby_floor_proof_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_standby_floor_proof_input": "(supplier_id, input_id) -> payroll_inputs (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "source_snapshot_json": "json_valid(`source_snapshot_json`)"
+            }
+        },
         "payroll_statutory_accumulator_entries": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -20421,6 +20691,33 @@
                 "chk_payroll_tic_request_due": "`due_on` >= `requested_on`"
             }
         },
+        "payroll_termination_floor_proofs": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "input_id": "bigint(20) unsigned NOT NULL",
+                "period_start": "date NOT NULL",
+                "source_snapshot_hash": "binary(32) NOT NULL",
+                "source_snapshot_json": "longtext NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_termination_floor_proof_employment": "BTREE (supplier_id, employment_id, period_start)",
+                "uq_termination_floor_proof_input": "UNIQUE BTREE (supplier_id, input_id)"
+            },
+            "foreign_keys": {
+                "fk_termination_floor_proof_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "fk_termination_floor_proof_input": "(supplier_id, input_id) -> payroll_inputs (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "source_snapshot_json": "json_valid(`source_snapshot_json`)"
+            }
+        },
         "payroll_time_entries": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -20605,6 +20902,66 @@
                 "chk_payroll_time_import_summary_values": "json_valid(`values_json`)"
             }
         },
+        "payroll_time_month_manual_segments": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "date_from": "date NOT NULL",
+                "date_to": "date NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "overtime_duration_units": "bigint(20) unsigned NULL DEFAULT NULL",
+                "sequence_no": "smallint(5) unsigned NOT NULL",
+                "summary_id": "bigint(20) unsigned NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "worked_days": "tinyint(3) unsigned NULL DEFAULT NULL",
+                "worked_duration_units": "bigint(20) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "uq_manual_segment_sequence": "UNIQUE BTREE (supplier_id, summary_id, sequence_no)"
+            },
+            "foreign_keys": {
+                "fk_manual_segment_summary": "(supplier_id, summary_id) -> payroll_time_month_manual_summaries (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_manual_segment_dates": "`date_to` >= `date_from`",
+                "chk_manual_segment_overtime": "`overtime_duration_units` is null or `overtime_duration_units` <= `worked_duration_units`"
+            }
+        },
+        "payroll_time_month_manual_summaries": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "content_sha256": "char(64) NOT NULL COLLATE ascii_bin",
+                "created_at": "timestamp NOT NULL DEFAULT current_timestamp()",
+                "created_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "employment_id": "bigint(20) unsigned NOT NULL",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "period_start": "date NOT NULL",
+                "reason": "varchar(500) NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "time_month_id": "bigint(20) unsigned NOT NULL",
+                "time_month_revision_no": "smallint(5) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "fk_manual_summary_user": "BTREE (created_by)",
+                "idx_manual_summary_employment": "BTREE (supplier_id, employment_id, period_start)",
+                "uq_manual_summary_revision": "UNIQUE BTREE (supplier_id, time_month_id, time_month_revision_no)",
+                "uq_manual_summary_tenant_id": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_manual_summary_employment": "(supplier_id, employment_id) -> payroll_employments (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_manual_summary_month": "(supplier_id, time_month_id) -> payroll_time_months (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "fk_manual_summary_user": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE SET NULL"
+            },
+            "checks": {
+                "chk_manual_summary_hash": "`content_sha256` regexp '^[0-9a-f]{64}$'",
+                "chk_manual_summary_period": "dayofmonth(`period_start`) = 1"
+            }
+        },
         "payroll_time_months": {
             "type": "BASE TABLE",
             "engine": "InnoDB",
@@ -20625,7 +20982,7 @@
                 "status": "enum('open','approved') NOT NULL DEFAULT 'open'",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
-                "work_source": "enum('entries','import_summary') NOT NULL DEFAULT 'entries'"
+                "work_source": "enum('entries','import_summary','manual_summary') NOT NULL DEFAULT 'entries'"
             },
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
@@ -29550,6 +29907,14 @@
         "trg_eldp_manual_completion_immutable_update": "BEFORE UPDATE ON payroll_eldp_manual_completions #f7f60a5bca726bee5310d71fb8a3a4b7ce4590b1",
         "trg_fuelings_tenant_links_insert": "BEFORE INSERT ON fuelings #f6dd466c643a63fdf7c9937b8b3a33de1332f4de",
         "trg_fuelings_tenant_links_update": "BEFORE UPDATE ON fuelings #74fd75dae200cb356a77b316a3ac836239c4b080",
+        "trg_hourly_evidence_no_delete": "BEFORE DELETE ON payroll_hourly_evidence_revisions #5232106be0cb9b573695b88dfd158d9dac4bc20b",
+        "trg_hourly_evidence_no_update": "BEFORE UPDATE ON payroll_hourly_evidence_revisions #5232106be0cb9b573695b88dfd158d9dac4bc20b",
+        "trg_hourly_included_consumption_no_delete": "BEFORE DELETE ON payroll_hourly_included_consumption #79d96b5e05c0d861ba8910f20b04bd8d7b726417",
+        "trg_hourly_included_consumption_no_update": "BEFORE UPDATE ON payroll_hourly_included_consumption #79d96b5e05c0d861ba8910f20b04bd8d7b726417",
+        "trg_hourly_time_revision_no_delete": "BEFORE DELETE ON payroll_hourly_time_entitlement_revisions #93afca7cb04ac2870c09300f480e700adfdd3278",
+        "trg_hourly_time_revision_no_update": "BEFORE UPDATE ON payroll_hourly_time_entitlement_revisions #93afca7cb04ac2870c09300f480e700adfdd3278",
+        "trg_hourly_wage_materialization_no_delete": "BEFORE DELETE ON payroll_hourly_wage_materializations #cd0f389aa4ae1cacb8d51a7bf231c973e35271e0",
+        "trg_hourly_wage_materialization_no_update": "BEFORE UPDATE ON payroll_hourly_wage_materializations #cd0f389aa4ae1cacb8d51a7bf231c973e35271e0",
         "trg_integration_change_allocate": "BEFORE INSERT ON integration_change_log #d6acca781aacb4ef4f8873c2bbe0646fe4b86503",
         "trg_integration_stock_i18n_delete": "AFTER DELETE ON stock_item_i18n #afedd493d657bd6c142fe82b5adc67b9076d3142",
         "trg_integration_stock_i18n_insert": "AFTER INSERT ON stock_item_i18n #46c9ccaae477ede29e1d6bdd431cba34a4d8d5ce",
@@ -29616,6 +29981,10 @@
         "trg_jmhz_scn_requirement_bu": "BEFORE UPDATE ON payroll_jmhz_field_requirements #b71c659e5b0a7a47ecbc804e6ae742279b0b9208",
         "trg_journal_payroll_batch_insert": "BEFORE INSERT ON journal_entries #f75c2f92cf4c2bec4dae140c18d6e95f50264967",
         "trg_journal_payroll_immutable_update": "BEFORE UPDATE ON journal_entries #3635d1e00151830cb61416104ed79cfa05bc025f",
+        "trg_manual_segment_no_delete": "BEFORE DELETE ON payroll_time_month_manual_segments #eacd078e50e95575ecd8770d51abfb9d64272d9b",
+        "trg_manual_segment_no_update": "BEFORE UPDATE ON payroll_time_month_manual_segments #eacd078e50e95575ecd8770d51abfb9d64272d9b",
+        "trg_manual_summary_no_delete": "BEFORE DELETE ON payroll_time_month_manual_summaries #c298a320792c37e724ceadeac03bf18304d74f20",
+        "trg_manual_summary_no_update": "BEFORE UPDATE ON payroll_time_month_manual_summaries #c298a320792c37e724ceadeac03bf18304d74f20",
         "trg_ncc_immutable_delete": "BEFORE DELETE ON nonprofit_capital_commands #f1b059c1fa4cf0b0d29ad9a4cdf2f80b3264f070",
         "trg_ncc_immutable_update": "BEFORE UPDATE ON nonprofit_capital_commands #f1b059c1fa4cf0b0d29ad9a4cdf2f80b3264f070",
         "trg_nce_immutable_delete": "BEFORE DELETE ON nonprofit_capital_events #f1b059c1fa4cf0b0d29ad9a4cdf2f80b3264f070",
@@ -29955,6 +30324,7 @@
         "trg_property_party_event_no_update": "BEFORE UPDATE ON property_claim_party_events #09e54dae44754623ff06ff29539d3414f985f499",
         "trg_property_party_member_no_delete": "BEFORE DELETE ON property_claim_party_members #09e54dae44754623ff06ff29539d3414f985f499",
         "trg_property_party_member_no_update": "BEFORE UPDATE ON property_claim_party_members #09e54dae44754623ff06ff29539d3414f985f499",
+        "trg_standby_floor_proof_no_update": "BEFORE UPDATE ON payroll_standby_floor_proofs #72ff01a143309e460f66ddea9916227310cfe59c",
         "trg_submission_defect_notice_guard": "BEFORE INSERT ON submission_defect_notices #a86513c4dc1c74e0b4cbe8de9a1bc593f16b17d9",
         "trg_submission_defect_notice_inbox_privacy": "BEFORE INSERT ON submission_defect_notices #8311952e7004cc589badcad747c0804d1de7b8c9",
         "trg_submission_defect_notice_update_guard": "BEFORE UPDATE ON submission_defect_notices #8caf5532dcdb8848b0a4c802df86cd71590a88f0",
@@ -29967,6 +30337,7 @@
         "trg_submission_outbox_inbox_privacy_insert": "BEFORE INSERT ON submission_outbox #2c2e144fc29cb2b25d11b4469a5b5c1f3eba863a",
         "trg_submission_outbox_inbox_privacy_update": "BEFORE UPDATE ON submission_outbox #c7b3bdae7d08c1a563f91ba6b5a23de501fd01de",
         "trg_submission_outbox_update_guard": "BEFORE UPDATE ON submission_outbox #9b79477ba4444eb38bc32b36e0414359f9251b42",
+        "trg_termination_floor_proof_no_update": "BEFORE UPDATE ON payroll_termination_floor_proofs #8875a6dde896cd479f0c4cf0351b9a34fae2097c",
         "trg_xmlzam_dispatch_no_delete": "BEFORE DELETE ON payroll_enforcement_xmlzam_dispatches #d7186cbb5f625245d37fe839408e588e4161275b",
         "trg_xmlzam_dispatch_no_update": "BEFORE UPDATE ON payroll_enforcement_xmlzam_dispatches #6692e91d658a0a3ca622c34c5e7c05cafba1baaa",
         "trg_xmlzam_dispatch_outbox_guard": "BEFORE INSERT ON payroll_enforcement_xmlzam_dispatches #16b10fbba63944b75a0c055c7495cd131ac1ceb4",

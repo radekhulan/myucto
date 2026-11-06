@@ -75,6 +75,9 @@ final class PayrollComponentDefaults
             'rows' => [
                 ['MZDA_MESICNI', 'Základní měsíční mzda', 'base_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['MZDA_HODINOVA', 'Základní hodinová mzda', 'hourly_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['MZDA_HODINOVA_ZAKLAD', 'Mzda za odpracovanou dobu', 'hourly_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['MZDA_DOSAZENA_PRESCAS', 'Dosažená mzda za přesčas', 'hourly_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
+                ['DOPLATEK_MINIMALNI_MZDA', 'Doplatek do minimální mzdy', 'hourly_wage', 'monetary', 'regular', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['MZDA_UKOLOVA', 'Úkolová mzda', 'task_wage', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['ODMENA', 'Odměna', 'bonus', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
                 ['PREMIE_PRIPLATKY', 'Prémie a příplatky', 'premium', 'monetary', 'one_off', 'included', 'included', 'included', 'included', 'included', 'included', 'included', null, null],
@@ -152,6 +155,7 @@ final class PayrollComponentDefaults
                 // v úhrnu 10337 a detail zůstával prázdný. Klasifikace je shodná
                 // s obecnou náhradou mzdy.
                 ['NAHRADA_MZDY_SVATEK', 'Náhrada mzdy za svátek', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
+                ['NAHRADA_MZDY_VOLNO_ZA_SVATEK', 'Náhrada mzdy za náhradní volno za svátek', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 ['NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL', 'Náhrada mzdy při překážkách na straně zaměstnavatele', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 ['NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC', 'Náhrada mzdy při překážkách na straně zaměstnance', 'compensation', 'monetary', 'one_off', 'included', 'included', 'included', 'excluded', 'included', 'included', 'included', null, null],
                 // Náhrada mzdy při DPN a karanténě je od daně OSVOBOZENÁ podle

@@ -303,6 +303,11 @@ final class Bootstrap
                 fn (ContainerInterface $c) => $c->get(
                     \MyInvoice\Repository\Payroll\PayrollModuleStateRepository::class,
                 ),
+            \MyInvoice\Action\Payroll\PayrollEmploymentAction::class =>
+                \DI\autowire()->constructorParameter(
+                    'rulesets',
+                    \DI\get(\MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider::class),
+                ),
             // Runtime registry = ověřený default z kódu (CzechPayrollRulesets2026)
             // sloučený s DB overridem z administrace (migrace 1306), stejně jako
             // u ročních daňových konstant. Bez tohohle bindu by „aktivace" rulesetu
@@ -462,6 +467,7 @@ final class Bootstrap
                     $c->get(
                         \MyInvoice\Service\Payroll\Document\PayrollDocumentBatchQueueService::class,
                     ),
+                    $c->get(\MyInvoice\Service\Payroll\PayrollHourlyWageMaterializer::class),
                 ),
             // Překlopení běhu do `paid` ze skutečnosti v platebním ledgeru.
             // Volitelné parametry výš PHP-DI neautowiruje, tady je jen

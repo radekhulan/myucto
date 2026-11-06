@@ -16,6 +16,7 @@ final class PayslipDocumentSnapshotHydrator
     private const SUPPORTED_SCHEMA_VERSIONS = [
         'payroll-payslip-document.v1',
         'payroll-payslip-document.v2',
+        'payroll-payslip-document.v3',
     ];
 
     private const DETAIL_SCHEMA_VERSION = 'payroll-payslip-document.v2';
@@ -34,7 +35,11 @@ final class PayslipDocumentSnapshotHydrator
         ) {
             throw new \DomainException('Výsledek osoby nemá podporovaný snapshot výplatní pásky.');
         }
-        $detailRecorded = $schemaVersion === self::DETAIL_SCHEMA_VERSION;
+        $detailRecorded = $schemaVersion !== 'payroll-payslip-document.v1';
+        $hourly = $schemaVersion === 'payroll-payslip-document.v3';
+        if ($hourly && (!is_array($snapshot['hourly_claims'] ?? null) || !array_is_list($snapshot['hourly_claims']) || $snapshot['hourly_claims'] === [])) {
+            throw new \DomainException('Hodinová páska nemá zmrazené nároky.');
+        }
 
         return new PayslipDocumentData(
             revisionId: $revisionId,
@@ -45,7 +50,7 @@ final class PayslipDocumentSnapshotHydrator
             employeeDisplayName: $this->text($snapshot, 'employee_display_name'),
             period: $period,
             employmentLabel: $this->text($snapshot, 'employment_label'),
-            incomeLines: $this->lines($snapshot, 'income_lines', $detailRecorded),
+            incomeLines: $this->lines($snapshot, 'income_lines', $detailRecorded, $hourly),
             grossMinorUnits: $this->integer($snapshot, 'gross_minor_units'),
             employeeSocialMinorUnits:
                 $this->integer($snapshot, 'employee_social_minor_units'),
@@ -89,6 +94,7 @@ final class PayslipDocumentSnapshotHydrator
                 ? PayslipDocumentData::INCOME_DETAIL_RECORDED
                 : PayslipDocumentData::INCOME_DETAIL_NOT_RECORDED,
             revisionNumber: $revisionNumber,
+            hourlyClaims: $hourly ? $snapshot['hourly_claims'] : [],
         );
     }
 
@@ -126,7 +132,7 @@ final class PayslipDocumentSnapshotHydrator
      * @param array<string,mixed> $snapshot
      * @return list<PayslipLine>
      */
-    private function lines(array $snapshot, string $key, bool $detailRecorded): array
+    private function lines(array $snapshot, string $key, bool $detailRecorded, bool $hourly = false): array
     {
         $rows = $snapshot[$key] ?? null;
         if (!is_array($rows) || !array_is_list($rows)) {
@@ -163,6 +169,7 @@ final class PayslipDocumentSnapshotHydrator
                 $this->integer($line, 'amount_minor_units'),
                 $basis,
                 $exemptPart,
+                $hourly ? ($line['hourly_detail'] ?? null) : null,
             );
         }
         return $result;

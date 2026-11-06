@@ -10,6 +10,16 @@ use PHPUnit\Framework\TestCase;
 
 final class PaidObstacleCompensationCalculatorTest extends TestCase
 {
+    public function testDifferentDailyAveragesRoundTheMonthlyTotal(): void
+    {
+        $result = PaidObstacleCompensationCalculator::calculate(13440, 8000,
+            [self::segment('2026-06-10', 480), self::segment('2026-06-20', 480)], [],
+            \MyInvoice\Service\Payroll\Calculation\PayrollWageRounding::Ceil,
+            ['2026-06-10' => 13440, '2026-06-20' => 14340]);
+        self::assertSame(177800, $result['amounts']['2026-06-01']);
+        self::assertSame(222300, $result['full_rate_amounts']['2026-06-01']);
+    }
+
     /** Prostoj § 207 písm. a) ZP: 80 % průměru, na celé koruny nahoru za měsíc. */
     public function testDowntimePaysEightyPercentOfTheAverage(): void
     {

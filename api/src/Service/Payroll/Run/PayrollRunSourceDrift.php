@@ -14,7 +14,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
  * i normalizaci jako `build()`). Nic nepočítá ani neukládá.
  *
  * Záměrně jen podklady, které se po zámku mění běžnou prací účetní: mzdové
- * vstupy, nepřítomnosti, množina vztahů v období a zákonná evidence osob.
+ * vstupy, nepřítomnosti, množina vztahů v období, hodinové podmínky a zákonná evidence osob.
  * Obnova podkladů sama bere VŠECHNO — tohle je jen detektor, který má
  * účetní upozornit a schválení zastavit.
  */
@@ -30,6 +30,8 @@ final readonly class PayrollRunSourceDrift
         public int $employmentsAdded = 0,
         public int $employmentsRemoved = 0,
         public int $statutoryEvidenceChanged = 0,
+        public int $remunerationChanged = 0,
+        public int $workedTimeChanged = 0,
     ) {}
 
     /**
@@ -38,6 +40,9 @@ final readonly class PayrollRunSourceDrift
      *   eligible_employment_ids:list<int>,
      *   inputs:array<int,list<array<string,mixed>>>,
      *   absences:array<int,list<array<string,mixed>>>,
+     *   worked_time_evidence?:array<int,array<string,mixed>>,
+     *   manual_time_month_state?:array<int,array<string,mixed>>,
+     *   hourly_remuneration_terms?:array<int,list<array<string,mixed>>>,
      *   statutory_evidence:array<int,mixed>|null
      * } $current
      */
@@ -47,6 +52,12 @@ final readonly class PayrollRunSourceDrift
         $frozenAbsences = [];
         $frozenEmployments = [];
         $frozenEvidence = [];
+        $frozenHourlyTerms = [];
+        $frozenWorkedTime = [];
+        $frozenHourlyContexts = [];
+        $frozenAverageSources = [];
+        $frozenHourlyClaims = [];
+        $frozenTimeMonths = [];
         $people = is_array($frozenSnapshot['people'] ?? null) ? $frozenSnapshot['people'] : [];
         foreach ($people as $person) {
             if (!is_array($person) || !is_array($person['employee'] ?? null)) {
@@ -60,6 +71,20 @@ final readonly class PayrollRunSourceDrift
                     continue;
                 }
                 $frozenEmployments[(int) ($employment['employment']['id'] ?? 0)] = true;
+                $frozenHourlyTerms[(int) ($employment['employment']['id'] ?? 0)] =
+                    $employment['hourly_remuneration_terms'] ?? [];
+                if (array_key_exists('hourly_settlement_terms', $employment)) {
+                    $frozenSettlementTerms[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_settlement_terms'];
+                }
+                if (array_key_exists('hourly_wage_claims', $employment)) $frozenHourlyClaims[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_wage_claims'];
+                if (array_key_exists('hourly_average_input_sources', $employment)) $frozenAverageSources[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_average_input_sources'];
+                if (array_key_exists('hourly_entitlement_context', $employment)) {
+                    $frozenHourlyContexts[(int) ($employment['employment']['id'] ?? 0)] = $employment['hourly_entitlement_context'];
+                }
+                $frozenTimeMonths[(int) ($employment['employment']['id'] ?? 0)] = $employment['time_month'] ?? null;
+                if (array_key_exists('worked_time_evidence', $employment)) {
+                    $frozenWorkedTime[(int) ($employment['employment']['id'] ?? 0)] = $employment['worked_time_evidence'];
+                }
                 foreach (self::rows($employment['inputs'] ?? null) as $row) {
                     $frozenInputs[] = $row;
                 }
@@ -102,6 +127,65 @@ final readonly class PayrollRunSourceDrift
             }
         }
 
+        $remunerationChanged = 0;
+        foreach (($frozenSettlementTerms ?? []) as $employmentId => $terms) {
+            if (self::fingerprint($terms) !== self::fingerprint($current['hourly_settlement_terms'][$employmentId] ?? [])) ++$remunerationChanged;
+        }
+        if (isset($current['hourly_remuneration_terms'])) {
+            foreach ($frozenHourlyTerms as $employmentId => $terms) {
+                if (self::fingerprint($terms) !== self::fingerprint(
+                    $current['hourly_remuneration_terms'][$employmentId] ?? [],
+                )) {
+                    ++$remunerationChanged;
+                }
+            }
+        }
+
+        $workedTimeChanged = 0;
+        if (isset($current['hourly_wage_claims'])) {
+            $ids = array_unique([...array_keys($frozenHourlyClaims), ...array_keys($current['hourly_wage_claims'])]);
+            foreach ($ids as $id) if (isset($frozenEmployments[$id]) && self::fingerprint($frozenHourlyClaims[$id] ?? null) !== self::fingerprint($current['hourly_wage_claims'][$id] ?? null)) ++$workedTimeChanged;
+        }
+        if (isset($current['hourly_average_input_sources'])) {
+            $ids = array_unique([...array_keys($frozenAverageSources), ...array_keys($current['hourly_average_input_sources'])]);
+            foreach ($ids as $id) if (isset($frozenEmployments[$id]) && self::fingerprint($frozenAverageSources[$id] ?? null) !== self::fingerprint($current['hourly_average_input_sources'][$id] ?? null)) ++$workedTimeChanged;
+        }
+        foreach (($current['hourly_settlement_terms'] ?? []) as $employmentId => $terms) {
+            if (isset($frozenEmployments[$employmentId]) && !array_key_exists($employmentId, $frozenHourlyContexts)) ++$workedTimeChanged;
+        }
+        if (isset($current['worked_time_evidence'])) {
+            foreach ($frozenWorkedTime as $employmentId => $evidence) {
+                if (self::fingerprint($evidence) !== self::fingerprint($current['worked_time_evidence'][$employmentId] ?? null)) {
+                    ++$workedTimeChanged;
+                }
+            }
+        }
+        if (isset($current['hourly_entitlement_context'])) {
+            foreach ($frozenHourlyContexts as $employmentId => $context) {
+                if (self::fingerprint($context) !== self::fingerprint($current['hourly_entitlement_context'][$employmentId] ?? null)) {
+                    ++$workedTimeChanged;
+                }
+            }
+        }
+        // Měsíční snímek zůstává historicky totožný. Kontrola se aktivuje pouze
+        // doloženou ruční volbou, a nepřestane platit ani po návratu k docházce/importu.
+        foreach ($current['manual_time_month_state'] ?? [] as $employmentId => $state) {
+            if (!isset($frozenEmployments[$employmentId]) || array_key_exists($employmentId, $frozenWorkedTime)) {
+                continue;
+            }
+            $month = $frozenTimeMonths[$employmentId];
+            $before = $month === null ? null : [
+                'id' => $month['id'],
+                'status' => $month['status'],
+                'revision_no' => $month['revision_no'],
+                'row_version' => $month['row_version'],
+                'summary_sha256' => $month['jmhz_work_summary']['summary_sha256'] ?? null,
+            ];
+            if (self::fingerprint($before) !== self::fingerprint($state)) {
+                ++$workedTimeChanged;
+            }
+        }
+
         return new self(
             inputsAdded: $inputsAdded,
             inputsChanged: $inputsChanged,
@@ -112,6 +196,8 @@ final readonly class PayrollRunSourceDrift
             employmentsAdded: count(array_diff_key($eligible, $frozenEmployments)),
             employmentsRemoved: count(array_diff_key($frozenEmployments, $eligible)),
             statutoryEvidenceChanged: $statutoryChanged,
+            remunerationChanged: $remunerationChanged,
+            workedTimeChanged: $workedTimeChanged,
         );
     }
 
@@ -125,7 +211,9 @@ final readonly class PayrollRunSourceDrift
             + $this->absencesRemoved
             + $this->employmentsAdded
             + $this->employmentsRemoved
-            + $this->statutoryEvidenceChanged;
+            + $this->statutoryEvidenceChanged
+            + $this->remunerationChanged
+            + $this->workedTimeChanged;
     }
 
     public function hasChanges(): bool
@@ -147,6 +235,8 @@ final readonly class PayrollRunSourceDrift
             'employments_added' => $this->employmentsAdded,
             'employments_removed' => $this->employmentsRemoved,
             'statutory_evidence_changed' => $this->statutoryEvidenceChanged,
+            'remuneration_changed' => $this->remunerationChanged,
+            'worked_time_changed' => $this->workedTimeChanged,
         ];
     }
 

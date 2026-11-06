@@ -1569,7 +1569,7 @@ final class AttendanceImportService
      *
      * @param list<array<string,mixed>> $persons
      * @param list<array<string,mixed>> $options volby vztahů s `employment_id` a `relation_type`
-     * @param array<int,array{own_minutes:int,takeover_minutes:int,total_minutes:int}> $prior roční součet
+     * @param array<int,array{own_minutes:?int,takeover_minutes:int,total_minutes:?int,own_duration_units?:?int,total_duration_units?:?int,manual_review_required?:bool}> $prior roční součet
      *        bez uloženého souhrnu importovaných vztahů za importovaný měsíc
      * @return list<array<string,mixed>>
      */
@@ -1584,11 +1584,7 @@ final class AttendanceImportService
             }
             $before = $prior[$employeeId] ?? ['own_minutes' => 0, 'takeover_minutes' => 0, 'total_minutes' => 0];
             $importedMinutes = intdiv(($imported[$employeeId] ?? 0) * 60, 1000);
-            $summary = PayrollAgreementAnnualHours::summary($year, [
-                'own_minutes' => $before['own_minutes'] + $importedMinutes,
-                'takeover_minutes' => $before['takeover_minutes'],
-                'total_minutes' => $before['total_minutes'] + $importedMinutes,
-            ]);
+            $summary = PayrollAgreementAnnualHours::summary($year, PayrollAgreementAnnualHours::addOwnMinutes($before, $importedMinutes));
             $person['dpp_annual_hours'] = $summary + ['imported_minutes' => $importedMinutes];
             if ($summary['status'] !== PayrollAgreementAnnualHours::STATUS_OK) {
                 $name = $person['match']['employee_name'] ?? null;
@@ -1596,8 +1592,9 @@ final class AttendanceImportService
                     $summary['status'],
                     is_string($name) && $name !== '' ? $name : (string) ($person['display_name'] ?? ''),
                     $year,
-                    $summary['total_minutes'],
+                    $summary['total_minutes'] ?? 0,
                     $summary['takeover_minutes'],
+                    $summary['total_duration_units'] ?? null,
                 );
             }
         }
@@ -2046,7 +2043,7 @@ final class AttendanceImportService
      * od začátku období — přesně to radí i hláška kontroly zúčtování.
      *
      * @param array<string,mixed> $person
-     * @param array{terms_id:int,effective_from:string,effective_to:?string,monthly_gross_minor:?int,is_latest:bool,employment_status:string}|null $terms
+     * @param array{terms_id:int,effective_from:string,effective_to:?string,monthly_gross_minor:?int,is_latest:bool,employment_status:string,hourly_in_period:bool}|null $terms
      * @param array<string,string> $kinds
      * @return array<string,mixed>|null null = mzda se shoduje, není co měnit
      */
@@ -2087,6 +2084,9 @@ final class AttendanceImportService
         }
         if (in_array($terms['employment_status'], ['ended', 'archived', 'no_show'], true)) {
             return $entry($mode, 'U ukončeného, archivovaného nebo nenastoupeného vztahu import podmínky nemění.');
+        }
+        if ($terms['hourly_in_period']) {
+            return $entry($mode, 'Vztah je v období odměňovaný hodinově. Měsíční mzda se do podmínek nezapíše; sazbu upravte na kartě vztahu.');
         }
         if (!$terms['is_latest']) {
             return $entry($mode, 'Po začátku období už platí novější verze podmínek. Mzdu upravte na kartě vztahu.');

@@ -194,6 +194,104 @@ describe('TimeAttendance', () => {
     await flushPromises()
   }
 
+  it.each([[3, '0,001'], [50, '0:01'], [53, '0:01:03.6'], [0, '0:00'], [null, 'payroll.worked_hours.unknown']] as const)('ruční souhrn %s ukáže přesně a staré denní hodiny pouze jako nepoužité', async (units, text) => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original,
+      month: { ...original.month, work_source: 'manual_summary' },
+      summary: { ...original.summary, work_source: 'manual_summary', worked_duration_units: units, actual_minutes: null, difference_minutes: null, category_minutes: null },
+      manual_summary: { id: 5, time_month_revision_no: 2, content_sha256: 'a'.repeat(64), reason: 'Syntetický ruční podklad', segments: [] },
+      shifts: [], entries: [{ id: 101, row_version: 1, category: 'regular', starts_at: '2026-09-01T08:00:00+02:00', ends_at: '2026-09-01T16:00:00+02:00', timezone_name: 'Europe/Prague', net_minutes: 480, break_minutes: 0, status: 'approved' }],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="time-actual-12"]').text()).toBe(text)
+    expect(wrapper.get('[data-test="grid-worked-total-12"]').text()).toBe(text)
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').element).toHaveProperty('value', '')
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-test="time-selected-source"]').text()).toContain('source_manual')
+    await openRowEditor(wrapper)
+    expect(wrapper.get('[data-test="time-inactive-records-hint"]').text()).toContain('inactive_entries_hint')
+    const old = wrapper.get('[data-test="time-record-entry-101"]')
+    expect(old.get('[data-test="time-inactive-entry"]').text()).toContain('inactive_entry')
+    expect(old.find('[data-test="time-record-edit"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="time-record-save-blocked"]').text()).toContain('daily_source_locked')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('importovaný měsíc měsíčně odměňovaného vztahu ponechá mřížku i přehled beze změny', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original, hourly_remuneration_in_period: false,
+      month: { ...original.month, work_source: 'import_summary' },
+      summary: { ...original.summary, work_source: 'import_summary', worked_duration_units: 0, actual_minutes: 0, difference_minutes: -9_600 },
+      shifts: [], entries: [],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="time-selected-source"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="grid-summary-source"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="grid-cell-12-2026-09-01"]').attributes('disabled')).toBeUndefined()
+    await openRowEditor(wrapper)
+    expect(wrapper.find('[data-test="time-inactive-records-hint"]').exists()).toBe(false)
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('historie měsíce použije přesný vybraný souhrn a ne archivní denní záznamy', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    m.timeMonth.mockResolvedValue({ items: [{ ...row(12, 'Syntetická Osoba'), entries: [] }], total: 1, limit: 25, offset: 0 })
+    const old = historyMonth('2026-09')
+    m.timeHistory.mockResolvedValue({ employment: { id: 12, full_name: 'Syntetická Osoba', code: 'SYN-12' }, items: [{ ...old, month: { ...old.month, work_source: 'manual_summary' }, summary: { ...old.summary, work_source: 'manual_summary', worked_duration_units: 3, actual_minutes: null, difference_minutes: null, category_minutes: null } }], total: 1, limit: 12, offset: 0, range: { from: '2026-01', to: '2026-12' } })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    await wrapper.get('[data-test="payroll-scope-year"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="history-actual-2026-09"]').text()).toBe('0,001')
+    expect(wrapper.get('[data-test="history-row-2026-09"]').text()).toContain('inactive_record_counts')
+    expect(wrapper.get('[data-test="history-row-2026-09"]').text()).toContain('payroll.worked_hours.unknown')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('neověřitelné přesčasy ukáže jako neznámé, nikoli nulu nebo prokázaný porušený zákaz', async () => {
+    m.routeQuery = { period: '2026-09' }
+    const item = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...item, entries: [], shifts: [], overtime_consents: [], overtime_protections: [], overtime_compensations: [],
+      overtime_limits: { employment_id: 12, evidence_status: 'manual_review_required', manual_summary_periods: ['2026-08'],
+        findings: [{ code: 'overtime_manual_summary_review_required', severity: 'warning', message: 'Neověřený podklad', actual_minutes: null, limit_minutes: 9000, scope_from: '2026-01-01', scope_to: '2026-09-30', consent_evidenced: false, provision: '§ 93', requires_override: true }],
+        weeks: [], ordered_year_minutes: null, agreed_year_minutes: null, ordered_year_limit_minutes: 9000,
+        averaging_from: '2026-01-01', averaging_to: '2026-09-30', averaging_weeks: 26, averaging_minutes: null,
+        averaging_limit_minutes: 12480, averaging_compensated_minutes: null, averaging_basis: 'statutory', averaging_reference: null,
+        prohibited_minutes: {}, requires_override: true, consent_evidenced: false, limits_from_ruleset: true,
+      },
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance)
+    await flushPromises()
+    const limits = wrapper.get('[data-test="overtime-limits-12"]')
+    expect(limits.text()).toContain('payroll.time.overtime.manual_review')
+    expect(limits.text()).toContain('payroll.time.overtime.year_unknown')
+    expect(limits.text()).toContain('payroll.time.overtime.averaging_unknown')
+    expect(limits.find('[data-test="overtime-prohibition-banner"]').exists()).toBe(false)
+    expect(limits.text()).not.toContain('payroll.time.overtime.year_summary')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it.each(['open', 'approved'] as const)('proklik na JMHZ otevře existující potvrzení jen u otevřeného měsíce (%s)', async status => {
+    m.routeQuery = { period: '2026-11', employment: '12', confirm_jmhz: '1' }
+    const item = row(12, 'Syntetická Osoba')
+    item.month.status = status
+    m.timeMonth.mockResolvedValue({ items: [item], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.find('[data-test="jmhz-confirm"]').exists()).toBe(status === 'open')
+    expect(m.approveTimeMonth).not.toHaveBeenCalled()
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
   it('nabídne počet ztěžujících vlivů jen u ztíženého prostředí a pošle vyplněný počet nebo null', async () => {
     m.timeMonth.mockResolvedValue({
       items: [row(12, 'Syntetická osoba A')],
@@ -1099,6 +1197,88 @@ describe('TimeAttendance', () => {
           unworked_hours_occurred: true,
           unworked_total_hours: '16',
           parental_hours: '16',
+          unpaid_leave_hours: null,
+          maternity_hours: null,
+        }),
+      }),
+    )
+    expect(m.approveTimeMonth.mock.calls.at(-1)?.[1].jmhz_work_summary).not.toHaveProperty('holiday_time_off_hours')
+  })
+  it.each(['jmhz-work-month.v11', 'jmhz-work-month.v12'])('confirms paid holiday time off for %s without adding it to totals again', async (version) => {
+    m.timeMonth.mockResolvedValue({
+      items: [{
+        employment: { id: 34, full_name: 'Osoba na rodičovské', code: 'ZAM-45' },
+        month: { status: 'open', row_version: 6 },
+        calendar: null,
+        summary: {
+          fund_minutes: 10_560,
+          planned_minutes: 10_080,
+          actual_minutes: 9_600,
+          difference_minutes: -480,
+          category_minutes: {},
+          incomplete: false,
+        },
+        jmhz_work_summary: {
+          preview: {
+            derivation_version: version,
+            source_snapshot_sha256: 'd'.repeat(64),
+            suggestions: {
+              standard_fund_hours: '168',
+              agreed_fund_hours: '176',
+              weekly_work_hours: '40.00',
+              evidence_days: 30,
+              worked_hours: '160',
+              unworked_hours_occurred: true,
+              work_obstacles_occurred: false,
+              unworked_total_hours: '16',
+              unworked_paid_hours: null,
+              dpn_without_employer_compensation_hours: null,
+              dpn_with_employer_compensation_hours: null,
+              vacation_hours: null,
+              care_hours: null,
+              employee_obstacle_paid_hours: null,
+              employer_obstacle_hours: null,
+              maternity_hours: null,
+              paternity_hours: null,
+              parental_hours: null,
+              holiday_time_off_hours: '16',
+              unpaid_leave_hours: null,
+              unexcused_hours: null,
+              compensatory_time_off_hours: null,
+            },
+            issues: [],
+            requires_unworked_hours_followup: true,
+            absence_types: ['holiday_compensatory_time_off'],
+          },
+          current_revision: null,
+        },
+        shifts: [],
+        entries: [],
+      }],
+    })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+
+    const approve = wrapper.findAll('button')
+      .find(button => button.text() === 'payroll.time.approve')
+    await approve!.trigger('click')
+
+    expect((wrapper.get('[data-test="jmhz-holiday_time_off"]').element as HTMLInputElement)
+      .value).toBe('16')
+    for (const absent of ['maternity', 'paternity', 'unpaid_leave', 'unexcused']) {
+      expect(wrapper.find(`[data-test="jmhz-${absent}"]`).exists()).toBe(false)
+    }
+
+    await wrapper.get('[data-test="jmhz-work-summary-form"]').trigger('submit')
+    await flushPromises()
+
+    expect(m.approveTimeMonth).toHaveBeenCalledWith(expect.any(String),
+      expect.objectContaining({
+        employment_id: 34,
+        jmhz_work_summary: expect.objectContaining({
+          unworked_hours_occurred: true,
+          unworked_total_hours: '16',
+          holiday_time_off_hours: '16',
           unpaid_leave_hours: null,
           maternity_hours: null,
         }),

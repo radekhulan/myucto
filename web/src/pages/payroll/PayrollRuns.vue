@@ -18,6 +18,7 @@ import {
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
+import PayrollPayslipHourlyBreakdown from '@/components/payroll/PayrollPayslipHourlyBreakdown.vue'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
 import PayrollInsuranceBreakdown from '@/components/payroll/PayrollInsuranceBreakdown.vue'
 import PayrollNetPayBreakdown from '@/components/payroll/PayrollNetPayBreakdown.vue'
@@ -760,6 +761,8 @@ function commandHint(run: PayrollRun): string {
 }
 
 const SOURCE_DRIFT_KEYS = [
+  'worked_time_changed',
+  'remuneration_changed',
   'inputs_added',
   'inputs_changed',
   'inputs_removed',
@@ -776,7 +779,7 @@ function sourceDriftLines(run: PayrollRun): { key: string, text: string }[] {
   const drift = run.source_drift
   if (!drift) return []
   return SOURCE_DRIFT_KEYS
-    .filter(key => drift[key] > 0)
+    .filter(key => (drift[key] ?? 0) > 0)
     .map(key => ({ key, text: t(`payroll.runs.source_drift.${key}`, { count: drift[key] }) }))
 }
 
@@ -2399,6 +2402,12 @@ onMounted(load)
             </div>
           </div>
         </section>
+
+        <PayrollPayslipHourlyBreakdown
+          v-if="breakdowns[run.id]?.length"
+          :people="breakdowns[run.id]"
+          :person-names="personNames"
+        />
 
         <PayrollIncomeTaxBreakdown
           v-if="breakdowns[run.id]?.length"

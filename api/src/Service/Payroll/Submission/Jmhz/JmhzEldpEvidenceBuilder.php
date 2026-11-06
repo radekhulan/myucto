@@ -121,6 +121,7 @@ final class JmhzEldpEvidenceBuilder
         // Svátek v jinak pracovní den: mzda se nekrátí nebo náleží náhrada
         // (pokyny MPSV k 10276). Nese ho až souhrn v7/v8.
         'holiday_millihours',
+        'holiday_time_off_millihours',
     ];
 
     /**
@@ -1833,6 +1834,8 @@ final class JmhzEldpEvidenceBuilder
                 self::UNWORKED_FIELDS,
                 self::V3_UNWORKED_FIELDS,
                 ['compensatory_time_off_millihours'],
+                in_array($summaryVersion, PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAY_TIME_OFF, true)
+                    ? PayrollJmhzWorkMonthSummaryBuilder::holidayTimeOffFields() : [],
                 self::carriesHolidays($summaryVersion)
                     ? PayrollJmhzWorkMonthSummaryBuilder::holidayFields()
                     : [],
@@ -2014,7 +2017,7 @@ final class JmhzEldpEvidenceBuilder
                         . ' dovolenou, nemoc, karanténu, ošetřovné, peněžitou pomoc'
                         . ' v mateřství, otcovskou, rodičovskou, neplacené volno,'
                         . ' neomluvenou absenci, překážky v práci a náhradní volno'
-                        . ' za přesčas (to až v pracovním souhrnu schváleném po jeho'
+                        . ' za přesčas nebo svátek (v odpovídající verzi souhrnu po jeho'
                         . ' zavedení).',
                 );
             }
@@ -2081,6 +2084,9 @@ final class JmhzEldpEvidenceBuilder
             : self::ABSENCE_WORK_SUMMARY_FIELDS;
         if (self::carriesCompensatoryTimeOff($summaryVersion)) {
             $fields['compensatory_time_off'] = ['compensatory_time_off_millihours'];
+        }
+        if (in_array($summaryVersion, PayrollJmhzWorkMonthSummaryBuilder::VERSIONS_WITH_HOLIDAY_TIME_OFF, true)) {
+            $fields['holiday_compensatory_time_off'] = PayrollJmhzWorkMonthSummaryBuilder::holidayTimeOffFields();
         }
 
         return $fields;

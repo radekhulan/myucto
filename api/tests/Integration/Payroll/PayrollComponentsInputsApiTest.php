@@ -101,6 +101,70 @@ final class PayrollComponentsInputsApiTest extends TestCase
         }
     }
 
+    public function testMinimumWageClassificationIsReasonedVersionedAndPreservedForLegacyUpdates(): void
+    {
+        $payload = $this->componentPayload('SYN_MINIMUM', '2026-01-01', null, 'premium', 'monetary');
+        $invalid = $this->components->create($this->request('POST', '/api/payroll/components')
+            ->withParsedBody($payload + ['minimum_wage_treatment' => 'included']), new Response());
+        self::assertSame(422, $invalid->getStatusCode());
+        $component = $this->createComponent($payload + [
+            'minimum_wage_treatment' => 'included',
+            'minimum_wage_reason' => 'Prémie za běžnou práci v daném měsíci.',
+        ]);
+        self::assertSame('included', $component['effective_minimum_wage_treatment']);
+        self::assertTrue($component['minimum_wage_treatment_editable']);
+        $id = (int) $component['id'];
+        $legacyUpdate = $this->components->update($this->request('PUT', '/api/payroll/components/' . $id)
+            ->withParsedBody([...$payload, 'name' => 'Přejmenovaná prémie', 'row_version' => $component['row_version']]),
+            new Response(), ['id' => (string) $id]);
+        self::assertSame(200, $legacyUpdate->getStatusCode(), (string) $legacyUpdate->getBody());
+        $updated = $this->json($legacyUpdate)['component'];
+        self::assertSame($component['minimum_wage_reason'], $updated['minimum_wage_reason']);
+        self::assertSame('included', $updated['minimum_wage_treatment']);
+
+        $input = $this->createInput($this->inputPayload($id, 10_000, 'synthetic-minimum'));
+        $approved = $this->inputs->approve($this->request('POST', '/api/payroll/inputs/' . $input['id'] . '/approve')
+            ->withParsedBody(['row_version' => $input['row_version']]), new Response(), ['id' => (string) $input['id']]);
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        $snapshot = $this->json($approved)['input']['component_snapshot_json'];
+        if (is_string($snapshot)) {
+            $snapshot = json_decode($snapshot, true, flags: JSON_THROW_ON_ERROR);
+        }
+        self::assertArrayNotHasKey('minimum_wage_treatment', $snapshot);
+        $change = $this->components->update($this->request('PUT', '/api/payroll/components/' . $id)->withParsedBody([
+            ...$payload, 'row_version' => $updated['row_version'],
+            'minimum_wage_treatment' => 'excluded', 'minimum_wage_reason' => 'Jiný právní titul.',
+        ]), new Response(), ['id' => (string) $id]);
+        self::assertSame(409, $change->getStatusCode(), (string) $change->getBody());
+        $next = $this->createComponent([...$payload, 'valid_from' => '2026-07-01',
+            'minimum_wage_treatment' => 'excluded', 'minimum_wage_reason' => 'Příplatek od července.']);
+        self::assertSame('excluded', $next['effective_minimum_wage_treatment']);
+    }
+
+    public function testMinimumWageCatalogRejectsStatutoryOverrideAndInvalidDecision(): void
+    {
+        $payload = $this->componentPayload('SYN_VALIDATION', '2026-01-01', null, 'premium', 'monetary');
+        foreach ([
+            ['minimum_wage_treatment' => 'unknown'],
+            ['minimum_wage_treatment' => 'included', 'minimum_wage_reason' => str_repeat('x', 501)],
+            ['code' => 'PRIPLATEK_NOCNI', 'minimum_wage_treatment' => 'included', 'minimum_wage_reason' => 'Test.'],
+            ['value_kind' => 'non_monetary', 'minimum_wage_treatment' => 'included', 'minimum_wage_reason' => 'Test.'],
+        ] as $change) {
+            $response = $this->components->create($this->request('POST', '/api/payroll/components')
+                ->withParsedBody([...$payload, ...$change]), new Response());
+            self::assertSame(422, $response->getStatusCode(), (string) $response->getBody());
+        }
+        $component = $this->createComponent($payload);
+        self::assertNull($component['minimum_wage_treatment']);
+        self::assertSame('manual_review', $component['effective_minimum_wage_treatment']);
+        $response = $this->components->list($this->request('GET', '/api/payroll/components'), new Response());
+        self::assertSame(200, $response->getStatusCode());
+        $catalog = $this->json($response)['minimum_wage_classification'];
+        self::assertSame('excluded', $catalog['codes']['MZDA_DOSAZENA_PRESCAS']);
+        self::assertSame('included', $catalog['codes']['DOPLATEK_MINIMALNI_MZDA']);
+        self::assertSame('manual_review', $catalog['fallback']);
+    }
+
     public function testVersionedCatalogPreviewSnapshotAndAnnualLimit(): void
     {
         $catalogResponse = $this->components->list(
@@ -259,8 +323,11 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'CESTOVNI_NAHRADA_LIMIT',
             'CESTOVNI_NAHRADA_NADLIMIT',
             'CESTOVNI_NAHRADA_ZALOHA',
+            'DOPLATEK_MINIMALNI_MZDA',
             'DOPLATEK_MZDY',
+            'MZDA_DOSAZENA_PRESCAS',
             'MZDA_HODINOVA',
+            'MZDA_HODINOVA_ZAKLAD',
             'MZDA_MESICNI',
             'MZDA_UKOLOVA',
             'NAHRADA_271CA',
@@ -272,6 +339,7 @@ final class PayrollComponentsInputsApiTest extends TestCase
             'NAHRADA_MZDY_PREKAZKY_ZAMESTNANEC',
             'NAHRADA_MZDY_PREKAZKY_ZAMESTNAVATEL',
             'NAHRADA_MZDY_SVATEK',
+            'NAHRADA_MZDY_VOLNO_ZA_SVATEK',
             // Nezdaněná náhrada výdajů převzatá z jiného programu (PAMICA J03).
             'NAHRADA_VYDAJU_PREVZATA',
             'NEPENEZNI_PRIJEM',

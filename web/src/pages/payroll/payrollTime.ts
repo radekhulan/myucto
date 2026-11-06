@@ -117,7 +117,7 @@ export function payrollWallTimeToIso(value: string, timezone: string): string {
 }
 
 interface PayrollFundCoverageSource {
-  summary: { fund_minutes: number; actual_minutes: number }
+  summary: { fund_minutes: number; actual_minutes: number | null; worked_duration_units?: number | null }
   jmhz_work_summary?: {
     preview: {
       suggestions: { unworked_total_hours: string | null }
@@ -149,5 +149,8 @@ export function payrollMonthCoversFund(item: PayrollFundCoverageSource): boolean
     + millihoursToMinutes(preview?.holiday_millihours)
     + millihoursToMinutes(preview?.holiday_unpaid_millihours)
 
-  return item.summary.actual_minutes + unworked >= item.summary.fund_minutes
+  if (item.summary.worked_duration_units != null) {
+    return item.summary.worked_duration_units + unworked * 50 >= item.summary.fund_minutes * 50
+  }
+  return item.summary.actual_minutes !== null && item.summary.actual_minutes + unworked >= item.summary.fund_minutes
 }

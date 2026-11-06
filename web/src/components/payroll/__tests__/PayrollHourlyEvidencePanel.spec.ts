@@ -1,0 +1,153 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import type { PayrollHourlyEvidenceResponse } from '@/api/payroll'
+import PayrollHourlyEvidencePanel from '../PayrollHourlyEvidencePanel.vue'
+const m = vi.hoisted(() => ({ get: vi.fn(), save: vi.fn() }))
+vi.mock('@/api/payroll', () => ({ payrollApi: { hourlyEvidence: m.get, saveHourlyEvidence: m.save } }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }) }))
+vi.mock('@/composables/useFormat', () => ({ formatDateTime: (value: string) => value, formatDate: (value: string) => `D(${value})` }))
+const response = (): PayrollHourlyEvidenceResponse => ({ period: '2026-11', employment_id: 12, work_source: 'manual_summary', options: { nonworked_holidays: [], holiday_time_off_entitlements: [], overtime_time_off_entitlements: [], time_off_absences: [] }, can_write: true, row_version: 3, work_source_hash: 'b'.repeat(64), segments_suggested: [{ date_from: '2026-11-01', date_to: '2026-11-30', overtime_duration_units: 0, overtime_mode: 'surcharge' }], evidence: null, history: [], history_offset: 0, history_has_more: false })
+function panel(canWrite = true) { return mount(PayrollHourlyEvidencePanel, { props: { employmentId: 12, period: '2026-11', canWrite } }) }
+async function confirmAll(wrapper: ReturnType<typeof panel>) {
+  for (const kind of ['holidays', 'grants', 'overtime']) await wrapper.get(`[data-test="hourly-evidence-confirm-${kind}"]`).setValue(true)
+}
+describe('PayrollHourlyEvidencePanel', () => {
+  beforeEach(() => { vi.clearAllMocks(); m.get.mockResolvedValue(response()); m.save.mockResolvedValue(response()) })
+  it('uses server scope and optimistic identity, retaining unknown separately from zero', async () => {
+    const wrapper = panel(); await flushPromises()
+    expect(m.get).toHaveBeenCalledWith(12, '2026-11', 0)
+    expect(wrapper.get('[data-test="hourly-evidence-segment"]').text()).toContain('D(2026-11-01) – D(2026-11-30)')
+    await wrapper.get('[data-test="hourly-evidence-night-0"]').setValue('0')
+    await wrapper.get('[data-test="hourly-evidence-weekend-0"]').setValue('0,001')
+    await wrapper.get('[data-test="hourly-evidence-difficulty-0"]').setValue(true)
+    await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Syntetický výkaz příplatků')
+    await confirmAll(wrapper)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).toHaveBeenCalledWith(12, { period: '2026-11', row_version: 3, work_source_hash: 'b'.repeat(64), reason: 'Syntetický výkaz příplatků', nonworked_holidays: [], holiday_time_off_grants: [], overtime_time_off_allocations: [], premium_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30', night_duration_units: 0, weekend_duration_units: 3, holiday_work_duration_units: null, holiday_work_days: [], overtime_work_days: [], difficult_exposures: [] }] })
+  })
+  it('preserves mixed exact saved units and finer saved ranges', async () => {
+    m.get.mockResolvedValue({ ...response(), evidence: { id: 1, revision_no: 2, reason: 'Syntetický doklad', nonworked_holidays: [], holiday_time_off_grants: [], overtime_time_off_allocations: [], premium_segments: [{ date_from: '2026-11-02', date_to: '2026-11-03', night_duration_units: 53, weekend_duration_units: null, holiday_work_duration_units: 0, holiday_work_days: [], overtime_work_days: [], difficult_exposures: null }] } })
+    const wrapper = panel(); await flushPromises()
+    expect((wrapper.get('[data-test="hourly-evidence-night-0"]').element as HTMLInputElement).value).toBe('0:01:03.6')
+    await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Potvrzení přesného podkladu')
+    await confirmAll(wrapper)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save.mock.calls[0][1].premium_segments[0]).toMatchObject({ date_from: '2026-11-02', date_to: '2026-11-03', night_duration_units: 53 })
+  })
+  it('requires real holiday dates and does not infer them from calendar', async () => {
+    const wrapper = panel(); await flushPromises()
+    await wrapper.get('[data-test="hourly-evidence-holiday-0"]').setValue('1:00')
+    await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Syntetický výkaz')
+    await confirmAll(wrapper)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="hourly-evidence-error"]').text()).toContain('holiday_days_required')
+    await wrapper.get('[data-test="hourly-evidence-holiday-0"]').setValue('invalid')
+    expect(wrapper.exists()).toBe(true)
+  })
+  it('does not replace the draft revision token while paging history', async () => {
+    m.get.mockResolvedValueOnce({ ...response(), history_has_more: true }).mockResolvedValue({ ...response(), row_version: 9, work_source_hash: 'c'.repeat(64), history_offset: 20 })
+    const wrapper = panel(); await flushPromises()
+    await wrapper.get('[data-test="hourly-evidence-night-0"]').setValue('0,001')
+    const historyButton = wrapper.findAll('button').find(button => button.text() === 'payroll.hourly_evidence.history')!
+    await historyButton.trigger('click')
+    const nextButton = wrapper.findAll('button').find(button => button.text() === 'common.next')!
+    await nextButton.trigger('click'); await flushPromises()
+    await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Syntetická oprava po historii')
+    await confirmAll(wrapper)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save.mock.calls[0][1]).toMatchObject({ row_version: 3, work_source_hash: 'b'.repeat(64) })
+    expect(m.save.mock.calls[0][1].premium_segments[0].night_duration_units).toBe(3)
+  })
+  it('uses only offered holiday and time off references with exact durations', async () => {
+    m.get.mockResolvedValue({ ...response(), work_source: 'entries', options: {
+      nonworked_holidays: [{ date: '2026-11-17', available_duration_units: 3000 }],
+      holiday_time_off_entitlements: [{ entitlement_id: 7, entitlement_revision: 2, work_date: '2026-09-28', due_on: '2026-12-31', available_duration_units: 3000 }],
+      overtime_time_off_entitlements: [{ work_date: '2026-10-21', available_duration_units: 53 }],
+      time_off_absences: [{ absence_id: 9, date: '2026-11-04', available_duration_units: 3000, kind: 'holiday' }, { absence_id: 10, date: '2026-11-05', available_duration_units: 3000, kind: 'overtime' }],
+    } })
+    const wrapper = panel(); await flushPromises(); await confirmAll(wrapper)
+    expect(wrapper.find('[data-test="hourly-evidence-night-0"]').exists()).toBe(false)
+    await wrapper.get('[data-test="hourly-evidence-add-nonworked"]').trigger('click')
+    const nonworked = wrapper.get('[data-test="hourly-evidence-nonworked-row"]')
+    await nonworked.get('select').setValue('2026-11-17'); await nonworked.get('input').setValue('0,001')
+    await wrapper.get('[data-test="hourly-evidence-add-grant"]').trigger('click')
+    const grant = wrapper.get('[data-test="hourly-evidence-grant-row"]')
+    await grant.findAll('select')[0]!.setValue('7'); await grant.findAll('select')[1]!.setValue('9:2026-11-04'); await grant.get('input').setValue('0:01')
+    await wrapper.get('[data-test="hourly-evidence-add-overtime"]').trigger('click')
+    const overtime = wrapper.get('[data-test="hourly-evidence-overtime-row"]')
+    await overtime.findAll('select')[0]!.setValue('2026-10-21'); await overtime.findAll('select')[1]!.setValue('10:2026-11-05')
+    await overtime.findAll('input')[0]!.setValue('0,001'); await overtime.findAll('input')[1]!.setValue('Syntetická dohoda o volnu')
+    await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Syntetický souhrn svátků a volna')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save.mock.calls[0][1]).toMatchObject({ premium_segments: [], nonworked_holidays: [{ date: '2026-11-17', duration_units: 3 }], holiday_time_off_grants: [{ entitlement_id: 7, entitlement_revision: 2, granted_on: '2026-11-04', duration_units: 50, absence_id: 9 }], overtime_time_off_allocations: [{ work_date: '2026-10-21', granted_on: '2026-11-05', duration_units: 3, absence_id: 10, reference: 'Syntetická dohoda o volnu' }] })
+    expect(m.save.mock.calls[0][1].nonworked_holidays[0]).not.toHaveProperty('scheduled_duration_units')
+  })
+  it('requires explicit confirmation before an empty array can mean no entitlement', async () => {
+    const wrapper = panel(); await flushPromises()
+    await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Syntetický podklad')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="hourly-evidence-error"]').text()).toContain('confirm_holidays')
+  })
+  it('saves a first revision without reason and without confirming automatically assessed zeros', async () => {
+    m.get.mockResolvedValue({ ...response(), row_version: 0, automatic_assessment: { nonworked_holidays: 'no_holiday_on_hourly_day', holiday_time_off_grants: 'no_holiday_time_off_entitlement', overtime_time_off_allocations: 'no_overtime_time_off_entitlement' } })
+    const wrapper = panel(); await flushPromises()
+    expect(wrapper.find('[data-test="hourly-evidence-confirm-holidays"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="hourly-evidence-automatic-holidays"]').text()).toBe('payroll.hourly_evidence.automatic')
+    expect(wrapper.find('[data-test="hourly-evidence-reason-optional"]').exists()).toBe(true)
+    await wrapper.get('[data-test="hourly-evidence-night-0"]').setValue('0')
+    await wrapper.get('[data-test="hourly-evidence-weekend-0"]').setValue('0')
+    await wrapper.get('[data-test="hourly-evidence-holiday-0"]').setValue('0')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).toHaveBeenCalledOnce()
+    expect(m.save.mock.calls[0][1]).not.toHaveProperty('reason')
+    expect(m.save.mock.calls[0][1]).toMatchObject({ row_version: 0, nonworked_holidays: null, holiday_time_off_grants: null, overtime_time_off_allocations: null })
+  })
+  it('keeps explicit assessment where an entitlement can arise and requires reason when overwriting', async () => {
+    m.get.mockResolvedValue({ ...response(), automatic_assessment: { holiday_time_off_grants: 'no_holiday_time_off_entitlement', overtime_time_off_allocations: 'no_overtime_time_off_entitlement' } })
+    const wrapper = panel(); await flushPromises()
+    expect(wrapper.find('[data-test="hourly-evidence-confirm-holidays"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="hourly-evidence-reason-optional"]').exists()).toBe(false)
+    await wrapper.get('[data-test="hourly-evidence-confirm-holidays"]').setValue(true)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="hourly-evidence-error"]').text()).toContain('reason_required')
+    await wrapper.get('[data-test="hourly-evidence-reason"]').setValue('Doplnění podkladu')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save.mock.calls[0][1]).toMatchObject({ nonworked_holidays: [], holiday_time_off_grants: null, overtime_time_off_allocations: null })
+  })
+  it('shows evidence options with application dates and without internal identifiers', async () => {
+    m.get.mockResolvedValue({ ...response(), options: { nonworked_holidays: [], overtime_time_off_entitlements: [],
+      holiday_time_off_entitlements: [{ entitlement_id: 7123, entitlement_revision: 2, work_date: '2026-09-28', due_on: '2026-12-31', available_duration_units: 3000 }],
+      time_off_absences: [{ absence_id: 9456, date: '2026-11-04', available_duration_units: 3000, kind: 'holiday' }] } })
+    const wrapper = panel(); await flushPromises()
+    await wrapper.get('[data-test="hourly-evidence-confirm-grants"]').setValue(true)
+    await wrapper.get('[data-test="hourly-evidence-add-grant"]').trigger('click')
+    const text = wrapper.get('[data-test="hourly-evidence-grant-row"]').text()
+    expect(text).toContain('D(2026-09-28)')
+    expect(text).toContain('D(2026-11-04)')
+    expect(text).not.toContain('#')
+    expect(text).not.toContain('2026-12-31 ')
+  })
+  it('honours the server lock even with local write permission', async () => {
+    m.get.mockResolvedValue({ ...response(), can_write: false })
+    const wrapper = panel(); await flushPromises()
+    expect(wrapper.find('[data-test="hourly-evidence-save"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).not.toHaveBeenCalled()
+  })
+  it('warns about changed policy boundaries without silently allocating stored hours', async () => {
+    m.get.mockResolvedValue({ ...response(), segments_suggested: [{ date_from: '2026-11-01', date_to: '2026-11-15', overtime_duration_units: 0, overtime_mode: 'surcharge' }, { date_from: '2026-11-16', date_to: '2026-11-30', overtime_duration_units: 0, overtime_mode: 'surcharge' }], evidence: { id: 1, revision_no: 1, reason: 'Syntetický původní podklad', nonworked_holidays: [], holiday_time_off_grants: [], overtime_time_off_allocations: [], premium_segments: [{ date_from: '2026-11-01', date_to: '2026-11-30', night_duration_units: 53, weekend_duration_units: null, holiday_work_duration_units: 0, holiday_work_days: [], overtime_work_days: [], difficult_exposures: null }] } })
+    const wrapper = panel(); await flushPromises()
+    expect(wrapper.get('[data-test="hourly-evidence-boundaries-changed"]').text()).toContain('0:01:03.6')
+    expect(wrapper.findAll('[data-test="hourly-evidence-segment"]')).toHaveLength(2)
+    expect((wrapper.get('[data-test="hourly-evidence-night-0"]').element as HTMLInputElement).value).toBe('')
+  })
+  it('does not offer mutations without time write permission', async () => {
+    const wrapper = panel(false); await flushPromises()
+    expect(wrapper.find('[data-test="hourly-evidence-save"]').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(m.save).not.toHaveBeenCalled()
+  })
+})

@@ -1,0 +1,217 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import type { PayrollManualTimeSummaryPayload, PayrollWorkedTime } from '@/api/payroll'
+import PayrollWorkedHoursPanel from '../PayrollWorkedHoursPanel.vue'
+
+const mocks = vi.hoisted(() => ({ save: vi.fn(), approve: vi.fn(), reopen: vi.fn(), restore: vi.fn(), history: vi.fn() }))
+vi.mock('@/api/payroll', () => ({ payrollApi: { saveManualTimeSummary: mocks.save, approveTimeMonth: mocks.approve, reopenTimeMonth: mocks.reopen, restoreTimeWorkSource: mocks.restore, timeHistory: mocks.history } }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => values ? `${key}${JSON.stringify(values)}` : key }) }))
+vi.mock('@/composables/useFormat', () => ({ formatDate: (value: string) => value, formatDateTime: (value: string) => value }))
+
+const evidenceMounts = { count: 0 }
+function evidence(overrides: Partial<PayrollWorkedTime> = {}): PayrollWorkedTime {
+  return { month: null, manual_summary: null, suggested_segments: [{ date_from: '2026-11-01', date_to: '2026-11-15' }, { date_from: '2026-11-16', date_to: '2026-11-30' }], worked_duration_units: null, overtime_duration_units: null, worked_days: null, jmhz_confirmed: false, ...overrides }
+}
+function panel(value = evidence(), props: Record<string, unknown> = {}) {
+  return mount(PayrollWorkedHoursPanel, { props: { employmentId: 12, fullName: 'Syntetická Osoba', period: '2026-11', value, closed: false, canWrite: true, canApprove: true, canReopen: true, ...props }, global: { stubs: {
+    RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
+    PayrollHourlyEvidencePanel: { props: ['employmentId'], setup() { evidenceMounts.count += 1 }, template: '<div data-test="hourly-evidence-stub" />' },
+  } } })
+}
+async function fill(wrapper: ReturnType<typeof panel>, first = '0:01', second = '0,001') {
+  await wrapper.get('[data-test="worked-hours-duration-0"]').setValue(first)
+  await wrapper.get('[data-test="worked-hours-duration-1"]').setValue(second)
+  await wrapper.get('[data-test="worked-hours-reason"]').setValue('Syntetický výkaz')
+}
+
+describe('PayrollWorkedHoursPanel', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    mocks.save.mockImplementation(async (_period: string, payload: PayrollManualTimeSummaryPayload) => ({
+      month: { id: 10, status: 'open', revision_no: 1, row_version: 1, work_source: 'manual_summary' },
+      manual_summary: { id: 20, time_month_revision_no: 1, content_sha256: 'a'.repeat(64), reason: payload.reason, segments: payload.segments },
+    }))
+    mocks.approve.mockResolvedValue({ id: 10, status: 'approved', revision_no: 1, row_version: 2, work_source: 'manual_summary' })
+    mocks.reopen.mockResolvedValue({ id: 10, status: 'open', revision_no: 2, row_version: 3, work_source: 'manual_summary' })
+    mocks.restore.mockResolvedValue({ month: { id: 10, status: 'open', revision_no: 2, row_version: 2, work_source: 'entries' } })
+    mocks.history.mockResolvedValue({ items: [{ period: '2026-11', manual_summary_history_truncated: true, manual_summary_history: [{ id: 1, time_month_revision_no: 1, content_sha256: 'a'.repeat(64), reason: 'Původní syntetický výkaz', created_by: 7, created_by_name: 'Syntetický Uživatel', created_at: '2026-11-30 12:00:00', segments: [{ date_from: '2026-11-01', date_to: '2026-11-30', worked_duration_units: 53, overtime_duration_units: null, worked_days: null }] }] }] })
+  })
+  it('nenabízí odpracované hodiny ani dny z kalendáře a vyžaduje odpracovanou dobu každého úseku', async () => {
+    const wrapper = panel()
+    expect(wrapper.get('[data-test="worked-hours-duration-0"]').element).toHaveProperty('value', '')
+    expect(wrapper.get('[data-test="worked-hours-days-0"]').element).toHaveProperty('value', '')
+    await wrapper.get('[data-test="worked-hours-reason"]').setValue('Podklad')
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="worked-hours-error"]').text()).toContain('duration_invalid')
+  })
+  it('uloží přesně minutu a tisícinu, neodvozuje dny a schválení vede do docházky se souhrnem JMHZ', async () => {
+    const wrapper = panel()
+    await fill(wrapper)
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    await flushPromises()
+    expect(mocks.save).toHaveBeenCalledWith('2026-11', expect.objectContaining({ employment_id: 12, row_version: 0, replace_source: false, segments: [
+      { date_from: '2026-11-01', date_to: '2026-11-15', worked_duration_units: 50, overtime_duration_units: null, worked_days: null },
+      { date_from: '2026-11-16', date_to: '2026-11-30', worked_duration_units: 3, overtime_duration_units: null, worked_days: null },
+    ] }))
+    expect(wrapper.get('[data-test="worked-hours-current"]').text()).toContain('0:01:03.6')
+    const approve = wrapper.get('[data-test="worked-hours-approve"]')
+    expect(JSON.parse(approve.attributes('data-to')!)).toEqual({ name: 'payroll-time', query: { period: '2026-11', employment: '12', confirm_jmhz: '1' } })
+    await approve.trigger('click')
+    await flushPromises()
+    expect(mocks.approve).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="worked-hours-jmhz-pending"]').text()).toContain('jmhz_pending_hint')
+  })
+  it('u desetinného zápisu ukáže převod na hodiny a minuty, aby se 7.30 nespletlo se 7:30', async () => {
+    const wrapper = panel()
+    await wrapper.get('[data-test="worked-hours-duration-0"]').setValue('7.30')
+    expect(wrapper.get('[data-test="worked-hours-duration-preview-0"]').text()).toContain('"value":"7:18"')
+    await wrapper.get('[data-test="worked-hours-duration-0"]').setValue('7:30')
+    expect(wrapper.find('[data-test="worked-hours-duration-preview-0"]').exists()).toBe(false)
+  })
+  it('po uložení hodin znovu načte evidenci příplatků s novým otiskem zdroje', async () => {
+    evidenceMounts.count = 0
+    const wrapper = panel(evidence(), { hourlyEnabled: true, canReadEvidence: true })
+    expect(evidenceMounts.count).toBe(1)
+    await fill(wrapper)
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    await flushPromises()
+    expect(evidenceMounts.count).toBe(2)
+  })
+  it('potvrzenou nulu odliší od nezjištěného přesčasu a dnů', async () => {
+    const wrapper = panel()
+    await fill(wrapper, '0', '0')
+    await wrapper.get('[data-test="worked-hours-overtime-0"]').setValue('0')
+    await wrapper.get('[data-test="worked-hours-days-0"]').setValue('0')
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    expect(mocks.save.mock.calls[0]![1].segments).toMatchObject([{ worked_duration_units: 0, overtime_duration_units: 0, worked_days: 0 }, { worked_duration_units: 0, overtime_duration_units: null, worked_days: null }])
+  })
+  it('nahrazení importu vyžaduje samostatný souhlas a důvod; zdroje nesčítá', async () => {
+    const wrapper = panel(evidence({ month: { id: 10, status: 'open', revision_no: 1, row_version: 7, work_source: 'import_summary' }, worked_duration_units: 90000 }))
+    await fill(wrapper)
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="worked-hours-error"]').text()).toContain('replace_required')
+    await wrapper.get('[data-test="worked-hours-replace"]').setValue(true)
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    expect(mocks.save).toHaveBeenCalledWith('2026-11', expect.objectContaining({ row_version: 7, replace_source: true }))
+    expect(mocks.save.mock.calls[0]![1].segments[0].worked_duration_units).toBe(50)
+  })
+  it('zápisové právo mzdových vstupů samo nepovoluje měnit hodiny', () => {
+    const wrapper = panel(evidence(), { canWrite: false })
+    expect(wrapper.find('[data-test="worked-hours-save"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-duration-0"]').exists()).toBe(false)
+  })
+  it('schválené podklady lze upravit až po oprávněném znovuotevření s důvodem', async () => {
+    const wrapper = panel(evidence({ month: { id: 10, status: 'approved', revision_no: 1, row_version: 2, work_source: 'manual_summary' } }))
+    expect(wrapper.find('[data-test="worked-hours-save"]').exists()).toBe(false)
+    await wrapper.get('[data-test="worked-hours-reopen"]').trigger('click')
+    expect(mocks.reopen).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="worked-hours-reopen-reason"]').setValue('Oprava výkazu')
+    await wrapper.get('[data-test="worked-hours-reopen"]').trigger('click')
+    await flushPromises()
+    expect(mocks.reopen).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 2, reason: 'Oprava výkazu' })
+    expect(wrapper.find('[data-test="worked-hours-save"]').exists()).toBe(true)
+  })
+  it.each([{ canApprove: false }, { canReopen: false }, { closed: true }])('respektuje oprávnění a uzavřený mzdový měsíc %j', props => {
+    const wrapper = panel(evidence({ month: { id: 10, status: 'approved', revision_no: 1, row_version: 2, work_source: 'manual_summary' } }), props)
+    if (props.canReopen === false || props.closed) expect(wrapper.find('[data-test="worked-hours-reopen"]').exists()).toBe(false)
+    expect(wrapper.find('[data-test="worked-hours-approve"]').exists()).toBe(false)
+  })
+  it('z importovaného souhrnu lze přímo obnovit denní záznamy bez mezikroku s ručními hodinami', async () => {
+    const wrapper = panel(evidence({ month: { id: 10, status: 'open', revision_no: 1, row_version: 7, work_source: 'import_summary' }, available_sources: ['entries', 'import_summary'] }))
+    expect(wrapper.get('[data-test="worked-hours-restore-source"]').findAll('option')).toHaveLength(1)
+    await wrapper.get('[data-test="worked-hours-restore-reason"]').setValue('Návrat k denní evidenci')
+    await wrapper.get('[data-test="worked-hours-restore-confirm"]').setValue(true)
+    await wrapper.get('[data-test="worked-hours-restore"]').trigger('click')
+    await flushPromises()
+    expect(mocks.restore).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 7, reason: 'Návrat k denní evidenci', replace_source: true, source: 'entries' })
+    expect(mocks.save).not.toHaveBeenCalled()
+  })
+  it('obnoví původní zdroj jen s výslovným souhlasem a důvodem', async () => {
+    const wrapper = panel()
+    await fill(wrapper)
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="worked-hours-restore-source"]').findAll('option')).toHaveLength(1)
+    await wrapper.get('[data-test="worked-hours-restore-reason"]').setValue('Vrácení k denním záznamům')
+    await wrapper.get('[data-test="worked-hours-restore"]').trigger('click')
+    expect(mocks.restore).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="worked-hours-restore-confirm"]').setValue(true)
+    await wrapper.get('[data-test="worked-hours-restore"]').trigger('click')
+    await flushPromises()
+    expect(mocks.restore).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 1, reason: 'Vrácení k denním záznamům', replace_source: true, source: 'entries' })
+  })
+  it('odmítne přesčas větší než odpracovaná doba a nekonzistentní počet dnů', async () => {
+    const wrapper = panel()
+    await fill(wrapper)
+    await wrapper.get('[data-test="worked-hours-overtime-0"]').setValue('1')
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    expect(mocks.save).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="worked-hours-overtime-0"]').setValue('0')
+    await wrapper.get('[data-test="worked-hours-days-0"]').setValue('0')
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    expect(mocks.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="worked-hours-error"]').text()).toContain('days_invalid')
+  })
+  it('neschválí otevřený ruční podklad bez schvalovacího práva', async () => {
+    const value = evidence({ month: { id: 10, status: 'open', revision_no: 1, row_version: 2, work_source: 'manual_summary' }, manual_summary: { id: 20, time_month_revision_no: 1, content_sha256: 'a'.repeat(64), reason: 'Podklad', segments: [] } })
+    const wrapper = panel(value, { canApprove: false, canWrite: false })
+    expect(wrapper.find('[data-test="worked-hours-approve"]').exists()).toBe(false)
+  })
+  it('při nezměněném smíšeném zlomku zachová původní jednotky', async () => {
+    const value = evidence({ month: { id: 10, status: 'open', revision_no: 1, row_version: 2, work_source: 'manual_summary' }, manual_summary: { id: 20, time_month_revision_no: 1, content_sha256: 'a'.repeat(64), reason: 'Podklad', segments: [{ date_from: '2026-11-01', date_to: '2026-11-15', worked_duration_units: 53, overtime_duration_units: null, worked_days: null }] } })
+    const wrapper = panel(value)
+    expect(wrapper.get('[data-test="worked-hours-duration-0"]').element).toHaveProperty('value', '0:01:03.6')
+    await wrapper.get('[data-test="worked-hours-reason"]').setValue('Oprava podkladu')
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    expect(mocks.save.mock.calls[0]![1].segments[0].worked_duration_units).toBe(53)
+  })
+  it('historii načte až na vyžádání pouze pro vybraný měsíc a ukáže autora, důvod i původní hodiny', async () => {
+    const wrapper = panel()
+    expect(mocks.history).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="worked-hours-history-open"]').trigger('click')
+    await flushPromises()
+    expect(mocks.history).toHaveBeenCalledWith(12, { from: '2026-11', to: '2026-11', limit: 1, manual_summary_offset: 0 })
+    expect(wrapper.get('[data-test="worked-hours-history-revision"]').text()).toContain('Syntetický Uživatel')
+    expect(wrapper.get('[data-test="worked-hours-history-revision"]').text()).toContain('Původní syntetický výkaz')
+    expect(wrapper.get('[data-test="worked-hours-history-revision"]').text()).toContain('0:01:03.6')
+    expect(wrapper.get('[data-test="worked-hours-history"]').text()).toContain('history_truncated')
+    await wrapper.get('[data-test="worked-hours-history-open"]').trigger('click')
+    await wrapper.get('[data-test="worked-hours-history-open"]').trigger('click')
+    expect(mocks.history).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-test="worked-hours-history-older"]').trigger('click')
+    await flushPromises()
+    expect(mocks.history).toHaveBeenLastCalledWith(12, { from: '2026-11', to: '2026-11', limit: 1, manual_summary_offset: 20 })
+    await wrapper.get('[data-test="worked-hours-history-newer"]').trigger('click')
+    await flushPromises()
+    expect(mocks.history).toHaveBeenLastCalledWith(12, { from: '2026-11', to: '2026-11', limit: 1, manual_summary_offset: 0 })
+  })
+  it('zachová jemnější platné členění existujícího souhrnu beze slévání hodin', async () => {
+    const saved = [{ date_from: '2026-11-01', date_to: '2026-11-07', worked_duration_units: 3000, overtime_duration_units: null, worked_days: null }, { date_from: '2026-11-08', date_to: '2026-11-15', worked_duration_units: 6000, overtime_duration_units: null, worked_days: null }]
+    const wrapper = panel(evidence({ manual_summary: { id: 1, time_month_revision_no: 1, content_sha256: 'a'.repeat(64), reason: 'Výkaz', segments: saved } }))
+    expect(wrapper.findAll('[data-test="worked-hours-segment"]')).toHaveLength(2)
+    expect(wrapper.get('[data-test="worked-hours-duration-0"]').element).toHaveProperty('value', '1:00')
+    expect(wrapper.get('[data-test="worked-hours-duration-1"]').element).toHaveProperty('value', '2:00')
+    expect(wrapper.find('[data-test="worked-hours-segmentation-warning"]').exists()).toBe(false)
+    await wrapper.get('[data-test="worked-hours-reason"]').setValue('Kontrola výkazu')
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    expect(mocks.save.mock.calls[0]![1].segments).toEqual(saved)
+  })
+  it('při změně hranic podmínek vyžádá nové rozdělení a původní hodiny viditelně zachová', () => {
+    const wrapper = panel(evidence({ manual_summary: { id: 1, time_month_revision_no: 1, content_sha256: 'a'.repeat(64), reason: 'Výkaz', segments: [{ date_from: '2026-11-01', date_to: '2026-11-30', worked_duration_units: 9000, overtime_duration_units: null, worked_days: null }] } }))
+    expect(wrapper.get('[data-test="worked-hours-segmentation-warning"]').text()).toContain('3:00')
+    expect(wrapper.findAll('[data-test="worked-hours-segment"]')).toHaveLength(2)
+    expect(wrapper.get('[data-test="worked-hours-duration-0"]').element).toHaveProperty('value', '')
+    expect(wrapper.get('[data-test="worked-hours-duration-1"]').element).toHaveProperty('value', '')
+  })
+  it('chybu konfliktu zobrazí a rozepsané hodiny zachová', async () => {
+    mocks.save.mockRejectedValue(new Error('Konflikt verze'))
+    const wrapper = panel()
+    await fill(wrapper)
+    await wrapper.get('[data-test="worked-hours-save"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.find('[data-test="worked-hours-error"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="worked-hours-duration-0"]').element).toHaveProperty('value', '0:01')
+  })
+})

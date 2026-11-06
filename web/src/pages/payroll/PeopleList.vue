@@ -26,6 +26,7 @@ import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
 import Modal from '@/components/ui/Modal.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import RowActionsMenu, { type RowAction } from '@/components/ui/RowActionsMenu.vue'
+import { parsePayrollAmountToMinor } from './payrollComponentsUi'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import { loadDefaultHealthInsurerCode } from '@/composables/usePayrollDefaultInsurer'
@@ -115,6 +116,13 @@ const creatingForId = ref<number | null>(null)
 const savingNew = ref(false)
 const newEmployment = ref<PayrollEmploymentCreatePayload | null>(null)
 const newEmploymentMonthlyGross = ref<number | null>(null)
+const newEmploymentHourlyRate = ref('')
+watch(() => newEmployment.value?.relation_type, (relationType) => {
+  if (newEmployment.value?.terms.remuneration_type === 'hourly' && !['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(relationType ?? '')) {
+    newEmployment.value.terms.remuneration_type = null
+    newEmployment.value.terms.hourly_rate_minor = null
+  }
+})
 const newEmploymentError = ref('')
 const advancedProfileOpen = ref(false)
 const personProfilePanel = ref<InstanceType<typeof PayrollPersonProfilePanel> | null>(null)
@@ -950,6 +958,7 @@ function startCreate(personId: number) {
   // Nabídka se drží v paměti aplikace, takže tohle nestojí požadavek navíc.
   void loadPayrollOffices().then((value) => { offices.value = value })
   newEmploymentMonthlyGross.value = null
+  newEmploymentHourlyRate.value = ''
   newEmploymentError.value = ''
   newEmployment.value = employmentDraft(
     '',
@@ -973,6 +982,10 @@ function employmentDraft(
     meal_entitlement_basis: 'shift',
     monthly_gross_minor: monthlyGrossMinor,
     terms: {
+      remuneration_type: null,
+      remuneration_basis_kind: null,
+      hourly_rate_minor: null,
+      remuneration_basis: null,
       office_id: null,
       effective_from: start,
       contract_signed_on: null,
@@ -1009,14 +1022,34 @@ function employmentDraft(
 
 async function saveNew(personId: number) {
   if (!newEmployment.value || savingNew.value) return
+  const hourly = newEmployment.value.terms.remuneration_type === 'hourly'
+  const hourlyRate = parsePayrollAmountToMinor(newEmploymentHourlyRate.value)
+  if (hourly && (hourlyRate === null || hourlyRate <= 0 || hourlyRate > 1_000_000_000)) {
+    newEmploymentError.value = t('payroll.people.remuneration.hourly_invalid')
+    return
+  }
+  if (hourly && !(newEmployment.value.terms.remuneration_basis ?? '').trim()) {
+    newEmploymentError.value = t('payroll.people.remuneration.basis_required')
+    return
+  }
+  if (hourly && !newEmployment.value.terms.remuneration_basis_kind) {
+    newEmploymentError.value = t('payroll.people.remuneration.basis_kind_required')
+    return
+  }
   savingNew.value = true
   newEmploymentError.value = ''
   try {
     const employment = await payrollApi.createEmployment(personId, {
       ...newEmployment.value,
-      monthly_gross_minor: Number(newEmploymentMonthlyGross.value) > 0
-        ? Number(newEmploymentMonthlyGross.value) * 100
+      monthly_gross_minor: !hourly && Number(newEmploymentMonthlyGross.value) > 0
+        ? Math.round(Number(newEmploymentMonthlyGross.value) * 100)
         : null,
+      terms: {
+        ...newEmployment.value.terms,
+        hourly_rate_minor: hourly ? hourlyRate : null,
+        remuneration_basis_kind: hourly ? newEmployment.value.terms.remuneration_basis_kind : null,
+        remuneration_basis: hourly ? (newEmployment.value.terms.remuneration_basis ?? '').trim() || null : null,
+      },
     })
     const person = details.value[personId]
     if (person) person.employments.push(employment)
@@ -1679,6 +1712,7 @@ onMounted(async () => {
           <label class="min-w-0 text-xs text-neutral-600">
             {{ t('payroll.people.create.monthly_gross') }}
             <input v-model.number="employeeForm.monthly_gross" type="number" min="0" step="1" class="mt-1 w-full min-w-0 rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm">
+            <span class="mt-1 block text-xs text-neutral-500">{{ t('payroll.people.remuneration.edit_on_card') }}</span>
           </label>
           <!--
             Úvazek se dosud dosazoval natvrdo na 40 hodin, takže poloviční
@@ -2027,7 +2061,32 @@ onMounted(async () => {
             />
           </label>
           <label class="text-xs text-neutral-600">{{ t('payroll.people.weekly_hours') }}<input v-model="newEmployment.terms.weekly_hours" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
-          <label class="text-xs text-neutral-600">{{ t('payroll.people.create.monthly_gross') }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="1" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.type') }}
+            <select v-model="newEmployment.terms.remuneration_type" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-type">
+              <option :value="null">{{ t('payroll.people.remuneration.legacy') }}</option>
+              <option value="monthly">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}</option>
+              <option v-if="['employment', 'small_scale_employment', 'dpp', 'dpc'].includes(newEmployment.relation_type)" value="hourly">{{ t(`payroll.people.remuneration.hourly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}</option>
+            </select>
+          </label>
+          <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.hourly_rate') }} <RequiredMark />
+            <input v-model="newEmploymentHourlyRate" inputmode="decimal" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-hourly-rate">
+          </label>
+          <label v-else class="text-xs text-neutral-600">{{ t(`payroll.people.remuneration.monthly_${['dpp', 'dpc'].includes(newEmployment.relation_type) ? 'reward' : 'wage'}`) }}<input v-model.number="newEmploymentMonthlyGross" type="number" min="0" step="0.01" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm"></label>
+          <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.basis_kind') }} <RequiredMark />
+            <select v-model="newEmployment.terms.remuneration_basis_kind" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis-kind">
+              <option :value="null">{{ t('payroll.people.remuneration.basis_kind_empty') }}</option>
+              <option v-for="kind in ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement']" :key="kind" :value="kind">{{ t(`payroll.people.remuneration.basis_kinds.${kind}`) }}</option>
+            </select>
+          </label>
+          <label v-if="newEmployment.terms.remuneration_type === 'hourly'" class="text-xs text-neutral-600">
+            {{ t('payroll.people.remuneration.basis') }} <RequiredMark />
+            <input v-model="newEmployment.terms.remuneration_basis" maxlength="255" class="mt-1 w-full rounded-md border border-neutral-300 bg-surface px-3 py-2 text-sm" data-test="new-employment-remuneration-basis">
+            <span class="mt-1 block">{{ t('payroll.people.remuneration.basis_hint') }}</span>
+          </label>
+          <p v-if="newEmployment.terms.remuneration_type === 'hourly'" class="sm:col-span-2 text-xs text-warning-800" data-test="new-employment-hourly-warning">{{ t('payroll.people.remuneration.calculation_evidence') }}</p>
           <label class="flex items-center gap-2 text-sm text-neutral-700"><input v-model="newEmployment.terms.is_primary" type="checkbox" class="rounded border-neutral-300 text-payroll-600">{{ t('payroll.people.primary') }}</label>
           <!-- Tytéž tři otázky pro ČSSZ jako u zakládání zaměstnance. -->
           <div class="sm:col-span-2 lg:col-span-4">

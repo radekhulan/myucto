@@ -111,6 +111,139 @@ final class PayrollPersonQuickEditApiTest extends TestCase
         }
     }
 
+    public function testQuickEditWithoutMonthlyGrossPreservesHourlyTerms(): void
+    {
+        $profile = $this->profiles->save(
+            $this->supplierId,
+            $this->employeeId,
+            $this->profileValidator->validate($this->profilePayload('Původní Zaměstnanec')),
+            0,
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $employment = $this->employments->create(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentValidator->create([
+                'code' => 'SYN-HOD',
+                'relation_type' => 'employment',
+                'terms' => array_replace($this->termsPayload('2026-01-01', '40'), [
+                    'remuneration_type' => 'hourly',
+                    'hourly_rate_minor' => 20000,
+                    'remuneration_basis_kind' => 'wage_statement',
+                    'remuneration_basis' => 'Syntetický výměr',
+                ]),
+            ]),
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $payload = [
+            'profile' => [
+                ...$this->profilePayload('Původní Zaměstnanec'),
+                'row_version' => $profile['row_version'],
+                'identity_history' => [[
+                    'id' => $profile['identity_history'][0]['id'],
+                    'full_name' => 'Původní Zaměstnanec',
+                    'first_name' => 'Původní',
+                    'last_name' => 'Zaměstnanec',
+                    'effective_from' => '2026-01-01',
+                    'effective_to' => null,
+                ]],
+            ],
+            'employment' => [
+                'id' => $employment['id'],
+                'row_version' => $employment['row_version'],
+                'terms' => $this->termsPayload('2026-08-04', '37.5'),
+            ],
+        ];
+        $response = $this->put($payload);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $terms = $this->json($response)['employment']['terms'][0];
+        self::assertSame('hourly', $terms['remuneration_type']);
+        self::assertSame(20000, $terms['hourly_rate_minor']);
+        self::assertSame('Syntetický výměr', $terms['remuneration_basis']);
+        self::assertNull($terms['monthly_gross_minor']);
+        $saved = $this->json($response);
+        $payload['profile']['row_version'] = $saved['profile']['row_version'];
+        $payload['employment']['row_version'] = $saved['employment']['row_version'];
+        $payload['employment']['terms']['effective_from'] = '2026-09-01';
+        $payload['employment']['monthly_gross_minor'] = null;
+        $denied = $this->put($payload);
+        self::assertSame(422, $denied->getStatusCode(), (string) $denied->getBody());
+        self::assertStringContainsString('U hodinového vztahu', (string) $denied->getBody());
+    }
+
+    /**
+     * Měsíční vztah s převzatým druhem činnosti, který neodpovídá druhu vztahu,
+     * musí jít rychle upravit jako dřív a mzda u něj zůstává povinná.
+     */
+    public function testQuickEditKeepsLegacyMonthlyTermsAndRequiresGross(): void
+    {
+        $profile = $this->profiles->save(
+            $this->supplierId,
+            $this->employeeId,
+            $this->profileValidator->validate($this->profilePayload('Původní Zaměstnanec')),
+            0,
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $employment = $this->employments->create(
+            $this->supplierId,
+            $this->employeeId,
+            $this->employmentValidator->create([
+                'code' => 'SYN-STARY',
+                'relation_type' => 'employment',
+                'monthly_gross_minor' => 4_200_000,
+                'terms' => $this->termsPayload('2026-01-01', '40'),
+            ]),
+            $this->userId,
+            '127.0.0.1',
+            'phpunit',
+        );
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employment_terms
+                SET activity_code = 'T', jmhz_relationship_detail_code = NULL
+              WHERE supplier_id = ? AND employment_id = ?"
+        )->execute([$this->supplierId, $employment['id']]);
+        $payload = [
+            'profile' => [
+                ...$this->profilePayload('Původní Zaměstnanec'),
+                'row_version' => $profile['row_version'],
+                'identity_history' => [[
+                    'id' => $profile['identity_history'][0]['id'],
+                    'full_name' => 'Původní Zaměstnanec',
+                    'first_name' => 'Původní',
+                    'last_name' => 'Zaměstnanec',
+                    'effective_from' => '2026-01-01',
+                    'effective_to' => null,
+                ]],
+            ],
+            'employment' => [
+                'id' => $employment['id'],
+                'row_version' => $employment['row_version'],
+                'terms' => [
+                    ...$this->termsPayload('2026-08-01', '40'),
+                    'activity_code' => 'T',
+                    'jmhz_relationship_detail_code' => null,
+                ],
+            ],
+        ];
+
+        $missingGross = $this->put($payload);
+        self::assertSame(422, $missingGross->getStatusCode(), (string) $missingGross->getBody());
+        self::assertStringContainsString('monthly_gross_minor', (string) $missingGross->getBody());
+
+        $payload['employment']['monthly_gross_minor'] = 4_500_000;
+        $saved = $this->put($payload);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $body = $this->json($saved);
+        self::assertSame(4_500_000, $body['employment']['monthly_gross_minor']);
+        self::assertSame('T', $body['employment']['terms'][0]['activity_code']);
+    }
+
     public function testProfileTermsAndGrossAreSavedAtomicallyAndKeepHistory(): void
     {
         $profile = $this->profiles->save(

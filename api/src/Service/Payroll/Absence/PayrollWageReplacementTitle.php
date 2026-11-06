@@ -38,6 +38,9 @@ enum PayrollWageReplacementTitle: string
     /** § 199 a § 208 ZP — jiná placená překážka v práci. */
     case PaidObstacle = 'paid_obstacle';
 
+    /** § 115 ZP — placené náhradní volno za práci ve svátek. */
+    case HolidayTimeOff = 'holiday_time_off';
+
     /**
      * Doba, za kterou mzda ani náhrada nepřísluší: neplacené volno, náhradní
      * volno za přesčas (§ 114 odst. 1 ZP — přesčas se už zaplatil dosaženou
@@ -57,6 +60,7 @@ enum PayrollWageReplacementTitle: string
             'vacation' => self::Vacation,
             'ocr', 'long_term_care', 'ppm', 'paternity', 'parental' => self::StateBenefit,
             'employee_obstacle', 'employer_obstacle' => self::PaidObstacle,
+            'holiday_compensatory_time_off' => self::HolidayTimeOff,
             'unpaid_leave', 'compensatory_time_off', 'unexcused', 'other',
             'public_function', 'employee_obstacle_unpaid', 'invalid_termination' => self::Unpaid,
             default => null,

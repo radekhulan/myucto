@@ -40,6 +40,8 @@ import {
 } from '@/pages/payroll/payrollTimeGrid'
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
+import PayrollTimeSourceNotice from '@/components/payroll/PayrollTimeSourceNotice.vue'
+import { formatPayrollDuration } from './payrollDuration'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
 import PayrollPeriodScopePicker from '@/components/payroll/PayrollPeriodScopePicker.vue'
@@ -144,6 +146,7 @@ watch([category, recordType], () => { difficultyFactorCount.value = '' })
  */
 const recordBlockedReason = computed<string | null>(() => {
   if (!selected.value) return t('payroll.time.editor.blocked_no_employment')
+  if (recordType.value === 'entry' && !usesDailyEntries(selected.value)) return t('payroll.worked_hours.daily_source_locked')
   if (!startsAt.value || !endsAt.value) return t('payroll.time.editor.blocked_no_range')
   const minutes = recordWallMinutes.value
   if (minutes !== null && minutes <= 0) return t('payroll.time.editor.blocked_end_before_start')
@@ -256,6 +259,7 @@ const approvalRareAbsences = ref<Record<string, string>>({
   unpaid_leave: '',
   unexcused: '',
   compensatory_time_off: '',
+  holiday_time_off: '',
 })
 /*
  * Pracovní volno bez náhrady mzdy (výkon veřejné funkce, neplacená překážka)
@@ -273,6 +277,7 @@ const RARE_ABSENCE_BLOCKS = [
   },
   { key: 'unexcused', absenceTypes: ['unexcused'], suggestion: 'unexcused_hours' },
   { key: 'compensatory_time_off', absenceTypes: ['compensatory_time_off'], suggestion: 'compensatory_time_off_hours' },
+  { key: 'holiday_time_off', absenceTypes: ['holiday_compensatory_time_off'], suggestion: 'holiday_time_off_hours' },
 ] as const
 const approvalNote = ref('')
 const reopenItem = ref<PayrollTimeOverviewItem | null>(null)
@@ -299,6 +304,28 @@ const selected = computed(() =>
  */
 const focusEmploymentId = ref<number | null>(payrollQueryId(route.query, 'employment'))
 const visibleItems = computed(() => overview.value?.items ?? [])
+
+type TimeSourceItem = Pick<PayrollTimeOverviewItem, 'summary' | 'month' | 'hourly_remuneration_in_period'>
+function timeSource(item: TimeSourceItem) {
+  return item.summary.work_source ?? item.month.work_source ?? 'entries'
+}
+/*
+ * Importovaný měsíc měsíčně odměňovaného vztahu zůstává v docházce beze
+ * změny; souhrn importu jako vybraný zdroj hodin platí jen pro hodinový výpočet.
+ */
+function usesDailyEntries(item: TimeSourceItem): boolean {
+  const source = timeSource(item)
+  return source === 'entries' || (source === 'import_summary' && item.hourly_remuneration_in_period !== true)
+}
+function workedTimeLabel(item: TimeSourceItem): string {
+  if (item.summary.worked_duration_units != null) return formatPayrollDuration(item.summary.worked_duration_units)
+  if (!usesDailyEntries(item) || item.summary.actual_minutes === null) return t('payroll.worked_hours.unknown')
+  return formatPayrollMinutes(item.summary.actual_minutes)
+}
+function differenceLabel(minutes: number | null): string {
+  return minutes === null ? t('payroll.worked_hours.unknown') : formatPayrollMinutes(minutes)
+}
+
 /*
  * Zobrazený měsíc zpracoval předchozí program.
  *
@@ -570,6 +597,14 @@ async function load() {
       void router.replace({ query })
       if (canApprove.value && selectableItems.value.length > 0) approveAllOpen()
     }
+    if (payrollQueryValue(route.query, 'confirm_jmhz') === '1' && focusEmploymentId.value !== null) {
+      const focusedMonth = overview.value.items.find(item => item.employment.id === focusEmploymentId.value)
+      if (canApprove.value && focusedMonth?.month.status === 'open') {
+        const { confirm_jmhz: _confirmation, ...query } = route.query
+        void router.replace({ query })
+        openApproval(focusedMonth)
+      }
+    }
     // Předvybraný vztah má přednost před prvním v seznamu — jinak by odkaz
     // z karty zúžil tabulku, ale editor otevřel někoho jiného.
     const focused = focusEmploymentId.value !== null
@@ -664,6 +699,7 @@ interface TimeRecordRow {
   netMinutes: number
   label: string
   tooLong: boolean
+  inactive: boolean
 }
 const editingRecord = ref<{ kind: TimeRecordKind; id: number; rowVersion: number } | null>(null)
 const cancelCandidate = ref<TimeRecordRow | null>(null)
@@ -675,6 +711,7 @@ const selectedRecords = computed<TimeRecordRow[]>(() => {
   const rows: TimeRecordRow[] = [
     ...(item.shifts ?? []).map(shift => ({
       kind: 'shift' as const,
+      inactive: false,
       id: shift.id,
       rowVersion: shift.row_version,
       startsAt: shift.starts_at,
@@ -686,6 +723,7 @@ const selectedRecords = computed<TimeRecordRow[]>(() => {
     })),
     ...(item.entries ?? []).map(entry => ({
       kind: 'entry' as const,
+      inactive: !usesDailyEntries(item),
       id: entry.id,
       rowVersion: entry.row_version,
       startsAt: entry.starts_at,
@@ -710,7 +748,7 @@ function formatRecordRange(row: TimeRecordRow): string {
 
 function editRecord(row: TimeRecordRow) {
   const item = selected.value
-  if (!item) return
+  if (!item || row.inactive) return
   recordType.value = row.kind
   timezone.value = row.timezone
   if (row.kind === 'shift') {
@@ -736,7 +774,7 @@ function editRecord(row: TimeRecordRow) {
 async function confirmCancelRecord() {
   const row = cancelCandidate.value
   const item = selected.value
-  if (!row || !item) return
+  if (!row || !item || row.inactive) return
   saving.value = true
   try {
     await payrollApi.cancelTimeRecord(row.kind === 'shift' ? 'shifts' : 'entries', row.id, {
@@ -971,10 +1009,17 @@ function fillWorkedAsAgreed() {
  * nepřítomnosti, které v měsíci skutečně jsou. Firma bez rodičovské ani
  * neplaceného volna tak nevidí o pole víc než dřív.
  */
+function supportsHolidayTimeOff(preview: PayrollTimeOverviewItem['jmhz_work_summary']['preview'] | undefined): boolean {
+  return preview !== null && preview !== undefined
+    && ['jmhz-work-month.v11', 'jmhz-work-month.v12'].includes(preview.derivation_version)
+    && Object.hasOwn(preview.suggestions, 'holiday_time_off_hours')
+}
+
 const visibleRareAbsenceBlocks = computed(() => {
   const types = approvalItem.value?.jmhz_work_summary.preview?.absence_types ?? []
   return RARE_ABSENCE_BLOCKS.filter(block =>
-    block.absenceTypes.some(type => types.includes(type)))
+    (block.key !== 'holiday_time_off' || supportsHolidayTimeOff(approvalItem.value?.jmhz_work_summary.preview))
+    && block.absenceTypes.some(type => types.includes(type)))
 })
 
 function clearConditionalValues() {
@@ -1075,7 +1120,7 @@ function overtimeWarnings(item: PayrollTimeOverviewItem) {
  * neschválí, takže se panel obarvuje jinak než u pouhého varování.
  */
 function overtimeProhibitions(item: PayrollTimeOverviewItem) {
-  return item.overtime_limits?.findings.filter(finding => finding.requires_override) ?? []
+  return item.overtime_limits?.findings.filter(finding => finding.requires_override && finding.actual_minutes !== null) ?? []
 }
 
 function overtimePanelClass(item: PayrollTimeOverviewItem): string {
@@ -1092,14 +1137,15 @@ function overtimeVisible(item: PayrollTimeOverviewItem): boolean {
   const limits = item.overtime_limits
   if (!limits) return false
   return limits.findings.length > 0
-    || limits.ordered_year_minutes > 0
-    || limits.agreed_year_minutes > 0
+    || (limits.ordered_year_minutes !== null && limits.ordered_year_minutes > 0)
+    || (limits.agreed_year_minutes !== null && limits.agreed_year_minutes > 0)
 }
 
 /** § 93 odst. 4 a 5 — stav klouzavého okna včetně vyňatého náhradního volna. */
 function overtimeAveragingSummary(item: PayrollTimeOverviewItem): string {
   const limits = item.overtime_limits
   if (!limits || limits.averaging_from === null || limits.averaging_to === null) return ''
+  if (limits.averaging_minutes === null) return t('payroll.time.overtime.averaging_unknown')
   const parts = [t('payroll.time.overtime.averaging_summary', {
     weeks: limits.averaging_weeks,
     from: limits.averaging_from,
@@ -1107,7 +1153,7 @@ function overtimeAveragingSummary(item: PayrollTimeOverviewItem): string {
     used: formatPayrollMinutes(limits.averaging_minutes),
     limit: formatPayrollMinutes(limits.averaging_limit_minutes),
   })]
-  if (limits.averaging_compensated_minutes > 0) {
+  if (limits.averaging_compensated_minutes !== null && limits.averaging_compensated_minutes > 0) {
     parts.push(t('payroll.time.overtime.averaging_compensated', {
       minutes: formatPayrollMinutes(limits.averaging_compensated_minutes),
     }))
@@ -1123,6 +1169,7 @@ function overtimeAveragingSummary(item: PayrollTimeOverviewItem): string {
 function overtimeYearSummary(item: PayrollTimeOverviewItem): string {
   const limits = item.overtime_limits
   if (!limits) return ''
+  if (limits.ordered_year_minutes === null) return t('payroll.time.overtime.year_unknown')
   return t('payroll.time.overtime.year_summary', {
     used: formatPayrollMinutes(limits.ordered_year_minutes),
     limit: formatPayrollMinutes(limits.ordered_year_limit_minutes),
@@ -1444,6 +1491,9 @@ async function approve() {
         unpaid_leave_hours: optionalHours(approvalRareAbsences.value.unpaid_leave),
         unexcused_hours: optionalHours(approvalRareAbsences.value.unexcused),
         compensatory_time_off_hours: optionalHours(approvalRareAbsences.value.compensatory_time_off),
+        ...(supportsHolidayTimeOff(item.jmhz_work_summary.preview)
+          ? { holiday_time_off_hours: optionalHours(approvalRareAbsences.value.holiday_time_off) }
+          : {}),
         confirmation_note: approvalNote.value.trim(),
       },
     })
@@ -1707,6 +1757,7 @@ async function approveSelected() {
           unpaid_leave_hours: null,
           unexcused_hours: null,
           compensatory_time_off_hours: null,
+          ...(supportsHolidayTimeOff(preview) ? { holiday_time_off_hours: null } : {}),
           confirmation_note: note,
         },
       })
@@ -1885,7 +1936,7 @@ const gridEditableCategory = computed(() => isWorkedCategory(gridCategory.value)
  * dvacet tisíc. Takhle je to O(1) lookup v mapě.
  */
 const gridRows = computed(() => visibleItems.value.map(item => {
-  const entries = item.entries ?? []
+  const entries = usesDailyEntries(item) ? (item.entries ?? []) : []
   const cells = new Map<string, {
     minutes: number
     locked: boolean
@@ -1900,7 +1951,7 @@ const gridRows = computed(() => visibleItems.value.map(item => {
     const plan = plans.get(day.date)
     cells.set(day.date, {
       minutes: state.minutes,
-      locked: state.locked,
+      locked: !usesDailyEntries(item) || state.locked,
       worked: payrollGridWorkedMinutes(entries, day.date),
       flags: payrollGridFlags(entries, day.date)
         .map(flag => t(`payroll.time.category.${flag}`))
@@ -2015,6 +2066,7 @@ function gridCellTitle(row: PayrollGridRow, date: string): string {
   const parts: string[] = []
   const error = gridCellErrors.value[gridKey(row.item.employment.id, date)]
   if (error) parts.push(error)
+  if (!usesDailyEntries(row.item)) parts.push(t('payroll.worked_hours.daily_source_locked'))
   if (row.item.month.status !== 'open') parts.push(t('payroll.time.grid.month_approved'))
   if (cell?.locked) parts.push(t('payroll.time.grid.problems.locked'))
   if (cell?.holidayName) parts.push(cell.holidayName)
@@ -2103,7 +2155,7 @@ async function fillWorkdays(onlyEmploymentIds?: Set<number>) {
   let withoutCalendar = 0
   const drafts = { ...gridDrafts.value }
   for (const row of gridRows.value) {
-    if (row.item.month.status !== 'open') continue
+    if (row.item.month.status !== 'open' || !usesDailyEntries(row.item)) continue
     if (onlyEmploymentIds && !onlyEmploymentIds.has(row.item.employment.id)) continue
     if (!row.item.calendar) withoutCalendar += 1
     const absent = absenceDays.get(row.item.employment.id)
@@ -2215,7 +2267,7 @@ function previousPeriod(value: string): string {
 async function copyPreviousMonth() {
   if (!canWrite.value) return
   const needed = new Set(gridRows.value
-    .filter(row => row.item.month.status === 'open')
+    .filter(row => row.item.month.status === 'open' && usesDailyEntries(row.item))
     .map(row => row.item.employment.id))
   if (needed.size === 0) return
   gridSaving.value = true
@@ -2230,7 +2282,7 @@ async function copyPreviousMonth() {
       const previous = await payrollApi.timeMonth(source, false, { limit: 200, offset: cursor })
       known = previous.total
       for (const item of previous.items) {
-        if (needed.has(item.employment.id)) found.set(item.employment.id, item.entries ?? [])
+        if (needed.has(item.employment.id)) found.set(item.employment.id, usesDailyEntries(item) ? (item.entries ?? []) : [])
       }
       cursor += previous.items.length
       if (previous.items.length === 0) break
@@ -2301,7 +2353,7 @@ async function saveGrid() {
       const context = new Map(gridRows.value.map(row => [row.item.employment.id, {
         entries: row.entries,
         monthRowVersion: row.item.month.row_version,
-        open: row.item.month.status === 'open',
+        open: row.item.month.status === 'open' && usesDailyEntries(row.item),
       }]))
       const drafts = [...remaining].flatMap(key => {
         const [employmentId, date] = key.split('|')
@@ -2831,6 +2883,7 @@ onMounted(async () => {
           {{ t('payroll.time.records.title', { name: selected?.employment.full_name ?? '' }) }}
         </h3>
         <p class="mt-1 max-w-prose text-xs text-neutral-600">{{ t('payroll.time.records.hint') }}</p>
+        <p v-if="selected && !usesDailyEntries(selected)" class="mt-2 rounded-md border border-warning-200 bg-warning-50 p-3 text-xs text-warning-800" data-test="time-inactive-records-hint">{{ t('payroll.worked_hours.inactive_entries_hint') }}</p>
         <p v-if="selectedRecords.length === 0" class="mt-3 text-sm text-neutral-500">{{ t('payroll.time.records.empty') }}</p>
         <ul v-else class="mt-3 divide-y divide-neutral-200 rounded-lg border border-neutral-200 bg-surface">
           <li
@@ -2843,11 +2896,12 @@ onMounted(async () => {
             <span class="min-w-0">
               <span class="font-medium text-neutral-900">{{ formatRecordRange(row) }}</span>
               <span class="text-neutral-600"> · {{ row.label }} · {{ formatPayrollMinutes(row.netMinutes) }} h</span>
+              <span v-if="row.inactive" class="ml-2 rounded bg-neutral-100 px-1.5 py-0.5 text-xs text-neutral-600" data-test="time-inactive-entry">{{ t('payroll.worked_hours.inactive_entry') }}</span>
               <span v-if="row.tooLong" class="ml-2 inline-flex rounded-full bg-warning-50 px-2 py-0.5 text-xs font-medium text-warning-700" data-test="time-record-too-long">
                 {{ t('payroll.time.records.too_long') }}
               </span>
             </span>
-            <span v-if="canWrite && selected?.month.status === 'open'" class="flex flex-wrap gap-2">
+            <span v-if="canWrite && selected?.month.status === 'open' && !row.inactive" class="flex flex-wrap gap-2">
               <button type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']" :disabled="saving" data-test="time-record-edit" @click="editRecord(row)">
                 <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>
                 {{ t('payroll.time.records.edit') }}
@@ -3057,6 +3111,7 @@ onMounted(async () => {
               <th scope="row" class="sticky left-0 z-10 max-w-[16rem] bg-surface px-3 py-1 text-left font-normal">
                 <span class="block truncate font-medium text-neutral-900">{{ row.item.employment.full_name }}</span>
                 <span class="block font-mono text-[10px] text-neutral-400">{{ row.item.employment.code }}</span>
+                <span v-if="!usesDailyEntries(row.item)" class="block text-[10px] text-payroll-700" data-test="grid-summary-source">{{ t(timeSource(row.item) === 'manual_summary' ? 'payroll.worked_hours.source_manual' : 'payroll.worked_hours.source_import') }}</span>
               </th>
               <td
                 v-for="(day, dayIndex) in gridDays"
@@ -3086,8 +3141,8 @@ onMounted(async () => {
                   aria-hidden="true"
                 >•</span>
               </td>
-              <td class="px-3 py-1 text-right font-medium text-neutral-700">
-                {{ formatPayrollMinutes(gridRowWorked(row)) }}
+              <td class="px-3 py-1 text-right font-medium text-neutral-700" :data-test="`grid-worked-total-${row.item.employment.id}`">
+                {{ usesDailyEntries(row.item) ? formatPayrollMinutes(gridRowWorked(row)) : workedTimeLabel(row.item) }}
               </td>
             </tr>
           </tbody>
@@ -3175,13 +3230,13 @@ onMounted(async () => {
             </tr></thead>
             <tbody class="divide-y divide-neutral-100">
               <tr v-for="month in history.items" :key="month.period" :data-test="`history-row-${month.period}`">
-                <td class="px-4 py-3 font-medium text-neutral-900">{{ formatPeriod(month.period) }}</td>
+                <td class="px-4 py-3 font-medium text-neutral-900">{{ formatPeriod(month.period) }}<PayrollTimeSourceNotice v-if="!usesDailyEntries(month)" :source="timeSource(month)" :manual-summary="month.manual_summary" :employment-id="history.employment.id" :period="month.period" /></td>
                 <td class="px-4 py-3">{{ formatPayrollMinutes(month.summary.fund_minutes) }}</td>
                 <td class="px-4 py-3">{{ formatPayrollMinutes(month.summary.planned_minutes) }}</td>
-                <td class="px-4 py-3">{{ formatPayrollMinutes(month.summary.actual_minutes) }}</td>
-                <td class="px-4 py-3" :class="month.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ formatPayrollMinutes(month.summary.difference_minutes) }}</td>
+                <td class="px-4 py-3" :data-test="`history-actual-${month.period}`">{{ workedTimeLabel(month) }}</td>
+                <td class="px-4 py-3" :class="month.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ differenceLabel(month.summary.difference_minutes) }}</td>
                 <td class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="historyStatusClass(month)">{{ t(`payroll.time.status.${historyStatusKey(month)}`) }}</span></td>
-                <td class="px-4 py-3 text-xs text-neutral-500">{{ t('payroll.time.history.records_value', { shifts: month.shift_count, entries: month.entry_count }) }}</td>
+                <td class="px-4 py-3 text-xs text-neutral-500">{{ t(usesDailyEntries(month) ? 'payroll.time.history.records_value' : 'payroll.worked_hours.inactive_record_counts', { shifts: month.shift_count, entries: month.entry_count }) }}</td>
                 <td class="px-4 py-3">
                   <div class="flex flex-wrap justify-end gap-2">
                     <button
@@ -3202,13 +3257,14 @@ onMounted(async () => {
           <article v-for="month in history.items" :key="month.period" class="rounded-lg border border-neutral-200 p-4">
             <div class="flex flex-wrap items-start justify-between gap-2">
               <h3 class="font-semibold text-neutral-900">{{ formatPeriod(month.period) }}</h3>
+              <PayrollTimeSourceNotice v-if="!usesDailyEntries(month)" :source="timeSource(month)" :manual-summary="month.manual_summary" :employment-id="history.employment.id" :period="month.period" />
               <span class="rounded-full px-2 py-1 text-xs font-medium" :class="historyStatusClass(month)">{{ t(`payroll.time.status.${historyStatusKey(month)}`) }}</span>
             </div>
             <dl class="mt-4 grid grid-cols-2 gap-3 text-sm">
               <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(month.summary.fund_minutes) }}</dd></div>
               <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(month.summary.planned_minutes) }}</dd></div>
-              <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ formatPayrollMinutes(month.summary.actual_minutes) }}</dd></div>
-              <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ formatPayrollMinutes(month.summary.difference_minutes) }}</dd></div>
+              <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ workedTimeLabel(month) }}</dd></div>
+              <div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ differenceLabel(month.summary.difference_minutes) }}</dd></div>
             </dl>
             <div class="mt-4 flex flex-wrap gap-2">
               <button :class="btnOutline('neutral')" @click="openHistoryMonth(month.period)">
@@ -3279,11 +3335,11 @@ onMounted(async () => {
                   @change="toggleSelection(item.employment.id)"
                 >
               </td>
-              <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></td>
+              <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p><PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" /></td>
               <td v-if="tbl.isVisible('fund')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.fund_minutes) }}</td>
               <td v-if="tbl.isVisible('plan')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.planned_minutes) }}</td>
-              <td v-if="tbl.isVisible('actual')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.actual_minutes) }}</td>
-              <td v-if="tbl.isVisible('difference')" class="px-4 py-3" :class="item.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ formatPayrollMinutes(item.summary.difference_minutes) }}</td>
+              <td v-if="tbl.isVisible('actual')" class="px-4 py-3" :data-test="`time-actual-${item.employment.id}`">{{ workedTimeLabel(item) }}</td>
+              <td v-if="tbl.isVisible('difference')" class="px-4 py-3" :class="item.summary.difference_minutes === 0 ? 'text-success-600' : 'text-warning-700'">{{ differenceLabel(item.summary.difference_minutes) }}</td>
               <td v-if="tbl.isVisible('status')" class="px-4 py-3"><span class="rounded-full px-2 py-1 text-xs font-medium" :class="monthStatusClass(item)">{{ t(`payroll.time.status.${monthStatusKey(item)}`) }}</span></td>
               <td class="px-4 py-3"><div class="flex flex-wrap justify-end gap-2">
                 <button v-if="canWrite && item.month.status === 'open'" :class="btnOutline('neutral')" :data-work-entries="item.employment.id" @click="openEditor(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.time.add') }}</button>
@@ -3317,7 +3373,7 @@ onMounted(async () => {
                     :data-test="`overtime-finding-${finding.code}`"
                   >
                     <span class="mr-2 rounded bg-white/70 px-1.5 py-0.5 text-[11px] font-medium">{{ finding.provision }}</span>
-                    {{ finding.message }}
+                    {{ finding.code === 'overtime_manual_summary_review_required' ? t('payroll.time.overtime.manual_review') : finding.message }}
                   </p>
                   <p class="mt-1 text-xs">{{ overtimeYearSummary(item) }} {{ overtimeConsentSummary(item) }}</p>
                   <p
@@ -3350,7 +3406,8 @@ onMounted(async () => {
       <div class="space-y-3 p-4 md:hidden">
         <article v-for="item in visibleItems" :key="item.employment.id" class="rounded-lg border border-neutral-200 p-4">
           <div class="flex flex-wrap items-start justify-between gap-2"><div class="flex items-start gap-3"><input v-if="item.month.status === 'open'" type="checkbox" class="mt-1" :checked="selectedEmploymentIds.includes(item.employment.id)" :aria-label="t('payroll.time.bulk.select', { name: item.employment.full_name })" @change="toggleSelection(item.employment.id)"><div><h2 class="font-semibold text-neutral-900">{{ item.employment.full_name }}</h2><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></div></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="monthStatusClass(item)">{{ t(`payroll.time.status.${monthStatusKey(item)}`) }}</span></div>
-          <dl class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(item.summary.fund_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(item.summary.planned_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ formatPayrollMinutes(item.summary.actual_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ formatPayrollMinutes(item.summary.difference_minutes) }}</dd></div></dl>
+          <PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" />
+          <dl class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(item.summary.fund_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(item.summary.planned_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ workedTimeLabel(item) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ differenceLabel(item.summary.difference_minutes) }}</dd></div></dl>
           <div
             v-if="overtimeVisible(item)"
             class="mt-4 rounded-lg border px-3 py-2 text-sm"
@@ -3367,7 +3424,7 @@ onMounted(async () => {
               class="mt-1 leading-snug"
             >
               <span class="mr-2 rounded bg-white/70 px-1.5 py-0.5 text-[11px] font-medium">{{ finding.provision }}</span>
-              {{ finding.message }}
+              {{ finding.code === 'overtime_manual_summary_review_required' ? t('payroll.time.overtime.manual_review') : finding.message }}
             </p>
             <p class="mt-1 text-xs">{{ overtimeYearSummary(item) }} {{ overtimeConsentSummary(item) }}</p>
             <p v-if="overtimeAveragingSummary(item)" class="mt-1 text-xs">{{ overtimeAveragingSummary(item) }}</p>
@@ -3648,7 +3705,7 @@ onMounted(async () => {
             <li v-for="item in bulkUnderFund" :key="item.employment.id">
               <span class="font-medium">{{ item.employment.full_name }}</span>
               - {{ t('payroll.time.bulk.under_fund.row', {
-                worked: formatPayrollMinutes(item.summary.actual_minutes),
+                worked: workedTimeLabel(item),
                 fund: formatPayrollMinutes(item.summary.fund_minutes),
               }) }}
             </li>

@@ -74,6 +74,9 @@ final class PayrollEnumContractTest extends TestCase
      * @var array<string,string>
      */
     private const UNION_DOMAIN = [
+        // Skupiny hodinové evidence, které server umí posoudit automatickou nulou
+        'payroll.ts::PayrollHourlyAutomaticKey'
+            => 'const:MyInvoice\Service\Payroll\PayrollHourlyEntitlementContextLoader::SELECTION_KEYS',
         // Zaokrouhlení krácené mzdy a náhrad v nastavení zaměstnavatele
         'payroll.ts::PayrollWageRounding'
             => 'enum:MyInvoice\Service\Payroll\Calculation\PayrollWageRounding',
@@ -308,6 +311,10 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollEmploymentStatus'        => 'db:payroll_employments.status',
         'payroll.ts::PayrollRelationType'
             => 'enum:MyInvoice\Service\Payroll\Employment\PayrollRelationType',
+        'payroll.ts::PayrollRemunerationType'
+            => 'db:payroll_employment_terms.remuneration_type',
+        'payroll.ts::PayrollRemunerationBasisKind'
+            => 'db:payroll_employment_terms.remuneration_basis_kind',
         'payroll.ts::PayrollMealEntitlementBasis'    => 'db:payroll_employments.meal_entitlement_basis',
         'payroll.ts::PayrollTaxRegime'               => 'db:payroll_employment_terms.tax_regime',
         // Sloupec z migrace 1403 do výpočtu daně už nevstupuje (§ 6 odst. 4
@@ -364,6 +371,7 @@ final class PayrollEnumContractTest extends TestCase
         'payroll.ts::PayrollRecurringCalculationKind' => 'db:payroll_recurring_components.calculation_kind',
         'payroll.ts::PayrollRecurringAllocationRule'  => 'db:payroll_recurring_components.allocation_rule',
         'payroll.ts::PayrollTimeCategory'          => 'db:payroll_time_entries.category',
+        'payroll.ts::PayrollTimeWorkSource'        => 'db:payroll_time_months.work_source',
         // Zákazy a vyrovnávací období u přesčasu (§ 93 odst. 4, § 240 odst. 3).
         // Sloupce jsou VARCHAR s CHECK, ne ENUM, protože doména je právní výčet
         // vázaný na ustanovení — páruje se proto konstanta domény, ne sloupec.

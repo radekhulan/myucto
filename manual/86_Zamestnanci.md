@@ -214,17 +214,57 @@ uplatnit." Prohlášení poplatníka musí být v daném měsíci **Podepsáno**
    **Platí od**.
 3. Klikněte na **Uložit vše**. Předchozí hodnota zůstane v historii.
 
-**Ostatní podmínky vztahu** (úvazek, účtárna, druh činnosti, režim pojištění,
-místo výkonu práce):
+**Podmínky konkrétního vztahu** (odměňování, úvazek, účtárna, druh činnosti,
+režim pojištění, místo výkonu práce):
 
 1. Otevřete kartu pracovního vztahu a upravte pole v části **Základní údaje**,
    případně ve sbalené části **Další údaje**.
-2. Vyplňte **Účinnost podmínek od**. Nová verze může začít nejdřív den po
-   začátku poslední verze. Pole **Důvod změny** je nepovinné.
+2. Při změně sjednaných podmínek zvolte uložení nové verze a vyplňte
+   **Účinnost podmínek od**. Nová verze může začít nejdřív den po začátku
+   poslední verze. Opravu chybně zadaného údaje bez změny účinnosti ukládejte
+   jako opravu aktuální verze; již zúčtované podmínky tímto způsobem měnit nejde.
 3. Klikněte na **Uložit vše**.
 
 **Jak poznáte, že je hotovo:** V časové ose vztahu přibude nová verze
 podmínek a předchozí je uzavřená dnem před novou účinností.
+
+**Hodinová mzda a odměna.** Na kartě pracovního vztahu zvolte hodinový způsob
+odměňování, zadejte **Sjednanou hodinovou sazbu (Kč/h)**, druh podkladu
+(mzdový výměr, smlouva, dohoda, vnitřní předpis nebo kolektivní smlouva)
+a jeho označení či odkaz. Sazba může mít dvě desetinná
+místa. Každý souběžný vztah má vlastní způsob odměňování a vlastní historii.
+U DPP a DPČ jde o hodinovou odměnu. Sjednaná sazba není průměrným ani
+pravděpodobným hodinovým výdělkem.
+
+Volba **Dosavadní režim (bez výslovného určení)** zachovává původní zpracování, například dohodu
+bez sjednané měsíční částky. Nabízí se jen vztahu, jehož poslední verze podmínek
+způsob odměňování výslovně neurčuje; z měsíčního nebo hodinového odměňování se
+na ni vrátit nelze. Změnu sazby i přechod mezi měsíčním
+a hodinovým odměňováním můžete uložit novou verzí s účinností během
+měsíce. Výpočet vyžaduje jednoznačné rozdělení skutečné práce podle
+účinných sazeb a podklad pro měsíční část; chybějící rozvrh či rozpad
+nelze nahradit odhadem. Před přechodem ukončete aktivní pravidelný předpis
+základní mzdy. Starší verze podmínek musí obsahovat svou vlastní měsíční
+částku, aby vymazání měsíční mzdy při přechodu nezměnilo minulost.
+
+Karta upozorní na sazbu pod hodinovým minimem pro běžný stanovený týden
+podle pravidel platných k datu účinnosti. Kratší sjednaný úvazek toto
+minimum nesnižuje; při kratší zákonné týdenní době může být minimum vyšší.
+Upozornění samo mzdu ani doplatek nevytváří.
+
+Hodinovou mzdu a její jednotlivé nároky zkontrolujete v
+[rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku).
+Výpočet používá přesné schválené hodiny a účinné sazby; příplatkové
+vrstvy se dokládají samostatně. V zásadách lze doložit také režim
+[posouzení minimální mzdy](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek):
+hodinový je výchozí, měsíční pouze pro pracovní poměr s předchozím
+rozhodnutím a platností. Jiná stanovená týdenní doba vyžaduje vlastní
+podklad a není totožná s kratším sjednaným úvazkem. Výpočet obsahuje
+minimum i doplatek. Schválený běh uchová rozpis sazeb, hodin a nároků
+pro výplatní pásku; pozdější změna podmínek jej nepřepočítá.
+Rychlý vstup ani pravidelné složky místo sazby nepoužijí dřívější měsíční mzdu.
+Dosavadní ruční a importované hotové částky bez přepnutí vztahu na nový
+hodinový způsob odměňování zůstávají podporované.
 
 > [!TIP]
 > Změna mzdy ani úvazku se ČSSZ nehlásí, projeví se v nejbližším měsíčním
@@ -894,7 +934,8 @@ A1 i změna A3) jen pětimístnou kategorii. Se čtyřmístným kódem se přihl
 zastaví a vyzve k výběru kategorie; aplikace ji sama nedoplní, protože
 podskupina má obvykle několik kategorií.
 
-Karta vztahu má v hlavním sloupci **Základní údaje** (pravidelná hrubá mzda,
+Karta vztahu má v hlavním sloupci **Základní údaje** (způsob odměňování,
+měsíční částka nebo sjednaná hodinová sazba s podkladem sjednání,
 týdenní pracovní doba, **Úvazek (%)**, **Výjimka z výměry dovolené (týdny)**,
 pravděpodobný výdělek, **Mzdová účtárna**, **Druh činnosti**, **Bližší určení
 pracovněprávního vztahu**, **Režim nároku na stravování**, primární vztah)

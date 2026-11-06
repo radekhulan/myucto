@@ -45,6 +45,13 @@ describe('payrollTime', () => {
     })).toBe(true)
   })
 
+  it('pro pokrytí fondu neplete neznámé minuty s nulou a použije přesné jednotky souhrnu', () => {
+    expect(payrollMonthCoversFund({ summary: { fund_minutes: 1, actual_minutes: null, worked_duration_units: null } })).toBe(false)
+    expect(payrollMonthCoversFund({ summary: { fund_minutes: 1, actual_minutes: null, worked_duration_units: 49 } })).toBe(false)
+    expect(payrollMonthCoversFund({ summary: { fund_minutes: 1, actual_minutes: null, worked_duration_units: 50 } })).toBe(true)
+    expect(payrollMonthCoversFund({ summary: { fund_minutes: 1, actual_minutes: 480, worked_duration_units: 3 } })).toBe(false)
+  })
+
   it('neodešle neplatný ani neexistující lokální čas při přechodu DST', () => {
     expect(payrollWallTimeToIso('není-datum', 'Europe/Prague')).toBe('')
     expect(payrollWallTimeToIso('2026-03-29T02:30', 'Europe/Prague')).toBe('')

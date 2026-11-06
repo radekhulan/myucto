@@ -127,6 +127,9 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
         $expected = [
             'MZDA_MESICNI' => '10329',
             'MZDA_HODINOVA' => '10329',
+            'MZDA_HODINOVA_ZAKLAD' => '10329',
+            'MZDA_DOSAZENA_PRESCAS' => '10329',
+            'DOPLATEK_MINIMALNI_MZDA' => '10329',
             'MZDA_UKOLOVA' => '10329',
             'ODMENA' => '10331',
             'PREMIE_PRIPLATKY' => '10332',
@@ -134,6 +137,7 @@ final class PayrollComponentJmhzMappingDefaultsTest extends TestCase
             'PRIPLATEK_NOCNI' => '10334',
             'PRIPLATEK_VIKEND' => '10335',
             'PRIPLATEK_SVATEK' => '10336',
+            'NAHRADA_MZDY_VOLNO_ZA_SVATEK' => '10339',
             'PRIPLATEK_ZTIZENE_PROSTREDI' => '10332',
             'ODMENA_POHOTOVOST' => '10343',
             // Nepeněžní stravování je součástí hrubé mzdy i obou vyměřovacích

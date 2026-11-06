@@ -21,6 +21,7 @@ namespace MyInvoice\Service\Payroll\Time\Overtime;
  */
 final readonly class OvertimeLimitFinding
 {
+    public const CODE_MANUAL_SUMMARY = 'overtime_manual_summary_review_required';
     public const CODE_WEEKLY = 'overtime_ordered_weekly_limit_exceeded';
     public const CODE_YEARLY = 'overtime_ordered_annual_limit_exceeded';
     public const CODE_AVERAGING = 'overtime_averaging_period_limit_exceeded';
@@ -36,7 +37,7 @@ final readonly class OvertimeLimitFinding
         public string $code,
         public string $severity,
         public string $message,
-        public int $actualMinutes,
+        public ?int $actualMinutes,
         public int $limitMinutes,
         public string $scopeFrom,
         public string $scopeTo,

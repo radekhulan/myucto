@@ -1096,6 +1096,8 @@ final class PayrollRunsAction
                 $e->getMessage(),
                 409,
             );
+        } catch (\MyInvoice\Service\Payroll\PayrollHourlyWageConflictException $e) {
+            return Json::error($response, $e::ERROR_CODE, $e->getMessage(), 409);
         } catch (PayrollRunPaymentsUnsettledException $e) {
             $hasIncomingRefund =
                 $e->coverage['incoming_unsettled_count'] > 0;

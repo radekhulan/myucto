@@ -72,6 +72,7 @@ const saveError = ref('')
 const profile = ref<PayrollPersonProfile | null>(null)
 const person = ref<PayrollPerson | null>(null)
 const primaryEmployment = ref<PayrollEmployment | null>(null)
+const hourlyRemuneration = computed(() => primaryEmployment.value?.terms[0]?.remuneration_type === 'hourly')
 const originalWeeklyHours = ref('')
 const originalMonthlyGrossMinor = ref<number | null>(null)
 const originalEmploymentCode = ref('')
@@ -107,7 +108,7 @@ const writableEmployment = computed(() =>
 const employmentChanged = computed(() => {
   if (!writableEmployment.value) return false
   return normalizeHours(form.weekly_hours) !== normalizeHours(originalWeeklyHours.value)
-    || amountMinor(form.monthly_gross) !== originalMonthlyGrossMinor.value
+    || (!hourlyRemuneration.value && amountMinor(form.monthly_gross) !== originalMonthlyGrossMinor.value)
 })
 /**
  * Osobní číslo se mění přejmenováním vztahu, ne novou verzí podmínek, proto
@@ -494,6 +495,10 @@ function termsPayload(employment: PayrollEmployment): PayrollEmploymentTermsPayl
   const terms = employment.terms[0]
   if (!terms) throw new Error('employment_terms_missing')
   return {
+    remuneration_type: terms.remuneration_type ?? null,
+    remuneration_basis_kind: terms.remuneration_basis_kind ?? null,
+    hourly_rate_minor: terms.hourly_rate_minor ?? null,
+    remuneration_basis: terms.remuneration_basis ?? null,
     office_id: terms.office_id,
     effective_from: form.employment_effective_from,
     contract_signed_on: terms.contract_signed_on,
@@ -590,7 +595,7 @@ async function save(): Promise<boolean> {
         ? {
             id: employment.id,
             row_version: employment.row_version,
-            monthly_gross_minor: amountMinor(form.monthly_gross),
+            ...(!hourlyRemuneration.value ? { monthly_gross_minor: amountMinor(form.monthly_gross) } : {}),
             terms: termsPayload(employment),
           }
         : null,
@@ -694,7 +699,8 @@ onMounted(load)
           {{ t(`payroll.people.relations.${primaryEmployment.relation_type}`) }}
           <template v-if="personalNumberLabel(t, primaryEmployment.code)"> · {{ personalNumberLabel(t, primaryEmployment.code) }}</template>
           <template v-if="form.weekly_hours"> · {{ form.weekly_hours }} {{ t('payroll.people.quick_edit.hours_unit') }}</template>
-          <template v-if="form.monthly_gross"> · {{ form.monthly_gross }} Kč</template>
+          <template v-if="hourlyRemuneration"> · {{ t(`payroll.people.remuneration.hourly_${['dpp', 'dpc'].includes(primaryEmployment.relation_type) ? 'reward' : 'wage'}`) }}: {{ minorToInput(primaryEmployment.terms[0]?.hourly_rate_minor ?? null) }} Kč{{ t('payroll.people.remuneration.per_hour') }}</template>
+          <template v-else-if="form.monthly_gross"> · {{ form.monthly_gross }} Kč</template>
         </dd>
       </div>
     </dl>
@@ -794,10 +800,12 @@ onMounted(load)
                 min="0"
                 :class="[inputClass, 'pr-10']"
                 data-test="monthly-gross"
+                :disabled="hourlyRemuneration"
               >
               <span class="pointer-events-none absolute right-3 top-1/2 mt-0.5 -translate-y-1/2 text-sm text-neutral-500">Kč</span>
             </div>
           </label>
+          <p v-if="hourlyRemuneration" class="text-xs text-neutral-500" data-test="hourly-edit-guidance">{{ t('payroll.people.remuneration.edit_on_card') }}</p>
           <!--
             Datum účinnosti řeší jen ten, kdo úvazek nebo mzdu opravdu mění.
             Trvale viditelné pole nutilo přemýšlet o verzování podmínek i toho,

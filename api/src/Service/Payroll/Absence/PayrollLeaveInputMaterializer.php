@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
+use MyInvoice\Service\Payroll\PayrollHourlyAverageSegments;
 use PDO;
 use PDOException;
 
@@ -98,10 +99,14 @@ final class PayrollLeaveInputMaterializer
         if ($segments === []) {
             return ['absence_id' => $absenceId, 'created' => [], 'replayed' => []];
         }
+        $floor = (new PayrollHourlyAverageSegments($this->db))->forEmployment(
+            $supplierId, PayrollTimeValue::int($absence['employment_id'] ?? null, 'employment_id'), $segments, $averageHourly,
+        );
         $result = LeaveCompensationCalculator::calculate(
             $averageHourly,
             $segments,
             PayrollWageRoundingPolicy::forSupplier($this->db, $supplierId),
+            $floor['averages'],
         );
 
         $created = [];
@@ -122,11 +127,11 @@ final class PayrollLeaveInputMaterializer
                 $replayed[] = ['period_start' => $period, 'input_id' => (int) $existing['id']];
                 continue;
             }
-            $snapshot = CanonicalJson::encode($result->trace(
+            $snapshot = CanonicalJson::encode([...$result->trace(
                 $period,
                 $absenceId,
                 PayrollTimeValue::int($absence['average_snapshot_id'] ?? null, 'average_snapshot_id'),
-            ));
+            ), ...(isset($floor['proofs'][$period]) ? ['hourly_average_floor' => $floor['proofs'][$period], 'hourly_average_segments' => array_values(array_filter($segments, static fn(array $segment): bool => substr((string) $segment['local_date'], 0, 7) === substr($period, 0, 7)))] : [])]);
             $input = $this->inputs->create($supplierId, [
                 'employee_id' => $this->employeeId($supplierId, $absence),
                 'employment_id' => PayrollTimeValue::int(

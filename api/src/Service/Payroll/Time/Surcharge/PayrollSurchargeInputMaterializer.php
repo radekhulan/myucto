@@ -11,6 +11,7 @@ use MyInvoice\Repository\Payroll\PayrollSurchargeClaimRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRounding;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
+use MyInvoice\Service\Payroll\Employment\PayrollHourlyRemuneration;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use PDO;
 use PDOException;
@@ -99,9 +100,14 @@ final class PayrollSurchargeInputMaterializer
              * v něm repozitář nedovolí, takže výpočet dnes vychází na nulu —
              * ale kdyby se do měsíce záznam dostal jinou cestou (nebo výpočet
              * začal číst hodiny ze souhrnu), vyplatil by se týž nárok podruhé.
+             * Ruční souhrn také nahrazuje intervaly, ale nedokládá příplatkové vrstvy.
              * Pojistka stojí na zdroji měsíce, ne na tom, že dnes vyjde nula.
              */
-            if (($month['work_source'] ?? 'entries') === 'import_summary') {
+            $skippedSource = in_array($month['work_source'] ?? 'entries', ['import_summary', 'manual_summary'], true)
+                ? $month['work_source']
+                : ((bool) ($month['hourly_in_period'] ?? false) ? 'hourly_claims' : null);
+            // Hodinový a smíšený měsíc má jediného vlastníka nároků před zmrazením běhu.
+            if ($skippedSource !== null) {
                 $this->commitOwned($pdo, $ownsTransaction);
 
                 return [
@@ -113,9 +119,9 @@ final class PayrollSurchargeInputMaterializer
                     'unchanged_count' => 0,
                     'written' => [],
                     'unchanged' => [],
-                    'requires_manual_review' => false,
+                    'requires_manual_review' => $month['work_source'] === 'manual_summary',
                     'findings' => [],
-                    'skipped_reason' => 'import_summary',
+                    'skipped_reason' => $skippedSource,
                 ];
             }
 
@@ -440,12 +446,16 @@ final class PayrollSurchargeInputMaterializer
         string $periodStart,
     ): array {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT id, status, revision_no, work_source
-               FROM payroll_time_months
-              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?
+            'SELECT month_row.id, month_row.status, month_row.revision_no, month_row.work_source,
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . ' AS hourly_in_period
+               FROM payroll_time_months month_row
+               JOIN payroll_employments employment
+                 ON employment.supplier_id = month_row.supplier_id AND employment.id = month_row.employment_id
+              WHERE month_row.supplier_id = ? AND month_row.employment_id = ? AND month_row.period_start = ?
               FOR UPDATE'
         );
-        $stmt->execute([$supplierId, $employmentId, $periodStart]);
+        $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
+        $stmt->execute([$periodEnd, $periodStart, $supplierId, $employmentId, $periodStart]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
             throw PayrollSurchargeException::of(

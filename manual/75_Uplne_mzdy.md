@@ -10,6 +10,21 @@ dokumenty, platby, zaúčtování a zákonná podání. Kroky jsou oddělené z�
 Výpočet mzdy sám neodešle peníze, nezaúčtuje doklad a nepodá hlášení. Každý
 další krok spouštíte vědomě.
 
+Na [kartě pracovního vztahu](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu)
+lze evidovat také hodinovou mzdu nebo hodinovou odměnu s účinností a historií.
+Hodinový výpočet používá přesně doložené a schválené hodiny, účinné sazby
+a samostatné podklady příplatků. V rychlém měsíčním vstupu ukazuje rozpad
+nároků, zaokrouhlené částky a konkrétní chybějící podklady. Podporuje více
+sazeb i změnu způsobu odměňování během měsíce, pokud lze dobu jednoznačně
+rozdělit. Součástí je posouzení minima a případný doplatek podle
+[doloženého režimu a započitatelných složek](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
+Neúplné podklady minima mají konkrétní důvod blokace. Po schválení
+běhu se hodinové nároky přenášejí do výplatní pásky a navazujících
+výstupů ze zmrazené revize, bez přepočtu podle pozdějších sazeb.
+Původní vztahy zůstávají v neurčeném režimu a jejich zpracování se nemění.
+Hodinový režim se volí výslovně pro konkrétní vztah; hotová importovaná
+částka sama tento režim nezapíná.
+
 ## 75.1 Kdy to potřebujete
 
 Kapitolu otevřete, když:
@@ -26,7 +41,7 @@ Kapitolu otevřete, když:
 | Pořadí | Co udělat | Kde v aplikaci |
 |---:|---|---|
 | 1 | Otevřít správnou firmu a měsíc, zkontrolovat nástupy, výstupy a změny podmínek | `Mzdy → Zaměstnanci`, viz [Zaměstnanci](86_Zamestnanci.md) |
-| 2 | Doplnit absence, dovolenou, docházku a pracovní cesty a **schválit měsíc docházky** | `Mzdy → Absence a dovolená`, `Mzdy → Docházka a směny`, `Mzdy → Cestovní náhrady` |
+| 2 | Doplnit absence, dovolenou a pracovní cesty a **schválit vybraný podklad pracovní doby** (docházku nebo doložený ruční souhrn) | `Mzdy → Absence a dovolená`, `Mzdy → Docházka a směny`, `Mzdy → Cestovní náhrady` |
 | 3 | Zadat mzdy, odměny, náhrady a srážky; pro víc lidí hromadně | `Mzdy → Rychlý měsíční vstup`, `Mzdy → Mzdové složky a vstupy` |
 | 4 | Založit mzdový běh, uzamknout vstupy, spočítat mzdy a projít blokace i varování | `Mzdy → Mzdové běhy` |
 | 5 | Zkontrolovat čisté mzdy, odvody, daně, rozpad po zaměstnancích, srážky a exekuce | `Mzdy → Mzdové běhy`, [Srážky a exekuce](88_Srazky_a_exekuce.md) |

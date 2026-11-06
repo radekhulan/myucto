@@ -29,6 +29,16 @@ Uživatelský návod včetně příkladů dotazů je přímo v aplikaci:
 | Mzdy | čtení osob a výsledků; změna sjednané mzdy od data se zachováním historie, mzdové vstupy, přesčasy a nové absence; schvalování absencí a řízení mzdového běhu, platby, podání a dokumenty jsou zakázané |
 | Hledání | globální vyhledávání napříč odběrateli a doklady |
 
+Mzdové nástroje zachovávají rozlišení sjednání: `remuneration_type: null`
+znamená dosavadní režim, `monthly` výslovné měsíční a `hourly` hodinové
+odměňování. `create_payroll_person` zakládá osobu bez změny tohoto režimu;
+volitelná `monthly_gross` je měsíční částka v korunách. Hodinové podmínky se
+nastavují na kartě vztahu ve webu. `get_payroll_person` vrací sazbu v haléřích
+(`hourly_rate_minor`), její druh podkladu a označení dokumentu v historii
+podmínek. Sazba není průměrný ani pravděpodobný výdělek. `change_payroll_salary`
+mění jen měsíční částku; u hodinového vztahu skončí s vysvětlením a žádný
+zápis neprovede. Režim `null` při změně měsíční mzdy zůstává zachován.
+
 E-shopová a skladová vrstva je naopak **obousměrná** — pohyb je dohledatelný ve
 skladové knize a zaúčtovaný doklad jde stornovat protidokladem, takže je chyba
 napravitelná v aplikaci. Mazání, storno dokladu a uzavření inventury přesto

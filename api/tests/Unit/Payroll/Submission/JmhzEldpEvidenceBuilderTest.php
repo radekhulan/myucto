@@ -1309,6 +1309,35 @@ final class JmhzEldpEvidenceBuilderTest extends TestCase
         self::assertSame(2, $section['section18_days']['omluvenaNepritomnost']);
     }
 
+    public function testPaidHolidayTimeOffIsPaidAndCreatesNoExcludedDays(): void
+    {
+        foreach (['jmhz-work-month.v11', 'jmhz-work-month.v12'] as $version) {
+            $source = $this->absenceSource('holiday_compensatory_time_off', '2026-07-13', '2026-07-14',
+                ['holiday_time_off_millihours' => 16000], paidMillihours: 16000);
+            $input = json_decode($source['revision']['input_snapshot_json'], true, flags: JSON_THROW_ON_ERROR);
+            $summary = &$input['people'][0]['employments'][0]['time_month']['jmhz_work_summary'];
+            $summary['derivation_version'] = $version;
+            $summary['values'] += ['holiday_millihours' => null, 'compensatory_time_off_millihours' => null];
+            if ($version === 'jmhz-work-month.v11') $summary['values']['holiday_unpaid_millihours'] = null;
+            unset($summary);
+            $source = $this->withInput($source, $input);
+            $builder = new JmhzEldpEvidenceBuilder();
+            $section = $builder->build(7, 101, $source, $builder->deriveOrdinaryConfirmation(7, 101, $source))->payload['eldp_sections'][0];
+            self::assertSame(31, $section['insurance_days']);
+            self::assertSame(0, $section['excluded_days_total']);
+            self::assertSame(0, $section['section18_days_total']);
+        }
+    }
+
+    public function testPaidHolidayTimeOffRequiresItsVersionedWorkSummary(): void
+    {
+        $source = $this->absenceSource('holiday_compensatory_time_off', '2026-07-13', '2026-07-14',
+            ['holiday_time_off_millihours' => 16000], paidMillihours: 16000);
+        $this->expectException(JmhzEldpEvidenceException::class);
+        $this->expectExceptionMessage('Ordinary ELDP automaticky podporuje');
+        (new JmhzEldpEvidenceBuilder())->deriveOrdinaryConfirmation(7, 101, $source);
+    }
+
     /**
      * Měsíc jen s nepřítomností bez náhrady mzdy nese 10276 nevyplněné:
      * souhrn nulu navrhuje jako prázdnou a XSD prvek nevyžaduje. Dřív to ELDP

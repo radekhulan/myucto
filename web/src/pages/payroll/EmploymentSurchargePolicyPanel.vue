@@ -46,6 +46,8 @@ import { isAxiosError } from 'axios'
 import { useI18n } from 'vue-i18n'
 import {
   payrollApi,
+  type PayrollHourlyPolicyTerms,
+  type PayrollRelationType,
   type PayrollEmploymentSurchargePolicies,
   type PayrollEmploymentSurchargePolicy,
   type PayrollEmploymentSurchargePolicyPayload,
@@ -62,11 +64,15 @@ import {
   disabledTitle,
   ICONS,
 } from '@/components/ui/buttonStyles'
+import PayrollHourlyPolicyTermsEditor from '@/components/payroll/PayrollHourlyPolicyTermsEditor.vue'
+import PayrollHourlyPolicyTermsSummary from '@/components/payroll/PayrollHourlyPolicyTermsSummary.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 
 const props = defineProps<{
   employmentId: number
   canWrite: boolean
+  hasHourlyTerms?: boolean
+  relationType?: PayrollRelationType
 }>()
 
 const { t } = useI18n()
@@ -151,6 +157,7 @@ function localDate(): string {
 }
 
 interface PolicyForm {
+  hourly_terms: PayrollHourlyPolicyTerms | null
   valid_from: string
   /**
    * Konec platnosti se zadává jen při OPRAVĚ a jen se doplňuje. Prázdno u
@@ -179,6 +186,7 @@ interface PolicyForm {
 
 function newForm(): PolicyForm {
   return {
+    hourly_terms: null,
     valid_from: localDate(),
     valid_to: '',
     overtime_mode: 'surcharge',
@@ -212,6 +220,7 @@ function newForm(): PolicyForm {
 }
 
 const form = ref<PolicyForm>(newForm())
+const hourlyTermsValid = ref(true)
 /** `null` = zakládá se nová verze; číslo = opravuje se otevřená verze s tímhle id. */
 const editingId = ref<number | null>(null)
 const editingVersion = ref(0)
@@ -327,11 +336,13 @@ const valid = computed(() => validFromValid.value
   && factorsValid.value
   && validToValid.value
   && fixedValid.value
-  && standbyValid.value)
+  && standbyValid.value
+  && hourlyTermsValid.value)
 
 const saveDisabled = computed(() => saving.value || !valid.value)
 const saveDisabledReason = computed(() => {
   if (saving.value) return ''
+  if (!hourlyTermsValid.value) return t('payroll.hourly_policy.invalid')
   if (!validFromValid.value) return t('payroll.people.surcharge_policy.valid_from_required')
   if (!factorsValid.value) return t('payroll.people.surcharge_policy.factors_invalid')
   if (!validToValid.value) return t('payroll.people.surcharge_policy.valid_to_invalid')
@@ -387,6 +398,7 @@ function policyFixedMajor(
 
 /** Obsah sjednání z uložené verze do formuláře; účinnost si volající řeší sám. */
 function fillFrom(policy: PayrollEmploymentSurchargePolicy) {
+  form.value.hourly_terms = policy.hourly_terms ?? null
   form.value.overtime_mode = policy.overtime_mode
   form.value.holiday_mode = policy.holiday_mode
   form.value.difficult_environment_factors = policy.difficult_environment_factors === null
@@ -407,6 +419,7 @@ function fillFrom(policy: PayrollEmploymentSurchargePolicy) {
 }
 
 function openNew() {
+  hourlyTermsValid.value = true
   form.value = newForm()
   editingId.value = null
   editingVersion.value = 0
@@ -434,6 +447,7 @@ function openNew() {
 function openEdit() {
   const current = currentPolicy.value
   if (!current) return
+  hourlyTermsValid.value = true
   form.value = newForm()
   form.value.valid_from = current.valid_from
   form.value.valid_to = ''
@@ -502,6 +516,7 @@ async function save() {
       standby_rate_bp: toBasisPoints(form.value.standby_rate),
       agreement_reference: form.value.agreement_reference.trim() || null,
       note: form.value.note.trim() || null,
+      ...((props.hasHourlyTerms || form.value.hourly_terms !== null) ? { hourly_terms: form.value.hourly_terms } : {}),
     }
 
     const policyId = editingId.value
@@ -693,6 +708,8 @@ onMounted(load)
       </p>
     </div>
 
+    <PayrollHourlyPolicyTermsSummary v-if="currentPolicy?.hourly_terms" :value="currentPolicy.hourly_terms" />
+
     <div v-if="historyPolicies.length > 0" class="mt-2">
       <p class="text-xs font-medium text-neutral-700">
         {{ t('payroll.people.surcharge_policy.history_title') }}
@@ -706,6 +723,7 @@ onMounted(load)
           <span class="font-medium text-neutral-800">{{ policy.valid_from }} – {{ policy.valid_to }}</span>
           · {{ t('payroll.people.surcharge_policy.overtime_mode') }}: {{ modeLabel(policy.overtime_mode) }}
           · {{ t('payroll.people.surcharge_policy.holiday_mode') }}: {{ modeLabel(policy.holiday_mode) }}
+          <PayrollHourlyPolicyTermsSummary v-if="policy.hourly_terms" :value="policy.hourly_terms" />
         </li>
       </ul>
     </div>
@@ -918,6 +936,8 @@ onMounted(load)
           >
         </label>
       </div>
+
+      <PayrollHourlyPolicyTermsEditor v-if="hasHourlyTerms || form.hourly_terms" v-model="form.hourly_terms" :disabled="!canWrite || saving" :allow-monthly-assessment="relationType === 'employment' || relationType === 'small_scale_employment'" :allow-overtime="relationType === 'employment' || relationType === 'small_scale_employment'" :allow-premiums="relationType === 'dpp' || relationType === 'dpc'" @valid="hourlyTermsValid = $event" />
 
       <!--
         Varování, ne blokace: podlahu vyhodnocuje server a jeho rozhodnutí se tu

@@ -97,6 +97,74 @@ final class PayrollOvertimeLimitTest extends TestCase
         }
     }
 
+    public function testManualSummaryExcludesArchivedIntervalsAndRequiresReviewAcrossHistory(): void
+    {
+        $this->overtime('2026-05-04', 600);
+        $this->overtime('2026-04-01', 60);
+        $this->db->pdo()->prepare('INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source)
+            VALUES (?, ?, "2026-05-01", "manual_summary")')->execute([$this->supplierId, $this->employmentId]);
+        $repository = new \MyInvoice\Repository\Payroll\PayrollOvertimeRepository($this->db);
+        $segments = $repository->segmentsForMany($this->supplierId, [$this->employmentId], '2026-01-01', '2026-05-31');
+        self::assertCount(1, $segments[$this->employmentId], 'Květnové archivní intervaly se nesmějí dál hodnotit.');
+        $items = $this->time->overview($this->supplierId, '2026-05', false)['items'];
+        $limits = $items[0]['overtime_limits'];
+        self::assertSame('manual_review_required', $limits['evidence_status']);
+        self::assertSame(['2026-05-01'], $limits['manual_summary_periods']);
+        foreach (['ordered_year_minutes', 'agreed_year_minutes', 'averaging_minutes', 'averaging_compensated_minutes'] as $key) {
+            self::assertNull($limits[$key]);
+        }
+        self::assertSame([], $limits['weeks']);
+        self::assertSame('overtime_manual_summary_review_required', $limits['findings'][0]['code']);
+        self::assertNull($limits['findings'][0]['actual_minutes']);
+        self::assertTrue($limits['requires_override']);
+        $findings = $this->overtimeValidations($this->build());
+        self::assertCount(1, $findings);
+        self::assertSame('overtime_manual_summary_review_required', $findings[0]->code);
+        self::assertTrue($findings[0]->requiresOverride);
+        // Ruční květen zasahuje i do ročního/vyrovnávacího okna června.
+        $june = $this->time->overview($this->supplierId, '2026-06', false)['items'][0]['overtime_limits'];
+        self::assertSame('manual_review_required', $june['evidence_status']);
+        // Budoucí ruční zdroj nesmí změnit posouzení předchozího měsíce.
+        $april = $this->time->overview($this->supplierId, '2026-04', false)['items'][0]['overtime_limits'];
+        self::assertArrayNotHasKey('evidence_status', $april);
+        self::assertSame(60, $april['ordered_year_minutes']);
+    }
+
+    public function testOnlyApprovedExplicitZeroManualOvertimeProvesNoOvertime(): void
+    {
+        $this->overtime('2026-05-04', 600);
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source, status, approved_at)
+            VALUES (?, ?, "2026-05-01", "manual_summary", "approved", NOW())')->execute([$this->supplierId, $this->employmentId]);
+        $monthId = (int) $pdo->lastInsertId();
+        foreach ([null, 3000, 0] as $index => $overtime) {
+            $revision = $index + 1;
+            $pdo->prepare('UPDATE payroll_time_months SET revision_no = ? WHERE supplier_id = ? AND id = ?')
+                ->execute([$revision, $this->supplierId, $monthId]);
+            $pdo->prepare('INSERT INTO payroll_time_month_manual_summaries (supplier_id, time_month_id, time_month_revision_no,
+                employment_id, period_start, content_sha256, reason) VALUES (?, ?, ?, ?, "2026-05-01", ?, "Syntetický souhrn")')
+                ->execute([$this->supplierId, $monthId, $revision, $this->employmentId, hash('sha256', 'synthetic-' . $revision)]);
+            $summaryId = (int) $pdo->lastInsertId();
+            $pdo->prepare('INSERT INTO payroll_time_month_manual_segments (supplier_id, summary_id, sequence_no,
+                date_from, date_to, worked_duration_units, overtime_duration_units)
+                VALUES (?, ?, 1, "2026-05-01", "2026-05-31", 30000, ?)')->execute([$this->supplierId, $summaryId, $overtime]);
+            $limits = $this->time->overview($this->supplierId, '2026-05', false)['items'][0]['overtime_limits'];
+            if ($overtime === 0) {
+                self::assertArrayNotHasKey('evidence_status', $limits);
+                self::assertSame(0, $limits['ordered_year_minutes']);
+                self::assertSame([], $limits['findings']);
+                self::assertFalse($limits['requires_override']);
+            } else {
+                self::assertSame('manual_review_required', $limits['evidence_status']);
+                self::assertNull($limits['ordered_year_minutes']);
+            }
+        }
+        $pdo->prepare('UPDATE payroll_time_months SET status = "open", approved_at = NULL WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $monthId]);
+        $draft = $this->time->overview($this->supplierId, '2026-05', false)['items'][0]['overtime_limits'];
+        self::assertSame('manual_review_required', $draft['evidence_status'], 'Koncept nuly ještě není schválený doklad.');
+    }
+
     public function testWeeklyOvertimeOverLimitReachesTheRunAsWarningOnly(): void
     {
         // Pondělí až středa po třech hodinách přesčasu = 9 h v jednom týdnu.

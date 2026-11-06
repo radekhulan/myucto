@@ -43,6 +43,14 @@ Kapitolu otevřete, když:
 
 ## 77.3 Krok za krokem: docházka za měsíc
 
+**Sjednaná hodinová sazba** se eviduje na kartě pracovního vztahu odděleně
+od docházky a průměrného výdělku. Samotná sazba není mzdovou částkou:
+[hodinový výpočet](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku)
+potřebuje také přesně doložené a schválené hodiny. Sazba nenahrazuje
+schválený průměr pro příplatky. Pole **Hodinová sazba**
+v importu docházky znamená pravděpodobný výdělek, nikoli sjednanou sazbu.
+Podrobnosti jsou v [Zaměstnancích](86_Zamestnanci.md#866-krok-za-krokem-zmena-mzdy-uvazku-nebo-podminek-vztahu).
+
 Nahoře na stránce je průvodce **Jak zpracovat měsíc** se třemi kroky:
 odpracovaný čas, nepřítomnosti a schválení měsíce všem.
 
@@ -84,6 +92,21 @@ a období je připravené pro [mzdový běh](80_Mzdove_behy.md).
 > měsíc schvalte a v běhu dejte **Začít znovu a spočítat**.
 
 ## 77.4 Krok za krokem: import docházky z CSV nebo XLSX
+
+Pro doložení hodin bez vedení jednotlivých docházkových záznamů slouží také
+ruční souhrn v [Rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79811-dolozene-odpracovane-hodiny).
+Je to samostatný zdroj za celý měsíc vztahu: jeho hodiny se s docházkou ani
+importem nesčítají. Nahrazení zdroje vyžaduje výslovné potvrzení a důvod,
+schválený měsíc je nutné nejprve znovu otevřít. Schválení ručního souhrnu
+hodin samo nepotvrzuje všechny údaje pro JMHZ.
+
+Ruční souhrn a změnu zdroje lze použít jen u vztahu s hodinovým
+odměňováním v daném měsíci. Přehled měsíce i historie ukazují hodiny
+vybraného zdroje. Při použití souhrnu se původní denní zápisy zobrazují
+odděleně jako nepoužité; denní mřížka je uzamčená. Chcete-li je znovu
+použít, změňte výslovně zdroj podkladů. Importovaný měsíc měsíčně
+odměňovaného vztahu se v přehledu i mřížce zobrazuje jako dosud. Doba, kterou nelze přesně vyjádřit celými minutami,
+se zachová v přesném zápisu a nepřepočítává se na zaokrouhlené minuty.
 
 1. V `Mzdy → Docházka a směny` klikněte na **Import**.
 2. Vyberte soubor CSV nebo XLSX s povinnými sloupci (viz
@@ -444,6 +467,13 @@ rozsahem:
 
 Podkladem jsou odpracované hodiny ze schválené docházky, u firmy po
 přechodu v průběhu roku i hodiny převzaté z předchozího programu.
+Je-li vybraný ruční souhrn, použije se jeho aktuální schválená revize
+včetně zlomků hodin; potvrzení JMHZ pro samotný limit není potřeba.
+Staré nahrazené denní zápisy ani jejich výkazový souhrn se nepřičítají.
+DPP i DPČ se posuzují bez zaokrouhlení přesné doby na minuty: také
+`300,001` hodin DPP už překračuje roční limit. Schválená nula je známý
+součet; neúplný nebo znovu otevřený ruční podklad vyvolá upozornění,
+že rozsah nelze ověřit, místo falešné nuly.
 Překročení se u revize běhu objeví jako upozornění se jménem, obdobím
 a průměrem a s odkazem na podmínky vztahu. Výpočet ani schválení nezastaví:
 odpracovanou práci je potřeba zaplatit, jen je třeba upravit rozsah práce
@@ -470,3 +500,11 @@ v seznamu zaměstnanců ([§ 86](86_Zamestnanci.md)), včetně zobrazení
 - [Zaměstnanci](86_Zamestnanci.md): pracovní vztah, kalendář a zásady
   příplatků.
 - [Nastavení mezd](90_Nastaveni_mezd.md): firemní sazby příplatků.
+
+Placené náhradní volno za práci ve svátek je v potvrzení pracovního
+souhrnu JMHZ samostatné pole, pokud je tato nepřítomnost v měsíci
+skutečně evidovaná a podklad ji podporuje. Zkontrolujte předvyplněné
+hodiny; jsou již součástí neodpracovaných i placených hodin a do
+úhrnů se nepřičítají podruhé. Nezaměňujte je s neplaceným náhradním
+volnem za přesčas. Historické souhrny bez tohoto údaje se zpětně
+nedoplňují.

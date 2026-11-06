@@ -118,6 +118,7 @@ use MyInvoice\Action\Payroll\PayrollDependantAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentAgendaSummaryAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentDimensionAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentSurchargePolicyAction;
+use MyInvoice\Action\Payroll\PayrollHourlyEvidenceAction;
 use MyInvoice\Action\Payroll\PayrollEmploymentTerminationAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceOverviewAction;
 use MyInvoice\Action\Payroll\PayrollHealthInsuranceIsdsAction;
@@ -1585,6 +1586,7 @@ final class Routes
             $g->delete('/people/{id:[0-9]+}', [PayrollPeopleAction::class, 'delete']);
             $g->post('/people/{id:[0-9]+}/employments', [PayrollEmploymentAction::class, 'create']);
             $g->delete('/employments/{id:[0-9]+}', [PayrollEmploymentAction::class, 'delete']);
+            $g->get('/employments/remuneration-options', [PayrollEmploymentAction::class, 'remunerationOptions']);
             $g->get(
                 '/jmhz/employment-evidence-options',
                 [PayrollEmploymentAction::class, 'jmhzEvidenceOptions'],
@@ -2442,6 +2444,8 @@ final class Routes
             $g->post('/time/imports/preview', [PayrollTimeAction::class, 'previewImport']);
             $g->post('/time/imports', [PayrollTimeAction::class, 'import']);
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/approve', [PayrollTimeAction::class, 'approve']);
+            $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/manual-summary', [PayrollTimeAction::class, 'saveManualSummary']);
+            $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/work-source', [PayrollTimeAction::class, 'restoreEntries']);
             $g->post('/time/months/{period:[0-9]{4}-[0-9]{2}}/reopen', [PayrollTimeAction::class, 'reopen']);
             $g->get('/settings/activation', [PayrollActivationAction::class, 'get']);
             $g->put('/settings/activation', [PayrollActivationAction::class, 'put']);
@@ -2504,6 +2508,8 @@ final class Routes
             $g->post('/employments/{id:[0-9]+}/termination/survivors', [PayrollEmploymentTerminationAction::class, 'addSurvivor']);
             $g->delete('/employments/{id:[0-9]+}/termination/survivors/{survivorId:[0-9]+}', [PayrollEmploymentTerminationAction::class, 'removeSurvivor']);
             $g->post('/employments/{id:[0-9]+}/termination/death-tax-assessment', [PayrollEmploymentTerminationAction::class, 'assessDeathTax']);
+            $g->get('/employments/{id:[0-9]+}/hourly-evidence', [PayrollHourlyEvidenceAction::class, 'show']);
+            $g->post('/employments/{id:[0-9]+}/hourly-evidence', [PayrollHourlyEvidenceAction::class, 'save']);
             $g->get(
                 '/employments/{id:[0-9]+}/surcharge-policies',
                 [PayrollEmploymentSurchargePolicyAction::class, 'list'],

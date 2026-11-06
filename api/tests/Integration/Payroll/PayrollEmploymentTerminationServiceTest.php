@@ -349,6 +349,30 @@ final class PayrollEmploymentTerminationServiceTest extends TestCase
      * NAHRADA_MZDY_DOVOLENA (JMHZ 10338) za měsíc skončení; kniha dovolené
      * dostane položku proplacení a zůstatek je nula.
      */
+    public function testHourlyUnusedLeaveUsesCurrentStatutoryAverageFloor(): void
+    {
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", hourly_rate_minor = 13000, monthly_gross_minor = NULL, remuneration_basis_kind = "contract", remuneration_basis = "Syntetický výměr", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $this->employmentId]);
+        $this->averageFor($this->employmentId, 13440);
+        $this->ledger($this->employmentId, 4801, -1);
+        $this->service->save($this->supplierId, $this->employmentId, ['termination_method' => 'agreement', 'legal_ground' => 'organizational'], $this->userId);
+        $plan = $this->service->overview($this->supplierId, $this->employmentId)['leave_settlement'];
+        self::assertSame(14340, $plan['average_hourly_minor']);
+        self::assertSame(1147200, $plan['amount_minor']);
+        $this->service->settleLeave($this->supplierId, $this->employmentId, $this->userId);
+        $input = $this->inputs('NAHRADA_MZDY_DOVOLENA')[0];
+        $proof = json_decode((string) $input['source_snapshot_json'], true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(14340, $proof['hourly_average_floor'][0]['minimum_hourly_minor']);
+        self::assertSame(13440, $proof['hourly_average_floor'][0]['raw_average_hourly_minor']);
+        $overview = $this->service->overview($this->supplierId, $this->employmentId);
+        self::assertSame(14340, $overview['average']['hourly_minor']);
+        self::assertSame(intdiv(3 * $overview['average']['monthly_gross_minor'] + 99, 100) * 100, $overview['severance']['amount_minor']);
+        $created = $this->service->createSeveranceInput($this->supplierId, $this->employmentId, $this->userId);
+        $stmt = $this->db->pdo()->prepare('SELECT source_snapshot_json FROM payroll_termination_floor_proofs WHERE supplier_id = ? AND input_id = ?');
+        $stmt->execute([$this->supplierId, $created['severance']['input']['id']]);
+        $severanceProof = json_decode((string) $stmt->fetchColumn(), true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(14340, $severanceProof['hourly_average_floor']['average_hourly_minor']);
+    }
+
     public function testUnusedLeaveIsPaidOutOnTheLeaveComponent(): void
     {
         $this->averageFor($this->employmentId);
@@ -572,7 +596,7 @@ final class PayrollEmploymentTerminationServiceTest extends TestCase
         return [$employeeId, $employmentId];
     }
 
-    private function averageFor(int $employmentId): void
+    private function averageFor(int $employmentId, int $hourly = 25000): void
     {
         $this->db->pdo()->prepare(
             'INSERT INTO payroll_average_earning_snapshots
@@ -583,12 +607,13 @@ final class PayrollEmploymentTerminationServiceTest extends TestCase
                  support_status, status, ruleset_id, ruleset_hash,
                  input_hash, input_trace, approved_by, approved_at)
              VALUES (?, ?, 2026, 3, 1, "actual", "2026-04-01", "2026-06-30",
-                     6000000, 0, 60000, 63, 25000,
+                     6000000, 0, 60000, 63, ?,
                      "supported", "approved", "cz-2026-average-earning", ?,
                      UNHEX(SHA2("synthetic", 256)), ?, ?, NOW())',
         )->execute([
             $this->supplierId,
             $employmentId,
+            $hourly,
             str_repeat('b', 64),
             json_encode(['rule' => 'synthetic-test-fixture'], JSON_THROW_ON_ERROR),
             $this->userId,

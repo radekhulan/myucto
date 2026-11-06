@@ -27,6 +27,30 @@ final class PayrollJmhzAbsenceHoursDeriverTest extends TestCase
 
     private const PERIOD_END = '2026-10-01';
 
+    public function testHolidayTimeOffIsPaidAndSeparateFromUnpaidOvertimeTimeOff(): void
+    {
+        $absences = $this->repositoryStub();
+        $absences->method('publishedShiftSegments')->willReturn($this->segments(['2026-09-15' => 480]));
+        $derived = $this->derive($absences, [$this->absence(30, 'holiday_compensatory_time_off', '2026-09-15', '2026-09-15')]);
+        self::assertTrue($derived['supported']);
+        self::assertSame(480, $derived['minutes']['holiday_time_off']);
+        self::assertSame(480, $derived['total']);
+        self::assertSame(480, $derived['paid']);
+        $suggested = PayrollJmhzWorkMonthSummaryBuilder::conditionalSuggestions($derived);
+        self::assertSame('8', $suggested['unworked_total_hours']);
+        self::assertSame('8', $suggested['unworked_paid_hours']);
+        self::assertNull($suggested['compensatory_time_off_hours']);
+        self::assertNull($suggested['employee_obstacle_paid_hours']);
+        self::assertArrayNotHasKey('holiday_time_off_hours', $suggested);
+        $current = PayrollJmhzWorkMonthSummaryBuilder::conditionalSuggestions($derived, true);
+        self::assertSame('8', $current['holiday_time_off_hours']);
+        self::assertSame('8', $current['unworked_paid_hours']);
+        $manual = PayrollJmhzWorkMonthSummaryBuilder::importConditionalSuggestions([], ['holiday_time_off' => 480], true);
+        self::assertSame('8', $manual['holiday_time_off_hours']);
+        self::assertSame('8', $manual['unworked_total_hours']);
+        self::assertSame('8', $manual['unworked_paid_hours']);
+    }
+
     public function testVacationFillsTheVacationBlockAndBothSums(): void
     {
         $absences = $this->repository();

@@ -25,14 +25,49 @@ Kapitolu otevřete, když:
 | po spárování plateb a odeslání podání | Uzavřít měsíc | karta běhu, tlačítko **Uzavřít** |
 | když se ve schváleném měsíci najde chyba | Opravná revize | karta běhu, postup v [§ 80.5](#805-krok-za-krokem-oprava-schvaleneho-mesice) |
 
+V rozbaleném detailu vypočteného běhu najdete **Hodinové nároky na
+výplatní pásce**. Vyberte osobu a rozbalte nárok. Uvidíte uložené
+množství, sazby po účinných úsecích, analytické částky a zaokrouhlení.
+Příplatky ukazují doložené procento či základ; smluvní základní sazba
+se za sazbu příplatku nevydává. U doplatku minima úseky dokládají
+hranici, nikoli jednotlivé vyplacené doplatky.
+
+Opravená revize je celkový přepočet včetně dříve zúčtovaných složek;
+její součet není dodatečná výplata. Při opravě páska odlišuje celý
+nárok, již zúčtovanou částku a nynější rozdíl. Detail samostatně ukáže
+také změnu skutečně odpracované doby, včetně záporné opravy nebo nuly. Množství původního nároku nepovažujte za nové odpracované
+hodiny. Jako dříve zúčtovaná se počítá jen částka ze schválené revize;
+obnova podkladů před prvním schválením nahradí dosavadní rozdíl, takže
+první páska ukáže celý nárok jedním řádkem. Výplatní páska i detail přebírají stejnou zmrazenou revizi;
+pozdější změna sazeb je nepřepočítá. Starší revize bez tohoto rozpisu
+jej zpětně nedopočítávají.
+
 ## 80.2 Než začnete
+
+Hodinový výpočet připravuje nároky z přesných schválených hodin, účinných
+sazeb a samostatně doložených příplatků. Při přípravě běhu je převádí
+do vstupů před jejich uzamčením; opakování nevytváří druhou platbu
+za tentýž nárok. Náhled a konkrétní chybějící podklady zkontrolujte
+v [rychlém měsíčním vstupu](79_Rychly_mesicni_vstup.md#79812-vypocet-hodinove-mzdy-a-dolozeni-naroku).
+
+Výpočet obsahuje posouzení minimální mzdy a případný doplatek.
+Neurčené započtení vlastní složky, chybějící rozhodnutí pro měsíční
+posouzení nebo rozporná stanovená doba mají konkrétní blokaci v
+[náhledu minima](79_Rychly_mesicni_vstup.md#79813-minimalni-mzda-a-doplatek).
+Schválení vyžaduje úplné podklady a vyřešené konkrétní kontroly běhu.
+Samotným zadáním hotové částky chybějící podklady nenahradíte. Snímek uchovává sazby, vybranou revizi hodin
+a další podklady nároků; pozdější změnu ohlásí jako změnu podkladů
+a již uzavřenou revizi nepřepíše.
 
 1. **Nastavení mezd.** Zaměstnavatel, zaměstnanci, pracovní vztahy, kalendář,
    absence a mzdové vstupy musí být hotové (průvodce je v
    [Úplné mzdy](75_Uplne_mzdy.md)).
-2. **Schválená docházka.** Měsíc docházky schvalte v `Mzdy → Docházka a směny`
-   ještě před spočítáním mezd. Zákonné příplatky vznikají právě schválením
-   docházky a po uzamčení vstupů se do běhu nedostanou.
+2. **Schválená pracovní doba.** Měsíc denní docházky schvalte v
+   `Mzdy → Docházka a směny` před spočítáním mezd. Doložený ruční souhrn
+   můžete schválit i v rychlém měsíčním vstupu. U hodinového výpočtu
+   samostatně doplňte příplatkové vrstvy a nároky na volno; schválení
+   celkových hodin samo jejich úplnost nepotvrzuje. Příslušné vstupy
+   musejí vzniknout před uzamčením podkladů běhu.
 3. **Schválené vstupy.** Mzdové vstupy a nepřítomnosti měsíce musí být
    schválené. Koncepty můžete schválit hromadně i přímo z běhu.
 4. **Oprávnění.** Potřebujete mzdové oprávnění. Celý běh může dokončit jedna
@@ -219,6 +254,7 @@ hlášením najdete v [Přechodu mezd v průběhu roku](113_Prechod_mezd_v_prube
 |---|---|---|
 | „…: pracovní vztah nemá v období žádnou schválenou mzdovou složku.“ | Vztah je v běhu, ale nemá schválený vstup | Doplňte a schvalte složku v měsíčních vstupech. Trvá-li vztah a příjem v měsíci opravdu nevznikl, zadejte u základní složky 0 Kč; za vztah se podá nulové hlášení JMHZ. Potom **Obnovit podklady**. |
 | Blokace kvůli vstupu v konceptu | Vstup zůstal neschválený | U blokace klikněte na **Schválit vše**, nebo v `Mzdy → Mzdové složky a vstupy` na **Schválit N odpovídajících filtru**. |
+| Hodinový nárok koliduje s ruční částkou, ručním příplatkem nebo jiným během | Pro tutéž mzdu existuje druhý podklad; blokován je jen tento vztah, ostatní se spočítají | Odkazem z blokace odeberte ruční vstup (příplatek) v rychlém měsíčním vstupu, případně dokončete nebo zrušte druhý běh, potom **Obnovit podklady**. |
 | „…: v období je nerozhodnutá nepřítomnost“ | Nepřítomnost v měsíci čeká na schválení nebo u ní běží oprava; platí pro měsíční i hodinovou mzdu | Nepřítomnost schvalte nebo zamítněte (opravu dokončete) v `Mzdy → Absence a dovolená`, potom **Obnovit podklady**. |
 | Schválení odmítnuto s výzvou k obnovení | Od zmrazení snímku přibyly nebo se změnily schválené podklady | Klikněte na **Obnovit podklady** a přepočítejte ([§ 80.6](#806-krok-za-krokem-obnoveni-podkladu-rozpracovaneho-behu)). |
 | Přepočet nevzal opravený údaj | **Přepočítat** počítá ze zmrazeného snímku | **Obnovit podklady**, u schváleného běhu **Vyžádat opravu**. |

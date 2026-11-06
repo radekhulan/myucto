@@ -16,6 +16,19 @@ use PHPUnit\Framework\TestCase;
  */
 final class AverageEarningProbableDerivationTest extends TestCase
 {
+    public function testAgreedHourlyRateIsOnlyAReviewProposalAndDoesNotChangeRecordedEarning(): void
+    {
+        $terms = [['id' => 7, 'effective_from' => '2026-06-01', 'remuneration_type' => 'hourly',
+            'hourly_rate_minor' => 20_000, 'probable_hourly_earning_minor' => 24_000,
+            'probable_earning_rationale' => 'Posouzeny obvyklé měsíční prémie.']];
+        $proposal = Derivation::probableFromAgreedHourlyRate($terms, '2026-04-01');
+        self::assertSame(20_000, $proposal['hourly_minor']);
+        self::assertSame('agreed_hourly_rate', $proposal['source']);
+        self::assertStringContainsString('ostatní obvyklé složky', $proposal['rationale']);
+        self::assertSame(24_000, Derivation::probableFromTerms($terms, '2026-04-01')['hourly_minor']);
+        self::assertNull(Derivation::probableFromAgreedHourlyRate([['remuneration_type' => null, 'hourly_rate_minor' => 20_000]], '2026-04-01'));
+    }
+
     public function testNewEmploymentGetsProbableEarningFromWageAchievedSinceStart(): void
     {
         $decisive = $this->decisiveMonthsWithoutRuns();

@@ -94,4 +94,17 @@ final class PayrollAbsenceApprovalWarningsTest extends TestCase
             'date_to' => '2026-09-20',
         ]));
     }
+
+    public function testManualSourceReportsUnverifiableDaysInsteadOfArchivedEntry(): void
+    {
+        $this->db->pdo()->prepare("INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source) VALUES (?, ?, '2026-09-01', 'manual_summary')")
+            ->execute([$this->supplierId, $this->employmentId]);
+        $this->db->pdo()->prepare("INSERT INTO payroll_time_entries (supplier_id, employment_id, series_key, category, starts_at_utc, ends_at_utc, timezone_name, source_kind, source_hash, status) VALUES (?, ?, ?, 'regular', '2026-09-08 06:00:00', '2026-09-08 14:00:00', 'Europe/Prague', 'manual', ?, 'draft')")
+            ->execute([$this->supplierId, $this->employmentId, bin2hex(random_bytes(16)), random_bytes(32)]);
+        $warnings = (new PayrollAbsenceApprovalWarnings($this->db))->forApproved($this->supplierId, [
+            'employment_id' => $this->employmentId, 'date_from' => '2026-09-08', 'date_to' => '2026-09-08',
+        ]);
+        self::assertSame(['absence_manual_work_time_unverifiable'], array_column($warnings, 'code'));
+        self::assertStringContainsString('neuvádí odpracované dny', $warnings[0]['message']);
+    }
 }

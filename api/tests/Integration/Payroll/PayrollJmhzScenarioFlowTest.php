@@ -62,6 +62,22 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         $this->tearDownPayrollFullFlow();
     }
 
+    public function testHourlyVacationUsesCurrentStatutoryAverageFloor(): void
+    {
+        $person = $this->hire('Syntetická Dovolená', 'female', '1988-04-12');
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employment_terms SET remuneration_type = "hourly", monthly_gross_minor = NULL, hourly_rate_minor = 13000, remuneration_basis_kind = "contract", remuneration_basis = "Syntetické podmínky", weekly_hours = 37.5, workload_basis_points = 10000 WHERE supplier_id = ? AND employment_id = ?')->execute([$this->supplierId, $person['employment_id']]);
+        $pdo->prepare('UPDATE payroll_average_earning_snapshots SET average_hourly_minor = 13440 WHERE supplier_id = ? AND id = ?')->execute([$this->supplierId, $person['average_id']]);
+        $this->createApprovedAbsence($person['employment_id'], 'vacation', '2026-07-20', '2026-07-21', $person['average_id']);
+        $stmt = $pdo->prepare('SELECT input.amount_minor, input.source_snapshot_json FROM payroll_inputs input JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id WHERE input.supplier_id = ? AND input.employment_id = ? AND component.code = "NAHRADA_MZDY_DOVOLENA"');
+        $stmt->execute([$this->supplierId, $person['employment_id']]);
+        $input = $stmt->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame(229500, (int) $input['amount_minor']);
+        $trace = json_decode((string) $input['source_snapshot_json'], true, 512, JSON_THROW_ON_ERROR);
+        self::assertSame(14340, $trace['hourly_average_floor'][0]['average_hourly_minor']);
+        self::assertCount(2, $trace['hourly_average_segments']);
+    }
+
     public function testFullTimeEmployeeWithVacation(): void
     {
         $person = $this->hire('Eva Dovolená', 'female', '1988-04-12');
@@ -263,6 +279,75 @@ final class PayrollJmhzScenarioFlowTest extends TestCase
         self::assertStringContainsString('<form:hodinyNeodpracCelkem>16.000</form:hodinyNeodpracCelkem>', $xml);
         self::assertStringContainsString('<form:hodinyNeodpracNahrada>8.000</form:hodinyNeodpracNahrada>', $xml);
         self::assertStringContainsString('<form:omluvenaNepritomnost>1</form:omluvenaNepritomnost>', $xml);
+    }
+
+    public function testPaidHolidayTimeOffPassesThroughWorkSummaryRunAndJmhzXml(): void
+    {
+        $person = $this->hire('Ilona Sváteční', 'female', '1986-05-05');
+        $this->seedPaidHolidayTimeOffForReporting($person['employment_id']);
+        $response = $this->approveTimeMonth($person['employment_id'], self::PERIOD,
+            self::workdays(self::PERIOD, ['2026-07-24']), ['holiday_time_off_hours' => '8']);
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $revision = $this->db->pdo()->prepare('SELECT derivation_version, holiday_time_off_millihours, unworked_total_millihours, unworked_paid_millihours FROM payroll_jmhz_work_month_revisions WHERE supplier_id = ? AND employment_id = ?');
+        $revision->execute([$this->supplierId, $person['employment_id']]);
+        $values = $revision->fetch(\PDO::FETCH_ASSOC);
+        self::assertSame('jmhz-work-month.v11', $values['derivation_version']);
+        self::assertSame(8000, (int) $values['holiday_time_off_millihours']);
+        self::assertSame(16000, (int) $values['unworked_total_millihours']);
+        self::assertSame(16000, (int) $values['unworked_paid_millihours']);
+        $this->pay($person, 4_200_000);
+        $xml = $this->submission('paid-holiday-time-off');
+        self::assertStringContainsString('<form:hodinyNeodpracCelkem>16.000</form:hodinyNeodpracCelkem>', $xml);
+        self::assertStringContainsString('<form:hodinyNeodpracNahrada>16.000</form:hodinyNeodpracNahrada>', $xml);
+        self::assertStringContainsString('<form:vylouceneDobyCelkem>0</form:vylouceneDobyCelkem>', $xml);
+        self::assertStringNotContainsString('<form:omluvenaNepritomnost>1</form:omluvenaNepritomnost>', $xml);
+        self::assertStringNotContainsString('holiday_time_off', $xml);
+    }
+
+    /** Již schválený placený titul; vznik a vypořádání nároku kryjí hodinové integrační testy. */
+    private function seedPaidHolidayTimeOffForReporting(int $employmentId): void
+    {
+        $this->db->pdo()->prepare('INSERT INTO payroll_absences
+            (supplier_id, employment_id, absence_type, date_from, date_to, timezone_name, compensation_policy, support_status, status, requested_by)
+            VALUES (?, ?, "holiday_compensatory_time_off", "2026-07-24", "2026-07-24", "Europe/Prague", "hourly_claim", "supported", "approved", ?)')
+            ->execute([$this->supplierId, $employmentId, $this->actors[0]]);
+    }
+
+    public function testManualPaidHolidayTimeOffKeepsUnknownDaysAndPassesJmhzXml(): void
+    {
+        $person = $this->hire('Jitka Sváteční', 'female', '1987-06-05');
+        $this->ensureRegularCalendar($person['employment_id']);
+        $this->seedPaidHolidayTimeOffForReporting($person['employment_id']);
+        // Ruční souhrn vzniká jen u hodinových podmínek; měsíční mzda k němu
+        // přijde pozdější změnou podmínek.
+        $terms = $this->db->pdo()->prepare('SELECT remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis, monthly_gross_minor FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?');
+        $terms->execute([$this->supplierId, $person['employment_id']]);
+        $monthlyTerms = $terms->fetch(\PDO::FETCH_ASSOC);
+        $updateTerms = $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = ?, hourly_rate_minor = ?, remuneration_basis_kind = ?, remuneration_basis = ?, monthly_gross_minor = ? WHERE supplier_id = ? AND employment_id = ?');
+        $updateTerms->execute(['hourly', 20000, 'wage_statement', 'Syntetický výměr', null, $this->supplierId, $person['employment_id']]);
+        $saved = $this->time->saveManualSummary($this->request('POST', '/api/payroll/time/months/2026-07/manual-summary')->withParsedBody([
+            'employment_id' => $person['employment_id'], 'row_version' => $this->timeMonthRowVersion($person['employment_id'], self::PERIOD),
+            'reason' => 'Syntetický doložený měsíční podklad', 'replace_source' => false,
+            'segments' => [['date_from' => '2026-07-01', 'date_to' => '2026-07-31', 'worked_duration_units' => 528000,
+                'overtime_duration_units' => 0, 'worked_days' => null]],
+        ]), new Response(), ['period' => self::PERIOD]);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $updateTerms->execute([...array_values($monthlyTerms), $this->supplierId, $person['employment_id']]);
+        $item = $this->timeMonthItem($person['employment_id'], self::PERIOD);
+        $preview = $item['jmhz_work_summary']['preview'];
+        self::assertSame('jmhz-work-month.v12', $preview['derivation_version']);
+        self::assertSame('8', $preview['suggestions']['holiday_time_off_hours']);
+        $approval = $this->time->approve($this->request('POST', '/api/payroll/time/months/2026-07/approve')->withParsedBody([
+            'employment_id' => $person['employment_id'], 'row_version' => $item['month']['row_version'],
+            'jmhz_work_summary' => ['work_obstacles_occurred' => false] + $preview['suggestions']
+                + ['source_snapshot_sha256' => $preview['source_snapshot_sha256']],
+        ]), new Response(), ['period' => self::PERIOD]);
+        self::assertSame(200, $approval->getStatusCode(), (string) $approval->getBody());
+        $this->pay($person, 4_200_000);
+        $xml = $this->submission('manual-paid-holiday-time-off');
+        self::assertStringContainsString('<form:hodinyNeodpracCelkem>8.000</form:hodinyNeodpracCelkem>', $xml);
+        self::assertStringContainsString('<form:hodinyNeodpracNahrada>8.000</form:hodinyNeodpracNahrada>', $xml);
+        self::assertStringContainsString('<form:odpracovaneDny><form:dnyEvidencniStav>31</form:dnyEvidencniStav></form:odpracovaneDny>', $xml);
     }
 
     public function testSickLeaveBeyondEmployerCompensationWindow(): void

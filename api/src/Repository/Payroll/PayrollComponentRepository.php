@@ -8,6 +8,8 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Demo\DemoMode;
 use MyInvoice\Service\Payroll\Component\PayrollComponentDefaults;
 use MyInvoice\Service\Payroll\Component\PayrollComponentJmhzMappingDefaults;
+use MyInvoice\Service\Payroll\Component\PayrollComponentMinimumWage;
+use MyInvoice\Service\Payroll\PayrollHourlyWageComponents;
 use PDO;
 use PDOException;
 
@@ -102,6 +104,7 @@ final class PayrollComponentRepository
      */
     public function create(int $supplierId, array $data): array
     {
+        PayrollComponentMinimumWage::assertValid($data);
         $this->ensureDefaults($supplierId);
         $pdo = $this->db->pdo();
         $ownsTransaction = !$pdo->inTransaction();
@@ -120,8 +123,9 @@ final class PayrollComponentRepository
                      enforcement_treatment, jmhz_treatment,
                      statistics_treatment, accounting_debit_code,
                      accounting_credit_code, annual_limit_minor, exemption_basket,
-                     exemption_basis, valid_from, valid_to, is_active)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+                     exemption_basis, valid_from, valid_to, is_active,
+                     minimum_wage_treatment, minimum_wage_reason)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
             );
             $stmt->execute([
                 $supplierId,
@@ -147,6 +151,8 @@ final class PayrollComponentRepository
                 $data['valid_from'],
                 $data['valid_to'],
                 PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
+                $data['minimum_wage_treatment'] ?? null,
+                $data['minimum_wage_reason'] ?? null,
             ]);
             $id = PayrollTimeValue::int($pdo->lastInsertId(), 'last_insert_id');
             $this->applyDefaultJmhzMappings($supplierId, [$id]);
@@ -186,6 +192,12 @@ final class PayrollComponentRepository
         if ($current === null) {
             return null;
         }
+        foreach (['minimum_wage_treatment', 'minimum_wage_reason'] as $field) {
+            if (!array_key_exists($field, $data)) {
+                $data[$field] = $current[$field] ?? null;
+            }
+        }
+        PayrollComponentMinimumWage::assertValid($data);
         if (PayrollTimeValue::string($current['code'] ?? null, 'code')
                 !== PayrollTimeValue::string($data['code'] ?? null, 'code')
             || PayrollTimeValue::string(
@@ -225,6 +237,7 @@ final class PayrollComponentRepository
                     accounting_credit_code = ?, annual_limit_minor = ?,
                     exemption_basket = ?, exemption_basis = ?,
                     valid_from = ?, valid_to = ?, is_active = ?,
+                    minimum_wage_treatment = ?, minimum_wage_reason = ?,
                     row_version = row_version + 1
               WHERE supplier_id = ? AND id = ? AND row_version = ?'
         );
@@ -252,6 +265,8 @@ final class PayrollComponentRepository
                 $data['valid_from'],
                 $data['valid_to'],
                 PayrollTimeValue::bool($data['is_active'] ?? null, 'is_active') ? 1 : 0,
+                $data['minimum_wage_treatment'],
+                $data['minimum_wage_reason'],
                 $supplierId,
                 $id,
                 $expectedVersion,
@@ -306,9 +321,24 @@ final class PayrollComponentRepository
         // Firma, která má všechny výchozí verze, nepotřebuje desítky INSERT IGNORE na každé
         // čtení číselníku (převod mezd ho čte u každé osoby a měsíce). Jediný dotaz to ověří;
         // chybí-li cokoli, proběhne doplnění celé jako dřív.
-        if ($this->defaultsPresent($supplierId, $versions)) {
+        [$present, $expected] = $this->defaultsPresent($supplierId, $versions);
+        if ($present === $expected) {
             $this->seedDefaultJmhzMappings($supplierId);
             return;
+        }
+        // Vlastní složku zákazníka s kódem, který si nově vyhradil hodinový výpočet,
+        // číselník nepřekryje souběžnou výchozí verzí; výpočet pak hlásí střet sám.
+        $customReserved = $this->customReservedCodes($supplierId, $versions);
+        if ($customReserved !== []) {
+            foreach ($versions as $version) {
+                foreach ($version['rows'] as $row) {
+                    if (isset($customReserved[$row['code']])) $expected--;
+                }
+            }
+            if ($present === $expected) {
+                $this->seedDefaultJmhzMappings($supplierId);
+                return;
+            }
         }
         $insert = $this->db->pdo()->prepare(
             'INSERT IGNORE INTO payroll_component_definitions
@@ -330,6 +360,9 @@ final class PayrollComponentRepository
         );
         foreach ($versions as $index => $version) {
             foreach ($version['rows'] as $row) {
+                if (isset($customReserved[$row['code']])) {
+                    continue;
+                }
                 if ($index > 0) {
                     $closePrevious->execute([
                         $version['valid_from'],
@@ -362,11 +395,12 @@ final class PayrollComponentRepository
     }
 
     /**
-     * Má firma každou výchozí verzi složky (kód + účinnost)?
+     * Kolik výchozích verzí složek (kód + účinnost) firma má a kolik jich je.
      *
      * @param list<array{valid_from:string,rows:list<array<string,mixed>>}> $versions
+     * @return array{0:int,1:int}
      */
-    private function defaultsPresent(int $supplierId, array $versions): bool
+    private function defaultsPresent(int $supplierId, array $versions): array
     {
         $pairs = [];
         $params = [$supplierId];
@@ -378,7 +412,7 @@ final class PayrollComponentRepository
             }
         }
         if ($pairs === []) {
-            return true;
+            return [0, 0];
         }
         $stmt = $this->db->pdo()->prepare(
             'SELECT COUNT(*) FROM payroll_component_definitions
@@ -386,7 +420,47 @@ final class PayrollComponentRepository
         );
         $stmt->execute($params);
 
-        return (int) $stmt->fetchColumn() === count($pairs);
+        return [(int) $stmt->fetchColumn(), count($pairs)];
+    }
+
+    /**
+     * Rezervované kódy hodinového výpočtu, které firma vede jako vlastní složku:
+     * má jejich verzi, ale žádnou s účinností výchozího číselníku.
+     *
+     * @param list<array{valid_from:string,rows:list<array<string,mixed>>}> $versions
+     * @return array<string,true>
+     */
+    private function customReservedCodes(int $supplierId, array $versions): array
+    {
+        $defaultDates = [];
+        foreach ($versions as $version) {
+            foreach ($version['rows'] as $row) {
+                if (PayrollHourlyWageComponents::isReserved((string) $row['code'])) {
+                    $defaultDates[(string) $row['code']][$version['valid_from']] = true;
+                }
+            }
+        }
+        if ($defaultDates === []) {
+            return [];
+        }
+        $in = implode(', ', array_fill(0, count($defaultDates), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT code, valid_from FROM payroll_component_definitions
+              WHERE supplier_id = ? AND code IN ({$in})"
+        );
+        $stmt->execute([$supplierId, ...array_keys($defaultDates)]);
+        $custom = [];
+        $standard = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $code = (string) $row['code'];
+            if (isset($defaultDates[$code][(string) $row['valid_from']])) {
+                $standard[$code] = true;
+            } else {
+                $custom[$code] = true;
+            }
+        }
+
+        return array_diff_key($custom, $standard);
     }
 
     /**
@@ -683,6 +757,9 @@ final class PayrollComponentRepository
             $row['is_active'] ?? null,
             'is_active',
         );
+        $minimum = PayrollComponentMinimumWage::resolve($row);
+        $row['effective_minimum_wage_treatment'] = $minimum['treatment'];
+        $row['minimum_wage_treatment_editable'] = $minimum['editable'];
         return $row;
     }
 }

@@ -295,6 +295,7 @@ final class RoutePermissionMap
         ['PUT', '#^/api/payroll/people/[0-9]+/quick-edit$#', 'payroll.person.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/people/[0-9]+/sensitive-reveal$#', 'payroll.person.read_sensitive', AccessLevel::READ],
         ['POST', '#^/api/payroll/people/[0-9]+/employments$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/employments/remuneration-options$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/employment-evidence-options$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/municipalities$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/jmhz/identities/[0-9]+$#', 'payroll', AccessLevel::READ],
@@ -321,6 +322,8 @@ final class RoutePermissionMap
         ['*', '#^/api/payroll/time/calendars/[0-9]+$#', 'payroll.time.write', AccessLevel::WRITE],
         ['*', '#^/api/payroll/time/(shifts|entries(?:/batch)?|imports(?:/preview)?)$#', 'payroll.time.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/approve$#', 'payroll.approve', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/manual-summary$#', 'payroll.time.write', AccessLevel::WRITE],
+        ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/work-source$#', 'payroll.time.write', AccessLevel::WRITE],
         // Hromadné schválení měsíců z dávky importu docházky — totéž právo jako
         // schválení měsíce po jednom. Musí stát před obecným `/payroll/time(/|$)`.
         ['POST', '#^/api/payroll/time/imports/attendance/[0-9]+/apply$#', 'payroll.approve', AccessLevel::WRITE],
@@ -662,6 +665,8 @@ final class RoutePermissionMap
         ['PUT', '#^/api/payroll/employments/[0-9]+/termination$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/employments/[0-9]+/termination/(leave-settlement|leave-settlement/reverse|severance-input|survivors|death-tax-assessment)$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['DELETE', '#^/api/payroll/employments/[0-9]+/termination/survivors/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
+        ['GET', '#^/api/payroll/employments/[0-9]+/hourly-evidence$#', 'payroll', AccessLevel::READ],
+        ['POST', '#^/api/payroll/employments/[0-9]+/hourly-evidence$#', 'payroll.time.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/employments/[0-9]+/surcharge-policies$#', 'payroll.employment.write', AccessLevel::READ],
         ['POST', '#^/api/payroll/employments/[0-9]+/surcharge-policies$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['PUT', '#^/api/payroll/employments/[0-9]+/surcharge-policies/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],

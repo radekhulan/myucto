@@ -33,16 +33,23 @@ final class PayrollComponentJmhzKindDefaultsMigrationTest extends TestCase
         '1926_payroll_standby_rate.sql',
         '1931_payroll_component_vacation_settlement_mapping.sql',
         '1983_payroll_component_meal_allowance_taxable_mapping.sql',
+        '2256_payroll_holiday_time_off.sql',
+        '2258_payroll_component_minimum_wage.sql',
     ];
 
     /**
      * Kódy, které do výchozího číselníku přibyly až PO posledním přechodu
      * balíku, a dorovnává je proto vlastní pozdější migrace (viz
-     * {@see self::MIGRATIONS}). Přechod 2210 na balík 1.4.2.11 nese všechny.
+     * {@see self::MIGRATIONS}). Přechod 2210 na balík 1.4.2.11 je proto ještě nenese.
      *
      * @var list<string>
      */
-    private const AFTER_PACKAGE_TRANSITION = [];
+    private const AFTER_PACKAGE_TRANSITION = [
+        'MZDA_HODINOVA_ZAKLAD',
+        'MZDA_DOSAZENA_PRESCAS',
+        'NAHRADA_MZDY_VOLNO_ZA_SVATEK',
+        'DOPLATEK_MINIMALNI_MZDA',
+    ];
 
     private const PACKAGE_TRANSITION = '2210_payroll_component_jmhz_catalog_1_4_2_11_package.sql';
 

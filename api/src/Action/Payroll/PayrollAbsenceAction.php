@@ -543,6 +543,7 @@ final class PayrollAbsenceAction
                     throw self::missingAverage($averageSource);
                 }
                 $segments = $this->withQuarterAverages($supplierId, $absence, (string) $averageSource['date_from'], $segments);
+                $segments = $this->withHourlyAverageFloors($supplierId, $absence, (int) $averageSource['average_hourly_minor'], $segments);
                 $result = $this->sicknessCalculator->calculate(
                     $rulesDate,
                     (int) $averageSource['average_hourly_minor'],
@@ -630,6 +631,27 @@ final class PayrollAbsenceAction
             }
         }
 
+        return $segments;
+    }
+
+    /** @param array<string,mixed> $absence @param list<array<string,mixed>> $segments @return list<array<string,mixed>> */
+    private function withHourlyAverageFloors(int $supplierId, array $absence, int $approvedAverage, array $segments): array
+    {
+        if ($segments === []) return [];
+        $dates = array_column($segments, 'local_date');
+        $employmentId = (int) $absence['employment_id'];
+        $intervals = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+            ->forMany($supplierId, [$employmentId], min($dates), max($dates), true)[$employmentId] ?? [];
+        foreach ($segments as &$segment) {
+            $adjusted = \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::apply(
+                $intervals, (string) $segment['local_date'], (int) ($segment['average_hourly_minor'] ?? $approvedAverage),
+            );
+            if ($adjusted['hourly_proof'] !== null) {
+                $segment['average_hourly_minor'] = $adjusted['hourly_minor'];
+                $segment['hourly_minimum_proof'] = $adjusted['hourly_proof'];
+            }
+        }
+        unset($segment);
         return $segments;
     }
 
@@ -795,14 +817,14 @@ final class PayrollAbsenceAction
                 $data['worked_days'],
                 $data['probable_hourly_minor'],
                 $data['rationale'],
-                // Kratší STANOVENÁ týdenní pracovní doba (§ 79 odst. 2 a 3 ZP)
-                // hodinovou minimální mzdu zvyšuje, kratší SJEDNANÁ pracovní doba
-                // (§ 80 ZP, částečný úvazek) ne. `payroll_employment_terms.weekly_hours`
-                // drží jen jedno číslo a obojí nerozliší, takže se z něj nedovozuje:
-                // u dvacetihodinového úvazku by přepočet zdvojnásobil minimum.
-                // Dokud vztah stanovenou dobu neeviduje, platí sazba pro 40 hodin.
+                // Historický měsíční výpočet zachová původní minimum. Nová hodinová
+                // cesta níže samostatně ověří doloženou stanovenou týdenní dobu.
                 null,
+                $data['worked_duration_units'] ?? null,
             );
+            $floorResolver = new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db);
+            $floorIntervals = $floorResolver->forMany($this->currentSupplierId($request), [$data['employment_id']], $applicationDate, $applicationDate);
+            $floorResolver::assertFloorKnown($floorIntervals[$data['employment_id']] ?? [], $applicationDate, $result->averageHourlyMinor);
             $ruleset = $this->rulesets->forDate(
                 PayrollRulesetDomain::CompensationAverages,
                 $applicationDate,
@@ -822,6 +844,7 @@ final class PayrollAbsenceAction
                 $result,
                 $ruleset,
                 $this->userId($request),
+                $data['worked_duration_units'] ?? null,
             );
         } catch (\InvalidArgumentException $e) {
             return Json::error($response, 'validation_failed', $e->getMessage(), 422);

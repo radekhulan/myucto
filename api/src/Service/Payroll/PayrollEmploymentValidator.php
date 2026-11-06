@@ -15,6 +15,10 @@ use MyInvoice\Service\Payroll\Submission\Registration\PayrollRegistrationRelatio
  *   actual_start_on:?string,
  *   fixed_term_end_on:?string,
  *   monthly_gross_minor:?int,
+ *   remuneration_type:?string,
+ *   hourly_rate_minor:?int,
+ *   remuneration_basis_kind:?string,
+ *   remuneration_basis:?string,
  *   weekly_hours:?string,
  *   leave_entitlement_weeks_override:?int,
  *   probable_hourly_earning_minor:?int,
@@ -85,6 +89,8 @@ final class PayrollEmploymentValidator
         'statutory_body',
     ];
     private const MEAL_ENTITLEMENT_BASES = ['shift', 'calendar_day'];
+    public const REMUNERATION_BASIS_KINDS = ['wage_statement', 'contract', 'agreement', 'internal_regulation', 'collective_agreement'];
+    public const MAX_HOURLY_RATE_MINOR = 1_000_000_000;
 
     private const INSURANCE_MODES = ['automatic', 'included', 'excluded', 'foreign'];
     private const TAX_REGIMES = ['advance', 'withholding', 'foreign', 'manual_review'];
@@ -162,6 +168,9 @@ final class PayrollEmploymentValidator
         }
 
         $terms = $this->terms($this->stringKeyed($input['terms']), relationType: $relationType);
+        if ($terms['remuneration_type'] === 'hourly' && $gross !== null) {
+            throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
+        }
         if ($terms['actual_start_on'] !== null) {
             throw new \InvalidArgumentException(
                 'Skutečný nástup se zaznamenává přechodem pracovního vztahu do aktivního stavu.'
@@ -224,6 +233,32 @@ final class PayrollEmploymentValidator
         ?string $relationType = null,
     ): array {
         $effectiveFrom = $this->requiredDate($input, 'effective_from');
+        $remunerationType = $input['remuneration_type'] ?? null;
+        if ($remunerationType !== null && !in_array($remunerationType, ['monthly', 'hourly'], true)) {
+            throw new \InvalidArgumentException('Způsob odměňování není podporován.');
+        }
+        $hourlyRate = $input['hourly_rate_minor'] ?? null;
+        $basisKind = $input['remuneration_basis_kind'] ?? null;
+        if ($basisKind !== null && !in_array($basisKind, self::REMUNERATION_BASIS_KINDS, true)) {
+            throw new \InvalidArgumentException('Druh podkladu odměňování není podporován.');
+        }
+        if (isset($input['remuneration_basis']) && !is_string($input['remuneration_basis'])) {
+            throw new \InvalidArgumentException('Označení podkladu odměňování musí být text.');
+        }
+        $basis = $this->optionalText($input, 'remuneration_basis', 255);
+        if ($remunerationType === 'hourly') {
+            if ($relationType !== null && !in_array($relationType, ['employment', 'small_scale_employment', 'dpp', 'dpc'], true)) {
+                throw new \InvalidArgumentException('Hodinové odměňování není pro tento typ vztahu podporováno.');
+            }
+            if (!is_int($hourlyRate) || $hourlyRate <= 0 || $hourlyRate > self::MAX_HOURLY_RATE_MINOR || $basisKind === null || $basis === null) {
+                throw new \InvalidArgumentException('Hodinové odměňování vyžaduje kladnou sazbu v haléřích, druh a označení podkladu.');
+            }
+            if ($this->optionalMonthlyGrossMinor($input) !== null) {
+                throw new \InvalidArgumentException('Hodinové odměňování nesmí mít sjednanou měsíční mzdu.');
+            }
+        } elseif ($hourlyRate !== null) {
+            throw new \InvalidArgumentException('Měsíční odměňování nesmí mít hodinovou sazbu.');
+        }
         $plannedStart = $this->requiredDate($input, 'planned_start_on');
         $fixedEnd = $this->optionalDate($input, 'fixed_term_end_on');
         if ($fixedEnd !== null && $fixedEnd < $plannedStart) {
@@ -367,6 +402,10 @@ final class PayrollEmploymentValidator
             'actual_start_on' => $this->optionalDate($input, 'actual_start_on'),
             'fixed_term_end_on' => $fixedEnd,
             'monthly_gross_minor' => $this->optionalMonthlyGrossMinor($input),
+            'remuneration_type' => $remunerationType,
+            'hourly_rate_minor' => $hourlyRate,
+            'remuneration_basis_kind' => $basisKind,
+            'remuneration_basis' => $basis,
             'weekly_hours' => $hours === null ? null : (string) $hours,
             'leave_entitlement_weeks_override' => $this->leaveWeeksOverride(
                 $input['leave_entitlement_weeks_override'] ?? null,

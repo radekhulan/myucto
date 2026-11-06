@@ -92,11 +92,14 @@ final class AverageEarningBatchService
             $year,
             $quarter,
         );
+        $floorDate = sprintf('%04d-%02d-01', $year, (($quarter - 1) * 3) + 1);
+        $hourlyFloors = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+            ->forMany($supplierId, array_map(static fn(array $row): int => (int) $row['id'], $rows), $floorDate, $floorDate);
         $items = [];
         foreach ($rows as $row) {
             $employmentId = (int) $row['id'];
             $items[] = $this->candidate(
-                $this->derivation->suggest($supplierId, $employmentId, $year, $quarter),
+                $this->derivation->suggest($supplierId, $employmentId, $year, $quarter, $hourlyFloors[$employmentId] ?? []),
                 (string) $row['full_name'],
                 (string) $row['code'],
                 $existing[$employmentId] ?? null,
@@ -153,6 +156,8 @@ final class AverageEarningBatchService
             $pdo->beginTransaction();
         }
         try {
+            $hourlyFloors = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+                ->forMany($supplierId, array_keys($versions), $applicationStart, $applicationStart, true);
             $approved = [];
             foreach ($versions as $employmentId => $expectedVersion) {
                 $this->lockEmployment($supplierId, $employmentId);
@@ -161,7 +166,7 @@ final class AverageEarningBatchService
                     // může být jen z ručně sestavené dávky. Přeskočí se, dávka ne.
                     continue;
                 }
-                $suggestion = $this->derivation->suggest($supplierId, $employmentId, $year, $quarter);
+                $suggestion = $this->derivation->suggest($supplierId, $employmentId, $year, $quarter, $hourlyFloors[$employmentId] ?? []);
                 if (!hash_equals($expectedVersion, (string) $suggestion['input_version'])) {
                     throw new AverageEarningBatchConflictException($employmentId);
                 }
@@ -174,7 +179,10 @@ final class AverageEarningBatchService
                 }
                 if (self::needsIndividualReview($suggestion)) {
                     throw new \InvalidArgumentException(sprintf(
-                        'Pracovní vztah %d má průměr z převzatých mezd předchozího programu; '
+                        ($suggestion['probable_source'] ?? null) === AverageEarningDerivationService::PROBABLE_SOURCE_AGREED_HOURLY_RATE
+                            ? 'Pracovní vztah %d má pouze návrh ze sjednané hodinové sazby; posuďte obvyklé složky mzdy a '
+                                . 'potvrďte ho jednotlivě v Nepřítomnostech → Průměrné výdělky.'
+                            : 'Pracovní vztah %d má průměr z převzatých mezd předchozího programu; '
                         . 'potvrďte ho jednotlivě v Nepřítomnostech → Průměrné výdělky.',
                         $employmentId,
                     ));
@@ -188,6 +196,7 @@ final class AverageEarningBatchService
                     $suggestion,
                     $ruleset,
                     $userId,
+                    $hourlyFloors[$employmentId] ?? [],
                 );
             }
             if ($ownsTransaction) {
@@ -216,10 +225,12 @@ final class AverageEarningBatchService
         array $suggestion,
         \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion $ruleset,
         ?int $userId,
+        array $hourlyFloorIntervals,
     ): array {
         $probable = $suggestion['source_kind'] === 'probable';
         $gross = $probable ? 0 : (int) $suggestion['gross_earnings_minor'];
-        $minutes = $probable ? 0 : (int) $suggestion['worked_minutes'];
+        $minutes = $probable ? 0 : $suggestion['worked_minutes'];
+        $units = $minutes === null ? AverageEarningDerivationService::durationUnits($suggestion) : null;
         $days = $probable ? 0 : (int) $suggestion['worked_days'];
         $rationale = $probable ? (string) $suggestion['probable_rationale'] : self::ACTUAL_RATIONALE;
         $calculated = $this->calculator->calculate(
@@ -230,10 +241,11 @@ final class AverageEarningBatchService
             $days,
             $probable ? (int) $suggestion['probable_hourly_minor'] : null,
             $probable ? $rationale : null,
-            // Stejně jako ruční založení: stanovenou kratší týdenní dobu
-            // podmínky vztahu nerozlišují, minimum platí pro 40 hodin.
+            // Původní výpočet zachováváme; nové hodinové minimum se ověří níže.
             null,
+            $units,
         );
+        \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::assertFloorKnown($hourlyFloorIntervals, $applicationStart, $calculated->averageHourlyMinor);
         $trace = $calculated->trace;
         $trace['automatic'] = 'bulk';
         $trace['input_version'] = (string) $suggestion['input_version'];
@@ -260,6 +272,7 @@ final class AverageEarningBatchService
             ),
             $ruleset,
             $userId,
+            $units,
         );
 
         return $this->averages->approve(
@@ -283,7 +296,8 @@ final class AverageEarningBatchService
      */
     private static function needsIndividualReview(array $suggestion): bool
     {
-        return (array) ($suggestion['takeover_periods'] ?? []) !== [];
+        return (array) ($suggestion['takeover_periods'] ?? []) !== []
+            || ($suggestion['probable_source'] ?? null) === AverageEarningDerivationService::PROBABLE_SOURCE_AGREED_HOURLY_RATE;
     }
 
     private function candidate(
@@ -302,7 +316,8 @@ final class AverageEarningBatchService
             'decisive_to' => $suggestion['decisive_to'],
             'ready' => $suggestion['ready'] && !$takeover,
             'blockers' => $takeover
-                ? [...$suggestion['blockers'], 'takeover_needs_review']
+                ? [...$suggestion['blockers'], ($suggestion['probable_source'] ?? null) === AverageEarningDerivationService::PROBABLE_SOURCE_AGREED_HOURLY_RATE
+                    ? 'probable_hourly_rate_needs_review' : 'takeover_needs_review']
                 : $suggestion['blockers'],
             'source_kind' => $suggestion['source_kind'],
             'probable_source' => $suggestion['probable_source'],
@@ -310,6 +325,7 @@ final class AverageEarningBatchService
             'probable_rationale' => $suggestion['probable_rationale'],
             'gross_earnings_minor' => $suggestion['gross_earnings_minor'],
             'worked_minutes' => $suggestion['worked_minutes'],
+            'worked_duration_units' => $suggestion['worked_duration_units'] ?? null,
             'worked_days' => $suggestion['worked_days'],
             'input_version' => $suggestion['input_version'],
             'existing' => $existing,
@@ -331,7 +347,7 @@ final class AverageEarningBatchService
         $in = implode(', ', array_fill(0, count($employmentIds), '?'));
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, employment_id, status, source_kind, average_hourly_minor, revision_no,
-                    gross_earnings_minor, longer_period_allocated_minor, worked_minutes, worked_days
+                    gross_earnings_minor, longer_period_allocated_minor, worked_minutes, worked_duration_units, worked_days
                FROM payroll_average_earning_snapshots
               WHERE supplier_id = ? AND applicable_year = ? AND applicable_quarter = ?
                 AND employment_id IN ({$in})
@@ -348,7 +364,8 @@ final class AverageEarningBatchService
                 'average_hourly_minor' => (int) $row['average_hourly_minor'],
                 'gross_earnings_minor' => (int) $row['gross_earnings_minor'],
                 'longer_period_allocated_minor' => (int) $row['longer_period_allocated_minor'],
-                'worked_minutes' => (int) $row['worked_minutes'],
+                'worked_minutes' => $row['worked_minutes'] === null ? null : (int) $row['worked_minutes'],
+                'worked_duration_units' => $row['worked_duration_units'] === null ? null : (int) $row['worked_duration_units'],
                 'worked_days' => (int) $row['worked_days'],
             ];
         }
@@ -373,24 +390,24 @@ final class AverageEarningBatchService
             return false;
         }
         $gross = 0;
-        $minutes = 0;
+        $units = 0;
         $days = 0;
         foreach ((array) ($suggestion['months'] ?? []) as $month) {
             if ((array) ($month['blockers'] ?? []) !== []
                 || ($month['takeover'] ?? false) === true
                 || !is_int($month['gross_earnings_minor'] ?? null)
-                || !is_int($month['worked_minutes'] ?? null)
+                || AverageEarningDerivationService::durationUnits($month) === null
                 || !is_int($month['worked_days'] ?? null)
             ) {
                 return false;
             }
             $gross += $month['gross_earnings_minor'];
-            $minutes += $month['worked_minutes'];
+            $units = \MyInvoice\Service\Payroll\Time\PayrollDuration::add($units, AverageEarningDerivationService::durationUnits($month));
             $days += $month['worked_days'];
         }
 
         return $gross !== $existing['gross_earnings_minor'] - $existing['longer_period_allocated_minor']
-            || $minutes !== $existing['worked_minutes']
+            || $units !== AverageEarningDerivationService::durationUnits($existing)
             || $days !== $existing['worked_days'];
     }
 
