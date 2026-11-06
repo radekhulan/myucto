@@ -2440,7 +2440,18 @@
       "add_holiday_day": "Add public holiday date",
       "difficulty_confirmed": "Difficult environment breakdown documented (no items = confirmed zero)",
       "add_exposure": "Add difficult environment exposure",
-      "exposure_invalid": "Enter a positive duration and positive whole number of exposure factors."
+      "exposure_invalid": "Enter a positive duration and positive whole number of exposure factors.",
+      "automatic": "Assessed automatically as no entitlement: {rule}.",
+      "automatic_rules": {
+        "no_holiday_on_hourly_day": "no public holiday falls on an hourly paid day this month",
+        "no_shift_on_holiday": "no public holiday falls on a scheduled shift",
+        "agreement_not_entitled": "agreements are not entitled to wage compensation for an unworked public holiday",
+        "no_holiday_time_off_entitlement": "no outstanding entitlement or absence for time off in lieu of a public holiday",
+        "no_overtime_time_off_entitlement": "no outstanding entitlement or absence for time off in lieu of overtime"
+      },
+      "due_on": "use by {date}",
+      "initial_revision": "Initial evidence",
+      "reason_optional": "A reason is not required on first save; it is required only when correcting saved evidence."
     },
     "hourly_policy": {
       "title": "Work included in wage / remuneration and minimum wage",

@@ -269,6 +269,17 @@ dostupných hodin. Každou ze tří skupin výslovně potvrďte; potvrzený
 prázdný seznam znamená žádný nárok nebo nulové čerpání. Bez potvrzení
 zůstává stav neznámý.
 
+Kde nárok v měsíci objektivně vzniknout nemůže, posoudí nulu aplikace
+sama a panel u skupiny zobrazí **Posouzeno automaticky** s důvodem:
+v měsíci není svátek s hodinovou mzdou nebo žádný svátek nepadá na
+rozvrženou směnu, případně vztah nemá nevyčerpaný nárok ani schválenou
+nepřítomnost náhradního volna. Dohodám o provedení práce a o pracovní
+činnosti náhrada mzdy za neodpracovaný svátek nepřísluší, takže ji
+aplikace nenabízí ani nepožaduje. Běžný měsíc s denní docházkou bez
+svátku a bez starších nároků proto nepotřebuje žádné ruční potvrzení.
+Ruční souhrn hodin dál vyžaduje doložení příplatkových vrstev. Posouzení
+se zapíše do podkladu výpočtu včetně použitého pravidla.
+
 Historický hodinový nárok lze doložit a vypořádat i v pozdějším měsíci,
 kdy už vztah přešel na měsíční mzdu. Panel pak nese nadpis **Náhled
 historických hodinových nároků**; běžný měsíční základ zůstává samostatně
@@ -284,9 +295,12 @@ nejméně však příslušnou aktuální minimální sazbou. Tento způsob ocen�
 je dohledatelný v podkladu výpočtu. U volna za svátek samotné uplynutí
 lhůty nevytváří příplatek bez doloženého sjednání jeho peněžní náhrady.
 
-Uložení podkladů příplatků vyžaduje právo zapisovat docházku, aktuální
-verzi podkladu a důvod. Jde o vlastní revizi, takže schválené celkové
-hodiny nemusíte kvůli doplnění vrstvy znovu otevírat. Změněné hranice
+Uložení podkladů příplatků vyžaduje právo zapisovat docházku a aktuální
+verzi podkladu; důvod je povinný až při opravě dříve uložené revize.
+Jde o vlastní revizi, takže schválené celkové hodiny nemusíte kvůli
+doplnění vrstvy znovu otevírat. Podklad se váže na obsah docházky, ne
+na její schválení: schválení měsíce ani zápisů uložené podklady
+nezneplatní, změna odpracované doby ano. Změněné hranice
 sazeb či zásad vyžadují nové doložené rozdělení; původní podklad
 zůstává viditelný. Historie ukazuje autora, čas a důvod změny.
 

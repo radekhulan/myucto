@@ -1,10 +1,10 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { payrollApi, type PayrollHourlyEvidenceResponse, type PayrollHourlyPremiumSegment, type PayrollHourlyHolidayEvidence } from '@/api/payroll'
+import { payrollApi, type PayrollHourlyAutomaticKey, type PayrollHourlyEvidenceResponse, type PayrollHourlyPremiumSegment, type PayrollHourlyHolidayEvidence } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
 import { formatPayrollDuration, parsePayrollDurationDraft } from '@/pages/payroll/payrollDuration'
-import { formatDateTime } from '@/composables/useFormat'
+import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import DateInput from '@/components/ui/DateInput.vue'
 const props = defineProps<{ employmentId: number; period: string; canWrite: boolean }>()
@@ -23,6 +23,19 @@ interface SegmentDraft {
 const state = ref<PayrollHourlyEvidenceResponse | null>(null)
 const segments = ref<SegmentDraft[]>([])
 const editable = computed(() => props.canWrite && state.value?.can_write !== false)
+// Server posoudil výslovnou nulu sám: nárok v měsíci objektivně vzniknout nemůže.
+const automatic = computed<Partial<Record<PayrollHourlyAutomaticKey, string>>>(() => {
+  const value = state.value?.automatic_assessment
+  return !value || Array.isArray(value) ? {} : value
+})
+function isAutomatic(key: PayrollHourlyAutomaticKey): boolean {
+  const rows = key === 'nonworked_holidays' ? holidays.value : key === 'holiday_time_off_grants' ? grants.value : overtimeAllocations.value
+  return automatic.value[key] !== undefined && rows.length === 0
+}
+function automaticText(key: PayrollHourlyAutomaticKey): string {
+  return t('payroll.hourly_evidence.automatic', { rule: t(`payroll.hourly_evidence.automatic_rules.${automatic.value[key]}`) })
+}
+const reasonRequired = computed(() => (state.value?.row_version ?? 0) > 0)
 const reason = ref('')
 const segmentationChanged = ref(false)
 const holidaysConfirmed = ref(false)
@@ -86,8 +99,8 @@ async function save() {
   if (!editable.value || !state.value || saving.value) return
   error.value = ''
   try {
-    if (!reason.value.trim()) throw new Error(t('payroll.worked_hours.reason_required'))
-    if (!holidaysConfirmed.value || !grantsConfirmed.value || !overtimeConfirmed.value) throw new Error(t('payroll.hourly_evidence.confirm_holidays'))
+    if (reasonRequired.value && !reason.value.trim()) throw new Error(t('payroll.worked_hours.reason_required'))
+    if ((!holidaysConfirmed.value && !isAutomatic('nonworked_holidays')) || (!grantsConfirmed.value && !isAutomatic('holiday_time_off_grants')) || (!overtimeConfirmed.value && !isAutomatic('overtime_time_off_allocations'))) throw new Error(t('payroll.hourly_evidence.confirm_holidays'))
     const payload: PayrollHourlyPremiumSegment[] = state.value.work_source !== 'manual_summary' ? [] : segments.value.map(segment => {
       const holiday = optionalDuration(segment.holiday, segment.original?.holiday_work_duration_units)
       const days = holiday != null && holiday > 0 ? segment.holidayDays.map(day => {
@@ -130,7 +143,7 @@ async function save() {
       }),
     }
     saving.value = true
-    await payrollApi.saveHourlyEvidence(props.employmentId, { period: props.period, row_version: state.value.row_version, work_source_hash: state.value.work_source_hash, reason: reason.value.trim(), premium_segments: payload, ...holidayPayload })
+    await payrollApi.saveHourlyEvidence(props.employmentId, { period: props.period, row_version: state.value.row_version, work_source_hash: state.value.work_source_hash, ...(reason.value.trim() ? { reason: reason.value.trim() } : {}), premium_segments: payload, ...holidayPayload })
     reason.value = ''
     emit('updated')
     await load()
@@ -148,12 +161,12 @@ async function save() {
     <form v-if="state" class="mt-3 space-y-3" @submit.prevent="save">
       <div v-if="segmentationChanged" class="rounded-md bg-warning-50 p-3 text-warning-800" data-test="hourly-evidence-boundaries-changed">
         <p>{{ t('payroll.hourly_evidence.boundaries_changed') }}</p>
-        <p v-for="(item, index) in state.evidence?.premium_segments ?? []" :key="index" class="mt-1">{{ item.date_from }} – {{ item.date_to }} · {{ t('payroll.people.surcharge_policy.kinds.night') }}: {{ item.night_duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(item.night_duration_units) }} · {{ t('payroll.people.surcharge_policy.kinds.weekend') }}: {{ item.weekend_duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(item.weekend_duration_units) }} · {{ t('payroll.hourly_evidence.holiday_work') }}: {{ item.holiday_work_duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(item.holiday_work_duration_units) }}</p>
+        <p v-for="(item, index) in state.evidence?.premium_segments ?? []" :key="index" class="mt-1">{{ formatDate(item.date_from) }} – {{ formatDate(item.date_to) }} · {{ t('payroll.people.surcharge_policy.kinds.night') }}: {{ item.night_duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(item.night_duration_units) }} · {{ t('payroll.people.surcharge_policy.kinds.weekend') }}: {{ item.weekend_duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(item.weekend_duration_units) }} · {{ t('payroll.hourly_evidence.holiday_work') }}: {{ item.holiday_work_duration_units === null ? t('payroll.worked_hours.unknown') : formatPayrollDuration(item.holiday_work_duration_units) }}</p>
       </div>
       <p v-if="!editable" class="text-neutral-500">{{ t('payroll.hourly_evidence.readonly') }}</p>
       <fieldset :disabled="!editable || saving || loading" class="space-y-3">
         <div v-for="(segment, index) in state.work_source === 'manual_summary' ? segments : []" :key="index" class="rounded-md border border-neutral-200 p-3" data-test="hourly-evidence-segment">
-          <p class="font-medium">{{ segment.from }} – {{ segment.to }}</p>
+          <p class="font-medium">{{ formatDate(segment.from) }} – {{ formatDate(segment.to) }}</p>
           <div class="mt-2 grid gap-3 sm:grid-cols-3">
             <label>{{ t('payroll.people.surcharge_policy.kinds.night') }}<input v-model="segment.night" :class="inputClass" :data-test="`hourly-evidence-night-${index}`"></label>
             <label>{{ t('payroll.people.surcharge_policy.kinds.weekend') }}<input v-model="segment.weekend" :class="inputClass" :data-test="`hourly-evidence-weekend-${index}`"></label>
@@ -188,10 +201,11 @@ async function save() {
           </div>
         </div>
         <section class="space-y-2 rounded-md border border-neutral-200 p-3" data-test="hourly-evidence-holidays">
-          <label class="flex items-center gap-2"><input v-model="holidaysConfirmed" type="checkbox" data-test="hourly-evidence-confirm-holidays">{{ t('payroll.hourly_evidence.confirm_nonworked') }}</label>
-          <template v-if="holidaysConfirmed">
+          <p v-if="isAutomatic('nonworked_holidays')" class="text-neutral-600" data-test="hourly-evidence-automatic-holidays">{{ automaticText('nonworked_holidays') }}</p>
+          <label v-else class="flex items-center gap-2"><input v-model="holidaysConfirmed" type="checkbox" data-test="hourly-evidence-confirm-holidays">{{ t('payroll.hourly_evidence.confirm_nonworked') }}</label>
+          <template v-if="holidaysConfirmed && !isAutomatic('nonworked_holidays')">
             <div v-for="(item, index) in holidays" :key="index" class="flex flex-wrap items-end gap-2" data-test="hourly-evidence-nonworked-row">
-              <label>{{ t('common.date') }}<select v-model="item.date" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in state.options.nonworked_holidays" :key="option.date" :value="option.date" :disabled="option.valid === false">{{ option.date }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
+              <label>{{ t('common.date') }}<select v-model="item.date" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in state.options.nonworked_holidays" :key="option.date" :value="option.date" :disabled="option.valid === false">{{ formatDate(option.date) }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
               <label>{{ t('payroll.hourly_evidence.hours') }}<input v-model="item.hours" :class="inputClass"></label>
               <button type="button" :class="btnOutlineSm('danger')" @click="holidays.splice(index, 1)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('common.remove') }}</button>
             </div>
@@ -199,11 +213,12 @@ async function save() {
           </template>
         </section>
         <section class="space-y-2 rounded-md border border-neutral-200 p-3" data-test="hourly-evidence-holiday-grants">
-          <label class="flex items-center gap-2"><input v-model="grantsConfirmed" type="checkbox" data-test="hourly-evidence-confirm-grants">{{ t('payroll.hourly_evidence.confirm_grants') }}</label>
-          <template v-if="grantsConfirmed">
+          <p v-if="isAutomatic('holiday_time_off_grants')" class="text-neutral-600" data-test="hourly-evidence-automatic-grants">{{ automaticText('holiday_time_off_grants') }}</p>
+          <label v-else class="flex items-center gap-2"><input v-model="grantsConfirmed" type="checkbox" data-test="hourly-evidence-confirm-grants">{{ t('payroll.hourly_evidence.confirm_grants') }}</label>
+          <template v-if="grantsConfirmed && !isAutomatic('holiday_time_off_grants')">
             <div v-for="(item, index) in grants" :key="index" class="grid gap-2 rounded-md border border-neutral-200 p-2 sm:grid-cols-3" data-test="hourly-evidence-grant-row">
-              <label>{{ t('payroll.hourly_evidence.entitlement') }}<select v-model="item.entitlement" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in state.options.holiday_time_off_entitlements" :key="option.entitlement_id" :value="String(option.entitlement_id)" :disabled="option.valid === false">#{{ option.entitlement_id }} · {{ option.work_date }} · {{ formatPayrollDuration(option.available_duration_units) }} · {{ option.due_on }}<template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
-              <label>{{ t('payroll.hourly_evidence.absence') }}<select v-model="item.absence" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in absenceOptions('holiday')" :key="absenceKey(option.absence_id, option.date)" :value="absenceKey(option.absence_id, option.date)" :disabled="option.valid === false">{{ option.date }} · #{{ option.absence_id }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
+              <label>{{ t('payroll.hourly_evidence.entitlement') }}<select v-model="item.entitlement" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in state.options.holiday_time_off_entitlements" :key="option.entitlement_id" :value="String(option.entitlement_id)" :disabled="option.valid === false">{{ option.work_date ? formatDate(option.work_date) : t('payroll.worked_hours.unknown') }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.due_on"> · {{ t('payroll.hourly_evidence.due_on', { date: formatDate(option.due_on) }) }}</template><template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
+              <label>{{ t('payroll.hourly_evidence.absence') }}<select v-model="item.absence" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in absenceOptions('holiday')" :key="absenceKey(option.absence_id, option.date)" :value="absenceKey(option.absence_id, option.date)" :disabled="option.valid === false">{{ formatDate(option.date) }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
               <label>{{ t('payroll.hourly_evidence.hours') }}<input v-model="item.hours" :class="inputClass"></label>
               <div class="flex flex-wrap gap-2"><button type="button" :class="btnOutlineSm('danger')" @click="grants.splice(index, 1)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('common.remove') }}</button></div>
             </div>
@@ -211,11 +226,12 @@ async function save() {
           </template>
         </section>
         <section class="space-y-2 rounded-md border border-neutral-200 p-3" data-test="hourly-evidence-overtime-grants">
-          <label class="flex items-center gap-2"><input v-model="overtimeConfirmed" type="checkbox" data-test="hourly-evidence-confirm-overtime">{{ t('payroll.hourly_evidence.confirm_overtime') }}</label>
-          <template v-if="overtimeConfirmed">
+          <p v-if="isAutomatic('overtime_time_off_allocations')" class="text-neutral-600" data-test="hourly-evidence-automatic-overtime">{{ automaticText('overtime_time_off_allocations') }}</p>
+          <label v-else class="flex items-center gap-2"><input v-model="overtimeConfirmed" type="checkbox" data-test="hourly-evidence-confirm-overtime">{{ t('payroll.hourly_evidence.confirm_overtime') }}</label>
+          <template v-if="overtimeConfirmed && !isAutomatic('overtime_time_off_allocations')">
             <div v-for="(item, index) in overtimeAllocations" :key="index" class="grid gap-2 rounded-md border border-neutral-200 p-2 sm:grid-cols-2" data-test="hourly-evidence-overtime-row">
-              <label>{{ t('payroll.hourly_evidence.entitlement') }}<select v-model="item.workDate" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in state.options.overtime_time_off_entitlements ?? []" :key="option.work_date" :value="option.work_date" :disabled="option.valid === false">{{ option.work_date }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.due_on"> · {{ option.due_on }}</template><template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
-              <label>{{ t('payroll.hourly_evidence.absence') }}<select v-model="item.absence" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in absenceOptions('overtime')" :key="absenceKey(option.absence_id, option.date)" :value="absenceKey(option.absence_id, option.date)" :disabled="option.valid === false">{{ option.date }} · #{{ option.absence_id }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
+              <label>{{ t('payroll.hourly_evidence.entitlement') }}<select v-model="item.workDate" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in state.options.overtime_time_off_entitlements ?? []" :key="option.work_date" :value="option.work_date" :disabled="option.valid === false">{{ formatDate(option.work_date) }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.due_on"> · {{ t('payroll.hourly_evidence.due_on', { date: formatDate(option.due_on) }) }}</template><template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
+              <label>{{ t('payroll.hourly_evidence.absence') }}<select v-model="item.absence" :class="inputClass"><option value="">{{ t('payroll.hourly_evidence.choose_evidence') }}</option><option v-for="option in absenceOptions('overtime')" :key="absenceKey(option.absence_id, option.date)" :value="absenceKey(option.absence_id, option.date)" :disabled="option.valid === false">{{ formatDate(option.date) }} · {{ formatPayrollDuration(option.available_duration_units) }}<template v-if="option.reason"> · {{ option.reason }}</template></option></select></label>
               <label>{{ t('payroll.hourly_evidence.hours') }}<input v-model="item.hours" :class="inputClass"></label>
               <label>{{ t('payroll.hourly_policy.agreement_reference') }}<input v-model="item.reference" :class="inputClass" maxlength="255"></label>
               <div class="flex flex-wrap gap-2"><button type="button" :class="btnOutlineSm('danger')" @click="overtimeAllocations.splice(index, 1)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.trash" /></svg>{{ t('common.remove') }}</button></div>
@@ -223,13 +239,14 @@ async function save() {
             <button type="button" :class="btnOutlineSm('neutral')" data-test="hourly-evidence-add-overtime" @click="overtimeAllocations.push({ workDate: '', absence: '', hours: '', reference: '', original: null })"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.hourly_evidence.add_overtime_grant') }}</button>
           </template>
         </section>
-        <label class="block">{{ t('payroll.worked_hours.reason') }}<input v-model="reason" :class="inputClass" data-test="hourly-evidence-reason" maxlength="1000"></label>
+        <label class="block">{{ t('payroll.worked_hours.reason') }}<input v-model="reason" :class="inputClass" data-test="hourly-evidence-reason" maxlength="500"></label>
+        <p v-if="!reasonRequired" class="text-neutral-500" data-test="hourly-evidence-reason-optional">{{ t('payroll.hourly_evidence.reason_optional') }}</p>
         <div v-if="editable" class="flex flex-wrap gap-2"><button type="submit" :class="btnFilledSm('primary')" :disabled="saving || loading || !state.work_source_hash" data-test="hourly-evidence-save"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('common.save') }}</button></div>
       </fieldset>
     </form>
     <button v-if="state" type="button" :class="[btnOutlineSm('neutral'), 'mt-3']" @click="historyOpen = !historyOpen"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.table" /></svg>{{ t('payroll.hourly_evidence.history') }}</button>
     <div v-if="historyOpen && state" class="mt-2 space-y-2">
-      <p v-for="item in state.history" :key="item.id">{{ t('payroll.worked_hours.revision', { number: item.revision_no }) }} · {{ item.created_by_name ?? t('payroll.worked_hours.unknown') }} · {{ formatDateTime(item.created_at) }} · {{ item.reason }}</p>
+      <p v-for="item in state.history" :key="item.id">{{ t('payroll.worked_hours.revision', { number: item.revision_no }) }} · {{ item.created_by_name ?? t('payroll.worked_hours.unknown') }} · {{ formatDateTime(item.created_at) }} · {{ item.reason ?? t('payroll.hourly_evidence.initial_revision') }}</p>
       <div class="flex flex-wrap gap-2"><button type="button" :class="btnOutlineSm('neutral')" :disabled="loading || state.history_offset === 0" @click="load(Math.max(0, state.history_offset - 20), true)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.chevronLeft" /></svg>{{ t('common.previous') }}</button><button type="button" :class="btnOutlineSm('neutral')" :disabled="loading || !state.history_has_more" @click="load(state.history_offset + 20, true)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.chevronRight" /></svg>{{ t('common.next') }}</button></div>
     </div>
   </section>
