@@ -1167,7 +1167,9 @@ této karty:
 
 Dobropis k vystavené faktuře a obnovení stornované faktury vezmou opravenou
 šarži samy: vrací nebo znovu vydávají kusy, které výdejky faktury skutečně
-vydaly (i když byla faktura vydaná po částech, každou zásilkou zvlášť). Oprava se zapisuje do historie změn.
+vydaly. U dobropisu se sečtou všechny výdejky faktury (i když byla vydaná po částech,
+každou zásilkou zvlášť); obnovení stornované faktury bere jen automatickou výdejku
+vystavení. Oprava se zapisuje do historie změn.
 
 Beze změny zůstávají vystavené a stornované faktury, vystavené zálohové faktury,
 expedované zásilky a jejich vratky. U vystavené faktury a zálohové faktury zůstává
