@@ -55,6 +55,18 @@ final class PayrollEmploymentJmhzEvidenceCatalog
             );
             $this->externalCodebooks->requireKnownCountry($countryCode, $termEffectiveOn);
         } catch (JmhzCodebookValueException|JmhzCodebookUnavailableException $e) {
+            // Číselník porovnává název s polem „Místo výkonu práce"; hláška musí
+            // říct, které pole a na jaký úřední název ho opravit.
+            $official = $this->externalCodebooks->findMunicipality($municipalityCode, $termEffectiveOn)['label'] ?? null;
+            if (is_string($official) && !hash_equals($official, $municipalityName)) {
+                throw new \InvalidArgumentException(sprintf(
+                    'Místo výkonu práce „%s" neodpovídá úřednímu názvu obce „%s" pro kód %s v číselníku CISOB. Opravte místo výkonu práce na „%s", nebo kód obce pracoviště JMHZ.',
+                    $municipalityName,
+                    $official,
+                    $municipalityCode,
+                    $official,
+                ), 0, $e);
+            }
             throw new \InvalidArgumentException($e->getMessage(), 0, $e);
         }
     }

@@ -274,6 +274,22 @@ final class PayrollEmploymentValidatorTest extends TestCase
         );
     }
 
+    public function testWorkplaceNameMismatchNamesTheFieldAndOfficialName(): void
+    {
+        $terms = $this->terms();
+        $terms['work_place'] = 'Praha';
+        $terms['jmhz_workplace_municipality_code'] = '554782';
+        $terms['jmhz_workplace_country_code'] = 'CZ';
+
+        try {
+            $this->validator()->terms($terms);
+            self::fail('Neshodný název místa výkonu práce musí neprojít.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('Místo výkonu práce „Praha"', $e->getMessage());
+            self::assertStringContainsString('„Hlavní město Praha"', $e->getMessage());
+        }
+    }
+
     /**
      * Plná adresa místa výkonu (JMHZ 2027, 10550 až 10554) ve tvaru XSD 1.5.0.3;
      * bez kódu obce v ČR se uvést nesmí. Státní zástupce (10587) je ano/ne/neuvedeno.
