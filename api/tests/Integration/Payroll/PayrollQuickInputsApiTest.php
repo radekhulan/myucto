@@ -140,6 +140,35 @@ final class PayrollQuickInputsApiTest extends TestCase
         self::assertNotNull($items[$hourlyId]['worked_time']);
     }
 
+    public function testFailedSettlementPreviewIsBlockedAndLogged(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-01-01", "2026-01-01", 4200000)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $settlementId = $this->employment($this->supplierId, 'Syntetické vypořádání', 'SYN-VYPORADANI');
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-01-01", "2026-01-01", 4200000)')
+            ->execute([$this->supplierId, $settlementId]);
+        // Měsíční vztah se starším hodinovým nárokem téhož období.
+        $pdo->prepare("INSERT INTO payroll_hourly_wage_claims (supplier_id, employment_id, work_period_start, purpose, claim_source) VALUES (?, ?, '2026-06-01', 'ordinary_base', 'hourly_calculation')")
+            ->execute([$this->supplierId, $settlementId]);
+        $handler = new \Monolog\Handler\TestHandler();
+        $this->container->get(\Psr\Log\LoggerInterface::class)->pushHandler($handler);
+        // Zastíněná evidence podkladů shodí jen náhled vztahů, kterých se hodinový výpočet týká.
+        $pdo->exec('CREATE TEMPORARY TABLE payroll_hourly_evidence_revisions (id INT)');
+        try {
+            $response = $this->action->list($this->request('GET')->withQueryParams(['period' => '2026-06']), new Response());
+        } finally {
+            $pdo->exec('DROP TEMPORARY TABLE IF EXISTS payroll_hourly_evidence_revisions');
+        }
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $items = array_column($this->json($response)['month']['items'], null, 'employment_id');
+        self::assertContains('hourly_preview_unavailable', $items[$settlementId]['blockers']);
+        self::assertNotContains('hourly_preview_unavailable', $items[$this->employmentId]['blockers']);
+        $logged = array_values(array_filter($handler->getRecords(), static fn($record): bool => ($record->context['employment_id'] ?? null) === $settlementId));
+        self::assertCount(1, $logged);
+        self::assertSame('Náhled hodinové mzdy vztahu nelze sestavit.', $logged[0]->message);
+    }
+
     public function testMonthlyBaseRemainsEditableWithRetiredHourlyClaim(): void
     {
         $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, monthly_gross_minor) VALUES (?, ?, "2026-01-01", "2026-01-01", 4200000)')

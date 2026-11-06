@@ -13,6 +13,7 @@ use MyInvoice\Service\Payroll\Calculation\DecimalRate;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
 use MyInvoice\Service\Payroll\Calculation\RoundingMode;
 use MyInvoice\Service\Payroll\PayrollClosedRunGuard;
+use MyInvoice\Service\Payroll\PayrollHourlyEntitlementLedger;
 use MyInvoice\Service\Payroll\PayrollHourlyWagePreview;
 use MyInvoice\Service\Payroll\PayrollRunClosedException;
 use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
@@ -30,6 +31,8 @@ use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargePolicy;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeRuleset;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeService;
 use PDO;
+use Psr\Log\LoggerInterface;
+use Psrogoggerinterface;
 
 final class PayrollQuickInputRepository
 {
@@ -167,6 +170,7 @@ final class PayrollQuickInputRepository
         private readonly PayrollSurchargeClaimRepository $surchargeClaims,
         private readonly PayrollWageProrationService $wageProration,
         private readonly PayrollClosedRunGuard $closedRuns,
+        private readonly LoggerInterface $logger,
     ) {}
 
     /**
@@ -1088,8 +1092,11 @@ final class PayrollQuickInputRepository
 
     /**
      * Náhled hodinové mzdy stránky. Chyba podkladů jednoho vztahu nesmí shodit
-     * rychlý vstup ostatním: dávka se při selhání zopakuje po vztazích a vadný
-     * hodinový vztah dostane blokaci. Odvolanou transakci vyhazuje dál.
+     * rychlý vstup ostatním. Při selhání dávky se opakuje jen nad vztahy,
+     * kterých se hodinový výpočet týká (hodinové podmínky nebo vypořádání
+     * dřívějších nároků), a dávka se dělí napůl, dokud se vadný vztah
+     * neoddělí. Vadný vztah dostane blokaci a chyba se zaloguje. Odvolanou
+     * transakci vyhazuje dál.
      *
      * @param list<array<string,mixed>> $rows
      * @return array{0:array<int,array<string,mixed>>,1:array<int,true>}
@@ -1103,22 +1110,55 @@ final class PayrollQuickInputRepository
             if (TransactionFailure::aborted($e)) {
                 throw $e;
             }
+            $this->logger->warning('Náhled hodinové mzdy stránky nelze sestavit dávkově, opakuje se po částech.', [
+                'supplier_id' => $supplierId, 'period_start' => $periodStart, 'error' => $e::class . ': ' . $e->getMessage(),
+            ]);
         }
-        $result = [];
-        $failed = [];
-        foreach ($rows as $row) {
-            try {
-                $result += $preview->forMany($supplierId, $periodStart, [$row]);
-            } catch (\Throwable $e) {
-                if (TransactionFailure::aborted($e)) {
-                    throw $e;
-                }
-                if ((bool) ($row['hourly_remuneration_in_period'] ?? false)) {
-                    $failed[(int) $row['employment_id']] = true;
-                }
+        $settlement = [];
+        try {
+            $ids = array_map(static fn (array $row): int => (int) $row['employment_id'], $rows);
+            $settlement = array_fill_keys((new PayrollHourlyEntitlementLedger($this->db))->employmentIdsWithOutstanding($supplierId, $ids, $periodStart, includeCurrentClaims: true), true);
+        } catch (\Throwable $e) {
+            if (TransactionFailure::aborted($e)) {
+                throw $e;
             }
         }
+        $candidates = array_values(array_filter($rows, static fn (array $row): bool =>
+            (bool) ($row['hourly_remuneration_in_period'] ?? false) || isset($settlement[(int) $row['employment_id']])));
+        $result = [];
+        $failed = [];
+        if ($candidates !== []) {
+            $this->hourlyPreviewChunk($preview, $supplierId, $periodStart, $candidates, $result, $failed);
+        }
         return [$result, $failed];
+    }
+
+    /**
+     * @param list<array<string,mixed>> $rows
+     * @param array<int,array<string,mixed>> $result
+     * @param array<int,true> $failed
+     */
+    private function hourlyPreviewChunk(PayrollHourlyWagePreview $preview, int $supplierId, string $periodStart, array $rows, array &$result, array &$failed): void
+    {
+        try {
+            $result += $preview->forMany($supplierId, $periodStart, $rows);
+        } catch (\Throwable $e) {
+            if (TransactionFailure::aborted($e)) {
+                throw $e;
+            }
+            if (count($rows) > 1) {
+                $half = intdiv(count($rows), 2);
+                $this->hourlyPreviewChunk($preview, $supplierId, $periodStart, array_slice($rows, 0, $half), $result, $failed);
+                $this->hourlyPreviewChunk($preview, $supplierId, $periodStart, array_slice($rows, $half), $result, $failed);
+                return;
+            }
+            $employmentId = (int) $rows[0]['employment_id'];
+            $failed[$employmentId] = true;
+            $this->logger->warning('Náhled hodinové mzdy vztahu nelze sestavit.', [
+                'supplier_id' => $supplierId, 'employment_id' => $employmentId, 'period_start' => $periodStart,
+                'error' => $e::class . ': ' . $e->getMessage(),
+            ]);
+        }
     }
 
     /** @param list<array<string,mixed>> $rows @param list<int> $ids @return array<int,array<string,mixed>> */
