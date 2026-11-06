@@ -17,6 +17,9 @@ use MyInvoice\Service\Auth\Oidc\OidcProviderRegistry;
  * Uživatel, jehož všechny firmy přihlášení u poskytovatele vyžadují, se heslem
  * nepřihlásí vůbec.
  *
+ * `auth.oidc.required_provider` vynutí poskytovatele pro celou instalaci: pro
+ * každou firmu včetně později založených a pro každého uživatele, i bez firmy.
+ *
  * Výjimkou jsou role z `auth.oidc.break_glass_roles` (výchozí `instance_admin`),
  * aby šlo instalaci spravovat i při výpadku poskytovatele.
  *
@@ -35,12 +38,32 @@ class LoginPolicyService
     ) {}
 
     /**
+     * Poskytovatel povinný pro celou instalaci, nebo null.
+     *
+     * Platí jen silný poskytovatel zapnutý v instalaci. Překlep nebo vypnutý
+     * poskytovatel vynucení nezapne, jinak by se nikdo kromě správce instance
+     * nepřihlásil.
+     */
+    public function globalRequiredProvider(): ?string
+    {
+        $provider = trim((string) $this->config->get('auth.oidc.required_provider', ''));
+        if ($provider === '' || !$this->providers->isEnabled()) {
+            return null;
+        }
+        return $this->providers->get($provider)?->isStrong() === true ? $provider : null;
+    }
+
+    /**
      * Poskytovatel, kterým se uživatel musí přihlásit, nebo null.
      */
     public function requiredProviderForUser(int $userId, ?string $roleSystemKey): ?string
     {
         if ($userId < 1 || $this->isBreakGlass($roleSystemKey) || !$this->providers->isEnabled()) {
             return null;
+        }
+        $global = $this->globalRequiredProvider();
+        if ($global !== null) {
+            return $global;
         }
         // Celý účet se zamkne jen tehdy, když vynucení chtějí VŠECHNY jeho firmy.
         // Správce jedné firmy jinak nesmí účetní, která pracuje i pro jiné firmy,
@@ -72,6 +95,10 @@ class LoginPolicyService
     {
         if ($supplierId < 1 || !$this->providers->isEnabled()) {
             return null;
+        }
+        $global = $this->globalRequiredProvider();
+        if ($global !== null) {
+            return $global;
         }
         if (!array_key_exists($supplierId, $this->supplierCache)) {
             $stmt = $this->db->pdo()->prepare(

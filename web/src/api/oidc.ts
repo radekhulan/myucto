@@ -23,6 +23,8 @@ export type LoginPolicy = 'any' | 'sso_required'
 export interface LoginPolicyState {
   login_policy: LoginPolicy
   login_sso_provider: string | null
+  /** Poskytovatel vynucený pro celou instalaci; nastavení firmy se pak nepoužije. */
+  global_sso_provider?: string | null
   providers: SsoProvider[]
   can_manage: boolean
   users_without_identity: number

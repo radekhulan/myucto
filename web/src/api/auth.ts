@@ -131,6 +131,11 @@ export interface SetupStatus {
   passwordless_login_enabled: boolean
   /** Poskytovatelé identity (OpenID Connect); prázdné = přihlášení přes organizaci vypnuté. */
   sso_providers?: SsoProvider[]
+  /**
+   * Poskytovatel povinný pro celou instalaci. Přihlašovací stránka pak heslo
+   * nabízí jen technickému účtu správce instance.
+   */
+  sso_required_provider?: string | null
   /** Ohlášení plánované údržby. `undefined` = starší backend bez pole. */
   maintenance_notices?: import('@/api/maintenanceNotice').MaintenanceNotice[]
   captcha: {

@@ -22490,6 +22490,8 @@
     "reauth_unlink": "Před odpojením od {provider} potvrďte, že jste to vy.",
     "reauth_required": "Ověřte se přístupovým klíčem, účtem organizace nebo heslem.",
     "reauth_or_password": "nebo zadejte heslo",
+    "global_admin_password_login": "Technický účet správce instance? Přihlásit se heslem",
+    "policy_global": "Přihlášení přes {provider} je vynucené pro celou instalaci, pro všechny firmy včetně nově založených. Heslem se přihlásí jen technický účet správce instance.",
     "verify_passkey": "Ověřit přístupovým klíčem",
     "passkey_failed": "Ověření přístupovým klíčem se nepodařilo.",
     "identities_empty": "Žádný účet zatím není propojený.",

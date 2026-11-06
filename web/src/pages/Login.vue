@@ -63,9 +63,17 @@ const ssoRequired = ref<string | null>(ssoRequiredFromQuery ? String(route.query
 const ssoErrorMessage = computed(() => typeof route.query.sso_error === 'string' && route.query.sso_error !== ''
   ? t(`sso.errors.${ssoErrorCode(route.query.sso_error)}`)
   : '')
-const ssoButtons = computed(() => ssoRequired.value === null
-  ? ssoProviders.value
-  : [...ssoProviders.value].sort((a, b) => Number(b.id === ssoRequired.value) - Number(a.id === ssoRequired.value)))
+// Instalace vynucuje poskytovatele všem: nabídne se jen jeho tlačítko a heslo
+// zůstane schované pro technický účet správce instance (nouzový přístup).
+const globalSso = computed(() => auth.setupStatus?.sso_required_provider ?? null)
+const adminPasswordLogin = ref(false)
+const passwordLoginVisible = computed(() => globalSso.value === null || adminPasswordLogin.value)
+const ssoButtons = computed(() => {
+  if (globalSso.value !== null) return ssoProviders.value.filter(p => p.id === globalSso.value)
+  return ssoRequired.value === null
+    ? ssoProviders.value
+    : [...ssoProviders.value].sort((a, b) => Number(b.id === ssoRequired.value) - Number(a.id === ssoRequired.value))
+})
 
 function startSsoLogin(provider: string) {
   navigateFullPage(ssoLoginUrl(provider, requestedReturnPath('/')))
@@ -736,13 +744,18 @@ async function resendCode() {
               <SsoProviderLogo :provider="provider.id" />
               {{ t('sso.login_with', { provider: provider.label }) }}
             </button>
-            <div v-if="!auth.setupStatus?.passwordless_login_enabled" class="flex items-center gap-3" aria-hidden="true">
+            <div v-if="!auth.setupStatus?.passwordless_login_enabled && passwordLoginVisible" class="flex items-center gap-3" aria-hidden="true">
               <span class="h-px flex-1 bg-neutral-200"></span>
               <span class="text-xs text-neutral-500">{{ t('auth.or_password_login') }}</span>
               <span class="h-px flex-1 bg-neutral-200"></span>
             </div>
+            <button v-if="!passwordLoginVisible" type="button" data-testid="admin-password-login"
+                    class="text-xs text-neutral-500 hover:text-primary-700 hover:underline"
+                    @click="adminPasswordLogin = true">
+              {{ t('sso.global_admin_password_login') }}
+            </button>
           </div>
-          <div v-if="auth.setupStatus?.passwordless_login_enabled && !secondFactorPending && !ssoTicket" class="space-y-3">
+          <div v-if="auth.setupStatus?.passwordless_login_enabled && passwordLoginVisible && !secondFactorPending && !ssoTicket" class="space-y-3">
             <button
               v-if="passkeySupported"
               type="button"
@@ -766,7 +779,7 @@ async function resendCode() {
             </div>
           </div>
 
-          <template v-if="!ssoTicket">
+          <template v-if="!ssoTicket && passwordLoginVisible">
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('auth.email') }}</label>
             <input
@@ -880,7 +893,7 @@ async function resendCode() {
 
           <!-- Turnstile container — vždy v DOM. Lokální template ref + watch
                v setup, který přiřadí do composable a vyrenderuje widget. -->
-          <div v-show="captchaRequired && !ssoTicket" class="flex justify-center py-2">
+          <div v-show="captchaRequired && !ssoTicket && passwordLoginVisible" class="flex justify-center py-2">
             <div ref="turnstileEl"></div>
           </div>
 
@@ -889,6 +902,7 @@ async function resendCode() {
           </div>
 
           <button
+            v-if="passwordLoginVisible || ssoTicket"
             type="submit"
             :disabled="auth.loading || passwordlessBusy || !!passkeyFlow || (!ssoTicket && captchaRequired && !turnstile.token.value)"
             class="w-full h-10 bg-primary-600 hover:bg-primary-700 active:bg-primary-800 disabled:bg-neutral-300 disabled:cursor-not-allowed text-white font-medium rounded-md transition"
@@ -896,7 +910,7 @@ async function resendCode() {
             {{ auth.loading ? '…' : t('auth.login') }}
           </button>
 
-          <div v-if="!auth.isDemo" class="text-center pt-2">
+          <div v-if="!auth.isDemo && passwordLoginVisible" class="text-center pt-2">
             <router-link to="/forgot" class="text-sm text-primary-600 hover:underline">
               {{ t('auth.forgot') }}
             </router-link>

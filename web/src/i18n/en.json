@@ -22490,6 +22490,8 @@
     "reauth_unlink": "Confirm it is you before unlinking from {provider}.",
     "reauth_required": "Verify with a passkey, your organisation account or your password.",
     "reauth_or_password": "or enter your password",
+    "global_admin_password_login": "Technical instance administrator account? Sign in with password",
+    "policy_global": "Sign-in with {provider} is required for the whole installation, for all companies including newly created ones. Only the technical instance administrator account signs in with a password.",
     "verify_passkey": "Verify with passkey",
     "passkey_failed": "Passkey verification failed.",
     "identities_empty": "No account is linked yet.",

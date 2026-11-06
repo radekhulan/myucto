@@ -79,3 +79,22 @@ it('s platným sezením a sso_required v adrese zůstane na přihlášení', asy
   expect(wrapper.find('[data-testid="sso-required"]').exists()).toBe(true)
   wrapper.unmount()
 })
+
+it('při vynucení pro celou instalaci nabídne jen poskytovatele a heslo schová pro správce instance', async () => {
+  m.auth.setupStatus = { ...m.auth.setupStatus, sso_required_provider: 'entra',
+    sso_providers: [{ id: 'entra', label: 'Microsoft Entra ID' }, { id: 'google', label: 'Google' }] } as never
+  const wrapper = mount(Login)
+  await flushPromises()
+  expect(wrapper.find('[data-testid="sso-login-entra"]').exists()).toBe(true)
+  expect(wrapper.find('[data-testid="sso-login-google"]').exists()).toBe(false)
+  expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+  expect(wrapper.find('button[type="submit"]').exists()).toBe(false)
+
+  await wrapper.get('[data-testid="admin-password-login"]').trigger('click')
+  expect(wrapper.find('input[type="password"]').exists()).toBe(true)
+  expect(wrapper.find('button[type="submit"]').exists()).toBe(true)
+  expect(wrapper.find('[data-testid="admin-password-login"]').exists()).toBe(false)
+  wrapper.unmount()
+  m.auth.setupStatus = { ...m.auth.setupStatus, sso_required_provider: null,
+    sso_providers: [{ id: 'entra', label: 'Microsoft' }] } as never
+})
