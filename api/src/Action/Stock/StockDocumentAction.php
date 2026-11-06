@@ -9,6 +9,8 @@ use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\StockDocumentRepository;
 use MyInvoice\Repository\WarehouseRepository;
+use MyInvoice\Security\AccessLevel;
+use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Pdf\StockDocumentPdfRenderer;
@@ -87,6 +89,13 @@ final class StockDocumentAction
         $doc = $this->docs->findWithLines($supplierId, (int) $args['id']);
         if ($doc === null) {
             return Json::error($response, 'not_found', 'Skladový doklad nenalezen.', 404);
+        }
+        if ($doc['doc_type'] === 'receipt') {
+            $doc['sales_invoices'] = $this->docs->salesInvoicesOfReceipt(
+                $supplierId,
+                (int) $args['id'],
+                RequestAuthorization::allows($request, 'invoices', AccessLevel::READ),
+            );
         }
         return Json::ok($response, $doc);
     }
@@ -257,6 +266,16 @@ final class StockDocumentAction
             return $err;
         }
         return Json::ok($response, $this->docs->listByInvoice($supplierId, (int) $args['id']));
+    }
+
+    /** Příjemky, ze kterých faktura vznikla — GET /api/invoices/{id}/source-receipts. */
+    public function sourceReceipts(Request $request, Response $response, array $args): Response
+    {
+        $supplierId = $this->currentSupplierId($request);
+        if (!$this->guardStockEnabled($this->db, $supplierId, $response, $err)) {
+            return $err;
+        }
+        return Json::ok($response, $this->docs->receiptsOfSalesInvoice($supplierId, (int) $args['id']));
     }
 
     private function log(Request $request, string $action, int $id, array $payload): void

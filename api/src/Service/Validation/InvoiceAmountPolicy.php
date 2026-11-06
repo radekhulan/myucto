@@ -12,6 +12,7 @@ use MyInvoice\Service\Invoice\TimeBilling;
 
 final class InvoiceAmountPolicy
 {
+    public const MANUAL_PRICE_MISSING_MESSAGE = 'Některé řádky čekají na zadání ceny. Doplňte je, než fakturu vystavíte.';
     public const NON_POSITIVE_DRAFT_MESSAGE = 'Výsledná částka k úhradě musí být větší než 0. Pro čistě záporný nebo nulový doklad použij dobropis.';
     public const NON_POSITIVE_MARK_PAID_MESSAGE = 'Fakturu s částkou k úhradě 0 nebo méně nelze označit jako zaplacenou.';
     public const NON_POSITIVE_REMINDER_MESSAGE = 'Upomínat lze jen faktury s kladnou částkou k úhradě.';
@@ -61,6 +62,16 @@ final class InvoiceAmountPolicy
 
         $items = $data['items'] ?? null;
         if (!is_array($items) || $items === []) {
+            return null;
+        }
+
+        // Koncept s řádkem „cenu zadá člověk" smí být zatím nulový. Hlídá ho vystavení: příznak
+        // nese jen koncept (replaceItems ho jinde neuloží, force-edit vystavené ho zahodí) a každá
+        // cesta, která vystavuje existující koncept, volá hasMissingManualPrice(): IssueInvoiceAction
+        // (UI, API v1, MCP `issue_invoice`), AutoIssueAndSendService (schválení výkazu) a už žádost
+        // o schválení (RequestApprovalAction). Pravidelná faktura, účtenka a storno vystavují vlastní
+        // nově založený doklad bez příznaku; kopie, dobropis a konečná faktura ze zálohy ho nepřenáší.
+        if (array_filter($items, static fn (mixed $item): bool => is_array($item) && !empty($item['manual_price'])) !== []) {
             return null;
         }
 
@@ -135,6 +146,22 @@ final class InvoiceAmountPolicy
      *
      * @param array<mixed> $items
      */
+    /**
+     * Řádek „cenu zadá člověk" (faktura z příjemky), kterému ještě chybí cena: součet může být
+     * kladný díky ostatním řádkům, plnění za 0 Kč by ale odešlo odběrateli.
+     *
+     * @param array<int, mixed> $items
+     */
+    public static function hasMissingManualPrice(array $items): bool
+    {
+        foreach ($items as $item) {
+            if (is_array($item) && !empty($item['manual_price']) && (float) ($item['unit_price_without_vat'] ?? 0) === 0.0) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static function hasPositiveItem(array $items): bool
     {
         foreach ($items as $item) {

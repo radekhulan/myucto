@@ -124,6 +124,9 @@ final class IssueInvoiceAction
         if (!InvoiceItemKind::hasAmountLine((array) $invoice['items'])) {
             return Json::error($response, 'no_items', 'Faktura musí obsahovat alespoň jednu položku.', 422);
         }
+        if (InvoiceAmountPolicy::hasMissingManualPrice((array) $invoice['items'])) {
+            return Json::error($response, 'manual_price_missing', InvoiceAmountPolicy::MANUAL_PRICE_MISSING_MESSAGE, 422);
+        }
         if (
             InvoiceAmountPolicy::requiresPositiveDraftAmountToPay(
                 (string) ($invoice['invoice_type'] ?? 'invoice'),
