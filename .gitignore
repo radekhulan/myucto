@@ -58,3 +58,5 @@ web/src/i18n/chunks/
 tools/pohoda-export/pohoda-sql.json
 tools/pamica-export/pamica-sql.json
 tools/regression/**/__pycache__/
+/tools/Invoke-MyUctoDeployment.ps1
+/tools/Publish-DeploymentSnapshot.ps1
