@@ -6,11 +6,14 @@ import AppShell from '@/components/layout/AppShell.vue'
 import { authApi } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { rememberTotpEnrollment } from '@/security/totpEnrollment'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 const auth = useAuthStore()
+// Vynucené přihlášení přes organizaci: heslo se nenastavuje, odkaz vede na přihlášení.
+const { passwordAllowed } = useSsoEnforcement()
 
 const token = ref('')
 const password = ref('')
@@ -22,6 +25,7 @@ const error = ref('')
 onMounted(() => {
   token.value = (route.query.token as string) || ''
   if (!token.value) error.value = t('errors.generic')
+  if (auth.setupStatus == null) auth.fetchSetupStatus().catch(() => undefined)
 })
 
 const passwordOk = computed(() => password.value.length >= 12)
@@ -58,7 +62,9 @@ async function submit() {
     }
     setTimeout(() => router.push('/login'), 2000)
   } catch (e: any) {
-    error.value = e?.response?.data?.error?.message || t('errors.generic')
+    error.value = e?.response?.data?.error?.code === 'password_login_disabled'
+      ? t('sso.password_login_disabled')
+      : e?.response?.data?.error?.message || t('errors.generic')
   } finally {
     submitting.value = false
   }
@@ -71,7 +77,15 @@ async function submit() {
       <div class="bg-surface border border-neutral-200 rounded-lg shadow-sm p-6">
         <h2 class="text-xl font-semibold mb-1">{{ t('auth.reset_title') }}</h2>
 
-        <div v-if="success" class="rounded-md bg-primary-50 border border-primary-200 p-4 text-sm text-primary-800 mt-4">
+        <div v-if="!passwordAllowed" class="mt-4 space-y-4" data-testid="password-login-disabled">
+          <p role="status" class="rounded-md bg-primary-50 border border-primary-200 p-4 text-sm text-primary-800">
+            {{ t('sso.password_login_disabled') }}
+          </p>
+          <div class="text-center">
+            <router-link to="/login" class="text-sm text-primary-600 hover:underline">{{ t('auth.back_to_login') }}</router-link>
+          </div>
+        </div>
+        <div v-else-if="success" class="rounded-md bg-primary-50 border border-primary-200 p-4 text-sm text-primary-800 mt-4">
           {{ t('common.success') }}…
         </div>
 

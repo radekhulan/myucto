@@ -26,6 +26,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { takeSsoStepUpReturn } from '@/security/oidc'
 
 const { t } = useI18n()
@@ -182,9 +183,14 @@ const hasPasskey = computed(() =>
   || (auth.user?.passkey_count ?? 0) > 0,
 )
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
 
 /** Prázdný řetězec = ověření je kompletní; jinak text, co ještě chybí. */
 const certificateStepUpMissing = computed(() => {
+  const enforced = ssoEnforcement.enforcedStepUpMissing(certificateStepPasskeyToken.value,
+    ssoVerified(certificateStepPasskeyToken.value), certificateStepTotp.value, hasTotp.value)
+  if (enforced !== null) return enforced === '' ? '' : t(enforced)
   if (certificateStepPasskeyToken.value) return ''
   if (!certificateStepPassword.value) return t('settings.certificate_vault_step_up_password_missing')
   if (hasTotp.value && !/^\d{6}$/.test(certificateStepTotp.value.trim())) {
@@ -550,7 +556,7 @@ async function uploadCertificate() {
       file: certificateFile.value,
       label: certificateLabel.value.trim(),
       password: certificatePassword.value,
-      proof: certificateStepUpProof(),
+      proof: await certificateStepUpProof(),
       shareWithOtherSuppliers: certificateShareWithOthers.value,
       shareOnlyWithoutValid: certificateShareWithOthers.value && certificateShareOnlyWithoutValid.value,
       replaceCredentialId: certificateReplaceId.value,
@@ -592,11 +598,11 @@ function replacedSummary(row: CertificateVaultSharingResult): string {
 }
 
 function certificateStepUpProof() {
-  return {
+  return ssoEnforcement.reauthProof('epo.certificate', {
     password: certificateStepPassword.value || undefined,
     totp_code: certificateStepTotp.value.trim() || undefined,
     step_up_token: certificateStepPasskeyToken.value || undefined,
-  }
+  })
 }
 
 async function shareCertificateWithOtherSuppliers(certificate: CertificateVaultItem) {
@@ -617,7 +623,7 @@ async function shareCertificateWithOtherSuppliers(certificate: CertificateVaultI
     certificateSharingResults.value = await settingsApi.shareCertificateWithOtherSuppliers(
       certificate.id,
       certificateShareOnlyWithoutValid.value,
-      certificateStepUpProof(),
+      await certificateStepUpProof(),
       certificateReplaceId.value,
     )
     resetCertificateStepUp()
@@ -682,7 +688,7 @@ async function deleteCertificate(certificate: CertificateVaultItem) {
   if (!window.confirm(question)) return
   certificateDeletingId.value = certificate.id
   try {
-    const result = await settingsApi.deleteCertificate(certificate.id, certificateStepUpProof())
+    const result = await settingsApi.deleteCertificate(certificate.id, await certificateStepUpProof())
     resetCertificateStepUp()
     await Promise.all([loadCertificates(), loadPersonalCertificates()])
     const removed = result.payroll_selections_removed?.length ?? 0
@@ -887,6 +893,12 @@ function validateSigningProfileCredentialSave(): boolean {
       toast.error(t('settings.signing_vault_certificate_required'))
       return false
     }
+    const enforced = ssoEnforcement.enforcedStepUpMissing(signingProfileVaultPasskeyToken.value,
+      ssoVerified(signingProfileVaultPasskeyToken.value), signingProfileVaultTotp.value, hasTotp.value)
+    if (enforced !== null) {
+      if (enforced !== '') toast.error(t(enforced))
+      return enforced === ''
+    }
     // Passkey proof nahradí heslo i TOTP naráz, stejně jako u sekce Certifikáty.
     if (signingProfileVaultPasskeyToken.value) {
       return true
@@ -932,11 +944,11 @@ async function saveSigningProfileCertFor(profileId: number) {
     signingProfileCredential.value = await settingsApi.linkPersonalSigningCertificate(
       profileId,
       signingProfileVaultCredentialId.value as number,
-      {
+      await ssoEnforcement.reauthProof('epo.certificate', {
         password: signingProfileVaultPassword.value || undefined,
         totp_code: signingProfileVaultTotp.value.trim() || undefined,
         step_up_token: signingProfileVaultPasskeyToken.value || undefined,
-      },
+      }),
     )
     signingProfileVaultPassword.value = ''
     signingProfileVaultTotp.value = ''
@@ -1175,7 +1187,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
         </div>
 
         <div class="mt-4 grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
-          <div v-if="hasPasskey && !ssoVerified(certificateStepPasskeyToken)" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified(certificateStepPasskeyToken)" class="sm:col-span-2 flex flex-wrap items-center gap-3">
             <div v-if="certificateStepPasskeyToken" class="text-sm font-medium text-success-600">
               ✓ {{ t('settings.certificate_vault_passkey_verified') }}
             </div>
@@ -1185,7 +1197,7 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
                 {{ certificatePasskeyBusy ? t('common.loading') : t('settings.certificate_vault_verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
             </template>
             <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
           </div>
@@ -1194,19 +1206,19 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
             :verified="ssoVerified(certificateStepPasskeyToken)" :disabled="certificatePasskeyBusy || certificateBusy"
             @verified="(proof: string) => { certificateStepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!certificateStepPasskeyToken">
-            <label class="text-xs text-neutral-600">
+            <label v-if="passwordAllowed" class="text-xs text-neutral-600">
               {{ t('settings.certificate_vault_step_up_password') }}
               <input v-model="certificateStepPassword" type="password" autocomplete="current-password"
                 class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
             </label>
-            <label class="text-xs text-neutral-600">
+            <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="text-xs text-neutral-600">
               {{ t('settings.certificate_vault_step_up_totp') }}
               <input v-model="certificateStepTotp" type="text" inputmode="numeric" maxlength="6"
                 autocomplete="one-time-code"
                 class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
             </label>
           </template>
-          <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_hint') }}</p>
+          <p v-if="passwordAllowed" class="sm:col-span-2 text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_hint') }}</p>
         </div>
 
         <h4 class="mt-5 mb-2 text-xs font-medium uppercase tracking-wide text-neutral-500">
@@ -1590,8 +1602,8 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                     data-testid="signing-vault-passkey-verified">
                     ✓ {{ ssoVerified(signingProfileVaultPasskeyToken) ? t('sso.step_up_verified') : t('settings.certificate_vault_passkey_verified') }}
                   </div>
-                  <div v-else class="grid grid-cols-2 gap-2">
-                    <label class="text-xs text-neutral-700">
+                  <div v-else-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="grid grid-cols-2 gap-2">
+                    <label v-if="passwordAllowed" class="text-xs text-neutral-700">
                       {{ t('reports.submissions.current_password') }}
                       <input v-model="signingProfileVaultPassword" type="password" autocomplete="current-password"
                         class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm">
@@ -1604,14 +1616,14 @@ async function testPdfOutputSetting(setting: PdfSignatureOutputSetting) {
                     </label>
                   </div>
                 </div>
-                <div v-if="hasPasskey && !signingProfileVaultPasskeyToken" class="mt-3 flex flex-wrap items-center gap-3">
+                <div v-if="localFactorsAllowed && hasPasskey && !signingProfileVaultPasskeyToken" class="mt-3 flex flex-wrap items-center gap-3">
                   <button v-if="passkeySupported" type="button" :class="[btnOutline('primary'), 'whitespace-nowrap']"
                     data-testid="signing-vault-passkey"
                     :disabled="signingProfileVaultPasskeyBusy || signingProfileSaving" @click="verifySigningProfileVaultPasskey">
                     <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
                     {{ signingProfileVaultPasskeyBusy ? t('common.loading') : t('settings.certificate_vault_verify_passkey') }}
                   </button>
-                  <span v-if="passkeySupported" class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
+                  <span v-if="passkeySupported && passwordAllowed" class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
                   <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
                 </div>
                 <SsoStepUpOption v-if="!signingProfileVaultPasskeyToken" class="mt-3" operation="epo.certificate"

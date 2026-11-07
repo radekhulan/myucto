@@ -45,6 +45,30 @@ describe('AppUserMenu', () => {
     expect(wrapper.text()).toContain('sso.profile_tab')
   })
 
+  it('při vynucení silného poskytovatele schová změnu hesla, ověřovací aplikaci i přístupové klíče', () => {
+    signIn('staff')
+    useAuthStore().setupStatus = { sso_required_provider: 'entra', sso_providers: [{ id: 'entra', strong: true }] } as never
+    const wrapper = mount(AppUserMenu, { props: { link, open: true } })
+    expect(wrapper.findAll('a').map(item => item.attributes('href'))).toEqual([
+      '/profile/password?tab=sso',
+      '/profile/password?tab=session-lock',
+      '/profile/password?tab=shortcuts',
+    ])
+  })
+
+  it('při vynucení poskytovatele jako prvního faktoru schová jen změnu hesla', () => {
+    signIn('staff')
+    useAuthStore().setupStatus = { sso_required_provider: 'entra', sso_providers: [{ id: 'entra', strong: false }] } as never
+    const wrapper = mount(AppUserMenu, { props: { link, open: true } })
+    expect(wrapper.findAll('a').map(item => item.attributes('href'))).toEqual([
+      '/profile/password?tab=totp',
+      '/profile/password?tab=passkeys',
+      '/profile/password?tab=sso',
+      '/profile/password?tab=session-lock',
+      '/profile/password?tab=shortcuts',
+    ])
+  })
+
   it('kompaktní tlačítko ukáže iniciály a popisek pro čtečky', () => {
     signIn('staff')
     const wrapper = mount(AppUserMenu, { props: { link, compact: true } })

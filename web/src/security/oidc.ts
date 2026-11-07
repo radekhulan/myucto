@@ -98,6 +98,25 @@ export function hasStrongProvider(
   return Array.isArray(providers) && providers.some(p => p.id === id && p.strong === true)
 }
 
+export interface SsoEnforcementPolicy {
+  /** Poskytovatel vynucený pro celou instalaci, `null` = nevynuceno. */
+  provider: string | null
+  /** Silný poskytovatel řídí i druhý faktor; místní faktory se pak nepoužívají. */
+  strong: boolean
+}
+
+/**
+ * Pravidla vynuceného přihlášení přes účet organizace ze stavu instalace.
+ * Čte je `useSsoEnforcement()` i auth store, aby se nerozešly.
+ */
+export function ssoEnforcementPolicy(
+  status: { sso_required_provider?: string | null; sso_providers?: Array<{ id: string; strong?: boolean }> } | null | undefined,
+): SsoEnforcementPolicy {
+  const value = status?.sso_required_provider
+  const provider = typeof value === 'string' && value !== '' ? value : null
+  return { provider, strong: provider !== null && hasStrongProvider(status?.sso_providers, provider) }
+}
+
 // ── Ověření citlivé operace v samostatném okně ───────────────────────────
 
 /**

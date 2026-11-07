@@ -47,6 +47,7 @@ import {
   type SsoLoginTicket,
 } from '@/security/oidc'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
+import { ssoEnforcedProvider } from '@/composables/useSsoEnforcement'
 import SsoProviderLogo from '@/components/security/SsoProviderLogo.vue'
 import { ssoButtonClass } from '@/components/security/ssoProviderStyles'
 
@@ -63,11 +64,10 @@ const ssoRequired = ref<string | null>(ssoRequiredFromQuery ? String(route.query
 const ssoErrorMessage = computed(() => typeof route.query.sso_error === 'string' && route.query.sso_error !== ''
   ? t(`sso.errors.${ssoErrorCode(route.query.sso_error)}`)
   : '')
-// Instalace vynucuje poskytovatele všem: nabídne se jen jeho tlačítko a heslo
-// zůstane schované pro technický účet správce instance (nouzový přístup).
-const globalSso = computed(() => auth.setupStatus?.sso_required_provider ?? null)
-const adminPasswordLogin = ref(false)
-const passwordLoginVisible = computed(() => globalSso.value === null || adminPasswordLogin.value)
+// Instalace vynucuje poskytovatele všem: nabídne se jen jeho tlačítko. Heslo,
+// passkey ani záložní kód se nepoužívají pro nikoho, ani pro správce instance.
+const globalSso = computed(() => ssoEnforcedProvider(auth.setupStatus?.sso_required_provider))
+const passwordLoginVisible = computed(() => globalSso.value === null)
 const ssoButtons = computed(() => {
   if (globalSso.value !== null) return ssoProviders.value.filter(p => p.id === globalSso.value)
   return ssoRequired.value === null
@@ -535,7 +535,7 @@ async function submit() {
 }
 
 async function loginWithPasskey() {
-  if (!passkeySupported || !auth.setupStatus?.passwordless_login_enabled) return
+  if (!passkeySupported || !auth.setupStatus?.passwordless_login_enabled || !passwordLoginVisible.value) return
   if (captchaRequired.value && !turnstile.token.value) {
     error.value = t('auth.captcha_loading')
     return
@@ -749,11 +749,6 @@ async function resendCode() {
               <span class="text-xs text-neutral-500">{{ t('auth.or_password_login') }}</span>
               <span class="h-px flex-1 bg-neutral-200"></span>
             </div>
-            <button v-if="!passwordLoginVisible" type="button" data-testid="admin-password-login"
-                    class="text-xs text-neutral-500 hover:text-primary-700 hover:underline"
-                    @click="adminPasswordLogin = true">
-              {{ t('sso.global_admin_password_login') }}
-            </button>
           </div>
           <div v-if="auth.setupStatus?.passwordless_login_enabled && passwordLoginVisible && !secondFactorPending && !ssoTicket" class="space-y-3">
             <button

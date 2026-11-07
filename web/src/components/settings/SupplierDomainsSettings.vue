@@ -12,6 +12,7 @@ import { navigateFullPage } from '@/workspace/fullPageNavigation'
 import { takeSsoStepUpProof } from '@/security/oidc'
 import { useSsoStepUp } from '@/composables/useSsoStepUp'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -29,8 +30,10 @@ const actionError = ref('')
 const drafts = reactive<Record<number, { purpose: DomainPurpose; primary: boolean }>>({})
 const canWrite = computed(() => auth.canWrite('settings.domains'))
 const mfaMethods = computed(() => auth.user?.mfa_methods || [])
-const canPasskey = computed(() => mfaMethods.value.includes('passkey') && isWebAuthnAvailable())
-const canTotp = computed(() => mfaMethods.value.includes('totp'))
+// Při vynucení silného poskytovatele potvrzuje aktivaci jen účet organizace.
+const { localFactorsAllowed } = useSsoEnforcement()
+const canPasskey = computed(() => localFactorsAllowed.value && mfaMethods.value.includes('passkey') && isWebAuthnAvailable())
+const canTotp = computed(() => localFactorsAllowed.value && mfaMethods.value.includes('totp'))
 const canonicalBaseUrl = computed(() => auth.domainContext?.canonical_base_url || '')
 const ssoAvailable = useSsoStepUp('domain.activate').available
 
@@ -346,7 +349,7 @@ function statusClass(status: SupplierDomain['status']): string {
       <SsoStepUpOption :key="activation.id" class="mt-3" :operation="`domain.activate:${activation.id}`"
         :disabled="busy === activation.id"
         @verified="(proof: string) => { if (activation) void activateWithProof(activation, proof) }" />
-      <p v-if="!canPasskey && !canTotp && !ssoAvailable" class="mt-3 text-sm text-warning-700">{{ t('domains.activate_no_mfa') }}</p>
+      <p v-if="localFactorsAllowed && !canPasskey && !canTotp && !ssoAvailable" class="mt-3 text-sm text-warning-700">{{ t('domains.activate_no_mfa') }}</p>
     </div>
   </section>
 </template>

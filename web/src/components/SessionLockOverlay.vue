@@ -10,6 +10,7 @@ import { isClientDomainAuthenticatedPath } from '@/security/clientRoutePolicy'
 import { ssoLoginUrl } from '@/security/oidc'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
 import SsoProviderLogo from '@/components/security/SsoProviderLogo.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 const { t } = useI18n()
 const auth = useAuthStore()
@@ -32,7 +33,13 @@ const centralDomainUnlock = computed(() => auth.domainContext?.locked === true)
 const automaticLockEnabled = computed(() => (security.state?.lock_after_minutes ?? 0) > 0)
 // Odemčení přes poskytovatele vydá nové sezení a zamčené zruší (OidcAction::callback).
 // Poskytovatel, který je jen prvním faktorem, vede přes lístek a přihlašovací stránku.
-const ssoUnlockProviders = computed(() => centralDomainUnlock.value ? [] : (auth.setupStatus?.sso_providers ?? []))
+// Při vynucení pro celou instalaci se nabídne jen vynucený poskytovatel, stejně jako na přihlášení.
+const { provider: enforcedProvider } = useSsoEnforcement()
+const ssoUnlockProviders = computed(() => {
+  if (centralDomainUnlock.value) return []
+  const providers = auth.setupStatus?.sso_providers ?? []
+  return enforcedProvider.value === null ? providers : providers.filter(p => p.id === enforcedProvider.value)
+})
 const ssoUnlock = computed(() => ssoUnlockProviders.value.length > 0)
 function unlockWithSso(provider: string) {
   navigateFullPage(ssoLoginUrl(provider, route.fullPath))

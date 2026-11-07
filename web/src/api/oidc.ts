@@ -18,18 +18,6 @@ export interface ReauthFields {
   totp_code?: string
 }
 
-export type LoginPolicy = 'any' | 'sso_required'
-
-export interface LoginPolicyState {
-  login_policy: LoginPolicy
-  login_sso_provider: string | null
-  /** Poskytovatel vynucený pro celou instalaci; nastavení firmy se pak nepoužije. */
-  global_sso_provider?: string | null
-  providers: SsoProvider[]
-  can_manage: boolean
-  users_without_identity: number
-}
-
 export const oidcApi = {
   identities: () =>
     api.get<{ identities: ExternalIdentity[] }>('/auth/oidc/identities').then(r => r.data.identities),
@@ -41,14 +29,6 @@ export const oidcApi = {
   stepUp: (provider: string, operation: string, returnTo: string) =>
     api.post<{ url: string }>(`/auth/oidc/${encodeURIComponent(provider)}/step-up`, { operation, return_to: returnTo })
       .then(r => r.data.url),
-
-  loginPolicy: () =>
-    api.get<LoginPolicyState>('/settings/login-policy').then(r => r.data),
-  updateLoginPolicy: (loginPolicy: LoginPolicy, provider: string | null) =>
-    api.put<LoginPolicyState>('/settings/login-policy', {
-      login_policy: loginPolicy,
-      login_sso_provider: provider,
-    }).then(r => r.data),
 
   adminIdentities: (userId: number) =>
     api.get<{ identities: ExternalIdentity[]; providers: SsoProvider[] }>(`/admin/users/${userId}/identities`)

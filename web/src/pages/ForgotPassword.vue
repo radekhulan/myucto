@@ -6,9 +6,12 @@ import { authApi } from '@/api/auth'
 import { useAuthStore } from '@/stores/auth'
 import { useTurnstile } from '@/composables/useTurnstile'
 import { apiErrorMessage } from '@/api/errors'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 const { t } = useI18n()
 const auth = useAuthStore()
+// Vynucené přihlášení přes organizaci: heslo se neobnovuje, odkaz vede zpět na přihlášení.
+const { passwordAllowed } = useSsoEnforcement()
 const email = ref('')
 const submitted = ref(false)
 const submitting = ref(false)
@@ -22,7 +25,7 @@ const turnstileEl = ref<HTMLElement | null>(null)
 
 onMounted(async () => {
   await auth.fetchSetupStatus()
-  if (auth.setupStatus?.captcha.provider === 'turnstile') {
+  if (passwordAllowed.value && auth.setupStatus?.captcha.provider === 'turnstile') {
     captchaEnabled.value = true
     captchaSiteKey.value = auth.setupStatus.captcha.site_key
     captchaScriptUrl.value = auth.setupStatus.captcha.script_url
@@ -49,7 +52,9 @@ async function submit() {
     await authApi.forgot(email.value.trim(), turnstile.token.value || undefined)
     submitted.value = true
   } catch (e: any) {
-    error.value = apiErrorMessage(e, t('auth.reset_send'))
+    error.value = e?.response?.data?.error?.code === 'password_login_disabled'
+      ? t('sso.password_login_disabled')
+      : apiErrorMessage(e, t('auth.reset_send'))
     turnstile.reset()
   } finally {
     submitting.value = false
@@ -64,7 +69,11 @@ async function submit() {
         <h2 class="text-xl font-semibold mb-1">{{ t('auth.reset_title') }}</h2>
         <p class="text-sm text-neutral-500 mb-6">{{ t('auth.reset_send') }}</p>
 
-        <div v-if="submitted" class="rounded-md bg-primary-50 border border-primary-200 p-4 text-sm text-primary-800">
+        <div v-if="!passwordAllowed" role="status" data-testid="password-login-disabled"
+             class="rounded-md bg-primary-50 border border-primary-200 p-4 text-sm text-primary-800">
+          {{ t('sso.password_login_disabled') }}
+        </div>
+        <div v-else-if="submitted" class="rounded-md bg-primary-50 border border-primary-200 p-4 text-sm text-primary-800">
           {{ t('auth.reset_sent') }}
         </div>
 

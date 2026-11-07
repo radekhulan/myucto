@@ -49,6 +49,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import PaginationBar from '@/components/ui/PaginationBar.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import { takeSsoStepUpReturn } from '@/security/oidc'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 // `tax` je stránka Daně → Podání, `payroll` záložka mzdových vyúčtování pod Mzdami.
 // Archiv je jeden a odesílá se touž cestou; liší se jen tím, co obrazovka ukazuje.
@@ -155,6 +156,8 @@ const hasPasskey = computed(() =>
   || (auth.user?.passkey_count ?? 0) > 0,
 )
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { strong: ssoOnly, passwordAllowed, localFactorsAllowed } = ssoEnforcement
 
 // Ověření přes Microsoft vede přes přesměrování; kontext říká, který ze tří
 // dialogů se po návratu otevře. Proof pak jde stejným polem jako passkey proof.
@@ -182,27 +185,27 @@ async function verifyEpoPasskey(target: 'step' | 'submit' | 'recovery') {
 }
 
 function stepProof() {
-  return {
+  return ssoEnforcement.reauthProof('epo.certificate', {
     password: stepPassword.value || undefined,
     totp_code: stepTotpCode.value.trim() || undefined,
     step_up_token: stepPasskeyToken.value || undefined,
-  }
+  })
 }
 
 function submitProof() {
-  return {
+  return ssoEnforcement.reauthProof('epo.certificate', {
     password: submitPassword.value || undefined,
     totp_code: submitTotpCode.value.trim() || undefined,
     step_up_token: submitPasskeyToken.value || undefined,
-  }
+  })
 }
 
 function recoveryProof() {
-  return {
+  return ssoEnforcement.reauthProof('epo.certificate', {
     password: recoveryPassword.value || undefined,
     totp_code: recoveryTotpCode.value.trim() || undefined,
     step_up_token: recoveryPasskeyToken.value || undefined,
-  }
+  })
 }
 
 /**
@@ -210,6 +213,10 @@ function recoveryProof() {
  * heslo (+ TOTP, má-li ho účet zapnuté).
  */
 function stepUpReady(password: string, totpCode: string, passkeyToken: string): boolean {
+  // Vynucené přihlášení přes organizaci: heslo se nepoužívá. Silný poskytovatel
+  // potvrzuje jen vlastním ověřením, jinak passkey nebo TOTP kód.
+  if (ssoOnly.value) return ssoVerified(passkeyToken)
+  if (!passwordAllowed.value) return passkeyToken !== '' || (hasTotp.value && /^\d{6}$/.test(totpCode.trim()))
   if (passkeyToken !== '') return true
   if (password === '') return false
   return !hasTotp.value || /^\d{6}$/.test(totpCode.trim())
@@ -258,7 +265,11 @@ const enabledCredentials = computed(() =>
   credentials.value.filter(credential => credential.enabled_for_supplier && credential.valid_now),
 )
 const credentialStepUpMissing = computed(() => {
+  if (ssoOnly.value) return ssoVerified(stepPasskeyToken.value) ? '' : t('sso.step_up_enforced_required')
   if (stepPasskeyToken.value) return ''
+  if (!passwordAllowed.value) {
+    return hasTotp.value && /^\d{6}$/.test(stepTotpCode.value.trim()) ? '' : t('sso.step_up_local_factor_required')
+  }
   if (!stepPassword.value) return t('reports.submissions.step_up_password_missing')
   if (hasTotp.value && !/^\d{6}$/.test(stepTotpCode.value.trim())) {
     return t('reports.submissions.step_up_totp_missing')
@@ -1183,7 +1194,7 @@ async function uploadOwnCredential() {
   credentialBusy.value = true
   try {
     const credential = await epoSubmissionsApi.uploadCredential(
-      credentialFile.value, credentialLabel.value, credentialPfxPassword.value, stepProof(),
+      credentialFile.value, credentialLabel.value, credentialPfxPassword.value, await stepProof(),
     )
     credentialFile.value = null
     credentialLabel.value = ''
@@ -1233,7 +1244,7 @@ async function toggleCredential(credential: EpoSigningCredential) {
     const result = await epoSubmissionsApi.setCredentialSupplier(
       credential.id,
       !credential.enabled_for_supplier,
-      stepProof(),
+      await stepProof(),
     )
     credentials.value = result.credentials
     resetCredentialSecrets()
@@ -1260,7 +1271,7 @@ async function deleteCredential(credential: EpoSigningCredential) {
   try {
     await epoSubmissionsApi.deleteCredential(
       credential.id,
-      stepProof(),
+      await stepProof(),
     )
     resetCredentialSecrets()
     await loadCredentials()
@@ -1291,7 +1302,7 @@ async function testDirect() {
     const result = await epoSubmissionsApi.testDirect(
       item.id,
       selectedCredentialId.value,
-      submitProof(),
+      await submitProof(),
     )
     directMessages.value = { ...directMessages.value, [item.id]: result.messages }
     submitModalOpen.value = false
@@ -1337,7 +1348,7 @@ async function submitDirect() {
     const result = await epoSubmissionsApi.submitDirect(
       item.id,
       submitAttemptId.value,
-      submitProof(),
+      await submitProof(),
       submitBlockingHandoff.value !== null && submitSupersedeConfirmed.value,
     )
     submitModalOpen.value = false
@@ -1446,7 +1457,7 @@ async function confirmRecovery() {
       const result = await epoSubmissionsApi.revealStatePassword(
         item.id,
         recoveryAttemptId.value,
-        recoveryProof(),
+        await recoveryProof(),
       )
       revealedPassword.value = { ...revealedPassword.value, [item.id]: result.state_password }
       recoveryModalOpen.value = false
@@ -1461,7 +1472,7 @@ async function confirmRecovery() {
         item.id,
         recoveryAttemptId.value,
         recoveryFile.value,
-        recoveryProof(),
+        await recoveryProof(),
       )
       toast.success(t('reports.submissions.confirmation_recovered'))
     } else {
@@ -1469,7 +1480,7 @@ async function confirmRecovery() {
         item.id,
         recoveryAttemptId.value,
         recoveryNote.value,
-        recoveryProof(),
+        await recoveryProof(),
       )
       toast.success(t('reports.submissions.attempt_released'))
     }
@@ -2712,7 +2723,7 @@ onMounted(async () => {
           </div>
 
           <div class="grid sm:grid-cols-2 gap-3 rounded-lg border border-neutral-200 p-4">
-            <div v-if="hasPasskey && !ssoVerified(stepPasskeyToken)" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+            <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified(stepPasskeyToken)" class="sm:col-span-2 flex flex-wrap items-center gap-3">
               <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">
                 ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
               </div>
@@ -2724,7 +2735,7 @@ onMounted(async () => {
                   </svg>
                   {{ passkeyBusy === 'step' ? t('auth.passkey_verifying') : t('reports.submissions.step_up_verify_passkey') }}
                 </button>
-                <span class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
+                <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
               </template>
               <p v-else class="text-xs text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
             </div>
@@ -2733,18 +2744,18 @@ onMounted(async () => {
               :verified="ssoVerified(stepPasskeyToken)" :disabled="credentialBusy || passkeyBusy !== ''"
               @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
             <template v-if="!stepPasskeyToken">
-              <label class="text-xs text-neutral-600">
+              <label v-if="passwordAllowed" class="text-xs text-neutral-600">
                 {{ t('reports.submissions.current_password') }}
                 <input v-model="stepPassword" type="password" autocomplete="current-password"
                   class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
               </label>
-              <label class="text-xs text-neutral-600">
+              <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="text-xs text-neutral-600">
                 {{ t('reports.submissions.totp_optional') }}
                 <input v-model="stepTotpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
                   class="mt-1 w-full h-9 rounded-md border border-neutral-300 bg-surface px-2 text-sm">
               </label>
             </template>
-            <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('reports.submissions.step_up_hint') }}</p>
+            <p v-if="passwordAllowed" class="sm:col-span-2 text-xs text-neutral-500">{{ t('reports.submissions.step_up_hint') }}</p>
             <p v-if="credentialStepUpMissing" class="sm:col-span-2 text-xs text-warning-700">
               {{ credentialStepUpMissing }}
             </p>
@@ -2888,7 +2899,7 @@ onMounted(async () => {
               <span>{{ t('reports.submissions.resolve_not_submitted_check') }}</span>
             </label>
           </template>
-          <div v-if="hasPasskey && !ssoVerified(recoveryPasskeyToken)" class="flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified(recoveryPasskeyToken)" class="flex flex-wrap items-center gap-3">
             <div v-if="recoveryPasskeyToken" class="text-sm font-medium text-success-600">
               ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
             </div>
@@ -2900,7 +2911,7 @@ onMounted(async () => {
                 </svg>
                 {{ passkeyBusy === 'recovery' ? t('auth.passkey_verifying') : t('reports.submissions.step_up_verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
             </template>
             <p v-else class="text-sm text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
           </div>
@@ -2909,11 +2920,11 @@ onMounted(async () => {
             :verified="ssoVerified(recoveryPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''"
             @verified="(proof: string) => { recoveryPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!recoveryPasskeyToken">
-            <label class="block text-sm">
+            <label v-if="passwordAllowed" class="block text-sm">
               {{ t('reports.submissions.current_password') }}
               <input v-model="recoveryPassword" type="password" autocomplete="current-password" class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">
             </label>
-            <label class="block text-sm">
+            <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="block text-sm">
               {{ t('reports.submissions.totp_optional') }}
               <input v-model="recoveryTotpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">
             </label>
@@ -2997,7 +3008,7 @@ onMounted(async () => {
           <div v-else class="rounded-lg border border-primary-500/30 bg-primary-50 p-3 text-sm text-primary-800">
             {{ t('reports.submissions.direct_test_signature_warning') }}
           </div>
-          <div v-if="hasPasskey && !ssoVerified(submitPasskeyToken)" class="flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified(submitPasskeyToken)" class="flex flex-wrap items-center gap-3">
             <div v-if="submitPasskeyToken" class="text-sm font-medium text-success-600">
               ✓ {{ t('reports.submissions.step_up_passkey_verified') }}
             </div>
@@ -3009,7 +3020,7 @@ onMounted(async () => {
                 </svg>
                 {{ passkeyBusy === 'submit' ? t('auth.passkey_verifying') : t('reports.submissions.step_up_verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('reports.submissions.step_up_or_password') }}</span>
             </template>
             <p v-else class="text-sm text-warning-700">{{ t('reports.submissions.step_up_passkey_unsupported') }}</p>
           </div>
@@ -3018,12 +3029,12 @@ onMounted(async () => {
             :verified="ssoVerified(submitPasskeyToken)" :disabled="directBusy || passkeyBusy !== ''"
             @verified="(proof: string) => { submitPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!submitPasskeyToken">
-            <label class="block text-sm">
+            <label v-if="passwordAllowed" class="block text-sm">
               {{ t('reports.submissions.current_password') }}
               <input v-model="submitPassword" type="password" autocomplete="current-password"
                 class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">
             </label>
-            <label class="block text-sm">
+            <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="block text-sm">
               {{ t('reports.submissions.totp_optional') }}
               <input v-model="submitTotpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
                 class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">

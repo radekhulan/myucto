@@ -17,6 +17,7 @@ const m = vi.hoisted(() => ({
   identities: vi.fn(),
   stepUp: vi.fn(),
   navigate: vi.fn(),
+  totpStepUp: vi.fn(),
 }))
 
 vi.mock('@/api/epoSubmissions', async (importOriginal) => {
@@ -36,7 +37,7 @@ vi.mock('@/api/epoSubmissions', async (importOriginal) => {
 
 vi.mock('@/api/oidc', () => ({ oidcApi: { identities: m.identities, stepUp: m.stepUp } }))
 vi.mock('@/workspace/fullPageNavigation', () => ({ navigateFullPage: m.navigate }))
-vi.mock('@/api/auth', () => ({ authApi: {} }))
+vi.mock('@/api/auth', () => ({ authApi: { totpStepUp: m.totpStepUp } }))
 vi.mock('@/api/errors', () => ({ apiErrorMessage: (e: unknown) => String(e) }))
 vi.mock('@/security/webauthn', () => ({
   getCredential: vi.fn(),
@@ -52,16 +53,15 @@ vi.mock('vue-i18n', () => ({
     locale: { value: 'cs' },
   }),
 }))
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    isClientRole: false,
-    // Účet jen s přihlášením přes organizaci: žádná passkey, žádné TOTP.
-    user: { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] },
-    setupStatus: { sso_providers: [{ id: 'entra', strong: true }] },
-    canWrite: () => true,
-    canRead: () => true,
-  }),
+const authState = vi.hoisted(() => ({
+  isClientRole: false,
+  // Účet jen s přihlášením přes organizaci: žádná passkey, žádné TOTP.
+  user: { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] as string[] },
+  setupStatus: { sso_providers: [{ id: 'entra', strong: true }], sso_required_provider: null as string | null },
+  canWrite: () => true,
+  canRead: () => true,
 }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => authState }))
 vi.mock('@/stores/supplier', () => ({
   useSupplierStore: () => ({ currentSupplierId: 1 }),
 }))
@@ -111,7 +111,7 @@ describe('TaxSubmissions.vue — přímé podání ověřené přes Microsoft', 
   beforeEach(() => {
     resetSsoState()
     localStorage.clear()
-    for (const fn of [m.list, m.credentials, m.settings, m.submitDirect, m.identities, m.stepUp, m.navigate]) fn.mockReset()
+    for (const fn of [m.list, m.credentials, m.settings, m.submitDirect, m.identities, m.stepUp, m.navigate, m.totpStepUp]) fn.mockReset()
     m.list.mockResolvedValue({
       data: [submission],
       meta: { total: 1, limit: 50, offset: 0, stats: { total: 1, waiting: 0, submitted: 0, problems: 0 }, form_codes: [] },
@@ -120,6 +120,9 @@ describe('TaxSubmissions.vue — přímé podání ověřené přes Microsoft', 
     m.settings.mockResolvedValue({ epo_environment: 'production' })
     m.identities.mockResolvedValue([{ id: 3, provider: 'entra' }])
     invalidateSsoIdentities()
+    authState.setupStatus.sso_required_provider = null
+    authState.setupStatus.sso_providers = [{ id: 'entra', strong: true }]
+    authState.user = { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] }
   })
 
   afterEach(() => {
@@ -192,5 +195,92 @@ describe('TaxSubmissions.vue — přímé podání ověřené přes Microsoft', 
     ;(wrapper.vm as any).openSubmitModal(submission)
     await flushPromises()
     expect(wrapper.find('[data-testid="sso-step-up"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sso-step-up-unavailable"]').exists()).toBe(false)
+  })
+
+  it('bez vynucení nabídne vedle Microsoftu heslo i přístupový klíč', async () => {
+    authState.user = { id: 1, totp_enabled: true, passkey_count: 1, mfa_methods: ['passkey'] }
+    const wrapper = mount(TaxSubmissions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.openSubmitModal(submission)
+    await flushPromises()
+    expect(wrapper.find('input[autocomplete="current-password"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('reports.submissions.step_up_passkey_unsupported')
+    vm.submitPassword = 'synthetic-pass'
+    vm.submitTotpCode = '123456'
+    await flushPromises()
+    expect(vm.submitStepUpReady).toBe(true)
+  })
+
+  it('při vynucení nabídne jen Microsoft a potvrzení povolí až s jeho proofem', async () => {
+    authState.setupStatus.sso_required_provider = 'entra'
+    authState.user = { id: 1, totp_enabled: true, passkey_count: 1, mfa_methods: ['passkey'] }
+    const wrapper = mount(TaxSubmissions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.openSubmitModal(submission)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="sso-step-up"]').exists()).toBe(true)
+    expect(wrapper.find('input[autocomplete="current-password"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('reports.submissions.step_up_passkey_unsupported')
+    expect(wrapper.text()).not.toContain('reports.submissions.step_up_verify_passkey')
+    // Ani podstrčený passkey proof potvrzení nepovolí.
+    vm.submitPasskeyToken = 'passkey-proof'
+    await flushPromises()
+    expect(vm.submitStepUpReady).toBe(false)
+    vm.ssoProof = 'passkey-proof'
+    await flushPromises()
+    expect(vm.submitStepUpReady).toBe(true)
+  })
+
+  it('bez vynucení odejde heslo s TOTP beze změny', async () => {
+    authState.user = { id: 1, totp_enabled: true, passkey_count: 0, mfa_methods: [] }
+    m.submitDirect.mockResolvedValue({ status: 'submitted', environment: 'production' })
+    const wrapper = mount(TaxSubmissions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.openSubmitModal(submission)
+    vm.submitPassword = 'synthetic-pass'
+    vm.submitTotpCode = '123456'
+    await vm.submitDirect()
+    expect(m.totpStepUp).not.toHaveBeenCalled()
+    expect(m.submitDirect).toHaveBeenCalledWith(1103, 15,
+      { password: 'synthetic-pass', totp_code: '123456', step_up_token: undefined }, false)
+  })
+
+  it('při vynucení poskytovatele jako prvního faktoru potvrdí TOTP bez hesla a pošle jen proof', async () => {
+    authState.setupStatus.sso_required_provider = 'entra'
+    authState.setupStatus.sso_providers = [{ id: 'entra', strong: false }]
+    authState.user = { id: 1, totp_enabled: true, passkey_count: 1, mfa_methods: ['passkey'] }
+    m.totpStepUp.mockResolvedValue('totp-proof')
+    m.submitDirect.mockResolvedValue({ status: 'submitted', environment: 'production' })
+    const wrapper = mount(TaxSubmissions)
+    await flushPromises()
+    const vm = wrapper.vm as any
+    vm.openSubmitModal(submission)
+    await flushPromises()
+    expect(wrapper.find('input[autocomplete="current-password"]').exists()).toBe(false)
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('reports.submissions.step_up_passkey_unsupported')
+    expect(wrapper.find('[data-testid="sso-step-up-unavailable"]').exists()).toBe(false)
+    expect(vm.submitStepUpReady).toBe(false)
+    vm.submitTotpCode = '123456'
+    await flushPromises()
+    expect(vm.submitStepUpReady).toBe(true)
+    await vm.submitDirect()
+    expect(m.totpStepUp).toHaveBeenCalledWith('epo.certificate', '123456')
+    expect(m.submitDirect).toHaveBeenCalledWith(1103, 15, { step_up_token: 'totp-proof' }, false)
+  })
+
+  it('při vynucení bez propojené identity ukáže vysvětlení místo prázdného dialogu', async () => {
+    authState.setupStatus.sso_required_provider = 'entra'
+    m.identities.mockResolvedValue([])
+    const wrapper = mount(TaxSubmissions)
+    await flushPromises()
+    ;(wrapper.vm as any).openSubmitModal(submission)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="sso-step-up"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sso-step-up-unavailable"]').text()).toBe('sso.step_up_enforced_unavailable')
   })
 })

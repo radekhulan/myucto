@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useSessionSecurityStore } from '@/stores/sessionSecurity'
 import { userInitials } from '@/utils/navigationLayout'
 import { USER_MENU_ITEM } from './navStyles'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 withDefaults(defineProps<{
   /** Odkaz položek: hlavní aplikace naviguje v panelu, technická plocha routerem. */
@@ -23,6 +24,7 @@ const sessionSecurity = useSessionSecurityStore()
 const displayName = computed(() => auth.user?.name || auth.user?.email || '')
 const initials = computed(() => userInitials(auth.user?.name, auth.user?.email))
 const ssoEnabled = computed(() => (auth.setupStatus?.sso_providers ?? []).length > 0)
+const { passwordAllowed, localFactorsAllowed } = useSsoEnforcement()
 const canLockSession = computed(() => sessionSecurity.state?.session_state === 'active'
   && sessionSecurity.state.unlock_methods.includes('passkey'))
 
@@ -70,15 +72,15 @@ defineExpose({ button })
           <div class="font-medium text-neutral-900 truncate">{{ displayName }}</div>
           <div v-if="auth.user?.name" class="text-xs text-neutral-500 truncate">{{ auth.user?.email }}</div>
         </div>
-        <component :is="link" :to="profilePath" :class="USER_MENU_ITEM" role="menuitem" @click="open = false">
+        <component :is="link" v-if="passwordAllowed" :to="profilePath" :class="USER_MENU_ITEM" role="menuitem" @click="open = false">
           <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 1 1 2 2m4 0a6 6 0 1 1-7.7 5.75L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.6a1 1 0 0 1 .3-.7l6-6A6 6 0 0 1 21 9z"/></svg>
           {{ t('auth.change_password_title') }}
         </component>
-        <component :is="link" :to="`${profilePath}?tab=totp`" :class="USER_MENU_ITEM" role="menuitem" @click="open = false">
+        <component :is="link" v-if="localFactorsAllowed" :to="`${profilePath}?tab=totp`" :class="USER_MENU_ITEM" role="menuitem" @click="open = false">
           <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 0 0 2-2v-6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2zm10-10V7a4 4 0 0 0-8 0v4h8z"/></svg>
           {{ t('auth.totp_tab') }}
         </component>
-        <component :is="link" :to="`${profilePath}?tab=passkeys`" :class="USER_MENU_ITEM" role="menuitem" @click="open = false">
+        <component :is="link" v-if="localFactorsAllowed" :to="`${profilePath}?tab=passkeys`" :class="USER_MENU_ITEM" role="menuitem" @click="open = false">
           <svg class="w-4 h-4 text-neutral-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M15 7a2 2 0 1 1 2 2m4 0a6 6 0 1 1-7.7 5.75L11 17H9v2H7v2H4a1 1 0 0 1-1-1v-2.6a1 1 0 0 1 .3-.7l6-6A6 6 0 0 1 21 9z"/></svg>
           {{ t('passkeys.title') }}
         </component>

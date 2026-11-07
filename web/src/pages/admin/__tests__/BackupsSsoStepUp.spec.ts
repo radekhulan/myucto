@@ -33,12 +33,14 @@ vi.mock('vue-i18n', () => ({
   useI18n: () => ({ t: (key: string) => key }),
 }))
 vi.mock('@/composables/useFormat', () => ({ formatDateTime: (value: string) => value }))
-vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({
-    user: { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] },
-    setupStatus: { sso_providers: [{ id: 'entra', strong: true }] },
-  }),
+const authState = vi.hoisted(() => ({
+  user: { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] as string[] },
+  setupStatus: {
+    sso_providers: [{ id: 'entra', strong: true }],
+    sso_required_provider: null as string | null,
+  },
 }))
+vi.mock('@/stores/auth', () => ({ useAuthStore: () => authState }))
 
 import Backups from '@/pages/admin/Backups.vue'
 import { invalidateSsoIdentities } from '@/composables/useSsoStepUp'
@@ -57,6 +59,8 @@ describe('Backups.vue — heslo k zálohám ověřené přes Microsoft', () => {
     })
     m.identities.mockResolvedValue([{ id: 3, provider: 'entra' }])
     invalidateSsoIdentities()
+    authState.user = { id: 1, totp_enabled: false, passkey_count: 0, mfa_methods: [] }
+    authState.setupStatus.sso_required_provider = null
   })
 
   afterEach(() => {
@@ -149,5 +153,48 @@ describe('Backups.vue — heslo k zálohám ověřené přes Microsoft', () => {
     ;(wrapper.vm as any).openPasswordModal()
     await flushPromises()
     expect(wrapper.find('[data-testid="sso-step-up"]').exists()).toBe(false)
+  })
+
+  function revealButton(wrapper: ReturnType<typeof mountPage>) {
+    return wrapper.findAll('button').find(button => button.text().includes('backups.show_password')
+      && button.element.closest('.fixed') !== null)!
+  }
+
+  it('bez vynucení nabídne heslo, TOTP i přístupový klíč a heslem tlačítko povolí', async () => {
+    authState.user = { id: 1, totp_enabled: true, passkey_count: 1, mfa_methods: ['passkey'] }
+    const wrapper = mountPage()
+    await flushPromises()
+    ;(wrapper.vm as any).openPasswordModal()
+    await flushPromises()
+    expect(wrapper.find('input[type="password"]').exists()).toBe(true)
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('backups.passkey_unsupported')
+    expect(revealButton(wrapper).attributes('disabled')).toBeDefined()
+    await wrapper.get('input[type="password"]').setValue('synthetic-pass')
+    expect(revealButton(wrapper).attributes('disabled')).toBeUndefined()
+  })
+
+  it('při vynucení silného poskytovatele nabídne jen Microsoft a bez jeho proofu tlačítko nepovolí', async () => {
+    authState.user = { id: 1, totp_enabled: true, passkey_count: 1, mfa_methods: ['passkey'] }
+    authState.setupStatus.sso_required_provider = 'entra'
+    const wrapper = mountPage()
+    await flushPromises()
+    ;(wrapper.vm as any).openPasswordModal()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="sso-step-up"]').exists()).toBe(true)
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    expect(wrapper.find('input[autocomplete="one-time-code"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('backups.passkey_unsupported')
+    expect(revealButton(wrapper).attributes('disabled')).toBeDefined()
+  })
+
+  it('při vynucení bez propojené identity vysvětlí, proč nejde potvrdit', async () => {
+    authState.setupStatus.sso_required_provider = 'entra'
+    m.identities.mockResolvedValue([])
+    const wrapper = mountPage()
+    await flushPromises()
+    ;(wrapper.vm as any).openPasswordModal()
+    await flushPromises()
+    expect(wrapper.find('[data-testid="sso-step-up-unavailable"]').text()).toBe('sso.step_up_enforced_unavailable')
   })
 })

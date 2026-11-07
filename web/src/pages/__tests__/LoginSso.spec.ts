@@ -80,21 +80,34 @@ it('s platným sezením a sso_required v adrese zůstane na přihlášení', asy
   wrapper.unmount()
 })
 
-it('při vynucení pro celou instalaci nabídne jen poskytovatele a heslo schová pro správce instance', async () => {
-  m.auth.setupStatus = { ...m.auth.setupStatus, sso_required_provider: 'entra',
+it('bez vynucení nabídne heslo, oddělovač i zapomenuté heslo', async () => {
+  const wrapper = mount(Login)
+  await flushPromises()
+  expect(wrapper.find('[data-testid="sso-login-entra"]').exists()).toBe(true)
+  expect(wrapper.find('input[type="password"]').exists()).toBe(true)
+  expect(wrapper.find('button[type="submit"]').exists()).toBe(true)
+  expect(wrapper.text()).toContain('auth.or_password_login')
+  expect(wrapper.html()).toContain('auth.forgot')
+  wrapper.unmount()
+})
+
+it('při vynucení pro celou instalaci nabídne jen poskytovatele, bez hesla, passkey i zapomenutého hesla', async () => {
+  m.query = { sso_required: 'entra' }
+  m.auth.setupStatus = { ...m.auth.setupStatus, sso_required_provider: 'entra', passwordless_login_enabled: true,
     sso_providers: [{ id: 'entra', label: 'Microsoft Entra ID' }, { id: 'google', label: 'Google' }] } as never
   const wrapper = mount(Login)
   await flushPromises()
   expect(wrapper.find('[data-testid="sso-login-entra"]').exists()).toBe(true)
   expect(wrapper.find('[data-testid="sso-login-google"]').exists()).toBe(false)
+  expect(wrapper.find('[data-testid="sso-required"]').exists()).toBe(true)
   expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+  expect(wrapper.find('input[type="email"]').exists()).toBe(false)
   expect(wrapper.find('button[type="submit"]').exists()).toBe(false)
-
-  await wrapper.get('[data-testid="admin-password-login"]').trigger('click')
-  expect(wrapper.find('input[type="password"]').exists()).toBe(true)
-  expect(wrapper.find('button[type="submit"]').exists()).toBe(true)
   expect(wrapper.find('[data-testid="admin-password-login"]').exists()).toBe(false)
+  expect(wrapper.text()).not.toContain('auth.or_password_login')
+  expect(wrapper.text()).not.toContain('auth.passwordless_passkey')
+  expect(wrapper.html()).not.toContain('auth.forgot')
   wrapper.unmount()
-  m.auth.setupStatus = { ...m.auth.setupStatus, sso_required_provider: null,
+  m.auth.setupStatus = { ...m.auth.setupStatus, sso_required_provider: null, passwordless_login_enabled: false,
     sso_providers: [{ id: 'entra', label: 'Microsoft' }] } as never
 })

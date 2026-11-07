@@ -13,6 +13,7 @@ import { getWindowSupplierScope } from '@/workspace/supplierContext'
 import { clearVatReportPeriodSession } from '@/utils/vatReportPeriodSession'
 import { useSupplierStore } from './supplier'
 import { accessLevelValue, type AccessLevel, type PermissionKey, type PermissionValue } from '@/security/permissions'
+import { ssoEnforcementPolicy } from '@/security/oidc'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -55,12 +56,15 @@ export const useAuthStore = defineStore('auth', () => {
   // se fail-closed tvářilo jako spravované, self-hosted instalace by přišla
   // o tlačítko Aktualizovat vždycky, když setup-status ještě nedorazil.
   const isManagedInstallation = computed(() => setupStatus.value?.managed === true)
-  const mustSetupTotp = computed(() => user.value?.must_setup_totp === true)
-  const mustSetupMfa = computed(() => user.value?.must_setup_mfa === true)
+  // Vynucený silný poskytovatel řídí druhý faktor sám: místní MFA se pak
+  // nezřizuje, ani povinně, ani nabídkou.
+  const localMfaApplies = computed(() => !ssoEnforcementPolicy(setupStatus.value).strong)
+  const mustSetupTotp = computed(() => localMfaApplies.value && user.value?.must_setup_totp === true)
+  const mustSetupMfa = computed(() => localMfaApplies.value && user.value?.must_setup_mfa === true)
   // Dobrovolná nabídka MFA. Na rozdíl od `mustSetupMfa` NIC neblokuje — router
   // podle ní jen otevře /setup-mfa tomu, kdo tam přijde po přihlášení. Fail-closed
   // na `false`: dokud server nabídku nepotvrdí, nikoho nikam neposíláme.
-  const shouldOfferMfa = computed(() => user.value?.should_offer_mfa === true)
+  const shouldOfferMfa = computed(() => localMfaApplies.value && user.value?.should_offer_mfa === true)
   const hasCommercialFeatures = computed(() => license.value?.commercial_features !== false)
   const hasPayrollFeatures = computed(() => license.value?.payroll_features === true)
   // ⚠️ Odemyká placené moduly TARIF? Bez toho obrazovka nerozliší „licence
