@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Nonprofit;
 
 use MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository;
+use MyInvoice\Repository\Nonprofit\Membership\MembershipBatchRepository;
+use MyInvoice\Service\Nonprofit\Membership\MembershipBatchService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipRateService;
-use MyInvoice\Http\IsoDate;
 use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Http\TenantReferenceGuard;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipBalanceRepository;
@@ -24,6 +26,7 @@ use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipReconciliationService;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
+use Psr\Log\LoggerInterface;
 
 final class MembershipAction
 {
@@ -33,15 +36,17 @@ final class MembershipAction
     private readonly MembershipMemberService $memberService;
     private readonly MembershipChargeService $chargeService;
     private readonly MembershipReconciliationService $reconciliation;
+    private readonly MembershipBatchService $batchService;
     private readonly TenantReferenceGuard $tenantRefs;
 
-    public function __construct(private readonly Connection $db, PostingService $posting)
+    public function __construct(private readonly Connection $db, PostingService $posting, ?LoggerInterface $logger = null)
     {
         $this->tenantRefs = new TenantReferenceGuard($db);
         $this->members = new MembershipRepository($db);
         $charges = new MembershipChargeRepository($db);
         $this->memberService = new MembershipMemberService($db, $this->members);
         $this->chargeService = new MembershipChargeService($db, $this->members, $charges, $posting);
+        $this->batchService = new MembershipBatchService($db, $this->chargeService, logger: $logger);
         $this->reconciliation = new MembershipReconciliationService(new MembershipBalanceRepository($db));
     }
 
@@ -68,6 +73,65 @@ final class MembershipAction
             return ['items' => $items, 'next_after_id' => count($items) === 100 ? $items[array_key_last($items)]['id'] : null,
                 'revenue_accounts'=>(new MembershipRateService($this->db))->revenueAccounts($supplier,$date)];
         });
+    }
+
+
+    public function batches(Request $request, Response $response): Response
+    {
+        return $this->handle($request, $response, false, function (int $supplier) use ($request): array {
+            $before = $this->queryInteger($request->getQueryParams()['before_id'] ?? PHP_INT_MAX, 'before_id', 1);
+            $items = (new MembershipBatchRepository($this->db))->recent($supplier, $before);
+            return ['items' => $items, 'next_before_id' => count($items) === 20 ? $items[array_key_last($items)]['id'] : null];
+        });
+    }
+
+    public function batch(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, false, fn (int $supplier): array => $this->batchResponse($request,$this->batchService->detail($supplier, (int) $args['id'],
+            $this->queryInteger($request->getQueryParams()['after_member_id'] ?? 0, 'after_member_id', 0),
+            write: RequestAuthorization::allows($request,'accounting.journal.post',AccessLevel::WRITE))));
+    }
+
+    public function createBatch(Request $request, Response $response): Response
+    {
+        return $this->handle($request, $response, true, function (int $supplier) use ($request): array {
+            $body = $this->body($request, ['template', 'selection_mode', 'member_ids', 'idempotency_key']);
+            return $this->batchResponse($request,$this->batchService->create($supplier, $body, $this->actor($request)));
+        }, 201);
+    }
+
+    public function prepareBatch(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, true, fn (int $supplier): array => $this->batchResponse($request,$this->batchService->prepare($supplier, (int) $args['id'])));
+    }
+
+    public function confirmBatch(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request, $response, true, function (int $supplier) use ($request, $args): array {
+            $body = $this->body($request, ['approval_token']);
+            if (!is_string($body['approval_token'])) throw new MembershipException('nonprofit_membership_batch_invalid', 'Potvrzení dávky nemá platný tvar.');
+            return $this->batchResponse($request,$this->batchService->confirm($supplier, (int) $args['id'], $body['approval_token'], $this->actor($request)));
+        });
+    }
+
+    public function cancelBatch(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request,$response,true,fn(int $supplier): array =>
+            $this->batchResponse($request,$this->batchService->cancel($supplier,(int)$args['id'],$this->actor($request))));
+    }
+
+    public function renewBatchPreview(Request $request, Response $response, array $args): Response
+    {
+        return $this->handle($request,$response,true,fn(int $supplier): array =>
+            $this->batchResponse($request,$this->batchService->renewPreview($supplier,(int)$args['id'],$this->actor($request))));
+    }
+
+    /** Interní identita replaye nepatří do DTO a schvalovací token je pouze pro zapisující roli. */
+    private function batchResponse(Request $request,array $result): array
+    {
+        unset($result['batch']['request_hash'],$result['batch']['idempotency_key'],$result['batch']['batch_uid']);
+        if(!RequestAuthorization::allows($request,'accounting.journal.post',AccessLevel::WRITE)) unset($result['batch']['approval_token']);
+        return $result;
     }
 
     public function createRate(Request $request, Response $response): Response

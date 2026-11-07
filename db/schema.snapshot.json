@@ -1166,7 +1166,8 @@
         "2260_payroll_termination_floor_proof.sql",
         "2261_payroll_jmhz_holiday_time_off.sql",
         "2262_drop_supplier_login_policy.sql",
-        "2263_membership_rates.sql"
+        "2263_membership_rates.sql",
+        "2264_membership_batches.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -9043,6 +9044,89 @@
                 "nonprofit_members_ibfk_3": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
             "checks": []
+        },
+        "nonprofit_membership_batch_members": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "amount_cents": "bigint(20) NOT NULL",
+                "attempts": "tinyint(3) unsigned NOT NULL DEFAULT 0",
+                "batch_id": "bigint(20) unsigned NOT NULL",
+                "deferral_date": "date NULL DEFAULT NULL",
+                "deferred_cents": "bigint(20) NOT NULL DEFAULT 0",
+                "error_code": "varchar(100) NULL DEFAULT NULL",
+                "error_message": "varchar(2000) NULL DEFAULT NULL",
+                "expected_case_version": "int(10) unsigned NULL DEFAULT NULL",
+                "member_id": "bigint(20) unsigned NOT NULL",
+                "operation_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "preview_hash": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "status": "enum('pending','ready','created','existing','rejected') NOT NULL DEFAULT 'pending'",
+                "supplier_id": "int(10) unsigned NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (supplier_id, batch_id, member_id)",
+                "ix_nmbm_status": "BTREE (supplier_id, batch_id, status, member_id)",
+                "supplier_id": "BTREE (supplier_id, member_id)",
+                "supplier_id_2": "BTREE (supplier_id, operation_id)"
+            },
+            "foreign_keys": {
+                "nonprofit_membership_batch_members_ibfk_1": "(supplier_id, batch_id) -> nonprofit_membership_batches (supplier_id, id) ON UPDATE RESTRICT ON DELETE CASCADE",
+                "nonprofit_membership_batch_members_ibfk_2": "(supplier_id, member_id) -> nonprofit_members (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "nonprofit_membership_batch_members_ibfk_3": "(supplier_id, operation_id) -> nonprofit_membership_charge_operations (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": []
+        },
+        "nonprofit_membership_batches": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "approval_expires_at": "datetime(6) NULL DEFAULT NULL",
+                "approval_token": "char(64) NULL DEFAULT NULL COLLATE ascii_bin",
+                "batch_uid": "char(32) NOT NULL COLLATE ascii_bin",
+                "confirmed_at": "datetime(6) NULL DEFAULT NULL",
+                "confirmed_by": "bigint(20) unsigned NULL DEFAULT NULL",
+                "created_at": "datetime(6) NOT NULL DEFAULT current_timestamp(6)",
+                "created_by": "bigint(20) unsigned NOT NULL",
+                "created_cents": "decimal(24,0) NOT NULL DEFAULT 0",
+                "created_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "deferral_date": "date NULL DEFAULT NULL",
+                "deferred_cents": "decimal(24,0) NOT NULL DEFAULT 0",
+                "existing_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
+                "idempotency_key": "varchar(80) NOT NULL COLLATE ascii_bin",
+                "member_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "pending_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "phase": "enum('seeding','preparing','ready','posting','finished','cancelled') NOT NULL DEFAULT 'seeding'",
+                "planned_cents": "decimal(24,0) NOT NULL DEFAULT 0",
+                "ready_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "rejected_count": "int(10) unsigned NOT NULL DEFAULT 0",
+                "request_hash": "char(64) NOT NULL COLLATE ascii_bin",
+                "seed_cursor": "bigint(20) unsigned NOT NULL DEFAULT 0",
+                "seed_until": "bigint(20) unsigned NOT NULL DEFAULT 0",
+                "selection_json": "longtext NOT NULL",
+                "selection_mode": "enum('active','selected') NOT NULL",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "template_json": "longtext NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "confirmed_by": "BTREE (confirmed_by)",
+                "created_by": "BTREE (created_by)",
+                "uq_nmb_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
+                "uq_nmb_tenant": "UNIQUE BTREE (supplier_id, id)",
+                "uq_nmb_uid": "UNIQUE BTREE (batch_uid)"
+            },
+            "foreign_keys": {
+                "nonprofit_membership_batches_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "nonprofit_membership_batches_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
+                "nonprofit_membership_batches_ibfk_3": "(confirmed_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
+            },
+            "checks": {
+                "selection_json": "json_valid(`selection_json`)",
+                "template_json": "json_valid(`template_json`)"
+            }
         },
         "nonprofit_membership_charge_cases": {
             "type": "BASE TABLE",

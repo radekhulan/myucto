@@ -142,6 +142,162 @@ final class MembershipNativeTest extends TestCase
         $this->charges->previewIssue($this->supplier, $request);
     }
 
+    public function testBatchPreviewIsPagedAndSharesExactlyTheSingleChargeProof(): void
+    {
+        $template = $this->batchTemplate();
+        $ids = [];
+        for ($i = 1; $i <= 4; $i++) $ids[] = $this->member('SYN-BULK-' . $i, 'bulk-' . $i)['id'];
+        $oneCount = $this->selectQueries(fn (): array => $this->charges->previewIssuePage($this->supplier, $template, [$ids[0]]));
+        $manyCount = $this->selectQueries(fn (): array => $this->charges->previewIssuePage($this->supplier, $template, $ids));
+        self::assertSame($oneCount, $manyCount, 'Náhled nesmí přidávat dotazy po členech.');
+        $page = $this->charges->previewIssuePage($this->supplier, $template, $ids);
+        foreach ($ids as $id) {
+            $single = $this->charges->previewIssue($this->supplier, ['member_id' => $id] + $template);
+            self::assertSame($single['preview_hash'], $page[$id]['preview']['preview_hash']);
+            self::assertSame($single['proof'], $page[$id]['preview']['proof']);
+        }
+    }
+
+    public function testBatchDeferralUsesSinglePreviewAmountsAndExcludesRejectedMembers(): void
+    {
+        $template = $this->batchTemplate();
+        $template['period_from'] = '2026-11-01'; $template['period_to'] = '2027-10-31';
+        $template['accounting_date'] = '2026-11-01'; $template['due_date'] = '2026-11-30';
+        $ids = [];
+        for ($i = 1; $i <= 3; $i++) $ids[] = $this->member('SYN-DEFERRAL-' . $i, 'deferral-' . $i)['id'];
+        $this->members->appendRevision($this->supplier, $ids[2], ['status' => 'suspended', 'effective_from' => '2026-07-01',
+            'expected_revision' => 1, 'idempotency_key' => 'synthetic-deferral-suspension', 'legal_basis' => $this->basis('Synthetic suspension')], $this->actor);
+        $single = $this->charges->previewIssue($this->supplier, ['member_id' => $ids[0]] + $template);
+        $expected = (string) ((int) round((float) $single['deferral']['deferred_amount'] * 100) * 2);
+        $batches = new \MyInvoice\Service\Nonprofit\Membership\MembershipBatchService($this->db, $this->charges);
+        $batch = $batches->create($this->supplier, ['template' => $template, 'selection_mode' => 'selected', 'member_ids' => $ids, 'idempotency_key' => 'synthetic-deferral-batch'], $this->actor);
+        $preview = $batches->prepare($this->supplier, $batch['batch']['id']);
+        self::assertSame(2, $preview['summary']['ready']);
+        self::assertSame(1, $preview['summary']['rejected']);
+        self::assertSame($expected, $preview['summary']['deferred_cents']);
+        self::assertSame($single['deferral']['balance_sheet_date'], $preview['summary']['deferral_date']);
+        $done = $batches->confirm($this->supplier, $batch['batch']['id'], $preview['batch']['approval_token'], $this->actor);
+        self::assertSame($expected, $done['summary']['deferred_cents']);
+        self::assertSame($preview['summary']['deferral_date'], $done['summary']['deferral_date']);
+    }
+
+    public function testBatchReportsCreatedExistingAndRejectedWithoutDuplicatePosting(): void
+    {
+        $template = $this->batchTemplate();
+        $ready = $this->member('SYN-BATCH-READY', 'batch-ready');
+        $inactive = $this->member('SYN-BATCH-INACTIVE', 'batch-inactive');
+        $existing = $this->member('SYN-BATCH-EXISTS', 'batch-exists');
+        $this->members->appendRevision($this->supplier, $inactive['id'], ['status' => 'suspended', 'effective_from' => '2026-07-01',
+            'expected_revision' => 1, 'idempotency_key' => 'batch-inactive-suspension', 'legal_basis' => $this->basis('Synthetic suspension')], $this->actor);
+        $this->issueTitle($existing['id'], $template['title_key'], 'batch-existing-issue');
+        $batches = new \MyInvoice\Service\Nonprofit\Membership\MembershipBatchService($this->db, $this->charges);
+        $input = ['template' => $template, 'selection_mode' => 'selected', 'member_ids' => [$ready['id'], $inactive['id'], $existing['id']], 'idempotency_key' => 'synthetic-batch'];
+        $created = $batches->create($this->supplier, $input, $this->actor);
+        $id = $created['batch']['id'];
+        self::assertSame(3, $created['summary']['pending']);
+        self::assertSame($id, $batches->create($this->supplier, $input, $this->actor)['batch']['id']);
+        $preview = $batches->prepare($this->supplier, $id);
+        self::assertSame('ready', $preview['batch']['phase']);
+        self::assertSame(1, $preview['summary']['ready']);
+        self::assertSame(1, $preview['summary']['existing']);
+        self::assertSame(1, $preview['summary']['rejected']);
+        self::assertSame('50000', $preview['summary']['planned_cents']);
+        self::assertSame(['315.100', '684.100'], array_column($preview['accounts'], 'account'));
+        self::assertSame('nonprofit_membership_period_inactive', $preview['items'][1]['error_code']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id=' . $this->supplier)->fetchColumn());
+        $done = $batches->confirm($this->supplier, $id, $preview['batch']['approval_token'], $this->actor);
+        self::assertSame('finished', $done['batch']['phase']);
+        self::assertSame(1, $done['summary']['created']);
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id=' . $this->supplier)->fetchColumn());
+        $again = $batches->confirm($this->supplier, $id, $preview['batch']['approval_token'], $this->actor);
+        self::assertSame($done['summary'], $again['summary']);
+        self::assertSame(2, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id=' . $this->supplier)->fetchColumn());
+    }
+
+    public function testBatchResumesAfterFinancialCommitBeforeOutcomeWasSaved(): void
+    {
+        $template = $this->batchTemplate();
+        $member = $this->member('SYN-BATCH-REPLAY', 'batch-replay');
+        $batches = new \MyInvoice\Service\Nonprofit\Membership\MembershipBatchService($this->db, $this->charges);
+        $batch = $batches->create($this->supplier, ['template' => $template, 'selection_mode' => 'selected', 'member_ids' => [$member['id']], 'idempotency_key' => 'synthetic-batch-replay'], $this->actor);
+        $id = $batch['batch']['id'];
+        $preview = $batches->prepare($this->supplier, $id);
+        $repository = new \MyInvoice\Repository\Nonprofit\Membership\MembershipBatchRepository($this->db);
+        $repository->beginPosting($this->supplier, $id, $preview['batch']['approval_token'], $this->actor);
+        $work = $repository->workPage($this->supplier, $id, 'ready', 10)[0];
+        // Skutečná účetní operace proběhla, proces skončil před uložením výsledku řádku dávky.
+        $issued = $this->charges->confirmIssue($this->supplier, ['member_id' => $member['id']] + $template,
+            (int) $work['expected_case_version'], $work['preview_hash'], \MyInvoice\Service\Nonprofit\Membership\MembershipBatchService::memberKey($repository->find($this->supplier,$id),$member['id']), $this->actor);
+        $done = $batches->confirm($this->supplier, $id, $preview['batch']['approval_token'], $this->actor);
+        self::assertSame('finished', $done['batch']['phase']);
+        self::assertSame(1, $done['summary']['created']);
+        self::assertSame($issued['operation']['id'], $done['items'][0]['operation_id']);
+        self::assertSame(1, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id=' . $this->supplier)->fetchColumn());
+    }
+
+    public function testBatchActiveSelectionUsesAccountingDateAndCanBeReopenedInPages(): void
+    {
+        $template = $this->batchTemplate();
+        for ($i = 1; $i <= 52; $i++) $this->member('SYN-PAGE-' . $i, 'batch-page-' . $i);
+        $future = $this->member('SYN-PAGE-FUTURE', 'batch-future');
+        $this->members->appendRevision($this->supplier, $future['id'], ['status' => 'ended', 'effective_from' => '2027-01-01', 'expected_revision' => 1,
+            'idempotency_key' => 'batch-future-ended', 'legal_basis' => $this->basis('Synthetic future termination')], $this->actor);
+        $batches = new \MyInvoice\Service\Nonprofit\Membership\MembershipBatchService($this->db, $this->charges);
+        $batch = $batches->create($this->supplier, ['template' => $template, 'selection_mode' => 'active', 'member_ids' => [], 'idempotency_key' => 'synthetic-batch-page'], $this->actor);
+        self::assertSame(53, $batch['summary']['total']);
+        self::assertCount(50, $batch['items']);
+        $page = $batches->detail($this->supplier, $batch['batch']['id'], $batch['next_after_member_id']);
+        self::assertCount(3, $page['items']);
+        self::assertSame($batch['summary'], $page['summary']);
+        $one = $batches->prepare($this->supplier, $batch['batch']['id']);
+        self::assertSame(3, $one['summary']['pending']);
+        $two = $batches->prepare($this->supplier, $batch['batch']['id']);
+        self::assertSame('ready', $two['batch']['phase']);
+        self::assertSame(53, $two['summary']['ready']);
+    }
+
+    public function testBatchRejectsForeignSelectionAndChangedPreviewWithoutCreatingCharges(): void
+    {
+        $template = $this->batchTemplate();
+        $member = $this->member('SYN-BATCH-STALE', 'batch-stale');
+        $batches = new \MyInvoice\Service\Nonprofit\Membership\MembershipBatchService($this->db, $this->charges);
+        try {
+            $batches->create($this->supplier, ['template' => $template, 'selection_mode' => 'selected', 'member_ids' => [$member['id'] + 100000], 'idempotency_key' => 'synthetic-batch-foreign'], $this->actor);
+            self::fail('Cizí výběr nesmí založit dávku.');
+        } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $e) {
+            self::assertSame('nonprofit_membership_batch_selection_invalid', $e->errorCode);
+        }
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_batches WHERE supplier_id=' . $this->supplier)->fetchColumn());
+        $batch = $batches->create($this->supplier, ['template' => $template, 'selection_mode' => 'selected', 'member_ids' => [$member['id']], 'idempotency_key' => 'synthetic-batch-stale'], $this->actor);
+        $id = $batch['batch']['id'];
+        try {
+            $batches->detail($this->supplier + 100000, $id);
+            self::fail('Dávka cizí firmy nesmí být dostupná.');
+        } catch (\MyInvoice\Service\Nonprofit\Membership\MembershipException $e) {
+            self::assertSame(404, $e->httpStatus);
+        }
+        $preview = $batches->prepare($this->supplier, $id);
+        $this->members->appendRevision($this->supplier, $member['id'], ['status' => 'suspended', 'effective_from' => '2026-07-01', 'expected_revision' => 1,
+            'idempotency_key' => 'batch-stale-suspension', 'legal_basis' => $this->basis('Synthetic suspension')], $this->actor);
+        $done = $batches->confirm($this->supplier, $id, $preview['batch']['approval_token'], $this->actor);
+        self::assertSame(1, $done['summary']['rejected']);
+        self::assertSame(0, $done['summary']['created']);
+        self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_membership_charge_operations WHERE supplier_id=' . $this->supplier)->fetchColumn());
+    }
+
+    private function batchTemplate(): array
+    {
+        $template = $this->request(1);
+        unset($template['member_id']);
+        $template['amount'] = '500.00'; $template['title_key'] = 'synthetic-batch-standard';
+        $rate = (new \MyInvoice\Service\Nonprofit\Membership\MembershipRateService($this->db))->save($this->supplier, null, [
+            'name' => 'Synthetic batch standard', 'amount' => '500.00', 'receivable_account' => '315.100', 'revenue_account' => '684.100',
+            'title_key' => $template['title_key'], 'period_months' => 12, 'title_reference' => 'Synthetic resolution', 'evidence' => 'Synthetic evidence',
+            'classification' => $this->classification, 'is_active' => true, 'row_version' => 0,
+        ]);
+        return ['rate_id' => $rate['id']] + $template;
+    }
+
     public function testRateIsTenantScopedAndRejectsStaleUpdateAndForeignDimensions(): void
     {
         $rates = new \MyInvoice\Service\Nonprofit\Membership\MembershipRateService($this->db);

@@ -42,6 +42,8 @@ final class AnonymizationPolicy
      * @var array<string,string> tabulka → důvod
      */
     public const TRUNCATE = [
+        'nonprofit_membership_batch_members' => 'rozpracované dávky nelze přehrávat nad pseudonymizovanými podklady',
+        'nonprofit_membership_batches' => 'požadavky dávek obsahují osobní podklady; finanční operace se anonymizují samostatně',
         'accounting_securities_debt_commands' => 'původní idempotentní odpovědi obsahují soukromé podklady instrumentů',
         'accounting_framework_conversion_commands'=>'original conversion command tokens',
         'property_service_lifecycle_commands' => 'původní idempotentní odpovědi nelze přehrát nad pseudonymizovanými podklady bez původního požadavku',

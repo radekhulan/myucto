@@ -95,3 +95,8 @@ export function membershipError(i18n: { t: (key: string) => string; te: (key: st
   if (code && i18n.te(key)) return i18n.t(key)
   return i18n.t('nonprofitMembership.error')
 }
+
+/** Firma má přednost, u fyzické osoby zobrazujeme jméno kontaktu. */
+export function membershipMemberLabel(row: { company_name?: string | null; first_name?: string | null; last_name?: string | null }): string {
+  return row.company_name?.trim() || [row.first_name, row.last_name].filter(Boolean).join(' ').trim()
+}

@@ -3113,6 +3113,13 @@ final class Routes
             $g->post('/nonprofit-dppo/acceptance/{operation:accept|revoke}', [\MyInvoice\Action\Accounting\Closing\NonprofitDppoAction::class, 'changeAcceptance']);
             $g->get('/nonprofit-membership/members', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'members']);
             $g->get('/nonprofit-membership/rates', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'rates']);
+            $g->get('/nonprofit-membership/batches', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'batches']);
+            $g->get('/nonprofit-membership/batches/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'batch']);
+            $g->post('/nonprofit-membership/batches', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'createBatch']);
+            $g->post('/nonprofit-membership/batches/{id:[0-9]+}/prepare', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'prepareBatch']);
+            $g->post('/nonprofit-membership/batches/{id:[0-9]+}/confirm', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'confirmBatch']);
+            $g->post('/nonprofit-membership/batches/{id:[0-9]+}/cancel', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'cancelBatch']);
+            $g->post('/nonprofit-membership/batches/{id:[0-9]+}/renew-preview', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'renewBatchPreview']);
             $g->get('/nonprofit-membership/rates/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'rate']);
             $g->post('/nonprofit-membership/rates', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'createRate']);
             $g->put('/nonprofit-membership/rates/{id:[0-9]+}', [\MyInvoice\Action\Nonprofit\MembershipAction::class, 'updateRate']);

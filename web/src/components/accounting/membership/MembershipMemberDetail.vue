@@ -13,7 +13,7 @@ import MembershipReverseFlow from './MembershipReverseFlow.vue'
 import MembershipRevisionForm from './MembershipRevisionForm.vue'
 import MembershipSettlement from './MembershipSettlement.vue'
 
-const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label: string; periods: AccountingPeriod[] }>()
+const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label: string; periods: AccountingPeriod[]; refreshVersion?: number }>()
 const emit = defineEmits<{ changed: []; close: [] }>()
 const { t, te } = useI18n()
 
@@ -31,6 +31,7 @@ const reverseClaim = ref<ClaimRow | null>(null)
 const locks = ref({ revision: false, issue: false, reverse: false })
 let alive = true
 let generation = 0
+let refreshPending = false
 
 const today = computed(() => appIsoDate())
 const current = computed(() => revisionAt(history.value, today.value))
@@ -40,7 +41,7 @@ const member = computed(() => ({ id: props.memberId, member_number: identity.val
 
 const issued = computed(() => claims.value.filter(c => c.reversal_claim_id === null).reduce((sum, c) => sum + c.amount_cents, 0))
 const provenOpen = computed(() => claims.value.reduce((sum, c) => sum + (c.settlement.open_cents ?? 0), 0))
-const unproven = computed(() => claims.value.filter(c => c.settlement.status === 'unreconciled' || c.settlement.status === 'ambiguous').length)
+const unproven = computed(() => claims.value.filter(c => c.settlement.status === 'ambiguous').length)
 
 async function load(append = false) {
   const ticket = ++generation, supplier = props.supplier, id = props.memberId
@@ -92,8 +93,15 @@ function startReverse(row: ClaimRow) {
   reverseClaim.value = row
 }
 
-watch(() => props.memberId, () => { generation++; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; void load() })
-watch(() => props.supplier, () => { generation++; loading.value = false; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = '' })
+watch(() => props.refreshVersion, () => {
+  if (anyLocked.value) refreshPending = true
+  else void load()
+})
+watch(anyLocked, locked => {
+  if (!locked && refreshPending) { refreshPending = false; void load() }
+})
+watch(() => props.memberId, () => { generation++; refreshPending = false; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; notice.value = ''; void load() })
+watch(() => props.supplier, () => { generation++; refreshPending = false; loading.value = false; identity.value = null; history.value = []; claims.value = []; nextAfter.value = null; issueOpen.value = false; reverseClaim.value = null; error.value = ''; notice.value = '' })
 onBeforeUnmount(() => { alive = false; generation++ })
 onMounted(() => { void load() })
 let firstActivation = true

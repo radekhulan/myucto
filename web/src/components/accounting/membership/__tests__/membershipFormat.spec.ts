@@ -1,4 +1,4 @@
-import { membershipError } from '../membershipFormat'
+import { membershipError, membershipMemberLabel } from '../membershipFormat'
 import { describe, expect, it } from 'vitest'
 import type { MemberRevision } from '@/api/nonprofitMembership'
 import { activeThroughout, amountDecimal, isIsoDate, lastRevision, revisionAt } from '../membershipFormat'
@@ -68,7 +68,7 @@ describe('membership active throughout the dues period', () => {
   })
 })
 
-describe('lokalizace serverových chyb', () => {
+describe('lokalizace serverových chyb a jméno člena', () => {
   it('uses a translated code and a safe fallback instead of server text', () => {
     const messages: Record<string,string> = {'nonprofitMembership.serverErrors.known':'Translated error','nonprofitMembership.error':'Generic error'}
     const i18n = {t: (key: string) => messages[key]!, te: (key: string) => key in messages}
@@ -79,5 +79,10 @@ describe('lokalizace serverových chyb', () => {
     const unknownValidation = {response:{status:422,data:{error:{code:'new_validation',message:'Česká serverová chyba'}}}}
     expect(membershipError(i18n,unknownValidation)).toBe('Generic error')
     expect(membershipError(i18n,{response:{status:500,data:{error:{code:'unknown',message:'Internal SQL detail'}}}})).toBe('Generic error')
+    expect(membershipError(i18n,'nonprofit_membership_future_rule','Česká chyba položky dávky.')).toBe('Generic error')
+  })
+  it('uses a natural person name when company name is empty', () => {
+    expect(membershipMemberLabel({company_name:'',first_name:'Syntetická',last_name:'Osoba'})).toBe('Syntetická Osoba')
+    expect(membershipMemberLabel({company_name:'Synthetic company',first_name:'Syntetická'})).toBe('Synthetic company')
   })
 })

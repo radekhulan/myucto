@@ -300,6 +300,47 @@ final class MembershipActionTest extends TestCase
         yield 'úprava' => [true];
     }
 
+    public function testBatchRoutesEnforceSessionWritePermissionAndApprovalToken(): void
+    {
+        [$status, $empty] = $this->call('GET', 'batches', null, [], ['accounting' => 1]);
+        self::assertSame(200, $status); self::assertSame([], $empty['items']);
+        [$status] = $this->call('GET', 'batches', null, [], ['accounting' => 1], 'bearer');
+        self::assertSame(403, $status);
+        $member = $this->activeMember('SYN-BATCH-ACTION');
+        [$status, $rate] = $this->call('POST', 'createRate', ['name' => 'Synthetic batch rate', 'amount' => '500.00',
+            'receivable_account' => '315.100', 'revenue_account' => '684.100', 'title_key' => 'synthetic-batch-action', 'period_months' => 12,
+            'title_reference' => 'Synthetic resolution', 'evidence' => 'Synthetic evidence', 'classification' => $this->classification, 'is_active' => true, 'row_version' => 0]);
+        self::assertSame(201, $status);
+        $template = $this->charge($member, '2026-01-01', '2026-12-31', '2026-01-01', '500.00');
+        unset($template['member_id']); $template['rate_id'] = $rate['id'];
+        $body = ['template' => $template, 'selection_mode' => 'selected', 'member_ids' => [$member], 'idempotency_key' => 'synthetic-action-batch'];
+        [$status] = $this->call('POST', 'createBatch', $body, [], ['accounting' => 1]);
+        self::assertSame(403, $status);
+        [$status] = $this->call('POST', 'createBatch', $body, [], ['accounting.journal.post' => 2], 'bearer');
+        self::assertSame(403, $status);
+        [$status, $created] = $this->call('POST', 'createBatch', $body);
+        self::assertSame(201, $status);
+        $args = ['id' => (string) $created['batch']['id']];
+        [$status] = $this->call('POST', 'confirmBatch', ['approval_token' => str_repeat('a', 64)], $args);
+        self::assertSame(409, $status);
+        [$status] = $this->call('POST', 'prepareBatch', [], $args, ['accounting' => 1]);
+        self::assertSame(403, $status);
+        [$status, $preview] = $this->call('POST', 'prepareBatch', [], $args);
+        self::assertSame(200, $status);
+        self::assertSame('ready', $preview['batch']['phase']);
+        [$readStatus,$readDetail]=$this->call('GET','batch',null,$args,['accounting'=>1]);
+        self::assertSame(200,$readStatus);
+        self::assertSame('selected',$readDetail['batch']['selection_mode']);
+        self::assertSame($this->supplier,$readDetail['batch']['supplier_id']);
+        foreach(['approval_token','request_hash','idempotency_key','batch_uid'] as $field) self::assertArrayNotHasKey($field,$readDetail['batch']);
+        [$status] = $this->call('POST', 'confirmBatch', ['approval_token' => $preview['batch']['approval_token']], $args, ['accounting' => 1]);
+        self::assertSame(403, $status);
+        [$status, $done] = $this->call('POST', 'confirmBatch', ['approval_token' => $preview['batch']['approval_token']], $args);
+        self::assertSame(200, $status); self::assertSame('finished', $done['batch']['phase']);
+        [$status] = $this->call('GET', 'batch', null, ['id' => (string) ($created['batch']['id'] + 100000)]);
+        self::assertSame(404, $status);
+    }
+
     private function charge(int $member, string $from, string $to, string $accountingDate, string $amount): array
     {
         return ['member_id' => $member, 'title_key' => 'dues-' . $from, 'period_from' => $from, 'period_to' => $to,

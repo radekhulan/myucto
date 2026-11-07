@@ -26,11 +26,13 @@ const props = defineProps<{
   supplier: number; canManage: boolean
   member: { id: number; member_number: string; label: string }
   history: MemberRevision[]; periods: AccountingPeriod[]
+  batchMode?: boolean; batchBusy?: boolean; initialRequest?: Omit<MembershipIssueRequest, 'member_id'>
 }>()
-const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean] }>()
+const emit = defineEmits<{ done: []; close: []; lock: [locked: boolean]; batchRequest: [request: MembershipIssueRequest] }>()
 const { t, te } = useI18n()
 
 const inputForm = ref<HTMLFormElement | null>(null)
+const initializing = ref(!!props.batchMode && !!props.initialRequest)
 
 const form = reactive({
   periodId: 0, accountingDate: '', dueDate: '', periodFrom: '', periodTo: '', titleKey: '', amount: '',
@@ -46,7 +48,7 @@ const rateCancel = ref<HTMLButtonElement | null>(null)
 const ratePicker = ref<HTMLElement | null>(null)
 const appliedRate = ref<Pick<MembershipRate, 'id' | 'name'> | null>(null)
 async function applyRate(rate: MembershipRate | null) {
-  if (commit.locked.value) return
+  if (inputsLocked.value) return
   const conflict = rate && (
     (rate.classification?.activity_value_id != null && form.activityValueId != null && form.activityValueId !== rate.classification.activity_value_id)
     || (rate.classification?.activity_kind_value_id != null && form.activityKindValueId != null && form.activityKindValueId !== rate.classification.activity_kind_value_id)
@@ -59,7 +61,7 @@ async function cancelRate() {
   await nextTick(); ratePicker.value?.querySelector<HTMLElement>('button, input')?.focus()
 }
 function acceptRate(rate: MembershipRate | null) {
-  if (commit.locked.value) return
+  if (inputsLocked.value) return
   pendingRate.value = null
   rateMonths.value = rate?.period_months ?? 0
   appliedRate.value = rate
@@ -91,6 +93,8 @@ const commit = useGuardedCommit<MembershipConfirmBody, MembershipPreview>({
   send: (supplier, body) => membershipApi.confirm(supplier, body),
   onDone: () => emit('done'),
 })
+
+const inputsLocked = computed(() => initializing.value || !!props.batchBusy || commit.locked.value)
 
 const openPeriods = computed(() => props.periods.filter(p => p.status === 'open'))
 const chosenPeriod = computed(() => props.periods.find(p => p.id === form.periodId))
@@ -133,6 +137,7 @@ const revisionAtDate = computed(() => (isIsoDate(form.accountingDate) ? revision
 const problems = computed(() => {
   const list: { key: string; text: string }[] = []
   const add = (key: string, params: Record<string, unknown> = {}) => list.push({ key, text: t(`nonprofitMembership.${key}`, params) })
+  if (props.batchMode && !appliedRate.value) add('batchNeedRate')
   const period = chosenPeriod.value
   if (!period || period.status !== 'open') add('issueNeedPeriod')
   const dates = [form.accountingDate, form.dueDate, form.periodFrom, form.periodTo]
@@ -140,6 +145,7 @@ const problems = computed(() => {
   if (!datesOk) add('dateInvalid')
   if (datesOk && period && (form.accountingDate < period.starts_on || form.accountingDate > period.ends_on)) add('issueDateOutsidePeriod')
   if (rateMonths.value && !membershipRatePeriodEnd(form.periodFrom, rateMonths.value)) add('rateStartFirstDay')
+  if (props.batchMode && !rateMonths.value) add('batchRatePeriodRequired')
   if (datesOk && form.periodFrom > form.periodTo) add('issuePeriodReversed')
   if (datesOk && form.dueDate < form.accountingDate) add('issueDueBeforeDate')
   if (!titleKeyPattern.test(form.titleKey)) add('issueTitleKeyInvalid')
@@ -213,7 +219,8 @@ function buildRequest(): MembershipIssueRequest {
 }
 
 async function runPreview() {
-  if (!props.canManage || commit.locked.value || pendingRate.value || problem.value || !inputForm.value?.reportValidity()) return
+  if (!props.canManage || inputsLocked.value || pendingRate.value || problem.value || !inputForm.value?.reportValidity()) return
+  if (props.batchMode) { emit('batchRequest', buildRequest()); return }
   const op = commit.begin()
   if (!op) return
   const request = buildRequest()
@@ -284,9 +291,13 @@ function clampDates() {
 }
 
 watch(() => form.accountingDate, () => {if (isIsoDate(form.accountingDate)) void loadAccounts()})
+watch(() => form.periodFrom, from => {
+  if (props.batchMode && rateMonths.value) form.periodTo = membershipRatePeriodEnd(from, rateMonths.value) ?? ''
+})
 watch(() => form.periodId, () => { clampDates(); void loadProfile() })
 watch([form, () => latestProfile.value?.id ?? 0, () => props.member.id], () => commit.touch(), { deep: true, flush: 'sync' })
 watch(() => props.supplier, () => {
+  initializing.value = false
   appliedRate.value = null
   pendingRate.value = null; rateMonths.value = 0; revenueAccounts.value = []
   commit.reset()
@@ -297,13 +308,34 @@ watch(() => props.supplier, () => {
   void loadClassification()
   void loadProfile()
 })
-watch(commit.locked, locked => emit('lock', locked))
+watch(inputsLocked, locked => emit('lock', locked))
 onBeforeUnmount(() => { alive = false })
-onMounted(() => {
+onMounted(async () => {
   const today = appIsoDate()
-  form.periodId = (openPeriods.value.find(p => p.starts_on <= today && p.ends_on >= today) ?? openPeriods.value[0])?.id ?? 0
+  const initial = props.batchMode ? props.initialRequest : undefined
+  const date = initial?.accounting_date ?? today
+  form.periodId = (openPeriods.value.find(p => p.starts_on <= date && p.ends_on >= date) ?? openPeriods.value[0])?.id ?? 0
   void loadAccounts()
-  void loadClassification()
+  const supplier = props.supplier
+  await loadClassification()
+  await nextTick()
+  if (!alive || supplier !== props.supplier) return
+  if (!initial) { initializing.value = false; return }
+  Object.assign(form, {accountingDate: initial.accounting_date, dueDate: initial.due_date, periodFrom: initial.period_from,
+    periodTo: initial.period_to, titleKey: initial.title_key, amount: initial.amount, receivable: initial.receivable_account,
+    revenue: initial.revenue_account, titleReference: initial.title_reference, evidence: initial.evidence, reason: initial.reason,
+    nonreciprocal: initial.nonreciprocal, activityValueId: initial.classification.activity_value_id,
+    activityKindValueId: initial.classification.activity_kind_value_id, taxRegimeValueId: initial.classification.tax_regime_value_id})
+  if (initial.rate_id) {
+    try {
+      const rate = await membershipApi.rate(supplier, initial.rate_id)
+      if (!alive || supplier !== props.supplier) return
+      appliedRate.value = rate; rateMonths.value = rate.period_months
+      form.amount = rate.amount; form.receivable = rate.receivable_account; form.revenue = rate.revenue_account
+      form.periodTo = membershipRatePeriodEnd(form.periodFrom, rate.period_months) ?? ''
+    } catch { accountsError.value = true }
+  }
+  initializing.value = false
 })
 
 const frozenRequest = computed(() => {
@@ -352,18 +384,18 @@ const classificationRows = computed(() => {
 })
 
 const retryActions = computed<ActionItem[]>(() => [
-  { key: 'classification-retry', label: t('nonprofitMembership.classificationRetry'), icon: 'cycle', tier: 'primary', variant: 'warning', disabled: commit.locked.value, run: () => { void loadClassification() } },
+  { key: 'classification-retry', label: t('nonprofitMembership.classificationRetry'), icon: 'cycle', tier: 'primary', variant: 'warning', disabled: inputsLocked.value, run: () => { void loadClassification() } },
 ])
 const actions = computed<ActionItem[]>(() => [
-  { key: 'issue-preview', label: t('nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', loading: commit.previewing.value, disabled: !props.canManage || !!problem.value || commit.busy.value || commit.locked.value || !!pendingRate.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
-  { key: 'issue-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
+  { key: 'issue-preview', label: t(props.batchMode ? 'nonprofitMembership.batchPrepare' : 'nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', loading: commit.previewing.value, disabled: !props.canManage || !!problem.value || commit.busy.value || inputsLocked.value || !!pendingRate.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
+  { key: 'issue-close', label: t('nonprofitMembership.close'), icon: 'x', show: !props.batchMode, disabled: inputsLocked.value, run: () => emit('close') },
 ])
 </script>
 
 <template>
   <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="issue-flow">
-    <h3 class="break-words font-semibold">{{ t('nonprofitMembership.issueTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
-    <div ref="ratePicker"><MembershipRates :key="supplier" :supplier="supplier" :can-manage="false" selectable :disabled="commit.locked.value || !!pendingRate" @selected="applyRate" /></div>
+    <h3 v-if="!batchMode" class="break-words font-semibold">{{ t('nonprofitMembership.issueTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
+    <div ref="ratePicker"><MembershipRates :key="supplier" :supplier="supplier" :can-manage="false" selectable :allow-manual="!batchMode" :disabled="inputsLocked || !!pendingRate" @selected="applyRate" /></div>
     <div v-if="pendingRate" :class="warningBox" role="alert" data-section="rate-overwrite">
       <p>{{ t('nonprofitMembership.rateOverwriteDimensions') }}</p>
       <div class="mt-2 flex flex-wrap gap-2">
@@ -393,7 +425,7 @@ const actions = computed<ActionItem[]>(() => [
       <ActionBar v-if="canManage" :actions="retryActions" />
     </div>
     <form ref="inputForm" @submit.prevent="runPreview" @input="commit.touch">
-    <fieldset :disabled="commit.locked.value" class="grid gap-3 sm:grid-cols-2">
+    <fieldset :disabled="inputsLocked" class="grid gap-3 sm:grid-cols-2">
       <label :class="formLabel">{{ t('nonprofitMembership.accountingPeriod') }}
         <select v-model.number="form.periodId" :class="field" data-field="issue-period">
           <option :value="0">{{ t('nonprofitMembership.choose') }}</option>
@@ -411,26 +443,26 @@ const actions = computed<ActionItem[]>(() => [
       <label :class="formLabel">{{ t('nonprofitMembership.accountingDate') }}<DateInput :class="dateInput" v-model="form.accountingDate" required :min="chosenPeriod?.starts_on" :max="chosenPeriod?.ends_on" data-field="accounting-date" /></label>
       <label :class="formLabel">{{ t('nonprofitMembership.dueDate') }}<DateInput :class="dateInput" v-model="form.dueDate" required data-field="due-date" /></label>
       <label :class="formLabel">{{ t('nonprofitMembership.periodFrom') }}<DateInput :class="dateInput" v-model="form.periodFrom" required data-field="period-from" /></label>
-      <label :class="formLabel">{{ t('nonprofitMembership.periodTo') }}<DateInput :class="dateInput" v-model="form.periodTo" required data-field="period-to" /></label>
-      <p v-if="form.accountingDate && revisionAtDate && revisionAtDate.status !== 'active'" class="text-sm text-warning-700 sm:col-span-2" data-section="issue-status-warning">{{ t('nonprofitMembership.issueMemberNotActive', { status: t(`nonprofitMembership.status_${revisionAtDate.status}`) }) }}</p>
-      <p v-else-if="form.accountingDate && isIsoDate(form.accountingDate) && !revisionAtDate" class="text-sm text-warning-700 sm:col-span-2" data-section="issue-status-warning">{{ t('nonprofitMembership.issueMemberNoRevision') }}</p>
-      <p v-else-if="coverageWarning" class="text-sm text-warning-700 sm:col-span-2" data-section="issue-coverage-warning">{{ t('nonprofitMembership.issueMemberNotActiveInPeriod', { range: formatDateRange(form.periodFrom, form.periodTo) }) }}</p>
+      <label :class="formLabel">{{ t('nonprofitMembership.periodTo') }}<DateInput :class="dateInput" v-model="form.periodTo" :disabled="batchMode" required data-field="period-to" /></label>
+      <p v-if="!batchMode && form.accountingDate && revisionAtDate && revisionAtDate.status !== 'active'" class="text-sm text-warning-700 sm:col-span-2" data-section="issue-status-warning">{{ t('nonprofitMembership.issueMemberNotActive', { status: t(`nonprofitMembership.status_${revisionAtDate.status}`) }) }}</p>
+      <p v-else-if="!batchMode && form.accountingDate && isIsoDate(form.accountingDate) && !revisionAtDate" class="text-sm text-warning-700 sm:col-span-2" data-section="issue-status-warning">{{ t('nonprofitMembership.issueMemberNoRevision') }}</p>
+      <p v-else-if="!batchMode && coverageWarning" class="text-sm text-warning-700 sm:col-span-2" data-section="issue-coverage-warning">{{ t('nonprofitMembership.issueMemberNotActiveInPeriod', { range: formatDateRange(form.periodFrom, form.periodTo) }) }}</p>
       <label :class="formLabel">{{ t('nonprofitMembership.titleKey') }}<input v-model="form.titleKey" :class="field" maxlength="80" placeholder="CP-2027" aria-describedby="membership-title-key-help" data-field="title-key" /><span id="membership-title-key-help" class="mt-1 block text-xs font-normal text-neutral-500" data-field="title-key-help">{{ t('nonprofitMembership.titleKeyHelp') }}</span></label>
-      <label :class="formLabel">{{ t('nonprofitMembership.amount') }}<input v-model="form.amount" inputmode="decimal" :class="field" data-field="amount" /></label>
+      <label :class="formLabel">{{ t('nonprofitMembership.amount') }}<input v-model="form.amount" :readonly="batchMode" inputmode="decimal" :class="field" data-field="amount" /></label>
       <label :class="formLabel">{{ t('nonprofitMembership.receivableAccount') }}
-        <SearchableSelect v-model="form.receivable" :options="receivableOptions" :disabled="commit.locked.value" :placeholder="t('nonprofitMembership.chooseAccount')" :aria-label="t('nonprofitMembership.receivableAccount')" data-field="receivable" />
+        <SearchableSelect v-model="form.receivable" :options="receivableOptions" :disabled="inputsLocked || batchMode" :placeholder="t('nonprofitMembership.chooseAccount')" :aria-label="t('nonprofitMembership.receivableAccount')" data-field="receivable" />
       </label>
       <label :class="formLabel">{{ t('nonprofitMembership.revenueAccount') }}
-        <SearchableSelect v-model="form.revenue" :options="revenueOptions" :disabled="commit.locked.value" :placeholder="t('nonprofitMembership.chooseAccount')" :aria-label="t('nonprofitMembership.revenueAccount')" data-field="revenue" />
+        <SearchableSelect v-model="form.revenue" :options="revenueOptions" :disabled="inputsLocked || batchMode" :placeholder="t('nonprofitMembership.chooseAccount')" :aria-label="t('nonprofitMembership.revenueAccount')" data-field="revenue" />
       </label>
       <label :class="formLabel">{{ t('nonprofitMembership.classificationActivity') }}
-        <SearchableSelect v-model="form.activityValueId" :options="activityOptions" :disabled="commit.locked.value || classificationBusy" :placeholder="t('nonprofitMembership.classificationChoose')" :aria-label="t('nonprofitMembership.classificationActivity')" data-field="activity" />
+        <SearchableSelect v-model="form.activityValueId" :options="activityOptions" :disabled="inputsLocked || classificationBusy" :placeholder="t('nonprofitMembership.classificationChoose')" :aria-label="t('nonprofitMembership.classificationActivity')" data-field="activity" />
       </label>
       <label :class="formLabel">{{ t('nonprofitMembership.classificationKind') }}
-        <SearchableSelect v-model="form.activityKindValueId" :options="kindOptions" :disabled="commit.locked.value || classificationBusy" :placeholder="t('nonprofitMembership.classificationChoose')" :aria-label="t('nonprofitMembership.classificationKind')" data-field="activity-kind" />
+        <SearchableSelect v-model="form.activityKindValueId" :options="kindOptions" :disabled="inputsLocked || classificationBusy" :placeholder="t('nonprofitMembership.classificationChoose')" :aria-label="t('nonprofitMembership.classificationKind')" data-field="activity-kind" />
       </label>
       <label :class="formLabel">{{ t('nonprofitMembership.classificationTaxRegime') }}
-        <SearchableSelect v-model="form.taxRegimeValueId" :options="taxRegimeOptions" :disabled="commit.locked.value || classificationBusy" :placeholder="t('nonprofitMembership.classificationChoose')" :aria-label="t('nonprofitMembership.classificationTaxRegime')" data-field="tax-regime" />
+        <SearchableSelect v-model="form.taxRegimeValueId" :options="taxRegimeOptions" :disabled="inputsLocked || classificationBusy" :placeholder="t('nonprofitMembership.classificationChoose')" :aria-label="t('nonprofitMembership.classificationTaxRegime')" data-field="tax-regime" />
       </label>
       <p class="text-sm text-neutral-500 sm:col-span-2" data-section="classification-help">{{ t('nonprofitMembership.classificationHelp') }}</p>
       <label :class="[formLabel, 'sm:col-span-2']">{{ t('nonprofitMembership.titleReference') }}<input v-model="form.titleReference" :class="field" maxlength="2000" data-field="title-reference" /></label>

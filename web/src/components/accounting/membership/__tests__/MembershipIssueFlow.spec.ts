@@ -9,7 +9,7 @@ import type { MemberRevision, MembershipPreview } from '@/api/nonprofitMembershi
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
 
-const api = vi.hoisted(() => ({ preview: vi.fn(), confirm: vi.fn(), classificationOptions: vi.fn(), rates: vi.fn() }))
+const api = vi.hoisted(() => ({ preview: vi.fn(), confirm: vi.fn(), classificationOptions: vi.fn(), rates: vi.fn(), rate: vi.fn() }))
 const accounting = vi.hoisted(() => ({ listAccounts: vi.fn() }))
 const dppo = vi.hoisted(() => ({ profile: vi.fn() }))
 vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
@@ -130,6 +130,7 @@ const token = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/
 beforeEach(() => {
   vi.clearAllMocks()
   api.rates.mockResolvedValue({items: [], next_after_id: null, revenue_accounts: [{account_code: '684', name: 'Synthetic revenue'}, {account_code: '684.100', name: 'Synthetic analytic'}]})
+  api.rate.mockResolvedValue({id: 42, name: 'Synthetic batch', period_months: 12, amount: '1200.50', receivable_account: '311', revenue_account: '684'})
   accounting.listAccounts.mockResolvedValue([account(1, '311', 'Receivables', 'asset'), account(2, '684', 'Membership dues', 'revenue'), account(3, '501', 'Material', 'expense')])
   dppo.profile.mockResolvedValue(legal())
   api.classificationOptions.mockImplementation((supplier: number) => Promise.resolve(overview(supplier)))
@@ -167,8 +168,53 @@ describe('Membership issue flow', () => {
     expect(w.findComponent(MembershipRates).props('canManage')).toBe(false)
     w.unmount()
   })
+  it('locks batch financial fields while recalculating its end from the editable start', async () => {
+    const w = mounted({batchMode: true})
+    await flushPromises()
+    w.findComponent(MembershipRates).vm.$emit('selected', {id: 42, name: 'Synthetic quarterly', amount: '500.00', receivable_account: '311', revenue_account: '684', title_key: 'synthetic', title_reference: 'Synthetic basis', evidence: 'Synthetic evidence', period_months: 3, classification: null})
+    await flushPromises()
+    await w.get('[data-field="period-from"]').setValue('2024-02-01')
+    expect(w.get('[data-field="amount"]').attributes('readonly')).toBeDefined()
+    expect(w.get('[data-field="receivable"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-field="revenue"]').attributes('disabled')).toBeDefined()
+    expect(w.get('[data-field="period-to"]').attributes('disabled')).toBeDefined()
+    expect((w.get('[data-field="period-to"]').element as HTMLInputElement).value).toBe('2024-04-30')
+    expect(w.find('[data-action="issue-close"]').exists()).toBe(false)
+    w.unmount()
+  })
 
-
+  it('restores all saved batch overrides after options load and requires a new preview', async () => {
+    const {member_id: _member, ...initialRequest} = {...expectedRequest, rate_id: 42, nonreciprocal: true as const}
+    const w = mounted({batchMode: true, initialRequest})
+    expect(w.get('fieldset').attributes('disabled')).toBeDefined()
+    await flushPromises()
+    expect((w.get('[data-field="due-date"]').element as HTMLInputElement).value).toBe(initialRequest.due_date)
+    expect((w.get('[data-field="amount"]').element as HTMLInputElement).value).toBe(initialRequest.amount)
+    expect((w.get('[data-field="tax-regime"]').element as HTMLSelectElement).value).toBe('1202')
+    expect(w.findComponent(MembershipRates).props('allowManual')).toBe(false)
+    expect(w.emitted('batchRequest')).toBeUndefined()
+    await w.get('[data-action="issue-preview"]').trigger('click'); await flushPromises()
+    expect(w.emitted('batchRequest')?.[0]?.[0]).toEqual({...expectedRequest, rate_id: 42})
+    expect(api.confirm).not.toHaveBeenCalled()
+    w.unmount()
+  })
+  it('uses the same form for a batch template without calling the single-member preview', async () => {
+    const w = mounted({batchMode: true})
+    await fill(w)
+    expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeDefined()
+    w.findComponent(MembershipRates).vm.$emit('selected', {id: 42, supplier_id: 5, name: 'Synthetic batch rate', amount: '500.00',
+      receivable_account: '311', revenue_account: '684', title_key: 'synthetic-batch', period_months: 6,
+      title_reference: 'Synthetic resolution', evidence: 'Synthetic evidence', is_active: true, row_version: 1,
+      classification: {activity_value_id: 1001, activity_kind_value_id: 1101, tax_regime_value_id: 1202}})
+    await flushPromises()
+    await w.get('[data-action="issue-preview"]').trigger('click'); await flushPromises()
+    expect(api.preview).not.toHaveBeenCalled()
+    expect(w.emitted('batchRequest')?.[0]?.[0]).toMatchObject({rate_id: 42, amount: '500.00', title_key: 'synthetic-batch'})
+    await w.setProps({batchBusy: true})
+    expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeDefined()
+    expect(w.get('fieldset').attributes('disabled')).toBeDefined()
+    w.unmount()
+  })
 
   it('applies explicit rate defaults, permits overrides and keeps the rate reference only in the request', async () => {
     const w = mounted()

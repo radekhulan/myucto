@@ -63,6 +63,32 @@ final class MembershipRepository
         return $this->memberRow($rows[0]);
     }
 
+    /** Podklady jedné stránky dávky načtené společně; poškozená historie neodřízne ostatní členy. */
+    public function batchContexts(int $supplier, array $ids): array
+    {
+        if ($ids === [] || count($ids) > 50) throw new \InvalidArgumentException('Stránka dávky vyžaduje 1–50 členů.');
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_members WHERE supplier_id=? AND id IN ({$marks}) ORDER BY id");
+        $q->execute([$supplier, ...$ids]);
+        $out = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) $out[(int) $row['id']] = ['member' => $this->memberRow($row), 'history' => []];
+        $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id IN ({$marks}) ORDER BY member_id,revision_no,id");
+        $q->execute([$supplier, ...$ids]);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $id = (int) $row['member_id'];
+            if (!isset($out[$id])) continue;
+            try { $out[$id]['history'][] = $this->revisionRow($row); }
+            catch (\JsonException) { $out[$id]['error'] = new MembershipException('nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.', 409); }
+        }
+        foreach ($out as &$context) {
+            if (isset($context['error'])) continue;
+            try { $context['history'] = $this->validateHistory($context['history']); }
+            catch (MembershipException $e) { $context['error'] = $e; }
+        }
+        unset($context);
+        return $out;
+    }
+
     public function insertMember(int $supplier, int $client, string $number, int $actor): array
     {
         $recordedAt = MembershipRecordedTime::nowSql();

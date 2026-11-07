@@ -42,6 +42,26 @@ Zvolte **Zobrazit náhled**, zkontrolujte člena, období, částku a účty a p
 
 Členský předpis není automatickým rozhodnutím o osvobození příjmu. Daňový režim doložte v daňovém posouzení příslušného období.
 
+### Hromadný předpis podle sazby
+
+Správce instalace může proměnnou prostředí `MYINVOICE_MEMBERSHIP_BATCH_MAX_MEMBERS` nastavit strop velikosti dávky na 1–5000 členů; výchozí hodnota je 5000.
+
+V seznamu zaškrtněte členy a otevřete **Hromadný předpis příspěvků**. Výběr se zachovává i při načítání dalších členů, nejvýše 500. Místo zaškrtnutých můžete výslovně zvolit **Všichni aktivní k účetnímu datu**; tento výběr nemá omezení na právě zobrazenou stránku. Členové s budoucím ukončením se posuzují podle účetního data. Každý předpis přesto vyžaduje aktivní členství po celé období příspěvku.
+
+Pro dávku vyberte sazbu s kalendářní délkou období a zkontrolujte společné údaje ve stejném formuláři jako u jednotlivého předpisu. U dávky určuje sazba částku, účty a délku období; tyto údaje nelze přepsat. Začátek kalendářního období musí být první den měsíce. Upravit můžete data, podklady a dimenze. **Připravit náhled dávky** uloží její společné údaje a výběr členů. Založení ani příprava náhledu nic neúčtuje. Příprava postupuje po omezených částech; k potvrzení musí nejdřív dokončit náhled všech členů.
+
+Souhrn zahrnuje celou dávku, ne jen zobrazenou stránku: počet členů, počet připravených předpisů, částku a rozpad zápisu na pohledávkový a výnosový účet. U členů uvidíte **Připraveno k zápisu**, **Předpis již existuje** nebo **Vynecháno s důvodem**. Existující předpis stejného označení a přesného období se nepřepisuje ani nevytváří podruhé; jeho částka se může od vybrané sazby lišit. Jiný překryv období se odmítne s důvodem. Výsledky členů lze stránkovat po 50.
+
+Při přesahu rozvahového dne náhled ukáže souhrnnou částku časového rozlišení připravených předpisů a vysvětlí odložení na účet 384 v kroku uzávěrky. Odmítnutí členové a dříve existující předpisy se do této částky nezapočítávají.
+
+Zkontrolujte společné období, data, částku na člena, účty, dimenze a podklady. Potvrzovací souhlas se vztahuje na všechny připravené členy dávky, nejen na viditelnou stránku. Až potom zvolte **Potvrdit dávku a zapsat předpisy**. Každý člen se účtuje samostatnou operací se stejnými kontrolami jako ruční předpis. Změna podkladů nebo uzavření období po náhledu může konkrétní předpis odmítnout; ostatní výsledky zůstávají uložené.
+
+Přípravu nebo zápis můžete pozastavit po současné části. Přes **Uložené dávky a pokračování** se lze vrátit i po obnovení stránky nebo přerušení spojení. Při pokračování se dokončí nezpracovaní členové a předchozí finanční zápisy se nezdvojí, ani když se předchozí odpověď ztratila. Po hromadném zápisu se obnoví otevřený detail člena; případné rozpracované potvrzení jednotlivého předpisu se nejdřív nechá bezpečně dokončit.
+
+Dávku lze také výslovně zrušit. Zrušení zastaví další zpracování a zachová již zapsané předpisy. Po vypršení souhlasu připravte nový náhled s novým souhlasem.
+
+Pro změnu společných údajů nebo nové zpracování členů po opravě odmítnutých podkladů použijte **Nová dávka**. Formulář převezme uložená data, texty, dimenze a původně zaškrtnuté členy; částku, účty a délku období znovu načte z aktuální sazby, také po otevření dávky z historie. U volby všech aktivních se jejich výběr znovu vyhodnotí k novému účetnímu datu. Pro jiný zaškrtnutý výběr dávku zavřete a vyberte členy v seznamu. Tato výslovná akce vytvoří nový požadavek a nový náhled; pouhé opakování neúspěšného spojení pokračuje v původním. Stav členství se dávkou nemění. Rozpracované dávky se do anonymizované kopie nepřenášejí; účetní operace se v ní zachovávají a anonymizují samostatně.
+
 ## 120.3 Úhrady a kontrola zůstatku
 
 Pohledávky se zobrazují po stránkách. Přehled rozlišuje předepsanou částku a prokázaný otevřený zůstatek. Úhrada je doložená teprve přes skutečné párování s nativním bankovním nebo pokladním dokladem.
