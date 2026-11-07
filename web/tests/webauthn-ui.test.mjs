@@ -89,8 +89,8 @@ test('API token step-up offers both factors and keeps a passkey proof after unre
 
   assert.match(tokens, /const needsStepUp = computed\(\(\) => needsTotp\.value \|\| hasPasskey\.value\)/)
   // Passkey tlačítko i TOTP pole jsou v modalu současně; TOTP mizí až po ověření.
-  assert.match(tokens, /v-if="hasPasskey"[\s\S]*verify_passkey/)
-  assert.match(tokens, /v-if="needsTotp && !passkeyStepUpToken"/)
+  assert.match(tokens, /v-if="localFactorsAllowed && hasPasskey"[\s\S]*verify_passkey/)
+  assert.match(tokens, /v-if="localFactorsAllowed && needsTotp && !passkeyStepUpToken"/)
   // Proof se nezahazuje preventivně před requestem.
   assert.doesNotMatch(tokens, /const proof = passkeyStepUpToken\.value\r?\n\s*passkeyStepUpToken\.value = ''/)
   assert.match(tokens, /step_up_proof_invalid'\) \{\s*\r?\n?\s*passkeyStepUpToken\.value = ''/)
