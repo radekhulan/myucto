@@ -1,15 +1,20 @@
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
+import WebcamCaptureDialog from '@/components/upload/WebcamCaptureDialog.vue'
 import { isCaptureDevice } from '@/composables/usePhotoCapture'
+import { hasCamera, supportsWebcam } from '@/composables/useWebcam'
 
 /**
- * Tlačítko „Vyfotit“: otevře fotoaparát (input capture) a vyfocenou fotku pošle
- * do {@link PhotoCropDialog}, kde se navrhne ořez dokladu, narovná se a
- * zkomprimuje na JPEG (~150 kB). Výsledek předá stávající upload funkci stránky
- * přes událost `captured`. Na zařízeních bez dotykového ovládání se neukazuje.
+ * Tlačítko „Vyfotit“: na telefonu a tabletu otevře fotoaparát (input capture),
+ * na počítači s připojenou kamerou živý náhled z webkamery
+ * ({@link WebcamCaptureDialog}). Vyfocenou fotku pošle do {@link PhotoCropDialog},
+ * kde se navrhne ořez dokladu, narovná se a zkomprimuje na JPEG (~150 kB).
+ * Výsledek předá stávající upload funkci stránky přes událost `captured`.
+ * Na počítači bez kamery se neukazuje; kamera se zjišťuje výčtem zařízení,
+ * o oprávnění se žádá až po kliknutí.
  */
 withDefaults(defineProps<{
   disabled?: boolean
@@ -21,24 +26,32 @@ const emit = defineEmits<{ captured: [file: File] }>()
 
 const { t } = useI18n()
 const input = ref<HTMLInputElement | null>(null)
-const visible = ref(false)
+const touch = ref(false)
+const webcam = ref(false)
+const visible = computed(() => touch.value || webcam.value)
+const webcamOpen = ref(false)
 /** Fotka v ořezu; dokud je nastavená, je dialog otevřený. */
 const photo = ref<File | null>(null)
 
 let mql: MediaQueryList | null = null
-const refreshVisible = () => { visible.value = isCaptureDevice() }
+const refreshTouch = () => { touch.value = isCaptureDevice() }
+const refreshWebcam = async () => { webcam.value = await hasCamera() }
 
 onMounted(() => {
-  refreshVisible()
+  refreshTouch()
   mql = window.matchMedia?.('(pointer: coarse)') ?? null
-  mql?.addEventListener?.('change', refreshVisible)
+  mql?.addEventListener?.('change', refreshTouch)
+  void refreshWebcam()
+  if (supportsWebcam()) navigator.mediaDevices.addEventListener?.('devicechange', refreshWebcam)
 })
 onBeforeUnmount(() => {
-  mql?.removeEventListener?.('change', refreshVisible)
+  mql?.removeEventListener?.('change', refreshTouch)
+  if (supportsWebcam()) navigator.mediaDevices.removeEventListener?.('devicechange', refreshWebcam)
 })
 
 function trigger() {
-  input.value?.click()
+  if (touch.value) input.value?.click()
+  else webcamOpen.value = true
 }
 
 function onPick(e: Event) {
@@ -46,6 +59,11 @@ function onPick(e: Event) {
   const file = el.files?.[0] ?? null
   el.value = ''
   if (file) photo.value = file
+}
+
+function onWebcamCaptured(file: File) {
+  webcamOpen.value = false
+  photo.value = file
 }
 
 function onDone(file: File) {
@@ -71,6 +89,7 @@ function onRetake() {
     </button>
     <input ref="input" type="file" accept="image/*" capture="environment" class="hidden" @change="onPick" />
 
+    <WebcamCaptureDialog v-if="webcamOpen" @captured="onWebcamCaptured" @cancel="webcamOpen = false" />
     <PhotoCropDialog v-if="photo" :file="photo" allow-retake
       @done="onDone" @retake="onRetake" @cancel="photo = null" />
   </span>

@@ -1054,7 +1054,18 @@
     "crop_manual_hint": "Rohy posuňte na okraje dokladu.",
     "crop_off_hint": "Nahraje se celá fotka.",
     "crop_not_found": "Doklad se na fotce nepodařilo najít. Ořez můžete vyznačit ručně.",
-    "corner": "Roh dokladu {n}"
+    "corner": "Roh dokladu {n}",
+    "webcam_title": "Vyfotit kamerou",
+    "webcam_starting": "Čekám na obraz z kamery. Prohlížeč se může zeptat na povolení kamery.",
+    "webcam_hint": "Doklad podržte před kamerou celý a dobře osvětlený, ořez doladíte v dalším kroku.",
+    "webcam_camera": "Kamera",
+    "webcam_camera_n": "Kamera {n}",
+    "webcam_close": "Zavřít",
+    "webcam_denied": "Přístup ke kameře je zakázaný. Povolte kameru pro tento web v nastavení prohlížeče a zkuste to znovu.",
+    "webcam_busy": "Kameru se nepodařilo spustit, nejspíš ji právě používá jiná aplikace. Zavřete ji a zkuste to znovu.",
+    "webcam_not_found": "Kamera nebyla nalezena. Zkontrolujte, že je připojená.",
+    "webcam_failed": "Fotku z kamery se nepodařilo pořídit.",
+    "webcam_error_hint": "Doklad můžete místo toho nahrát ze souboru."
   },
   "documents": {
     "ai": {

@@ -1054,7 +1054,18 @@
     "crop_manual_hint": "Move the corners to the edges of the document.",
     "crop_off_hint": "The whole photo will be uploaded.",
     "crop_not_found": "The document could not be found in the photo. You can mark the crop manually.",
-    "corner": "Document corner {n}"
+    "corner": "Document corner {n}",
+    "webcam_title": "Take photo with camera",
+    "webcam_starting": "Waiting for the camera image. Your browser may ask for permission to use the camera.",
+    "webcam_hint": "Hold the whole document in front of the camera in good light, you can adjust the crop in the next step.",
+    "webcam_camera": "Camera",
+    "webcam_camera_n": "Camera {n}",
+    "webcam_close": "Close",
+    "webcam_denied": "Camera access is blocked. Allow the camera for this site in your browser settings and try again.",
+    "webcam_busy": "The camera could not be started, it is probably being used by another application. Close it and try again.",
+    "webcam_not_found": "No camera was found. Check that it is connected.",
+    "webcam_failed": "The photo could not be taken with the camera.",
+    "webcam_error_hint": "You can upload the document from a file instead."
   },
   "documents": {
     "ai": {

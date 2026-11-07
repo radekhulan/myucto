@@ -100,7 +100,7 @@ Volitelné kroky:
 ## 25.4 Krok za krokem: importovat přijaté faktury z PDF
 
 1. Otevřete `Nákup → AI import`.
-2. Vyberte nebo přetáhněte jeden nebo více souborů (PDF, obrázek), nebo na telefonu a tabletu klikněte na **Vyfotit**: doklad se vyfotí, zmenší a po potvrzení náhledu se použije jako vybraný soubor. U vybrané nebo přetažené fotky se otevře stejná obrazovka s návrhem ořezu jako u **Vyfotit**; ořez v ní jde vypnout. U více fotek najednou nabídne **Přeskočit ořez u ostatních**, které zbývající fotky nahraje beze změny. Na počítači se při výběru více než tří fotek ořez nenabízí. Při více souborech vznikne dávka, která se zpracuje
+2. Vyberte nebo přetáhněte jeden nebo více souborů (PDF, obrázek), nebo klikněte na **Vyfotit**: doklad se vyfotí, zmenší a po potvrzení náhledu se použije jako vybraný soubor. Na telefonu a tabletu se otevře fotoaparát. Na počítači je tlačítko vidět, jen když je připojená kamera; otevře živý náhled z webkamery (při více kamerách s výběrem kamery), doklad podržte před kamerou a klikněte na **Vyfotit**. Prohlížeč se napoprvé zeptá na povolení kamery; když ho odmítnete nebo kameru používá jiná aplikace, dialog to oznámí a doklad můžete nahrát ze souboru. U vybrané nebo přetažené fotky se otevře stejná obrazovka s návrhem ořezu jako u **Vyfotit**; ořez v ní jde vypnout. U více fotek najednou nabídne **Přeskočit ořez u ostatních**, které zbývající fotky nahraje beze změny. Na počítači se při výběru více než tří fotek ořez nenabízí. Při více souborech vznikne dávka, která se zpracuje
    postupně po jednom.
    Nahrané obrázky se pro vytěžení a archivaci převedou do PDF se zachovaným poměrem stran, bez deformace či ořezu.
 3. Počkejte na zpracování. U každého souboru uvidíte stav, dodavatele, částku a **typ dokladu**.
@@ -165,7 +165,7 @@ V editoru faktury jsou tytéž položky orámované červeně a návrh AI je u v
 ## 25.6 Krok za krokem: importovat vydané faktury z PDF
 
 1. Otevřete `Prodej → AI import`. Položku vidí uživatel, který smí vytvářet vydané faktury.
-2. Vyberte nebo přetáhněte PDF, obrázek, ISDOC nebo ISDOCX, nebo na telefonu a tabletu klikněte na **Vyfotit**. Při více souborech vznikne dávka, zpracuje se postupně po jednom.
+2. Vyberte nebo přetáhněte PDF, obrázek, ISDOC nebo ISDOCX, nebo klikněte na **Vyfotit** (fotoaparát telefonu nebo tabletu, na počítači připojená webkamera, viz 25.4). Při více souborech vznikne dávka, zpracuje se postupně po jednom.
    Pro jednotlivý import i dávku lze dočasně vybrat jiný model z whitelistu aktivního poskytovatele.
 3. Po úspěchu klikněte na odkaz do editoru.
 4. Ověřte odběratele, typ dokladu, DUZP, splatnost, režim cen s/bez DPH, sazby a text položek.

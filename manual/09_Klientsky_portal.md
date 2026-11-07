@@ -81,7 +81,7 @@ Heslo, 2FA a profil (nabídka pod jménem vpravo nahoře) fungují pro klienta s
 Provede klient. Hodí se pro účtenky, faktury a další doklady, které nechce přepisovat.
 
 1. Otevřete `Dokumenty → Předat doklady účetní`.
-2. Klikněte na **Vybrat soubory** a vyberte soubory (najednou až 20, formáty PDF, JPG, PNG, ISDOC, XML nebo ISDOCX), nebo je přetáhněte do vyznačené plochy. Na telefonu a tabletu můžete doklad **Vyfotit**. Každý další výběr nebo fotka se přidá k už vybraným souborům, takže lze předat víc dokladů najednou i z telefonu. Omylem vybraný soubor odeberete křížkem.
+2. Klikněte na **Vybrat soubory** a vyberte soubory (najednou až 20, formáty PDF, JPG, PNG, ISDOC, XML nebo ISDOCX), nebo je přetáhněte do vyznačené plochy. Doklad můžete také **Vyfotit**: na telefonu a tabletu fotoaparátem, na počítači připojenou webkamerou (tlačítko je vidět, jen když je kamera připojená; prohlížeč se napoprvé zeptá na povolení kamery). Každý další výběr nebo fotka se přidá k už vybraným souborům, takže lze předat víc dokladů najednou i z telefonu. Omylem vybraný soubor odeberete křížkem.
 3. Podle potřeby doplňte **Poznámka pro účetní (nepovinné)** a **Typ dokladu (nepovinné)**. Používá-li firma střediska, vyberte i středisko, kterého se doklad týká.
 4. Klikněte na **Předat účetní**.
 
