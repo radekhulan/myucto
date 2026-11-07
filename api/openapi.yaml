@@ -66227,6 +66227,11 @@ components:
           const: proven_utc
     NonprofitMembershipReceivableSettlement:
       type: object
+      description: >-
+        Stav unreconciled označuje platný předpis bez spárované úhrady:
+        paid_cents je "0" a open_cents je celá částka předpisu. Ambiguous označuje
+        neprůkazný účetní podklad nebo vadné párování; tehdy jsou paid_cents i open_cents null.
+        Reversed má open_cents "0". Úhrady se odvozují pouze z nativního párování banky a pokladny.
       additionalProperties: false
       required:
       - status

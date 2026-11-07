@@ -1186,7 +1186,8 @@
         "2280_membership_batches.sql",
         "2281_microsoft365_imap_oauth.sql",
         "2282_clients_simplified_only.sql",
-        "2283_payroll_submission_parts_subject_index.sql"
+        "2283_payroll_submission_parts_subject_index.sql",
+        "2284_membership_list_indexes.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -9296,6 +9297,7 @@
                 "created_by": "BTREE (created_by)",
                 "fk_nmcc_head": "BTREE (supplier_id, id, head_operation_id)",
                 "ix_nmcc_deferral": "BTREE (supplier_id, period_to, period_from, id)",
+                "ix_nmcc_list_title": "BTREE (supplier_id, title_key, period_to, period_from, member_id)",
                 "ix_nmcc_overlap": "BTREE (supplier_id, member_id, title_key, period_from, period_to, id)",
                 "uq_nmcc_identity": "UNIQUE BTREE (supplier_id, member_id, title_key, period_from, period_to)",
                 "uq_nmcc_tenant": "UNIQUE BTREE (supplier_id, id)"
