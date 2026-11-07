@@ -6,7 +6,10 @@ namespace MyInvoice\Service\Nonprofit\Membership;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository;
+use MyInvoice\Service\Accounting\AccountRoleResolver;
+use MyInvoice\Service\Accounting\AccountingFrameworkService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Tax\Nonprofit\NonprofitTaxRules;
 use PDO;
 
 final class MembershipRateService
@@ -31,24 +34,45 @@ final class MembershipRateService
         }
         catch (\InvalidArgumentException) { self::invalid(); }
         if ($cents <= 0 || $cents > 999999999999999) self::invalid();
-        // U šablony ověřujeme vlastnictví a typ účtů; platnost k účetnímu datu a roli znovu ověří náhled předpisu.
-        $q = $this->db->pdo()->prepare('SELECT account_code,account_type FROM chart_of_accounts WHERE supplier_id=? AND account_code IN (?,?)');
-        $q->execute([$supplier, $input['receivable_account'], $input['revenue_account']]);
-        $accounts = $q->fetchAll(PDO::FETCH_KEY_PAIR);
-        if (($accounts[$input['receivable_account']] ?? null) !== 'asset' || ($accounts[$input['revenue_account']] ?? null) !== 'revenue'
-            || !str_starts_with($input['revenue_account'], '684')) self::invalid();
-        if ($input['classification'] !== null) {
-            if (!is_array($input['classification'])) self::invalid();
-            (new MembershipClassification($this->db))->resolve($supplier, $input['classification']);
+        $repository = new MembershipRateRepository($this->db);
+        $stored = $id === null ? null : $repository->find($supplier, $id);
+        // Vyřazení historické sazby nesmí blokovat již neplatný účet ani dimenze.
+        $unchangedAccounting = $stored !== null;
+        foreach (['amount', 'receivable_account', 'revenue_account', 'classification'] as $field) {
+            if ($stored === null || NonprofitTaxRules::canonicalJson([$stored[$field]]) !== NonprofitTaxRules::canonicalJson([$input[$field]])) $unchangedAccounting = false;
+        }
+        $validateAccounting = $input['is_active'] || !$unchangedAccounting;
+        if ($validateAccounting) {
+            // Platnost k datu předpisu znovu ověří MembershipChargeService; zde jde o aktuální číselník.
+            $q = $this->db->pdo()->prepare('SELECT account_code,account_type FROM chart_of_accounts WHERE supplier_id=? AND is_active=1 AND account_code IN (?,?)');
+            $q->execute([$supplier, $input['receivable_account'], $input['revenue_account']]);
+            $accounts = $q->fetchAll(PDO::FETCH_KEY_PAIR);
+            if (($accounts[$input['receivable_account']] ?? null) !== 'asset' || ($accounts[$input['revenue_account']] ?? null) !== 'revenue'
+                || !in_array($input['revenue_account'], array_column($this->revenueAccounts($supplier, date('Y-m-d')), 'account_code'), true)) self::invalid();
+            if ($input['classification'] !== null) {
+                if (!is_array($input['classification'])) self::invalid();
+                (new MembershipClassification($this->db))->resolve($supplier, $input['classification']);
+            }
         }
         $input['is_active'] = (int) $input['is_active'];
-        return (new MembershipRateRepository($this->db))->save($supplier, $id, $input, $input['row_version']);
+        return $repository->save($supplier, $id, $input, $input['row_version']);
     }
 
-    public function assertUsable(int $supplier, int $id, bool $lock): void
+    /** Účty pro výběr v UI i validaci sazby sdílejí účetní roli s jednotlivým předpisem. */
+    public function revenueAccounts(int $supplier, string $date): array
+    {
+        $roles = AccountRoleResolver::fromConnection($this->db)->forDate($supplier, $date);
+        if ($roles->framework !== AccountingFrameworkService::CZ_504) return [];
+        return (new MembershipRateRepository($this->db))->revenueAccounts($supplier, $roles->account('nonprofit.membership_revenue'));
+    }
+
+    public function assertUsable(int $supplier, int $id, bool $lock, ?string $periodFrom = null): void
     {
         $rate = (new MembershipRateRepository($this->db))->find($supplier, $id, $lock);
         if ($rate === null || !$rate['is_active']) throw new MembershipException('nonprofit_membership_rate_unavailable', 'Vybraná sazba není dostupná v této organizaci. Vyberte jinou nebo zadejte předpis ručně.', 409);
+        if ($rate['period_months'] > 0 && $periodFrom !== null && substr($periodFrom, 8, 2) !== '01') {
+            throw new MembershipException('nonprofit_membership_rate_period_invalid', 'Období kalendářní sazby musí začínat prvním dnem měsíce.', 422);
+        }
     }
 
     private static function invalid(): never

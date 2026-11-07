@@ -10,13 +10,14 @@ import type { DimensionOverview } from '@/api/dimensions'
 import { accountPickerOptions } from '@/utils/chartAccountOptions'
 import { dimensionValueName } from '@/utils/dimensionValueLabel'
 import { formatMoney } from '@/composables/useFormat'
-import { amountDecimal, errorBox, errorMessage } from './membershipFormat'
+import { amountDecimal, errorBox, membershipError } from './membershipFormat'
 import { notifyMembershipRatesChanged, onMembershipRatesChanged } from './membershipRateChanges'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
 
 const props = withDefaults(defineProps<{ supplier: number; canManage: boolean; selectable?: boolean; disabled?: boolean; allowManual?: boolean }>(), {allowManual: true})
 const emit = defineEmits<{ selected: [rate: MembershipRate | null] }>()
 const { t, te } = useI18n()
+const revenueAccounts = ref<string[]>([])
 const items = ref<MembershipRate[]>([]), next = ref<number | null>(null), selected = ref<number | null>(null)
 const includeInactive = ref(false), loading = ref(false), saving = ref(false), editing = ref(false)
 const error = ref(''), notice = ref(''), editor = ref<HTMLFormElement | null>(null)
@@ -28,6 +29,7 @@ const reloadTrigger = ref<HTMLButtonElement | null>(null), reloadCancel = ref<HT
 const editorError = ref(''), editorReady = ref(false)
 const blank = (): MembershipRateInput => ({ name: '', amount: '', receivable_account: '', revenue_account: '', title_key: '', period_months: 0, title_reference: '', evidence: '', classification: null, is_active: true, row_version: 0 })
 const form = reactive(blank())
+const original = ref<MembershipRateInput | null>(null)
 const selection = reactive({ activity_value_id: null as number | null, activity_kind_value_id: null as number | null, tax_regime_value_id: null as number | null })
 let alive = true, generation = 0, editorGeneration = 0, saveGeneration = 0
 const chosen = computed(() => items.value.find(x => x.id === selected.value))
@@ -36,7 +38,7 @@ function chooseRate(value: unknown) {
   if (props.disabled || saving.value || loading.value) return
   selected.value = typeof value === 'number' && items.value.some(x => x.id === value) ? value : null
 }
-const accountOptions = (type: string) => accountPickerOptions(accounts.value, a => a.account_type === type && (type !== 'revenue' || a.account_code.startsWith('684'))).map(a => ({ value: a.account_code, label: `${a.account_code} ${a.name}` }))
+const accountOptions = (type: string) => accountPickerOptions(accounts.value, a => a.account_type === type && (type !== 'revenue' || revenueAccounts.value.includes(a.account_code))).map(a => ({ value: a.account_code, label: `${a.account_code} ${a.name}` }))
 const axes = ['activity', 'activity_kind', 'tax_regime'] as const
 const axisOptions = (axis: typeof axes[number]) => {
   const types = dimensions.value?.types.filter(x => x.supplier_id === props.supplier && x.system_key === axis && x.is_active) ?? []
@@ -44,6 +46,17 @@ const axisOptions = (axis: typeof axes[number]) => {
   return (dimensions.value?.values ?? []).filter(v => v.supplier_id === props.supplier && v.type_id === types[0]!.id && v.is_active
     && (axis === 'activity_kind' || (axis === 'activity' ? ['main', 'economic'] : ['subject', 'out_of_scope', 'exempt']).includes(v.semantic_key ?? '')))
     .map(v => ({ value: v.id, label: dimensionValueName({ t, te }, v, axis) }))
+}
+const displayAxisOptions = (axis: typeof axes[number]) => {
+  const options = axisOptions(axis), id = original.value?.classification?.[`${axis}_value_id`]
+  if (!id || options.some(o => o.value === id)) return options
+  const value = dimensions.value?.values.find(v => v.id === id && v.supplier_id === props.supplier)
+  const type = dimensions.value?.types.find(t => t.id === value?.type_id && t.supplier_id === props.supplier && t.system_key === axis)
+  // Historická volba zůstává viditelná, ale při aktivaci ji validují jen aktivní číselníky.
+  return value && type ? [...options, { value: id, label: dimensionValueName({ t, te }, value, axis) }] : options
+}
+function rememberOriginal() {
+  original.value = { ...form, classification: form.classification ? { ...form.classification } : null }
 }
 
 async function load(append = false) {
@@ -56,17 +69,19 @@ async function load(append = false) {
     if (!alive || ticket !== generation || supplier !== props.supplier) return
     items.value = append ? [...new Map([...items.value, ...page.items].map(row => [row.id, row])).values()] : page.items
     if (selectedRate && selected.value === picked) items.value.push(selectedRate)
+    revenueAccounts.value = page.revenue_accounts?.map(a => a.account_code) ?? []
     next.value = page.next_after_id
     if (!items.value.some(x => x.id === selected.value)) selected.value = null
-  } catch (e) { if (alive && ticket === generation) error.value = errorMessage(e) || t('nonprofitMembership.error') }
+  } catch (e) { if (alive && ticket === generation) error.value = membershipError({t, te}, e) }
   finally { if (alive && ticket === generation) loading.value = false }
 }
 
 async function openEditor(rate?: MembershipRate) {
-  if (editing.value || saving.value || props.disabled) return
+  if (!props.canManage || props.selectable || editing.value || saving.value || props.disabled) return
   reloadEditorAcknowledgement.value = false
   editId.value = rate?.id ?? null
   Object.assign(form, blank(), rate ? { ...rate } : {})
+  rememberOriginal()
   withDimensions.value = !!rate?.classification
   for (const axis of axes) selection[`${axis}_value_id`] = rate?.classification?.[`${axis}_value_id`] ?? null
   editing.value = true; error.value = ''; notice.value = ''
@@ -82,10 +97,11 @@ async function reloadEditor() {
     const current = await membershipApi.rate(supplier, id)
     if (!alive || ticket !== editorGeneration || supplier !== props.supplier || !editing.value || editId.value !== id) return
     Object.assign(form, blank(), current)
+    rememberOriginal()
     withDimensions.value = !!current.classification
     for (const axis of axes) selection[`${axis}_value_id`] = current.classification?.[`${axis}_value_id`] ?? null
     reloadEditorAcknowledgement.value = false; error.value = ''; reloaded = true
-  } catch (e) { if (alive && ticket === editorGeneration) editorError.value = errorMessage(e) || t('nonprofitMembership.error') }
+  } catch (e) { if (alive && ticket === editorGeneration) editorError.value = membershipError({t, te}, e) }
   finally {
     if (alive && ticket === editorGeneration) {
       editorLoading.value = false
@@ -111,14 +127,20 @@ async function loadEditorOptions() {
     const [chart, overview] = await Promise.all([accountingApi.listAccounts({ supplierId: supplier }), membershipApi.classificationOptions(supplier)])
     if (!alive || ticket !== editorGeneration || supplier !== props.supplier) return
     accounts.value = chart; dimensions.value = overview; editorReady.value = true
-  } catch (e) { if (alive && ticket === editorGeneration) editorError.value = errorMessage(e) || t('nonprofitMembership.error') }
+  } catch (e) { if (alive && ticket === editorGeneration) editorError.value = membershipError({t, te}, e) }
   finally { if (alive && ticket === editorGeneration) editorLoading.value = false }
 }
 
 async function save() {
   if (!props.canManage || props.disabled || saving.value || !editorReady.value || editorLoading.value || !editor.value?.reportValidity()) return
   const amount = amountDecimal(form.amount)
-  if (!amount || (withDimensions.value && axes.some(a => !axisOptions(a).some(o => o.value === selection[`${a}_value_id`])))) {
+  const unchangedAccounting = editId.value !== null && original.value !== null
+    && amount === amountDecimal(original.value.amount)
+    && form.receivable_account === original.value.receivable_account && form.revenue_account === original.value.revenue_account
+    && (withDimensions.value ? !!original.value.classification && axes.every(a => selection[`${a}_value_id`] === original.value!.classification![`${a}_value_id`]) : original.value.classification === null)
+  // Stejně jako server vynecháme kontrolu historických číselníků jen u nezměněné neaktivní sazby.
+  const validateAccounting = form.is_active || !unchangedAccounting
+  if (!amount || (validateAccounting && withDimensions.value && axes.some(a => !axisOptions(a).some(o => o.value === selection[`${a}_value_id`])))) {
     error.value = t('nonprofitMembership.rateInvalid'); return
   }
   const supplier = props.supplier, ticket = ++saveGeneration
@@ -140,15 +162,15 @@ async function save() {
     if (!items.value.some(x => x.id === saved.id) && (includeInactive.value || saved.is_active)) items.value.push(saved)
     selected.value = items.value.some(x => x.id === saved.id) ? saved.id : null
     notifyMembershipRatesChanged(supplier)
-  } catch (e) { if (alive && supplier === props.supplier && ticket === saveGeneration) error.value = errorMessage(e) || t('nonprofitMembership.error') }
+  } catch (e) { if (alive && supplier === props.supplier && ticket === saveGeneration) error.value = membershipError({t, te}, e) }
   finally { if (alive && supplier === props.supplier && ticket === saveGeneration) saving.value = false }
 }
 
 const actions = computed<ActionItem[]>(() => [
-  { key: 'use-rate', label: t('nonprofitMembership.rateUse'), icon: 'check', tier: 'primary', variant: 'primary', show: props.selectable, disabled: props.disabled || loading.value || !!error.value || !chosen.value?.is_active, run: () => emit('selected', chosen.value ?? null) },
+  { key: 'use-rate', label: t('nonprofitMembership.rateUse'), icon: 'check', variant: 'neutral', show: props.selectable, disabled: props.disabled || loading.value || !!error.value || !chosen.value?.is_active, run: () => emit('selected', chosen.value ?? null) },
   { key: 'manual-rate', label: t('nonprofitMembership.rateManual'), icon: 'edit', show: props.selectable && props.allowManual, disabled: props.disabled, run: () => { selected.value = null; emit('selected', null) } },
-  { key: 'new-rate', label: t('nonprofitMembership.rateNew'), icon: 'plus', show: props.canManage && !editing.value, disabled: props.disabled || saving.value, run: () => { void openEditor() } },
-  { key: 'edit-rate', label: t('nonprofitMembership.rateEdit'), icon: 'edit', show: props.canManage && !editing.value, disabled: props.disabled || saving.value || !chosen.value, run: () => { if (chosen.value) void openEditor(chosen.value) } },
+  { key: 'new-rate', label: t('nonprofitMembership.rateNew'), icon: 'plus', show: props.canManage && !props.selectable && !editing.value, disabled: props.disabled || saving.value, run: () => { void openEditor() } },
+  { key: 'edit-rate', label: t('nonprofitMembership.rateEdit'), icon: 'edit', show: props.canManage && !props.selectable && !editing.value, disabled: props.disabled || saving.value || !chosen.value, run: () => { if (chosen.value) void openEditor(chosen.value) } },
   { key: 'reload-rates', label: t('nonprofitMembership.reload'), icon: 'cycle', disabled: loading.value || saving.value, run: () => { void load() } },
 ])
 const editActions = computed<ActionItem[]>(() => [
@@ -174,8 +196,8 @@ onBeforeUnmount(() => { alive = false; generation++; editorGeneration++; saveGen
 
 <template>
   <section class="space-y-3 rounded-lg border bg-surface p-4" data-section="membership-rates">
-    <h2 class="font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</h2>
-    <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.ratesHelp') }}</p>
+    <h2 v-if="!selectable" class="font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</h2>
+    <p v-if="!selectable" class="text-sm text-neutral-500">{{ t('nonprofitMembership.ratesHelp') }}</p>
     <p v-if="error" role="alert" :class="errorBox">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-700">{{ notice }}</p>
     <p v-if="loading" role="status" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
@@ -184,8 +206,8 @@ onBeforeUnmount(() => { alive = false; generation++; editorGeneration++; saveGen
       <p class="text-neutral-500">{{ t('nonprofitMembership.ratePartialList') }}</p>
       <button type="button" :class="btnOutline('neutral')" :disabled="loading || saving" data-action="more-rates" @click="load(true)"><svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path :d="ICONS.chevron" /></svg>{{ t('nonprofitMembership.rateMore') }}</button>
     </div>
-    <label class="flex items-center gap-2 text-sm"><input v-model="includeInactive" type="checkbox" :disabled="saving" />{{ t('nonprofitMembership.rateShowInactive') }}</label>
-    <p v-if="!loading && !items.length" class="text-sm text-neutral-500">{{ t('nonprofitMembership.ratesEmpty') }}</p>
+    <label v-if="!selectable" class="flex items-center gap-2 text-sm"><input v-model="includeInactive" type="checkbox" :disabled="saving" />{{ t('nonprofitMembership.rateShowInactive') }}</label>
+    <p v-if="!loading && !items.length" class="text-sm text-neutral-500">{{ t(allowManual ? 'nonprofitMembership.ratesEmpty' : 'nonprofitMembership.ratesEmptyRequired') }}</p>
     <ActionBar :actions="actions" />
     <form v-if="editing" ref="editor" class="space-y-3 border-t pt-3" data-section="rate-editor" @submit.prevent="save">
       <p v-if="editorLoading" role="status" class="text-sm text-neutral-500">{{ t('common.loading') }}</p>
@@ -202,7 +224,7 @@ onBeforeUnmount(() => { alive = false; generation++; editorGeneration++; saveGen
         <label :class="formLabel">{{ t('nonprofitMembership.titleReference') }}<textarea v-model="form.title_reference" :class="textarea" required maxlength="2000" data-field="rate-reference" /></label>
         <label :class="formLabel">{{ t('nonprofitMembership.evidence') }}<textarea v-model="form.evidence" :class="textarea" required maxlength="2000" data-field="rate-evidence" /></label>
         <label class="flex items-center gap-2 text-sm sm:col-span-2"><input v-model="withDimensions" type="checkbox" data-field="rate-with-dimensions" />{{ t('nonprofitMembership.rateDimensions') }}</label>
-        <template v-if="withDimensions"><label v-for="axis in axes" :key="axis" :class="formLabel">{{ t(`nonprofitMembership.${axis === 'activity' ? 'classificationActivity' : axis === 'activity_kind' ? 'classificationKind' : 'classificationTaxRegime'}`) }}<SearchableSelect :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" v-model="selection[`${axis}_value_id`]" :options="axisOptions(axis)" :data-field="`rate-${axis}`" /></label></template>
+        <template v-if="withDimensions"><label v-for="axis in axes" :key="axis" :class="formLabel">{{ t(`nonprofitMembership.${axis === 'activity' ? 'classificationActivity' : axis === 'activity_kind' ? 'classificationKind' : 'classificationTaxRegime'}`) }}<SearchableSelect :no-results-label="t('nonprofitMembership.rateNoResults')" :clear-label="t('nonprofitMembership.rateClear')" v-model="selection[`${axis}_value_id`]" :options="displayAxisOptions(axis)" :data-field="`rate-${axis}`" /></label></template>
         <label class="flex items-center gap-2 text-sm sm:col-span-2"><input v-model="form.is_active" type="checkbox" data-field="rate-active" />{{ t('nonprofitMembership.rateActive') }}</label>
       </fieldset>
       <div v-if="editId !== null" class="flex flex-wrap gap-2">

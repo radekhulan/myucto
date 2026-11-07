@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import ActionBar, { type ActionItem } from '@/components/ui/ActionBar.vue'
@@ -39,17 +39,37 @@ const form = reactive({
   activityValueId: null as number | null, activityKindValueId: null as number | null, taxRegimeValueId: null as number | null,
 })
 const accounts = ref<ChartAccount[]>([])
-const appliedRate = ref<MembershipRate | null>(null)
-function applyRate(rate: MembershipRate | null) {
+const revenueAccounts = ref<string[]>([])
+const rateMonths = ref(0)
+const pendingRate = ref<MembershipRate | null>(null)
+const rateCancel = ref<HTMLButtonElement | null>(null)
+const ratePicker = ref<HTMLElement | null>(null)
+const appliedRate = ref<Pick<MembershipRate, 'id' | 'name'> | null>(null)
+async function applyRate(rate: MembershipRate | null) {
   if (commit.locked.value) return
+  const conflict = rate && (
+    (rate.classification?.activity_value_id != null && form.activityValueId != null && form.activityValueId !== rate.classification.activity_value_id)
+    || (rate.classification?.activity_kind_value_id != null && form.activityKindValueId != null && form.activityKindValueId !== rate.classification.activity_kind_value_id)
+    || (rate.classification?.tax_regime_value_id != null && form.taxRegimeValueId != null && form.taxRegimeValueId !== rate.classification.tax_regime_value_id))
+  if (conflict) { pendingRate.value = rate; await nextTick(); rateCancel.value?.focus(); return }
+  acceptRate(rate)
+}
+async function cancelRate() {
+  pendingRate.value = null
+  await nextTick(); ratePicker.value?.querySelector<HTMLElement>('button, input')?.focus()
+}
+function acceptRate(rate: MembershipRate | null) {
+  if (commit.locked.value) return
+  pendingRate.value = null
+  rateMonths.value = rate?.period_months ?? 0
   appliedRate.value = rate
   commit.touch()
   if (!rate) return
   form.amount = rate.amount; form.receivable = rate.receivable_account; form.revenue = rate.revenue_account
   form.titleKey = rate.title_key; form.titleReference = rate.title_reference; form.evidence = rate.evidence
-  form.activityValueId = rate.classification?.activity_value_id ?? null
-  form.activityKindValueId = rate.classification?.activity_kind_value_id ?? null
-  form.taxRegimeValueId = rate.classification?.tax_regime_value_id ?? null
+  form.activityValueId = rate.classification?.activity_value_id ?? form.activityValueId
+  form.activityKindValueId = rate.classification?.activity_kind_value_id ?? form.activityKindValueId
+  form.taxRegimeValueId = rate.classification?.tax_regime_value_id ?? form.taxRegimeValueId
   if (rate.period_months) {
     const from = isIsoDate(form.periodFrom) ? form.periodFrom : form.accountingDate
     const to = membershipRatePeriodEnd(from, rate.period_months)
@@ -76,8 +96,8 @@ const openPeriods = computed(() => props.periods.filter(p => p.status === 'open'
 const chosenPeriod = computed(() => props.periods.find(p => p.id === form.periodId))
 const option = (a: ChartAccount) => ({ value: a.account_code, label: `${a.account_code} ${a.name}` })
 const receivableOptions = computed(() => accountPickerOptions(accounts.value, a => a.account_type === 'asset').map(option))
-// Server vynucuje roli nonprofit.membership_revenue (684 a analytiky), výběr nabízí jen ty.
-const revenueOptions = computed(() => accountPickerOptions(accounts.value, a => a.account_type === 'revenue' && a.account_code.startsWith('684')).map(option))
+// Povolené účty určuje server podle nastavené účetní role firmy.
+const revenueOptions = computed(() => accountPickerOptions(accounts.value, a => a.account_type === 'revenue' && revenueAccounts.value.includes(a.account_code)).map(option))
 const accountName = (code: string) => accounts.value.find(a => a.account_code === code)?.name ?? ''
 
 const standardSemantic: Record<'activity' | 'activity_kind' | 'tax_regime', readonly string[] | null> = {
@@ -119,6 +139,7 @@ const problems = computed(() => {
   const datesOk = dates.every(isIsoDate)
   if (!datesOk) add('dateInvalid')
   if (datesOk && period && (form.accountingDate < period.starts_on || form.accountingDate > period.ends_on)) add('issueDateOutsidePeriod')
+  if (rateMonths.value && !membershipRatePeriodEnd(form.periodFrom, rateMonths.value)) add('rateStartFirstDay')
   if (datesOk && form.periodFrom > form.periodTo) add('issuePeriodReversed')
   if (datesOk && form.dueDate < form.accountingDate) add('issueDueBeforeDate')
   if (!titleKeyPattern.test(form.titleKey)) add('issueTitleKeyInvalid')
@@ -192,7 +213,7 @@ function buildRequest(): MembershipIssueRequest {
 }
 
 async function runPreview() {
-  if (!props.canManage || problem.value || !inputForm.value?.reportValidity()) return
+  if (!props.canManage || commit.locked.value || pendingRate.value || problem.value || !inputForm.value?.reportValidity()) return
   const op = commit.begin()
   if (!op) return
   const request = buildRequest()
@@ -211,9 +232,10 @@ async function loadAccounts() {
   const ticket = ++loadTicket, supplier = props.supplier
   accountsError.value = false
   try {
-    const rows = await accountingApi.listAccounts({ supplierId: supplier })
+    const [rows, ratePage] = await Promise.all([accountingApi.listAccounts({ supplierId: supplier }), membershipApi.rates(supplier, 0, true, isIsoDate(form.accountingDate) ? form.accountingDate : undefined)])
     if (!alive || ticket !== loadTicket || supplier !== props.supplier) return
     accounts.value = rows
+    revenueAccounts.value = ratePage.revenue_accounts?.map(a => a.account_code) ?? []
   } catch {
     if (alive && ticket === loadTicket) accountsError.value = true
   }
@@ -261,10 +283,12 @@ function clampDates() {
   }
 }
 
+watch(() => form.accountingDate, () => {if (isIsoDate(form.accountingDate)) void loadAccounts()})
 watch(() => form.periodId, () => { clampDates(); void loadProfile() })
 watch([form, () => latestProfile.value?.id ?? 0, () => props.member.id], () => commit.touch(), { deep: true, flush: 'sync' })
 watch(() => props.supplier, () => {
   appliedRate.value = null
+  pendingRate.value = null; rateMonths.value = 0; revenueAccounts.value = []
   commit.reset()
   accounts.value = []
   form.receivable = null
@@ -331,16 +355,24 @@ const retryActions = computed<ActionItem[]>(() => [
   { key: 'classification-retry', label: t('nonprofitMembership.classificationRetry'), icon: 'cycle', tier: 'primary', variant: 'warning', disabled: commit.locked.value, run: () => { void loadClassification() } },
 ])
 const actions = computed<ActionItem[]>(() => [
-  { key: 'issue-preview', label: t('nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', loading: commit.previewing.value, disabled: !props.canManage || !!problem.value || commit.busy.value || commit.locked.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
+  { key: 'issue-preview', label: t('nonprofitMembership.preview'), icon: 'eye', tier: 'primary', variant: 'primary', loading: commit.previewing.value, disabled: !props.canManage || !!problem.value || commit.busy.value || commit.locked.value || !!pendingRate.value, disabledReason: problem.value || undefined, run: () => { void runPreview() } },
   { key: 'issue-close', label: t('nonprofitMembership.close'), icon: 'x', disabled: commit.locked.value, run: () => emit('close') },
 ])
 </script>
 
 <template>
   <section class="space-y-4 rounded-lg border bg-surface p-4" data-section="issue-flow">
-    <MembershipRates :key="supplier" :supplier="supplier" :can-manage="canManage" selectable :disabled="commit.locked.value" @selected="applyRate" />
-    <p v-if="appliedRate" class="text-sm text-neutral-500" data-section="applied-rate">{{ t('nonprofitMembership.rateApplied', { name: appliedRate.name }) }}</p>
     <h3 class="break-words font-semibold">{{ t('nonprofitMembership.issueTitle') }} · {{ member.member_number }} · {{ member.label }}</h3>
+    <div ref="ratePicker"><MembershipRates :key="supplier" :supplier="supplier" :can-manage="false" selectable :disabled="commit.locked.value || !!pendingRate" @selected="applyRate" /></div>
+    <div v-if="pendingRate" :class="warningBox" role="alert" data-section="rate-overwrite">
+      <p>{{ t('nonprofitMembership.rateOverwriteDimensions') }}</p>
+      <div class="mt-2 flex flex-wrap gap-2">
+        <button ref="rateCancel" type="button" :class="btnOutlineSm('neutral')" data-action="rate-keep" @click="cancelRate"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button>
+        <button type="button" :class="btnOutlineSm('warning')" data-action="rate-overwrite" @click="acceptRate(pendingRate)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path :d="ICONS.check" /></svg>{{ t('nonprofitMembership.rateConfirmOverwrite') }}</button>
+      </div>
+    </div>
+    <p v-if="appliedRate" class="text-sm text-neutral-500" data-section="applied-rate">{{ t('nonprofitMembership.rateApplied', { name: appliedRate.name }) }}</p>
+
     <p class="text-sm text-neutral-500">{{ t('nonprofitMembership.issueHelp') }}</p>
     <div v-if="missingPrerequisites.length" :class="warningBox" data-section="issue-prerequisites">
       <p class="font-medium">{{ t('nonprofitMembership.prerequisitesTitle') }}</p>
@@ -460,8 +492,8 @@ const actions = computed<ActionItem[]>(() => [
         v-model:acknowledged="commit.acknowledged.value"
         :busy="commit.busy.value" :uncertain="commit.uncertain.value" :can-manage="canManage"
         :ack-label="t('nonprofitMembership.issueAck')"
-        :blocked-reason="classificationMatchesRequest ? undefined : t('nonprofitMembership.classificationProofMissing')"
-        @confirm="classificationMatchesRequest && commit.send()" @cancel="commit.touch()" @discard="commit.discard()"
+        :blocked-reason="pendingRate ? t('nonprofitMembership.rateOverwriteDimensions') : classificationMatchesRequest ? undefined : t('nonprofitMembership.classificationProofMissing')"
+        @confirm="!pendingRate && classificationMatchesRequest && commit.send()" @cancel="commit.touch()" @discard="commit.discard()"
       />
     </div>
   </section>

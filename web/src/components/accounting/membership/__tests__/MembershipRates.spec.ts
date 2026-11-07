@@ -17,15 +17,59 @@ const SearchableSelect = defineComponent({ props: ['modelValue', 'options', 'dis
   onChange: (e: Event) => { const option = (p.options as {value: string | number}[]).find(x => String(x.value) === (e.target as HTMLSelectElement).value); emit('update:modelValue', option?.value ?? null) },
 }, [h('option', {value: ''}), ...(p.options as {value: string | number; label: string}[]).map(x => h('option', {value: x.value}, x.label))]) })
 const rate: MembershipRate = { id: 1, supplier_id: 5, name: 'Synthetic standard', amount: '500.00', receivable_account: '315', revenue_account: '684.020', title_key: 'synthetic', period_months: 12, title_reference: 'Synthetic resolution', evidence: 'Synthetic evidence', classification: null, is_active: true, row_version: 1 }
-function mounted(props = {}) { return mount(Rates, { attachTo: document.body, props: {supplier: 5, canManage: true, selectable: true, ...props}, global: { plugins: [createI18n({legacy: false, locale: 'cs', messages: {cs, en}})], stubs: {ActionBar, SearchableSelect} } }) }
+function mounted(props = {}) { return mount(Rates, { attachTo: document.body, props: {supplier: 5, canManage: true, selectable: false, ...props}, global: { plugins: [createI18n({legacy: false, locale: 'cs', messages: {cs, en}})], stubs: {ActionBar, SearchableSelect} } }) }
 beforeEach(() => {
   vi.clearAllMocks()
-  api.rates.mockResolvedValue({items: [rate], next_after_id: null})
+  api.rates.mockResolvedValue({items: [rate], next_after_id: null, revenue_accounts: [{account_code: '684.020', name: 'Synthetic revenue'}]})
   api.rate.mockResolvedValue(rate)
   api.classificationOptions.mockResolvedValue({types: [], values: []})
   chart.listAccounts.mockResolvedValue([{id: 1, supplier_id: 5, account_code: '315', name: 'Synthetic receivable', account_type: 'asset', is_active: true, is_synthetic: false}, {id: 2, supplier_id: 5, account_code: '684.020', name: 'Synthetic revenue', account_type: 'revenue', is_active: true, is_synthetic: false}])
 })
 describe('sazby členských příspěvků', () => {
+  it.each(['value', 'axis'])('preserves stored classification when deactivating a rate with an inactive %s', async inactive => {
+    const classification = {activity_value_id: 11, activity_kind_value_id: 12, tax_regime_value_id: 13}
+    const stored = {...rate, classification}
+    api.rates.mockResolvedValue({items: [stored], next_after_id: null})
+    api.classificationOptions.mockResolvedValue({
+      types: ['activity', 'activity_kind', 'tax_regime'].map((system_key, index) => ({id: index + 1, supplier_id: 5, system_key, is_active: inactive !== 'axis' || index !== 0})),
+      values: ['main', null, 'subject'].map((semantic_key, index) => ({id: index + 11, type_id: index + 1, supplier_id: 5, semantic_key, name: `Synthetic ${index}`, is_active: inactive !== 'value' || index !== 0})),
+    })
+    api.updateRate.mockResolvedValue({...stored, is_active: false, row_version: 2})
+    const w = mounted(); await flushPromises()
+    try {
+      await w.get('[data-field="rate-select"]').setValue('1')
+      await w.get('[data-action="edit-rate"]').trigger('click'); await flushPromises()
+      for (const [axis, id] of Object.entries(classification)) {
+        expect((w.get(`[data-field="rate-${axis.replace('_value_id', '')}"]`).element as HTMLSelectElement).value).toBe(String(id))
+      }
+      await w.get('[data-field="rate-active"]').setValue(false)
+      await w.get('[data-field="rate-with-dimensions"]').setValue(false)
+      await w.get('[data-field="rate-with-dimensions"]').setValue(true)
+      await w.get('[data-action="save-rate"]').trigger('click'); await flushPromises()
+      expect(api.updateRate).toHaveBeenCalledWith(5, 1, expect.objectContaining({is_active: false, classification}))
+    } finally { w.unmount() }
+  })
+
+  it.each(['reactivate', 'amount', 'receivable', 'revenue', 'classification'])('rejects %s with an inactive stored classification', async change => {
+    const classification = {activity_value_id: 11, activity_kind_value_id: 12, tax_regime_value_id: 13}
+    api.rates.mockResolvedValue({items: [{...rate, classification, is_active: false}], next_after_id: null})
+    api.classificationOptions.mockResolvedValue({types: [], values: []})
+    const w = mounted(); await flushPromises()
+    try {
+      await w.get('[data-field="rate-select"]').setValue('1')
+      await w.get('[data-action="edit-rate"]').trigger('click'); await flushPromises()
+      if (change === 'reactivate') await w.get('[data-field="rate-active"]').setValue(true)
+      else if (change === 'classification') {
+        const picker = w.findAllComponents(SearchableSelect).find(c => c.attributes('data-field') === 'rate-activity')!
+        picker.vm.$emit('update:modelValue', 99)
+        await flushPromises()
+      } else await w.get(`[data-field="rate-${change}"]`).setValue(change === 'amount' ? '600' : '')
+      await w.get('[data-action="save-rate"]').trigger('click'); await flushPromises()
+      expect(api.updateRate).not.toHaveBeenCalled()
+      expect(w.get('[role="alert"]').text()).toBe(cs.nonprofitMembership.rateInvalid)
+    } finally { w.unmount() }
+  })
+
   it('renders empty search and clear selection labels in English', async () => {
     const w = mount(Rates, {props: {supplier: 5, canManage: true}, global: {
       plugins: [createI18n({legacy: false, locale: 'en', messages: {cs, en}})], stubs: {ActionBar, WorkspaceTeleport: {template: '<div><slot /></div>'}},
@@ -64,8 +108,11 @@ describe('sazby členských příspěvků', () => {
     w.unmount()
   })
   it('hides manual entry when the parent requires a rate', async () => {
-    const w = mounted({allowManual: false}); await flushPromises()
+    api.rates.mockResolvedValue({items: [], next_after_id: null})
+    const w = mounted({allowManual: false, selectable: true}); await flushPromises()
     expect(w.find('[data-action="manual-rate"]').exists()).toBe(false)
+    expect(w.text()).toContain(cs.nonprofitMembership.ratesEmptyRequired)
+    expect(w.text()).not.toContain(cs.nonprofitMembership.ratesEmpty)
     w.unmount()
   })
   it.each(['create', 'update'])('keeps a successful %s response when its cached panel reactivates during saving', async path => {
@@ -99,7 +146,7 @@ describe('sazby členských příspěvků', () => {
   it('locks selection while refreshing the detail of a selected later-page rate', async () => {
     const later = {...rate, id: 150}
     api.rates.mockResolvedValueOnce({items: [rate], next_after_id: 100}).mockResolvedValueOnce({items: [later], next_after_id: null})
-    const w = mounted(); await flushPromises()
+    const w = mounted({selectable: true}); await flushPromises()
     await w.get('[data-action="more-rates"]').trigger('click'); await flushPromises()
     await w.get('[data-field="rate-select"]').setValue('150')
     let complete!: (value: MembershipRate) => void
@@ -131,7 +178,7 @@ describe('sazby členských příspěvků', () => {
   it('preserves a selected later-page rate on catalog refresh and checks its current status', async () => {
     const later = {...rate, id: 150}
     api.rates.mockResolvedValueOnce({items: [rate], next_after_id: 100}).mockResolvedValueOnce({items: [later], next_after_id: null})
-    const w = mounted(); await flushPromises()
+    const w = mounted({selectable: true}); await flushPromises()
     await w.get('[data-action="more-rates"]').trigger('click'); await flushPromises()
     await w.get('[data-field="rate-select"]').setValue('150')
     api.rates.mockResolvedValue({items: [rate], next_after_id: 100})
@@ -157,27 +204,32 @@ describe('sazby členských příspěvků', () => {
     w.unmount()
   })
 
-  it('uses a rate only after explicit confirmation and retains a saved item outside the first page', async () => {
-    const w = mounted(); await flushPromises()
+  it('allows selection without exposing catalog writes inside a charge form', async () => {
+    const w = mounted({selectable: true}); await flushPromises()
     await w.get('[data-field="rate-select"]').setValue('1')
     expect(w.emitted('selected')).toBeUndefined()
     await w.get('[data-action="use-rate"]').trigger('click')
     expect(w.emitted('selected')?.[0]?.[0]).toEqual(rate)
-    await w.get('[data-action="edit-rate"]').trigger('click'); await flushPromises()
+    expect(w.find('[data-action="edit-rate"]').exists()).toBe(false)
     expect(w.find('[data-action="new-rate"]').exists()).toBe(false)
+    w.unmount()
+  })
+  it('retains a saved rate outside the first page without applying it to a charge', async () => {
+    const w = mounted(); await flushPromises()
+    await w.get('[data-field="rate-select"]').setValue('1')
+    await w.get('[data-action="edit-rate"]').trigger('click'); await flushPromises()
     await w.get('[data-field="rate-name"]').setValue('Synthetic updated')
     api.updateRate.mockResolvedValue({...rate, name: 'Synthetic updated', row_version: 2})
     api.rates.mockResolvedValue({items: [], next_after_id: 100})
     await w.get('[data-action="save-rate"]').trigger('click'); await flushPromises()
     expect(api.updateRate).toHaveBeenCalledWith(5, 1, expect.objectContaining({name: 'Synthetic updated', row_version: 1}))
     expect(w.get('[data-field="rate-select"]').text()).toContain('Synthetic updated')
-    expect(w.get('[data-action="use-rate"]').attributes('disabled')).toBeUndefined()
-    expect(w.emitted('selected')).toHaveLength(1)
+    expect(w.emitted('selected')).toBeUndefined()
     w.unmount()
   })
   it('does not offer catalog writes without permission or apply an inactive rate', async () => {
     api.rates.mockResolvedValue({items: [{...rate, is_active: false}], next_after_id: null})
-    const w = mounted({canManage: false}); await flushPromises()
+    const w = mounted({canManage: false, selectable: true}); await flushPromises()
     await w.get('[data-field="rate-select"]').setValue('1')
     expect(w.find('[data-action="new-rate"]').exists()).toBe(false)
     expect(w.find('[data-action="edit-rate"]').exists()).toBe(false)

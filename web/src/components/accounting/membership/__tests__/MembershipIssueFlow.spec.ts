@@ -9,7 +9,7 @@ import type { MemberRevision, MembershipPreview } from '@/api/nonprofitMembershi
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
 
-const api = vi.hoisted(() => ({ preview: vi.fn(), confirm: vi.fn(), classificationOptions: vi.fn() }))
+const api = vi.hoisted(() => ({ preview: vi.fn(), confirm: vi.fn(), classificationOptions: vi.fn(), rates: vi.fn() }))
 const accounting = vi.hoisted(() => ({ listAccounts: vi.fn() }))
 const dppo = vi.hoisted(() => ({ profile: vi.fn() }))
 vi.mock('@/api/nonprofitMembership', () => ({ membershipApi: api }))
@@ -129,6 +129,7 @@ const token = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,79}$/
 
 beforeEach(() => {
   vi.clearAllMocks()
+  api.rates.mockResolvedValue({items: [], next_after_id: null, revenue_accounts: [{account_code: '684', name: 'Synthetic revenue'}, {account_code: '684.100', name: 'Synthetic analytic'}]})
   accounting.listAccounts.mockResolvedValue([account(1, '311', 'Receivables', 'asset'), account(2, '684', 'Membership dues', 'revenue'), account(3, '501', 'Material', 'expense')])
   dppo.profile.mockResolvedValue(legal())
   api.classificationOptions.mockImplementation((supplier: number) => Promise.resolve(overview(supplier)))
@@ -137,6 +138,38 @@ beforeEach(() => {
 })
 
 describe('Membership issue flow', () => {
+  it('rejects a calendar rate starting mid-month without requesting a preview', async () => {
+    const w=mounted({}, 'en'); await fill(w)
+    w.findComponent(MembershipRates).vm.$emit('selected', {id:42,name:'Synthetic annual',amount:'500.00',receivable_account:'311',revenue_account:'684',title_key:'synthetic',period_months:12,title_reference:'Synthetic basis',evidence:'Synthetic evidence',classification:null})
+    await flushPromises()
+    await w.get('[data-field="period-from"]').setValue('2026-04-15')
+    expect(w.text()).toContain(en.nonprofitMembership.rateStartFirstDay)
+    expect(w.get('[data-action="issue-preview"]').attributes('disabled')).toBeDefined()
+    await w.get('[data-action="issue-preview"]').trigger('click'); await flushPromises()
+    expect(api.preview).not.toHaveBeenCalled()
+    expect(api.rates).toHaveBeenCalledWith(5,0,true,'2026-10-19')
+    w.unmount()
+  })
+
+  it('keeps manual dimensions when a rate has none, and confirms conflicting replacements', async () => {
+    const w = mounted()
+    await fill(w)
+    const rate = {id: 42, name: 'Synthetic default', amount: '500.00', receivable_account: '311', revenue_account: '684', title_key: 'synthetic', title_reference: 'Synthetic basis', evidence: 'Synthetic evidence', period_months: 12, classification: null}
+    w.findComponent(MembershipRates).vm.$emit('selected', rate); await flushPromises()
+    expect((w.get('[data-field="activity"]').element as HTMLSelectElement).value).toBe('1001')
+    w.findComponent(MembershipRates).vm.$emit('selected', {...rate, classification: {activity_value_id: 1002, activity_kind_value_id: 1101, tax_regime_value_id: 1201}}); await flushPromises()
+    expect(w.find('[data-section="rate-overwrite"]').exists()).toBe(true)
+    await w.get('[data-action="rate-keep"]').trigger('click')
+    expect((w.get('[data-field="activity"]').element as HTMLSelectElement).value).toBe('1001')
+    w.findComponent(MembershipRates).vm.$emit('selected', {...rate, classification: {activity_value_id: 1002, activity_kind_value_id: 1101, tax_regime_value_id: 1201}}); await flushPromises()
+    await w.get('[data-action="rate-overwrite"]').trigger('click')
+    expect((w.get('[data-field="activity"]').element as HTMLSelectElement).value).toBe('1002')
+    expect(w.findComponent(MembershipRates).props('canManage')).toBe(false)
+    w.unmount()
+  })
+
+
+
   it('applies explicit rate defaults, permits overrides and keeps the rate reference only in the request', async () => {
     const w = mounted()
     await fill(w)
@@ -196,15 +229,15 @@ describe('Membership issue flow', () => {
     w.unmount()
   })
 
-  it('offers only membership revenue 684 and its analytics as the revenue account', async () => {
+  it('offers only revenue accounts allowed by the server role, including a changed prefix', async () => {
     accounting.listAccounts.mockResolvedValue([account(1, '311', 'Receivables', 'asset'), account(2, '684', 'Membership dues', 'revenue'),
       account(4, '684.100', 'Membership dues analytic', 'revenue'), account(5, '649', 'Other revenue', 'revenue')])
+    api.rates.mockResolvedValue({items: [], next_after_id: null, revenue_accounts: [{account_code: '649', name: 'Synthetic revenue'}]})
     const w = mounted()
     await fill(w)
     const revenue = w.get('[data-field="revenue"]').text()
-    expect(revenue).toContain('684 Membership dues')
-    expect(revenue).toContain('684.100 Membership dues analytic')
-    expect(revenue).not.toContain('649')
+    expect(revenue).not.toContain('684')
+    expect(revenue).toContain('649 Other revenue')
     w.unmount()
   })
 
@@ -347,7 +380,7 @@ describe('Membership issue flow', () => {
     expect(api.confirm).toHaveBeenCalledTimes(2)
     expect(w.find('[data-section="uncertain"]').exists()).toBe(false)
     expect(w.find('[data-section="issue-preview"]').exists()).toBe(false)
-    expect(w.get('[data-section="issue-error"]').text()).toContain('Synthetic stale preview')
+    expect(w.get('[data-section="issue-error"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_preview_stale)
     w.unmount()
   })
 

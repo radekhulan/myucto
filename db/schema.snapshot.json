@@ -1165,7 +1165,8 @@
         "2259_payroll_standby_floor_proof.sql",
         "2260_payroll_termination_floor_proof.sql",
         "2261_payroll_jmhz_holiday_time_off.sql",
-        "2262_drop_supplier_login_policy.sql"
+        "2262_drop_supplier_login_policy.sql",
+        "2263_membership_rates.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -9128,6 +9129,7 @@
                 "created_by": "bigint(20) unsigned NOT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "idempotency_key": "varchar(80) NOT NULL COLLATE ascii_bin",
+                "rate_id": "int(10) unsigned NULL DEFAULT NULL",
                 "request_hash": "char(64) NOT NULL COLLATE ascii_bin",
                 "request_json": "longtext NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"
@@ -9135,10 +9137,12 @@
             "indexes": {
                 "PRIMARY": "UNIQUE BTREE (id)",
                 "created_by": "BTREE (created_by)",
+                "idx_nmcmd_rate": "BTREE (supplier_id, rate_id, id)",
                 "uq_nmcmd_key": "UNIQUE BTREE (supplier_id, idempotency_key)",
                 "uq_nmcmd_tenant": "UNIQUE BTREE (supplier_id, id)"
             },
             "foreign_keys": {
+                "fk_nmcmd_rate": "(supplier_id, rate_id) -> nonprofit_membership_rates (supplier_id, id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_membership_charge_commands_ibfk_1": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE RESTRICT",
                 "nonprofit_membership_charge_commands_ibfk_2": "(created_by) -> users (id) ON UPDATE RESTRICT ON DELETE RESTRICT"
             },
@@ -9216,6 +9220,38 @@
                 "CONSTRAINT_2": "`operation` = 'issue' and `original_operation_id` is null or `operation` = 'reverse' and `original_operation_id` is not null",
                 "proof_json": "json_valid(`proof_json`)",
                 "receipt_json": "json_valid(`receipt_json`)"
+            }
+        },
+        "nonprofit_membership_rates": {
+            "type": "BASE TABLE",
+            "engine": "InnoDB",
+            "collation": "utf8mb4_unicode_ci",
+            "columns": {
+                "amount": "decimal(15,2) NOT NULL",
+                "classification_json": "longtext NULL DEFAULT NULL",
+                "evidence": "text NOT NULL",
+                "id": "int(10) unsigned NOT NULL AUTO_INCREMENT",
+                "is_active": "tinyint(1) NOT NULL DEFAULT 1",
+                "name": "varchar(160) NOT NULL",
+                "period_months": "smallint(5) unsigned NOT NULL DEFAULT 0",
+                "receivable_account": "varchar(20) NOT NULL",
+                "revenue_account": "varchar(20) NOT NULL",
+                "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
+                "supplier_id": "int(10) unsigned NOT NULL",
+                "title_key": "varchar(80) NOT NULL",
+                "title_reference": "text NOT NULL"
+            },
+            "indexes": {
+                "PRIMARY": "UNIQUE BTREE (id)",
+                "idx_nmr_active": "BTREE (supplier_id, is_active, id)",
+                "uq_nmr_tenant": "UNIQUE BTREE (supplier_id, id)"
+            },
+            "foreign_keys": {
+                "fk_nmr_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
+            },
+            "checks": {
+                "chk_nmr_amount": "`amount` > 0",
+                "chk_nmr_classification": "`classification_json` is null or json_valid(`classification_json`)"
             }
         },
         "nonprofit_tax_assessment_funding_members": {

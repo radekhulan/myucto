@@ -7,7 +7,7 @@ import type { AccountingPeriod } from '@/api/accounting'
 import { membershipApi, type ClaimRow, type MemberIdentity, type MemberRevision } from '@/api/nonprofitMembership'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { badgeBase, errorBox, errorMessage, formatDateRange, memberStatusBadge, revisionAt } from './membershipFormat'
+import { badgeBase, errorBox, membershipError, formatDateRange, memberStatusBadge, revisionAt } from './membershipFormat'
 import MembershipIssueFlow from './MembershipIssueFlow.vue'
 import MembershipReverseFlow from './MembershipReverseFlow.vue'
 import MembershipRevisionForm from './MembershipRevisionForm.vue'
@@ -15,7 +15,7 @@ import MembershipSettlement from './MembershipSettlement.vue'
 
 const props = defineProps<{ supplier: number; canManage: boolean; memberId: number; label: string; periods: AccountingPeriod[] }>()
 const emit = defineEmits<{ changed: []; close: [] }>()
-const { t } = useI18n()
+const { t, te } = useI18n()
 
 const identity = ref<MemberIdentity | null>(null)
 const history = ref<MemberRevision[]>([])
@@ -53,7 +53,7 @@ async function load(append = false) {
     claims.value = append ? [...claims.value, ...data.balance.items] : data.balance.items
     nextAfter.value = data.balance.next_after_claim_id
   } catch (e) {
-    if (alive && ticket === generation) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && ticket === generation) error.value = membershipError({t, te}, e)
   } finally {
     if (alive && ticket === generation) loading.value = false
   }
@@ -66,7 +66,7 @@ async function refreshClaim(row: ClaimRow) {
     if (!alive || ticket !== generation || supplier !== props.supplier || id !== props.memberId) return
     claims.value = claims.value.map(c => (c.claim_id === fresh.claim_id ? fresh : c))
   } catch (e) {
-    if (alive && ticket === generation) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && ticket === generation) error.value = membershipError({t, te}, e)
   }
 }
 

@@ -325,9 +325,19 @@ final class MembershipActionTest extends TestCase
         self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_members WHERE supplier_id IN (' . $this->supplier . ',' . $foreignSupplier . ')')->fetchColumn());
     }
 
+    public function testRateManagementUsesTemplatePermissionInsteadOfPostingPermission(): void
+    {
+        [$status]=$this->call('POST','createRate',[],[],['accounting.journal.post'=>2]);
+        self::assertSame(403,$status);
+        [$status]=$this->call('POST','createRate',[],[],['accounting.templates'=>2]);
+        self::assertSame(422,$status,'Oprávněný uživatel musí projít až k validaci vstupu.');
+        [$status]=$this->call('POST','createRate',[],[],['accounting.templates'=>2],'bearer');
+        self::assertSame(403,$status);
+    }
+
     private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session'): array
     {
-        $permissions ??= ['accounting' => 1, 'accounting.journal.post' => 2];
+        $permissions ??= ['accounting' => 1, 'accounting.journal.post' => 2, 'accounting.templates' => 2];
         $request = (new ServerRequestFactory())->createServerRequest($httpMethod, '/api/accounting/nonprofit-membership')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
             ->withAttribute(AuthMiddleware::ATTR_METHOD, $auth)

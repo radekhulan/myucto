@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Nonprofit;
 
+use MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository;
+use MyInvoice\Service\Nonprofit\Membership\MembershipRateService;
+use MyInvoice\Http\IsoDate;
 use MyInvoice\Action\Accounting\AccountingActionSupport;
 use MyInvoice\Http\Json;
 use MyInvoice\Http\TenantReferenceGuard;
@@ -59,8 +62,11 @@ final class MembershipAction
             $query = $request->getQueryParams();
             $after = $this->queryInteger($query['after_id'] ?? 0, 'after_id', 0);
             $active = $this->queryInteger($query['active_only'] ?? 1, 'active_only', 0, 1);
-            $items = (new \MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository($this->db))->page($supplier, $after, (bool) $active);
-            return ['items' => $items, 'next_after_id' => count($items) === 100 ? $items[array_key_last($items)]['id'] : null];
+            $items = (new MembershipRateRepository($this->db))->page($supplier, $after, (bool) $active);
+            $date=$query['date']??date('Y-m-d');
+            if(!is_string($date)||!IsoDate::isValid($date)) throw new MembershipException('nonprofit_membership_rate_invalid','Neplatné datum výběru účtů.',422);
+            return ['items' => $items, 'next_after_id' => count($items) === 100 ? $items[array_key_last($items)]['id'] : null,
+                'revenue_accounts'=>(new MembershipRateService($this->db))->revenueAccounts($supplier,$date)];
         });
     }
 
@@ -72,7 +78,7 @@ final class MembershipAction
     public function rate(Request $request, Response $response, array $args): Response
     {
         return $this->handle($request, $response, false, fn (int $supplier): array =>
-            (new \MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository($this->db))->find($supplier, (int) $args['id'])
+            (new MembershipRateRepository($this->db))->find($supplier, (int) $args['id'])
             ?? throw new MembershipException('nonprofit_membership_rate_not_found', 'Sazba nebyla nalezena v této organizaci.', 404));
     }
 
@@ -86,8 +92,8 @@ final class MembershipAction
         return $this->handle($request, $response, true, function (int $supplier) use ($request, $id): array {
             $body = $request->getParsedBody();
             if (!is_array($body)) throw new MembershipException('nonprofit_membership_invalid', 'Sazba musí být strukturovaný požadavek.');
-            return (new \MyInvoice\Service\Nonprofit\Membership\MembershipRateService($this->db))->save($supplier, $id, $body);
-        }, $id === null ? 201 : 200);
+            return (new MembershipRateService($this->db))->save($supplier, $id, $body);
+        }, $id === null ? 201 : 200, 'accounting.templates');
     }
 
     public function member(Request $request, Response $response, array $args): Response
@@ -160,14 +166,14 @@ final class MembershipAction
         });
     }
 
-    private function handle(Request $request, Response $response, bool $write, callable $work, int $status = 200): Response
+    private function handle(Request $request, Response $response, bool $write, callable $work, int $status = 200, string $writePermission = 'accounting.journal.post'): Response
     {
         if (!$write && !RequestAuthorization::isSessionAuth($request)) {
             return Json::error($response, 'token_endpoint_forbidden', 'API token má přístup pouze k veřejnému API (/api/v1). Tento endpoint je dostupný jen z webového rozhraní.', 403);
         }
         if ($write && !RequestAuthorization::isSessionAuth($request)) return Json::sessionRequired($response, 'Změna členské evidence vyžaduje přihlášenou relaci.');
         $allowed = $write
-            ? $this->requirePermission($request, $response, 'accounting.journal.post', AccessLevel::WRITE, $error)
+            ? $this->requirePermission($request, $response, $writePermission, AccessLevel::WRITE, $error)
             : $this->requirePermission($request, $response, 'accounting', AccessLevel::READ, $error);
         if (!$allowed) return $error;
         try {

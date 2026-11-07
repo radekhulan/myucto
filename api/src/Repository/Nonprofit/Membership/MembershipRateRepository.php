@@ -13,6 +13,14 @@ final class MembershipRateRepository
 {
     public function __construct(private readonly Connection $db) {}
 
+    /** Aktivní výnosové účty v rozsahu role; prefix pochází výhradně z resolveru. */
+    public function revenueAccounts(int $supplier, string $prefix): array
+    {
+        $q = $this->db->pdo()->prepare("SELECT account_code,name FROM chart_of_accounts WHERE supplier_id=? AND account_type='revenue' AND is_active=1 AND account_code LIKE ? ORDER BY account_code");
+        $q->execute([$supplier, $prefix . '%']);
+        return $q->fetchAll(PDO::FETCH_ASSOC);
+    }
+
     public function page(int $supplier, int $after, bool $activeOnly, int $limit = 100): array
     {
         $q = $this->db->pdo()->prepare('SELECT * FROM nonprofit_membership_rates WHERE supplier_id=?'

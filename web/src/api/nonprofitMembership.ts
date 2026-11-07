@@ -112,11 +112,11 @@ export interface MembershipRateInput {
   is_active: boolean; row_version: number
 }
 export interface MembershipRate extends MembershipRateInput { id: number; supplier_id: number }
-export interface MembershipRatePage { items: MembershipRate[]; next_after_id: number | null }
+export interface MembershipRatePage { items: MembershipRate[]; next_after_id: number | null; revenue_accounts?: {account_code: string; name: string}[] }
 
 export const membershipApi = {
   rate: (supplier: number, id: number) => api.get<MembershipRate>(`${base}/rates/${id}`, options(supplier)).then(r => r.data),
-  rates: (supplier: number, afterId = 0, activeOnly = true) => api.get<MembershipRatePage>(`${base}/rates`, { ...options(supplier), params: { after_id: afterId, active_only: activeOnly ? 1 : 0 } }).then(r => r.data),
+  rates: (supplier: number, afterId = 0, activeOnly = true, date?: string) => api.get<MembershipRatePage>(`${base}/rates`, { ...options(supplier), params: { after_id: afterId, active_only: activeOnly ? 1 : 0, ...(date ? {date} : {}) } }).then(r => r.data),
   createRate: (supplier: number, body: MembershipRateInput) => api.post<MembershipRate>(`${base}/rates`, body, options(supplier)).then(r => r.data),
   updateRate: (supplier: number, id: number, body: MembershipRateInput) => api.put<MembershipRate>(`${base}/rates/${id}`, body, options(supplier)).then(r => r.data),
   members: (supplier: number, afterId = 0, limit = 50) => api.get<MemberPage>(`${base}/members`, { ...options(supplier), params: { after_id: afterId, limit } }).then(r => r.data),
