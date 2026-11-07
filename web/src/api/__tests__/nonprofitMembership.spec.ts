@@ -61,3 +61,12 @@ it('refuses requests captured before a supplier switch', () => {
   expect(calls.get).not.toHaveBeenCalled()
   expect(calls.post).not.toHaveBeenCalled()
 })
+
+it('uses date-dependent allowed accounts and supports cancellation and renewed consent', async () => {
+  await api.rates(5,0,true,'2026-04-01')
+  expect(calls.get).toHaveBeenLastCalledWith('/accounting/nonprofit-membership/rates',{headers:{'X-Supplier-Id':'5'},params:{after_id:0,active_only:1,date:'2026-04-01'}})
+  await api.cancelBatch(5,7)
+  expect(calls.post.mock.calls.at(-1)?.slice(0,2)).toEqual(['/accounting/nonprofit-membership/batches/7/cancel',{}])
+  await api.renewBatch(5,7)
+  expect(calls.post.mock.calls.at(-1)?.slice(0,2)).toEqual(['/accounting/nonprofit-membership/batches/7/renew-preview',{}])
+})

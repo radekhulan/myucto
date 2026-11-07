@@ -14,21 +14,53 @@ Změny stavu se zapisují jako další revize přes **Změnit stav členství** 
 
 ## 120.2 Předpis příspěvku
 
-Zvolte **Nový předpis příspěvku**. Pokud firmě nebo zvolenému období chybí některý předpoklad (otevřené účetní období, potvrzený právní profil spolku, osy činnosti, druhu činnosti a daňového režimu v dimenzích, výnosový účet 684 v účtové osnově), formulář ho hned nahoře vypíše s odkazem, kde ho doplnit.
+### Sazby členských příspěvků
+
+V rozbalovací části **Sazby členských příspěvků** založte šablony své organizace. Každá sazba obsahuje název, částku na jednoho člena, účet pohledávky, výnosový účet povolený nastavenou rolí přijatých členských příspěvků, označení příspěvku, výchozí délku období a texty podkladu. Analytiky lze členit podle vlastních potřeb; nemusí odpovídat částce příspěvku. Vstupní poplatek může mít vlastní sazbu a vlastní označení. Rodinná částka za domácnost se touto sazbou nerozděluje.
+
+U nového předpisu vyberte sazbu a zvolte **Použít sazbu**. Výchozí délka (měsíc, čtvrtletí, pololetí, rok) se počítá od vyplněného začátku příspěvku, jinak od účetního data. Kalendářní sazba vyžaduje začátek prvním dnem měsíce. Konec připadne na poslední den posledního měsíce zvolené délky. Volba ručního období data nemění. Před náhledem vždy zkontrolujte a případně upravte obě data, částku, účty a texty. Délka příspěvku neurčuje platnost členství ani automaticky nezapisuje jeho prodloužení či ukončení. Předpis lze zadat také bez sazby.
+
+Sazba smí předvyplnit všechny tři účetní dimenze, pokud je v ní firma výslovně nastavila. Ve formuláři zůstávají viditelné a upravitelné a náhled je ověří stejně jako ruční volbu. Z výnosového účtu se dimenze automaticky neodvozují.
+
+Změna sazby nepřepisuje rozepsaný ani zaúčtovaný předpis. Pro změnu rozepsaného předpisu sazbu znovu výslovně použijte. Dřívější předpisy drží skutečně potvrzené částky a účetní podklady. Nepoužívanou sazbu vyřaďte vypnutím **Nabízet pro nové předpisy**; zůstane dohledatelná přes **Zobrazit i vyřazené sazby**. Při současné změně stejné sazby z jiného okna použijte v editoru **Načíst aktuální sazbu**. Před přepsáním neuložených změn dostanete upozornění; obnovení samotného katalogu editor nepřepíše.
+
+### Zadání a potvrzení
+
+Zvolte **Nový předpis příspěvku**. Pokud firmě nebo zvolenému období chybí některý předpoklad (otevřené účetní období, potvrzený právní profil spolku, osy činnosti, druhu činnosti a daňového režimu v dimenzích, povolený výnosový účet v účtové osnově), formulář ho hned nahoře vypíše s odkazem, kde ho doplnit.
 
 Vyberte otevřené účetní období, účetní datum, splatnost a období, za které příspěvek náleží. Vyplňte označení příspěvku (například `CP-2027`), částku, pohledávkový a výnosový účet z rozvrhu, odkaz na titul a doložení částky. Jakmile začnete formulář vyplňovat, vypíše pod sebou všechno, co ještě chybí.
 
 Stejné označení nejde u člena předepsat dvakrát na překrývající se období. Po stornu předpisu lze stejné označení a období předepsat znovu. Členství musí být aktivní k účetnímu datu a po celé období příspěvku, od prvního do posledního dne. Pokud není, formulář na to upozorní ještě před náhledem a náhled skončí chybou.
 
-Výnos se účtuje na účet 684 (přijaté členské příspěvky) nebo jeho analytiku. Když období příspěvku přesahuje rozvahový den účetního období, náhled to oznámí a krok uzávěrky **Časové rozlišení** odloží část připadající na další období na účet 384 a v dalším období ji rozpustí.
+Výnos se účtuje na účet povolený rolí přijatých členských příspěvků; ve výchozím nastavení jde o účet 684 nebo jeho analytiku. Když období příspěvku přesahuje rozvahový den účetního období, náhled to oznámí a krok uzávěrky **Časové rozlišení** odloží část připadající na další období na účet 384 a v dalším období ji rozpustí.
 
-Výslovně vyberte činnost, druh činnosti a daňový režim z účetních dimenzí firmy. Hodnoty se nepředvyplňují podle výnosového účtu. V náhledu zkontrolujte také ověřené členění; bez jeho shody s vaší volbou nelze předpis potvrdit.
+Vyberte nebo zkontrolujte činnost, druh činnosti a daňový režim z účetních dimenzí firmy. Sazby se spravují pouze v samostatném číselníku na stránce členů s oprávněním ke správě účetních šablon. Použití sazby vyžaduje oprávnění k zaúčtování. Sazba bez dimenzí ponechá ruční výběr; přepis odlišných dimenzí vyžaduje potvrzení. Předvyplnění je možné jen výslovně nastavenou sazbou, nikoli podle výnosového účtu. V náhledu zkontrolujte také ověřené členění; bez jeho shody s vaší volbou nelze předpis potvrdit.
 
 Účetní období musí mít potvrzený právní profil spolku s hlavní nepodnikatelskou činností. Zkontrolujte také revizi členství platnou k účetnímu datu. Samotné číslo účtu ani označení organizace neprokazuje právní titul.
 
 Zvolte **Zobrazit náhled**, zkontrolujte člena, období, částku a účty a použijte **Potvrdit a zapsat**. Potvrzení vytvoří pohledávku a navazující účetní doklad v jednom kroku. Změna formuláře vyžaduje nový náhled. Zápis vyžaduje přihlášenou relaci a oprávnění k zaúčtování.
 
 Členský předpis není automatickým rozhodnutím o osvobození příjmu. Daňový režim doložte v daňovém posouzení příslušného období.
+
+### Hromadný předpis podle sazby
+
+Správce instalace může proměnnou prostředí `MYINVOICE_MEMBERSHIP_BATCH_MAX_MEMBERS` nastavit strop velikosti dávky na 1–5000 členů; výchozí hodnota je 5000.
+
+V seznamu zaškrtněte členy a otevřete **Hromadný předpis příspěvků**. Výběr se zachovává i při načítání dalších členů, nejvýše 500. Místo zaškrtnutých můžete výslovně zvolit **Všichni aktivní k účetnímu datu**; tento výběr nemá omezení na právě zobrazenou stránku. Členové s budoucím ukončením se posuzují podle účetního data. Každý předpis přesto vyžaduje aktivní členství po celé období příspěvku.
+
+Pro dávku vyberte sazbu s kalendářní délkou období a zkontrolujte společné údaje ve stejném formuláři jako u jednotlivého předpisu. U dávky určuje sazba částku, účty a délku období; tyto údaje nelze přepsat. Začátek kalendářního období musí být první den měsíce. Upravit můžete data, podklady a dimenze. **Připravit náhled dávky** uloží její společné údaje a výběr členů. Založení ani příprava náhledu nic neúčtuje. Příprava postupuje po omezených částech; k potvrzení musí nejdřív dokončit náhled všech členů.
+
+Souhrn zahrnuje celou dávku, ne jen zobrazenou stránku: počet členů, počet připravených předpisů, částku a rozpad zápisu na pohledávkový a výnosový účet. U členů uvidíte **Připraveno k zápisu**, **Předpis již existuje** nebo **Vynecháno s důvodem**. Existující předpis stejného označení a přesného období se nepřepisuje ani nevytváří podruhé; jeho částka se může od vybrané sazby lišit. Jiný překryv období se odmítne s důvodem. Výsledky členů lze stránkovat po 50.
+
+Při přesahu rozvahového dne náhled ukáže souhrnnou částku časového rozlišení připravených předpisů a vysvětlí odložení na účet 384 v kroku uzávěrky. Odmítnutí členové a dříve existující předpisy se do této částky nezapočítávají.
+
+Zkontrolujte společné období, data, částku na člena, účty, dimenze a podklady. Potvrzovací souhlas se vztahuje na všechny připravené členy dávky, nejen na viditelnou stránku. Až potom zvolte **Potvrdit dávku a zapsat předpisy**. Každý člen se účtuje samostatnou operací se stejnými kontrolami jako ruční předpis. Změna podkladů nebo uzavření období po náhledu může konkrétní předpis odmítnout; ostatní výsledky zůstávají uložené.
+
+Přípravu nebo zápis můžete pozastavit po současné části. Přes **Uložené dávky a pokračování** se lze vrátit i po obnovení stránky nebo přerušení spojení. Při pokračování se dokončí nezpracovaní členové a předchozí finanční zápisy se nezdvojí, ani když se předchozí odpověď ztratila. Po hromadném zápisu se obnoví otevřený detail člena; případné rozpracované potvrzení jednotlivého předpisu se nejdřív nechá bezpečně dokončit.
+
+Dávku lze také výslovně zrušit. Zrušení zastaví další zpracování a zachová již zapsané předpisy. Po vypršení souhlasu připravte nový náhled s novým souhlasem.
+
+Pro změnu společných údajů nebo nové zpracování členů po opravě odmítnutých podkladů použijte **Nová dávka**. Formulář převezme uložená data, texty, dimenze a původně zaškrtnuté členy; částku, účty a délku období znovu načte z aktuální sazby, také po otevření dávky z historie. U volby všech aktivních se jejich výběr znovu vyhodnotí k novému účetnímu datu. Pro jiný zaškrtnutý výběr dávku zavřete a vyberte členy v seznamu. Tato výslovná akce vytvoří nový požadavek a nový náhled; pouhé opakování neúspěšného spojení pokračuje v původním. Stav členství se dávkou nemění. Rozpracované dávky se do anonymizované kopie nepřenášejí; účetní operace se v ní zachovávají a anonymizují samostatně.
 
 ## 120.3 Úhrady a kontrola zůstatku
 

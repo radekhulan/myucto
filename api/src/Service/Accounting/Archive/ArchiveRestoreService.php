@@ -7,6 +7,7 @@ namespace MyInvoice\Service\Accounting\Archive;
 use MyInvoice\Infrastructure\Config\RuntimePaths;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Closing\ClosingSourceId;
+use MyInvoice\Service\Anonymization\MembershipCloneScrubber;
 use MyInvoice\Service\Document\JournalAttachmentStorage;
 use PDO;
 use Psr\Log\LoggerInterface;
@@ -52,6 +53,7 @@ final class ArchiveRestoreService
      */
     private const RESTORE_ORDER = [
         'supplier',
+        'supplier_accounting_frameworks',
         'accounting_periods',
         'chart_of_accounts',
         'currencies',
@@ -59,6 +61,9 @@ final class ArchiveRestoreService
         'posting_rules',
         'bank_rule_templates',
         'cost_centers',
+        'dimension_types',
+        'dimension_values',
+        'nonprofit_membership_rates',
         'accounting_supplier_settings',
         'accounting_document_series',
         'invoices',
@@ -445,6 +450,10 @@ final class ArchiveRestoreService
             }
 
             $this->runDeferred($warnings);
+            if (isset($tables['nonprofit_membership_rates'])) {
+                // JSON není FK: původní ID hodnot by jinak dál mířila do zdrojové firmy.
+                MembershipCloneScrubber::remapRateClassifications($this->db, $newSupplierId, $this->maps['dimension_values'] ?? []);
+            }
             if (isset($tables['product_variants'])) {
                 $variants = $pdo->prepare('SELECT master_id, stock_item_id FROM product_variants WHERE supplier_id = ?');
                 $variants->execute([$newSupplierId]);

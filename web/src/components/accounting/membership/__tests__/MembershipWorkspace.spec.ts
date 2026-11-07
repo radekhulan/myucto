@@ -4,6 +4,7 @@ import { createI18n } from 'vue-i18n'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { formatDate } from '@/composables/useFormat'
 import Workspace from '../MembershipWorkspace.vue'
+import MembershipBatchFlow from '../MembershipBatchFlow.vue'
 import type { MemberPage, MemberRow } from '@/api/nonprofitMembership'
 import cs from '@/i18n/cs.json'
 import en from '@/i18n/en.json'
@@ -31,7 +32,7 @@ const ClientSearchSelect = defineComponent({
     },
   }, [h('option', { value: '' }), h('option', { value: '3' }, 'Synthetic client 3')]),
 })
-const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
+const Detail = defineComponent({ name: 'MembershipMemberDetail', props: ['supplier', 'canManage', 'memberId', 'label', 'periods', 'refreshVersion'], emits: ['changed', 'close'], setup: () => () => h('div', { 'data-stub': 'detail' }, [h('h2', { tabindex: -1, 'data-focus': 'member-heading' })]) })
 const ClientFormModal = defineComponent({ name: 'ClientFormModal', emits: ['created', 'close'], setup: () => () => h('div', { 'data-stub': 'client-modal' }) })
 const Reconciliation = defineComponent({ name: 'MembershipReconciliation', props: ['supplier', 'periods', 'dataVersion'], setup: () => () => h('div', { 'data-stub': 'reconciliation' }) })
 
@@ -47,7 +48,7 @@ function mounted(props: Record<string, unknown> = {}, locale = 'cs') {
     props: { supplier: 5, canManage: true, ...props },
     global: {
       plugins: [createI18n({ legacy: false, locale, messages: { cs, en } })],
-      stubs: { ActionBar, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation },
+      stubs: { ActionBar, ClientSearchSelect, ClientFormModal, MembershipMemberDetail: Detail, MembershipReconciliation: Reconciliation, MembershipBatchFlow: true },
     },
   })
 }
@@ -65,6 +66,20 @@ beforeEach(() => {
 })
 
 describe('Membership workspace', () => {
+  it('passes selected members into a batch and invalidates the existing detail when any batch part completes', async () => {
+    const w=mounted();await flushPromises()
+    await w.get('[data-member="1"] [data-action="batch-check-member"]').setValue(true)
+    await w.get('[data-member="1"] [data-action="open-member"]').trigger('click');await flushPromises()
+    await w.get('[data-action="batch-open"]').trigger('click');await flushPromises()
+    const batch=w.findComponent(MembershipBatchFlow)
+    expect(batch.props('selectedMemberIds')).toEqual([1])
+    expect(w.findComponent(Detail).props('refreshVersion')).toBe(0)
+    batch.vm.$emit('changed');await flushPromises()
+    expect(w.findComponent(Detail).props('refreshVersion')).toBe(1)
+    expect(w.findComponent(Detail).props('memberId')).toBe(1)
+    expect(api.members).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
   it('refreshes the register and accounting periods after returning to a cached workspace', async () => {
     const visible = ref(true)
     const host = mount(defineComponent({
@@ -207,7 +222,7 @@ describe('Membership workspace', () => {
     await w.get('[data-field="member-number"]').setValue('M-1')
     await w.get('[data-action="create-member"]').trigger('click')
     await flushPromises()
-    expect(w.get('[data-section="workspace-error"]').text()).toContain('Synthetic identity conflict')
+    expect(w.get('[data-section="workspace-error"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_identity_conflict)
     expect(w.find('[data-stub="detail"]').exists()).toBe(false)
     w.unmount()
   })
@@ -252,7 +267,7 @@ describe('Membership workspace', () => {
     api.members.mockRejectedValue({ response: { status: 403, data: { error: { code: 'forbidden', message: 'Synthetic forbidden' } } } })
     const w = mounted()
     await flushPromises()
-    expect(w.get('[data-section="workspace-error"]').text()).toContain('Synthetic forbidden')
+    expect(w.get('[data-section="workspace-error"]').text()).toContain(cs.nonprofitMembership.error)
     expect(w.get('[data-section="workspace-error"]').classes()).toEqual(expect.arrayContaining(['bg-danger-50', 'text-danger-700']))
     expect(w.find('[data-section="members-empty"]').exists()).toBe(true)
     w.unmount()

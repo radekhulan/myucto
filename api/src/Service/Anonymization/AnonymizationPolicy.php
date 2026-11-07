@@ -42,6 +42,8 @@ final class AnonymizationPolicy
      * @var array<string,string> tabulka → důvod
      */
     public const TRUNCATE = [
+        'nonprofit_membership_batch_members' => 'rozpracované dávky nelze přehrávat nad pseudonymizovanými podklady',
+        'nonprofit_membership_batches' => 'požadavky dávek obsahují osobní podklady; finanční operace se anonymizují samostatně',
         'accounting_securities_debt_commands' => 'původní idempotentní odpovědi obsahují soukromé podklady instrumentů',
         'accounting_framework_conversion_commands'=>'original conversion command tokens',
         'property_service_lifecycle_commands' => 'původní idempotentní odpovědi nelze přehrát nad pseudonymizovanými podklady bez původního požadavku',
@@ -144,6 +146,9 @@ final class AnonymizationPolicy
         'nonprofit_membership_charge_commands' => ['idempotency_key'=>'keep','request_json'=>'keep','request_hash'=>'keep'],
         'nonprofit_membership_charge_operations' => ['preview_hash'=>'keep','proof_json'=>'keep','receipt_json'=>'keep','parent_hash'=>'keep','record_hash'=>'keep'],
         'nonprofit_membership_charge_claims' => ['record_hash'=>'keep'],
+        // Sazba je firemní číselník, ne finanční důkaz. Volné podklady mohou obsahovat osobní údaje.
+        'nonprofit_membership_rates' => ['name'=>'text', 'receivable_account'=>'keep', 'revenue_account'=>'keep',
+            'title_key'=>'keep', 'title_reference'=>'text', 'evidence'=>'text', 'classification_json'=>'keep'],
         'nonprofit_legal_profiles' => ['profile_json'=>'keep','module_proof_json'=>'keep','reason'=>'keep','idempotency_key'=>'keep','request_hash'=>'keep','record_hash'=>'keep'],
         'nonprofit_tax_saving_sources' => ['basis_json'=>'keep','record_hash'=>'keep'],
         'nonprofit_tax_saving_commands' => ['idempotency_key'=>'keep','request_json'=>'keep','request_hash'=>'keep'],
