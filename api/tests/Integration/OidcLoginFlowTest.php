@@ -47,10 +47,6 @@ final class OidcLoginFlowTest extends TestCase
     private LoginPolicyService $policy;
     private int $userId = 0;
     private string $email = '';
-    private int $supplierId = 0;
-    private bool $createdMembership = false;
-    /** @var array{login_policy:string,login_sso_provider:?string}|null */
-    private ?array $supplierBefore = null;
     private string $cacheDir = '';
 
     protected function setUp(): void
@@ -65,7 +61,6 @@ final class OidcLoginFlowTest extends TestCase
         $data['auth']['oidc'] = [
             'enabled' => true,
             'session_lifetime_hours' => 12,
-            'break_glass_roles' => ['instance_admin'],
             'providers' => ['entra' => [
                 'enabled' => true,
                 'label' => 'Microsoft',
@@ -90,7 +85,7 @@ final class OidcLoginFlowTest extends TestCase
         $this->sessions = new SessionManager($this->db, $this->config, $clock);
         $this->identities = new ExternalIdentityRepository($this->db);
         $this->invites = new OidcInviteService($this->db);
-        $this->policy = new LoginPolicyService($this->db, $this->config, $registry);
+        $this->policy = new LoginPolicyService($this->config, $registry);
         $this->service = new OidcLoginService(
             $this->db,
             $registry,
@@ -121,17 +116,10 @@ final class OidcLoginFlowTest extends TestCase
             return;
         }
         $pdo = $this->db->pdo();
-        if ($this->supplierBefore !== null) {
-            $pdo->prepare('UPDATE supplier SET login_policy = ?, login_sso_provider = ? WHERE id = ?')
-                ->execute([$this->supplierBefore['login_policy'], $this->supplierBefore['login_sso_provider'], $this->supplierId]);
-        }
         if ($this->userId > 0) {
             $pdo->prepare('DELETE FROM sessions WHERE user_id = ?')->execute([$this->userId]);
             $pdo->prepare('DELETE FROM mfa_step_up_proofs WHERE user_id = ?')->execute([$this->userId]);
             $pdo->prepare('DELETE FROM oidc_login_flows WHERE user_id = ? OR user_id IS NULL')->execute([$this->userId]);
-            if ($this->createdMembership) {
-                $pdo->prepare('DELETE FROM user_suppliers WHERE user_id = ?')->execute([$this->userId]);
-            }
             $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$this->userId]);
         }
         foreach (glob($this->cacheDir . DIRECTORY_SEPARATOR . '*') ?: [] as $file) {
@@ -179,19 +167,6 @@ final class OidcLoginFlowTest extends TestCase
             OidcException::TOKEN_INVALID,
             fn () => $this->stepUpRoundTrip($session['token'], $oid, claims: ['auth_time' => time() - 3600]),
         );
-    }
-
-    public function testPasswordLoginStaysAllowedWhileUserHasNonEnforcedCompany(): void
-    {
-        $this->enforceOnSupplier();
-        $other = (int) $this->db->pdo()->query('SELECT MAX(id) FROM supplier')->fetchColumn();
-        if ($other === $this->supplierId) {
-            $this->markTestSkipped('Test DB má jen jednu firmu.');
-        }
-        $this->db->pdo()->prepare('INSERT IGNORE INTO user_suppliers (user_id, supplier_id) VALUES (?, ?)')
-            ->execute([$this->userId, $other]);
-        self::assertNull($this->policy->requiredProviderForUser($this->userId, null));
-        self::assertFalse($this->policy->sessionAllowedForSupplier($this->supplierId, 'password', null));
     }
 
     public function testGoogleLoginLinksByInviteAndYieldsBrowserBoundTicket(): void
@@ -277,30 +252,6 @@ final class OidcLoginFlowTest extends TestCase
         $this->db->pdo()->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$this->userId]);
 
         $this->expectOidcError(OidcException::USER_INACTIVE, fn () => $this->loginRoundTrip($oid));
-    }
-
-    public function testSupplierPolicyAdmitsOnlyEntraSessions(): void
-    {
-        $this->enforceOnSupplier();
-
-        self::assertSame('entra', $this->policy->requiredProviderForUser($this->userId, null));
-        self::assertFalse($this->policy->sessionAllowedForSupplier($this->supplierId, 'password', null));
-        self::assertFalse($this->policy->sessionAllowedForSupplier($this->supplierId, 'passkey', null));
-        self::assertTrue($this->policy->sessionAllowedForSupplier($this->supplierId, 'oidc:entra', null));
-        self::assertTrue($this->policy->sessionAllowedForSupplier($this->supplierId, 'password', 'instance_admin'));
-    }
-
-    public function testSupplierPolicyStillRequiresEntraWithLocalMfa(): void
-    {
-        $this->enforceOnSupplier();
-        $data = $this->config->all();
-        $data['auth']['oidc']['providers']['entra']['skip_mfa'] = false;
-        $config = new Config($data);
-        $policy = new LoginPolicyService($this->db, $config, new OidcProviderRegistry($config));
-        self::assertSame('entra', $policy->requiredProviderForUser($this->userId, null));
-        self::assertSame('entra', $policy->requiredProviderForSupplier($this->supplierId));
-        self::assertFalse($policy->sessionAllowedForSupplier($this->supplierId, 'password', null));
-        self::assertTrue($policy->sessionAllowedForSupplier($this->supplierId, 'oidc:entra', null));
     }
 
     public function testExternalSessionIsCappedToConfiguredLifetime(): void
@@ -489,22 +440,6 @@ final class OidcLoginFlowTest extends TestCase
             return;
         }
         self::fail('Očekávaná chyba ' . $code . ' nenastala.');
-    }
-
-    private function enforceOnSupplier(): void
-    {
-        $pdo = $this->db->pdo();
-        $this->supplierId = (int) $pdo->query('SELECT MIN(id) FROM supplier')->fetchColumn();
-        if ($this->supplierId < 1) {
-            $this->markTestSkipped('Test DB nemá firmu.');
-        }
-        $row = $pdo->query('SELECT login_policy, login_sso_provider FROM supplier WHERE id = ' . $this->supplierId)->fetch(\PDO::FETCH_ASSOC);
-        $this->supplierBefore = ['login_policy' => (string) $row['login_policy'], 'login_sso_provider' => $row['login_sso_provider']];
-        $pdo->prepare('INSERT IGNORE INTO user_suppliers (user_id, supplier_id) VALUES (?, ?)')
-            ->execute([$this->userId, $this->supplierId]);
-        $this->createdMembership = true;
-        $pdo->prepare("UPDATE supplier SET login_policy = 'sso_required', login_sso_provider = 'entra' WHERE id = ?")
-            ->execute([$this->supplierId]);
     }
 
     private function createUser(): void

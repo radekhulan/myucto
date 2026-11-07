@@ -22,6 +22,7 @@ final class McpResourcePolicy
         private readonly Connection $db,
         private readonly Config $config,
         private readonly PermissionResolver $roles,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function canonical(): string
@@ -56,6 +57,9 @@ final class McpResourcePolicy
     /** Stejná kontrola při vydání, obnově tokenu i při každém jeho použití. */
     public function allowsGrant(string $resource, int $userId, ?int $supplierId, string $scope, ?string $issuedAuthMethod = null): bool
     {
+        // Grant z přihlášení, které vynucený poskytovatel identity nepřipouští,
+        // se nevydá ani neobnoví.
+        if (!$this->loginPolicy->authMethodAllowed($issuedAuthMethod)) return false;
         $target = $this->resolve($resource);
         if ($target === null) return false;
         // Dosavadní canonical připojení mohou být i bez vazby na jedinou firmu.

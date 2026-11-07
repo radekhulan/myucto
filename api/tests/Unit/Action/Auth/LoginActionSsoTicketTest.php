@@ -101,6 +101,20 @@ final class LoginActionSsoTicketTest extends TestCase
         self::assertNotNull($captured['context']->mfaVerifiedAt);
     }
 
+    public function testPasswordIsRejectedForEveryoneWhenEntraIsEnforced(): void
+    {
+        // Heslo se při vynucení neověřuje vůbec (hasher->verify se nesmí zavolat),
+        // a to ani pro technického správce instance.
+        [$response] = $this->login(
+            null,
+            false,
+            requiredProvider: 'entra',
+            body: ['sso_ticket' => '', 'email' => 'spravce@example.invalid', 'password' => 'synthetic-password'],
+        );
+        self::assertSame(403, $response->getStatusCode());
+        self::assertStringContainsString('sso_required', (string) $response->getBody());
+    }
+
     public function testOtherProvidersTicketDoesNotSatisfyRequiredEntra(): void
     {
         [$response] = $this->login(
@@ -185,7 +199,7 @@ final class LoginActionSsoTicketTest extends TestCase
         $clock = $this->createMock(ClockInterface::class);
         $clock->method('now')->willReturn(new \DateTimeImmutable('2026-11-06 12:00:00 UTC'));
         $policy = $this->createMock(LoginPolicyService::class);
-        $policy->method('requiredProviderForUser')->willReturn($requiredProvider);
+        $policy->method('requiredProvider')->willReturn($requiredProvider);
         $action = new LoginAction(
             $db, $hasher, $bruteForce, $turnstile, $this->createMock(ActivityLogger::class), $ipMatcher,
             new Config(['auth' => ['email_otp' => ['enabled' => false]]]),
@@ -200,7 +214,7 @@ final class LoginActionSsoTicketTest extends TestCase
         $request = (new ServerRequestFactory())
             ->createServerRequest('POST', '/api/auth/login')
             ->withCookieParams(['__Host-myinvoice_oidc' => self::BINDING])
-            ->withParsedBody(['sso_ticket' => self::TICKET] + $body);
+            ->withParsedBody(array_merge(['sso_ticket' => self::TICKET], $body));
 
         return [$action($request, (new ResponseFactory())->createResponse()), $captured];
     }

@@ -259,13 +259,11 @@ final class OidcAction
         if ($row === null) {
             return Json::error($response, 'not_found', 'Propojení nenalezeno.', 404);
         }
-        $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
-        $roleKey = $user['role_summary']['system_key'] ?? null;
-        if ($this->loginPolicy->requiredProviderForUser($userId, is_string($roleKey) ? $roleKey : null) === $row['provider']) {
+        if ($this->loginPolicy->requiredProvider() === $row['provider']) {
             return Json::error(
                 $response,
                 'sso_required',
-                'Bez tohoto propojení byste se nepřihlásili. Firma vyžaduje přihlášení přes poskytovatele identity.',
+                'Bez tohoto propojení byste se nepřihlásili. Instalace vyžaduje přihlášení přes poskytovatele identity.',
                 409,
             );
         }

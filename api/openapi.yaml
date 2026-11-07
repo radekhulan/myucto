@@ -39,6 +39,10 @@ info:
       rozsahů (IPv4 i IPv6). Prázdný seznam znamená bez omezení; jinak volání
       z jiné adresy skončí `403 token_ip_forbidden`.
 
+    Vynucuje-li instalace přihlášení přes Microsoft Entra ID, platí jen token vydaný
+    ze sezení přihlášeného přes Entra. Token vydaný dřív ze sezení s heslem skončí
+    `401 sso_required`.
+
     OAuth token vzdáleného MCP není běžný PAT: přímo proti REST API se odmítá
     odpovědí `401 invalid_token`. Na klientské doméně je připojení navíc pevně
     vázané na tuto doménu a její firmu; při každém volání se kontrolují aktuální
@@ -35141,7 +35145,7 @@ components:
 
   responses:
     Unauthorized:
-      description: Neplatný nebo chybějící token
+      description: Neplatný nebo chybějící token (`invalid_token`), nebo token vydaný ze sezení, které vynucené přihlášení přes Microsoft Entra ID nepřipouští (`sso_required`)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }

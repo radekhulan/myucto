@@ -5,16 +5,14 @@ declare(strict_types=1);
 namespace MyInvoice\Action\Admin;
 
 use MyInvoice\Http\Json;
-use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\Oidc\ExternalIdentityRepository;
-use MyInvoice\Service\Auth\Oidc\OidcInviteService;
+use MyInvoice\Service\Auth\Oidc\OidcInviteMailer;
 use MyInvoice\Service\Auth\Oidc\OidcProviderRegistry;
 use MyInvoice\Service\IpMatcher;
-use MyInvoice\Service\Mail\Mailer;
 use Psr\Http\Message\ResponseInterface as Response;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -30,12 +28,10 @@ final class UserExternalIdentityAdminAction
     public function __construct(
         private readonly Connection $db,
         private readonly ExternalIdentityRepository $identities,
-        private readonly OidcInviteService $invites,
+        private readonly OidcInviteMailer $invites,
         private readonly OidcProviderRegistry $providers,
-        private readonly Mailer $mailer,
         private readonly ActivityLogger $activity,
         private readonly IpMatcher $ipMatcher,
-        private readonly Config $config,
     ) {}
 
     public function list(Request $request, Response $response, array $args): Response
@@ -79,16 +75,15 @@ final class UserExternalIdentityAdminAction
         $actor = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $userId = (int) $user['id'];
         $ip = $this->ipMatcher->clientIpFromRequest($request->getServerParams());
-        $token = $this->invites->issue($userId, $provider->id, isset($actor['id']) ? (int) $actor['id'] : null);
-        $appUrl = rtrim((string) $this->config->get('app.url', ''), '/');
-        $locale = in_array($user['locale'], ['cs', 'en'], true) ? (string) $user['locale'] : 'cs';
         try {
-            $smtp = $this->mailer->sendTemplate('user_sso_invite', $locale, [(string) $user['email']], [
-                'name' => (string) ($user['name'] ?? ''),
-                'provider' => $provider->label,
-                'inviteLink' => $appUrl . '/api/auth/oidc/' . $provider->id . '/login?invite=' . $token,
-                'expiresIn' => $locale === 'en' ? '3 days' : '3 dny',
-            ]);
+            $smtp = $this->invites->send(
+                $userId,
+                (string) $user['email'],
+                (string) ($user['name'] ?? ''),
+                (string) ($user['locale'] ?? 'cs'),
+                $provider,
+                isset($actor['id']) ? (int) $actor['id'] : null,
+            );
         } catch (\Throwable $e) {
             $this->activity->log('user.invite_mail_failed', isset($actor['id']) ? (int) $actor['id'] : null, 'user', $userId, [
                 'to' => [(string) $user['email']], 'purpose' => 'sso_invite', 'error' => $e->getMessage(),

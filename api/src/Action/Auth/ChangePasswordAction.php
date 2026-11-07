@@ -27,10 +27,19 @@ final class ChangePasswordAction
         private readonly IpMatcher $ipMatcher,
         private readonly BruteForceGuard $bruteForce,
         private readonly ApiTokenService $tokens,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
+        if ($this->loginPolicy->isEnforced()) {
+            return Json::error(
+                $response,
+                'password_login_disabled',
+                'Instalace se přihlašuje přes poskytovatele identity organizace, heslo se nepoužívá.',
+                409,
+            );
+        }
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $token = (string) $request->getAttribute(AuthMiddleware::ATTR_TOKEN, '');
         $userId = (int) ($user['id'] ?? 0);

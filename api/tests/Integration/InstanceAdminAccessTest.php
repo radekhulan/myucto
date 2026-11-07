@@ -153,7 +153,7 @@ final class InstanceAdminAccessTest extends TestCase
         $capacity = new LicenseCapacityGate($this->db, $license, new SeatPolicy($this->db), new PayrollUsagePolicy($this->db));
         $action = new UserAdminAction($this->db, new ActivityLogger($this->db), new IpMatcher($this->config),
             new PasswordHasher($this->config), new SessionManager($this->db, $this->config, new DatabaseSecurityClock()),
-            $capacity, new PasswordSetupLinkIssuer(), $this->createStub(Mailer::class), $this->config);
+            $capacity, new PasswordSetupLinkIssuer(), $this->createStub(Mailer::class), $this->config, $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class), new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry($this->config), $this->createStub(\MyInvoice\Service\Auth\Oidc\OidcInviteMailer::class));
         $request = $this->adminRequest('PUT', '/')->withParsedBody(['role_id' => $this->technicalRole]);
         $response = $action->update($request, (new ResponseFactory())->createResponse(), ['id' => $target]);
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
@@ -189,7 +189,7 @@ final class InstanceAdminAccessTest extends TestCase
         $mailer->expects(self::never())->method('sendTemplate');
         $action = new UserAdminAction($this->db, new ActivityLogger($this->db), new IpMatcher($this->config),
             new PasswordHasher($this->config), new SessionManager($this->db, $this->config, new DatabaseSecurityClock()),
-            $capacity, new PasswordSetupLinkIssuer(), $mailer, $this->config);
+            $capacity, new PasswordSetupLinkIssuer(), $mailer, $this->config, $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class), new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry($this->config), $this->createStub(\MyInvoice\Service\Auth\Oidc\OidcInviteMailer::class));
 
         $created = $action->create($this->adminRequest('POST', '/')->withParsedBody([
             'email' => 'technical-capacity-' . bin2hex(random_bytes(6)) . '@example.invalid',

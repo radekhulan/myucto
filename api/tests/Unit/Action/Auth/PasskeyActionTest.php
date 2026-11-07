@@ -317,7 +317,7 @@ final class PasskeyActionTest extends TestCase
             'totp_enabled' => 0,
         ];
         if ($sso) {
-            $this->loginPolicy->method('requiredProviderForUser')->willReturn('entra');
+            $this->loginPolicy->method('requiredProvider')->willReturn('entra');
             $this->sessionCookies->method('name')->willReturn('__Host-myinvoice_session');
             $this->oidcFlows->expects(self::once())->method('peekTicket')
                 ->with(str_repeat('f', 64), str_repeat('b', 64))
@@ -836,7 +836,6 @@ final class PasskeyActionTest extends TestCase
             $this->protectedOperations,
             $this->recoveryCodes,
             $this->loginPolicy,
-            new \MyInvoice\Security\UserRoleProfile($this->db),
             $this->oidcFlows,
         );
     }

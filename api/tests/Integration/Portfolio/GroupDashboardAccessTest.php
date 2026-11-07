@@ -234,7 +234,7 @@ final class GroupDashboardAccessTest extends TestCase
     private function access(): GroupDashboardAccess
     {
         $memberships = new UserSupplierRepository($this->db);
-        $suppliers = new SupplierAccessResolver($this->db, $memberships, Bootstrap::buildContainer()->get(\MyInvoice\Service\Auth\LoginPolicyService::class));
+        $suppliers = new SupplierAccessResolver($this->db, $memberships);
         return new GroupDashboardAccess($this->db, $memberships, $suppliers, new PermissionResolver($this->db, $suppliers, new PermissionCatalog()));
     }
 

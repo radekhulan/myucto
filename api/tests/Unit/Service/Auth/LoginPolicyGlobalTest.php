@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Unit\Service\Auth;
 
 use MyInvoice\Infrastructure\Config\Config;
-use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Auth\LoginPolicyService;
 use MyInvoice\Service\Auth\Oidc\OidcProviderRegistry;
 use MyInvoice\Tests\Support\FakeOidcIdp;
@@ -13,8 +12,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Vynucení poskytovatele pro celou instalaci (`auth.oidc.required_provider`).
- * Rozhoduje dřív než nastavení firem, takže databázi nepotřebuje; kdyby na ni
- * sáhlo, stub bez PDO test shodí.
+ * Jiné vynucení neexistuje: firmy ani role (správce instance) výjimku nemají.
  */
 final class LoginPolicyGlobalTest extends TestCase
 {
@@ -24,7 +22,6 @@ final class LoginPolicyGlobalTest extends TestCase
             'app' => ['url' => 'https://ucto.example.test'],
             'auth' => ['oidc' => [
                 'enabled' => $oidcEnabled,
-                'break_glass_roles' => ['instance_admin'],
                 'required_provider' => $required,
                 'providers' => [
                     'entra' => [
@@ -42,58 +39,63 @@ final class LoginPolicyGlobalTest extends TestCase
                 ],
             ]],
         ]);
-        return new LoginPolicyService($this->createStub(Connection::class), $config, new OidcProviderRegistry($config));
+        return new LoginPolicyService($config, new OidcProviderRegistry($config));
     }
 
-    public function testGlobalProviderAppliesToEveryCompanyAndUser(): void
+    public function testEnforcedProviderAllowsOnlyItsSessions(): void
     {
         $policy = $this->policy('entra');
 
-        self::assertSame('entra', $policy->globalRequiredProvider());
-        // I firma, která sama nic nevynucuje, a uživatel bez jediné firmy (superadmin).
-        self::assertSame('entra', $policy->requiredProviderForSupplier(42));
-        self::assertSame('entra', $policy->requiredProviderForUser(7, 'admin'));
-        self::assertSame('entra', $policy->requiredProviderForUser(7, null));
-        self::assertFalse($policy->sessionAllowedForSupplier(42, 'password', 'admin'));
-        self::assertFalse($policy->sessionAllowedForSupplier(42, 'passkey', null));
-        self::assertTrue($policy->sessionAllowedForSupplier(42, 'oidc:entra', 'admin'));
+        self::assertSame('entra', $policy->requiredProvider());
+        self::assertTrue($policy->isEnforced());
+        self::assertTrue($policy->authMethodAllowed('oidc:entra'));
+        self::assertFalse($policy->authMethodAllowed('password'));
+        self::assertFalse($policy->authMethodAllowed('passkey'));
+        self::assertFalse($policy->authMethodAllowed('oidc:seznam'));
+        self::assertFalse($policy->authMethodAllowed(null));
     }
 
-    public function testInstanceAdminStaysOnPasswordAsBreakGlass(): void
+    public function testStrongProviderConfirmsOperationsOnlyItself(): void
     {
         $policy = $this->policy('entra');
 
-        self::assertNull($policy->requiredProviderForUser(1, 'instance_admin'));
-        self::assertTrue($policy->sessionAllowedForSupplier(42, 'password', 'instance_admin'));
+        self::assertTrue($policy->stepUpMethodAllowed('oidc'));
+        self::assertFalse($policy->stepUpMethodAllowed('password'));
+        self::assertFalse($policy->stepUpMethodAllowed('passkey'));
+        self::assertFalse($policy->stepUpMethodAllowed('totp'));
+        self::assertFalse($policy->stepUpMethodAllowed('recovery'));
     }
 
-    public function testEntraWithLocalMfaStillEnforcesSso(): void
+    public function testFirstFactorEntraKeepsLocalFactorsButNeverPassword(): void
     {
         $policy = $this->policy('entra', skipMfa: false);
 
-        self::assertSame('entra', $policy->globalRequiredProvider());
-        self::assertSame('entra', $policy->requiredProviderForUser(7, null));
-        self::assertSame('entra', $policy->requiredProviderForSupplier(42));
-        self::assertFalse($policy->sessionAllowedForSupplier(42, 'password', null));
-        self::assertTrue($policy->sessionAllowedForSupplier(42, 'oidc:entra', null));
+        self::assertSame('entra', $policy->requiredProvider());
+        self::assertFalse($policy->authMethodAllowed('password'));
+        self::assertTrue($policy->authMethodAllowed('oidc:entra'));
+        self::assertFalse($policy->stepUpMethodAllowed('password'));
+        self::assertFalse($policy->stepUpMethodAllowed('oidc'));
+        self::assertTrue($policy->stepUpMethodAllowed('passkey'));
+        self::assertTrue($policy->stepUpMethodAllowed('totp'));
     }
 
-    public function testFirstFactorOrUnknownProviderNeverEnforcesGlobally(): void
+    public function testFirstFactorOrUnknownProviderNeverEnforces(): void
     {
         // Seznam nese jen první faktor, překlep nezná registr. Ani jedno nesmí
-        // zamknout instalaci; rozhodování pak padá na nastavení firem.
-        self::assertNull($this->policy('seznam')->globalRequiredProvider());
-        self::assertNull($this->policy('microsoft')->globalRequiredProvider());
-        self::assertNull($this->policy('')->globalRequiredProvider());
+        // zamknout instalaci.
+        self::assertNull($this->policy('seznam')->requiredProvider());
+        self::assertNull($this->policy('microsoft')->requiredProvider());
+        self::assertNull($this->policy('')->requiredProvider());
     }
 
-    public function testDisabledOidcDisablesGlobalEnforcement(): void
+    public function testDisabledOidcOrNoEnforcementAllowsEverything(): void
     {
-        $policy = $this->policy('entra', oidcEnabled: false);
-
-        self::assertNull($policy->globalRequiredProvider());
-        self::assertNull($policy->requiredProviderForUser(7, null));
-        self::assertNull($policy->requiredProviderForSupplier(42));
-        self::assertTrue($policy->sessionAllowedForSupplier(42, 'password', null));
+        foreach ([$this->policy('entra', oidcEnabled: false), $this->policy('')] as $policy) {
+            self::assertNull($policy->requiredProvider());
+            self::assertFalse($policy->isEnforced());
+            self::assertTrue($policy->authMethodAllowed('password'));
+            self::assertTrue($policy->stepUpMethodAllowed('password'));
+            self::assertTrue($policy->stepUpMethodAllowed('passkey'));
+        }
     }
 }

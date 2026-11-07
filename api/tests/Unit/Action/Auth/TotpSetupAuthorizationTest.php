@@ -357,6 +357,7 @@ final class TotpSetupAuthorizationTest extends TestCase
             $this->bruteForce,
             $this->protectedOperations,
             $this->credentials,
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
     }
 

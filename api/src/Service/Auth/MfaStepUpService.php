@@ -79,6 +79,7 @@ final class MfaStepUpService
         private readonly MfaStepUpProofStore $proofs,
         private readonly MfaPolicyService $policy,
         private readonly PasskeyCredentialRepository $credentials,
+        private readonly ?LoginPolicyService $loginPolicy = null,
     ) {}
 
     public function assertAllowed(int $userId, string $operation, string $authMethod): string
@@ -86,6 +87,11 @@ final class MfaStepUpService
         $operation = trim($operation);
         if (!in_array($authMethod, self::METHODS, true)) {
             throw new StepUpOperationException('Nepodporovaná metoda step-up ověření.');
+        }
+        // Instalace s vynuceným poskytovatelem identity potvrzuje operace jen
+        // jím (viz LoginPolicyService::stepUpMethodAllowed()).
+        if ($this->loginPolicy !== null && !$this->loginPolicy->stepUpMethodAllowed($authMethod)) {
+            throw new StepUpOperationException('Operaci potvrďte přihlášením přes poskytovatele identity organizace.');
         }
         $isPasskeyRevoke = preg_match('/^passkey\.revoke:([1-9][0-9]*)$/D', $operation, $passkeyMatches) === 1;
         $isDomainActivation = preg_match('/^domain\.activate:([1-9][0-9]*)$/D', $operation) === 1;

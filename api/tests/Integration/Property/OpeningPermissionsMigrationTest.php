@@ -145,8 +145,7 @@ final class OpeningPermissionsMigrationTest extends TestCase
     {
         $catalog = new PermissionCatalog();
         $config = new Config([]);
-        $loginPolicy = new \MyInvoice\Service\Auth\LoginPolicyService($this->db, $config, new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry($config));
-        $resolver = new PermissionResolver($this->db, new SupplierAccessResolver($this->db, new UserSupplierRepository($this->db), $loginPolicy), $catalog);
+        $resolver = new PermissionResolver($this->db, new SupplierAccessResolver($this->db, new UserSupplierRepository($this->db)), $catalog);
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/')->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role_id' => $roleId]);
         $role = $resolver->resolveDefault($request);
         self::assertSame($roleId, $role->id);

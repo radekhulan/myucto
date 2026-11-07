@@ -93,6 +93,9 @@ final class UserAdminAction
         private readonly PasswordSetupLinkIssuer $passwordSetupLinks,
         private readonly Mailer $mailer,
         private readonly Config $config,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
+        private readonly \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry $oidcProviders,
+        private readonly \MyInvoice\Service\Auth\Oidc\OidcInviteMailer $ssoInvites,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -124,6 +127,12 @@ final class UserAdminAction
         // ⚠️ Prázdné heslo NENÍ chyba — je to pozvánka. Uživatel si heslo nastaví
         // sám z jednorázového odkazu, takže ho admin nemusí vymýšlet, posílat
         // nezabezpečeným kanálem ani znát. Heslo zadané výslovně se chová jako dřív.
+        // Při vynuceném poskytovateli identity heslo nikdo nezadává ani nenastavuje.
+        // Účet dostane náhodné nepoužitelné heslo a pozvánku k propojení identity.
+        $ssoProvider = $this->loginPolicy->requiredProvider();
+        if ($ssoProvider !== null) {
+            $password = '';
+        }
         $invite = $password === '';
         if ($invite) {
             $password = $this->passwordSetupLinks->randomPassword();
@@ -164,7 +173,9 @@ final class UserAdminAction
         $this->log($request, 'user.created', $id, ['email' => $email, 'role_id' => $roleId, 'invite' => $invite]);
 
         $user = $this->fetchUser($id);
-        if ($invite) {
+        if ($invite && $ssoProvider !== null) {
+            $user['invite_sent'] = $this->sendSsoInvite($request, $id, $email, $name, $locale, $ssoProvider);
+        } elseif ($invite) {
             // ⚠️ Neúspěch odeslání nesmí objednávku uživatele shodit — účet už je
             // založený a zabírá licenční místo, rollback tady by ho jen osiřel.
             // Admin se o tom ale MUSÍ dozvědět: bez odkazu se do účtu nikdo
@@ -195,6 +206,9 @@ final class UserAdminAction
         if (!$row['is_active']) {
             return Json::error($response, 'user_inactive', 'Deaktivovanému uživateli odkaz neposíláme — nejdřív ho aktivujte.', 409);
         }
+        if ($this->loginPolicy->isEnforced()) {
+            return self::passwordDisabled($response);
+        }
 
         $sent = $this->sendPasswordLink(
             $request,
@@ -209,6 +223,44 @@ final class UserAdminAction
         }
 
         return Json::ok($response, ['ok' => true]);
+    }
+
+    private static function passwordDisabled(Response $response): Response
+    {
+        return Json::error(
+            $response,
+            'password_login_disabled',
+            'Instalace se přihlašuje přes poskytovatele identity organizace, heslo se nepoužívá.',
+            409,
+        );
+    }
+
+    /** Pozvánka k propojení identity u vynuceného poskytovatele. Vrací, jestli mail odešel. */
+    private function sendSsoInvite(
+        Request $request,
+        int $userId,
+        string $email,
+        string $name,
+        string $locale,
+        string $providerId,
+    ): bool {
+        $provider = $this->oidcProviders->get($providerId);
+        $actor = (array) $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, []);
+        try {
+            if ($provider === null) {
+                throw new \RuntimeException('Poskytovatel identity není zapnutý.');
+            }
+            $smtp = $this->ssoInvites->send($userId, $email, $name, $locale, $provider, isset($actor['id']) ? (int) $actor['id'] : null);
+            $this->log($request, 'user.sso_invite_sent', $userId, [
+                'to' => [$email], 'provider' => $providerId, 'smtp_response' => $smtp,
+            ]);
+            return true;
+        } catch (\Throwable $e) {
+            $this->log($request, 'user.invite_mail_failed', $userId, [
+                'to' => [$email], 'purpose' => 'sso_invite', 'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
     }
 
     /**
@@ -309,6 +361,9 @@ final class UserAdminAction
         }
         if (array_key_exists('is_active', $body)) {
             $sets[] = 'is_active = ?'; $params[] = (bool) $body['is_active'] ? 1 : 0;
+        }
+        if (!empty($body['password']) && $this->loginPolicy->isEnforced()) {
+            return self::passwordDisabled($response);
         }
         if (!empty($body['password'])) {
             try { $this->hasher->validate((string) $body['password']); }

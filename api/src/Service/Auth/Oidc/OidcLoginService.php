@@ -215,7 +215,7 @@ class OidcLoginService
         if ($user === null) {
             throw new OidcException(OidcException::USER_INACTIVE, 'Účet je deaktivovaný.');
         }
-        $required = $this->loginPolicy->requiredProviderForUser($userId, $user['system_key'] ?? null);
+        $required = $this->loginPolicy->requiredProvider();
         if ($required !== null && $required !== $provider->id) {
             throw new OidcException(OidcException::IDENTITY_MISMATCH, 'Účet se přihlašuje přes jiného poskytovatele.');
         }

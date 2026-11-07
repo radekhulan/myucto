@@ -882,7 +882,6 @@ final class Bootstrap
             \MyInvoice\Service\Tenant\SupplierAccessResolver::class => fn (ContainerInterface $c) => new \MyInvoice\Service\Tenant\SupplierAccessResolver(
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Repository\UserSupplierRepository::class),
-                $c->get(\MyInvoice\Service\Auth\LoginPolicyService::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\EntityCache::class),
                 $c->get(\MyInvoice\Service\Tenant\DefaultSupplierService::class),
             ),
@@ -915,6 +914,12 @@ final class Bootstrap
             ),
             AuthMiddleware::class => \DI\autowire()->constructorParameter(
                 'mcpResources', \DI\get(\MyInvoice\Service\Mcp\McpResourcePolicy::class),
+            )->constructorParameter(
+                'loginPolicy', \DI\get(\MyInvoice\Service\Auth\LoginPolicyService::class),
+            ),
+            // Vynucený poskytovatel identity omezuje metody step-up ověření.
+            \MyInvoice\Service\Auth\MfaStepUpService::class => \DI\autowire()->constructorParameter(
+                'loginPolicy', \DI\get(\MyInvoice\Service\Auth\LoginPolicyService::class),
             ),
             \MyInvoice\Security\UserRoleProfile::class => fn (ContainerInterface $c) => new \MyInvoice\Security\UserRoleProfile(
                 $c->get(Connection::class),

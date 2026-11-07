@@ -64,6 +64,7 @@ final class CreateTokenAction
         private readonly MfaPolicyService $mfaPolicy,
         private readonly BruteForceGuard $bruteForce,
         private readonly MfaProtectedOperationService $protectedOperations,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
@@ -208,6 +209,16 @@ final class CreateTokenAction
             } catch (LicenseSeatLimitExceeded) {
                 return self::seatLimitError($response);
             }
+        } elseif ($this->loginPolicy->isEnforced()) {
+            // Vynucený poskytovatel identity: heslo ani přímý TOTP kód neplatí,
+            // token vznikne jen s jednorázovým step-up proofem.
+            return Json::error(
+                $response,
+                'step_up_required',
+                'Pro vytvoření tokenu je vyžadováno ověření přes poskytovatele identity organizace.',
+                401,
+                ['methods' => ['sso']],
+            );
         } elseif ($totpAvailable) {
             if ($totpCode === '') {
                 return Json::error(

@@ -27,10 +27,19 @@ final class ResetPasswordAction
         private readonly IpMatcher $ipMatcher,
         private readonly LoginSessionIssuer $loginIssuer,
         private readonly MfaPolicyService $mfaPolicy,
+        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
     ) {}
 
     public function __invoke(Request $request, Response $response): Response
     {
+        if ($this->loginPolicy->isEnforced()) {
+            return Json::error(
+                $response,
+                'password_login_disabled',
+                'Instalace se přihlašuje přes poskytovatele identity organizace, heslo se nepoužívá.',
+                409,
+            );
+        }
         $body = (array) ($request->getParsedBody() ?? []);
         $tokenRaw = (string) ($body['token'] ?? '');
         $password = (string) ($body['password'] ?? '');

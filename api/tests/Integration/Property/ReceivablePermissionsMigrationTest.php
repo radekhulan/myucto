@@ -123,8 +123,7 @@ final class ReceivablePermissionsMigrationTest extends TestCase
     {
         $catalog = new PermissionCatalog();
         $config = new Config([]);
-        $loginPolicy = new \MyInvoice\Service\Auth\LoginPolicyService($this->db, $config, new \MyInvoice\Service\Auth\Oidc\OidcProviderRegistry($config));
-        $resolver = new PermissionResolver($this->db, new SupplierAccessResolver($this->db, new UserSupplierRepository($this->db), $loginPolicy), $catalog);
+        $resolver = new PermissionResolver($this->db, new SupplierAccessResolver($this->db, new UserSupplierRepository($this->db)), $catalog);
         $request = (new ServerRequestFactory())->createServerRequest('POST', '/')->withHeader('X-Supplier-Id', '1')
             ->withAttribute(AuthMiddleware::ATTR_USER, ['id' => 1, 'role_id' => $roleId, 'role_summary' => ['type' => $roleId === 5 ? 'client' : 'staff']]);
         $role = $resolver->resolve($request);

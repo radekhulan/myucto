@@ -130,6 +130,7 @@ final class PasswordResetTokenInvalidationTest extends TestCase
             $this->database(), $hasher ?? $this->hasher(), $sessions,
             $this->createMock(ActivityLogger::class), new IpMatcher(), $issuer,
             new MfaPolicyService(new Config(['auth' => ['require_mfa' => false]])),
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
     }
 
@@ -143,6 +144,7 @@ final class PasswordResetTokenInvalidationTest extends TestCase
             $this->database(), $hasher ?? $this->hasher(), $sessions,
             $this->createMock(ActivityLogger::class), new IpMatcher(), $bruteForce,
             $this->createMock(ApiTokenService::class),
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
     }
 

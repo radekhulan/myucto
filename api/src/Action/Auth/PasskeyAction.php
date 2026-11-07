@@ -55,7 +55,6 @@ final class PasskeyAction
         private readonly MfaProtectedOperationService $protectedOperations,
         private readonly MfaRecoveryCodeService $recoveryCodes,
         private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
-        private readonly \MyInvoice\Security\UserRoleProfile $roleProfile,
         private readonly \MyInvoice\Service\Auth\Oidc\OidcFlowStore $oidcFlows,
     ) {}
 
@@ -111,8 +110,18 @@ final class PasskeyAction
         $requireNoActivePasskey = false;
         // Účet bez silného faktoru se prokazuje heslem, nebo proofem z přihlášení
         // u poskytovatele identity (uživatel přihlášený přes Entra heslo nemá).
+        // Při vynuceném poskytovateli identity se heslo nepoužívá vůbec. První klíč
+        // si pak účet bez faktoru zřídí jen v setup sezení, které právě vzniklo
+        // přihlášením u poskytovatele (Entra jako první faktor + povinné MFA).
         $proofSupplied = trim((string) ($body['step_up_token'] ?? '')) !== '';
-        if ($hasStrongFactor || $proofSupplied) {
+        $session = (array) $request->getAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_SESSION, []);
+        $providerSetup = !$hasStrongFactor && !$proofSupplied
+            && $context['assurance_level'] === 'setup'
+            && $this->loginPolicy->isEnforced()
+            && $this->loginPolicy->authMethodAllowed(isset($session['auth_method']) ? (string) $session['auth_method'] : null);
+        if ($providerSetup) {
+            $requireNoActivePasskey = true;
+        } elseif ($hasStrongFactor || $proofSupplied || $this->loginPolicy->isEnforced()) {
             try {
                 $proof = $this->stepUp->consume(
                     trim((string) ($body['step_up_token'] ?? '')),
@@ -309,6 +318,16 @@ final class PasskeyAction
                 return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
             }
         }
+        $requiredProvider = $this->loginPolicy->requiredProvider();
+        if ($requiredProvider !== null && ($ssoTicket['provider'] ?? null) !== $requiredProvider) {
+            return Json::error(
+                $response,
+                'sso_required',
+                'Přihlaste se přes poskytovatele identity organizace.',
+                403,
+                ['provider' => $requiredProvider],
+            );
+        }
         $loginContext = $this->ceremonies->peekLoginContext($flowToken);
         $discoverable = ($loginContext['purpose'] ?? null)
             === WebAuthnCeremonyStore::PURPOSE_DISCOVERABLE_LOGIN;
@@ -344,16 +363,11 @@ final class PasskeyAction
                 return Json::error($response, 'sso_flow_invalid', 'Přihlášení vypršelo, zkuste to znovu.', 401);
             }
             $this->bruteForce->recordPasskeySuccess($verifiedUserId);
-            // Passkey bez hesla je taky místní přihlášení a nesmí obejít firmu,
-            // která vyžaduje poskytovatele identity. Sezení už vzniklo v transakci
+            // Passkey bez hesla je taky místní přihlášení a nesmí obejít instalaci,
+            // která vyžaduje poskytovatele identity. Projde jen jako druhý faktor
+            // po přihlášení u poskytovatele. Sezení už vzniklo v transakci
             // ceremonie, proto se hned zruší.
-            $requiredProvider = $this->loginPolicy->requiredProviderForUser($verifiedUserId, null);
-            if ($requiredProvider !== null
-                && ($ssoTicket['provider'] ?? null) !== $requiredProvider
-                && $this->loginPolicy->isBreakGlass($this->roleProfile->forUser($verifiedUserId)['system_key'] ?? null)
-            ) {
-                $requiredProvider = null;
-            }
+            $requiredProvider = $this->loginPolicy->requiredProvider();
             if ($requiredProvider !== null
                 && $completed['auth_context']->authMethod !== SessionAuthContext::EXTERNAL_PREFIX . $requiredProvider
             ) {

@@ -1164,7 +1164,8 @@
         "2258_payroll_component_minimum_wage.sql",
         "2259_payroll_standby_floor_proof.sql",
         "2260_payroll_termination_floor_proof.sql",
-        "2261_payroll_jmhz_holiday_time_off.sql"
+        "2261_payroll_jmhz_holiday_time_off.sql",
+        "2262_drop_supplier_login_policy.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -26710,8 +26711,6 @@
                 "is_identified": "tinyint(1) NOT NULL DEFAULT 0",
                 "is_vat_payer": "tinyint(1) NOT NULL DEFAULT 1",
                 "legal_form": "varchar(3) NULL DEFAULT NULL",
-                "login_policy": "enum('any','sso_required') NOT NULL DEFAULT 'any'",
-                "login_sso_provider": "varchar(32) NULL DEFAULT NULL COLLATE ascii_bin",
                 "logo_path": "varchar(255) NULL DEFAULT NULL",
                 "ollama_api_key_enc": "varbinary(512) NULL DEFAULT NULL",
                 "ollama_base_url": "varchar(255) NULL DEFAULT NULL",

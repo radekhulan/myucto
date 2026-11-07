@@ -333,10 +333,9 @@ final class Config
                 'oidc' => [
                     'enabled' => false,
                     'session_lifetime_hours' => 12,
-                    'break_glass_roles' => ['instance_admin'],
-                    // Poskytovatel povinný pro celou instalaci (např. 'entra'). Má
-                    // přednost před nastavením jednotlivých firem a platí i pro firmy
-                    // založené později. Prázdné = vynucení jen po firmách.
+                    // Poskytovatel povinný pro celou instalaci (např. 'entra'). Platí
+                    // pro všechny firmy i uživatele včetně správce instance, heslo
+                    // se pak nepoužívá. Prázdné = přihlášení heslem i přes poskytovatele.
                     'required_provider' => '',
                     'providers' => [
                         'entra' => [

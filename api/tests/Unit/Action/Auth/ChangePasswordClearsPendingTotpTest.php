@@ -168,6 +168,7 @@ final class ChangePasswordClearsPendingTotpTest extends TestCase
             new IpMatcher(),
             $bruteForce,
             $tokens ?? $this->createMock(ApiTokenService::class),
+            $this->createStub(\MyInvoice\Service\Auth\LoginPolicyService::class),
         );
     }
 }

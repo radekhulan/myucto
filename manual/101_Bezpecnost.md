@@ -135,19 +135,17 @@ místní MFA povinné i pro účty bez zřízeného faktoru, zapněte také
 v obou režimech. S hodnotou `false` se citlivé operace potvrzují místním
 ověřením; popup Entra se pro ně nenabízí.
 
-Před přepnutím účtům zřiďte místní MFA. Je-li povolený pouze passkey a uživatel
-nemá žádný faktor ani nezná místní heslo, nejprve si nastaví místní heslo přes
-obnovu hesla. Tím pak potvrdí registraci prvního passkey po přihlášení přes Entra.
+Při vynuceném přihlášení přes Entra se heslo nepoužívá. Účet bez místního faktoru
+si ho zřídí v povinném nastavení MFA hned po přihlášení přes Entra
+(`auth.require_mfa = true`).
 
 Výchozí `skip_mfa = true` zachovává důvěru v MFA organizace. Změna platí při
 dalších přihlášeních; potřebujete-li okamžitě odebrat důvěru dosavadním relacím,
 zrušte také aktivní sezení uživatelů.
 
-Povinné firemní SSO platí pro každou cílovou firmu také v portfoliu,
-automatizaci, seznamech firem a operacích mezi firmami. Místní přihlášení
-do jiné firmy nepovolí čtení ani zápis ve firmě vyžadující Entra ID.
-Stejná podmínka platí pro API token podle přihlášení, ze kterého byl vydán.
-Do souhrnů a výběrů se zahrnou jen firmy dostupné aktuálním přihlášením.
+Vynucené přihlášení přes Entra platí pro celou instalaci, tedy pro všechny firmy,
+portfolio, automatizace i operace mezi firmami. API token a MCP připojení platí
+jen tehdy, když vznikly ze sezení přihlášeného přes Entra.
 
 1. V Microsoft Entra admin center založte registraci aplikace: *single tenant*,
    platforma **Web**, redirect URI `https://<adresa instalace>/api/auth/oidc/entra/callback`
@@ -179,16 +177,35 @@ Do souhrnů a výběrů se zahrnou jen firmy dostupné aktuálním přihlášen�
 4. Účty uživatelů zakládejte dál v **Nastavení → Uživatelé**. U uživatele
    v části **Propojené identity** zvolte **Pozvat k přihlášení přes Microsoft Entra ID**. Uživatel dostane e-mail
    s odkazem a prvním přihlášením se jeho účet propojí s identitou v Entra ID.
-5. Až budou všichni propojení, vynuťte přihlášení přes Microsoft Entra ID
-   jedním ze dvou způsobů:
-   - **Pro celou instalaci:** v konfiguraci `'required_provider' => 'entra'`
-     pod `auth.oidc`, v Dockeru `MYINVOICE_OIDC_REQUIRED=entra`. Platí pro všechny
-     firmy včetně nově založených a pro všechny uživatele. Přihlašovací stránka
-     nabídne jen tlačítko Microsoft Entra ID, heslo zůstane schované pro technický
-     účet správce instance.
-   - **Pro jednotlivou firmu:** přihlaste se sami přes Microsoft Entra ID a v
-     **Nastavení → Údaje firmy → Přihlášení** zvolte **Jen přes účet organizace**
-     a klikněte na **Uložit přihlášení**.
+5. Až budou všichni propojení včetně technického účtu správce instance, vynuťte
+   přihlášení přes Microsoft Entra ID v konfiguraci: `'required_provider' => 'entra'`
+   pod `auth.oidc`, v Dockeru `MYINVOICE_OIDC_REQUIRED=entra`. Vynucení platí pro
+   celou instalaci, všechny firmy včetně nově založených a všechny uživatele.
+   Jednotlivé firmy ho nastavit ani vypnout nemohou.
+
+Při vynucení se heslo v aplikaci nepoužívá vůbec, ani pro správce instance:
+
+- přihlašovací stránka nabídne jen tlačítko Microsoft Entra ID, bez formuláře
+  s heslem, přihlášení přístupovým klíčem i záložním kódem,
+- změna hesla, zapomenuté heslo a odkaz na nastavení hesla nejsou k dispozici,
+- nový uživatel dostane místo odkazu na nastavení hesla pozvánku k přihlášení
+  přes Microsoft Entra ID,
+- citlivé operace (podání EPO, certifikáty, API tokeny, zálohy, vlastní domény
+  a další) potvrdíte novým přihlášením u Microsoftu v okně, které se otevře nad
+  rozdělanou prací. Při `skip_mfa = false` je potvrdíte místním přístupovým
+  klíčem nebo kódem z autentikátoru, heslem nikdy,
+- sezení, API tokeny a MCP připojení vzniklé dřív přihlášením heslem přestanou
+  platit. Uživatel se přihlásí znovu přes Microsoft a token si vystaví znovu.
+
+Účet, který se přes Entra ještě nepřihlásil (například první správce po instalaci),
+propojíte pozvánkou z příkazové řádky:
+
+```
+php api/bin/oidc-invite.php --email=spravce@example.com
+```
+
+Nástroj vypíše odkaz, který platí 3 dny a jednou. S volbou `--send` ho pošle
+e-mailem. Odkaz předejte jen majiteli účtu.
 
 | Pravidlo | Chování |
 |---|---|
@@ -198,25 +215,23 @@ Do souhrnů a výběrů se zahrnou jen firmy dostupné aktuálním přihlášen�
 | Hosté B2B | Smí se přihlásit jen s `allow_guests = true` (ENV `MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS=1`) a přiřazením k aplikaci |
 | Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin |
 | Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení skončí nejpozději vypršením |
-| Firma vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód do firmy nepustí |
-| Instalace vyžaduje Microsoft | Totéž pro všechny firmy a uživatele; nastavení firmy se nepoužije a jde jen zobrazit |
-| Nouzový přístup | Role `instance_admin` se přihlašuje dál heslem a MFA (`auth.oidc.break_glass_roles`) |
-| Citlivé operace | Při `skip_mfa = true` je potvrdíte novým přihlášením u Microsoftu místo hesla; při `false` místním ověřením |
+| Instalace vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód nepustí nikoho, ani správce instance |
+| Nouzový přístup | Jen vypnutím vynucení v konfiguraci, aplikace výjimku nemá |
+| Citlivé operace | Při `skip_mfa = true` je potvrdíte novým přihlášením u Microsoftu; při `false` místním přístupovým klíčem nebo TOTP, při vynucení nikdy heslem |
 
-Vynucení ve firmě zapnete jen ze sezení přihlášeného přes Microsoft, jinak
-byste si firmu sami zavřeli. Neúplná konfigurace poskytovatele se nezapne a
-ukáže se v Diagnostice. Vynucení pro celou instalaci platí jen pro zapnutého
-poskytovatele podporujícího firemní SSO (Microsoft Entra ID), a to i při místním MFA.
-Překlep v názvu ani vypnutý poskytovatel nikoho nezamknou. Při výpadku Entra ID
-vypněte přihlášení přes poskytovatele (`MYINVOICE_OIDC_ENABLED=0`), uživatelé se
-pak přihlásí heslem a MFA.
+Neúplná konfigurace poskytovatele se nezapne a ukáže se v Diagnostice. Vynucení
+platí jen pro zapnutého poskytovatele podporujícího firemní SSO (Microsoft Entra ID),
+a to i při místním MFA. Překlep v názvu ani vypnutý poskytovatel nikoho nezamknou.
+Při výpadku Entra ID vypněte vynucení (`MYINVOICE_OIDC_REQUIRED=` prázdné), uživatelé
+se pak přihlásí heslem a MFA. Heslo si účet, který ho nezná, nastaví přes
+zapomenuté heslo.
 
 ### 101.6.2 Přihlášení přes Google, Apple a Seznam (správce)
 
 Google, Apple a Seznam nahrazují jen heslo. Má-li uživatel přístupový klíč
 nebo TOTP, ověří ho po návratu od poskytovatele stejně jako po hesle, a při
 `auth.require_mfa` se bez silného faktoru do aplikace nedostane. Citlivé
-operace přes tyto poskytovatele potvrdit nejde a firma je nemůže vynutit.
+operace přes tyto poskytovatele potvrdit nejde a instalace je nemůže vynutit.
 Účty se nezakládají; uživatel se propojí pozvánkou nebo v profilu.
 
 Návratová adresa je u všech `https://<adresa instalace>/api/auth/oidc/<poskytovatel>/callback`

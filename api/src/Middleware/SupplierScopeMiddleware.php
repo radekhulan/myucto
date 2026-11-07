@@ -7,7 +7,6 @@ namespace MyInvoice\Middleware;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Cache\SupplierWriteGenerations;
 use MyInvoice\Http\RequestPath;
-use MyInvoice\Service\Auth\LoginPolicyService;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use MyInvoice\Security\InstanceAdminRoutePolicy;
 use MyInvoice\Security\RequestAuthorization;
@@ -41,7 +40,6 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
     public function __construct(
         private readonly SupplierAccessResolver $resolver,
         private readonly ResponseFactory $responseFactory,
-        private readonly LoginPolicyService $loginPolicy,
     ) {}
 
     public function process(Request $request, Handler $handler): Response
@@ -85,7 +83,7 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
 
         $access = $this->resolver->resolve($request);
 
-        if ($access->denied && $access->requiredLoginProvider === null) {
+        if ($access->denied) {
             // Self-service cesty (me/logout/change-password/totp…) nesmí denied
             // membership zablokovat — klient bez membershipu (Epic F6, fail-closed)
             // musí umět načíst vlastní účet a odhlásit se. Scope se nepropíše (0).
@@ -97,25 +95,6 @@ final class SupplierScopeMiddleware implements MiddlewareInterface
             }
             $response = $this->responseFactory->createResponse(403);
             return Json::error($response, 'forbidden_supplier', 'K této firmě nemáš oprávnění.', 403);
-        }
-
-        // Firma vyžadující přihlášení u poskytovatele identity nepřijme sezení
-        // z hesla ani z passkey. Totéž platí pro API token a MCP grant: rozhoduje
-        // přihlášení, ze kterého byl token vydaný (api_tokens.issued_auth_method),
-        // jinak by si člověk z heslového sezení vyrobil token do zakázané firmy.
-        if ($access->supplierId > 0) {
-            if (!$this->loginPolicy->requestAllowedForSupplier($request, $access->supplierId)) {
-                if (in_array($path, PermissionMiddleware::PUBLIC_OR_SELF, true)) {
-                    return $handler->handle($request->withAttribute(self::ATTR_CURRENT_ID, 0));
-                }
-                return Json::error(
-                    $this->responseFactory->createResponse(403),
-                    'sso_required',
-                    'Do této firmy se lze přihlásit jen přes poskytovatele identity.',
-                    403,
-                    ['provider' => $this->loginPolicy->requiredProviderForSupplier($access->supplierId)],
-                );
-            }
         }
 
         SupplierWriteGenerations::setRequestSupplier($access->supplierId);

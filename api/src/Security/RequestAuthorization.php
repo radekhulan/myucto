@@ -179,18 +179,6 @@ final class RequestAuthorization
     }
 
     /**
-     * Vynucení přihlášení přes poskytovatele identity pro firmu. Rozhoduje,
-     * kdo se do firmy dostane, proto jen správce firmy ze session (ne token)
-     * a superadmin.
-     */
-    public static function canManageLoginPolicy(Request $request): bool
-    {
-        $role = self::effectiveRole($request);
-        return self::isSessionAuth($request) && $role->isActive
-            && ($role->isSuperadmin() || $role->isCompanyAdmin());
-    }
-
-    /**
      * Pozvánky k propojení a odpojení identit cizích účtů. Účty spravuje jen
      * superadmin (UserAdminAction), proto i jejich identity.
      */

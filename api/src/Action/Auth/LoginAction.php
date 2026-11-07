@@ -147,6 +147,20 @@ final class LoginAction
             $password = '';
         }
 
+        // Instalace s vynuceným poskytovatelem heslo vůbec nepřijímá, ani od
+        // technického správce. Vynucení je veřejné (setup-status), odmítnutí před
+        // ověřením hesla proto nic neprozradí.
+        $requiredProvider = $this->loginPolicy->requiredProvider();
+        if ($requiredProvider !== null && ($ssoTicket['provider'] ?? null) !== $requiredProvider) {
+            return Json::error(
+                $response,
+                'sso_required',
+                'Přihlaste se přes poskytovatele identity organizace.',
+                403,
+                ['provider' => $requiredProvider],
+            );
+        }
+
         if ($email === '' || ($password === '' && $ssoTicket === null)) {
             return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
         }
@@ -210,25 +224,6 @@ final class LoginAction
                 'email' => $email, 'reason' => 'wrong_password',
             ], $ip, $userAgent);
             return Json::error($response, 'invalid_credentials', 'Neplatné přihlašovací údaje.', 401);
-        }
-
-        // Až po ověření hesla, aby odpověď neprozradila, kdo má vynucené přihlášení
-        // u poskytovatele. Platí i pro záložní kód níž.
-        $requiredProvider = $this->loginPolicy->requiredProviderForUser(
-            (int) $user['id'],
-            isset($user['system_key']) ? (string) $user['system_key'] : null,
-        );
-        if ($requiredProvider !== null && ($ssoTicket['provider'] ?? null) !== $requiredProvider) {
-            $this->logger->log('auth.login_failed', (int) $user['id'], 'user', (int) $user['id'], [
-                'email' => $email, 'reason' => 'sso_required', 'provider' => $requiredProvider,
-            ], $ip, $userAgent);
-            return Json::error(
-                $response,
-                'sso_required',
-                'Váš účet se přihlašuje přes poskytovatele identity organizace.',
-                403,
-                ['provider' => $requiredProvider],
-            );
         }
 
         $totpActive = (int) $user['totp_enabled'] === 1 && !empty($user['totp_secret']);

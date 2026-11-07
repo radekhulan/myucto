@@ -134,20 +134,16 @@ final class ClientDomainMcpTest extends TestCase
             'MYINVOICE_OIDC_ENTRA_TENANT_ID' => '11111111-1111-1111-1111-111111111111',
             'MYINVOICE_OIDC_ENTRA_CLIENT_ID' => '22222222-2222-2222-2222-222222222222',
             'MYINVOICE_OIDC_ENTRA_CLIENT_SECRET' => 'synthetic-unused',
+            'MYINVOICE_OIDC_REQUIRED' => 'entra',
         ];
         $priorEnvironment = [];
         foreach ($environment as $key => $value) {
             $priorEnvironment[$key] = getenv($key);
             putenv($key . '=' . $value);
         }
-        $statement = $this->pdo->prepare('SELECT login_policy, login_sso_provider FROM supplier WHERE id=?');
-        $statement->execute([$this->supplier]);
-        $priorPolicy = $statement->fetch(\PDO::FETCH_ASSOC);
         try {
             self::assertNotNull(Bootstrap::buildContainer()->get(OidcProviderRegistry::class)->get('entra'),
-                'Entra se zapne jen s https app.url; bez ní povinné SSO firmy neplatí a test by nic neověřil.');
-            $this->pdo->prepare("UPDATE supplier SET login_policy='sso_required', login_sso_provider='entra' WHERE id=?")
-                ->execute([$this->supplier]);
+                'Entra se zapne jen s https app.url; bez ní vynucené SSO instalace neplatí a test by nic neověřil.');
             $this->pdo->prepare("UPDATE sessions SET auth_method='oidc:entra' WHERE id=?")
                 ->execute([$this->session['token']]);
             $consent = $this->request('GET', $canonical . '/oauth/authorize?' . http_build_query($this->params()), session: true);
@@ -166,8 +162,6 @@ final class ClientDomainMcpTest extends TestCase
             self::assertArrayHasKey('result', $result);
             self::assertFalse($result['result']['isError'] ?? false, json_encode($result));
         } finally {
-            $this->pdo->prepare('UPDATE supplier SET login_policy=?, login_sso_provider=? WHERE id=?')
-                ->execute([$priorPolicy['login_policy'], $priorPolicy['login_sso_provider'], $this->supplier]);
             foreach ($priorEnvironment as $key => $value) putenv($value === false ? $key : $key . '=' . $value);
         }
     }

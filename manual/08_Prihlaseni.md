@@ -61,10 +61,11 @@ Propojení účtu i ověření citlivé operace dokončete před zamčením apli
 Po ručním nebo automatickém zamčení je potřeba aplikaci odemknout a ověření
 zahájit znovu.
 
-Vyžaduje-li vaše firma přihlášení přes Microsoft, heslem ani přístupovým klíčem
-se nepřihlásíte. Aplikace vás pak na přihlašovací obrazovce na tlačítko
-Microsoftu upozorní. Vyžaduje-li přihlášení přes Microsoft celá instalace,
-přihlašovací obrazovka nabízí jen tlačítko Microsoft Entra ID.
+Vyžaduje-li instalace přihlášení přes Microsoft, přihlašovací obrazovka nabízí
+jen tlačítko Microsoft Entra ID. Heslo se v aplikaci pak nepoužívá vůbec: nezadáváte
+ho při přihlášení, nemění se a citlivé operace (například podání EPO, práci
+s certifikátem nebo vytvoření API tokenu) potvrdíte novým přihlášením u Microsoftu
+v okně, které se otevře nad rozdělanou prací.
 
 ### 8.3.4 Účtem Google, Apple nebo Seznam
 

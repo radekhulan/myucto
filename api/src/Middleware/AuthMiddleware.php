@@ -11,6 +11,7 @@ use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Security\UserRoleProfile;
 use MyInvoice\Service\Auth\ApiTokenService;
+use MyInvoice\Service\Auth\LoginPolicyService;
 use MyInvoice\Service\ApiRequestLogger;
 use MyInvoice\Service\Auth\SessionManager;
 use MyInvoice\Service\IpMatcher;
@@ -127,7 +128,19 @@ final class AuthMiddleware implements MiddlewareInterface
         private readonly ApiRequestLogger $apiRequestLog,
         private readonly ?LoggerInterface $logger = null,
         private readonly ?\MyInvoice\Service\Mcp\McpResourcePolicy $mcpResources = null,
+        private readonly ?LoginPolicyService $loginPolicy = null,
     ) {}
+
+    private function ssoRequired(Response $response): Response
+    {
+        return Json::error(
+            $response,
+            'sso_required',
+            'Přihlaste se přes poskytovatele identity organizace.',
+            401,
+            ['provider' => $this->loginPolicy?->requiredProvider()],
+        );
+    }
 
     public function process(Request $request, Handler $handler): Response
     {
@@ -258,6 +271,14 @@ final class AuthMiddleware implements MiddlewareInterface
             ];
             Locale::set((string) ($user['locale'] ?? 'cs'));
 
+            // Token vydaný ze sezení z hesla nebo passkey při vynucení přihlášení
+            // přes poskytovatele identity neplatí, jinak by vynucení obešel.
+            if ($this->loginPolicy !== null
+                && !$this->loginPolicy->authMethodAllowed(isset($tokenRow['issued_auth_method']) ? (string) $tokenRow['issued_auth_method'] : null)
+            ) {
+                return $this->withMcpChallenge($request, $this->ssoRequired($this->responseFactory->createResponse(401)));
+            }
+
             $this->apiTokens->touch($tokenRow['id'], $ip);
 
             $request = $request
@@ -310,6 +331,18 @@ final class AuthMiddleware implements MiddlewareInterface
             $user = $this->loadUser((int) $session['user_id']);
         }
 
+        $ssoRequired = false;
+        if ($session !== null && !$logoutTombstone && $this->loginPolicy !== null
+            && !$this->loginPolicy->authMethodAllowed(isset($session['auth_method']) ? (string) $session['auth_method'] : null)
+        ) {
+            // Instalace vynucuje přihlášení přes poskytovatele identity. Sezení
+            // z hesla, passkey nebo záložního kódu (typicky vydané před zapnutím
+            // vynucení) se zruší, uživatel se přihlásí znovu u poskytovatele.
+            $this->sessions->destroy($token);
+            $session = null;
+            $ssoRequired = true;
+        }
+
         if ($session !== null) {
             if (is_array($user) && $user['is_active'] === true) {
                 // SessionManager vrací účet v upstream tvaru (legacy `users.role`).
@@ -347,6 +380,9 @@ final class AuthMiddleware implements MiddlewareInterface
 
         if ($request->getAttribute(self::ATTR_USER) === null) {
             $response = $this->responseFactory->createResponse(401);
+            if ($ssoRequired) {
+                return $this->ssoRequired($response);
+            }
             // Relace ukončená novějším přihlášením nad limit licence dostane
             // vlastní kód, aby aplikace řekla, proč uživatele odhlásila.
             if ($token !== '' && $this->sessions->isSuperseded($token)) {

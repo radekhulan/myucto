@@ -64,9 +64,9 @@ final class SetupStatusAction
                 && $this->mfaPolicy->isMethodAllowed('passkey'),
             // Tlačítka přihlášení u poskytovatelů identity; bez zapnutého OIDC prázdné.
             'sso_providers' => $this->oidcProviders->isEnabled() ? $this->oidcProviders->publicList() : [],
-            // Poskytovatel povinný pro celou instalaci: přihlašovací stránka pak
-            // heslo nabízí jen technickému účtu správce instance.
-            'sso_required_provider' => $this->loginPolicy->globalRequiredProvider(),
+            // Poskytovatel povinný pro celou instalaci: aplikace pak heslo
+            // nenabízí nikde, ani technickému účtu správce instance.
+            'sso_required_provider' => $this->loginPolicy->requiredProvider(),
             'captcha'     => [
                 'provider'   => $this->config->get('captcha.provider', 'none'),
                 'site_key'   => $this->config->get('captcha.site_key', ''),

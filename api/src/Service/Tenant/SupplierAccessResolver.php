@@ -50,7 +50,6 @@ final class SupplierAccessResolver
     public function __construct(
         private readonly Connection $db,
         private readonly UserSupplierRepository $memberships,
-        private readonly \MyInvoice\Service\Auth\LoginPolicyService $loginPolicy,
         ?EntityCache $cache = null,
         private readonly ?DefaultSupplierService $defaultSupplier = null,
     ) {
@@ -61,20 +60,12 @@ final class SupplierAccessResolver
 
     public function resolve(Request $request): SupplierAccess
     {
-        $access = $this->resolveMembership($request);
-        if (!$access->denied && $access->supplierId > 0
-            && !$this->loginPolicy->requestAllowedForSupplier($request, $access->supplierId)
-        ) {
-            return new SupplierAccess($access->supplierId, true, $access->roleIdOverride,
-                $this->loginPolicy->requiredProviderForSupplier($access->supplierId));
-        }
-        return $access;
+        return $this->resolveMembership($request);
     }
 
     /**
      * Z firem, které volající už povolil podle členství, ponechá jen ty, kam požadavek
-     * pustí i jeho vazba (vlastní doména, token vázaný na firmu) a přihlašovací
-     * politika cílové firmy (povinné SSO).
+     * pustí i jeho vazba (vlastní doména, token vázaný na firmu).
      *
      * Členství se tu znovu nerozhoduje: každý volající má vlastní, otestovaný výklad
      * (globální správce, klient bez členství), a druhý výklad by ho tiše zúžil.
@@ -87,11 +78,10 @@ final class SupplierAccessResolver
         $supplierIds = array_values(array_unique(array_filter(array_map('intval', $supplierIds), static fn (int $id): bool => $id > 0)));
         if ($supplierIds === []) return [];
         $boundSupplierId = \MyInvoice\Security\RequestAuthorization::boundSupplierId($request);
-        $this->loginPolicy->preloadSupplierPolicies($supplierIds);
         $allowed = [];
         foreach ($supplierIds as $id) {
             if ($boundSupplierId !== null && $id !== $boundSupplierId) continue;
-            if ($this->loginPolicy->requestAllowedForSupplier($request, $id)) $allowed[] = $id;
+            $allowed[] = $id;
         }
         return $allowed;
     }
@@ -108,7 +98,6 @@ final class SupplierAccessResolver
             foreach ($missing as $id) $this->existenceMemo[$id] = false;
             foreach ($stmt->fetchAll(\PDO::FETCH_COLUMN) as $id) $this->existenceMemo[(int) $id] = true;
         }
-        $this->loginPolicy->preloadSupplierPolicies($supplierIds);
     }
 
     private function resolveMembership(Request $request): SupplierAccess
