@@ -619,11 +619,25 @@ final class UserAdminAction
 
     private function selectSql(): string
     {
+        // Při vynuceném poskytovateli identity správce vidí, jaký účet organizace
+        // je k uživateli napojený. Identita poskytovatele je u účtu nejvýš jedna
+        // (OidcLoginService), dotaz jde po indexu ix_external_identity_user.
+        $provider = $this->loginPolicy->requiredProvider();
+        $sso = $provider === null
+            ? 'NULL AS sso_identity_id, NULL AS sso_email, NULL AS sso_display_name, NULL AS sso_last_used_at'
+            : 'x.id AS sso_identity_id, x.email_at_link AS sso_email, x.display_name AS sso_display_name,
+               x.last_used_at AS sso_last_used_at';
+        $join = $provider === null
+            ? ''
+            : ' LEFT JOIN user_external_identities x ON x.id = (
+                    SELECT MIN(x2.id) FROM user_external_identities x2
+                     WHERE x2.user_id = u.id AND x2.provider = ' . $this->db->pdo()->quote($provider) . '
+               )';
         return 'SELECT u.id, u.email, u.name, u.role_id, u.locale, u.is_active, u.created_at, u.last_login_at,
                        u.totp_enabled,
                        (SELECT COUNT(*) FROM webauthn_credentials c WHERE c.user_id = u.id AND c.revoked_at IS NULL) AS passkey_count,
-                       r.name AS role_name, r.role_type, r.is_active AS role_active, r.system_key
-                  FROM users u JOIN roles r ON r.id = u.role_id';
+                       r.name AS role_name, r.role_type, r.is_active AS role_active, r.system_key, ' . $sso . '
+                  FROM users u JOIN roles r ON r.id = u.role_id' . $join;
     }
 
     private function normalize(array $row): array
@@ -636,6 +650,12 @@ final class UserAdminAction
             'is_superadmin' => $row['system_key'] === 'superadmin', 'locale' => (string) $row['locale'],
             'is_active' => (bool) $row['is_active'], 'created_at' => $row['created_at'], 'last_login_at' => $row['last_login_at'],
             'mfa' => ['totp' => (int) $row['totp_enabled'] === 1, 'passkeys' => (int) $row['passkey_count']],
+            'sso_identity' => $row['sso_identity_id'] === null ? null : [
+                'provider' => $this->loginPolicy->requiredProvider(),
+                'email' => $row['sso_email'] !== null ? (string) $row['sso_email'] : null,
+                'display_name' => $row['sso_display_name'] !== null ? (string) $row['sso_display_name'] : null,
+                'last_used_at' => $row['sso_last_used_at'],
+            ],
         ];
     }
 

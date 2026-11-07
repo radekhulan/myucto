@@ -134,6 +134,8 @@ export interface AdminUser {
   created_at: string
   last_login_at: string | null
   mfa?: { totp: boolean; passkeys: number }
+  /** Napojený účet organizace; jen při vynuceném přihlášení přes poskytovatele, jinak null. */
+  sso_identity?: { provider: string | null; email: string | null; display_name: string | null; last_used_at: string | null } | null
 }
 
 /** Epic F0 — membership uživatel ↔ firma (user_suppliers). role null = zdědit globální users.role. */

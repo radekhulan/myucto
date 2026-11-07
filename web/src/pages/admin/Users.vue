@@ -16,7 +16,7 @@ const toast = useToast()
 const auth = useAuthStore()
 // Identity cizích účtů spravuje jen superadmin (canManageExternalIdentities).
 const ssoEnabled = computed(() => auth.isSuperadmin && (auth.setupStatus?.sso_providers ?? []).length > 0)
-const { passwordAllowed } = useSsoEnforcement()
+const { passwordAllowed, enforced: ssoEnforced, localFactorsAllowed } = useSsoEnforcement()
 
 /**
  * Limit aktivních účtů je varování: správce může stále založit účet
@@ -302,7 +302,14 @@ onMounted(load)
     <div v-else class="bg-surface border border-neutral-200 rounded-lg overflow-hidden">
       <div v-for="user in users" :key="user.id" class="p-3 border-b border-neutral-100 flex flex-wrap items-center gap-3" :class="{ 'opacity-50': !user.is_active }">
         <div class="min-w-0 flex-1"><div class="font-medium truncate">{{ user.name }}</div><div class="text-xs text-neutral-500 font-mono truncate">{{ user.email }}</div></div>
-        <span v-if="user.mfa" class="flex flex-wrap gap-1" data-field="user-mfa">
+        <span v-if="ssoEnforced" class="flex flex-wrap gap-1" data-field="user-sso">
+          <span v-if="user.sso_identity" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700 max-w-[18rem] truncate"
+            :title="t('users.sso_linked_hint', { name: user.sso_identity.display_name ?? '-', last: (user.sso_identity.last_used_at ?? '-').replace('T', ' ').slice(0, 16) })">
+            {{ t('users.sso_linked', { account: user.sso_identity.email ?? user.sso_identity.display_name ?? '?' }) }}
+          </span>
+          <span v-else class="text-xs px-2 py-1 rounded bg-warning-50 text-warning-700" :title="t('users.sso_not_linked_hint')">{{ t('users.sso_not_linked') }}</span>
+        </span>
+        <span v-if="user.mfa && localFactorsAllowed" class="flex flex-wrap gap-1" data-field="user-mfa">
           <span v-if="user.mfa.totp" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700" :title="t('users.mfa_totp_hint')">{{ t('users.mfa_totp') }}</span>
           <span v-if="user.mfa.passkeys > 0" class="text-xs px-2 py-1 rounded bg-success-50 text-success-700" :title="t('users.mfa_passkeys_hint', { count: user.mfa.passkeys })">{{ t('users.mfa_passkeys', { count: user.mfa.passkeys }) }}</span>
           <span v-if="!user.mfa.totp && user.mfa.passkeys === 0" class="text-xs px-2 py-1 rounded bg-warning-50 text-warning-700" :title="t('users.mfa_none_hint')">{{ t('users.mfa_none') }}</span>

@@ -351,6 +351,37 @@ final class OidcLoginFlowTest extends TestCase
         self::assertSame(1, $this->identities->countForUser($this->userId));
     }
 
+    public function testIdentityLinkedToOneAccountCannotBeLinkedToAnother(): void
+    {
+        $oid = self::guid();
+        $this->loginRoundTrip($oid, invite: $this->invites->issue($this->userId, 'entra', null));
+        self::assertSame(1, $this->identities->countForUser($this->userId));
+
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO users (email, password_hash, name, role_id, is_active)
+             SELECT ?, ?, ?, id, 1 FROM roles WHERE system_key = ? LIMIT 1'
+        )->execute(['oidc-other-' . bin2hex(random_bytes(6)) . '@example.test', 'x', 'OIDC other', 'accountant']);
+        $other = (int) $pdo->lastInsertId();
+        try {
+            $session = $this->sessions->create($other, self::IP, self::UA, SessionAuthContext::basic('password'));
+            $binding = OidcFlowStore::newBinding();
+            $url = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LINK, $binding, '/profile', $other, $session['token']);
+            $this->idp->nextClaims = $this->idp->claims($oid, (string) $this->idp->lastNonce);
+
+            $this->expectOidcError(
+                OidcException::ALREADY_LINKED,
+                fn () => $this->complete(self::queryParam($url, 'state'), $binding, $session['token']),
+            );
+            self::assertSame(0, $this->identities->countForUser($other));
+            self::assertSame(1, $this->identities->countForUser($this->userId));
+        } finally {
+            $pdo->prepare('DELETE FROM sessions WHERE user_id = ?')->execute([$other]);
+            $pdo->prepare('DELETE FROM oidc_login_flows WHERE user_id = ?')->execute([$other]);
+            $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$other]);
+        }
+    }
+
     public function testStepUpCannotIssueProofForLockedSession(): void
     {
         $oid = self::guid();
