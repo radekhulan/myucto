@@ -15,7 +15,7 @@ const evidence = computed(() => (evidences.includes(props.settlement.evidence) ?
 const tone = computed(() => ({
   settled: 'bg-success-50 text-success-600',
   partially_settled: 'bg-warning-50 text-warning-700',
-  unreconciled: 'bg-warning-50 text-warning-700',
+  unreconciled: 'bg-danger-50 text-danger-600',
   ambiguous: 'bg-warning-50 text-warning-700',
   reversed: 'bg-neutral-100 text-neutral-700',
 }[status.value]))

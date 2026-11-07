@@ -15,18 +15,19 @@ final class MembershipBalanceRepository
     public function claimsForMember(int $supplier, int $member, int $afterId = 0, int $limit = 100): array
     {
         $limit = max(1, min(101, $limit));
+        $valid=self::receiptValiditySql();
         $q = $this->db->pdo()->prepare(
             "SELECT c.id claim_id,c.case_id,c.operation_id,c.member_id,c.client_id,c.amount_cents,
                     r.id reversal_claim_id,o.accounting_date,o.due_date,o.journal_entry_id,o.receivable_line_id,
-                    l.line_no,l.account_id,e.posted_at,e.reversed_by,cc.title_key,cc.period_from,cc.period_to
+                    l.line_no,l.account_id,e.posted_at,e.reversed_by,{$valid} receipt_valid,cc.title_key,cc.period_from,cc.period_to
                FROM nonprofit_membership_charge_claims c FORCE INDEX(ix_nmclaim_member)
                JOIN nonprofit_membership_charge_operations o
                  ON o.supplier_id=c.supplier_id AND o.id=c.operation_id AND o.operation='issue'
                JOIN nonprofit_membership_charge_cases cc
                  ON cc.supplier_id=c.supplier_id AND cc.id=c.case_id
-               JOIN journal_entry_lines l
+          LEFT JOIN journal_entry_lines l
                  ON l.supplier_id=o.supplier_id AND l.id=o.receivable_line_id AND l.entry_id=o.journal_entry_id
-               JOIN journal_entries e
+          LEFT JOIN journal_entries e
                  ON e.supplier_id=o.supplier_id AND e.id=o.journal_entry_id
           LEFT JOIN nonprofit_membership_charge_claims r
                  ON r.supplier_id=c.supplier_id AND r.original_claim_id=c.id AND r.kind='reversal'
@@ -40,18 +41,19 @@ final class MembershipBalanceRepository
 
     public function claim(int $supplier, int $claim): ?array
     {
+        $valid=self::receiptValiditySql();
         $q = $this->db->pdo()->prepare(
             "SELECT c.id claim_id,c.case_id,c.operation_id,c.member_id,c.client_id,c.amount_cents,
                     r.id reversal_claim_id,o.accounting_date,o.due_date,o.journal_entry_id,o.receivable_line_id,
-                    l.line_no,l.account_id,e.posted_at,e.reversed_by,cc.title_key,cc.period_from,cc.period_to
+                    l.line_no,l.account_id,e.posted_at,e.reversed_by,{$valid} receipt_valid,cc.title_key,cc.period_from,cc.period_to
                FROM nonprofit_membership_charge_claims c
                JOIN nonprofit_membership_charge_operations o
                  ON o.supplier_id=c.supplier_id AND o.id=c.operation_id AND o.operation='issue'
                JOIN nonprofit_membership_charge_cases cc
                  ON cc.supplier_id=c.supplier_id AND cc.id=c.case_id
-               JOIN journal_entry_lines l
+          LEFT JOIN journal_entry_lines l
                  ON l.supplier_id=o.supplier_id AND l.id=o.receivable_line_id AND l.entry_id=o.journal_entry_id
-               JOIN journal_entries e
+          LEFT JOIN journal_entries e
                  ON e.supplier_id=o.supplier_id AND e.id=o.journal_entry_id
           LEFT JOIN nonprofit_membership_charge_claims r
                  ON r.supplier_id=c.supplier_id AND r.original_claim_id=c.id AND r.kind='reversal'
@@ -93,28 +95,7 @@ final class MembershipBalanceRepository
             array_push($params, $claim, $pair, $claimsById[$claim]['account_id']);
         }
         $q = $this->db->pdo()->prepare(
-            'WITH requested AS (' . implode(' UNION ALL ', $requested) . ")
-             SELECT r.claim_id,r.pairing_id,COUNT(*) item_count,
-                    SUM(l.id IS NULL OR e.posted_at IS NULL OR e.reversed_by IS NOT NULL OR l.is_red_storno<>0
-                        OR l.currency_code IS NOT NULL OR l.amount_foreign IS NOT NULL OR l.fx_rate IS NOT NULL
-                        OR l.account_id<>r.account_id
-                        OR (mo.id IS NULL AND NOT ((e.source_type='bank' AND bs.id IS NOT NULL)
-                                                   OR (e.source_type='cash' AND cd.id IS NOT NULL)))) invalid_count,
-                    SUM(mo.id IS NOT NULL) membership_claim_count,
-                    COALESCE(SUM(CASE WHEN l.id IS NULL THEN 0 WHEN l.side='debit' THEN ROUND(l.signed_amount*100) ELSE -ROUND(l.signed_amount*100) END),0) net_cents
-               FROM requested r
-               JOIN journal_line_pairing_items i ON i.supplier_id=? AND i.pairing_id=r.pairing_id
-               JOIN journal_entries e ON e.supplier_id=i.supplier_id AND e.id=i.entry_id
-          LEFT JOIN journal_entry_lines l ON l.supplier_id=i.supplier_id AND l.entry_id=i.entry_id
-                    AND l.line_no=i.line_no AND l.account_id=i.account_id
-          LEFT JOIN nonprofit_membership_charge_operations mo
-                 ON mo.supplier_id=l.supplier_id AND mo.receivable_line_id=l.id AND mo.operation='issue'
-          LEFT JOIN bank_transactions bt ON e.source_type='bank' AND bt.id=e.source_id
-          LEFT JOIN bank_statements bs ON bs.id=bt.statement_id
-                    AND " . BankStatementOwnershipResolver::sqlForColumn('i.supplier_id') . "
-          LEFT JOIN cash_documents cd ON e.source_type='cash' AND cd.id=e.source_id AND cd.supplier_id=i.supplier_id
-              GROUP BY r.claim_id,r.pairing_id
-              ORDER BY r.claim_id"
+            'WITH requested AS (' . implode(' UNION ALL ', $requested) . ') ' . self::nativePairingTotalsSql()
         );
         $q->execute([...$params, $supplier]);
         $out = [];
@@ -124,6 +105,45 @@ final class MembershipBalanceRepository
                 'net_cents' => (int) $row['net_cents']];
         }
         return $out;
+    }
+
+    /** Stejná kontrola pohledávkového řádku v detailu i SQL přehledu; chybějící párování ji nenahrazuje. */
+    public static function receiptValiditySql(): string
+    {
+        return "CASE WHEN l.id IS NOT NULL AND e.source_type='nonprofit_membership' AND e.source_id=o.case_id
+          AND l.account_id=o.receivable_account_id AND l.side='debit'
+          AND l.is_red_storno=0 AND ROUND(l.signed_amount*100)=o.amount_cents AND c.amount_cents=o.amount_cents
+          AND l.currency_code IS NULL AND l.amount_foreign IS NULL AND l.fx_rate IS NULL THEN 1 ELSE 0 END";
+    }
+
+    /**
+     * Stejná agregace pro detail a seznam; requested má claim_id/pairing_id/account_id.
+     * Začínáme omezenými požadavky a čteme index skupiny a zápisu: volba pouhého
+     * supplier_id při malých či neaktuálních statistikách násobila sken celé firmy.
+     */
+    public static function nativePairingTotalsSql(): string
+    {
+        return "             SELECT STRAIGHT_JOIN r.claim_id,r.pairing_id,COUNT(*) item_count,
+                    SUM(l.id IS NULL OR e.posted_at IS NULL OR e.reversed_by IS NOT NULL OR l.is_red_storno<>0
+                        OR l.currency_code IS NOT NULL OR l.amount_foreign IS NOT NULL OR l.fx_rate IS NOT NULL
+                        OR l.account_id<>r.account_id
+                        OR (mo.id IS NULL AND NOT ((e.source_type='bank' AND bs.id IS NOT NULL)
+                                                   OR (e.source_type='cash' AND cd.id IS NOT NULL)))) invalid_count,
+                    SUM(mo.id IS NOT NULL) membership_claim_count,
+                    COALESCE(SUM(CASE WHEN l.id IS NULL THEN 0 WHEN l.side='debit' THEN ROUND(l.signed_amount*100) ELSE -ROUND(l.signed_amount*100) END),0) net_cents
+               FROM requested r
+               JOIN journal_line_pairing_items i FORCE INDEX(idx_jlpi_pairing) ON i.supplier_id=? AND i.pairing_id=r.pairing_id
+               JOIN journal_entries e ON e.supplier_id=i.supplier_id AND e.id=i.entry_id
+          LEFT JOIN journal_entry_lines l FORCE INDEX(idx_jel_supplier_entry) ON l.supplier_id=i.supplier_id AND l.entry_id=i.entry_id
+                    AND l.line_no=i.line_no AND l.account_id=i.account_id
+          LEFT JOIN nonprofit_membership_charge_operations mo
+                 ON mo.supplier_id=l.supplier_id AND mo.receivable_line_id=l.id AND mo.operation='issue'
+          LEFT JOIN bank_transactions bt ON e.source_type='bank' AND bt.id=e.source_id
+          LEFT JOIN bank_statements bs ON bs.id=bt.statement_id
+                    AND " . BankStatementOwnershipResolver::sqlForColumn('i.supplier_id') . "
+          LEFT JOIN cash_documents cd ON e.source_type='cash' AND cd.id=e.source_id AND cd.supplier_id=i.supplier_id
+              GROUP BY r.claim_id,r.pairing_id
+              ORDER BY r.claim_id";
     }
 
     public function reconciliationTotals(int $supplier, int $period): array
