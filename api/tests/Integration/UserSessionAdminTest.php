@@ -26,6 +26,7 @@ final class UserSessionAdminTest extends TestCase
     private array $admin;
     private array $technical;
     private array $staff;
+    private int $auditStart = 0;
 
     protected function setUp(): void
     {
@@ -33,6 +34,7 @@ final class UserSessionAdminTest extends TestCase
         $this->db = new Connection($this->config);
         self::assertStringEndsWith('_test', (string) $this->db->pdo()->query('SELECT DATABASE()')->fetchColumn());
         $this->db->pdo()->exec("SET SESSION sql_mode = 'STRICT_ALL_TABLES,NO_ENGINE_SUBSTITUTION'");
+        $this->auditStart = (int) $this->db->pdo()->query('SELECT COALESCE(MAX(id), 0) FROM activity_log')->fetchColumn();
         $this->manager = new SessionManager($this->db, $this->config, new DatabaseSecurityClock());
         $this->admin = $this->account('superadmin');
         $this->technical = $this->account('instance_admin');
@@ -49,6 +51,8 @@ final class UserSessionAdminTest extends TestCase
             $pdo->prepare('DELETE FROM activity_log WHERE user_id = ?')->execute([$id]);
             $pdo->prepare('DELETE FROM users WHERE id = ?')->execute([$id]);
         }
+        $pdo->prepare("DELETE FROM activity_log WHERE id > ? AND action = 'auth.sessions_revoked' AND payload LIKE '%cli:user-sessions%'")
+            ->execute([$this->auditStart]);
         $this->db->close();
     }
 
@@ -310,6 +314,93 @@ final class UserSessionAdminTest extends TestCase
         $this->manager->destroy($target['token']);
         self::assertNull($this->manager->load($rotated['token']));
         self::assertNotNull($this->manager->loadTombstoneForLogout($this->staff['token'])['revoked_at']);
+    }
+
+    private function cli(?\MyInvoice\Service\ActivityLogger $audit = null): \MyInvoice\Service\Auth\UserSessionCli
+    {
+        return new \MyInvoice\Service\Auth\UserSessionCli(new UserSessionRepository($this->db), $this->manager,
+            $audit ?? new \MyInvoice\Service\ActivityLogger($this->db));
+    }
+
+    private function cliRun(array $args): array
+    {
+        return $this->cli()->run(\MyInvoice\Service\Auth\UserSessionCli::parse($args));
+    }
+
+    public function testCliListIncludesTechnicalAccountsWithoutLeakingTokens(): void
+    {
+        $page = $this->cliRun(['list']);
+        self::assertContains($this->technical['family'], array_column($page['data'], 'id'));
+        $json = json_encode($page, JSON_THROW_ON_ERROR);
+        foreach ([$this->admin, $this->technical, $this->staff] as $session) {
+            self::assertStringNotContainsString($session['token'], $json);
+            self::assertStringNotContainsString($session['csrf_token'], $json);
+        }
+        $stmt = $this->db->pdo()->prepare('SELECT email FROM users WHERE id = ?');
+        $stmt->execute([$this->staff['user_id']]);
+        $email = $stmt->fetchColumn();
+        self::assertSame([$this->staff['family']], array_column($this->cliRun(['list', '--email=' . $email])['data'], 'id'));
+        $preview = $this->cliRun(['terminate', '--email=' . $email]);
+        self::assertFalse($preview['executed']);
+        self::assertSame(1, $preview['matched']);
+        self::assertNotNull($this->manager->load($this->staff['token']));
+        $done = $this->cliRun(['terminate', '--email=' . $email, '--yes']);
+        self::assertSame(1, $done['terminated']);
+        self::assertNotNull($this->manager->load($this->admin['token']));
+    }
+
+    public function testCliAllIsPreviewByDefaultAndTerminatesAcrossPagesIncludingAdmins(): void
+    {
+        $this->db->pdo()->prepare('UPDATE sessions SET session_family_id = UNHEX(?) WHERE id = ?')
+            ->execute([str_repeat('0', 64), $this->staff['token']]);
+        for ($i = 0; $i < 55; $i++) $this->session($this->staff['user_id']);
+        $preview = $this->cliRun(['terminate', '--all']);
+        self::assertGreaterThanOrEqual(58, $preview['matched']);
+        self::assertFalse($preview['executed']);
+        self::assertSame($this->auditStart, (int) $this->db->pdo()->query('SELECT COALESCE(MAX(id), 0) FROM activity_log')->fetchColumn());
+        self::assertNotNull($this->manager->load($this->technical['token']));
+        $page = $this->cliRun(['list']);
+        self::assertCount(50, $page['data']);
+        self::assertNotNull($page['next_cursor']);
+        $next = $this->cliRun(['list', '--cursor=' . $page['next_cursor']]);
+        self::assertSame([], array_intersect(array_column($page['data'], 'id'), array_column($next['data'], 'id')));
+        $done = $this->cliRun(['terminate', '--all', '--yes']);
+        self::assertGreaterThanOrEqual(58, $done['terminated']);
+        foreach ([$this->admin, $this->technical, $this->staff] as $session) self::assertNull($this->manager->load($session['token']));
+        self::assertSame([], $this->cliRun(['list'])['data']);
+        self::assertSame(0, $this->cliRun(['terminate', '--all', '--yes'])['terminated']);
+        $rows = $this->db->pdo()->query("SELECT payload FROM activity_log WHERE id > " . $this->auditStart . " AND action = 'auth.sessions_revoked' AND payload LIKE '%cli:user-sessions%'")->fetchAll(\PDO::FETCH_COLUMN);
+        self::assertNotEmpty($rows);
+        $payload = json_decode($rows[array_key_last($rows)], true, flags: JSON_THROW_ON_ERROR);
+        self::assertArrayHasKey('operator_os_user', $payload);
+        self::assertArrayHasKey('operator_host', $payload);
+    }
+
+    public function testCliSelectedFamilyIsAuditedAndAuditFailureRollsBack(): void
+    {
+        $rotated = bin2hex(random_bytes(32));
+        $this->db->pdo()->prepare('INSERT INTO sessions
+            (id, user_id, csrf_token, ip, user_agent, created_at, last_seen, expires_at,
+             auth_method, assurance_level, last_user_activity_at, session_family_id, generation)
+            SELECT ?, user_id, csrf_token, ip, user_agent, created_at, last_seen, expires_at,
+                   auth_method, assurance_level, last_user_activity_at, session_family_id, generation + 1
+              FROM sessions WHERE id = ?')->execute([$rotated, $this->technical['token']]);
+        $this->db->pdo()->prepare('UPDATE sessions SET replaced_at = UTC_TIMESTAMP(6) WHERE id = ?')->execute([$this->technical['token']]);
+        $audit = new class($this->db) extends \MyInvoice\Service\ActivityLogger {
+            public function log(string $action, ?int $userId = null, ?string $entityType = null, ?int $entityId = null,
+                ?array $payload = null, ?string $ip = null, ?string $userAgent = null, ?int $supplierId = null): void
+            { throw new \RuntimeException('Synthetic audit failure'); }
+        };
+        $options = \MyInvoice\Service\Auth\UserSessionCli::parse(['terminate', '--id=' . $this->technical['family'], '--yes']);
+        $result = $this->cli($audit)->run($options);
+        self::assertArrayHasKey('error', $result);
+        self::assertSame(0, $result['terminated']);
+        self::assertNotNull($this->manager->load($rotated));
+        self::assertSame(1, $this->cli()->run($options)['terminated']);
+        self::assertNull($this->manager->load($rotated));
+        self::assertNotNull($this->manager->loadTombstoneForLogout($this->technical['token'])['revoked_at']);
+        self::assertNull($this->manager->load($this->technical['token']));
+        self::assertNotNull($this->manager->load($this->staff['token']));
     }
 
     private function account(string $role): array
