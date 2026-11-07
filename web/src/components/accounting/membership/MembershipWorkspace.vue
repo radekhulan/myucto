@@ -11,12 +11,13 @@ import { membershipApi, type MemberRow } from '@/api/nonprofitMembership'
 import type { Client } from '@/api/clients'
 import { formatDate } from '@/composables/useFormat'
 import { appIsoDate } from '@/utils/date'
-import { errorBox, errorMessage, memberStatusBadge } from './membershipFormat'
+import { errorBox, membershipError, memberStatusBadge } from './membershipFormat'
 import MembershipMemberDetail from './MembershipMemberDetail.vue'
 import MembershipReconciliation from './MembershipReconciliation.vue'
+import MembershipRates from './MembershipRates.vue'
 
-const props = defineProps<{ supplier: number; canManage: boolean }>()
-const { t, tm, rt } = useI18n()
+const props = defineProps<{ supplier: number; canManage: boolean; canManageRates?: boolean }>()
+const { t, te, tm, rt } = useI18n()
 
 const members = ref<MemberRow[]>([])
 const nextAfter = ref<number | null>(null)
@@ -71,7 +72,7 @@ async function load(append = false) {
     members.value = append ? [...members.value, ...page.items] : page.items
     nextAfter.value = page.next_after_id
   } catch (e) {
-    if (alive && ticket === generation) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && ticket === generation) error.value = membershipError({t, te}, e)
   } finally {
     if (alive && ticket === generation) loading.value = false
   }
@@ -116,7 +117,7 @@ async function create() {
     clientId.value = null; clientLabel.value = ''; memberNumber.value = ''
     await load()
   } catch (e) {
-    if (alive && ticket === createTicket) error.value = errorMessage(e) || t('nonprofitMembership.error')
+    if (alive && ticket === createTicket) error.value = membershipError({t, te}, e)
   } finally {
     if (alive && ticket === createTicket) creating.value = false
   }
@@ -153,6 +154,11 @@ const createActions = computed<ActionItem[]>(() => [
     <p v-if="error" role="alert" :class="errorBox" data-section="workspace-error">{{ error }}</p>
     <p v-if="notice" role="status" class="text-sm text-success-600" data-section="workspace-notice">{{ notice }}</p>
     <ActionBar :actions="actions" />
+
+    <details class="rounded-lg border bg-surface p-4" data-section="rates-management">
+      <summary class="cursor-pointer font-semibold">{{ t('nonprofitMembership.ratesTitle') }}</summary>
+      <MembershipRates :key="supplier" :supplier="supplier" :can-manage="!!canManageRates" />
+    </details>
 
     <section v-if="canManage" class="space-y-3 rounded-lg border bg-surface p-4" data-section="create-member">
       <h2 class="font-semibold">{{ t('nonprofitMembership.createTitle') }}</h2>

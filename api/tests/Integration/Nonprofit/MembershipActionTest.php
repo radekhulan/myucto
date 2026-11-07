@@ -22,6 +22,7 @@ use MyInvoice\Service\Nonprofit\Membership\MembershipPublicCatalog;
 use MyInvoice\Service\Tax\Nonprofit\NonprofitLegalProfileService;
 use PDO;
 use PHPUnit\Framework\TestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Slim\Psr7\Factory\ServerRequestFactory;
 use Slim\Psr7\Response;
 
@@ -237,6 +238,68 @@ final class MembershipActionTest extends TestCase
         return (int) $member['id'];
     }
 
+    public function testRateCatalogUsesSessionAndExistingAccountingPermissions(): void
+    {
+        [$status] = $this->call('GET', 'rates', null, [], ['accounting' => 1], 'bearer');
+        self::assertSame(403, $status);
+        [$status, $empty] = $this->call('GET', 'rates', null, [], ['accounting' => 1]);
+        self::assertSame(200, $status);
+        self::assertSame([], $empty['items']);
+        $input = ['name' => 'Synthetic standard', 'amount' => '500.00', 'receivable_account' => '315.100', 'revenue_account' => '684.100',
+            'title_key' => 'synthetic-standard', 'period_months' => 12, 'title_reference' => 'Synthetic resolution', 'evidence' => 'Synthetic evidence',
+            'classification' => $this->classification, 'is_active' => true, 'row_version' => 0];
+        [$status] = $this->call('POST', 'createRate', $input, [], ['accounting' => 1]);
+        self::assertSame(403, $status);
+        [$status] = $this->call('POST', 'createRate', $input, [], ['accounting.journal.post' => 2], 'bearer');
+        self::assertSame(403, $status);
+        [$status, $rate] = $this->call('POST', 'createRate', $input);
+        self::assertSame(201, $status);
+        [$status, $detail] = $this->call('GET', 'rate', null, ['id' => (string) $rate['id']]);
+        self::assertSame(200, $status);
+        self::assertSame($rate['id'], $detail['id']);
+        [$status] = $this->call('GET', 'rate', null, ['id' => (string) $rate['id']], ['accounting' => 1], 'bearer');
+        self::assertSame(403, $status);
+        $input['row_version'] = 1; $input['is_active'] = false;
+        [$status] = $this->call('PUT', 'updateRate', $input, ['id' => (string) $rate['id']]);
+        self::assertSame(200, $status);
+        [$status, $page] = $this->call('GET', 'rates', null);
+        self::assertSame(200, $status);
+        self::assertSame([], $page['items']);
+        $input['row_version'] = 2; $input['amount'] = '-1';
+        [$status] = $this->call('PUT', 'updateRate', $input, ['id' => (string) $rate['id']]);
+        self::assertSame(422, $status);
+    }
+
+    #[DataProvider('rateOverflowPaths')]
+    public function testOverflowingRateAmountIsValidationErrorWithoutChangingData(bool $update): void
+    {
+        $input = ['name' => 'Synthetic standard', 'amount' => '500.00', 'receivable_account' => '315.100', 'revenue_account' => '684.100',
+            'title_key' => 'synthetic-standard', 'period_months' => 12, 'title_reference' => 'Synthetic resolution', 'evidence' => 'Synthetic evidence',
+            'classification' => $this->classification, 'is_active' => true, 'row_version' => 0];
+        $args = [];
+        if ($update) {
+            [$status, $rate] = $this->call('POST', 'createRate', $input);
+            self::assertSame(201, $status);
+            $args = ['id' => (string) $rate['id']];
+            $input['row_version'] = 1;
+        }
+        $q = $this->pdo->prepare('SELECT * FROM nonprofit_membership_rates WHERE supplier_id=? ORDER BY id');
+        $q->execute([$this->supplier]);
+        $before = $q->fetchAll(PDO::FETCH_ASSOC);
+        $input['amount'] = '100000000000000000000';
+        [$status, $result] = $this->call($update ? 'PUT' : 'POST', $update ? 'updateRate' : 'createRate', $input, $args);
+        self::assertSame(422, $status);
+        self::assertSame('nonprofit_membership_rate_invalid', $result['error']['code']);
+        $q->execute([$this->supplier]);
+        self::assertSame($before, $q->fetchAll(PDO::FETCH_ASSOC));
+    }
+
+    public static function rateOverflowPaths(): iterable
+    {
+        yield 'založení' => [false];
+        yield 'úprava' => [true];
+    }
+
     private function charge(int $member, string $from, string $to, string $accountingDate, string $amount): array
     {
         return ['member_id' => $member, 'title_key' => 'dues-' . $from, 'period_from' => $from, 'period_to' => $to,
@@ -262,9 +325,19 @@ final class MembershipActionTest extends TestCase
         self::assertSame(0, (int) $this->pdo->query('SELECT COUNT(*) FROM nonprofit_members WHERE supplier_id IN (' . $this->supplier . ',' . $foreignSupplier . ')')->fetchColumn());
     }
 
+    public function testRateManagementUsesTemplatePermissionInsteadOfPostingPermission(): void
+    {
+        [$status]=$this->call('POST','createRate',[],[],['accounting.journal.post'=>2]);
+        self::assertSame(403,$status);
+        [$status]=$this->call('POST','createRate',[],[],['accounting.templates'=>2]);
+        self::assertSame(422,$status,'Oprávněný uživatel musí projít až k validaci vstupu.');
+        [$status]=$this->call('POST','createRate',[],[],['accounting.templates'=>2],'bearer');
+        self::assertSame(403,$status);
+    }
+
     private function call(string $httpMethod, string $method, ?array $body, array $args = [], ?array $permissions = null, string $auth = 'session'): array
     {
-        $permissions ??= ['accounting' => 1, 'accounting.journal.post' => 2];
+        $permissions ??= ['accounting' => 1, 'accounting.journal.post' => 2, 'accounting.templates' => 2];
         $request = (new ServerRequestFactory())->createServerRequest($httpMethod, '/api/accounting/nonprofit-membership')
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, $this->supplier)
             ->withAttribute(AuthMiddleware::ATTR_METHOD, $auth)

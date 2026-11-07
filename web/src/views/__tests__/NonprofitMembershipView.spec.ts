@@ -4,10 +4,10 @@ import View from '../NonprofitMembershipView.vue'
 
 const auth = vi.hoisted(() => ({ user: { id: 1 } as { id: number } | null, csrfToken: 'synthetic-csrf', can: vi.fn() }))
 const supplier = vi.hoisted(() => ({ currentSupplierId: 5 as number | null }))
-vi.mock('@/components/accounting/membership/MembershipWorkspace.vue', () => ({ default: { name: 'MembershipWorkspace', props: ['supplier', 'canManage'], template: '<div />' } }))
+vi.mock('@/components/accounting/membership/MembershipWorkspace.vue', () => ({ default: { name: 'MembershipWorkspace', props: ['supplier', 'canManage', 'canManageRates'], template: '<div />' } }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => auth }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => supplier }))
-const Workspace = { props: ['supplier', 'canManage'], template: '<div />' }
+const Workspace = { props: ['supplier', 'canManage', 'canManageRates'], template: '<div />' }
 
 beforeEach(() => {
   auth.user = { id: 1 }
@@ -43,5 +43,12 @@ it('mounts nothing without a current supplier and passes the current supplier ot
   supplier.currentSupplierId = 5
   const w = mount(View, { global: { stubs: { MembershipWorkspace: Workspace } } })
   expect(w.findComponent(Workspace).props('supplier')).toBe(5)
+  w.unmount()
+})
+
+it('separates posting permission from template management permission', () => {
+  auth.can.mockImplementation((key: string) => key === 'accounting.templates')
+  const w = mount(View, {global:{stubs:{MembershipWorkspace: Workspace}}})
+  expect(w.findComponent(Workspace).props()).toMatchObject({canManage:false,canManageRates:true})
   w.unmount()
 })

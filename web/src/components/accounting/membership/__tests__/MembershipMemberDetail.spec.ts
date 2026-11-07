@@ -217,7 +217,7 @@ describe('Membership member detail', () => {
     api.member.mockRejectedValue({ response: { status: 404, data: { error: { code: 'nonprofit_membership_member_not_found', message: 'Synthetic missing member' } } } })
     const w = mounted()
     await flushPromises()
-    expect(w.get('[data-section="detail-error"]').text()).toContain('Synthetic missing member')
+    expect(w.get('[data-section="detail-error"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_not_found)
     expect(w.findAll('[data-section="claim-row"]')).toHaveLength(0)
     w.unmount()
   })

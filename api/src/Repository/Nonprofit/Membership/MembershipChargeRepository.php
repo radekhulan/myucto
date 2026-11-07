@@ -29,8 +29,8 @@ final class MembershipChargeRepository
 
     public function insertCommand(int $supplier, string $key, array $request, string $hash, int $actor): array
     {
-        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_commands(supplier_id,idempotency_key,request_json,request_hash,created_by,created_at) VALUES(?,?,?,?,?,UTC_TIMESTAMP(6))');
-        $q->execute([$supplier, $key, NonprofitTaxRules::canonicalJson($request), $hash, $actor]);
+        $q = $this->db->pdo()->prepare('INSERT INTO nonprofit_membership_charge_commands(supplier_id,idempotency_key,request_json,request_hash,created_by,rate_id,created_at) VALUES(?,?,?,?,?,?,UTC_TIMESTAMP(6))');
+        $q->execute([$supplier, $key, NonprofitTaxRules::canonicalJson($request), $hash, $actor, $request['request']['rate_id'] ?? null]);
         return $this->command($supplier, $key, true) ?? throw new \LogicException('Inserted membership command disappeared.');
     }
 

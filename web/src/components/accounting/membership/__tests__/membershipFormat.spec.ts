@@ -1,3 +1,4 @@
+import { membershipError } from '../membershipFormat'
 import { describe, expect, it } from 'vitest'
 import type { MemberRevision } from '@/api/nonprofitMembership'
 import { activeThroughout, amountDecimal, isIsoDate, lastRevision, revisionAt } from '../membershipFormat'
@@ -64,5 +65,19 @@ describe('membership active throughout the dues period', () => {
   })
   it('accepts two consecutive active revisions inside the period', () => {
     expect(activeThroughout([revision(1, 1, '2020-01-01', 'active'), revision(2, 2, '2026-05-01', 'active')], from, to)).toBe(true)
+  })
+})
+
+describe('lokalizace serverových chyb', () => {
+  it('uses a translated code and a safe fallback instead of server text', () => {
+    const messages: Record<string,string> = {'nonprofitMembership.serverErrors.known':'Translated error','nonprofitMembership.error':'Generic error'}
+    const i18n = {t: (key: string) => messages[key]!, te: (key: string) => key in messages}
+    const response = (code: string) => ({response:{data:{error:{code,message:'Česká serverová chyba'}}}})
+    expect(membershipError(i18n,response('known'))).toBe('Translated error')
+    expect(membershipError(i18n,response('unknown'))).toBe('Generic error')
+    expect(membershipError(i18n,'known')).toBe('Translated error')
+    const unknownValidation = {response:{status:422,data:{error:{code:'new_validation',message:'Česká serverová chyba'}}}}
+    expect(membershipError(i18n,unknownValidation)).toBe('Generic error')
+    expect(membershipError(i18n,{response:{status:500,data:{error:{code:'unknown',message:'Internal SQL detail'}}}})).toBe('Generic error')
   })
 })

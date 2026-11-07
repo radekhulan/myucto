@@ -20,6 +20,60 @@ final class MembershipCloneScrubber
 {
     private const BATCH = MembershipCloneCapture::BATCH_SIZE;
 
+    /**
+     * Přepíše ID uvnitř JSON sazeb při obnově archivu do nové firmy podle mapy hodnot.
+     * Volající vlastní transakci celého klonu; neúplná mapa nesmí zanechat částečný klon.
+     * @param array<int,int> $valueIds původní ID => cílové ID
+     */
+    public static function remapRateClassifications(Connection $db, int $supplier, array $valueIds): void
+    {
+        $pdo = $db->pdo();
+        if (!$pdo->inTransaction()) throw new \LogicException('Přemapování sazeb vyžaduje transakci klonu.');
+        $after = 0;
+        do {
+            $q = $pdo->prepare('SELECT id,classification_json FROM nonprofit_membership_rates WHERE supplier_id=? AND id>? ORDER BY id LIMIT ' . self::BATCH . ' FOR UPDATE');
+            $q->execute([$supplier, $after]);
+            $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+            $updates = [];
+            $originalJson = [];
+            $requested = [];
+            foreach ($rows as $row) {
+                $after = (int) $row['id'];
+                if ($row['classification_json'] === null) continue;
+                $selection = json_decode($row['classification_json'], true, flags: JSON_THROW_ON_ERROR);
+                $fields = array_map(static fn (string $axis): string => $axis . '_value_id', MembershipClassification::AXES);
+                if (!is_array($selection) || count($selection) !== 3 || array_diff(array_keys($selection), $fields) !== []) {
+                    throw new \LogicException('Klasifikace klonované sazby má neplatný tvar.');
+                }
+                foreach (MembershipClassification::AXES as $axis) {
+                    $field = $axis . '_value_id';
+                    $old = $selection[$field];
+                    $new = is_int($old) ? ($valueIds[$old] ?? null) : null;
+                    if (!is_int($new) || $new <= 0) throw new \LogicException('Chybí cílová hodnota dimenze sazby.');
+                    $selection[$field] = $new;
+                    if (isset($requested[$new]) && $requested[$new] !== $axis) throw new \LogicException('Cílová dimenze sazby je použita pro různé osy.');
+                    $requested[$new] = $axis;
+                }
+                if (count(array_unique($selection)) !== 3) throw new \LogicException('Cílové osy sazby musí mít různé hodnoty.');
+                $originalJson[$after] = $row['classification_json'];
+                $updates[] = ['id' => $after, 'classification_json' => NonprofitTaxRules::canonicalJson($selection)];
+            }
+            if ($requested !== []) {
+                $marks = implode(',', array_fill(0, count($requested), '?'));
+                // Historické neaktivní dimenze se také klonují, jejich stav se zde nemění.
+                $q = $pdo->prepare("SELECT v.id,t.system_key FROM dimension_values v JOIN dimension_types t ON t.supplier_id=v.supplier_id AND t.id=v.type_id WHERE v.supplier_id=? AND v.id IN ({$marks})");
+                $q->execute([$supplier, ...array_keys($requested)]);
+                $found = $q->fetchAll(PDO::FETCH_KEY_PAIR);
+                foreach ($requested as $id => $axis) {
+                    if (($found[$id] ?? null) !== $axis) throw new \LogicException('Cílová dimenze sazby nepatří firmě nebo správné ose.');
+                }
+                // Identická mapa je běžná při klonu celé databáze a nemá vyvolat zápis.
+                $changed = array_values(array_filter($updates, static fn (array $update): bool => $originalJson[$update['id']] !== $update['classification_json']));
+                self::bulkUpdate($pdo, 'nonprofit_membership_rates', $supplier, $changed, ['classification_json']);
+            }
+        } while (count($rows) === self::BATCH);
+    }
+
     public static function capture(Connection $db): MembershipCloneCapture
     {
         self::assertClonePhase($db);

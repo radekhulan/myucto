@@ -1,5 +1,6 @@
+import { useI18n } from 'vue-i18n'
 import { computed, onBeforeUnmount, ref, shallowRef, toRaw } from 'vue'
-import { errorCode, errorMessage, errorStatus } from './membershipFormat'
+import { errorCode, membershipError, errorStatus } from './membershipFormat'
 
 /** Stavy, u kterých server požadavek jednoznačně odmítl; cokoli jiného je nejistý výsledek. */
 const DEFINITE = [400, 401, 403, 404, 409, 422]
@@ -21,6 +22,7 @@ interface Options<P> {
  * rozpracované nebo nejisté. Po nejistém výsledku zůstává stejný požadavek znovu odeslatelný.
  */
 export function useGuardedCommit<P extends object, R = unknown>(options: Options<P>) {
+  const { t, te } = useI18n()
   const review = shallowRef<R | null>(null)
   const frozen = shallowRef<FrozenCommit<P> | null>(null)
   const acknowledged = ref(false)
@@ -74,7 +76,7 @@ export function useGuardedCommit<P extends object, R = unknown>(options: Options
   }
 
   function fail(e: unknown) {
-    error.value = errorMessage(e)
+    error.value = membershipError({t, te}, e)
     errorKind.value = errorCode(e) || 'unknown'
   }
 
