@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace MyInvoice\Action\Nonprofit;
 
+use MyInvoice\Repository\Nonprofit\Membership\MembershipListRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipRateRepository;
 use MyInvoice\Repository\Nonprofit\Membership\MembershipBatchRepository;
+use MyInvoice\Service\Nonprofit\Membership\MembershipListFilter;
 use MyInvoice\Service\Nonprofit\Membership\MembershipBatchService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipRateService;
 use MyInvoice\Action\Accounting\AccountingActionSupport;
@@ -22,6 +24,7 @@ use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipChargeService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipException;
+use MyInvoice\Service\Nonprofit\Membership\MembershipChargeRequest;
 use MyInvoice\Service\Nonprofit\Membership\MembershipMemberService;
 use MyInvoice\Service\Nonprofit\Membership\MembershipReconciliationService;
 use Psr\Http\Message\ResponseInterface as Response;
@@ -56,8 +59,11 @@ final class MembershipAction
             $query = $request->getQueryParams();
             $after = $this->queryInteger($query['after_id'] ?? 0, 'after_id', 0);
             $limit = $this->queryInteger($query['limit'] ?? 100, 'limit', 1, 100);
-            $items = $this->members->page($supplier, $after, $limit);
-            return ['items' => $items, 'next_after_id' => count($items) === $limit ? $items[array_key_last($items)]['id'] : null];
+            $filter = MembershipListFilter::parse($query);
+            $items = (new MembershipListRepository($this->db))->page($supplier, $after, $limit + 1, $filter);
+            $more = count($items) > $limit;
+            if ($more) array_pop($items);
+            return ['items' => $items, 'next_after_id' => $more ? $items[array_key_last($items)]['id'] : null];
         });
     }
 
@@ -75,6 +81,32 @@ final class MembershipAction
         });
     }
 
+    public function titles(Request $request, Response $response): Response
+    {
+        return $this->handle($request,$response,false,function(int $supplier) use($request): array {
+            $q=$request->getQueryParams();
+            $year=isset($q['year']) && $q['year']!=='' ? $this->queryInteger($q['year'],'year',1900,9998) : null;
+            $after=$q['after_title_key']??'';
+            if(!is_string($after)) throw new MembershipException('nonprofit_membership_list_filter_invalid','Neplatné označení příspěvku.',422);
+            if($after!=='') $after=MembershipChargeRequest::key($after,'titulu');
+            $limit=$this->queryInteger($q['limit']??100,'limit',1,100);
+            $items=(new MembershipListRepository($this->db))->titles($supplier,$year,$after,$limit+1);
+            $more=count($items)>$limit; if($more) array_pop($items);
+            return ['items'=>$items,'next_after_title_key'=>$more ? $items[array_key_last($items)] : null];
+        });
+    }
+
+    public function selectionCheck(Request $request, Response $response): Response
+    {
+        return $this->handle($request,$response,false,function(int $supplier) use($request): array {
+            $body=$this->body($request,['member_ids','filters']);
+            if(!is_array($body['member_ids']) || !array_is_list($body['member_ids']) || count($body['member_ids'])>500 || !is_array($body['filters'])) {
+                throw new MembershipException('nonprofit_membership_list_filter_invalid','Neplatný výběr členů.',422);
+            }
+            foreach($body['member_ids'] as $id) if(!is_int($id)||$id<=0) throw new MembershipException('nonprofit_membership_list_filter_invalid','Neplatný výběr členů.',422);
+            return ['member_ids'=>(new MembershipListRepository($this->db))->matchingSelection($supplier,array_values(array_unique($body['member_ids'])),MembershipListFilter::parse($body['filters']))];
+        });
+    }
 
     public function batches(Request $request, Response $response): Response
     {

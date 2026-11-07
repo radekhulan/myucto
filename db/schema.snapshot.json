@@ -1167,7 +1167,8 @@
         "2261_payroll_jmhz_holiday_time_off.sql",
         "2262_drop_supplier_login_policy.sql",
         "2263_membership_rates.sql",
-        "2264_membership_batches.sql"
+        "2264_membership_batches.sql",
+        "2265_membership_list_indexes.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -9149,6 +9150,7 @@
                 "created_by": "BTREE (created_by)",
                 "fk_nmcc_head": "BTREE (supplier_id, id, head_operation_id)",
                 "ix_nmcc_deferral": "BTREE (supplier_id, period_to, period_from, id)",
+                "ix_nmcc_list_title": "BTREE (supplier_id, title_key, period_to, period_from, member_id)",
                 "ix_nmcc_overlap": "BTREE (supplier_id, member_id, title_key, period_from, period_to, id)",
                 "uq_nmcc_identity": "UNIQUE BTREE (supplier_id, member_id, title_key, period_from, period_to)",
                 "uq_nmcc_tenant": "UNIQUE BTREE (supplier_id, id)"

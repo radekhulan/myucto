@@ -72,11 +72,11 @@ final class MembershipReconciliationService
         if ($claim['reversal_claim_id'] !== null) {
             return ['status' => 'reversed', 'paid_cents' => null, 'open_cents' => 0, 'pairing_id' => null, 'evidence' => 'membership_reversal_claim'];
         }
-        if ($claim['posted_at'] === null || $claim['reversed_by'] !== null) {
+        if ($claim['posted_at'] === null || $claim['reversed_by'] !== null || !$claim['account_id'] || empty($claim['receipt_valid'])) {
             return ['status' => 'ambiguous', 'paid_cents' => null, 'open_cents' => null, 'pairing_id' => null, 'evidence' => 'journal_receipt_mismatch'];
         }
         if ($evidence === null) {
-            return ['status' => 'unreconciled', 'paid_cents' => null, 'open_cents' => null, 'pairing_id' => null, 'evidence' => 'no_native_pairing'];
+            return ['status' => 'unreconciled', 'paid_cents' => 0, 'open_cents' => $claim['amount_cents'], 'pairing_id' => null, 'evidence' => 'no_native_pairing'];
         }
         $net = $evidence['net_cents'];
         if ($evidence['invalid_count'] !== 0 || $evidence['membership_claim_count'] !== 1 || $net < 0 || $net > $claim['amount_cents']) {
@@ -89,5 +89,17 @@ final class MembershipReconciliationService
             'pairing_id' => $evidence['pairing_id'],
             'evidence' => 'journal_line_pairing_bank_or_cash',
         ];
+    }
+
+    /**
+     * SQL podoba pravidel settlement(): filtr musí proběhnout před stránkováním, PHP metodu z SQL volat nelze.
+     * Agregace párování je společná; shodu stavů SQL přehledu s detailem ověřuje integrační test.
+     */
+    public static function settlementStatusSql(): string
+    {
+        return "CASE WHEN c.posted_at IS NULL OR c.reversed_by IS NOT NULL OR c.receipt_valid=0 THEN 'ambiguous'
+          WHEN p.claim_id IS NULL THEN 'unreconciled'
+          WHEN p.invalid_count<>0 OR p.membership_claim_count<>1 OR p.net_cents<0 OR p.net_cents>c.amount_cents THEN 'ambiguous'
+          WHEN p.net_cents=0 THEN 'settled' ELSE 'partially_settled' END";
     }
 }
