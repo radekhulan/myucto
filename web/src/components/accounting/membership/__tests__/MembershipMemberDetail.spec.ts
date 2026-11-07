@@ -35,7 +35,7 @@ const claim = (id: number, cents: number, settlement: ClaimRow['settlement'], ov
   accounting_date: '2026-03-01', due_date: '2026-03-31', journal_entry_id: 100 + id, receivable_line_id: 200 + id, line_no: 1, account_id: 7,
   posted_at: '2026-03-01 10:00:00', reversed_by: null, title_key: `DUES-${id}`, period_from: '2026-01-01', period_to: '2026-12-31', settlement, ...overrides,
 })
-const unreconciled = { status: 'unreconciled', paid_cents: null, open_cents: null, pairing_id: null, evidence: 'no_native_pairing' } as const
+const unreconciled = { status: 'unreconciled', paid_cents: 0, open_cents: 100000, pairing_id: null, evidence: 'no_native_pairing' } as const
 const ambiguous = { status: 'ambiguous', paid_cents: null, open_cents: null, pairing_id: 4, evidence: 'pairing_not_exact_native_payment' } as const
 const partial = { status: 'partially_settled', paid_cents: 50000, open_cents: 30000, pairing_id: 5, evidence: 'journal_line_pairing_bank_or_cash' } as const
 const reversed = { status: 'reversed', paid_cents: null, open_cents: 0, pairing_id: null, evidence: 'membership_reversal_claim' } as const
@@ -64,6 +64,24 @@ beforeEach(() => {
 })
 
 describe('Membership member detail', () => {
+  it('defers an external refresh while a single-charge confirmation is locked', async () => {
+    const w=mounted({refreshVersion:0});await flushPromises()
+    await w.get('[data-action="new-charge"]').trigger('click');await flushPromises()
+    w.findComponent(IssueFlow).vm.$emit('lock',true);await flushPromises()
+    await w.setProps({refreshVersion:1});await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(1)
+    expect(w.findComponent(IssueFlow).exists()).toBe(true)
+    w.findComponent(IssueFlow).vm.$emit('lock',false);await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
+  it('refreshes externally changed claims without closing the detail', async () => {
+    const w=mounted({refreshVersion:0});await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(1)
+    await w.setProps({refreshVersion:1});await flushPromises()
+    expect(api.member).toHaveBeenCalledTimes(2)
+    w.unmount()
+  })
   it.each(['cs', 'en'])('renders translated %s texts', async locale => {
     const w = mounted({}, locale)
     await flushPromises()
@@ -98,22 +116,22 @@ describe('Membership member detail', () => {
     w.unmount()
   })
 
-  it('shows ambiguous and unreconciled payments as unproven and never mixes the issued total with a debt', async () => {
+  it('shows only ambiguous payments as needing review and unmatched charges as unpaid and never mixes the issued total with a debt', async () => {
     const w = mounted()
     await flushPromises()
     const rows = w.findAll('[data-section="claim-row"]')
     expect(rows).toHaveLength(4)
     expect(rows[0]!.get('[data-field="settlement-status"]').text()).toBe(cs.nonprofitMembership.settlement_unreconciled)
-    expect(rows[0]!.find('[data-field="settlement-amounts"]').exists()).toBe(false)
-    expect(rows[0]!.find('[data-field="settlement-unknown"]').exists()).toBe(true)
+    expect(rows[0]!.get('[data-field="settlement-amounts"]').text()).toContain(formatMoneyMinor(100000))
+    expect(rows[0]!.find('[data-field="settlement-unknown"]').exists()).toBe(false)
     expect(rows[1]!.get('[data-field="settlement-status"]').text()).toBe(cs.nonprofitMembership.settlement_ambiguous)
     expect(rows[1]!.find('[data-field="settlement-amounts"]').exists()).toBe(false)
     expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatMoneyMinor(50000))
     expect(rows[2]!.get('[data-field="settlement-amounts"]').text()).toContain(formatMoneyMinor(30000))
     expect(rows[3]!.get('[data-field="settlement-status"]').text()).toBe(cs.nonprofitMembership.settlement_reversed)
     expect(w.get('[data-field="sum-issued"]').text()).toBe(formatMoneyMinor(100000 + 80000 + 120050))
-    expect(w.get('[data-field="sum-proven-open"]').text()).toBe(formatMoneyMinor(30000))
-    expect(w.get('[data-field="sum-unproven"]').text()).toBe('2')
+    expect(w.get('[data-field="sum-proven-open"]').text()).toBe(formatMoneyMinor(130000))
+    expect(w.get('[data-field="sum-unproven"]').text()).toBe('1')
     expect(w.get('[data-section="unproven-note"]').text()).toContain(cs.nonprofitMembership.unprovenNote)
     expect(w.get('[data-section="claims-summary"]').text()).not.toMatch(/neuhrazen|dluh:/i)
     w.unmount()
@@ -217,7 +235,7 @@ describe('Membership member detail', () => {
     api.member.mockRejectedValue({ response: { status: 404, data: { error: { code: 'nonprofit_membership_member_not_found', message: 'Synthetic missing member' } } } })
     const w = mounted()
     await flushPromises()
-    expect(w.get('[data-section="detail-error"]').text()).toContain('Synthetic missing member')
+    expect(w.get('[data-section="detail-error"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_member_not_found)
     expect(w.findAll('[data-section="claim-row"]')).toHaveLength(0)
     w.unmount()
   })

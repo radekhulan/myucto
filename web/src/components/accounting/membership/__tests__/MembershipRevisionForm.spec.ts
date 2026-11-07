@@ -145,7 +145,7 @@ describe('Membership revision form', () => {
     await flushPromises()
     expect(api.appendRevision).toHaveBeenCalledTimes(1)
     expect(w.find('[data-section="uncertain"]').exists()).toBe(false)
-    expect(w.get('[role="alert"]').text()).toContain('Synthetic history changed')
+    expect(w.get('[role="alert"]').text()).toContain(cs.nonprofitMembership.serverErrors.nonprofit_membership_revision_changed)
     w.unmount()
   })
 

@@ -24,32 +24,6 @@ final class MembershipRepository
         return $row === false ? null : $this->memberRow($row);
     }
 
-    public function page(int $supplier, int $afterId = 0, int $limit = 100): array
-    {
-        $limit = max(1, min(100, $limit));
-        $q = $this->db->pdo()->prepare(
-            "SELECT m.*,c.company_name,r.revision_no,r.effective_from,r.status
-               FROM nonprofit_members m
-               JOIN clients c ON c.supplier_id=m.supplier_id AND c.id=m.client_id
-          LEFT JOIN nonprofit_member_revisions r
-                 ON r.supplier_id=m.supplier_id AND r.member_id=m.id
-                AND NOT EXISTS(SELECT 1 FROM nonprofit_member_revisions newer
-                                WHERE newer.supplier_id=r.supplier_id AND newer.member_id=r.member_id
-                                  AND newer.revision_no>r.revision_no)
-              WHERE m.supplier_id=? AND m.id>?
-              ORDER BY m.id
-              LIMIT {$limit}"
-        );
-        $q->execute([$supplier, max(0, $afterId)]);
-        $rows = [];
-        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            foreach (['id', 'supplier_id', 'client_id', 'created_by'] as $field) $row[$field] = (int) $row[$field];
-            $row['revision_no'] = $row['revision_no'] === null ? null : (int) $row['revision_no'];
-            $rows[] = $row;
-        }
-        return $rows;
-    }
-
     public function byIdentity(int $supplier, int $client, string $number, bool $currentRead = false): ?array
     {
         $this->current($currentRead);
@@ -61,6 +35,32 @@ final class MembershipRepository
             throw new MembershipException('nonprofit_membership_identity_conflict', 'Klient nebo členské číslo už patří jinému členovi.', 409);
         }
         return $this->memberRow($rows[0]);
+    }
+
+    /** Podklady jedné stránky dávky načtené společně; poškozená historie neodřízne ostatní členy. */
+    public function batchContexts(int $supplier, array $ids): array
+    {
+        if ($ids === [] || count($ids) > 50) throw new \InvalidArgumentException('Stránka dávky vyžaduje 1–50 členů.');
+        $marks = implode(',', array_fill(0, count($ids), '?'));
+        $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_members WHERE supplier_id=? AND id IN ({$marks}) ORDER BY id");
+        $q->execute([$supplier, ...$ids]);
+        $out = [];
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) $out[(int) $row['id']] = ['member' => $this->memberRow($row), 'history' => []];
+        $q = $this->db->pdo()->prepare("SELECT * FROM nonprofit_member_revisions WHERE supplier_id=? AND member_id IN ({$marks}) ORDER BY member_id,revision_no,id");
+        $q->execute([$supplier, ...$ids]);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $id = (int) $row['member_id'];
+            if (!isset($out[$id])) continue;
+            try { $out[$id]['history'][] = $this->revisionRow($row); }
+            catch (\JsonException) { $out[$id]['error'] = new MembershipException('nonprofit_membership_revision_corrupt', 'Historie členství není průkazná.', 409); }
+        }
+        foreach ($out as &$context) {
+            if (isset($context['error'])) continue;
+            try { $context['history'] = $this->validateHistory($context['history']); }
+            catch (MembershipException $e) { $context['error'] = $e; }
+        }
+        unset($context);
+        return $out;
     }
 
     public function insertMember(int $supplier, int $client, string $number, int $actor): array
