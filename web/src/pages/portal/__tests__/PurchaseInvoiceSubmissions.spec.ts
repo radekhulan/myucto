@@ -87,6 +87,23 @@ describe('Předání dokladů: smazání a odmítnutí', () => {
     expect(m.upload).toHaveBeenCalledWith([pdf], '', null, {})
   })
 
+  it('přetažená fotka projde ořezem dokladu a do výběru jde výřez', async () => {
+    m.list.mockResolvedValue({ items: [] })
+    const wrapper = await mountPage([])
+    const photo = new File(['jpg'], 'sken.jpg', { type: 'image/jpeg' })
+    const pdf = new File(['%PDF'], 'faktura.pdf', { type: 'application/pdf' })
+    await wrapper.get('[data-test="portal-dropzone"]').trigger('drop', { dataTransfer: { files: [pdf, photo] } })
+    await flushPromises()
+    const dialog = wrapper.findComponent({ name: 'PhotoCropDialog' })
+    expect(dialog.exists()).toBe(true)
+    expect(wrapper.find('[data-test="portal-selected-files"]').exists()).toBe(false)
+    const cropped = new File(['crop'], 'sken.jpg', { type: 'image/jpeg' })
+    dialog.vm.$emit('done', cropped)
+    await flushPromises()
+    expect(wrapper.findComponent({ name: 'PhotoCropDialog' }).exists()).toBe(false)
+    expect(wrapper.findAll('[data-test="portal-selected-files"] li').map(li => li.text())).toEqual(['faktura.pdf', 'sken.jpg'])
+  })
+
   it('další výběr a fotka soubory přidají k vybraným, odebraný soubor se neodešle', async () => {
     m.upload.mockResolvedValueOnce({ created: 2, duplicates: 0, errors: [] })
     m.list.mockResolvedValue({ items: [] })

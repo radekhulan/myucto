@@ -17,6 +17,8 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import Modal from '@/components/ui/Modal.vue'
 import SubmissionPreview from '@/components/documents/SubmissionPreview.vue'
 import CapturePhotoButton from '@/components/upload/CapturePhotoButton.vue'
+import PhotoCropDialog from '@/components/upload/PhotoCropDialog.vue'
+import { usePhotoCropQueue } from '@/composables/usePhotoCropQueue'
 
 const { t } = useI18n()
 const supplierStore = useSupplierStore()
@@ -116,9 +118,12 @@ function addFiles(incoming: File[]) {
   files.value = [...files.value, ...accepted.filter(file => !known.has(`${file.name}|${file.size}`))]
 }
 
+/** Vybrané a přetažené fotky projdou ořezem dokladu stejně jako v AI importu. */
+const crop = usePhotoCropQueue(addFiles)
+
 function selectFiles(event: Event) {
   const input = event.target as HTMLInputElement
-  addFiles(Array.from(input.files ?? []))
+  crop.start(Array.from(input.files ?? []))
   // Reset, ať jde přidat další soubory i znovu vybrat týž soubor po odebrání.
   input.value = ''
 }
@@ -130,7 +135,8 @@ function removeFile(file: File) {
 
 function onDrop(event: DragEvent) {
   dragOver.value = false
-  addFiles(Array.from(event.dataTransfer?.files ?? []))
+  if (uploading.value) return
+  crop.start(Array.from(event.dataTransfer?.files ?? []))
 }
 
 async function submit() {
@@ -436,5 +442,8 @@ onBeforeUnmount(() => { context++; loadRequest++; dimensionRequest++ })
       <SubmissionPreview :src="portalPurchaseInvoiceSubmissionsApi.previewUrl(previewItem.id)"
         :file-name="previewItem.original_name" :doc-type="previewItem.doc_type" />
     </Modal>
+    <PhotoCropDialog v-if="crop.current.value" :key="crop.step.value" :file="crop.current.value" from-file
+      :step="crop.step.value" :steps="crop.steps.value" :skip-count="crop.remaining.value"
+      @done="crop.done" @skip-rest="crop.skipRest" @cancel="crop.cancel" />
   </div>
 </template>
