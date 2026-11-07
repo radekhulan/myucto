@@ -7,6 +7,7 @@ namespace MyInvoice\Action\Admin;
 use MyInvoice\Http\Json;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Middleware\AuthMiddleware;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Auth\PasswordHasher;
@@ -41,6 +42,46 @@ final class UserAdminAction
      * by záznamy vynulovala, a proto u ní smazání blokuje dál.
      */
     private const AUDIT_USER_TABLES = ['activity_log', 'instance_admin_events', 'instance_smtp_targets'];
+
+    private const ER_LOCK_WAIT_TIMEOUT = 1205;
+
+    /**
+     * Každá tabulka information_schema má vlastní podmínku `= DATABASE()`. Spojení
+     * přes sloupec schématu (`r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA`) ani podmínka
+     * v ON u LEFT JOIN MariaDB pro výběr databáze nepoužije a otevře tabulky všech
+     * databází na serveru (EXPLAIN „Scanned all databases"): se sousedními instalacemi
+     * nebo paralelními testy to trvá minuty a čeká na jejich DDL.
+     */
+    private const USER_FOREIGN_KEYS_SQL = "WITH r AS (
+                SELECT TABLE_NAME, CONSTRAINT_NAME, DELETE_RULE
+                  FROM information_schema.REFERENTIAL_CONSTRAINTS
+                 WHERE CONSTRAINT_SCHEMA = DATABASE()
+                   AND REFERENCED_TABLE_NAME = 'users'
+            )
+            SELECT k.TABLE_NAME, k.COLUMN_NAME, r.DELETE_RULE
+              FROM information_schema.KEY_COLUMN_USAGE k
+              JOIN r
+                ON r.TABLE_NAME = k.TABLE_NAME
+               AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
+             WHERE k.TABLE_SCHEMA = DATABASE()
+               AND k.REFERENCED_TABLE_SCHEMA = DATABASE()
+               AND k.REFERENCED_TABLE_NAME = 'users'";
+
+    private const USER_IMPLICIT_COLUMNS_SQL = "SELECT c.TABLE_NAME, c.COLUMN_NAME
+              FROM information_schema.COLUMNS c
+             WHERE c.TABLE_SCHEMA = DATABASE()
+               AND c.TABLE_NAME <> 'users'
+               AND c.DATA_TYPE IN ('tinyint', 'smallint', 'mediumint', 'int', 'bigint')
+               AND (c.COLUMN_NAME REGEXP '(^|_)user_id$' OR c.COLUMN_NAME REGEXP '_by$'
+                    OR c.COLUMN_NAME IN ('actor_id', 'assigned_to'))
+               AND NOT EXISTS (
+                    SELECT 1
+                      FROM information_schema.KEY_COLUMN_USAGE k
+                     WHERE k.TABLE_SCHEMA = DATABASE()
+                       AND k.TABLE_NAME = c.TABLE_NAME
+                       AND k.COLUMN_NAME = c.COLUMN_NAME
+                       AND k.REFERENCED_TABLE_NAME IS NOT NULL
+               )";
 
     public function __construct(
         private readonly Connection $db,
@@ -342,78 +383,77 @@ final class UserAdminAction
     private function deleteInactive(Request $request, Response $response, int $id, string $email): Response
     {
         $pdo = $this->db->pdo();
-        $pdo->beginTransaction();
+        // Metadata se čtou před transakcí: zámek řádku uživatele pak drží jen
+        // krátké dotazy na data, ne průchod information_schema.
+        $references = $this->userReferenceColumns();
         try {
-            $locked = $pdo->prepare('SELECT is_active FROM users WHERE id = ? FOR UPDATE');
-            $locked->execute([$id]);
-            $active = $locked->fetchColumn();
-            if ($active === false || (int) $active === 1) {
-                $pdo->rollBack();
-                return Json::error($response, 'user_changed', 'Stav uživatele se změnil. Obnovte seznam.', 409);
-            }
-            if ($this->hasUserData($id)) {
-                $pdo->rollBack();
-                return Json::error($response, 'user_in_use', 'Uživatel má navázaná data. Ponechte ho deaktivovaného.', 409);
-            }
-            $delete = $pdo->prepare('DELETE FROM users WHERE id = ? AND is_active = 0');
-            $delete->execute([$id]);
-            $pdo->commit();
+            $conflict = TransactionFailure::retrying($pdo, function () use ($pdo, $id, $references): ?array {
+                $pdo->beginTransaction();
+                try {
+                    $locked = $pdo->prepare('SELECT is_active FROM users WHERE id = ? FOR UPDATE');
+                    $locked->execute([$id]);
+                    $active = $locked->fetchColumn();
+                    if ($active === false || (int) $active === 1) {
+                        $pdo->rollBack();
+                        return ['user_changed', 'Stav uživatele se změnil. Obnovte seznam.'];
+                    }
+                    if ($this->hasUserData($id, $references)) {
+                        $pdo->rollBack();
+                        return ['user_in_use', 'Uživatel má navázaná data. Ponechte ho deaktivovaného.'];
+                    }
+                    $delete = $pdo->prepare('DELETE FROM users WHERE id = ? AND is_active = 0');
+                    $delete->execute([$id]);
+                    $pdo->commit();
+                    return null;
+                } catch (\Throwable $e) {
+                    if ($pdo->inTransaction()) $pdo->rollBack();
+                    throw $e;
+                }
+            });
         } catch (\PDOException $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
             if ($e->getCode() === '23000') {
                 return Json::error($response, 'user_in_use', 'Uživatel má navázaná data. Ponechte ho deaktivovaného.', 409);
             }
+            if (TransactionFailure::aborted($e) || (int) ($e->errorInfo[1] ?? 0) === self::ER_LOCK_WAIT_TIMEOUT) {
+                return Json::error($response, 'user_busy', 'Uživatele právě upravuje jiná operace. Zkuste smazání za chvíli znovu.', 409);
+            }
             throw $e;
-        } catch (\Throwable $e) {
-            if ($pdo->inTransaction()) $pdo->rollBack();
-            throw $e;
+        }
+        if ($conflict !== null) {
+            return Json::error($response, $conflict[0], $conflict[1], 409);
         }
         $this->log($request, 'user.deleted', $id, ['email' => $email]);
         return Json::ok($response, ['deleted' => true]);
     }
 
-    private function hasUserData(int $id): bool
+    /**
+     * Sloupce, jejichž hodnota v kterémkoli řádku brání smazání uživatele.
+     *
+     * @return list<array{0:string,1:string}>
+     */
+    private function userReferenceColumns(): array
     {
         $pdo = $this->db->pdo();
-        $relations = $pdo->query(
-            "SELECT k.TABLE_NAME, k.COLUMN_NAME, r.DELETE_RULE
-               FROM information_schema.KEY_COLUMN_USAGE k
-               JOIN information_schema.REFERENTIAL_CONSTRAINTS r
-                 ON r.CONSTRAINT_SCHEMA = k.CONSTRAINT_SCHEMA
-                AND r.TABLE_NAME = k.TABLE_NAME
-                AND r.CONSTRAINT_NAME = k.CONSTRAINT_NAME
-              WHERE k.TABLE_SCHEMA = DATABASE()
-                AND k.REFERENCED_TABLE_SCHEMA = DATABASE()
-                AND k.REFERENCED_TABLE_NAME = 'users'"
-        );
-        foreach ($relations->fetchAll(\PDO::FETCH_ASSOC) as $relation) {
+        $columns = [];
+        foreach ($pdo->query(self::USER_FOREIGN_KEYS_SQL)->fetchAll(\PDO::FETCH_ASSOC) as $relation) {
             if ($relation['DELETE_RULE'] === 'CASCADE'
                 && in_array($relation['TABLE_NAME'], self::DISPOSABLE_USER_TABLES, true)) continue;
-            $table = str_replace('`', '``', (string) $relation['TABLE_NAME']);
-            $column = str_replace('`', '``', (string) $relation['COLUMN_NAME']);
-            $reference = $pdo->prepare("SELECT 1 FROM `{$table}` WHERE `{$column}` = ? LIMIT 1");
-            $reference->execute([$id]);
-            if ($reference->fetchColumn() !== false) return true;
+            $columns[] = [(string) $relation['TABLE_NAME'], (string) $relation['COLUMN_NAME']];
         }
-        $implicitRelations = $pdo->query(
-            "SELECT c.TABLE_NAME, c.COLUMN_NAME
-               FROM information_schema.COLUMNS c
-               LEFT JOIN information_schema.KEY_COLUMN_USAGE k
-                ON k.TABLE_SCHEMA = c.TABLE_SCHEMA
-                AND k.TABLE_NAME = c.TABLE_NAME
-                AND k.COLUMN_NAME = c.COLUMN_NAME
-                AND k.REFERENCED_TABLE_NAME IS NOT NULL
-              WHERE c.TABLE_SCHEMA = DATABASE()
-                AND c.TABLE_NAME <> 'users'
-                AND c.DATA_TYPE IN ('tinyint', 'smallint', 'mediumint', 'int', 'bigint')
-                AND (c.COLUMN_NAME REGEXP '(^|_)user_id$' OR c.COLUMN_NAME REGEXP '_by$'
-                     OR c.COLUMN_NAME IN ('actor_id', 'assigned_to'))
-                AND k.COLUMN_NAME IS NULL"
-        );
-        foreach ($implicitRelations->fetchAll(\PDO::FETCH_ASSOC) as $relation) {
+        foreach ($pdo->query(self::USER_IMPLICIT_COLUMNS_SQL)->fetchAll(\PDO::FETCH_ASSOC) as $relation) {
             if (in_array($relation['TABLE_NAME'], self::AUDIT_USER_TABLES, true)) continue;
-            $table = str_replace('`', '``', (string) $relation['TABLE_NAME']);
-            $column = str_replace('`', '``', (string) $relation['COLUMN_NAME']);
+            $columns[] = [(string) $relation['TABLE_NAME'], (string) $relation['COLUMN_NAME']];
+        }
+        return $columns;
+    }
+
+    /** @param list<array{0:string,1:string}> $references */
+    private function hasUserData(int $id, array $references): bool
+    {
+        $pdo = $this->db->pdo();
+        foreach ($references as [$table, $column]) {
+            $table = str_replace('`', '``', $table);
+            $column = str_replace('`', '``', $column);
             $reference = $pdo->prepare("SELECT 1 FROM `{$table}` WHERE `{$column}` = ? LIMIT 1");
             $reference->execute([$id]);
             if ($reference->fetchColumn() !== false) return true;
