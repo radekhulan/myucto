@@ -163,6 +163,15 @@ final class StockIssueService
         if ($rows === []) {
             return;
         }
+        // Obnovení po stornu vydá tytéž kusy, které storno vrátilo (i když se kód šarže mezitím
+        // opravil), ne text z `tracking_json`.
+        $returned = $this->tracking->issuedUnitsByInvoiceItem($supplierId, $invoiceId, 'reversed');
+        foreach ($rows as &$row) {
+            if (($row['tracking_mode'] ?? 'none') !== 'none' && $row['tracking'] !== [] && isset($returned[$row['id']])) {
+                $row['tracking'] = $returned[$row['id']];
+            }
+        }
+        unset($row);
         $hasPostedIssue = false;
         $hasPostedReturn = false;
         foreach ($this->docsRepo->listByInvoice($supplierId, $invoiceId) as $existing) {
@@ -659,9 +668,11 @@ final class StockIssueService
     /** Klíč kusu shodný s `TrackingAllocationService::resolveUnit()`. */
     private static function trackingKey(array $allocation): string
     {
-        return ($allocation['serial_number'] ?? null) !== null
-            ? 'serial:' . $allocation['serial_number']
-            : 'lot:' . ($allocation['lot_code'] ?? '') . '|' . ($allocation['expires_on'] ?? '');
+        return TrackingAllocationService::trackingKey(
+            $allocation['serial_number'] ?? null,
+            $allocation['lot_code'] ?? null,
+            $allocation['expires_on'] ?? null,
+        );
     }
 
     /**

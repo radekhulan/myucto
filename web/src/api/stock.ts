@@ -581,6 +581,24 @@ export interface StockTrackingOverview {
   history: Array<Record<string, unknown>>
 }
 
+/** Oprava kódu a data spotřeby šarže; chybějící klíč hodnotu ponechá, `expires_on: null` expiraci smaže. */
+export interface StockTrackingUnitPayload {
+  lot_code?: string
+  expires_on?: string | null
+}
+
+/** Šarže karty v seznamu k opravě (kmen šarže bez pohybů). */
+export interface StockTrackingLotUnit {
+  id: number
+  lot_code: string
+  expires_on: string | null
+}
+
+export interface StockTrackingUnitResult {
+  unit: { id: number; lot_code: string; expires_on: string | null }
+  updated: { invoices: number; stock_drafts: number; stock_posted: number; fulfillment: number }
+}
+
 export interface StockLevelRow {
   warehouse_id: number
   stock_item_id: number
@@ -1167,6 +1185,14 @@ export const stockApi = {
     api.get<StockTrackingChoices>(`/stock/items/${id}/tracking-choices`, {
       params: { warehouse_id: params.warehouse_id ?? undefined, invoice_id: params.invoice_id ?? undefined },
     }).then(r => r.data),
+  /** Šarže karty po stránkách (lehké, bez historie pohybů), volitelně hledání v kódu. */
+  listTrackingUnits: (itemId: number, params: { q?: string; page?: number; per_page?: number } = {}) =>
+    api.get<{ data: StockTrackingLotUnit[]; meta: StockPageMeta }>(`/stock/items/${itemId}/tracking-units`, {
+      params: { q: params.q || undefined, page: params.page ?? undefined, per_page: params.per_page ?? undefined },
+    }).then(r => r.data),
+  /** Oprava šarže na kartě; nový text se propíše do konceptů a zaúčtovaných skladových dokladů. */
+  updateTrackingUnit: (itemId: number, unitId: number, payload: StockTrackingUnitPayload) =>
+    api.put<StockTrackingUnitResult>(`/stock/items/${itemId}/tracking-units/${unitId}`, payload).then(r => r.data),
   replaceItemUnits: (id: number, units: Array<{ unit_code: string; numerator: number; denominator: number }>) => api.put(`/stock/items/${id}/units`, { units }).then(r => r.data),
 
   // ── Výchozí účet a dimenze produktu (Účtování podle dimenzí, F1) ─────────

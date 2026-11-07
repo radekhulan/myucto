@@ -1134,6 +1134,50 @@ a karty. Šarže dovoluje množství a volitelné datum expirace. Detail karty u
 aktuální rozpad i historii od příjmu přes převody a výdeje po vratku. Storno použije
 přesně stejné identity a množství jako původní doklad.
 
+Překlep v kódu šarže nebo v datu spotřeby opravíte na úpravě skladové karty
+(`Sklad → Skladové karty`, tlačítko **Upravit**, právo **Spravovat skladové karty**).
+V rámečku **Šarže karty** pod polem **Sledování zásoby** přepíšete kód nebo datum
+spotřeby přímo v poli, jako ostatní údaje karty, a uložíte běžným **Uložit**.
+Rámeček ukazuje i šarže s nulovým stavem. Šarže se načítají po padesáti: má-li karta
+víc než deset šarží, objeví se nad seznamem hledání v kódu a pod ním tlačítko
+**Načíst další šarže**. Rozepsané změny zůstanou i po novém hledání a uloží se
+společně. Nepodaří-li se šarže načíst, rámeček ukáže chybu a tlačítko
+**Zkusit znovu**. Karta se uloží první a pak změněné šarže.
+Šarže, kterou systém odmítne, zůstane v poli označená hláškou (u kódu i u data)
+a po opravě ji uložíte znovu. Stejnou opravu umí REST API
+(`PUT /api/v1/stock/items/{id}/tracking-units/{unitId}`, seznam šarží po stránkách
+vrací `GET /api/v1/stock/items/{id}/tracking-units`). Opravit jde jen šarži,
+ne sériové číslo, a šarže se nesloučí: šarže, která by měla stejný kód a datum
+spotřeby jako jiná šarže téže karty, se odmítne (porovnání nerozlišuje velikost
+písmen ani diakritiku).
+
+Kódy dvou šarží nejde prohodit jedním uložením (A na B a B na A): první uložená by
+dostala kód, který ještě drží druhá, a systém ji odmítne jako duplicitu (409).
+Prohoďte je přes pomocný kód: A přejmenujte na dočasný kód, B na A a dočasný kód
+na B. Kdyby se oprava potkala s vystavením faktury nebo zaúčtováním dokladu téže
+karty, systém ji odmítne hláškou **Zkuste to prosím znovu** a nic se nezmění.
+
+Pohyby šarže zůstávají a nový kód a datum se propíšou do rozpracovaných dokladů
+této karty:
+
+- konceptů faktur,
+- nezaúčtovaných i zaúčtovaných skladových dokladů (příjemka, výdejka, převodka,
+  protidoklad storna),
+- rozpracované expedice.
+
+Dobropis k vystavené faktuře a obnovení stornované faktury vezmou opravenou
+šarži samy: vrací nebo znovu vydávají kusy, které výdejky faktury skutečně
+vydaly. U dobropisu se sečtou všechny výdejky faktury (i když byla vydaná po částech,
+každou zásilkou zvlášť); obnovení stornované faktury bere jen automatickou výdejku
+vystavení. Oprava se zapisuje do historie změn.
+
+Beze změny zůstávají vystavené a stornované faktury, vystavené zálohové faktury,
+expedované zásilky a jejich vratky. U vystavené faktury a zálohové faktury zůstává
+i uložené PDF s původním kódem, protože odešlo zákazníkovi. Finální faktura
+vytvořená ze zálohové faktury po opravě šarže proto nese původní kód. Nejde ji
+vystavit se starým kódem: otevřete koncept finální faktury a šarži na řádku
+vyberte znovu z nabídky, kde je už opravený kód.
+
 Převodní jednotky šarží se definují přesným zlomkem vůči základní jednotce karty,
 například 12 kusů jako 12/1, a slouží jen k zadání množství v alokacích šarží
 a sériových čísel. Systém přijme jen převod, který lze beze zbytku vyjádřit
@@ -1794,8 +1838,11 @@ Pokud fyzický tok faktury spravuje objednávka nebo vychystání, její vystave
 následný dobropis nevytvoří další automatický skladový pohyb. Fyzickou vratku
 zaznamenejte u zásilky. Běžné faktury mimo tento tok používají dosavadní nastavení
 automatického výdeje a vratky. Snapshot komponent, sledovaných jednotek, šarží
-a sériových čísel zůstává u zásilky a vratky, takže pozdější změna karty nebo složení
-setu historii nepřepíše.
+a sériových čísel zůstává u expedované zásilky a vratky, takže pozdější změna karty
+nebo složení setu historii nepřepíše. Oprava kódu nebo data spotřeby šarže
+([§ 37.12.6](#37126-sklady-vice-skladu)) přepíše jen rozpracovanou zásilku a otevřenou
+úlohu vychystání; vratka k expedované zásilce vybírá šarži podle původního snapshotu
+zásilky.
 
 Právo **Vychystání a expedice** dovoluje skenovat, balit, expedovat a přijímat
 vratky. Právo **Odchylky při vychystání** navíc dovoluje potvrdit výslovně zdůvodněnou

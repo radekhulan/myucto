@@ -65,6 +65,7 @@ final class CancelInvoiceAction
         private readonly TaxConstantsRepository $taxConstants,
         private readonly \MyInvoice\Service\Invoice\CreditNoteOffsetService $creditNoteOffsets,
         private readonly \MyInvoice\Service\Eet\EetHistoryGuard $eetHistory,
+        private readonly \MyInvoice\Repository\StockTrackingRepository $stockTracking,
     ) {}
 
     public function __invoke(Request $request, Response $response, array $args): Response
@@ -393,6 +394,11 @@ final class CancelInvoiceAction
             && $this->db->hasColumn('invoice_items', 'oss_needs_manual_review');
         $supportsTracking = $this->db->hasColumn('invoice_items', 'tracking_json');
         $supportsLineDiscount = $this->db->hasColumn('invoice_items', LineDiscount::LIST_COLUMN);
+        // Dobropis vrací kusy, které výdejka původní faktury skutečně vydala (s aktuálním
+        // textem šarže, i když se kód šarže po vydání opravil); bez výdejky zůstává kopie výběru.
+        $issuedUnits = $supportsTracking
+            ? $this->stockTracking->issuedUnitsByInvoiceItem((int) $invoice['supplier_id'], (int) $invoice['id'])
+            : [];
         $sourcePeriod = OssPeriod::quarterCode((string) ($invoice['tax_date'] ?? $invoice['issue_date'] ?? ''));
         $creditPeriod = OssPeriod::quarterCode(date('Y-m-d'));
         $defaultOriginalPeriod = $sourcePeriod !== null && $creditPeriod !== null && $sourcePeriod < $creditPeriod
@@ -559,7 +565,11 @@ final class CancelInvoiceAction
                     $params[] = !empty($item['oss_needs_manual_review']) ? 1 : 0;
                 }
                 if ($supportsTracking) {
-                    $params[] = \MyInvoice\Service\Stock\InvoiceItemTracking::storedJson($item);
+                    $stored = \MyInvoice\Service\Stock\InvoiceItemTracking::storedJson($item);
+                    $issued = $issuedUnits[(int) ($item['id'] ?? 0)] ?? [];
+                    $params[] = $stored !== null && $issued !== []
+                        ? \MyInvoice\Service\Stock\InvoiceItemTracking::fromIssuedUnits($issued)
+                        : $stored;
                 }
                 if ($supportsLineDiscount) {
                     array_push($params, ...LineDiscount::columns($item));

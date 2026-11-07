@@ -4348,6 +4348,8 @@ final class Routes
             $g->get   ('/items/{id:[0-9]+}/posting-defaults', [\MyInvoice\Action\Accounting\DimensionDefaultsAction::class, 'productPostingDefaults']);
             $g->put   ('/items/{id:[0-9]+}/posting-defaults', [\MyInvoice\Action\Stock\StockItemAction::class, 'updateAccounts']);
             $g->put   ('/items/{id:[0-9]+}/units',      [\MyInvoice\Action\Stock\StockTrackingAction::class, 'replaceUnits']);
+            $g->get   ('/items/{id:[0-9]+}/tracking-units', [\MyInvoice\Action\Stock\StockTrackingAction::class, 'units']);
+            $g->put   ('/items/{id:[0-9]+}/tracking-units/{unitId:[0-9]+}', [\MyInvoice\Action\Stock\StockTrackingAction::class, 'updateUnit']);
             // Balení karty a individuální ceny zákazníků (issue #17).
             $g->get   ('/items/{id:[0-9]+}/packaging',  [\MyInvoice\Action\Stock\StockItemPackagingAction::class, 'get']);
             $g->put   ('/items/{id:[0-9]+}/packaging',  [\MyInvoice\Action\Stock\StockItemPackagingAction::class, 'put']);
