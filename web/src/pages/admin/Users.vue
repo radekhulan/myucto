@@ -240,10 +240,12 @@ async function save() {
     }
     // ⚠️ Neodeslaná pozvánka nesmí zmizet se zavřeným formulářem. Účet už
     // existuje a jeho heslo je náhodné — dokud odkaz nedorazí, je nepoužitelný.
+    // Při vynuceném přihlášení přes organizaci server místo odkazu na heslo
+    // posílá pozvánku k propojení účtu (UserAdminAction::create).
     if (inviteFailed.value) {
-      toast.error(t('users.invite_failed'))
+      toast.error(t(ssoEnforced.value ? 'users.sso_invite_failed' : 'users.invite_failed'))
     } else if (creating && form.password === '') {
-      toast.success(t('users.invite_sent'))
+      toast.success(t(ssoEnforced.value ? 'users.sso_invite_sent' : 'users.invite_sent'))
     }
     showForm.value = false
     await load()
@@ -345,6 +347,7 @@ onMounted(load)
           <input v-model="form.password" type="password" autocomplete="new-password" :placeholder="t('users.password_invite_placeholder')" class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
           <span class="mt-1 block text-xs text-neutral-500">{{ t('users.password_invite_hint') }}</span>
         </label>
+        <p v-else-if="form.id === null" class="text-sm text-neutral-600" data-user-sso-invite-hint>{{ t('users.sso_invite_hint') }}</p>
 
         <!-- ⚠️ Jen u existujícího účtu. U nového se odkaz pošle sám při uložení,
              dřív ho není komu poslat — uživatel ještě neexistuje. -->

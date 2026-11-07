@@ -2,12 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 
 const m = vi.hoisted(() => ({
-  listUsers: vi.fn(), listRoles: vi.fn(),
+  listUsers: vi.fn(), listRoles: vi.fn(), createUser: vi.fn(), setUserSuppliers: vi.fn(), success: vi.fn(), error: vi.fn(),
   setupStatus: { sso_required_provider: 'entra' as string | null, sso_providers: [{ id: 'entra', strong: true }] },
 }))
-vi.mock('@/api/admin', () => ({ adminApi: { listUsers: m.listUsers } }))
+vi.mock('@/api/admin', () => ({ adminApi: { listUsers: m.listUsers, createUser: m.createUser, setUserSuppliers: m.setUserSuppliers } }))
 vi.mock('@/api/roles', () => ({ rolesApi: { list: m.listRoles } }))
-vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }) }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: m.success, error: m.error, warning: vi.fn() }) }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ newUserBlocked: null, setupStatus: m.setupStatus }) }))
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, params?: Record<string, unknown>) => params ? `${key} ${JSON.stringify(params)}` : key }),
@@ -42,6 +42,23 @@ describe('Uživatelé — napojený účet Entra ID', () => {
     expect(badges[1]!.text()).toContain('users.sso_not_linked')
     // Silná Entra řídí i MFA, štítky místních faktorů by zbytečně varovaly.
     expect(wrapper.find('[data-field="user-mfa"]').exists()).toBe(false)
+  })
+
+  it('nový uživatel dostane pozvánku přes Entra místo odkazu na heslo', async () => {
+    m.listRoles.mockResolvedValue([{ id: 1, name: 'Superadmin', system_key: 'superadmin', role_type: 'superadmin', is_active: true }])
+    m.createUser.mockResolvedValue({ ...base, id: 5, email: 'nova@example.test', name: 'Nová', invite_sent: true, sso_identity: null })
+    m.setUserSuppliers.mockResolvedValue([])
+    const wrapper = mount(Users)
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'users.new')!.trigger('click')
+    expect(wrapper.find('[data-user-sso-invite-hint]').exists()).toBe(true)
+    expect(wrapper.find('input[type="password"]').exists()).toBe(false)
+    await wrapper.get('input[type="email"]').setValue('nova@example.test')
+    await wrapper.findAll('input').filter(input => input.attributes('type') === undefined)[0]!.setValue('Nová')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(m.createUser.mock.calls[0]![0]).not.toHaveProperty('password')
+    expect(m.success).toHaveBeenCalledWith('users.sso_invite_sent')
   })
 
   it('bez vynucení zůstává seznam beze změny', async () => {
