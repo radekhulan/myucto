@@ -28,6 +28,7 @@ import { apiErrorMessage } from '@/api/errors'
 import { getCredential, isWebAuthnAvailable } from '@/security/webauthn'
 import { takeSsoStepUpReturn } from '@/security/oidc'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { useToast } from '@/composables/useToast'
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 
@@ -355,6 +356,8 @@ const passkeySupported = isWebAuthnAvailable()
 const hasPasskey = computed(() =>
   auth.user?.mfa_methods?.includes('passkey') === true || (auth.user?.passkey_count ?? 0) > 0)
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
 
 // Ověření přes Microsoft: po návratu se znovu otevře nahrání (soubor a heslo
 // k němu se zadají znovu), nebo deaktivace téhož certifikátu.
@@ -378,6 +381,8 @@ function resumeSsoStepUp(returned: { token: string; detail: string }) {
 }
 
 const stepUpMissing = computed(() => {
+  const enforced = ssoEnforcement.enforcedStepUpMissing(stepPasskeyToken.value, ssoVerified.value, stepTotp.value, hasTotp.value)
+  if (enforced !== null) return enforced === '' ? '' : t(enforced)
   if (stepPasskeyToken.value) return ''
   if (!stepPassword.value) return t('eet.certificates.step_up_password_missing')
   if (hasTotp.value && !/^\d{6}$/.test(stepTotp.value.trim())) return t('eet.certificates.step_up_totp_missing')
@@ -430,11 +435,11 @@ async function uploadCertificate() {
       password: certForm.value.password,
       environment: certForm.value.environment,
       label: certForm.value.label.trim() || undefined,
-      proof: {
+      proof: await ssoEnforcement.reauthProof('epo.certificate', {
         password: stepPassword.value || undefined,
         totp_code: stepTotp.value.trim() || undefined,
         step_up_token: stepPasskeyToken.value || undefined,
-      },
+      }),
     })
     toast.success(t('eet.certificates.uploaded'))
     closeCertUpload()
@@ -465,11 +470,11 @@ async function runDeactivate() {
   }
   certBusy.value = true
   try {
-    await eetApi.deactivateCertificate(c.id, {
+    await eetApi.deactivateCertificate(c.id, await ssoEnforcement.reauthProof('epo.certificate', {
       password: stepPassword.value || undefined,
       totp_code: stepTotp.value.trim() || undefined,
       step_up_token: stepPasskeyToken.value || undefined,
-    })
+    }))
     toast.success(t('eet.certificates.deactivated'))
     closeDeactivate()
     await load(true)
@@ -1116,14 +1121,14 @@ const th = 'px-3 py-2 text-left font-medium'
         </div>
 
         <div class="grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
-          <div v-if="hasPasskey && !ssoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
             <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">{{ t('eet.certificates.passkey_verified') }}</div>
             <template v-else-if="passkeySupported">
               <button type="button" :class="btnOutline('primary')" :disabled="passkeyBusy || certBusy" @click="verifyPasskey">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
                 {{ passkeyBusy ? t('common.loading') : t('eet.certificates.verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('eet.certificates.step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('eet.certificates.step_up_or_password') }}</span>
             </template>
             <p v-else class="text-xs text-warning-700">{{ t('eet.certificates.passkey_unsupported') }}</p>
           </div>
@@ -1132,16 +1137,16 @@ const th = 'px-3 py-2 text-left font-medium'
             :verified="ssoVerified" :disabled="passkeyBusy || certBusy"
             @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!stepPasskeyToken">
-            <label class="text-xs text-neutral-600">
+            <label v-if="passwordAllowed" class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_password') }}
               <input v-model="stepPassword" type="password" autocomplete="current-password" :class="[formInput, 'mt-1']" />
             </label>
-            <label v-if="hasTotp" class="text-xs text-neutral-600">
+            <label v-if="hasTotp && localFactorsAllowed" class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_totp') }}
               <input v-model="stepTotp" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" :class="[formInput, 'mt-1']" />
             </label>
           </template>
-          <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('eet.certificates.step_up_hint') }}</p>
+          <p v-if="passwordAllowed" class="sm:col-span-2 text-xs text-neutral-500">{{ t('eet.certificates.step_up_hint') }}</p>
         </div>
       </div>
       <template #footer>
@@ -1162,14 +1167,14 @@ const th = 'px-3 py-2 text-left font-medium'
           {{ t('eet.certificates.deactivate_confirm', { eic: deactivateTarget.eic, env: t(`eet.environment.${deactivateTarget.environment}`) }) }}
         </p>
         <div class="grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-4">
-          <div v-if="hasPasskey && !ssoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+          <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
             <div v-if="stepPasskeyToken" class="text-sm font-medium text-success-600">{{ t('eet.certificates.passkey_verified') }}</div>
             <template v-else-if="passkeySupported">
               <button type="button" :class="btnOutline('primary')" :disabled="passkeyBusy || certBusy" @click="verifyPasskey">
                 <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
                 {{ passkeyBusy ? t('common.loading') : t('eet.certificates.verify_passkey') }}
               </button>
-              <span class="text-xs text-neutral-500">{{ t('eet.certificates.step_up_or_password') }}</span>
+              <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('eet.certificates.step_up_or_password') }}</span>
             </template>
             <p v-else class="text-xs text-warning-700">{{ t('eet.certificates.passkey_unsupported') }}</p>
           </div>
@@ -1178,16 +1183,16 @@ const th = 'px-3 py-2 text-left font-medium'
             :verified="ssoVerified" :disabled="passkeyBusy || certBusy"
             @verified="(proof: string) => { stepPasskeyToken = proof; ssoProof = proof }" />
           <template v-if="!stepPasskeyToken">
-            <label class="text-xs text-neutral-600">
+            <label v-if="passwordAllowed" class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_password') }}
               <input v-model="stepPassword" type="password" autocomplete="current-password" :class="[formInput, 'mt-1']" />
             </label>
-            <label v-if="hasTotp" class="text-xs text-neutral-600">
+            <label v-if="hasTotp && localFactorsAllowed" class="text-xs text-neutral-600">
               {{ t('eet.certificates.step_up_totp') }}
               <input v-model="stepTotp" type="text" inputmode="numeric" maxlength="6" autocomplete="one-time-code" :class="[formInput, 'mt-1']" />
             </label>
           </template>
-          <p class="sm:col-span-2 text-xs text-neutral-500">{{ t('eet.certificates.step_up_hint') }}</p>
+          <p v-if="passwordAllowed" class="sm:col-span-2 text-xs text-neutral-500">{{ t('eet.certificates.step_up_hint') }}</p>
         </div>
       </div>
       <template #footer>

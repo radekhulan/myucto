@@ -9,12 +9,14 @@ import { btnFilled, btnOutline, ICONS } from '@/components/ui/buttonStyles'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
 import UserExternalIdentitiesAdmin from '@/components/settings/UserExternalIdentitiesAdmin.vue'
 import ActiveSessions from '@/components/security/ActiveSessions.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 
 const { t } = useI18n()
 const toast = useToast()
 const auth = useAuthStore()
 // Identity cizích účtů spravuje jen superadmin (canManageExternalIdentities).
 const ssoEnabled = computed(() => auth.isSuperadmin && (auth.setupStatus?.sso_providers ?? []).length > 0)
+const { passwordAllowed } = useSsoEnforcement()
 
 /**
  * Limit aktivních účtů je varování: správce může stále založit účet
@@ -330,7 +332,8 @@ onMounted(load)
         </div>
         <p class="text-sm text-neutral-500">{{ t('users.seat_policy_hint') }}</p>
         <label v-if="form.id !== null" class="flex gap-2 items-center"><input v-model="form.is_active" :disabled="editingLastActiveSuperadmin" type="checkbox" />{{ t('common.active') }}<span v-if="editingLastActiveSuperadmin" class="text-xs text-neutral-500">— {{ t('users.is_last_admin_lock') }}</span></label>
-        <label class="text-sm">
+        <!-- Vynucené přihlášení přes organizaci: heslo ani odkaz na jeho nastavení se nenabízí. -->
+        <label v-if="passwordAllowed" class="text-sm">
           <span class="block font-medium mb-1">{{ t('auth.password') }} <span class="font-normal text-neutral-500">— {{ t('common.optional') }}</span></span>
           <input v-model="form.password" type="password" autocomplete="new-password" :placeholder="t('users.password_invite_placeholder')" class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
           <span class="mt-1 block text-xs text-neutral-500">{{ t('users.password_invite_hint') }}</span>
@@ -338,7 +341,7 @@ onMounted(load)
 
         <!-- ⚠️ Jen u existujícího účtu. U nového se odkaz pošle sám při uložení,
              dřív ho není komu poslat — uživatel ještě neexistuje. -->
-        <div v-if="form.id !== null" class="text-sm">
+        <div v-if="passwordAllowed && form.id !== null" class="text-sm">
           <button type="button" :disabled="sendingLink" class="h-9 px-3 border border-neutral-300 rounded-md hover:bg-neutral-50 disabled:opacity-60" data-user-password-link @click="sendPasswordLink">
             {{ sendingLink ? t('users.password_link_sending') : t('users.password_link_cta') }}
           </button>

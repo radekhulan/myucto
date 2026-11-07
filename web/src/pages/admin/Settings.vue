@@ -22,7 +22,6 @@ import CompanyProfileBox from '@/components/settings/CompanyProfileBox.vue'
 import SearchableSelect from '@/components/ui/SearchableSelect.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierDomainsSettings from '@/components/settings/SupplierDomainsSettings.vue'
-import SupplierLoginPolicySettings from '@/components/settings/SupplierLoginPolicySettings.vue'
 import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
 import AccountingFrameworkSettings from '@/components/settings/AccountingFrameworkSettings.vue'
 import TaxOfficeFields from '@/components/settings/TaxOfficeFields.vue'
@@ -1369,8 +1368,6 @@ async function confirmTaxRepDelete() {
         </div>
       </section>
       <SupplierDomainsSettings v-else-if="tab === 'company' && auth.domainsFeatureEnabled && auth.canRead('settings.domains')" />
-      <SupplierLoginPolicySettings
-        v-if="tab === 'company' && (auth.setupStatus?.sso_providers ?? []).length > 0 && auth.canRead('settings.company')" />
 
       <!-- Číslování faktur — samostatná záložka -->
       <section v-if="tab === 'numbering'" class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">

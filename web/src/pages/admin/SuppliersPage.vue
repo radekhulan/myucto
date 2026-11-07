@@ -26,6 +26,7 @@ import EmptyState from '@/components/ui/EmptyState.vue'
 import SupplierUrgency from '@/components/supplier/SupplierUrgency.vue'
 import { useSupplierSwitch } from '@/composables/useSupplierSwitch'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { takeSsoStepUpProof } from '@/security/oidc'
 
 const { t } = useI18n()
@@ -251,6 +252,8 @@ const hasPasskey = computed(() =>
   || (auth.user?.passkey_count ?? 0) > 0,
 )
 const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
 
 const carryOverOffered = computed(() =>
   carryOver.value !== null
@@ -260,7 +263,11 @@ const carryOverNeedsStepUp = computed(() => carryOverCertificateIds.value.length
 
 /** Prázdný řetězec = ověření je kompletní; jinak text, co ještě chybí. */
 const carryOverStepUpMissing = computed(() => {
-  if (!carryOverNeedsStepUp.value || carryOverStepPasskeyToken.value) return ''
+  if (!carryOverNeedsStepUp.value) return ''
+  const enforced = ssoEnforcement.enforcedStepUpMissing(
+    carryOverStepPasskeyToken.value, carryOverSsoVerified.value, carryOverStepTotp.value, hasTotp.value)
+  if (enforced !== null) return enforced === '' ? '' : t(enforced)
+  if (carryOverStepPasskeyToken.value) return ''
   if (!carryOverStepPassword.value) return t('settings.certificate_vault_step_up_password_missing')
   if (hasTotp.value && !/^\d{6}$/.test(carryOverStepTotp.value.trim())) {
     return t('settings.certificate_vault_step_up_totp_missing')
@@ -310,17 +317,17 @@ async function verifyCarryOverPasskey() {
   }
 }
 
-function carryOverPayload(): SupplierCreatePayload['carry_over'] {
+async function carryOverPayload(): Promise<SupplierCreatePayload['carry_over']> {
   if (carryOver.value === null || (!carryOverAi.value && carryOverCertificateIds.value.length === 0)) return undefined
   return {
     ai: carryOverAi.value,
     certificate_ids: [...carryOverCertificateIds.value],
     step_up: carryOverNeedsStepUp.value
-      ? {
+      ? await ssoEnforcement.reauthProof('epo.certificate', {
           password: carryOverStepPassword.value || undefined,
           totp_code: carryOverStepTotp.value.trim() || undefined,
           step_up_token: carryOverStepPasskeyToken.value || undefined,
-        }
+        })
       : undefined,
   }
 }
@@ -407,7 +414,7 @@ async function saveSupplier() {
         bic: supplierBank.bic || undefined,
       }
     }
-    const carry = carryOverPayload()
+    const carry = await carryOverPayload()
     if (carry) payload.carry_over = carry
     const created = await suppliersApi.create(payload)
     supplierCreateOpen.value = false
@@ -760,7 +767,7 @@ async function switchSupplier(id: number) {
 
               <div v-if="carryOverNeedsStepUp" class="mt-3 grid gap-3 sm:grid-cols-2 rounded-lg border border-neutral-200 p-3"
                 data-testid="carry-over-step-up">
-                <div v-if="hasPasskey && !carryOverSsoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
+                <div v-if="localFactorsAllowed && hasPasskey && !carryOverSsoVerified" class="sm:col-span-2 flex flex-wrap items-center gap-3">
                   <div v-if="carryOverStepPasskeyToken" class="text-sm font-medium text-success-600">
                     ✓ {{ t('settings.certificate_vault_passkey_verified') }}
                   </div>
@@ -770,7 +777,7 @@ async function switchSupplier(id: number) {
                       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
                       {{ carryOverPasskeyBusy ? t('common.loading') : t('settings.certificate_vault_verify_passkey') }}
                     </button>
-                    <span class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
+                    <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('settings.certificate_vault_step_up_or_password') }}</span>
                   </template>
                   <p v-else class="text-xs text-warning-700">{{ t('settings.certificate_vault_passkey_unsupported') }}</p>
                 </div>
@@ -779,13 +786,13 @@ async function switchSupplier(id: number) {
                   :verified="carryOverSsoVerified" :disabled="carryOverPasskeyBusy"
                   @verified="(proof: string) => { carryOverStepPasskeyToken = proof; ssoProof = proof }" />
                 <template v-if="!carryOverStepPasskeyToken">
-                  <label class="text-xs text-neutral-600">
+                  <label v-if="passwordAllowed" class="text-xs text-neutral-600">
                     {{ t('settings.certificate_vault_step_up_password') }}
                     <input v-model="carryOverStepPassword" type="password" autocomplete="current-password"
                       data-testid="carry-over-step-password"
                       class="mt-1 h-9 w-full rounded-md border border-neutral-300 bg-surface px-3 text-sm" />
                   </label>
-                  <label class="text-xs text-neutral-600">
+                  <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="text-xs text-neutral-600">
                     {{ t('settings.certificate_vault_step_up_totp') }}
                     <input v-model="carryOverStepTotp" type="text" inputmode="numeric" maxlength="6"
                       autocomplete="one-time-code"

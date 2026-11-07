@@ -74,8 +74,11 @@ export interface ApiLogFilter {
 
 export interface CreateTokenPayload {
   name: string
-  /** Re-auth současným heslem — backend ho vyžaduje vždy (step-up, CreateTokenAction). */
-  password: string
+  /**
+   * Re-auth současným heslem — backend ho vyžaduje vždy (step-up, CreateTokenAction).
+   * Při vynuceném přihlášení přes organizaci se heslo neposílá, jen `step_up_token`.
+   */
+  password?: string
   supplier_id?: number | null
   scope: 'read' | 'read_write'
   expires_at?: string | null

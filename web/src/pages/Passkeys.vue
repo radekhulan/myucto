@@ -11,6 +11,7 @@ import RecoveryCodes from '@/components/security/RecoveryCodes.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import { useSsoStepUp } from '@/composables/useSsoStepUp'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { hasStrongProvider, takeSsoStepUpProof } from '@/security/oidc'
 
 const { t } = useI18n()
@@ -18,6 +19,7 @@ const emit = defineEmits<{ registered: [] }>()
 const auth = useAuthStore()
 // Volba ověření přes Microsoft jen tam, kde je silný poskytovatel zapnutý.
 const ssoStrongEnabled = computed(() => hasStrongProvider(auth.setupStatus?.sso_providers, 'entra'))
+const { passwordAllowed } = useSsoEnforcement()
 const sessionSecurity = useSessionSecurityStore()
 const pageId = useId()
 const list = ref<PasskeyCredential[]>([])
@@ -298,7 +300,11 @@ onMounted(() => {
                autocomplete="off" required :placeholder="t('passkeys.label_placeholder')"
                class="w-full h-10 px-3 border border-neutral-300 rounded-md" />
       </div>
-      <div v-if="list.length === 0 && !auth.user?.totp_enabled && !ssoRegisterProof">
+      <p v-if="!passwordAllowed && list.length === 0 && !auth.user?.totp_enabled && !ssoRegisterProof"
+         class="text-sm text-warning-700" data-test="passkey-needs-factor">
+        {{ t('sso.local_factor_setup_unavailable') }}
+      </p>
+      <div v-else-if="list.length === 0 && !auth.user?.totp_enabled && !ssoRegisterProof">
         <label :for="`${pageId}-passkey-current-password`" class="block text-sm font-medium text-neutral-700 mb-1">
           {{ t('auth.current_password') }} *
         </label>
@@ -323,7 +329,8 @@ onMounted(() => {
                        :verified="ssoRegisterProof !== ''" :disabled="busy"
                        @verified="(proof: string) => { ssoRegisterProof = proof }" />
       <button type="button" @click="add"
-              :disabled="busy || !label.trim() || !passkeySupported || (totpRequired && !totpCodeValid && !recoveryCodeFilled && !ssoRegisterProof)"
+              :disabled="busy || !label.trim() || !passkeySupported || (totpRequired && !totpCodeValid && !recoveryCodeFilled && !ssoRegisterProof)
+                || (!passwordAllowed && list.length === 0 && !auth.user?.totp_enabled && !ssoRegisterProof)"
               class="h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white rounded-md font-medium">
         {{ t('passkeys.add') }}
       </button>

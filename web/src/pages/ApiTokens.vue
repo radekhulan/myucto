@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { tokensApi, type ApiToken, type CreateTokenResult, type TokenIpRule } from '@/api/tokens'
+import { tokensApi, type ApiToken, type CreateTokenPayload, type CreateTokenResult, type TokenIpRule } from '@/api/tokens'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
@@ -9,6 +9,7 @@ import { authApi } from '@/api/auth'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { takeSsoStepUpProof } from '@/security/oidc'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import DateInput from '@/components/ui/DateInput.vue'
 
@@ -28,6 +29,11 @@ const passkeyBusy = ref(false)
 const createError = ref('')
 const passkeyStepUpToken = ref('')
 const passkeySupported = isWebAuthnAvailable()
+// Proof z ověření účtem organizace jde stejným polem jako passkey proof.
+const ssoProof = ref('')
+const ssoVerified = computed(() => passkeyStepUpToken.value !== '' && passkeyStepUpToken.value === ssoProof.value)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
 const form = ref({
   name: '',
   // Re-auth současným heslem — backend ho vyžaduje vždy (SEC-09 step-up).
@@ -137,13 +143,20 @@ async function submitCreate() {
     return
   }
   const hasValidTotp = needsTotp.value && /^\d{6}$/.test(form.value.totp_code)
-  if (needsStepUp.value && !passkeyStepUpToken.value && !hasValidTotp) {
+  const enforcedMissing = ssoEnforcement.enforcedStepUpMissing(
+    passkeyStepUpToken.value, ssoVerified.value, form.value.totp_code, needsTotp.value)
+  if (enforcedMissing !== null) {
+    if (enforcedMissing !== '') {
+      createError.value = t(enforcedMissing)
+      return
+    }
+  } else if (needsStepUp.value && !passkeyStepUpToken.value && !hasValidTotp) {
     createError.value = t('api_tokens.step_up_required')
     return
   }
   // Účet bez passkey i TOTP nemá čím udělat step-up — backend v takovém případě
   // vyžaduje re-auth heslem, ať na vydání tokenu nestačí samotná session.
-  if (!needsStepUp.value && !passkeyStepUpToken.value && form.value.password === '') {
+  if (passwordAllowed.value && !needsStepUp.value && !passkeyStepUpToken.value && form.value.password === '') {
     createError.value = t('api_tokens.password_required')
     return
   }
@@ -151,7 +164,7 @@ async function submitCreate() {
   createError.value = ''
   const proof = passkeyStepUpToken.value
   try {
-    const res = await tokensApi.create({
+    const payload: CreateTokenPayload = {
       name: form.value.name.trim(),
       password: form.value.password,
       supplier_id: form.value.supplier_id,
@@ -162,7 +175,18 @@ async function submitCreate() {
       allow_payroll_submission_docs: form.value.allow_payroll_submission_docs,
       totp_code: !proof && hasValidTotp ? form.value.totp_code : undefined,
       step_up_token: proof || undefined,
-    })
+    }
+    if (!passwordAllowed.value) {
+      // Vynucené přihlášení přes organizaci: odejde jen proof, nikdy heslo ani holý TOTP kód.
+      const reauth = await ssoEnforcement.reauthProof('api_token.create', {
+        totp_code: payload.totp_code,
+        step_up_token: payload.step_up_token,
+      })
+      delete payload.password
+      payload.totp_code = undefined
+      payload.step_up_token = reauth.step_up_token
+    }
+    const res = await tokensApi.create(payload)
     // Heslo nedržíme v paměti déle, než je nutné.
     form.value.password = ''
     passkeyStepUpToken.value = ''
@@ -345,6 +369,7 @@ onMounted(() => {
   if (proof && canManageTokens.value) {
     openCreate()
     passkeyStepUpToken.value = proof
+    ssoProof.value = proof
     toast.info(t('sso.step_up_done'))
   }
 })
@@ -614,14 +639,14 @@ onMounted(() => {
 
           <!-- Účet s passkey nebo TOTP se prokáže step-upem; heslo se ptá jen tam,
                kde uživatel žádný silný faktor nemá (jinak by session stačila sama). -->
-          <label v-if="!needsStepUp && !passkeyStepUpToken" class="block text-sm">
+          <label v-if="passwordAllowed && !needsStepUp && !passkeyStepUpToken" class="block text-sm">
             <span class="text-neutral-700 font-medium">{{ t('api_tokens.password') }}</span>
             <input v-model="form.password" type="password" autocomplete="current-password"
               class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md" />
             <p class="text-xs text-neutral-500 mt-1">{{ t('api_tokens.password_hint') }}</p>
           </label>
 
-          <div v-if="hasPasskey" class="rounded-md border border-neutral-200 bg-neutral-50 p-3">
+          <div v-if="localFactorsAllowed && hasPasskey" class="rounded-md border border-neutral-200 bg-neutral-50 p-3">
             <p class="text-sm text-neutral-700 mb-2">{{ t('api_tokens.step_up_hint') }}</p>
             <div v-if="passkeyStepUpToken"
               class="text-sm font-medium text-success-600">
@@ -634,7 +659,7 @@ onMounted(() => {
             <p v-else class="text-sm text-warning-700">{{ t('api_tokens.passkey_unsupported') }}</p>
           </div>
 
-          <label v-if="needsTotp && !passkeyStepUpToken" class="block text-sm">
+          <label v-if="localFactorsAllowed && needsTotp && !passkeyStepUpToken" class="block text-sm">
             <span class="text-neutral-700 font-medium">{{ t('auth.totp_code') }}</span>
             <input v-model="form.totp_code" type="text" inputmode="numeric" maxlength="6" pattern="\d{6}"
               placeholder="000000"
@@ -642,11 +667,11 @@ onMounted(() => {
             <p class="text-xs text-neutral-500 mt-1">{{ t('api_tokens.totp_hint') }}</p>
           </label>
 
-          <div v-if="passkeyStepUpToken && !hasPasskey" class="text-sm font-medium text-success-600">
+          <div v-if="passkeyStepUpToken && (!hasPasskey || !localFactorsAllowed)" class="text-sm font-medium text-success-600">
             ✓ {{ t('sso.step_up_verified') }}
           </div>
           <SsoStepUpOption v-else-if="!passkeyStepUpToken" operation="api_token.create" :disabled="createBusy || passkeyBusy"
-            @verified="(proof: string) => { passkeyStepUpToken = proof }" />
+            @verified="(proof: string) => { passkeyStepUpToken = proof; ssoProof = proof }" />
         </div>
 
         <div v-if="createError"
@@ -659,7 +684,7 @@ onMounted(() => {
             class="cursor-pointer h-10 px-4 border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50">
             {{ t('common.cancel') }}
           </button>
-          <button @click="submitCreate" :disabled="createBusy || passkeyBusy"
+          <button @click="submitCreate" :disabled="createBusy || passkeyBusy || (ssoEnforcement.strong.value && !ssoVerified)"
             class="cursor-pointer h-10 px-4 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white font-medium rounded-md">
             {{ createBusy ? '…' : t('api_tokens.create') }}
           </button>

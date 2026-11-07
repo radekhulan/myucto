@@ -3,6 +3,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { btnOutline } from '@/components/ui/buttonStyles'
 import { useSsoStepUp } from '@/composables/useSsoStepUp'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { isSsoErrorCode } from '@/security/oidc'
 import MicrosoftLogo from '@/components/security/MicrosoftLogo.vue'
 
@@ -19,6 +20,10 @@ const emit = defineEmits<{ verified: [token: string] }>()
 
 const { t } = useI18n()
 const sso = useSsoStepUp(props.operation, () => props.context ?? '', token => emit('verified', token))
+const { strong: ssoEnforced } = useSsoEnforcement()
+// Při vynucení silného poskytovatele je ověření účtem organizace jediná cesta;
+// bez propojené identity by dialog jinak zůstal bez jakékoli možnosti potvrzení.
+const unavailableNotice = computed(() => ssoEnforced.value && !sso.available.value && sso.settled.value)
 
 const errorText = computed(() => {
   const code = sso.error.value
@@ -42,8 +47,12 @@ const errorText = computed(() => {
       </button>
     </div>
     <p class="text-xs text-neutral-500">
-      {{ sso.waiting.value ? t('sso.step_up_waiting') : t('sso.step_up_hint') }}
+      {{ sso.waiting.value ? t('sso.step_up_waiting') : t(ssoEnforced ? 'sso.step_up_hint_enforced' : 'sso.step_up_hint') }}
     </p>
     <p v-if="errorText" class="text-sm text-danger-500" data-testid="sso-step-up-error">{{ errorText }}</p>
   </div>
+  <p v-else-if="unavailableNotice" role="alert" data-testid="sso-step-up-unavailable"
+     class="rounded-md border border-warning-500/40 bg-warning-50 px-3 py-2 text-sm text-warning-700">
+    {{ t('sso.step_up_enforced_unavailable') }}
+  </p>
 </template>

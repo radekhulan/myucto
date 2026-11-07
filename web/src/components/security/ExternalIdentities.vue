@@ -14,6 +14,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import { invalidateSsoIdentities, useSsoStepUp } from '@/composables/useSsoStepUp'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { getCredential, isWebAuthnAvailable, webAuthnErrorKey } from '@/security/webauthn'
 import { ssoReturnPath, takeSsoStepUpProof } from '@/security/oidc'
 import { navigateFullPage } from '@/workspace/fullPageNavigation'
@@ -48,7 +49,12 @@ const totpEnabled = computed(() => auth.user?.totp_enabled === true)
 // heslo" ukazuje, že stačí jedna z cest. Účet organizace se ověřuje v novém okně,
 // takže rozpracované propojení zůstane.
 const ssoStepUp = useSsoStepUp(OPERATION)
-const hasAlternatives = computed(() => (hasPasskey.value && passkeySupported) || ssoStepUp.available.value)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
+// Proof vydaný ověřením účtem organizace (při vynucení silného poskytovatele jediný platný).
+const ssoProof = ref('')
+const hasAlternatives = computed(() => passwordAllowed.value
+  && ((hasPasskey.value && passkeySupported) || ssoStepUp.available.value))
 
 function stamp(value: string | null): string {
   return value?.replace('T', ' ').slice(0, 16) || '—'
@@ -77,6 +83,7 @@ onMounted(async () => {
   const returned = takeSsoStepUpProof(OPERATION)
   if (returned) {
     proof.value = returned
+    ssoProof.value = returned
     notice.value = t('sso.step_up_done')
   }
 })
@@ -127,27 +134,34 @@ async function verifyPasskey() {
   }
 }
 
-function reauthFields(): ReauthFields {
-  if (proof.value) return { step_up_token: proof.value }
-  return {
+function reauthFields(): Promise<ReauthFields> {
+  if (proof.value) return Promise.resolve({ step_up_token: proof.value })
+  return ssoEnforcement.reauthProof(OPERATION, {
     password: password.value,
     totp_code: totpEnabled.value && totpCode.value !== '' ? totpCode.value : undefined,
-  }
+  })
 }
 
 async function confirm() {
   const action = pending.value
   if (!action || busy.value) return
-  if (!proof.value && password.value === '') {
+  const enforcedMissing = ssoEnforcement.enforcedStepUpMissing(
+    proof.value, proof.value !== '' && proof.value === ssoProof.value, totpCode.value, totpEnabled.value)
+  if (enforcedMissing !== null) {
+    if (enforcedMissing !== '') {
+      error.value = t(enforcedMissing)
+      return
+    }
+  } else if (!proof.value && password.value === '') {
     error.value = t('sso.reauth_required')
     return
   }
   busy.value = true
   error.value = ''
-  const fields = reauthFields()
-  // Proof je jednorázový: server ho spotřebuje i při neúspěchu akce.
-  proof.value = ''
   try {
+    const fields = await reauthFields()
+    // Proof je jednorázový: server ho spotřebuje i při neúspěchu akce.
+    proof.value = ''
     if (action.kind === 'link') {
       const url = await oidcApi.link(action.provider, ssoReturnPath(route.fullPath, '/profile/password?tab=sso'), fields)
       navigateFullPage(url)
@@ -199,14 +213,14 @@ async function confirm() {
       </p>
       <p v-if="proof" class="text-sm font-medium text-success-600">✓ {{ t('sso.step_up_verified') }}</p>
       <template v-else>
-        <div v-if="hasPasskey && passkeySupported" class="flex flex-wrap gap-2">
+        <div v-if="localFactorsAllowed && hasPasskey && passkeySupported" class="flex flex-wrap gap-2">
           <button type="button" :class="btnOutline('primary')" :disabled="busy || passkeyBusy" @click="verifyPasskey">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
             {{ passkeyBusy ? t('auth.passkey_verifying') : t('sso.verify_passkey') }}
           </button>
         </div>
         <SsoStepUpOption :operation="OPERATION" :disabled="busy || passkeyBusy"
-          @verified="(token: string) => { proof = token }" />
+          @verified="(token: string) => { proof = token; ssoProof = token }" />
         <div v-if="hasAlternatives" class="flex items-center gap-3 text-xs text-neutral-500" data-testid="sso-reauth-or">
           <span class="h-px flex-1 bg-neutral-200" aria-hidden="true"></span>
           {{ t('sso.reauth_or_password') }}
@@ -214,12 +228,12 @@ async function confirm() {
         </div>
       </template>
       <form class="space-y-3" @submit.prevent="confirm">
-        <label v-if="!proof" class="block text-sm">
+        <label v-if="passwordAllowed && !proof" class="block text-sm">
           <span class="text-neutral-700 font-medium">{{ t('auth.current_password') }}</span>
           <input ref="passwordInput" v-model="password" type="password" autocomplete="current-password"
                  class="mt-1 w-full h-10 px-3 border border-neutral-300 rounded-md" />
         </label>
-        <label v-if="totpEnabled && !proof" class="block text-sm">
+        <label v-if="localFactorsAllowed && totpEnabled && !proof" class="block text-sm">
           <span class="text-neutral-700 font-medium">{{ t('auth.totp_code') }}</span>
           <input v-model="totpCode" type="text" inputmode="numeric" maxlength="6" pattern="\d{6}" placeholder="000000"
                  autocomplete="one-time-code"
@@ -230,7 +244,8 @@ async function confirm() {
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button type="submit" :class="btnFilled(pending.kind === 'unlink' ? 'danger' : 'primary')" :disabled="busy || passkeyBusy">
+          <button type="submit" :class="btnFilled(pending.kind === 'unlink' ? 'danger' : 'primary')"
+                  :disabled="busy || passkeyBusy || (ssoEnforcement.strong.value && (proof === '' || proof !== ssoProof))">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" :d="pending.kind === 'unlink' ? ICONS.trash : ICONS.check" /></svg>
             {{ busy ? '…' : pending.kind === 'unlink' ? t('sso.unlink_button') : t('sso.confirm_link') }}
           </button>

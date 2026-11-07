@@ -60,6 +60,8 @@ export function useSsoStepUp(
   const enabled = computed(() => hasStrongProvider(auth.setupStatus?.sso_providers, PROVIDER))
   const available = computed(() => enabled.value
     && (identities.value ?? []).some(identity => identity.provider === PROVIDER))
+  /** O dostupnosti je rozhodnuto: poskytovatel je vypnutý, nebo jsou identity načtené. */
+  const settled = computed(() => !enabled.value || identities.value !== null)
 
   if (enabled.value && identities.value === null) void loadIdentities()
 
@@ -127,6 +129,7 @@ export function useSsoStepUp(
   return {
     enabled,
     available,
+    settled,
     busy,
     waiting,
     /** Kód chyby (např. `sso_not_linked`, `popup_blocked`), prázdné = bez chyby. */

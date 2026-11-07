@@ -12,6 +12,7 @@ import { useAuthStore } from '@/stores/auth'
 import { ICONS, btnFilled, btnOutline, btnOutlineSm } from '@/components/ui/buttonStyles'
 import EmptyState from '@/components/ui/EmptyState.vue'
 import SsoStepUpOption from '@/components/security/SsoStepUpOption.vue'
+import { useSsoEnforcement } from '@/composables/useSsoEnforcement'
 import { takeSsoStepUpProof } from '@/security/oidc'
 
 /**
@@ -49,8 +50,15 @@ const hasPasskey = computed(() =>
   auth.user?.mfa_methods?.includes('passkey') === true
   || (auth.user?.passkey_count ?? 0) > 0,
 )
+const hasTotp = computed(() => auth.user?.totp_enabled === true)
+const ssoEnforcement = useSsoEnforcement()
+const { passwordAllowed, localFactorsAllowed } = ssoEnforcement
 const sections = computed(() => overview.value?.sections ?? [])
-const canReveal = computed(() => passkeyToken.value !== '' || password.value !== '')
+const canReveal = computed(() => {
+  const enforced = ssoEnforcement.enforcedStepUpMissing(passkeyToken.value, ssoVerified.value, totpCode.value, hasTotp.value)
+  if (enforced !== null) return enforced === ''
+  return passkeyToken.value !== '' || password.value !== ''
+})
 
 async function load() {
   loading.value = true
@@ -125,11 +133,11 @@ async function verifyPasskey() {
 async function reveal() {
   revealing.value = true
   try {
-    const result = await backupsApi.revealPassword({
+    const result = await backupsApi.revealPassword(await ssoEnforcement.reauthProof('backup.password', {
       password: password.value || undefined,
       totp_code: totpCode.value.trim() || undefined,
       step_up_token: passkeyToken.value || undefined,
-    })
+    }))
     revealedPassword.value = result.password
     if (!result.encrypted) toast.error(t('backups.not_encrypted'))
   } catch (e: unknown) {
@@ -303,7 +311,7 @@ function formatBytes(bytes: number | null): string {
 
         <template v-else>
           <div class="p-5 space-y-4">
-            <div v-if="hasPasskey && !ssoVerified" class="flex flex-wrap items-center gap-3">
+            <div v-if="localFactorsAllowed && hasPasskey && !ssoVerified" class="flex flex-wrap items-center gap-3">
               <div v-if="passkeyToken" class="text-sm font-medium text-success-600">
                 ✓ {{ t('backups.passkey_verified') }}
               </div>
@@ -315,7 +323,7 @@ function formatBytes(bytes: number | null): string {
                   </svg>
                   {{ passkeyBusy ? t('auth.passkey_verifying') : t('backups.verify_passkey') }}
                 </button>
-                <span class="text-xs text-neutral-500">{{ t('backups.or_password') }}</span>
+                <span v-if="passwordAllowed" class="text-xs text-neutral-500">{{ t('backups.or_password') }}</span>
               </template>
               <p v-else class="text-sm text-warning-700">{{ t('backups.passkey_unsupported') }}</p>
             </div>
@@ -323,12 +331,12 @@ function formatBytes(bytes: number | null): string {
               :verified="ssoVerified" :disabled="passkeyBusy || revealing"
               @verified="(proof: string) => { ssoProof = proof; passkeyToken = proof }" />
             <template v-if="!passkeyToken">
-              <label class="block text-sm">
+              <label v-if="passwordAllowed" class="block text-sm">
                 {{ t('backups.current_password') }}
                 <input v-model="password" type="password" autocomplete="current-password"
                   class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">
               </label>
-              <label class="block text-sm">
+              <label v-if="passwordAllowed || (localFactorsAllowed && hasTotp)" class="block text-sm">
                 {{ t('backups.totp_optional') }}
                 <input v-model="totpCode" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6"
                   class="mt-1 w-full h-10 rounded-md border border-neutral-300 bg-surface px-3">

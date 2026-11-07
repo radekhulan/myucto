@@ -132,8 +132,8 @@ export interface SetupStatus {
   /** Poskytovatelé identity (OpenID Connect); prázdné = přihlášení přes organizaci vypnuté. */
   sso_providers?: SsoProvider[]
   /**
-   * Poskytovatel povinný pro celou instalaci. Přihlašovací stránka pak heslo
-   * nabízí jen technickému účtu správce instance.
+   * Poskytovatel povinný pro celou instalaci. Heslo, passkey ani TOTP se pak
+   * nepoužívají pro nikoho; citlivé operace ověřuje jen účet organizace.
    */
   sso_required_provider?: string | null
   /** Ohlášení plánované údržby. `undefined` = starší backend bez pole. */
