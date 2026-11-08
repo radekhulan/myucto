@@ -2625,7 +2625,9 @@
         "text": "{name}: neschválené mzdové vstupy z importu docházky za tento měsíc se zruší a hodiny se budou počítat ze směn a časových záznamů. Schválené nebo zamčené vstupy se nezmění; pokud nějaké jsou, akce se neprovede. Původní souhrn importu zůstane v historii.",
         "confirm": "Zrušit vstupy z importu a přepnout",
         "done": "Zdroj hodin je přepnutý na směny. Zrušené vstupy z importu: {count}.",
-        "failed": "Zdroj hodin se nepodařilo přepnout."
+        "failed": "Zdroj hodin se nepodařilo přepnout.",
+        "needs_rate": "Měsíc bere hodiny z importu docházky. Chcete-li zapisovat směny a počítat mzdu z nich, nastavte nejdřív na kartě pracovního vztahu hodinovou odměnu a sazbu. Pak se tu objeví tlačítko Počítat ze směn.",
+        "open_card": "Nastavit sazbu na kartě vztahu"
       },
       "restore_title": "Změnit vybraný zdroj hodin",
       "restore_source": "Obnovený zdroj",

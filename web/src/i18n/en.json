@@ -2625,7 +2625,9 @@
         "text": "{name}: unapproved payroll inputs from the attendance import for this month will be cancelled and hours will be calculated from shifts and time entries. Approved or locked inputs are not changed; if there are any, nothing happens. The original import summary stays in the history.",
         "confirm": "Cancel import inputs and switch",
         "done": "The hours source now uses shifts. Cancelled import inputs: {count}.",
-        "failed": "The hours source could not be switched."
+        "failed": "The hours source could not be switched.",
+        "needs_rate": "This month takes hours from the attendance import. To record shifts and calculate pay from them, first set hourly pay and a rate on the employment card. The Calculate from shifts button then appears here.",
+        "open_card": "Set the rate on the employment card"
       },
       "restore_title": "Change the selected hours source",
       "restore_source": "Restored source",

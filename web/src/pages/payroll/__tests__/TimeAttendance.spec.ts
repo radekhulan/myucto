@@ -239,6 +239,21 @@ describe('TimeAttendance', () => {
     m.routeQuery = {}
   })
 
+  it('importovaný měsíc vztahu bez hodinové odměny pošle nastavit sazbu na kartu vztahu', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original, hourly_remuneration_in_period: false,
+      month: { ...original.month, status: 'open', work_source: 'import_summary' },
+      summary: { ...original.summary, work_source: 'import_summary', worked_duration_units: 0, actual_minutes: 0, difference_minutes: -9_600 },
+      shifts: [], entries: [],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="time-import-needs-rate-12"]').text()).toContain('payroll.worked_hours.switch_to_entries.needs_rate')
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
   it('historie měsíce použije přesný vybraný souhrn a ne archivní denní záznamy', async () => {
     m.routeQuery = { period: '2026-09', employment: '12' }
     m.timeMonth.mockResolvedValue({ items: [{ ...row(12, 'Syntetická Osoba'), entries: [] }], total: 1, limit: 25, offset: 0 })

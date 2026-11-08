@@ -317,6 +317,18 @@ function usesDailyEntries(item: TimeSourceItem): boolean {
   const source = timeSource(item)
   return source === 'entries' || (source === 'import_summary' && item.hourly_remuneration_in_period !== true)
 }
+/*
+ * Importovaný měsíc vztahu bez hodinového odměňování nemá upozornění na zdroj
+ * (přehled zůstává beze změny), server ale zápis směny odmítne a zdroj hodin
+ * přepnout nedovolí (krácení měsíční mzdy). Bez pokynu by účetní nevěděla,
+ * že má nejdřív nastavit hodinovou sazbu; pak se nabídne „Počítat ze směn".
+ */
+function importNeedsHourlyRate(item: TimeSourceItem): boolean {
+  return timeSource(item) === 'import_summary'
+    && usesDailyEntries(item)
+    && item.month.status === 'open'
+    && canWrite.value
+}
 function workedTimeLabel(item: TimeSourceItem): string {
   if (item.summary.worked_duration_units != null) return formatPayrollDuration(item.summary.worked_duration_units)
   if (!usesDailyEntries(item) || item.summary.actual_minutes === null) return t('payroll.worked_hours.unknown')
@@ -3335,7 +3347,7 @@ onMounted(async () => {
                   @change="toggleSelection(item.employment.id)"
                 >
               </td>
-              <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p><PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" :month-row-version="item.month.status === 'open' ? item.month.row_version : null" :can-switch="canWrite && auth.canWrite('payroll.inputs.write')" :name="item.employment.full_name" @switched="load()" /></td>
+              <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p><PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" :month-row-version="item.month.status === 'open' ? item.month.row_version : null" :can-switch="canWrite && auth.canWrite('payroll.inputs.write')" :name="item.employment.full_name" @switched="load()" /><div v-if="importNeedsHourlyRate(item)" class="mt-2 space-y-1" :data-test="`time-import-needs-rate-${item.employment.id}`"><p class="max-w-xs text-xs text-warning-800">{{ t('payroll.worked_hours.switch_to_entries.needs_rate') }}</p><RouterLink :to="{ name: 'payroll-people', query: { person: String(item.employment.employee_id) } }" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>{{ t('payroll.worked_hours.switch_to_entries.open_card') }}</RouterLink></div></td>
               <td v-if="tbl.isVisible('fund')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.fund_minutes) }}</td>
               <td v-if="tbl.isVisible('plan')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.planned_minutes) }}</td>
               <td v-if="tbl.isVisible('actual')" class="px-4 py-3" :data-test="`time-actual-${item.employment.id}`">{{ workedTimeLabel(item) }}</td>
@@ -3407,6 +3419,7 @@ onMounted(async () => {
         <article v-for="item in visibleItems" :key="item.employment.id" class="rounded-lg border border-neutral-200 p-4">
           <div class="flex flex-wrap items-start justify-between gap-2"><div class="flex items-start gap-3"><input v-if="item.month.status === 'open'" type="checkbox" class="mt-1" :checked="selectedEmploymentIds.includes(item.employment.id)" :aria-label="t('payroll.time.bulk.select', { name: item.employment.full_name })" @change="toggleSelection(item.employment.id)"><div><h2 class="font-semibold text-neutral-900">{{ item.employment.full_name }}</h2><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></div></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="monthStatusClass(item)">{{ t(`payroll.time.status.${monthStatusKey(item)}`) }}</span></div>
           <PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" :month-row-version="item.month.status === 'open' ? item.month.row_version : null" :can-switch="canWrite && auth.canWrite('payroll.inputs.write')" :name="item.employment.full_name" @switched="load()" />
+          <div v-if="importNeedsHourlyRate(item)" class="mt-3 space-y-1"><p class="text-xs text-warning-800">{{ t('payroll.worked_hours.switch_to_entries.needs_rate') }}</p><RouterLink :to="{ name: 'payroll-people', query: { person: String(item.employment.employee_id) } }" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>{{ t('payroll.worked_hours.switch_to_entries.open_card') }}</RouterLink></div>
           <dl class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(item.summary.fund_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(item.summary.planned_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ workedTimeLabel(item) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ differenceLabel(item.summary.difference_minutes) }}</dd></div></dl>
           <div
             v-if="overtimeVisible(item)"
