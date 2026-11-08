@@ -18987,7 +18987,8 @@
       "month_lines": "Řádky měsíce {month}",
       "month_expand_hint": "Kliknutím na měsíc zobrazíte jeho řádky deníku.",
       "month_empty": "V tomto měsíci nejsou žádné řádky.",
-      "month_more": "Zobrazeno prvních {shown} z {total} řádků - pokračovat v opisu účtu.",
+      "month_more": "Zobrazeno {shown} z {total} řádků.",
+      "month_load_more": "Načíst další",
       "open_account": "Karta účtu",
       "totals": "Součty"
     },

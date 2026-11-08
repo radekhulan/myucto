@@ -40,7 +40,7 @@ Hlavní kniha zahrnuje rozvahové, výsledkové, uzávěrkové i podrozvahové �
 1. U účtu klikněte na šipku na začátku řádku. Rozbalí se obrat MD a Dal po měsících.
 2. Klikněte na měsíc s pohybem. Zobrazí se jednotlivé řádky deníku: datum, doklad, analytika, popis a částka.
 3. Klikněte na doklad. Otevře se prvotní doklad.
-4. Přesahuje-li měsíc 200 řádků, klikněte na odkaz v patičce a pokračujte v opisu účtu za stejný měsíc.
+4. Přesahuje-li měsíc 200 řádků, klikněte v patičce na **Načíst další**.
 5. Chcete-li vidět celý účet, klikněte na **kód účtu**. Otevře se karta účtu se zachovaným rozsahem **Od / Do**. Odtud otevřete **Opis účtu**.
 6. V opisu čtěte sloupec **Zůstatek**, což je běžící saldo. Kladný zůstatek znamená MD, záporný Dal.
 
@@ -190,8 +190,14 @@ počátečního stavu, ne lednového obratu.
 
 Kliknutí na měsíc s pohybem rozbalí **jednotlivé řádky deníku** za ten měsíc:
 datum, doklad, analytiku, popis a částku na správné straně. Doklad vede na
-prvotní doklad (viz [§ 55.8.5](#5585-opis-uctu)). Zobrazí se prvních 200 řádků;
-u delších měsíců odkaz v patičce pokračuje v opisu účtu za stejný měsíc.
+prvotní doklad (viz [§ 55.8.5](#5585-opis-uctu)). Řádky měsíce mají stejné
+filtry jako kniha na obrazovce (dimenze, dodavatel, odběratel, položka a stav po
+uzavření knih) a na krajích rozsahu `Od / Do` jen dny uvnitř rozsahu. Součet řádků
+proto sedí na obrat měsíce; u řádku rozděleného mezi víc hodnot dimenze se ukáže
+jen díl vybrané hodnoty. Při rozpadu po analytikách ukáže řádek syntetiky jen
+pohyby zaúčtované přímo na ni. Najednou se zobrazí 200 řádků, další načte tlačítko
+**Načíst další** v patičce. Odkaz **Opis účtu** v záhlaví měsíce otevře opis za
+stejné dny bez filtrů knihy a ve výchozím stavu před uzavřením knih.
 
 Kliknutí na **kód účtu** otevře [kartu účtu](66_Ucetni_osnova.md#666-krok-za-krokem-karta-uctu)
 se zachovaným rozsahem `Od / Do`. Z karty vede odkaz zpět do hlavní knihy;

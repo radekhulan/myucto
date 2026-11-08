@@ -18987,7 +18987,8 @@
       "month_lines": "Lines for {month}",
       "month_expand_hint": "Click a month to show its journal lines.",
       "month_empty": "No lines in this month.",
-      "month_more": "Showing the first {shown} of {total} lines — continue in the account statement.",
+      "month_more": "Showing {shown} of {total} lines.",
+      "month_load_more": "Load more",
       "open_account": "Account card",
       "totals": "Totals"
     },

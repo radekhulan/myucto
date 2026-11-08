@@ -15034,12 +15034,20 @@ paths:
     get:
       tags: [Accounting]
       summary: Opis účtu (pohyby s běžícím zůstatkem, stránkované)
+      description: "Filtry hlavní knihy (dimenze, vendor, client, item) zúží řádky, obraty i počáteční stav stejně jako v hlavní knize; zůstatek je pak zůstatkem jen vybraných řádků, u řádku s rozpadem dimenze jen jeho díl. S nimi se nevrací counter_totals a nejdou kombinovat s counter_account_id (422). Spolu s opening_date a include_analytics=0 dají řádky jednoho měsíce řádku hlavní knihy. Export opisu žádné z těchto zúžení nepodporuje (422)."
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
+        - $ref: '#/components/parameters/DimensionValueId'
+        - $ref: '#/components/parameters/DimensionDescendants'
         - { in: path, name: accountId, required: true, schema: { type: integer } }
         - { in: query, name: from, required: true, schema: { type: string, format: date } }
         - { in: query, name: to, required: true, schema: { type: string, format: date } }
         - { in: query, name: counter_account_id, description: "Jen řádky s tímto účtem nebo jeho analytikou na opačné účinné straně téhož zápisu. Řádek se shodnou částkou na obou stranách se filtruje jen ve své dvojici. Zůstatek zůstává zůstatkem celého účtu.", schema: { type: integer } }
+        - { in: query, name: vendor, description: "Jen zápisy přijatých faktur dodavatele (část názvu)", schema: { type: string, maxLength: 100 } }
+        - { in: query, name: client, description: "Jen zápisy vydaných faktur odběratele (část názvu)", schema: { type: string, maxLength: 100 } }
+        - { in: query, name: item, description: "Jen zápisy faktur s položkou obsahující text", schema: { type: string, maxLength: 100 } }
+        - { in: query, name: opening_date, description: "Den (nejpozději from), jehož otevírací zápis patří do počátečního stavu; ostatní otevírací zápisy v rozsahu jsou pohyby jako v hlavní knize. Bez parametru se vyřazuje otevírací zápis z from, před uzavřením knih všechny.", schema: { type: string, format: date } }
+        - { in: query, name: include_analytics, description: "0 = jen řádky účtu samotného, bez jeho analytik", schema: { type: integer, enum: [0, 1], default: 1 } }
         - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
         - { in: query, name: per_page, schema: { type: integer, minimum: 1, default: 50, maximum: 200 } }
         - { in: query, name: after_closing, description: "1 = zahrnout technické uzavírací a otevírací zápisy", schema: { type: integer, enum: [0, 1], default: 0 } }
@@ -61559,7 +61567,7 @@ components:
         turnover_d:
           type: number
         counter_totals:
-          description: Obraty podle protiúčtu, Σ = obrat účtu. Řádky se shodnou částkou na obou stranách zápisu patří své dvojici, ostatní se dělí poměrem řádků protistrany. Jen na první stránce, jinak null.
+          description: Obraty podle protiúčtu, Σ = obrat účtu. Řádky se shodnou částkou na obou stranách zápisu patří své dvojici, ostatní se dělí poměrem řádků protistrany. Jen na první stránce a bez filtrů hlavní knihy (dimenze, vendor, client, item), jinak null.
           type:
           - array
           - 'null'
@@ -61603,6 +61611,31 @@ components:
               type: number
             d:
               type: number
+        dimension:
+          description: Použitý filtr dimenze; null bez filtru.
+          anyOf:
+          - $ref: '#/components/schemas/ReportDimensionFilter'
+          - type: 'null'
+        vendor:
+          type:
+          - string
+          - 'null'
+        client:
+          type:
+          - string
+          - 'null'
+        item:
+          type:
+          - string
+          - 'null'
+        opening_date:
+          description: Použitý den počátečního stavu (parametr opening_date); null = výchozí pravidlo.
+          type:
+          - string
+          - 'null'
+          format: date
+        include_analytics:
+          type: boolean
 
     AccountStatementItem:
       type: object

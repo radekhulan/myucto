@@ -203,6 +203,42 @@ final class ReportsApiTest extends TestCase
         self::assertCount(1, $res['body']['items']);
     }
 
+    public function testAccountStatementValidatesLedgerFilters(): void
+    {
+        $args = ['accountId' => (string) $this->accountId('311')];
+        $range = ['from' => self::YEAR . '-01-01', 'to' => self::YEAR . '-12-31'];
+        foreach ([
+            'neplatná dimenze' => ['dimension_value_id' => 'abc'],
+            'pole místo textu' => ['vendor' => ['a', 'b']],
+            'protiúčet s filtrem' => ['vendor' => 'x', 'counter_account_id' => (string) $this->accountId('602')],
+            'den PS po from' => ['opening_date' => self::YEAR . '-01-02'],
+            'den PS není datum' => ['opening_date' => '2099-02-31'],
+            'neplatný rozpad' => ['include_analytics' => '2'],
+        ] as $case => $query) {
+            $res = $this->call($this->accountStatementAction, 'get', 'GET', 'readonly', $range + $query, $args);
+            self::assertSame(422, $res['status'], $case);
+        }
+        $ok = $this->call($this->accountStatementAction, 'get', 'GET', 'readonly', $range + ['vendor' => 'Neexistuje'], $args);
+        self::assertSame(200, $ok['status']);
+        self::assertSame(0, $ok['body']['total']);
+        self::assertSame('Neexistuje', $ok['body']['vendor']);
+        // Prázdná hodnota a „0" filtr nezapnou stejně jako v hlavní knize.
+        $off = $this->call($this->accountStatementAction, 'get', 'GET', 'readonly',
+            $range + ['vendor' => '0', 'client' => ' ', 'counter_account_id' => (string) $this->accountId('602')], $args);
+        self::assertSame(200, $off['status']);
+        self::assertNull($off['body']['vendor']);
+        $scoped = $this->call($this->accountStatementAction, 'get', 'GET', 'readonly',
+            $range + ['opening_date' => self::YEAR . '-01-01', 'include_analytics' => '0'], $args);
+        self::assertSame(200, $scoped['status']);
+        self::assertSame(self::YEAR . '-01-01', $scoped['body']['opening_date']);
+        self::assertFalse($scoped['body']['include_analytics']);
+        // Export filtr neuvádí v hlavičce, proto ho odmítne místo tichého zúžení.
+        foreach ([['item' => 'x'], ['opening_date' => self::YEAR . '-01-01'], ['include_analytics' => '0']] as $query) {
+            $export = $this->call($this->accountStatementAction, 'export', 'GET', 'readonly', $range + ['format' => 'xlsx'] + $query, $args);
+            self::assertSame(422, $export['status'], (string) array_key_first($query));
+        }
+    }
+
     public function testBalanceSheetAndIncomeStatementReturnData(): void
     {
         $query = ['period_id' => (string) $this->periodId, 'as_of' => self::YEAR . '-12-31', 'scope' => 'full'];
