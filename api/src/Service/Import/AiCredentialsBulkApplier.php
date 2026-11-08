@@ -14,6 +14,8 @@ use MyInvoice\Security\PermissionChecker;
 use MyInvoice\Security\PermissionResolver;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\ActivityLogger;
+use MyInvoice\Service\Ai\AiDpaGate;
+use MyInvoice\Service\Ai\AiJobService;
 use MyInvoice\Service\Tenant\SupplierAccessResolver;
 use Psr\Http\Message\ServerRequestInterface as Request;
 
@@ -51,6 +53,8 @@ final class AiCredentialsBulkApplier
         private readonly SupplierAccessResolver $supplierAccess,
         private readonly PermissionResolver $permissions,
         private readonly PermissionChecker $checker,
+        private readonly AiDpaGate $dpa,
+        private readonly AiJobService $jobs,
     ) {}
 
     /**
@@ -116,6 +120,9 @@ final class AiCredentialsBulkApplier
      * žádný řádek `user_suppliers` nemá, a přesto ji má dostat. Oprávnění se ale
      * vyhodnotí stejně jako u hromadné akce, tedy rolí přepnutou do cílové firmy.
      *
+     * Má-li zdrojová firma zapnutou AI asistenci účtování, převezme se i ta: rozsah,
+     * potvrzení DPA téhož poskytovatele a vlastní pseudonymizační sůl nové firmy.
+     *
      * @return self::STATUS_* výsledek; firma mimo dosah resoluce = STATUS_FORBIDDEN
      */
     public function applyToSupplier(
@@ -145,6 +152,7 @@ final class AiCredentialsBulkApplier
             ['provider' => $provider, 'carry_over_source_supplier_id' => $sourceSupplierId],
             $ip,
             $userAgent,
+            $sourceSupplierId,
         );
     }
 
@@ -235,6 +243,7 @@ final class AiCredentialsBulkApplier
         array $auditPayload,
         ?string $ip,
         string $userAgent,
+        ?int $assistSourceId = null,
     ): string {
         $provider = $source['provider'];
         $client   = $source['client'];
@@ -281,6 +290,13 @@ final class AiCredentialsBulkApplier
             // Pojistka po zápisu: region se počítá z uložené konfigurace cílové firmy.
             (new ResidencyPolicy())->assertAllowed($provider, $client->capabilities($targetId)->dataRegion, $euRequired);
 
+            if ($assistSourceId !== null) {
+                $assistScope = $this->carryAssist($assistSourceId, $targetId, $provider, $userId);
+                if ($assistScope !== null) {
+                    $auditPayload['ai_assist_scope'] = $assistScope;
+                }
+            }
+
             $this->logger->log(
                 'import.ai_credentials_set',
                 $userId,
@@ -301,6 +317,63 @@ final class AiCredentialsBulkApplier
         }
 
         return self::STATUS_UPDATED;
+    }
+
+    /**
+     * AI asistence účtování zdrojové firmy do cílové, volá se uvnitř transakce cíle.
+     * Převezme se jen zapnutá asistence s potvrzeným DPA téhož poskytovatele (nebo
+     * s výjimkou lokální Ollamy). Sůl se nekopíruje, každá firma má vlastní.
+     *
+     * @return string|null převzatý rozsah, null = nic se nepřevzalo
+     */
+    private function carryAssist(int $sourceId, int $targetId, string $provider, int $userId): ?string
+    {
+        $pdo = $this->db->pdo();
+        $stmt = $pdo->prepare('SELECT ai_assist_enabled, ai_assist_scope FROM supplier WHERE id = ?');
+        $stmt->execute([$sourceId]);
+        $source = $stmt->fetch(\PDO::FETCH_ASSOC);
+        $scope = is_array($source) ? (string) $source['ai_assist_scope'] : '';
+        if (!is_array($source) || (int) $source['ai_assist_enabled'] !== 1 || $scope === '') {
+            return null;
+        }
+        $sourceConfirmed = $this->dpa->confirmations($sourceId)[$provider] ?? null;
+        if ($sourceConfirmed === null && !$this->dpa->isExempt($targetId, $provider)) {
+            return null;
+        }
+
+        $stmt = $pdo->prepare('SELECT ai_pseudo_salt, ai_dpa_confirmations FROM supplier WHERE id = ? FOR UPDATE');
+        $stmt->execute([$targetId]);
+        $target = $stmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $confirmations = json_decode((string) ($target['ai_dpa_confirmations'] ?? '{}'), true);
+        if (!is_array($confirmations)) {
+            $confirmations = [];
+        }
+        if ($sourceConfirmed !== null) {
+            $confirmations[$provider] = [
+                'confirmed_at'             => gmdate('c'),
+                'user_id'                  => $userId,
+                'carried_from_supplier_id' => $sourceId,
+            ];
+        }
+        $salt = $target['ai_pseudo_salt'] ?? null;
+        if (!is_string($salt) || strlen($salt) !== 32) {
+            $salt = random_bytes(32);
+        }
+        $pdo->prepare(
+            'UPDATE supplier SET ai_assist_enabled = 1, ai_assist_scope = ?, ai_pseudo_salt = ?, ai_dpa_confirmations = ? WHERE id = ?'
+        )->execute([
+            $scope, $salt, json_encode($confirmations, JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR), $targetId,
+        ]);
+
+        $scopes = explode(',', $scope);
+        if (in_array('bank_tx', $scopes, true)) {
+            $this->jobs->enqueue($targetId, 'embed_backfill', 'bank_transaction', 0);
+        }
+        if (in_array('purchase_invoices', $scopes, true)) {
+            $this->jobs->enqueue($targetId, 'embed_backfill', 'purchase_invoice', 0);
+        }
+
+        return $scope;
     }
 
     /** @return list<int> */

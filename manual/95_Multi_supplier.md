@@ -83,7 +83,9 @@ předem zaškrtnuté:
   z `Firma → AI nastavení`, [§ 25](25_AI_extrakce.md)). Nabízí se jen tehdy, když mají všechny vaše firmy s nastavenou AI totéž nastavení
   včetně stejného klíče. Firmy bez AI nevadí. Liší-li se klíč nebo nastavení mezi firmami, AI se nepřebírá
   a formulář to oznámí; v nové firmě ho pak nastavte ručně. Klíč se do prohlížeče nikdy neposílá, porovnává
-  ho jen server.
+  ho jen server. Má-li zdrojová firma (ta s nejnižším interním číslem mezi firmami s nastavenou AI) zapnutou
+  **AI asistenci účtování** s potvrzeným DPA téhož poskytovatele, převezme se i ta: zapnutí, rozsah (bankovní
+  transakce, přijaté faktury) a potvrzení DPA na vaše jméno. Pseudonymizační klíč dostane nová firma vlastní.
 - **Certifikát** z vašeho osobního trezoru (`Systém → Elektronické podpisy`), který je platný a povolený ve
   všech firmách, kde smíte spravovat podpisy. Certifikát se nekopíruje, nová firma k němu jen dostane
   přístup stejně jako při ručním povolení v dalších firmách. Převzetí certifikátu potvrďte stejně jako jeho

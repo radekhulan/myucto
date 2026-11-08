@@ -199,6 +199,51 @@ final class SupplierCarryOverTest extends TestCase
         self::assertSame(1, $this->auditCount('supplier.carry_over', $id));
     }
 
+    public function testAiAssistIsCarriedWhenEnabledInSourceCompany(): void
+    {
+        $sourceSalt = random_bytes(32);
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET ai_assist_enabled = 1, ai_assist_scope = 'bank_tx,purchase_invoices', ai_pseudo_salt = ?,
+                    ai_dpa_confirmations = ? WHERE id = ?"
+        )->execute([
+            $sourceSalt,
+            json_encode(['anthropic' => ['confirmed_at' => '2026-01-01T00:00:00+00:00', 'user_id' => $this->userId]]),
+            $this->a,
+        ]);
+
+        [$status, $body] = $this->create(['carry_over' => ['ai' => true]]);
+
+        self::assertSame(201, $status);
+        $id = (int) $body['id'];
+        self::assertSame('1', $this->column($id, 'ai_assist_enabled'));
+        self::assertSame('bank_tx,purchase_invoices', $this->column($id, 'ai_assist_scope'));
+        $salt = $this->column($id, 'ai_pseudo_salt');
+        self::assertSame(32, strlen((string) $salt));
+        self::assertNotSame($sourceSalt, $salt, 'sůl se nekopíruje');
+        $dpa = json_decode((string) $this->column($id, 'ai_dpa_confirmations'), true);
+        self::assertSame($this->userId, $dpa['anthropic']['user_id'] ?? null);
+        self::assertSame($this->a, $dpa['anthropic']['carried_from_supplier_id'] ?? null);
+        self::assertSame(2, (int) $this->scalar(
+            "SELECT COUNT(*) FROM ai_jobs WHERE supplier_id = ? AND job_type = 'embed_backfill' AND status = 'queued'",
+            [$id],
+        ));
+    }
+
+    public function testAiAssistIsNotCarriedWhenDisabledOrWithoutDpa(): void
+    {
+        $this->db->pdo()->prepare(
+            "UPDATE supplier SET ai_assist_enabled = 1, ai_assist_scope = 'bank_tx' WHERE id = ?"
+        )->execute([$this->a]);
+
+        [$status, $body] = $this->create(['carry_over' => ['ai' => true]]);
+
+        self::assertSame(201, $status);
+        $id = (int) $body['id'];
+        self::assertSame(['ok' => true, 'provider' => 'anthropic'], $body['carry_over_result']['ai']);
+        self::assertSame('0', $this->column($id, 'ai_assist_enabled'), 'bez DPA zdrojové firmy se asistence nezapne');
+        self::assertNull($this->column($id, 'ai_dpa_confirmations'));
+    }
+
     /** Nepovedené převzetí (klíče se mezitím rozešly, cizí certifikát) firmu nezruší. */
     public function testFailedCarryOverKeepsTheNewCompany(): void
     {
@@ -389,7 +434,8 @@ final class SupplierCarryOverTest extends TestCase
         $this->db->pdo()->prepare(
             "UPDATE supplier SET ai_provider = 'anthropic', ai_data_region = 'us', ai_eu_residency_required = 0{$effort},
                 anthropic_api_key_enc = NULL, azure_openai_api_key_enc = NULL, openai_api_key_enc = NULL,
-                gemini_api_key_enc = NULL WHERE id = ?"
+                gemini_api_key_enc = NULL, ai_assist_enabled = 0, ai_assist_scope = '', ai_pseudo_salt = NULL,
+                ai_dpa_confirmations = NULL WHERE id = ?"
         )->execute([$id]);
 
         return $id;
