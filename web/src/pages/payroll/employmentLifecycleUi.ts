@@ -235,11 +235,22 @@ export function employmentDiffValue(field: string, value: unknown): EmploymentDi
  * takže stejný údaj v diffu je druhý výpis téhož. Filtruje se jen tam, kde hlavička
  * opravdu vznikla — u události bez `from_status`/`to_status` je diff jediný zdroj.
  */
+const MERGE_DIFF_KEYS = new Set(['merged_from', 'moved'])
+
+/** Osobní číslo vztahu, ze kterého sloučení přesunulo data (událost `merged`). */
+export function mergedFromCode(diff: Record<string, unknown> | null | undefined): string | null {
+  const source = diff?.merged_from
+  if (source === null || typeof source !== 'object' || !('code' in source)) return null
+  return typeof source.code === 'string' ? source.code : null
+}
+
 export function employmentDiffFields(
   diff: Record<string, unknown> | null | undefined,
   hasStatusHeader: boolean,
 ): string[] {
-  const keys = Object.keys(diff ?? {})
+  // Sloučení nese vedle změn „z → na" i `merged_from` a `moved`, které karta
+  // ukazuje vlastní větou.
+  const keys = Object.keys(diff ?? {}).filter(key => !MERGE_DIFF_KEYS.has(key))
   return hasStatusHeader ? keys.filter(key => key !== 'status') : keys
 }
 

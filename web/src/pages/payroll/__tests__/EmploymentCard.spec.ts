@@ -15,6 +15,7 @@ vi.mock('@/api/payroll', () => ({
     saveStatutoryOpenings: vi.fn(),
     renameEmployment: vi.fn(),
     changeEmploymentRelationType: vi.fn(),
+    mergeEmployment: vi.fn(),
     setEmploymentMealEntitlementBasis: vi.fn(),
     remunerationOptions: vi.fn().mockResolvedValue({ minimum_hourly_40h_minor: null, ruleset_id: null }),
     addEmploymentTerms: vi.fn(),
@@ -1996,6 +1997,59 @@ describe('EmploymentCard', () => {
     expect(payrollApi.changeEmploymentRelationType).toHaveBeenLastCalledWith(10, 1, 'dpp', 'Import registrace převzal dohodu jako ZMR.')
     expect(wrapper.emitted('updated')?.at(-1)).toEqual([corrected])
     expect(wrapper.find('[data-test="employment-relation-type-change"]').exists()).toBe(false)
+  })
+
+  it('sloučí vztah do jiného vztahu osoby a blokaci ze serveru ukáže u formuláře', async () => {
+    const manual = { ...employment(), code: 'DPP-1', relation_type: 'dpp' as const }
+    const registered = { ...employment(), id: 11, code: 'REG-1', row_version: 4 }
+    const ended = { ...employment(), id: 12, code: 'OLD-1', status: 'ended' as const }
+    const wrapper = await mountCard(manual, {
+      props: { employment: manual, canWrite: true, siblingEmployments: [manual, registered, ended] },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-merge-employment"]').trigger('click')
+    const target = selectByTest(wrapper, 'employment-merge-target')
+    expect((target.props('options') as Array<{ value: number }>).map(option => option.value)).toEqual([11])
+    expect(target.props('modelValue')).toBe(11)
+    expect((wrapper.get('[data-test="employment-merge-adopt-terms"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-test="employment-merge-note"]').setValue('Registrace vede vztah jako HPP.')
+
+    vi.mocked(payrollApi.mergeEmployment).mockRejectedValueOnce({
+      response: { data: { error: { code: 'payroll_merge_source_has_approved', message: 'Slučovaný vztah má schválené mzdové vstupy.' } } },
+    })
+    await wrapper.get('[data-test="employment-merge"]').trigger('submit')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>('[data-test="employment-confirm-ok"]')!.click()
+    await flushPromises()
+    expect(wrapper.get('[data-test="employment-merge-error"]').text()).toContain('schválené mzdové vstupy')
+
+    const merged = { ...registered, relation_type: 'dpp' as const, row_version: 5 }
+    vi.mocked(payrollApi.mergeEmployment).mockResolvedValueOnce({
+      employment: merged,
+      warnings: [{ code: 'registration_start_differs', message: 'Podejte opravu registrace.' }],
+      merged_employment_id: 10,
+    })
+    await wrapper.get('[data-test="employment-merge"]').trigger('submit')
+    await flushPromises()
+    expect(document.body.querySelector('[data-test="employment-confirm-hint"]')).not.toBeNull()
+    document.body.querySelector<HTMLButtonElement>('[data-test="employment-confirm-ok"]')!.click()
+    await flushPromises()
+
+    expect(payrollApi.mergeEmployment).toHaveBeenLastCalledWith(10, 1, { id: 11, row_version: 4 }, true, 'Registrace vede vztah jako HPP.')
+    expect(wrapper.emitted('merged')?.at(-1)).toEqual([10, merged])
+    expect(wrapper.find('[data-test="employment-merge"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('bez jiného otevřeného vztahu osoby sloučení nenabídne', async () => {
+    const ended = { ...employment(), id: 12, status: 'ended' as const }
+    const wrapper = await mountCard(employment(), {
+      props: { employment: employment(), canWrite: true, siblingEmployments: [employment(), ended] },
+      global: { stubs: actionBarStub },
+    })
+
+    expect(wrapper.get('[data-test="action-merge-employment"]').isVisible()).toBe(false)
   })
 
   it('česky vysvětlí zámek režimu stravování po schváleném příspěvku', async () => {

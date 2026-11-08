@@ -391,6 +391,28 @@ má schválené mzdové vstupy, schválenou docházku nebo průměrný výdělek
 když k němu aplikace už připravila registraci ČSSZ. Pokud jste vztah
 u ČSSZ přihlásili s nesprávným druhem činnosti, podejte tam opravu registrace.
 
+Má-li osoba za stejné období **dva vztahy**, typicky vztah s registrací
+z importu registrací ČSSZ a ručně založenou dohodu, na kterou jste
+naimportovali docházku a mzdové vstupy, použijte na kartě ručního vztahu
+**Další akce vztahu → Sloučit do jiného vztahu**. Vyberte cílový vztah téže
+osoby, tedy ten, který je správný pro ČSSZ a JMHZ. Docházka (pracovní měsíce,
+souhrny importu, časové záznamy a směny), mzdové vstupy v konceptu,
+nepřítomnosti, kalendáře a pravidla příplatků se přesunou k cíli a ruční vztah
+se smaže. Volba **Převzít druh, nástup, konec a odměňování z tohoto vztahu**
+(výchozí) nastaví cíli druh vztahu, dřívější z obou nástupů, konec na dobu
+určitou a hodinovou sazbu ze slučovaného vztahu. Bez ní zůstanou podmínky
+cíle beze změny. Na časové ose cíle zůstane záznam **Sloučen jiný vztah**.
+
+Sloučení nejde, pokud má slučovaný vztah registraci ČSSZ, hlášení JMHZ,
+mzdový běh, schválené nebo zamčené mzdové vstupy, schválenou docházku,
+průměrný výdělek, knihu dovolené nebo případ nemocenské. Nejde ani do
+ukončeného či archivovaného vztahu, do vztahu ve mzdovém běhu za měsíce, kterých
+se přesun týká, a když docházku za stejný měsíc mají oba vztahy. Posune-li se
+nástup nebo změní druh registrovaného vztahu, aplikace vás upozorní, že máte
+u ČSSZ podat opravu registrace. Import docházky páruje lidi podle osobního
+čísla; liší-li se osobní čísla obou vztahů, upravte po sloučení osobní číslo
+cílového vztahu.
+
 ### 86.9.1 Hromadné ukončení skončených dohod
 
 Brigádníci na DPP a DPČ mívají krátké dohody. Aby seznam nezůstal plný lidí,

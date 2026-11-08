@@ -47,6 +47,7 @@ import {
   employmentDiffFields,
   employmentDiffValue,
   employmentEventNote,
+  mergedFromCode,
   personalNumberLabel,
   todayIso,
   transitionPresentation,
@@ -67,10 +68,14 @@ const props = defineProps<{
   payrollStartPeriod?: string | null
   /** Zvýší ho karta osoby po uložení kmenových dat osoby (UI-26). */
   personDataVersion?: number
+  /** Ostatní vztahy téže osoby: cíle pro „Sloučit do jiného vztahu". */
+  siblingEmployments?: PayrollEmployment[]
 }>()
 const emit = defineEmits<{
   updated: [employment: PayrollEmployment]
   deleted: [employmentId: number]
+  /** Vztah se sloučil do `target` a sám zmizel; karta osoby se má načíst znovu. */
+  merged: [employmentId: number, target: PayrollEmployment]
   /** „Kde se to nastavuje" — stránka osoby na to odroluje k panelu evidence. */
   focusStatutoryEvidence: []
 }>()
@@ -1279,6 +1284,80 @@ async function saveRelationType() {
   }
 }
 
+/*
+ * Sloučení do jiného vztahu téže osoby. Typicky import registrací založil
+ * registrovaný vztah a docházka s mzdovými vstupy leží na ručně založeném:
+ * data se přesunou k cíli a tento vztah se smaže. Pojistky hlídá server,
+ * jeho důvod blokace se ukáže u formuláře.
+ */
+const MERGE_TARGET_CLOSED: PayrollEmploymentStatus[] = ['ended', 'archived', 'no_show']
+const merging = ref(false)
+const mergeTargetId = ref<number | null>(null)
+const mergeAdoptTerms = ref(true)
+const mergeNote = ref('')
+const mergeError = ref('')
+const mergeTargets = computed(() => (props.siblingEmployments ?? [])
+  .filter(other => other.id !== props.employment.id && !MERGE_TARGET_CLOSED.includes(other.status)))
+const mergeTargetOptions = computed(() => mergeTargets.value.map(other => {
+  const relation = t(`payroll.people.relations.${other.relation_type}`)
+  const code = personalNumberLabel(t, other.code) || `#${other.id}`
+  const since = other.actual_start_date ?? other.start_date
+  return {
+    value: other.id,
+    label: since
+      ? t('payroll.people.merge.target_option_since', { relation, code, date: formatDate(since) })
+      : t('payroll.people.merge.target_option', { relation, code }),
+  }
+}))
+
+/** Vztah ve větě: osobní číslo, a když ho vztah nemá, aspoň druh. */
+function mergeName(employment: PayrollEmployment): string {
+  return personalNumberLabel(t, employment.code) || t(`payroll.people.relations.${employment.relation_type}`)
+}
+
+function startMerge() {
+  mergeTargetId.value = mergeTargets.value.length === 1 ? mergeTargets.value[0].id : null
+  mergeAdoptTerms.value = true
+  mergeNote.value = ''
+  mergeError.value = ''
+  merging.value = true
+}
+
+async function saveMerge() {
+  const target = mergeTargets.value.find(other => other.id === mergeTargetId.value)
+  if (busy.value || !target) return
+  const source = mergeName(props.employment)
+  const targetCode = mergeName(target)
+  if (!await askConfirm({
+    title: t('payroll.people.merge.confirm_title'),
+    message: t('payroll.people.merge.confirm', { source, target: targetCode }),
+    hint: mergeAdoptTerms.value ? t('payroll.people.merge.confirm_adopt', { source, target: targetCode }) : undefined,
+    confirmLabel: t('payroll.people.merge.confirm_label'),
+    tone: 'warning',
+    icon: ICONS.swap,
+  })) return
+
+  busy.value = true
+  mergeError.value = ''
+  try {
+    const result = await payrollApi.mergeEmployment(
+      props.employment.id,
+      props.employment.row_version,
+      { id: target.id, row_version: target.row_version },
+      mergeAdoptTerms.value,
+      mergeNote.value.trim() || null,
+    )
+    merging.value = false
+    toast.success(t('payroll.people.merge.done'))
+    for (const warning of result.warnings) toast.warning(warning.message)
+    emit('merged', props.employment.id, result.employment)
+  } catch (error) {
+    mergeError.value = apiErrorMessage(error, t('payroll.people.mutation_failed'))
+  } finally {
+    busy.value = false
+  }
+}
+
 /**
  * Potvrzení nástupu použije datum nástupu, ne dnešek — jinak by se do evidence
  * zapsalo, že člověk nastoupil ve chvíli, kdy si toho někdo všiml.
@@ -1604,6 +1683,18 @@ const actions = computed<ActionItem[]>(() => [
     disabled: busy.value,
     show: props.canWrite && CORRECTABLE_RELATION_TYPES.includes(props.employment.relation_type),
     run: () => startRelationTypeChange(),
+  },
+  {
+    // Vedle opravy druhu: řeší tentýž následek importu registrací, jen když
+    // vedle registrovaného vztahu vznikl ještě ruční.
+    key: 'merge-employment',
+    label: t('payroll.people.merge.action'),
+    icon: 'swap',
+    tier: 'overflow',
+    variant: 'warning',
+    disabled: busy.value,
+    show: props.canWrite && mergeTargets.value.length > 0,
+    run: () => startMerge(),
   },
   {
     // Patří do „…", ne mezi hlavní tlačítka: je to výjimečná a nevratná akce.
@@ -2686,6 +2777,49 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       </div>
     </form>
 
+    <form
+      v-if="merging"
+      class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3"
+      data-test="employment-merge"
+      @submit.prevent="saveMerge"
+    >
+      <p class="text-sm font-medium text-neutral-800">{{ t('payroll.people.merge.title') }}</p>
+      <p :class="HINT">{{ t('payroll.people.merge.hint', { code: mergeName(employment) }) }}</p>
+      <div class="mt-2 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <label :class="FIELD">
+          {{ t('payroll.people.merge.target') }}
+          <SearchableSelect
+            v-model="mergeTargetId"
+            class="mt-1"
+            :options="mergeTargetOptions"
+            :clearable="false"
+            accent="payroll"
+            data-test="employment-merge-target"
+          />
+        </label>
+        <label :class="FIELD">
+          {{ t('payroll.people.merge.note') }}
+          <input v-model="mergeNote" maxlength="500" :class="INPUT" data-test="employment-merge-note">
+        </label>
+      </div>
+      <label class="mt-3 flex items-start gap-2 text-sm text-neutral-700">
+        <input v-model="mergeAdoptTerms" type="checkbox" :disabled="busy" class="mt-0.5 rounded border-neutral-300 text-payroll-600" data-test="employment-merge-adopt-terms">
+        <span class="min-w-0">
+          {{ t('payroll.people.merge.adopt_terms') }}
+          <span :class="HINT">{{ t('payroll.people.merge.adopt_terms_hint') }}</span>
+        </span>
+      </label>
+      <p v-if="mergeError" role="alert" class="mt-2 text-xs text-danger-700" data-test="employment-merge-error">{{ mergeError }}</p>
+      <div class="mt-3 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" @click="merging = false">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}
+        </button>
+        <button type="submit" :class="[btnFilledSm('warning'), 'whitespace-nowrap']" :disabled="busy || mergeTargetId === null" data-test="employment-merge-save">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.swap" /></svg>{{ t('payroll.people.merge.save') }}
+        </button>
+      </div>
+    </form>
+
     <ActionBar v-if="actions.some(action => action.show)" :actions="actions" :more-label="t('payroll.people.employment_more_actions')" class="mt-4" />
 
     <!--
@@ -2796,6 +2930,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <span class="absolute -left-[1.18rem] top-1 h-2 w-2 rounded-full bg-payroll-500"></span>
             <p class="font-medium text-neutral-800">{{ t(`payroll.people.event.${event.event_type}`) }}</p>
             <p class="text-neutral-500">{{ formatDate(event.effective_on) }}<template v-if="event.from_status && event.to_status"> · {{ statusLabel(event.from_status) }} → {{ statusLabel(event.to_status) }}</template></p>
+            <p v-if="mergedFromCode(event.diff)" class="text-neutral-600">{{ t('payroll.people.merge.timeline', { code: personalNumberLabel(t, mergedFromCode(event.diff) ?? '') }) }}</p>
             <ul class="mt-1 space-y-0.5 text-neutral-600">
               <li
                 v-for="key in employmentDiffFields(event.diff, Boolean(event.from_status && event.to_status))"

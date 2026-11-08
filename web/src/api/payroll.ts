@@ -450,7 +450,9 @@ export interface PayrollEmploymentEvent {
   // `terms_corrected` = oprava platné verze (přepis na místě), `terms_changed`
   // = nová verze od data. V historii se to nesmí slít — jedno je oprava
   // zápisu, druhé skutečná změna podmínek.
-  event_type: 'created' | 'terms_changed' | 'terms_corrected' | 'status_changed' | 'checklist_changed' | 'relation_type_changed'
+  // `merged` = sloučení jiného vztahu do tohoto; diff nese `merged_from`
+  // (odkud data přišla) a `moved` (počty přesunutých řádků) vedle změn from/to.
+  event_type: 'created' | 'terms_changed' | 'terms_corrected' | 'status_changed' | 'checklist_changed' | 'relation_type_changed' | 'merged'
   from_status: PayrollEmploymentStatus | null
   to_status: PayrollEmploymentStatus | null
   effective_on: string
@@ -8852,6 +8854,27 @@ export const payrollApi = {
     api.patch<{ employment: PayrollEmployment, warnings: Array<{ code: string, message: string }> }>(
       `/payroll/employments/${employmentId}/relation-type`,
       { row_version: rowVersion, relation_type: relationType, note },
+    ).then(response => response.data),
+  /**
+   * Sloučení vztahu do jiného vztahu téže osoby: data se přesunou k cíli
+   * a tento vztah se smaže. Vrací cílový vztah a varování ze serveru.
+   */
+  mergeEmployment: (
+    employmentId: number,
+    rowVersion: number,
+    target: { id: number, row_version: number },
+    adoptTerms: boolean,
+    note: string | null,
+  ) =>
+    api.post<{ employment: PayrollEmployment, warnings: Array<{ code: string, message: string }>, merged_employment_id: number }>(
+      `/payroll/employments/${employmentId}/merge-into`,
+      {
+        row_version: rowVersion,
+        target_employment_id: target.id,
+        target_row_version: target.row_version,
+        adopt_terms: adoptTerms,
+        note,
+      },
     ).then(response => response.data),
   setEmploymentMealEntitlementBasis: (
     employmentId: number,

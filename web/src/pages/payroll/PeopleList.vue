@@ -775,6 +775,21 @@ function removeEmploymentFromDetail(personId: number, employmentId: number) {
   if (listItem && listItem.employment_count > 0) listItem.employment_count -= 1
 }
 
+/*
+ * Sloučení přesunulo data do jiného vztahu a sloučený smazalo. Karta osoby se
+ * načte celá znovu: změnil se cílový vztah (druh, nástup, časová osa) i souhrny
+ * osoby, které z vztahů vycházejí.
+ */
+async function reloadAfterMerge(personId: number, employmentId: number, target: PayrollEmployment) {
+  removeEmploymentFromDetail(personId, employmentId)
+  updateEmployment(personId, target)
+  try {
+    details.value[personId] = await payrollApi.person(personId)
+  } catch {
+    // Karta zůstane s místně upraveným stavem; další otevření ji načte znovu.
+  }
+}
+
 function resetEmployeeForm() {
   employeeForm.first_name = ''
   employeeForm.last_name = ''
@@ -2186,8 +2201,10 @@ onMounted(async () => {
           :can-write-documents="auth.canWrite('payroll.documents')"
           :payroll-start-period="payrollStartPeriod"
           :person-data-version="personDataVersion"
+          :sibling-employments="details[expandedId].employments"
           @updated="updateEmployment(expandedId, $event)"
           @deleted="removeEmploymentFromDetail(expandedId, $event)"
+          @merged="(employmentId, target) => reloadAfterMerge(expandedId!, employmentId, target)"
           @focus-statutory-evidence="focusPanel('statutory_evidence')"
         />
       </section>

@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   employmentDiffFields,
   employmentDiffValue,
+  mergedFromCode,
   todayIso,
   transitionPresentation,
 } from '@/pages/payroll/employmentLifecycleUi'
@@ -107,6 +108,17 @@ describe('employmentLifecycleUi', () => {
 
     it('chybějící diff nespadne', () => {
       expect(employmentDiffFields(null, true)).toEqual([])
+    })
+
+    it('u sloučení vynechá původ dat a počty přesunů, změny podmínek ukáže', () => {
+      const diff = {
+        merged_from: { employment_id: 7, code: 'DPP-1', relation_type: 'dpp' },
+        moved: { payroll_inputs: 1 },
+        relation_type: { from: 'employment', to: 'dpp' },
+      }
+      expect(employmentDiffFields(diff, false)).toEqual(['relation_type'])
+      expect(mergedFromCode(diff)).toBe('DPP-1')
+      expect(mergedFromCode({ relation_type: { from: 'a', to: 'b' } })).toBeNull()
     })
   })
 })

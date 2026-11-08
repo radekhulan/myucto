@@ -7751,6 +7751,25 @@
         "save": "Correct type",
         "saved": "The relationship type has been corrected."
       },
+      "merge": {
+        "action": "Merge into another relationship",
+        "title": "Merge into another employment relationship",
+        "hint": "Attendance, draft payroll inputs, absences and shifts of relationship {code} move to the selected relationship of the same person, and relationship {code} is deleted. Use this when the person has two relationships for the same period, typically a registered one from a registration import and a manually created one with attendance. Merging is not possible if relationship {code} has a registration, a JMHZ report, a payroll run, or approved inputs or attendance.",
+        "target": "Target relationship",
+        "target_option": "{relation} · {code}",
+        "target_option_since": "{relation} · {code} · from {date}",
+        "adopt_terms": "Take over the type, start, end and remuneration from this relationship",
+        "adopt_terms_hint": "The target relationship takes over the relationship type, the earlier of both start dates, the fixed-term end and the hourly rate. Without it, the target terms stay unchanged.",
+        "note": "Note",
+        "save": "Merge",
+        "no_targets": "The person has no other employment relationship to merge into.",
+        "confirm_title": "Merge the employment relationship?",
+        "confirm": "Data of relationship {source} move to relationship {target} and relationship {source} is deleted. The merge cannot be undone.",
+        "confirm_adopt": "Relationship {target} takes over the type, start, end and remuneration from relationship {source}.",
+        "confirm_label": "Merge and delete",
+        "done": "The relationship has been merged.",
+        "timeline": "Merged from relationship {code}"
+      },
       "meal_entitlement_basis": {
         "label": "Meal entitlement regime",
         "shift": "Work scheduled in shifts",
@@ -7853,9 +7872,11 @@
         "terms_corrected": "Effective terms corrected",
         "status_changed": "Status changed",
         "checklist_changed": "Duty updated",
-        "relation_type_changed": "Relationship type corrected"
+        "relation_type_changed": "Relationship type corrected",
+        "merged": "Another relationship merged"
       },
       "term_field": {
+        "start_date": "Start date",
         "remuneration_basis_kind": "Type of contractual document",
         "remuneration_type": "Remuneration basis",
         "hourly_rate_minor": "Agreed hourly rate (CZK/h)",

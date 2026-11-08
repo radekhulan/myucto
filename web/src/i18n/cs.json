@@ -7751,6 +7751,25 @@
         "save": "Opravit druh",
         "saved": "Druh vztahu je opravený."
       },
+      "merge": {
+        "action": "Sloučit do jiného vztahu",
+        "title": "Sloučení do jiného pracovního vztahu",
+        "hint": "Docházka, mzdové vstupy v konceptu, nepřítomnosti a směny vztahu {code} se přesunou do vybraného vztahu téže osoby a vztah {code} se smaže. Použijte to, když má osoba za stejné období dva vztahy, typicky registrovaný z importu registrací a ručně založený s docházkou. Sloučení nejde, pokud má vztah {code} registraci, hlášení JMHZ, mzdový běh nebo schválené vstupy či docházku.",
+        "target": "Cílový vztah",
+        "target_option": "{relation} · {code}",
+        "target_option_since": "{relation} · {code} · od {date}",
+        "adopt_terms": "Převzít druh, nástup, konec a odměňování z tohoto vztahu",
+        "adopt_terms_hint": "Cílový vztah převezme druh vztahu, dřívější z obou nástupů, konec na dobu určitou a hodinovou sazbu. Bez převzetí zůstanou podmínky cílového vztahu beze změny.",
+        "note": "Poznámka",
+        "save": "Sloučit",
+        "no_targets": "Osoba nemá jiný pracovní vztah, do kterého by šlo sloučit.",
+        "confirm_title": "Sloučit pracovní vztah?",
+        "confirm": "Data vztahu {source} se přesunou do vztahu {target} a vztah {source} se smaže. Sloučení nejde vrátit.",
+        "confirm_adopt": "Vztah {target} převezme druh, nástup, konec a odměňování ze vztahu {source}.",
+        "confirm_label": "Sloučit a smazat",
+        "done": "Vztah je sloučený.",
+        "timeline": "Sloučeno ze vztahu {code}"
+      },
       "meal_entitlement_basis": {
         "label": "Režim nároku na stravování",
         "shift": "Práce rozvržená na směny",
@@ -7853,9 +7872,11 @@
         "terms_corrected": "Platné podmínky opraveny",
         "status_changed": "Stav změněn",
         "checklist_changed": "Povinnost aktualizována",
-        "relation_type_changed": "Druh vztahu opraven"
+        "relation_type_changed": "Druh vztahu opraven",
+        "merged": "Sloučen jiný vztah"
       },
       "term_field": {
+        "start_date": "Nástup",
         "remuneration_basis_kind": "Druh podkladu sjednání",
         "remuneration_type": "Způsob odměňování",
         "hourly_rate_minor": "Sjednaná hodinová sazba (Kč/h)",
