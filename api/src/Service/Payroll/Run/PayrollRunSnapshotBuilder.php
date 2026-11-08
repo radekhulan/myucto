@@ -313,7 +313,7 @@ final class PayrollRunSnapshotBuilder
                 } else {
                     foreach ($preview['blockers'] as $blocker) {
                         $validations[] = new PayrollRunValidation('blocker', (string) $blocker['code'], 'employment', $employmentId,
-                            (string) $blocker['message'], self::hourlyBlockerLink((string) $blocker['code'], $periodStart, $employmentId, $hourlyLink));
+                            (string) $blocker['message'], self::hourlyBlockerLink((string) $blocker['code'], $periodStart, $employmentId, $hourlyLink, (array) ($blocker['context'] ?? [])));
                     }
                     if ($preview['complete'] && !isset($hourlyMaterializationBlockers[$employmentId])) {
                         $latest = [];
@@ -2008,8 +2008,19 @@ final class PayrollRunSnapshotBuilder
      * Blokace hodin a doložení příplatků se opravují v panelu hodin Rychlého
      * měsíčního vstupu, ne v podmínkách vztahu.
      */
-    private static function hourlyBlockerLink(string $code, string $periodStart, int $employmentId, string $fallback): string
+    /** @param array<string,mixed> $context */
+    private static function hourlyBlockerLink(string $code, string $periodStart, int $employmentId, string $fallback, array $context = []): string
     {
+        // Chybějící průměrný výdělek se zakládá v Absence a dovolená → Průměrný
+        // výdělek; odkaz předvyplní vztah i čtvrtletí, za které průměr chybí.
+        if ($code === 'hourly_average_earning_missing') {
+            return PayrollHourlyAverageEarningLink::path(
+                $employmentId,
+                (int) ($context['applicable_year'] ?? substr($periodStart, 0, 4)),
+                (int) ($context['applicable_quarter'] ?? (intdiv((int) substr($periodStart, 5, 2) - 1, 3) + 1)),
+                $periodStart,
+            );
+        }
         return str_starts_with($code, 'hourly_time_')
             || in_array($code, ['hourly_premium_evidence_missing', 'hourly_premium_partition_missing'], true)
             ? '/payroll/quick-inputs?period=' . substr($periodStart, 0, 7) . '&employment=' . $employmentId . '&hours=1'

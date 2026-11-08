@@ -2569,8 +2569,10 @@
         "hourly_holiday_time_off_evidence_missing": "Document the paid time off taken for public holidays or confirm that none was taken.",
         "hourly_overtime_time_off_evidence_missing": "Document the overtime time off taken or confirm that none was taken.",
         "hourly_minimum_floor_missing": "For positive worked time, document the effective minimum and the stated weekly working time.",
-        "hourly_minimum_time_missing": "Provide the regular hours worked; missing evidence is not a confirmed zero."
+        "hourly_minimum_time_missing": "Provide the regular hours worked; missing evidence is not a confirmed zero.",
+        "hourly_average_earning_missing": "An approved average earning for Q{applicable_quarter} {applicable_year} is missing. Statutory premiums (for example night or weekend work) are calculated from the average earning."
       },
+      "blocker_fix_average": "Add the average earning",
       "overtime_time_off": "Overtime compensatory time off entitlement",
       "holiday_time_off": "Public holiday compensatory time off entitlement",
       "holiday_time_off_allocation": "Public holiday compensatory time off allocation",

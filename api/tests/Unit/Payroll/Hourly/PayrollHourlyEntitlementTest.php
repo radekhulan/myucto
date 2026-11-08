@@ -116,6 +116,27 @@ final class PayrollHourlyEntitlementTest extends TestCase
         self::assertFalse($calculator->calculate($this->context($evidence))->complete);
     }
 
+    /**
+     * Noční práce nového vztahu bez schváleného průměru: dřív jen „Chybí
+     * povinný kladný údaj nároku". Teď kód, čtvrtletí a vztah pro proklik
+     * na formulář průměru.
+     */
+    public function testNightPremiumWithoutAverageNamesTheMissingQuarter(): void
+    {
+        $evidence = $this->evidence();
+        $evidence['premium_segments'][0]['night_duration_units'] = 6000;
+        $evidence['average_earning'] = null;
+        $result = (new PayrollHourlyWageCalculator())->calculate($this->context($evidence));
+        self::assertFalse($result->complete);
+        $blockers = array_values(array_filter($result->blockers, static fn (array $blocker): bool => $blocker['context']['purpose'] === 'premium_night'));
+        self::assertCount(1, $blockers, json_encode($result->blockers));
+        self::assertSame('hourly_average_earning_missing', $blockers[0]['code']);
+        self::assertStringContainsString('Chybí schválený průměrný výdělek za 3. čtvrtletí 2026', $blockers[0]['message']);
+        self::assertSame(2026, $blockers[0]['context']['applicable_year']);
+        self::assertSame(3, $blockers[0]['context']['applicable_quarter']);
+        self::assertTrue($this->claim($result, 'ordinary_base')['ready']);
+    }
+
     public function testUnknownNightDoesNotEraseKnownBaseOrWeekendClaim(): void
     {
         $evidence = $this->evidence();

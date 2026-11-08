@@ -937,7 +937,7 @@ describe('AbsenceManagement', () => {
     await flushPromises()
     expect(m.createAverage).not.toHaveBeenCalled()
     expect(wrapper.find('[data-test="average-error"]').text())
-      .toBe('payroll_absence.validation.money_precision')
+      .toBe('payroll_absence.averages.gross_minor: payroll_absence.validation.money_precision')
 
     m.createAverage.mockRejectedValueOnce({
       response: { data: { error: { message: 'Přesná zpráva validační chyby z API.' } } },
@@ -995,6 +995,34 @@ describe('AbsenceManagement', () => {
     await wrapper.get('[data-test="average-form"]').trigger('submit')
     await flushPromises()
     expect(m.createAverage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('names the field whose number is missing instead of a generic number error', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ worked_minutes: null, worked_duration_units: null, worked_days: null }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    await wrapper.get('[data-test="average-worked-hours"]').setValue('8')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="average-error"]').text()).toContain('payroll_absence.averages.worked_days: payroll_absence.validation.number')
+    await wrapper.get('[data-test="average-worked-days"]').setValue('1')
+    await wrapper.get('[data-test="average-worked-hours"]').setValue('')
+    await wrapper.get('[data-test="average-form"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="average-error"]').text()).toContain('payroll_absence.averages.worked_minutes:')
+    expect(m.createAverage).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('prefills zero hours and days when the employment did not exist in the decisive period', async () => {
+    m.averageSuggestion.mockResolvedValue(averageSuggestion({ worked_minutes: null, worked_duration_units: null, worked_days: null, employment_started_after_decisive_period: true }))
+    const wrapper = mount(AbsenceManagement)
+    await flushPromises()
+    await wrapper.find('[data-test="tab-averages"]').trigger('click')
+    expect((wrapper.get('[data-test="average-worked-hours"]').element as HTMLInputElement).value).toBe('0')
+    expect((wrapper.get('[data-test="average-worked-days"]').element as HTMLInputElement).value).toBe('0')
     wrapper.unmount()
   })
 

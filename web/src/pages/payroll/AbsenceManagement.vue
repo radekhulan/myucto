@@ -1138,9 +1138,13 @@ function applyAverageSuggestion(suggestion: AverageEarningSuggestion) {
   averageForm.decisive_from = suggestion.decisive_from
   averageForm.decisive_to = suggestion.decisive_to
   const gross = (suggestion.gross_earnings_minor ?? 0) / 100
-  const units = suggestion.worked_duration_units ?? (suggestion.worked_minutes == null ? null : suggestion.worked_minutes * 50)
+  // Vztah, který v rozhodném období ještě netrval, v něm prokazatelně
+  // neodpracoval nic: 0 h a 0 dnů, ne prázdná pole s obecnou chybou čísla.
+  const notEmployed = suggestion.employment_started_after_decisive_period === true
+  const units = suggestion.worked_duration_units
+    ?? (suggestion.worked_minutes == null ? (notEmployed ? 0 : null) : suggestion.worked_minutes * 50)
   const hours = units == null ? '' : units % 50 === 0 ? String(units / 3000) : formatPayrollDuration(units)
-  const days = suggestion.worked_days ?? ''
+  const days = suggestion.worked_days ?? (notEmployed ? 0 : '')
   averageOriginalDuration.value = units == null ? null : { raw: hours, units }
   averageForm.gross_earnings_czk = gross
   averageForm.worked_hours = hours
@@ -1164,22 +1168,38 @@ function averageWorkedTimePayload(): { worked_minutes: number } | { worked_durat
   return units % 50 === 0 ? { worked_minutes: units / 50 } : { worked_duration_units: units }
 }
 
+/**
+ * Chyba vstupu se jménem pole. Obecné „Zadejte platné číslo" u formuláře
+ * s pěti čísly neříkalo, které z nich je špatně.
+ */
+function averageField<T>(labelKey: string, read: () => T): T {
+  try {
+    return read()
+  } catch (error) {
+    if (error instanceof Error) throw new Error(`${t(labelKey)}: ${error.message}`)
+    throw error
+  }
+}
+
 async function createAverage() {
   averageError.value = ''
   saving.value = true
   try {
-    if (averageForm.worked_days === '') throw new Error(t('payroll_absence.validation.number'))
+    const workedDays = averageField('payroll_absence.averages.worked_days', () => {
+      if (averageForm.worked_days === '') throw new Error(t('payroll_absence.validation.number'))
+      return wholeNumber(averageForm.worked_days)
+    })
     await payrollAbsenceApi.createAverage({
       employment_id: averageForm.employment_id,
       applicable_year: wholeNumber(averageForm.applicable_year, true),
       applicable_quarter: wholeNumber(averageForm.applicable_quarter, true),
       decisive_from: averageForm.decisive_from,
       decisive_to: averageForm.decisive_to,
-      gross_earnings_minor: toMinor(averageForm.gross_earnings_czk),
-      longer_period_allocated_minor: toMinor(averageForm.longer_period_allocated_czk),
-      ...averageWorkedTimePayload(),
-      worked_days: wholeNumber(averageForm.worked_days),
-      probable_hourly_minor: toMinor(averageForm.probable_hourly_czk, true, true),
+      gross_earnings_minor: averageField('payroll_absence.averages.gross_minor', () => toMinor(averageForm.gross_earnings_czk)),
+      longer_period_allocated_minor: averageField('payroll_absence.averages.allocated_minor', () => toMinor(averageForm.longer_period_allocated_czk)),
+      ...averageField('payroll_absence.averages.worked_minutes', averageWorkedTimePayload),
+      worked_days: workedDays,
+      probable_hourly_minor: averageField('payroll_absence.averages.probable_minor',() => toMinor(averageForm.probable_hourly_czk, true, true)),
       rationale: averageForm.rationale || null,
     })
     toast.success(t('payroll_absence.messages.average_created'))

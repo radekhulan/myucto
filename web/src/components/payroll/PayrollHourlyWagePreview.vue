@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import PayrollMinimumWagePreviewView from './PayrollMinimumWagePreview.vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink, type RouteLocationRaw } from 'vue-router'
 import type { PayrollHourlyWagePreview } from '@/api/payroll'
 import { formatDate, formatMoneyMinor } from '@/composables/useFormat'
 import { formatPayrollDuration } from '@/pages/payroll/payrollDuration'
@@ -9,17 +10,35 @@ import { uniqueBy } from '@/pages/payroll/payrollFieldFeedback'
 
 const props = defineProps<{ value: PayrollHourlyWagePreview; compact?: boolean }>()
 const { t, te } = useI18n()
+type Blocker = PayrollHourlyWagePreview['blockers'][number]
 /** Text blokace podle kódu v jazyce aplikace; serverová zpráva je jen záloha. */
-function blockerMessage(blocker: { code: string; message: string }): string {
+function blockerMessage(blocker: Blocker): string {
   const key = `payroll.hourly_preview.blockers.${blocker.code}`
-  return te(key) ? t(key) : blocker.message
+  return te(key) ? t(key, blocker.context ?? {}) : blocker.message
+}
+/**
+ * Kam blokaci napravit. Chybějící průměrný výdělek se zakládá na jiné
+ * obrazovce; odkaz předvyplní vztah a čtvrtletí, za které průměr chybí.
+ */
+function blockerLink(blocker: Blocker): RouteLocationRaw | null {
+  if (blocker.code !== 'hourly_average_earning_missing') return null
+  const context = blocker.context ?? {}
+  const year = Number(context.applicable_year)
+  const quarter = Number(context.applicable_quarter)
+  const employment = Number(context.employment_id)
+  if (!Number.isInteger(year) || !Number.isInteger(quarter) || !Number.isInteger(employment)) return null
+  return { name: 'payroll-absences', query: { tab: 'averages', employment: String(employment), year: String(year), quarter: String(quarter) } }
 }
 /*
  * Server hlásí blokaci po úsecích pracovní doby — „doložte příplatkové
  * vrstvy" tak přišla čtyřikrát pro čtyři úseky. Pro člověka je to jedna
  * věc, kterou má udělat, proto se stejná věta ukazuje jen jednou.
  */
-const blockerMessages = computed(() => uniqueBy(props.value.blockers.map(blockerMessage), message => message))
+const blockerItems = computed(() => uniqueBy(
+  props.value.blockers.map(blocker => ({ message: blockerMessage(blocker), to: blockerLink(blocker) })),
+  item => item.message,
+))
+const blockerMessages = computed(() => blockerItems.value.map(item => item.message))
 const purposes: Record<string, string> = {
   minimum_wage_top_up: 'minimum_wage_top_up',
   ordinary_base: 'ordinary_base', achieved_overtime: 'achieved_overtime', premium_overtime: 'premium_overtime',
@@ -71,7 +90,7 @@ const minimumTopUp = computed(() => {
         <span class="min-w-0">{{ blockerMessages[0] }}<template v-if="blockerMessages.length > 1"> · {{ t('payroll.hourly_preview.more_blockers', { count: blockerMessages.length - 1 }) }}</template></span>
       </summary>
       <ul class="mt-1 list-disc space-y-1 pl-5 text-warning-700" data-test="hourly-preview-blockers">
-        <li v-for="message in blockerMessages" :key="message">{{ message }}</li>
+        <li v-for="item in blockerItems" :key="item.message">{{ item.message }}<RouterLink v-if="item.to" :to="item.to" class="ml-1 font-medium underline" data-test="hourly-preview-blocker-link">{{ t('payroll.hourly_preview.blocker_fix_average') }}</RouterLink></li>
       </ul>
     </details>
   </section>
@@ -114,7 +133,7 @@ const minimumTopUp = computed(() => {
     </div>
     <p class="mt-2 text-neutral-500">{{ t(value.rounding === 'ceil' ? 'payroll.hourly_preview.rounding_ceil' : 'payroll.hourly_preview.rounding_half_up') }}</p>
     <ul v-if="blockerMessages.length" class="mt-2 list-disc space-y-1 pl-4 text-warning-700" data-test="hourly-preview-blockers">
-      <li v-for="message in blockerMessages" :key="message">{{ message }}</li>
+      <li v-for="item in blockerItems" :key="item.message">{{ item.message }}<RouterLink v-if="item.to" :to="item.to" class="ml-1 font-medium underline" data-test="hourly-preview-blocker-link">{{ t('payroll.hourly_preview.blocker_fix_average') }}</RouterLink></li>
     </ul>
   </section>
 </template>

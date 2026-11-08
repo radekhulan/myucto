@@ -429,7 +429,28 @@ final class PayrollHourlyEntitlementCalculator
 
     private function average(?array $segment = null): int
     {
-        self::positive($this->evidence['average_earning']['id'] ?? null);
+        /*
+         * Bez schváleného průměru (typicky nový vztah, jehož rozhodné období
+         * ještě neproběhlo) dřív náhled hlásil jen „Chybí povinný kladný údaj
+         * nároku". Účetní nevěděla, co chybí ani kde to doplnit. Kód a čtvrtletí
+         * v kontextu vedou rovnou na formulář průměru.
+         */
+        $id = $this->evidence['average_earning']['id'] ?? null;
+        if (!is_int($id) || $id <= 0) {
+            $date = (string) ($segment['date_from'] ?? $this->context->periodStart);
+            $year = (int) substr($date, 0, 4);
+            $quarter = intdiv((int) substr($date, 5, 2) - 1, 3) + 1;
+            throw new PayrollHourlyCalculationException(
+                'hourly_average_earning_missing',
+                sprintf(
+                    'Chybí schválený průměrný výdělek za %d. čtvrtletí %d. Zákonný příplatek se počítá '
+                    . 'z průměrného výdělku. Doplňte ho v Absence a dovolená → Průměrný výdělek.',
+                    $quarter,
+                    $year,
+                ),
+                ['applicable_year' => $year, 'applicable_quarter' => $quarter, 'employment_id' => $this->context->employmentId],
+            );
+        }
         self::positive($this->evidence['average_earning']['revision_no'] ?? null);
         // Historický přesčas si níže vloží svůj průměr i minimum ke dni vypořádání.
         if ($segment === null) return self::positive($this->evidence['average_earning']['hourly_minor'] ?? null);

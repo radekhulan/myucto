@@ -36,6 +36,17 @@ describe('PayrollHourlyWagePreview', () => {
     expect(text).not.toContain('Doložte skutečně odpracovanou dobu.')
     expect(text).toContain('Syntetická záložní zpráva')
   })
+  it('links a missing average earning to the prefilled average form', () => {
+    const wrapper = mount(PayrollHourlyWagePreviewView, {
+      props: { value: preview({ complete: false, payable_total_minor: null, blockers: [
+        { code: 'hourly_average_earning_missing', message: 'Chybí schválený průměrný výdělek za 1. čtvrtletí 2026.', context: { purpose: 'premium_night', applicable_year: 2026, applicable_quarter: 1, employment_id: 44 } },
+      ] }) },
+      global: { stubs: { RouterLink: { props: ['to'], template: '<a data-test="hourly-preview-blocker-link" :data-to="JSON.stringify(to)"><slot /></a>' } } },
+    })
+    expect(wrapper.get('[data-test="hourly-preview-blockers"]').text()).toContain('Chybí schválený průměrný výdělek za 1. čtvrtletí 2026.')
+    const link = wrapper.get('[data-test="hourly-preview-blocker-link"]')
+    expect(JSON.parse(link.attributes('data-to')!)).toEqual({ name: 'payroll-absences', query: { tab: 'averages', employment: '44', year: '2026', quarter: '1' } })
+  })
   it('does not present a partially evidenced premium as a complete claim', () => {
     const value = preview({ complete: false, payable_total_minor: null })
     value.claims[0] = { ...value.claims[0]!, ready: false, payable_minor: null, analytical_minor: null, raw_numerator_minor: null, raw_denominator: null }

@@ -271,6 +271,11 @@ final class AverageEarningDerivationService
             'applicable_quarter' => $quarter,
             'decisive_from' => $decisiveStart->format('Y-m-d'),
             'decisive_to' => $applicationStart->modify('-1 day')->format('Y-m-d'),
+            // Vztah v rozhodném období ještě netrval: odpracováno v něm bylo
+            // prokazatelně 0 hodin a 0 dnů. Formulář je předvyplní místo
+            // prázdných polí, která by skončila obecnou chybou čísla.
+            'employment_started_after_decisive_period' => $employmentStart !== null
+                && $employmentStart >= $applicationStart->format('Y-m-d'),
         ] + self::combine(
             $months,
             $minimumWorkedDays,

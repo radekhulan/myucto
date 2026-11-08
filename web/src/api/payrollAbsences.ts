@@ -188,6 +188,8 @@ export interface AverageEarningSuggestion {
   decisive_from: string
   decisive_to: string
   minimum_worked_days: number
+  /** Vztah začal až po rozhodném období: odpracováno v něm bylo 0 h a 0 dnů. */
+  employment_started_after_decisive_period?: boolean
   ready: boolean
   blockers: string[]
   /**

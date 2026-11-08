@@ -2569,8 +2569,10 @@
         "hourly_holiday_time_off_evidence_missing": "Doložte čerpání placeného volna za svátek nebo potvrďte nulové čerpání.",
         "hourly_overtime_time_off_evidence_missing": "Doložte čerpání přesčasového volna nebo potvrďte nulové čerpání.",
         "hourly_minimum_floor_missing": "Pro kladnou odpracovanou dobu doložte účinné minimum a stanovenou týdenní dobu.",
-        "hourly_minimum_time_missing": "Doložte běžnou odpracovanou dobu; chybějící podklady nejsou potvrzenou nulou."
+        "hourly_minimum_time_missing": "Doložte běžnou odpracovanou dobu; chybějící podklady nejsou potvrzenou nulou.",
+        "hourly_average_earning_missing": "Chybí schválený průměrný výdělek za {applicable_quarter}. čtvrtletí {applicable_year}. Zákonný příplatek (například za noc nebo víkend) se počítá z průměrného výdělku."
       },
+      "blocker_fix_average": "Doplnit průměrný výdělek",
       "overtime_time_off": "Nárok na náhradní volno za přesčas",
       "holiday_time_off": "Nárok na náhradní volno za svátek",
       "holiday_time_off_allocation": "Čerpání náhradního volna za svátek",
