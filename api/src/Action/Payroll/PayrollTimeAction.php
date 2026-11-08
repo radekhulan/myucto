@@ -742,17 +742,20 @@ final class PayrollTimeAction
     /**
      * „Počítat ze směn" — zruší neschválené vstupy z importu docházky a přepne
      * zdroj měsíce na docházku. Ruší mzdové vstupy, proto kromě zápisu docházky
-     * vyžaduje i právo na zápis mzdových vstupů.
+     * vyžaduje i právo na zápis mzdových vstupů. Varianta `keep_import_inputs`
+     * („Zapisovat směny, částky ponechat") vstupy nemění, stačí jí docházka.
      *
      * @param array<string,string> $args
      */
     public function switchToEntries(Request $request, Response $response, array $args): Response
     {
         if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
-        if (($error = $this->authorize($request, $response, 'payroll.inputs.write', AccessLevel::WRITE)) !== null) return $error;
+        $input = $this->input($request);
+        if (($input['keep_import_inputs'] ?? false) !== true
+            && ($error = $this->authorize($request, $response, 'payroll.inputs.write', AccessLevel::WRITE)) !== null) return $error;
         try {
             $supplierId = $this->currentSupplierId($request);
-            $result = $this->time->switchImportToEntries($supplierId, $this->routePeriod($args), $this->input($request), $this->userId($request));
+            $result = $this->time->switchImportToEntries($supplierId, $this->routePeriod($args), $input, $this->userId($request));
             if ($result['changed']) {
                 $this->auditMonth($request, 'payroll.time.source_changed', $result['month']);
             }

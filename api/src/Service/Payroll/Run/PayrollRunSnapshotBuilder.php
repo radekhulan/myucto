@@ -33,6 +33,7 @@ use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookUnavailableException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzCodebookValueException;
 use MyInvoice\Service\Payroll\Submission\Jmhz\JmhzExternalCodebookCatalog;
 use MyInvoice\Service\Payroll\Submission\Ozuspoj\OzuspojClaimDeadlinePolicy;
+use MyInvoice\Service\Payroll\Time\Juvenile\PayrollJuvenileWorkTimeService;
 use MyInvoice\Service\Payroll\Time\Overtime\PayrollOvertimeLimitService;
 use MyInvoice\Service\Payroll\Time\PayrollAgreementAnnualHours;
 use MyInvoice\Service\Payroll\Time\PayrollAgreementWeeklyAverage;
@@ -179,6 +180,15 @@ final class PayrollRunSnapshotBuilder
         }
         // Průměrný týdenní rozsah DPČ (§ 76 odst. 2 ZP), stejně mimo snapshot.
         foreach ((new PayrollAgreementWeeklyAverage($this->db))->validations(
+            $supplierId,
+            $employments,
+            $periodStart,
+        ) as $validation) {
+            $validations[] = $validation;
+        }
+        // Pracovní doba mladistvých (§ 79a, § 88, § 90, § 245 ZP) nad skutečnými
+        // záznamy. Varování bez výjimky, mzdu neovlivňuje, mimo snapshot.
+        foreach ((new PayrollJuvenileWorkTimeService($this->db, $this->rulesets))->validations(
             $supplierId,
             $employments,
             $periodStart,

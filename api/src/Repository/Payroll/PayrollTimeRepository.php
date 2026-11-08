@@ -1544,7 +1544,6 @@ final class PayrollTimeRepository
      */
     public function activeImportInputs(int $supplierId, int $employmentId, string $periodStart): array
     {
-        $month = substr($periodStart, 0, 7);
         $stmt = $this->db->pdo()->prepare(
             "SELECT id, status, row_version FROM payroll_inputs
               WHERE supplier_id = ? AND employment_id = ? AND period_start = ? AND status <> 'cancelled'
@@ -1554,8 +1553,7 @@ final class PayrollTimeRepository
         );
         $stmt->execute([
             $supplierId, $employmentId, $periodStart,
-            'attendance:' . $month . ':' . $employmentId . ':%',
-            'leave:attendance:' . $month . ':' . $employmentId . ':%',
+            ...self::importInputExternalPatterns($periodStart, $employmentId),
         ]);
 
         return array_map(
@@ -1595,8 +1593,155 @@ final class PayrollTimeRepository
         return $days;
     }
 
+    /**
+     * Vzory `external_id` mzdových vstupů z importu docházky vztahu za měsíc.
+     * Jediné místo, kde se skládají; čte je kontrola změny zdroje i pojistka
+     * příplatků a pohotovosti.
+     *
+     * @return array{string,string}
+     */
+    public static function importInputExternalPatterns(string $periodStart, int $employmentId): array
+    {
+        $month = substr($periodStart, 0, 7);
+
+        return [
+            'attendance:' . $month . ':' . $employmentId . ':%',
+            'leave:attendance:' . $month . ':' . $employmentId . ':%',
+        ];
+    }
+
+    public const KEEP_IMPORT_AMOUNTS_REFUSED =
+        'Importované částky lze ponechat jen u vztahu, který v měsíci nemá hodinovou odměnu ani sjednanou '
+        . 'měsíční mzdu (ani předpis základní mzdy nebo odměny podle odpracovaných hodin). U hodinové odměny '
+        . 'by se mzda ze směn spočítala znovu, použijte proto „Počítat ze směn". U měsíční mzdy rozhoduje '
+        . 'zdroj hodin o krácení, proto zůstává souhrn importu.';
+
+    /**
+     * Vztahy, kterým jde měsíc z importu docházky přepnout na směny a přitom
+     * ponechat importované mzdové vstupy.
+     *
+     * Hodiny ze směn u nich nevstupují do žádné částky: vztah v měsíci nemá
+     * hodinovou odměnu (mzda by se spočítala znovu a vyplatila vedle importu),
+     * nemá měsíční mzdu (zdroj hodin rozhoduje o krácení, viz
+     * {@see \MyInvoice\Service\Payroll\Absence\PayrollWageProrationService})
+     * a nemá ani předpis, který se krátí odpracovanou dobou (základní mzda nebo
+     * pravidlo `hours`, viz {@see \MyInvoice\Service\Payroll\Component\PayrollRecurringMaterializer}).
+     * Měsíční mzda se čte stejně jako v běhu: podmínky, jinak vztah.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,true>
+     */
+    public function importAmountsKeepableIds(int $supplierId, array $employmentIds, string $periodStart): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $days = self::monthDays($periodStart);
+        $first = $days[0];
+        $last = $days[count($days) - 1];
+        $in = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT employment.id
+               FROM payroll_employments employment
+              WHERE employment.supplier_id = ? AND employment.id IN ($in)
+                AND NOT EXISTS (
+                    SELECT 1 FROM payroll_employment_terms term
+                     WHERE term.supplier_id = employment.supplier_id AND term.employment_id = employment.id
+                       AND term.effective_from <= ? AND (term.effective_to IS NULL OR term.effective_to >= ?)
+                       AND (term.remuneration_type = 'hourly'
+                            OR COALESCE(term.monthly_gross_minor, employment.monthly_gross_minor, 0) > 0))
+                AND (COALESCE(employment.monthly_gross_minor, 0) = 0 OR EXISTS (
+                    SELECT 1 FROM payroll_employment_terms term
+                     WHERE term.supplier_id = employment.supplier_id AND term.employment_id = employment.id
+                       AND term.effective_from <= ? AND (term.effective_to IS NULL OR term.effective_to >= ?)))
+                AND NOT EXISTS (
+                    SELECT 1 FROM payroll_recurring_components recurring
+                      JOIN payroll_component_definitions component
+                        ON component.supplier_id = recurring.supplier_id AND component.id = recurring.component_id
+                     WHERE recurring.supplier_id = employment.supplier_id AND recurring.employment_id = employment.id
+                       AND recurring.is_active = 1
+                       AND recurring.valid_from <= ? AND (recurring.valid_to IS NULL OR recurring.valid_to >= ?)
+                       AND (component.component_kind = 'base_wage' OR recurring.allocation_rule = 'hours'))"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $last, $first, $last, $first, $last, $first]);
+
+        return array_fill_keys(array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN)), true);
+    }
+
+    /**
+     * Odpracované hodiny posledního souhrnu importu u měsíců, které už berou
+     * hodiny ze směn (souhrn zůstal v historii revizí měsíce), v millihodinách.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,int>
+     */
+    public function replacedImportWorkedMillihours(int $supplierId, array $employmentIds, string $periodStart): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        $in = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "WITH ranked AS (
+                SELECT summary.employment_id, summary.values_json,
+                       ROW_NUMBER() OVER (PARTITION BY summary.employment_id
+                                          ORDER BY summary.time_month_revision_no DESC, summary.id DESC) AS position
+                  FROM payroll_time_month_import_summaries summary
+                  JOIN payroll_time_months month_row
+                    ON month_row.supplier_id = summary.supplier_id AND month_row.id = summary.time_month_id
+                 WHERE summary.supplier_id = ? AND summary.employment_id IN ($in) AND summary.period_start = ?
+                   AND month_row.work_source = 'entries'
+             )
+             SELECT employment_id, values_json FROM ranked WHERE position = 1"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $periodStart]);
+        $result = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $values = json_decode((string) $row['values_json'], true);
+            $worked = is_array($values) ? ($values['worked_hours'] ?? null) : null;
+            if (is_int($worked) && $worked >= 0) {
+                $result[(int) $row['employment_id']] = $worked;
+            }
+        }
+
+        return $result;
+    }
+
+    /**
+     * Publikované směny vztahů začínající (místním časem) v měsíci, seřazené
+     * podle začátku. Rozpis jde uložit i u měsíce ze souhrnu importu, takže
+     * z něj lze při přechodu na směny převzít odpracovaný čas.
+     *
+     * @param list<int> $employmentIds
+     * @return array<int,list<array<string,mixed>>>
+     */
+    public function publishedShiftsInPeriod(int $supplierId, array $employmentIds, string $periodStart): array
+    {
+        if ($employmentIds === []) {
+            return [];
+        }
+        [$startsAtUtc, $endsAtUtc] = self::utcMonthBounds($periodStart);
+        [$candidateStart, $candidateEnd] = self::candidateBounds($startsAtUtc, $endsAtUtc);
+        $in = implode(',', array_fill(0, count($employmentIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT * FROM payroll_shifts
+              WHERE supplier_id = ? AND employment_id IN ($in) AND status = 'published'
+                AND starts_at_utc >= ? AND starts_at_utc < ?
+              ORDER BY employment_id, starts_at_utc, id"
+        );
+        $stmt->execute([$supplierId, ...$employmentIds, $candidateStart, $candidateEnd]);
+        $result = [];
+        foreach (self::rows($stmt) as $shift) {
+            if (self::startsInPeriod($shift, $periodStart)) {
+                $result[PayrollTimeValue::int($shift['employment_id'] ?? null, 'employment_id')][] = $shift;
+            }
+        }
+
+        return $result;
+    }
+
     /** @return array<string,mixed> */
-    public function restoreEntries(int $supplierId, int $employmentId, string $periodStart, int $expectedVersion, string $reason, string $source, ?int $userId): array
+    public function restoreEntries(int $supplierId, int $employmentId, string $periodStart, int $expectedVersion, string $reason, string $source, ?int $userId, bool $keepImportAmounts = false): array
     {
         $scope = $this->beginTransactionScope();
         try {
@@ -1606,12 +1751,19 @@ final class PayrollTimeRepository
             $currentSource = $current->fetchColumn();
             $currentSource = $currentSource === false ? 'entries' : (string) $currentSource;
             if ($currentSource !== $source) {
-                if ($currentSource !== 'manual_summary') {
+                if ($keepImportAmounts) {
+                    if ($currentSource !== 'import_summary' || $source !== 'entries') {
+                        throw new \InvalidArgumentException('Importované částky lze ponechat jen při přechodu ze souhrnu importu docházky na směny.');
+                    }
+                    if (!isset($this->importAmountsKeepableIds($supplierId, [$employmentId], $periodStart)[$employmentId])) {
+                        throw new \InvalidArgumentException(self::KEEP_IMPORT_AMOUNTS_REFUSED);
+                    }
+                } elseif ($currentSource !== 'manual_summary') {
                     self::assertHourlyTerms($this->monthTerms($supplierId, $employmentId, $periodStart));
                 }
                 $month = $this->lockOpenMonth($supplierId, $employmentId, $periodStart, $expectedVersion, $userId);
                 $this->assertManualSourceHasNoMaterializedAmounts($supplierId, $employmentId, $periodStart);
-                if ($currentSource === 'import_summary') {
+                if ($currentSource === 'import_summary' && !$keepImportAmounts) {
                     $this->assertNoActiveImportInputs($supplierId, $employmentId, $periodStart);
                 }
                 $import = null;

@@ -78,6 +78,28 @@ final class PayrollStandbyFullFlowTest extends TestCase
         }
     }
 
+    /** Ponechané částky z importu docházky nesou i odměnu za pohotovost. */
+    public function testActiveAttendanceImportInputsKeepStandbyFromShifts(): void
+    {
+        $person = $this->hire('Syntetická Pohotovost', 'female', '1988-03-14');
+        $this->standby($person['employment_id'], ['2026-07-07', '2026-07-09'], 240);
+        $this->db->pdo()->prepare('INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, work_source, status, approved_at)
+            VALUES (?, ?, ?, "entries", "approved", NOW())
+            ON DUPLICATE KEY UPDATE work_source = "entries", status = "approved", approved_at = NOW()')
+            ->execute([$this->supplierId, $person['employment_id'], self::PERIOD_START]);
+        $this->db->pdo()->prepare('INSERT INTO payroll_inputs (supplier_id, employee_id, employment_id, component_id, period_start, amount_minor, status, source_kind, external_id)
+            VALUES (?, ?, ?, ?, ?, 50000, "draft", "manual", ?)')
+            ->execute([$this->supplierId, $person['employee_id'], $person['employment_id'], $this->baseComponentId, self::PERIOD_START,
+                'attendance:2026-07:' . $person['employment_id'] . ':POHOTOVOST']);
+        $service = $this->container->get(\MyInvoice\Service\Payroll\Time\Surcharge\PayrollStandbyInputMaterializer::class);
+
+        $result = $service->materialize($this->supplierId, $person['employment_id'], self::PERIOD_START, $this->actors[0]);
+
+        self::assertFalse($result['written']);
+        self::assertSame('import_inputs', $result['skipped_reason']);
+        self::assertSame(0, $this->standbyTotal($person['employment_id']));
+    }
+
     public function testHourlyStandbyUsesCurrentAverageFloorAndKeepsTrustedProof(): void
     {
         $person = $this->hire('Syntetická Pohotovost', 'female', '1988-03-14');

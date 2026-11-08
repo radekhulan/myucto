@@ -12,6 +12,7 @@ use MyInvoice\Service\Payroll\Ruleset\CanonicalJson;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollSurchargeRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
 use MyInvoice\Service\Payroll\Ruleset\PayrollRulesetProvider;
@@ -155,6 +156,10 @@ final class PayrollStandbyInputMaterializer
             // Měsíc ze souhrnu importu nese odměny jako spočítané složky;
             // druhý výpočet ze směn by nárok zaplatil dvakrát.
             return $this->report($employmentId, $periodStart, null, false, $month['work_source']);
+        }
+        if ($this->hasActiveImportInputs($supplierId, $employmentId, $periodStart)) {
+            // Směny s ponechanými částkami z importu: odměny nesou importované vstupy.
+            return $this->report($employmentId, $periodStart, null, false, 'import_inputs');
         }
         $calculation = $this->calculate($supplierId, $employmentId, $periodStart);
         $existing = $this->existingInputs($supplierId, $employmentId, $periodStart);
@@ -315,6 +320,22 @@ final class PayrollStandbyInputMaterializer
         }
 
         return (int) $id;
+    }
+
+    private function hasActiveImportInputs(int $supplierId, int $employmentId, string $periodStart): bool
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT 1 FROM payroll_inputs
+              WHERE supplier_id = ? AND employment_id = ? AND period_start = ? AND status <> 'cancelled'
+                AND (external_id LIKE ? OR external_id LIKE ?)
+              LIMIT 1"
+        );
+        $stmt->execute([
+            $supplierId, $employmentId, $periodStart,
+            ...PayrollTimeRepository::importInputExternalPatterns($periodStart, $employmentId),
+        ]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     /**

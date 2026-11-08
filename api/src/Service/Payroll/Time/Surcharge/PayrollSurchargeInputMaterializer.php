@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\Payroll\PayrollComponentRepository;
 use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollSurchargeClaimRepository;
+use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRounding;
 use MyInvoice\Service\Payroll\Calculation\PayrollWageRoundingPolicy;
@@ -102,10 +103,15 @@ final class PayrollSurchargeInputMaterializer
              * začal číst hodiny ze souhrnu), vyplatil by se týž nárok podruhé.
              * Ruční souhrn také nahrazuje intervaly, ale nedokládá příplatkové vrstvy.
              * Pojistka stojí na zdroji měsíce, ne na tom, že dnes vyjde nula.
+             *
+             * Totéž platí pro měsíc přepnutý na směny s ponechanými částkami
+             * z importu („Zapisovat směny, částky ponechat"): dokud jsou
+             * importované vstupy aktivní, příplatky nesou ony.
              */
             $skippedSource = in_array($month['work_source'] ?? 'entries', ['import_summary', 'manual_summary'], true)
                 ? $month['work_source']
-                : ((bool) ($month['hourly_in_period'] ?? false) ? 'hourly_claims' : null);
+                : ((bool) ($month['hourly_in_period'] ?? false) ? 'hourly_claims'
+                    : ((bool) ($month['import_inputs_active'] ?? false) ? 'import_inputs' : null));
             // Hodinový a smíšený měsíc má jediného vlastníka nároků před zmrazením běhu.
             if ($skippedSource !== null) {
                 $this->commitOwned($pdo, $ownsTransaction);
@@ -447,7 +453,11 @@ final class PayrollSurchargeInputMaterializer
     ): array {
         $stmt = $this->db->pdo()->prepare(
             'SELECT month_row.id, month_row.status, month_row.revision_no, month_row.work_source,
-                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . ' AS hourly_in_period
+                    ' . PayrollHourlyRemuneration::overlapsPeriodSql() . ' AS hourly_in_period,
+                    EXISTS (SELECT 1 FROM payroll_inputs input
+                             WHERE input.supplier_id = month_row.supplier_id AND input.employment_id = month_row.employment_id
+                               AND input.period_start = month_row.period_start AND input.status <> "cancelled"
+                               AND (input.external_id LIKE ? OR input.external_id LIKE ?)) AS import_inputs_active
                FROM payroll_time_months month_row
                JOIN payroll_employments employment
                  ON employment.supplier_id = month_row.supplier_id AND employment.id = month_row.employment_id
@@ -455,7 +465,11 @@ final class PayrollSurchargeInputMaterializer
               FOR UPDATE'
         );
         $periodEnd = (new \DateTimeImmutable($periodStart))->modify('last day of this month')->format('Y-m-d');
-        $stmt->execute([$periodEnd, $periodStart, $supplierId, $employmentId, $periodStart]);
+        $stmt->execute([
+            $periodEnd, $periodStart,
+            ...PayrollTimeRepository::importInputExternalPatterns($periodStart, $employmentId),
+            $supplierId, $employmentId, $periodStart,
+        ]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!is_array($row)) {
             throw PayrollSurchargeException::of(

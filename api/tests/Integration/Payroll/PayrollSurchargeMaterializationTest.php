@@ -106,6 +106,27 @@ final class PayrollSurchargeMaterializationTest extends TestCase
         self::assertSame(0, $this->ledgerCount());
     }
 
+    /**
+     * Měsíc přepnutý na směny s ponechanými částkami z importu docházky:
+     * příplatky nesou importované vstupy, výpočet ze směn by je zaplatil podruhé.
+     */
+    public function testActiveAttendanceImportInputsKeepSurchargesFromShifts(): void
+    {
+        $this->entry('overtime', '2026-06-10 08:00', '2026-06-10 10:00');
+        $pdo = $this->db->pdo();
+        $component = (int) $pdo->query('SELECT id FROM payroll_component_definitions WHERE supplier_id = ' . $this->supplierId . ' ORDER BY id LIMIT 1')->fetchColumn();
+        $employee = (int) $pdo->query('SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId)->fetchColumn();
+        $pdo->prepare('INSERT INTO payroll_inputs (supplier_id, employee_id, employment_id, component_id, period_start, amount_minor, status, source_kind, external_id)
+            VALUES (?, ?, ?, ?, ?, 50000, "draft", "manual", ?)')
+            ->execute([$this->supplierId, $employee, $this->employmentId, $component, self::PERIOD, 'attendance:2026-06:' . $this->employmentId . ':PRIPLATKY']);
+
+        $result = $this->materialize();
+
+        self::assertSame('import_inputs', $result['skipped_reason']);
+        self::assertSame(0, $result['written_count']);
+        self::assertSame(0, $this->inputCount('PRIPLATEK_PRESCAS'));
+    }
+
     public function testHourlyTermsOutsidePeriodDoNotChangeLegacySurchargeCalculation(): void
     {
         $this->entry('overtime', '2026-06-10 08:00', '2026-06-10 10:00');

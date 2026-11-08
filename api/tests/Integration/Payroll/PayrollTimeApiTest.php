@@ -711,6 +711,33 @@ final class PayrollTimeApiTest extends TestCase
         self::assertSame('import_summary', $stmt->fetchColumn());
     }
 
+    /**
+     * „Zapisovat směny, částky ponechat" vstupy nemění, takže stačí zápis
+     * docházky; „Počítat ze směn" je ruší a dál chce i zápis mzdových vstupů.
+     */
+    public function testKeepingImportInputsNeedsOnlyTimeWritePermission(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employments SET monthly_gross_minor = NULL WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on) VALUES (?, ?, "2026-01-01", "2026-01-01")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, status, work_source, revision_no, row_version) VALUES (?, ?, "2026-05-01", "open", "import_summary", 1, 1)')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $inputId = $this->importInput('draft', 'attendance:2026-05:' . $this->employmentId . ':hours');
+        $writer = new EffectiveRole(0, 'Test', 'staff', true, ['payroll.time.write' => AccessLevel::WRITE->value]);
+        $path = '/api/payroll/time/months/2026-05/switch-to-entries';
+        $payload = ['employment_id' => $this->employmentId, 'row_version' => 1];
+
+        $denied = $this->action->switchToEntries($this->request('POST', $path)->withAttribute('auth.effective_role', $writer)->withParsedBody($payload), new Response(), ['period' => '2026-05']);
+        self::assertSame(403, $denied->getStatusCode());
+        $kept = $this->action->switchToEntries($this->request('POST', $path)->withAttribute('auth.effective_role', $writer)
+            ->withParsedBody($payload + ['keep_import_inputs' => true]), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $kept->getStatusCode(), (string) $kept->getBody());
+        self::assertSame('entries', $this->json($kept)['month']['work_source']);
+        self::assertSame('draft', $this->inputStatus($inputId));
+    }
+
     private function importSummaryMonth(): int
     {
         $pdo = $this->db->pdo();
