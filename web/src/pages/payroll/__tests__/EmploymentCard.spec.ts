@@ -14,6 +14,7 @@ vi.mock('@/api/payroll', () => ({
     transitionEmployment: vi.fn(),
     saveStatutoryOpenings: vi.fn(),
     renameEmployment: vi.fn(),
+    changeEmploymentRelationType: vi.fn(),
     setEmploymentMealEntitlementBasis: vi.fn(),
     remunerationOptions: vi.fn().mockResolvedValue({ minimum_hourly_40h_minor: null, ruleset_id: null }),
     addEmploymentTerms: vi.fn(),
@@ -1913,6 +1914,33 @@ describe('EmploymentCard', () => {
     await flushPromises()
 
     expect(payrollApi.renameEmployment).toHaveBeenCalledWith(10, 1, 'DOCHAZKA-7')
+  })
+
+  it('opraví druh vztahu a důvod blokace ze serveru ukáže u formuláře', async () => {
+    const wrapper = await mountCard(employment(), {
+      props: { employment: employment(), canWrite: true },
+      global: { stubs: actionBarStub },
+    })
+
+    await wrapper.get('[data-test="action-change-relation-type"]').trigger('click')
+    selectByTest(wrapper, 'employment-relation-type-select').vm.$emit('update:modelValue', 'dpp')
+    await wrapper.get('[data-test="employment-relation-type-note"]').setValue('Import registrace převzal dohodu jako ZMR.')
+
+    vi.mocked(payrollApi.changeEmploymentRelationType).mockRejectedValueOnce({
+      response: { data: { error: { code: 'payroll_relation_type_in_run', message: 'Pracovní vztah je zahrnutý v revizi mzdového běhu.' } } },
+    })
+    await wrapper.get('[data-test="employment-relation-type-change"]').trigger('submit')
+    await flushPromises()
+    expect(wrapper.get('[data-test="employment-relation-type-error"]').text()).toContain('revizi mzdového běhu')
+
+    const corrected = { ...employment(), relation_type: 'dpp' as const, row_version: 2 }
+    vi.mocked(payrollApi.changeEmploymentRelationType).mockResolvedValueOnce({ employment: corrected, warnings: [] })
+    await wrapper.get('[data-test="employment-relation-type-change"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.changeEmploymentRelationType).toHaveBeenLastCalledWith(10, 1, 'dpp', 'Import registrace převzal dohodu jako ZMR.')
+    expect(wrapper.emitted('updated')?.at(-1)).toEqual([corrected])
+    expect(wrapper.find('[data-test="employment-relation-type-change"]').exists()).toBe(false)
   })
 
   it('česky vysvětlí zámek režimu stravování po schváleném příspěvku', async () => {

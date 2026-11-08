@@ -444,7 +444,7 @@ export interface PayrollEmploymentEvent {
   // `terms_corrected` = oprava platné verze (přepis na místě), `terms_changed`
   // = nová verze od data. V historii se to nesmí slít — jedno je oprava
   // zápisu, druhé skutečná změna podmínek.
-  event_type: 'created' | 'terms_changed' | 'terms_corrected' | 'status_changed' | 'checklist_changed'
+  event_type: 'created' | 'terms_changed' | 'terms_corrected' | 'status_changed' | 'checklist_changed' | 'relation_type_changed'
   from_status: PayrollEmploymentStatus | null
   to_status: PayrollEmploymentStatus | null
   effective_on: string
@@ -8801,6 +8801,17 @@ export const payrollApi = {
       `/payroll/employments/${employmentId}/code`,
       { row_version: rowVersion, code },
     ).then(response => response.data.employment),
+  /** Oprava druhu vztahu založeného s nesprávným druhem (např. importem registrace). */
+  changeEmploymentRelationType: (
+    employmentId: number,
+    rowVersion: number,
+    relationType: PayrollRelationType,
+    note: string | null,
+  ) =>
+    api.patch<{ employment: PayrollEmployment, warnings: Array<{ code: string, message: string }> }>(
+      `/payroll/employments/${employmentId}/relation-type`,
+      { row_version: rowVersion, relation_type: relationType, note },
+    ).then(response => response.data),
   setEmploymentMealEntitlementBasis: (
     employmentId: number,
     rowVersion: number,

@@ -865,6 +865,26 @@ describe('PayrollPersonStatutoryEvidencePanel', () => {
     expect(wrapper.find('[data-test="statutory-evidence-frozen"]').exists()).toBe(true)
   })
 
+  it('rezidenci zadanou jen na měsíc brigády neoznačí jako nezadanou', async () => {
+    const evidence = filledEvidence()
+    evidence.sections.tax_residences = [{
+      id: 23,
+      row_version: 1,
+      residence: 'czech-resident',
+      country_code: 'CZ',
+      effective_from: '2026-02-01',
+      effective_to: '2026-02-28',
+      evidence_reference: null,
+      evidence_note: null,
+    }]
+    mocks.statutoryEvidence.mockResolvedValue(evidence)
+    const wrapper = await mounted()
+
+    const current = wrapper.get('[data-test="current-tax_residences"]').text()
+    expect(current).toContain('payroll.people.statutory_evidence.current_ended')
+    expect(current).not.toContain('payroll.people.statutory_evidence.current_missing')
+  })
+
   it('ukáže nahoře, co u sekce teď platí a od kdy', async () => {
     mocks.statutoryEvidence.mockResolvedValue(filledEvidence())
     const wrapper = await mounted()

@@ -294,6 +294,82 @@ final class PayrollEmploymentLifecycleApiTest extends TestCase
         self::assertSame(422, $invalid->getStatusCode());
     }
 
+    public function testRelationTypeCorrectionTurnsEmploymentIntoAgreement(): void
+    {
+        $employment = $this->create($this->employeeId, 'REG-1', 'small_scale_employment', true);
+        self::assertSame('1', $employment['terms'][0]['activity_code']);
+
+        $response = $this->changeRelationType($employment, 'dpp', 'Převzato z registrace omylem jako ZMR.');
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $changed = $this->json($response)['employment'];
+        self::assertSame('dpp', $changed['relation_type']);
+        self::assertSame('T', $changed['terms'][0]['activity_code'], 'Druh činnosti ZMR k dohodě nepatří, nahradí ho kód první DPP.');
+        self::assertSame($employment['row_version'] + 1, $changed['row_version']);
+
+        $event = $this->db->pdo()->query(
+            "SELECT note, diff_json FROM payroll_employment_events WHERE event_type = 'relation_type_changed'"
+            . ' AND employment_id = ' . (int) $employment['id'],
+        )->fetch(\PDO::FETCH_ASSOC);
+        self::assertIsArray($event, 'Oprava druhu má vlastní událost na časové ose.');
+        self::assertSame('Převzato z registrace omylem jako ZMR.', $event['note']);
+        $diff = json_decode((string) $event['diff_json'], true);
+        self::assertSame(['from' => 'small_scale_employment', 'to' => 'dpp'], $diff['relation_type']);
+        self::assertSame(['from' => '1', 'to' => 'T'], $diff['activity_code']);
+        self::assertSame('dpp', $this->db->pdo()->query(
+            'SELECT employment_type FROM payroll_employees WHERE id = ' . $this->employeeId,
+        )->fetchColumn(), 'Osoba s jediným vztahem dostane i souhrnný druh dohody.');
+
+        $same = $this->changeRelationType($changed, 'dpp');
+        self::assertSame(422, $same->getStatusCode());
+        $stale = $this->changeRelationType($employment, 'employment');
+        self::assertSame(409, $stale->getStatusCode(), 'Zastaralá verze vztahu se odmítne.');
+        $unsupported = $this->changeRelationType($changed, 'statutory_body');
+        self::assertSame(422, $unsupported->getStatusCode());
+    }
+
+    public function testRelationTypeCorrectionIsRefusedAfterApprovedAttendance(): void
+    {
+        $employment = $this->create($this->employeeId, 'REG-2', 'employment', true);
+        $this->db->pdo()->prepare(
+            "INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, status, approved_at)
+             VALUES (?, ?, '2026-02-01', 'approved', NOW())"
+        )->execute([$this->supplierId, $employment['id']]);
+
+        $response = $this->changeRelationType($employment, 'dpp');
+        self::assertSame(409, $response->getStatusCode(), (string) $response->getBody());
+        self::assertSame('payroll_relation_type_has_approved_time', $this->json($response)['error']['code']);
+        self::assertSame('employment', $this->db->pdo()->query(
+            'SELECT relation_type FROM payroll_employments WHERE id = ' . (int) $employment['id'],
+        )->fetchColumn());
+    }
+
+    public function testRelationTypeCorrectionCannotReachAnotherTenant(): void
+    {
+        $foreign = $this->db->pdo()->prepare(
+            "INSERT INTO payroll_employments (supplier_id, employee_id, code, relation_type, status, is_primary, row_version)
+             VALUES (?, ?, 'CIZI', 'employment', 'planned', 0, 1)"
+        );
+        $foreign->execute([$this->otherSupplierId, $this->otherEmployeeId]);
+        $foreignId = (int) $this->db->pdo()->lastInsertId();
+
+        $response = $this->changeRelationType(['id' => $foreignId, 'row_version' => 1], 'dpp');
+        self::assertSame(404, $response->getStatusCode(), (string) $response->getBody());
+    }
+
+    /** @param array<string,mixed> $employment */
+    private function changeRelationType(array $employment, string $relationType, ?string $note = null): Response
+    {
+        return $this->action->changeRelationType(
+            $this->request(
+                'PATCH',
+                "/api/payroll/employments/{$employment['id']}/relation-type",
+                ['row_version' => $employment['row_version'], 'relation_type' => $relationType, 'note' => $note],
+            ),
+            new Response(),
+            ['id' => (string) $employment['id']],
+        );
+    }
+
     public function testMealEntitlementBasisIsExplicitAndEditable(): void
     {
         $employment = $this->create($this->employeeId, 'STRAVNE-1', 'employment', true);

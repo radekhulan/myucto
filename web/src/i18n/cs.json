@@ -7374,6 +7374,7 @@
         "remove_row": "Odebrat",
         "row_frozen": "Uzavřeno schválenou mzdou",
         "current_missing": "Nezadáno",
+        "current_ended": "Zadáno jen do {day}, k {month} chybí. Trvá-li vztah dál, nechte Platí do prázdné.",
         "current_none_claimed": "Žádná sleva",
         "derived_taxpayer_credit": "Sleva na poplatníka (z podepsaného prohlášení)",
         "current_from": "platí od {day}",
@@ -7698,6 +7699,15 @@
       "rename_action": "Změnit osobní číslo",
       "rename_label": "Osobní číslo",
       "rename_hint": "Osobní číslo zaměstnance. Podle něj se páruje import docházky, na úřední výstupy nemá vliv.",
+      "relation_type_change": {
+        "action": "Opravit druh vztahu",
+        "title": "Oprava druhu pracovního vztahu",
+        "hint": "Vztah je vedený jako {current}. Opravu použijte, když vznikl s nesprávným druhem, například importem registrace. Docházka a mzdové vstupy v konceptu zůstanou u vztahu, druh činnosti pro ČSSZ se nastaví podle nového druhu. Nejde to, pokud je vztah ve mzdovém běhu, v hlášení JMHZ nebo má schválené vstupy či docházku.",
+        "new_type": "Správný druh vztahu",
+        "note": "Důvod opravy",
+        "save": "Opravit druh",
+        "saved": "Druh vztahu je opravený."
+      },
       "meal_entitlement_basis": {
         "label": "Režim nároku na stravování",
         "shift": "Práce rozvržená na směny",
@@ -7799,7 +7809,8 @@
         "terms_changed": "Smluvní podmínky změněny",
         "terms_corrected": "Platné podmínky opraveny",
         "status_changed": "Stav změněn",
-        "checklist_changed": "Povinnost aktualizována"
+        "checklist_changed": "Povinnost aktualizována",
+        "relation_type_changed": "Druh vztahu opraven"
       },
       "term_field": {
         "remuneration_basis_kind": "Druh podkladu sjednání",

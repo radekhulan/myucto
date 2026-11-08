@@ -283,6 +283,50 @@ final class PayrollEmploymentAction
         return Json::ok($response, ['employment' => $employment]);
     }
 
+    /**
+     * Oprava druhu vztahu založeného s nesprávným druhem. Pojistky (běh,
+     * podání, schválené vstupy a docházka…) hlídá repozitář pod zámkem vztahu.
+     *
+     * @param array{id:string} $args
+     */
+    public function changeRelationType(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $relationType = $body['relation_type'] ?? null;
+            if (!is_string($relationType)
+                || !in_array($relationType, PayrollEmploymentRepository::RELATION_TYPE_CORRECTABLE, true)
+            ) {
+                throw new PayrollFieldValidationException(
+                    'Vyberte druh vztahu: pracovní poměr, zaměstnání malého rozsahu, DPP nebo DPČ.',
+                    'relation_type',
+                );
+            }
+            $note = $body['note'] ?? null;
+            if ($note !== null && !is_string($note)) {
+                throw new PayrollFieldValidationException('Důvod opravy musí být text.', 'note');
+            }
+            $note = $note === null ? null : mb_substr(trim($note), 0, 500);
+            $result = $this->employments->changeRelationType(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $relationType,
+                $this->validator->rowVersion($body),
+                $note === '' ? null : $note,
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        return Json::ok($response, $result);
+    }
+
     /** @param array{id:string} $args */
     public function setMealEntitlementBasis(
         Request $request,

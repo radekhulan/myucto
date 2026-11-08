@@ -207,10 +207,142 @@ final class PayrollEmploymentDeletionRepository
         'payroll_sickness_cases' => self::SICKNESS_DRAFT,
     ];
 
+    /**
+     * Důkazy, které drží druh pracovního vztahu. Oproti mazání chybí převzatý
+     * profil registrace (`payroll_registration_a1_profiles`): ten jen opisuje
+     * registraci podanou mimo aplikaci a oprava druhu je právě náprava jejího
+     * chybného převzetí. Mzdové vstupy drží druh jen schválené, koncept vstupu
+     * opravu nepřežije bez kontroly, ale nic nepotvrdil. Dovolená drží proto,
+     * že dohoda nárok na dovolenou nemá a vedená kniha dovolené by osiřela.
+     *
+     * @var array<string,array{tables:list<string>,where?:string,code:string,message:string}>
+     */
+    private const RELATION_TYPE_BLOCKERS = [
+        'registration' => [
+            'tables' => [
+                'payroll_registration_identity_snapshots',
+                'payroll_registration_event_snapshots',
+                'payroll_registration_a2_evidence_ledger',
+                'payroll_employment_external_ids',
+                'payroll_identity_resolution_tasks',
+            ],
+            'code' => 'payroll_relation_type_registered',
+            'message' => 'Pracovní vztah má z aplikace připravenou nebo potvrzenou registraci u ČSSZ '
+                . 'nebo identifikátory vztahu od ČSSZ. Druh vztahu proto opravit nelze. '
+                . 'Ukončete vztah a založte nový se správným druhem.',
+        ],
+        'submission' => [
+            'tables' => [
+                'payroll_jmhz_work_month_revisions',
+                'payroll_jmhz_eldp_evidence_snapshots',
+                'payroll_jmhz_eldp_idempotency_claims',
+                'payroll_jmhz_ordinary_evidence_snapshots',
+                'payroll_jmhz_ordinary_evidence_idempotency_claims',
+            ],
+            'code' => 'payroll_relation_type_has_submissions',
+            'message' => 'Za tento pracovní vztah už bylo připraveno nebo odesláno hlášení JMHZ. '
+                . 'Druh vztahu proto opravit nelze. Ukončete vztah a založte nový se správným druhem.',
+        ],
+        'eldp' => [
+            'tables' => ['payroll_eldp_statements', 'payroll_eldp_statement_claims'],
+            'code' => 'payroll_relation_type_has_eldp_statement',
+            'message' => 'Za tento pracovní vztah je sestavený evidenční list důchodového pojištění. '
+                . 'Druh vztahu proto opravit nelze.',
+        ],
+        'run' => [
+            'tables' => ['payroll_run_employments'],
+            'code' => 'payroll_relation_type_in_run',
+            'message' => 'Pracovní vztah je zahrnutý v revizi mzdového běhu. Nejdřív smažte nebo zrušte '
+                . 'ten mzdový běh, teprve pak půjde druh vztahu opravit.',
+        ],
+        'exit_document' => [
+            'tables' => ['payroll_employment_exit_revisions'],
+            'code' => 'payroll_relation_type_has_exit_documents',
+            'message' => 'K pracovnímu vztahu je vydaný výstupní doklad. Druh vztahu proto opravit nelze.',
+        ],
+        'wage_statement' => [
+            'tables' => ['payroll_wage_statement_revisions'],
+            'code' => 'payroll_relation_type_has_wage_statement',
+            'message' => 'K pracovnímu vztahu je vydaný mzdový výměr. Druh vztahu proto opravit nelze.',
+        ],
+        'approved_input' => [
+            'tables' => ['payroll_inputs'],
+            'where' => "{t}.status = 'approved'",
+            'code' => 'payroll_relation_type_has_approved_inputs',
+            'message' => 'Pracovní vztah má schválené mzdové vstupy. Schválený vstup se počítal podle '
+                . 'dosavadního druhu vztahu, proto druh vztahu opravit nelze.',
+        ],
+        'hourly_wage_claim' => [
+            'tables' => ['payroll_hourly_wage_claims', 'payroll_hourly_time_entitlements', 'payroll_hourly_included_consumption', 'payroll_hourly_evidence_revisions'],
+            'code' => 'payroll_relation_type_has_hourly_wage_claims',
+            'message' => 'Pracovní vztah má evidované nároky na hodinovou mzdu. Druh vztahu proto opravit nelze.',
+        ],
+        'approved_time' => [
+            'tables' => ['payroll_time_months'],
+            'where' => "{t}.status = 'approved'",
+            'code' => 'payroll_relation_type_has_approved_time',
+            'message' => 'Pracovní vztah má schválenou docházku za měsíc. Schválení se posuzovalo podle '
+                . 'dosavadního druhu vztahu, proto druh vztahu opravit nelze.',
+        ],
+        'average_earning' => [
+            'tables' => ['payroll_average_earning_snapshots'],
+            'where' => "{t}.status IN ('approved', 'superseded')",
+            'code' => 'payroll_relation_type_has_average_earning',
+            'message' => 'Pracovní vztah má schválený průměrný výdělek. Druh vztahu proto opravit nelze.',
+        ],
+        'discount' => [
+            'tables' => ['payroll_discount_intents'],
+            'where' => "{t}.status NOT IN ('draft', 'cancelled')",
+            'code' => 'payroll_relation_type_has_discount',
+            'message' => 'K pracovnímu vztahu je podané oznámení o slevě na pojistném. Druh vztahu proto opravit nelze.',
+        ],
+        'leave' => [
+            'tables' => ['payroll_leave_ledger', 'payroll_leave_entitlement_snapshots'],
+            'code' => 'payroll_relation_type_has_leave',
+            'message' => 'Pracovní vztah má vedenou knihu dovolené. Druh vztahu proto opravit nelze.',
+        ],
+        'sickness' => [
+            'tables' => ['payroll_sickness_cases'],
+            'where' => self::SICKNESS_SUBMITTED,
+            'code' => 'payroll_relation_type_has_sickness_submission',
+            'message' => 'Z případu dávky nemocenského pojištění k tomuto vztahu už bylo připravené '
+                . 'nebo odeslané podání ČSSZ. Druh vztahu proto opravit nelze.',
+        ],
+    ];
+
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $activityLogger,
     ) {}
+
+    /**
+     * Co brání opravě druhu vztahu. Volá se pod zámkem řádku vztahu.
+     *
+     * @return array{code:string,message:string}|null
+     */
+    public function relationTypeChangeBlocker(int $supplierId, int $employmentId): ?array
+    {
+        $columns = [];
+        foreach (self::RELATION_TYPE_BLOCKERS as $alias => $blocker) {
+            $columns[] = self::existsExpression($blocker['tables'], $blocker['where'] ?? null) . " AS blocker_{$alias}";
+        }
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT ' . implode(', ', $columns)
+            . ' FROM payroll_employments employment WHERE employment.supplier_id = ? AND employment.id = ?'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if (!is_array($row)) {
+            return null;
+        }
+        foreach (self::RELATION_TYPE_BLOCKERS as $alias => $blocker) {
+            if ((int) $row["blocker_{$alias}"] > 0) {
+                return ['code' => $blocker['code'], 'message' => $blocker['message']];
+            }
+        }
+
+        return null;
+    }
 
     /**
      * Vrací `null`, když vztah v tomto tenantu neexistuje — volající to překlopí na

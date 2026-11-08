@@ -12,6 +12,7 @@ import {
   type PayrollEmploymentStatus,
   type PayrollEmploymentJmhzEvidenceOptions,
   type PayrollMealEntitlementBasis,
+  type PayrollRelationType,
   type PayrollJmhzMunicipalityOption,
   type PayrollEmploymentSaveWarning,
   type PayrollEmploymentTermsPayload,
@@ -1134,6 +1135,49 @@ async function saveCode() {
   }
 }
 
+/*
+ * Oprava druhu vztahu, který vznikl s nesprávným druhem (typicky import
+ * registrace převzal dohodu jako pracovní poměr). Pojistky hlídá server;
+ * když oprava nejde, důvod se ukáže jako chyba u formuláře.
+ */
+const CORRECTABLE_RELATION_TYPES: PayrollRelationType[] = ['employment', 'small_scale_employment', 'dpp', 'dpc']
+const changingRelationType = ref(false)
+const relationTypeDraft = ref<PayrollRelationType | null>(null)
+const relationTypeNote = ref('')
+const relationTypeError = ref('')
+const relationTypeOptions = computed(() => CORRECTABLE_RELATION_TYPES
+  .filter(type => type !== props.employment.relation_type)
+  .map(type => ({ value: type, label: t(`payroll.people.relations.${type}`) })))
+
+function startRelationTypeChange() {
+  relationTypeDraft.value = null
+  relationTypeNote.value = ''
+  relationTypeError.value = ''
+  changingRelationType.value = true
+}
+
+async function saveRelationType() {
+  if (busy.value || relationTypeDraft.value === null) return
+  busy.value = true
+  relationTypeError.value = ''
+  try {
+    const result = await payrollApi.changeEmploymentRelationType(
+      props.employment.id,
+      props.employment.row_version,
+      relationTypeDraft.value,
+      relationTypeNote.value.trim() || null,
+    )
+    emit('updated', result.employment)
+    changingRelationType.value = false
+    toast.success(t('payroll.people.relation_type_change.saved'))
+    for (const warning of result.warnings) toast.warning(warning.message)
+  } catch (error) {
+    relationTypeError.value = apiErrorMessage(error, t('payroll.people.mutation_failed'))
+  } finally {
+    busy.value = false
+  }
+}
+
 /**
  * Potvrzení nástupu použije datum nástupu, ne dnešek — jinak by se do evidence
  * zapsalo, že člověk nastoupil ve chvíli, kdy si toho někdo všiml.
@@ -1447,6 +1491,16 @@ const actions = computed<ActionItem[]>(() => [
     disabled: busy.value,
     show: props.canWrite,
     run: () => startRename(),
+  },
+  {
+    key: 'change-relation-type',
+    label: t('payroll.people.relation_type_change.action'),
+    icon: 'edit',
+    tier: 'advanced',
+    variant: 'warning',
+    disabled: busy.value,
+    show: props.canWrite && CORRECTABLE_RELATION_TYPES.includes(props.employment.relation_type),
+    run: () => startRelationTypeChange(),
   },
   {
     // Patří do „…", ne mezi hlavní tlačítka: je to výjimečná a nevratná akce.
@@ -2472,6 +2526,42 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       <div class="flex gap-2 pb-6">
         <button type="button" :class="btnOutlineSm('neutral')" @click="renaming = false">{{ t('common.cancel') }}</button>
         <button type="submit" :class="btnOutlineSm('accent')" :disabled="busy">{{ t('common.save') }}</button>
+      </div>
+    </form>
+
+    <form
+      v-if="changingRelationType"
+      class="mt-3 rounded-lg border border-warning-500/30 bg-warning-50 p-3"
+      data-test="employment-relation-type-change"
+      @submit.prevent="saveRelationType"
+    >
+      <p class="text-sm font-medium text-neutral-800">{{ t('payroll.people.relation_type_change.title') }}</p>
+      <p :class="HINT">{{ t('payroll.people.relation_type_change.hint', { current: t(`payroll.people.relations.${employment.relation_type}`) }) }}</p>
+      <div class="mt-2 grid min-w-0 grid-cols-1 gap-3 sm:grid-cols-2">
+        <label :class="FIELD">
+          {{ t('payroll.people.relation_type_change.new_type') }}
+          <SearchableSelect
+            v-model="relationTypeDraft"
+            class="mt-1"
+            :options="relationTypeOptions"
+            :clearable="false"
+            accent="payroll"
+            data-test="employment-relation-type-select"
+          />
+        </label>
+        <label :class="FIELD">
+          {{ t('payroll.people.relation_type_change.note') }}
+          <input v-model="relationTypeNote" maxlength="500" :class="INPUT" data-test="employment-relation-type-note">
+        </label>
+      </div>
+      <p v-if="relationTypeError" role="alert" class="mt-2 text-xs text-danger-700" data-test="employment-relation-type-error">{{ relationTypeError }}</p>
+      <div class="mt-3 flex flex-wrap justify-end gap-2">
+        <button type="button" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" @click="changingRelationType = false">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}
+        </button>
+        <button type="submit" :class="[btnFilledSm('warning'), 'whitespace-nowrap']" :disabled="busy || relationTypeDraft === null" data-test="employment-relation-type-save">
+          <svg class="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.check" /></svg>{{ t('payroll.people.relation_type_change.save') }}
+        </button>
       </div>
     </form>
 

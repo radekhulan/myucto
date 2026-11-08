@@ -299,7 +299,7 @@ final class RegistrationImportPlanner
         }
         if ($record->documentType === 'PREZEC26') {
             $plan['warnings'][] = 'Částečné přihlášení druh vztahu neuvádí — osoba se založí s pracovním '
-                . 'poměrem. Jde-li o dohodu, změňte druh vztahu na kartě.';
+                . 'poměrem. Jde-li o dohodu, opravte druh na kartě vztahu akcí Opravit druh vztahu.';
         }
         $this->derivedStartWarnings($plan, $record);
 

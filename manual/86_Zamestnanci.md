@@ -370,6 +370,15 @@ checklistu jsou splněné a odhláška A2 je přijatá.
 Nenastoupil-li zaměstnanec vůbec, klikněte na **Označit nenástup** a podejte
 storno A8 nebo ukončení předregistrace P2.
 
+Vznikl-li vztah s nesprávným druhem (například import registrace převzal
+dohodu o provedení práce jako pracovní poměr), opravíte ho na kartě vztahu
+v **… → Pokročilé → Opravit druh vztahu**. Docházka i mzdové vstupy v konceptu
+zůstanou u vztahu a druh činnosti pro ČSSZ se nastaví podle nového druhu.
+Oprava nejde, jakmile je vztah zahrnutý ve mzdovém běhu nebo v hlášení JMHZ,
+má schválené mzdové vstupy, schválenou docházku nebo průměrný výdělek, nebo
+když k němu aplikace už připravila registraci ČSSZ. Pokud jste vztah
+u ČSSZ přihlásili s nesprávným druhem činnosti, podejte tam opravu registrace.
+
 ### 86.9.1 Hromadné ukončení skončených dohod
 
 Brigádníci na DPP a DPČ mívají krátké dohody. Aby seznam nezůstal plný lidí,

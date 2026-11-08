@@ -7374,6 +7374,7 @@
         "remove_row": "Remove",
         "row_frozen": "Closed by approved payroll",
         "current_missing": "Not recorded",
+        "current_ended": "Recorded only until {day}, missing for {month}. If the relationship continues, leave Valid to empty.",
         "current_none_claimed": "No credit",
         "derived_taxpayer_credit": "Basic taxpayer credit (from the signed declaration)",
         "current_from": "valid from {day}",
@@ -7698,6 +7699,15 @@
       "rename_action": "Change personal number",
       "rename_label": "Personal number",
       "rename_hint": "The employee's personal number. Attendance imports match rows by it; it has no effect on official filings.",
+      "relation_type_change": {
+        "action": "Correct relationship type",
+        "title": "Correct the employment relationship type",
+        "hint": "The relationship is recorded as {current}. Use this when it was created with the wrong type, for example by a registration import. Attendance and draft payroll inputs stay with the relationship, and the ČSSZ activity code is set for the new type. It is not possible once the relationship is in a payroll run, in a JMHZ report, or has approved inputs or attendance.",
+        "new_type": "Correct relationship type",
+        "note": "Reason for the correction",
+        "save": "Correct type",
+        "saved": "The relationship type has been corrected."
+      },
       "meal_entitlement_basis": {
         "label": "Meal entitlement regime",
         "shift": "Work scheduled in shifts",
@@ -7799,7 +7809,8 @@
         "terms_changed": "Contractual terms changed",
         "terms_corrected": "Effective terms corrected",
         "status_changed": "Status changed",
-        "checklist_changed": "Duty updated"
+        "checklist_changed": "Duty updated",
+        "relation_type_changed": "Relationship type corrected"
       },
       "term_field": {
         "remuneration_basis_kind": "Type of contractual document",

@@ -323,6 +323,22 @@ function summaryLabel(section: StatutorySectionSpec): string {
     ].join(', ')
   }
   if (rows.length === 0) {
+    // Záznam je, jen k vybranému měsíci už neplatí (typicky zadaný jen na
+    // měsíc brigády u trvající dohody). „Nezadáno" by tvrdilo, že se uložení
+    // nepovedlo.
+    const endedOn = section.kind === 'month' || section.optional === true
+      ? null
+      : rowsOf(section)
+        .map(row => statutoryText(row, 'effective_to'))
+        .filter(to => /^\d{4}-\d{2}-\d{2}$/.test(to) && to < effectiveOn.value)
+        .sort()
+        .at(-1) ?? null
+    if (endedOn !== null) {
+      return t('payroll.people.statutory_evidence.current_ended', {
+        day: formatDate(endedOn),
+        month: formatDate(effectiveOn.value),
+      })
+    }
     return t(section.optional === true
       ? `payroll.people.statutory_evidence.${section.emptyKey ?? 'current_none_claimed'}`
       : 'payroll.people.statutory_evidence.current_missing')
