@@ -2627,7 +2627,18 @@
         "done": "The hours source now uses shifts. Cancelled import inputs: {count}.",
         "failed": "The hours source could not be switched.",
         "needs_rate": "This month takes hours from the attendance import. To record shifts and calculate pay from them, first set hourly pay and a rate on the employment card. The Calculate from shifts button then appears here.",
-        "open_card": "Set the rate on the employment card"
+        "open_card": "Set the rate on the employment card",
+        "take_over": "Use the shift schedule as worked time",
+        "take_over_hint": "Published shifts of the month ({count}) will be recorded as regular time entries with the same start, end and break. Each entry keeps a link to its shift.",
+        "taken_over": "Shifts taken over: {count}.",
+        "keep": {
+          "action": "Record shifts, keep amounts",
+          "title": "Record shifts and keep imported amounts",
+          "hint": "Do you only want to record the days and times of shifts (for example because of shift length and rest of young workers) and keep pay from the import? Switch the hours source to shifts; imported amounts stay.",
+          "text": "{name}: hours for this month will come from shifts and time entries (working time records and JMHZ). Imported payroll inputs stay unchanged and pay is not calculated from hours, because the employment has neither hourly pay nor a monthly wage. The original import summary stays in the history.",
+          "confirm": "Switch to shifts",
+          "done": "The hours source now uses shifts; imported amounts were kept."
+        }
       },
       "restore_title": "Change the selected hours source",
       "restore_source": "Restored source",
@@ -6238,6 +6249,12 @@
         "blocked_unsupported": "The file did not pass the safety checks. Correct the reported issue and run preview again."
       },
       "load_failed_hint": "Attendance for this period did not load. Until it does, do not read the empty overview as \"nobody reported anything\".",
+      "import_comparison": "Shifts {entries} h, original import summary {imported} h. Check whether a shift is missing or extra; this does not block approval.",
+      "juvenile": {
+        "title": "Working time of a young worker",
+        "hint": "Check of worked time entries of an employee under 18; time of all their employments is added up. This is a warning only and does not affect pay.",
+        "approval_hint": "The young worker has working time findings this month ({count}), shown in the employee row. They do not block approval."
+      },
       "overtime": {
         "manual_review": "A manual monthly summary does not establish the weekly overtime breakdown. Compliance with overtime limits requires a separate review.",
         "year_unknown": "Ordered and agreed overtime for the year: unknown.",

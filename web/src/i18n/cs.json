@@ -2627,7 +2627,18 @@
         "done": "Zdroj hodin je přepnutý na směny. Zrušené vstupy z importu: {count}.",
         "failed": "Zdroj hodin se nepodařilo přepnout.",
         "needs_rate": "Měsíc bere hodiny z importu docházky. Chcete-li zapisovat směny a počítat mzdu z nich, nastavte nejdřív na kartě pracovního vztahu hodinovou odměnu a sazbu. Pak se tu objeví tlačítko Počítat ze směn.",
-        "open_card": "Nastavit sazbu na kartě vztahu"
+        "open_card": "Nastavit sazbu na kartě vztahu",
+        "take_over": "Převzít rozpis směn jako odpracovaný čas",
+        "take_over_hint": "Publikované směny měsíce ({count}) se zapíšou jako časové záznamy běžné práce se stejným začátkem, koncem a přestávkou. Původ zůstane u záznamu dohledatelný.",
+        "taken_over": "Převzaté směny: {count}.",
+        "keep": {
+          "action": "Zapisovat směny, částky ponechat",
+          "title": "Zapisovat směny a ponechat importované částky",
+          "hint": "Chcete jen evidovat dny a časy směn (třeba kvůli délce směny a odpočinku mladistvých) a mzdu ponechat podle importu? Zdroj hodin přepněte na směny, importované částky zůstanou.",
+          "text": "{name}: hodiny za tento měsíc se budou brát ze směn a časových záznamů (evidence pracovní doby a JMHZ). Importované mzdové vstupy zůstanou beze změny a mzda se z hodin nepočítá, protože vztah nemá hodinovou odměnu ani měsíční mzdu. Původní souhrn importu zůstane v historii.",
+          "confirm": "Přepnout na směny",
+          "done": "Zdroj hodin je přepnutý na směny, importované částky zůstaly."
+        }
       },
       "restore_title": "Změnit vybraný zdroj hodin",
       "restore_source": "Obnovený zdroj",
@@ -6238,6 +6249,12 @@
         "blocked_unsupported": "Soubor neprošel bezpečnostní kontrolou. Opravte uvedenou chybu a spusťte náhled znovu."
       },
       "load_failed_hint": "Docházka za toto období se nenačetla. Než se to povede, neberte prázdný přehled jako doklad, že nikdo nic nevykázal.",
+      "import_comparison": "Ze směn {entries} h, původní souhrn importu {imported} h. Zkontrolujte, zda nechybí nebo nepřebývá směna; schválení to neblokuje.",
+      "juvenile": {
+        "title": "Pracovní doba mladistvého",
+        "hint": "Kontrola odpracovaných záznamů zaměstnance mladšího 18 let, doba všech jeho vztahů se sčítá. Jde o upozornění, mzdu neovlivňuje.",
+        "approval_hint": "U mladistvého jsou v měsíci nálezy k pracovní době ({count}), najdete je v řádku zaměstnance. Schválení neblokují."
+      },
       "overtime": {
         "manual_review": "Ruční měsíční souhrn nedokládá rozpad přesčasů po týdnech. Dodržení limitů je nutné samostatně ověřit.",
         "year_unknown": "Nařízené a dohodnuté přesčasy v roce: nezjištěno.",

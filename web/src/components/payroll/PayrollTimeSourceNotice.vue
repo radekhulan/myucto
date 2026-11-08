@@ -16,6 +16,8 @@ defineProps<{
   monthRowVersion?: number | null
   canSwitch?: boolean
   name?: string | null
+  /** Publikované směny měsíce, které jde při přepnutí převzít jako odpracovaný čas. */
+  publishedShiftCount?: number
 }>()
 const emit = defineEmits<{ switched: [] }>()
 const { t } = useI18n()
@@ -40,6 +42,8 @@ const { t } = useI18n()
         :period="period"
         :month-row-version="monthRowVersion"
         :name="name"
+        :published-shift-count="publishedShiftCount ?? 0"
+        :entry-count="0"
         @switched="emit('switched')"
       />
     </div>

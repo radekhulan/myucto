@@ -41,6 +41,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useToast } from '@/composables/useToast'
 import PayrollTimeSourceNotice from '@/components/payroll/PayrollTimeSourceNotice.vue'
+import PayrollSwitchToEntriesButton from '@/components/payroll/PayrollSwitchToEntriesButton.vue'
 import { formatPayrollDuration } from './payrollDuration'
 import PayrollFocusNotice from '@/components/payroll/PayrollFocusNotice.vue'
 import { payrollQueryId, payrollQueryValue } from '@/pages/payroll/payrollAgendaLinks'
@@ -328,6 +329,22 @@ function importNeedsHourlyRate(item: TimeSourceItem): boolean {
     && usesDailyEntries(item)
     && item.month.status === 'open'
     && canWrite.value
+}
+/** Publikované směny měsíce; při přechodu z importu je jde převzít jako odpracovaný čas. */
+function publishedShiftCount(item: PayrollTimeOverviewItem): number {
+  return item.shifts.filter(shift => shift.status === 'published').length
+}
+/*
+ * Měsíc přešel z importu na směny. Rozdíl proti původnímu souhrnu jen
+ * upozorní na chybějící nebo navíc zapsanou směnu, schválení neblokuje.
+ */
+function importComparisonText(item: PayrollTimeOverviewItem): string {
+  const comparison = item.import_summary_comparison
+  if (!comparison) return ''
+  return t('payroll.time.import_comparison', {
+    entries: formatPayrollDuration(comparison.entries_worked_duration_units),
+    imported: formatPayrollDuration(comparison.import_worked_duration_units),
+  })
 }
 function workedTimeLabel(item: TimeSourceItem): string {
   if (item.summary.worked_duration_units != null) return formatPayrollDuration(item.summary.worked_duration_units)
@@ -3347,7 +3364,7 @@ onMounted(async () => {
                   @change="toggleSelection(item.employment.id)"
                 >
               </td>
-              <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p><PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" :month-row-version="item.month.status === 'open' ? item.month.row_version : null" :can-switch="canWrite && auth.canWrite('payroll.inputs.write')" :name="item.employment.full_name" @switched="load()" /><div v-if="importNeedsHourlyRate(item)" class="mt-2 space-y-1" :data-test="`time-import-needs-rate-${item.employment.id}`"><p class="max-w-xs text-xs text-warning-800">{{ t('payroll.worked_hours.switch_to_entries.needs_rate') }}</p><RouterLink :to="{ name: 'payroll-people', query: { person: String(item.employment.employee_id) } }" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>{{ t('payroll.worked_hours.switch_to_entries.open_card') }}</RouterLink></div></td>
+              <td class="px-4 py-3"><p class="font-medium text-neutral-900">{{ item.employment.full_name }}</p><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p><PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" :month-row-version="item.month.status === 'open' ? item.month.row_version : null" :can-switch="canWrite && auth.canWrite('payroll.inputs.write')" :name="item.employment.full_name" :published-shift-count="publishedShiftCount(item)" @switched="load()" /><div v-if="importNeedsHourlyRate(item)" class="mt-2 space-y-1" :data-test="`time-import-needs-rate-${item.employment.id}`"><p class="max-w-xs text-xs text-warning-800">{{ t('payroll.worked_hours.switch_to_entries.needs_rate') }}</p><RouterLink :to="{ name: 'payroll-people', query: { person: String(item.employment.employee_id) } }" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>{{ t('payroll.worked_hours.switch_to_entries.open_card') }}</RouterLink><template v-if="item.import_amounts_keepable"><p class="max-w-xs pt-1 text-xs text-neutral-600">{{ t('payroll.worked_hours.switch_to_entries.keep.hint') }}</p><PayrollSwitchToEntriesButton keep-import-inputs :employment-id="item.employment.id" :period="period" :month-row-version="item.month.row_version" :name="item.employment.full_name" :published-shift-count="publishedShiftCount(item)" :entry-count="item.entries.length" @switched="load()" /></template></div><p v-if="item.import_summary_comparison?.differs" class="mt-2 max-w-xs text-xs text-neutral-500" :data-test="`time-import-comparison-${item.employment.id}`">{{ importComparisonText(item) }}</p></td>
               <td v-if="tbl.isVisible('fund')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.fund_minutes) }}</td>
               <td v-if="tbl.isVisible('plan')" class="px-4 py-3">{{ formatPayrollMinutes(item.summary.planned_minutes) }}</td>
               <td v-if="tbl.isVisible('actual')" class="px-4 py-3" :data-test="`time-actual-${item.employment.id}`">{{ workedTimeLabel(item) }}</td>
@@ -3411,6 +3428,24 @@ onMounted(async () => {
                 </div>
               </td>
             </tr>
+            <tr v-if="item.juvenile_work_time?.length" :data-test="`juvenile-work-time-${item.employment.id}`">
+              <td />
+              <td :colspan="detailColspan" class="px-4 pb-4">
+                <div class="rounded-lg border border-warning-500/40 bg-warning-50 px-3 py-2 text-sm text-warning-700">
+                  <p class="text-xs font-semibold uppercase tracking-wide">{{ t('payroll.time.juvenile.title') }}</p>
+                  <p class="mt-1 max-w-prose text-xs leading-snug">{{ t('payroll.time.juvenile.hint') }}</p>
+                  <p
+                    v-for="finding in item.juvenile_work_time"
+                    :key="finding.code + finding.scope_from"
+                    class="mt-1 max-w-prose leading-snug"
+                    :data-test="`juvenile-finding-${finding.code}`"
+                  >
+                    <span class="mr-2 rounded bg-white/70 px-1.5 py-0.5 text-[11px] font-medium">{{ finding.provision }}</span>
+                    {{ finding.message }}
+                  </p>
+                </div>
+              </td>
+            </tr>
             </template>
           </tbody>
         </table>
@@ -3418,8 +3453,9 @@ onMounted(async () => {
       <div class="space-y-3 p-4 md:hidden">
         <article v-for="item in visibleItems" :key="item.employment.id" class="rounded-lg border border-neutral-200 p-4">
           <div class="flex flex-wrap items-start justify-between gap-2"><div class="flex items-start gap-3"><input v-if="item.month.status === 'open'" type="checkbox" class="mt-1" :checked="selectedEmploymentIds.includes(item.employment.id)" :aria-label="t('payroll.time.bulk.select', { name: item.employment.full_name })" @change="toggleSelection(item.employment.id)"><div><h2 class="font-semibold text-neutral-900">{{ item.employment.full_name }}</h2><p class="text-xs text-neutral-500">{{ relationLabel(item.employment.relation_type) }}</p><p class="font-mono text-[11px] text-neutral-400">{{ item.employment.code }}</p></div></div><span class="rounded-full px-2 py-1 text-xs font-medium" :class="monthStatusClass(item)">{{ t(`payroll.time.status.${monthStatusKey(item)}`) }}</span></div>
-          <PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" :month-row-version="item.month.status === 'open' ? item.month.row_version : null" :can-switch="canWrite && auth.canWrite('payroll.inputs.write')" :name="item.employment.full_name" @switched="load()" />
-          <div v-if="importNeedsHourlyRate(item)" class="mt-3 space-y-1"><p class="text-xs text-warning-800">{{ t('payroll.worked_hours.switch_to_entries.needs_rate') }}</p><RouterLink :to="{ name: 'payroll-people', query: { person: String(item.employment.employee_id) } }" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>{{ t('payroll.worked_hours.switch_to_entries.open_card') }}</RouterLink></div>
+          <PayrollTimeSourceNotice v-if="!usesDailyEntries(item)" :source="timeSource(item)" :manual-summary="item.manual_summary" :employment-id="item.employment.id" :period="period" :month-row-version="item.month.status === 'open' ? item.month.row_version : null" :can-switch="canWrite && auth.canWrite('payroll.inputs.write')" :name="item.employment.full_name" :published-shift-count="publishedShiftCount(item)" @switched="load()" />
+          <div v-if="importNeedsHourlyRate(item)" class="mt-3 space-y-1"><p class="text-xs text-warning-800">{{ t('payroll.worked_hours.switch_to_entries.needs_rate') }}</p><RouterLink :to="{ name: 'payroll-people', query: { person: String(item.employment.employee_id) } }" :class="[btnOutlineSm('warning'), 'whitespace-nowrap']"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.edit" /></svg>{{ t('payroll.worked_hours.switch_to_entries.open_card') }}</RouterLink><template v-if="item.import_amounts_keepable"><p class="pt-1 text-xs text-neutral-600">{{ t('payroll.worked_hours.switch_to_entries.keep.hint') }}</p><PayrollSwitchToEntriesButton keep-import-inputs :employment-id="item.employment.id" :period="period" :month-row-version="item.month.row_version" :name="item.employment.full_name" :published-shift-count="publishedShiftCount(item)" :entry-count="item.entries.length" @switched="load()" /></template></div>
+          <p v-if="item.import_summary_comparison?.differs" class="mt-2 text-xs text-neutral-500">{{ importComparisonText(item) }}</p>
           <dl class="mt-4 grid grid-cols-2 gap-3 text-sm"><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.fund') }}</dt><dd>{{ formatPayrollMinutes(item.summary.fund_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.plan') }}</dt><dd>{{ formatPayrollMinutes(item.summary.planned_minutes) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.actual') }}</dt><dd>{{ workedTimeLabel(item) }}</dd></div><div><dt class="text-xs text-neutral-500">{{ t('payroll.time.columns.difference') }}</dt><dd>{{ differenceLabel(item.summary.difference_minutes) }}</dd></div></dl>
           <div
             v-if="overtimeVisible(item)"
@@ -3441,6 +3477,14 @@ onMounted(async () => {
             </p>
             <p class="mt-1 text-xs">{{ overtimeYearSummary(item) }} {{ overtimeConsentSummary(item) }}</p>
             <p v-if="overtimeAveragingSummary(item)" class="mt-1 text-xs">{{ overtimeAveragingSummary(item) }}</p>
+          </div>
+          <div v-if="item.juvenile_work_time?.length" class="mt-4 rounded-lg border border-warning-500/40 bg-warning-50 px-3 py-2 text-sm text-warning-700">
+            <p class="text-xs font-semibold uppercase tracking-wide">{{ t('payroll.time.juvenile.title') }}</p>
+            <p class="mt-1 text-xs leading-snug">{{ t('payroll.time.juvenile.hint') }}</p>
+            <p v-for="finding in item.juvenile_work_time" :key="finding.code + finding.scope_from" class="mt-1 leading-snug">
+              <span class="mr-2 rounded bg-white/70 px-1.5 py-0.5 text-[11px] font-medium">{{ finding.provision }}</span>
+              {{ finding.message }}
+            </p>
           </div>
           <div class="mt-4 flex flex-wrap gap-2">
             <button v-if="canWrite" :class="btnOutline('neutral')" :disabled="saving" @click="openConsent(item)"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.doc" /></svg>{{ t('payroll.time.overtime.consent_action') }}</button>
@@ -3476,6 +3520,12 @@ onMounted(async () => {
         </p>
         <p class="rounded-lg border border-payroll-200 bg-payroll-50 p-3 text-sm text-payroll-800">
           {{ t('payroll.time.jmhz.hint') }}
+        </p>
+        <p v-if="approvalItem.import_summary_comparison?.differs" class="text-xs text-neutral-500" data-test="approval-import-comparison">
+          {{ importComparisonText(approvalItem) }}
+        </p>
+        <p v-if="approvalItem.juvenile_work_time?.length" class="text-xs text-warning-800" data-test="approval-juvenile-work-time">
+          {{ t('payroll.time.juvenile.approval_hint', { count: approvalItem.juvenile_work_time.length }) }}
         </p>
         <ul
           v-if="approvalItem.jmhz_work_summary.preview?.issues.length"

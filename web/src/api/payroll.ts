@@ -1704,6 +1704,17 @@ export interface PayrollOvertimeAveragingPeriod {
   created_at: string
 }
 
+export interface PayrollJuvenileWorkTimeFinding {
+  code: 'juvenile_daily_shift_exceeded' | 'juvenile_weekly_hours_exceeded' | 'juvenile_rest_between_shifts_too_short' | 'juvenile_night_work' | 'juvenile_break_missing'
+  severity: 'warning'
+  message: string
+  scope_from: string
+  scope_to: string
+  actual_minutes: number
+  limit_minutes: number
+  provision: string
+}
+
 export interface PayrollTimeOverviewItem {
   employment: {
     id: number
@@ -1718,6 +1729,16 @@ export interface PayrollTimeOverviewItem {
   manual_summary?: PayrollManualTimeSummary | null
   /** Vztah má v měsíci hodinové podmínky; jen pak je souhrn importu vybraným zdrojem hodin. */
   hourly_remuneration_in_period?: boolean
+  /** Měsíc z importu jde přepnout na směny s ponechanými importovanými částkami. */
+  import_amounts_keepable?: boolean
+  /** Měsíc přešel z importu na směny: hodiny původního souhrnu proti hodinám ze směn. */
+  import_summary_comparison?: {
+    import_worked_duration_units: number
+    entries_worked_duration_units: number
+    differs: boolean
+  } | null
+  /** Varování k pracovní době mladistvého nad odpracovanými záznamy. */
+  juvenile_work_time?: PayrollJuvenileWorkTimeFinding[]
   calendar: PayrollWorkCalendar | null
   month: PayrollTimeMonthState
   summary: {
@@ -2669,6 +2690,10 @@ export interface PayrollWorkedTime {
   overtime_duration_units: number | null
   worked_days: number | null
   jmhz_confirmed: boolean
+  /** Měsíc z importu jde přepnout na směny s ponechanými importovanými částkami. */
+  import_amounts_keepable?: boolean
+  /** Publikované směny měsíce z importu, které jde převzít jako odpracovaný čas. */
+  published_shift_count?: number
 }
 
 export interface PayrollManualTimeSummaryRevision extends PayrollManualTimeSummary {
@@ -10799,8 +10824,14 @@ export const payrollApi = {
    * vztahu za měsíc a přepne zdroj hodin na docházku. Schválené nebo zamčené
    * vstupy server nezmění a odpoví 409 `import_inputs_approved`.
    */
-  switchTimeToEntries: (period: string, payload: { employment_id: number; row_version: number; reason?: string }) =>
-    api.post<{ month: PayrollTimeMonthState; changed: boolean; cancelled_input_ids: number[] }>(
+  switchTimeToEntries: (period: string, payload: {
+    employment_id: number; row_version: number; reason?: string
+    /** „Zapisovat směny, částky ponechat": importované vstupy se nezruší. */
+    keep_import_inputs?: boolean
+    /** Publikované směny měsíce se převezmou jako odpracovaný čas. */
+    take_over_shifts?: boolean
+  }) =>
+    api.post<{ month: PayrollTimeMonthState; changed: boolean; cancelled_input_ids: number[]; created_entry_ids?: number[] }>(
       `/payroll/time/months/${period}/switch-to-entries`, payload,
     ).then(response => response.data),
   saveManualTimeSummary: (period: string, payload: PayrollManualTimeSummaryPayload) =>

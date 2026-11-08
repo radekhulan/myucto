@@ -250,6 +250,39 @@ describe('TimeAttendance', () => {
     const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
     await flushPromises()
     expect(wrapper.get('[data-test="time-import-needs-rate-12"]').text()).toContain('payroll.worked_hours.switch_to_entries.needs_rate')
+    expect(wrapper.find('[data-test="switch-to-entries-keep"]').exists()).toBe(false)
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('vztah bez sazby a měsíční mzdy nabídne zapisovat směny s ponechanými částkami', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    const original = row(12, 'Syntetická Osoba')
+    m.timeMonth.mockResolvedValue({ items: [{ ...original, hourly_remuneration_in_period: false, import_amounts_keepable: true,
+      month: { ...original.month, status: 'open', work_source: 'import_summary' },
+      summary: { ...original.summary, work_source: 'import_summary', worked_duration_units: 0, actual_minutes: 0, difference_minutes: -9_600 },
+      shifts: [], entries: [],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    const block = wrapper.get('[data-test="time-import-needs-rate-12"]')
+    expect(block.text()).toContain('payroll.worked_hours.switch_to_entries.keep.hint')
+    expect(block.find('[data-test="switch-to-entries-keep"]').exists()).toBe(true)
+    wrapper.unmount()
+    m.routeQuery = {}
+  })
+
+  it('ukáže nálezy pracovní doby mladistvého a rozdíl proti původnímu souhrnu importu', async () => {
+    m.routeQuery = { period: '2026-09', employment: '12' }
+    m.timeMonth.mockResolvedValue({ items: [{ ...row(12, 'Syntetická Osoba'),
+      import_summary_comparison: { import_worked_duration_units: 30_000, entries_worked_duration_units: 27_000, differs: true },
+      juvenile_work_time: [{ code: 'juvenile_daily_shift_exceeded', severity: 'warning', message: '4. 9. 2026: mladistvý odpracoval 8:01 h.', scope_from: '2026-09-04', scope_to: '2026-09-04', actual_minutes: 481, limit_minutes: 480, provision: '§ 79a zákoníku práce' }],
+    }], total: 1, limit: 25, offset: 0 })
+    const wrapper = mount(TimeAttendance, { global: { stubs: { teleport: true } } })
+    await flushPromises()
+    expect(wrapper.get('[data-test="juvenile-finding-juvenile_daily_shift_exceeded"]').text()).toContain('8:01 h')
+    expect(wrapper.get('[data-test="juvenile-finding-juvenile_daily_shift_exceeded"]').text()).toContain('§ 79a')
+    expect(wrapper.get('[data-test="time-import-comparison-12"]').text()).toContain('payroll.time.import_comparison')
     wrapper.unmount()
     m.routeQuery = {}
   })

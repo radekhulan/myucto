@@ -171,6 +171,7 @@ final class PayrollQuickInputRepository
         private readonly PayrollWageProrationService $wageProration,
         private readonly PayrollClosedRunGuard $closedRuns,
         private readonly LoggerInterface $logger,
+        private readonly PayrollTimeRepository $time,
     ) {}
 
     /**
@@ -1180,6 +1181,11 @@ final class PayrollQuickInputRepository
         $imports = $this->db->pdo()->prepare("SELECT DISTINCT employment_id FROM payroll_time_month_import_summaries WHERE supplier_id = ? AND period_start = ? AND employment_id IN ($in)");
         $imports->execute([$supplierId, $periodStart, ...$ids]);
         $importIds = array_fill_keys(array_map('intval', $imports->fetchAll(PDO::FETCH_COLUMN)), true);
+        // „Zapisovat směny, částky ponechat" a převzetí rozpisu se nabízí jen
+        // u měsíce ze souhrnu importu; obojí rozhoduje repozitář docházky.
+        $importMonthIds = array_values(array_filter($ids, static fn (int $id): bool => ($evidence[$id]['work_source'] ?? null) === 'import_summary'));
+        $keepable = $this->time->importAmountsKeepableIds($supplierId, $importMonthIds, $periodStart);
+        $publishedShifts = $this->time->publishedShiftsInPeriod($supplierId, $importMonthIds, $periodStart);
         $result = [];
         foreach ($rows as $row) {
             $id = (int) $row['employment_id'];
@@ -1209,6 +1215,8 @@ final class PayrollQuickInputRepository
                 'worked_days' => $value['worked_days'] ?? null,
                 'jmhz_confirmed' => isset($confirmedIds[$id]),
                 'available_sources' => isset($importIds[$id]) ? ['entries', 'import_summary'] : ['entries'],
+                'import_amounts_keepable' => isset($keepable[$id]),
+                'published_shift_count' => count($publishedShifts[$id] ?? []),
             ];
         }
         return $result;

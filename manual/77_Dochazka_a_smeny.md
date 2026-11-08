@@ -121,6 +121,29 @@ znovu otevřete mzdový běh) a akci opakujte. Obecná změna zdroje v panelu
 vstupy byly zrušené předem. Doba, kterou nelze přesně vyjádřit celými minutami,
 se zachová v přesném zápisu a nepřepočítává se na zaokrouhlené minuty.
 
+U vztahu, který v měsíci nemá hodinovou odměnu ani sjednanou měsíční mzdu
+(typicky brigádník na DPP s hotovými částkami z importu), nabízí docházka
+u zaměstnance i panel **Podklady hodin** akci **Zapisovat směny, částky
+ponechat**. Zdroj hodin se přepne na směny a importované mzdové vstupy
+zůstanou beze změny: mzda se u takového vztahu z hodin nepočítá, takže se nic
+nevyplatí dvakrát. Hodiny pro JMHZ a evidenci pracovní doby se pak berou ze
+směn, příplatky a odměna za pohotovost se ze směn nepočítají, dokud jsou
+importované vstupy aktivní. Akci stačí právo zápisu docházky. U vztahu
+s hodinovou odměnou nebo měsíční mzdou ji server odmítne: hodinová mzda by
+se ze směn spočítala znovu (použijte **Počítat ze směn**) a u měsíční mzdy
+rozhoduje zdroj hodin o krácení, proto zůstává souhrn importu.
+
+Má-li měsíc publikovaný rozpis směn, nabídne potvrzovací dialog obou akcí
+volbu **Převzít rozpis směn jako odpracovaný čas**. Je předem zapnutá, když
+měsíc nemá žádný časový záznam. Každá publikovaná směna měsíce se v téže
+operaci zapíše jako časový záznam běžné práce se stejným začátkem, koncem,
+přestávkou a časovým pásmem; záznam nese odkaz na svou směnu. Platí pro něj
+stejné kontroly jako pro ručně zapsaný záznam (otevřený měsíc, překryv).
+
+Původní souhrn importu zůstává v historii měsíce. Liší-li se součet hodin
+ze směn od hodin původního souhrnu, ukáže docházka u zaměstnance i v dialogu
+schválení nenápadné upozornění s oběma čísly. Schválení neblokuje.
+
 1. V `Mzdy → Docházka a směny` klikněte na **Import**.
 2. Vyberte soubor CSV nebo XLSX s povinnými sloupci (viz
    [§ 77.9.1](#7791-format-importu-dochazky)).
@@ -523,6 +546,35 @@ odpracované hodiny z importovaného souboru a u osob přiřazených na DPP vyp�
 upozornění při dosažení prahu nebo překročení limitu. Přehled po osobách je
 v seznamu zaměstnanců ([§ 86](86_Zamestnanci.md)), včetně zobrazení
 **DPP u limitu 300 h**.
+
+### 77.9.7 Pracovní doba mladistvých
+
+Mladistvý je zaměstnanec mladší 18 let (§ 350 odst. 2 zákoníku práce); věk se
+počítá z data narození osoby ke každému dni. Den 18. narozenin a dny po něm se
+už nekontrolují. Bez data narození se kontrola neprovede.
+
+Aplikace kontroluje skutečně odpracované časové záznamy (běžná práce
+a přesčas), ne plán směn. Doba všech pracovněprávních vztahů osoby u firmy se
+sčítá. Den a týden záznamu určuje jeho místní začátek, týden začíná pondělím.
+
+| Kontrola | Pravidlo |
+|---|---|
+| Délka směny (§ 79a) | v jednotlivém dni nejvýše 8 h (8:00 projde, 8:01 ne) |
+| Týdenní doba (§ 79a) | nejvýše 40 h za týden |
+| Odpočinek mezi směnami (§ 90 odst. 1) | nejméně 12 h mezi koncem poslední práce dne a začátkem práce dalšího dne |
+| Noční práce (§ 245 odst. 1) | žádná práce v noční době 22:00 až 6:00 |
+| Přestávka (§ 88 odst. 1) | záznam bez přestávky delší než 4,5 h |
+
+Výjimku pro mladistvého staršího 16 let (noční práce nejvýše 1 h, potřebná
+pro přípravu na povolání a navazující na denní práci) aplikace sama nepozná;
+nález ji jen připomene. Přestávka se posuzuje jen u záznamu, který žádnou
+přestávku nemá, protože její poloha uvnitř záznamu se neeviduje.
+
+Nálezy se v `Mzdy → Docházka a směny` zobrazí u zaměstnance v bloku
+**Pracovní doba mladistvého** s dnem a konkrétními hodnotami, v dialogu
+schválení měsíce jako upozornění a v kontrole mzdového běhu jako varování.
+Mzdu neovlivňují a nic neblokují: odpracovanou dobu je potřeba zaplatit,
+jen je třeba upravit rozvrh práce.
 
 ## 77.10 Související kapitoly
 

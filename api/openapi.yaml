@@ -44287,11 +44287,42 @@ components:
               manual_summary: { $ref: '#/components/schemas/PayrollManualTimeSummary' }
               jmhz_work_summary: { $ref: '#/components/schemas/PayrollJmhzWorkSummary' }
               overtime_limits: { $ref: '#/components/schemas/PayrollOvertimeLimits' }
+              import_amounts_keepable:
+                type: boolean
+                description: Měsíc ze souhrnu importu docházky lze přepnout na směny a ponechat importované mzdové vstupy (vztah bez hodinové odměny, měsíční mzdy a předpisu kráceného odpracovanou dobou).
+              import_summary_comparison:
+                type: [object, "null"]
+                description: U měsíce, který přešel ze souhrnu importu na směny, odpracovaná doba původního souhrnu a ze směn v jednotkách 1/3000 hodiny. Jen upozornění.
+                required: [import_worked_duration_units, entries_worked_duration_units, differs]
+                properties:
+                  import_worked_duration_units: { type: integer, minimum: 0 }
+                  entries_worked_duration_units: { type: integer, minimum: 0 }
+                  differs: { type: boolean }
+              juvenile_work_time:
+                type: array
+                description: Varování ke skutečně odpracované době mladistvého (§ 79a, § 88 odst. 1, § 90 odst. 1, § 245 odst. 1 zákoníku práce); doba všech vztahů osoby se sčítá.
+                items: { $ref: '#/components/schemas/PayrollJuvenileWorkTimeFinding' }
         total: { type: integer, minimum: 0 }
         limit: { type: integer, minimum: 1 }
         offset: { type: integer, minimum: 0 }
         payroll_start_period: { $ref: '#/components/schemas/PayrollStartPeriod' }
         historical: { $ref: '#/components/schemas/PayrollHistoricalPeriodFlag' }
+
+    PayrollJuvenileWorkTimeFinding:
+      type: object
+      additionalProperties: false
+      required: [code, severity, message, scope_from, scope_to, actual_minutes, limit_minutes, provision]
+      properties:
+        code:
+          type: string
+          enum: [juvenile_daily_shift_exceeded, juvenile_weekly_hours_exceeded, juvenile_rest_between_shifts_too_short, juvenile_night_work, juvenile_break_missing]
+        severity: { type: string, enum: [warning] }
+        message: { type: string }
+        scope_from: { type: string, format: date }
+        scope_to: { type: string, format: date }
+        actual_minutes: { type: integer, minimum: 0 }
+        limit_minutes: { type: integer, minimum: 0 }
+        provision: { type: string }
 
     PayrollJmhzWorkSummary:
       type: [object, "null"]

@@ -51,6 +51,38 @@ describe('PayrollWorkedHoursPanel: Počítat ze směn', () => {
     const wrapper = panel(imported(), { canWriteInputs: false })
     expect(wrapper.find('[data-test="switch-to-entries"]').exists()).toBe(false)
   })
+
+  it('vztah bez hodinové odměny a měsíční mzdy přepne na směny a importované částky ponechá', async () => {
+    mocks.switchToEntries.mockResolvedValue({ month: { id: 10, status: 'open', revision_no: 2, row_version: 5, work_source: 'entries' }, changed: true, cancelled_input_ids: [], created_entry_ids: [] })
+    const wrapper = panel({ ...imported(), import_amounts_keepable: true }, { canWriteInputs: false })
+    expect(wrapper.find('[data-test="switch-to-entries"]').exists()).toBe(false)
+    await wrapper.get('[data-test="switch-to-entries-keep"]').trigger('click')
+    expect(wrapper.get('[data-test="switch-to-entries-text"]').text()).toContain('switch_to_entries.keep.text')
+    expect(wrapper.find('[data-test="switch-to-entries-take-over"]').exists()).toBe(false)
+    await wrapper.get('[data-test="switch-to-entries-confirm"]').trigger('click')
+    await flushPromises()
+    expect(mocks.switchToEntries).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 4, keep_import_inputs: true })
+    expect(mocks.toastSuccess).toHaveBeenCalledWith('payroll.worked_hours.switch_to_entries.keep.done')
+  })
+
+  it('publikovaný rozpis nabídne převzít jako odpracovaný čas, předem zaškrtnuté', async () => {
+    mocks.switchToEntries.mockResolvedValue({ month: { id: 10, status: 'open', revision_no: 2, row_version: 5, work_source: 'entries' }, changed: true, cancelled_input_ids: [], created_entry_ids: [31, 32] })
+    const wrapper = panel({ ...imported(), import_amounts_keepable: true, published_shift_count: 2 })
+    await wrapper.get('[data-test="switch-to-entries-keep"]').trigger('click')
+    const checkbox = wrapper.get<HTMLInputElement>('[data-test="switch-to-entries-take-over"]')
+    expect(checkbox.element.checked).toBe(true)
+    await wrapper.get('[data-test="switch-to-entries-confirm"]').trigger('click')
+    await flushPromises()
+    expect(mocks.switchToEntries).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 4, keep_import_inputs: true, take_over_shifts: true })
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(expect.stringContaining('"count":2'))
+
+    mocks.switchToEntries.mockClear()
+    await wrapper.get('[data-test="switch-to-entries-keep"]').trigger('click')
+    await wrapper.get('[data-test="switch-to-entries-take-over"]').setValue(false)
+    await wrapper.get('[data-test="switch-to-entries-confirm"]').trigger('click')
+    await flushPromises()
+    expect(mocks.switchToEntries).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 4, keep_import_inputs: true })
+  })
 })
 async function fill(wrapper: ReturnType<typeof panel>, first = '0:01', second = '0,001') {
   await wrapper.get('[data-test="worked-hours-duration-0"]').setValue(first)

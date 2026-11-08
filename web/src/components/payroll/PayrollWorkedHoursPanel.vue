@@ -275,15 +275,30 @@ async function reopen(): Promise<void> {
     </div>
     <!--
       Import → směny jedním krokem: zruší neschválené vstupy z importu a přepne
-      zdroj. Obecná změna zdroje níž by na těch vstupech spadla.
+      zdroj. Obecná změna zdroje níž by na těch vstupech spadla. Vztah bez
+      hodinové odměny a měsíční mzdy může vstupy ponechat.
     -->
-    <div v-if="editable && canWriteInputs && current.month?.id != null && current.month.work_source === 'import_summary'" class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-warning-200 bg-warning-50 p-3" data-test="worked-hours-switch-to-entries">
-      <p class="min-w-0 flex-1 text-xs text-warning-800">{{ t('payroll.worked_hours.switch_to_entries.hint') }}</p>
+    <div v-if="editable && current.month?.id != null && current.month.work_source === 'import_summary' && (canWriteInputs || current.import_amounts_keepable)" class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-warning-200 bg-warning-50 p-3" data-test="worked-hours-switch-to-entries">
+      <p class="min-w-0 flex-1 text-xs text-warning-800">{{ t(current.import_amounts_keepable ? 'payroll.worked_hours.switch_to_entries.keep.hint' : 'payroll.worked_hours.switch_to_entries.hint') }}</p>
       <PayrollSwitchToEntriesButton
+        v-if="current.import_amounts_keepable"
+        keep-import-inputs
         :employment-id="employmentId"
         :period="period"
         :month-row-version="current.month.row_version"
         :name="fullName"
+        :published-shift-count="current.published_shift_count ?? 0"
+        :entry-count="0"
+        @switched="emit('updated')"
+      />
+      <PayrollSwitchToEntriesButton
+        v-else-if="canWriteInputs"
+        :employment-id="employmentId"
+        :period="period"
+        :month-row-version="current.month.row_version"
+        :name="fullName"
+        :published-shift-count="current.published_shift_count ?? 0"
+        :entry-count="0"
         @switched="emit('updated')"
       />
     </div>
