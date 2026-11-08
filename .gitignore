@@ -60,3 +60,5 @@ tools/pamica-export/pamica-sql.json
 tools/regression/**/__pycache__/
 /tools/Invoke-MyUctoDeployment.ps1
 /tools/Publish-DeploymentSnapshot.ps1
+/production.sh
+/demo.sh
