@@ -500,7 +500,8 @@ final class PayrollTimeApiTest extends TestCase
         // Docházka do měsíce s ručním souhrnem neprojde a hláška řekne, kde zdroj vrátit.
         $entry = $this->saveEntry(monthVersion: $body['month']['row_version']);
         self::assertGreaterThanOrEqual(400, $entry->getStatusCode());
-        self::assertStringContainsString('obnovte zdroj Docházka v panelu Odpracované hodiny', (string) $entry->getBody());
+        self::assertStringContainsString('Podklady hodin', (string) $this->json($entry)['error']['message']);
+        self::assertStringContainsString('Změnit vybraný zdroj hodin', (string) $this->json($entry)['error']['message']);
 
         unset($payload['reason']);
         $payload['row_version'] = $body['month']['row_version'];
@@ -612,6 +613,114 @@ final class PayrollTimeApiTest extends TestCase
         ]), new Response(), ['period' => '2026-05']);
         self::assertSame(422, $restore->getStatusCode(), (string) $restore->getBody());
         self::assertSame(0, $this->countRows('payroll_time_months'));
+    }
+
+    /**
+     * „Počítat ze směn": měsíc z importu docházky přejde na směny jedním
+     * krokem. Dřív zápis směny odkázal na neexistující panel a změna zdroje
+     * spadla na nezrušených vstupech z importu, které musela účetní hledat jinde.
+     */
+    public function testSwitchToEntriesCancelsDraftImportInputsAndChangesSource(): void
+    {
+        $monthVersion = $this->importSummaryMonth();
+        $draftId = $this->importInput('draft', 'attendance:2026-05:' . $this->employmentId . ':hours');
+        $leaveId = $this->importInput('draft', 'leave:attendance:2026-05:' . $this->employmentId . ':leave');
+        $manualId = $this->importInput('draft', 'manual:2026-05:' . $this->employmentId);
+
+        $blocked = $this->saveEntry(monthVersion: $monthVersion);
+        self::assertSame(422, $blocked->getStatusCode());
+        self::assertStringContainsString('Počítat ze směn', (string) $this->json($blocked)['error']['message']);
+        self::assertStringNotContainsString('Odpracované hodiny', (string) $this->json($blocked)['error']['message']);
+
+        $switched = $this->action->switchToEntries($this->request('POST', '/api/payroll/time/months/2026-05/switch-to-entries')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => $monthVersion,
+        ]), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $switched->getStatusCode(), (string) $switched->getBody());
+        $body = $this->json($switched);
+        self::assertSame('entries', $body['month']['work_source']);
+        self::assertEqualsCanonicalizing([$draftId, $leaveId], $body['cancelled_input_ids']);
+        self::assertSame('cancelled', $this->inputStatus($draftId));
+        self::assertSame('cancelled', $this->inputStatus($leaveId));
+        self::assertSame('draft', $this->inputStatus($manualId));
+
+        $entry = $this->saveEntry(monthVersion: (int) $body['month']['row_version']);
+        self::assertSame(201, $entry->getStatusCode(), (string) $entry->getBody());
+    }
+
+    public function testSwitchToEntriesRefusesApprovedImportInputsAndChangesNothing(): void
+    {
+        $monthVersion = $this->importSummaryMonth();
+        $draftId = $this->importInput('draft', 'attendance:2026-05:' . $this->employmentId . ':hours');
+        $approvedId = $this->importInput('approved', 'attendance:2026-05:' . $this->employmentId . ':bonus');
+
+        $refused = $this->action->switchToEntries($this->request('POST', '/api/payroll/time/months/2026-05/switch-to-entries')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => $monthVersion,
+        ]), new Response(), ['period' => '2026-05']);
+        self::assertSame(409, $refused->getStatusCode(), (string) $refused->getBody());
+        $error = $this->json($refused)['error'];
+        self::assertSame('import_inputs_approved', $error['code']);
+        self::assertStringContainsString('schválených nebo zamčených', (string) $error['message']);
+        self::assertSame('draft', $this->inputStatus($draftId));
+        self::assertSame('approved', $this->inputStatus($approvedId));
+        $stmt = $this->db->pdo()->prepare('SELECT work_source FROM payroll_time_months WHERE supplier_id = ? AND employment_id = ? AND period_start = "2026-05-01"');
+        $stmt->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame('import_summary', $stmt->fetchColumn());
+    }
+
+    private function importSummaryMonth(): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-01-01", "2026-01-01", 40, 10000, "hourly", 20000, "wage_statement", "Syntetický výměr")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $calendar = $this->action->calendar($this->request('PUT', '/api/payroll/time/calendars/' . $this->employmentId)
+            ->withParsedBody($this->calendarPayload()), new Response(), ['employmentId' => (string) $this->employmentId]);
+        self::assertSame(201, $calendar->getStatusCode(), (string) $calendar->getBody());
+        $pdo->prepare('INSERT INTO payroll_time_months (supplier_id, employment_id, period_start, status, work_source, revision_no, row_version) VALUES (?, ?, "2026-05-01", "open", "import_summary", 1, 1)
+            ON DUPLICATE KEY UPDATE work_source = "import_summary"')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $stmt = $pdo->prepare('SELECT row_version FROM payroll_time_months WHERE supplier_id = ? AND employment_id = ? AND period_start = "2026-05-01"');
+        $stmt->execute([$this->supplierId, $this->employmentId]);
+
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function importInput(string $status, string $externalId): int
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            'INSERT INTO payroll_component_definitions
+                (supplier_id, code, name, component_kind, value_kind, frequency_kind, tax_treatment,
+                 social_participation_treatment, social_treatment, health_participation_treatment, health_treatment,
+                 average_earning_treatment, enforcement_treatment, jmhz_treatment, statistics_treatment,
+                 accounting_debit_code, accounting_credit_code, valid_from)
+             VALUES (?, ?, "Syntetická složka importu", "base_wage", "monetary", "regular", "included",
+                     "included", "included", "included", "included", "included", "included", "included",
+                     "included", "521", "331", "2026-01-01")'
+        )->execute([$this->supplierId, 'IMP' . bin2hex(random_bytes(3))]);
+        $componentId = (int) $pdo->lastInsertId();
+        $employeeId = (int) $pdo->query('SELECT employee_id FROM payroll_employments WHERE id = ' . $this->employmentId)->fetchColumn();
+        $json = '{"code":"IMP"}';
+        $pdo->prepare(
+            'INSERT INTO payroll_inputs
+                (supplier_id, employee_id, employment_id, component_id, period_start, amount_minor, source_kind, external_id, status,
+                 component_snapshot_json, component_snapshot_hash, approved_by, approved_at)
+             VALUES (?, ?, ?, ?, "2026-05-01", 10000, "manual", ?, ?, ?, ?, ?, ?)'
+        )->execute([
+            $this->supplierId, $employeeId, $this->employmentId, $componentId, $externalId, $status,
+            $json, hash('sha256', $json, true),
+            $status === 'draft' ? null : $this->userId,
+            $status === 'draft' ? null : '2026-05-31 12:00:00',
+        ]);
+
+        return (int) $pdo->lastInsertId();
+    }
+
+    private function inputStatus(int $id): string
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT status FROM payroll_inputs WHERE supplier_id = ? AND id = ?');
+        $stmt->execute([$this->supplierId, $id]);
+
+        return (string) $stmt->fetchColumn();
     }
 
     public function testManualSummaryRejectsGapsMalformedDatesAndOverlongReason(): void

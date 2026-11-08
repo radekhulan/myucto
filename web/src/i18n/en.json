@@ -2614,6 +2614,15 @@
       "history_empty": "No manual revisions are recorded for this month.",
       "history_truncated": "More older manual revisions are available for this month.",
       "history_retry": "Retry",
+      "switch_to_entries": {
+        "action": "Calculate from shifts",
+        "title": "Calculate from shifts instead of the import",
+        "hint": "This month takes hours from the attendance import. To record and calculate shifts, switch the source; unapproved payroll inputs from the import are cancelled so they are not paid twice.",
+        "text": "{name}: unapproved payroll inputs from the attendance import for this month will be cancelled and hours will be calculated from shifts and time entries. Approved or locked inputs are not changed; if there are any, nothing happens. The original import summary stays in the history.",
+        "confirm": "Cancel import inputs and switch",
+        "done": "The hours source now uses shifts. Cancelled import inputs: {count}.",
+        "failed": "The hours source could not be switched."
+      },
       "restore_title": "Change the selected hours source",
       "restore_source": "Restored source",
       "restore_hint": "I confirm replacing the monthly summary with the selected source. Hours are not added together; previous evidence remains in history.",

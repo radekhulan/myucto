@@ -2131,6 +2131,7 @@ onMounted(() => {
             :can-read-evidence="auth.canRead('payroll')"
             :closed="rowClosed(activeWorkedRow) || historicalMonth"
             :can-write="canWriteTime"
+            :can-write-inputs="canWrite"
             :can-approve="canApprove"
             :can-reopen="canReopenTime"
             @updated="load"

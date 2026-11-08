@@ -5,13 +5,19 @@ import type { PayrollManualTimeSummary, PayrollTimeWorkSource } from '@/api/payr
 import { formatDate } from '@/composables/useFormat'
 import { formatPayrollDuration } from '@/pages/payroll/payrollDuration'
 import { btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
+import PayrollSwitchToEntriesButton from '@/components/payroll/PayrollSwitchToEntriesButton.vue'
 
 defineProps<{
   source: PayrollTimeWorkSource
   manualSummary?: PayrollManualTimeSummary | null
   employmentId: number
   period: string
+  /** Verze otevřeného měsíce; bez ní (nebo bez práva) se „Počítat ze směn" nenabízí. */
+  monthRowVersion?: number | null
+  canSwitch?: boolean
+  name?: string | null
 }>()
+const emit = defineEmits<{ switched: [] }>()
 const { t } = useI18n()
 </script>
 
@@ -26,6 +32,16 @@ const { t } = useI18n()
         {{ formatDate(segment.date_from) }} — {{ formatDate(segment.date_to) }}: {{ formatPayrollDuration(segment.worked_duration_units) }}
       </p>
     </details>
-    <RouterLink :to="{ name: 'payroll-quick-inputs', query: { employment: String(employmentId), period, hours: '1' } }" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-test="time-worked-source-link"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.table" /></svg>{{ t('payroll.worked_hours.open') }}</RouterLink>
+    <div class="flex flex-wrap gap-2">
+      <RouterLink :to="{ name: 'payroll-quick-inputs', query: { employment: String(employmentId), period, hours: '1' } }" :class="[btnOutlineSm('neutral'), 'whitespace-nowrap']" data-test="time-worked-source-link"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.table" /></svg>{{ t('payroll.worked_hours.open') }}</RouterLink>
+      <PayrollSwitchToEntriesButton
+        v-if="source === 'import_summary' && canSwitch && monthRowVersion != null"
+        :employment-id="employmentId"
+        :period="period"
+        :month-row-version="monthRowVersion"
+        :name="name"
+        @switched="emit('switched')"
+      />
+    </div>
   </div>
 </template>

@@ -10,6 +10,7 @@ import { formatPayrollDuration, parsePayrollDuration, parsePayrollDurationDraft 
 import { formatDate, formatDateTime } from '@/composables/useFormat'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import RequiredMark from '@/components/ui/RequiredMark.vue'
+import PayrollSwitchToEntriesButton from './PayrollSwitchToEntriesButton.vue'
 
 const props = defineProps<{
   employmentId: number
@@ -24,6 +25,8 @@ const props = defineProps<{
   canWrite: boolean
   canApprove: boolean
   canReopen: boolean
+  /** Právo na zápis mzdových vstupů — „Počítat ze směn" ruší vstupy z importu. */
+  canWriteInputs?: boolean
 }>()
 const emit = defineEmits<{ updated: []; close: [] }>()
 const { t } = useI18n()
@@ -269,6 +272,20 @@ async function reopen(): Promise<void> {
         <span v-if="!reasonRequired" class="mt-1 block text-neutral-500" data-test="worked-hours-reason-optional">{{ t('payroll.worked_hours.reason_optional_first') }}</span>
       </label>
       <button type="button" :class="[btnFilledSm('primary'), 'whitespace-nowrap']" :disabled="busy" data-test="worked-hours-save" @click="save"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.check" /></svg>{{ t('payroll.worked_hours.save') }}</button>
+    </div>
+    <!--
+      Import → směny jedním krokem: zruší neschválené vstupy z importu a přepne
+      zdroj. Obecná změna zdroje níž by na těch vstupech spadla.
+    -->
+    <div v-if="editable && canWriteInputs && current.month?.id != null && current.month.work_source === 'import_summary'" class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-warning-200 bg-warning-50 p-3" data-test="worked-hours-switch-to-entries">
+      <p class="min-w-0 flex-1 text-xs text-warning-800">{{ t('payroll.worked_hours.switch_to_entries.hint') }}</p>
+      <PayrollSwitchToEntriesButton
+        :employment-id="employmentId"
+        :period="period"
+        :month-row-version="current.month.row_version"
+        :name="fullName"
+        @switched="emit('updated')"
+      />
     </div>
     <details v-if="editable && current.month && current.month.work_source !== 'entries'" class="mt-3 rounded-lg border border-warning-200 p-3" data-test="worked-hours-restore-panel">
       <summary class="cursor-pointer text-xs font-medium text-warning-800">{{ t('payroll.worked_hours.restore_title') }}</summary>

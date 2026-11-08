@@ -4,8 +4,11 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Time;
 
+use MyInvoice\Infrastructure\Database\Connection;
+use MyInvoice\Repository\Payroll\PayrollInputRepository;
 use MyInvoice\Repository\Payroll\PayrollOvertimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeConflictException;
+use MyInvoice\Repository\Payroll\PayrollTimeImportInputsApprovedException;
 use MyInvoice\Repository\Payroll\PayrollTimeLockedException;
 use MyInvoice\Repository\Payroll\PayrollTimeRepository;
 use MyInvoice\Repository\Payroll\PayrollTimeValue;
@@ -92,6 +95,80 @@ final class PayrollTimeService
         return $this->repository->restoreEntries($supplierId, $this->positiveInt($input, 'employment_id'), $periodStart, $this->nonNegativeInt($input, 'row_version'), trim($reason), $source, $userId);
     }
 
+    /**
+     * „Počítat ze směn": měsíc z importu docházky přepne na docházku jedním krokem.
+     *
+     * Dřív to byly tři kroky na dvou obrazovkách: hláška u zápisu směny poslala
+     * na neexistující panel, změna zdroje pak spadla na nezrušených vstupech
+     * z importu a ty se musely hledat a rušit v Mzdových vstupech. Teď se
+     * v jedné transakci zruší neschválené importované vstupy vztahu za měsíc
+     * a zdroj se přepne. Schválené a zamčené vstupy se nemění — to je
+     * rozhodnutí účetní, ne vedlejší účinek přepnutí (409 se seznamem).
+     *
+     * @param array<string,mixed> $input
+     * @return array<string,mixed>
+     */
+    public function switchImportToEntries(
+        int $supplierId,
+        string $period,
+        array $input,
+        ?int $userId,
+    ): array {
+        [$periodStart] = $this->periodBounds($period);
+        $note = $input['reason'] ?? null;
+        if ($note !== null && (!is_string($note) || mb_strlen(trim($note)) > self::SOURCE_REASON_MAX_LENGTH)) {
+            throw new \InvalidArgumentException('Důvod může mít nejvýše ' . self::SOURCE_REASON_MAX_LENGTH . ' znaků.');
+        }
+        $reason = is_string($note) && trim($note) !== ''
+            ? trim($note)
+            : 'Počítat ze směn: importované vstupy zrušeny, zdroj přepnut na docházku';
+        $employmentId = $this->positiveInt($input, 'employment_id');
+        $rowVersion = $this->nonNegativeInt($input, 'row_version');
+
+        $pdo = $this->db->pdo();
+        $owns = !$pdo->inTransaction();
+        if ($owns) {
+            $pdo->beginTransaction();
+        }
+        try {
+            if ($this->repository->lockedWorkSource($supplierId, $employmentId, $periodStart) !== 'import_summary') {
+                throw new \InvalidArgumentException('Měsíc nebere hodiny ze souhrnu importu docházky, není co přepínat.');
+            }
+            $active = $this->repository->activeImportInputs($supplierId, $employmentId, $periodStart);
+            $frozen = array_values(array_map(
+                static fn (array $row): int => $row['id'],
+                array_filter($active, static fn (array $row): bool => $row['status'] !== 'draft'),
+            ));
+            if ($frozen !== []) {
+                throw new PayrollTimeImportInputsApprovedException($frozen);
+            }
+            $cancelled = [];
+            foreach ($active as $row) {
+                $this->inputs->cancel($supplierId, $row['id'], $row['row_version']);
+                $cancelled[] = $row['id'];
+            }
+            $result = $this->repository->restoreEntries(
+                $supplierId,
+                $employmentId,
+                $periodStart,
+                $rowVersion,
+                $reason,
+                'entries',
+                $userId,
+            );
+            if ($owns) {
+                $pdo->commit();
+            }
+        } catch (\Throwable $e) {
+            if ($owns && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $e;
+        }
+
+        return $result + ['cancelled_input_ids' => $cancelled];
+    }
+
     /** Přesně YYYY-MM-DD; regex se `$` by propustil i datum s koncovým odřádkováním. */
     private static function strictDate(mixed $value): bool
     {
@@ -140,6 +217,8 @@ final class PayrollTimeService
         private readonly PayrollJmhzWorkMonthSummaryBuilder $jmhzWorkSummary,
         private readonly PayrollOvertimeLimitService $overtimeLimits,
         private readonly PayrollOvertimeRepository $overtime,
+        private readonly PayrollInputRepository $inputs,
+        private readonly Connection $db,
     ) {}
 
     /** @return array<string,mixed> */

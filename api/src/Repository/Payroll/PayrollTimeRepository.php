@@ -767,11 +767,20 @@ final class PayrollTimeRepository
                 $userId,
             );
             if (($month['work_source'] ?? 'entries') !== 'entries') {
-                $sourceLabel = $month['work_source'] === 'import_summary' ? 'docházku ze souhrnu importu' : 'hodiny z ručního souhrnu';
-                throw new \InvalidArgumentException(
-                    "Pracovní měsíc bere {$sourceLabel}. Časový záznam by byl druhým "
-                    . 'zdrojem téhož měsíce, proto se neuložil. Chcete-li evidovat docházku, '
-                    . 'obnovte zdroj Docházka v panelu Odpracované hodiny.'
+                // Text jmenuje skutečné místo v aplikaci a u importu i to, že
+                // importované mzdové vstupy se musí zrušit (jinak by se
+                // vyplatily vedle hodin ze směn dvakrát).
+                throw new \InvalidArgumentException($month['work_source'] === 'import_summary'
+                    ? 'Pracovní měsíc bere hodiny ze souhrnu importu docházky. Časový záznam by byl druhým '
+                        . 'zdrojem téhož měsíce, proto se neuložil. Chcete-li počítat ze směn, použijte '
+                        . 'v Mzdy → Docházka a směny u zaměstnance akci „Počítat ze směn": zruší '
+                        . 'neschválené mzdové vstupy z importu a přepne zdroj na docházku. Totéž jde '
+                        . 'v panelu „Podklady hodin" → „Změnit vybraný zdroj hodin", importované vstupy '
+                        . 'je ale nutné nejdřív zrušit.'
+                    : 'Pracovní měsíc bere hodiny z ručního souhrnu. Časový záznam by byl druhým '
+                        . 'zdrojem téhož měsíce, proto se neuložil. Chcete-li evidovat docházku, otevřete '
+                        . 'v Mzdy → Docházka a směny u zaměstnance „Podklady hodin" a použijte '
+                        . '„Změnit vybraný zdroj hodin".'
                 );
             }
             $seriesKey = bin2hex(random_bytes(16));
@@ -877,7 +886,8 @@ final class PayrollTimeRepository
             if ($kind === 'entry' && ($month['work_source'] ?? 'entries') !== 'entries') {
                 throw new \InvalidArgumentException(
                     'Časové záznamy lze měnit jen při zvoleném zdroji docházky. Měsíc teď bere hodiny '
-                    . 'z jiného zdroje; obnovte zdroj Docházka v panelu Odpracované hodiny a záznam pak upravte.'
+                    . 'z jiného zdroje; v Mzdy → Docházka a směny u zaměstnance v „Podklady hodin" použijte '
+                    . '„Změnit vybraný zdroj hodin" (u importu „Počítat ze směn") a záznam pak upravte.'
                 );
             }
             $currentVersion = PayrollTimeValue::int($current['row_version'] ?? null, 'row_version');
@@ -1515,24 +1525,61 @@ final class PayrollTimeRepository
      */
     private function assertNoActiveImportInputs(int $supplierId, int $employmentId, string $periodStart): void
     {
+        if ($this->activeImportInputs($supplierId, $employmentId, $periodStart) !== []) {
+            throw new \InvalidArgumentException(
+                'Měsíc má nezrušené mzdové vstupy z importu docházky (náhrady nebo částky). '
+                . 'Použijte u zaměstnance v Mzdy → Docházka a směny akci „Počítat ze směn", '
+                . 'která je zruší a zdroj přepne, nebo je zrušte v Mzdových vstupech.'
+            );
+        }
+    }
+
+    /**
+     * Nezrušené mzdové vstupy z importu docházky vztahu za měsíc
+     * (`attendance:` a `leave:attendance:`), se zámkem řádků.
+     *
+     * Dotaz jde po `uq_payroll_input_external` (firma, vztah, období).
+     *
+     * @return list<array{id:int,status:string,row_version:int}>
+     */
+    public function activeImportInputs(int $supplierId, int $employmentId, string $periodStart): array
+    {
         $month = substr($periodStart, 0, 7);
         $stmt = $this->db->pdo()->prepare(
-            "SELECT id FROM payroll_inputs
+            "SELECT id, status, row_version FROM payroll_inputs
               WHERE supplier_id = ? AND employment_id = ? AND period_start = ? AND status <> 'cancelled'
                 AND (external_id LIKE ? OR external_id LIKE ?)
-              LIMIT 1"
+              ORDER BY id
+              FOR UPDATE"
         );
         $stmt->execute([
             $supplierId, $employmentId, $periodStart,
             'attendance:' . $month . ':' . $employmentId . ':%',
             'leave:attendance:' . $month . ':' . $employmentId . ':%',
         ]);
-        if ($stmt->fetchColumn() !== false) {
-            throw new \InvalidArgumentException(
-                'Měsíc má nestornované mzdové vstupy z importu docházky (náhrady nebo částky). '
-                . 'Před změnou zdroje hodin je v Mzdových vstupech stornujte.'
-            );
-        }
+
+        return array_map(
+            static fn (array $row): array => [
+                'id' => (int) $row['id'],
+                'status' => (string) $row['status'],
+                'row_version' => (int) $row['row_version'],
+            ],
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        );
+    }
+
+    /** Zdroj hodin měsíce se zámkem řádku; měsíc bez řádku bere docházku. */
+    public function lockedWorkSource(int $supplierId, int $employmentId, string $periodStart): string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT work_source FROM payroll_time_months
+              WHERE supplier_id = ? AND employment_id = ? AND period_start = ?
+              FOR UPDATE'
+        );
+        $stmt->execute([$supplierId, $employmentId, $periodStart]);
+        $source = $stmt->fetchColumn();
+
+        return $source === false ? 'entries' : (string) $source;
     }
 
     /** @return list<string> */

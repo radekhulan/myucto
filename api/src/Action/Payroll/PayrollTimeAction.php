@@ -738,6 +738,38 @@ final class PayrollTimeAction
         }
     }
 
+    /**
+     * „Počítat ze směn" — zruší neschválené vstupy z importu docházky a přepne
+     * zdroj měsíce na docházku. Ruší mzdové vstupy, proto kromě zápisu docházky
+     * vyžaduje i právo na zápis mzdových vstupů.
+     *
+     * @param array<string,string> $args
+     */
+    public function switchToEntries(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
+        if (($error = $this->authorize($request, $response, 'payroll.inputs.write', AccessLevel::WRITE)) !== null) return $error;
+        try {
+            $result = $this->time->switchImportToEntries($this->currentSupplierId($request), $this->routePeriod($args), $this->input($request), $this->userId($request));
+            if ($result['changed']) {
+                $this->auditMonth($request, 'payroll.time.source_changed', $result['month']);
+            }
+            return Json::ok($response, $result);
+        } catch (PayrollTimeConflictException $e) {
+            return $this->conflict($response, $e);
+        } catch (PayrollTimeLockedException $e) {
+            return Json::error($response, 'payroll_time_locked', $e->getMessage(), 409);
+        } catch (\MyInvoice\Repository\Payroll\PayrollTimeImportInputsApprovedException $e) {
+            return Json::error($response, 'import_inputs_approved', $e->getMessage(), 409, ['input_ids' => $e->inputIds]);
+        } catch (\MyInvoice\Repository\Payroll\PayrollInputCancellationException $e) {
+            return Json::error($response, $e->errorCode, $e->getMessage(), 409);
+        } catch (\MyInvoice\Repository\Payroll\PayrollInputConflictException $e) {
+            return Json::error($response, 'row_version_conflict', $e->getMessage(), 409);
+        } catch (\InvalidArgumentException $e) {
+            return $this->validation($response, $e);
+        }
+    }
+
     public function approve(Request $request, Response $response, array $args): Response
     {
         if (($error = $this->authorize(

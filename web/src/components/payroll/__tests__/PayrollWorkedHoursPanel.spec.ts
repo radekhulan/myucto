@@ -3,8 +3,9 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { PayrollManualTimeSummaryPayload, PayrollWorkedTime } from '@/api/payroll'
 import PayrollWorkedHoursPanel from '../PayrollWorkedHoursPanel.vue'
 
-const mocks = vi.hoisted(() => ({ save: vi.fn(), approve: vi.fn(), reopen: vi.fn(), restore: vi.fn(), history: vi.fn() }))
-vi.mock('@/api/payroll', () => ({ payrollApi: { saveManualTimeSummary: mocks.save, approveTimeMonth: mocks.approve, reopenTimeMonth: mocks.reopen, restoreTimeWorkSource: mocks.restore, timeHistory: mocks.history } }))
+const mocks = vi.hoisted(() => ({ save: vi.fn(), approve: vi.fn(), reopen: vi.fn(), restore: vi.fn(), history: vi.fn(), switchToEntries: vi.fn(), toastSuccess: vi.fn() }))
+vi.mock('@/api/payroll', () => ({ payrollApi: { saveManualTimeSummary: mocks.save, approveTimeMonth: mocks.approve, reopenTimeMonth: mocks.reopen, restoreTimeWorkSource: mocks.restore, timeHistory: mocks.history, switchTimeToEntries: mocks.switchToEntries } }))
+vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: mocks.toastSuccess, error: vi.fn(), warning: vi.fn(), info: vi.fn() }) }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => values ? `${key}${JSON.stringify(values)}` : key }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (value: string) => value, formatDateTime: (value: string) => value }))
 
@@ -16,8 +17,41 @@ function panel(value = evidence(), props: Record<string, unknown> = {}) {
   return mount(PayrollWorkedHoursPanel, { props: { employmentId: 12, fullName: 'Syntetická Osoba', period: '2026-11', value, closed: false, canWrite: true, canApprove: true, canReopen: true, ...props }, global: { stubs: {
     RouterLink: { props: ['to'], template: '<a :data-to="JSON.stringify(to)"><slot /></a>' },
     PayrollHourlyEvidencePanel: { props: ['employmentId'], setup() { evidenceMounts.count += 1 }, template: '<div data-test="hourly-evidence-stub" />' },
+    Modal: { props: ['title'], template: '<div data-test="modal-stub"><slot /></div>' },
   } } })
 }
+
+describe('PayrollWorkedHoursPanel: Počítat ze směn', () => {
+  beforeEach(() => vi.clearAllMocks())
+  const imported = () => evidence({ month: { id: 10, employment_id: 12, period_start: '2026-11-01', status: 'open', revision_no: 1, row_version: 4, approved_at: null, reopened_at: null, reopen_reason: null, work_source: 'import_summary' } as PayrollWorkedTime['month'] })
+
+  it('u importovaného měsíce po potvrzení v dialogu zruší vstupy z importu a přepne na směny', async () => {
+    mocks.switchToEntries.mockResolvedValue({ month: { id: 10, status: 'open', revision_no: 2, row_version: 5, work_source: 'entries' }, changed: true, cancelled_input_ids: [7, 8] })
+    const wrapper = panel(imported(), { canWriteInputs: true })
+    await wrapper.get('[data-test="switch-to-entries"]').trigger('click')
+    expect(mocks.switchToEntries).not.toHaveBeenCalled()
+    await wrapper.get('[data-test="switch-to-entries-confirm"]').trigger('click')
+    await flushPromises()
+    expect(mocks.switchToEntries).toHaveBeenCalledWith('2026-11', { employment_id: 12, row_version: 4 })
+    expect(mocks.toastSuccess).toHaveBeenCalledWith(expect.stringContaining('"count":2'))
+    expect(wrapper.emitted('updated')).toHaveLength(1)
+  })
+
+  it('odmítnutí kvůli schváleným vstupům ukáže v dialogu důvod ze serveru', async () => {
+    mocks.switchToEntries.mockRejectedValue({ response: { status: 409, data: { error: { code: 'import_inputs_approved', message: 'Měsíc má 1 schválených nebo zamčených mzdových vstupů z importu docházky.' } } } })
+    const wrapper = panel(imported(), { canWriteInputs: true })
+    await wrapper.get('[data-test="switch-to-entries"]').trigger('click')
+    await wrapper.get('[data-test="switch-to-entries-confirm"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-test="switch-to-entries-error"]').text()).toContain('schválených nebo zamčených')
+    expect(wrapper.emitted('updated')).toBeUndefined()
+  })
+
+  it('bez práva na mzdové vstupy akci nenabízí', () => {
+    const wrapper = panel(imported(), { canWriteInputs: false })
+    expect(wrapper.find('[data-test="switch-to-entries"]').exists()).toBe(false)
+  })
+})
 async function fill(wrapper: ReturnType<typeof panel>, first = '0:01', second = '0,001') {
   await wrapper.get('[data-test="worked-hours-duration-0"]').setValue(first)
   await wrapper.get('[data-test="worked-hours-duration-1"]').setValue(second)

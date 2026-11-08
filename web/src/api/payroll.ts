@@ -10790,6 +10790,15 @@ export const payrollApi = {
   restoreTimeWorkSource: (period: string, payload: {
     employment_id: number; row_version: number; reason: string; replace_source: true; source: 'entries' | 'import_summary'
   }) => api.post<{ month: PayrollTimeMonthState }>(`/payroll/time/months/${period}/work-source`, payload).then(response => response.data),
+  /**
+   * „Počítat ze směn": zruší neschválené mzdové vstupy z importu docházky
+   * vztahu za měsíc a přepne zdroj hodin na docházku. Schválené nebo zamčené
+   * vstupy server nezmění a odpoví 409 `import_inputs_approved`.
+   */
+  switchTimeToEntries: (period: string, payload: { employment_id: number; row_version: number; reason?: string }) =>
+    api.post<{ month: PayrollTimeMonthState; changed: boolean; cancelled_input_ids: number[] }>(
+      `/payroll/time/months/${period}/switch-to-entries`, payload,
+    ).then(response => response.data),
   saveManualTimeSummary: (period: string, payload: PayrollManualTimeSummaryPayload) =>
     api.post<{ month: PayrollTimeMonthState; manual_summary: PayrollManualTimeSummary }>(
       `/payroll/time/months/${period}/manual-summary`, payload,

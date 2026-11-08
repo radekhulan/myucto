@@ -326,6 +326,8 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/approve$#', 'payroll.approve', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/manual-summary$#', 'payroll.time.write', AccessLevel::WRITE],
         ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/work-source$#', 'payroll.time.write', AccessLevel::WRITE],
+        // Ruší i mzdové vstupy z importu; akce navíc vyžaduje payroll.inputs.write.
+        ['POST', '#^/api/payroll/time/months/[0-9]{4}-[0-9]{2}/switch-to-entries$#', 'payroll.time.write', AccessLevel::WRITE],
         // Hromadné schválení měsíců z dávky importu docházky — totéž právo jako
         // schválení měsíce po jednom. Musí stát před obecným `/payroll/time(/|$)`.
         ['POST', '#^/api/payroll/time/imports/attendance/[0-9]+/apply$#', 'payroll.approve', AccessLevel::WRITE],
