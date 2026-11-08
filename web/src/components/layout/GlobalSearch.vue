@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed, watch, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { searchApi, type SearchEmployee, type SearchResults } from '@/api/search'
 import { useWorkspaceNavigation } from '@/composables/useWorkspaceNavigation'
@@ -12,6 +12,9 @@ const props = withDefaults(defineProps<{
   placement?: 'above' | 'below'
   compact?: boolean
   shortcut?: string
+  /** Velké pole uprostřed stránky (nová záložka). */
+  large?: boolean
+  autofocus?: boolean
 }>(), {
   placement: 'below',
   compact: false,
@@ -172,13 +175,15 @@ function groupHeaderFor(i: number): string | null {
 const showDropdown = computed(() => open.value && q.value.trim().length > 0)
 const hasResults = computed(() => options.value.length > 0)
 
+onMounted(() => { if (props.autofocus) inputEl.value?.focus({ preventScroll: true }) })
 onBeforeUnmount(() => clearTimeout(debounceTimer))
 </script>
 
 <template>
-  <div class="relative" :class="compact ? '' : 'px-0.5 pb-2'">
+  <div class="relative" :class="compact || large ? '' : 'px-0.5 pb-2'">
     <div class="relative">
-      <svg class="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+      <svg class="absolute top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none"
+           :class="large ? 'left-4 h-5 w-5' : 'left-2.5 h-4 w-4'"
            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-4.35-4.35M17 11a6 6 0 1 1-12 0 6 6 0 0 1 12 0z" />
       </svg>
@@ -187,11 +192,14 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
         v-model="q"
         type="text"
         :placeholder="t('search.placeholder')"
-        class="w-full pl-8 text-sm rounded-md border border-neutral-200 bg-neutral-50 focus:bg-surface focus:border-primary-400 focus:outline-none focus:ring-1 focus:ring-primary-200"
-        :class="[
-          compact ? 'h-8 py-1' : 'py-1.5',
-          compact && shortcut ? 'pr-20' : 'pr-3',
-        ]"
+        class="w-full border focus:border-primary-400 focus:outline-none"
+        :class="large
+          ? 'h-12 pl-12 pr-4 text-base border-neutral-300 bg-surface shadow-sm focus:ring-4 focus:ring-primary-100'
+          : [
+            'pl-8 text-sm rounded-md border-neutral-200 bg-neutral-50 focus:bg-surface focus:ring-1 focus:ring-primary-200',
+            compact ? 'h-8 py-1' : 'py-1.5',
+            compact && shortcut ? 'pr-20' : 'pr-3',
+          ]"
         autocomplete="off"
         spellcheck="false"
         @focus="open = q.trim().length > 0"
@@ -207,8 +215,8 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
     <!-- Dropdown výsledků -->
     <div
       v-if="showDropdown"
-      class="absolute left-0 right-0 z-40 bg-surface border border-neutral-200 rounded-md shadow-lg max-h-[70vh] overflow-y-auto"
-      :class="placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1'"
+      class="absolute left-0 right-0 z-40 bg-surface border border-neutral-200 shadow-lg overflow-y-auto"
+      :class="[placement === 'above' ? 'bottom-full mb-1' : 'top-full mt-1', large ? 'max-h-[55vh] text-left' : 'rounded-md max-h-[70vh]']"
     >
       <div v-if="loading && !hasResults" class="px-3 py-2 text-xs text-neutral-500">{{ t('common.loading') }}</div>
       <div v-else-if="!hasResults" class="px-3 py-2 text-xs text-neutral-500">{{ t('search.no_results') }}</div>
@@ -220,8 +228,8 @@ onBeforeUnmount(() => clearTimeout(debounceTimer))
         </div>
         <button
           type="button"
-          class="w-full text-left px-3 py-1.5 flex flex-col gap-0.5 cursor-pointer"
-          :class="i === activeIndex ? 'bg-primary-50' : 'hover:bg-neutral-50'"
+          class="w-full text-left flex flex-col gap-0.5 cursor-pointer"
+          :class="[i === activeIndex ? 'bg-primary-50' : 'hover:bg-neutral-50', large ? 'px-4 py-2' : 'px-3 py-1.5']"
           @mouseenter="activeIndex = i"
           @mousedown.prevent="select(i)"
         >

@@ -1,5 +1,6 @@
 import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
+import { readWindowTabsHidden, storeWindowTabsHidden } from '@/workspace/windowTabs'
 
 export type PaneCount = 1 | 2 | 3
 export type PaneId = 'primary' | 'secondary-2' | 'secondary-3'
@@ -23,6 +24,10 @@ export interface WorkspaceWindowState {
   subtitle?: string | null
   supplierId?: number
   supplierName?: string
+  /** Pořadí otevření pro lištu záložek; obnovené okno si drží místo původního. */
+  order?: number
+  /** Záložka, do které okno patří: agenda a firma, nebo samostatná záložka otevřená uživatelem. */
+  tab?: string
 }
 
 function createPane(id: PaneId, fullPath: string | null = null): WorkspacePaneState {
@@ -46,6 +51,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const windows = ref<WorkspaceWindowState[]>([])
   const windowSwitcherOpen = ref(false)
   const companySwitching = ref(false)
+  const windowTabsHidden = ref(readWindowTabsHidden())
 
   const activePane = computed(() => panes.value.find(pane => pane.id === activePaneId.value) ?? panes.value[0])
   const activeFullPath = computed(() => activePane.value?.fullPath ?? '/')
@@ -112,6 +118,11 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     maximumPaneCount.value = count
   }
 
+  function setWindowTabsHidden(hidden: boolean): void {
+    windowTabsHidden.value = hidden
+    storeWindowTabsHidden(hidden)
+  }
+
   return {
     paneCount,
     maximumPaneCount,
@@ -121,6 +132,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     windows,
     windowSwitcherOpen,
     companySwitching,
+    windowTabsHidden,
     activePane,
     activeFullPath,
     activatePane,
@@ -130,5 +142,6 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     removeEmptyPane,
     dropLastPane,
     setMaximumPaneCount,
+    setWindowTabsHidden,
   }
 })

@@ -13,6 +13,7 @@ import { paneForBeside, paneForCtrlClick, rightPanePlan } from './panelLinks'
 import { getWindowManager, setWindowManager } from './windowRegistry'
 import { manualSwitchDestination } from '@/composables/useSupplierSwitch'
 import { changedAreas, isWindowAffected } from './dataDependencies'
+import { NEW_TAB_PATH } from './windowTabs'
 export { getWindowManager } from './windowRegistry'
 
 interface WindowRuntime {
@@ -44,17 +45,28 @@ interface WindowManagerOptions {
   keyboard?: (event: FrameKeyboardEvent) => void
   globalNavigate?: (to: RouteLocationRaw, mode?: 'assign' | 'replace') => void
   frameContainer?: () => HTMLElement | null
+  /** Agenda stránky (položka hlavního menu); okna jedné agendy sdílejí záložku. */
+  agendaFor?: (fullPath: string) => string
 }
+
+/** Záložky otevřené uživatelem; ostatní záložky odpovídají agendě a firmě. */
+const USER_TAB_PREFIX = 'tab-'
 
 /** Uložení často posílá víc požadavků za sebou, viditelné okno se má načíst jednou. */
 const VISIBLE_REFRESH_DEBOUNCE_MS = 250
 
 export interface WorkspaceWindowManager {
   open: (to: RouteLocationRaw, paneId: PaneId, options?: { fresh?: boolean }) => Promise<void>
+  /** Nová prázdná záložka; první stránka otevřená z ní v ní zůstane. S oknem záložku duplikuje. */
+  openTab: (duplicateWindowId?: string) => Promise<void>
   openRight: (to: RouteLocationRaw, sourcePaneId: PaneId) => Promise<void>
+  /** Otevře odkaz jako novou záložku v daném panelu (Shift+klik). */
+  openInTab: (to: RouteLocationRaw, paneId: PaneId) => Promise<void>
   select: (id: string) => Promise<void>
   /** Zavře okno a zahodí jeho rozpracovaný obsah; viditelné okno v panelu nahradí poslední zaparkované okno téže firmy. */
   closeWindow: (id: string) => Promise<void>
+  /** Zavře všechna okna záložky; viditelná až nakonec, aby je nenahradilo okno téže záložky. */
+  closeWindows: (ids: string[]) => Promise<void>
   /** Znovu načte okno panelu na stejné adrese s výchozími daty, ostatní okna nechá beze změny. */
   reloadPane: (paneId: PaneId) => Promise<void>
   previous: () => Promise<void>
@@ -257,8 +269,20 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
     return true
   }
 
-  async function open(to: RouteLocationRaw, paneId: PaneId, fresh = false, reuseVisibleElsewhere = true): Promise<void> {
+  function tabFor(fullPath: string, supplierId: number, source: WindowRuntime | undefined): string {
+    const agenda = options.agendaFor?.(fullPath) ?? ''
+    if (!source?.state.tab || (source.state.supplierId ?? 0) !== supplierId) return `${supplierId}:${agenda}`
+    const sourceAgenda = options.agendaFor?.(source.state.fullPath) ?? ''
+    if (sourceAgenda === agenda) return source.state.tab
+    // Prázdná záložka převezme agendu, kterou v ní otevřete jako první.
+    const blankTab = source.state.fullPath.split(/[?#]/)[0] === NEW_TAB_PATH
+    return blankTab ? source.state.tab : `${supplierId}:${agenda}`
+  }
+
+  async function open(to: RouteLocationRaw, paneId: PaneId, fresh = false, reuseVisibleElsewhere = true,
+    placement: { source?: WindowRuntime, tab?: string } = {}): Promise<void> {
     if (!workspace.panes.some(pane => pane.id === paneId)) return
+    const source = placement.source ?? windowFor(paneId)
     const resolver = options.createRouter()
     if (forwardGlobalNavigation(to, resolver)) return
     const resolved = resolver.resolve(to)
@@ -286,6 +310,8 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
     if (oldest && runtimes.size >= MAX_WORKSPACE_WINDOWS) remove(runtimes.get(oldest.id)!)
     const state: WorkspaceWindowState = {
       id: `window-${++sequence}`,
+      order: sequence,
+      tab: placement.tab ?? tabFor(useFrame ? fullPath : resolver.currentRoute.value.fullPath, supplier.id, source),
       fullPath: useFrame ? fullPath : resolver.currentRoute.value.fullPath,
       title: useFrame ? fullPath : resolver.currentRoute.value.fullPath,
       paneId: null,
@@ -353,6 +379,11 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
           runtime.surface?.update()
         },
         navigate: (to, newPane, placement) => {
+          if (placement === 'tab') {
+            const paneId = runtime.state.paneId
+            if (paneId) void enqueue(() => open(to, paneId, true, true, { tab: newUserTab() }))
+            return
+          }
           if (placement === 'right') {
             const sourcePane = runtime.state.paneId
             if (sourcePane) void enqueue(() => openRight(to, sourcePane, runtime))
@@ -370,14 +401,23 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
               // Změna firmy parkuje panely; zdrojový report musí zůstat vedle detailu.
               if (runtime.state.paneId === null) await display(runtime, sourcePane, false)
               if (destroyed || sourceGeneration !== generation || runtimes.get(runtime.state.id) !== runtime) return
-              await open(to, targetPane)
+              await open(to, targetPane, false, true, { source: runtime })
             })
             return
           }
           const paneId = newPane && runtime.state.paneId ? paneForCtrlClick(runtime.state.paneId, workspace.panes) : runtime.state.paneId
-          if (paneId && (runtime.state.supplierId ?? 0) === (options.currentSupplier?.().id ?? 0)) void manager.open(to, paneId)
+          if (paneId && (runtime.state.supplierId ?? 0) === (options.currentSupplier?.().id ?? 0)) void enqueue(() => open(to, paneId, false, true, { source: runtime }))
         },
         activate: () => { if (runtime.state.paneId) workspace.activatePane(runtime.state.paneId) },
+        selectWindow: windowId => {
+          void enqueue(async () => {
+            if (!runtimes.has(windowId) || windowId === runtime.state.id) return
+            await select(windowId)
+            // Jako „přepnout na kartu" v prohlížeči: prázdná nová záložka po výběru zmizí.
+            if (runtimes.get(state.id) === runtime && runtime.state.paneId === null
+              && runtime.state.fullPath.split(/[?#]/)[0] === NEW_TAB_PATH) remove(runtime)
+          })
+        },
         history: direction => {
           if (runtime.state.paneId && workspace.activePaneId === runtime.state.paneId) {
             if (direction < 0) void manager.previous()
@@ -446,7 +486,7 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
       await nextTick()
     }
     if (destroyed || sourceGeneration !== generation) return
-    await open(to, plan.paneId, false, false)
+    await open(to, plan.paneId, false, false, { source })
   }
 
   async function select(id: string, visit = true): Promise<void> {
@@ -470,8 +510,32 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
     const runtime = windowFor(paneId)
     if (!runtime) return
     const fullPath = runtime.state.fullPath
+    const { order, tab } = runtime.state
     remove(runtime)
-    await open(fullPath, paneId, true)
+    await open(fullPath, paneId, true, true, { tab })
+    const reloaded = windowFor(paneId)
+    if (reloaded && order !== undefined) reloaded.state.order = order
+  }
+
+  function newUserTab(): string {
+    return `${USER_TAB_PREFIX}${sequence + 1}`
+  }
+
+  async function openTab(duplicateWindowId?: string): Promise<void> {
+    const tab = newUserTab()
+    if (duplicateWindowId === undefined) {
+      await open(NEW_TAB_PATH, workspace.activePaneId, true, true, { tab })
+      return
+    }
+    const original = runtimes.get(duplicateWindowId)
+    if (!original || !await authorized(original)) return
+    await open(original.state.fullPath, workspace.activePaneId, true, true, { tab })
+  }
+
+  async function closeWindows(ids: string[]): Promise<void> {
+    const ordered = ids.map(id => runtimes.get(id)).filter((runtime): runtime is WindowRuntime => !!runtime)
+      .sort((a, b) => Number(a.state.paneId !== null) - Number(b.state.paneId !== null))
+    for (const runtime of ordered) await closeWindow(runtime.state.id)
   }
 
   async function traverse(direction: number): Promise<void> {
@@ -564,8 +628,11 @@ export function createWindowManager(options: WindowManagerOptions): WorkspaceWin
   const manager: WorkspaceWindowManager = {
     open: (to, paneId, options) => enqueue(() => open(to, paneId, options?.fresh)),
     openRight: (to, sourcePaneId) => enqueue(() => openRight(to, sourcePaneId)),
+    openInTab: (to, paneId) => enqueue(() => open(to, paneId, true, true, { tab: newUserTab() })),
     select: id => enqueue(() => select(id)),
     closeWindow: id => enqueue(() => closeWindow(id)),
+    closeWindows: ids => enqueue(() => closeWindows(ids)),
+    openTab: duplicateWindowId => enqueue(() => openTab(duplicateWindowId)),
     reloadPane: paneId => enqueue(() => reloadPane(paneId)),
     previous: () => enqueue(() => traverse(-1)),
     next: () => enqueue(() => traverse(1)),

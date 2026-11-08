@@ -80,13 +80,27 @@ describe('navigace uvnitř pracovního okna', () => {
     expect(anchor.hasAttribute('rel')).toBe(false)
   })
 
-  it('Shift klik přesměruje do pravého panelu i bez aktivního rozdělení', () => {
+  it('Shift klik otevře novou záložku bez ohledu na panely', () => {
     const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id', component: { render: () => null } }] })
     const anchor = document.createElement('a')
     anchor.href = '/invoices/42?tab=payments#detail'
     const event = new MouseEvent('click', { button: 0, shiftKey: true })
     Object.defineProperty(event, 'target', { value: anchor })
-    expect(internalAnchorNavigation(router, event, false, true)).toEqual({ to: '/invoices/42?tab=payments#detail', placement: 'right' })
+    expect(internalAnchorNavigation(router, event, false, true)).toEqual({ to: '/invoices/42?tab=payments#detail', placement: 'tab' })
+    expect(internalAnchorNavigation(router, event, false, false)).toEqual({ to: '/invoices/42?tab=payments#detail', placement: 'tab' })
+    const both = new MouseEvent('click', { button: 0, shiftKey: true, ctrlKey: true })
+    Object.defineProperty(both, 'target', { value: anchor })
+    expect(internalAnchorNavigation(router, both, true, true)).toBeNull()
+  })
+
+  it('Ctrl klik otevře existující panel napravo, jinak panel přidá; bez místa nechá prohlížeč', () => {
+    const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/invoices/:id', component: { render: () => null } }] })
+    const anchor = document.createElement('a')
+    anchor.href = '/invoices/42'
+    const event = new MouseEvent('click', { button: 0, ctrlKey: true })
+    Object.defineProperty(event, 'target', { value: anchor })
+    expect(internalAnchorNavigation(router, event, true, true)).toEqual({ to: '/invoices/42', newPane: true })
+    expect(internalAnchorNavigation(router, event, false, true)).toEqual({ to: '/invoices/42', placement: 'right' })
     expect(internalAnchorNavigation(router, event, false, false)).toBeNull()
   })
 

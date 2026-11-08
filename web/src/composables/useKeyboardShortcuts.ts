@@ -38,6 +38,8 @@ const DEFAULT_SHORTCUTS: Record<string, string> = {
   'windows.recent': 'alt+shift+w',
   'windows.reload': 'alt+shift+r',
   'windows.favorites': 'alt+shift+f',      // oblíbené stránky (Favorites)
+  'windows.new_tab': 'alt+shift+t',        // nová záložka (Tab); ctrl+t si bere prohlížeč
+  'windows.close_tab': 'alt+shift+x',      // zavřít záložku (×); ctrl+w si bere prohlížeč
   'new:/invoices/new': 'alt+1',
   'new:/purchase-invoices/new': 'alt+2',
   'new:/clients/new': 'alt+3',

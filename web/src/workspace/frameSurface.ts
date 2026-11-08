@@ -2,6 +2,7 @@ import type { RouteLocationRaw } from 'vue-router'
 import type { PaneId } from '@/stores/workspace'
 import type { ShortcutAction } from '@/composables/useKeyboardShortcuts'
 import { readStorageQuotaHeaders } from '@/api/storageQuota'
+import { isWorkspaceWindowId, type WorkspaceMenuItem, type WorkspaceOpenTab } from './newTabData'
 
 export interface FrameKeyboardEvent {
   key: string
@@ -27,6 +28,9 @@ export interface FrameAppearance {
   csrfToken?: string
   accent?: string
   singlePanel?: boolean
+  /** Jen pro okno nové záložky, které v menu vyhledává. */
+  menuItems?: WorkspaceMenuItem[]
+  openTabs?: WorkspaceOpenTab[]
 }
 
 export interface FrameMutation {
@@ -42,8 +46,10 @@ interface FrameSurfaceOptions {
   root: HTMLElement
   appearance: () => FrameAppearance
   route: (fullPath: string, title: string, subtitle: string | null) => void
-  navigate: (to: RouteLocationRaw, newPane: boolean, placement?: 'beside' | 'right') => void
+  navigate: (to: RouteLocationRaw, newPane: boolean, placement?: 'beside' | 'right' | 'tab') => void
   activate: () => void
+  /** Nová záložka vybrala jiné okno z přehledu otevřených záložek. */
+  selectWindow?: (windowId: string) => void
   history?: (direction: -1 | 1) => void
   keyboard: (event: FrameKeyboardEvent) => void
   globalNavigate: (to: RouteLocationRaw, mode?: 'assign' | 'replace') => void
@@ -76,9 +82,10 @@ export function createFrameSurface(options: FrameSurfaceOptions) {
     } else if (data.type === 'myucto-window-route' && typeof data.fullPath === 'string' && data.fullPath.startsWith('/') && !data.fullPath.startsWith('//')) {
       options.route(data.fullPath, typeof data.title === 'string' ? data.title : data.fullPath, typeof data.subtitle === 'string' ? data.subtitle : null)
     } else if (data.type === 'myucto-window-navigate' && (typeof data.to === 'string' || typeof data.to === 'object' && data.to !== null)) {
-      if (data.placement === 'beside' || data.placement === 'right') options.navigate(data.to, data.newPane === true, data.placement)
+      if (data.placement === 'beside' || data.placement === 'right' || data.placement === 'tab') options.navigate(data.to, data.newPane === true, data.placement)
       else options.navigate(data.to, data.newPane === true)
     } else if (data.type === 'myucto-window-activate') options.activate()
+    else if (data.type === 'myucto-window-select' && isWorkspaceWindowId(data.windowId)) options.selectWindow?.(data.windowId)
     else if (data.type === 'myucto-window-history' && (data.direction === -1 || data.direction === 1)) options.history?.(data.direction)
     else if (data.type === 'myucto-window-activity') window.dispatchEvent(new CustomEvent('myucto:window-activity'))
     else if (data.type === 'myucto-window-demo-read-only') window.dispatchEvent(new CustomEvent('myinvoice:demo-read-only'))

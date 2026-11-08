@@ -92,6 +92,7 @@ function testRouter(slowGate?: { entered: Deferred<void>, release: Deferred<bool
       { path: '/editor/:id', name: 'editor', component: TestEditor },
       { path: '/slow/:id', name: 'slow-editor', component: TestEditor },
       { path: '/list', name: 'list', component: TestEditor },
+      { path: '/new-tab', name: 'new-tab', component: TestEditor },
       { path: '/', name: 'home', component: TestEditor },
     ],
   })
@@ -114,6 +115,7 @@ function createHarness(options: {
   frames?: boolean
   routerFactory?: () => Router
   globalNavigate?: (to: RouteLocationRaw) => void
+  agendaFor?: (fullPath: string) => string
 } = {}): Harness {
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -133,6 +135,7 @@ function createHarness(options: {
     frames: options.frames,
     globalNavigate: options.globalNavigate,
     frameContainer: () => frameContainer,
+    agendaFor: options.agendaFor,
   })
 
   function attachPane(id: PaneId): PaneMount {
@@ -639,6 +642,83 @@ describe('workspace window manager', () => {
     expect(harness.store.windows.map(window => window.fullPath).sort()).toEqual(['/editor/1', '/editor/2'])
     expect(other.isConnected).toBe(true)
     expect(otherInput.value).toBe('zůstane')
+    expect(harness.errors).toEqual([])
+  })
+
+  it('okna téže agendy otevřená za sebou sdílejí záložku, jiná agenda dostane vlastní', async () => {
+    const harness = createHarness({ agendaFor: fullPath => `/${fullPath.split(/[/?]/)[1] ?? ''}` })
+    harness.attachPane('primary')
+    const tabOf = (fullPath: string) => harness.store.windows.find(window => window.fullPath === fullPath)?.tab
+
+    await harness.manager.open('/editor/1', 'primary')
+    await harness.manager.open('/editor/2', 'primary')
+    await harness.manager.open('/list', 'primary')
+    await harness.manager.open('/editor/3', 'primary')
+
+    expect(tabOf('/editor/1')).toBe('0:/editor')
+    expect(tabOf('/editor/2')).toBe('0:/editor')
+    expect(tabOf('/editor/3')).toBe('0:/editor')
+    expect(tabOf('/list')).toBe('0:/list')
+
+    await harness.manager.reloadPane('primary')
+    expect(tabOf('/editor/3')).toBe('0:/editor')
+    expect(harness.errors).toEqual([])
+  })
+
+  it('nová prázdná záložka převezme agendu první otevřené stránky', async () => {
+    const harness = createHarness({ agendaFor: fullPath => `/${fullPath.split(/[/?]/)[1] ?? ''}` })
+    harness.attachPane('primary')
+    await harness.manager.open('/editor/1', 'primary')
+
+    await harness.manager.openTab()
+    const blank = harness.store.windows[0]!
+    expect(blank.fullPath).toBe('/new-tab')
+    expect(blank.tab?.startsWith('tab-')).toBe(true)
+    expect(blank.paneId).toBe('primary')
+
+    await harness.manager.open('/list', 'primary')
+    expect(harness.store.windows.find(window => window.fullPath === '/list')?.tab).toBe(blank.tab)
+    await harness.manager.open('/editor/2', 'primary')
+    expect(harness.store.windows.find(window => window.fullPath === '/editor/2')?.tab).toBe('0:/editor')
+    expect(harness.errors).toEqual([])
+  })
+
+  it('Shift+klik otevře cíl jako novou samostatnou záložku i tehdy, když stejná stránka už otevřená je', async () => {
+    const harness = createHarness({ agendaFor: fullPath => `/${fullPath.split(/[/?]/)[1] ?? ''}` })
+    harness.attachPane('primary')
+    await harness.manager.open('/editor/1', 'primary')
+    await harness.manager.open('/list', 'primary')
+
+    await harness.manager.openInTab('/editor/1', 'primary')
+    const copies = harness.store.windows.filter(window => window.fullPath === '/editor/1')
+    expect(copies).toHaveLength(2)
+    expect(copies[0]!.tab?.startsWith('tab-')).toBe(true)
+    expect(copies[0]!.paneId).toBe('primary')
+    expect(harness.errors).toEqual([])
+  })
+
+  it('duplikace otevře stránku záložky znovu a další okna agendy v kopii zůstanou', async () => {
+    const harness = createHarness({ agendaFor: fullPath => `/${fullPath.split(/[/?]/)[1] ?? ''}` })
+    const primary = harness.attachPane('primary')
+    await harness.manager.open('/list', 'primary')
+    await harness.manager.open('/editor/1', 'primary')
+    const original = editor(1)
+    await typeDraft(original, 'rozepsáno')
+
+    await harness.manager.openTab(windowIdFor(harness.store, '/editor/1'))
+    const copies = harness.store.windows.filter(window => window.fullPath === '/editor/1')
+    expect(copies).toHaveLength(2)
+    const own = copies.find(window => window.tab !== '0:/editor')!
+    expect(own.paneId).toBe('primary')
+    expect((primary.target.querySelector('[data-testid="draft"]') as HTMLInputElement).value).toBe('')
+
+    await harness.manager.open('/editor/2', 'primary')
+    expect(harness.store.windows.find(window => window.fullPath === '/editor/2')?.tab).toBe(own.tab)
+
+    await harness.manager.closeWindows(harness.store.windows.filter(window => window.tab === own.tab).map(window => window.id))
+    expect(harness.store.windows.map(window => window.tab)).toEqual(['0:/editor', '0:/list'])
+    expect(primary.target.contains(original)).toBe(true)
+    expect((original.querySelector('[data-testid="draft"]') as HTMLInputElement).value).toBe('rozepsáno')
     expect(harness.errors).toEqual([])
   })
 

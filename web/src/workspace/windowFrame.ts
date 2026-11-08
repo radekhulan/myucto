@@ -7,6 +7,7 @@ import { vSelectOnFocus } from '@/directives/vSelectOnFocus'
 import { vColumnLabels } from '@/directives/columnLabels'
 import { useAuthStore } from '@/stores/auth'
 import { authorizationGuard, applyAuthorizationMeta } from '@/router'
+import { sanitizeMenuItems, sanitizeOpenTabs, setOpenTabSelectHandler, workspaceMenuItems, workspaceOpenTabs } from './newTabData'
 import { createPaneRouter } from '@/router/createPaneRouter'
 import { setForbiddenPermissionHandler } from '@/api/client'
 import { shortcutFromEvent, useKeyboardShortcuts } from '@/composables/useKeyboardShortcuts'
@@ -129,6 +130,9 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
   if (init.csrfToken) auth.setSessionCsrfToken(init.csrfToken)
   const shortcuts = useKeyboardShortcuts()
   shortcuts.registerActions(init.shortcutActions ?? [])
+  if (init.menuItems) workspaceMenuItems.value = sanitizeMenuItems(init.menuItems)
+  if (init.openTabs) workspaceOpenTabs.value = sanitizeOpenTabs(init.openTabs)
+  setOpenTabSelectHandler(windowId => postWindowFrameMessage({ type: 'myucto-window-select', id: frame.id, windowId }))
   const globalNavigation = (to: RouteLocationRaw) => {
     postWindowFrameMessage({ type: 'myucto-window-global', id: frame.id, to })
   }
@@ -245,6 +249,8 @@ export async function startWindowFrame(frame: WindowFrameBootstrap): Promise<voi
     })
     if (state.globalShortcuts) globalShortcuts.value = new Set(state.globalShortcuts)
     if (state.shortcutActions) shortcuts.registerActions(state.shortcutActions)
+    if (state.menuItems) workspaceMenuItems.value = sanitizeMenuItems(state.menuItems)
+    if (state.openTabs) workspaceOpenTabs.value = sanitizeOpenTabs(state.openTabs)
     if (state.csrfToken) auth.setSessionCsrfToken(state.csrfToken)
     if (state.invalidation?.supplierId === frame.supplierId) window.dispatchEvent(new CustomEvent('myucto:window-data-changed', { detail: state.invalidation }))
     if (state.refreshAuth) void auth.refresh()

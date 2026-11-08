@@ -1,5 +1,6 @@
 import type { RouteLocationRaw } from 'vue-router'
 import type { ShortcutAction } from '@/composables/useKeyboardShortcuts'
+import type { WorkspaceMenuItem, WorkspaceOpenTab } from './newTabData'
 
 export type WindowFrameTheme = 'light' | 'dark'
 export type WindowFrameLocale = 'cs' | 'en'
@@ -37,6 +38,8 @@ export interface WindowFrameInitMessage {
   csrfToken?: string
   accent?: string
   singlePanel?: boolean
+  menuItems?: WorkspaceMenuItem[]
+  openTabs?: WorkspaceOpenTab[]
 }
 
 export interface WindowFrameStateMessage {
@@ -54,6 +57,8 @@ export interface WindowFrameStateMessage {
   csrfToken?: string
   accent?: string
   singlePanel?: boolean
+  menuItems?: WorkspaceMenuItem[]
+  openTabs?: WorkspaceOpenTab[]
   invalidation?: { supplierId: number; resource: string; self?: boolean }
 }
 
@@ -62,9 +67,10 @@ export type WindowFrameParentMessage = WindowFrameInitMessage | WindowFrameState
 export type WindowFrameChildMessage =
   | { type: 'myucto-window-ready'; id: string }
   | { type: 'myucto-window-route'; id: string; fullPath: string; title: string; subtitle?: string | null }
-  | { type: 'myucto-window-navigate'; id: string; to: RouteLocationRaw; newPane?: boolean; placement?: 'beside' | 'right' }
+  | { type: 'myucto-window-navigate'; id: string; to: RouteLocationRaw; newPane?: boolean; placement?: 'beside' | 'right' | 'tab' }
   | { type: 'myucto-window-key'; id: string; event: WindowFrameKeyboardEvent }
   | { type: 'myucto-window-activate'; id: string }
+  | { type: 'myucto-window-select'; id: string; windowId: string }
   | { type: 'myucto-window-history'; id: string; direction: -1 | 1 }
   | { type: 'myucto-window-activity'; id: string }
   | { type: 'myucto-window-demo-read-only'; id: string }
@@ -101,6 +107,8 @@ export function isWindowFrameParentMessage(value: unknown, id: string): value is
   if (message.canOpenRight !== undefined && typeof message.canOpenRight !== 'boolean') return false
   if (message.csrfToken !== undefined && typeof message.csrfToken !== 'string') return false
   if (message.singlePanel !== undefined && typeof message.singlePanel !== 'boolean') return false
+  if (message.menuItems !== undefined && !Array.isArray(message.menuItems)) return false
+  if (message.openTabs !== undefined && !Array.isArray(message.openTabs)) return false
   if (message.accent !== undefined && (typeof message.accent !== 'string' || !['primary', 'primaryDeep', 'warning', 'success', 'danger', 'accent', 'teal', 'payroll', 'neutral'].includes(message.accent))) return false
   if (message.invalidation !== undefined) {
     const invalidation = message.invalidation as Record<string, unknown> | null
@@ -125,6 +133,7 @@ export function isWindowFrameChildMessage(value: unknown): value is WindowFrameC
     'myucto-window-navigate',
     'myucto-window-key',
     'myucto-window-activate',
+    'myucto-window-select',
     'myucto-window-history',
     'myucto-window-activity',
     'myucto-window-demo-read-only',

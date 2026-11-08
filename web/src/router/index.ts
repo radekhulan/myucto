@@ -109,7 +109,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'admin-work-report-billing-templates': ['price_list'],
   'admin-price-list': ['price_list'], 'admin-price-list-view': ['price_list'],
   'admin-price-list-new': ['price_list', 'write'], 'admin-price-list-edit': ['price_list', 'write'],
-  home: ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
+  home: ['dashboard'], 'workspace-new-tab': ['dashboard'], portal: ['profile'], 'portal-document-requests': ['documents.submit'],
   'portal-purchase-invoice-submissions': ['documents.submit'], 'portal-company-settings': [OPERATIONAL_SETTINGS_KEYS, 'write'],
   clients: ['clients'], 'client-new': ['clients.create', 'write'], 'client-detail': ['clients'], 'client-edit': ['clients', 'write'],
   projects: ['projects'], 'project-new': ['projects.create', 'write'], 'project-detail': ['projects'], 'project-edit': ['projects', 'write'],

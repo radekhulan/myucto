@@ -37,6 +37,8 @@ import { hostingNavAttention, resolveHostingActions } from '@/api/hostingActions
 import WorkspaceHost from '@/components/workspace/WorkspaceHost.vue'
 import WorkspaceNavLink from '@/components/workspace/WorkspaceNavLink.vue'
 import WorkspaceWindowSwitcher from '@/components/workspace/WorkspaceWindowSwitcher.vue'
+import WorkspaceWindowTabs from '@/components/workspace/WorkspaceWindowTabs.vue'
+import { windowTabKey } from '@/workspace/windowTabs'
 import WorkspaceWindowButton from '@/components/workspace/WorkspaceWindowButton.vue'
 import WorkspaceReloadButton from '@/components/workspace/WorkspaceReloadButton.vue'
 import WorkspaceFavorites from '@/components/workspace/WorkspaceFavorites.vue'
@@ -1265,6 +1267,16 @@ function sectionAccent(fullPath: string): string {
 }
 const activeSectionAccent = computed(() => sectionAccent(workspace.activeFullPath))
 
+/** Agenda stránky = položka menu, ke které patří (seznam, detail i úprava faktury sdílejí jednu záložku). */
+function sectionAgenda(fullPath: string): string {
+  const resolved = router.resolve(fullPath)
+  for (const section of orderedNav.value) {
+    const item = section.items.find(candidate => !candidate.external && isActive(candidate, resolved))
+    if (item) return item.to
+  }
+  return `/${resolved.path.split('/')[1] ?? ''}`
+}
+
 /** Rychlé zkratky v topbaru (desktop) — ikony navazují na menu (ICONS). */
 const quickActions = computed(() => {
   const actions = [
@@ -1365,6 +1377,10 @@ const shortcutActions = computed<ShortcutAction[]>(() => {
   }, {
     id: 'windows.favorites', label: t('favorites.title'), group: 'general',
   }, {
+    id: 'windows.new_tab', label: t('workspace.tab_new'), group: 'general',
+  }, {
+    id: 'windows.close_tab', label: t('workspace.tab_close'), group: 'general',
+  }, {
     // Registruje se vždy, i když v aktuální agendě zakládat nejde — jinak by
     // zkratka zmizela z nastavení v profilu. Prázdné `to` handler ignoruje.
     id: 'create.contextual',
@@ -1422,6 +1438,14 @@ function isEditableTarget(target: EventTarget | null): boolean {
     && (target.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName))
 }
 
+/** Zavře záložku aktivního panelu se všemi jejími okny. */
+function closeActiveTab(): void {
+  const active = workspace.windows.find(window => window.paneId === workspace.activePaneId)
+  if (!active) return
+  const key = windowTabKey(active)
+  void getWindowManager()?.closeWindows(workspace.windows.filter(window => windowTabKey(window) === key).map(window => window.id))
+}
+
 function onGlobalShortcut(event: KeyboardEvent): void {
   if (event.repeat || event.isComposing || sessionSecurity.privacyCurtain) return
   const target = event.target instanceof HTMLElement ? event.target : null
@@ -1449,6 +1473,8 @@ function onGlobalShortcut(event: KeyboardEvent): void {
       else if (action.id === 'windows.next') void manager?.next()
       else if (action.id === 'windows.recent') void manager?.toggleRecent()
       else if (action.id === 'windows.reload' && !workspace.companySwitching) void manager?.reloadPane(workspace.activePaneId)
+      else if (action.id === 'windows.new_tab' && !workspace.companySwitching) void manager?.openTab()
+      else if (action.id === 'windows.close_tab' && !workspace.companySwitching) closeActiveTab()
     }
     return
   }
@@ -2028,6 +2054,7 @@ onBeforeUnmount(() => {
 
       <!-- ── HLAVNÍ OBSAH ── -->
       <div class="flex-1 min-w-0 flex flex-col">
+        <WorkspaceWindowTabs :accent-for="sectionAccent" :disabled="tabletNavigationRail" />
         <!-- Paleta příkazů (Ctrl/⌘+K) — sama si registruje zkratku i teleport,
              stačí ji mít v layoutu jednou. -->
         <CommandPalette ref="paletteRef" :nav-items="paletteNavItems" :quick-actions="quickActions" />
@@ -2062,7 +2089,7 @@ onBeforeUnmount(() => {
               </WorkspaceNavLink>
             </span>
           </div>
-          <WorkspaceHost :accent-for="sectionAccent" />
+          <WorkspaceHost :accent-for="sectionAccent" :agenda-for="sectionAgenda" :menu-items="flatNavItems" />
         </main>
 
         <!-- Patička je stejné „chrome" jako topbar (globální hledání, jazyk, motiv),

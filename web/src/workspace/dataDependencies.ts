@@ -138,6 +138,8 @@ const ROUTE_RULES: readonly RouteRule[] = [
   [/^portal(?:\/|$)/, 'all', 'manual'],
   // Vlastní profil, licence a nástroje nečtou data dokladů.
   [/^(?:profile|activation|hosting|utilities|imports|exchange|templates|isds-gateway)(?:\/|$)/, NOTHING, 'manual'],
+  // Nová záložka čeká na hledání; rozepsaný dotaz se nesmí přepsat obnovou.
+  [/^new-tab$/, NOTHING, 'manual'],
 ]
 
 function normalize(path: string): string {
