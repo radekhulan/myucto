@@ -7699,6 +7699,7 @@
       "rename_action": "Change personal number",
       "rename_label": "Personal number",
       "rename_hint": "The employee's personal number. Attendance imports match rows by it; it has no effect on official filings.",
+      "employment_more_actions": "More relationship actions",
       "relation_type_change": {
         "action": "Correct relationship type",
         "title": "Correct the employment relationship type",

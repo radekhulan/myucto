@@ -7699,6 +7699,7 @@
       "rename_action": "Změnit osobní číslo",
       "rename_label": "Osobní číslo",
       "rename_hint": "Osobní číslo zaměstnance. Podle něj se páruje import docházky, na úřední výstupy nemá vliv.",
+      "employment_more_actions": "Další akce vztahu",
       "relation_type_change": {
         "action": "Opravit druh vztahu",
         "title": "Oprava druhu pracovního vztahu",

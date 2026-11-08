@@ -1493,10 +1493,12 @@ const actions = computed<ActionItem[]>(() => [
     run: () => startRename(),
   },
   {
+    // Přímo v nabídce, ne pod „Pokročilé": oprava druhu po importu registrací
+    // je běžný úkon a schovaná se nedala najít.
     key: 'change-relation-type',
     label: t('payroll.people.relation_type_change.action'),
     icon: 'edit',
-    tier: 'advanced',
+    tier: 'overflow',
     variant: 'warning',
     disabled: busy.value,
     show: props.canWrite && CORRECTABLE_RELATION_TYPES.includes(props.employment.relation_type),
@@ -2565,7 +2567,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
       </div>
     </form>
 
-    <ActionBar v-if="actions.some(action => action.show)" :actions="actions" class="mt-4" />
+    <ActionBar v-if="actions.some(action => action.show)" :actions="actions" :more-label="t('payroll.people.employment_more_actions')" class="mt-4" />
 
     <!--
       Povinnosti i časová osa byly vždycky rozbalené, takže jeden člověk se dvěma
