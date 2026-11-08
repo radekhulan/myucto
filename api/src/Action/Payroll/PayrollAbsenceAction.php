@@ -73,7 +73,40 @@ final class PayrollAbsenceAction
         private readonly PayrollObstacleInputMaterializer $obstacleInputs,
         private readonly SicknessCaseFromAbsenceService $sicknessCases,
         private readonly PayrollAbsenceApprovalWarnings $approvalWarnings,
+        private readonly \MyInvoice\Service\Payroll\Absence\ProbableAverageFromRateFiller $probableFromRate,
     ) {}
+
+    /**
+     * „Doplnit pravděpodobný výdělek ze sazby" pro vztahy mzdového měsíce,
+     * kterým chybí schválený průměr ({@see \MyInvoice\Service\Payroll\Absence\ProbableAverageFromRateFiller}).
+     */
+    public function fillProbableFromRate(Request $request, Response $response): Response
+    {
+        if (($error = $this->authorize($request, $response, AccessLevel::WRITE)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $period = $body['period'] ?? null;
+            if (!is_string($period) || preg_match('/^\d{4}-(0[1-9]|1[0-2])$/D', $period) !== 1) {
+                throw new \InvalidArgumentException('Zadejte mzdové období ve tvaru RRRR-MM.');
+            }
+            $officeId = $body['office_id'] ?? null;
+            if ($officeId !== null && (!is_int($officeId) || $officeId <= 0)) {
+                throw new \InvalidArgumentException('Mzdová účtárna není platná.');
+            }
+            $result = $this->probableFromRate->fill(
+                $this->currentSupplierId($request),
+                $period . '-01',
+                $officeId,
+                $this->userId($request),
+            );
+        } catch (\InvalidArgumentException $exception) {
+            return Json::error($response, 'validation_failed', $exception->getMessage(), 422);
+        }
+
+        return Json::ok($response, $result, 201);
+    }
 
     public function context(Request $request, Response $response): Response
     {

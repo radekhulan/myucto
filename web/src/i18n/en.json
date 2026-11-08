@@ -4671,6 +4671,9 @@
       },
       "readiness": {
         "affected": "Affects: {names}",
+        "fill_probable_average": "Fill in probable earnings from the rate",
+        "fill_probable_average_done": "Filled in automatically from the agreed hourly rate: {count}. The average can be corrected with a new revision in Absences and leave → Average earnings.",
+        "fill_probable_average_failed": "Probable earnings could not be filled in.",
         "impact": {
           "blocking": "Payroll cannot be calculated without this",
           "approval": "Can be calculated, not approved",
@@ -31894,7 +31897,6 @@
         "worked_days_not_provided": "The number of days worked could not be determined",
         "probable_earning_required": "The statutory minimum number of days was not worked in the decisive period; the average is set as probable earnings (§ 355 of the Labour Code)",
         "average_already_exists": "An average for this quarter already exists; the suggestion will not overwrite it",
-        "probable_hourly_rate_needs_review": "A proposal from an agreed hourly rate cannot be created in bulk. Create the average individually and assess the usual earning components.",
         "probable_earning_not_recorded": "The actual average cannot be derived from closed runs and no probable earning is recorded for the employment (§ 355 of the Labour Code). Open Payroll → People, fill in the probable hourly earning and its justification on the employment card and save."
       }
     },

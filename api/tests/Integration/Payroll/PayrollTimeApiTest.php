@@ -137,6 +137,50 @@ final class PayrollTimeApiTest extends TestCase
         self::assertNull($revision['overtime_millihours']);
     }
 
+    /**
+     * Schválení docházky nového hodinového vztahu založí chybějící
+     * pravděpodobný výdělek za čtvrtletí ze sjednané sazby (rozhodnutí
+     * maintainera 11/2026), aby příplatek za noc nebo víkend nečekal na
+     * ruční zadání průměru.
+     */
+    public function testApprovingTimeMonthCreatesProbableEarningFromRate(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('UPDATE payroll_employments SET start_date = "2026-04-01" WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_employment_terms (supplier_id, employment_id, effective_from, planned_start_on, weekly_hours, workload_basis_points, remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis) VALUES (?, ?, "2026-04-01", "2026-04-01", 40, 10000, "hourly", 20000, "wage_statement", "Syntetický výměr")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $calendar = $this->action->calendar($this->request('PUT', '/api/payroll/time/calendars/' . $this->employmentId)
+            ->withParsedBody([...$this->calendarPayload(), 'valid_from' => '2026-04-01']), new Response(), ['employmentId' => (string) $this->employmentId]);
+        self::assertSame(201, $calendar->getStatusCode(), (string) $calendar->getBody());
+        $saved = $this->action->saveManualSummary($this->request('POST', '/api/payroll/time/months/2026-05/manual-summary')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => 0, 'reason' => 'Syntetický ruční podklad', 'replace_source' => false,
+            'segments' => [['date_from' => '2026-05-01', 'date_to' => '2026-05-31', 'worked_duration_units' => 480000,
+                'overtime_duration_units' => null, 'worked_days' => null]],
+        ]), new Response(), ['period' => '2026-05']);
+        self::assertSame(200, $saved->getStatusCode(), (string) $saved->getBody());
+        $preview = $this->json($this->action->month($this->request('GET', '/api/payroll/time/month')->withQueryParams([
+            'period' => '2026-05', 'employment_id' => $this->employmentId,
+        ]), new Response()))['items'][0]['jmhz_work_summary']['preview'];
+
+        $approved = $this->action->approve($this->request('POST', '/api/payroll/time/months/2026-05/approve')->withParsedBody([
+            'employment_id' => $this->employmentId, 'row_version' => $this->json($saved)['month']['row_version'],
+            'jmhz_work_summary' => ['unworked_hours_occurred' => false, 'work_obstacles_occurred' => false]
+                + $preview['suggestions'] + ['source_snapshot_sha256' => $preview['source_snapshot_sha256']],
+        ]), new Response(), ['period' => '2026-05']);
+
+        self::assertSame(200, $approved->getStatusCode(), (string) $approved->getBody());
+        $probable = $this->json($approved)['probable_average'];
+        self::assertIsArray($probable, (string) $approved->getBody());
+        self::assertSame(20000, $probable['average_hourly_minor']);
+        $stmt = $pdo->prepare('SELECT status, source_kind, applicable_quarter FROM payroll_average_earning_snapshots WHERE supplier_id = ? AND employment_id = ?');
+        $stmt->execute([$this->supplierId, $this->employmentId]);
+        self::assertSame([['status' => 'approved', 'source_kind' => 'probable', 'applicable_quarter' => 2]], array_map(
+            static fn (array $row): array => ['status' => $row['status'], 'source_kind' => $row['source_kind'], 'applicable_quarter' => (int) $row['applicable_quarter']],
+            $stmt->fetchAll(PDO::FETCH_ASSOC),
+        ));
+    }
+
     public function testCalendarShiftAndActualTimeBuildMonthlySummary(): void
     {
         $calendar = $this->action->calendar(

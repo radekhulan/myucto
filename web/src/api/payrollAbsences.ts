@@ -466,4 +466,13 @@ export const payrollAbsenceApi = {
     items: Array<{ employment_id: number, input_version: string }>
   }) => api.post<{ averages: AverageSnapshot[] }>('/payroll/time/averages/bulk', payload)
     .then(response => response.data.averages),
+  /**
+   * Doplní pravděpodobný výdělek ze sjednané hodinové sazby vztahům měsíce,
+   * kterým chybí schválený průměr (automatický záznam, opravitelný revizí).
+   */
+  fillProbableFromRate: (period: string, officeId: number | null = null) =>
+    api.post<{ created: AverageSnapshot[]; candidates: number }>('/payroll/time/averages/probable-from-rate', {
+      period,
+      ...(officeId === null ? {} : { office_id: officeId }),
+    }).then(response => response.data),
 }

@@ -25,6 +25,7 @@ const m = vi.hoisted(() => ({
   advanceStart: vi.fn(),
   monthlyChecklist: vi.fn(),
   hideWarning: vi.fn(),
+  fillProbable: vi.fn(),
   push: vi.fn(),
   replace: vi.fn(),
 }))
@@ -69,6 +70,9 @@ vi.mock('@/api/payroll', () => ({
     monthlyChecklist: m.monthlyChecklist,
     hideWarning: m.hideWarning,
   },
+}))
+vi.mock('@/api/payrollAbsences', () => ({
+  payrollAbsenceApi: { fillProbableFromRate: m.fillProbable },
 }))
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ canWrite: m.canWrite }),
@@ -1954,8 +1958,41 @@ describe('PayrollRuns', () => {
       wrapper.unmount()
     })
 
-    it('předběžná kontrola nabídne skrytí jen u skrytelného nálezu', async () => {
+    it('předběžná kontrola doplní chybějící průměr ze sazby jedním tlačítkem', async () => {
       m.runs.mockResolvedValue([])
+      m.readiness.mockReturnValue({
+        period_start: '2026-08-01',
+        payment_date: '2026-09-15',
+        office_id: null,
+        ready: false,
+        has_findings: true,
+        findings: [{
+          code: 'hourly_average_earning_missing',
+          severity: 'blocker',
+          impact: 'approval',
+          scope: 'monthly',
+          message: 'Chybí schválený průměrný výdělek za 3. čtvrtletí 2026.',
+          remediation_path: null,
+          count: 1,
+          entities: [],
+          hideable: false,
+          subject_type: null,
+          subject_ids: [],
+        }],
+      } satisfies PayrollRunReadiness)
+      m.fillProbable.mockResolvedValue({ created: [{ id: 1 }], candidates: 1 })
+
+      const wrapper = mount(PayrollRuns)
+      await flushPromises()
+      await wrapper.get('[data-test="run-readiness-fill-probable-hourly_average_earning_missing"]').trigger('click')
+      await flushPromises()
+
+      expect(m.fillProbable).toHaveBeenCalledTimes(1)
+      expect(m.success).toHaveBeenCalledWith('payroll.runs.readiness.fill_probable_average_done')
+      wrapper.unmount()
+    })
+
+    it('předběžná kontrola nabídne skrytí jen u skrytelného nálezu', async () => {      m.runs.mockResolvedValue([])
       m.readiness.mockReturnValue({
         period_start: '2026-08-01',
         payment_date: '2026-09-15',

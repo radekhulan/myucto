@@ -4671,6 +4671,9 @@
       },
       "readiness": {
         "affected": "Týká se: {names}",
+        "fill_probable_average": "Doplnit pravděpodobný výdělek ze sazby",
+        "fill_probable_average_done": "Doplněno automaticky ze sjednané hodinové sazby: {count}. Průměr jde opravit novou revizí v Absence a dovolená → Průměrný výdělek.",
+        "fill_probable_average_failed": "Pravděpodobný výdělek se nepodařilo doplnit.",
         "impact": {
           "blocking": "Bez tohohle se nedá počítat",
           "approval": "Spočítat půjde, schválit ne",
@@ -31894,7 +31897,6 @@
         "worked_days_not_provided": "Počet odpracovaných dnů se nepodařilo zjistit",
         "probable_earning_required": "V rozhodném období nebyl odpracován zákonný minimální počet dnů; průměr se stanovuje jako pravděpodobný výdělek (§ 355 ZP)",
         "average_already_exists": "Průměr pro toto čtvrtletí už existuje; návrh jej nepřepíše",
-        "probable_hourly_rate_needs_review": "Návrh ze sjednané hodinové sazby se nezakládá hromadně. Založte průměr jednotlivě a posuďte obvyklé složky výdělku.",
         "probable_earning_not_recorded": "Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek (§ 355 zákoníku práce). Otevřete Mzdy → Zaměstnanci, na kartě vztahu vyplňte pravděpodobný hodinový výdělek a jeho odůvodnění a uložte."
       }
     },

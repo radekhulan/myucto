@@ -17,6 +17,7 @@ import {
   type PayrollRunValidation,
 } from '@/api/payroll'
 import { apiErrorMessage } from '@/api/errors'
+import { payrollAbsenceApi } from '@/api/payrollAbsences'
 import { usePayrollYearClosedToast } from '@/composables/usePayrollYearClosedToast'
 import PayrollPayslipHourlyBreakdown from '@/components/payroll/PayrollPayslipHourlyBreakdown.vue'
 import PayrollIncomeTaxBreakdown from '@/components/payroll/PayrollIncomeTaxBreakdown.vue'
@@ -156,6 +157,28 @@ const readiness = ref<PayrollRunReadiness | null>(null)
 const pendingStart = ref<{ run: PayrollRun, command: PayrollRunCommand } | null>(null)
 
 const readinessFindings = computed(() => readiness.value?.findings ?? [])
+
+/*
+ * Chybějící průměrný výdělek hodinového vztahu (příplatek za noc a víkend,
+ * atribut JMHZ). Rozhodnutí maintainera: doplní se pravděpodobný výdělek ze
+ * sjednané sazby hromadně jedním tlačítkem; jde opravit novou revizí.
+ */
+const PROBABLE_AVERAGE_CODES = ['hourly_average_earning_missing', 'jmhz_average_hourly_earning_missing']
+const canFillAverages = computed(() => auth.canWrite('payroll.time.write'))
+const fillingAverages = ref(false)
+async function fillProbableAverages(): Promise<void> {
+  if (fillingAverages.value) return
+  fillingAverages.value = true
+  try {
+    const result = await payrollAbsenceApi.fillProbableFromRate(period.value)
+    toast.success(t('payroll.runs.readiness.fill_probable_average_done', { count: result.created.length }))
+    await load()
+  } catch (error) {
+    toast.error(apiErrorMessage(error, t('payroll.runs.readiness.fill_probable_average_failed')))
+  } finally {
+    fillingAverages.value = false
+  }
+}
 
 const canWrite = computed(() => auth.canWrite('payroll.inputs.write'))
 const checklistEnvironment = ref<PayrollRegzelEnvironment>('production')
@@ -1864,6 +1887,17 @@ onMounted(load)
                   </svg>
                   {{ t('payroll.runs.validation.open_remediation') }}
                 </a>
+                <button
+                  v-if="PROBABLE_AVERAGE_CODES.includes(finding.code) && canFillAverages"
+                  type="button"
+                  :class="[btnOutlineSm('success'), 'mt-2 whitespace-nowrap']"
+                  :disabled="fillingAverages"
+                  :data-test="`run-readiness-fill-probable-${finding.code}`"
+                  @click="fillProbableAverages"
+                >
+                  <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path :d="ICONS.plus" /></svg>
+                  {{ t('payroll.runs.readiness.fill_probable_average') }}
+                </button>
                 <div
                   v-if="finding.hideable && canHideWarnings"
                   class="mt-2 flex flex-wrap gap-2"

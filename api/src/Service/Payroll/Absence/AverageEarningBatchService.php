@@ -179,10 +179,7 @@ final class AverageEarningBatchService
                 }
                 if (self::needsIndividualReview($suggestion)) {
                     throw new \InvalidArgumentException(sprintf(
-                        ($suggestion['probable_source'] ?? null) === AverageEarningDerivationService::PROBABLE_SOURCE_AGREED_HOURLY_RATE
-                            ? 'Pracovní vztah %d má pouze návrh ze sjednané hodinové sazby; posuďte obvyklé složky mzdy a '
-                                . 'potvrďte ho jednotlivě v Nepřítomnostech → Průměrné výdělky.'
-                            : 'Pracovní vztah %d má průměr z převzatých mezd předchozího programu; '
+                        'Pracovní vztah %d má průměr z převzatých mezd předchozího programu; '
                         . 'potvrďte ho jednotlivě v Nepřítomnostech → Průměrné výdělky.',
                         $employmentId,
                     ));
@@ -212,6 +209,96 @@ final class AverageEarningBatchService
         }
     }
 
+    /** Odůvodnění automaticky založeného pravděpodobného výdělku ze sazby. */
+    public const AUTOMATIC_RATE_RATIONALE = 'Automaticky ze sjednané hodinové sazby (§ 355 odst. 2 ZP). '
+        . 'Založeno automaticky; pokud mají být zohledněny další obvyklé složky výdělku, opravte ho novou revizí.';
+
+    /** Zdroje pravděpodobného výdělku, které se smí založit automaticky. */
+    private const AUTOMATIC_PROBABLE_SOURCES = [
+        AverageEarningDerivationService::PROBABLE_SOURCE_AGREED_HOURLY_RATE,
+        AverageEarningDerivationService::PROBABLE_SOURCE_TERMS,
+    ];
+
+    /**
+     * Pravděpodobný výdělek ze sjednané sazby, pokud za čtvrtletí chybí.
+     *
+     * Rozhodnutí maintainera (11/2026): u hodinově odměňovaného vztahu, kde
+     * skutečný průměr z rozhodného období odvodit nejde (nový vztah, málo
+     * odpracovaných dnů), se pravděpodobný výdělek podle § 355 ZP založí
+     * a schválí automaticky ze sjednané hodinové sazby, nebo z pravděpodobného
+     * výdělku zadaného v podmínkách vztahu. Bez něj zákonný příplatek za noc
+     * a víkend (10 % průměru) zastavil výpočet u každé brigádnice zvlášť.
+     * Záznam nese v odůvodnění i ve stopě, že vznikl automaticky, a opravuje
+     * se novou revizí jako každý jiný.
+     *
+     * Nezakládá nic, když za čtvrtletí už nějaký průměr je (i neschválený),
+     * když návrh není pravděpodobný výdělek z těchto zdrojů, nebo když vztah
+     * ve čtvrtletí netrval. Volá se z akcí, které mění podklady (schválení
+     * docházky, „Počítat ze směn", hromadné doplnění v kontrole běhu), nikdy
+     * při čtení.
+     *
+     * @return array<string,mixed>|null schválený snapshot, nebo `null`
+     */
+    public function ensureProbableFromRate(
+        int $supplierId,
+        int $employmentId,
+        int $year,
+        int $quarter,
+        ?int $userId,
+    ): ?array {
+        [$applicationStart] = $this->quarter($year, $quarter);
+        $pdo = $this->db->pdo();
+        $ownsTransaction = !$pdo->inTransaction();
+        if ($ownsTransaction) {
+            $pdo->beginTransaction();
+        }
+        try {
+            $this->lockEmployment($supplierId, $employmentId);
+            $created = null;
+            if ($this->hourlyInQuarter($supplierId, $employmentId, $year, $quarter)
+                && $this->existing($supplierId, [$employmentId], $year, $quarter) === []
+                && $this->averages->quarterMismatch($supplierId, $employmentId, $year, $quarter) === null
+            ) {
+                $floors = (new \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver($this->db))
+                    ->forMany($supplierId, [$employmentId], $applicationStart, $applicationStart, true);
+                $suggestion = $this->derivation->suggest($supplierId, $employmentId, $year, $quarter, $floors[$employmentId] ?? []);
+                if (($suggestion['ready'] ?? false) === true
+                    && ($suggestion['source_kind'] ?? null) === 'probable'
+                    && in_array($suggestion['probable_source'] ?? null, self::AUTOMATIC_PROBABLE_SOURCES, true)
+                    && (int) ($suggestion['probable_hourly_minor'] ?? 0) > 0
+                ) {
+                    $rationale = ($suggestion['probable_source'] ?? null) === AverageEarningDerivationService::PROBABLE_SOURCE_TERMS
+                        ? mb_substr('Automaticky z pravděpodobného výdělku v podmínkách vztahu (§ 355 odst. 2 ZP): '
+                            . (string) $suggestion['probable_rationale'], 0, 1000)
+                        : self::AUTOMATIC_RATE_RATIONALE;
+                    $created = $this->createAndApprove(
+                        $supplierId,
+                        $employmentId,
+                        $year,
+                        $quarter,
+                        $applicationStart,
+                        $suggestion,
+                        $this->rulesets->forDate(PayrollRulesetDomain::CompensationAverages, $applicationStart),
+                        $userId,
+                        $floors[$employmentId] ?? [],
+                        $rationale,
+                        'probable_from_rate',
+                    );
+                }
+            }
+            if ($ownsTransaction) {
+                $pdo->commit();
+            }
+
+            return $created;
+        } catch (\Throwable $exception) {
+            if ($ownsTransaction && $pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            throw $exception;
+        }
+    }
+
     /**
      * @param array<string,mixed> $suggestion
      * @return array<string,mixed>
@@ -226,13 +313,15 @@ final class AverageEarningBatchService
         \MyInvoice\Service\Payroll\Ruleset\PayrollRulesetVersion $ruleset,
         ?int $userId,
         array $hourlyFloorIntervals,
+        ?string $rationaleOverride = null,
+        string $automatic = 'bulk',
     ): array {
         $probable = $suggestion['source_kind'] === 'probable';
         $gross = $probable ? 0 : (int) $suggestion['gross_earnings_minor'];
         $minutes = $probable ? 0 : $suggestion['worked_minutes'];
         $units = $minutes === null ? AverageEarningDerivationService::durationUnits($suggestion) : null;
         $days = $probable ? 0 : (int) $suggestion['worked_days'];
-        $rationale = $probable ? (string) $suggestion['probable_rationale'] : self::ACTUAL_RATIONALE;
+        $rationale = $rationaleOverride ?? ($probable ? (string) $suggestion['probable_rationale'] : self::ACTUAL_RATIONALE);
         $calculated = $this->calculator->calculate(
             $applicationStart,
             $gross,
@@ -247,7 +336,7 @@ final class AverageEarningBatchService
         );
         \MyInvoice\Service\Payroll\PayrollHourlyAverageFloorResolver::assertFloorKnown($hourlyFloorIntervals, $applicationStart, $calculated->averageHourlyMinor);
         $trace = $calculated->trace;
-        $trace['automatic'] = 'bulk';
+        $trace['automatic'] = $automatic;
         $trace['input_version'] = (string) $suggestion['input_version'];
         if ($probable) {
             $trace['probable_source'] = (string) $suggestion['probable_source'];
@@ -292,12 +381,16 @@ final class AverageEarningBatchService
      * Průměr z převzatých mezd se hromadně neschvaluje: převzatá hrubá mzda
      * není započitatelná mzda § 354 ZP a účetní ji musí posoudit sama.
      *
+     * Návrh ze sjednané hodinové sazby se dřív hromadně nezakládal
+     * (`probable_hourly_rate_needs_review`). Rozhodnutí maintainera (11/2026):
+     * zakládá se automaticky ze sazby a jde opravit novou revizí, viz
+     * {@see ensureProbableFromRate()}. Pojistka proto platí jen pro převzaté mzdy.
+     *
      * @param array<string,mixed> $suggestion
      */
     private static function needsIndividualReview(array $suggestion): bool
     {
-        return (array) ($suggestion['takeover_periods'] ?? []) !== []
-            || ($suggestion['probable_source'] ?? null) === AverageEarningDerivationService::PROBABLE_SOURCE_AGREED_HOURLY_RATE;
+        return (array) ($suggestion['takeover_periods'] ?? []) !== [];
     }
 
     private function candidate(
@@ -316,8 +409,7 @@ final class AverageEarningBatchService
             'decisive_to' => $suggestion['decisive_to'],
             'ready' => $suggestion['ready'] && !$takeover,
             'blockers' => $takeover
-                ? [...$suggestion['blockers'], ($suggestion['probable_source'] ?? null) === AverageEarningDerivationService::PROBABLE_SOURCE_AGREED_HOURLY_RATE
-                    ? 'probable_hourly_rate_needs_review' : 'takeover_needs_review']
+                ? [...$suggestion['blockers'], 'takeover_needs_review']
                 : $suggestion['blockers'],
             'source_kind' => $suggestion['source_kind'],
             'probable_source' => $suggestion['probable_source'],
@@ -409,6 +501,54 @@ final class AverageEarningBatchService
         return $gross !== $existing['gross_earnings_minor'] - $existing['longer_period_allocated_minor']
             || $units !== AverageEarningDerivationService::durationUnits($existing)
             || $days !== $existing['worked_days'];
+    }
+
+    /**
+     * Totéž jako {@see ensureProbableFromRate()} pro období měsíce, ale chyba
+     * nezmění odpověď akce, která ho vyvolala (schválení docházky, přepnutí
+     * zdroje hodin). Odvolanou transakci vyhazuje dál.
+     *
+     * @return array<string,mixed>|null
+     */
+    public function ensureProbableFromRateAfterTimeChange(int $supplierId, int $employmentId, string $periodStart, ?int $userId): ?array
+    {
+        try {
+            return $this->ensureProbableFromRate(
+                $supplierId,
+                $employmentId,
+                (int) substr($periodStart, 0, 4),
+                intdiv((int) substr($periodStart, 5, 2) - 1, 3) + 1,
+                $userId,
+            );
+        } catch (\Throwable $exception) {
+            if (\MyInvoice\Infrastructure\Database\TransactionFailure::aborted($exception)) {
+                throw $exception;
+            }
+            error_log(sprintf(
+                'Automatický pravděpodobný výdělek vztahu %d za %s se nepodařilo založit: %s',
+                $employmentId,
+                $periodStart,
+                $exception->getMessage(),
+            ));
+
+            return null;
+        }
+    }
+
+    /** Má vztah ve čtvrtletí hodinové podmínky s kladnou sazbou? */
+    private function hourlyInQuarter(int $supplierId, int $employmentId, int $year, int $quarter): bool
+    {
+        [$from, $to] = $this->quarter($year, $quarter);
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT 1 FROM payroll_employment_terms
+              WHERE supplier_id = ? AND employment_id = ?
+                AND remuneration_type = "hourly" AND hourly_rate_minor > 0
+                AND effective_from <= ? AND (effective_to IS NULL OR effective_to >= ?)
+              LIMIT 1',
+        );
+        $stmt->execute([$supplierId, $employmentId, $to, $from]);
+
+        return $stmt->fetchColumn() !== false;
     }
 
     private function lockEmployment(int $supplierId, int $employmentId): void

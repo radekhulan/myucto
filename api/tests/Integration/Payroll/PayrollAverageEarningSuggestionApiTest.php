@@ -31,6 +31,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
 
     private Connection $db;
     private PayrollAbsenceAction $action;
+    private \DI\Container $container;
     private int $userId;
     private int $supplierId;
     private int $employeeId;
@@ -46,6 +47,7 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
             $container = \MyInvoice\Tests\Support\PayrollTestContainer::build();
             $this->db = $container->get(Connection::class);
             $this->action = $container->get(PayrollAbsenceAction::class);
+            $this->container = $container;
         } catch (\Throwable $e) {
             $this->markTestSkipped('DI/DB nedostupné: ' . $e->getMessage());
         }
@@ -168,7 +170,12 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertTrue($page['body']['items'][0]['existing_outdated']);
     }
 
-    public function testHourlyRateIsOnlyIndividualProposalAndAccountantValueTakesPriority(): void
+    /**
+     * Návrh ze sjednané hodinové sazby se dřív hromadně nezakládal. Rozhodnutí
+     * maintainera (11/2026): zakládá se i hromadně, opravuje se novou revizí.
+     * Hodnota zadaná účetní v podmínkách má dál přednost.
+     */
+    public function testHourlyRateProposalIsBulkCreatableAndAccountantValueTakesPriority(): void
     {
         $this->startEmploymentOn('2026-06-01');
         $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
@@ -181,12 +188,8 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         self::assertSame(20000, $suggestion['probable_hourly_minor']);
         self::assertTrue($suggestion['ready']);
         $page = $this->call('averageCandidates', 'GET', ['year' => 2026, 'quarter' => 2]);
-        self::assertFalse($page['body']['items'][0]['ready']);
-        self::assertContains('probable_hourly_rate_needs_review', $page['body']['items'][0]['blockers']);
-        $bulk = $this->call('createAutomaticAverages', 'POST', ['year' => 2026, 'quarter' => 2,
-            'items' => [['employment_id' => $this->employmentId, 'input_version' => $suggestion['input_version']]]]);
-        self::assertSame(422, $bulk['status']);
-        self::assertStringContainsString('hodinové sazby', $bulk['body']['error']['message']);
+        self::assertTrue($page['body']['items'][0]['ready']);
+        self::assertNotContains('probable_hourly_rate_needs_review', $page['body']['items'][0]['blockers']);
         $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET probable_hourly_earning_minor = 24000,
             probable_earning_rationale = "Posouzení obvyklé odměny a příplatků" WHERE supplier_id = ? AND employment_id = ?')
             ->execute([$this->supplierId, $this->employmentId]);
@@ -196,6 +199,62 @@ final class PayrollAverageEarningSuggestionApiTest extends TestCase
         $term = $this->db->pdo()->prepare('SELECT hourly_rate_minor FROM payroll_employment_terms WHERE supplier_id = ? AND employment_id = ?');
         $term->execute([$this->supplierId, $this->employmentId]);
         self::assertSame(20000, (int) $term->fetchColumn());
+    }
+
+    /**
+     * Nový hodinový vztah bez průměru dostane pravděpodobný výdělek ze sazby
+     * automaticky, schválený a označený jako automatický. Opakované volání
+     * nic nezaloží a měsíčně odměňovaný vztah se nezakládá vůbec.
+     */
+    public function testProbableEarningFromRateIsCreatedAutomaticallyOnlyOnce(): void
+    {
+        $this->startEmploymentOn('2026-06-01');
+        $this->db->pdo()->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, actual_start_on, weekly_hours,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2026-06-01", "2026-06-01", "2026-06-01", 40, "hourly", 20000, "contract", "Syntetická smlouva")')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $batch = $this->container->get(\MyInvoice\Service\Payroll\Absence\AverageEarningBatchService::class);
+
+        $created = $batch->ensureProbableFromRate($this->supplierId, $this->employmentId, 2026, 2, $this->userId);
+
+        self::assertNotNull($created);
+        self::assertSame('approved', $created['status']);
+        self::assertSame('probable', $created['source_kind']);
+        self::assertSame(20000, $created['average_hourly_minor']);
+        self::assertStringContainsString('Automaticky ze sjednané hodinové sazby (§ 355 odst. 2 ZP)', (string) $created['rationale']);
+        self::assertSame('probable_from_rate', $created['input_trace']['automatic']);
+        self::assertNull($batch->ensureProbableFromRate($this->supplierId, $this->employmentId, 2026, 2, $this->userId));
+
+        $this->db->pdo()->prepare('UPDATE payroll_employment_terms SET remuneration_type = "monthly", hourly_rate_minor = NULL,
+            monthly_gross_minor = 4000000, remuneration_basis_kind = NULL, remuneration_basis = NULL WHERE supplier_id = ? AND employment_id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        self::assertNull($batch->ensureProbableFromRate($this->supplierId, $this->employmentId, 2026, 3, $this->userId));
+    }
+
+    public function testFillEndpointCreatesProbableEarningForHourlyEmploymentsOfThePeriod(): void
+    {
+        $pdo = $this->db->pdo();
+        $this->startEmploymentOn('2026-06-01');
+        $pdo->prepare('UPDATE payroll_employments SET actual_start_date = "2026-06-01" WHERE supplier_id = ? AND id = ?')
+            ->execute([$this->supplierId, $this->employmentId]);
+        $pdo->prepare('INSERT INTO payroll_employee_profiles (supplier_id, employee_id, profile_status) VALUES (?, ?, "ready")')
+            ->execute([$this->supplierId, $this->employeeId]);
+        $pdo->prepare('INSERT INTO payroll_employment_terms
+            (supplier_id, employment_id, effective_from, planned_start_on, actual_start_on, weekly_hours,
+             remuneration_type, hourly_rate_minor, remuneration_basis_kind, remuneration_basis)
+            VALUES (?, ?, "2026-06-01", "2026-06-01", "2026-06-01", 40, "hourly", 20000, "contract", "Syntetická smlouva")')
+            ->execute([$this->supplierId, $this->employmentId]);
+
+        $filled = $this->call('fillProbableFromRate', 'POST', ['period' => '2026-06']);
+
+        self::assertSame(201, $filled['status'], json_encode($filled['body']));
+        self::assertSame(1, $filled['body']['candidates']);
+        self::assertCount(1, $filled['body']['created']);
+        self::assertSame(20000, $filled['body']['created'][0]['average_hourly_minor']);
+        $again = $this->call('fillProbableFromRate', 'POST', ['period' => '2026-06']);
+        self::assertSame(0, $again['body']['candidates']);
+        self::assertSame(422, $this->call('fillProbableFromRate', 'POST', ['period' => '2026-6'])['status']);
     }
 
     public function testHourlyAverageCreationAndBulkProposalUseDocumentedStatutoryWeek(): void

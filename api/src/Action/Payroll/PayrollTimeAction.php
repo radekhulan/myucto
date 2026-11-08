@@ -39,6 +39,7 @@ final class PayrollTimeAction
         private readonly PayrollSurchargeInputMaterializer $surchargeInputs,
         private readonly PayrollHistoricalPeriodService $historicalPeriods,
         private readonly PayrollStandbyInputMaterializer $standbyInputs,
+        private readonly \MyInvoice\Service\Payroll\Absence\AverageEarningBatchService $averageBatch,
     ) {}
 
     public function month(Request $request, Response $response): Response
@@ -750,10 +751,17 @@ final class PayrollTimeAction
         if (($error = $this->authorize($request, $response, 'payroll.time.write', AccessLevel::WRITE)) !== null) return $error;
         if (($error = $this->authorize($request, $response, 'payroll.inputs.write', AccessLevel::WRITE)) !== null) return $error;
         try {
-            $result = $this->time->switchImportToEntries($this->currentSupplierId($request), $this->routePeriod($args), $this->input($request), $this->userId($request));
+            $supplierId = $this->currentSupplierId($request);
+            $result = $this->time->switchImportToEntries($supplierId, $this->routePeriod($args), $this->input($request), $this->userId($request));
             if ($result['changed']) {
                 $this->auditMonth($request, 'payroll.time.source_changed', $result['month']);
             }
+            $result['probable_average'] = $this->averageBatch->ensureProbableFromRateAfterTimeChange(
+                $supplierId,
+                PayrollTimeValue::int($result['month']['employment_id'] ?? null, 'employment_id'),
+                PayrollTimeValue::string($result['month']['period_start'] ?? null, 'period_start'),
+                $this->userId($request),
+            );
             return Json::ok($response, $result);
         } catch (PayrollTimeConflictException $e) {
             return $this->conflict($response, $e);
@@ -831,10 +839,19 @@ final class PayrollTimeAction
                 throw $e;
             }
             $this->auditMonth($request, 'payroll.time.month_approved', $month);
+            // Až po commitu a bez vlivu na odpověď: chybí-li hodinovému vztahu
+            // průměr za čtvrtletí, založí se pravděpodobný výdělek ze sazby.
+            $probableAverage = $this->averageBatch->ensureProbableFromRateAfterTimeChange(
+                $supplierId,
+                PayrollTimeValue::int($month['employment_id'] ?? null, 'employment_id'),
+                PayrollTimeValue::string($month['period_start'] ?? null, 'period_start'),
+                $this->userId($request),
+            );
             return Json::ok($response, [
                 'month' => $month,
                 'surcharges' => $surcharges,
                 'standby' => $standby,
+                'probable_average' => $probableAverage,
             ]);
         } catch (PayrollSurchargeException $e) {
             return Json::error($response, $e->reason, $e->getMessage(), 409);
