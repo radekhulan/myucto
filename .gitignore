@@ -62,3 +62,4 @@ tools/regression/**/__pycache__/
 /tools/Publish-DeploymentSnapshot.ps1
 /production.sh
 /demo.sh
+/cfg.velin-db.php
