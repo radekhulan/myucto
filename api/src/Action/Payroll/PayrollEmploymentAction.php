@@ -18,6 +18,7 @@ use MyInvoice\Security\AccessLevel;
 use MyInvoice\Security\RequestAuthorization;
 use MyInvoice\Service\IpMatcher;
 use MyInvoice\Service\Payroll\PayrollEmploymentJmhzEvidenceCatalog;
+use MyInvoice\Service\Payroll\PayrollEmploymentMergeService;
 use MyInvoice\Service\Payroll\PayrollEmploymentValidator;
 use MyInvoice\Service\Payroll\PayrollFieldValidationException;
 use MyInvoice\Service\Payroll\PayrollModuleAccess;
@@ -39,6 +40,7 @@ final class PayrollEmploymentAction
         private readonly PayrollModuleAccess $access,
         private readonly IpMatcher $ipMatcher,
         private readonly PayrollEmploymentDeletionRepository $deletion,
+        private readonly PayrollEmploymentMergeService $merge,
         private readonly ?PayrollRulesetProvider $rulesets = null,
     ) {}
 
@@ -315,6 +317,55 @@ final class PayrollEmploymentAction
                 (int) $args['id'],
                 $relationType,
                 $this->validator->rowVersion($body),
+                $note === '' ? null : $note,
+                $this->userId($request),
+                $this->ip($request),
+                $request->getHeaderLine('User-Agent'),
+            );
+        } catch (\Throwable $e) {
+            return $this->domainError($response, $e);
+        }
+
+        return Json::ok($response, $result);
+    }
+
+    /**
+     * Sloučení vztahu do jiného vztahu téže osoby: data se přesunou k cíli
+     * a tento vztah se smaže. Pojistky hlídá služba pod zámkem obou vztahů.
+     *
+     * @param array{id:string} $args
+     */
+    public function mergeInto(Request $request, Response $response, array $args): Response
+    {
+        if (($error = $this->authorize($request, $response)) !== null) {
+            return $error;
+        }
+        try {
+            $body = $this->body($request);
+            $targetId = $body['target_employment_id'] ?? null;
+            if (!is_int($targetId) || $targetId <= 0) {
+                throw new PayrollFieldValidationException('Vyberte vztah, do kterého se má tento vztah sloučit.', 'target_employment_id');
+            }
+            $targetVersion = $body['target_row_version'] ?? null;
+            if (!is_int($targetVersion) || $targetVersion <= 0) {
+                throw new PayrollFieldValidationException('Chybí verze cílového vztahu.', 'target_row_version');
+            }
+            $adoptTerms = $body['adopt_terms'] ?? false;
+            if (!is_bool($adoptTerms)) {
+                throw new PayrollFieldValidationException('Převzetí podmínek musí být ano, nebo ne.', 'adopt_terms');
+            }
+            $note = $body['note'] ?? null;
+            if ($note !== null && !is_string($note)) {
+                throw new PayrollFieldValidationException('Poznámka musí být text.', 'note');
+            }
+            $note = $note === null ? null : mb_substr(trim($note), 0, 500);
+            $result = $this->merge->merge(
+                $this->currentSupplierId($request),
+                (int) $args['id'],
+                $targetId,
+                $this->validator->rowVersion($body),
+                $targetVersion,
+                $adoptTerms,
                 $note === '' ? null : $note,
                 $this->userId($request),
                 $this->ip($request),

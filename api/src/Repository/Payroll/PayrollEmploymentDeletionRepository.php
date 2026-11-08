@@ -318,12 +318,18 @@ final class PayrollEmploymentDeletionRepository
     /**
      * Co brání opravě druhu vztahu. Volá se pod zámkem řádku vztahu.
      *
+     * `$except` vynechá skupiny blokátorů podle aliasu. Sloučení vztahů vynechá
+     * `registration`: cílem sloučení je právě registrovaný vztah a nesoulad
+     * s registrací hlásí varováním (podejte opravu registrace).
+     *
+     * @param list<string> $except
      * @return array{code:string,message:string}|null
      */
-    public function relationTypeChangeBlocker(int $supplierId, int $employmentId): ?array
+    public function relationTypeChangeBlocker(int $supplierId, int $employmentId, array $except = []): ?array
     {
         $columns = [];
-        foreach (self::RELATION_TYPE_BLOCKERS as $alias => $blocker) {
+        $blockers = array_diff_key(self::RELATION_TYPE_BLOCKERS, array_flip($except));
+        foreach ($blockers as $alias => $blocker) {
             $columns[] = self::existsExpression($blocker['tables'], $blocker['where'] ?? null) . " AS blocker_{$alias}";
         }
         $stmt = $this->db->pdo()->prepare(
@@ -335,7 +341,7 @@ final class PayrollEmploymentDeletionRepository
         if (!is_array($row)) {
             return null;
         }
-        foreach (self::RELATION_TYPE_BLOCKERS as $alias => $blocker) {
+        foreach ($blockers as $alias => $blocker) {
             if ((int) $row["blocker_{$alias}"] > 0) {
                 return ['code' => $blocker['code'], 'message' => $blocker['message']];
             }

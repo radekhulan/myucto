@@ -1166,7 +1166,8 @@
         "2260_payroll_termination_floor_proof.sql",
         "2261_payroll_jmhz_holiday_time_off.sql",
         "2262_drop_supplier_login_policy.sql",
-        "2263_payroll_employment_relation_type_changed_event.sql"
+        "2263_payroll_employment_relation_type_changed_event.sql",
+        "2264_payroll_employment_merged_event.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -13013,7 +13014,7 @@
                 "diff_json": "longtext NULL DEFAULT NULL",
                 "effective_on": "date NOT NULL",
                 "employment_id": "bigint(20) unsigned NOT NULL",
-                "event_type": "enum('created','terms_changed','terms_corrected','status_changed','checklist_changed','relation_type_changed') NOT NULL",
+                "event_type": "enum('created','terms_changed','terms_corrected','status_changed','checklist_changed','relation_type_changed','merged') NOT NULL",
                 "from_status": "varchar(32) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
                 "note": "varchar(500) NULL DEFAULT NULL",

@@ -319,6 +319,8 @@ final class RoutePermissionMap
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Oprava druhu vztahu je oprava jeho založení, proto totéž právo.
         ['PATCH', '#^/api/payroll/employments/[0-9]+/relation-type$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Sloučení je oprava založení dvou vztahů a končí smazáním jednoho z nich.
+        ['POST', '#^/api/payroll/employments/[0-9]+/merge-into$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],
         ['GET', '#^/api/payroll/time/history$#', 'payroll', AccessLevel::READ],
         ['*', '#^/api/payroll/time/calendars/[0-9]+$#', 'payroll.time.write', AccessLevel::WRITE],
