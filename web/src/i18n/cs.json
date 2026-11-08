@@ -2586,6 +2586,7 @@
       "holiday_time_off_compensation": "Náhrada při čerpání náhradního volna za svátek",
       "included": "Již zahrnuto ve sjednané mzdě / odměně",
       "inputs_only": "Součet zadaných peněžních podkladů. Hodinový výpočet je v samostatném náhledu.",
+      "includes_preview": "Včetně náhledu hodinové mzdy {amount}. Jde o náhled, mzdový vstup vznikne až zamčením podkladů běhu.",
       "input_totals_hint": "Součty peněžních podkladů ještě nezahrnují nově vypočtené hodinové nároky před jejich vytvořením do vstupů běhu. Hodinový náhled k nim ručně nepřičítejte.",
       "more_blockers": "Další důvody v panelu podkladů: {count}",
       "settlement_title": "Náhled historických hodinových nároků",

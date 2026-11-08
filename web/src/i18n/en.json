@@ -2586,6 +2586,7 @@
       "holiday_time_off_compensation": "Public holiday compensatory time off compensation",
       "included": "Already included in the agreed wage / remuneration",
       "inputs_only": "Total monetary inputs. The hourly calculation is shown in its separate preview.",
+      "includes_preview": "Includes the hourly wage preview of {amount}. This is a preview; the payroll input is created when the run inputs are locked.",
       "input_totals_hint": "Monetary input totals do not yet include newly calculated hourly entitlements before they are created as run inputs. Do not manually add the hourly preview to these totals.",
       "more_blockers": "More blockers in the evidence panel: {count}",
       "settlement_title": "Historical hourly entitlement settlement preview",

@@ -1309,6 +1309,20 @@ function overtimePreview(row: UiRow): number {
   return Math.round(row.overtime_hourly_rate_minor * ((hours ?? 0) / 1000) * 1.25)
 }
 
+/**
+ * Hodinová mzda z úplného náhledu, která ještě není ve vstupech.
+ *
+ * Vstup vznikne až zamčením podkladů běhu, takže sloupec „Náhled hrubého
+ * příjmu" ukazoval jen peněžní vstupy (třeba 500 Kč odměny), i když byl
+ * hodinový náhled kompletní. Neúplný náhled se nepřičítá: částka, kterou
+ * nelze doložit, by vypadala jako hotová.
+ */
+function hourlyGrossAddition(row: UiRow): number {
+  const preview = row.hourly_wage_preview
+  if (!preview || !preview.complete || preview.settlement_only || row.hourly_claims_in_inputs === true) return 0
+  return Math.max(0, preview.payable_total_minor ?? 0)
+}
+
 function grossPreview(row: UiRow): number {
   return validAmount(row.baseAmount)
     + overtimePreview(row)
@@ -2643,8 +2657,11 @@ onMounted(() => {
                   </p>
                 </td>
                 <td v-if="tbl.isVisible('gross_preview')" class="px-3 py-2 text-right">
-                  <p class="font-semibold tabular-nums text-neutral-900">{{ formatMoney(grossPreview(row)) }}</p>
-                  <p v-if="hasHourlyEvidence(row)" class="mt-1 text-xs text-neutral-500">{{ t('payroll.hourly_preview.inputs_only') }}</p>
+                  <p class="font-semibold tabular-nums text-neutral-900" :data-testid="`quick-gross-${row.employment_id}`">{{ formatMoney(grossPreview(row) + hourlyGrossAddition(row)) }}</p>
+                  <p v-if="hourlyGrossAddition(row) > 0" class="mt-1 text-xs text-neutral-500" :data-testid="`quick-gross-hourly-${row.employment_id}`">
+                    {{ t('payroll.hourly_preview.includes_preview', { amount: formatMoney(hourlyGrossAddition(row)) }) }}
+                  </p>
+                  <p v-else-if="hasHourlyEvidence(row)" class="mt-1 text-xs text-neutral-500">{{ t('payroll.hourly_preview.inputs_only') }}</p>
                   <p v-if="row.other_amount_minor" class="mt-1 text-xs text-neutral-500">
                     {{ t('payroll.quick_inputs.other_inputs', { amount: formatMoney(row.other_amount_minor) }) }}
                   </p>
@@ -3080,7 +3097,7 @@ onMounted(() => {
 
     <div v-if="rows.length && !historyMode" class="flex flex-wrap justify-end gap-2 lg:sticky lg:bottom-4">
       <RouterLink
-        :to="{ name: 'payroll-runs' }"
+        :to="{ name: 'payroll-runs', query: { period } }"
         :class="[btnOutline('primary'), 'w-full sm:w-auto']"
         data-testid="quick-payroll-runs"
       >

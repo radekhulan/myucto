@@ -1077,6 +1077,18 @@ final class PayrollQuickInputRepository
                 $item['blockers'] = array_values(array_unique($item['blockers']));
             }
             $item['hourly_wage_preview'] = $preview;
+            // Hodinová mzda vzniká jako vstup až zamčením podkladů běhu. Dokud
+            // ve vstupech není, náhled hrubého příjmu ji připočte z náhledu
+            // hodinové mzdy; potom by ji započítal dvakrát.
+            $item['hourly_claims_in_inputs'] = false;
+            foreach ($byEmployment[$employmentId] ?? [] as $input) {
+                if ($input['status'] !== 'cancelled'
+                    && str_starts_with((string) ($input['external_id'] ?? ''), 'hourly-wage:')
+                ) {
+                    $item['hourly_claims_in_inputs'] = true;
+                    break;
+                }
+            }
             $items[] = $item;
         }
         return ['period' => $period, 'items' => $items, 'total' => $total];

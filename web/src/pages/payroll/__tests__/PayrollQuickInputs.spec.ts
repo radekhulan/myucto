@@ -510,6 +510,39 @@ describe('PayrollQuickInputs', () => {
     expect(wrapper.get('[data-testid="quick-hourly-card-12"]').find('[data-test="hourly-wage-preview"]').exists()).toBe(true)
   })
 
+  it('tlačítko na mzdový běh zachová zvolené období', async () => {
+    m.routeQuery = { period: '2026-02' }
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(JSON.parse(wrapper.get('[data-testid="quick-payroll-runs"]').attributes('data-to')!))
+      .toEqual({ name: 'payroll-runs', query: { period: '2026-02' } })
+  })
+
+  it.each([
+    [false, '4725000'],
+    [true, '4275000'],
+  ])('náhled hrubého příjmu přičte úplný hodinový náhled, jen když hodinová mzda není ve vstupech (%s)', async (inInputs, digits) => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      hourly_claims_in_inputs: inInputs,
+      hourly_wage_preview: { complete: true, blockers: [], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: 450000, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-gross-12"]').text().replace(/\D/g, '')).toBe(digits)
+    expect(wrapper.find('[data-testid="quick-gross-hourly-12"]').exists()).toBe(!inInputs)
+  })
+
+  it('neúplný hodinový náhled k hrubému příjmu nepřičte', async () => {
+    m.load.mockImplementation(async period => ({ period, total: 1, items: [fixture({
+      hourly_remuneration_in_period: true,
+      hourly_wage_preview: { complete: false, blockers: [], rounding: 'ceil', evidence_hash: 'a'.repeat(64), payable_total_minor: null, claims: [], entitlements: [], included_allocations: [] },
+    })] }))
+    const wrapper = mountPage()
+    await flushPromises()
+    expect(wrapper.get('[data-testid="quick-gross-12"]').text().replace(/\D/g, '')).toBe('4275000')
+  })
+
   it('měsíční řádek žádný hodinový řádek nemá', async () => {
     const wrapper = mountPage()
     await flushPromises()

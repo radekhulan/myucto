@@ -2842,6 +2842,8 @@ export interface PayrollHourlyWagePreview {
 
 export interface PayrollQuickInputRow {
   hourly_wage_preview?: PayrollHourlyWagePreview | null
+  /** Hodinová mzda už je ve vstupech (zamčené podklady běhu); náhled ji nepřičítá. */
+  hourly_claims_in_inputs?: boolean
   worked_time?: PayrollWorkedTime | null
   hourly_remuneration_in_period?: boolean
   employee_id: number
