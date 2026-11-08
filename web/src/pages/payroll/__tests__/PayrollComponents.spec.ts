@@ -815,6 +815,26 @@ describe('PayrollComponents', () => {
     wrapper.unmount()
   })
 
+  it('posune editor vstupu do zorného pole, protože stojí nad dlouhým seznamem', async () => {
+    const scrollIntoView = vi.fn()
+    const original = HTMLElement.prototype.scrollIntoView
+    HTMLElement.prototype.scrollIntoView = scrollIntoView
+    try {
+      const wrapper = mount(PayrollComponents)
+      await flushPromises()
+
+      await wrapper.get('[data-layout="desktop"]').get('[data-testid="payroll-input-edit"]').trigger('click')
+      await flushPromises()
+
+      const editor = wrapper.get('[data-testid="payroll-input-editor"]')
+      expect(scrollIntoView).toHaveBeenCalledTimes(1)
+      expect(scrollIntoView.mock.contexts[0]).toBe(editor.element)
+      wrapper.unmount()
+    } finally {
+      HTMLElement.prototype.scrollIntoView = original
+    }
+  })
+
   it('renders matching desktop tables and mobile cards from one API contract', async () => {
     const wrapper = mount(PayrollComponents)
     await flushPromises()

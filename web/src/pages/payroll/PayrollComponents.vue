@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { personalNumberLabel, todayIso } from './employmentLifecycleUi'
 import { useRoute, useRouter } from 'vue-router'
@@ -437,6 +437,7 @@ const editingRecurring = ref<PayrollRecurringComponent | null>(null)
 const recurringEmployeeId = ref<number | null>(null)
 const recurringForm = ref<RecurringForm>(newRecurringForm())
 const inputEditorOpen = ref(false)
+const inputEditorSection = ref<HTMLElement | null>(null)
 const editingInput = ref<PayrollInput | null>(null)
 const inputForm = ref<InputForm>(newInputForm())
 const inputPreview = ref<PayrollInputPreview | null>(null)
@@ -1516,6 +1517,12 @@ function openNewInput() {
   inputPreview.value = null
   inputError.value = ''
   inputEditorOpen.value = true
+  revealInputEditor()
+}
+
+/** Editor stojí nad seznamem; u dlouhého seznamu by se otevřel mimo obrazovku a tlačítko by působilo mrtvě. */
+function revealInputEditor() {
+  void nextTick(() => inputEditorSection.value?.scrollIntoView?.({ behavior: 'smooth', block: 'start' }))
 }
 
 function editInput(input: PayrollInput) {
@@ -1532,6 +1539,7 @@ function editInput(input: PayrollInput) {
   inputPreview.value = null
   inputError.value = ''
   inputEditorOpen.value = true
+  revealInputEditor()
 }
 
 async function previewManualInput() {
@@ -2199,7 +2207,7 @@ onMounted(load)
         <div class="flex flex-wrap items-center justify-between gap-3"><div><h2 class="text-lg font-semibold text-neutral-900">{{ t('payroll.components.inputs.title') }}</h2><p class="text-sm text-neutral-500">{{ t('payroll.components.inputs.hint') }}</p></div><button v-if="canWrite" :class="btnFilled('primary')" @click="openNewInput"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.plus" /></svg>{{ t('payroll.components.inputs.add') }}</button></div>
         <p v-if="inputError" role="alert" class="rounded-lg border border-danger-500/30 bg-danger-50 px-4 py-3 text-sm text-danger-700">{{ inputError }}</p>
 
-        <section v-if="inputEditorOpen" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
+        <section v-if="inputEditorOpen" ref="inputEditorSection" data-testid="payroll-input-editor" class="rounded-xl border border-payroll-500/30 bg-payroll-50 p-4 sm:p-6">
           <div class="flex flex-wrap items-start justify-between gap-3"><div><h3 class="font-semibold text-neutral-900">{{ t(editingInput ? 'payroll.components.inputs.edit' : 'payroll.components.inputs.new') }}</h3><p class="mt-1 text-xs text-neutral-600">{{ t('payroll.components.inputs.preview_hint') }}</p></div><button :class="btnOutline('neutral')" @click="inputEditorOpen = false"><svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path :d="ICONS.x" /></svg>{{ t('common.cancel') }}</button></div>
           <p v-if="editingImported" class="mt-3 text-xs text-neutral-600" data-testid="payroll-input-origin-hint">{{ t('payroll.components.inputs.edit_origin_hint') }}</p>
           <div class="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
