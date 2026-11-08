@@ -169,6 +169,27 @@ final class PayrollEmploymentMergeApiTest extends TestCase
         self::assertSame(1, $diff['moved']['payroll_inputs']);
     }
 
+    public function testMergingSecondAgreementLeavesSingleAgreementAsFirst(): void
+    {
+        // Registrovaná DPP vznikla vedle ruční jako druhá souběžná (U); po
+        // sloučení zbude jediná dohoda, takže je první u zaměstnavatele (T).
+        $registered = $this->employment('REG-U', 'dpp', '2026-02-20', true, null);
+        $this->importedRegistration((int) $registered['id']);
+        $this->db->pdo()->prepare(
+            "UPDATE payroll_employment_terms SET activity_code = 'U' WHERE supplier_id = ? AND employment_id = ?"
+        )->execute([$this->supplierId, $registered['id']]);
+        $manual = $this->employment('DPP-T', 'dpp', '2026-02-07', false, '2026-02-28');
+        $this->input((int) $manual['id'], 'draft', null);
+
+        $response = $this->merge($manual, $registered, true);
+
+        self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
+        $merged = $this->json($response)['employment'];
+        foreach ($merged['terms'] as $terms) {
+            self::assertSame('T', $terms['activity_code'], 'Jediná dohoda osoby je první dohodou u zaměstnavatele.');
+        }
+    }
+
     public function testMergeWithoutTermsKeepsTargetTerms(): void
     {
         $registered = $this->employment('REG-2', 'employment', '2026-02-20', true, null);

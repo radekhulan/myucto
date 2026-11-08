@@ -1108,6 +1108,17 @@ final class PayrollEmploymentRepository
                         'UPDATE payroll_employments SET relation_type = ? WHERE supplier_id = ? AND id = ?'
                     )->execute([$source['relation_type'], $supplierId, $targetId]);
                     $diff += $this->followRelationType($supplierId, $employeeId, $targetId, $previous, $source['relation_type'], $start);
+                } elseif (in_array($previous, ['dpp', 'dpc'], true)) {
+                    // Dohoda do dohody: druh se nemění, ale zdroj už mezi souběžnými
+                    // vztahy osoby není. Pořadí dohody (první T / další U) se proto
+                    // určí znovu, jinak by jediná zbylá dohoda zůstala „druhá".
+                    $activityChanges = $this->realignActivityCodes($supplierId, $employeeId, $targetId, $previous, $start, true);
+                    if ($activityChanges !== []) {
+                        $diff['activity_code'] = [
+                            'from' => implode(', ', array_unique(array_column($activityChanges, 'from'))),
+                            'to' => implode(', ', array_unique(array_column($activityChanges, 'to'))),
+                        ];
+                    }
                 }
 
                 $diff += $this->adoptMergedEnd($supplierId, $targetId, $source['fixed_term_end_on']);
@@ -1247,6 +1258,7 @@ final class PayrollEmploymentRepository
         int $employmentId,
         string $relationType,
         string $startOn,
+        bool $recomputeAgreementOrder = false,
     ): array {
         if (!PayrollEmploymentJmhzActivityFamily::appliesTo($relationType)) {
             return [];
@@ -1261,7 +1273,8 @@ final class PayrollEmploymentRepository
         $stmt->execute([$supplierId, $employmentId]);
         $versions = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        $used = $this->concurrentActivityCodes($supplierId, $employeeId, $startOn !== '' ? $startOn : date('Y-m-d'), $employmentId);        [$code, $detail] = PayrollEmploymentJmhzActivityFamily::nextRelationDefaults($relationType, $used);
+        $used = $this->concurrentActivityCodes($supplierId, $employeeId, $startOn !== '' ? $startOn : date('Y-m-d'), $employmentId);
+        [$code, $detail] = PayrollEmploymentJmhzActivityFamily::nextRelationDefaults($relationType, $used);
         $update = $this->db->pdo()->prepare(
             'UPDATE payroll_employment_terms
                 SET activity_code = ?, jmhz_relationship_detail_code = ?,
@@ -1273,7 +1286,8 @@ final class PayrollEmploymentRepository
             $current = is_string($version['activity_code']) && $version['activity_code'] !== '' ? $version['activity_code'] : null;
             $currentDetail = is_string($version['jmhz_relationship_detail_code']) ? $version['jmhz_relationship_detail_code'] : null;
             $fits = $current !== null
-                && PayrollEmploymentJmhzActivityFamily::matches($relationType, $current, $currentDetail);
+                && PayrollEmploymentJmhzActivityFamily::matches($relationType, $current, $currentDetail)
+                && (!$recomputeAgreementOrder || $current === $code);
             $agreement = in_array($relationType, ['dpp', 'dpc'], true);
             if ($fits && !$agreement) {
                 continue;
