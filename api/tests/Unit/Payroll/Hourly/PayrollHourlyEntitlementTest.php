@@ -137,6 +137,19 @@ final class PayrollHourlyEntitlementTest extends TestCase
         self::assertTrue($this->claim($result, 'ordinary_base')['ready']);
     }
 
+    public function testNightDerivedFromShiftsIsMarkedInClaimTrace(): void
+    {
+        $evidence = $this->evidence();
+        $evidence['premium_segments'][0]['night_duration_units'] = 6000;
+        $evidence['premium_segments'][0]['night_derived_from_shifts'] = true;
+        $result = (new PayrollHourlyWageCalculator())->calculate($this->context($evidence));
+        self::assertTrue($result->complete, json_encode($result->blockers));
+        self::assertTrue($this->claim($result, 'premium_night')['segments'][0]['derived_from_shifts'] ?? false);
+        unset($evidence['premium_segments'][0]['night_derived_from_shifts']);
+        $explicit = (new PayrollHourlyWageCalculator())->calculate($this->context($evidence));
+        self::assertArrayNotHasKey('derived_from_shifts', $this->claim($explicit, 'premium_night')['segments'][0]);
+    }
+
     public function testUnknownNightDoesNotEraseKnownBaseOrWeekendClaim(): void
     {
         $evidence = $this->evidence();

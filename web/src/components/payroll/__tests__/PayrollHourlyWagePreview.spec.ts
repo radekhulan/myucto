@@ -36,6 +36,12 @@ describe('PayrollHourlyWagePreview', () => {
     expect(text).not.toContain('Doložte skutečně odpracovanou dobu.')
     expect(text).toContain('Syntetická záložní zpráva')
   })
+  it('marks night or weekend time derived automatically from shifts', () => {
+    const base = preview()
+    const claim = { ...base.claims[0]!, purpose: 'premium_night', segments: [{ ...base.claims[0]!.segments[0]!, derived_from_shifts: true }] }
+    const wrapper = mount(PayrollHourlyWagePreviewView, { props: { value: preview({ claims: [claim] }) } })
+    expect(wrapper.get('[data-test="hourly-preview-derived"]').text()).toContain('payroll.hourly_preview.derived_from_shifts')
+  })
   it('links a missing average earning to the prefilled average form', () => {
     const wrapper = mount(PayrollHourlyWagePreviewView, {
       props: { value: preview({ complete: false, payable_total_minor: null, blockers: [

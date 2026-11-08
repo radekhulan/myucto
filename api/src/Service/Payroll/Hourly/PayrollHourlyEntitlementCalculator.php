@@ -115,7 +115,11 @@ final class PayrollHourlyEntitlementCalculator
                         $amount = $this->premiumAmount($kind, $policy, $units, $factors, $segment);
                         $deduction = $this->includedAgreementPremium($segment, $policy, $kind, $units);
                         $amount = $amount->compare($deduction) > 0 ? $amount->minus($deduction) : new PayrollExactFraction(0);
-                        $this->add($purpose, $amount, $units, [...$this->segmentTrace($segment, $policy), 'factors' => $factors]);
+                        $trace = [...$this->segmentTrace($segment, $policy), 'factors' => $factors];
+                        // Doba odvozená ze směn (bez překryvného záznamu) se v rozpisu
+                        // nároku označí, ať účetní ví, odkud číslo je.
+                        if (($row[$kind->value . '_derived_from_shifts'] ?? false) === true) $trace['derived_from_shifts'] = true;
+                        $this->add($purpose, $amount, $units, $trace);
                     }
                 });
             }

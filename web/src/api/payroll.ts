@@ -2832,6 +2832,8 @@ export interface PayrollHourlyWagePreview {
       minimum_hourly_minor?: number | null
       hourly_rate_minor?: number | null
       monthly_gross_minor?: number | null
+      /** Doba noci nebo víkendu odvozená automaticky ze směn (bez překryvného záznamu). */
+      derived_from_shifts?: boolean
       raw_numerator_minor?: number
       raw_denominator?: number
       raw_fraction?: Record<string, unknown>

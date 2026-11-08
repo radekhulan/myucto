@@ -112,6 +112,7 @@ const minimumTopUp = computed(() => {
         <template v-if="segment.minimum_hourly_minor != null"> · {{ t('payroll.minimum.hourly_rate', { amount: formatMoneyMinor(segment.minimum_hourly_minor) }) }}</template>
         <template v-else-if="segment.hourly_rate_minor != null"> · {{ t('payroll.hourly_preview.rate', { amount: formatMoneyMinor(segment.hourly_rate_minor) }) }}</template>
         <template v-else-if="segment.monthly_gross_minor != null"> · {{ t('payroll.hourly_preview.monthly_part') }}</template>
+        <template v-if="segment.derived_from_shifts"> · <span data-test="hourly-preview-derived">{{ t('payroll.hourly_preview.derived_from_shifts') }}</span></template>
       </p>
     </div>
     <div v-if="zeroClaims.length" class="mt-3 border-t border-neutral-200 pt-2" data-test="hourly-preview-zero-claims">

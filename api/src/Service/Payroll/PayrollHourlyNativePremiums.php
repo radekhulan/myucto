@@ -12,7 +12,10 @@ use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeKind;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargePolicy;
 use MyInvoice\Service\Payroll\Time\Surcharge\PayrollSurchargeRuleset;
 
-/** Příplatkové vrstvy ze stejné docházky jako tarif; nerozmisťuje přestávky. */
+/**
+ * Příplatkové vrstvy ze stejné docházky jako tarif. Noc a víkend bez
+ * překryvného záznamu odvodí ze směn (přestávka mimo příplatkovou dobu).
+ */
 final class PayrollHourlyNativePremiums
 {
     public static function project(array $entries, array $segments, array $policies, PayrollSurchargeRuleset $rules, string $period, string $end, ?array $calendar): array
@@ -47,8 +50,28 @@ final class PayrollHourlyNativePremiums
                     if ($kind === 'holiday') $row['holiday_work_days'][] = ['date' => $fact->localDate, 'duration_units' => PayrollDuration::fromMinutes($fact->minutes)];
                 }
                 $range = self::eligibleRange($selected, $kind, $rules, $calendar);
-                // Chybějící flag v noci/svátek není potvrzená nula. Existující
-                // překryvná vrstva naopak výslovně dokládá polohu přestávky.
+                /*
+                 * Noc a víkend bez překryvného záznamu se odvodí ze směn samy.
+                 *
+                 * Dřív chybějící překryv znamenal „nedoloženo" a směna So 18:00
+                 * až Ne 02:30 zastavila výpočet na příplatku za noc. Rozhodnutí
+                 * maintainera: dobu odvodit z intervalů běžné práce a přesčasu
+                 * podle okna noci (PayrollSurchargeRuleset) a víkendu (So/Ne
+                 * v místním čase). Přestávka s neznámou polohou se klade MIMO
+                 * příplatkovou dobu, bere se tedy horní mez min(hrubá doba
+                 * v okně, čistá doba záznamu). Je to hodnota ve prospěch
+                 * zaměstnance; zákon stanoví minimum, vyšší plnění je bezpečné.
+                 * Existující překryvný záznam dál výslovně dokládá polohu
+                 * přestávky a platí přednostně (ruční přebití). Svátek se
+                 * neodvozuje: tam rozhoduje i volba náhradního volna.
+                 */
+                if ($kind !== 'holiday' && $range !== null && !self::hasOverlay($selected, $kind)) {
+                    $row[$key] = $range[1];
+                    if ($range[1] > 0) $row[$kind . '_derived_from_shifts'] = true;
+                    continue;
+                }
+                // Chybějící flag svátku není potvrzená nula. Existující překryvná
+                // vrstva naopak výslovně dokládá polohu přestávky.
                 if ($range !== null && $units >= $range[0] && $units <= $range[1] && ($units > 0 || $range[1] === 0)) $row[$key] = $units;
             }
             foreach ($facts->segmentsFor(PayrollSurchargeKind::DifficultEnvironment) as $fact) $row['difficult_exposures'][] = ['duration_units' => PayrollDuration::fromMinutes($fact->minutes), 'factors' => $fact->factors];
@@ -57,6 +80,15 @@ final class PayrollHourlyNativePremiums
             $result[] = $row;
         }
         return $result;
+    }
+
+    /** Má úsek aspoň jeden živý překryvný záznam daného druhu? */
+    private static function hasOverlay(array $entries, string $kind): bool
+    {
+        foreach ($entries as $entry) {
+            if (($entry['category'] ?? null) === $kind && ($entry['status'] ?? null) !== 'superseded') return true;
+        }
+        return false;
     }
 
     /** Dolní/horní mez; skutečnou část přestávky bez důkazu nepřidělujeme. */

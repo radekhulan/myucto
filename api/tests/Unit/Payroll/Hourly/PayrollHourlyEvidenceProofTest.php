@@ -82,18 +82,58 @@ final class PayrollHourlyEvidenceProofTest extends TestCase
         self::assertSame(2500, $policies[0]['rates']['overtime']['statutory_rate_bp']);
     }
 
-    public function testMissingWeekendLayerIsUnknownAndExplicitOverlayRestoresExactUnits(): void
+    /**
+     * Víkend bez překryvného záznamu se odvodí ze směny (rozhodnutí
+     * maintainera); výslovný překryv dál platí přednostně.
+     */
+    public function testMissingWeekendLayerIsDerivedAndExplicitOverlayRestoresExactUnits(): void
     {
         $rules = PayrollSurchargeRuleset::forDate(PayrollRulesetRegistry::defaults(), '2026-07-01');
         $policies = Loader::policyVersions([], [], $rules, [], '2026-07-01', '2026-07-31');
         $work = [...$this->shift(), 'category' => 'regular', 'starts_at_utc' => '2026-07-04 06:00:00', 'ends_at_utc' => '2026-07-04 10:00:00', 'status' => 'approved'];
         $segments = [['date_from' => '2026-07-04', 'date_to' => '2026-07-04', 'worked_duration_units' => 12000, 'overtime_duration_units' => 0]];
         $project = fn(array $entries) => PayrollHourlyNativePremiums::project($entries, $segments, $policies, $rules, '2026-07-01', '2026-07-31', ['dates' => ['2026-07-05', '2026-07-06']]);
-        self::assertNull($project([$work])[0]['weekend_duration_units']);
+        $derived = $project([$work])[0];
+        self::assertSame(12000, $derived['weekend_duration_units']);
+        self::assertTrue($derived['weekend_derived_from_shifts']);
+        self::assertSame(0, $derived['night_duration_units']);
+        self::assertArrayNotHasKey('night_derived_from_shifts', $derived);
         $withFlag = $project([$work, [...$work, 'id' => 2, 'category' => 'weekend']]);
         self::assertSame(12000, $withFlag[0]['weekend_duration_units']);
+        self::assertArrayNotHasKey('weekend_derived_from_shifts', $withFlag[0]);
         self::assertSame(0, $withFlag[0]['night_duration_units']);
         self::assertSame([], $withFlag[0]['difficult_exposures']);
+    }
+
+    /**
+     * Směna So 18:00 až Ne 02:30 (místní čas) s přestávkou 30 min: noc 4:30 h,
+     * víkend 8:00 h. Přestávka s neznámou polohou leží mimo příplatkovou dobu,
+     * takže noc zůstává celá; víkend omezí čistá doba záznamu.
+     */
+    public function testNightAndWeekendAreDerivedFromShiftWithBreakOutsidePremiumTime(): void
+    {
+        $rules = PayrollSurchargeRuleset::forDate(PayrollRulesetRegistry::defaults(), '2026-07-01');
+        $policies = Loader::policyVersions([], [], $rules, [], '2026-07-01', '2026-07-31');
+        $work = [...$this->shift(), 'category' => 'regular', 'starts_at_utc' => '2026-07-04 16:00:00', 'ends_at_utc' => '2026-07-05 00:30:00', 'break_minutes' => 30, 'status' => 'approved'];
+        $segments = [['date_from' => '2026-07-04', 'date_to' => '2026-07-05', 'worked_duration_units' => 24000, 'overtime_duration_units' => 0]];
+        $project = fn(array $entries) => PayrollHourlyNativePremiums::project($entries, $segments, $policies, $rules, '2026-07-01', '2026-07-31', ['dates' => []]);
+
+        $withBreak = $project([$work])[0];
+        self::assertSame(13500, $withBreak['night_duration_units']);
+        self::assertSame(24000, $withBreak['weekend_duration_units']);
+        self::assertTrue($withBreak['night_derived_from_shifts']);
+        self::assertTrue($withBreak['weekend_derived_from_shifts']);
+
+        $withoutBreak = $project([[...$work, 'break_minutes' => 0]])[0];
+        self::assertSame(13500, $withoutBreak['night_duration_units']);
+        self::assertSame(25500, $withoutBreak['weekend_duration_units']);
+
+        // Výslovný překryv noci 22:00 až 02:00 je ruční přebití: platí jeho 4 h.
+        $night = [...$work, 'id' => 2, 'category' => 'night', 'starts_at_utc' => '2026-07-04 20:00:00', 'ends_at_utc' => '2026-07-05 00:00:00', 'break_minutes' => 0];
+        $overridden = $project([$work, $night])[0];
+        self::assertSame(12000, $overridden['night_duration_units']);
+        self::assertArrayNotHasKey('night_derived_from_shifts', $overridden);
+        self::assertSame(24000, $overridden['weekend_duration_units']);
     }
 
     public function testMissingDifficultyFactorsBlocksEvidenceInsteadOfThrowingWholeBatch(): void
