@@ -17,7 +17,7 @@ final class PaymentPermissionsMigrationTest extends TestCase
     protected function setUp(): void
     {
         $config = Config::load(dirname(__DIR__, 4));
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $this->database = 'myucto_payment_roles_' . bin2hex(random_bytes(6)) . '_test';
         $this->server = new PDO(
             sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $config->get('db.host'), $config->get('db.port', 3306)),

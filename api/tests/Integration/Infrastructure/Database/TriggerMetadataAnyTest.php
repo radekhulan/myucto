@@ -23,7 +23,7 @@ final class TriggerMetadataAnyTest extends TestCase
     public function testAnswerMatchesInformationSchemaForTheConnectionDatabase(): void
     {
         $config = Config::load(Bootstrap::rootDir());
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
             (string) $config->get('db.user'), (string) $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $schema = 'myucto_trigger_any_' . bin2hex(random_bytes(5)) . '_test';

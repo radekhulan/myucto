@@ -25,7 +25,7 @@ final class ChunkedJsonColumnReaderGcTest extends TestCase
         self::assertStringEndsWith('_test', $database);
         self::assertSame((string) getenv('MYINVOICE_DB_NAME'), $database);
         $host = (string) $config->get('db.host');
-        self::assertContains($host, ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($host)), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $this->pdo = new GcHookPdo(
             sprintf('mysql:host=%s;port=%d;dbname=%s;charset=utf8mb4', $host, (int) $config->get('db.port', 3306), $database),
             (string) $config->get('db.user'), (string) $config->get('db.pass'),

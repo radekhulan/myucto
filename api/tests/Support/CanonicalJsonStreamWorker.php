@@ -40,7 +40,7 @@ if ($mode === 'legacy') {
     $config = Config::load($root);
     $database = (string) $config->get('db.name');
     $host = (string) $config->get('db.host', '');
-    if (!in_array($host, ['localhost', '127.0.0.1', '::1'], true)
+    if (!\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($host))
         || !str_ends_with($database, '_test')
         || getenv('MYINVOICE_DB_NAME') !== $database) {
         throw new RuntimeException('Unsafe stream worker database configuration.');

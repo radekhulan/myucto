@@ -47,7 +47,7 @@ final class MembershipCloneScrubberTest extends TestCase
         self::assertStringEndsWith('_test', $sourceSchema);
         $sourceBefore = $this->sourceCounts($source);
         $config = $container->get(Config::class);
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
             $config->get('db.user'), $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $schema = CloneSandbox::acquire($server, $sourceSchema);

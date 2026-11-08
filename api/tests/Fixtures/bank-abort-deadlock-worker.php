@@ -7,7 +7,7 @@ require $argv[1] . '/api/vendor/autoload.php';
 $config = \MyInvoice\Infrastructure\Config\Config::load($argv[1]);
 $table = $argv[2];
 if (!str_ends_with((string) $config->get('db.name'), '_test')
-    || !in_array($config->get('db.host'), ['localhost', '127.0.0.1', '::1'], true)
+    || !\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host')))
     || !preg_match('/^test_bank_abort_[a-f0-9]{12}$/D', $table)) {
     exit(2);
 }

@@ -27,7 +27,7 @@ final class MeAccountingFrameworkTest extends TestCase
         $host = strtolower((string) $config->get('db.host', '127.0.0.1'));
         $source = (string) $config->get('db.name');
         self::assertMatchesRegularExpression('/^[A-Za-z0-9_]+_test$/D', $source);
-        self::assertTrue(in_array($host, ['localhost', '127.0.0.1', '::1'], true) || getenv('MYINVOICE_ALLOW_REMOTE_TEST_DB') === '1');
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($host)) || getenv('MYINVOICE_ALLOW_REMOTE_TEST_DB') === '1');
         $this->database = 'myucto_me_framework_' . bin2hex(random_bytes(6)) . '_test';
         $this->db = new PDO(
             sprintf('mysql:host=%s;port=%d;charset=utf8mb4', $host, (int) $config->get('db.port', 3306)),

@@ -43,7 +43,7 @@ final class CloneSandboxTest extends TestCase
     {
         $config = Config::load(Bootstrap::rootDir());
         self::assertStringEndsWith('_test', (string) $config->get('db.name'));
-        self::assertContains($config->get('db.host'), ['localhost', '127.0.0.1', '::1']);
+        self::assertTrue(\MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($config->get('db.host'))), 'Testovací DB musí být lokální nebo v db.test_allowed_hosts.');
         $this->server = new PDO('mysql:host=' . $config->get('db.host') . ';port=' . $config->get('db.port', 3306) . ';charset=utf8mb4',
             (string) $config->get('db.user'), (string) $config->get('db.pass', ''), [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
         $this->source = $this->syntheticSource();

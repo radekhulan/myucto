@@ -27,7 +27,7 @@ final class AccountingFrameworkMigrationRuntimeTest extends TestCase
         $host = strtolower((string) $this->config->get('db.host', '127.0.0.1'));
         $configuredDatabase = (string) $this->config->get('db.name', '');
         self::assertMatchesRegularExpression('/^[A-Za-z0-9_]+_test$/D', $configuredDatabase, 'Fixture vyžaduje konfiguraci testovací DB.');
-        $local = in_array($host, ['localhost', '127.0.0.1', '::1'], true);
+        $local = \MyInvoice\Tests\Support\TestDatabaseHost::isAllowed((string) ($host));
         self::assertTrue($local || getenv('MYINVOICE_ALLOW_REMOTE_TEST_DB') === '1', 'Mimo localhost nastavte MYINVOICE_ALLOW_REMOTE_TEST_DB=1 pouze pro testovací DB server.');
         $this->database = 'myucto_framework_' . bin2hex(random_bytes(6)) . '_test';
         $this->db = new PDO(
