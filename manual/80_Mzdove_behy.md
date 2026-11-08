@@ -85,9 +85,18 @@ a již uzavřenou revizi nepřepíše.
 3. Klikněte na **Spočítat mzdy**. Jedno tlačítko uzamkne vstupy a spustí
    výpočet.
 4. Zobrazí se **Kontrola před zahájením**. Projděte ji a potvrďte volbou
-   **Přesto zahájit**.
+   **Přesto zahájit**. Kontrola hlásí i pracovní vztahy, které mají za
+   období nezrušené mzdové vstupy, ale do běhu nevstoupí (nepotvrzený
+   nástup, podmínky účinné až po období). Takové vstupy by se nevyplatily;
+   na kartě vztahu potvrďte nástup (**Potvrdit nástup**), případně opravte
+   účinnost podmínek. Chybí-li hodinově odměňovaným vztahům průměrný
+   výdělek, doplníte ho tlačítkem **Doplnit pravděpodobný výdělek ze
+   sazby**. Nezmrazený hodinový výpočet se tu nehlásí, zmrazí se sám
+   uzamčením vstupů.
 5. Zůstal-li některý vstup v konceptu, běh to ohlásí jako blokaci. Klikněte
-   přímo u ní na **Schválit vše**. Na jinou obrazovku nemusíte.
+   přímo u ní na **Schválit vše**. Na jinou obrazovku nemusíte. Tentýž
+   problém se neopakuje jako vztah bez mzdových vstupů ani jako chybějící
+   schválená mzdová složka v zákonném posouzení.
 6. Projděte blokace, varování a výsledky jednotlivých zaměstnanců. U každého
    důvodu je odkaz na místo opravy. U skupiny osob použijte odkaz u konkrétního
    člověka. Karta vztahu se otevře přímo na příslušné sekci nebo poli,

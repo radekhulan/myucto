@@ -65,7 +65,9 @@ odpracovaný čas, nepřítomnosti a schválení měsíce všem.
    nebo **Import z CSV nebo XLSX** a změny uložit tlačítkem **Uložit mřížku**.
    Noční,
    víkendovou, svátkovou práci a ztížené prostředí zapište jako příznak
-   **k** odpracované době, ne místo ní.
+   **k** odpracované době, ne místo ní. Noc a víkend zapisovat nemusíte:
+   bez příznaku je hodinový výpočet odvodí ze směny sám (viz
+   [Noc a víkend odvozené ze směn](#noc-a-vikend-odvozene-ze-smen)).
 4. U směny s pracovní pohotovostí vyplňte **Pohotovost (min)**.
 5. Porovnejte docházku s absencemi, svátky a změnami vztahu.
 6. Klikněte na **Schválit měsíc všem**. Dialog hromadného schválení předvyplní
@@ -105,7 +107,18 @@ odměňováním v daném měsíci. Přehled měsíce i historie ukazují hodiny
 vybraného zdroje. Při použití souhrnu se původní denní zápisy zobrazují
 odděleně jako nepoužité; denní mřížka je uzamčená. Chcete-li je znovu
 použít, změňte výslovně zdroj podkladů. Importovaný měsíc měsíčně
-odměňovaného vztahu se v přehledu i mřížce zobrazuje jako dosud. Doba, kterou nelze přesně vyjádřit celými minutami,
+odměňovaného vztahu se v přehledu i mřížce zobrazuje jako dosud.
+
+Měsíc, který bere hodiny z importu docházky, přepnete na směny jedním krokem
+tlačítkem **Počítat ze směn** u zaměstnance v `Mzdy → Docházka a směny` nebo
+v panelu **Podklady hodin**. Po potvrzení v dialogu se zruší neschválené
+mzdové vstupy z importu tohoto vztahu za měsíc (aby se nevyplatily vedle
+hodin ze směn dvakrát) a zdroj hodin se přepne na docházku. Schválené nebo
+zamčené vstupy z importu se nemění: akce se pak neprovede a hláška řekne,
+kolik jich je. Vraťte je v Mzdových vstupech do konceptu (u zamčených nejdřív
+znovu otevřete mzdový běh) a akci opakujte. Obecná změna zdroje v panelu
+**Podklady hodin** → **Změnit vybraný zdroj hodin** vyžaduje, aby importované
+vstupy byly zrušené předem. Doba, kterou nelze přesně vyjádřit celými minutami,
 se zachová v přesném zápisu a nepřepočítává se na zaokrouhlené minuty.
 
 1. V `Mzdy → Docházka a směny` klikněte na **Import**.
@@ -344,6 +357,27 @@ nesčítají a příplatky se **sčítají vedle sebe a nevylučují se**:
 
 - přesčas odpracovaný v noci o víkendu nese **tři** příplatky současně,
 - práce ve svátek, který padne na sobotu, nese **dva** (§ 115 i § 118).
+
+#### Noc a víkend odvozené ze směn
+
+U hodinově odměňovaného vztahu se doba noční práce a práce v sobotu a neděli
+odvodí ze zapsané běžné práce a přesčasu automaticky, pokud k ní v úseku
+nezapíšete příznak noc nebo víkend:
+
+- noc je doba v nočním okně legislativní sady (22 až 6 hodin),
+- víkend je sobota a neděle v místním čase směny,
+- přestávka, u které není známo, kdy proběhla, se klade mimo příplatkovou
+  dobu. Příplatková doba je tedy kratší z hrubé doby v okně a čisté doby
+  záznamu. Je to výklad ve prospěch zaměstnance: zákon stanoví minimum
+  a vyšší plnění je přípustné.
+
+Příklad: směna od soboty 18:00 do neděle 2:30 s přestávkou 30 minut má noc
+4:30 h a víkend 8:00 h. Bez přestávky by víkend byl 8:30 h.
+
+Zapíšete-li k odpracované době příznak noc nebo víkend, platí zapsaná doba
+(ruční přebití) a odvození se pro daný druh nepoužije. Práce ve svátek se
+neodvozuje, zapisuje se dál příznakem. V náhledu hodinové mzdy je u nároku
+uvedeno, že doba byla odvozena automaticky ze směn.
 
 #### Z čeho se počítají
 

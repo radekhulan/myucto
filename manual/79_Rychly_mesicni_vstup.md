@@ -61,8 +61,8 @@ se zpracovávají jako dosud.
 7. Klikněte na **Uložit měsíční podklady** (nebo v pruhu nahoře na **Uložit
    a schválit vše (N)**, bez práva schvalovat **Uložit vše (N)**). Uloží se
    celá rozepsaná sada ze všech stránek.
-8. Klikněte na **Přejít na mzdový běh** a mzdy spočítejte nebo přepočítejte
-   (viz [Mzdové běhy](80_Mzdove_behy.md)).
+8. Klikněte na **Přejít na mzdový běh** (otevře běh za zvolené období)
+   a mzdy spočítejte nebo přepočítejte (viz [Mzdové běhy](80_Mzdove_behy.md)).
 
 **Jak poznáte, že je hotovo:** Objeví se hláška **Měsíční podklady byly
 bezpečně uloženy.**, pruh **Navrženo, neuloženo** zmizí a pole mají ikonu
@@ -164,7 +164,10 @@ zařazené jako zdanitelný příjem včetně nepeněžních. Osvobozené náhra
 a jiné složky mimo hrubý příjem se zobrazí zvlášť a do součtu se nepřičtou.
 Složka s neuzavřeným daňovým zařazením vytvoří ruční kontrolu. Jde jen
 o náhled hrubých složek; pojištění, daň, srážky a čistou mzdu spočítá až
-mzdový běh.
+mzdový běh. U hodinově odměňovaného vztahu s úplným náhledem hodinové mzdy
+připočte náhled i hodinovou mzdu, dokud z ní nevznikl mzdový vstup (vzniká
+uzamčením podkladů běhu); popisek pod částkou uvede, kolik z ní je náhled
+hodinové mzdy. Neúplný hodinový náhled se nepřičítá.
 
 **Součet za období** pod tabulkou sčítá všechny vztahy měsíce (při hledání
 všechny nalezené), ne jen zobrazenou stránku, a započítá i rozepsané změny.

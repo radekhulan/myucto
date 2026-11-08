@@ -123,8 +123,10 @@ Průměrný výdělek se zakládá jednou za čtvrtletí pro každý pracovní v
    čtvrtletí doplňte ručně do **Poměrná část delších odměn (Kč)**.
 3. Zkontrolujte skutečně odpracovanou dobu. **H:MM** i desetinné hodiny
    s nejvýše třemi místy zachovají přesný zlomek; prázdná doba ani počet
-   dnů nejsou nula. Nezměněný uložený smíšený součet aplikace zachová
-   přesně, i když jej ukazuje se sekundami.
+   dnů nejsou nula a hláška jmenuje pole, které je potřeba doplnit. Vztah,
+   který v rozhodném období ještě netrval, má předvyplněno 0 h a 0 dnů.
+   Nezměněný uložený smíšený součet aplikace zachová přesně, i když jej
+   ukazuje se sekundami.
 4. Klikněte na **Vypočítat snapshot**.
 5. Zkontrolujte výsledek a klikněte na **Schválit**.
 
@@ -279,6 +281,7 @@ listu se doba vykáže jako vyloučená doba.
 | *„Pro tento vztah není spočítaný žádný průměrný výdělek.“* | Chybí průměr za čtvrtletí | Klikněte na **Přejít na Průměrný výdělek** a založte ho ([§ 76.4](#764-krok-za-krokem-prumerny-vydelek-pro-nahrady)). |
 | *„Průměrný výdělek … čeká na schválení.“* | Průměr je založený, ale neschválený | Na záložce **Průměrný výdělek** klikněte na **Schválit**. |
 | Návrh průměru: *„Skutečný průměr z uzavřených běhů odvodit nelze a u pracovního vztahu není zadaný pravděpodobný výdělek“* | Nový vztah bez podkladů | Na kartě vztahu klikněte na **Zadat pravděpodobný výdělek (§ 355 ZP)**. |
+| Náhled hodinové mzdy: *„Chybí schválený průměrný výdělek za N. čtvrtletí RRRR“* | Příplatek za noc nebo víkend se počítá z průměru, který za čtvrtletí chybí | Klikněte na **Doplnit průměrný výdělek**: otevře se tento formulář s předvyplněným vztahem a čtvrtletím. U hodinově odměňovaného vztahu průměr doplní i **Doplnit pravděpodobný výdělek ze sazby** v kontrole mzdového běhu. |
 | Návrh průměru nevznikl, chybí běh za měsíc | V rozhodném období je měsíc bez mzdového běhu, i když vztah trval | Doplňte evidenci (mzdový běh za ten měsíc). |
 | *„Překážka je schválená, ale náhrada mzdy nevznikla“* | Na dny překážky nejsou rozvržené směny | Klikněte na **Rozvrhnout směny v docházce**, nebo zadejte náhradu jako mzdový vstup. |
 | *„U překážky chybí druh … schválit ji nelze.“* | Překážka zapsaná bez druhu | Zrušte ji a zapište znovu s vybraným **Druh překážky**. |
@@ -323,17 +326,22 @@ navrhne podle § 355 odst. 2 zákoníku práce v tomto pořadí:
    a odpracované hodiny z uzavřených mzdových běhů od nástupu, typicky
    z prvního uzavřeného měsíce;
 2. z účinné sjednané hodinové sazby, je-li vztah hodinově odměňovaný;
-   jde pouze o návrh k individuálnímu posouzení obvyklých složek
-   mzdy či odměny, nikoli automaticky správný průměr;
 3. ze sjednané měsíční mzdy přepočtené na hodinu koeficientem 4,348
    (týdenní pracovní doba × 4,348, § 356 odst. 2);
 4. nemá-li vztah ani sjednanou mzdu, z minimální mzdy účinné v rozhodném
    období přepočtené na hodinu při 40hodinové týdenní době.
 
-Návrh ze sjednané hodinové sazby se **nezakládá hromadně**. Otevřete
-jednotlivý vztah, posuďte obvyklé složky výdělku, upravte částku
-a odůvodnění a až poté snapshot schvalte. Sjednaná sazba, pravděpodobný
-výdělek a schválený průměr jsou různé údaje.
+**Automaticky ze sjednané sazby.** U hodinově odměňovaného vztahu, kterému
+za čtvrtletí chybí průměr a skutečný průměr odvodit nejde, se pravděpodobný
+výdělek založí a schválí automaticky ze sjednané hodinové sazby (nebo
+z pravděpodobného výdělku zadaného na kartě vztahu) s odůvodněním
+*„Automaticky ze sjednané hodinové sazby (§ 355 odst. 2 ZP)“*. Stane se to
+při schválení docházky měsíce a při akci **Počítat ze směn**; v kontrole
+před zahájením mzdového běhu to pro všechny vztahy měsíce, kterým průměr
+chybí, udělá tlačítko **Doplnit pravděpodobný výdělek ze sazby**. Mají-li
+se zohlednit další obvyklé složky výdělku, opravte průměr novou revizí
+v jednotlivém formuláři. Za čtvrtletí, které už nějaký průměr má, se nic
+automaticky nezakládá. Návrh ze sjednané sazby jde založit i hromadně.
 
 Přesnou dobu přesčasu zúčtovaného až v jiném čtvrtletí ověřuje návrh
 proti jeho původnímu podkladu a zúčtování. Při chybějící či rozporné

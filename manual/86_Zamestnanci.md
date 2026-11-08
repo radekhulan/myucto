@@ -219,11 +219,22 @@ režim pojištění, místo výkonu práce):
 
 1. Otevřete kartu pracovního vztahu a upravte pole v části **Základní údaje**,
    případně ve sbalené části **Další údaje**.
-2. Při změně sjednaných podmínek zvolte uložení nové verze a vyplňte
-   **Účinnost podmínek od**. Nová verze může začít nejdřív den po začátku
-   poslední verze. Opravu chybně zadaného údaje bez změny účinnosti ukládejte
-   jako opravu aktuální verze; již zúčtované podmínky tímto způsobem měnit nejde.
-3. Klikněte na **Uložit vše**.
+2. Zvolte, **Jak změnu uložit**. Dokud z platné verze podmínek není
+   zúčtovaná žádná mzda, je výchozí **Opravit platné podmínky**, i při změně
+   způsobu odměňování nebo sazby. Je-li z platné verze už zúčtováno, karta
+   předvolí **Od data platí nové podmínky** a jako **Účinnost podmínek od**
+   nabídne první den prvního nezúčtovaného měsíce. Nová verze může začít
+   nejdřív den po začátku poslední verze a ne v zúčtovaném měsíci.
+3. Zvolený způsob a datum jsou vidět nad volbou i v liště **Uložit vše**
+   (například „Uloží se jako nová verze podmínek účinná od 1. 3. 2026“).
+4. Klikněte na **Uložit vše**.
+
+**Oprava účinnosti platné verze.** Mají-li podmínky platit od jiného dne,
+než od kterého je platná verze uložená (typicky ručně založená dohoda
+s nástupem 7. 2., jejíž podmínky platí až ode dne zápisu), opravte v části
+**Termíny** pole **Účinnost platných podmínek od** a uložte jako opravu.
+Nová verze nevznikne. Účinnost jde posunout jen za předchozí verzi a mimo
+zúčtované měsíce.
 
 **Jak poznáte, že je hotovo:** V časové ose vztahu přibude nová verze
 podmínek a předchozí je uzavřená dnem před novou účinností.

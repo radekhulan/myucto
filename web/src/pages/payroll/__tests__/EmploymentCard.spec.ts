@@ -602,7 +602,7 @@ describe('EmploymentCard', () => {
     expect(native.value).toBe('2026-06-01')
     expect(native.min).toBe('2026-06-01')
     expect(wrapper.get('[data-test="terms-save-mode-summary"]').text()).toContain('payroll.people.save_mode.summary_version')
-    expect(wrapper.get('[data-test="save-mode-correct-settled"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="save-mode-correct-settled"]').exists()).toBe(true)
   })
 
   it('opraví účinnost platné verze bez založení nové', async () => {
