@@ -1591,7 +1591,22 @@ final class PayrollRunRepository
              VALUES (?, ?, "blocker", "statutory_calculation_manual_review",
                      ?, ?, ?, ?, 0)'
         );
-        foreach (PayrollRunValidationMessageFormatter::statutoryDetails($statutory) as $detail) {
+        // Vztahy, u kterých revize hlásí neschválené vstupy: chybějící schválenou
+        // složku u nich zákonné posouzení znovu neopakuje.
+        $drafts = $this->db->pdo()->prepare(
+            'SELECT entity_id
+               FROM payroll_run_validations
+              WHERE supplier_id = ? AND revision_id = ?
+                AND code = "draft_inputs_present"
+                AND entity_type = "employment"
+                AND entity_id IS NOT NULL'
+        );
+        $drafts->execute([$supplierId, $revisionId]);
+        $draftInputEmployments = [];
+        foreach ($drafts->fetchAll(PDO::FETCH_COLUMN) as $employmentId) {
+            $draftInputEmployments[(int) $employmentId] = true;
+        }
+        foreach (PayrollRunValidationMessageFormatter::statutoryDetails($statutory, $draftInputEmployments) as $detail) {
             $insert->execute([
                 $supplierId,
                 $revisionId,

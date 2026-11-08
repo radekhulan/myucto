@@ -87,6 +87,9 @@ final class PayrollRunReadinessImpact
         // ruční kontrolou „chybí schválená mzdová složka"), i když snímek sám
         // to hlásí jen jako varování. Cesta ven: zadat složku, případně 0 Kč.
         'employment_without_inputs' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
+        // Vstupy vztahu, který do běhu nevstoupí (nepotvrzený nástup, podmínky
+        // účinné až po období). Bez opravy se tiše nevyplatí.
+        'inputs_on_unstarted_employment' => [self::IMPACT_APPROVAL, self::SCOPE_MONTHLY],
 
         // ── Skupina 2: opraví se, ale po zamknutí přes opravnou revizi ───────
         // Rozhodnutí nepřítomnosti mění snímek vstupů (schválené nepřítomnosti).

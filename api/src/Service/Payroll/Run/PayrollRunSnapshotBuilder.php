@@ -135,6 +135,14 @@ final class PayrollRunSnapshotBuilder
                 '/payroll/people',
             );
         }
+        foreach ($this->inputsOnUnstartedEmploymentValidations(
+            $supplierId,
+            $periodStart,
+            $periodEnd,
+            $officeId,
+        ) as $validation) {
+            $validations[] = $validation;
+        }
 
         // Zmrazená množina ID — od tohohle bodu se podklady načítají MNOŽINOVĚ.
         // Dřív tady běžel dotaz na osobu a na vztah, takže běh nad ~300 osobami
@@ -543,7 +551,10 @@ final class PayrollRunSnapshotBuilder
                 && ($hourlyPreview['complete'] ?? false) === true
                 && ($hourlyPreview['settlement_only'] ?? true) === false
                 && (int) ($hourlyPreview['payable_total_minor'] ?? 0) > 0;
-            if ($inputs === [] && !$deferredWithoutIncome && !$hourlyWagePending) {
+            // Neschválené vstupy už hlásí `draft_inputs_present`; vztah, kterému
+            // chybí jen jejich schválení, „bez vstupu" není a druhá hláška by
+            // tentýž problém jen opakovala.
+            if ($inputs === [] && $draftCount === 0 && !$deferredWithoutIncome && !$hourlyWagePending) {
                 // Vztah bez složky je většinou chyba zadání (zapomenutá mzda).
                 // Výjimku (override) tu NEnabízíme: když měsíc bez vstupu
                 // nevysvětluje schválená nepřítomnost, zastaví vztah zákonný
@@ -1397,6 +1408,132 @@ final class PayrollRunSnapshotBuilder
         }
 
         return sprintf(' (nejstarší uložená platí až od %s)', $earliest);
+    }
+
+    /**
+     * Mzdové vstupy vztahů, které do mzdového běhu nepatří.
+     *
+     * Vztah s nepotvrzeným nástupem (plánovaný, nebo založený až po období),
+     * archivovaný či s nástupem po období do běhu nevstoupí
+     * ({@see PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql()}).
+     * Jeho nezrušené vstupy za období se ale tím neztratí, jen se nevyplatí:
+     * u brigádnice zadané před potvrzením nástupu tak z výplat tiše vypadla
+     * celá měsíční mzda a kontrola běhu o tom nevěděla, protože hlídala jen
+     * vztahy, které v běhu jsou. Doplněk množiny se proto počítá stejným
+     * pravidlem členství, ne vlastní kopií.
+     *
+     * Dotaz začíná vstupy období (`idx_payroll_input_period_status`) a teprve
+     * seskupené vztahy spojuje s jejich stavem, takže na velikosti historie
+     * vstupů nezávisí.
+     *
+     * @return list<PayrollRunValidation>
+     */
+    public function inputsOnUnstartedEmploymentValidations(
+        int $supplierId,
+        string $periodStart,
+        string $periodEnd,
+        ?int $officeId,
+    ): array {
+        $officeSql = $officeId === null ? '1 = 1' : 'employment.office_id = ?';
+        $stmt = $this->db->pdo()->prepare(
+            'WITH period_inputs AS (
+                    SELECT input.employment_id,
+                           COUNT(*) AS input_count,
+                           SUM(input.amount_minor) AS amount_minor
+                      FROM payroll_inputs input
+                     WHERE input.supplier_id = ?
+                       AND input.period_start = ?
+                       AND input.status IN ("draft", "approved", "locked")
+                     GROUP BY input.employment_id
+                 ),
+                 effective_employment AS (
+                    SELECT employment.*,
+                           ' . PayrollEmploymentLifecycleSql::effectiveStatusAtPlaceholder() . '
+                               AS effective_status,
+                           period_inputs.input_count,
+                           period_inputs.amount_minor AS input_amount_minor
+                      FROM period_inputs
+                      JOIN payroll_employments employment
+                        ON employment.supplier_id = ?
+                       AND employment.id = period_inputs.employment_id
+                 )
+             SELECT employment.id AS employment_id,
+                    employment.employee_id,
+                    employment.effective_status,
+                    COALESCE(employment.actual_start_date, employment.start_date) AS start_date,
+                    employment.input_count,
+                    employment.input_amount_minor,
+                    ' . \MyInvoice\Repository\Payroll\PayrollPeopleRepository::fullNameExpression('employee') . ' AS full_name,
+                    EXISTS (
+                        SELECT 1
+                          FROM payroll_employment_terms term
+                         WHERE term.supplier_id = employment.supplier_id
+                           AND term.employment_id = employment.id
+                           AND term.effective_from <= ?
+                           AND (term.effective_to IS NULL OR term.effective_to >= ?)
+                    ) AS has_term
+               FROM effective_employment employment
+               JOIN payroll_employees employee
+                 ON employee.supplier_id = employment.supplier_id
+                AND employee.id = employment.employee_id
+              WHERE NOT (' . PayrollEmploymentLifecycleSql::payrollPeriodMembershipSql() . ')
+                AND ' . $officeSql . '
+              ORDER BY employment.employee_id, employment.id'
+        );
+        $stmt->execute([
+            $supplierId,
+            $periodStart,
+            $periodEnd,
+            $supplierId,
+            $periodEnd,
+            $periodStart,
+            ...PayrollEmploymentLifecycleSql::payrollPeriodMembershipParams($periodStart, $periodEnd),
+            ...($officeId === null ? [] : [$officeId]),
+        ]);
+
+        $validations = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $employmentId = (int) $row['employment_id'];
+            $employeeId = (int) $row['employee_id'];
+            $status = $row['effective_status'] === null ? null : (string) $row['effective_status'];
+            $startDate = $row['start_date'] === null ? null : (string) $row['start_date'];
+            $reasons = [];
+            if ($status === null || $status === 'planned') {
+                $reasons[] = 'nástup není potvrzený';
+            } elseif ($status === 'archived') {
+                $reasons[] = 'vztah je archivovaný';
+            } elseif ($status === 'no_show') {
+                $reasons[] = 'vztah je označený jako nenastoupení';
+            }
+            if ($startDate !== null && $startDate > $periodEnd) {
+                $reasons[] = sprintf('nástup je evidovaný až od %s', $startDate);
+            }
+            if ((int) $row['has_term'] === 0) {
+                $reasons[] = 'za období nemá účinné podmínky (zkontrolujte účinnost verze podmínek)';
+            }
+            if ($reasons === []) {
+                $reasons[] = 'vztah do období nepatří';
+            }
+            $validations[] = new PayrollRunValidation(
+                'blocker',
+                'inputs_on_unstarted_employment',
+                'employment',
+                $employmentId,
+                sprintf(
+                    '%s: pracovní vztah má za období %d nezrušených mzdových vstupů (%s Kč), '
+                    . 'ale do mzdového běhu nevstoupí, protože %s. Bez opravy se vstupy nevyplatí. '
+                    . 'Na kartě vztahu potvrďte nástup (Potvrdit nástup), případně opravte účinnost '
+                    . 'podmínek, a pak obnovte podklady běhu.',
+                    (string) $row['full_name'],
+                    (int) $row['input_count'],
+                    number_format(((int) $row['input_amount_minor']) / 100, 2, ',', ' '),
+                    implode(', ', $reasons),
+                ),
+                "/payroll/people?person={$employeeId}&employment={$employmentId}&panel=employment_terms",
+            );
+        }
+
+        return $validations;
     }
 
     /** @return list<array<string,mixed>> */

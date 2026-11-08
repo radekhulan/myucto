@@ -42,6 +42,13 @@ final class PayrollRunReadinessService
     /** Kolik konkrétních jmen se u nálezu vypíše, než se přejde na počet. */
     private const MAX_ENTITIES = 25;
 
+    /**
+     * Nálezy, které před zahájením běhu nedávají smysl: odstraní je samo
+     * zamknutí vstupů. Hodinová mzda se zmrazí právě při zamknutí, takže výzva
+     * „zamkněte nebo obnovte podklady" před založením běhu jen strašila.
+     */
+    private const RESOLVED_BY_LOCKING = ['hourly_claims_not_materialized'];
+
     /** Zdroje ověření účtu instituce, které platí za doklad. */
     private const VERIFIED_SOURCE_KINDS = [
         'official_registry',
@@ -153,9 +160,13 @@ final class PayrollRunReadinessService
         if ($snapshot !== null) {
             // Jméno u každého záznamu: 25× „Otevřít místo k opravě" bez jména
             // neříkalo, koho proklik otevře.
-            $validations = $this->warningSuppressions
-                ->activeSet($supplierId)
-                ->filterValidations($snapshot->validations);
+            $validations = array_values(array_filter(
+                $this->warningSuppressions
+                    ->activeSet($supplierId)
+                    ->filterValidations($snapshot->validations),
+                static fn (PayrollRunValidation $validation): bool =>
+                    !in_array($validation->code, self::RESOLVED_BY_LOCKING, true),
+            ));
             $employmentIds = [];
             foreach ($validations as $validation) {
                 if ($validation->entityType === 'employment' && $validation->entityId !== null) {

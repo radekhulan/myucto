@@ -9,10 +9,24 @@ final class PayrollRunValidationMessageFormatter
     private const MAX_MESSAGE_LENGTH = 500;
     public const NET_PAY_ISSUE = 'income:net_pay_result_missing_or_unverified';
 
-    public static function statutoryDetails(array $statutory): array
+    /**
+     * `$draftInputEmployments` jsou vztahy, u kterých revize už hlásí
+     * neschválené vstupy (`draft_inputs_present`). Chybějící schválená složka je
+     * u nich jen ozvěnou téhož problému: složka chybí právě proto, že vstup
+     * čeká na schválení. Řádek se proto vynechá jen pro tuhle dvojici, ostatní
+     * důvody zákonného posouzení zůstávají. Vynechané důvody nenahrazuje obecná
+     * hláška „výpočet není úplný", protože vztah dál blokuje `draft_inputs_present`.
+     *
+     * @param array<int,true> $draftInputEmployments
+     */
+    public static function statutoryDetails(array $statutory, array $draftInputEmployments = []): array
     {
         $details = [];
-        self::collectDetails($statutory, $details);
+        $covered = 0;
+        self::collectDetails($statutory, $details, null, null, $draftInputEmployments, $covered);
+        if ($details === [] && $covered > 0) {
+            return [];
+        }
         return array_values($details === []
             ? [PayrollRunIssueGuidance::describe('statutory_input_incomplete')]
             : $details);
@@ -40,6 +54,8 @@ final class PayrollRunValidationMessageFormatter
         array &$details,
         ?int $employeeId = null,
         ?int $employmentId = null,
+        array $draftInputEmployments = [],
+        int &$covered = 0,
     ): void {
         foreach (['person_reference', 'person_id', 'employee_reference'] as $field) {
             if (is_string($node[$field] ?? null)) {
@@ -55,6 +71,14 @@ final class PayrollRunValidationMessageFormatter
         if (is_int($node['employment_id'] ?? null) && $node['employment_id'] > 0) $employmentId = $node['employment_id'];
         foreach (is_array($node['issues'] ?? null) ? $node['issues'] : [] as $issue) {
             if (is_string($issue) && $issue !== '') {
+                $issueEmploymentId = PayrollRunIssueGuidance::reference($issue, 'employment') ?? $employmentId;
+                if ($issueEmploymentId !== null
+                    && isset($draftInputEmployments[$issueEmploymentId])
+                    && in_array('payroll_component_missing', explode(':', str_replace('-', '_', $issue)), true)
+                ) {
+                    ++$covered;
+                    continue;
+                }
                 $detail = PayrollRunIssueGuidance::describe($issue, $employeeId, $employmentId);
                 // Klíčem je to, co se uloží a co účetní uvidí, ne kód issue.
                 // Assembler hlásí tentýž problém v každé ze tří domén
@@ -67,7 +91,7 @@ final class PayrollRunValidationMessageFormatter
         }
         foreach ($node as $field => $value) {
             if ($field !== 'issues' && is_array($value)) {
-                self::collectDetails($value, $details, $employeeId, $employmentId);
+                self::collectDetails($value, $details, $employeeId, $employmentId, $draftInputEmployments, $covered);
             }
         }
     }

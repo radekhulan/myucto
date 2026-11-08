@@ -223,6 +223,11 @@ final class PayrollRunPersistenceTest extends TestCase
         // Kontrola před zahájením: mzda vznikne až zamčením, vztah „bez vstupu" není.
         $beforeStart = $this->container->get(PayrollRunSnapshotBuilder::class)->build($this->supplierId, '2026-06-01', '2026-07-15');
         self::assertNotContains('employment_without_inputs', array_map(static fn ($validation): string => $validation->code, $beforeStart->validations));
+        // Nezmrazený hodinový výpočet vyřeší samo zamknutí vstupů; předběžná
+        // kontrola ho proto nehlásí, snímek běhu ano.
+        self::assertContains('hourly_claims_not_materialized', array_map(static fn ($validation): string => $validation->code, $beforeStart->validations));
+        $readiness = $this->container->get(\MyInvoice\Service\Payroll\Run\PayrollRunReadinessService::class)->inspect($this->supplierId, '2026-06-01', '2026-07-15');
+        self::assertNotContains('hourly_claims_not_materialized', array_column($readiness['findings'], 'code'));
         $run = $this->productionService->createRun($this->supplierId, '2026-06-01', '2026-07-15', null, $this->actors[0]);
         $locked = $this->productionService->lockInputs($this->supplierId, (int) $run['id'], (int) $run['row_version'], 'minimum-lock', $this->actors[0]);
         $stmt = $pdo->prepare('SELECT input.id, input.amount_minor FROM payroll_inputs input JOIN payroll_component_definitions component ON component.supplier_id = input.supplier_id AND component.id = input.component_id WHERE input.supplier_id = ? AND input.employment_id = ? AND component.code = "DOPLATEK_MINIMALNI_MZDA" AND input.status IN ("approved", "locked")');
@@ -3666,7 +3671,8 @@ final class PayrollRunPersistenceTest extends TestCase
             (int) $locked->revision['id'],
         );
         self::assertContains('draft_inputs_present', array_column($validations, 'code'));
-        self::assertContains('employment_without_inputs', array_column($validations, 'code'));
+        // Jeden problém, jedna hláška: neschválený vstup nehlásí ještě „bez vstupu".
+        self::assertNotContains('employment_without_inputs', array_column($validations, 'code'));
 
         $calculated = $this->service->calculate(
             $this->supplierId,
