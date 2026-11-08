@@ -158,12 +158,55 @@ function nextCalendarDay(isoDate: string): string {
   return date.toISOString().slice(0, 10)
 }
 
+function nextMonthStart(isoDate: string): string {
+  const [year, month] = isoDate.split('-').map(Number)
+  const date = new Date(Date.UTC(year!, month!, 1))
+  return date.toISOString().slice(0, 10)
+}
+
+/**
+ * První nezúčtovaný měsíc vztahu, nebo `null`, když nic zúčtováno není.
+ * Nová verze nesmí začít dřív (server ji odmítne `payroll_terms_settled`).
+ */
+const firstUnsettledMonth = computed(() => {
+  const settled = props.employment.settled_through ?? null
+  return settled === null ? null : nextMonthStart(settled)
+})
+
+/**
+ * Zasahuje platná verze podmínek do zúčtovaného měsíce? Pak ji opravit na
+ * místě nejde a změna patří do nové verze. Totéž pravidlo hlídá server
+ * (`assertTermsOpenFrom`); karta se na něj ptá předem.
+ */
+const currentTermsSettled = computed(() => {
+  const settled = props.employment.settled_through ?? null
+  const from = currentTerms.value?.effective_from
+  if (settled === null || from === undefined) return false
+  return settled >= `${from.slice(0, 8)}01`
+})
+
+/**
+ * Nejdřívější účinnost nové verze: den po začátku dosud poslední verze
+ * a zároveň první nezúčtovaný měsíc. Zpětná verze do nezúčtovaného měsíce
+ * je běžný případ (zvýšení od 1. 2. zadané v březnu), proto se nedrží dneška.
+ */
 const minimumNewTermsDate = computed(() => {
-  const today = todayIso()
   const latest = currentTerms.value?.effective_from
-  if (latest === undefined) return today
-  const next = nextCalendarDay(latest)
-  return next > today ? next : today
+  const candidates = [
+    latest === undefined ? null : nextCalendarDay(latest),
+    firstUnsettledMonth.value,
+  ].filter((value): value is string => value !== null)
+  if (candidates.length === 0) return todayIso()
+  return candidates.reduce((max, value) => value > max ? value : max)
+})
+
+/**
+ * Výchozí účinnost nové verze. Je-li něco zúčtováno, první den prvního
+ * nezúčtovaného měsíce; jinak dnešek. Vždy aspoň nejdřívější přípustné datum.
+ */
+const defaultNewTermsDate = computed(() => {
+  const preferred = firstUnsettledMonth.value ?? todayIso()
+  return preferred > minimumNewTermsDate.value ? preferred : minimumNewTermsDate.value
 })
 
 /**
@@ -361,6 +404,12 @@ const probableEarningOpen = ref(false)
 const mealBasis = ref<PayrollMealEntitlementBasis>('shift')
 const saveMode = ref<TermsSaveMode>('correct')
 const versionEffectiveFrom = ref(todayIso())
+/**
+ * Oprava účinnosti PLATNÉ verze (ne nová verze). Ručně založená dohoda
+ * s nástupem 7. 2. mívá podmínky účinné až ode dne zápisu, takže únor
+ * podmínky nemá. Posun data posílá server jen s `correct_effective_from`.
+ */
+const correctedEffectiveFrom = ref('')
 const saveError = ref('')
 const hourlyMinimum = ref<{ minimum_hourly_40h_minor: number | null; ruleset_id: string | null } | null>(null)
 const minimumLoading = ref(false)
@@ -404,16 +453,48 @@ function fingerprint(): string {
     hourlyRateInput.value.trim(),
     probableEarningInput.value.trim(),
     mealBasis.value,
+    correctedEffectiveFrom.value,
   ])
 }
 
 const dirty = computed(() => baseline.value !== '' && fingerprint() !== baseline.value)
 
-// Skutečná změna sjednání patří do nové účinné verze. Opravu překlepu
-// může účetní zvolit výslovně v již existující volbě způsobu uložení.
+const effectiveFromCorrected = computed(() => currentTerms.value !== null
+  && correctedEffectiveFrom.value !== ''
+  && correctedEffectiveFrom.value !== currentTerms.value.effective_from)
+
+/*
+ * Změna sjednání (způsob odměňování, sazba, podklad) předvolí novou verzi
+ * JEN tehdy, když platnou verzi už opravit nejde, protože zasahuje do
+ * zúčtovaného měsíce. Dřív se přepínalo vždy a s datem od dneška: uložení
+ * přes společnou lištu karty tak založilo verzi od dneška, aniž by uživatel
+ * datum viděl. Dokud z platné verze nikdo nic nezúčtoval, je oprava správná
+ * cesta a nová verze zůstává výslovnou volbou.
+ */
 watch(() => [termsForm.value?.remuneration_type, hourlyRateInput.value, termsForm.value?.remuneration_basis_kind, termsForm.value?.remuneration_basis], () => {
-  if (!dirty.value) return
+  if (!dirty.value || !currentTermsSettled.value || saveMode.value === 'version') return
   saveMode.value = 'version'
+  versionEffectiveFrom.value = defaultNewTermsDate.value
+})
+
+// Oprava účinnosti platné verze dává smysl jen jako oprava.
+watch(correctedEffectiveFrom, () => {
+  if (effectiveFromCorrected.value) saveMode.value = 'correct'
+})
+
+/**
+ * Co se stane po uložení, jednou větou. Stojí v liště karty u „Uložit vše",
+ * kde je volba „Jak změnu uložit" daleko a datum nové verze by jinak nebylo
+ * vidět.
+ */
+const saveModeSummary = computed(() => {
+  if (saveMode.value === 'version') {
+    return t('payroll.people.save_mode.summary_version', { date: formatDate(versionEffectiveFrom.value) })
+  }
+  const from = effectiveFromCorrected.value ? correctedEffectiveFrom.value : currentTerms.value?.effective_from ?? ''
+  return effectiveFromCorrected.value
+    ? t('payroll.people.save_mode.summary_correct_moved', { date: formatDate(from) })
+    : t('payroll.people.save_mode.summary_correct', { date: formatDate(from) })
 })
 
 /*
@@ -679,7 +760,8 @@ function hydrate(employment: PayrollEmployment) {
   probableEarningInput.value = minorToInput(terms.probable_hourly_earning_minor ?? null)
   probableEarningOpen.value = probableEarningInput.value !== ''
   mealBasis.value = employment.meal_entitlement_basis
-  versionEffectiveFrom.value = minimumNewTermsDate.value
+  versionEffectiveFrom.value = defaultNewTermsDate.value
+  correctedEffectiveFrom.value = terms.effective_from ?? ''
   saveMode.value = 'correct'
   saveError.value = ''
   invalidField.value = null
@@ -877,6 +959,10 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
     saveError.value = t('payroll.people.new_terms_date_required')
     return false
   }
+  if (saveMode.value === 'version' && effectiveFromCorrected.value) {
+    saveError.value = t('payroll.people.save_mode.effective_from_correction_needs_correct')
+    return false
+  }
   const probableEarning = inputToMinor(probableEarningInput.value)
   if (Number.isNaN(probableEarning)) {
     saveError.value = t('payroll.people.probable_earning_invalid')
@@ -923,7 +1009,13 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
         ...shared,
         effective_from: versionEffectiveFrom.value,
       })
-      : await payrollApi.correctEmploymentTerms(props.employment.id, rowVersion, shared)
+      : await payrollApi.correctEmploymentTerms(
+        props.employment.id,
+        rowVersion,
+        effectiveFromCorrected.value
+          ? { ...shared, correct_effective_from: true, effective_from: correctedEffectiveFrom.value }
+          : shared,
+      )
     emit('updated', updated)
     hydrate(updated)
     prefilledBasis = null
@@ -945,9 +1037,9 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
      * hotové mzdy — server ji odmítne a karta rovnou přepne na novou verzi,
      * aby uživatel nehledal, co má udělat jinak.
      */
-    if (detail?.code === 'payroll_terms_settled') {
+    if (detail?.code === 'payroll_terms_settled' && !effectiveFromCorrected.value) {
       saveMode.value = 'version'
-      versionEffectiveFrom.value = minimumNewTermsDate.value
+      versionEffectiveFrom.value = defaultNewTermsDate.value
     }
     if (detail?.code === 'meal_entitlement_basis_locked') {
       saveError.value = t('payroll.people.meal_entitlement_basis.locked')
@@ -969,7 +1061,9 @@ async function save(options: { endRecurringBase?: boolean } = {}): Promise<boole
       if (apiErrorDetailCode(error) === 'recurring_base_wage_active' && !options.endRecurringBase) {
         const details = apiErrorDetails(error)
         const name = [details.recurring_name, details.name].find(value => typeof value === 'string' && value !== '') as string | undefined
-        const effectiveFrom = saveMode.value === 'version' ? versionEffectiveFrom.value : currentTerms.value?.effective_from ?? ''
+        const effectiveFrom = saveMode.value === 'version'
+          ? versionEffectiveFrom.value
+          : effectiveFromCorrected.value ? correctedEffectiveFrom.value : currentTerms.value?.effective_from ?? ''
         if (/^\d{4}-\d{2}-\d{2}$/.test(effectiveFrom)) {
           endRecurringOffer.value = { name: name ?? null, date: previousCalendarDay(effectiveFrom) }
         }
@@ -1018,9 +1112,16 @@ function healthNotificationTarget(item: PayrollEmploymentChecklistItem) {
 
 const saveBar = ref<HTMLElement | null>(null)
 const { managed } = usePersonCardSaveSection({
-  label: () => [relationLabel(), personalNumberLabel(t, props.employment.code)]
-    .filter(part => part !== '')
-    .join(' · '),
+  // Lišta karty jmenuje i režim a datum uložení, jinak by „Uložit vše"
+  // založilo novou verzi s datem, které uživatel nikde neviděl.
+  label: () => {
+    const name = [relationLabel(), personalNumberLabel(t, props.employment.code)]
+      .filter(part => part !== '')
+      .join(' · ')
+    return canEditTerms.value && dirty.value && termsForm.value !== null
+      ? `${name} (${saveModeSummary.value})`
+      : name
+  },
   dirty: () => canEditTerms.value && dirty.value,
   save: () => save(),
   discard: discardChanges,
@@ -1977,6 +2078,22 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
             <DateInput v-model="termsForm.fixed_term_end_on" :disabled="!canEditTerms || busy" :class="[INPUT, fieldClass('fixed_term_end_on')]" :aria-invalid="fieldInvalid('fixed_term_end_on')" data-test="terms-fixed-end" />
             <FieldNote :error="fieldError('fixed_term_end_on')" :warning="fieldWarning('fixed_term_end_on')" />
           </label>
+          <!--
+            Účinnost PLATNÉ verze. Změna data se uloží jako oprava této verze
+            (bez nové verze) — typicky ručně založená dohoda, jejíž podmínky
+            platí až ode dne zápisu místo ode dne nástupu.
+          -->
+          <label v-if="currentTerms" :class="FIELD" data-test="terms-correct-effective-from-field">
+            {{ t('payroll.people.save_mode.current_effective_from') }}
+            <DateInput
+              v-model="correctedEffectiveFrom"
+              :disabled="!canEditTerms || busy"
+              :class="[INPUT, fieldClass('effective_from')]"
+              :aria-invalid="fieldInvalid('effective_from')"
+              data-test="terms-correct-effective-from" />
+            <span class="text-xs text-neutral-500">{{ t('payroll.people.save_mode.current_effective_from_hint') }}</span>
+            <FieldNote :error="saveMode === 'correct' ? fieldError('effective_from') : null" :warning="fieldWarning('effective_from')" />
+          </label>
           <div>
             <dt :class="READ_LABEL">{{ t('payroll.people.actual_start') }}</dt>
             <dd :class="READ_VALUE">{{ formatDate(employment.actual_start_date) }}</dd>
@@ -2355,6 +2472,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
           </button>
         </div>
 
+        <p class="mb-2 text-xs font-medium text-neutral-900" data-test="terms-save-mode-summary">{{ saveModeSummary }}</p>
         <div class="flex flex-wrap items-end justify-between gap-3">
           <fieldset class="min-w-0">
             <legend class="text-xs font-medium text-neutral-600">{{ t('payroll.people.save_mode.title') }}</legend>
@@ -2364,6 +2482,7 @@ const GRID = 'mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
                 <span class="min-w-0">
                   <span class="block font-medium text-neutral-900">{{ t('payroll.people.save_mode.correct') }}</span>
                   <span class="block text-neutral-500">{{ t('payroll.people.save_mode.correct_hint', { date: formatDate(currentTerms?.effective_from ?? '') }) }}</span>
+                  <span v-if="currentTermsSettled" class="block text-warning-800" data-test="save-mode-correct-settled">{{ t('payroll.people.save_mode.correct_settled_hint', { period: formatDate(employment.settled_through ?? '') }) }}</span>
                 </span>
               </label>
               <label class="flex max-w-xs items-start gap-2 text-xs text-neutral-700">

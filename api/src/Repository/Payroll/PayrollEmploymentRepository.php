@@ -239,6 +239,7 @@ final class PayrollEmploymentRepository
                 'tax_declaration' => $taxDeclaration,
                 'health_insurer' => $healthInsurer,
                 'terms' => $this->terms($supplierId, $employmentId),
+                'settled_through' => $this->settledThrough($supplierId, $employmentId),
                 'checklist' => $this->checklist($supplierId, $employmentId),
                 'timeline' => $this->events($supplierId, $employmentId),
             ];
@@ -2200,6 +2201,36 @@ final class PayrollEmploymentRepository
         if (is_string($settled) && $settled !== '') {
             throw new PayrollTermsSettledException($settled);
         }
+    }
+
+    /**
+     * Poslední zúčtované mzdové období vztahu (první den měsíce), nebo `null`.
+     *
+     * Karta vztahu se podle něj rozhodne DŘÍV, než uživatel uloží: dokud
+     * platná verze podmínek nezasahuje do zúčtovaného měsíce, jde opravit na
+     * místě, a nová verze začne nejdřív prvním nezúčtovaným měsícem. Je to
+     * totéž pravidlo jako {@see assertTermsOpenFrom()}, jen se na něj ptá
+     * předem a nečeká na chybu `payroll_terms_settled`.
+     */
+    public function settledThrough(int $supplierId, int $employmentId): ?string
+    {
+        $stmt = $this->db->pdo()->prepare(
+            'SELECT MAX(run.period_start)
+               FROM payroll_run_employments run_employment
+               JOIN payroll_run_revisions revision
+                 ON revision.supplier_id = run_employment.supplier_id
+                AND revision.id = run_employment.revision_id
+               JOIN payroll_runs run
+                 ON run.supplier_id = revision.supplier_id
+                AND run.id = revision.run_id
+              WHERE run_employment.supplier_id = ?
+                AND run_employment.employment_id = ?
+                AND run.status IN ("posted", "payment_ready", "paid", "closed")'
+        );
+        $stmt->execute([$supplierId, $employmentId]);
+        $settled = $stmt->fetchColumn();
+
+        return is_string($settled) && $settled !== '' ? $settled : null;
     }
 
     /**

@@ -6970,7 +6970,14 @@
         "correct": "Correct the effective terms",
         "correct_hint": "Overwrites the version effective from {date}. For typos and filling in a missing detail.",
         "version": "New terms apply from a date",
-        "version_hint": "Creates a new version. The current one stays in the history."
+        "version_hint": "Creates a new version. The current one stays in the history.",
+        "summary_correct": "Saves as a correction of the effective terms (effective from {date}).",
+        "summary_correct_moved": "Saves as a correction of the effective terms and moves their effective date to {date}.",
+        "summary_version": "Saves as a new version of the terms effective from {date}.",
+        "correct_settled_hint": "Payroll has already been settled under this version (last period starting {period}); the server will refuse a correction. Choose a new version.",
+        "current_effective_from": "Current terms effective from",
+        "current_effective_from_hint": "Corrects the date of the current version without creating a new one. For example when the terms start on the day they were entered instead of the start date.",
+        "effective_from_correction_needs_correct": "The effective date of the current version can only be corrected with \"Correct the effective terms\". Restore the date or change how to save."
       },
       "mutation_failed": "The employment relationship could not be updated.",
       "transition_saved": "The employment status has been changed.",

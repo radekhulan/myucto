@@ -174,6 +174,11 @@ async function mountCard(
   return wrapper
 }
 
+/** Vztah, z jehož platné verze je už zúčtovaná mzda: změna sjednání předvolí novou verzi. */
+function settledEmployment(): PayrollEmployment {
+  return { ...employment(), settled_through: '2026-01-01' }
+}
+
 function employment(): PayrollEmployment {
   return {
     id: 10,
@@ -567,6 +572,56 @@ describe('EmploymentCard', () => {
     expect(wrapper.find('[data-test="terms-effective-from"]').exists()).toBe(true)
   })
 
+  /**
+   * Past z reálného provozu: změna sazby přepnula uložení na novou verzi od
+   * dneška a „Uložit vše" ji založilo, aniž by uživatel datum viděl. Dokud
+   * z platné verze není nic zúčtováno, zůstává oprava.
+   */
+  it('změnu sazby u nezúčtované verze uloží jako opravu, ne jako verzi od dneška', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
+    const wrapper = await mountCard()
+    await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+    await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
+    await wrapper.get('[data-test="terms-remuneration-basis-kind"]').setValue('agreement')
+    expect((wrapper.get('[data-test="save-mode-correct"]').element as HTMLInputElement).checked).toBe(true)
+    expect(wrapper.get('[data-test="terms-save-mode-summary"]').text()).toContain('payroll.people.save_mode.summary_correct')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+    expect(payrollApi.addEmploymentTerms).not.toHaveBeenCalled()
+    expect(payrollApi.correctEmploymentTerms).toHaveBeenCalledWith(10, 1, expect.objectContaining({ remuneration_type: 'hourly', hourly_rate_minor: 20000 }))
+  })
+
+  it('u zúčtované verze předvolí novou verzi od prvního nezúčtovaného měsíce a řekne to u uložení', async () => {
+    const stored = employment()
+    stored.settled_through = '2026-05-01'
+    const wrapper = await mountCard(stored)
+    await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
+    expect((wrapper.get('[data-test="save-mode-version"]').element as HTMLInputElement).checked).toBe(true)
+    const native = wrapper.get('[data-test="terms-effective-from"]').element.parentElement!
+      .querySelector('input[type="date"]') as HTMLInputElement
+    expect(native.value).toBe('2026-06-01')
+    expect(native.min).toBe('2026-06-01')
+    expect(wrapper.get('[data-test="terms-save-mode-summary"]').text()).toContain('payroll.people.save_mode.summary_version')
+    expect(wrapper.get('[data-test="save-mode-correct-settled"]').exists()).toBe(true)
+  })
+
+  it('opraví účinnost platné verze bez založení nové', async () => {
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
+    const wrapper = await mountCard()
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(false)
+    wrapper.get('[data-test="terms-correct-effective-from-field"]').findComponent(DateInput).vm.$emit('update:modelValue', '2025-12-07')
+    await flushPromises()
+    expect(wrapper.find('[data-test="terms-save-bar"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="terms-save-mode-summary"]').text()).toContain('payroll.people.save_mode.summary_correct_moved')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+    expect(payrollApi.addEmploymentTerms).not.toHaveBeenCalled()
+    expect(payrollApi.correctEmploymentTerms).toHaveBeenCalledWith(10, 1, expect.objectContaining({
+      correct_effective_from: true,
+      effective_from: '2025-12-07',
+    }))
+  })
+
   it.each(['employment', 'small_scale_employment', 'dpp', 'dpc'] as const)('uloží hodinovou sazbu a podklad pro %s bez měsíční částky', async (relation) => {
     const stored = employment()
     stored.relation_type = relation
@@ -614,7 +669,7 @@ describe('EmploymentCard', () => {
   })
 
   it('u pracovního poměru předvyplní mzdový výměr s datem účinnosti a text sleduje datum, dokud ho nikdo nepřepíše', async () => {
-    const wrapper = await mountCard()
+    const wrapper = await mountCard(settledEmployment())
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     await flushPromises()
     expect((wrapper.get('[data-test="terms-remuneration-basis-kind"]').element as HTMLSelectElement).value).toBe('wage_statement')
@@ -714,7 +769,7 @@ describe('EmploymentCard', () => {
         details: { field: 'remuneration_type', code: 'recurring_base_wage_active', recurring_name: 'Základní mzda' },
       } } } })
       .mockResolvedValueOnce({ employment: employment(), warnings: [] })
-    const wrapper = await mountCard()
+    const wrapper = await mountCard(settledEmployment())
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
     wrapper.get('[data-test="terms-effective-from-field"]').findComponent(DateInput).vm.$emit('update:modelValue', '2099-03-01')
@@ -744,7 +799,7 @@ describe('EmploymentCard', () => {
 
   it('vyžaduje podklad a uloží hodinovou sazbu také jako novou účinnou verzi', async () => {
     vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
-    const wrapper = await mountCard()
+    const wrapper = await mountCard(settledEmployment())
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     expect(wrapper.get('[data-test="save-mode-version"]').element).toHaveProperty('checked', true)
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200.05')
@@ -784,7 +839,7 @@ describe('EmploymentCard', () => {
   })
 
   it('při přechodu z hodinové na měsíční vyžaduje výslovnou částku a nepřevezme starou projekci; nulu přijme', async () => {
-    const stored = employment()
+    const stored = settledEmployment()
     stored.monthly_gross_minor = 4000000
     Object.assign(stored.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis: 'Syntetická dohoda', monthly_gross_minor: null })
     vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
@@ -843,7 +898,7 @@ describe('EmploymentCard', () => {
 
   it('přechod do hodinového režimu zachová i účinnost uprostřed měsíce', async () => {
     vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
-    const wrapper = await mountCard()
+    const wrapper = await mountCard(settledEmployment())
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('hourly')
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('200')
     await wrapper.get('[data-test="terms-remuneration-basis"]').setValue('Syntetická smlouva')
@@ -856,7 +911,7 @@ describe('EmploymentCard', () => {
   })
 
   it('změnu sazby při zachovaném hodinovém režimu dovolí i uprostřed měsíce', async () => {
-    const stored = employment()
+    const stored = settledEmployment()
     Object.assign(stored.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis_kind: 'contract', remuneration_basis: 'Syntetická smlouva', effective_from: '2026-01-15' })
     vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: stored, warnings: [] })
     const wrapper = await mountCard(stored)
@@ -870,7 +925,7 @@ describe('EmploymentCard', () => {
 
   it('zpřesnění legacy na měsíční režim dovolí i uprostřed měsíce', async () => {
     vi.mocked(payrollApi.addEmploymentTerms).mockResolvedValue({ employment: employment(), warnings: [] })
-    const wrapper = await mountCard()
+    const wrapper = await mountCard(settledEmployment())
     await wrapper.get('[data-test="terms-remuneration-type"]').setValue('monthly')
     const picker = wrapper.get('[data-test="terms-effective-from-field"]').findComponent(DateInput)
     picker.vm.$emit('update:modelValue', '2099-03-15')
@@ -899,7 +954,7 @@ describe('EmploymentCard', () => {
     const older = new Promise<{ minimum_hourly_40h_minor: number; ruleset_id: string }>(resolve => { resolveOlder = resolve })
     const newer = new Promise<{ minimum_hourly_40h_minor: number; ruleset_id: string }>(resolve => { resolveNewer = resolve })
     vi.mocked(payrollApi.remunerationOptions).mockImplementation(date => date === '2099-01-01' ? older : date === '2100-01-01' ? newer : Promise.resolve({ minimum_hourly_40h_minor: null, ruleset_id: null }))
-    const stored = employment()
+    const stored = settledEmployment()
     Object.assign(stored.terms[0]!, { remuneration_type: 'hourly', hourly_rate_minor: 18050, remuneration_basis_kind: 'contract', remuneration_basis: 'Syntetická smlouva' })
     const wrapper = await mountCard(stored)
     await wrapper.get('[data-test="terms-hourly-rate"]').setValue('150')

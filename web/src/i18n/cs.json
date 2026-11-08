@@ -6970,7 +6970,14 @@
         "correct": "Opravit platné podmínky",
         "correct_hint": "Přepíše verzi platnou od {date}. Pro překlepy a doplnění chybějícího údaje.",
         "version": "Od data platí nové podmínky",
-        "version_hint": "Založí novou verzi. Původní zůstane v historii."
+        "version_hint": "Založí novou verzi. Původní zůstane v historii.",
+        "summary_correct": "Uloží se jako oprava platných podmínek (účinných od {date}).",
+        "summary_correct_moved": "Uloží se jako oprava platných podmínek, účinnost se opraví na {date}.",
+        "summary_version": "Uloží se jako nová verze podmínek účinná od {date}.",
+        "correct_settled_hint": "Z této verze je už zúčtovaná mzda (naposledy za období od {period}), opravu server odmítne. Zvolte novou verzi.",
+        "current_effective_from": "Účinnost platných podmínek od",
+        "current_effective_from_hint": "Opraví datum platné verze, novou verzi nezaloží. Například když podmínky platí až ode dne zápisu místo ode dne nástupu.",
+        "effective_from_correction_needs_correct": "Účinnost platné verze lze opravit jen volbou „Opravit platné podmínky“. Vraťte datum, nebo změňte způsob uložení."
       },
       "mutation_failed": "Změnu pracovního vztahu se nepodařilo uložit.",
       "transition_saved": "Stav pracovního vztahu byl změněn.",

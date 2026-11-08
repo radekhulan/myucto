@@ -303,6 +303,12 @@ export interface PayrollEmployment {
    */
   health_insurer: PayrollEmploymentHealthInsurer | null
   terms: PayrollEmploymentTerms[]
+  /**
+   * Poslední zúčtované mzdové období vztahu (první den měsíce). Karta podle
+   * něj předem pozná, zda jde platnou verzi podmínek opravit na místě
+   * a od kdy nejdřív smí začít nová verze. Volitelné kvůli starší odpovědi.
+   */
+  settled_through?: string | null
   checklist: PayrollEmploymentChecklistItem[]
   timeline: PayrollEmploymentEvent[]
 }
@@ -507,12 +513,18 @@ export type PayrollEmploymentTermsPayload = Omit<
  *
  * `monthly_gross_minor` je volitelné a rozlišuje se PŘÍTOMNOSTÍ klíče: chybí =
  * mzdu neřešíme, `null` = mzda není sjednaná.
+ *
+ * Oprava účinnosti je výslovná volba: datum se posílá jen spolu
+ * s `correct_effective_from: true` (server ji přijme jen v relaci uživatele).
  */
 export type PayrollEmploymentTermsCorrectionPayload =
   Omit<PayrollEmploymentTermsPayload, 'effective_from'> & {
     monthly_gross_minor?: number | null
     end_recurring_base?: boolean
-  }
+  } & (
+    | { correct_effective_from?: false; effective_from?: never }
+    | { correct_effective_from: true; effective_from: string }
+  )
 
 /**
  * Varování k uložení podmínek: pole, které neprošlo číselníkovou nebo
@@ -8967,9 +8979,9 @@ export const payrollApi = {
   /**
    * OPRAVA platné verze podmínek — přepis na místě, bez nové verze.
    *
-   * `effective_from` se neposílá schválně: účinnost je vlastnost opravované
-   * verze, ne údaj, kterým by šlo z formuláře hnout. Server si ji doplní
-   * z uložené hodnoty.
+   * `effective_from` se běžně neposílá: účinnost je vlastnost opravované
+   * verze a server si ji doplní z uložené hodnoty. Posune se jen výslovnou
+   * opravou (`correct_effective_from: true`).
    */
   correctEmploymentTerms: (
     employmentId: number,
