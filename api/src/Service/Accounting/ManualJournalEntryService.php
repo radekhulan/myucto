@@ -170,8 +170,7 @@ final class ManualJournalEntryService
             }
             $pairNo++;
             $analytics = array_intersect_key($pair, array_flip(['cost_center', 'dimensions', 'dimension_splits']));
-            $result = static fn (string $code): bool => in_array(substr($code, 0, 1), ['5', '6'], true);
-            $onBoth = !$result($debit) && !$result($credit);
+            $carries = self::pairAnalyticsSides($debit, $credit);
             foreach (['debit' => $debit, 'credit' => $credit] as $side => $code) {
                 $line = [
                     'account_code'  => $code,
@@ -185,13 +184,26 @@ final class ManualJournalEntryService
                 if (isset($pair['line_text'])) {
                     $line['line_text'] = $pair['line_text'];
                 }
-                if ($onBoth || $result($code)) {
+                if ($carries[$side]) {
                     $line += $analytics;
                 }
                 $raw[] = $line;
             }
         }
         return $this->normalizeLines($supplierId, $raw);
+    }
+
+    /**
+     * Který řádek dvojice nese středisko a dimenze: výsledkový (5xx/6xx), a když ho
+     * dvojice nemá, oba. Sdílí ruční zápis, interní doklad i CSV import šablony.
+     *
+     * @return array{debit:bool, credit:bool}
+     */
+    public static function pairAnalyticsSides(string $debitCode, string $creditCode): array
+    {
+        $result = static fn (string $code): bool => in_array(substr($code, 0, 1), ['5', '6'], true);
+        $onBoth = !$result($debitCode) && !$result($creditCode);
+        return ['debit' => $onBoth || $result($debitCode), 'credit' => $onBoth || $result($creditCode)];
     }
 
     /**
