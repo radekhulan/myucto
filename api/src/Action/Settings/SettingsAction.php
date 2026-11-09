@@ -1081,20 +1081,12 @@ final class SettingsAction
                 if ($v === '') {
                     $body[$f] = null;
                 } else {
-                    if (strlen($v) > 60) {
-                        return Json::error($response, 'validation_failed', "Pole '$f' má max 60 znaků.", 400);
-                    }
-                    if (!preg_match('/\{C+\}/', $v)) {
-                        return Json::error($response, 'validation_failed', "Pole '$f' musí obsahovat counter placeholder, např. {CCC}.", 400);
-                    }
-                    // Řady vydaných dokladů renderuje VarsymbolGenerator — neznámý placeholder
-                    // (`{1YY}`) by prošel do čísla faktury doslova.
-                    if (in_array($f, InvoiceNumberFormat::SUPPLIER_COLUMNS, true)) {
-                        try {
-                            InvoiceNumberFormat::templateOrNull($v, $f);
-                        } catch (\InvalidArgumentException $e) {
-                            return Json::error($response, 'validation_failed', $e->getMessage(), 400);
-                        }
+                    // Řady vydaných i přijatých dokladů: tvar (symboly, mezery, právě jeden čítač,
+                    // délka) hlídá sdílený InvoiceNumberFormat, závorky ()[] převede na {}.
+                    try {
+                        $v = (string) InvoiceNumberFormat::templateOrNull($v, $f, !in_array($f, InvoiceNumberFormat::SUPPLIER_COLUMNS, true));
+                    } catch (\InvalidArgumentException $e) {
+                        return Json::error($response, 'validation_failed', $e->getMessage(), 400);
                     }
                     $body[$f] = $v;
                 }

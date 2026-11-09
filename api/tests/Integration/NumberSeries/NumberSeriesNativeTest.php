@@ -215,6 +215,25 @@ final class NumberSeriesNativeTest extends TestCase
         }
     }
 
+    public function testTemplateBracketsAreConvertedAndNonsenseIsRejected(): void
+    {
+        $series = $this->service->create($this->supplierId, [
+            'doc_kind' => 'invoice', 'name' => 'Závorky', 'prefix' => 'ZV', 'template' => '[PREFIX](YY)[CCCC]', 'period' => 'year',
+        ], $this->userId);
+        self::assertSame('{PREFIX}{YY}{CCCC}', $series['template']);
+        self::assertSame('ZV' . $this->yy . '0001', $series['next_preview']);
+
+        try {
+            $this->service->create($this->supplierId, [
+                'doc_kind' => 'invoice', 'name' => 'Nesmysl', 'prefix' => 'NS', 'template' => '{PREFIX}{YYx}{CCCC}', 'period' => 'year',
+            ], $this->userId);
+            self::fail('Neznámý zástupný symbol {YYx} musí být odmítnut.');
+        } catch (NumberSeriesException $e) {
+            self::assertSame('template_invalid', $e->errorCode);
+            self::assertStringContainsString('neznámý zástupný symbol', $e->getMessage());
+        }
+    }
+
     public function testCompletenessIsReportedPerNewSeries(): void
     {
         $series = $this->service->create($this->supplierId, ['doc_kind' => 'invoice', 'name' => 'E-shop', 'prefix' => 'FVE'], $this->userId);

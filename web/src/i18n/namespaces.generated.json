@@ -113,6 +113,7 @@
     "nonprofitTaxJ6",
     "nonprofitTaxNative",
     "number_series",
+    "number_template",
     "oss_rates",
     "other_items",
     "pamica",
@@ -278,6 +279,7 @@
     "client-new": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings"
@@ -294,6 +296,7 @@
     "client-edit": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings"
@@ -347,6 +350,7 @@
       "errors",
       "lock",
       "number_series",
+      "number_template",
       "payment_method",
       "price_list",
       "project",
@@ -394,6 +398,7 @@
       "errors",
       "lock",
       "number_series",
+      "number_template",
       "payment_method",
       "price_list",
       "project",
@@ -528,6 +533,7 @@
       "errors",
       "lock",
       "number_series",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
@@ -564,6 +570,7 @@
       "errors",
       "lock",
       "number_series",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
@@ -786,6 +793,7 @@
     "accounting-nonprofit-membership": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings"
@@ -1111,6 +1119,7 @@
       "errors",
       "kb_plus",
       "linked_documents",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings",
@@ -1129,6 +1138,7 @@
       "documents",
       "errors",
       "linked_documents",
+      "number_template",
       "payment_method",
       "purchase_invoice",
       "settings",
@@ -1169,6 +1179,7 @@
       "domains",
       "invoice_default_note",
       "number_series",
+      "number_template",
       "refundInvoice",
       "settings",
       "stock",
@@ -1208,6 +1219,7 @@
     ],
     "admin-codebooks": [
       "expense_categories",
+      "number_template",
       "oss_rates",
       "public_holidays",
       "revenue_categories",
@@ -1216,6 +1228,7 @@
     ],
     "admin-tax-constants": [
       "expense_categories",
+      "number_template",
       "oss_rates",
       "public_holidays",
       "revenue_categories",
@@ -1378,6 +1391,7 @@
     "recurring-new": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "project",
       "purchase_invoice",
@@ -1393,6 +1407,7 @@
     "recurring-edit": [
       "dimensions",
       "errors",
+      "number_template",
       "payment_method",
       "project",
       "purchase_invoice",
