@@ -9,6 +9,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingModeRepository;
 use MyInvoice\Security\FrameworkScopePolicy;
+use MyInvoice\Service\Accounting\LegalFormProfileRecommendation;
 use MyInvoice\Service\ActivityLogger;
 
 /**
@@ -129,8 +130,8 @@ final class EntryFormService
     /**
      * Naplánuje formu zápisu od data. Jediná zápisová cesta do historie.
      *
-     * Pravidla: firma vede podvojné účetnictví k datu; nejde o SVJ ani o neziskovku
-     * či rámec 504 (v1 je jednoduchý zápis jen pro obchodní firmy); valid_from leží
+     * Pravidla: firma vede podvojné účetnictví k datu; je to obchodní firma nebo SVJ
+     * (spolky a ostatní NNO zatím ne, viz {@see supportsSingle()}); valid_from leží
      * v otevřeném účetním období a za zámkem k datu (locked_until); neexistuje novější
      * ani stejně datovaná změna; forma k datu se skutečně mění. Oprávnění (jen admin
      * firmy) řeší Action přes RequestAuthorization, služba ho nepředpokládá.
@@ -167,12 +168,10 @@ final class EntryFormService
                 409,
             );
         }
-        if ($this->frameworkScope->allows($supplierId, FrameworkScopePolicy::SVJ)
-            || $this->frameworkScope->allows($supplierId, FrameworkScopePolicy::NONPROFIT_504)
-        ) {
+        if (!$this->supportsSingle($supplierId)) {
             throw new EntryFormException(
                 'entry_form_unsupported_module',
-                'Jednoduchý zápis zatím není dostupný pro společenství vlastníků jednotek ani pro neziskové organizace.',
+                'Jednoduchý zápis zatím není dostupný pro spolky a ostatní neziskové organizace.',
                 409,
             );
         }
@@ -293,6 +292,32 @@ final class EntryFormService
         $this->forget($supplierId);
 
         return $id;
+    }
+
+    /**
+     * Smí firma zapnout jednoduchý zápis? Obchodní firmy a SVJ (i v rámci 504, i firma
+     * s výslovně zapnutým modulem nemovitostí) ano; spolky a ostatní NNO (právní forma
+     * nevýdělečné organizace nebo rámec 504 bez SVJ) zatím ne.
+     */
+    public function supportsSingle(int $supplierId): bool
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT legal_form, accounting_mode FROM supplier WHERE id = ?');
+        $stmt->execute([$supplierId]);
+        $supplier = $stmt->fetch(\PDO::FETCH_ASSOC);
+        if ($supplier === false) {
+            return false;
+        }
+        $profile = LegalFormProfileRecommendation::forLegalForm(
+            isset($supplier['legal_form']) ? (string) $supplier['legal_form'] : null,
+            isset($supplier['accounting_mode']) ? (string) $supplier['accounting_mode'] : null,
+        )['entity_profile'];
+        if ($profile === LegalFormProfileRecommendation::PROFILE_NONPROFIT) {
+            return false;
+        }
+        if ($this->frameworkScope->allows($supplierId, FrameworkScopePolicy::SVJ)) {
+            return true;
+        }
+        return !$this->frameworkScope->allows($supplierId, FrameworkScopePolicy::NONPROFIT_504);
     }
 
     /** Zahodí paměť instance (po změně formy, v dlouho běžících workerech mezi dávkami). */
