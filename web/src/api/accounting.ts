@@ -189,11 +189,10 @@ export interface JournalEntry {
    */
   has_related?: boolean
   /**
-   * Zápis nejde rozdělit na dvojice (M : N); jen u firem s jednoduchou formou. Seznam deníku
-   * backend dnes tohle pole nevrací (filtr `pair_status` ani odznak z něj nefungují), stav
-   * jednoho zápisu je v detailu jako `pair_status.status`.
+   * Posouzení zápisu bez dvojic, jen u firem s jednoduchou formou: `composite_mn` = nejde
+   * rozdělit (M : N, k ruční úpravě), `ineligible` = převod ho fyzicky nedělí; null = dvojice má.
    */
-  pair_status?: JournalLineStatus | null
+  pair_status?: 'composite_mn' | 'ineligible' | null
   /** Interní doklad, jehož zaúčtováním (posting) nebo stornem (reversal) zápis je (migrace 2193). */
   internal_document?: { id: number; document_no: string | null; status: 'draft' | 'posted' | 'reversed'; role: 'posting' | 'reversal' } | null
   automation?: AutomationProvenance | null
