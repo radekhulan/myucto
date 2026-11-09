@@ -2080,16 +2080,17 @@ final class BankPostingService
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign
+            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign, jel.pair_no
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id AND c.supplier_id = jel.supplier_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?
               ORDER BY jel.line_no, jel.id'
         );
         $stmt->execute([(int) $entry['id'], $supplierId]);
+        $clearing = null;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-            if ($this->cardRegime->isClearingCode($supplierId, (string) $row['account_code'])) {
-                return [
+            if ($clearing === null && $this->cardRegime->isClearingCode($supplierId, (string) $row['account_code'])) {
+                $clearing = [
                     'code'           => (string) $row['account_code'],
                     'side'           => (string) $row['side'],
                     'amount'         => round((float) $row['amount'], 2),
@@ -2097,9 +2098,19 @@ final class BankPostingService
                     'fx_rate'        => $row['fx_rate'] !== null ? (float) $row['fx_rate'] : null,
                     'amount_foreign' => $row['amount_foreign'] !== null ? (float) $row['amount_foreign'] : null,
                 ];
+                continue;
+            }
+            // Zápis po dvojicích může mít mezičlen rozdělený na díly (přeúčtovaný pohyb
+            // s víc protiúčty): vypořádání patří celé částce, díly se sečtou.
+            if ($clearing !== null && $row['pair_no'] !== null
+                && (string) $row['account_code'] === $clearing['code'] && (string) $row['side'] === $clearing['side']) {
+                $clearing['amount'] = round($clearing['amount'] + (float) $row['amount'], 2);
+                if ($clearing['amount_foreign'] !== null && $row['amount_foreign'] !== null) {
+                    $clearing['amount_foreign'] = round($clearing['amount_foreign'] + (float) $row['amount_foreign'], 2);
+                }
             }
         }
-        return null;
+        return $clearing;
     }
 
     /**
