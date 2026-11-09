@@ -18,6 +18,9 @@ api/test-results/
 node_modules/
 web/node_modules/
 MCP/node_modules/
+# i jako symlink do sdílených závislostí (worktree), ten vzor s lomítkem nechytí
+/web/node_modules
+/MCP/node_modules
 MCP/dist/
 web/dist/
 web/dist.bak/
