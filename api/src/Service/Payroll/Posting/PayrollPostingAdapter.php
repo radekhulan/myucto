@@ -170,12 +170,27 @@ final class PayrollPostingAdapter
             // Jednoduchá (párová) forma k datu zápisu: tytéž částky po dvojicích
             // předkontací (souhrnně za firmu a středisko). Dávka i její otisky se
             // počítají dál ze složených řádků, takže revize nemění target ani delta hash.
+            //
+            // Firma, která zvolila zaúčtování po zaměstnancích (zmrazeno ve
+            // snapshotu), dostane tytéž částky rozdělené po osobách: ve formě
+            // single vlastní dvojice každé osoby, ve složené formě řádky po
+            // osobách. Součty po účtech, stranách a střediscích se nemění.
+            $employees = PayrollPostingLineBuilder::postsByEmployee($snapshot)
+                ? PayrollPostingEmployees::fromSnapshot($snapshot)
+                : null;
             $journalLines = $preview->lines;
             if ($this->entryForms->formAt($supplierId, $entryDate, true)->isSingle()) {
                 $journalLines = $this->lineBuilder->singleEntryLines(
                     $preview->targetAllocations,
                     $previous['allocations'] ?? [],
+                    $employees,
                 ) ?? $preview->lines;
+            } elseif ($employees !== null) {
+                $journalLines = $this->lineBuilder->employeeDeltaLines(
+                    $preview->targetAllocations,
+                    $previous['allocations'] ?? [],
+                    $employees,
+                );
             }
 
             $journalEntryId = $this->posting->postDocument(
@@ -193,6 +208,9 @@ final class PayrollPostingAdapter
                     }
                     if (isset($line['cost_center'])) {
                         $mapped['cost_center'] = $line['cost_center'];
+                    }
+                    if (isset($line['line_text'])) {
+                        $mapped['line_text'] = $line['line_text'];
                     }
                     // Firemní dimenze řádku (typ → hodnota) jdou do deníku
                     // stejnou cestou jako u ručního zápisu: PostingService je

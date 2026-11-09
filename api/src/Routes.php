@@ -92,6 +92,7 @@ use MyInvoice\Action\Payroll\PayrollDeadlineOverviewAction;
 use MyInvoice\Action\Payroll\PayrollDeductionAgreementAction;
 use MyInvoice\Action\Payroll\PayrollDimensionAction;
 use MyInvoice\Action\Payroll\PayrollDimensionCostReportAction;
+use MyInvoice\Action\Payroll\PayrollPostingDetailReportAction;
 use MyInvoice\Action\Payroll\PayrollDiscountIntentAction;
 use MyInvoice\Action\Payroll\PayrollDocumentAction;
 use MyInvoice\Action\Payroll\PayrollDocumentDeliveryAction;
@@ -1254,6 +1255,15 @@ final class Routes
                 '/reports/dimension-costs/{year:[0-9]{4}}',
                 [PayrollDimensionCostReportAction::class, 'show'],
             );
+            // Podrobné zaúčtování mezd po zaměstnancích a druzích mezd za měsíc.
+            $g->get(
+                '/reports/posting-detail',
+                [PayrollPostingDetailReportAction::class, 'show'],
+            );
+            $g->get(
+                '/reports/posting-detail/export.{format:xlsx|csv}',
+                [PayrollPostingDetailReportAction::class, 'export'],
+            );
             // Kontrola přepočtu převzatého měsíce proti číslům původního systému.
             // Bez ní je přepočet historického měsíce hazard: původní systém ta čísla
             // už podal do JMHZ, na pojišťovny a na finanční úřad.
@@ -1641,6 +1651,7 @@ final class Routes
             $g->patch('/employments/{id:[0-9]+}/relation-type', [PayrollEmploymentAction::class, 'changeRelationType']);
             $g->post('/employments/{id:[0-9]+}/merge-into', [PayrollEmploymentAction::class, 'mergeInto']);
             $g->patch('/employments/{id:[0-9]+}/meal-entitlement-basis', [PayrollEmploymentAction::class, 'setMealEntitlementBasis']);
+            $g->patch('/employments/{id:[0-9]+}/statutory-partner', [PayrollEmploymentAction::class, 'setStatutoryPartner']);
             $g->post('/employments/{id:[0-9]+}/start-confirmation', [PayrollEmploymentAction::class, 'confirmStart']);
             $g->post(
                 '/employments/{id:[0-9]+}/transitions/{target:preregistered|active|suspended|ended|archived|no_show}',

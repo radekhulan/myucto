@@ -1962,6 +1962,7 @@
     "payroll_runs": "Mzdové běhy",
     "payroll_payments": "Mzdové příkazy a úhrady",
     "payroll_posting_reconciliation": "Shoda účtování mezd",
+    "payroll_posting_detail": "Zaúčtování mezd",
     "payroll_people": "Zaměstnanci",
     "payroll_quick_inputs": "Rychlý měsíční vstup",
     "payroll_components": "Mzdové složky a vstupy",
@@ -3718,6 +3719,35 @@
         "open_institution_accounts": "Otevřít účty institucí",
         "open_person_accounts": "Otevřít výplatní účty zaměstnance",
         "unknown_posting_reason": "Důvod nezaúčtování aplikace neumí vysvětlit. Požádejte správce o kontrolu a předejte mu technické podrobnosti níže."
+      }
+    },
+    "posting_detail": {
+      "title": "Podrobné zaúčtování mezd",
+      "subtitle": "Zaúčtování mzdového předpisu za měsíc po zaměstnancích a druzích mezd: účet MD, účet Dal, osobní číslo, druh mzdy, hodiny a částka. Nahoře je souhrn za firmu. Součet sedí na mzdové zápisy měsíce v deníku.",
+      "period": "Období",
+      "reload": "Načíst znovu",
+      "retry": "Zkusit znovu",
+      "load_failed": "Sestavu zaúčtování mezd se nepodařilo načíst.",
+      "export_xlsx": "Export XLSX",
+      "export_csv": "Export CSV",
+      "export_failed": "Export zaúčtování mezd se nepodařilo stáhnout.",
+      "summary_title": "Souhrn za firmu",
+      "rows_title": "Po zaměstnancích a druzích mezd",
+      "company_wide": "Celá firma",
+      "total": "Celkem",
+      "open_runs": "Otevřít mzdové běhy",
+      "empty": {
+        "title": "Za měsíc není nic zaúčtováno",
+        "message": "Sestava se plní ze zaúčtovaných mzdových běhů. Schvalte a zaúčtujte běh měsíce na stránce Mzdové běhy."
+      },
+      "table": {
+        "person": "Osobní číslo a jméno",
+        "label": "Druh mzdy",
+        "debit": "Účet MD",
+        "credit": "Účet Dal",
+        "cost_center": "Středisko",
+        "hours": "Hodiny",
+        "amount": "Částka"
       }
     },
     "posting_reconciliation": {
@@ -7770,6 +7800,10 @@
         "done": "Vztah je sloučený.",
         "timeline": "Sloučeno ze vztahu {code}"
       },
+      "statutory_partner": {
+        "label": "Člen orgánu je zároveň společníkem",
+        "hint": "Odměna za výkon funkce společníka se účtuje 523/366 (závazek ke společníkům), jednatele bez podílu 523/331, je-li v nastavení mezd vyplněná předkontace odměny jednatele, který není společníkem. Platí pro běhy přepočítané po uložení."
+      },
       "meal_entitlement_basis": {
         "label": "Režim nároku na stravování",
         "shift": "Práce rozvržená na směny",
@@ -10400,6 +10434,11 @@
       "rounding_label": "Krácená mzda a náhrady mzdy",
       "rounding_ceil": "Nahoru na celé koruny (§ 142 odst. 2 zákoníku práce)",
       "rounding_half_up": "Matematicky, jako předchozí mzdový program",
+      "posting_granularity_title": "Zaúčtování mezd",
+      "posting_granularity_hint": "Jak se mzdový předpis zapíše do deníku. Souhrnně jsou řádky (ve formě jednoduchého zápisu dvojice) za celou firmu a středisko. Po zaměstnancích má každý zaměstnanec vlastní řádky s osobním číslem a pojistné zaměstnavatele se rozdělí na jeho pracovní vztahy, což se hodí pro controlling. Částky ani účty se nemění. Volba platí pro mzdové běhy přepočítané po uložení.",
+      "posting_granularity_label": "Mzdový předpis",
+      "posting_granularity_summary": "Souhrnně za firmu a středisko",
+      "posting_granularity_employee": "Po zaměstnancích",
       "offices_title": "Mzdové účtárny",
       "offices_hint": "Každá firma musí mít alespoň jednu aktivní účtárnu. Výchozí účtárna musí být aktivní.",
       "offices_empty": "Zatím není založena žádná mzdová účtárna.",
@@ -10733,6 +10772,7 @@
         "employment_gross": "Mzda zaměstnance mimo výkon funkce",
         "partner_gross": "Závislý příjem společníka",
         "statutory_gross": "Odměna za výkon funkce",
+        "statutory_nonpartner_gross": "Odměna jednatele, který není společníkem",
         "employer_insurance": "Pojistné hrazené zaměstnavatelem",
         "social_insurance": "Závazek sociálního pojištění",
         "health_insurance": "Závazek zdravotního pojištění",
@@ -10831,6 +10871,7 @@
         "terminate_hint": "Dimenzi nejde smazat, protože je použitá v historii - ukončete její účinnost nastavením konce platnosti."
       },
       "accounting_row_hint": {
+        "statutory_nonpartner_gross": "Závazek z odměny za výkon funkce jednatele nebo člena orgánu, který není společníkem: věřitelem je jako zaměstnanec, proto 523/331. U jednatele, který je společníkem (příznak na kartě vztahu), zůstává 523/366 z řádku Odměna za výkon funkce. Nechte prázdné, pokud má odměna všech jednatelů dál jít proti 366.",
         "withholding_tax": "Daň zvláštní sazbou podle § 6 odst. 4 ZDP (dohody do limitu bez prohlášení, drobné příjmy). Odvádí se jinou platbou než záloha (předčíslí 7720 místo 7704), v jiném termínu a vykazuje se vlastním hlášením, takže na společném účtu se závazky slijí a saldo proti platbám nejde přiřadit k jedné z daní. Bonus i doplatek z ročního zúčtování patří na účet ZÁLOHY, ne sem - vracejí se ze záloh.",
         "risky_savings": "Zákonný příspěvek zaměstnavatele na spoření na stáří u rizikové práce (4 % vyměřovacího základu od 1. 1. 2026). Zaměstnanci se nevyplácí, posílá se penzijní společnosti - proto zákonný sociální náklad (527) proti jinému závazku (379), ne pojistné na 336.",
         "employee_receivable": "Kam se překlopí záporná čistá mzda - typicky doplatek zdravotního pojištění do minimálního vyměřovacího základu v měsíci bez peněžního příjmu. Zaměstnanec dluží zaměstnavateli, takže jde o pohledávku (335), ne o závazek.",

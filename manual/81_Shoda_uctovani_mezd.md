@@ -156,6 +156,34 @@ Pohledávka za zaměstnancem ze záporné čisté mzdy (účet 335) se do porovn
 záměrně nezapočítává jako záporná čistá mzda. Obě strany rozvahy se nesčítají
 do jednoho čísla se znaménkem.
 
+### 81.5.5 Podrobné zaúčtování mezd
+
+Stránka **Mzdy → Zaúčtování mezd** ukazuje, jak se mzdový předpis měsíce
+zaúčtoval, po dvojicích účtů:
+
+- Nahoře je **souhrn za firmu**: druh mzdy, účet MD, účet Dal, hodiny a částka.
+- Pod ním je **rozpad po zaměstnancích a druzích mezd**: osobní číslo a jméno,
+  druh mzdy, účet MD, účet Dal, středisko, hodiny a částka.
+
+Druh mzdy je u hrubé mzdy název mzdové složky, u ostatních řádků jejich povaha
+(pojistné zaměstnance, záloha na daň, pojistné zaměstnavatele, srážka, zápočet
+na účet společníka). Hodiny se vyplní jen u hodinové mzdy, jinde je katalog
+mzdových složek nevede. Pojistné zaměstnavatele se zaměstnancům přiřadí, když
+firma účtuje po zaměstnancích nebo pracovní vztahy nesou středisko; jinak je
+v řádku **Celá firma**. Tam zůstává i závazek pojistného zaměstnavatele vůči
+institucím.
+
+Sestava čte zaúčtovaný stav posledních zaúčtovaných revizí běhů měsíce. Její
+součet je proto obratem mzdových zápisů měsíce v deníku a zůstatek po účtech
+sedí na deník bez ohledu na to, zda firma účtuje souhrnně, nebo po
+zaměstnancích, a zda používá jednoduchou, nebo složenou formu zápisu. Po
+opravné revizi sestava ukazuje opravený stav, deník k němu dojde rozdílovým
+zápisem.
+
+Tlačítka **Export XLSX** a **Export CSV** stáhnou sestavu do souboru. XLSX má
+souhrn i rozpad na jednom listu, CSV jen řádky rozpadu. Sestavu vidí role
+s právem na mzdové sestavy; stažení exportu se zapíše do historie činností.
+
 ## 81.6 Související kapitoly
 
 - [Mzdové běhy](80_Mzdove_behy.md): zdroj porovnání a zaúčtování

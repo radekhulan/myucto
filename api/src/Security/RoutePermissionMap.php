@@ -319,6 +319,9 @@ final class RoutePermissionMap
         ['DELETE', '#^/api/payroll/employments/[0-9]+$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Oprava druhu vztahu je oprava jeho založení, proto totéž právo.
         ['PATCH', '#^/api/payroll/employments/[0-9]+/relation-type$#', 'payroll.employment.write', AccessLevel::WRITE],
+        // Společník u výkonu funkce mění zaúčtování odměny, ne založení vztahu,
+        // ale je to údaj vztahu, proto totéž právo.
+        ['PATCH', '#^/api/payroll/employments/[0-9]+/statutory-partner$#', 'payroll.employment.write', AccessLevel::WRITE],
         // Sloučení je oprava založení dvou vztahů a končí smazáním jednoho z nich.
         ['POST', '#^/api/payroll/employments/[0-9]+/merge-into$#', 'payroll.employment.write', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/time/month$#', 'payroll', AccessLevel::READ],
@@ -339,6 +342,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/reports/annual/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/reports/dimension-costs/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
+        ['GET', '#^/api/payroll/reports/posting-detail(?:/export\.(?:xlsx|csv))?$#', 'payroll.reports', AccessLevel::READ],
         // Kontrola přepočtu proti mzdám převzatým z původního systému — čtení
         // mzdových dat osob, tedy stejné právo jako ostatní mzdové sestavy.
         ['GET', '#^/api/payroll/reports/migration-reconciliation/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],

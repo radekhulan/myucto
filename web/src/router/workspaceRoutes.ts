@@ -168,6 +168,8 @@ export function createWorkspaceRoutes(): RouteRecordRaw[] {
       { path: 'payroll/payments', name: 'payroll-payments', component: () => import('@/pages/payroll/PayrollPayments.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // MZ-18-W07 — reconciliation účetního můstku mezd (mzda ↔ deník ↔ platby).
       { path: 'payroll/posting-reconciliation', name: 'payroll-posting-reconciliation', component: () => import('@/pages/payroll/PayrollPostingReconciliation.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
+      // Podrobné zaúčtování mezd po zaměstnancích a druzích mezd (sestava + export).
+      { path: 'payroll/posting-detail', name: 'payroll-posting-detail', component: () => import('@/pages/payroll/PayrollPostingDetail.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       { path: 'payroll/people', name: 'payroll-people', component: () => import('@/pages/payroll/PeopleList.vue'), meta: { requiresSupplier: true, requiresPayroll: true } },
       // Karta člověka má vlastní adresu, aby na ni šlo odkázat z termínů, e-mailu
       // i z jiné agendy. Zůstává to ale JEDNA komponenta (viz komentář v

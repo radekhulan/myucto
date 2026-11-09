@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Document;
 
+use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
 use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
 use MyInvoice\Service\Payroll\Calculation\Money;
 use MyInvoice\Service\Payroll\Component\PayrollExemptIncomeSplit;
@@ -427,6 +428,7 @@ final class PayslipDocumentSnapshotMapper
             $fallbackAccounts = $this->relationAccounts(
                 $relationType,
                 $configuredAccounts,
+                $employment,
             );
 
             $inputs = [];
@@ -521,6 +523,7 @@ final class PayslipDocumentSnapshotMapper
             $fallback = $this->relationAccounts(
                 $this->requiredText($employment, 'relation_type'),
                 $configuredAccounts,
+                $employment,
             );
             $accountPairs[] = [
                 'debit' => $fallback['gross_debit'],
@@ -883,6 +886,7 @@ final class PayslipDocumentSnapshotMapper
 
     /**
      * @param array<string,mixed> $accounts
+     * @param array<string,mixed> $employment zmrazený pracovní vztah
      * @return array{
      *   gross_debit:string,
      *   gross_credit:string,
@@ -890,7 +894,7 @@ final class PayslipDocumentSnapshotMapper
      *   employer_insurance_credit:string
      * }
      */
-    private function relationAccounts(string $relationType, array $accounts): array
+    private function relationAccounts(string $relationType, array $accounts, array $employment = []): array
     {
         [$grossDebit, $grossCredit] = match ($relationType) {
             'employment', 'small_scale_employment', 'dpp', 'dpc' => [
@@ -910,9 +914,21 @@ final class PayslipDocumentSnapshotMapper
             ),
         };
 
+        $credit = $this->account($accounts, $grossCredit);
+        if ($relationType === 'statutory_body') {
+            // Jednatel bez podílu má závazek na 331, je-li předkontace zmrazená;
+            // páska ukazuje tutéž dvojici jako zaúčtování.
+            $credit = PayrollAccountingDefaults::relationGrossCredit(
+                $relationType,
+                $accounts,
+                $accounts,
+                $employment,
+            );
+        }
+
         return [
             'gross_debit' => $this->account($accounts, $grossDebit),
-            'gross_credit' => $this->account($accounts, $grossCredit),
+            'gross_credit' => $credit,
             'employer_insurance_debit' =>
                 $this->account($accounts, 'employer_insurance_debit'),
             'employer_insurance_credit' =>

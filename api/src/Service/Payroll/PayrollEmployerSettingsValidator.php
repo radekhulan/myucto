@@ -80,6 +80,7 @@ final class PayrollEmployerSettingsValidator
      *   payroll_contact_email:?string,
      *   payroll_contact_phone:?string,
      *   wage_rounding:?string,
+     *   posting_granularity:?string,
      *   accounts:array<string,string>,
      *   offices:list<array{
      *     code:string,
@@ -129,6 +130,14 @@ final class PayrollEmployerSettingsValidator
             throw new \InvalidArgumentException('Zaokrouhlení mzdy musí být ceil nebo half_up.');
         }
         $normalized['wage_rounding'] = $rounding === null ? null : (string) $rounding;
+
+        // Zaúčtování předpisu souhrnně, nebo po zaměstnancích; chybějící volba
+        // nemění uloženou stejně jako u zaokrouhlení.
+        $granularity = $input['posting_granularity'] ?? null;
+        if ($granularity !== null && !in_array($granularity, ['summary', 'employee'], true)) {
+            throw new \InvalidArgumentException('Zaúčtování mezd musí být summary nebo employee.');
+        }
+        $normalized['posting_granularity'] = $granularity;
 
         $offices = $this->offices($input['offices'] ?? null);
         $defaultOfficeCode = strtoupper(trim((string) ($input['default_office_code'] ?? '')));
@@ -277,6 +286,15 @@ final class PayrollEmployerSettingsValidator
             // PayrollAccountingDefaults::NULLABLE_ACCOUNTS). Výchozí účet se
             // doplní jen klientovi, který klíč vůbec neposlal — a jen když ho
             // firma v osnově má.
+            // Předkontaci, která by stávající firmě změnila zápis (odměna
+            // jednatele bez podílu), nezapne klient, který ji neposlal.
+            if ($code === ''
+                && PayrollAccountingDefaults::isExplicitOnly($key)
+                && !array_key_exists($key, $value)
+            ) {
+                $result[$key] = '';
+                continue;
+            }
             if ($code === ''
                 && PayrollAccountingDefaults::isNullable($key)
                 && (array_key_exists($key, $value)
