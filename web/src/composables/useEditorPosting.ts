@@ -17,8 +17,10 @@ export function useEditorPosting() {
   const accounts = ref<ChartAccount[]>([])
   let loading: Promise<void> | null = null
 
+  // Zaúčtování na řádku a náhled zápisu vidí jen ten, kdo smí zaúčtovat; ostatním editor
+  // tyto části nezobrazí, hodnoty řádku ale beze změny posílá zpět.
   const enabled = computed(() => supplierStore.currentSupplier?.accounting_mode === 'double_entry'
-    && !auth.isClientRole && auth.canRead('accounting'))
+    && !auth.isClientRole && auth.canWrite('accounting.journal.post'))
   const canPost = computed(() => enabled.value && auth.saveAndPostEnabled === true
     && auth.canWrite('accounting.journal.post'))
 

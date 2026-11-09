@@ -212,7 +212,7 @@ v kapitole [Platební příkazy](26_Platebni_prikazy.md).
 **Jak poznáte, že je hotovo:** u faktury je účetní ikona **Zaúčtováno** (datum je v tooltipu)
 a funguje proklik **Zobrazit v deníku**.
 
-Box **Náhled zápisu** pod položkami je v editoru vždy. Je-li na instalaci zapnutá volba
+Box **Náhled zápisu** pod položkami a pole Předkontace a Protiúčet na řádku vidí uživatel s právem zaúčtovat. Je-li na instalaci zapnutá volba
 **Uložit a zaúčtovat** (viz [§ 23.11.18](#231118-zauctovani-do-deniku-a-tlacitko-zauctovat)), zaúčtujete rovnou z editoru
 tlačítkem **Uložit a zaúčtovat**; koncept se při tom zároveň přijme. Jinak doklad uložte a zaúčtujte z detailu.
 
