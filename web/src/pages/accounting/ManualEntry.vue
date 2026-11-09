@@ -740,7 +740,7 @@ async function submitTransfer(force = false) {
         </div>
         <p class="text-xs text-neutral-500 mb-2">{{ t('accounting.pairs.manual.hint') }}</p>
         <JournalPairsEditor ref="pairsEditor" v-model="pairs" :accounts="accounts" :errors="pairErrors"
-          with-cost-center :cost-center-list-id="`${pageId}-cost-center-options`" list-id="manual-pairs-coa">
+          :with-cost-center="!dims.enabled.value" :cost-center-list-id="`${pageId}-cost-center-options`" list-id="manual-pairs-coa">
           <template #extra="{ pair }">
             <DimensionFields v-if="dims.enabled.value" v-model="(pair as PairRow).dimensions" compact class="col-span-12" />
           </template>

@@ -7,6 +7,7 @@ const m = vi.hoisted(() => ({
   push: vi.fn(),
   success: vi.fn(),
   query: {} as Record<string, string>,
+  dims: false,
 }))
 
 vi.mock('vue-i18n', () => ({
@@ -38,7 +39,7 @@ vi.mock('@/api/documents', () => ({ documentsApi: {} }))
 vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: m.success, error: vi.fn(), warning: vi.fn() }) }))
 vi.mock('@/composables/useDemoMode', () => ({ useDemoMode: () => ({ blockDemoMutation: () => false }) }))
 vi.mock('@/composables/useFormat', () => ({ formatDate: (v: string) => v, formatMoney: (v: number) => String(v) }))
-vi.mock('@/composables/useDimensions', () => ({ useDimensions: () => ({ enabled: { value: false } }) }))
+vi.mock('@/composables/useDimensions', () => ({ useDimensions: () => ({ enabled: { get value() { return m.dims } } }) }))
 vi.mock('@/utils/date', () => ({ appIsoDate: () => '2027-03-15' }))
 vi.mock('@/components/accounting/DocumentLinkPicker.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@/components/dimensions/DimensionFields.vue', () => ({ default: { template: '<div />' } }))
@@ -66,6 +67,7 @@ async function fillPair(w: ReturnType<typeof mountPage>, debit: string, credit: 
 beforeEach(() => {
   vi.clearAllMocks()
   for (const k of Object.keys(m.query)) delete m.query[k]
+  m.dims = false
   m.createEntry.mockResolvedValue({ id: 55, lines: [] })
 })
 
@@ -98,6 +100,20 @@ describe('ManualEntry: jednoduchý zápis po dvojicích', () => {
     expect(body.pairs).toEqual([{ debit_account_code: '221', credit_account_code: '311', amount: 1250.5, is_red_storno: false }])
     expect(m.push).toHaveBeenCalledWith('/accounting/journal')
     w.unmount()
+  })
+
+  it('středisko je jedno pole: firma bez dimenzí má textové, s dimenzemi jen dimenzní výběr', async () => {
+    m.getEntryForm.mockResolvedValue(single)
+    const plain = mountPage()
+    await flushPromises()
+    expect(plain.find('[data-pair-row="1"] input[aria-label="accounting.manual.cost_center"]').exists()).toBe(true)
+    plain.unmount()
+
+    m.dims = true
+    const withDims = mountPage()
+    await flushPromises()
+    expect(withDims.find('[data-pair-row="1"] input[aria-label="accounting.manual.cost_center"]').exists()).toBe(false)
+    withDims.unmount()
   })
 
   it('dvojici se stejnými účty klient nepustí na server', async () => {
