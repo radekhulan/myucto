@@ -138,6 +138,7 @@ final class Bootstrap
                 $c->get(Connection::class),
                 $c->get(\MyInvoice\Infrastructure\Cache\RedisFactory::class),
                 $c->get(\MyInvoice\Service\License\LicenseCapacityGate::class),
+                $c->get(Config::class),
             ),
 
             LoggerInterface::class => function (ContainerInterface $c) use ($config): LoggerInterface {

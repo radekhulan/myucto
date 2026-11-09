@@ -146,6 +146,12 @@ final class ClientDomainMcpTest extends TestCase
                 'Entra se zapne jen s https app.url; bez ní vynucené SSO instalace neplatí a test by nic neověřil.');
             $this->pdo->prepare("UPDATE sessions SET auth_method='oidc:entra' WHERE id=?")
                 ->execute([$this->session['token']]);
+            // Token z přihlášení přes Entra ID platí, jen dokud se uživatel přes
+            // Entra ID ověřil v rámci stropu sezení (ApiTokenService::issuingIdentityFresh).
+            $this->pdo->prepare(
+                "INSERT INTO user_external_identities (user_id, provider, issuer, tenant_id, subject, linked_by, last_used_at)
+                 VALUES (?, 'entra', 'https://login.example.test/v2.0', 'synthetic-tenant', ?, 'admin', UTC_TIMESTAMP(6))"
+            )->execute([$this->user, 'synthetic-oid-' . bin2hex(random_bytes(6))]);
             $consent = $this->request('GET', $canonical . '/oauth/authorize?' . http_build_query($this->params()), session: true);
             self::assertSame(200, $consent->getStatusCode(), (string) $consent->getBody());
 

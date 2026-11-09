@@ -201,6 +201,67 @@ final class McpOAuthGrantTest extends TestCase
         self::assertNull($this->oauth->refresh($second['refresh_token'], $client));
     }
 
+    public function testEntraIssuedTokensFollowEntraVerificationWithinSessionCap(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO user_external_identities
+                (user_id, provider, issuer, tenant_id, subject, linked_by, last_used_at)
+             VALUES (?, 'entra', 'https://login.example.test/v2.0', 'synthetic-tenant', ?, 'admin', UTC_TIMESTAMP(6))"
+        )->execute([$this->userId, 'synthetic-oid-' . bin2hex(random_bytes(6))]);
+        $stale = fn (int $hours) => $pdo->prepare(
+            'UPDATE user_external_identities SET last_used_at = UTC_TIMESTAMP(6) - INTERVAL ? HOUR WHERE user_id = ?'
+        )->execute([$hours, $this->userId]);
+
+        $client = $this->oauth->register('Synthetic Entra assistant', ['https://client.example.test/callback']);
+        $this->clientIds[] = $client;
+        $verifier = str_repeat('c', 64);
+        $challenge = rtrim(strtr(base64_encode(hash('sha256', $verifier, true)), '+/', '-_'), '=');
+        $resource = rtrim((string) Config::load(dirname(__DIR__, 3))->get('app.url'), '/') . '/mcp';
+        $code = fn (?string $method) => $this->oauth->createCode(
+            $client, $this->userId, $this->supplierId,
+            'https://client.example.test/callback', $challenge, 'read', $resource, $method,
+        );
+        $exchange = fn (string $c) => $this->oauth->exchange($c, $client, 'https://client.example.test/callback', $verifier, $resource);
+
+        $entra = $exchange($code('oidc:entra'));
+        self::assertIsArray($entra);
+        $password = $exchange($code('password'));
+        self::assertIsArray($password);
+        $pat = $this->tokens->generate($this->userId, $this->supplierId, 'Entra PAT', 'read', new \DateTimeImmutable('+90 days'));
+        $pdo->prepare("UPDATE api_tokens SET issued_auth_method = 'oidc:entra' WHERE id = ?")->execute([$pat['id']]);
+        $googlePat = $this->tokens->generate($this->userId, $this->supplierId, 'Google PAT', 'read', new \DateTimeImmutable('+90 days'));
+        $pdo->prepare("UPDATE api_tokens SET issued_auth_method = 'oidc:google' WHERE id = ?")->execute([$googlePat['id']]);
+        self::assertNotNull($this->tokens->validate($entra['access_token']));
+        self::assertNotNull($this->tokens->validate($pat['plaintext']));
+
+        // Zablokovaný v Entra ID se už neověří: po stropu sezení (12 h) přestane
+        // platit token i obnova MCP připojení vydané z přihlášení přes Entra ID.
+        $stale(13);
+        self::assertNull($this->tokens->validate($entra['access_token']));
+        self::assertNull($this->tokens->validate($pat['plaintext']));
+        self::assertNull($this->oauth->refresh($entra['refresh_token'], $client));
+        self::assertNull($exchange($code('oidc:entra')));
+
+        // Tokeny vydané bez Entra ID se nemění.
+        self::assertNotNull($this->tokens->validate($password['access_token']));
+        self::assertNotNull($this->tokens->validate($googlePat['plaintext']));
+        $passwordRefreshed = $this->oauth->refresh($password['refresh_token'], $client);
+        self::assertIsArray($passwordRefreshed);
+
+        // Po dalším přihlášení přes Entra ID připojení zase funguje.
+        $stale(0);
+        self::assertNotNull($this->tokens->validate($pat['plaintext']));
+        $refreshed = $this->oauth->refresh($entra['refresh_token'], $client);
+        self::assertIsArray($refreshed);
+        self::assertNotNull($this->tokens->validate($refreshed['access_token']));
+
+        // Odpojená identita už žádný token z Entra ID nepustí.
+        $pdo->prepare('DELETE FROM user_external_identities WHERE user_id = ?')->execute([$this->userId]);
+        self::assertNull($this->tokens->validate($pat['plaintext']));
+        self::assertNull($this->tokens->validate($refreshed['access_token']));
+    }
+
     public function testUserCanListAndRevokeOwnOAuthConnection(): void
     {
         $config = Config::load(dirname(__DIR__, 3));

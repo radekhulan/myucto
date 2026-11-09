@@ -92,6 +92,7 @@ final class McpOAuth
                 || (int) $row['role_active'] !== 1
                 || !$this->resources->allowsGrant((string) $row['resource'], (int) $row['user_id'],
                     $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'], $row['issued_auth_method'] ?? null)
+                || !$this->tokens->issuingIdentityFresh((int) $row['user_id'], $row['issued_auth_method'] ?? null, $pdo)
             ) {
                 $pdo->rollBack();
                 return null;
@@ -148,6 +149,9 @@ final class McpOAuth
                 || (int) $row['role_active'] !== 1
                 || !$this->resources->allowsGrant((string) $row['resource'], (int) $row['user_id'],
                     $row['supplier_id'] !== null ? (int) $row['supplier_id'] : null, (string) $row['scope'], $row['issued_auth_method'] ?? null)
+                // Připojení z přihlášení přes Entra ID se obnoví, jen když se uživatel
+                // přes Entra ID ověřil v rámci stropu sezení (zablokovaný už ne).
+                || !$this->tokens->issuingIdentityFresh((int) $row['user_id'], $row['issued_auth_method'] ?? null, $pdo)
             ) {
                 $pdo->rollBack();
                 return null;
