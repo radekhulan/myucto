@@ -27,6 +27,47 @@ trait PairedJournalAssertions
     }
 
     /**
+     * Celý deník firmy je po dvojicích: žádný zápis nezůstal složený (`journal_entry_pair_status`)
+     * a každý zápis je rozdělený na platné dvojice se součtem rovným obratu MD zápisu.
+     * Zápisy s výslovně povoleným důvodem posouzení (např. přeúčtování mezi buňkami
+     * dimenzí téhož účtu, které dvojici tvořit nemůže) se jen spočítají a vynechají.
+     *
+     * @param list<string> $allowedReasons důvody `journal_entry_pair_status`, které scénář očekává
+     * @return int počet ověřených zápisů po dvojicích
+     */
+    protected function assertSupplierJournalPaired(PDO $pdo, int $supplierId, array $allowedReasons = []): int
+    {
+        $stmt = $pdo->prepare(
+            'SELECT s.entry_id, s.status, s.reason, e.source_type, e.description FROM journal_entry_pair_status s
+               JOIN journal_entries e ON e.supplier_id = s.supplier_id AND e.id = s.entry_id
+              WHERE s.supplier_id = ? ORDER BY s.entry_id'
+        );
+        $stmt->execute([$supplierId]);
+        $unpaired = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $skip = [];
+        foreach ($unpaired as $i => $row) {
+            if (in_array($row['reason'], $allowedReasons, true)) {
+                $skip[(int) $row['entry_id']] = true;
+                unset($unpaired[$i]);
+            }
+        }
+        self::assertSame([], array_values($unpaired), 'Zápisy bez dvojic: ' . json_encode(array_values($unpaired), JSON_UNESCAPED_UNICODE));
+        $stmt = $pdo->prepare(
+            "SELECT e.id, SUM(CASE WHEN (l.side = 'debit') <> (l.is_red_storno = 1) THEN l.amount ELSE 0 END) turnover
+               FROM journal_entries e JOIN journal_entry_lines l ON l.supplier_id = e.supplier_id AND l.entry_id = e.id
+              WHERE e.supplier_id = ? GROUP BY e.id ORDER BY e.id"
+        );
+        $stmt->execute([$supplierId]);
+        $entries = $stmt->fetchAll(PDO::FETCH_KEY_PAIR);
+        self::assertNotSame([], $entries, 'Firma nemá žádný zápis.');
+        $entries = array_diff_key($entries, $skip);
+        foreach ($entries as $entryId => $turnover) {
+            $this->assertEntryPaired($pdo, $supplierId, (int) $entryId, (string) $turnover);
+        }
+        return count($entries);
+    }
+
+    /**
      * @return list<array{string,string,string}> dvojice [účet MD, účet Dal, částka] v pořadí čísel dvojic
      */
     protected function assertEntryPaired(PDO $pdo, int $supplierId, int $entryId, ?string $expectedTotal = null): array

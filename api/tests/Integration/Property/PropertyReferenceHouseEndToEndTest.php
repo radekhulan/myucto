@@ -36,6 +36,7 @@ use PHPUnit\Framework\TestCase;
 final class PropertyReferenceHouseEndToEndTest extends TestCase
 {
     use PropertyChargeFixture;
+    use \MyInvoice\Tests\Support\PairedJournalAssertions;
 
     private const ACCOUNTS = ['315.100', '315.110', '315.120', '315.130', '315.210', '315.300', '315.400', '324.110', '324.200',
         '379.900', '379.910', '379.920', '388.210', '389.110', '518.200', '518.900', '549.900', '549.910', '641.900', '644.100',
@@ -135,58 +136,18 @@ final class PropertyReferenceHouseEndToEndTest extends TestCase
     }
 
     /**
-     * Týž dům v jednoduché formě zápisu od 1. 1. 2026: všechny zápisy modulu nemovitostí
+     * Týž dům v jednoduché formě zápisu od počátku: všechny zápisy modulu nemovitostí
      * (otevření, předpisy, úhrady, fondy, životní cyklus a vyúčtování služby, vratka)
-     * i uzávěrky jsou po dvojicích, součet dvojic = obrat zápisu, důkazy zápisů projdou
-     * a zůstatky, výkazy i podúčty jsou stejné jako ve složené formě.
+     * i uzávěrky rámce 504 jsou po dvojicích, součet dvojic = obrat zápisu, důkazy zápisů
+     * projdou a zůstatky, výkazy i podúčty vyjdou stejně jako ve složené formě.
      */
     #[\PHPUnit\Framework\Attributes\Group('pairs-e2e')]
-    public function testReferenceHouseInSingleEntryFormIsPaired(): void
+    public function testReferenceHouseTwoYearsInSingleEntryForm(): void
     {
-        $this->pdo->prepare("INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, note) VALUES (?, '2026-01-01', 'single', 'test')")
-            ->execute([$this->supplier]);
-        \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($this->supplier);
-        try {
-            PropertyInstant::withNormalizationContext($this->referenceHouseTwoYears(...));
-        } finally {
-            \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($this->supplier);
-        }
-        $status = $this->pdo->query('SELECT s.entry_id, s.status, s.reason, e.source_type, e.description FROM journal_entry_pair_status s
-            JOIN journal_entries e ON e.supplier_id=s.supplier_id AND e.id=s.entry_id WHERE s.supplier_id=' . $this->supplier . ' ORDER BY s.entry_id')->fetchAll(PDO::FETCH_ASSOC);
-        self::assertSame([], $status, 'Zápisy SVJ bez dvojic: ' . json_encode($status, JSON_UNESCAPED_UNICODE));
-        $entries = $this->pdo->query('SELECT id FROM journal_entries WHERE supplier_id=' . $this->supplier . ' ORDER BY id')->fetchAll(PDO::FETCH_COLUMN);
-        self::assertNotSame([], $entries);
-        foreach ($entries as $entry) {
-            $this->assertEntryPaired((int) $entry);
-        }
-    }
-
-    /** Každý řádek zápisu nese dvojici, dvojice jsou platné a jejich součet je obrat MD zápisu. */
-    private function assertEntryPaired(int $entry): void
-    {
-        $q = $this->pdo->prepare('SELECT account_id, side, amount, is_red_storno, pair_no, line_no FROM journal_entry_lines WHERE supplier_id=? AND entry_id=? ORDER BY line_no, id');
-        $q->execute([$this->supplier, $entry]);
-        $lines = $q->fetchAll(PDO::FETCH_ASSOC);
-        self::assertNotSame([], $lines, 'Zápis #' . $entry . ' nemá řádky.');
-        $pairs = [];
-        $debit = 0;
-        foreach ($lines as $line) {
-            self::assertNotNull($line['pair_no'], 'Zápis #' . $entry . ' není po dvojicích.');
-            $effective = \MyInvoice\Service\Accounting\Pair\JournalPairInvariant::effectiveSide(['side' => $line['side'], 'is_red_storno' => (bool) $line['is_red_storno']]);
-            $cents = \MyInvoice\Service\Accounting\JournalLineAmount::cents($line['amount']);
-            $pairs[(int) $line['pair_no']][$effective] = [(int) $line['account_id'], $cents, (bool) $line['is_red_storno']];
-            if ($effective === 'debit') $debit += $cents;
-        }
-        $total = 0;
-        foreach ($pairs as $no => $pair) {
-            self::assertCount(2, $pair, 'Zápis #' . $entry . ' dvojice ' . $no);
-            self::assertNotSame($pair['debit'][0], $pair['credit'][0], 'Zápis #' . $entry . ' dvojice ' . $no . ' má stejný účet.');
-            self::assertSame($pair['debit'][1], $pair['credit'][1], 'Zápis #' . $entry . ' dvojice ' . $no);
-            self::assertSame($pair['debit'][2], $pair['credit'][2], 'Zápis #' . $entry . ' dvojice ' . $no);
-            $total += $pair['debit'][1];
-        }
-        self::assertSame(range(1, count($pairs)), array_keys($pairs) === [] ? [] : (static function (array $keys): array { sort($keys); return $keys; })(array_keys($pairs)));
-        self::assertSame($debit, $total, 'Zápis #' . $entry . ': součet dvojic = obrat zápisu.');
+        self::assertTrue((new \MyInvoice\Service\Accounting\EntryForm\EntryFormService($this->db, new \MyInvoice\Service\ActivityLogger($this->db),
+            new \MyInvoice\Repository\AccountingModeRepository($this->db), new \MyInvoice\Security\FrameworkScopePolicy($this->db)))->formAt($this->supplier, '2026-01-01', true)->isSingle());
+        PropertyInstant::withNormalizationContext($this->referenceHouseTwoYears(...));
+        self::assertGreaterThan(30, $this->assertSupplierJournalPaired($this->pdo, $this->supplier));
     }
 
     /**

@@ -21,8 +21,12 @@ use MyInvoice\Service\Accounting\JournalLineAmount;
  *     po dvojicích předkontací: pohledávka / fond, odhad / dohad, 933 / výsledkový účet),
  *     řádky se jen očíslují; pořadí, částky i `line_no` zůstávají, takže na zápis dál
  *     sedí i pozice řádků, na které se odkazují evidence modulu (účinky vyúčtování).
- *  2. Jinak rozhodne {@see JournalPairer} (1 : N po složkách, shodné částky).
- *  3. Co nejde ani tak, zůstane složené a vede se jako nezpůsobilé (`ineligible`).
+ *  2. Skládá-li builder zápis po pohybech (jeden řádek a za ním jeho protiřádky, např.
+ *     vyúčtování služby: MD záloha / Dal několik dílčích nákladů), páruje se uvnitř
+ *     každého pohybu (1 : N); pohyby zůstávají v pořadí a v pohybu jde díl hlavního
+ *     řádku vždy před svým protiřádkem ({@see runs()}).
+ *  3. Jinak rozhodne {@see JournalPairer} nad celým zápisem (1 : N, shodné částky).
+ *  4. Co nejde ani tak, zůstane složené a vede se jako nezpůsobilé (`ineligible`).
  *
  * Firma se složenou formou tudy nejde: řádky i otisky zůstávají bajtově stejné.
  */
@@ -64,7 +68,65 @@ final class TypedJournalPairs
         if ($mode === self::CONSECUTIVE) {
             return ['lines' => $lines, 'status' => JournalPairer::STATUS_UNPAIRABLE, 'reason' => self::REASON_NOT_CONSECUTIVE];
         }
+        $runs = self::runs($lines);
+        if ($runs !== null) {
+            foreach ($runs as $run => $indexes) {
+                foreach ($indexes as $i) {
+                    $lines[$i]['pair_group'] = 'typed:run:' . $run;
+                }
+            }
+            $result = JournalPairer::pair($lines);
+            if ($result['status'] === JournalPairer::STATUS_PAIRED) {
+                return $result;
+            }
+            $lines = array_map(static function (array $line): array {
+                unset($line['pair_group']);
+                return $line;
+            }, $lines);
+        }
         return JournalPairer::pair($lines);
+    }
+
+    /**
+     * Rozklad zápisu na pohyby: řádek se stranou prvního řádku zápisu a za ním jeden
+     * nebo více řádků opačné účinné strany, každý pohyb vyrovnaný v haléřích. Řádky
+     * s vlastním `pair_group` nebo zápis, který tak složený není, vrací null.
+     *
+     * @param list<array<string,mixed>> $lines
+     * @return list<list<int>>|null indexy řádků po pohybech
+     */
+    public static function runs(array $lines): ?array
+    {
+        $head = JournalPairInvariant::effectiveSide($lines[0] ?? []);
+        if ($head === null) {
+            return null;
+        }
+        $runs = [];
+        $balance = [];
+        foreach (array_values($lines) as $i => $line) {
+            if (isset($line['pair_group'])) {
+                return null;
+            }
+            $side = JournalPairInvariant::effectiveSide($line);
+            if ($side === null) {
+                return null;
+            }
+            $cents = JournalLineAmount::cents($line['amount']);
+            if ($side === $head) {
+                if ($runs !== [] && count($runs[array_key_last($runs)]) < 2) {
+                    return null;
+                }
+                $runs[] = [$i];
+                $balance[] = $cents;
+                continue;
+            }
+            $runs[array_key_last($runs)][] = $i;
+            $balance[array_key_last($balance)] -= $cents;
+        }
+        if (count($runs[array_key_last($runs)]) < 2 || array_filter($balance, static fn (int $b): bool => $b !== 0) !== []) {
+            return null;
+        }
+        return $runs;
     }
 
     /**

@@ -76,7 +76,7 @@ final class JournalEntryRepository
         return (new DimensionPeriodGuard($this->db))->transaction(function()use($supplier,$conversion):int{
             $proof=\MyInvoice\Service\Accounting\Conversion\FrameworkConversionJournalProof::pending($this->db,$supplier,$conversion);
             (new SystemDimensionWritePolicy($this->db))->assertClosingCarry($proof);
-            $entry=$this->persistJournal($proof->header,$proof->lines);
+            $entry=$this->persistJournal($proof->header,$proof->lines,typedPairs:TypedJournalPairs::CONSECUTIVE);
             $this->activity->log('accounting.posted',(int)$proof->header['posted_by'],'journal_entry',$entry,
                 ['source_type'=>$proof->header['source_type'],'source_id'=>$proof->header['source_id'],'framework_conversion_id'=>$conversion],null,null,$supplier);
             return $entry;
@@ -350,7 +350,7 @@ final class JournalEntryRepository
             $proof = \MyInvoice\Service\Accounting\Closing\ClosingLegal504Proof::forPending($this->db, $this, $supplierId, $periodId, $expectedVersion);
             (new SystemDimensionWritePolicy($this->db))->assertLegalClosing($proof);
             if ($proof->pending['status'] === 'written') return (int) $proof->pending['entry_id'];
-            $entryId = $this->persistJournal($proof->header, $proof->lines);
+            $entryId = $this->persistJournal($proof->header, $proof->lines, typedPairs: TypedJournalPairs::CONSECUTIVE);
             $payload = $proof->stepRow['decoded_payload'];
             $payload['entries'][] = ['entry_id' => $entryId] + $proof->record;
             $payload['legal_pending'] = array_replace($proof->pending, ['status' => 'written', 'entry_id' => $entryId,
@@ -377,7 +377,7 @@ final class JournalEntryRepository
             $entryId = null;
             if ($proof->lines !== []) {
                 (new SystemDimensionWritePolicy($this->db))->assertAssetReserveCorrection($proof);
-                $entryId = $this->persistJournal($proof->header, $proof->lines);
+                $entryId = $this->persistJournal($proof->header, $proof->lines, typedPairs: TypedJournalPairs::CONSECUTIVE);
                 $meta = $proof->pending['meta'] ?? [];
                 $this->activity->log('accounting.posted', $meta['user_id'] ?? null, 'journal_entry', $entryId,
                     ['source_type' => $proof->header['source_type'] ?? 'manual', 'source_id' => $proof->header['source_id'] ?? null, 'asset_reserve_correction' => true],
@@ -409,7 +409,7 @@ final class JournalEntryRepository
             foreach (array_keys($proof->batches) as $index) $policy->assertDeferredTax504($proof->batch($index));
             $batches = [];
             foreach ($proof->batches as $batch) {
-                $entryId = $this->persistJournal($batch['header'], $batch['lines']);
+                $entryId = $this->persistJournal($batch['header'], $batch['lines'], typedPairs: TypedJournalPairs::CONSECUTIVE);
                 $batches[] = ['phase' => $batch['phase'], 'entry_id' => $entryId, 'entry_version' => 1];
                 $meta = $proof->pending['meta'] ?? [];
                 $this->activity->log('accounting.posted', $meta['user_id'] ?? null, 'journal_entry', $entryId,
@@ -443,7 +443,7 @@ final class JournalEntryRepository
             if ($proof->lines === []) {
                 if ($previous !== null) throw Fx504JournalProof::changed();
             } elseif ($previous === null) {
-                $entryId = $this->persistJournal($header, $proof->lines);
+                $entryId = $this->persistJournal($header, $proof->lines, typedPairs: TypedJournalPairs::CONSECUTIVE);
             } else {
                 $entryId = (int) $previous['id'];
                 (new \MyInvoice\Service\Accounting\Closing\SecuritiesDebt504UseGuard($this->db))->assertEntriesMutable($supplierId, [$entryId]);
@@ -454,7 +454,8 @@ final class JournalEntryRepository
                     $header['period_id'], $header['entry_date'], $previous['row_version']]);
                 if ($stmt->rowCount() !== 1) throw Fx504JournalProof::changed();
                 $this->deleteLines($entryId, $supplierId);
-                $this->insertLines($this->db->pdo(), $entryId, $header + ['supplier_id' => $supplierId, 'pair_typed_owner' => true], $proof->lines);
+                [$pairHeader, $lines] = $this->pairTypedLines($header + ['supplier_id' => $supplierId], $proof->lines, TypedJournalPairs::CONSECUTIVE);
+                $this->insertLines($this->db->pdo(), $entryId, $pairHeader + ['pair_typed_owner' => true], $lines);
                 $this->logReleasedPairings($supplierId, $entryId, (new JournalLinePairingRepository($this->db))->releaseStale($supplierId, $entryId), 'repost');
             }
             if ($entryId !== null) {
@@ -690,6 +691,17 @@ final class JournalEntryRepository
                 $source['lines'] = array_values(array_filter(
                     $source['lines'],
                     static fn (array $line): bool => !isset($line['pair_no']) || !isset($reversedPairs[(int) $line['pair_no']]),
+                ));
+            }
+            // Typovaný vlastník (SVJ) skládá protizápis z plánu v tvaru složeného zápisu, zdroj
+            // po dvojicích ale leží rozdělený. Plán se vezme v tom tvaru dvojic, ve kterém zdroj
+            // leží (totéž deterministické pravidlo jako zápis zdroje); kontrola řádek po řádku
+            // proti živému zdroji níže platí beze změny.
+            if (TypedJournalPairs::hasPairs($source['lines']) && !TypedJournalPairs::hasPairs($lines)
+                && count($source['lines']) !== count($lines)) {
+                $lines = TypedJournalPairs::expectedFor($lines, array_map(
+                    static fn (array $line): array => array_replace($line, JournalLineAmount::reversal($line)),
+                    $source['lines'],
                 ));
             }
         }

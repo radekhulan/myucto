@@ -40,7 +40,7 @@ final class IssuanceJournalProof
         return PairGroups::consecutive(self::lines($charge),'charge');
     }
 
-    /** Očekávané řádky zápisu jednoduché formy: tytéž dvojice po párovači, ve stejném pořadí. */
+    /** Očekávané řádky zápisu jednoduché formy: tytéž dvojice po párovači, ve stejném pořadí (storno zrcadlí pořadí originálu). */
     private static function pairedLines(array $expected): array
     {
         $paired=JournalPairer::pair(PairGroups::consecutive($expected,'charge'));
@@ -75,7 +75,7 @@ final class IssuanceJournalProof
             if(($entry['reversed_by']===null?null:(int)$entry['reversed_by'])!==$expectedReversal||(!$reversal&&$entry['entry_date']!==$charge['accounting_date']))self::fail();
             if($reversal&&($entry['source_id']!==null||(int)($entries[$charge['journal_entry_id']]['reversed_by']??0)!==$entryId))self::fail();
             $actual=$lines[$entryId]??[];$expected=self::lines($charge);
-            if(!$reversal&&array_filter($actual,static fn(array $line):bool=>$line['pair_no']!==null)!==[])$expected=self::pairedLines($expected);
+            if(array_filter($actual,static fn(array $line):bool=>$line['pair_no']!==null)!==[])$expected=self::pairedLines($expected);
             if(count($actual)!==count($expected))self::fail();
             foreach($actual as $i=>$line){
                 $want=$expected[$i];$side=$reversal?($want['side']==='debit'?'credit':'debit'):$want['side'];

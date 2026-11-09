@@ -51,6 +51,16 @@ trait IsolatedSupplierTrait
              SELECT ?, '1900-01-01', is_vat_payer, is_identified FROM supplier WHERE id = ?"
         )->execute([$supplierId, $supplierId]);
 
+        // Varianta testu `…InSingleEntryForm` projde týž scénář ve firmě s jednoduchou
+        // (párovou) formou zápisu od počátku, tedy už od fixture.
+        if (method_exists($this, 'name') && str_ends_with($this->name(), 'InSingleEntryForm')) {
+            $pdo->prepare(
+                "INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, note)
+                 VALUES (?, '1900-01-01', 'single', 'test')"
+            )->execute([$supplierId]);
+            \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($supplierId);
+        }
+
         return $supplierId;
     }
 

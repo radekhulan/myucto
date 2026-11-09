@@ -207,7 +207,7 @@ final class SettlementHistory
     }
     public static function effects(array $preview,array $ledger):array
     {
-        $plan=$preview['plan'];$starts=SettlementPlanner::journal($plan['movements'])['starts'];$sources=[];foreach($plan['document']['origins'] as $source)$sources[$source['kind'].':'.$source['id']]=$source;$out=[];
+        $plan=$preview['plan'];$starts=self::ledgerStarts($plan['movements'],$ledger['lines']);$sources=[];foreach($plan['document']['origins'] as $source)$sources[$source['kind'].':'.$source['id']]=$source;$out=[];
         foreach($plan['movements'] as $index=>$movement){$source=$sources[$movement['origin_key']]??null;$kind=match($movement['kind']){'advance_application'=>'advance_applied','principal_reduction'=>'claim_reduction','allocation_release'=>'allocation_relief','opening_paid_credit'=>'opening_paid_credit','new_claim'=>'new_claim'};
             $effect=['kind'=>$kind,'debt_id'=>$source['debt_id']??null,'charge_line_id'=>($source['kind']??null)==='s3_line'?$source['id']:null,'opening_component_id'=>($source['kind']??null)==='opening_component'?$source['id']:null,'allocation_id'=>$movement['allocation_id'],'amount_cents'=>$movement['amount_cents'],'movement_index'=>$index];
             if(in_array($kind,['allocation_relief','opening_paid_credit'],true)){
@@ -218,5 +218,31 @@ final class SettlementHistory
             $out[]=$effect;
         }
         return $out;
+    }
+
+    /**
+     * Pozice prvního řádku každého pohybu v zapsaném zápisu. Složený zápis i zápis po
+     * dvojicích bez dělení řádků leží jako plán. Jednoduchá forma rozdělí pohyb s dílčími
+     * náklady na dvojice uvnitř pohybu ({@see \MyInvoice\Service\Accounting\Pair\TypedJournalPairs::runs()}):
+     * pohyb s N dílčími náklady zabere 2N řádků, ostatní dva. Řádek, na který se účinek
+     * odkazuje, musí i pak odpovídat řádku plánu.
+     *
+     * @return array<int,int>
+     */
+    private static function ledgerStarts(array $movements,array $ledgerLines):array
+    {
+        $journal=SettlementPlanner::journal($movements);
+        if(count($ledgerLines)===count($journal['lines']))return $journal['starts'];
+        $starts=[];$position=0;
+        foreach($movements as $index=>$movement){
+            $starts[$index]=$position;$width=isset($movement['cost_credits'])?count($movement['cost_credits']):1;
+            if($width===1){
+                foreach([0,1] as $offset){$want=$journal['lines'][$journal['starts'][$index]+$offset];$have=$ledgerLines[$position+$offset]??null;
+                    if($have===null||$have['account_code']!==$want['account_code']||$have['side']!==$want['side']||bccomp((string)$have['amount'],(string)$want['amount'],2)!==0)SettlementEvidence::reject('ledger_mismatch');}
+            }
+            $position+=2*$width;
+        }
+        if($position!==count($ledgerLines))SettlementEvidence::reject('ledger_mismatch');
+        return $starts;
     }
 }
