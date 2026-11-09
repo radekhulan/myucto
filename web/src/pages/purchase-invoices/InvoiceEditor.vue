@@ -915,7 +915,11 @@ function populate(inv: PurchaseInvoice) {
   form.value.project_id = inv.project_id ?? null
   form.value.vat_classification_code = inv.vat_classification_code ?? null
   form.value.parent_purchase_invoice_id = inv.parent_purchase_invoice_id ?? null
-  form.value.items = inv.items.length > 0 ? inv.items : []
+  form.value.items = inv.items.map(it => ({
+    ...it,
+    expense_account_code: it.expense_account_code ?? null,
+    vat_classification_code: it.vat_classification_code ?? null,
+  }))
   // Faktura s už zadaným časovým rozlišením → odkryj celý blok (jinak by řádek s pickery byl schovaný).
   showAccrual.value = form.value.items.some(it => !!it.accrual_from || !!it.accrual_to)
   // §DM legacy: doklad označený hlavičkovým `is_fixed_asset` z doby před item-level
@@ -1095,6 +1099,10 @@ function addItem(hideDropzone = true) {
     vat_rate_id: vatRates.value.find(v => v.is_default)?.id || vatRates.value[0]?.id || 1,
     order_index: form.value.items.length,
     expense_kind: null,
+    // Výběry na řádku mají volbu s hodnotou null („Účet podle druhu nákladu", „Automaticky…");
+    // bez explicitního null by select zůstal prázdný.
+    expense_account_code: null,
+    vat_classification_code: null,
     counter_account_code: null,
     posting_rule_key: null,
     accrual_from: null,
@@ -1678,13 +1686,28 @@ function buildPayload(): PurchaseInvoicePayload {
     }
 }
 
-/** Náhled zápisu pod položkami: jen když doklad jde uložit (dodavatel, číslo dokladu, měna, vyplněné položky). */
-const previewPayload = computed<PurchaseInvoicePayload | null>(() =>
-  editorPosting.enabled.value && form.value.vendor_id && form.value.currency_id
-    && form.value.vendor_invoice_number.trim() !== '' && form.value.items.length > 0
-    && form.value.items.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)
-    ? buildPayload()
-    : null)
+/**
+ * Náhled zápisu pod položkami: jen když doklad jde uložit (dodavatel, číslo dokladu, měna,
+ * vyplněné položky). Úplně prázdný řádek (např. založený editorem) se přeskočí jako u vydané faktury.
+ */
+const previewMissing = computed<string[]>(() => {
+  const missing: string[] = []
+  if (!form.value.vendor_id) missing.push('partner')
+  if (form.value.vendor_invoice_number.trim() === '') missing.push('number')
+  if (!form.value.currency_id) missing.push('currency')
+  const filled = form.value.items.filter(it =>
+    (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0)
+  if (filled.length === 0) missing.push('items')
+  else if (!filled.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)) missing.push('item_detail')
+  return missing
+})
+const previewPayload = computed<PurchaseInvoicePayload | null>(() => {
+  if (!editorPosting.enabled.value || previewMissing.value.length > 0) return null
+  const payload = buildPayload()
+  // Prázdné řádky do náhledu neposíláme, uložení by je odmítlo.
+  return { ...payload, items: payload.items.filter(it =>
+    (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0) }
+})
 
 let postAfterSave = false
 /** Uložit a zaúčtovat: uloží doklad stejnou cestou jako Uložit a pak ho zaúčtuje. */
@@ -2639,7 +2662,7 @@ useWindowTitle(
 
       <!-- Náhled zápisu (zaúčtování už při zadání): tentýž výpočet jako Zaúčtovat. -->
       <DraftPostingPreviewPanel v-if="editorPosting.enabled.value" source="purchase-invoices"
-        :doc-id="invoiceId" :payload="previewPayload" />
+        :doc-id="invoiceId" :payload="previewPayload" :missing="previewMissing" />
 
       <!-- Box 2b: Rekapitulace DPH — editovatelná dle dokladu dodavatele (§ 73 ZDPH).
            Pod reverse-charge se skrývá (na dokladu zahr. dodavatele není česká DPH). -->

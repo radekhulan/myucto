@@ -3093,6 +3093,17 @@ async function saveDocument(payload: InvoicePayload): Promise<void> {
  * uložit. Prázdné řádky vynechá stejně jako uložení; rozepsaná položka (bez popisu
  * nebo s nulovou cenou) náhled odloží, server by ji odmítl validací.
  */
+/** Co chybí, aby šel doklad pro náhled zápisu uložit (klíče `accounting.editor_posting.missing_*`). */
+const previewMissing = computed<string[]>(() => {
+  const missing: string[] = []
+  if (!form.value.client_id && !form.value.is_simplified) missing.push('partner')
+  if (!form.value.currency_id) missing.push('currency')
+  const filled = form.value.items.filter(it =>
+    (it.description || '').trim() !== '' || (Number(it.unit_price_without_vat) || 0) !== 0)
+  if (filled.length === 0) missing.push('items')
+  else if (!filled.every(it => (it.description || '').trim() !== '' && (Number(it.unit_price_without_vat) || 0) !== 0)) missing.push('item_detail')
+  return missing
+})
 const previewPayload = computed<InvoicePayload | null>(() => {
   if (!editorPostable.value || !form.value.currency_id || (!form.value.client_id && !form.value.is_simplified)) return null
   const items = form.value.items.filter(it =>
@@ -4087,7 +4098,7 @@ useWindowTitle(
 
       <!-- Náhled zápisu (zaúčtování už při zadání): tentýž výpočet jako Zaúčtovat. -->
       <DraftPostingPreviewPanel v-if="editorPostable" source="invoices"
-        :doc-id="invoiceId ?? null" :payload="previewPayload" />
+        :doc-id="invoiceId ?? null" :payload="previewPayload" :missing="previewMissing" />
 
       <!-- Klasifikace (VAT pro DPH přiznání + volitelný revenue tag) -->
       <div class="bg-surface border border-neutral-200 rounded-lg p-5 shadow-sm">

@@ -18942,6 +18942,13 @@
       "none": "The source of this posting cannot be determined — a manual entry, or a document from before origin tracking."
     },
     "editor_posting": {
+      "missing": "The posting preview appears once you fill in: {fields}.",
+      "missing_partner": "partner",
+      "missing_number": "document number",
+      "missing_currency": "currency",
+      "missing_items": "at least one item with a description and a price",
+      "missing_item_detail": "a description and a price on every filled item",
+      "server_invalid": "The preview cannot be calculated yet: {message}",
       "title": "Journal entry preview",
       "loading": "Calculating preview…",
       "refresh": "Recalculate",
