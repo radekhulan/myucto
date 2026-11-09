@@ -251,6 +251,7 @@ describe('TimeAttendance', () => {
     await flushPromises()
     expect(wrapper.get('[data-test="time-import-needs-rate-12"]').text()).toContain('payroll.worked_hours.switch_to_entries.needs_rate')
     expect(wrapper.find('[data-test="switch-to-entries-keep"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="time-import-keep-blocked-12"]').text()).toContain('payroll.worked_hours.switch_to_entries.keep.blocked')
     wrapper.unmount()
     m.routeQuery = {}
   })
@@ -268,6 +269,7 @@ describe('TimeAttendance', () => {
     const block = wrapper.get('[data-test="time-import-needs-rate-12"]')
     expect(block.text()).toContain('payroll.worked_hours.switch_to_entries.keep.hint')
     expect(block.find('[data-test="switch-to-entries-keep"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="time-import-keep-blocked-12"]').exists()).toBe(false)
     wrapper.unmount()
     m.routeQuery = {}
   })

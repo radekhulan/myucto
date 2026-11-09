@@ -2637,7 +2637,8 @@
           "hint": "Chcete jen evidovat dny a časy směn (třeba kvůli délce směny a odpočinku mladistvých) a mzdu ponechat podle importu? Zdroj hodin přepněte na směny, importované částky zůstanou.",
           "text": "{name}: hodiny za tento měsíc se budou brát ze směn a časových záznamů (evidence pracovní doby a JMHZ). Importované mzdové vstupy zůstanou beze změny a mzda se z hodin nepočítá, protože vztah nemá hodinovou odměnu ani měsíční mzdu. Původní souhrn importu zůstane v historii.",
           "confirm": "Přepnout na směny",
-          "done": "Zdroj hodin je přepnutý na směny, importované částky zůstaly."
+          "done": "Zdroj hodin je přepnutý na směny, importované částky zůstaly.",
+          "blocked": "Zapisovat směny a ponechat importované částky tu nejde: vztah má v tomto měsíci sjednanou měsíční mzdu nebo odměnu, případně pravidelnou složku krácenou podle odpracované doby. Pokud ji mít nemá (třeba dohoda placená jen podle importu), smažte ji na kartě vztahu v podmínkách. Pak se tu nabídne „Zapisovat směny, částky ponechat“. Hodinová sazba a „Počítat ze směn“ naopak mzdu ze směn spočítají znovu a vstupy z importu zruší."
         }
       },
       "restore_title": "Změnit vybraný zdroj hodin",

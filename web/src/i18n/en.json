@@ -2637,7 +2637,8 @@
           "hint": "Do you only want to record the days and times of shifts (for example because of shift length and rest of young workers) and keep pay from the import? Switch the hours source to shifts; imported amounts stay.",
           "text": "{name}: hours for this month will come from shifts and time entries (working time records and JMHZ). Imported payroll inputs stay unchanged and pay is not calculated from hours, because the employment has neither hourly pay nor a monthly wage. The original import summary stays in the history.",
           "confirm": "Switch to shifts",
-          "done": "The hours source now uses shifts; imported amounts were kept."
+          "done": "The hours source now uses shifts; imported amounts were kept.",
+          "blocked": "Recording shifts while keeping imported amounts is not available here: in this month the employment has an agreed monthly wage or reward, or a recurring component reduced by worked time. If it should not have one (for example an agreement paid only from the import), remove it from the terms on the employment card. Record shifts, keep amounts is then offered here. An hourly rate with Calculate from shifts, by contrast, recalculates pay from shifts and cancels the imported inputs."
         }
       },
       "restore_title": "Change the selected hours source",
