@@ -142,6 +142,7 @@ const stage = ref<Stage>('source')
 const error = ref('')
 const job = ref<CatalogJob | null>(null)
 const reportJob = ref<CatalogJob | null>(null)
+const reportFilter = ref<{ jobId: number; status: string } | null>(null)
 const applyResultJob = ref<CatalogJob | null>(null)
 const report = ref<CatalogImportItems | null>(null)
 const reportPage = ref(1)
@@ -199,6 +200,12 @@ const reportCounts = computed(() => {
   const current = jobCounts(reportJob.value)
   return [...ITEM_STATUSES].filter(status => (current[status] ?? 0) > 0).map(status => ({ status, count: current[status] }))
 })
+const activeReportStatus = computed(() => (
+  reportFilter.value && reportFilter.value.jobId === reportJob.value?.id ? reportFilter.value.status : null
+))
+const reportTotal = computed(() => (
+  activeReportStatus.value ? reportCounts.value.reduce((sum, entry) => sum + entry.count, 0) : report.value?.pagination.total ?? 0
+))
 const canApply = computed(() => (
   canWrite.value
   && job.value?.kind === 'catalog_import_stage'
@@ -700,12 +707,22 @@ async function refreshJob() {
   }
 }
 
+async function filterReport(status: string | null) {
+  const jobId = reportJob.value?.id
+  if (!jobId) return
+  reportFilter.value = status ? { jobId, status } : null
+  await loadReport(1, jobId)
+}
+
 async function loadReport(page = reportPage.value, expectedJobId = reportJob.value?.id) {
   if (!expectedJobId) return
   const token = beginRequest('report')
   reportLoading.value = true
   try {
-    const nextReport = await catalogImportApi.items(expectedJobId, page, token.controller.signal)
+    const status = reportFilter.value?.jobId === expectedJobId ? reportFilter.value.status : null
+    const nextReport = status
+      ? await catalogImportApi.items(expectedJobId, page, token.controller.signal, status)
+      : await catalogImportApi.items(expectedJobId, page, token.controller.signal)
     if (!isCurrent(token) || reportJob.value?.id !== expectedJobId) return
     report.value = nextReport
     reportPage.value = page
@@ -1255,11 +1272,34 @@ onBeforeUnmount(() => {
           <div>
             <h2 class="font-semibold text-neutral-900">{{ t(reportJob?.kind === 'catalog_import_media' ? 'eshop.import2.media_report_title' : reportJob?.kind === 'catalog_import_apply' ? 'eshop.import2.apply_report_title' : 'eshop.import2.report_title') }}</h2>
             <p class="mt-0.5 text-xs text-neutral-500">
-              {{ report ? t('eshop.import2.report_summary', { total: report.pagination.total }) : t('eshop.import2.report_waiting') }}
+              {{ report ? t('eshop.import2.report_summary', { total: reportTotal }) : t('eshop.import2.report_waiting') }}
             </p>
-            <p v-if="reportCounts.length" class="mt-0.5 flex flex-wrap gap-x-3 text-xs text-neutral-500" data-test="report-counts">
-              <span v-for="entry in reportCounts" :key="entry.status">{{ itemStatusLabel(entry.status) }}: {{ entry.count }}</span>
-            </p>
+            <div v-if="reportCounts.length" class="mt-2 flex flex-wrap gap-1.5" data-test="report-counts">
+              <button
+                type="button"
+                class="cursor-pointer rounded-md border px-2 py-0.5 text-xs font-medium"
+                :class="activeReportStatus === null ? 'border-primary-500/30 bg-primary-50 text-primary-700' : 'border-neutral-300 text-neutral-600'"
+                :aria-pressed="activeReportStatus === null"
+                :disabled="reportLoading"
+                data-test="report-filter-all"
+                @click="filterReport(null)"
+              >
+                {{ t('common.all') }}
+              </button>
+              <button
+                v-for="entry in reportCounts"
+                :key="entry.status"
+                type="button"
+                class="cursor-pointer rounded-md border px-2 py-0.5 text-xs font-medium"
+                :class="activeReportStatus === entry.status ? 'border-primary-500/30 bg-primary-50 text-primary-700' : 'border-neutral-300 text-neutral-600'"
+                :aria-pressed="activeReportStatus === entry.status"
+                :disabled="reportLoading"
+                :data-test="`report-filter-${entry.status}`"
+                @click="filterReport(entry.status)"
+              >
+                {{ itemStatusLabel(entry.status) }}: {{ entry.count }}
+              </button>
+            </div>
           </div>
           <button
             v-if="canRetry"
