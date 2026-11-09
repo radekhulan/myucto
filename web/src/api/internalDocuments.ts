@@ -28,6 +28,8 @@ export interface InternalDocumentLink {
 
 export interface InternalDocument {
   id: number
+  /** Řada z číselníku: na konceptu volba, po zaúčtování nová řada (null = řada ID). */
+  number_series_id?: number | null
   kind: InternalDocumentKind
   title: string
   document_date: string
@@ -51,6 +53,8 @@ export interface InternalDocument {
 }
 
 export interface InternalDocumentPayload {
+  /** Řada z číselníku; vynechané = beze změny, null = výchozí řada interních dokladů. */
+  number_series_id?: number | null
   kind: InternalDocumentKind
   title: string
   document_date: string

@@ -1554,6 +1554,14 @@ final class PurchaseInvoiceRepository
         // a nemá číslo, pod kterým by ho účetní našla. Stejná past už jednou vznikla
         // u AI auto-paid (markAlreadyPaid) a řešila se až backfillem; pravidlo proto drží
         // ZAKLÁDÁNÍ dokladu, ne každý volající zvlášť.
+        // Řada z číselníku (ověřená akcí přes NumberSeriesSelection) musí být na dokladu
+        // dřív, než dostane číslo.
+        if (isset($data['number_series_id']) && (int) $data['number_series_id'] > 0
+            && $this->db->hasColumn('purchase_invoices', 'number_series_id')) {
+            $pdo->prepare('UPDATE purchase_invoices SET number_series_id = ? WHERE id = ? AND supplier_id = ?')
+                ->execute([(int) $data['number_series_id'], $newId, $supplierId]);
+        }
+
         if ($initialStatus === 'received' && $manualVarsymbol === null) {
             $this->ensureVarsymbol($newId, $supplierId);
         }
@@ -3338,8 +3346,9 @@ final class PurchaseInvoiceRepository
      */
     public function reprefixVarsymbol(int $id, int $supplierId): void
     {
+        $seriesColumn = $this->db->hasColumn('purchase_invoices', 'number_series_id') ? 'number_series_id' : 'NULL AS number_series_id';
         $stmt = $this->db->pdo()->prepare(
-            'SELECT varsymbol, vat_deduction, tax_deductible, document_kind FROM purchase_invoices WHERE id = ? AND supplier_id = ?'
+            "SELECT varsymbol, vat_deduction, tax_deductible, document_kind, {$seriesColumn} FROM purchase_invoices WHERE id = ? AND supplier_id = ?"
         );
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -3348,7 +3357,11 @@ final class PurchaseInvoiceRepository
         $vs = (string) ($row['varsymbol'] ?? '');
         if ($vs === '') return; // draft / bez čísla
 
-        $template = $this->purchaseSeries($supplierId, (string) ($row['document_kind'] ?? 'invoice'))['template'];
+        // Číslo z nové řady číselníku má šablonu své řady (prefix řady dosazený).
+        $native = $this->numberSeriesAllocator()->nativeById($supplierId, $row['number_series_id'] !== null ? (int) $row['number_series_id'] : null);
+        $template = $native !== null
+            ? str_replace('{PREFIX}', (string) $native['prefix'], (string) $native['template'])
+            : $this->purchaseSeries($supplierId, (string) ($row['document_kind'] ?? 'invoice'))['template'];
         // Bez {PP} se daňový prefix v čísle nevyskytuje → není co přepisovat (např. legacy 'PF-…').
         if (!str_contains($template, '{PP}')) return;
 
@@ -3413,7 +3426,8 @@ final class PurchaseInvoiceRepository
     public function ensureVarsymbol(int $id, int $supplierId): string
     {
         $pdo = $this->db->pdo();
-        $stmt = $pdo->prepare('SELECT varsymbol, issue_date, vat_deduction, tax_deductible, document_kind FROM purchase_invoices WHERE id = ? AND supplier_id = ?');
+        $seriesColumn = $this->db->hasColumn('purchase_invoices', 'number_series_id') ? 'number_series_id' : 'NULL AS number_series_id';
+        $stmt = $pdo->prepare("SELECT varsymbol, issue_date, vat_deduction, tax_deductible, document_kind, {$seriesColumn} FROM purchase_invoices WHERE id = ? AND supplier_id = ?");
         $stmt->execute([$id, $supplierId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
@@ -3434,15 +3448,39 @@ final class PurchaseInvoiceRepository
             $pdo->beginTransaction();
         }
         try {
-            $varsymbol = $this->nextVarsymbol($supplierId, $period, $prefix, (string) ($row['document_kind'] ?? 'invoice'));
-            $pdo->prepare('UPDATE purchase_invoices SET varsymbol = ? WHERE id = ? AND supplier_id = ?')
-                ->execute([$varsymbol, $id, $supplierId]);
+            // Řada z číselníku: volba na dokladu, jinak výchozí řada. Převedená řada nebo
+            // prázdný číselník čísluje dosavadní cestou podle druhu dokladu.
+            $chosen = $row['number_series_id'] !== null ? (int) $row['number_series_id'] : null;
+            $issueDate = new \DateTimeImmutable((string) $row['issue_date']);
+            $native = $this->numberSeriesAllocator()->nativeFor($supplierId, 'purchase', $chosen, $issueDate);
+            $varsymbol = $native !== null
+                ? $this->numberSeriesAllocator()->allocate($supplierId, $native, $issueDate, $prefix)
+                : $this->nextVarsymbol($supplierId, $period, $prefix, (string) ($row['document_kind'] ?? 'invoice'));
+            $usedSeries = $native !== null ? (int) $native['id'] : null;
+            if ($usedSeries !== $chosen) {
+                $pdo->prepare('UPDATE purchase_invoices SET varsymbol = ?, number_series_id = ? WHERE id = ? AND supplier_id = ?')
+                    ->execute([$varsymbol, $usedSeries, $id, $supplierId]);
+            } else {
+                $pdo->prepare('UPDATE purchase_invoices SET varsymbol = ? WHERE id = ? AND supplier_id = ?')
+                    ->execute([$varsymbol, $id, $supplierId]);
+            }
             if ($ownTransaction) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
         return $varsymbol;
+    }
+
+    private ?\MyInvoice\Service\NumberSeries\NumberSeriesAllocator $numberSeriesAllocator = null;
+
+    /** Číselník řad; repository se staví i ručně (testy), proto si ho skládá sama. */
+    private function numberSeriesAllocator(): \MyInvoice\Service\NumberSeries\NumberSeriesAllocator
+    {
+        return $this->numberSeriesAllocator ??= new \MyInvoice\Service\NumberSeries\NumberSeriesAllocator(
+            $this->db,
+            new NumberSeriesRepository($this->db),
+        );
     }
 
     /**

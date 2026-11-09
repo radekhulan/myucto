@@ -699,6 +699,9 @@ final class Routes
         // ?format=pdf-zip|isdoc|pohoda|stereo|money_s3|csv & month=YYYY-MM nebo period=quarterly&year&quarter
         $app->get    ('/api/invoices/export',       ExportAction::class);
         $app->get    ('/api/invoices/preview-varsymbol', PreviewVarsymbolAction::class);
+        // Výběr řady z číselníku v editoru a výchozí řada uživatele (bod 4).
+        $app->get    ('/api/invoices/number-series',         [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'invoices']);
+        $app->put    ('/api/invoices/number-series/default', [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'setInvoicesDefault']);
         $app->post   ('/api/invoices',              CreateInvoiceAction::class);
         // Převzetí faktury/dobropisu už vystaveného jinde (e-shop) bez přepočtu (issue #145).
         $app->post   ('/api/invoices/import',       \MyInvoice\Action\Invoice\ImportIssuedInvoiceAction::class);
@@ -805,6 +808,8 @@ final class Routes
         $app->get    ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'preview']);
         $app->post   ('/api/purchase-invoices/renumber',                   [\MyInvoice\Action\PurchaseInvoice\RenumberPurchaseInvoicesAction::class, 'renumber']);
         $app->get    ('/api/purchase-invoices',                           ListPurchaseInvoicesAction::class);
+        $app->get    ('/api/purchase-invoices/number-series',             [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'purchase']);
+        $app->put    ('/api/purchase-invoices/number-series/default',     [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'setPurchaseDefault']);
         $app->post   ('/api/purchase-invoices',                           CreatePurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}',                GetPurchaseInvoiceAction::class);
         $app->get    ('/api/purchase-invoices/{id:[0-9]+}/items',          GetPurchaseInvoiceItemsAction::class);
@@ -3269,6 +3274,8 @@ final class Routes
             $g->get   ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'list']);
             $g->post  ('/internal-documents',                       [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'create']);
             $g->get   ('/internal-documents/export',                [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'export']);
+            $g->get   ('/internal-documents/number-series',         [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'internal']);
+            $g->put   ('/internal-documents/number-series/default', [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'setInternalDefault']);
             $g->post  ('/internal-documents/from-entry/{id:[0-9]+}', [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'fromEntry']);
             $g->get   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'get']);
             $g->put   ('/internal-documents/{id:[0-9]+}',           [\MyInvoice\Action\Accounting\InternalDocumentAction::class, 'update']);
@@ -3278,6 +3285,8 @@ final class Routes
             $g->post  ('/cash-documents',                      [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'create']);
             $g->get   ('/cash-documents/unpaid',               [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'unpaid']);
             $g->get   ('/cash-documents/rule-presets',         [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'rulePresets']);
+            $g->get   ('/cash-documents/number-series',        [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'cash']);
+            $g->put   ('/cash-documents/number-series/default', [\MyInvoice\Action\NumberSeries\NumberSeriesOptionsAction::class, 'setCashDefault']);
             $g->get   ('/cash-documents/{id:[0-9]+}',          [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'get']);
             $g->put   ('/cash-documents/{id:[0-9]+}',          [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'update']);
             $g->delete('/cash-documents/{id:[0-9]+}',          [\MyInvoice\Action\Accounting\Cash\CashDocumentAction::class, 'delete']);
@@ -3795,6 +3804,13 @@ final class Routes
         $app->post('/api/settings/accounting-activation/jobs/{id:[0-9]+}/force-complete', [AccountingActivationAction::class, 'forceComplete']);
         $app->get ('/api/settings/supplier/invoice-counter', [SupplierInvoiceCounterAction::class, 'peek']);
         $app->put ('/api/settings/supplier/invoice-counter', SupplierInvoiceCounterAction::class);
+        // Číselník řad všech druhů dokladů (migrace 2265).
+        $app->get   ('/api/settings/number-series',                       [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'list']);
+        $app->get   ('/api/settings/number-series/completeness',          [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'completeness']);
+        $app->post  ('/api/settings/number-series',                       [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'create']);
+        $app->put   ('/api/settings/number-series/{id:[0-9]+}',           [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'update']);
+        $app->post  ('/api/settings/number-series/{id:[0-9]+}/default',   [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'setDefault']);
+        $app->delete('/api/settings/number-series/{id:[0-9]+}',           [\MyInvoice\Action\Settings\NumberSeriesAction::class, 'delete']);
         $app->get('/api/settings/email-templates', [SupplierEmailTemplateAction::class, 'list']);
         $app->get('/api/settings/email-templates/{code:[a-z_]+}/{locale:cs|en}', [SupplierEmailTemplateAction::class, 'get']);
         $app->put('/api/settings/email-templates/{code:[a-z_]+}/{locale:cs|en}', [SupplierEmailTemplateAction::class, 'put']);

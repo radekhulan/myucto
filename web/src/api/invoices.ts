@@ -341,6 +341,8 @@ export interface Invoice {
   note_above_items: string | null
   note_below_items: string | null
   revenue_category_id: number | null
+  /** Řada z číselníku: na konceptu volba, na vystaveném dokladu nová řada (null = dosavadní číslování). */
+  number_series_id?: number | null
   revenue_category_label?: string | null
   revenue_category_code?: string | null
   /** Klasifikace plnění pro DPHDP3/KH nastavená na hlavičce (položky mohou mít vlastní). */
@@ -601,6 +603,8 @@ export interface MonthGroup {
 
 export interface InvoicePayload {
   invoice_type?: InvoiceType
+  /** Řada z číselníku (jen koncept); vynechané = beze změny, null = výchozí řada druhu. */
+  number_series_id?: number | null
   /** null jen u zjednodušeného dokladu (§ 30) — backend doplní koncového zákazníka. */
   client_id: number | null
   project_id?: number | null
@@ -940,6 +944,8 @@ export const invoicesApi = {
     revenueCategoryId?: number,
     /** Zjednodušený daňový doklad, může mít vlastní řadu firmy. */
     simplified?: boolean,
+    /** Řada z číselníku vybraná v hlavičce (bez ní výchozí řada druhu). */
+    numberSeriesId?: number | null,
   ) =>
     api.get<{ varsymbol: string; has_template: boolean }>(
       `/invoices/preview-varsymbol`,
@@ -950,6 +956,7 @@ export const invoicesApi = {
           ...(clientId ? { client_id: clientId } : {}),
           ...(revenueCategoryId ? { revenue_category_id: revenueCategoryId } : {}),
           ...(simplified ? { simplified: 1 } : {}),
+          ...(numberSeriesId ? { number_series_id: numberSeriesId } : {}),
         },
       },
     ).then(r => r.data),

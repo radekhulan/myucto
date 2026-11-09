@@ -525,6 +525,9 @@ export interface InvoiceSeriesGroup {
   /** Řada kategorie tržby; 0 = řada není vázaná na kategorii. */
   revenue_category_id: number
   revenue_category_name: string | null
+  /** Řada z číselníku (nová řada); u dosavadních řad chybí. */
+  number_series_id?: number
+  series_name?: string
   period: 'year' | 'month' | 'none'
   template_by_type: Record<string, string>
   buckets: InvoiceSeriesBucket[]

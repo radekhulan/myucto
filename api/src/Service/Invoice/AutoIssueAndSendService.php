@@ -249,13 +249,7 @@ final class AutoIssueAndSendService
             $pdo->beginTransaction();
         }
         try {
-            $varsymbol = $this->varsymbol->next(
-                $supplierId,
-                VarsymbolGenerator::seriesTypeFor($invoice),
-                $issueDate,
-                (int) $invoice['client_id'],
-                (int) ($invoice['revenue_category_id'] ?? 0),
-            );
+            [$varsymbol, $usedSeriesId] = $this->varsymbol->nextForInvoice($supplierId, $invoice, $issueDate);
             $stmt = $pdo->prepare(
                 'UPDATE invoices SET
                     varsymbol         = ?,
@@ -282,10 +276,12 @@ final class AutoIssueAndSendService
                         $issueDate,
                         (int) $invoice['client_id'],
                         (int) ($invoice['revenue_category_id'] ?? 0),
+                        $usedSeriesId,
                     );
                 }
                 return $this->repo->find($invoiceId) ?? $invoice;
             }
+            $this->varsymbol->recordSeries($invoiceId, $invoice, $usedSeriesId);
             if ($ownTransaction) $pdo->commit();
         } catch (\Throwable $e) {
             if ($ownTransaction && $pdo->inTransaction()) $pdo->rollBack();

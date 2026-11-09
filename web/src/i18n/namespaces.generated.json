@@ -112,6 +112,7 @@
     "nonprofitTax",
     "nonprofitTaxJ6",
     "nonprofitTaxNative",
+    "number_series",
     "oss_rates",
     "other_items",
     "pamica",
@@ -345,6 +346,7 @@
       "dimensions",
       "errors",
       "lock",
+      "number_series",
       "payment_method",
       "price_list",
       "project",
@@ -391,6 +393,7 @@
       "dimensions",
       "errors",
       "lock",
+      "number_series",
       "payment_method",
       "price_list",
       "project",
@@ -524,6 +527,7 @@
       "dimensions",
       "errors",
       "lock",
+      "number_series",
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
@@ -559,6 +563,7 @@
       "dimensions",
       "errors",
       "lock",
+      "number_series",
       "payment_method",
       "purchase_invoice",
       "purchase_submissions",
@@ -720,7 +725,8 @@
     ],
     "accounting-internal-document-new": [
       "dimensions",
-      "internal_documents"
+      "internal_documents",
+      "number_series"
     ],
     "accounting-internal-document-detail": [
       "documents",
@@ -729,7 +735,8 @@
     ],
     "accounting-internal-document-edit": [
       "dimensions",
-      "internal_documents"
+      "internal_documents",
+      "number_series"
     ],
     "accounting-ai-assistant": [
       "internal_documents",
@@ -849,6 +856,7 @@
       "dimensions",
       "documents",
       "linked_documents",
+      "number_series",
       "purchase_invoice"
     ],
     "accounting-cash-edit": [
@@ -856,6 +864,7 @@
       "dimensions",
       "documents",
       "linked_documents",
+      "number_series",
       "purchase_invoice"
     ],
     "accounting-cash-book": [
@@ -1150,11 +1159,13 @@
     "admin-settings": [
       "activation",
       "automation",
+      "cash",
       "company_email_templates",
       "company_profile",
       "dimensions",
       "domains",
       "invoice_default_note",
+      "number_series",
       "refundInvoice",
       "settings",
       "stock",

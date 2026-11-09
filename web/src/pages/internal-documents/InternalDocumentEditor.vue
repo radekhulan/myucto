@@ -26,6 +26,7 @@ import ClientSearchSelect from '@/components/ui/ClientSearchSelect.vue'
 import ChartAccountSelect from '@/components/accounting/ChartAccountSelect.vue'
 import DocumentLinkPicker from '@/components/accounting/DocumentLinkPicker.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -146,8 +147,12 @@ function docTypeLabel(type: string): string {
   return value === key ? type : value
 }
 
+// Řada z číselníku. undefined = beze změny, null = výchozí řada interních dokladů.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+
 function payload(): InternalDocumentPayload {
   return {
+    number_series_id: numberSeriesId.value,
     kind: form.kind,
     title: form.title.trim(),
     document_date: form.document_date,
@@ -236,6 +241,7 @@ async function load() {
           return
         }
         form.kind = doc.kind
+        numberSeriesId.value = doc.document_no ? undefined : (doc.number_series_id ?? undefined)
         form.title = doc.title
         form.document_date = doc.document_date
         form.entry_date = doc.entry_date
@@ -307,6 +313,7 @@ onMounted(load)
               <option v-for="k in INTERNAL_DOCUMENT_KINDS" :key="k" :value="k">{{ t(`internal_documents.kind.${k}`) }}</option>
             </select>
           </label>
+          <NumberSeriesSelect class="text-sm font-medium" :scope="{ module: 'internal-documents' }" v-model="numberSeriesId" />
           <label class="text-sm font-medium">{{ t('internal_documents.document_date') }}
             <DateInput v-model="form.document_date" class="mt-1 block h-9 w-full rounded-md border border-neutral-300 px-2" />
           </label>
