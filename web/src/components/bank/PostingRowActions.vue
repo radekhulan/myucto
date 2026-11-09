@@ -8,6 +8,7 @@ import type { BankTransaction } from '@/api/bank'
 import { bankPostingApi, bankPostingErrorMessage, type PostResult } from '@/api/bankPosting'
 import { btnFilledSm, btnOutlineSm, ICONS } from '@/components/ui/buttonStyles'
 import PostTransactionModal from './PostTransactionModal.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import RepostModal from '@/components/accounting/RepostModal.vue'
 import WorkspaceTeleport from '@/components/workspace/WorkspaceTeleport.vue'
 
@@ -114,9 +115,16 @@ async function reject() {
   }
 }
 
-async function unpost() {
+const unpostConfirm = ref(false)
+
+function unpost() {
   if (busy.value) return
-  if (!confirm(t('bank.posting.unpost_confirm'))) return
+  unpostConfirm.value = true
+}
+
+async function confirmUnpost() {
+  unpostConfirm.value = false
+  if (busy.value) return
   busy.value = true
   try {
     await bankPostingApi.unpost(props.tx.id)
@@ -186,6 +194,11 @@ function onPosted(payload: { result: PostResult; debit: string; credit: string }
         {{ t('bank.posting.action_unpost') }}
       </button>
     </div>
+
+    <ConfirmDialog v-if="unpostConfirm"
+      :title="t('bank.posting.action_unpost')" :message="t('bank.posting.unpost_confirm')"
+      :confirm-label="t('bank.posting.action_unpost')" variant="danger"
+      @confirm="confirmUnpost" @cancel="unpostConfirm = false" />
 
     <PostTransactionModal v-if="showModal" :tx="tx" :currency="currency"
       @posted="onPosted" @close="showModal = false" />
