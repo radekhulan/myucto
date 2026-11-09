@@ -87,9 +87,10 @@ final class PostingService
     /**
      * Zdroje typovaných vlastníků (SVJ, NNO): jejich zápisy hlídají vlastní důkazy řádků,
      * proto je jednoduchá forma zatím nedělí na dvojice (vedou se jako `ineligible`).
+     * Předpis SVJ (`unit_charge`) sem nepatří: jde po dvojicích a jeho důkaz je přijme.
      */
     private const PAIR_TYPED_SOURCES = [
-        'unit_charge' => true, 'unit_payment' => true, 'unit_payment_revision' => true,
+        'unit_payment' => true, 'unit_payment_revision' => true,
         'property_service_settlement' => true, 'property_service_lifecycle' => true,
         'property_funding' => true, 'nonprofit_capital' => true, 'nonprofit_membership' => true,
     ];
@@ -322,10 +323,7 @@ final class PostingService
                     JournalPairInvariant::message(JournalPairInvariant::COMPOSITE_FORM),
                 );
             }
-            foreach ($resolved as $i => $line) {
-                unset($resolved[$i]['pair_group'], $resolved[$i]['pair_role']);
-            }
-            return $resolved;
+            return JournalPairer::stripPairKeys($resolved);
         }
         if ($keepComposite || isset(self::PAIR_TYPED_SOURCES[$sourceType])) {
             $this->pairOutcome = ['status' => 'ineligible', 'reason' => $keepComposite ? 'import' : 'typed_owner'];
@@ -624,8 +622,13 @@ final class PostingService
             // rozhodne převod zápisů (`entry_form_override` = 'composite').
             $keepComposite = ($meta['entry_form_override'] ?? null) === 'composite';
             if (isset($batchDocument['resolved_lines'])) {
+                // Dávka předpisů SVJ skládala řádky (i dvojice) už v preflightu.
                 $resolved = $batchDocument['resolved_lines'];
-                $pairOutcome = ['status' => 'ineligible', 'reason' => 'typed_owner'];
+                $pairOutcome = null;
+                if (array_filter($resolved, static fn (array $l): bool => isset($l['pair_no'])) === []
+                    && $this->entryForms()->formAt($supplierId, $entryDate, true)->isSingle()) {
+                    $pairOutcome = ['status' => 'composite_mn', 'reason' => JournalPairer::REASON_MANY_TO_MANY];
+                }
             } else {
                 $resolved = $this->prepareDocumentLines($supplierId, $sourceType, $sourceId, $lines, $entryDate, true, $keepComposite);
                 $pairOutcome = $this->pairOutcome;

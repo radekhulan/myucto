@@ -22,6 +22,7 @@ use MyInvoice\Service\Property\Charges\Issuance\IssuanceReversalIntent;
 use MyInvoice\Service\Accounting\Closing\Fx504JournalProof;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
+use MyInvoice\Service\Accounting\Pair\JournalPairer;
 use MyInvoice\Security\FrameworkScopePolicy;
 use PDO;
 
@@ -35,6 +36,9 @@ use PDO;
 final class JournalEntryRepository
 {
     public const int SECURITIES_DEBT_GUARD_VERSION = 1;
+
+    private ?EntryFormService $entryForms = null;
+
     public function __construct(
         private readonly Connection $db,
         private readonly ActivityLogger $activity,
@@ -90,6 +94,7 @@ final class JournalEntryRepository
         }
         try {
             (new SystemDimensionWritePolicy($this->db))->assertJournal($header, $lines);
+            $lines = $this->pairGenericLines($header, $lines);
             $entryId = $this->persistJournal($header, $lines, false);
 
             if ($ownTx) {
@@ -102,6 +107,39 @@ final class JournalEntryRepository
             }
             throw $e;
         }
+    }
+
+    /**
+     * Obecný zápis mimo PostingService (opravné a převzaté zápisy, testovací předpisy):
+     * ve firmě s jednoduchou formou k datu se řádky bez dvojic a bez posouzení rozloží
+     * stejným párovačem jako zaúčtování. Co rozložit nejde, zastaví invariant dvojic.
+     * Složená firma řádky beze změny.
+     *
+     * @param array<string,mixed> $header
+     * @param list<array<string,mixed>> $lines
+     * @return list<array<string,mixed>>
+     */
+    private function pairGenericLines(array $header, array $lines): array
+    {
+        if (isset($header['pair_status']) || array_filter($lines, static fn (array $l): bool => isset($l['pair_no'])) !== []) {
+            return $lines;
+        }
+        $form = $this->entryForms()->formAt((int) $header['supplier_id'], (string) $header['entry_date'], currentRead: true);
+        if (!$form->isSingle()) {
+            return $lines;
+        }
+        $result = JournalPairer::pair($lines);
+        return $result['status'] === JournalPairer::STATUS_PAIRED ? $result['lines'] : $lines;
+    }
+
+    private function entryForms(): EntryFormService
+    {
+        return $this->entryForms ??= new EntryFormService(
+            $this->db,
+            $this->activity,
+            new AccountingModeRepository($this->db),
+            new FrameworkScopePolicy($this->db),
+        );
     }
 
     public function insertPropertyOpening(\MyInvoice\Service\Property\Opening\OpeningOwnerProof $proof):array
@@ -825,6 +863,11 @@ final class JournalEntryRepository
             }
         }
         $result = [...$retained, ...array_values($addLines)];
+        // Zápis, který už je po dvojicích, zůstává po dvojicích i ve složené formě
+        // (storno dvojice datované do složeného období, převedený zápis).
+        if (array_filter($entry['lines'], static fn (array $l): bool => isset($l['pair_no'])) !== []) {
+            $pairHeader['pairs_inherited'] = true;
+        }
         usort($result, static fn (array $a, array $b): int => (int) ($a['line_no'] ?? 0) <=> (int) ($b['line_no'] ?? 0));
         $this->insertLines($pdo, $entryId, $pairHeader + $entry, array_values($addLines), $result);
         $this->logReleasedPairings(
@@ -1534,12 +1577,7 @@ final class JournalEntryRepository
                 break;
             }
         }
-        $form = (new EntryFormService(
-            $this->db,
-            $this->activity,
-            new AccountingModeRepository($this->db),
-            new FrameworkScopePolicy($this->db),
-        ))->formAt((int) $header['supplier_id'], (string) $header['entry_date'], currentRead: true);
+        $form = $this->entryForms()->formAt((int) $header['supplier_id'], (string) $header['entry_date'], currentRead: true);
         if (!$paired && !$form->isSingle()) {
             return null;
         }
