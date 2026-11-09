@@ -526,9 +526,11 @@ final class DimensionStamper
             // Rozdělený je jen tehdy, když má zápis na tomtéž účtu a straně aspoň tolik
             // řádků, kolik je kombinací; jediný nerozdělený řádek by si jinak ponechal
             // dimenzi jedné položky pro celou částku a zbytek by v sestavách chyběl.
+            // Platí pro přerazítkování i pro přeúčtování ve formě single, kde řádek se
+            // stávající dimenzí dodá volající (jinak by nové rozdělení rozbilo dvojice).
             $current = isset($line['current_dimensions']) ? self::merge([], (array) $line['current_dimensions']) : null;
             $wasSplit = ($line['split_siblings'] ?? PHP_INT_MAX) >= count($combos);
-            if (!$allowSplit && $current !== null && $wasSplit && isset($combos[self::key(self::merge($current, $explicit))])) {
+            if ((!$allowSplit || isset($line['split_siblings'])) && $current !== null && $wasSplit && isset($combos[self::key(self::merge($current, $explicit))])) {
                 $out[] = self::withDims($line, self::merge($current, $explicit), $line['current_dimension_origins'] ?? []);
                 continue;
             }
