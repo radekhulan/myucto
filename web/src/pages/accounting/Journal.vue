@@ -79,6 +79,26 @@ const page = ref(1)
 const listBox = ref<HTMLElement | null>(null)
 useAdaptiveTableRows(computed(() => listBox.value ? [listBox.value] : []))
 useFillViewportHeight(listBox)
+
+// Tabulka deníku je `w-max` a při užším okně se posouvá vodorovně; rozbalený detail (colspan přes
+// celou tabulku) by pak byl široký jako celá tabulka a jeho pravá část (akce, částky) by zůstala
+// mimo obrazovku. Detail proto drží šířku viditelné plochy a při posunu zůstává na místě.
+const listBoxWidth = ref(0)
+let listBoxObserver: ResizeObserver | null = null
+watch(listBox, el => {
+  listBoxObserver?.disconnect()
+  listBoxObserver = null
+  if (!el) return
+  listBoxWidth.value = el.clientWidth
+  if (typeof ResizeObserver === 'undefined') return
+  listBoxObserver = new ResizeObserver(() => { listBoxWidth.value = el.clientWidth })
+  listBoxObserver.observe(el)
+})
+onBeforeUnmount(() => listBoxObserver?.disconnect())
+/** Šířka obsahu detailu = viditelná plocha bez vnitřního odsazení buňky (px-3). */
+const detailViewportStyle = computed(() => listBoxWidth.value > 48
+  ? { position: 'sticky', left: '0.75rem', width: `${listBoxWidth.value - 24}px`, minWidth: `${listBoxWidth.value - 24}px` } as const
+  : undefined)
 const total = ref(0)
 const perPage = ref(50)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
@@ -1348,6 +1368,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               <tr v-if="isExpanded(e.id)" class="table-detail-row">
                 <td :colspan="visibleColCount"
                   class="px-3 py-3 bg-primary-50/60 border-x-2 border-b-2 border-primary-500/60">
+                  <div data-test="journal-detail-viewport" :style="detailViewportStyle">
                   <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
                   <template v-else-if="details[e.id]">
                     <section v-if="entryHasPairs(details[e.id]!)" class="mb-3" data-test="journal-entry-pairs">
@@ -1369,6 +1390,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                       @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
                       @reposted="onReposted" />
                   </template>
+                  </div>
                 </td>
               </tr>
             </template>

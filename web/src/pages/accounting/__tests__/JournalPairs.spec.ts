@@ -25,6 +25,7 @@ vi.mock('@/composables/useDimensions', () => ({
     valueLabel: (id: number) => (id === 5 ? 'P5 – Projekt pět' : `#${id}`),
   }),
 }))
+vi.mock('@/composables/useAdaptiveTableRows', () => ({ useAdaptiveTableRows: vi.fn() }))
 vi.mock('@/api/accounting', () => ({
   accountingApi: {
     listPeriods: m.listPeriods,
@@ -147,6 +148,15 @@ describe('Journal: dvojice jednoduchého zápisu', () => {
     await wrapper.get('[data-test="confirm-ok"]').trigger('click')
     await flushPromises()
     expect(m.reversePairs).toHaveBeenCalledWith(7, { pair_nos: [2] })
+    wrapper.unmount()
+  })
+
+  it('rozbalený detail drží šířku viditelné plochy, ne celé vodorovně posuvné tabulky', async () => {
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockReturnValue(1000)
+    const wrapper = await openEntry(entry(7))
+    const box = wrapper.get('[data-test="journal-detail-viewport"]').element as HTMLElement
+    expect(box.style.position).toBe('sticky')
+    expect(box.style.width).toBe('976px')
     wrapper.unmount()
   })
 
