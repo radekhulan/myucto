@@ -18,7 +18,7 @@ vi.mock('@/composables/useToast', () => ({ useToast: () => ({ success: vi.fn(), 
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: mocks.canWrite }) }))
 
 type Line = { purchase_invoice_item_id: number; stock_item_id: number | null; [key: string]: unknown }
-let proposal: { lines: Line[]; unmatched_lines?: Line[]; [key: string]: unknown }
+let proposal: { lines: Line[]; unmatched_lines?: Line[]; uncoded_lines?: Line[]; [key: string]: unknown }
 
 const baseLine = {
   purchase_order_line_id: null,
@@ -64,7 +64,7 @@ describe('StockReceiptModal: párování podle kódu', () => {
     }
     // Stejně jako server: řádek s vybranou kartou přejde do `lines`.
     mocks.receiptPropose.mockImplementation(async (_id: number, cards?: Record<number, number>) => {
-      const moved = (proposal.unmatched_lines ?? []).filter(l => cards?.[l.purchase_invoice_item_id])
+      const moved = [...(proposal.unmatched_lines ?? []), ...(proposal.uncoded_lines ?? [])].filter(l => cards?.[l.purchase_invoice_item_id])
         .map(l => ({ ...l, stock_item_id: cards![l.purchase_invoice_item_id]! }))
       return { ...proposal, lines: [...proposal.lines, ...moved] }
     })
@@ -94,6 +94,34 @@ describe('StockReceiptModal: párování podle kódu', () => {
     expect(payload.lines).toEqual([
       expect.objectContaining({ purchase_invoice_item_id: 1, stock_item_id: 50, remember_seller_code: undefined }),
       expect.objectContaining({ purchase_invoice_item_id: 2, stock_item_id: 60, remember_seller_code: true }),
+    ])
+  })
+
+  it('řádek bez kódu ukáže, bez karty ho neodešle a s vybranou kartou ano', async () => {
+    proposal.unmatched_lines = []
+    proposal.uncoded_lines = [
+      { ...baseLine, order_index: 1, purchase_invoice_item_id: 5, stock_item_id: null, description: 'Olej bez kódu', seller_item_code: null, matched_stock_item_id: null, match_source: null },
+      { ...baseLine, order_index: 2, purchase_invoice_item_id: 6, stock_item_id: null, description: 'Filtr bez kódu', seller_item_code: null, matched_stock_item_id: null, match_source: null },
+    ]
+    const wrapper = mountModal()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('Olej bez kódu')
+    expect(wrapper.text()).toContain('Filtr bez kódu')
+    expect(wrapper.text()).not.toContain('Karta nenalezena, vyberte ji')
+
+    const select = wrapper.findAllComponents({ name: 'SearchableSelect' })[1]!
+    await select.vm.$emit('search', 'olej')
+    await flushPromises()
+    await select.vm.$emit('update:modelValue', 60)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Zapamatovat kód')
+
+    await wrapper.findAll('footer button')[1]!.trigger('click')
+    await flushPromises()
+    expect(mocks.receiptCreate.mock.calls[0]![1].lines).toEqual([
+      expect.objectContaining({ purchase_invoice_item_id: 1, stock_item_id: 50 }),
+      expect.objectContaining({ purchase_invoice_item_id: 5, stock_item_id: 60, remember_seller_code: undefined }),
     ])
   })
 

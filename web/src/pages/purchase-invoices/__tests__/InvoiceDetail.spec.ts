@@ -525,6 +525,15 @@ describe('InvoiceDetail.vue — skladové příjemky', () => {
     expect(m.push).toHaveBeenCalledWith('/stock/documents/777')
   })
 
+  it('nabídne příjemku i faktuře, která má jen řádky bez kódu a bez karty', async () => {
+    const line = { purchase_invoice_item_id: 2, purchase_order_line_id: null, stock_item_id: null, description: 'Zboží bez kódu', quantity: '1', already_received: '0', remaining_qty: '1', unit_cost: '100' }
+    m.receiptPropose.mockResolvedValue({ lines: [], unmatched_lines: [], uncoded_lines: [line], cost_candidates: [], pf_changed_after_receipt: false })
+    const wrapper = mount(InvoiceDetail, { global: { stubs } })
+    await flushPromises()
+    const action = (wrapper.findComponent({ name: 'ActionBar' }).props('actions') as Array<{ key: string; show?: boolean }>).find(a => a.key === 'stock-receipt')
+    expect(action?.show).toBe(true)
+  })
+
   it('zobrazí historii draft, posted i reversed příjemek a rozliší prázdný stav', async () => {
     m.receiptList.mockResolvedValue([
       makeStockDocument(41, 'draft', null),

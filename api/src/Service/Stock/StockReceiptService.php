@@ -61,7 +61,8 @@ final class StockReceiptService
     /**
      * Návrh příjemky: řádky PF s kartou (ručně přiřazenou, nebo spárovanou podle kódu;
      * zbývá přijmout, návrh PC), řádky bez karty jako kandidáti na vedlejší náklady.
-     * Nespárované řádky s kódem jdou navíc do `unmatched_lines`, ať jim člověk kartu vybere.
+     * Nespárované řádky s kódem jdou navíc do `unmatched_lines`, řádky bez kódu a bez EAN
+     * do `uncoded_lines`, ať jim člověk kartu vybere.
      *
      * @param array<int,int> $cardOverrides purchase_invoice_item_id => karta, kterou člověk vybral: návrh
      *                                      řádku se přepočte podle balení této karty (množství, cena)
@@ -80,6 +81,7 @@ final class StockReceiptService
                 'purchase_invoice_id' => $piId,
                 'lines'               => [],
                 'unmatched_lines'     => [],
+                'uncoded_lines'       => [],
                 'cost_candidates'     => [],
                 'not_receivable_kind' => (string) $pi['document_kind'],
             ];
@@ -90,6 +92,7 @@ final class StockReceiptService
 
         $stockLines    = [];
         $unmatchedLines = [];
+        $uncodedLines   = [];
         $costCandidates = [];
         $items = $this->purchaseInvoiceItems($supplierId, $piId, $this->ownGoodsCards($supplierId, $cardOverrides));
         $codeHolders = $this->matcher->cardsHoldingCodes($supplierId, (int) $pi['vendor_id'], array_column($items, 'seller_item_code'));
@@ -129,9 +132,8 @@ final class StockReceiptService
                     'invoice_unit'             => (string) $it['unit'],
                 ];
             } else {
-                if ($it['stock_item_id'] === null && $remaining > 0 && $it['expense_kind'] !== 'service'
-                    && ($it['seller_item_code'] !== null || $it['item_ean'] !== null)) {
-                    $unmatchedLines[] = [
+                if ($it['stock_item_id'] === null && $remaining > 0 && $it['expense_kind'] !== 'service') {
+                    $openLine = [
                         'order_index'              => (int) $it['order_index'],
                         'vendor_code_cards'        => $holders,
                         'purchase_invoice_item_id' => (int) $it['id'],
@@ -148,6 +150,11 @@ final class StockReceiptService
                         'remaining_qty'            => number_format($remaining, 3, '.', ''),
                         'unit_cost'                => number_format($this->costs->unitCost($costContext, ['quantity' => $it['base_quantity']] + $it), 6, '.', ''),
                     ];
+                    if ($it['seller_item_code'] !== null || $it['item_ean'] !== null) {
+                        $unmatchedLines[] = $openLine;
+                    } else {
+                        $uncodedLines[] = $openLine;
+                    }
                 }
                 $base = $this->costs->amount($costContext, $it);
                 $costCandidates[] = [
@@ -169,6 +176,7 @@ final class StockReceiptService
             ],
             'lines'                    => $stockLines,
             'unmatched_lines'          => $unmatchedLines,
+            'uncoded_lines'            => $uncodedLines,
             'cost_candidates'          => $costCandidates,
             // B6: existuje posted příjemka k této PF, jejíž zdrojový řádek PF byl
             // od té doby přepsán (SetPurchaseInvoiceItemsAction je replace-all,
