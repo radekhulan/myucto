@@ -12,7 +12,7 @@ final class CatalogImportProfile
     public const FIELDS = [
         'id', 'external_id', 'sku', 'name', 'unit', 'ean', 'item_type', 'vat_rate_id',
         'min_qty', 'is_active', 'note', 'manufacturer_code', 'manufacturer_id',
-        'warranty_months', 'delivery_days', 'weight_g', 'export_eshop', 'is_stocked',
+        'warranty_months', 'delivery_days', 'weight_g', 'weight_kg', 'export_eshop', 'is_stocked',
         'pricing_base', 'categories', 'tag_ids', 'i18n', 'attributes', 'fees', 'price', 'prices',
         'master_id', 'master_external_id', 'variant_options', 'inheritance', 'relations', 'media_urls',
     ];
@@ -45,6 +45,9 @@ final class CatalogImportProfile
             if (!is_string($header) || trim($header) === '' || mb_strlen($header) > 200) {
                 throw new \InvalidArgumentException('import_mapping_invalid');
             }
+        }
+        if (isset($mapping['weight_g'], $mapping['weight_kg'])) {
+            throw new \InvalidArgumentException('import_mapping_invalid');
         }
         $operations = $input['operations'] ?? [];
         if (!is_array($operations) || array_diff(array_keys($operations), self::FIELDS) !== []) {
@@ -105,6 +108,10 @@ final class CatalogImportProfile
                 $result[$field] = self::empty($field);
             }
         }
+        if (array_key_exists('weight_kg', $result)) {
+            $result['weight_g'] = $result['weight_kg'];
+            unset($result['weight_kg']);
+        }
         return $result;
     }
 
@@ -158,6 +165,14 @@ final class CatalogImportProfile
                 throw new \InvalidArgumentException('import_integer_invalid');
             }
             return (int) $value;
+        }
+        if ($field === 'weight_kg') {
+            $kg = LocaleNumber::parse($value) ?? '';
+            if (!preg_match('/^\d{1,6}(?:\.\d{1,6})?$/D', $kg)) {
+                throw new \InvalidArgumentException('import_decimal_invalid');
+            }
+            // Gramy zaokrouhlené na celé číslo (půl nahoru).
+            return (int) bcadd(bcmul($kg, '1000', 6), '0.5', 0);
         }
         if ($field === 'min_qty' || $field === 'price') {
             $value = LocaleNumber::parse($value) ?? '';

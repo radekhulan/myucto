@@ -16997,6 +16997,7 @@
         "warranty_months": "Záruka v měsících",
         "delivery_days": "Dodací lhůta ve dnech",
         "weight_g": "Hmotnost v gramech",
+        "weight_kg": "Hmotnost v kilogramech (převede se na gramy)",
         "export_eshop": "Export do e-shopu",
         "is_stocked": "Skladová karta",
         "pricing_base": "Zdroj nákupní ceny",

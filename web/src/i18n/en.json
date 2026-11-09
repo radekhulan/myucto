@@ -16997,6 +16997,7 @@
         "warranty_months": "Warranty in months",
         "delivery_days": "Delivery time in days",
         "weight_g": "Weight in grams",
+        "weight_kg": "Weight in kilograms (converted to grams)",
         "export_eshop": "Export to e-shop",
         "is_stocked": "Stock item",
         "pricing_base": "Purchase price source",
