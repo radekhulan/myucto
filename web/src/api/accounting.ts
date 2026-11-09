@@ -2387,6 +2387,9 @@ export function postingErrorI18nKey(code: string | null | undefined): string {
 export function postingErrorMessage(t: (key: string) => string, e: any): string {
   const err = e?.response?.data?.error
   const code = typeof err?.code === 'string' ? err.code : null
+  const serverMessage = typeof err?.message === 'string' && err.message !== '' ? err.message : null
+  // Protiúčet a předkontace: server říká, který účet či klíč a proč nejde použít.
+  if (serverMessage && (code === 'invalid_counter_account' || code === 'invalid_posting_rule')) return serverMessage
   if ((POSTING_ERROR_CODES as readonly string[]).includes(code ?? '')) {
     return t(`accounting.posting_errors.${code}`)
   }

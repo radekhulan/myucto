@@ -17,6 +17,13 @@ describe('postingErrorMessage', () => {
       .toBe('t:accounting.posting_errors.rc_partial_deduction_unsupported')
   })
 
+  it('chyba protiúčtu ukáže konkrétní text ze serveru, bez něj přeložený', () => {
+    expect(postingErrorMessage(t, apiError('invalid_counter_account', 'Protiúčet 999 není aktivní v účtové osnově firmy.')))
+      .toBe('Protiúčet 999 není aktivní v účtové osnově firmy.')
+    expect(postingErrorMessage(t, apiError('invalid_counter_account')))
+      .toBe('t:accounting.posting_errors.invalid_counter_account')
+  })
+
   it('neznámý kód ukáže hlášku ze serveru', () => {
     expect(postingErrorMessage(t, apiError('some_new_code', 'Konkrétní příčina.'))).toBe('Konkrétní příčina.')
   })
