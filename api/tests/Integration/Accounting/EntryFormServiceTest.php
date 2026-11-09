@@ -135,12 +135,39 @@ final class EntryFormServiceTest extends TestCase
         $this->assertScheduleFails('entry_form_requires_double_entry', '2098-06-01');
     }
 
-    public function testHomeownersAssociationIsRejected(): void
+    public function testHomeownersAssociationOnFramework504MaySwitchToSingle(): void
     {
         $this->db->pdo()->prepare("UPDATE supplier SET legal_form = '145' WHERE id = ?")
             ->execute([$this->supplierId]);
+        $this->setFramework504();
+
+        self::assertTrue($this->service->supportsSingle($this->supplierId));
+        $this->service->schedule($this->supplierId, '2098-06-01', EntryForm::Single, $this->actorId);
+        self::assertSame(EntryForm::Single, $this->service->formAt($this->supplierId, '2098-06-01'));
+    }
+
+    public function testAssociationIsRejected(): void
+    {
+        $this->db->pdo()->prepare("UPDATE supplier SET legal_form = '706' WHERE id = ?")
+            ->execute([$this->supplierId]);
+
+        self::assertFalse($this->service->supportsSingle($this->supplierId));
+        $this->assertScheduleFails('entry_form_unsupported_module', '2098-06-01');
+    }
+
+    public function testCommercialSupplierOnFramework504IsRejected(): void
+    {
+        $this->setFramework504();
 
         $this->assertScheduleFails('entry_form_unsupported_module', '2098-06-01');
+    }
+
+    private function setFramework504(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare('DELETE FROM supplier_accounting_frameworks WHERE supplier_id = ?')->execute([$this->supplierId]);
+        $pdo->prepare("INSERT INTO supplier_accounting_frameworks (supplier_id, effective_from, accounting_framework) VALUES (?, '1900-01-01', 'cz_504')")
+            ->execute([$this->supplierId]);
     }
 
     public function testInvalidDateIsRejected(): void
