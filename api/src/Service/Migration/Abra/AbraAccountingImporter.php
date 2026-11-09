@@ -275,6 +275,9 @@ final class AbraAccountingImporter
         try {
             $nested ? $pdo->exec('SAVEPOINT abra_accounting_import') : $pdo->beginTransaction();
             (new AccountingFrameworkImportGuard($this->db))->assertCz500Periods($supplierId, $preflight['periods'], true);
+            // Forma zápisu nové firmy dřív, než převod zapíše první zápis deníku (podvojné
+            // účetnictví přepne až na konci); zablokovaný převod ji vrátí s transakcí.
+            $this->accountingUnit->applyEntryFormDefault($supplierId);
             $this->checkCancelled($cancelled);
             $sourceOss = $snapshot['_meta']['source_oss'] ?? [];
             if (is_array($sourceOss)) (new AbraOssSettingsImporter($this->db))->apply($supplierId, $sourceOss);

@@ -199,6 +199,8 @@ final class StereoNxAccountingImporter
                     }
                     $report['payroll_setup_result'] = $setup;
                 }
+                // Forma zápisu nové firmy dřív, než převod zapíše první zápis deníku.
+                $this->accountingUnit->applyEntryFormDefault($supplierId);
                 $report['written'] = $this->documents->writeAccountingPartners($partners, $identity, $backup->companyIndex(), $supplierId);
                 foreach (['journal' => $this->journal, 'assets' => $this->assets, 'employees' => $this->employees,
                     'payroll' => $this->payroll,
