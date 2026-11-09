@@ -705,7 +705,7 @@ async function submitRepostPair() {
       ...(repostPairDialog.text.trim() ? { line_text: repostPairDialog.text.trim() } : {}),
       ...(repostPairDialog.date ? { entry_date: repostPairDialog.date } : {}),
     })
-    toast.success(t(['in_place', 'tax_neutral', 'correction'].includes(result.mode)
+    toast.success(t(['in_place', 'tax_neutral', 'correction_entry'].includes(result.mode)
       ? `accounting.pairs.repost_done_${result.mode}` : 'accounting.pairs.repost_done'))
     repostPairDialog.open = false
     pairSelection.value = { ...pairSelection.value, [d.id]: [] }

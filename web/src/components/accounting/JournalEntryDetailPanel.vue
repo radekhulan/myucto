@@ -53,6 +53,10 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 
+// Zápis po dvojicích ukazuje stránka deníku v tabulce dvojic nad panelem; tabulka řádků pod ní
+// by tytéž částky opakovala. Složený zápis (bez `pairs`) zůstává s tabulkou řádků.
+const hasPairs = computed(() => (props.detail.pairs?.length ?? 0) > 0)
+
 // Přeúčtovat jde i z deníku, ne jen z detailu dokladu: účetní opravu kontace hledá
 // u zápisu, a bez tohohle tlačítka jí deník nabízel jen smazání. Jen živý zápis
 // dokladu nebo bankovního pohybu, plán i provedení rozhoduje server.
@@ -97,7 +101,7 @@ function onLineDimensionsSaved(byLine: Record<number, Record<number, number>>, s
   <div>
     <!-- Rozpad na účty — sdílená karta, tutéž ukazuje panel Souvisí
          u protějšku, aby je účetní poznal jako stejnou věc. -->
-    <JournalLinesTable class="mb-3" :lines="detail.lines" :date-from="dateFrom" :date-to="dateTo" />
+    <JournalLinesTable v-if="!hasPairs" class="mb-3" :lines="detail.lines" :date-from="dateFrom" :date-to="dateTo" />
     <JournalLineDimensionsEditor v-if="canWrite" class="mb-3" :entry-id="detail.id" :lines="detail.lines" @saved="onLineDimensionsSaved" />
     <!-- Souvisí hned za kontacemi: protějšek zápisu (doklad ↔ úhrada)
          je to první, co účetní po rozpadu na účty hledá. -->

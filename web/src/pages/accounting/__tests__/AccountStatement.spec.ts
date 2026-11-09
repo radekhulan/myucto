@@ -92,8 +92,8 @@ describe('AccountStatement.vue', () => {
     m.getAccountStatement.mockResolvedValue(statement({
       items: [
         { ...base, line_id: 1, counter_accounts: '221', pair_no: 1, counter_account_id: 21 },
-        { ...base, line_id: 2, counter_accounts: '602', pair_derived: true },
-        { ...base, line_id: 3, counter_accounts: '501, 502', pair_composite_mn: true },
+        { ...base, line_id: 2, counter_accounts: '602', pair_status: 'derived' },
+        { ...base, line_id: 3, counter_accounts: '501, 502', pair_status: 'composite_mn' },
       ],
       total: 3,
     }))
