@@ -98,6 +98,15 @@ final class PostingService
     ];
 
     /**
+     * Zdroje modulu nemovitostí SVJ: dimenze jednotek si vede modul sám a jeho důkazy
+     * (PaymentJournalProof, IssuanceJournalProof) porovnávají zapsané řádky s plánem,
+     * proto jim zaúčtování po dvojicích středisko a dimenze na druhou stranu nedoplňuje.
+     */
+    private const PAIR_OWN_ANALYTICS_SOURCES = [
+        'unit_charge' => true, 'unit_payment' => true,
+    ];
+
+    /**
      * Fallback účtu pro daň v režimu OSS, když kontace `oss.output.vat` chybí (instance,
      * která ještě nemá migraci 1295). Analytika k 345 (ostatní daně) — daň v režimu
      * jednoho správního místa NENÍ česká daň na výstupu: patří státu spotřeby, do
@@ -344,7 +353,11 @@ final class PostingService
             throw new PostingException($e->errorCode, $e->getMessage(), $e->httpStatus, $e->context);
         }
         if ($result['status'] === JournalPairer::STATUS_PAIRED) {
-            return $result['lines'];
+            // Středisko, zakázka a dimenze dvojice i na saldokontní straně (311, 321, …),
+            // aby přehledy a rozvaha po dimenzi seděly po dvojicích.
+            return isset(self::PAIR_OWN_ANALYTICS_SOURCES[$sourceType])
+                ? $result['lines']
+                : JournalPairer::shareAnalytics($result['lines']);
         }
         $reason = (string) ($result['reason'] ?? JournalPairer::REASON_MANY_TO_MANY);
         if ($sourceType === 'manual') {
@@ -1055,6 +1068,9 @@ final class PostingService
                 422,
                 ['reason' => $result['reason'] ?? null],
             );
+        }
+        if ($single) {
+            $result['lines'] = JournalPairer::shareAnalytics($result['lines']);
         }
 
         $retained = [];

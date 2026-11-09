@@ -127,7 +127,9 @@ final class ManualJournalEntryService
      * dvojice) a znovu v invariantu dvojic při zápisu.
      *
      * Středisko a dimenze dvojice se zapíší na výsledkový řádek (5xx/6xx) jako u automatiky;
-     * dvojice bez výsledkového účtu je nese na obou řádcích. Text dvojice jde na oba řádky.
+     * dvojice bez výsledkového účtu je nese na obou řádcích. Zaúčtování v jednoduché formě je
+     * pak doplní i na druhý řádek dvojice ({@see \MyInvoice\Service\Accounting\Pair\JournalPairer::shareAnalytics()}).
+     * Text dvojice jde na oba řádky.
      * Ve složené formě (`$single` false) vzniknou řádky bez `pair_no`, takže API klient
      * nemůže firmu přepnout do dvojic.
      *

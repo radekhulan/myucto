@@ -1914,6 +1914,11 @@ Formu zápisu mění **správce firmy** na stránce `Nástroje → Uzávěrka` v
 4. Klikněte na **Uložit změnu formy**. Změna je v auditním logu (`accounting.entry_form_changed`) a v historii formy.
 
 Zpět na složený zápis jde přejít stejným postupem. Zápisy, které už jsou po dvojicích, zůstanou po dvojicích.
+
+Instalace může mít jednoduchý zápis jako **výchozí formu nových firem** (konfigurace `accounting.default_entry_form`,
+proměnná prostředí `MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single`). Firma, která pak vstoupí do podvojného
+účetnictví (založení, převod z jiného programu, aktivace účetnictví), účtuje po dvojicích od začátku, pro všechna
+data. Stávající firmy a firmy, které už mají zápisy v deníku, se nezmění.
 Jednoduchý zápis zatím není dostupný pro společenství vlastníků jednotek a neziskové organizace.
 
 #### 52.14.16.2 Krok za krokem: ruční zápis po dvojicích
@@ -1926,7 +1931,9 @@ Má-li firma k datu zápisu jednoduchý zápis, místo tabulky řádků vidíte 
 4. Klikněte na **Zaúčtovat**.
 
 Změníte-li datum na období s jinou formou zápisu, rozepsané řádky se převedou na dvojice a zpět, kde je převod
-jednoznačný. Středisko a dimenze patří k výsledkovému účtu dvojice. **Kopírovat jako nový**, **Uložit a nový** i nový
+jednoznačný. Středisko a dimenze dvojice se zapíší na oba její řádky, i na saldokontní účet (311, 321, 331, 211…),
+takže předvaha a rozvaha po středisku jsou po dvojicích vyrovnané. Totéž platí pro automatické zápisy z dokladů:
+saldokontní strana dvojice nese středisko, zakázku a dimenze řádku dokladu, ke kterému patří. **Kopírovat jako nový**, **Uložit a nový** i nový
 zápis ze šablony nesou dvojice.
 
 Server odmítne dvojici, která nemá účet MD, nemá účet Dal, má oba účty stejné nebo má nulovou či zápornou částku.
@@ -1956,8 +1963,11 @@ vyplní řádky a v jednoduchém zápisu se převedou na dvojice podle stejného
 
 - V rozbaleném zápisu je tabulka **Dvojice zápisu** s číslem, účty, částkou a textem. Stornovaná nebo přeúčtovaná
   dvojice odkazuje na opravný zápis.
-- Zápis, který nejde jednoznačně rozdělit (M : N), má v seznamu odznak **M : N**. Filtr **Dvojice** vybere jen tyto
-  zápisy k ruční úpravě. Filtr se nabízí jen firmě, která jednoduchý zápis používá.
+- Automatický zápis dokladu, který nejde jednoznačně rozdělit na dvojice, se do deníku nezapíše: doklad zůstane
+  nezaúčtovaný v [K doúčtování](54_Rucni_fronta_doctovani.md) s chybou, že zápis nejde rozložit na dvojice, a zaúčtujete
+  ho ručně po dvojicích nebo upravíte předkontaci. Ostatní doklady téhož běhu automatiky se zaúčtují.
+- Starší zápis, který nejde jednoznačně rozdělit (M : N), má v seznamu odznak **M : N**. Filtr **Dvojice** vybere jen
+  tyto zápisy k ruční úpravě. Filtr se nabízí jen firmě, která jednoduchý zápis používá.
 - **Opis účtu** ukazuje u řádku z dvojice jediný protiúčet. Starší složený zápis 1 : N se v opisu zobrazí rozložený na
   pohyby (odznak **rozloženo**) a data zůstanou beze změny; zápis M : N zůstane v původním tvaru s odznakem **M : N**.
   Podle protiúčtu jde opis filtrovat a sčítat ([§ 55.8.5](55_Hlavni_kniha.md#5585-opis-uctu)).
@@ -1974,7 +1984,8 @@ V tabulce **Dvojice zápisu** zaškrtněte dvojice a použijte lištu akcí:
   neutrální změnou se použije stejná cesta jako u přeúčtování dokladu. Jinak vznikne opravný zápis se stornem dvojice
   a novou dvojicí. Po uložení aplikace řekne, která cesta se použila.
 - **Storno dvojice** (jedna nebo víc vybraných dvojic) vytvoří opravný zápis se zrcadlem dvojic. Původní zápis zůstane
-  nestornovaný. Pozdější storno celého zápisu zrcadlí jen dvojice, které ještě stornované nejsou.
+  nestornovaný. Pozdější storno celého zápisu zrcadlí jen dvojice, které ještě stornované nejsou, a stornuje i nové
+  dvojice z přeúčtování opravným zápisem, takže storno vždy zruší celý doklad.
 
 U zápisů vzniklých zaúčtováním dokladu (faktura, banka, pokladna) jde dvojici **jen přeúčtovat**, protože čisté
 storno dvojice by rozešlo zápis s dokladem. Čisté storno dvojice je jen u ručních a interních zápisů. U mzdových

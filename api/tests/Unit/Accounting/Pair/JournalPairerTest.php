@@ -369,4 +369,25 @@ final class JournalPairerTest extends TestCase
                 'pair_no' => 1, 'line_text' => 'x', 'pair_group' => 'g', 'pair_role' => 'rounding']]),
         );
     }
+
+    public function testShareAnalyticsFillsOnlyMissingAnalyticsOnPartnerLine(): void
+    {
+        $lines = [
+            ['account_id' => 1, 'side' => 'debit', 'amount' => '10.00', 'pair_no' => 1,
+                'cost_center' => 'A', 'project_id' => 7, 'dimensions' => [3 => 30, 1 => 10],
+                'dimension_origins' => [3 => ['source' => 'item']], 'dimension_splits' => [5 => [50 => 1.0]]],
+            ['account_id' => 2, 'side' => 'credit', 'amount' => '10.00', 'pair_no' => 1, 'dimensions' => [1 => 11]],
+            ['account_id' => 3, 'side' => 'debit', 'amount' => '5.00', 'line_no' => 9],
+        ];
+
+        $out = JournalPairer::shareAnalytics($lines);
+
+        self::assertSame($lines[0], $out[0], 'Řádek, který nic nepostrádá, se nemění.');
+        self::assertSame('A', $out[1]['cost_center']);
+        self::assertSame(7, $out[1]['project_id']);
+        self::assertSame([1 => 11, 3 => 30], $out[1]['dimensions'], 'Vlastní hodnota typu zůstává, chybějící typ se doplní.');
+        self::assertSame([3 => ['source' => 'item']], $out[1]['dimension_origins']);
+        self::assertSame([5 => [50 => 1.0]], $out[1]['dimension_splits']);
+        self::assertSame($lines[2], $out[2], 'Řádek bez dvojice zůstává beze změny.');
+    }
 }
