@@ -81,4 +81,55 @@ final class JournalLineAmount
         $line['is_red_storno'] = false;
         return $line;
     }
+
+    /**
+     * Zrcadlo řádků pro storno celého zápisu i jen vybraných dvojic (jediné místo,
+     * kde se protizápis řádků skládá). Dimenze, rozpady a jejich původ se předávají
+     * podle id původního řádku: storno musí odečíst tam, kam původní řádek přičetl.
+     * Zakázka se přenáší ze stejného důvodu. Číslo a text dvojice se přenesou jen
+     * u řádku, který je nese (složený zápis dostane tentýž tvar jako dosud).
+     *
+     * @param list<array<string,mixed>> $lines řádky originálu (s `id`)
+     * @param array<int,array<mixed>> $dimensions id řádku => dimenze
+     * @param array<int,array<mixed>> $splits id řádku => rozpady
+     * @param array<int,array<mixed>> $origins id řádku => původ dimenzí
+     * @param array<int,array<mixed>> $splitOrigins id řádku => původ rozpadů
+     * @return list<array<string,mixed>>
+     */
+    public static function mirrorLines(
+        array $lines,
+        array $dimensions = [],
+        array $splits = [],
+        array $origins = [],
+        array $splitOrigins = [],
+    ): array {
+        $mirror = [];
+        foreach ($lines as $line) {
+            $id = (int) ($line['id'] ?? 0);
+            $reversalLine = self::reversal($line);
+            $row = [
+                'account_id'     => (int) $line['account_id'],
+                'side'           => $reversalLine['side'],
+                'amount'         => $line['amount'],
+                'is_red_storno'  => $reversalLine['is_red_storno'],
+                'currency_code'  => $line['currency_code'] ?? null,
+                'fx_rate'        => $line['fx_rate'] ?? null,
+                'amount_foreign' => $line['amount_foreign'] ?? null,
+                'cost_center'    => $line['cost_center'] ?? null,
+                'project_id'     => isset($line['project_id']) ? (int) $line['project_id'] : null,
+                'dimensions'     => $dimensions[$id] ?? [],
+                'dimension_splits' => $splits[$id] ?? [],
+                'dimension_origins' => $origins[$id] ?? [],
+                'dimension_split_origins' => $splitOrigins[$id] ?? [],
+            ];
+            if (isset($line['pair_no'])) {
+                $row['pair_no'] = (int) $line['pair_no'];
+            }
+            if (isset($line['line_text']) && $line['line_text'] !== '') {
+                $row['line_text'] = (string) $line['line_text'];
+            }
+            $mirror[] = $row;
+        }
+        return $mirror;
+    }
 }
