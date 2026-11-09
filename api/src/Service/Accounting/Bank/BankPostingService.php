@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Accounting\Bank;
 
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\DocumentEntryNumber;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\AccountRoleResolver;
 use MyInvoice\Infrastructure\Database\TransactionFailure;
@@ -733,6 +735,10 @@ final class BankPostingService
             }
         }
 
+        $texts = $this->paymentTexts($supplierId,
+            array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']], $allocations),
+            array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']], $purchaseRefundAllocations),
+        );
         $lines = [$this->line($bankAcc, 'debit', $absAmount)];
         $allocSum = 0.0;
         foreach ($allocations as $a) {
@@ -740,14 +746,14 @@ final class BankPostingService
             $counter = $this->incomingCounterAccount($supplierId, $invId, $receivable);
             $alloc = round((float) $a['amount'], 2);
             $allocSum += $alloc;
-            $lines[] = $this->line($counter, 'credit', $alloc);
+            $lines[] = $this->line($counter, 'credit', $alloc) + self::textOf($texts, 'invoice', $invId);
         }
         foreach ($purchaseRefundAllocations as $a) {
             $pfId = (int) $a['purchase_invoice_id'];
             $counter = $this->incomingPurchaseRefundCounter($supplierId, $pfId);
             $alloc = round((float) $a['amount'], 2);
             $allocSum += $alloc;
-            $lines[] = $this->line($counter, 'credit', $alloc);
+            $lines[] = $this->line($counter, 'credit', $alloc) + self::textOf($texts, 'purchase_invoice', $pfId);
         }
 
         $this->appendRounding($lines, $absAmount - round($allocSum, 2), $supplierId, (string) $tx['posted_at']);
@@ -898,9 +904,12 @@ final class BankPostingService
             $this->line($bankAcc, 'debit', $net),
             $this->line(AccountRoleResolver::fromConnection($this->db)->resolve($supplierId, 'bank.fee', (string) $tx['posted_at']), 'debit', $fee),
         ];
+        $texts = $this->paymentTexts($supplierId,
+            array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']], $allocations), []);
         foreach ($allocations as $allocation) {
             $counter = $this->incomingCounterAccount($supplierId, (int) $allocation['invoice_id'], $receivable);
-            $lines[] = $this->line($counter, 'credit', (float) $allocation['amount']);
+            $lines[] = $this->line($counter, 'credit', (float) $allocation['amount'])
+                + self::textOf($texts, 'invoice', (int) $allocation['invoice_id']);
         }
         return ['lines' => $lines];
     }
@@ -972,6 +981,12 @@ final class BankPostingService
             }
         }
 
+        $texts = $this->paymentTexts($supplierId,
+            array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']],
+                array_values(array_filter($allocations, static fn (array $a): bool => $a['invoice_id'] === null))),
+            array_map(static fn (array $a): array => ['invoice', (int) $a['invoice_id']],
+                array_values(array_filter($allocations, static fn (array $a): bool => $a['invoice_id'] !== null))),
+        );
         $lines = [];
         $allocSum = 0.0;
         foreach ($allocations as $a) {
@@ -980,7 +995,9 @@ final class BankPostingService
                 : $this->outgoingCounterAccount($supplierId, (int) $a['purchase_invoice_id'], $payable);
             $alloc = round((float) $a['amount'], 2);
             $allocSum += $alloc;
-            $lines[] = $this->line($counter, 'debit', $alloc);
+            $lines[] = $this->line($counter, 'debit', $alloc) + ($a['invoice_id'] !== null
+                ? self::textOf($texts, 'invoice', (int) $a['invoice_id'])
+                : self::textOf($texts, 'purchase_invoice', (int) $a['purchase_invoice_id']));
         }
         $lines[] = $this->line($bankAcc, 'credit', $absAmount);
 
@@ -1014,6 +1031,8 @@ final class BankPostingService
             throw new PostingException('allocation_mismatch', 'Rozpad korunové platby neodpovídá částce bankovní transakce.');
         }
 
+        $texts = $this->paymentTexts($supplierId,
+            array_map(static fn (array $a): array => ['purchase_invoice', (int) $a['purchase_invoice_id']], $allocations), []);
         $lines = [];
         foreach ($allocations as $allocation) {
             $purchaseId = (int) $allocation['purchase_invoice_id'];
@@ -1040,7 +1059,7 @@ final class BankPostingService
                 $currency,
                 $rate,
                 $foreign,
-            );
+            ) + self::textOf($texts, 'purchase_invoice', $purchaseId);
         }
         $lines[] = $this->line($bankAcc, 'credit', $bankCzk);
         $this->appendFxDifference($lines, $supplierId, (string) $tx['posted_at'], 0.0, false);
@@ -2061,16 +2080,17 @@ final class BankPostingService
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign
+            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign, jel.pair_no
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id AND c.supplier_id = jel.supplier_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?
               ORDER BY jel.line_no, jel.id'
         );
         $stmt->execute([(int) $entry['id'], $supplierId]);
+        $clearing = null;
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-            if ($this->cardRegime->isClearingCode($supplierId, (string) $row['account_code'])) {
-                return [
+            if ($clearing === null && $this->cardRegime->isClearingCode($supplierId, (string) $row['account_code'])) {
+                $clearing = [
                     'code'           => (string) $row['account_code'],
                     'side'           => (string) $row['side'],
                     'amount'         => round((float) $row['amount'], 2),
@@ -2078,9 +2098,19 @@ final class BankPostingService
                     'fx_rate'        => $row['fx_rate'] !== null ? (float) $row['fx_rate'] : null,
                     'amount_foreign' => $row['amount_foreign'] !== null ? (float) $row['amount_foreign'] : null,
                 ];
+                continue;
+            }
+            // Zápis po dvojicích může mít mezičlen rozdělený na díly (přeúčtovaný pohyb
+            // s víc protiúčty): vypořádání patří celé částce, díly se sečtou.
+            if ($clearing !== null && $row['pair_no'] !== null
+                && (string) $row['account_code'] === $clearing['code'] && (string) $row['side'] === $clearing['side']) {
+                $clearing['amount'] = round($clearing['amount'] + (float) $row['amount'], 2);
+                if ($clearing['amount_foreign'] !== null && $row['amount_foreign'] !== null) {
+                    $clearing['amount_foreign'] = round($clearing['amount_foreign'] + (float) $row['amount_foreign'], 2);
+                }
             }
         }
-        return null;
+        return $clearing;
     }
 
     /**
@@ -4331,6 +4361,76 @@ final class BankPostingService
     private function line(string $code, string $side, float $amount): array
     {
         return ['account_code' => $code, 'side' => $side, 'amount' => round($amount, 2)];
+    }
+
+    /**
+     * Text dvojice hromadné úhrady: „Úhrada FV 2027001", „Úhrada FP 2027015", u vratky
+     * „Vratka FV/FP …". Jen u pohybu s víc doklady a u firmy s jednoduchým zápisem (složená
+     * firma text nedostane, zaúčtování by ho stejně zahodilo). Číslo dokladu jako číslo
+     * zápisu dokladu ({@see DocumentEntryNumber::sql()}), jedním dotazem na druh dokladu.
+     *
+     * @param list<array{0:string,1:int}> $payments doklady hrazené pohybem [typ, id]
+     * @param list<array{0:string,1:int}> $refunds doklady vracené pohybem [typ, id]
+     * @return array<string,string> "typ:id" => text
+     */
+    private function paymentTexts(int $supplierId, array $payments, array $refunds): array
+    {
+        if (count($payments) + count($refunds) < 2 || !$this->entryForms()->hasAnySingle($supplierId)) {
+            return [];
+        }
+        $labels = ['invoice' => 'FV', 'purchase_invoice' => 'FP'];
+        $ids = [];
+        foreach ([...$payments, ...$refunds] as [$type, $id]) {
+            $ids[$type][$id] = $id;
+        }
+        $numbers = [];
+        foreach (['invoice' => 'invoices', 'purchase_invoice' => 'purchase_invoices'] as $type => $table) {
+            if (empty($ids[$type])) {
+                continue;
+            }
+            $in = implode(',', array_fill(0, count($ids[$type]), '?'));
+            $stmt = $this->db->pdo()->prepare(
+                'SELECT d.id, ' . DocumentEntryNumber::sql("'{$type}'", 'd.id', 'd.supplier_id') . " AS no
+                   FROM {$table} d WHERE d.supplier_id = ? AND d.id IN ({$in})"
+            );
+            $stmt->execute([$supplierId, ...array_values($ids[$type])]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                if ($row['no'] !== null) {
+                    $numbers[$type . ':' . $row['id']] = (string) $row['no'];
+                }
+            }
+        }
+        $texts = [];
+        foreach ([['Úhrada', $payments], ['Vratka', $refunds]] as [$verb, $docs]) {
+            foreach ($docs as [$type, $id]) {
+                $no = $numbers[$type . ':' . $id] ?? null;
+                if ($no !== null) {
+                    $texts[$type . ':' . $id] = $verb . ' ' . $labels[$type] . ' ' . $no;
+                }
+            }
+        }
+        return $texts;
+    }
+
+    /**
+     * @param array<string,string> $texts
+     * @return array{line_text?:string}
+     */
+    private static function textOf(array $texts, string $type, int $id): array
+    {
+        return isset($texts[$type . ':' . $id]) ? ['line_text' => $texts[$type . ':' . $id]] : [];
+    }
+
+    private ?EntryFormService $entryForms = null;
+
+    private function entryForms(): EntryFormService
+    {
+        return $this->entryForms ??= new EntryFormService(
+            $this->db,
+            $this->activity,
+            new \MyInvoice\Repository\AccountingModeRepository($this->db),
+            new \MyInvoice\Security\FrameworkScopePolicy($this->db),
+        );
     }
 
     /**

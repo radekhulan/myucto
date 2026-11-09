@@ -43,6 +43,12 @@ export const PAIR_ERROR_CODES = [
   'invalid_entry_form_date',
   'not_implemented',
   'payroll_reversal_forbidden',
+  'pair_not_found',
+  'pair_already_reversed',
+  'pair_renumber_blocked',
+  'pair_unchanged',
+  'conversion_in_progress',
+  'accounting_not_double_entry',
 ] as const
 
 export interface ApiErrorInfo {

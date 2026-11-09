@@ -9,7 +9,9 @@ use MyInvoice\Infrastructure\Database\TransactionFailure;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
+use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\ActivityLogger;
 
 /**
@@ -60,6 +62,7 @@ final class DocumentRepostService
         private readonly ChartOfAccountsRepository $accounts,
         private readonly ActivityLogger $activity,
         private readonly BankPostingService $bankPosting,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     /**
@@ -406,7 +409,9 @@ final class DocumentRepostService
             // PostingService podmínky ověří znovu sám, pod zámkem zápisu.
             $postMeta['tax_neutral_rewrite'] = true;
         }
-        $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId, $lines, $postMeta);
+        $traceIds = array_column($plan['posting_entries'], 'id') ?: [(int) $plan['entry_id']];
+        $entryId = $this->posting->postDocument($supplierId, $sourceType, $docId,
+            $this->withCurrentDimensions($supplierId, array_map('intval', $traceIds), $targetDate, $lines), $postMeta);
         // Přeúčtování stornem vytvoří nový zápis — poznámky případu jdou s ním.
         (new \MyInvoice\Repository\JournalEntryNoteRepository($this->db))
             ->copyToEntry((int) $plan['entry_id'], $entryId, $supplierId);
@@ -561,6 +566,74 @@ final class DocumentRepostService
         $stmt->execute([$supplierId]);
         $value = $stmt->fetchColumn();
         return $value === false || $value === null ? null : (string) $value;
+    }
+
+    /**
+     * Přeúčtování ve formě single: řádek, který se shoduje s původním (účet, strana, částka,
+     * červené storno), nese jeho stávající dimenze. Razítko dimenzí ho pak znovu nerozdělí
+     * podle položek dokladu ({@see Dimension\DimensionStamper::assign()}), takže opakované
+     * zaúčtování dá tytéž dvojice a díly si dimenze ponechají. Řádek s rozpadem dimenze
+     * a složená forma jdou beze změny dosavadní cestou.
+     *
+     * @param list<int> $entryIds původní zápisy dokladu
+     * @param list<array<string,mixed>> $lines opravené řádky
+     * @return list<array<string,mixed>>
+     */
+    private function withCurrentDimensions(int $supplierId, array $entryIds, string $entryDate, array $lines): array
+    {
+        if ($entryIds === [] || !$this->entryForms->formAt($supplierId, $entryDate, true)->isSingle()) {
+            return $lines;
+        }
+        $assignments = new DimensionAssignmentRepository($this->db);
+        $dims = [];
+        $splits = [];
+        foreach ($entryIds as $entryId) {
+            $dims += $assignments->entryLineDimensions($supplierId, $entryId, true);
+            $splits += $assignments->entryLineSplits($supplierId, $entryId, true);
+        }
+        if ($dims === []) {
+            return $lines;
+        }
+        $old = (new DocumentPostingGroup($this->db))->lines($supplierId, $entryIds, true);
+        $siblings = [];
+        foreach ($old as $o) {
+            $key = $o['account_code'] . '|' . $o['side'];
+            $siblings[$key] = ($siblings[$key] ?? 0) + 1;
+        }
+        $carry = function (int $i, array $o) use (&$lines, $dims, $splits, $siblings): void {
+            $lineId = (int) $o['id'];
+            if (isset($dims[$lineId]) && !isset($splits[$lineId])) {
+                $lines[$i]['current_dimensions'] = $dims[$lineId];
+                $lines[$i]['split_siblings'] = $siblings[$o['account_code'] . '|' . $o['side']];
+            }
+        };
+        $sameMovement = static fn (array $o, array $line): bool => (string) $o['side'] === (string) ($line['side'] ?? '')
+            && (bool) $o['is_red_storno'] === (bool) ($line['is_red_storno'] ?? false)
+            && JournalLineAmount::cents((string) $o['amount']) === JournalLineAmount::cents($line['amount'] ?? 0);
+        // Nejdřív řádky beze změny (týž účet), pak řádek s přeúčtovaným účtem: dimenze
+        // převezme, jen když mu zbyl jediný původní řádek se stejnou stranou a částkou.
+        $unmatched = [];
+        foreach ($lines as $i => $line) {
+            $code = (string) ($line['account_code'] ?? '');
+            $codes = [$code, $this->posting->redirectedAccountCode($supplierId, $code)];
+            foreach ($old as $j => $o) {
+                if (in_array((string) $o['account_code'], $codes, true) && $sameMovement($o, $line)) {
+                    unset($old[$j]);
+                    $carry($i, $o);
+                    continue 2;
+                }
+            }
+            $unmatched[] = $i;
+        }
+        foreach ($unmatched as $i) {
+            $candidates = array_filter($old, static fn (array $o): bool => $sameMovement($o, $lines[$i]));
+            if (count($candidates) === 1) {
+                $j = array_key_first($candidates);
+                $carry($i, $old[$j]);
+                unset($old[$j]);
+            }
+        }
+        return $lines;
     }
 
     /**

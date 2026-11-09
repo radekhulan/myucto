@@ -16,6 +16,7 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionPeriodGuard;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use PDO;
 
 /**
@@ -89,6 +90,7 @@ final class InternalDocumentService
             // Částečná úprava: chybějící klíč = uložená hodnota.
             foreach (['kind', 'title', 'document_date', 'entry_date', 'partner_id', 'partner_name', 'note',
                 'lines', 'document_links'] as $key) {
+                if ($key === 'lines' && array_key_exists('pairs', $input)) continue;
                 if (!array_key_exists($key, $input)) $input[$key] = $existing[$key] ?? null;
             }
             // Uzavřenou hodnotu dimenze, kterou koncept už nese, smí úprava ponechat.
@@ -143,8 +145,14 @@ final class InternalDocumentService
                     throw new InternalDocumentException('lines_required', 'Doklad nemá žádné řádky kontace.');
                 }
                 self::assertBalanced($doc['lines']);
+                // Koncept zadaný po dvojicích zaúčtuje firma ve složené formě k datu
+                // zápisu bez čísel dvojic (jako `pairs` ručního zápisu).
+                $draftLines = $doc['lines'];
+                if (!$this->manualEntries->singleAt($supplierId, (string) $doc['entry_date'])) {
+                    $draftLines = array_map(static fn (array $l): array => array_diff_key($l, ['pair_no' => true, 'line_text' => true]), $draftLines);
+                }
                 try {
-                    $lines = $this->manualEntries->normalizeLines($supplierId, $doc['lines']);
+                    $lines = $this->manualEntries->normalizeLines($supplierId, $draftLines);
                     $links = $this->manualEntries->normalizeLinks($supplierId, $doc['document_links']);
                 } catch (ManualJournalEntryException $e) {
                     throw new InternalDocumentException($e->errorCode, $e->getMessage(), $e->httpStatus);
@@ -350,7 +358,7 @@ final class InternalDocumentService
                     'is_red_storno' => $red,
                     'cost_center' => $line['cost_center'] !== null ? (string) $line['cost_center'] : null,
                     'dimensions' => [],
-                ];
+                ] + array_intersect_key($line, ['pair_no' => true, 'line_text' => true]);
             }
             $title = trim((string) ($input['title'] ?? '')) ?: trim((string) ($entry['description'] ?? ''));
             $data = [
@@ -451,7 +459,11 @@ final class InternalDocumentService
             throw new InternalDocumentException('invalid_date', 'Neplatné datum účetního případu.');
         }
         [$partnerId, $partnerName] = $this->partner($supplierId, $input['partner_id'] ?? null, $input['partner_name'] ?? null);
-        $lines = $this->normalizeLines($supplierId, $input['lines'] ?? [], $currentDimensions);
+        if (array_key_exists('pairs', $input) && array_key_exists('lines', $input) && $input['lines'] !== null) {
+            throw new InternalDocumentException('invalid_lines', 'Zadejte buď pairs, nebo lines.');
+        }
+        $rawLines = array_key_exists('pairs', $input) ? $this->pairLines($supplierId, $input['pairs']) : ($input['lines'] ?? []);
+        $lines = $this->normalizeLines($supplierId, $rawLines, $currentDimensions);
         $total = 0;
         foreach ($lines as $line) {
             if ($line['side'] === 'debit') $total += (int) round($line['amount'] * 100) * ($line['is_red_storno'] ? -1 : 1);
@@ -519,7 +531,7 @@ final class InternalDocumentService
                     throw new InternalDocumentException($e->errorCode, "Řádek {$n}: " . $e->getMessage(), $e->httpStatus);
                 }
             }
-            $lines[] = [
+            $line = [
                 'account_code' => $code,
                 'side' => $side,
                 'amount' => round((float) $amount, 2),
@@ -527,6 +539,53 @@ final class InternalDocumentService
                 'cost_center' => $costCenter !== '' ? $costCenter : null,
                 'dimensions' => $dims,
             ];
+            // Dvojice konceptu; úplnost a vyrovnanost dvojic ověří zaúčtování (invariant dvojic).
+            if (isset($row['pair_no']) && $row['pair_no'] !== '') {
+                $pairNo = JournalPairInvariant::pairNoOf(['pair_no' => $row['pair_no']]);
+                if ($pairNo === null || $pairNo < 1) {
+                    throw new InternalDocumentException('invalid_lines', "Řádek {$n}: číslo dvojice musí být kladné celé číslo.");
+                }
+                $line['pair_no'] = $pairNo;
+                $text = is_string($row['line_text'] ?? null) ? trim($row['line_text']) : '';
+                if ($text !== '') {
+                    $line['line_text'] = mb_substr($text, 0, 255);
+                }
+            }
+            $lines[] = $line;
+        }
+        return $lines;
+    }
+
+    /**
+     * Koncept po dvojicích: `pairs: [{debit_account_code, credit_account_code, amount,
+     * is_red_storno?, line_text?, cost_center?, dimensions?}]` rozloží stejná cesta jako
+     * ruční zápis ({@see ManualJournalEntryService::normalizePairs()}, kontroly kritéria b).
+     * Dimenze konceptu ověřuje až {@see normalizeLines()} (smí ponechat uzavřenou hodnotu,
+     * kterou koncept už nese), proto se na řádky vrací podle stejného pravidla jako středisko.
+     *
+     * @return list<array<string,mixed>>
+     */
+    private function pairLines(int $supplierId, mixed $rawPairs): array
+    {
+        if (!is_array($rawPairs) || !array_is_list($rawPairs) || count($rawPairs) * 2 > self::MAX_LINES) {
+            throw new InternalDocumentException('invalid_lines', 'Zadejte nejvýše ' . intdiv(self::MAX_LINES, 2) . ' dvojic.');
+        }
+        $stripped = array_map(
+            static fn (mixed $p): mixed => is_array($p) ? array_diff_key($p, ['dimensions' => true, 'dimension_splits' => true]) : $p,
+            $rawPairs,
+        );
+        try {
+            $lines = $this->manualEntries->normalizePairs($supplierId, $stripped, true);
+        } catch (ManualJournalEntryException $e) {
+            throw new InternalDocumentException($e->errorCode, $e->getMessage(), $e->httpStatus);
+        }
+        foreach ($rawPairs as $i => $pair) {
+            if (empty($pair['dimensions']) || !is_array($pair['dimensions'])) continue;
+            $sides = ManualJournalEntryService::pairAnalyticsSides(
+                (string) $lines[2 * $i]['account_code'], (string) $lines[2 * $i + 1]['account_code']);
+            foreach ([0 => 'debit', 1 => 'credit'] as $offset => $side) {
+                if ($sides[$side]) $lines[2 * $i + $offset]['dimensions'] = $pair['dimensions'];
+            }
         }
         return $lines;
     }

@@ -231,6 +231,45 @@ final class AccountStatementPairsTest extends TestCase
         }
         $bulk = array_values(array_filter($lines, static fn (array $l): bool => $l['entry_id'] === $entries['bulk'] && $l['account_code'] === '221'));
         self::assertSame(['321', '321', '568'], array_column($bulk, 'counter_accounts'));
+        self::assertSame(array_fill(0, 3, JournalLineContext::PAIR_STATUS_PAIRED), array_column($bulk, 'pair_status'));
+    }
+
+    public function testGeneralLedgerDetailExpandsOlderOneToManyLikeStatement(): void
+    {
+        $entries = $this->postScenario();
+        $this->switchToSingle(self::YEAR . '-01-01');
+        $derived = $this->ledgerDetailLines();
+        $bulk = array_values(array_filter($derived, static fn (array $l): bool => $l['entry_id'] === $entries['bulk'] && $l['account_code'] === '221'));
+        self::assertSame(['321', '321', '568'], array_column($bulk, 'counter_accounts'), 'Řádek 221 hromadné platby se rozloží na díly jako v opisu.');
+        self::assertSame([1, 2, 3], array_column($bulk, 'pair_piece'));
+        self::assertSame(array_fill(0, 3, JournalLineContext::PAIR_STATUS_DERIVED), array_column($bulk, 'pair_status'));
+        self::assertSame([1210.0, 605.0, 15.0], array_column($bulk, 'amount'));
+        self::assertSame(['credit', 'credit', 'credit'], array_column($bulk, 'side'));
+        $mn = array_values(array_filter($derived, static fn (array $l): bool => $l['entry_id'] === $entries['mn']));
+        self::assertNotSame([], $mn);
+        self::assertSame([JournalLineContext::PAIR_STATUS_COMPOSITE], array_values(array_unique(array_column($mn, 'pair_status'))));
+
+        // Po fyzickém rozdělení stejné pohyby, protiúčty a zůstatky.
+        $this->pairAllInPlace($entries);
+        $paired = $this->ledgerDetailLines();
+        $keep = static fn (array $lines): array => array_map(static fn (array $l): array => [
+            $l['entry_id'], $l['account_code'], $l['counter_accounts'], (float) $l['amount'], $l['balance'],
+        ], array_values(array_filter($lines, static fn (array $l): bool => $l['entry_id'] === $entries['bulk'])));
+        self::assertSame($keep($derived), $keep($paired));
+    }
+
+    /** @return list<array<string,mixed>> */
+    private function ledgerDetailLines(): array
+    {
+        $this->entryForms->forget();
+        $ledger = $this->container->get(GeneralLedgerService::class)->build($this->supplierId, $this->periodId, null, null, false, [], false, true);
+        $lines = [];
+        foreach ($this->container->get(GeneralLedgerDetailService::class)->events($this->supplierId, $ledger, [], false) as $event) {
+            if ($event['kind'] === 'line') {
+                $lines[] = $event['item'];
+            }
+        }
+        return $lines;
     }
 
     /** @return array<string,mixed> */

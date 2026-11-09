@@ -37,7 +37,13 @@ let disposed = false
 
 const running = computed(() => starting.value || run.value?.status === 'queued' || run.value?.status === 'running')
 const counts = computed(() => run.value?.counts ?? null)
-const reasons = computed(() => Object.entries(counts.value?.reasons ?? {}).filter(([, n]) => Number(n) > 0))
+const reasons = computed(() => {
+  const merged: Record<string, number> = {}
+  for (const group of [counts.value?.composite_mn_reasons, counts.value?.ineligible_reasons]) {
+    for (const [reason, n] of Object.entries(group ?? {})) merged[reason] = (merged[reason] ?? 0) + Number(n)
+  }
+  return Object.entries(merged).filter(([, n]) => n > 0)
+})
 const sample = computed(() => run.value?.sample ?? [])
 
 function stopPolling() {
@@ -132,10 +138,6 @@ defineExpose({ start, run })
           <dd class="font-mono font-medium text-success-600" data-test="count-auto">{{ counts.auto ?? 0 }}</dd>
         </div>
         <div class="flex justify-between gap-3">
-          <dt class="text-neutral-600">{{ t('accounting.pairs.conversion.derived') }}</dt>
-          <dd class="font-mono font-medium" data-test="count-derived">{{ counts.derived ?? 0 }}</dd>
-        </div>
-        <div class="flex justify-between gap-3">
           <dt class="text-neutral-600">{{ t('accounting.pairs.conversion.composite_mn') }}</dt>
           <dd class="font-mono font-medium text-warning-600" data-test="count-mn">{{ counts.composite_mn ?? 0 }}</dd>
         </div>
@@ -145,7 +147,7 @@ defineExpose({ start, run })
         </div>
         <div class="flex justify-between gap-3">
           <dt class="text-neutral-600">{{ t('accounting.pairs.conversion.already_paired') }}</dt>
-          <dd class="font-mono font-medium">{{ counts.already_paired ?? counts.paired ?? 0 }}</dd>
+          <dd class="font-mono font-medium">{{ counts.paired ?? 0 }}</dd>
         </div>
       </dl>
       <ul v-if="reasons.length" class="text-xs text-neutral-500 space-y-0.5">

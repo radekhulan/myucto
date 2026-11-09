@@ -11,6 +11,8 @@ use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Service\Accounting\Bank\BankPostingService;
 use MyInvoice\Service\Accounting\DocumentRepostService;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\EntryForm\EntryForm;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\ActivityLogger;
 use PDO;
 use PDOStatement;
@@ -160,6 +162,9 @@ final class BankRepostLineGuardTest extends TestCase
         $accounts = $this->createStub(ChartOfAccountsRepository::class);
         $accounts->method('idToAccountMap')->willReturn([]);
 
+        $forms = $this->createStub(EntryFormService::class);
+        $forms->method('formAt')->willReturn(EntryForm::Composite);
+
         return new DocumentRepostService(
             $db,
             $posting,
@@ -168,6 +173,7 @@ final class BankRepostLineGuardTest extends TestCase
             $accounts,
             $this->createStub(ActivityLogger::class),
             $bank,
+            $forms,
         );
     }
 }

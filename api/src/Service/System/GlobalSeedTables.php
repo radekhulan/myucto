@@ -203,6 +203,9 @@ final class GlobalSeedTables
         // Identita firmy, skupiny firem, přihlašovací domény, měny, číslování dokladů.
         'supplier', 'supplier_groups', 'supplier_domains', 'branding_profiles',
         'currencies', 'invoice_counters', 'purchase_invoice_counters', 'app_meta',
+        // Číselník řad je konfigurace firmy stejně jako dosavadní počítadla; výchozí
+        // řady uživatelů zůstávají s uživateli.
+        'number_series', 'number_series_counters', 'number_series_user_defaults',
         // API tokeny (PAT) včetně povolených IP.
         'api_tokens', 'api_token_ips',
         'mcp_server_settings', 'mcp_oauth_clients', 'mcp_oauth_grants',

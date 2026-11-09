@@ -273,6 +273,11 @@ final class PostingService
             $this->itemAccountIds($supplierId, $sourceType, $sourceId, $codeMap, $entryDate, $currentRead),
             $entryDate,
         );
+        foreach ($resolved as $i => $line) {
+            if (isset($line['split_siblings'])) {
+                unset($resolved[$i]['current_dimensions'], $resolved[$i]['split_siblings']);
+            }
+        }
         // Účtotvorná dimenze (migrace 1952): hodnota dimenze přepíše výsledkovou syntetiku
         // na analytiku z mapy, rozpad typu rozdělí řádek po analytikách. Až po razítkování
         // a rozpadech dokladu — rozhoduje výsledná dimenze řádku, ať ji dal doklad, položka,
@@ -4610,6 +4615,12 @@ final class PostingService
             }
             if (isset($line['line_text']) && trim((string) $line['line_text']) !== '') {
                 $resolvedLine['line_text'] = mb_substr(trim((string) $line['line_text']), 0, 255);
+            }
+            // Přeúčtování ve formě single: dimenze shodného původního řádku, které razítko
+            // ponechá místo nového rozdělení podle položek ({@see DocumentRepostService}).
+            if (isset($line['current_dimensions'], $line['split_siblings']) && is_array($line['current_dimensions'])) {
+                $resolvedLine['current_dimensions'] = array_map('intval', $line['current_dimensions']);
+                $resolvedLine['split_siblings'] = (int) $line['split_siblings'];
             }
             $out[] = $resolvedLine;
         }

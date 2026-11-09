@@ -395,7 +395,7 @@ final class AnonymizationPolicy
         'income_tax_return_snapshots' => ['business_errors' => 'json', 'snapshot_json' => 'json', 'source_manifest' => 'json', 'source_sha256' => 'keep', 'xml_content' => 'text', 'xml_sha256' => 'keep'],
         'income_tax_returns' => ['computed' => 'json', 'inputs' => 'json'],
         'instance_storage_usage' => ['breakdown' => 'keep'],
-        'internal_document_lines' => ['account_code' => 'keep', 'cost_center' => 'keep', 'dimensions_json' => 'keep'],
+        'internal_document_lines' => ['account_code' => 'keep', 'cost_center' => 'keep', 'dimensions_json' => 'keep', 'line_text' => 'text'],
         'internal_documents' => ['document_links_json' => 'json', 'document_no' => 'keep', 'kind' => 'keep', 'note' => 'text', 'partner_name' => 'party_name', 'reversal_reason' => 'text', 'title' => 'text'],
         'integration_change_log' => ['entity_type' => 'keep'],
         'integration_connections' => ['connection_uuid' => 'keep', 'connector_key' => 'keep', 'credentials_enc' => 'wipe', 'field_ownership_json' => 'keep', 'last_error_code' => 'keep', 'mappings_json' => 'json', 'name' => 'text', 'webhook_secret_enc' => 'wipe', 'webhook_secret_hash' => 'wipe'],
@@ -404,6 +404,11 @@ final class AnonymizationPolicy
         'integration_outbox' => ['entity_id' => 'keep', 'entity_type' => 'keep', 'event_type' => 'keep', 'event_uuid' => 'keep', 'idempotency_key' => 'keep', 'last_error_code' => 'keep', 'lease_token' => 'keep', 'payload_json' => 'json', 'payload_sha256' => 'keep'],
         'invoice_attachments' => ['filename' => 'file_path', 'mime_type' => 'keep', 'original_name' => 'file_name', 'sha256' => 'keep'],
         'invoice_counters' => ['period' => 'keep'],
+        // Název převedené řady přebírá jméno klienta, kategorie, pokladny nebo popisek
+        // a číslo bankovního účtu, proto jde přes slovník pseudonymů. Ostatní jsou kódy.
+        'number_series' => ['doc_kind' => 'keep', 'legacy_key' => 'keep', 'name' => 'text', 'prefix' => 'keep', 'template' => 'keep'],
+        'number_series_counters' => ['period_key' => 'keep'],
+        'number_series_user_defaults' => ['doc_kind' => 'keep'],
         'invoice_items' => ['work_report_billing_key' => 'keep', 'counter_account_code' => 'keep', 'posting_rule_key' => 'keep', 'description' => 'text', 'oss_consumer_country' => 'keep', 'oss_original_period' => 'keep', 'oss_rate_type' => 'keep', 'revenue_account_code' => 'keep', 'seller_item_code' => 'keep', 'tracking_json' => 'keep', 'unit' => 'keep', 'vat_classification_code' => 'keep'],
         'invoice_payment_schedule' => ['note' => 'text'],
         'invoice_payments' => ['bank_reference' => 'keep', 'currency' => 'keep', 'note' => 'text', 'variable_symbol' => 'symbol'],

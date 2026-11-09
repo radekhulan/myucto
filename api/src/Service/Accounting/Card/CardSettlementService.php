@@ -49,7 +49,7 @@ final class CardSettlementService
             return null;
         }
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign
+            'SELECT c.account_code, jel.side, jel.amount, jel.currency_code, jel.fx_rate, jel.amount_foreign, jel.pair_no
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id AND c.supplier_id = jel.supplier_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?
@@ -88,7 +88,10 @@ final class CardSettlementService
             fn (array $l): array => ['account_code' => $this->posting->redirectedAccountCode($supplierId, (string) $l['account_code'])] + $l,
             $lines,
         );
-        if ($live !== null && self::signature($live['lines']) === self::signature($posted)) {
+        // Zápis po dvojicích má rozdělený hub (378.x po dokladech), požadované řádky ho
+        // mají v jednom kuse: porovnává se proto obsah po účtech, ne po řádcích.
+        $paired = $live !== null && array_filter($live['lines'], static fn (array $l): bool => $l['pair_no'] !== null) !== [];
+        if ($live !== null && self::signature($live['lines'], $paired) === self::signature($posted, $paired)) {
             return ['action' => 'unchanged', 'entry_id' => (int) $live['id']];
         }
         if ($live !== null && !$this->policy->isOpenDate($supplierId, (string) $live['entry_date'])) {
@@ -183,12 +186,27 @@ final class CardSettlementService
 
     /**
      * Účetní obsah zápisu jako porovnatelná množina (strana|účet|haléře|měna|cizí částka).
+     * `$byAccount` (zápis po dvojicích): řádky téže strany, účtu a měny se nejdřív sečtou.
      *
      * @param list<array<string,mixed>> $lines
      * @return list<string>
      */
-    public static function signature(array $lines): array
+    public static function signature(array $lines, bool $byAccount = false): array
     {
+        if ($byAccount) {
+            $sum = [];
+            foreach ($lines as $l) {
+                $key = $l['side'] . '|' . $l['account_code'] . '|' . ($l['currency_code'] ?? '');
+                $foreign = $l['amount_foreign'] ?? null;
+                $sum[$key] ??= ['side' => $l['side'], 'account_code' => $l['account_code'], 'currency_code' => $l['currency_code'] ?? null, 'amount' => 0, 'amount_foreign' => null];
+                $sum[$key]['amount'] += (int) round(((float) $l['amount']) * 100.0);
+                if ($foreign !== null) {
+                    $sum[$key]['amount_foreign'] = ($sum[$key]['amount_foreign'] ?? 0) + (int) round(((float) $foreign) * 100.0);
+                }
+            }
+            $lines = array_map(static fn (array $l): array => ['amount' => $l['amount'] / 100,
+                'amount_foreign' => $l['amount_foreign'] === null ? null : $l['amount_foreign'] / 100] + $l, array_values($sum));
+        }
         $out = [];
         foreach ($lines as $l) {
             $foreign = $l['amount_foreign'] ?? null;

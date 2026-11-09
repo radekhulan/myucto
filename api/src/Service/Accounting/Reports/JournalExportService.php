@@ -64,9 +64,18 @@ final class JournalExportService
         }
 
         $ids = array_map(static fn (array $e): int => (int) $e['id'], $entries);
-        $linesByEntry = $this->journal->linesForEntries($ids, $supplierId);
+        $single = $this->entryForms->hasAnySingle($supplierId);
+        $linesByEntry = $this->journal->linesForEntries($ids, $supplierId, $single);
         $provenance = $this->automationProvenance->forJournalEntries($supplierId, $ids);
-        $pairsByEntry = $this->entryForms->hasAnySingle($supplierId) ? $this->pairsForEntries($supplierId, $ids) : null;
+        $pairsByEntry = null;
+        if ($single) {
+            $pairsByEntry = self::pairsForEntries($linesByEntry);
+            // Řádky zápisu v exportu mají tvar jako dřív, id a cizí částka sloužily jen dvojicím.
+            $linesByEntry = array_map(static fn (array $lines): array => array_map(
+                static fn (array $l): array => array_diff_key($l, ['line_id' => 1, 'account_id' => 1, 'amount_decimal' => 1, 'amount_foreign' => 1]),
+                $lines,
+            ), $linesByEntry);
+        }
 
         $totalDebit = 0.0;
         $totalCredit = 0.0;
@@ -117,45 +126,33 @@ final class JournalExportService
     }
 
     /**
-     * Dvojice zápisů exportu jedním dotazem (po dávkách id). Stav: `paired` (řádky nesou
-     * `pair_no`), `derived` (starší zápis rozložený za běhu), `composite_mn` (zůstává
-     * po řádcích).
+     * Dvojice zápisů exportu z řádků {@see JournalEntryRepository::linesForEntries()}
+     * (bez dalšího dotazu). Stav: `paired` (řádky nesou `pair_no`), `derived` (starší
+     * zápis rozložený za běhu), `composite_mn` (zůstává po řádcích).
      *
-     * @param list<int> $entryIds
+     * @param array<int, list<array<string,mixed>>> $linesByEntry řádky s `line_id`, `account_id`, `amount_decimal`, `amount_foreign`
      * @return array<int, array{pair_status:string, pairs:list<array<string,mixed>>}>
      */
-    private function pairsForEntries(int $supplierId, array $entryIds): array
+    private static function pairsForEntries(array $linesByEntry): array
     {
         $lines = [];
-        foreach (array_chunk($entryIds, 1000) as $chunk) {
-            $in = implode(',', array_fill(0, count($chunk), '?'));
-            $stmt = $this->db->pdo()->prepare(
-                "SELECT l.id, l.entry_id, l.account_id, c.account_code, c.name AS account_name, l.side AS raw_side,
-                        l.amount, l.amount_foreign, l.is_red_storno, l.cost_center, l.pair_no, l.line_text,
-                        CASE WHEN l.is_red_storno = 1
-                             THEN (CASE WHEN l.side = 'debit' THEN 'credit' ELSE 'debit' END)
-                             ELSE l.side END AS side
-                   FROM journal_entry_lines l
-                   JOIN chart_of_accounts c ON c.id = l.account_id
-                  WHERE l.supplier_id = ? AND l.entry_id IN ({$in})
-                  ORDER BY l.entry_id, l.line_no, l.id"
-            );
-            $stmt->execute([$supplierId, ...$chunk]);
-            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $lines[(int) $r['entry_id']][(int) $r['id']] = [
-                    'line_id'        => (int) $r['id'],
-                    'account_id'     => (int) $r['account_id'],
+        foreach ($linesByEntry as $entryId => $entryLines) {
+            foreach ($entryLines as $r) {
+                $red = (bool) $r['is_red_storno'];
+                $lines[$entryId][$r['line_id']] = [
+                    'line_id'        => $r['line_id'],
+                    'account_id'     => $r['account_id'],
                     'account_code'   => (string) $r['account_code'],
                     'account_name'   => (string) $r['account_name'],
-                    'side'           => (string) $r['side'],
-                    'raw_side'       => (string) $r['raw_side'],
-                    'is_red_storno'  => (bool) $r['is_red_storno'],
-                    'amount'         => (string) $r['amount'],
-                    'amount_foreign' => $r['amount_foreign'] === null ? null : (string) $r['amount_foreign'],
-                    'amount_cents'   => JournalLineAmount::cents((string) $r['amount']),
+                    'side'           => $red ? ($r['side'] === 'debit' ? 'credit' : 'debit') : (string) $r['side'],
+                    'raw_side'       => (string) $r['side'],
+                    'is_red_storno'  => $red,
+                    'amount'         => $r['amount_decimal'],
+                    'amount_foreign' => $r['amount_foreign'],
+                    'amount_cents'   => JournalLineAmount::cents($r['amount_decimal']),
                     'cost_center'    => $r['cost_center'],
-                    'pair_no'        => $r['pair_no'] === null ? null : (int) $r['pair_no'],
-                    'line_text'      => $r['line_text'],
+                    'pair_no'        => $r['pair_no'] ?? null,
+                    'line_text'      => $r['line_text'] ?? null,
                 ];
             }
         }

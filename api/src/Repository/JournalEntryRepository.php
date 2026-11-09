@@ -1515,6 +1515,30 @@ final class JournalEntryRepository
     }
 
     /**
+     * Posouzení zápisů bez dvojic (`composite_mn` / `ineligible`) pro stránku seznamu
+     * deníku, jedním dotazem po primárním klíči. Zápis bez posouzení v mapě chybí.
+     *
+     * @param list<int> $entryIds
+     * @return array<int,string> entry_id => status
+     */
+    public function pairStatusesForEntries(int $supplierId, array $entryIds): array
+    {
+        if ($entryIds === []) {
+            return [];
+        }
+        $place = implode(',', array_fill(0, count($entryIds), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT entry_id, status FROM journal_entry_pair_status WHERE supplier_id = ? AND entry_id IN ({$place})"
+        );
+        $stmt->execute([$supplierId, ...$entryIds]);
+        $out = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $out[(int) $row['entry_id']] = (string) $row['status'];
+        }
+        return $out;
+    }
+
+    /**
      * Čísla dvojic zápisu, které už storno nebo přeúčtování dvojice odebralo
      * (`journal_pair_reversals`). Storno celého zápisu je nezrcadlí podruhé.
      *
@@ -2199,20 +2223,24 @@ final class JournalEntryRepository
 
     /**
      * Řádky pro seznam zápisů (export) obohacené o kód/název účtu — jeden dotaz
-     * pro celou dávku (žádné N+1), seskupené podle entry_id.
+     * pro celou dávku (žádné N+1), seskupené podle entry_id. `pair_no` a `line_text`
+     * nese jen řádek, který je má (složený zápis klíče nedostane).
+     *
+     * `$withLineIds` (dvojice exportu deníku): navíc `line_id`, `account_id` a
+     * `amount_foreign`, ze kterých se skládají dvojice i starší zápisy rozložené za běhu.
      *
      * @param list<int> $entryIds
      * @return array<int, list<array<string,mixed>>> keyed entry_id
      */
-    public function linesForEntries(array $entryIds, int $supplierId): array
+    public function linesForEntries(array $entryIds, int $supplierId, bool $withLineIds = false): array
     {
         if ($entryIds === []) {
             return [];
         }
         $place = implode(',', array_fill(0, count($entryIds), '?'));
         $stmt = $this->db->pdo()->prepare(
-            "SELECT jel.entry_id, jel.side, jel.amount, jel.is_red_storno, jel.cost_center, jel.line_no,
-                    jel.pair_no, jel.line_text, c.account_code, c.name AS account_name
+            "SELECT jel.id, jel.entry_id, jel.account_id, jel.side, jel.amount, jel.amount_foreign, jel.is_red_storno,
+                    jel.cost_center, jel.line_no, jel.pair_no, jel.line_text, c.account_code, c.name AS account_name
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
               WHERE jel.entry_id IN ({$place}) AND jel.supplier_id = ?
@@ -2223,7 +2251,7 @@ final class JournalEntryRepository
         $out = [];
         foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $entryId = (int) $r['entry_id'];
-            $out[$entryId][] = self::castPairColumns([
+            $line = [
                 'side'         => $r['side'],
                 'amount'       => (float) $r['amount'],
                 'is_red_storno' => (bool) $r['is_red_storno'],
@@ -2232,7 +2260,16 @@ final class JournalEntryRepository
                 'account_name' => $r['account_name'],
                 'pair_no'      => $r['pair_no'],
                 'line_text'    => $r['line_text'],
-            ]);
+            ];
+            if ($withLineIds) {
+                $line += [
+                    'line_id'        => (int) $r['id'],
+                    'account_id'     => (int) $r['account_id'],
+                    'amount_decimal' => (string) $r['amount'],
+                    'amount_foreign' => $r['amount_foreign'] === null ? null : (string) $r['amount_foreign'],
+                ];
+            }
+            $out[$entryId][] = self::castPairColumns($line);
         }
         return $out;
     }
@@ -2460,6 +2497,13 @@ final class JournalEntryRepository
                 'any'      => "(je.reversed_by IS NOT NULL OR {$isReversal})",
                 default    => "(je.reversed_by IS NULL AND NOT {$isReversal})",
             };
+        }
+        // Posouzení zápisu bez dvojic (jednoduchý zápis). Podmínka vzniká jen s filtrem,
+        // dotaz firmy bez něj zůstává beze změny; jde po idx_jeps_status.
+        if (in_array($filters['pair_status'] ?? null, ['composite_mn', 'ineligible'], true)) {
+            $where[] = 'je.id IN (SELECT jeps.entry_id FROM journal_entry_pair_status jeps
+                                   WHERE jeps.supplier_id = ? AND jeps.status = ?)';
+            array_push($params, $supplierId, (string) $filters['pair_status']);
         }
         if (!empty($filters['automation'])) {
             $bankStatus = $filters['automation'] === 'auto' ? 'auto_posted' : 'approved';

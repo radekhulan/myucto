@@ -164,37 +164,26 @@ final class AccountStatementService
     {
         $out = [];
         foreach ($items as $item) {
-            $pieces = $item['pair_pieces'] ?? null;
+            $movements = JournalLineContext::pieceMovements($item);
             unset($item['pair_pieces']);
-            if ($pieces === null) {
+            if ($movements === null) {
                 $out[] = $item + ['pair_piece' => null];
                 continue;
             }
-            $red = !empty($item['is_red_storno']);
             $debit = $item['side'] === 'debit';
             $effect = static fn (int $signedCents): int => $debit ? $signedCents : -$signedCents;
-            $lineSigned = (int) round((float) $item['amount'] * 100);
-            $balance = (int) round((float) $item['balance'] * 100) - $effect($lineSigned);
-            foreach ($pieces as $n => $piece) {
-                $signed = $red ? -$piece['amount_cents'] : $piece['amount_cents'];
-                $balance += $effect($signed);
+            $balance = (int) round((float) $item['balance'] * 100) - $effect((int) round((float) $item['amount'] * 100));
+            foreach ($movements as ['row' => $row, 'piece' => $piece]) {
+                $balance += $effect((int) round($row['amount'] * 100));
                 if ($counterAccountId !== null
                     && $piece['counter_account_id'] !== $counterAccountId
                     && $piece['counter_parent_id'] !== $counterAccountId
                 ) {
                     continue;
                 }
-                $row = $item;
-                $row['amount'] = round($signed / 100, 2);
-                if ($row['amount_foreign'] !== null && $piece['amount_foreign_cents'] !== null) {
-                    $row['amount_foreign'] = round(($red ? -$piece['amount_foreign_cents'] : $piece['amount_foreign_cents']) / 100, 2);
-                }
                 $row['balance'] = round($balance / 100, 2);
                 $row['balance_signed'] = AccountBalanceSign::signed($row['balance'], $type);
                 $row['balance_unusual'] = AccountBalanceSign::isUnusual($row['balance'], $normalSide);
-                $row['counter_accounts'] = $piece['counter_account_code'];
-                $row['counter_account_id'] = $piece['counter_account_id'];
-                $row['pair_piece'] = $n + 1;
                 $out[] = $row;
             }
         }
