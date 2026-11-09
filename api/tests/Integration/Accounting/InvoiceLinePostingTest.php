@@ -263,6 +263,38 @@ final class InvoiceLinePostingTest extends TestCase
         self::assertContains('325|credit|12503.33', self::signature($preview['body']['lines']));
     }
 
+    /**
+     * BEZ OPRAVY PADÁ: syntetika s jedinou analytikou. Náhled ukazoval účet z návrhu
+     * (602, 325), zaúčtování ho ale přesměruje na analytiku (602.100, 325.100). Náhled
+     * musí ukázat přesně zapsané účty, u vydané i přijaté faktury.
+     */
+    public function testDraftPreviewShowsAnalyticAccountsAsPosted(): void
+    {
+        $this->analytic('602', '602.100');
+        $this->analytic('325', '325.100');
+
+        $sale = $this->invoicePayload([$this->saleItem(['unit_price_without_vat' => 300])]);
+        $preview = $this->draftPreview('invoices', null, $sale);
+        self::assertSame(200, $preview['status'], json_encode($preview['body'], JSON_UNESCAPED_UNICODE));
+        $created = self::decode(($this->createInvoice)($this->request('POST', $sale), new Psr7Response()));
+        self::assertSame(201, $created['status'], json_encode($created['body'], JSON_UNESCAPED_UNICODE));
+        $invoiceId = (int) $created['body']['id'];
+        $this->db->pdo()->prepare("UPDATE invoices SET status = 'issued' WHERE id = ?")->execute([$invoiceId]);
+        $posted = self::decode($this->journal->postInvoice($this->request('POST', []), new Psr7Response(), ['id' => (string) $invoiceId]));
+        self::assertSame(200, $posted['status'], json_encode($posted['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(self::signature($this->journalLines($invoiceId, 'invoice')), self::signature($preview['body']['lines']));
+        self::assertContains('602.100|credit|300.00', self::signature($preview['body']['lines']));
+
+        $purchase = $this->purchasePayload([$this->purchaseItem(['counter_account_code' => '325'])]);
+        $preview = $this->draftPreview('purchase-invoices', null, $purchase);
+        self::assertSame(200, $preview['status'], json_encode($preview['body'], JSON_UNESCAPED_UNICODE));
+        $id = $this->receivedPurchase([$this->purchaseItem(['counter_account_code' => '325'])]);
+        $posted = self::decode($this->journal->postPurchase($this->request('POST', []), new Psr7Response(), ['id' => (string) $id]));
+        self::assertSame(200, $posted['status'], json_encode($posted['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame(self::signature($this->journalLines($id)), self::signature($preview['body']['lines']));
+        self::assertContains('325.100|credit|12100.00', self::signature($preview['body']['lines']));
+    }
+
     /** Náhled nového konceptu vydané faktury: koncept se pro náhled bere jako vystavený. */
     public function testDraftPreviewOfNewIssuedInvoice(): void
     {
@@ -309,6 +341,15 @@ final class InvoiceLinePostingTest extends TestCase
             static fn (array $l): string => $l['account_code'] . '|' . $l['side'] . '|' . number_format((float) $l['amount'], 2, '.', ''),
             $lines,
         );
+    }
+
+    private function analytic(string $synthetic, string $code): void
+    {
+        $this->db->pdo()->prepare(
+            "INSERT INTO chart_of_accounts (supplier_id, account_code, name, account_type, normal_side, is_synthetic, parent_id, is_active)
+             SELECT supplier_id, ?, CONCAT('Analytika ', ?), account_type, normal_side, 0, id, 1
+               FROM chart_of_accounts WHERE supplier_id = ? AND account_code = ?"
+        )->execute([$code, $code, $this->supplierId, $synthetic]);
     }
 
     private function rule(string $key, string $debit, string $credit): void
@@ -421,17 +462,17 @@ final class InvoiceLinePostingTest extends TestCase
     }
 
     /** @return list<array<string,mixed>> */
-    private function journalLines(int $purchaseId): array
+    private function journalLines(int $purchaseId, string $sourceType = 'purchase_invoice'): array
     {
         $stmt = $this->db->pdo()->prepare(
             "SELECT a.account_code, l.side, l.amount
                FROM journal_entries e
                JOIN journal_entry_lines l ON l.entry_id = e.id
                JOIN chart_of_accounts a ON a.id = l.account_id
-              WHERE e.supplier_id = ? AND e.source_type = 'purchase_invoice' AND e.source_id = ? AND e.reversed_by IS NULL
+              WHERE e.supplier_id = ? AND e.source_type = ? AND e.source_id = ? AND e.reversed_by IS NULL
               ORDER BY l.line_no, l.id"
         );
-        $stmt->execute([$this->supplierId, $purchaseId]);
+        $stmt->execute([$this->supplierId, $sourceType, $purchaseId]);
 
         return $stmt->fetchAll(\PDO::FETCH_ASSOC);
     }

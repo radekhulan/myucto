@@ -59,6 +59,53 @@ final class InvoicePostingProposal
     }
 
     /**
+     * Řádky návrhu v podobě, v jaké je zaúčtování ZAPÍŠE do deníku.
+     *
+     * Návrh z {@see lines()} nese kódy z pravidel (602, 325). Zápis je ale skládá až
+     * v {@see PostingService::prepareDocumentLines()}: syntetika s jedinou analytikou
+     * přejde na ni (602.100), účtotvorná dimenze rozdělí výsledkový řádek a jednoduchá
+     * forma zápisu ho složí do dvojic. Náhled, který ukazuje jen návrh, by uživateli
+     * ukázal jiný účet, než jaký pak najde v deníku. Proto jde náhled toutéž metodou
+     * jako zápis, jen nic neukládá.
+     *
+     * @param 'invoice'|'purchase_invoice' $sourceType
+     * @param list<array<string,mixed>> $lines řádky z {@see lines()}
+     * @return list<array<string,mixed>> account_code, side, amount, is_red_storno, cost_center (+ pair_no)
+     */
+    public function prepared(int $supplierId, string $sourceType, int $docId, array $lines, string $entryDate): array
+    {
+        $prepared = $this->posting->prepareDocumentLines($supplierId, $sourceType, $docId, $lines, $entryDate);
+        $ids = array_values(array_unique(array_map(static fn (array $l): int => (int) $l['account_id'], $prepared)));
+        if ($ids === []) {
+            return [];
+        }
+        $ph = implode(',', array_fill(0, count($ids), '?'));
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT id, account_code FROM chart_of_accounts WHERE supplier_id = ? AND id IN ({$ph})"
+        );
+        $stmt->execute(array_merge([$supplierId], $ids));
+        $codes = [];
+        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+            $codes[(int) $r['id']] = (string) $r['account_code'];
+        }
+
+        return array_map(static function (array $l) use ($codes): array {
+            $out = [
+                'account_code'  => $codes[(int) $l['account_id']] ?? '',
+                'side'          => (string) $l['side'],
+                'amount'        => $l['amount'],
+                'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
+                'cost_center'   => $l['cost_center'] ?? null,
+            ];
+            if (isset($l['pair_no'])) {
+                $out['pair_no'] = (int) $l['pair_no'];
+            }
+
+            return $out;
+        }, $prepared);
+    }
+
+    /**
      * Doplní k řádkům názvy účtů, ať uživatel nepotvrzuje holá čísla.
      *
      * @param list<array<string,mixed>> $lines
@@ -87,8 +134,7 @@ final class InvoicePostingProposal
 
         return array_map(static function (array $l) use ($names): array {
             $code = (string) $l['account_code'];
-
-            return [
+            $out = [
                 'account_code' => $code,
                 'account_name' => $names[$code] ?? null,
                 'side'         => (string) $l['side'],
@@ -96,6 +142,11 @@ final class InvoicePostingProposal
                 'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
                 'cost_center'  => $l['cost_center'] ?? null,
             ];
+            if (isset($l['pair_no'])) {
+                $out['pair_no'] = (int) $l['pair_no'];
+            }
+
+            return $out;
         }, $lines);
     }
 

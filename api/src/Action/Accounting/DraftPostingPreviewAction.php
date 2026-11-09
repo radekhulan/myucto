@@ -174,7 +174,14 @@ final class DraftPostingPreviewAction
             return Json::error($response, 'not_found', 'Doklad nenalezen.', 404);
         }
         try {
-            $lines = $this->proposal->lines($supplierId, $sourceType, $id, $entryDate);
+            // Náhled ukazuje řádky tak, jak je zápis uloží (analytika, dvojice), ne surový návrh.
+            $lines = $this->proposal->prepared(
+                $supplierId,
+                $sourceType,
+                $id,
+                $this->proposal->lines($supplierId, $sourceType, $id, $entryDate),
+                $entryDate,
+            );
         } catch (PostingException|UnbalancedEntryException $e) {
             return $this->mapPostingError($response, $e);
         }
