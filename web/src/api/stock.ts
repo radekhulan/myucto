@@ -941,6 +941,8 @@ interface StockReceiptProposalBase {
   }>
   /** Řádky s kódem, ke kterým se nenašla karta: člověk ji vybere v okně příjemky. */
   unmatched_lines?: StockReceiptProposalBase['lines']
+  /** Řádky bez kódu a bez EAN, které nejsou služba: člověk jim kartu vybere v okně příjemky. */
+  uncoded_lines?: StockReceiptProposalBase['lines']
   cost_candidates: Array<{
     purchase_invoice_item_id: number
     description: string

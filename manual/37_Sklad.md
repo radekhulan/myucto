@@ -145,7 +145,7 @@ Počáteční zásoby naskladníte podle [§ 37.4.3](#3743-pocatecni-stav-zasob)
    kartu, na kterou je napojený. Řádek s kódem zboží se s kartou spáruje sám
    ([§ 37.12.5.2](#371252-naskladneni-z-prijate-faktury)).
 2. Klikněte na **Přijmout na sklad**. Tlačítko je u faktury, která má aspoň jeden
-   dosud nenaskladněný řádek s kartou nebo s kódem zboží.
+   dosud nenaskladněný řádek, který není služba.
 3. V průvodci zkontrolujte **zbývající množství k naskladnění**. Můžete ho
    přepsat na menší (částečné naskladnění), zvolit jinou kartu, nebo rovnou
    z popisu řádku založit novou skladovou kartu. Když řádku s kódem vyberete kartu
@@ -1080,10 +1080,11 @@ nezobrazuje nikdy.
 #### 37.12.5.2 Naskladnění z přijaté faktury
 
 Na detailu [přijaté faktury](23_Prijate_faktury.md) je tlačítko **Přijmout na sklad**,
-pokud má alespoň jeden dosud nenaskladněný řádek s kartou nebo s kódem zboží. Faktura
+pokud má alespoň jeden dosud nenaskladněný řádek, který není služba. Faktura
 bez takového řádku tlačítko nenabízí. Akce otevře průvodce naskladněním. Ten
-nabídne řádky faktury s kartou i řádky s kódem bez karty a **zbývající množství
-k naskladnění**: fakturované množství mínus součet množství, které už bylo
+nabídne řádky faktury s kartou i bez ní. Řádek bez kódu se s kartou sám nespáruje:
+kartu mu vyberete nebo založíte v průvodci, a když ji nevyberete, do příjemky se
+nedostane. U řádku uvidíte **zbývající množství k naskladnění**: fakturované množství mínus součet množství, které už bylo
 naskladněno dřívějšími zaúčtovanými příjemkami napojenými na tentýž řádek faktury.
 Pokus naskladnit víc systém odmítne hláškou „Množství přesahuje zbývající k příjmu
 z faktury“ (s tolerancí na zaokrouhlení asi 0,0005 jednotky). Kontroluje se hned při
