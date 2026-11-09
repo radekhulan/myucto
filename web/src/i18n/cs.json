@@ -18942,6 +18942,13 @@
       "none": "Zdroj kontace nelze určit - ruční zápis nebo doklad z doby před evidencí původu."
     },
     "editor_posting": {
+      "missing": "Náhled zápisu se zobrazí po vyplnění: {fields}.",
+      "missing_partner": "partner",
+      "missing_number": "číslo dokladu",
+      "missing_currency": "měna",
+      "missing_items": "aspoň jedna položka s popisem a cenou",
+      "missing_item_detail": "popis a cena u všech vyplněných položek",
+      "server_invalid": "Náhled zatím nejde spočítat: {message}",
       "title": "Náhled zápisu",
       "loading": "Počítám náhled…",
       "refresh": "Přepočítat",

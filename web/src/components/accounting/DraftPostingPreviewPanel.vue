@@ -17,6 +17,8 @@ const props = defineProps<{
   source: 'invoices' | 'purchase-invoices'
   docId: number | null
   payload: object | null
+  /** Co chybí, aby šel doklad uložit (klíče `accounting.editor_posting.missing_*`); prázdné = nevíme. */
+  missing?: string[]
 }>()
 
 const { t } = useI18n()
@@ -24,6 +26,7 @@ const { t } = useI18n()
 const preview = ref<DraftPostingPreview | null>(null)
 const error = ref('')
 const invalid = ref(false)
+const invalidMessage = ref('')
 const loading = ref(false)
 let timer: ReturnType<typeof setTimeout> | null = null
 let controller: AbortController | null = null
@@ -51,6 +54,7 @@ async function load(): Promise<void> {
     const err = e?.response?.data?.error
     const postingStage = err?.stage === 'posting'
     invalid.value = !postingStage && status >= 400 && status < 500 && status !== 401 && status !== 403
+    invalidMessage.value = invalid.value && typeof err?.message === 'string' ? err.message : ''
     error.value = invalid.value ? ''
       : postingStage && typeof err?.message === 'string' && err.message !== '' ? err.message
         : postingErrorMessage(t, e)
@@ -77,6 +81,9 @@ onBeforeUnmount(() => {
   controller?.abort()
 })
 
+const missingText = computed(() => (props.missing ?? []).length
+  ? t('accounting.editor_posting.missing', { fields: (props.missing ?? []).map(k => t(`accounting.editor_posting.missing_${k}`)).join(', ') })
+  : t('accounting.editor_posting.incomplete'))
 const lines = computed(() => preview.value?.lines ?? [])
 const totals = computed(() => lines.value.reduce((acc, l) => {
   if (l.side === 'debit') acc.debit += l.amount
@@ -108,8 +115,10 @@ defineExpose({ refresh: load })
     </header>
 
     <div class="px-5 py-3 text-sm">
-      <p v-if="payload === null" class="text-xs text-neutral-500">{{ t('accounting.editor_posting.incomplete') }}</p>
-      <p v-else-if="invalid" class="text-xs text-neutral-500" data-test="draft-posting-invalid">{{ t('accounting.editor_posting.incomplete') }}</p>
+      <p v-if="payload === null" class="text-xs text-neutral-500" data-test="draft-posting-missing">{{ missingText }}</p>
+      <p v-else-if="invalid" class="text-xs text-neutral-500" data-test="draft-posting-invalid">
+        {{ invalidMessage ? t('accounting.editor_posting.server_invalid', { message: invalidMessage }) : t('accounting.editor_posting.incomplete') }}
+      </p>
       <p v-else-if="error" class="text-sm text-danger-600" role="alert" data-test="draft-posting-error">{{ error }}</p>
       <p v-else-if="preview?.already_posted" class="text-sm text-neutral-600" data-test="draft-posting-posted">
         {{ t('accounting.editor_posting.already_posted', { id: preview.already_posted }) }}
