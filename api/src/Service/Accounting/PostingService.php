@@ -457,7 +457,7 @@ final class PostingService
             }
             if ($lockedUntil !== null && $entryDate <= $lockedUntil) {
                 throw new PostingException('date_locked', 'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
-                    . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. Zámek posuň v nastavení účetnictví (jen admin).');
+                    . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. Zámek posuň v nastavení účetnictví (smí správce nebo role s právem posunout zámek).');
             }
             $dates[$entryDate] = true;
             $ids[$sourceId] = true;
@@ -1273,7 +1273,7 @@ final class PostingService
                 throw new PostingException(
                     'date_locked',
                     'Zámek období k ' . $lockedUntil . ' zasahuje i aktuální datum — storno nelze '
-                        . 'zaúčtovat do otevřeného data. Posuň zámek zpět v nastavení účetnictví (jen admin).',
+                        . 'zaúčtovat do otevřeného data. Posuň zámek zpět v nastavení účetnictví (smí správce nebo role s právem posunout zámek).',
                 );
             }
             $reversalDate = $today;
@@ -3712,7 +3712,7 @@ final class PostingService
             'date_locked',
             'Datum účetního případu ' . $entryDate . ' je uzamčené k ' . $lockedUntil
                 . ' (podané daňové přiznání / ruční zámek období) — do zamčeného data nelze účtovat. '
-                . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (jen admin).',
+                . 'Zámek posuňte v Měsíční kontrole tlačítkem Uzamknout k datu (smí správce nebo role s právem posunout zámek).',
         );
     }
 

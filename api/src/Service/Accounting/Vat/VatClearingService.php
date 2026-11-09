@@ -753,7 +753,7 @@ final class VatClearingService
             );
         if (!$status['writable']) {
             $note .= $status['writable_reason'] === 'date_locked'
-                ? ' Období je uzamčené — přepočet až po posunutí zámku (jen admin).'
+                ? ' Období je uzamčené — přepočet až po posunutí zámku (smí správce nebo role s právem posunout zámek).'
                 : ' Období není otevřené — rozdíl patří do dodatečného přiznání, ne do zavřených knih.';
         }
 

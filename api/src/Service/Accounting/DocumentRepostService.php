@@ -359,7 +359,7 @@ final class DocumentRepostService
                 $plan['reason_code'] === 'date_locked' ? 'date_locked' : 'period_not_open',
                 $plan['reason_code'] === 'date_locked'
                     ? 'Účetnictví je zamčené k ' . (string) $plan['locked_until']
-                        . ' včetně dneška — opravu není kam zapsat. Posuň zámek v nastavení účetnictví (jen admin).'
+                        . ' včetně dneška — opravu není kam zapsat. Posuň zámek v nastavení účetnictví (smí správce nebo role s právem posunout zámek).'
                     : 'Zápis je v období „' . (string) $plan['period_status']
                         . '" a pro dnešek není otevřené účetní období — opravu není kam zapsat.',
                 409,
