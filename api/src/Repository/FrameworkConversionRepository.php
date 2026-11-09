@@ -63,7 +63,7 @@ final class FrameworkConversionRepository
         $rows=$this->rows(
             // STRAIGHT_JOIN: rozsah data zápisu po idx_je_supplier_entry_date musí řídit
             // dotaz; jinak optimalizátor začne osnovou a projde všechny řádky firmy.
-            'SELECT STRAIGHT_JOIN l.*,e.entry_date,e.period_id,e.source_type,e.source_id,e.row_version AS entry_version,a.account_code,a.account_type
+            'SELECT STRAIGHT_JOIN '.JournalLineProofColumns::select('l').',e.entry_date,e.period_id,e.source_type,e.source_id,e.row_version AS entry_version,a.account_code,a.account_type
                FROM journal_entries e
                JOIN journal_entry_lines l ON l.supplier_id=e.supplier_id AND l.entry_id=e.id
                JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id

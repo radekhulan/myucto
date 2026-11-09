@@ -13,7 +13,8 @@ declare(strict_types=1);
  * Pro KAŽDÉHO dodavatele v podvojném účetnictví (accounting_mode='double_entry')
  * spustí ČISTĚ ČTECÍ kontroly konzistence doklad ↔ deník (viz JournalIntegrityService):
  *   orphan_entry, unbalanced_entry, booked_without_entry, entry_without_booked,
- *   amount_mismatch.
+ *   amount_mismatch; u firmy s jednoduchým (párovým) zápisem navíc kontroly dvojic
+ *   pair_unbalanced, pair_incomplete, pair_same_account, single_unpaired.
  *
  * Job NIC NEOPRAVUJE — jen zapíše poslední výsledek do `journal_integrity_findings`
  * (separátní diagnostická tabulka; účetní data se nemění). Dashboard čte tento
@@ -83,8 +84,11 @@ foreach ($supplierIds as $sid) {
         $findings = $dryRun ? $service->check($sid) : $service->checkAndStore($sid, $checkedAt);
         $supplierTotal = 0;
         $parts = [];
-        foreach (JournalIntegrityService::TYPES as $type) {
-            $cnt = $findings[$type]['count'];
+        foreach ($findings as $type => $finding) {
+            $cnt = $finding['count'];
+            // Typy dvojic se do souhrnu přidávají, až je některá firma vrátí: instance
+            // bez jednoduchého zápisu má souhrn běhu beze změny.
+            $report['by_type'][$type] ??= 0;
             $supplierTotal += $cnt;
             $report['by_type'][$type] += $cnt;
             if ($cnt > 0) {

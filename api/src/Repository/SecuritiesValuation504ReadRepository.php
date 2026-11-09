@@ -30,7 +30,7 @@ final class SecuritiesValuation504ReadRepository
         $profileSnapshot['history'] = array_values(array_filter($profileSnapshot['history'], static fn (array $row): bool => isset($priorPeriods[(int) $row['period_id']])));
         $headers = $this->rows('SELECT id,period_id,entry_date,source_type,source_id,posted_at,reversed_by,row_version,document_no FROM journal_entries WHERE supplier_id=? ORDER BY id', [$supplierId], $currentRead);
         $excluded = Fx504ReadRepository::excludedEntries(array_values(array_filter($headers, static fn (array $header): bool => $header['posted_at'] !== null && $header['entry_date'] <= $period['ends_on'])), (int) $period['id']);
-        $rows = $this->rows('SELECT l.*,a.account_code,a.account_type,e.entry_date,e.source_type,e.source_id,e.posted_at,e.reversed_by,e.row_version AS entry_version
+        $rows = $this->rows('SELECT ' . JournalLineProofColumns::select('l') . ',a.account_code,a.account_type,e.entry_date,e.source_type,e.source_id,e.posted_at,e.reversed_by,e.row_version AS entry_version
             FROM journal_entries e JOIN journal_entry_lines l ON l.entry_id=e.id AND l.supplier_id=e.supplier_id
             JOIN chart_of_accounts a ON a.id=l.account_id AND a.supplier_id=l.supplier_id WHERE e.supplier_id=? ORDER BY e.id,l.line_no,l.id', [$supplierId], $currentRead);
         $ids = array_map('intval', array_column($rows, 'id'));
