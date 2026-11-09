@@ -75,6 +75,8 @@ final class DemoReadOnlyMiddlewareTest extends TestCase
             ['POST', '/api/auth/setup'],
             ['POST', '/api/public/approval/abc/decide'],
             ['POST', '/api/admin/cron-jobs/cron-cleanup/run'],
+            ['POST', '/api/stock/reports/value-trend-jobs'],
+            ['POST', '/api/stock/reports/value-trend-jobs/7/cancel'],
         ];
     }
 

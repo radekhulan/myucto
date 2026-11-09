@@ -158,7 +158,14 @@ final class StockValueTrendService
         $warehouseIds = array_map('intval', array_keys($input['source_versions']));
 
         if (($report['phase'] ?? null) === null) {
-            return $this->restart($supplierId, $job, 0, 0);
+            return $this->restart($supplierId, $job, 0, (int) $job['checkpoint']);
+        }
+        // Značka řádku 0/0 říká, že fronta patří tomuto průchodu. Chybí-li (po chybě nebo zrušení
+        // se fronta smaže a opakování navazuje na starý stav), začne se znovu od čistého stavu.
+        $mark = $pdo->prepare('SELECT 1 FROM stock_valuation_rows WHERE supplier_id = ? AND job_id = ? AND stock_item_id = 0');
+        $mark->execute([$supplierId, $job['id']]);
+        if ($mark->fetchColumn() === false) {
+            return $this->restart($supplierId, $job, 0, (int) $job['checkpoint']);
         }
         if ($report['phase'] === 'fill') {
             $stmt = $pdo->prepare('SELECT id FROM stock_items WHERE supplier_id = ? AND id > ? ORDER BY id LIMIT ' . self::FILL_ITEMS);
@@ -169,7 +176,7 @@ final class StockValueTrendService
                 $report['fill_cursor'] = end($ids);
             } else {
                 $report['phase'] = 'compute';
-                $pdo->prepare('UPDATE catalog_jobs SET total = GREATEST(total, (SELECT COUNT(*) FROM stock_valuation_rows WHERE job_id = ? AND supplier_id = ?))
+                $pdo->prepare('UPDATE catalog_jobs SET total = GREATEST(total, (SELECT COUNT(*) FROM stock_valuation_rows WHERE job_id = ? AND supplier_id = ? AND stock_item_id > 0))
                     WHERE id = ? AND supplier_id = ?')->execute([$job['id'], $supplierId, $job['id'], $supplierId]);
             }
             return ['checkpoint' => (int) $job['checkpoint'], 'done' => false, 'report' => $report];
@@ -177,11 +184,6 @@ final class StockValueTrendService
 
         $this->warehouses->lockForStockOperation($supplierId, $warehouseIds);
         $restarts = (int) $report['restarts'];
-        $queued = $pdo->prepare('SELECT 1 FROM stock_valuation_rows WHERE supplier_id = ? AND job_id = ? LIMIT 1');
-        $queued->execute([$supplierId, $job['id']]);
-        if ($queued->fetchColumn() === false && (int) $job['total'] > 0) {
-            return $this->restart($supplierId, $job, 0, 0); // fronta byla smazaná (opakování po chybě nebo zrušení)
-        }
         $current = $this->snapshots->versions($supplierId, $warehouseIds);
         if ($current != $input['source_versions']) {
             if ($this->fingerprint($supplierId, $last, $input['warehouse_id']) !== $report['fp']) {
@@ -205,11 +207,21 @@ final class StockValueTrendService
                 GROUP BY stock_item_id ORDER BY stock_item_id LIMIT ' . self::BATCH_ITEMS);
             $groups->execute([$supplierId, $job['id']]);
             $sum = 0;
-            foreach ($groups->fetchAll(PDO::FETCH_ASSOC) as $g) {
-                if ($window !== [] && $sum + (int) $g['m'] > $this->batchMovements) {
+            $candidates = $groups->fetchAll(PDO::FETCH_ASSOC);
+            // Karta s už uzavřenou dvojicí se nečte oknem (kniha se čte přes všechny sklady karty a strop by neplatil), ale po dvojicích stránkováním.
+            $partial = [];
+            if ($candidates !== []) {
+                $in = implode(',', array_map(fn ($g) => (int) $g['stock_item_id'], $candidates));
+                $closed = $pdo->prepare("SELECT DISTINCT stock_item_id FROM stock_valuation_rows WHERE supplier_id = ? AND job_id = ? AND completed = 1 AND stock_item_id IN ({$in})");
+                $closed->execute([$supplierId, $job['id']]);
+                $partial = array_flip(array_map('intval', $closed->fetchAll(PDO::FETCH_COLUMN)));
+            }
+            foreach ($candidates as $g) {
+                $big = (int) $g['m'] > $this->batchMovements || isset($partial[(int) $g['stock_item_id']]);
+                if ($window !== [] && ($big || $sum + (int) $g['m'] > $this->batchMovements)) {
                     break;
                 }
-                if ($window === [] && (int) $g['m'] > $this->batchMovements) {
+                if ($window === [] && $big) {
                     $first = $pdo->prepare('SELECT * FROM stock_valuation_rows WHERE supplier_id = ? AND job_id = ? AND stock_item_id = ? AND completed = 0 ORDER BY warehouse_id LIMIT 1 FOR UPDATE');
                     $first->execute([$supplierId, $job['id'], $g['stock_item_id']]);
                     $row = $first->fetch(PDO::FETCH_ASSOC);
@@ -250,6 +262,8 @@ final class StockValueTrendService
         $pdo->prepare('UPDATE catalog_jobs SET input_json = ? WHERE supplier_id = ? AND id = ?')
             ->execute([json_encode($input, JSON_THROW_ON_ERROR), $supplierId, $job['id']]);
         $this->dropQueue($supplierId, $job['id']);
+        $pdo->prepare('INSERT INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id, started, completed) VALUES (?, ?, 0, 0, 1, 1)')
+            ->execute([$job['id'], $supplierId]);
         $dates = $input['dates'];
         $fp = $this->fingerprint($supplierId, end($dates), $input['warehouse_id']);
         $n = count($dates);
@@ -277,6 +291,7 @@ final class StockValueTrendService
      * Dvojice (sklad, karta) s pohybem do data `$last` pro karty s id v rozmezí; `movements` nese
      * počet pohybů (podle něj se dávky omezují). Probíhá ve workeru po oknech karet a bez zámku skladu.
      */
+    // STRAIGHT_JOIN: číst řádky podle rozsahu karet z indexu; optimalizátor jinak může jít od dokladů a číst celé doklady pro každé okno
     private function fillQueue(int $supplierId, int $jobId, int $fromItem, int $toItem, string $last, ?int $warehouseId): void
     {
         $legA = $warehouseId !== null ? ' AND d.warehouse_id = ?' : '';
@@ -292,11 +307,11 @@ final class StockValueTrendService
         $this->db->pdo()->prepare("INSERT INTO stock_valuation_rows (job_id, supplier_id, warehouse_id, stock_item_id, movements)
             SELECT ?, ?, wh, item, COUNT(*) FROM (
                 SELECT d.warehouse_id AS wh, l.stock_item_id AS item FROM stock_document_lines l
-                JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+                STRAIGHT_JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
                 WHERE l.supplier_id = ? AND l.stock_item_id BETWEEN ? AND ? AND l.doc_date <= ? AND d.status IN ('posted','reversed'){$legA}
                 UNION ALL
                 SELECT d.warehouse_to_id, l.stock_item_id FROM stock_document_lines l
-                JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
+                STRAIGHT_JOIN stock_documents d ON d.id = l.document_id AND d.supplier_id = l.supplier_id
                 WHERE l.supplier_id = ? AND l.stock_item_id BETWEEN ? AND ? AND l.doc_date <= ? AND d.status IN ('posted','reversed') AND d.doc_type = 'transfer'{$legB}
             ) legs GROUP BY wh, item")->execute($params);
     }

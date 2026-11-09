@@ -381,6 +381,41 @@ final class StockValueTrendTest extends StockTestCase
         self::assertSame($day['totals']['value_total'], $svc->result($sid, $id, true)['totals']['2026-01-31']['value_total']);
     }
 
+    /** Selhání (fronta se smaže, fill_cursor i checkpoint zůstanou) a opakování musí začít z čistého stavu a dát stejné součty. */
+    #[\PHPUnit\Framework\Attributes\DataProvider('failurePhases')]
+    public function testRetryAfterFailureStartsCleanAndSumsMatch(int $ticksBeforeFailure): void
+    {
+        ['sid' => $sid, 'root' => $root] = $this->fiveCards();
+        $svc = $this->service(2);
+        $jobs = $this->container->get(\MyInvoice\Service\Eshop\CatalogJobService::class);
+        $id = (int) $svc->enqueue($sid, ['2026-01-31'], null, $root, true)['id'];
+        for ($i = 0; $i < $ticksBeforeFailure; $i++) {
+            $svc->tick($sid, 1);
+        }
+        $before = $jobs->find($sid, $id);
+        if ($ticksBeforeFailure === 2) {
+            self::assertGreaterThan(0, $before['report']['fill_cursor']); // selhání po první dávce plnění
+        } else {
+            self::assertGreaterThan(0, $before['checkpoint']); // selhání uprostřed výpočtu
+        }
+        $svc->dropQueue($sid, $id);
+        $this->db->pdo()
+            ->prepare("UPDATE catalog_jobs SET status = 'failed', error_code = 'stock_value_trend_failed', finished_at = NOW(), lease_token = NULL, lease_until = NULL WHERE id = ?")->execute([$id]);
+        self::assertTrue($jobs->retry($sid, $id));
+        $state = $jobs->find($sid, $id);
+        for ($i = 0; $i < 300 && $state['status'] !== 'completed'; $i++) {
+            $state = $svc->tick($sid, 1) ?? $state;
+        }
+        self::assertSame('completed', $state['status']);
+        $day = $this->container->get(StockReportService::class)->valuation($sid, '2026-01-31', []);
+        self::assertSame($day['totals']['value_total'], $svc->result($sid, $id, true)['totals']['2026-01-31']['value_total']);
+    }
+
+    public static function failurePhases(): array
+    {
+        return ['po první dávce plnění' => [2], 'uprostřed výpočtu' => [5]];
+    }
+
     public function testMovementAfterLastDateDoesNotRestart(): void
     {
         ['sid' => $sid, 'wh' => $wh, 'root' => $root] = $this->fiveCards();
