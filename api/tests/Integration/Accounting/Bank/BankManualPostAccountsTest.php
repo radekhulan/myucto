@@ -166,6 +166,29 @@ final class BankManualPostAccountsTest extends BankPostingTestCase
         self::assertSame(0, $this->entryCountForTx($tx));
     }
 
+    /**
+     * BEZ OPRAVY PADÁ: stejný účet na MD i Dal (zadaný přímo i po doplnění analytiky
+     * banky z holého „221") je nesmyslný zápis a odmítne se validační chybou.
+     */
+    public function testManualPairWithSameAccountOnBothSidesIsRejected(): void
+    {
+        $this->ownAccountWithAnalytic();
+        $bank = '221.' . self::SUFFIX;
+        foreach ([[$bank, $bank], ['221', $bank]] as [$debit, $credit]) {
+            $tx = $this->transaction($this->statement(), 1000.00);
+            try {
+                $this->service->postManual($this->supplierId, $tx, [
+                    'debit_account_code' => $debit, 'credit_account_code' => $credit,
+                ], $this->meta());
+                self::fail('Stejný účet MD i Dal nesmí projít (' . $debit . '/' . $credit . ').');
+            } catch (PostingException $e) {
+                self::assertSame('same_account', $e->errorCode);
+                self::assertSame(422, $e->httpStatus);
+            }
+            self::assertSame(0, $this->entryCountForTx($tx));
+        }
+    }
+
     public function testRuleFromManualSaldoPostingStillRejected(): void
     {
         // Uvolnění saldokonta platí pro JEDNORÁZOVÝ zápis, ne pro pravidlo (H2).

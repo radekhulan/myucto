@@ -194,6 +194,29 @@ final class BankPostingService
     }
 
     /**
+     * Ruční zaúčtování pohybu dvojicí MD/D: stejný účet na obou stranách nic nezaúčtuje
+     * (zůstatek se nehne, pohyb ale vypadá zaúčtovaný), proto se odmítne v každé formě
+     * zápisu. Porovnává se až po doplnění analytiky banky, kdy „221" a „221.100" splynou.
+     *
+     * @param list<array<string,mixed>> $lines
+     */
+    private static function assertDistinctPairAccounts(array $lines): void
+    {
+        $codes = array_values(array_unique(array_map(
+            static fn (array $l): string => (string) $l['account_code'],
+            $lines,
+        )));
+        if (count($lines) >= 2 && count($codes) === 1) {
+            throw new PostingException(
+                'same_account',
+                'Účet MD a účet Dal se musí lišit, na obou stranách je účet ' . $codes[0] . '.',
+                422,
+                ['account_code' => $codes[0]],
+            );
+        }
+    }
+
+    /**
      * Má transakce živý zápis TOTOŽNÝ s předloženými řádky? Vrací jeho id, jinak null.
      *
      * Porovnává se množina (strana, kód účtu, podepsaná částka v haléřích) — tedy účetní obsah,
@@ -3538,7 +3561,11 @@ final class BankPostingService
             // u automatiky i schvalování návrhu. Ruční zaúčtování jako jediné tenhle krok
             // vynechávalo, takže holé '221' z modalu skončilo na syntetice a rozbilo
             // jednoúčtovou (a tím jednoměnovou) analytiku, kterou zbytek systému udržuje.
-            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $this->withBankAnalytic($supplierId, $tx, $lines), [
+            $lines = $this->withBankAnalytic($supplierId, $tx, $lines);
+            if (!is_array($rawLines) || $rawLines === []) {
+                self::assertDistinctPairAccounts($lines);
+            }
+            $entryId = $this->posting->postDocument($supplierId, 'bank', $txId, $lines, [
                 'entry_date'    => (string) $tx['posted_at'],
                 'document_date' => (string) $tx['posted_at'],
                 'description'   => $description,
