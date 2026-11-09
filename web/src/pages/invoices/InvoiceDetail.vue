@@ -330,6 +330,7 @@ async function load() {
   bankTransactions.value = []
   paymentsLoaded.value = false
   stockDocuments.value = []
+  sourceReceipts.value = []
   stockDocumentsError.value = ''
   stockDocumentsLoading.value = stockIntegrationVisible.value
   try {
@@ -384,18 +385,26 @@ async function load() {
 const stockDocuments = ref<StockDocument[]>([])
 const stockDocumentsLoading = ref(false)
 const stockDocumentsError = ref('')
+/** Příjemky, ze kterých faktura vznikla. Karta Sklad je ukazuje s výdejkami. */
+const sourceReceipts = ref<StockDocument[]>([])
+const stockCardDocuments = computed(() => [...stockDocuments.value, ...sourceReceipts.value])
 const stockIntegrationVisible = computed(() => stockEnabled.value && auth.canRead('stock'))
 
 async function loadStockDocuments(invoiceId = Number(route.params.id), generation = loadGeneration) {
   stockDocumentsLoading.value = true
   stockDocumentsError.value = ''
   try {
-    const docs = await stockApi.documentsForInvoice(invoiceId)
+    const [docs, receipts] = await Promise.allSettled([stockApi.documentsForInvoice(invoiceId), stockApi.sourceReceipts(invoiceId)])
     if (generation !== loadGeneration) return
-    stockDocuments.value = docs
+    // Výpadek jednoho seznamu nesmí schovat ten druhý.
+    stockDocuments.value = docs.status === 'fulfilled' ? docs.value : []
+    sourceReceipts.value = receipts.status === 'fulfilled' ? receipts.value : []
+    const failed = [docs, receipts].find(r => r.status === 'rejected') as PromiseRejectedResult | undefined
+    if (failed) stockDocumentsError.value = apiErrorMessage(failed.reason)
   } catch (e) {
     if (generation !== loadGeneration) return
     stockDocuments.value = []
+    sourceReceipts.value = []
     stockDocumentsError.value = apiErrorMessage(e)
   } finally {
     if (generation === loadGeneration) stockDocumentsLoading.value = false
@@ -2827,6 +2836,8 @@ useWindowRefresh(async () => {
             </template>
           </div>
         </div>
+        <p v-if="invoice.status === 'draft' && invoice.items.some(i => i.manual_price)" data-test="manual-price-warning"
+          class="px-5 py-2 border-b border-warning-500/30 bg-warning-50 text-sm text-warning-700">{{ t('invoice.manual_price_warning') }}</p>
         <!-- Desktop: tabulka -->
         <div class="hidden md:block overflow-x-auto">
         <table class="w-full text-sm table-sticky-first">
@@ -3850,11 +3861,11 @@ useWindowRefresh(async () => {
             {{ t('stock.invoice_card.retry') }}
           </button>
         </div>
-        <div v-else-if="stockDocuments.length === 0" class="px-5 py-4 text-sm text-neutral-500">
+        <div v-else-if="stockCardDocuments.length === 0" class="px-5 py-4 text-sm text-neutral-500">
           {{ t('stock.invoice_card.empty') }}
         </div>
         <div v-else class="divide-y divide-neutral-100">
-          <RouterLink v-for="d in stockDocuments" :key="d.id" :to="`/stock/documents/${d.id}`"
+          <RouterLink v-for="d in stockCardDocuments" :key="d.id" :to="`/stock/documents/${d.id}`"
             class="flex items-center justify-between gap-2 px-5 py-2.5 text-sm hover:bg-neutral-50">
             <span class="flex items-center gap-2">
               <span class="font-mono text-xs text-neutral-500">{{ d.doc_number || '—' }}</span>
