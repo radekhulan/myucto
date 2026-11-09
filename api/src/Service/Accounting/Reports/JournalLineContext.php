@@ -110,10 +110,14 @@ final class JournalLineContext
      * je jinak nepoužije a u celého roku by stály tisíce dotazů navíc.
      * Položka nese entry_id, line_id, account_code, side a is_red_storno základního řádku (účinná strana protiúčtu).
      *
+     * `$withPairs` (rozpis hlavní knihy): u firmy s jednoduchým zápisem doplní totéž co
+     * opis účtu (`pair_no`, `counter_account_id`, `pair_status`, `pair_pieces`); pohyby
+     * po dílech rozbalí volající přes {@see pieceMovements()}.
+     *
      * @param list<array<string,mixed>> $items
      * @return list<array<string,mixed>>
      */
-    public function withCounterAccounts(int $supplierId, array $items): array
+    public function withCounterAccounts(int $supplierId, array $items, bool $withPairs = false): array
     {
         if ($items === []) {
             return [];
@@ -123,9 +127,50 @@ final class JournalLineContext
         $entryLines = $pairs ? $this->pairedEntryLines($supplierId, $entryIds) : $this->entryLines($supplierId, $entryIds);
         foreach ($items as &$it) {
             $it['counter_accounts'] = $this->counterAccounts($entryLines[(int) $it['entry_id']] ?? [], $it);
+            if ($pairs && $withPairs) {
+                $it += self::pairContext($entryLines[(int) $it['entry_id']] ?? [], $it, true);
+            }
         }
         unset($it);
         return $items;
+    }
+
+    /**
+     * Pohyby po dílech řádku staršího zápisu 1 : N (`pair_pieces` z {@see enrich()} nebo
+     * {@see withCounterAccounts()}): každý díl jako samostatný pohyb s jediným protiúčtem,
+     * částkou dílu (červené storno záporně) a pořadím `pair_piece`. Zůstatek dopočítá
+     * volající. Sdílí opis účtu i rozpis hlavní knihy.
+     *
+     * Null = řádek se nerozkládá: nemá díly, nebo položka nese jen podíl řádku (rozpad
+     * dimenze) a díly by nedaly její částku.
+     *
+     * @param array<string,mixed> $item položka se signovanou `amount` (a případně `amount_foreign`)
+     * @return list<array{row:array<string,mixed>, piece:array<string,mixed>}>|null
+     */
+    public static function pieceMovements(array $item): ?array
+    {
+        $pieces = $item['pair_pieces'] ?? null;
+        if ($pieces === null) {
+            return null;
+        }
+        unset($item['pair_pieces']);
+        if (array_sum(array_column($pieces, 'amount_cents')) !== abs((int) round((float) $item['amount'] * 100))) {
+            return null;
+        }
+        $red = !empty($item['is_red_storno']);
+        $out = [];
+        foreach ($pieces as $n => $piece) {
+            $row = $item;
+            $row['amount'] = round(($red ? -$piece['amount_cents'] : $piece['amount_cents']) / 100, 2);
+            if (($row['amount_foreign'] ?? null) !== null && $piece['amount_foreign_cents'] !== null) {
+                $row['amount_foreign'] = round(($red ? -$piece['amount_foreign_cents'] : $piece['amount_foreign_cents']) / 100, 2);
+            }
+            $row['counter_accounts'] = $piece['counter_account_code'];
+            $row['counter_account_id'] = $piece['counter_account_id'];
+            $row['pair_piece'] = $n + 1;
+            $out[] = ['row' => $row, 'piece' => $piece];
+        }
+        return $out;
     }
 
     /**
