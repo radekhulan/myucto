@@ -22,6 +22,7 @@ use MyInvoice\Service\Accounting\AutoPostingPolicyService;
 use MyInvoice\Service\Accounting\ForeignCurrencyAccountPolicy;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\OperationType;
+use MyInvoice\Service\Accounting\Pair\JournalPairer;
 use MyInvoice\Service\Accounting\PolicyInput;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -208,22 +209,30 @@ final class BankPostingService
         $entryId = (int) $existing['id'];
 
         $stmt = $this->db->pdo()->prepare(
-            'SELECT c.account_code AS code, jel.side, jel.amount, jel.is_red_storno
+            'SELECT c.account_code AS code, jel.side, jel.amount, jel.is_red_storno, jel.pair_no
                FROM journal_entry_lines jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
               WHERE jel.entry_id = ? AND jel.supplier_id = ?'
         );
         $stmt->execute([$entryId, $supplierId]);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        // Zápis jednoduché formy je rozdělený na dvojice (221 po protiúčtech), takže
+        // se srovnává součet po straně a účtu. Zápis bez dvojic beze změny po řádcích.
+        $paired = array_filter($rows, static fn (array $r): bool => $r['pair_no'] !== null) !== [];
 
-        $signature = static function (array $rows): array {
+        $signature = static function (array $rows) use ($paired): array {
             $out = [];
             foreach ($rows as $r) {
-                $out[] = sprintf(
-                    '%s|%s|%d',
-                    (string) $r['side'],
-                    (string) $r['code'],
-                    JournalLineAmount::signedCents($r)
-                );
+                $key = (string) $r['side'] . '|' . (string) $r['code'];
+                if ($paired) {
+                    $out[$key] = ($out[$key] ?? 0) + JournalLineAmount::signedCents($r);
+                    continue;
+                }
+                $out[] = $key . '|' . JournalLineAmount::signedCents($r);
+            }
+            if ($paired) {
+                ksort($out);
+                return $out;
             }
             sort($out);
             return $out;
@@ -239,7 +248,7 @@ final class BankPostingService
             $lines
         ));
 
-        return $signature($stmt->fetchAll(\PDO::FETCH_ASSOC)) === $proposed ? $entryId : null;
+        return $signature($rows) === $proposed ? $entryId : null;
     }
 
     // ── hlavní hook ─────────────────────────────────────────────────────────────
@@ -1822,8 +1831,8 @@ final class BankPostingService
         $remainderCents = (int) round(abs($remainderCzk) * 100.0);
         if ($remainderCents > 0) {
             $lines[] = $incoming
-                ? $this->line($profile->account('rounding.gain'), 'credit', $remainderCents / 100.0)
-                : $this->line($profile->account('rounding.loss'), 'debit', $remainderCents / 100.0);
+                ? $this->supplementaryLine($profile->account('rounding.gain'), 'credit', $remainderCents / 100.0)
+                : $this->supplementaryLine($profile->account('rounding.loss'), 'debit', $remainderCents / 100.0);
             $diff += $incoming ? -$remainderCents : $remainderCents;
         }
         if ($diff === 0) {
@@ -1831,9 +1840,9 @@ final class BankPostingService
         }
         [$loss, $gain] = $this->fxResultAccounts($supplierId, $entryDate);
         if ($diff > 0) {
-            $lines[] = $this->line($gain, 'credit', $diff / 100.0);
+            $lines[] = $this->supplementaryLine($gain, 'credit', $diff / 100.0);
         } else {
-            $lines[] = $this->line($loss, 'debit', -$diff / 100.0);
+            $lines[] = $this->supplementaryLine($loss, 'debit', -$diff / 100.0);
         }
     }
 
@@ -3004,7 +3013,7 @@ final class BankPostingService
                 $lines[$i]['account_code'] = $preview['code'] ?? $line['account_code'];
                 $result['resolved'] = $result['resolved'] && ($preview['resolved'] ?? false);
             }
-            $result['lines'] = $lines;
+            $result['lines'] = JournalPairer::stripPairKeys($lines);
         } catch (PostingException $e) {
             $result['reason'] = $e->errorCode;
         }
@@ -3111,7 +3120,7 @@ final class BankPostingService
             'suggestion_id' => $suggestionId,
             'bank_transaction_id' => $txId,
             'currency' => $baseCurrency,
-            'lines' => $lines,
+            'lines' => JournalPairer::stripPairKeys($lines),
             'accounts_resolved' => $resolved,
         ];
     }
@@ -4324,6 +4333,17 @@ final class BankPostingService
         return ['account_code' => $code, 'side' => $side, 'amount' => round($amount, 2)];
     }
 
+    /**
+     * Doplňkový řádek úhrady (haléřové vyrovnání, kurzový rozdíl). V jednoduchém zápisu
+     * se páruje postupně s hlavním řádkem strany (JournalPairer, role `rounding`), takže
+     * hromadná úhrada s rozdílem zůstane rozdělitelná na dvojice. Složená firma klíč
+     * nevidí, zaúčtování ho zahodí.
+     */
+    private function supplementaryLine(string $code, string $side, float $amount): array
+    {
+        return $this->line($code, $side, $amount) + ['pair_role' => JournalPairer::ROLE_ROUNDING];
+    }
+
     /** @param array<string,mixed> $line */
     private function redStornoFlag(array $line, int $index): bool
     {
@@ -4881,9 +4901,9 @@ final class BankPostingService
         }
         $profile = AccountRoleResolver::fromConnection($this->db)->forDate($supplierId, $entryDate);
         if ($cents > 0) {
-            $lines[] = $this->line($profile->account('rounding.gain'), 'credit', $cents / 100.0);
+            $lines[] = $this->supplementaryLine($profile->account('rounding.gain'), 'credit', $cents / 100.0);
         } else {
-            $lines[] = $this->line($profile->account('rounding.loss'), 'debit', -$cents / 100.0);
+            $lines[] = $this->supplementaryLine($profile->account('rounding.loss'), 'debit', -$cents / 100.0);
         }
     }
 

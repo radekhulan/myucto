@@ -151,7 +151,7 @@ final class IssuanceRepository
     private function postingDocument(array $charge,int $actor):array
     {
         $documentDate=(new \DateTimeImmutable($charge['snapshot']['issued_at']))->setTimezone(new \DateTimeZone('Europe/Prague'))->format('Y-m-d');
-        return ['source_id'=>$charge['id'],'lines'=>IssuanceJournalProof::lines($charge),'meta'=>[
+        return ['source_id'=>$charge['id'],'lines'=>IssuanceJournalProof::postingLines($charge),'meta'=>[
             'entry_date'=>$charge['accounting_date'],'document_date'=>$documentDate,'document_no'=>'P-'.$charge['id'],
             'description'=>'Předpis '.$charge['snapshot']['registry']['revision']['state']['unit_no'].' / '.$charge['period_from'],
             'posted_by'=>$actor,'user_id'=>$actor]];

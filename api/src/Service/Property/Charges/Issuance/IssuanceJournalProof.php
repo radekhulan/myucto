@@ -7,6 +7,8 @@ namespace MyInvoice\Service\Property\Charges\Issuance;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\DimensionAssignmentRepository;
 use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Accounting\Pair\JournalPairer;
+use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Property\PropertyInput;
 use PDO;
 
@@ -26,6 +28,24 @@ final class IssuanceJournalProof
                 $out[]=['account_code'=>$code,'side'=>$side,'amount'=>$amount,'dimensions'=>$line['dimensions'],'dimension_origins'=>$origins];
         }
         return $out;
+    }
+
+    /**
+     * Řádky předpisu, jak je zapíše jednoduchá (párová) forma: každá složka je dvojice
+     * pohledávka / fond nebo služba ({@see PairGroups::consecutive()}), párovač jen
+     * srovná pořadí na MD, Dal. Stejné řádky se posílají k zaúčtování.
+     */
+    public static function postingLines(array $charge): array
+    {
+        return PairGroups::consecutive(self::lines($charge),'charge');
+    }
+
+    /** Očekávané řádky zápisu jednoduché formy: tytéž dvojice po párovači, ve stejném pořadí. */
+    private static function pairedLines(array $expected): array
+    {
+        $paired=JournalPairer::pair(PairGroups::consecutive($expected,'charge'));
+        if($paired['status']!==JournalPairer::STATUS_PAIRED)self::fail();
+        return $paired['lines'];
     }
 
     public function assertEntry(int $supplier,int $entryId,array $charge,bool $reversal=false): void
@@ -55,6 +75,7 @@ final class IssuanceJournalProof
             if(($entry['reversed_by']===null?null:(int)$entry['reversed_by'])!==$expectedReversal||(!$reversal&&$entry['entry_date']!==$charge['accounting_date']))self::fail();
             if($reversal&&($entry['source_id']!==null||(int)($entries[$charge['journal_entry_id']]['reversed_by']??0)!==$entryId))self::fail();
             $actual=$lines[$entryId]??[];$expected=self::lines($charge);
+            if(!$reversal&&array_filter($actual,static fn(array $line):bool=>$line['pair_no']!==null)!==[])$expected=self::pairedLines($expected);
             if(count($actual)!==count($expected))self::fail();
             foreach($actual as $i=>$line){
                 $want=$expected[$i];$side=$reversal?($want['side']==='debit'?'credit':'debit'):$want['side'];

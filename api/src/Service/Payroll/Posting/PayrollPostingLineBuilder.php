@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Payroll\Posting;
 
+use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Accounting\Pair\JournalPairer;
 use MyInvoice\Service\Payroll\Accounting\PayrollAccountCode;
 use MyInvoice\Service\Payroll\IncomeTax\SeparateTaxBaseRegime;
 use MyInvoice\Service\Payroll\PayrollAccountingDefaults;
@@ -1342,6 +1344,161 @@ final class PayrollPostingLineBuilder
         ksort($grouped, SORT_STRING);
 
         return array_values($grouped);
+    }
+
+    /**
+     * Rozdílové řádky téhož předpisu pro firmu s jednoduchou (párovou) formou zápisu.
+     *
+     * {@see deltaLines()} slévá řádky podle účtu a strany, takže z dvojic předkontací
+     * (521/331, 524/336, 331/336, 331/342 …) vznikne zápis M : N, který se rozdělit nedá.
+     * Tady se rozdíl počítá zvlášť pro každou vyrovnanou jednotku alokací (jedna dvojice
+     * {@see addPair()}, jedna srážka {@see addEmployeeCharge()} s jejími podíly, jedno
+     * pojistné s nákladovými podíly …), jednotka se rozdělí na dvojice sdíleným
+     * {@see JournalPairer} a dvojice se stejnými účty MD a Dal, střediskem a dimenzemi
+     * se sečtou. Výsledek je souhrnný za firmu a středisko, ne po zaměstnancích.
+     *
+     * Každá dvojice dostane vlastní `pair_group`, takže ji párovač při zaúčtování jen
+     * převezme. Součty po účtech, stranách, střediscích a dimenzích jsou stejné jako
+     * u {@see deltaLines()} (řádky se jen jinak seskupí), takže výkazy se nezmění.
+     *
+     * Výstup {@see build()}, cílový ani rozdílový otisk se nemění: složená firma
+     * dostává dál tytéž řádky a uložená dávka tentýž `delta_hash`.
+     *
+     * @param list<array<string,mixed>> $target cílové alokace revize
+     * @param list<array<string,mixed>> $previous alokace předchozí účinné revize
+     * @return list<array{account_code:string, side:'debit'|'credit', amount_minor:int, description:string, pair_group:string, cost_center?:string, dimensions?:array<int,int>}>|null
+     *         null = některou jednotku nejde rozdělit na dvojice (neznámý tvar klíče,
+     *         nevyrovnaná jednotka, přeřazení na stejném účtu); volající pak účtuje
+     *         řádky z {@see build()} a zápis zůstane složený
+     */
+    public function singleEntryLines(array $target, array $previous): ?array
+    {
+        $current = $this->allocationVector($target, 'cílové alokace');
+        $before = $this->allocationVector($previous, 'předchozí alokace');
+        $keys = array_values(array_unique([
+            ...array_keys($current),
+            ...array_keys($before),
+        ]));
+        sort($keys, SORT_STRING);
+
+        /** @var array<string,list<array<string,mixed>>> $units */
+        $units = [];
+        /** @var array<string,int> $unitBalance */
+        $unitBalance = [];
+        foreach ($keys as $key) {
+            $source = $current[$key] ?? $before[$key];
+            $unit = self::pairUnit($source['allocation_key']);
+            if ($unit === null) {
+                return null;
+            }
+            $delta = $this->subtract(
+                $current[$key]['signed_minor'] ?? 0,
+                $before[$key]['signed_minor'] ?? 0,
+            );
+            $unitBalance[$unit] = $this->add($unitBalance[$unit] ?? 0, $delta);
+            if ($delta === 0) {
+                continue;
+            }
+            $line = [
+                'account_code' => $source['account_code'],
+                'side' => $delta > 0 ? 'debit' : 'credit',
+                'amount' => self::minorToDecimal($this->absolute($delta)),
+            ];
+            $costCenter = $source['cost_center']
+                ?? $this->deductionDimension($source['allocation_key']);
+            if ($costCenter !== null) {
+                $line['cost_center'] = $costCenter;
+            }
+            if ($source['dimensions'] !== []) {
+                $line['dimensions'] = $source['dimensions'];
+            }
+            $units[$unit][] = $line;
+        }
+        foreach ($unitBalance as $balance) {
+            if ($balance !== 0) {
+                return null;
+            }
+        }
+
+        /** @var array<string,array{debit:array<string,mixed>,credit:array<string,mixed>,amount_minor:int}> $merged */
+        $merged = [];
+        foreach ($units as $lines) {
+            $paired = JournalPairer::pair($lines);
+            if ($paired['status'] !== JournalPairer::STATUS_PAIRED) {
+                return null;
+            }
+            for ($i = 0; $i < count($paired['lines']); $i += 2) {
+                [$debit, $credit] = [$paired['lines'][$i], $paired['lines'][$i + 1]];
+                $mergeKey = self::pairMergeKey($debit) . "\x01" . self::pairMergeKey($credit);
+                $amount = JournalLineAmount::cents($debit['amount']);
+                if (!isset($merged[$mergeKey])) {
+                    $merged[$mergeKey] = ['debit' => $debit, 'credit' => $credit, 'amount_minor' => 0];
+                }
+                $merged[$mergeKey]['amount_minor'] = $this->add($merged[$mergeKey]['amount_minor'], $amount);
+            }
+        }
+        ksort($merged, SORT_STRING);
+
+        $out = [];
+        $pairNo = 0;
+        foreach ($merged as $pair) {
+            $pairNo++;
+            foreach (['debit', 'credit'] as $side) {
+                $line = [
+                    'account_code' => (string) $pair[$side]['account_code'],
+                    'side' => $side,
+                    'amount_minor' => $pair['amount_minor'],
+                    'description' => 'Mzdový předpis',
+                    'pair_group' => 'payroll:' . $pairNo,
+                ];
+                if (isset($pair[$side]['cost_center'])) {
+                    $line['cost_center'] = (string) $pair[$side]['cost_center'];
+                }
+                if (!empty($pair[$side]['dimensions'])) {
+                    $line['dimensions'] = $pair[$side]['dimensions'];
+                }
+                $out[] = $line;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Vyrovnaná jednotka alokací, ze které vznikají dvojice: klíč alokace bez přípony
+     * strany, podílu nebo nákladové části. Neznámý tvar = null (párová forma se pak
+     * pro předpis nepoužije, zápis zůstane složený).
+     */
+    private static function pairUnit(string $allocationKey): ?string
+    {
+        $patterns = [
+            '/^(.+?):settlement:.+$/D',
+            '/^(employer-insurance:[a-z]+):employment:\d+(?::part:\d+)?:debit$/D',
+            '/^(.+):part:\d+:debit$/D',
+            '/^(.+):(?:debit|credit|liability|tax)$/D',
+        ];
+        foreach ($patterns as $pattern) {
+            if (preg_match($pattern, $allocationKey, $match) === 1) {
+                return $match[1];
+            }
+        }
+
+        return null;
+    }
+
+    /** @param array<string,mixed> $line */
+    private static function pairMergeKey(array $line): string
+    {
+        $dimensions = $line['dimensions'] ?? [];
+
+        return $line['account_code']
+            . "\0" . ($line['cost_center'] ?? '')
+            . ($dimensions === [] ? '' : "\0" . self::dimensionsKey($dimensions));
+    }
+
+    private static function minorToDecimal(int $minor): string
+    {
+        return intdiv($minor, 100) . '.' . str_pad((string) ($minor % 100), 2, '0', STR_PAD_LEFT);
     }
 
     /**

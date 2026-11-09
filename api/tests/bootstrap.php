@@ -80,6 +80,7 @@ require __DIR__ . '/../vendor/autoload.php';
     '*/api/src/Repository/BankPaymentOrderSubmissionRepository.php',
     '*/api/src/Repository/PaymentOrderRepository.php',
     '*/api/src/Repository/AccountingModeRepository.php',
+    '*/api/src/Service/Accounting/EntryForm/EntryFormService.php',
     '*/api/src/Repository/ClosingRepository.php',
     '*/api/src/Repository/EmailProfileRepository.php',
     '*/api/src/Repository/EmailTemplateRepository.php',
