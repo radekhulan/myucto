@@ -1,0 +1,53 @@
+{
+    "period": {
+        "id": "period",
+        "starts_on": "2099-01-01",
+        "ends_on": "2099-12-31"
+    },
+    "opening": 0.0,
+    "closing": 28930.0,
+    "net_change": 28930.0,
+    "operating": -21070.0,
+    "investing": 0.0,
+    "financing": 50000.0,
+    "unclassified": 0.0,
+    "reconciles": true,
+    "breakdown": {
+        "operating": [
+            {
+                "account_code": "311",
+                "name": "Pohledávky z obchodních vztahů (odběratelé)",
+                "amount": 1210.0
+            },
+            {
+                "account_code": "321",
+                "name": "Závazky z obchodních vztahů (dodavatelé)",
+                "amount": -21565.0
+            },
+            {
+                "account_code": "512",
+                "name": "Cestovné",
+                "amount": -300.0
+            },
+            {
+                "account_code": "513",
+                "name": "Náklady na reprezentaci",
+                "amount": -400.0
+            },
+            {
+                "account_code": "568",
+                "name": "Ostatní finanční náklady",
+                "amount": -15.0
+            }
+        ],
+        "investing": [],
+        "financing": [
+            {
+                "account_code": "461",
+                "name": "Dlouhodobé závazky k úvěrovým institucím",
+                "amount": 50000.0
+            }
+        ],
+        "unclassified": []
+    }
+}

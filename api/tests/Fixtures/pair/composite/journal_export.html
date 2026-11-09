@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+<meta charset="utf-8">
+<title>Účetní deník</title>
+<style>
+    body { font-family: montserrat, dejavusans, sans-serif; font-size: 8pt; color: #15131D; }
+    .header-table { width: 100%; border-collapse: collapse; margin-bottom: 4mm; }
+    .header-table td { vertical-align: top; }
+    .header-meta { font-size: 8pt; color: #555; }
+    .header-title { font-size: 13pt; font-weight: bold; text-align: center; }
+    .header-sub { text-align: center; font-size: 8pt; color: #555; margin-top: 1mm; }
+    .entity { font-size: 8pt; color: #333; margin-bottom: 3mm; }
+    table.entries { width: 100%; border-collapse: collapse; margin: 0; } /* bez okraje: šev mezi kusy tabulky nesmí dělat mezeru */
+    tr.entry-head td {
+        padding: 1.2mm 1mm 0.5mm 1mm;
+        font-size: 7.5pt;
+        font-weight: bold;
+        border-top: 0.4pt solid #999;
+        background-color: #f7f7f7;
+    }
+    tr.entry-line td {
+        padding: 0.6mm 1mm;
+        font-size: 7.5pt;
+        border-bottom: 0.2pt solid #eee;
+    }
+    /* Pevné šířky všech sloupců: dlouhý deník se sází po kusech (ChunkedHtmlWriter)
+       a kusy i hlavička stránky musí lícovat, proto procenta se součtem 100 %. */
+    .col-date { width: 7%; }
+    .col-doc { width: 11%; }
+    .col-desc { width: 22%; }
+    .col-origin { width: 7%; }
+    .col-amount { width: 12%; }
+    .col-account { width: 7%; }
+    .col-name { width: 22%; }
+    .num { text-align: right; }
+    .badge { font-size: 6.5pt; color: #92400e; }
+    .totals { width: 100%; border-collapse: collapse; margin-top: 3mm; }
+    .totals td { font-weight: bold; font-size: 8.5pt; padding: 1.5mm 1mm; border-top: 0.5pt solid #333; }
+    .empty { text-align: center; color: #888; padding: 10mm 0; }
+</style>
+</head>
+<body>
+
+<table class="header-table">
+    <tr>
+        <td style="width:30%;">
+            <div class="header-meta">Ze dne: <date></div>
+        </td>
+        <td style="width:40%;">
+            <div class="header-title">Účetní deník</div>
+                            <div class="header-sub">Za období: 01.01.2099 – 31.12.2099</div>
+                                </td>
+        <td style="width:30%;"></td>
+    </tr>
+</table>
+
+<div class="entity">Dvojice test s.r.o. — IČO: 12345678 — Testovací 1, 11000 Praha</div>
+
+<table class="entries">
+    <thead>
+        <tr>
+            <th class="thl col-date" style="text-align:left;">Datum</th>
+            <th class="thl col-doc" style="text-align:left;">Doklad</th>
+            <th class="thl col-desc" style="text-align:left;">Popis</th>
+            <th class="thl col-origin" style="text-align:left;">Původ</th>
+            <th class="thl col-account" style="text-align:left;">Účet</th>
+            <th class="thl col-name" style="text-align:left;">Název</th>
+            <th class="col-amount" style="text-align:right;">MD</th>
+            <th class="col-amount" style="text-align:right;">Dal</th>
+        </tr>
+    </thead>
+    <tbody>
+                    <tr class="entry-head">
+            <td class="col-date">10.01.2099</td>
+            <td class="col-doc">FV-1</td>
+            <td class="col-desc">
+                Vydaná faktura
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">1 210,00</td>
+            <td class="num col-amount">1 210,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>311</td>
+                <td>Pohledávky z obchodních vztahů (odběrate</td>
+                <td class="num">1 210,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>602</td>
+                <td>Tržby z prodeje služeb</td>
+                <td class="num"></td>
+                <td class="num">1 000,00</td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>343.200</td>
+                <td>Daň z přidané hodnoty výstup</td>
+                <td class="num"></td>
+                <td class="num">210,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">12.01.2099</td>
+            <td class="col-doc">FP-1</td>
+            <td class="col-desc">
+                Přijatá faktura
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">1 210,00</td>
+            <td class="num col-amount">1 210,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>513</td>
+                <td>Náklady na reprezentaci</td>
+                <td class="num">1 000,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>343.100</td>
+                <td>Daň z přidané hodnoty vstup</td>
+                <td class="num">210,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>321</td>
+                <td>Závazky z obchodních vztahů (dodavatelé)</td>
+                <td class="num"></td>
+                <td class="num">1 210,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">20.01.2099</td>
+            <td class="col-doc">BV-1</td>
+            <td class="col-desc">
+                Úhrada FV-1
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">1 210,00</td>
+            <td class="num col-amount">1 210,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>221</td>
+                <td>Peněžní prostředky na účtech</td>
+                <td class="num">1 210,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>311</td>
+                <td>Pohledávky z obchodních vztahů (odběrate</td>
+                <td class="num"></td>
+                <td class="num">1 210,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">25.01.2099</td>
+            <td class="col-doc">BV-2</td>
+            <td class="col-desc">
+                Hromadná platba
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">1 830,00</td>
+            <td class="num col-amount">1 830,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>321</td>
+                <td>Závazky z obchodních vztahů (dodavatelé)</td>
+                <td class="num">1 210,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>321</td>
+                <td>Závazky z obchodních vztahů (dodavatelé)</td>
+                <td class="num">605,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>568</td>
+                <td>Ostatní finanční náklady</td>
+                <td class="num">15,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>221</td>
+                <td>Peněžní prostředky na účtech</td>
+                <td class="num"></td>
+                <td class="num">1 830,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">03.02.2099</td>
+            <td class="col-doc">PD-1</td>
+            <td class="col-desc">
+                Pokladní doklad
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">200,00</td>
+            <td class="num col-amount">200,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>512</td>
+                <td>Cestovné</td>
+                <td class="num">100,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>513</td>
+                <td>Náklady na reprezentaci</td>
+                <td class="num">100,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>211</td>
+                <td>Pokladna</td>
+                <td class="num"></td>
+                <td class="num">100,00</td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>211</td>
+                <td>Pokladna</td>
+                <td class="num"></td>
+                <td class="num">100,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">10.02.2099</td>
+            <td class="col-doc">ID-1</td>
+            <td class="col-desc">
+                Složený zápis M : N
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">500,00</td>
+            <td class="num col-amount">500,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>513</td>
+                <td>Náklady na reprezentaci</td>
+                <td class="num">300,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>512</td>
+                <td>Cestovné</td>
+                <td class="num">200,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>321</td>
+                <td>Závazky z obchodních vztahů (dodavatelé)</td>
+                <td class="num"></td>
+                <td class="num">250,00</td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>211</td>
+                <td>Pokladna</td>
+                <td class="num"></td>
+                <td class="num">250,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">15.02.2099</td>
+            <td class="col-doc">FV-2</td>
+            <td class="col-desc">
+                Opravný doklad
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">-121,00</td>
+            <td class="num col-amount">-121,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>311</td>
+                <td>Pohledávky z obchodních vztahů (odběrate</td>
+                <td class="num">-121,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>602</td>
+                <td>Tržby z prodeje služeb</td>
+                <td class="num"></td>
+                <td class="num">-100,00</td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>343.200</td>
+                <td>Daň z přidané hodnoty výstup</td>
+                <td class="num"></td>
+                <td class="num">-21,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">01.03.2099</td>
+            <td class="col-doc">BV-3</td>
+            <td class="col-desc">
+                Výběr do pokladny
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">5 000,00</td>
+            <td class="num col-amount">5 000,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>211</td>
+                <td>Pokladna</td>
+                <td class="num">5 000,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>221</td>
+                <td>Peněžní prostředky na účtech</td>
+                <td class="num"></td>
+                <td class="num">5 000,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">05.03.2099</td>
+            <td class="col-doc">FP-2</td>
+            <td class="col-desc">
+                Nákup stroje
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">20 000,00</td>
+            <td class="num col-amount">20 000,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>022</td>
+                <td>Hmotné movité věci a jejich soubory</td>
+                <td class="num">20 000,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>321</td>
+                <td>Závazky z obchodních vztahů (dodavatelé)</td>
+                <td class="num"></td>
+                <td class="num">20 000,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">06.03.2099</td>
+            <td class="col-doc">BV-4</td>
+            <td class="col-desc">
+                Úhrada stroje
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">20 000,00</td>
+            <td class="num col-amount">20 000,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>321</td>
+                <td>Závazky z obchodních vztahů (dodavatelé)</td>
+                <td class="num">20 000,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>221</td>
+                <td>Peněžní prostředky na účtech</td>
+                <td class="num"></td>
+                <td class="num">20 000,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">10.03.2099</td>
+            <td class="col-doc">BV-5</td>
+            <td class="col-desc">
+                Úvěr
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">50 000,00</td>
+            <td class="num col-amount">50 000,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>221</td>
+                <td>Peněžní prostředky na účtech</td>
+                <td class="num">50 000,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>461</td>
+                <td>Dlouhodobé závazky k úvěrovým institucím</td>
+                <td class="num"></td>
+                <td class="num">50 000,00</td>
+            </tr>
+                            <tr class="entry-head">
+            <td class="col-date">20.03.2099</td>
+            <td class="col-doc">FV-3</td>
+            <td class="col-desc">
+                Vydaná faktura dvě sazby
+                                            </td>
+            <td class="col-origin">ručně</td>
+            <td class="col-account"></td>
+            <td class="col-name"></td>
+                        <td class="num col-amount">13 220,00</td>
+            <td class="num col-amount">13 220,00</td>
+        </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>311</td>
+                <td>Pohledávky z obchodních vztahů (odběrate</td>
+                <td class="num">13 220,00</td>
+                <td class="num"></td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>602</td>
+                <td>Tržby z prodeje služeb</td>
+                <td class="num"></td>
+                <td class="num">10 000,00</td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>343.200</td>
+                <td>Daň z přidané hodnoty výstup</td>
+                <td class="num"></td>
+                <td class="num">2 100,00</td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>604</td>
+                <td>Tržby za zboží</td>
+                <td class="num"></td>
+                <td class="num">1 000,00</td>
+            </tr>
+                                <tr class="entry-line">
+                <td></td>
+                <td></td>
+                <td></td>
+                <td></td>
+                <td>343.200</td>
+                <td>Daň z přidané hodnoty výstup</td>
+                <td class="num"></td>
+                <td class="num">120,00</td>
+            </tr>
+                </tbody>
+</table>
+
+<table class="totals">
+    <tr>
+        <td>Počet zápisů: 12</td>
+        <td class="num" style="width:20%;">114 259,00</td>
+        <td class="num" style="width:20%;">114 259,00</td>
+    </tr>
+</table>
+
+</body>
+</html>
