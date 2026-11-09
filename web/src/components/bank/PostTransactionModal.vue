@@ -401,7 +401,8 @@ onMounted(async () => {
 
 <template>
   <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-    <div class="bg-surface rounded-xl shadow-lg max-w-md w-full max-h-[85vh] overflow-y-auto overflow-x-hidden p-5">
+    <!-- Dialog se vykresluje uvnitř buňky tabulky (text-right, nowrap): bez resetu by se texty nezalamovaly. -->
+    <div class="bg-surface rounded-xl shadow-lg max-w-md w-full max-h-[85vh] overflow-y-auto overflow-x-hidden p-5 text-left whitespace-normal">
       <h3 class="text-lg font-semibold mb-1">{{ t('bank.posting.modal_title') }}</h3>
 
       <!-- Kontext transakce -->
