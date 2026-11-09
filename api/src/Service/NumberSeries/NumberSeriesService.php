@@ -146,6 +146,9 @@ final class NumberSeriesService
         if (!NumberSeriesKinds::isSelectable($kind)) {
             throw new NumberSeriesException('kind_invalid', 'Pro tento druh dokladu nejde založit další řadu.');
         }
+        // Převedené řady musí v číselníku být dřív, než se proti nim kontroluje překryv
+        // a než nová řada převezme výchozí.
+        $this->catalog->sync($supplierId);
         if ($kind === 'manual' && !$this->isDoubleEntry($supplierId)) {
             throw new NumberSeriesException('kind_invalid', 'Interní doklady vede jen podvojné účetnictví.');
         }

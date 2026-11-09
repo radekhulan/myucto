@@ -2840,6 +2840,26 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
 
+  /api/v1/invoices/number-series:
+    get:
+      tags: [Invoices]
+      summary: Číselné řady pro výběr v editoru vydaného dokladu
+      description: |
+        Řady z číselníku, ze kterých jde vybrat při zakládání dokladu, a výchozí řada
+        (výchozí řada uživatele, pokladny nebo druhu). `multiple = false` znamená jedinou
+        řadu, editor pak výběr neukazuje. Ukončené řady se nenabízejí.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: query
+          name: type
+          schema: { type: string, enum: [invoice, proforma, credit_note], default: invoice }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberSeriesOptions' }
+
   /api/v1/invoices/preview-varsymbol:
     get:
       tags: [Invoices]
@@ -2881,6 +2901,12 @@ paths:
           description: |
             Kategorie tržby — rozhoduje o případné číselné řadě kategorie.
             Uplatní se jen tehdy, když klient vlastní řadu nastavenou nemá.
+          schema: { type: integer }
+        - in: query
+          name: number_series_id
+          description: |
+            Řada z číselníku vybraná v editoru. Bez ní náhled ukáže číslo z výchozí řady druhu
+            (u převedené řady faktur včetně řady klienta a kategorie tržby).
           schema: { type: integer }
       responses:
         '200':
@@ -8814,6 +8840,23 @@ paths:
   # ============================================================================
   # Purchase invoices (přijaté faktury) — fáze 1 integrace forku
   # ============================================================================
+  /api/v1/purchase-invoices/number-series:
+    get:
+      tags: [Purchase invoices]
+      summary: Číselné řady pro výběr v editoru přijatého dokladu
+      description: |
+        Řady z číselníku, ze kterých jde vybrat při zakládání dokladu, a výchozí řada
+        (výchozí řada uživatele, pokladny nebo druhu). `multiple = false` znamená jedinou
+        řadu, editor pak výběr neukazuje. Ukončené řady se nenabízejí.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberSeriesOptions' }
+
   /api/v1/purchase-invoices:
     get:
       tags: [Purchase invoices]
@@ -18979,6 +19022,23 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
+  /api/v1/accounting/internal-documents/number-series:
+    get:
+      tags: [Accounting]
+      summary: Číselné řady pro výběr v interním dokladu
+      description: |
+        Řady z číselníku, ze kterých jde vybrat při zakládání dokladu, a výchozí řada
+        (výchozí řada uživatele, pokladny nebo druhu). `multiple = false` znamená jedinou
+        řadu, editor pak výběr neukazuje. Ukončené řady se nenabízejí.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberSeriesOptions' }
+
   /api/v1/accounting/internal-documents/export:
     get:
       tags: [Accounting]
@@ -19157,6 +19217,30 @@ paths:
         - { in: query, name: limit, schema: { type: integer, default: 20 } }
       responses:
         '200': { description: "OK — položky {id, kind, number, partner_name, partner_ic, partner_dic, total, paid, remaining, currency_code, issued_on} + `invoice_type`/`is_proforma` (FV) nebo `document_kind` (PF)", content: { application/json: { schema: { type: array, items: { type: object, properties: { id: { type: integer }, kind: { type: string, enum: [invoice, purchase_invoice] }, number: { type: string }, partner_name: { type: string }, partner_ic: { type: string, nullable: true, description: "IČ odběratele (FV) nebo dodavatele (PF)" }, partner_dic: { type: string, nullable: true, description: "DIČ odběratele (FV) nebo dodavatele (PF)" }, total: { type: number }, paid: { type: number }, remaining: { type: number }, currency_code: { type: string }, issued_on: { type: string, format: date }, invoice_type: { type: string }, is_proforma: { type: boolean }, document_kind: { type: string } } } } } } }
+
+  /api/v1/accounting/cash-documents/number-series:
+    get:
+      tags: [Accounting]
+      summary: Číselné řady pro výběr v pokladním dokladu
+      description: |
+        Řady z číselníku, ze kterých jde vybrat při zakládání dokladu, a výchozí řada
+        (výchozí řada uživatele, pokladny nebo druhu). `multiple = false` znamená jedinou
+        řadu, editor pak výběr neukazuje. Ukončené řady se nenabízejí.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - in: query
+          name: doc_type
+          schema: { type: string, enum: [in, out], default: in }
+        - in: query
+          name: register_id
+          description: Pokladna; nabízí se řady pokladny a řady firmy pro všechny pokladny.
+          schema: { type: integer }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/NumberSeriesOptions' }
 
   /api/v1/accounting/cash-documents/rule-presets:
     get:
@@ -41556,6 +41640,7 @@ components:
         status: { type: string, enum: [draft, posted, reversed] }
         origin: { type: string, enum: [draft, journal], description: journal = hlavička nad existujícím ručním zápisem; jeho zápis v deníku nejde smazat }
         document_no: { type: [string, 'null'], description: Číslo z řady ID, vydané při zaúčtování }
+        number_series_id: { type: [integer, "null"], description: "Řada z číselníku (Nastavení → Číselné řady). Na konceptu volba uživatele (null = výchozí řada druhu), na dokladu s číslem nová řada, ze které číslo pochází (null = dosavadní číslování)." }
         journal_entry_id: { type: [integer, 'null'], format: int64, description: Ruční zápis deníku (source_type manual) }
         reversal_entry_id: { type: [integer, 'null'], format: int64 }
         reversal_reason: { type: [string, 'null'] }
@@ -41564,6 +41649,25 @@ components:
         document_count: { type: integer, description: Jen v seznamu, počet připojených dokumentů }
         lines: { type: array, items: { $ref: '#/components/schemas/InternalDocumentLine' }, description: Jen v detailu }
         document_links: { type: array, items: { $ref: '#/components/schemas/InternalDocumentLink' } }
+    NumberSeriesOptions:
+      type: object
+      required: [kind, multiple, default_id, series]
+      properties:
+        kind: { type: string, enum: [invoice, proforma, credit_note, purchase, cash_in, cash_out, manual] }
+        multiple: { type: boolean, description: Druh má víc řad na výběr }
+        default_id: { type: [integer, "null"], description: Řada předvybraná pro nový doklad }
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: integer }
+              name: { type: string, description: Název řady; prázdný u převedené řady (popisek skládá klient podle druhu) }
+              label: { type: string }
+              storage: { type: string, enum: [legacy, native], description: legacy = převedená dosavadní řada, native = řada založená v číselníku }
+              prefix: { type: [string, "null"] }
+              template: { type: string, description: Tvar čísla se zástupnými symboly }
+              valid_to: { type: [string, "null"], format: date, description: Ukončení řady }
     InternalDocumentList:
       type: object
       required: [items, total, page, per_page]
@@ -48161,6 +48265,7 @@ components:
         client_ic: { type: [string, "null"], description: "Denormalizováno z klienta" }
         client_dic: { type: [string, "null"] }
         revenue_category_id: { type: [integer, "null"], description: "FK do /revenue-categories — kategorie tržby pro CRM/Grafy" }
+        number_series_id: { type: [integer, "null"], description: "Řada z číselníku (Nastavení → Číselné řady). Na konceptu volba uživatele (null = výchozí řada druhu), na dokladu s číslem nová řada, ze které číslo pochází (null = dosavadní číslování)." }
         revenue_category_label: { type: [string, "null"], description: "Denormalizovaný label kategorie tržby" }
         revenue_category_code: { type: [string, "null"] }
         revenue_category: { type: [string, "null"], description: "Legacy volný textový tag (nahrazeno revenue_category_id)" }
@@ -48396,6 +48501,7 @@ components:
         prices_include_vat: { type: boolean, default: false, description: "Ceny položek zadané včetně DPH (DPH shora koeficientem)." }
         auto_send_reminders: { type: boolean, default: true, description: "Per-faktura přepínač automatických upomínek (migrace 0088). False = cron tuto fakturu přeskočí." }
         revenue_category_id: { type: [integer, "null"], description: "Kategorie tržby. Když chybí, na create se odvodí z defaultu projektu/klienta." }
+        number_series_id: { type: [integer, "null"], description: "Řada z číselníku pro číslo dokladu (jen koncept bez čísla). Vynechaný klíč volbu nemění, null = výchozí řada druhu. Řada musí patřit firmě a druhu dokladu, jinak 422 `series_invalid`." }
         revenue_category: { type: [string, "null"], description: "Legacy textová kategorie tržby vedle `revenue_category_id`; ukládá se, jen když je neprázdná." }
         vat_classification_code: { type: [string, "null"], description: "Hlavičkový default klasifikace plnění; auto-default podle sazby/RC/země, pokud prázdné." }
         is_simplified:
@@ -51224,6 +51330,7 @@ components:
         supplier_id: { type: integer }
         vendor_id: { type: integer }
         varsymbol: { type: [string, "null"] }
+        number_series_id: { type: [integer, "null"], description: "Řada z číselníku (Nastavení → Číselné řady). Na konceptu volba uživatele (null = výchozí řada druhu), na dokladu s číslem nová řada, ze které číslo pochází (null = dosavadní číslování)." }
         vendor_invoice_number: { type: string }
         external_barcode: { type: [string, "null"], description: "Čárový kód dokladu z předchozího systému (nálepka na papírovém dokladu). Plní ho převod dat; slouží jako jistý klíč při připojování skenů." }
         document_kind: { type: string, enum: [invoice, receipt, credit_note, advance, tax_document] }
@@ -51650,6 +51757,7 @@ components:
       required: [vendor_id, vendor_invoice_number, issue_date, due_date, currency_id, items]
       properties:
         vendor_id: { type: integer }
+        number_series_id: { type: [integer, "null"], description: "Řada z číselníku pro číslo dokladu (jen koncept bez čísla). Vynechaný klíč volbu nemění, null = výchozí řada druhu. Řada musí patřit firmě a druhu dokladu, jinak 422 `series_invalid`." }
         vendor_invoice_number: { type: string, maxLength: 50 }
         allow_duplicate_number:
           type: boolean

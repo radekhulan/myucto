@@ -69,7 +69,7 @@ final class InternalDocumentService
     public function create(int $supplierId, array $input, ?int $userId): array
     {
         $data = $this->normalize($supplierId, $input);
-        $id = $this->inTransaction(function () use ($supplierId, $data, $userId): int {
+        $id = $this->inTransaction(function () use ($supplierId, $data, $userId, $input): int {
             $id = $this->documents->insert($supplierId, $data, $userId);
             $this->documents->replaceLines($supplierId, $id, $data['lines']);
             self::seriesGuard(fn () => $this->numberSeriesSelection->apply('internal_documents', $supplierId, $id, $input, 'manual', 0, $userId, isNew: true));
