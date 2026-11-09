@@ -69,4 +69,21 @@ final class CatalogImportProfileTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
         CatalogImportProfile::normalize(['identity' => 'external_id', 'mapping' => ['external_id' => 'id']]);
     }
+
+    public function testCategoryCodeCannotBeCombinedWithCategoriesAndCannotBeCleared(): void
+    {
+        $profile = CatalogImportProfile::normalize(['mapping' => ['sku' => 'Kód', 'category_code' => 'Skupina']]);
+        self::assertSame(['category_code' => 'C', 'sku' => 'X'], CatalogImportProfile::map($profile, ['Kód', 'Skupina'], ['X', 'C']));
+
+        $cleared = CatalogImportProfile::normalize(['mapping' => ['sku' => 'Kód', 'category_code' => 'Skupina'], 'blank' => 'clear']);
+        try {
+            CatalogImportProfile::map($cleared, ['Kód', 'Skupina'], ['X', '']);
+            self::fail('Prázdný kód kategorie nesmí vymazat zařazení.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertSame('import_required_value', $e->getMessage());
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        CatalogImportProfile::normalize(['mapping' => ['sku' => 'Kód', 'category_code' => 'A', 'categories' => 'B']]);
+    }
 }

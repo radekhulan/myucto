@@ -56,6 +56,7 @@ const NON_CLEARABLE_FIELDS = new Set([
   'is_stocked',
   'export_eshop',
   'media_urls',
+  'category_code',
 ])
 const HIDDEN_DIFF_FIELDS = new Set(['id', 'row_version', 'url_hash'])
 const ITEM_STATUSES = new Set(['pending', 'ready', 'applied', 'unchanged', 'failed', 'conflict', 'skipped'])
@@ -73,6 +74,7 @@ const IMPORT_ERROR_CODES = new Set([
   'media_url_invalid',
   'media_unsupported_type',
   'import_boolean_invalid',
+  'import_category_invalid',
   'import_cell_invalid',
   'import_csv_options_invalid',
   'import_database_validation_failed',
@@ -809,6 +811,9 @@ function displayValue(value: unknown): string {
 function displayFieldValue(field: string, value: unknown): string {
   if (field === 'item_type' && ['goods', 'material', 'product'].includes(String(value))) return t(`stock.item_type.${value}`)
   if (field === 'pricing_base' && ['weighted_avg', 'last_purchase', 'manual'].includes(String(value))) return t(`eshop.item.pricing_${value}`)
+  if (field === 'categories' && Array.isArray(value)) {
+    return value.map(entry => String((entry as Record<string, unknown>)?.name ?? (entry as Record<string, unknown>)?.category_id ?? entry)).join(', ') || t('eshop.import2.empty_value')
+  }
   if (field !== 'prices' || !Array.isArray(value)) return displayValue(value)
   if (value.length === 0) return t('eshop.import2.empty_value')
   return value.map((entry) => {
