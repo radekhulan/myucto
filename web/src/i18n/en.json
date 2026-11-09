@@ -17022,7 +17022,7 @@
         "unchanged": "Unchanged",
         "failed": "Error",
         "conflict": "Conflict",
-        "skipped": "Skipped",
+        "skipped": "Product not found",
         "unknown": "Unknown status"
       },
       "errors": {

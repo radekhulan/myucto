@@ -195,6 +195,10 @@ const applyFailedCount = computed(() => applyCounts.value.failed ?? 0)
 const applyConflictCount = computed(() => applyCounts.value.conflict ?? 0)
 const hasApplyFailures = computed(() => applyFailedCount.value + applyConflictCount.value > 0)
 const readyCount = computed(() => counts.value.ready ?? 0)
+const reportCounts = computed(() => {
+  const current = jobCounts(reportJob.value)
+  return [...ITEM_STATUSES].filter(status => (current[status] ?? 0) > 0).map(status => ({ status, count: current[status] }))
+})
 const canApply = computed(() => (
   canWrite.value
   && job.value?.kind === 'catalog_import_stage'
@@ -1252,6 +1256,9 @@ onBeforeUnmount(() => {
             <h2 class="font-semibold text-neutral-900">{{ t(reportJob?.kind === 'catalog_import_media' ? 'eshop.import2.media_report_title' : reportJob?.kind === 'catalog_import_apply' ? 'eshop.import2.apply_report_title' : 'eshop.import2.report_title') }}</h2>
             <p class="mt-0.5 text-xs text-neutral-500">
               {{ report ? t('eshop.import2.report_summary', { total: report.pagination.total }) : t('eshop.import2.report_waiting') }}
+            </p>
+            <p v-if="reportCounts.length" class="mt-0.5 flex flex-wrap gap-x-3 text-xs text-neutral-500" data-test="report-counts">
+              <span v-for="entry in reportCounts" :key="entry.status">{{ itemStatusLabel(entry.status) }}: {{ entry.count }}</span>
             </p>
           </div>
           <button
