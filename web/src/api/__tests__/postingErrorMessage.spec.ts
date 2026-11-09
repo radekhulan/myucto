@@ -24,6 +24,12 @@ describe('postingErrorMessage', () => {
       .toBe('t:accounting.posting_errors.invalid_counter_account')
   })
 
+  it('automatic_pairing_failed: text ze serveru má přednost, bez něj překlad', () => {
+    expect(postingErrorMessage(t, apiError('automatic_pairing_failed', 'Zápis nejde rozložit.'))).toBe('Zápis nejde rozložit.')
+    expect(postingErrorMessage(t, apiError('automatic_pairing_failed')))
+      .toBe('t:accounting.posting_errors.automatic_pairing_failed')
+  })
+
   it('neznámý kód ukáže hlášku ze serveru', () => {
     expect(postingErrorMessage(t, apiError('some_new_code', 'Konkrétní příčina.'))).toBe('Konkrétní příčina.')
   })

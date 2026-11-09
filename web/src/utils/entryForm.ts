@@ -27,6 +27,7 @@ export const PAIR_ERROR_CODES = [
   'pair_missing_debit_account',
   'pair_missing_credit_account',
   'pair_same_account',
+  'automatic_pairing_failed',
   'pair_amount_not_positive',
   'pair_unbalanced',
   'pair_incomplete',

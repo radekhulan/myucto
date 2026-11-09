@@ -2378,6 +2378,8 @@ export const POSTING_ERROR_CODES = [
   // Protiúčet a předkontace řádku faktury (zaúčtování už při zadání dokladu).
   'mixed_counter_accounts', 'invalid_counter_account', 'counter_account_with_advance',
   'counter_account_not_applicable', 'invalid_posting_rule',
+  // Automatický zápis v jednoduché formě nejde rozložit na dvojice; text ze serveru má přednost.
+  'automatic_pairing_failed',
 ] as const
 
 /** Vrátí i18n klíč pro hlášku k chybovému kódu zaúčtování (fallback = generic). */
@@ -2396,7 +2398,7 @@ export function postingErrorMessage(t: (key: string) => string, e: any): string 
   const code = typeof err?.code === 'string' ? err.code : null
   const serverMessage = typeof err?.message === 'string' && err.message !== '' ? err.message : null
   // Protiúčet a předkontace: server říká, který účet či klíč a proč nejde použít.
-  if (serverMessage && (code === 'invalid_counter_account' || code === 'invalid_posting_rule')) return serverMessage
+  if (serverMessage && (code === 'invalid_counter_account' || code === 'invalid_posting_rule' || code === 'automatic_pairing_failed')) return serverMessage
   if ((POSTING_ERROR_CODES as readonly string[]).includes(code ?? '')) {
     return t(`accounting.posting_errors.${code}`)
   }

@@ -18594,7 +18594,13 @@
         "unknown_user": "neznámý uživatel",
         "created": "Vznik zápisu.",
         "no_changes": "Zápis nebyl od vzniku upraven.",
-        "pair": "dvojice {n}"
+        "pair": "dvojice {n}",
+        "col_pair": "Dvojice",
+        "col_account": "Účet",
+        "col_change": "Změna",
+        "line_added": "přidáno",
+        "line_removed": "odebráno",
+        "line_changed": "změněno, dříve"
       },
       "att_preview": "Otevřít náhled",
       "net_on_account": "Čistý dopad na {account}",
@@ -18847,6 +18853,7 @@
       "open_periods_action": "Založit období",
       "period_not_open": "Účetní období je uzavřené - do něj nelze účtovat.",
       "unbalanced_entry": "Účetní zápis není vyvážený (MD ≠ Dal) - zkontrolujte předkontaci a částky dokladu.",
+      "automatic_pairing_failed": "Zápis dokladu nejde v jednoduché formě rozložit na dvojice MD/Dal. Doklad zůstal nezaúčtovaný: zaúčtujte ho ručně po dvojicích nebo upravte předkontaci.",
       "unknown_account": "V účtové osnově chybí potřebný účet - zkontrolujte předkontaci nebo doplňte osnovu.",
       "entry_reversed": "Zápis dokladu je stornovaný - opravu zaúčtujte novým zápisem.",
       "empty_entry": "Doklad nemá žádné řádky k zaúčtování.",
@@ -18860,7 +18867,7 @@
       "counter_account_with_advance": "Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Nechte ho prázdný.",
       "counter_account_not_applicable": "Doklad tohoto druhu nemá závazek ani pohledávku, protiúčet na řádku u něj nelze použít.",
       "invalid_posting_rule": "Předkontace řádku ve firmě neexistuje.",
-      "date_locked": "Datum zápisu spadá do uzamčené části účetnictví. Zámek posuň v nastavení účetnictví (jen admin).",
+      "date_locked": "Datum zápisu spadá do uzamčené části účetnictví. Zámek posuň v nastavení účetnictví (smí správce nebo role s právem posunout zámek).",
       "repost_date_shift_confirmation_required": "Původní datum je uzavřené nebo zamčené - potvrďte, že storno i oprava padnou na jiné datum.",
       "version_conflict": "Zaúčtování dokladu se mezitím změnilo. Obnovte náhled přeúčtování a zkontrolujte jeho zápisy."
     },
@@ -18887,7 +18894,7 @@
       "suggestion_used": "Řádky odpovídají předpisu z aktuálního dokladu. Zkontrolujte účty, převzaté analytiky se v něm nemusí zachovat.",
       "use_suggested": "Použít předpis z dokladu",
       "use_current": "Vrátit stávající zaúčtování",
-      "blocked_date_locked": "Účetnictví je zamčené k {date} včetně dneška, takže opravu není kam zapsat. Zámek posuň v nastavení účetnictví (jen admin).",
+      "blocked_date_locked": "Účetnictví je zamčené k {date} včetně dneška, takže opravu není kam zapsat. Zámek posuň v nastavení účetnictví (smí správce nebo role s právem posunout zámek).",
       "blocked_period_not_open": "Období původního zápisu je „{status}“ a pro dnešek není otevřené účetní období, opravu není kam zapsat. Otevřete účetní období v Účetnictví → Uzávěrka.",
       "confirm_date_shift": "Rozumím, že storno i oprava se zaúčtují k {to} místo k původnímu {from}.",
       "tax_neutral_available": "Datum zápisu je zamčené k {lock} podaným DPH, rok ale uzavřený není. Když oprava jen přesune částky mezi účty (např. 511 → 518.100, sloučení slevy do zboží) a nezmění DPH, závazek, pohledávku ani peníze, zápis se přepíše na místě k {date}, bez storna. Po podání přiznání k dani z příjmů za rok navíc jen v rámci téže třídy a bez změny daňové uznatelnosti. Jinak vznikne storno a nový zápis. Rozhodne se podle řádků, jak je upravíte.",
@@ -21307,6 +21314,7 @@
     },
     "error": {
       "unbalanced_entry": "Zápis není vyrovnaný (MD ≠ Dal).",
+      "automatic_pairing_failed": "Zápis dokladu nejde v jednoduché formě rozložit na dvojice MD/Dal. Doklad zůstal nezaúčtovaný: zaúčtujte ho ručně po dvojicích nebo upravte předkontaci.",
       "period_not_open": "Účetní období není otevřené.",
       "unknown_account": "Neznámý účet.",
       "validation_failed": "Validace selhala.",
@@ -29547,7 +29555,7 @@
         "linked_submission": "odpovídá podání #{id} (druh {variant})",
         "blocked": {
           "period_not_open": "Účetní období není otevřené - doklad se nepřepočítá. Rozdíl patří do dodatečného přiznání, ne do zavřených knih.",
-          "date_locked": "Datum konce období je uzamčené (podané přiznání / ruční zámek). Přepočet je možný až po posunutí zámku v nastavení účetnictví (jen admin).",
+          "date_locked": "Datum konce období je uzamčené (podané přiznání / ruční zámek). Přepočet je možný až po posunutí zámku v nastavení účetnictví (smí správce nebo role s právem posunout zámek).",
           "no_accounting_period": "Pro konec období neexistuje účetní období."
         },
         "action_post": "Zaúčtovat zúčtování",
@@ -31430,6 +31438,7 @@
     "origin_approved": "Potvrzeno",
     "origin_manual": "Ručně",
     "reason": {
+      "automatic_pairing_failed": "Zápis nejde rozložit na dvojice MD/Dal, doklad zůstal nezaúčtovaný k ručnímu doúčtování.",
       "document_not_posted": "Doklad zatím nemá zaúčtovaný předpis.",
       "period_closed": "Období je uzavřené - zápis nelze provést.",
       "rule_conflict": "Platbě odpovídá více pravidel se stejnou prioritou.",
