@@ -18957,6 +18957,7 @@
       "text_placeholder": "text dvojice",
       "complete": "Dvojice jsou úplné",
       "incomplete": "Doplňte účty a částky",
+      "total_valid": "Celkem (jen úplné dvojice)",
       "badge_mn": "M : N",
       "badge_mn_title": "Zápis má víc účtů na obou stranách a nejde ho jednoznačně rozdělit na dvojice. Upravte ho přeúčtováním po dvojicích.",
       "filter_status": "Dvojice",

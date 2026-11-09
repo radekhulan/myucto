@@ -102,8 +102,10 @@ function removePair(i: number) {
   update(next)
 }
 
+// Součet jen z úplných dvojic: chybná dvojice (chybí účet, stejné účty) by jinak zvýšila „Celkem“,
+// zatímco vedle stojí, že zápis není hotový.
 const total = computed(() =>
-  Math.round(props.modelValue.reduce((s, p) => s + (p.is_red_storno ? -1 : 1) * (Number(p.amount) > 0 ? Number(p.amount) : 0), 0) * 100) / 100)
+  Math.round(props.modelValue.reduce((s, p) => s + (problemOf(p) === null ? (p.is_red_storno ? -1 : 1) * Number(p.amount) : 0), 0) * 100) / 100)
 const complete = computed(() => props.modelValue.length > 0 && props.modelValue.every(p => problemOf(p) === null))
 
 defineExpose({ complete, valid: complete, problemOf })
@@ -178,7 +180,7 @@ defineExpose({ complete, valid: complete, problemOf })
         {{ t('accounting.pairs.add') }}
       </button>
       <div class="text-sm text-neutral-500">
-        {{ t('accounting.pairs.total') }}: <strong class="font-mono text-neutral-800">{{ formatMoney(total) }}</strong>
+        {{ complete ? t('accounting.pairs.total') : t('accounting.pairs.total_valid') }}: <strong class="font-mono text-neutral-800" data-test="pairs-total">{{ formatMoney(total) }}</strong>
         <span class="ml-2 px-2 py-0.5 rounded text-xs font-medium"
           :class="complete ? 'bg-success-50 text-success-600' : 'bg-warning-50 text-warning-600'">
           {{ complete ? t('accounting.pairs.complete') : t('accounting.pairs.incomplete') }}

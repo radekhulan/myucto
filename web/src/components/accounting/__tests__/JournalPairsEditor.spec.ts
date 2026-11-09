@@ -26,6 +26,13 @@ describe('JournalPairsEditor', () => {
     w.unmount()
   })
 
+  it('součet nezapočítá chybnou dvojici a řekne to v popisku', () => {
+    const w = mountEditor([row('221', '311', 100), row('221', '221', 50)])
+    expect(w.get('[data-test="pairs-total"]').text()).toBe('100')
+    expect(w.text()).toContain('accounting.pairs.total_valid')
+    w.unmount()
+  })
+
   it.each([
     ['chybí MD', row('', '311', 10), 'accounting.error.pair_missing_debit_account'],
     ['chybí Dal', row('221', '', 10), 'accounting.error.pair_missing_credit_account'],

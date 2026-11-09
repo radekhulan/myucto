@@ -18957,6 +18957,7 @@
       "text_placeholder": "pair text",
       "complete": "Pairs are complete",
       "incomplete": "Fill in accounts and amounts",
+      "total_valid": "Total (complete pairs only)",
       "badge_mn": "M : N",
       "badge_mn_title": "The entry has several accounts on both sides and cannot be split into pairs unambiguously. Fix it by reposting pair by pair.",
       "filter_status": "Pairs",
