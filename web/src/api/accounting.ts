@@ -265,6 +265,20 @@ export interface PostingPreview {
   rule_basis: { vendor_client_id: number; vendor_name: string; expense_kind: string } | null
 }
 
+/**
+ * Náhled zápisu v editoru faktury z neuloženého stavu. Server doklad uloží akcí Uložit
+ * v transakci, která se odvolá, takže návrh je tentýž, jaký pak vznikne zaúčtováním.
+ */
+export interface DraftPostingPreview {
+  source_type: 'invoice' | 'purchase_invoice'
+  doc_id: number | null
+  entry_date: string | null
+  lines: PostingPreviewLine[]
+  balanced: boolean
+  /** Id živého zápisu, když je doklad už zaúčtovaný (pak se nesimuluje a `lines` je prázdné). */
+  already_posted: number | null
+}
+
 export interface JournalEntryDetail extends JournalEntry {
   lines: JournalLine[]
   /** Měkké vazby na doklady (migrace 1514); chodí s detailem zápisu. */
@@ -2160,6 +2174,9 @@ export const POSTING_ERROR_CODES = [
   // Přeúčtování: datum je zamčené (§35 soft-close) resp. storno i oprava by padly
   // na jiné datum než původní zápis a uživatel to ještě nepotvrdil.
   'date_locked', 'repost_date_shift_confirmation_required', 'version_conflict',
+  // Protiúčet a předkontace řádku faktury (zaúčtování už při zadání dokladu).
+  'mixed_counter_accounts', 'invalid_counter_account', 'counter_account_with_advance',
+  'counter_account_not_applicable', 'invalid_posting_rule',
 ] as const
 
 /** Vrátí i18n klíč pro hlášku k chybovému kódu zaúčtování (fallback = generic). */
@@ -2492,6 +2509,10 @@ export const accountingApi = {
    */
   postingPreview: (source: 'invoices' | 'purchase-invoices', id: number) =>
     api.get<PostingPreview>(`/accounting/journal/posting-preview/${source}/${id}`).then(r => r.data),
+  /** Náhled zápisu v editoru faktury: tělo dokladu jako při uložení, nic se neuloží. */
+  draftPostingPreview: (source: 'invoices' | 'purchase-invoices', docId: number | null, document: object, signal?: AbortSignal) =>
+    api.post<DraftPostingPreview>(`/accounting/journal/draft-posting-preview/${source}`, { doc_id: docId, document }, { signal })
+      .then(r => r.data),
   // Hromadné zaúčtování z výběru v seznamu (A2) — vrací souhrnný report ok/fail.
   postInvoicesBulk: (ids: number[]) =>
     api.post<BulkPostReport>('/accounting/journal/post-invoices-bulk', { ids }).then(r => r.data),

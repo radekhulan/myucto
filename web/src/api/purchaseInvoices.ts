@@ -153,7 +153,12 @@ export interface PurchaseInvoiceItem {
   vat_label_en?: string
   /** §DM — druh nákladu. Autoritativní klasifikace, BE z ní odvozuje `is_fixed_asset`. */
   expense_kind?: ExpenseKind | null
+  /** Účet MD řádku (náklad). */
   expense_account_code?: string | null
+  /** Účet Dal řádku (závazek); NULL = z předkontace řádku nebo dokladu. Jeden na doklad. */
+  counter_account_code?: string | null
+  /** Předkontace řádku — doplní účty, které řádek sám nemá. */
+  posting_rule_key?: string | null
   /** §DČR — časové rozlišení nákladu (381): období od–do, do kterého náklad věcně patří. NULL = bez rozlišení. */
   accrual_from?: string | null
   accrual_to?: string | null

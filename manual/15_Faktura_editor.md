@@ -621,6 +621,30 @@ službu a každý řádek sedne na svůj účet. Nenavázané řádky zůstávaj
 dlouhodobým majetkem navíc dostane klasifikaci DPH **1m/2m**, prodej dlouhodobého majetku se
 podle § 76 odst. 4 ZDPH nezapočítává do koeficientu. Ruční volba klasifikace má přednost.
 
+#### Zaúčtování už při zadání faktury
+
+V podvojném účetnictví vidí účetní pod šipkou na konci řádku vedle účtu položky ještě dvě pole.
+Řádek tak nese celou dvojici účtů, kterou vytvoří zaúčtování:
+
+- **Předkontace** vybere předkontaci řádku. Doplní výnosový účet položky (strana Dal) a pohledávku
+  (strana MD), pokud je řádek ještě nemá. Vyplněný účet má vždy přednost.
+- **Účet MD (pohledávka)** je protiúčet řádku. Prázdné pole použije pohledávku z předkontace
+  dokladu (obvykle 311). Zadat lze 311 nebo její analytiku, protože úhrada vydané faktury v bance,
+  pokladně i zápočtem odúčtovává pohledávku 311. Všechny řádky dokladu musí mít stejný protiúčet.
+
+Středisko, zakázku a další dimenze řádku zadáte ikonou dimenzí u popisu položky (viz
+[Dimenze](114_Dimenze.md)), do deníku se propíšou na řádky zápisu.
+
+Pod položkami je box **Náhled zápisu**. Ukazuje účty MD a Dal s částkami přesně tak, jak se
+doklad zaúčtuje, včetně DPH a pohledávky, a přepočítá se chvíli po každé změně dokladu. Náhled
+počítá server stejným výpočtem jako tlačítko **Zaúčtovat**, doklad přitom neuloží. Chybu, kvůli
+které by se doklad neuložil nebo nezaúčtoval (zamčené období, podané DPH, neplatný účet), ukáže
+rovnou v boxu. Náhled je jen u druhů dokladu, které se účtují do deníku (faktura, dobropis, daňový
+doklad k platbě, penále), a jen pro účetní.
+
+Protiúčet z řádku nelze použít u vyúčtování zálohy, daňového dokladu k platbě a penále: tyto
+doklady účtují pohledávku podle vlastní předkontace a zaúčtování to ohlásí chybou.
+
 **Členění DPH položky** zvolíte pod šipkou na konci řádku, kde je i účet položky. Výchozí
 **Automaticky podle sazby** kód odvodí ze sazby, jednotky a odběratele. Zvolený kód se při dalším
 uložení zachová, dokud nezměníte sazbu, jednotku, kartu majetku, odběratele, přenesenou daňovou
@@ -804,9 +828,15 @@ aplikaci označíte akcí **Označit jako vyplaceno**.
 
 ### 15.9.5 Tlačítka
 
-Editor má dole jedno tlačítko: **Vytvořit** u nové faktury, **Uložit** u úpravy konceptu.
-Faktura se uloží jako koncept, zůstane neviditelná pro klienta. Další akce najdete v **detailu
-faktury**:
+Editor má dole tlačítko **Vytvořit** u nové faktury, **Uložit** u úpravy konceptu.
+Faktura se uloží jako koncept, zůstane neviditelná pro klienta.
+
+V podvojném účetnictví vidí uživatel s právem zaúčtovat vedle něj i **Uložit a zaúčtovat**. Uloží
+doklad stejně jako Uložit, koncept rovnou vystaví (stejně jako **Vystavit** v detailu) a zaúčtuje
+ho podle náhledu zápisu. Když zaúčtování selže, doklad zůstane uložený a aplikace ukáže důvod.
+Tlačítko je jen u druhů dokladu, které se účtují do deníku, a u konceptu jen s právem vystavit.
+
+Další akce najdete v **detailu faktury**:
 
 <!-- cols: 30 70 -->
 | Tlačítko (detail) | Funkce |
