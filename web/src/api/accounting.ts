@@ -237,6 +237,8 @@ export interface JournalEntryWithLines extends JournalEntry {
 /** Jeden navržený řádek kontace — MD/DAL s názvem účtu, ať uživatel nepotvrzuje holá čísla. */
 export interface PostingPreviewLine {
   account_code: string
+  /** Číslo dvojice, když firma k datu účtuje jednoduchým zápisem. */
+  pair_no?: number | null
   account_name: string | null
   side: 'debit' | 'credit'
   is_red_storno?: boolean

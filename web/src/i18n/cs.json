@@ -18813,7 +18813,7 @@
       "advance_tax_document_oss": "Daňový doklad k přijaté platbě nese jen daň OSS a samostatně se neúčtuje (v režimu OSS se daňový doklad k záloze nevydává). Stornujte ho a vyúčtování vystavte bez něj, nebo zúčtuj zálohu ručním zápisem.",
       "ddkp_reverse_charge_unsupported": "Daňový doklad k platbě v režimu přenesené daňové povinnosti (reverse charge) se automaticky neúčtuje - zaúčtujte DPH ručním zápisem.",
       "rc_partial_deduction_unsupported": "Doklad je v režimu přenesené daňové povinnosti (samovyměření DPH), ale má nastavený nárok na odpočet „bez nároku\". Tuto kombinaci systém automaticky nezaúčtuje. Pokud doklad souvisí s ekonomickou činností, nastavte v jeho editaci plný nárok na odpočet, jinak ho zaúčtujte ručním zápisem.",
-      "mixed_counter_accounts": "Řádky dokladu mají různé protiúčty. Doklad musí mít jeden závazek nebo pohledávku, aby ho úhrada mohla uzavřít.",
+      "mixed_counter_accounts": "Řádky dokladu mají různé protiúčty. Všechny řádky musí mít stejný účet závazku nebo pohledávky, jinak by doklad úhrada neuzavřela.",
       "invalid_counter_account": "Protiúčet řádku nejde použít. U přijaté faktury zvolte závazkový účet třídy 3 (např. 321, 325), u vydané pohledávku 311 nebo její analytiku.",
       "counter_account_with_advance": "Doklad zúčtovává zálohu, protiúčet na řádku u něj nelze použít. Nechte ho prázdný.",
       "counter_account_not_applicable": "Doklad tohoto druhu nemá závazek ani pohledávku, protiúčet na řádku u něj nelze použít.",
