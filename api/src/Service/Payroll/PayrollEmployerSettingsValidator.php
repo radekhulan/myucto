@@ -19,6 +19,9 @@ final class PayrollEmployerSettingsValidator
      * položek právě tři číslice. Délkový limit 16 sám o sobě propouštěl cokoliv
      * až do zákonného podání i do platebních příkazů.
      */
+    /** Zaúčtování mzdového předpisu: souhrnně za firmu a středisko, nebo po zaměstnancích. */
+    public const POSTING_GRANULARITIES = ['summary', 'employee'];
+
     private const SOCIAL_SECURITY_OFFICE_CODE_PATTERN = '/^[0-9]{3}$/';
 
     /**
@@ -134,7 +137,7 @@ final class PayrollEmployerSettingsValidator
         // Zaúčtování předpisu souhrnně, nebo po zaměstnancích; chybějící volba
         // nemění uloženou stejně jako u zaokrouhlení.
         $granularity = $input['posting_granularity'] ?? null;
-        if ($granularity !== null && !in_array($granularity, ['summary', 'employee'], true)) {
+        if ($granularity !== null && !in_array($granularity, self::POSTING_GRANULARITIES, true)) {
             throw new \InvalidArgumentException('Zaúčtování mezd musí být summary nebo employee.');
         }
         $normalized['posting_granularity'] = $granularity;
