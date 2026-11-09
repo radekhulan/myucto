@@ -338,6 +338,21 @@ final class MeActionTest extends TestCase
         self::assertFalse($disabled['invoice_public_links_enabled']);
     }
 
+    /** Tlačítko Uložit a zaúčtovat v editorech faktur: výchozí vypnuto, zapíná ho volba instalace. */
+    public function testSaveAndPostFlagFollowsInstallationConfig(): void
+    {
+        $default = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+        ]));
+        $enabled = $this->meBodyForClient(new Config([
+            'auth' => ['allowed_mfa_methods' => ['passkey', 'totp']],
+            'accounting' => ['save_and_post' => true],
+        ]));
+
+        self::assertFalse($default['save_and_post_enabled']);
+        self::assertTrue($enabled['save_and_post_enabled']);
+    }
+
     /** @return array<string,mixed> */
     private function meBodyForClient(Config $config): array
     {

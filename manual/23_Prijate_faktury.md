@@ -212,8 +212,9 @@ v kapitole [Platební příkazy](26_Platebni_prikazy.md).
 **Jak poznáte, že je hotovo:** u faktury je účetní ikona **Zaúčtováno** (datum je v tooltipu)
 a funguje proklik **Zobrazit v deníku**.
 
-Zaúčtovat jde i rovnou z editoru: zkontrolujte box **Náhled zápisu** pod položkami a klikněte na
-**Uložit a zaúčtovat**. Koncept se při tom zároveň přijme (viz [§ 23.11.18](#231118-zauctovani-do-deniku-a-tlacitko-zauctovat)).
+Box **Náhled zápisu** pod položkami je v editoru vždy. Je-li na instalaci zapnutá volba
+**Uložit a zaúčtovat** (viz [§ 23.11.18](#231118-zauctovani-do-deniku-a-tlacitko-zauctovat)), zaúčtujete rovnou z editoru
+tlačítkem **Uložit a zaúčtovat**; koncept se při tom zároveň přijme. Jinak doklad uložte a zaúčtujte z detailu.
 
 Tlačítko se u dokladu typu **Záloha** nezobrazuje: zálohová výzva není účetní předpis, účtuje se
 až její skutečná úhrada. Kromě ručního zaúčtování lze zapnout automatické zaúčtování při přijetí
@@ -1137,7 +1138,9 @@ kvůli které by se doklad neuložil nebo nezaúčtoval (zamčené období, poda
 rovnou v boxu. U zaúčtovaného dokladu náhled jen odkáže na zápis v deníku, změnu kontace pak udělejte
 přes **Přeúčtovat** (viz [§ 23.11.19](#231119-nakladove-pravidlo-a-preuctovani)).
 
-**Uložit a zaúčtovat.** Vedle tlačítka Uložit v editoru, jen s právem zaúčtovat. Uloží doklad,
+**Uložit a zaúčtovat.** Tlačítko je ve výchozím stavu vypnuté. Zapíná ho volba instalace
+`accounting.save_and_post` v `cfg.php` (proměnná prostředí `MYINVOICE_ACCOUNTING_SAVE_AND_POST=1`).
+Při zapnuté volbě je vedle tlačítka Uložit v editoru, jen v podvojném účetnictví a jen s právem zaúčtovat. Uloží doklad,
 koncept přijme (stejně jako **Označit jako přijaté**) a zaúčtuje ho podle náhledu. Když zaúčtování
 selže, doklad zůstane uložený a aplikace ukáže důvod.
 

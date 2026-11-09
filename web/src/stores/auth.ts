@@ -32,6 +32,7 @@ export const useAuthStore = defineStore('auth', () => {
   const submissionTestEnvironmentAllowed = ref(false)
   // Web faktura je výchozí funkce; skrývá se jen na výslovné false ze serveru.
   const invoicePublicLinksEnabled = ref(true)
+  const saveAndPostEnabled = ref(false)
   const lockedSession = ref<SessionState | null>(null)
   const profileHydrated = ref(false)
   const domainContext = ref<DomainContext | null>(null)
@@ -163,6 +164,7 @@ export const useAuthStore = defineStore('auth', () => {
       rememberSsoSession(data.sso_session, data.server_time)
       submissionTestEnvironmentAllowed.value = data.submission_test_environment_allowed === true
       invoicePublicLinksEnabled.value = data.invoice_public_links_enabled !== false
+      saveAndPostEnabled.value = data.save_and_post_enabled === true
       lockedSession.value = null
       profileHydrated.value = true
       domainContext.value = data.domain_context && domainContext.value
@@ -323,6 +325,7 @@ export const useAuthStore = defineStore('auth', () => {
     license,
     submissionTestEnvironmentAllowed,
     invoicePublicLinksEnabled,
+    saveAndPostEnabled,
     lockedSession,
     profileHydrated,
     domainContext,

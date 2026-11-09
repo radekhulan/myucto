@@ -530,6 +530,12 @@ return [
         // v podvojném účetnictví po nastavení; stávající firmy se nemění.
         // ENV varianta: MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single
         'default_entry_form' => 'composite',
+        // Tlačítko „Uložit a zaúčtovat“ v editorech vydané a přijaté faktury (jen pro
+        // firmy v podvojném účetnictví a uživatele s právem zaúčtovat). Výchozí je
+        // vypnuto; náhled zápisu pod položkami i zaúčtování z detailu dokladu fungují
+        // vždy.
+        // ENV varianta: MYINVOICE_ACCOUNTING_SAVE_AND_POST=1
+        'save_and_post' => false,
     ],
     'pagination' => [
         // Velikost stránky pro tlačítko "Další" v UI seznamech.

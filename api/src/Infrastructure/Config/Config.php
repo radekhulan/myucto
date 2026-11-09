@@ -444,6 +444,9 @@ final class Config
             // dál přepíná sama v nastavení účetnictví. Viz EntryFormInstallationDefault.
             'accounting' => [
                 'default_entry_form' => 'composite',
+                // Tlačítko „Uložit a zaúčtovat“ v editorech vydané a přijaté faktury.
+                // Výchozí vypnuto; zaúčtování z detailu dokladu funguje vždy.
+                'save_and_post' => false,
             ],
             'ares' => [
                 'api'       => 'https://ares.gov.cz/ekonomicke-subjekty-v-be/rest/ekonomicke-subjekty',
@@ -485,6 +488,7 @@ final class Config
             'MYINVOICE_APP_DEBUG'   => ['app.debug', 'bool'],
             'MYINVOICE_OVERDUE_INCLUDES_TODAY' => ['invoices.overdue_includes_today', 'bool'],
             'MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM' => ['accounting.default_entry_form', 'string'],
+            'MYINVOICE_ACCOUNTING_SAVE_AND_POST' => ['accounting.save_and_post', 'bool'],
             'MYINVOICE_INVOICE_PUBLIC_LINKS' => ['invoices.public_links', 'bool'],
             'MYINVOICE_APP_URL'     => ['app.url', 'string'],
             'MYINVOICE_DOMAINS_ENABLED' => ['domains.enabled', 'bool'],

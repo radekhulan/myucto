@@ -75,3 +75,30 @@ describe('web faktura v auth store', () => {
     expect(auth.invoicePublicLinksEnabled).toBe(true)
   })
 })
+
+describe('Uložit a zaúčtovat v auth store', () => {
+  beforeEach(() => {
+    localStorage.clear()
+    setActivePinia(createPinia())
+    mocks.me.mockReset()
+    mocks.domainContext.mockReset()
+    mocks.domainContext.mockResolvedValue({
+      mode: 'canonical', hostname: 'dev.example.test', origin: 'https://dev.example.test',
+      locked: false, supplier_id: null, purpose: null,
+    })
+  })
+
+  it('bez pole ze serveru je tlačítko vypnuté', async () => {
+    const auth = useAuthStore()
+    mocks.me.mockResolvedValue(session())
+    expect(await auth.refresh()).toBe(true)
+    expect(auth.saveAndPostEnabled).toBe(false)
+  })
+
+  it('převezme zapnutou volbu instalace', async () => {
+    const auth = useAuthStore()
+    mocks.me.mockResolvedValue(session({ save_and_post_enabled: true }))
+    expect(await auth.refresh()).toBe(true)
+    expect(auth.saveAndPostEnabled).toBe(true)
+  })
+})
