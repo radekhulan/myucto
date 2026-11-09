@@ -17,18 +17,22 @@ final class StockValueTrendPdfRenderer extends ReportPdfRendererBase
     public function render(array $data): string
     {
         $parent = $data['parent'] ?? null;
-        $fmt = static fn (string $v): string => number_format((float) $v, 0, ',', ' ');
+        $round = static fn (string $v): int => (int) round((float) $v);
+        $fmt = static fn (int $v): string => number_format($v, 0, ',', ' ');
         $tables = [];
         foreach (array_chunk($data['dates'], self::PER_TABLE) as $dates) {
             $rows = [];
             foreach ($data['groups'] as $g) {
                 $rows[] = ['label' => StockReportXlsxExporter::valuationGroupLabel($g, $parent),
-                    'cells' => array_map(static fn (string $d): string => $fmt($g['values'][$d]), $dates)];
+                    'cells' => array_map(static fn (string $d): string => $fmt($round($g['values'][$d])), $dates)];
             }
             $tables[] = [
                 'heads' => $dates,
                 'rows' => $rows,
-                'total' => array_map(static fn (string $d): string => $fmt($data['totals'][$d]['value_total']), $dates),
+                // Celkem je součet zaokrouhlených řádků, ať v tabulce sedí; bez řádků zaokrouhlený součet.
+                'total' => array_map(static fn (string $d): string => $fmt($data['groups'] === []
+                    ? $round($data['totals'][$d]['value_total'])
+                    : array_sum(array_map(static fn (array $g): int => $round($g['values'][$d]), $data['groups']))), $dates),
             ];
         }
         $body = $this->renderTemplate('stock_value_trend.twig', [

@@ -26,7 +26,7 @@ final class StockValueTrendTest extends StockTestCase
         $this->documents->post($sid, (int) $draft['id'], $this->userId);
     }
 
-    private function service(int $chunkItems = 1000): StockValueTrendService
+    private function service(int $batchMovements = 2000): StockValueTrendService
     {
         return new StockValueTrendService(
             $this->db,
@@ -34,7 +34,8 @@ final class StockValueTrendTest extends StockTestCase
             $this->container->get(\MyInvoice\Service\Eshop\CatalogJobService::class),
             $this->container->get(\MyInvoice\Repository\StockValuationSnapshotRepository::class),
             $this->container->get(\MyInvoice\Repository\WarehouseRepository::class),
-            $chunkItems,
+            $this->container->get(\MyInvoice\Service\Stock\StockLedgerReader::class),
+            $batchMovements,
         );
     }
 
@@ -44,11 +45,24 @@ final class StockValueTrendTest extends StockTestCase
         $svc ??= $this->service();
         $job = $svc->enqueue($sid, $dates, $warehouse, $parent, $grouped);
         $state = $job;
-        while (!in_array($state['status'], ['completed', 'failed', 'cancelled'], true)) {
+        for ($i = 0; $i < 500 && !in_array($state['status'], ['completed', 'failed', 'cancelled'], true); $i++) {
             $state = $svc->tick($sid, 1) ?? $state;
         }
         self::assertSame('completed', $state['status']);
         return $svc->result($sid, (int) $job['id'], $withGroups);
+    }
+
+    /** Posune úlohu do fáze výpočtu (po naplnění fronty), kde se kontroluje změna skladu. */
+    private function advanceToCompute(StockValueTrendService $svc, int $sid, int $jobId): void
+    {
+        $jobs = $this->container->get(\MyInvoice\Service\Eshop\CatalogJobService::class);
+        for ($i = 0; $i < 50; $i++) {
+            $svc->tick($sid, 1);
+            if (($jobs->find($sid, $jobId)['report']['phase'] ?? null) === 'compute') {
+                return;
+            }
+        }
+        self::fail('Úloha se nedostala do fáze výpočtu.');
     }
 
     private function queueRows(int $sid, int $jobId): int
@@ -326,34 +340,24 @@ final class StockValueTrendTest extends StockTestCase
         self::assertNotSame($first['id'], $svc->enqueue($sid, ['2026-02-28'], null, $root, true)['id']);
     }
 
-    public function testChangeDuringRunRestartsThenFailsWithReasonAndDropsQueue(): void
+    public function testRelevantChangeRestartsThenFailsWithReasonAndRetryStartsAgain(): void
     {
         ['sid' => $sid, 'wh' => $wh, 'root' => $root] = $this->fiveCards();
         $svc = $this->service(2);
+        $jobs = $this->container->get(\MyInvoice\Service\Eshop\CatalogJobService::class);
         $job = $svc->enqueue($sid, ['2026-01-31'], null, $root, true);
-        self::assertGreaterThan(0, $this->queueRows($sid, (int) $job['id']));
-        $svc->tick($sid, 1); // první dávka
+        $id = (int) $job['id'];
+        self::assertSame(0, $this->queueRows($sid, $id)); // fronta se plní až ve workeru, ne v požadavku
+        $this->advanceToCompute($svc, $sid, $id);
+        self::assertGreaterThan(0, $this->queueRows($sid, $id));
         $this->receiveStock($sid, $wh, $this->item($sid, 'S-X1'), '1', 5.0, '2026-01-11');
         $svc->tick($sid, 1); // první restart
-        $this->receiveStock($sid, $wh, $this->item($sid, 'S-X2'), '1', 5.0, '2026-01-11');
+        self::assertSame(1, $jobs->find($sid, $id)['report']['restarts']);
+        $this->advanceToCompute($svc, $sid, $id);
+        $this->receiveStock($sid, $wh, $this->item($sid, 'S-X2'), '1', 5.0, '2026-01-12');
         $svc->tick($sid, 1); // druhý restart
-        $jobs = $this->container->get(\MyInvoice\Service\Eshop\CatalogJobService::class);
-        self::assertSame(2, $jobs->find($sid, (int) $job['id'])['report']['restarts']);
-        // po restartech se dopočítá správně a sedí s jednodenním oceněním
-        $done = $svc->enqueue($sid, ['2026-01-31'], null, $root, true);
-        while ($done['status'] !== 'completed') {
-            $done = $svc->tick($sid, 1) ?? $done;
-        }
-        $day = $this->container->get(StockReportService::class)->valuation($sid, '2026-01-31', []);
-        self::assertSame($day['totals']['value_total'], $svc->result($sid, (int) $done['id'], true)['totals']['2026-01-31']['value_total']);
-
-        // třetí změna během běhu = chyba s důvodem a úklid fronty
-        ['sid' => $sid, 'wh' => $wh, 'root' => $root] = $this->fiveCards();
-        $job = $svc->enqueue($sid, ['2026-01-31'], null, $root, true);
-        for ($i = 0; $i < 3; $i++) {
-            $svc->tick($sid, 1);
-            $this->receiveStock($sid, $wh, $this->item($sid, "S-Y$i"), '1', 5.0, '2026-01-11');
-        }
+        $this->advanceToCompute($svc, $sid, $id);
+        $this->receiveStock($sid, $wh, $this->item($sid, 'S-X3'), '1', 5.0, '2026-01-13');
         try {
             $svc->tick($sid, 1);
             self::fail('Čekána chyba o změně skladu.');
@@ -361,10 +365,83 @@ final class StockValueTrendTest extends StockTestCase
             self::assertSame('stock_value_trend_stale', $e->errorCode);
             self::assertStringContainsString('změnil sklad', $e->getMessage());
         }
-        $failed = $jobs->find($sid, (int) $job['id']);
+        $failed = $jobs->find($sid, $id);
         self::assertSame('failed', $failed['status']);
         self::assertSame('stock_value_trend_stale', $failed['error_code']);
-        self::assertSame(0, $this->queueRows($sid, (int) $job['id']));
+        self::assertSame(0, $this->queueRows($sid, $id));
+
+        // obecné opakování (retry) začne znovu s nulovými restarty a uspěje
+        self::assertTrue($jobs->retry($sid, $id));
+        $state = $jobs->find($sid, $id);
+        for ($i = 0; $i < 200 && $state['status'] !== 'completed'; $i++) {
+            $state = $svc->tick($sid, 1) ?? $state;
+        }
+        self::assertSame('completed', $state['status']);
+        $day = $this->container->get(StockReportService::class)->valuation($sid, '2026-01-31', []);
+        self::assertSame($day['totals']['value_total'], $svc->result($sid, $id, true)['totals']['2026-01-31']['value_total']);
+    }
+
+    public function testMovementAfterLastDateDoesNotRestart(): void
+    {
+        ['sid' => $sid, 'wh' => $wh, 'root' => $root] = $this->fiveCards();
+        $svc = $this->service(2);
+        $jobs = $this->container->get(\MyInvoice\Service\Eshop\CatalogJobService::class);
+        $id = (int) $svc->enqueue($sid, ['2026-01-31'], null, $root, true)['id'];
+        $this->advanceToCompute($svc, $sid, $id);
+        $this->receiveStock($sid, $wh, $this->item($sid, 'S-AFTER'), '1', 5.0, '2026-02-15'); // po datu sestavy
+        $state = $jobs->find($sid, $id);
+        for ($i = 0; $i < 100 && $state['status'] !== 'completed'; $i++) {
+            $state = $svc->tick($sid, 1) ?? $state;
+        }
+        self::assertSame('completed', $state['status']);
+        self::assertSame(0, $state['report']['restarts']);
+        self::assertSame('150.00', $svc->result($sid, $id, true)['totals']['2026-01-31']['value_total']);
+    }
+
+    public function testWarehouseFilterIncludesTransferTargetAndLargeCardIsPagedByCursor(): void
+    {
+        $sid = $this->createSupplier();
+        $wh = $this->warehouse($sid);
+        $wh2 = $this->warehouse($sid, 'DRUHY', false);
+        $root = $this->category($sid, 'W-ROOT');
+        $big = $this->item($sid, 'W-BIG');
+        $small = $this->item($sid, 'W-SMALL');
+        $this->assignCategory($sid, $big, $root, true);
+        foreach (range(1, 9) as $n) { // 9 pohybů: při stropu 2 pohyby na dávku se karta čte po stránkách s kurzorem
+            $this->receiveStock($sid, $wh, $big, '2', 5.0 + $n, sprintf('2026-01-%02d', $n));
+        }
+        $this->receiveStock($sid, $wh, $small, '4', 3.0, '2026-01-02');
+        $this->move($sid, 'transfer', $wh, $big, '5', '2026-02-05', $wh2);
+        $this->move($sid, 'issue', $wh2, $big, '1', '2026-02-20');
+        $dates = ['2025-12-31', '2026-01-31', '2026-02-28'];
+        foreach ([null, $wh, $wh2] as $warehouse) {
+            $svc = $this->service(2);
+            $trend = $this->trend($sid, $dates, $warehouse, $root, true, true, $svc);
+            $single = $this->container->get(StockReportService::class);
+            foreach ($dates as $date) {
+                $day = $single->valuation($sid, $date, $warehouse !== null ? ['warehouse_id' => $warehouse] : []);
+                self::assertSame($day['totals']['value_total'], $trend['totals'][$date]['value_total'], "sklad " . var_export($warehouse, true) . " $date");
+                self::assertSame($day['totals']['count'], $trend['totals'][$date]['count']);
+            }
+        }
+        self::assertNotSame('0.00', $trend['totals']['2026-02-28']['value_total']);
+    }
+
+    public function testQueueIsKeptWhenLeaseIsLost(): void
+    {
+        ['sid' => $sid, 'root' => $root] = $this->fiveCards();
+        $svc = $this->service(2);
+        $id = (int) $svc->enqueue($sid, ['2026-01-31'], null, $root, true)['id'];
+        $this->advanceToCompute($svc, $sid, $id);
+        $abort = new \ReflectionMethod($svc, 'abort');
+        $e = new \RuntimeException('boom');
+        // úlohu už drží jiný worker (jiný token): fronta musí zůstat
+        self::assertFalse($abort->invoke($svc, $sid, $id, 'cizi-token', $e));
+        self::assertGreaterThan(0, $this->queueRows($sid, $id));
+        // vlastní lease: úloha selže a fronta se smaže
+        $token = $this->container->get(\MyInvoice\Service\Eshop\CatalogJobService::class)->claim($sid, StockValueTrendService::KIND)['lease_token'];
+        self::assertTrue($abort->invoke($svc, $sid, $id, $token, $e));
+        self::assertSame(0, $this->queueRows($sid, $id));
     }
 
     public function testCancelDropsQueueRows(): void
@@ -372,6 +449,7 @@ final class StockValueTrendTest extends StockTestCase
         ['sid' => $sid, 'root' => $root] = $this->fiveCards();
         $svc = $this->service();
         $job = $svc->enqueue($sid, ['2026-01-31'], null, $root, true);
+        $this->advanceToCompute($svc, $sid, (int) $job['id']);
         self::assertGreaterThan(0, $this->queueRows($sid, (int) $job['id']));
         $action = $this->container->get(\MyInvoice\Action\Stock\StockReportAction::class);
         $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/stock/reports/value-trend-jobs/1/cancel')
@@ -387,10 +465,11 @@ final class StockValueTrendTest extends StockTestCase
         ['sid' => $sid, 'root' => $root, 'a' => $a] = $this->fiveCards();
         $svc = $this->service(2);
         $job = $svc->enqueue($sid, ['2026-01-31'], null, $root, true);
+        $this->advanceToCompute($svc, $sid, (int) $job['id']);
         $svc->tick($sid, 1); // dvě karty započítané pod kategorii A
         $this->db->pdo()->prepare('UPDATE stock_categories SET parent_id = NULL, path = ? WHERE supplier_id = ? AND id = ?')
             ->execute(['/' . $a . '/', $sid, $a]);
-        $state = $svc->tick($sid, 10);
+        $state = $svc->tick($sid, 50);
         self::assertSame('completed', $state['status']);
         $result = $svc->result($sid, (int) $job['id'], true);
         $sum = 0;
@@ -405,7 +484,9 @@ final class StockValueTrendTest extends StockTestCase
     public function testCancelThroughGenericJobsEndpointDropsQueue(): void
     {
         ['sid' => $sid, 'root' => $root] = $this->fiveCards();
-        $job = $this->service()->enqueue($sid, ['2026-01-31'], null, $root, true);
+        $svc = $this->service();
+        $job = $svc->enqueue($sid, ['2026-01-31'], null, $root, true);
+        $this->advanceToCompute($svc, $sid, (int) $job['id']);
         self::assertGreaterThan(0, $this->queueRows($sid, (int) $job['id']));
         $action = $this->container->get(\MyInvoice\Action\Eshop\CatalogJobAction::class);
         $request = (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', '/api/eshop/jobs/1/cancel')
@@ -415,5 +496,22 @@ final class StockValueTrendTest extends StockTestCase
         $response = $action->change($request, new \Slim\Psr7\Response(), ['id' => $job['id'], 'operation' => 'cancel']);
         self::assertSame(200, $response->getStatusCode(), (string) $response->getBody());
         self::assertSame(0, $this->queueRows($sid, (int) $job['id']));
+    }
+
+    public function testReadOnlyUserCancelsOnlyOwnJob(): void
+    {
+        ['sid' => $sid, 'root' => $root] = $this->fiveCards();
+        $svc = $this->service();
+        $mine = $svc->enqueue($sid, ['2026-01-31'], null, $root, true, $this->userId);
+        $foreign = $svc->enqueue($sid, ['2026-02-28'], null, $root, true, $this->userId + 1000000);
+        $action = $this->container->get(\MyInvoice\Action\Stock\StockReportAction::class);
+        $cancel = fn (int $id) => $action->cancelValueTrendJob(
+            (new \Slim\Psr7\Factory\ServerRequestFactory())->createServerRequest('POST', "/api/stock/reports/value-trend-jobs/$id/cancel")
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_METHOD, 'session')
+                ->withAttribute(\MyInvoice\Middleware\SupplierScopeMiddleware::ATTR_CURRENT_ID, $sid)
+                ->withAttribute(\MyInvoice\Middleware\AuthMiddleware::ATTR_USER, ['id' => $this->userId, 'role' => 'readonly']),
+            new \Slim\Psr7\Response(), ['id' => $id]);
+        self::assertSame(403, $cancel((int) $foreign['id'])->getStatusCode());
+        self::assertSame(200, $cancel((int) $mine['id'])->getStatusCode());
     }
 }

@@ -24158,10 +24158,11 @@ paths:
       description: |
         Dokončený výsledek je snímek (`computed_at`), zůstává čitelný i po dalších
         pohybech skladu: `dates`, `groups` (hodnoty po datech) a `totals`. Bez práva
-        číst katalog je `groups` prázdné. Před dokončením 409. Změní-li se sklad během
-        výpočtu, úloha se sama dvakrát začne od začátku, pak selže s kódem
-        `stock_value_trend_stale`. Stejné zadání nad stejným stavem skladu vrátí
-        už existující úlohu.
+        číst katalog je `groups` prázdné. Před dokončením 409. Přibude-li nebo se změní
+        doklad s datem do posledního data sestavy (u filtru skladu v něm), úloha se
+        sama dvakrát začne od začátku, pak selže s kódem `stock_value_trend_stale`;
+        opakování (retry) začne znovu s nulovým počtem restartů. Stejné zadání nad
+        stejným stavem skladu vrátí už existující úlohu.
       responses:
         '200': { description: OK }
         '404': { description: Výpočet nenalezen }
@@ -24183,6 +24184,7 @@ paths:
     post:
       tags: [Stock]
       summary: Zrušení výpočtu vývoje hodnoty zásob
+      description: Zrušit smí zakladatel úlohy (stačí čtení skladu), jinak uživatel s právem zápisu do skladu (403).
       responses:
         '200': { description: OK }
         '404': { description: Výpočet nenalezen }

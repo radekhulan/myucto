@@ -124,7 +124,7 @@ async function loadSales() {
 
 function onWarehouseChange() {
   if (tab.value === 'sales') reloadSales()
-  else void load()
+  else if (tab.value !== 'trend') void load() // vývoj hodnoty se počítá až tlačítkem
 }
 
 function reloadSales(resetPage = true) {
@@ -184,7 +184,7 @@ const trendReport = ref<StockValueTrendReport | null>(null)
 const trendGroup = ref<'' | number>('') // vlastní volba, aby se nepletla se seskupením ocenění
 let loadSeq = 0 // novější načtení nesmí přepsat starší odpověď
 const trendJob = ref<CatalogJob | null>(null)
-let trendJobOwn = false // úloha založená touto stránkou; sdílenou (reused) jen přestaneme sledovat
+const trendJobOwn = ref(false) // úloha založená touto stránkou; sdílenou (reused) jen přestaneme sledovat
 const cancellingTrend = ref(false)
 let trendTimer: ReturnType<typeof setTimeout> | undefined
 let trendGeneration = 0
@@ -195,7 +195,7 @@ async function abandonTrend() {
   clearTrendTimer()
   ++trendGeneration
   const job = trendJob.value
-  if (job && trendJobOwn && ['queued', 'running'].includes(job.status)) await catalogJobsApi.cancelValueTrend(job.id).catch(() => {})
+  if (job && trendJobOwn.value && ['queued', 'running'].includes(job.status)) await catalogJobsApi.cancelValueTrend(job.id).catch(() => {})
 }
 async function startTrend(seq: number) {
   await abandonTrend()
@@ -209,7 +209,7 @@ async function startTrend(seq: number) {
   })
   if (generation !== trendGeneration || seq !== loadSeq) return
   trendJob.value = job
-  trendJobOwn = !job.reused
+  trendJobOwn.value = !job.reused
   await pollTrend(generation)
 }
 async function pollTrend(generation = trendGeneration) {
@@ -229,6 +229,12 @@ async function pollTrend(generation = trendGeneration) {
     if ([403, 404, 409].includes(e?.response?.status)) { toast.error(e?.response?.data?.error?.message || t('common.error')); return }
     trendTimer = setTimeout(() => { void pollTrend(generation) }, 5000)
   }
+}
+/** Sdílenou úlohu jiného uživatele nezrušíme, jen přestaneme sledovat. */
+function stopWatchingTrend() {
+  clearTrendTimer()
+  ++trendGeneration
+  trendJob.value = null
 }
 async function cancelTrend() {
   if (!trendJob.value) return
@@ -345,7 +351,7 @@ async function cancelValuation() {
   finally { cancellingValuation.value = false }
 }
 
-function selectTab(t2: ReportTab) { clearValuationTimer(); ++valuationGeneration; void abandonTrend(); tab.value = t2; void load() }
+function selectTab(t2: ReportTab) { clearValuationTimer(); ++valuationGeneration; void abandonTrend(); tab.value = t2; if (t2 !== 'trend') void load() }
 
 async function exportFile(format: 'pdf' | 'xlsx') {
   if (tab.value === 'sales') {
@@ -449,20 +455,21 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
         <template v-if="tab === 'trend'">
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.trend_from') }}</label>
-            <DateInput v-model="trendFilters.from" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="trendFilters.from" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.trend_to') }}</label>
-            <DateInput v-model="trendFilters.to" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
+            <DateInput v-model="trendFilters.to" class="h-9 px-2 border border-neutral-300 rounded-md text-sm" />
           </div>
           <div v-if="categories.length">
             <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.trend_level') }}</label>
-            <select v-model="trendGroup" data-test="trend-group" @change="load" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[12rem]">
+            <select v-model="trendGroup" data-test="trend-group" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[12rem]">
               <option value="">{{ t('stock.reports.group_top') }}</option>
               <option v-for="c in categories" :key="c.id" :value="c.id">{{ indentedCategoryLabel(c) }}</option>
             </select>
           </div>
         </template>
+        <button v-if="tab === 'trend'" type="button" @click="load" data-test="trend-run" :class="btnOutline('primary')">{{ t('stock.reports.trend_run') }}</button>
         <div v-if="tab === 'valuation' && categories.length">
           <label class="block text-xs font-medium text-neutral-500 mb-1">{{ t('stock.reports.filter_group') }}</label>
           <select v-model="valuationGroup" data-test="valuation-group" @change="onValuationGroupChange" class="h-9 px-2 border border-neutral-300 rounded-md text-sm bg-surface min-w-[12rem]">
@@ -729,9 +736,15 @@ onBeforeUnmount(() => { clearValuationTimer(); ++valuationGeneration; void aband
 
     <!-- Vývoj hodnoty -->
     <template v-else-if="tab === 'trend'">
-      <CatalogJobProgress v-if="trendJob && ['queued', 'running'].includes(trendJob.status)" class="mb-4" :job="trendJob" :cancelling="cancellingTrend" :can-cancel="auth.canWrite('stock')" @cancel="cancelTrend" />
+      <p v-if="!trendJob && !trendReport && !loading" class="text-sm text-neutral-500 mb-3" data-test="trend-hint">{{ t('stock.reports.trend_hint') }}</p>
+      <CatalogJobProgress v-if="trendJob && ['queued', 'running'].includes(trendJob.status)" class="mb-2" :job="trendJob" :cancelling="cancellingTrend" :can-cancel="trendJobOwn" @cancel="cancelTrend" />
+      <div v-if="trendJob && !trendJobOwn && ['queued', 'running'].includes(trendJob.status)" class="mb-4 flex items-center gap-3 text-sm text-neutral-600" data-test="trend-shared">
+        <span>{{ t('stock.reports.trend_shared') }}</span>
+        <button type="button" :class="btnOutline('neutral')" data-test="trend-stop-watching" @click="stopWatchingTrend">{{ t('stock.reports.trend_stop_watching') }}</button>
+      </div>
       <p v-if="trendJob && ['queued', 'running'].includes(trendJob.status) && Number((trendJob.report as any)?.restarts) > 0" class="text-sm text-neutral-600 mb-3" data-test="trend-restart">{{ t('stock.reports.trend_restart') }}</p>
-      <p v-if="trendJob?.status === 'failed' || trendJob?.status === 'cancelled'" class="text-sm text-danger-600 mb-3" data-test="trend-failed">{{ trendJob.error_code === 'stock_value_trend_stale' ? t('stock.reports.trend_stale') : t('stock.reports.valuation_failed') }}</p>
+      <p v-if="trendJob?.status === 'cancelled'" class="text-sm text-neutral-600 mb-3" data-test="trend-cancelled">{{ t('stock.reports.trend_cancelled') }}</p>
+      <p v-if="trendJob?.status === 'failed'" class="text-sm text-danger-600 mb-3" data-test="trend-failed">{{ trendJob.error_code === 'stock_value_trend_stale' ? t('stock.reports.trend_stale') : t('stock.reports.trend_failed') }}</p>
       <p v-if="trendReport?.computed_at" class="text-xs text-neutral-500 mb-2" data-test="trend-computed">{{ t('stock.reports.trend_computed', { at: formatDateTime(trendReport.computed_at) }) }}</p>
       <div v-if="trendReport" class="bg-surface border border-neutral-200 rounded-lg shadow-sm overflow-hidden">
         <div class="overflow-x-auto">

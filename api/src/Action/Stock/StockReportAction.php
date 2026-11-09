@@ -164,9 +164,10 @@ final class StockReportAction
         return Json::ok($response, $this->trendJobView($job));
     }
 
+    /** Zrušit smí zakladatel úlohy (stačí čtení skladu, výpočet nic nemění), jinak uživatel s právem zápisu do skladu. */
     public function cancelValueTrendJob(Request $request, Response $response, array $args): Response
     {
-        if (!$this->requirePermission($request, $response, 'stock', \MyInvoice\Security\AccessLevel::WRITE, $err)) {
+        if (!$this->requirePermission($request, $response, 'stock', \MyInvoice\Security\AccessLevel::READ, $err)) {
             return $err;
         }
         $supplierId = $this->currentSupplierId($request);
@@ -177,6 +178,10 @@ final class StockReportAction
         $job = $this->jobs->find($supplierId, $id);
         if ($job === null || $job['kind'] !== StockValueTrendService::KIND) {
             return Json::error($response, 'not_found', 'Výpočet nenalezen.', 404);
+        }
+        if (($job['created_by'] === null || (int) $job['created_by'] !== $this->userId($request))
+            && !RequestAuthorization::allows($request, 'stock', AccessLevel::WRITE)) {
+            return Json::error($response, 'forbidden', 'Výpočet založil někdo jiný, zrušit ho může jen správce skladu.', 403);
         }
         if (!$this->jobs->cancel($supplierId, $id)) {
             return Json::error($response, 'job_state_conflict', 'Úlohu již nelze zrušit.', 409);
