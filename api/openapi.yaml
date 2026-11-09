@@ -14706,7 +14706,11 @@ paths:
     post:
       tags: [Accounting]
       summary: Napáruje CSV rekapitulaci mezd na řádky šablony (náhled, nic nezapisuje)
-      description: Účetní/admin. Multipart upload CSV/TXT, max 512 kB.
+      description: >-
+        Účetní/admin. Multipart upload CSV/TXT, max 512 kB. Řádek `kód účtu nebo název;částka`. Šablona po
+        dvojicích přijme navíc `MD;Dal;Částka[;Text;Středisko]`: napáruje se na dvojici se stejnými účty
+        (opakovaná dvojice po pořadí), nenalezená se připojí jako nová dvojice, dvojice se stejným účtem MD
+        a Dal skončí v `unmatched`. Řádky výsledku šablony po dvojicích nesou `pair_no` a `line_text`.
       parameters:
         - $ref: '#/components/parameters/SupplierIdHeader'
         - { in: path, name: id, required: true, schema: { type: integer } }
@@ -41828,6 +41832,8 @@ components:
         is_red_storno: { type: boolean }
         cost_center: { type: [string, 'null'], maxLength: 50 }
         dimensions: { type: object, additionalProperties: { type: integer }, description: Typ dimenze -> hodnota }
+        pair_no: { type: integer, minimum: 1, description: Číslo dvojice (koncept zadaný po dvojicích); u složeného konceptu klíč chybí. }
+        line_text: { type: string, maxLength: 255, description: Text dvojice; jen u řádku s `pair_no`. }
     InternalDocumentLink:
       type: object
       required: [doc_type, doc_id]
@@ -41848,6 +41854,25 @@ components:
         partner_name: { type: [string, 'null'], maxLength: 190 }
         note: { type: [string, 'null'] }
         lines: { type: array, maxItems: 200, items: { $ref: '#/components/schemas/InternalDocumentLine' } }
+        pairs:
+          type: array
+          maxItems: 100
+          description: >-
+            Koncept po dvojicích místo `lines` (obojí naráz 422 `invalid_lines`). Kontroly jako u ručního zápisu:
+            `pair_missing_debit_account`, `pair_missing_credit_account`, `pair_same_account`, `pair_amount_not_positive`.
+            Středisko a dimenze jdou na výsledkový účet dvojice (bez něj na oba řádky), text na oba řádky.
+            Firma ve složené formě k datu zápisu zaúčtuje koncept bez čísel dvojic.
+          items:
+            type: object
+            required: [debit_account_code, credit_account_code, amount]
+            properties:
+              debit_account_code: { type: string }
+              credit_account_code: { type: string }
+              amount: { type: number, exclusiveMinimum: 0 }
+              is_red_storno: { type: boolean }
+              line_text: { type: [string, 'null'], maxLength: 255 }
+              cost_center: { type: [string, 'null'], maxLength: 50 }
+              dimensions: { type: object, additionalProperties: { type: integer }, description: Typ dimenze -> hodnota }
         document_links:
           type: array
           maxItems: 50
