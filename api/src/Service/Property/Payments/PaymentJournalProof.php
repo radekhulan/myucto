@@ -101,19 +101,17 @@ final class PaymentJournalProof
 
     /**
      * Odpovídá zaúčtovaný zápis očekávaným řádkům? Zápis jednoduché formy je rozdělený
-     * na dvojice tímtéž deterministickým párovačem, jakým prošlo zaúčtování, takže se
-     * s ním porovnají očekávané řádky po rozdělení. Bez dvojic beze změny řádek po řádku.
+     * na dvojice tímtéž deterministickým pravidlem, jakým prošlo zaúčtování
+     * ({@see \MyInvoice\Service\Accounting\Pair\TypedJournalPairs}), takže se s ním
+     * porovnají očekávané řádky po rozdělení (i zrcadlo storna). Bez dvojic beze změny
+     * řádek po řádku; pořadí argumentů nerozhoduje.
      *
      * @param list<array<string,mixed>> $expected řádky, které se posílaly k zaúčtování
      * @param list<array<string,mixed>> $actual řádky důkazu ({@see current()})
      */
     public static function matches(array $expected, array $actual): bool
     {
-        $hash=static fn(array $lines):string=>PropertyInput::hash(self::canonicalLines($lines));
-        if($hash($expected)===$hash($actual))return true;
-        if(array_filter($actual,static fn(array $line):bool=>isset($line['pair_no']))===[])return false;
-        $paired=\MyInvoice\Service\Accounting\Pair\JournalPairer::pair($expected);
-        return $paired['status']===\MyInvoice\Service\Accounting\Pair\JournalPairer::STATUS_PAIRED&&$hash($paired['lines'])===$hash($actual);
+        return \MyInvoice\Service\Accounting\Pair\TypedJournalPairs::matches($expected,$actual,static fn(array $lines):string=>PropertyInput::hash(self::canonicalLines($lines)));
     }
 
     private static function legacyContext(array $line): array

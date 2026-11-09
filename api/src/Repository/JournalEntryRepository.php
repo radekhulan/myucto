@@ -23,6 +23,7 @@ use MyInvoice\Service\Accounting\Closing\Fx504JournalProof;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Accounting\Pair\JournalPairer;
+use MyInvoice\Service\Accounting\Pair\TypedJournalPairs;
 use MyInvoice\Security\FrameworkScopePolicy;
 use PDO;
 
@@ -152,7 +153,7 @@ final class JournalEntryRepository
             }
             $result=['journal_entry_id'=>null,'reversal_entry_id'=>null];
             foreach($journals as $part=>$journal){
-                $entry=$this->persistJournal($journal['header'],$journal['lines']);
+                $entry=$this->persistJournal($journal['header'],$journal['lines'],typedPairs:TypedJournalPairs::SPLIT);
                 if($part==='reversal'){
                     if($original===null||!$this->setReversedByLocked($original['entry']['id'],$proof->supplier,$entry))\MyInvoice\Service\Property\Opening\OpeningException::reject('reversal_conflict');
                     $result['reversal_entry_id']=$entry;
@@ -170,7 +171,7 @@ final class JournalEntryRepository
             if ($proof['header']['source_type'] !== 'cash' || trim($documentNumber) === '' || mb_strlen($documentNumber) > 100) throw new \LogicException('A cash number requires the current cash owner.');
             $proof['header']['document_no'] = $documentNumber;
         }
-        $entry = $this->persistJournal($proof['header'], $proof['lines']);
+        $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
         $this->auditTypedPosting($proof['header'], $entry, null, ['property_clearing' => true]);
         $intent->bindJournal($entry);
         return $entry;
@@ -180,7 +181,7 @@ final class JournalEntryRepository
     {
         return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
             $proof = $intent->journal($this->db);
-            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
             $this->auditTypedPosting($proof['header'], $entry, null, ['property_source_revision' => true]);
             $intent->complete($this->db, $entry);
             return $entry;
@@ -190,7 +191,7 @@ final class JournalEntryRepository
     public function insertPropertySettlement(\MyInvoice\Service\Property\Payments\Workflow\PaymentSettlementIntent $intent): int
     {
         $proof = $intent->journal($this->db);
-        $entry = $this->persistJournal($proof['header'], $proof['lines']);
+        $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
         $this->auditTypedPosting($proof['header'], $entry, null, ['property_settlement' => true]);
         $stmt = $this->db->pdo()->prepare("UPDATE unit_payment_operations SET journal_entry_id=? WHERE supplier_id=? AND id=? AND status='pending' AND journal_entry_id IS NULL");
         $stmt->execute([$entry, $intent->supplier, $intent->operationId]);
@@ -216,7 +217,7 @@ final class JournalEntryRepository
             $journal=$proof->journal($this->db);
             (new SystemDimensionWritePolicy($this->db))->assertPropertyFunding($journal['header'],$journal['lines'],$proof);
             \MyInvoice\Service\Accounting\PostingService::assertBalanced($journal['lines']);
-            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines']):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
+            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines'],typedPairs:TypedJournalPairs::SPLIT):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
             $this->auditTypedPosting($journal['header'],$entry,$journal['source_entry_id'],['typed_owner'=>$proof::class]);
             $proof->complete($this->db,$entry);return $entry;
         });
@@ -227,7 +228,7 @@ final class JournalEntryRepository
             $journal=$proof->journal($this->db);
             (new SystemDimensionWritePolicy($this->db))->assertPropertyServiceLifecycle($journal['header'],$journal['lines'],$proof);
             \MyInvoice\Service\Accounting\PostingService::assertBalanced($journal['lines']);
-            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines']):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
+            $entry=$journal['source_entry_id']===null?$this->persistJournal($journal['header'],$journal['lines'],typedPairs:TypedJournalPairs::SPLIT):$this->insertReversalLocked($journal['header'],$journal['lines'],$journal['source_entry_id']);
             $this->auditTypedPosting($journal['header'],$entry,$journal['source_entry_id'],['typed_owner'=>$proof::class]);
             $proof->complete($this->db,$entry);return $entry;
         });
@@ -241,7 +242,7 @@ final class JournalEntryRepository
             if ($proof['source_entry_id'] !== null) throw new \LogicException('An application cannot reverse a source.');
             (new \MyInvoice\Service\Accounting\Dimension\SystemDimensionWritePolicy($this->db))->assertPropertyServiceSettlementJournal($proof['header'], $proof['lines'], $intent->carrier($this->db));
             \MyInvoice\Service\Accounting\PostingService::assertBalanced($proof['lines']);
-            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
             $this->auditTypedPosting($proof['header'], $entry, null, ['property_service_settlement' => true]);
             $intent->complete($this->db, $entry);
             return $entry;
@@ -266,7 +267,7 @@ final class JournalEntryRepository
         $intent->claim($this->db);
         return (new DimensionPeriodGuard($this->db))->transaction(function () use ($intent): int {
             $proof = $intent->journal($this->db);
-            $entry = $this->persistJournal($proof['header'], $proof['lines']);
+            $entry = $this->persistJournal($proof['header'], $proof['lines'], typedPairs: TypedJournalPairs::SPLIT);
             $this->auditTypedPosting($proof['header'], $entry, null, ['property_setoff' => true]);
             $intent->complete($this->db, $entry);
             return $entry;
@@ -496,7 +497,7 @@ final class JournalEntryRepository
             if (($existing === null ? null : (int) $existing['id']) !== ($proof->record['previous_entry_id'] ?? null)
                 || ($existing === null ? null : (int) $existing['row_version']) !== ($proof->record['previous_entry_version'] ?? null)) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
             if ($existing === null) {
-                $entryId = $this->persistJournal($header, $proof->lines);
+                $entryId = $this->persistJournal($header, $proof->lines, typedPairs: TypedJournalPairs::CONSECUTIVE);
                 $entryVersion = 1;
             } else {
                 $entryId = (int) $existing['id'];
@@ -535,7 +536,8 @@ final class JournalEntryRepository
             $header['supplier_id'], $entryId, $header['period_id'], $entryVersion]);
         if ($stmt->rowCount() !== 1) throw \MyInvoice\Repository\ClosingCarryReadRepository::changed();
         $this->deleteLines($entryId, $header['supplier_id']);
-        $this->insertLines($this->db->pdo(), $entryId, $header + ['pair_typed_owner' => true], $proof->lines);
+        [$pairHeader, $lines] = $this->pairTypedLines($header, $proof->lines, TypedJournalPairs::CONSECUTIVE);
+        $this->insertLines($this->db->pdo(), $entryId, $pairHeader + ['pair_typed_owner' => true], $lines);
         $this->logReleasedPairings($header['supplier_id'], $entryId,
             (new JournalLinePairingRepository($this->db))->releaseStale($header['supplier_id'], $entryId), 'repost');
     }
@@ -553,13 +555,18 @@ final class JournalEntryRepository
 
     /**
      * @param bool $typedOwner zápis typovaného zapisovače (SVJ, NNO, uzávěrka 504, převod
-     *        rámce): dvojice zatím netvoří, v jednoduché formě se vede jako `ineligible`
+     *        rámce): bez `$typedPairs` dvojice netvoří, v jednoduché formě se vede jako `ineligible`
+     * @param ?string $typedPairs režim {@see TypedJournalPairs} typovaného zápisu, jehož důkazy
+     *        přijmou zápis po dvojicích: v jednoduché formě se rozdělí, složená forma beze změny
      */
-    private function persistJournal(array $header, array $lines, bool $typedOwner = true): int
+    private function persistJournal(array $header, array $lines, bool $typedOwner = true, ?string $typedPairs = null): int
     {
         $pdo = $this->db->pdo();
         if (!$pdo->inTransaction()) {
             throw new \LogicException('Journal persistence requires a transaction.');
+        }
+        if ($typedOwner && $typedPairs !== null) {
+            [$header, $lines] = $this->pairTypedLines($header, $lines, $typedPairs);
         }
         (new MembershipUseGuard($this->db))->assertHeaderOwner($header);
         if (($header['posted_at'] ?? null) !== null) (new \MyInvoice\Service\Accounting\Funding\NativeCostCoverage($this->db))->assertCreditNotePosting($header);
@@ -583,6 +590,41 @@ final class JournalEntryRepository
         $entryId = (int) $pdo->lastInsertId();
         $this->insertLines($pdo, $entryId, $header + ['pair_typed_owner' => $typedOwner], $lines);
         return $entryId;
+    }
+
+    /**
+     * Řádky typovaného zápisu (modul nemovitostí SVJ, kroky uzávěrky 504) ve firmě
+     * s jednoduchou formou k datu zápisu: rozdělí je na dvojice jediným pravidlem
+     * {@see TypedJournalPairs::pair()}, se kterým porovnávají i jejich důkazy. Co rozdělit
+     * nejde, zůstane složené s posouzením `ineligible` a důvodem párovače.
+     *
+     * Číslo dvojice převzaté ze zdrojového zápisu (protiřádek banky, řádek předpisu)
+     * do nového zápisu nepatří a zahodí se v obou formách; firma, která jednoduchou
+     * formu nikdy neměla, takové řádky nemá a zapisuje bajtově stejně.
+     *
+     * @param array<string,mixed> $header
+     * @param list<array<string,mixed>> $lines
+     * @param TypedJournalPairs::SPLIT|TypedJournalPairs::CONSECUTIVE $mode
+     * @return array{array<string,mixed>, list<array<string,mixed>>}
+     */
+    private function pairTypedLines(array $header, array $lines, string $mode = TypedJournalPairs::SPLIT): array
+    {
+        if (isset($header['pair_status'])) {
+            return [$header, $lines];
+        }
+        if (TypedJournalPairs::hasPairs($lines)) {
+            $lines = TypedJournalPairs::withoutCarriedPairs($lines);
+        }
+        if (!$this->entryForms()->formAt((int) $header['supplier_id'], (string) $header['entry_date'], currentRead: true)->isSingle()) {
+            return [$header, $lines];
+        }
+        $result = TypedJournalPairs::pair($lines, $mode);
+        if ($result['status'] === JournalPairer::STATUS_PAIRED) {
+            return [$header, $result['lines']];
+        }
+        $header['pair_status'] = 'ineligible';
+        $header['pair_status_reason'] = TypedJournalPairs::REASON_PREFIX . ($result['reason'] ?? JournalPairer::REASON_MANY_TO_MANY);
+        return [$header, $lines];
     }
 
     public function insertReversal(array $header, array $lines, int $sourceEntryId): int

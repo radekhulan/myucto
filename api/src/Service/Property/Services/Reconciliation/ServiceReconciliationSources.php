@@ -39,7 +39,7 @@ final class ServiceReconciliationSources
     private function reversal(int $supplier,array $ledger):?array
     {
         if($ledger['entry']['reversed_by']===null)return null;$reverse=(new PaymentJournalProof($this->db))->current($supplier,$ledger['entry']['reversed_by']);$want=array_map(JournalLineAmount::reversal(...),$ledger['lines']);
-        if($reverse['entry']['source_type']!==$ledger['entry']['source_type']||$reverse['entry']['source_id']!==null||$reverse['entry']['entry_date']<$ledger['entry']['entry_date']||PropertyInput::hash(PaymentJournalProof::canonicalLines($want))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($reverse['lines'])))throw new ServiceReconciliationException('source_reversal');return $reverse;
+        if($reverse['entry']['source_type']!==$ledger['entry']['source_type']||$reverse['entry']['source_id']!==null||$reverse['entry']['entry_date']<$ledger['entry']['entry_date']||!PaymentJournalProof::matches($want, $reverse['lines']))throw new ServiceReconciliationException('source_reversal');return $reverse;
     }
     public function read(int $supplier):array
     {

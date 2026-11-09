@@ -85,14 +85,13 @@ final class PostingService
     private const ROUNDING_TOLERANCE_CENTS = 200;
 
     /**
-     * Zdroje typovaných vlastníků (SVJ, NNO): jejich zápisy hlídají vlastní důkazy řádků,
-     * proto je jednoduchá forma zatím nedělí na dvojice (vedou se jako `ineligible`).
-     * Předpis SVJ (`unit_charge`) sem nepatří: jde po dvojicích a jeho důkaz je přijme.
+     * Zdroje typovaných vlastníků NNO: jejich zápisy hlídají vlastní důkazy řádků, proto
+     * je jednoduchá forma nedělí na dvojice (vedou se jako `ineligible`). Zdroje SVJ sem
+     * nepatří: jejich důkazy porovnávají zápis po dvojicích
+     * ({@see \MyInvoice\Service\Accounting\Pair\TypedJournalPairs}).
      */
     private const PAIR_TYPED_SOURCES = [
-        'unit_payment' => true, 'unit_payment_revision' => true,
-        'property_service_settlement' => true, 'property_service_lifecycle' => true,
-        'property_funding' => true, 'nonprofit_capital' => true, 'nonprofit_membership' => true,
+        'nonprofit_capital' => true, 'nonprofit_membership' => true,
     ];
 
     /**

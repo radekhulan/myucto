@@ -50,7 +50,7 @@ final class ClearingRevisionHistory
             if ($ledger['entry']['source_type'] !== 'unit_payment_revision' || $ledger['entry']['source_id'] !== (int) $row['id']
                 || $ledger['entry']['entry_date'] !== $row['accounting_date'] || $ledger['entry']['reversed_by'] !== null
                 || $ledger['entry']['period_id'] !== $snapshot['journal']['header']['period_id'] || $request['source_id'] !== (int) $source['id']
-                || PropertyInput::hash(PaymentJournalProof::canonicalLines($ledger['lines'])) !== PropertyInput::hash(PaymentJournalProof::canonicalLines($plan['lines']))) self::corrupt();
+                || !PaymentJournalProof::matches($ledger['lines'], $plan['lines'])) self::corrupt();
             $cells = array_column($plan['cells'], null, 'key');
             foreach ($plan['moves'] as $index => $move) $cells[$move['to']['key']]['line'] = $ledger['lines'][2 * $index + 1];
             $cells = array_values($cells); $previous = (int) $row['id']; $date = $row['accounting_date'];

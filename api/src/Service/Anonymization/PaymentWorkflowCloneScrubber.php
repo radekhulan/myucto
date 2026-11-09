@@ -89,7 +89,7 @@ final class PaymentWorkflowCloneScrubber
             $actual = $ledgerProof->current((int) $row['supplier_id'], (int) $row['journal_entry_id']);
             if ($actual['entry']['source_type'] !== 'unit_payment_revision' || $actual['entry']['source_id'] !== (int) $row['id']
                 || $actual['entry']['entry_date'] !== $row['accounting_date'] || $actual['entry']['reversed_by'] !== null
-                || PropertyInput::hash(PaymentJournalProof::canonicalLines($actual['lines'])) !== PropertyInput::hash(PaymentJournalProof::canonicalLines($text($snapshot['plan']['lines'])))) self::corrupt();
+                || !PaymentJournalProof::matches($actual['lines'], $text($snapshot['plan']['lines']))) self::corrupt();
         }
         $savepoint = 'property_clone_' . bin2hex(random_bytes(12)); $pdo->exec('SAVEPOINT ' . $savepoint);
         return new self($db, $scrubber, $text, $rows, $sources, $operations, $savepoint, $exports);
