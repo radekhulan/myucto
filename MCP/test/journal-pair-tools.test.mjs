@@ -5,8 +5,6 @@ import { validateToolArguments } from '../src/tool-args.mjs';
 
 const ENTRY = {
   id: 7,
-  entry_form: 'single',
-  pair_status: null,
   lines: [
     { id: 1, side: 'debit', account_code: '311', amount: 1210, pair_no: 1, line_text: 'faktura' },
     { id: 2, side: 'credit', account_code: '602', amount: 1000, pair_no: 1, line_text: 'faktura' },
@@ -32,24 +30,23 @@ test('detail zápisu předá dvojice, formu a pair_no beze ztráty', async () =>
   const description = TOOLS_BY_NAME.get('get_journal_entry').description;
   assert.match(description, /pairs/);
   assert.match(description, /pair_no/);
+  assert.doesNotMatch(description, /`entry_form`/);
+  assert.match(description, /journal_entry_form/);
 });
 
-test('deník filtruje zápisy M : N přes pair_status a jiné hodnoty odmítne', async () => {
+test('deník nenabízí filtr pair_status, který backend nezná, a odmítne ho', async () => {
   const tool = TOOLS_BY_NAME.get('list_journal_entries');
-  assert.deepEqual(tool.inputSchema.properties.pair_status.enum, ['composite_mn']);
-  assert.deepEqual(validateToolArguments(tool, { pair_status: 'composite_mn' }), { pair_status: 'composite_mn' });
-  assert.throws(() => validateToolArguments(tool, { pair_status: 'jine' }));
-  const { request } = await call('list_journal_entries', { pair_status: 'composite_mn', entry_id: 7 });
+  assert.equal(tool.inputSchema.properties.pair_status, undefined);
+  assert.throws(() => validateToolArguments(tool, { pair_status: 'composite_mn' }));
+  const { request } = await call('list_journal_entries', { entry_id: 7 });
   assert.equal(request.path, '/accounting/journal');
-  assert.equal(request.query.pair_status, 'composite_mn');
   assert.equal(request.query.entry_id, 7);
-  const none = await call('list_journal_entries', {});
-  assert.equal(none.request.query.pair_status, undefined);
-  assert.match(tool.description, /pairs/);
+  assert.equal('pair_status' in request.query, false);
+  assert.match(tool.description, /get_journal_entry/);
 });
 
 test('opis účtu předá protiúčet dvojice beze změny a filtruje podle protiúčtu', async () => {
-  const statement = { items: [{ entry_id: 7, counter_accounts: '602', counter_account_id: 21, pair_no: 1 }], counter_totals: [{ account_id: 21, md: 1000, d: 0 }] };
+  const statement = { items: [{ entry_id: 7, counter_accounts: '602', counter_account_id: 21, pair_no: 1, pair_status: 'paired', pair_piece: null }], counter_totals: [{ account_id: 21, md: 1000, d: 0 }] };
   const { request, out } = await call('account_statement', { account_id: 9, from: '2027-01-01', to: '2027-12-31', counter_account_id: 21 }, statement);
   assert.equal(request.path, '/accounting/reports/account-statement/9');
   assert.equal(request.query.counter_account_id, 21);
@@ -57,6 +54,8 @@ test('opis účtu předá protiúčet dvojice beze změny a filtruje podle proti
   const description = TOOLS_BY_NAME.get('account_statement').description;
   assert.match(description, /jediný protiúčet/);
   assert.match(description, /counter_totals/);
+  assert.match(description, /pair_piece/);
+  assert.doesNotMatch(description, /pair_derived|pair_composite_mn/);
 });
 
 test('forma zápisu firmy je čtecí nástroj bez argumentů a volá entry-form', async () => {

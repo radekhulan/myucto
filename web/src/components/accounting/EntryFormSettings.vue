@@ -92,13 +92,14 @@ async function submit() {
   dialog.error = ''
   dialog.saving = true
   try {
-    await accountingApi.scheduleEntryForm({
+    const saved = await accountingApi.scheduleEntryForm({
       valid_from: form.valid_from,
       entry_form: form.entry_form,
       ...(previewId.value ? { conversion_preview_id: previewId.value } : {}),
       ...(form.note.trim() ? { note: form.note.trim() } : {}),
     })
     toast.success(t('accounting.pairs.settings.saved'))
+    if (saved?.conversion?.error) toast.warning(t('accounting.pairs.settings.conversion_failed'))
     dialog.open = false
     await load()
     if (state.value) emit('changed', state.value)

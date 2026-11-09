@@ -18974,7 +18974,7 @@
       "repost_done": "Dvojice byla přeúčtována.",
       "repost_done_in_place": "Dvojice byla přeúčtována na místě, původní obsah zůstává v historii zápisu.",
       "repost_done_tax_neutral": "Dvojice byla přeúčtována jako daňově neutrální změna v zamčeném datu.",
-      "repost_done_correction": "Dvojice byla přeúčtována opravným zápisem (storno a nová dvojice).",
+      "repost_done_correction_entry": "Dvojice byla přeúčtována opravným zápisem (storno a nová dvojice).",
       "manual": {
         "pairs": "Dvojice",
         "hint": "Každá dvojice je jeden účet MD proti jednomu účtu Dal se stejnou částkou, zápis je tedy vždy vyrovnaný. Středisko a dimenze patří k výsledkovému účtu.",
@@ -19012,7 +19012,8 @@
         "preview_recommended": "Doporučujeme nejdřív spustit náhled převodu, ať vidíte, kolik zápisů se rozdělí.",
         "back_to_composite": "Už rozdělené zápisy zůstanou po dvojicích, nové se budou zapisovat složeně.",
         "save": "Uložit změnu formy",
-        "saved": "Forma účetního zápisu byla změněna."
+        "saved": "Forma účetního zápisu byla změněna.",
+        "conversion_failed": "Forma zápisu je uložená, ale převod starších zápisů od zvoleného data selhal. Spusťte ho znovu z náhledu převodu."
       },
       "conversion": {
         "title": "Náhled převodu starších zápisů",
@@ -19023,7 +19024,6 @@
         "failed": "Náhled převodu selhal.",
         "cancelled": "Náhled byl zrušen.",
         "auto": "Rozdělí se na dvojice automaticky",
-        "derived": "Zobrazí se po dvojicích bez změny dat",
         "composite_mn": "Zůstanou složené M : N (k ruční úpravě)",
         "ineligible": "Beze změny (uzavřené období, vazby, mzdy)",
         "already_paired": "Už jsou po dvojicích",
@@ -19034,10 +19034,14 @@
           "saldo_pairing": "párování otevřených položek",
           "payroll": "mzdový zápis",
           "closed_period": "uzavřené období",
-          "locked_date": "zamčené datum",
+          "date_locked": "zamčené datum",
           "typed_owner": "zápis z modulu s vlastní kontrolou",
           "same_account": "stejný účet na obou stranách",
           "reversed": "stornovaný zápis",
+          "no_lines": "zápis bez řádků",
+          "mixed_red_storno": "dvojice se stejnou částkou s různým červeným stornem",
+          "group_unbalanced": "řádky skupiny nejsou vyvážené",
+          "reversal": "protizápis ke stornu",
           "many_to_many": "M : N"
         }
       }
@@ -21262,7 +21266,13 @@
       "entry_form_unchanged": "Firma má k tomuto datu už nastavenou stejnou formu zápisu.",
       "invalid_entry_form_date": "Datum účinnosti formy zápisu není platné.",
       "not_implemented": "Tato funkce zatím není k dispozici.",
-      "payroll_reversal_forbidden": "Mzdový zápis nelze stornovat ani přeúčtovat, opravuje se ve mzdách."
+      "payroll_reversal_forbidden": "Mzdový zápis nelze stornovat ani přeúčtovat, opravuje se ve mzdách.",
+      "pair_not_found": "Zápis tuhle dvojici nemá.",
+      "pair_already_reversed": "Dvojice už byla stornována nebo přeúčtována.",
+      "pair_renumber_blocked": "Zápis má stornovanou dvojici, kterou by výměna musela přečíslovat.",
+      "pair_unchanged": "Dvojice už je zaúčtovaná na zadaných účtech.",
+      "conversion_in_progress": "Převod zápisů na dvojice už běží.",
+      "accounting_not_double_entry": "Převod na dvojice je jen pro podvojné účetnictví."
     },
     "legal504": {
       "asset_title": "Rezerva na opravu majetku a její zdroj",

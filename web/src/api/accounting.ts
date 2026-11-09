@@ -188,8 +188,12 @@ export interface JournalEntry {
    * zápočet). Podklad pro odznak ve sloupci Zdroj; obsah panelu dodá /journal/{id}/related.
    */
   has_related?: boolean
-  /** Zápis nejde rozdělit na dvojice (M : N) nebo je odvozený; jen u firem s jednoduchou formou. */
-  pair_status?: JournalPairStatus | null
+  /**
+   * Zápis nejde rozdělit na dvojice (M : N); jen u firem s jednoduchou formou. Seznam deníku
+   * backend dnes tohle pole nevrací (filtr `pair_status` ani odznak z něj nefungují), stav
+   * jednoho zápisu je v detailu jako `pair_status.status`.
+   */
+  pair_status?: JournalLineStatus | null
   /** Interní doklad, jehož zaúčtováním (posting) nebo stornem (reversal) zápis je (migrace 2193). */
   internal_document?: { id: number; document_no: string | null; status: 'draft' | 'posted' | 'reversed'; role: 'posting' | 'reversal' } | null
   automation?: AutomationProvenance | null
@@ -285,8 +289,24 @@ export interface DraftPostingPreview {
   already_posted: number | null
 }
 
-/** Stav zápisu bez fyzických dvojic: `derived` = zobrazuje se po dvojicích za běhu, `composite_mn` = M : N k ruční úpravě. */
-export type JournalPairStatus = 'derived' | 'composite_mn' | 'ineligible'
+/**
+ * Stav řádku v opisu účtu, hlavní knize a otevřených položkách (firma s jednoduchým zápisem):
+ * `paired` = řádek nese `pair_no`, `derived` = starší zápis 1 : N rozložený za běhu,
+ * `composite_mn` = M : N, protiúčty zůstávají v původním tvaru.
+ */
+export type JournalLineStatus = 'paired' | 'derived' | 'composite_mn'
+
+/** Posouzení zápisu bez fyzických dvojic v detailu: `composite_mn` = M : N k ruční úpravě, `ineligible` = převod nepřipadá v úvahu. */
+export type JournalPairAssessment = 'composite_mn' | 'ineligible'
+
+/** Posouzení zápisu bez dvojic z tabulky `journal_entry_pair_status` (detail zápisu). */
+export interface JournalPairAssessmentInfo {
+  status: JournalPairAssessment
+  reason: string | null
+}
+
+/** Stav zápisu v exportu deníku (`layout: "pairs"`). */
+export type JournalExportPairStatus = JournalLineStatus
 
 /** Forma účetního zápisu firmy: složený (dosavadní) nebo jednoduchý (po dvojicích). */
 export type EntryForm = 'composite' | 'single'
@@ -307,14 +327,14 @@ export interface JournalEntryPair {
   reversed_by_entry_id?: number | null
 }
 
-export interface JournalEntryDetail extends JournalEntry {
+export interface JournalEntryDetail extends Omit<JournalEntry, 'pair_status'> {
   lines: JournalLine[]
-  /** Forma zápisu k datu zápisu (aditivní, chodí s detailem). */
+  /** Forma zápisu k datu zápisu; backend ji v detailu dnes nevrací (forma firmy je v GET /accounting/entry-form). */
   entry_form?: EntryForm
-  /** Dvojice zápisu; prázdné nebo chybí u složeného zápisu. */
+  /** Dvojice zápisu; u zápisu bez dvojic klíč chybí. */
   pairs?: JournalEntryPair[]
-  /** Posouzení zápisu bez fyzických dvojic (odvozené / M : N / nezpůsobilé). */
-  pair_status?: JournalPairStatus | null
+  /** Posouzení zápisu bez fyzických dvojic; klíč chybí u zápisu s dvojicemi i u složeného zápisu bez posouzení. */
+  pair_status?: JournalPairAssessmentInfo
   /** Měkké vazby na doklady (migrace 1514); chodí s detailem zápisu. */
   links?: JournalDocumentLink[]
   /** Varování pravidel dimenzí (vynucení „varovat") po zaúčtování. */
@@ -712,21 +732,34 @@ export type PairConversionStatus = 'queued' | 'running' | 'done' | 'failed' | 'c
 
 /** Počty klasifikace zápisů v běhu převodu (náhled nanečisto i provedení). */
 export interface PairConversionCounts {
+  /** Zápisy v rozsahu běhu a kolik jich běh zpracoval. */
+  total?: number
+  processed?: number
+  /** Už po dvojicích (nic se nemění). */
   paired?: number
+  /** Rozdělí se na dvojice automaticky (1 : N). */
   auto?: number
-  derived?: number
+  /** Zůstanou složené M : N (k ruční úpravě). */
   composite_mn?: number
+  /** Beze změny (uzavřené období, vazby, mzdy). */
   ineligible?: number
-  already_paired?: number
-  /** Důvod → počet nezpůsobilých zápisů (vazba na saldo, mzdy, uzavřené období, ...). */
-  reasons?: Record<string, number>
-  [key: string]: unknown
+  /** Důvod -> počet zápisů M : N / nezpůsobilých zápisů. */
+  composite_mn_reasons?: Record<string, number>
+  ineligible_reasons?: Record<string, number>
+  /** Zdrojový typ -> klasifikace -> počet. */
+  by_source_type?: Record<string, Partial<Record<'paired' | 'auto' | 'composite_mn' | 'ineligible', number>>>
+  /** Jen provedení: převedené, přeskočené (složená forma) a neúspěšné zápisy. */
+  converted?: number
+  skipped_composite_form?: number
+  failed?: number
 }
 
 export interface PairConversionSampleItem {
   entry_id: number
   entry_date?: string
   document_no?: string | null
+  source_type?: string
+  source_id?: number | null
   status: 'composite_mn' | 'ineligible'
   reason?: string | null
 }
@@ -764,11 +797,16 @@ export interface RepostPairPayload {
   description?: string
 }
 
-/** Jak se dvojice přeúčtovala: na místě, daňově neutrálně v zamčeném datu, nebo opravným zápisem. */
+/**
+ * Jak se dvojice přeúčtovala: na místě, daňově neutrálně v zamčeném datu, nebo opravným zápisem.
+ * `entry` je přeúčtovaný zápis (`in_place`, `tax_neutral`) nebo nový opravný zápis (`correction_entry`),
+ * `pair_no` je číslo dvojice v něm (u opravného zápisu vždy 2, dvojice 1 je zrcadlo původní).
+ */
 export interface RepostPairResult {
-  mode: 'in_place' | 'tax_neutral' | 'correction' | string
+  mode: 'in_place' | 'tax_neutral' | 'correction_entry'
   pair_no: number
-  entry: JournalEntryDetail
+  /** Zápis tak, jak ho vrací `JournalEntryRepository::find` (hlavička a řádky, bez `pairs`). */
+  entry: JournalEntry & { lines?: JournalLine[] }
 }
 
 // ── Šablony ručních zápisů (Fáze F, mzdový můstek, audit 2026-07) ──────────
@@ -1419,12 +1457,12 @@ export interface AccountStatementItem {
   counter_accounts: string | null
   /** Protiúčet dvojice (jednoduchý zápis); null = protiúčet z heuristiky složeného zápisu. */
   counter_account_id?: number | null
-  /** Číslo dvojice řádku; null u řádku složeného zápisu. */
+  /** Číslo dvojice řádku; null u řádku složeného zápisu (jen u firmy s jednoduchým zápisem). */
   pair_no?: number | null
-  /** Starší složený zápis rozložený na pohyby za běhu (nezměněná data). */
-  pair_derived?: boolean
-  /** Zápis M : N, který nejde rozložit; protiúčty jsou v původním tvaru. */
-  pair_composite_mn?: boolean
+  /** Stav řádku (jen u firmy s jednoduchým zápisem). */
+  pair_status?: JournalLineStatus | null
+  /** Pořadí dílu starší 1 : N rozložené na víc pohybů (1..n); jinak null (jen v opisu účtu). */
+  pair_piece?: number | null
   partner: string | null
   variable_symbol: string | null
   currency: string
@@ -1464,8 +1502,7 @@ export interface OpenItemLine {
   counter_accounts: string | null
   counter_account_id?: number | null
   pair_no?: number | null
-  pair_derived?: boolean
-  pair_composite_mn?: boolean
+  pair_status?: JournalLineStatus | null
   partner: string | null
   variable_symbol: string | null
   currency: string
@@ -1557,6 +1594,8 @@ export interface AccountStatementReport {
   counter_totals: AccountCounterTotal[] | null
   /** Vybraný protiúčet: podíl na obratu účtu, ne součet zobrazených řádků. Jen na první stránce. */
   counter_filter: { account_id: number; account_code: string; name: string; md: number; d: number } | null
+  /** `pairs` u firmy s jednoduchým zápisem: řádky nesou `pair_no`, `pair_status`, `pair_piece`; jinak klíč chybí. */
+  layout?: 'pairs'
 }
 
 export type StatementScope = 'auto' | 'full' | 'small' | 'micro'
@@ -2700,7 +2739,7 @@ export const accountingApi = {
     api.get<EntryFormState>('/accounting/entry-form').then(r => r.data),
   /** Naplánuje změnu formy od data (jen admin firmy). */
   scheduleEntryForm: (payload: ScheduleEntryFormPayload) =>
-    api.post<{ ok?: boolean }>('/accounting/entry-form', payload).then(r => r.data),
+    api.post<EntryFormState & { conversion: { run_id: number | null; error: string | null } | null }>('/accounting/entry-form', payload).then(r => r.data),
   listPairConversions: () =>
     api.get<{ runs: PairConversionRun[] }>('/accounting/pair-conversion').then(r => r.data.runs ?? []),
   /** Náhled převodu nanečisto; vrací id běhu, výsledek se čte pollingem. */

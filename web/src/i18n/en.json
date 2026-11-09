@@ -18974,7 +18974,7 @@
       "repost_done": "The pair was reposted.",
       "repost_done_in_place": "The pair was reposted in place; the original content stays in the entry history.",
       "repost_done_tax_neutral": "The pair was reposted as a tax-neutral change in a locked date.",
-      "repost_done_correction": "The pair was reposted with a correcting entry (reversal and a new pair).",
+      "repost_done_correction_entry": "The pair was reposted with a correcting entry (reversal and a new pair).",
       "manual": {
         "pairs": "Pairs",
         "hint": "Each pair is one debit account against one credit account with the same amount, so the entry is always balanced. Cost center and dimensions belong to the profit and loss account.",
@@ -19012,7 +19012,8 @@
         "preview_recommended": "We recommend running the conversion preview first to see how many entries will be split.",
         "back_to_composite": "Entries already split into pairs stay as they are, new ones will be written as composite.",
         "save": "Save form change",
-        "saved": "The journal entry form was changed."
+        "saved": "The journal entry form was changed.",
+        "conversion_failed": "The entry form is saved, but converting older entries from the chosen date failed. Run it again from the conversion preview."
       },
       "conversion": {
         "title": "Preview of converting older entries",
@@ -19023,7 +19024,6 @@
         "failed": "The conversion preview failed.",
         "cancelled": "The preview was cancelled.",
         "auto": "Split into pairs automatically",
-        "derived": "Shown by pairs without changing data",
         "composite_mn": "Stay composite M : N (manual fix)",
         "ineligible": "Unchanged (closed period, links, payroll)",
         "already_paired": "Already by pairs",
@@ -19034,10 +19034,14 @@
           "saldo_pairing": "open item matching",
           "payroll": "payroll entry",
           "closed_period": "closed period",
-          "locked_date": "locked date",
+          "date_locked": "locked date",
           "typed_owner": "entry from a module with its own checks",
           "same_account": "same account on both sides",
           "reversed": "reversed entry",
+          "no_lines": "entry without lines",
+          "mixed_red_storno": "pairs with the same amount and mixed red reversal",
+          "group_unbalanced": "group lines are not balanced",
+          "reversal": "reversal entry",
           "many_to_many": "M : N"
         }
       }
@@ -21262,7 +21266,13 @@
       "entry_form_unchanged": "The company already has the same entry form on this date.",
       "invalid_entry_form_date": "The effective date of the entry form is not valid.",
       "not_implemented": "This function is not available yet.",
-      "payroll_reversal_forbidden": "A payroll entry cannot be reversed or reposted, it is corrected in payroll."
+      "payroll_reversal_forbidden": "A payroll entry cannot be reversed or reposted, it is corrected in payroll.",
+      "pair_not_found": "The entry has no such pair.",
+      "pair_already_reversed": "The pair has already been reversed or reposted.",
+      "pair_renumber_blocked": "The entry has a reversed pair that the replacement would have to renumber.",
+      "pair_unchanged": "The pair is already posted to the given accounts.",
+      "conversion_in_progress": "A conversion of entries to pairs is already running.",
+      "accounting_not_double_entry": "Conversion to pairs is only available for double-entry bookkeeping."
     },
     "deferred504": {
       "stale": "The sources have changed since the last assessment. Preview the decision again and confirm a current assessment.",
