@@ -12,7 +12,7 @@ import {
   accountingApi, type JournalHistoryResponse, type JournalHistoryLineChange,
 } from '@/api/accounting'
 import { useToast } from '@/composables/useToast'
-import { formatDate, formatMoney } from '@/composables/useFormat'
+import { formatDate, formatDateTime, formatMoney } from '@/composables/useFormat'
 import { ICONS } from '@/components/ui/buttonStyles'
 import CollapsibleSection from '@/components/ui/CollapsibleSection.vue'
 
@@ -76,15 +76,15 @@ function lineSideLabel(side: string): string {
     <div>
       <div v-if="loading" class="text-xs text-neutral-400 py-2">{{ t('common.loading') }}</div>
       <template v-else-if="history">
-        <p v-if="history.versions.length <= 1" class="text-xs text-neutral-400">{{ t('accounting.journal.history.no_changes') }}</p>
-        <ol v-else class="space-y-3">
+        <p v-if="history.versions.length <= 1" class="text-xs text-neutral-400 mb-2">{{ t('accounting.journal.history.no_changes') }}</p>
+        <ol class="space-y-3">
           <li v-for="v in history.versions" :key="v.version" class="border border-neutral-200 rounded-md px-3 py-2 bg-neutral-50">
             <div class="flex items-center flex-wrap gap-2 text-xs">
               <span class="font-semibold text-neutral-700">{{ t('accounting.journal.history.version', { n: v.version }) }}</span>
               <span v-if="v.is_current" class="px-1.5 py-0.5 rounded bg-success-50 text-success-600 font-medium">{{ t('accounting.journal.history.current') }}</span>
-              <span class="text-neutral-400">{{ formatDate(v.valid_from) }}</span>
-              <span v-if="v.changed_by" class="text-neutral-500">
-                - {{ v.changed_by.user_name || t('accounting.journal.history.unknown_user') }}
+              <span class="text-neutral-400">{{ formatDateTime(v.valid_from) }}</span>
+              <span class="text-neutral-500">
+                - {{ v.changed_by?.user_name || t('accounting.journal.history.unknown_user') }}
               </span>
             </div>
 
@@ -109,6 +109,7 @@ function lineSideLabel(side: string): string {
                     <span class="text-success-600 font-medium">+ </span>
                     <span class="font-mono">{{ c.line.account_code }}</span> {{ c.line.account_name }}
                     - {{ lineSideLabel(c.line.side) }} {{ formatMoney(journalAmount(c.line)) }}
+                    <span v-if="c.line.pair_no" class="text-neutral-400">({{ t('accounting.journal.history.pair', { n: c.line.pair_no }) }})</span>
                   </template>
                   <template v-else-if="c.type === 'removed' && c.line">
                     <span class="text-danger-500 font-medium">− </span>
@@ -121,6 +122,7 @@ function lineSideLabel(side: string): string {
                     <span class="text-neutral-400 line-through">{{ lineSideLabel(c.before.side) }} {{ formatMoney(journalAmount(c.before)) }}</span>
                     <span class="mx-1">→</span>
                     <span>{{ lineSideLabel(c.after.side) }} {{ formatMoney(journalAmount(c.after)) }}</span>
+                    <span v-if="c.after.pair_no" class="text-neutral-400">({{ t('accounting.journal.history.pair', { n: c.after.pair_no }) }})</span>
                   </template>
                 </li>
               </ul>

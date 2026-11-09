@@ -549,6 +549,7 @@ export interface JournalHistoryLine {
   amount: number
   cost_center: string | null
   line_no: number
+  pair_no?: number
 }
 
 export interface JournalHistoryHeader {

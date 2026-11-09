@@ -18552,7 +18552,8 @@
         "version": "Version {n}",
         "unknown_user": "unknown user",
         "created": "Entry created.",
-        "no_changes": "The entry has not been modified since it was created."
+        "no_changes": "The entry has not been modified since it was created.",
+        "pair": "pair {n}"
       },
       "att_preview": "Open preview",
       "net_on_account": "Net effect on {account}",

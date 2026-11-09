@@ -12,7 +12,9 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\EntryForm\EntryForm;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\ManualJournalEntryException;
+use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\ManualJournalEntryService;
+use MyInvoice\Service\Accounting\Pair\JournalPairCorrectionService;
 use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -251,6 +253,37 @@ final class ManualPairEntryTest extends TestCase
         // Storno celého dokladu ruší všechny dvojice včetně přeúčtované: nic nezůstane.
         self::assertSame([], $this->balances());
         self::assertNotNull($this->journal->find($entryId, $this->supplierId)['reversed_by']);
+    }
+
+    public function testHistoryShowsAuthorTimeAndFullLinesOfEveryVersionIncludingInPlacePairRepost(): void
+    {
+        $this->switchToSingle();
+        $entryId = $this->postPairs([
+            ['debit_account_code' => '568', 'credit_account_code' => '221', 'amount' => 15],
+            ['debit_account_code' => '518', 'credit_account_code' => '221', 'amount' => 100],
+        ]);
+        $result = Bootstrap::buildContainer()->get(JournalPairCorrectionService::class)
+            ->repostPair($this->supplierId, $entryId, 2, ['debit_account_code' => '549', 'credit_account_code' => '221'], ['user_id' => $this->userId]);
+        self::assertSame('in_place', $result['mode']);
+
+        $history = Bootstrap::buildContainer()->get(JournalHistoryService::class)->build($entryId, $this->supplierId);
+        self::assertNotNull($history);
+        self::assertCount(2, $history['versions']);
+        [$current, $created] = $history['versions'];
+
+        foreach ([$current, $created] as $version) {
+            self::assertNotNull($version['changed_by'], 'Každá verze má autora.');
+            self::assertSame($this->userId, $version['changed_by']['user_id']);
+            self::assertNotEmpty($version['valid_from']);
+        }
+        self::assertSame('accounting.posted', $created['changed_by']['action']);
+        self::assertSame('accounting.pair_reposted', $current['changed_by']['action']);
+
+        $codes = static fn (array $lines): array => array_map(
+            static fn (array $l): string => $l['account_code'] . '/' . $l['side'] . '/' . ($l['pair_no'] ?? '-'), $lines);
+        self::assertSame(['568/debit/1', '221/credit/1', '518/debit/2', '221/credit/2'], $codes($created['lines']));
+        self::assertSame(['568/debit/1', '221/credit/1', '549/debit/2', '221/credit/2'], $codes($current['lines']),
+            'Verze po přeúčtování dvojice ukazuje celý zápis, ne jen novou dvojici.');
     }
 
     /** @return array<string,string> účet => zůstatek MD − Dal (jen nenulové) */
