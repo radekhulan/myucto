@@ -3638,6 +3638,10 @@ final class Routes
         $app->get    ('/api/reports/invoice-series-completeness', \MyInvoice\Action\Report\InvoiceSeriesCompletenessAction::class);
         // Měsíční export — background job: jeden ZIP s vybranými exporty za měsíc
         // (VF/PF PDF+ISDOC, výpisy PDF+GPC, Kniha DPH). Běží na pozadí (import_jobs).
+        // Plánovaný export dokladů do Pohody e-mailem účetní (nastavení, evidence běhů, spustit teď).
+        $app->get    ('/api/reports/pohoda-schedule',     [\MyInvoice\Action\Report\PohodaScheduleAction::class, 'get']);
+        $app->put    ('/api/reports/pohoda-schedule',     [\MyInvoice\Action\Report\PohodaScheduleAction::class, 'save']);
+        $app->post   ('/api/reports/pohoda-schedule/run', [\MyInvoice\Action\Report\PohodaScheduleAction::class, 'run']);
         $app->get    ('/api/reports/monthly-export/preview',                  [MonthlyExportAction::class, 'preview']);
         $app->post   ('/api/reports/monthly-export/start',                    [MonthlyExportAction::class, 'start']);
         $app->get    ('/api/reports/monthly-export/jobs',                     [MonthlyExportAction::class, 'list']);

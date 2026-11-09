@@ -4,6 +4,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useYearOptions } from '@/composables/useYearOptions'
 import { btnOutline, ICONS } from '@/components/ui/buttonStyles'
+import PohodaSchedulePanel from './PohodaSchedulePanel.vue'
 
 const { t, tm, rt } = useI18n()
 
@@ -261,5 +262,7 @@ const monthLabel = (m: string): string => {
         </button>
       </div>
     </div>
+
+    <PohodaSchedulePanel />
   </div>
 </template>

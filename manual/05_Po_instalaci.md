@@ -193,6 +193,7 @@ proto si předem zálohujte databázi.
 | `cron-bank-email-notices` | každých 30 min |
 | `cron-scan-purchase-inbox` | každých 10 min |
 | `cron-send-reminders` | 1× denně 09:00, Po-Pá |
+| `cron-scheduled-pohoda-export` | 1× denně 06:30 |
 | `cron-send-approval-reminders` | 1× denně 09:15, Po-Pá |
 | `cron-purchase-approval-reminders` | 1× denně 09:20, Po-Pá |
 | `cron-document-request-reminders` | 1× denně 09:30, Po-Pá |

@@ -128,6 +128,7 @@
     "period_filter",
     "permissions",
     "pohoda",
+    "pohodaSchedule",
     "portal",
     "portfolio",
     "premier",
@@ -407,6 +408,7 @@
       "dimensions",
       "export",
       "imports",
+      "pohodaSchedule",
       "purchase_invoice"
     ],
     "invoices-import": [
@@ -414,6 +416,7 @@
       "dimensions",
       "export",
       "imports",
+      "pohodaSchedule",
       "purchase_invoice"
     ],
     "purchase-invoices": [
@@ -436,6 +439,7 @@
       "dimensions",
       "export",
       "imports",
+      "pohodaSchedule",
       "purchase_invoice"
     ],
     "purchase-invoices-import": [
@@ -443,6 +447,7 @@
       "dimensions",
       "export",
       "imports",
+      "pohodaSchedule",
       "purchase_invoice"
     ],
     "imports-overview": [

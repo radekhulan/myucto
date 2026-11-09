@@ -71,6 +71,29 @@ final class PohodaExporterSchemaTest extends TestCase
             $xml, '//inv:invoiceHeader/inv:partnerIdentity/typ:address/typ:company'));
     }
 
+    /**
+     * Zjednodušený daňový doklad je v myúčtu běžná faktura (invoice_type = invoice) s příznakem
+     * is_simplified a vlastní číselnou řadou. Exportér ho nerozlišuje: vyjde jako issuedInvoice
+     * s číslem z vlastní řady. Dokladům bez odběratele (nebo s prázdným snapshotem) vyjde
+     * partnerIdentity s prázdnými poli, což XSD akceptuje.
+     */
+    public function testSimplifiedDocumentWithOwnSeriesIsSchemaValid(): void
+    {
+        $inv = $this->issuedInvoice(['is_simplified' => true, 'hide_customer_on_pdf' => true, 'varsymbol' => 'ZD2026-0007']);
+        $xml = $this->exporter->buildXml([$inv], $this->issuedCfg());
+        $this->assertValidPohoda($xml);
+        self::assertSame('issuedInvoice', $this->xpathOne($xml, '//inv:invoiceHeader/inv:invoiceType'));
+        self::assertSame('ZD2026-0007', $this->xpathOne($xml, '//inv:invoiceHeader/inv:number/typ:numberRequested'));
+    }
+
+    public function testSimplifiedDocumentWithoutCustomerIsSchemaValid(): void
+    {
+        $inv = $this->issuedInvoice(['is_simplified' => true, 'varsymbol' => 'ZD2026-0008', 'client_snapshot' => []]);
+        $xml = $this->exporter->buildXml([$inv], $this->issuedCfg());
+        $this->assertValidPohoda($xml);
+        self::assertSame('ZD2026-0008', $this->xpathOne($xml, '//inv:invoiceHeader/inv:number/typ:numberRequested'));
+    }
+
     public function testIssuedCreditNoteAndProformaTypesAreValid(): void
     {
         $credit = $this->exporter->buildXml([$this->issuedInvoice(['invoice_type' => 'credit_note'])], $this->issuedCfg());

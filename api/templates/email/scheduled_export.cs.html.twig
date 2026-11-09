@@ -1,0 +1,16 @@
+{% extends '_layout.html.twig' %}
+
+{% block content %}
+<h1 style="margin:0 0 16px;font-size:22px;font-weight:600;color:#15131D;">Export dokladů do Pohody</h1>
+<p style="margin:0 0 16px;">Dobrý den,</p>
+{% if has_attachment %}
+<p style="margin:0 0 16px;">v příloze zasíláme doklady za období <strong>{{ period }}</strong> ve formátu XML pro import do Pohody. Počet dokladů: <strong>{{ count }}</strong>.</p>
+{% else %}
+<p style="margin:0 0 16px;">Za období <strong>{{ period }}</strong> nebyly vystaveny žádné doklady k exportu.</p>
+{% endif %}
+{% for note in change_notes %}
+<p style="margin:0 0 16px;"><strong>{{ note }}</strong></p>
+{% endfor %}
+<p style="margin:0 0 16px;">Export obsahuje vydané faktury, zjednodušené daňové doklady a dobropisy podle data vystavení. Neobsahuje pokladní doklady, přijaté faktury, zálohové faktury, daňové doklady k platbě ani bankovní pohyby.</p>
+<p style="margin:24px 0 0;font-size:13px;color:#7A748C;">E-mail byl odeslán automaticky.</p>
+{% endblock %}

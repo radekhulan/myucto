@@ -189,7 +189,7 @@ final class GlobalSeedTables
      * @var list<string>
      */
     public const RESET_KEEP_USERS_SUPPLIER = [
-        'work_report_billing_templates',
+        'work_report_billing_templates', 'scheduled_pohoda_export',
         // Účet, přihlášení a jeho druhé faktory. Bez passkeys a záchranných kódů by
         // se uživatel s vynuceným MFA po resetu nepřihlásil.
         'users', 'sessions', 'trusted_devices', 'login_otps',
@@ -324,6 +324,7 @@ final class GlobalSeedTables
      * @var list<string>
      */
     public const RESET_KEEP_USERS_SUPPLIER_WIPES = [
+        'scheduled_pohoda_export_doc', 'scheduled_pohoda_export_run',
         ...\MyInvoice\Service\Nonprofit\Membership\MembershipUseGuard::TABLES,
         ...\MyInvoice\Service\Property\Funds\FundingUseGuard::TABLES,
         ...\MyInvoice\Service\Accounting\Conversion\FrameworkConversionResetCleanup::TABLES,
