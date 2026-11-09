@@ -615,7 +615,7 @@ final class NumberSeriesService
                         (string) $row['name'],
                         (string) $row['scope_type'],
                         $this->label(['name' => ''] + $row, $this->scopeNames($supplierId)),
-                    ) . '" (' . $other['template'] . '). Zvolte jiný prefix nebo tvar čísla.',
+                    ) . '“ (' . $other['template'] . '). Zvolte jiný prefix nebo tvar čísla.',
                 );
             }
             // Bankovní párování bere z variabilního symbolu jen číslice ({@see VarsymbolSeriesCollisionChecker}).

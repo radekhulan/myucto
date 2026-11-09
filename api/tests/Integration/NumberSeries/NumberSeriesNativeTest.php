@@ -205,7 +205,7 @@ final class NumberSeriesNativeTest extends TestCase
         } catch (NumberSeriesException $e) {
             self::assertSame('template_overlap', $e->errorCode);
             // Převedená řada nemá název: hláška ji pojmenuje druhem dokladu jako seznam řad.
-            self::assertStringStartsWith('Čísla řady by se mohla plést s řadou „Faktury" (', $e->getMessage());
+            self::assertStringStartsWith('Čísla řady by se mohla plést s řadou „Faktury“ (', $e->getMessage());
         }
         try {
             $this->service->create($this->supplierId, ['doc_kind' => 'invoice', 'name' => 'Bez roku', 'prefix' => 'X', 'template' => '{PREFIX}{CCCC}', 'period' => 'year'], $this->userId);
