@@ -42,6 +42,7 @@ import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue
 import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailPanel.vue'
 import JournalPairsTable from '@/components/accounting/JournalPairsTable.vue'
 import Modal from '@/components/ui/Modal.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import type { ActionItem } from '@/components/ui/ActionBar.vue'
 import { apiErrorText, hasAnySingle } from '@/utils/entryForm'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
@@ -78,6 +79,26 @@ const page = ref(1)
 const listBox = ref<HTMLElement | null>(null)
 useAdaptiveTableRows(computed(() => listBox.value ? [listBox.value] : []))
 useFillViewportHeight(listBox)
+
+// Tabulka deníku je `w-max` a při užším okně se posouvá vodorovně; rozbalený detail (colspan přes
+// celou tabulku) by pak byl široký jako celá tabulka a jeho pravá část (akce, částky) by zůstala
+// mimo obrazovku. Detail proto drží šířku viditelné plochy a při posunu zůstává na místě.
+const listBoxWidth = ref(0)
+let listBoxObserver: ResizeObserver | null = null
+watch(listBox, el => {
+  listBoxObserver?.disconnect()
+  listBoxObserver = null
+  if (!el) return
+  listBoxWidth.value = el.clientWidth
+  if (typeof ResizeObserver === 'undefined') return
+  listBoxObserver = new ResizeObserver(() => { listBoxWidth.value = el.clientWidth })
+  listBoxObserver.observe(el)
+})
+onBeforeUnmount(() => listBoxObserver?.disconnect())
+/** Šířka obsahu detailu = viditelná plocha bez vnitřního odsazení buňky (px-3). */
+const detailViewportStyle = computed(() => listBoxWidth.value > 48
+  ? { position: 'sticky', left: '0.75rem', width: `${listBoxWidth.value - 24}px`, minWidth: `${listBoxWidth.value - 24}px` } as const
+  : undefined)
 const total = ref(0)
 const perPage = ref(50)
 const totalPages = computed(() => Math.max(1, Math.ceil(total.value / perPage.value)))
@@ -123,7 +144,7 @@ function accountName(code: string): string {
 
 const SOURCE_TYPES = [
   'manual', 'invoice', 'purchase_invoice', 'other_item', 'bank', 'gopay', 'cash',
-  'depreciation', 'asset', 'asset_disposal', 'unit_charge',
+  'depreciation', 'payroll', 'asset', 'asset_disposal', 'unit_charge',
   'closing', 'opening', 'fx_revaluation', 'stock',
   'offset', 'settlement', 'vat_clearing', 'card_settlement', 'card_writeoff',
 ] as const
@@ -657,15 +678,25 @@ function pairActions(d: JournalEntryDetail): ActionItem[] {
       key: 'pair-reverse', label: t('accounting.pairs.action_reverse'), icon: 'uturn', tier: 'secondary', variant: 'danger',
       show: pairsEditable(d) && canPureReverse, disabled: picked.length === 0 || pairBusy.value,
       disabledReason: picked.length === 0 ? t('accounting.pairs.reverse_pick_some') : undefined,
-      run: () => void reversePairs(d),
+      run: () => reversePairs(d),
     },
   ]
 }
 
-async function reversePairs(d: JournalEntryDetail) {
+/** Čeká na potvrzení stylovaným dialogem (místo nativního confirm()). */
+const reversePairsConfirm = reactive({ open: false, entry: null as JournalEntryDetail | null, nos: [] as number[] })
+
+function reversePairs(d: JournalEntryDetail) {
   const nos = selectedPairs(d.id)
   if (nos.length === 0) return
-  if (!confirm(t('accounting.pairs.reverse_confirm', { n: nos.length, nos: nos.join(', ') }))) return
+  Object.assign(reversePairsConfirm, { open: true, entry: d, nos })
+}
+
+async function confirmReversePairs() {
+  const d = reversePairsConfirm.entry
+  const nos = reversePairsConfirm.nos
+  reversePairsConfirm.open = false
+  if (!d || nos.length === 0) return
   pairBusy.value = true
   try {
     const created = await accountingApi.reversePairs(d.id, { pair_nos: nos })
@@ -1337,6 +1368,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
               <tr v-if="isExpanded(e.id)" class="table-detail-row">
                 <td :colspan="visibleColCount"
                   class="px-3 py-3 bg-primary-50/60 border-x-2 border-b-2 border-primary-500/60">
+                  <div data-test="journal-detail-viewport" :style="detailViewportStyle">
                   <div v-if="isDetailLoading(e.id)" class="text-center text-neutral-500 py-4 text-sm">{{ t('common.loading') }}</div>
                   <template v-else-if="details[e.id]">
                     <section v-if="entryHasPairs(details[e.id]!)" class="mb-3" data-test="journal-entry-pairs">
@@ -1358,6 +1390,7 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
                       @reverse="reverse" @remove="deleteEntry" @remove-pair="deleteEntryPair" @open-reversal="openReversal"
                       @reposted="onReposted" />
                   </template>
+                  </div>
                 </td>
               </tr>
             </template>
@@ -1470,6 +1503,12 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
     <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
+
+    <ConfirmDialog v-if="reversePairsConfirm.open"
+      :title="t('accounting.pairs.action_reverse')"
+      :message="t('accounting.pairs.reverse_confirm', { n: reversePairsConfirm.nos.length, nos: reversePairsConfirm.nos.join(', ') }, reversePairsConfirm.nos.length)"
+      :confirm-label="t('accounting.pairs.action_reverse')" variant="danger"
+      @confirm="confirmReversePairs" @cancel="reversePairsConfirm.open = false" />
 
     <!-- Přeúčtování jedné dvojice: nové účty MD/Dal, částka zůstává. Na místě, nebo opravným zápisem
          rozhodne server podle zámků a období. -->

@@ -358,6 +358,9 @@ function vatLinesInDocumentCurrency(doc: CashDocument): CashVatLine[] {
 // Řada z číselníku (víc řad v jedné pokladně, např. hotovostní účtenky vedle PPD).
 // undefined = beze změny, null = výchozí řada pokladny / uživatele.
 const numberSeriesId = ref<number | null | undefined>(undefined)
+const seriesOption = ref<{ prefix: string | null; name: string } | null>(null)
+// Nápověda pod datem ukazuje vybranou řadu, ne napevno PPD.
+const seriesHintPrefix = computed(() => seriesOption.value ? (seriesOption.value.prefix || seriesOption.value.name || '') : '')
 
 async function loadDocument(id: number): Promise<void> {
   hydrating.value = true
@@ -872,13 +875,13 @@ async function startNextDocument(): Promise<void> {
           </div>
           <NumberSeriesSelect v-if="form.register_id !== '' && loadedStatus !== 'posted' && loadedStatus !== 'reversed'"
             :scope="{ module: 'cash-documents', docType: form.doc_type, registerId: Number(form.register_id) }"
-            v-model="numberSeriesId" />
+            v-model="numberSeriesId" @option="seriesOption = $event" />
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.date') }}</label>
             <DateInput v-model="form.issue_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />
           </div>
         </div>
-        <p class="text-xs text-neutral-400 -mt-2">{{ t('cash.form.number_hint') }}</p>
+        <p class="text-xs text-neutral-400 -mt-2" data-test="cash-number-hint">{{ seriesHintPrefix ? t('cash.form.number_hint_series', { series: seriesHintPrefix }) : t('cash.form.number_hint') }}</p>
 
         <!-- Účel -->
         <div>

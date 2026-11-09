@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { numberSeriesApi, type NumberSeriesOptions, type NumberSeriesScope } from '@/api/numberSeries'
+import { numberSeriesApi, type NumberSeriesOption, type NumberSeriesOptions, type NumberSeriesScope } from '@/api/numberSeries'
 import { numberSeriesLabel } from '@/utils/numberSeries'
 
 /**
@@ -15,7 +15,11 @@ const props = defineProps<{
   modelValue: number | null | undefined
   disabled?: boolean
 }>()
-const emit = defineEmits<{ (e: 'update:modelValue', v: number | null): void }>()
+const emit = defineEmits<{
+  (e: 'update:modelValue', v: number | null): void
+  /** Právě vybraná řada (i předvybraná výchozí); null, když druh dokladu má jedinou řadu. */
+  (e: 'option', v: NumberSeriesOption | null): void
+}>()
 
 const { t } = useI18n()
 const options = ref<NumberSeriesOptions | null>(null)
@@ -32,6 +36,10 @@ async function load() {
 watch(scopeKey, load, { immediate: true })
 
 const selected = computed<number | null>(() => props.modelValue ?? options.value?.default_id ?? null)
+
+watch([selected, options], () => {
+  emit('option', options.value?.multiple ? options.value.series.find(x => x.id === selected.value) ?? null : null)
+}, { immediate: true })
 
 function onChange(e: Event) {
   const v = Number((e.target as HTMLSelectElement).value)

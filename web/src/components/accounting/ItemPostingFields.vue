@@ -40,8 +40,23 @@ const counterAccounts = computed(() => props.accounts.filter(a => a.is_active
   && !['343', '314', '324'].includes(a.account_code.slice(0, 3))
   && a.account_type === (props.direction === 'purchase' ? 'liability' : 'asset')))
 
+/**
+ * Předkontace opačného typu dokladu se nenabízí. Z dat pravidla se pozná podle protiúčtu:
+ * přijatá faktura nemá pohledávku (31x na MD) ani výnos (6xx, 384 na Dal), vydaná
+ * faktura nemá závazek (32x na Dal) ani náklad či majetek (5xx, 0xx na MD).
+ */
+function matchesDirection(r: PostingRule): boolean {
+  const d = r.debit_account_code ?? ''
+  const c = r.credit_account_code ?? ''
+  if (props.direction === 'purchase') {
+    return !d.startsWith('31') && !c.startsWith('6') && !c.startsWith('384')
+  }
+  return !c.startsWith('32') && !d.startsWith('5') && !d.startsWith('0')
+}
+
 const ruleOptions = computed(() => props.rules
-  .filter(r => r.is_active && (r.debit_account_code || r.credit_account_code))
+  .filter(r => r.is_active && (r.debit_account_code || r.credit_account_code)
+    && (matchesDirection(r) || r.rule_key === props.ruleKey))
   .slice()
   .sort((a, b) => a.rule_key.localeCompare(b.rule_key)))
 

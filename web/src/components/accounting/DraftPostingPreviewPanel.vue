@@ -23,6 +23,7 @@ const { t } = useI18n()
 
 const preview = ref<DraftPostingPreview | null>(null)
 const error = ref('')
+const invalid = ref(false)
 const loading = ref(false)
 let timer: ReturnType<typeof setTimeout> | null = null
 let controller: AbortController | null = null
@@ -40,10 +41,13 @@ async function load(): Promise<void> {
     if (controller !== current) return
     preview.value = data
     error.value = ''
+    invalid.value = false
   } catch (e: any) {
     if (controller !== current || e?.code === 'ERR_CANCELED') return
     preview.value = null
-    error.value = postingErrorMessage(t, e)
+    const status = Number(e?.response?.status)
+    invalid.value = status >= 400 && status < 500 && status !== 401 && status !== 403
+    error.value = invalid.value ? '' : postingErrorMessage(t, e)
   } finally {
     if (controller === current) loading.value = false
   }
@@ -55,6 +59,7 @@ watch(key, (value) => {
     controller?.abort()
     preview.value = null
     error.value = ''
+    invalid.value = false
     loading.value = false
     return
   }
@@ -98,6 +103,7 @@ defineExpose({ refresh: load })
 
     <div class="px-5 py-3 text-sm">
       <p v-if="payload === null" class="text-xs text-neutral-500">{{ t('accounting.editor_posting.incomplete') }}</p>
+      <p v-else-if="invalid" class="text-xs text-neutral-500" data-test="draft-posting-invalid">{{ t('accounting.editor_posting.incomplete') }}</p>
       <p v-else-if="error" class="text-sm text-danger-600" role="alert" data-test="draft-posting-error">{{ error }}</p>
       <p v-else-if="preview?.already_posted" class="text-sm text-neutral-600" data-test="draft-posting-posted">
         {{ t('accounting.editor_posting.already_posted', { id: preview.already_posted }) }}
