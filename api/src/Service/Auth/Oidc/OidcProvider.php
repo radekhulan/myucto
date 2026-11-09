@@ -65,6 +65,6 @@ final readonly class OidcProvider
 
     public function supportsLoginPolicy(): bool
     {
-        return $this->id === 'entra';
+        return $this->id === \MyInvoice\Service\Auth\SessionAuthContext::ORGANIZATION_PROVIDER;
     }
 }
