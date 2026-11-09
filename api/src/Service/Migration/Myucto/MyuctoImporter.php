@@ -8,6 +8,7 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\SchemaMetadataProvider;
 use MyInvoice\Repository\AccountingFrameworkRepository;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\UnusedAccountingPeriods;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Export\Instance\TenantScopeResolver;
@@ -93,6 +94,7 @@ final class MyuctoImporter
             }
             $this->assertVatHistory($pdo, $tables['supplier_vat_status_history'] ?? null, $sourceSupplier, $supplierId);
             $this->assertAccountingFramework($tables, $package['context']['supplier_accounting_frameworks'] ?? null, $sourceSupplier, $supplierId);
+            $this->assertEntryForm($pdo, $tables, $supplierId);
             $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ? AND is_active = 1');
             $stmt->execute([$actorId]);
             if ($stmt->fetchColumn() === false) {
@@ -364,6 +366,59 @@ final class MyuctoImporter
      * @param array<string,array<int|string,array<string,mixed>>> $tables
      * @param array<int|string,array<string,mixed>>|null $source
      */
+    /**
+     * Forma účetního zápisu cílové firmy musí sedět na převáděný deník: ve formě single
+     * (i výchozí formě instalace) má každý řádek číslo dvojice, ve složené žádný.
+     * Obnova přenáší řádky beze změny a invariant dvojic za ni nikdo jiný nehlídá, proto
+     * neshodu odmítne celou, dřív než cokoli zapíše.
+     *
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     */
+    private function assertEntryForm(PDO $pdo, array $tables, int $supplierId): void
+    {
+        $entries = $tables['journal_entries'] ?? [];
+        if ($entries === []) {
+            return;
+        }
+        $stmt = $pdo->prepare('SELECT valid_from, entry_form FROM accounting_entry_form_history WHERE supplier_id = ? ORDER BY valid_from');
+        $stmt->execute([$supplierId]);
+        $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $paired = [];
+        $unpaired = [];
+        foreach ($tables['journal_entry_lines'] ?? [] as $line) {
+            $entryId = (string) MyuctoExportReader::id($line['entry_id'] ?? null);
+            if (($line['pair_no'] ?? null) !== null && $line['pair_no'] !== '') {
+                $paired[$entryId] = true;
+            } else {
+                $unpaired[$entryId] = true;
+            }
+        }
+        $single = 0;
+        $composite = 0;
+        foreach ($entries as $id => $entry) {
+            $isSingle = $history !== [] && EntryFormService::formFromHistory($history, (string) ($entry['entry_date'] ?? ''))->isSingle();
+            if ($isSingle && isset($unpaired[(string) $id])) {
+                $single++;
+            } elseif (!$isSingle && isset($paired[(string) $id])) {
+                $composite++;
+            }
+        }
+        if ($single > 0) {
+            throw new RuntimeException(sprintf(
+                'Cílová firma účtuje jednoduchým zápisem (po dvojicích), ale %d převáděných zápisů deníku dvojice nemá (složený zápis). '
+                . 'Obnova řádky deníku nemění; obnovte firmu do firmy se složeným zápisem a na jednoduchý zápis ji převeďte v nastavení účetnictví.',
+                $single,
+            ));
+        }
+        if ($composite > 0) {
+            throw new RuntimeException(sprintf(
+                'Cílová firma účtuje složeným zápisem, ale %d převáděných zápisů deníku je po dvojicích (jednoduchý zápis). '
+                . 'Před obnovou nastavte cílové firmě jednoduchý zápis od data prvního takového zápisu.',
+                $composite,
+            ));
+        }
+    }
+
     private function assertAccountingFramework(
         array $tables,
         ?array $source,

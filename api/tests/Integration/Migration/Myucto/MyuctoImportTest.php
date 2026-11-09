@@ -158,6 +158,26 @@ final class MyuctoImportTest extends TestCase
         self::assertSame([], $repeat['created']); self::assertSame(1, $repeat['existing']['invoices']); self::assertSame(1, $this->targetCount('invoices'));
     }
 
+    public function testTargetWithSingleEntryFormRejectsCompositeJournalBeforeAnyWrite(): void
+    {
+        // Výchozí jednoduchý zápis instalace: cílová firma má formu single od začátku.
+        $this->pdo->prepare("INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, note) VALUES (?, '1900-01-01', 'single', 'Syntetická forma')")
+            ->execute([$this->target]);
+        try {
+            $package = (new MyuctoExportReader())->read($this->archive);
+            try {
+                $this->importer->import($package, $this->target, $this->actor, 'synthetic-entry-form', false);
+                self::fail('Složený deník nesmí do firmy s jednoduchým zápisem projít tiše.');
+            } catch (\RuntimeException $e) {
+                self::assertStringContainsString('jednoduchým zápisem', $e->getMessage());
+            }
+            self::assertSame(0, $this->targetCount('journal_entries'));
+            self::assertSame(0, $this->targetCount('invoices'));
+        } finally {
+            $this->pdo->prepare('DELETE FROM accounting_entry_form_history WHERE supplier_id = ?')->execute([$this->target]);
+        }
+    }
+
     public function testUnusedSetupPeriodOfNewCompanyIsReplacedByExportPeriods(): void
     {
         $this->pdo->prepare("INSERT INTO accounting_periods (supplier_id, fiscal_year, starts_on, ends_on, created_reason) VALUES (?, 2090, '2090-01-01', '2090-12-31', 'setup')")
