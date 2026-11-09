@@ -17,5 +17,7 @@ final readonly class OidcFlow
         public ?string $stepUpOperation,
         public ?int $inviteId,
         public int $createdAt = 0,
+        /** Tiché obnovení (`prompt=none`); když vyžaduje uživatele, pokračuje se interaktivně. */
+        public bool $silent = false,
     ) {}
 }

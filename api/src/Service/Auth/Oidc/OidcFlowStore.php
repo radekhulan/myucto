@@ -20,6 +20,11 @@ class OidcFlowStore
     public const PURPOSE_LINK = 'link';
     public const PURPOSE_STEP_UP = 'stepup';
     public const PURPOSE_TICKET = 'ticket';
+    /**
+     * Tiché obnovení přihlášení (`prompt=none`). Ukládá se jen do sloupce
+     * `purpose`, navenek je to běžné přihlášení s příznakem {@see OidcFlow::$silent}.
+     */
+    private const STORED_LOGIN_SILENT = 'login_silent';
 
     private const PURPOSES = [self::PURPOSE_LOGIN, self::PURPOSE_LINK, self::PURPOSE_STEP_UP];
     private const TTL_SECONDS = 600;
@@ -54,9 +59,13 @@ class OidcFlowStore
         #[\SensitiveParameter] ?string $sessionToken = null,
         ?string $stepUpOperation = null,
         ?int $inviteId = null,
+        bool $silent = false,
     ): array {
         if (!in_array($purpose, self::PURPOSES, true) || !self::isBindingShape($browserBinding)) {
             throw new \InvalidArgumentException('Neplatné zahájení přihlášení.');
+        }
+        if ($silent && $purpose !== self::PURPOSE_LOGIN) {
+            throw new \InvalidArgumentException('Tiché obnovení je jen pro přihlášení.');
         }
         if ($purpose !== self::PURPOSE_LOGIN && ($userId === null || $sessionToken === null)) {
             throw new \InvalidArgumentException('Propojení a ověření vyžadují přihlášeného uživatele.');
@@ -79,7 +88,7 @@ class OidcFlowStore
         )->execute([
             hash('sha256', $state),
             $provider,
-            $purpose,
+            $silent ? self::STORED_LOGIN_SILENT : $purpose,
             $nonce,
             $verifier,
             hash('sha256', $browserBinding),
@@ -125,9 +134,10 @@ class OidcFlowStore
         if ($row === false) {
             throw new OidcException(OidcException::FLOW_INVALID);
         }
+        $silent = $row['purpose'] === self::STORED_LOGIN_SILENT;
         return new OidcFlow(
             provider: (string) $row['provider'],
-            purpose: (string) $row['purpose'],
+            purpose: $silent ? self::PURPOSE_LOGIN : (string) $row['purpose'],
             nonce: (string) $row['nonce'],
             codeVerifier: (string) $row['code_verifier'],
             returnTo: $row['return_to'] !== null ? (string) $row['return_to'] : null,
@@ -136,6 +146,7 @@ class OidcFlowStore
             stepUpOperation: $row['step_up_operation'] !== null ? (string) $row['step_up_operation'] : null,
             inviteId: $row['invite_id'] !== null ? (int) $row['invite_id'] : null,
             createdAt: (int) $row['created_epoch'],
+            silent: $silent,
         );
     }
 

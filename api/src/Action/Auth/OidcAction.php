@@ -60,13 +60,20 @@ final class OidcAction
         private readonly OidcFlowStore $flows,
     ) {}
 
-    /** GET /api/auth/oidc/{provider}/login */
+    /**
+     * GET /api/auth/oidc/{provider}/login
+     *
+     * `silent=1` = tiché obnovení po vypršení sezení: poskytovatel uživatele
+     * ověří bez dotazu (`prompt=none`). Když to bez uživatele nejde, návrat
+     * pokračuje běžným přihlášením (viz callback), ne chybou.
+     */
     public function login(Request $request, Response $response, array $args): Response
     {
         $query = $request->getQueryParams();
         $returnTo = self::safeReturnTo($query['return_to'] ?? null);
         $invite = is_string($query['invite'] ?? null) ? $query['invite'] : null;
         $hint = is_string($query['login_hint'] ?? null) ? trim($query['login_hint']) : null;
+        $silent = ($query['silent'] ?? null) === '1';
         try {
             $provider = $this->oidc->provider((string) ($args['provider'] ?? ''));
             $binding = $this->binding($request);
@@ -77,6 +84,7 @@ final class OidcAction
                 $returnTo,
                 inviteToken: $invite,
                 loginHint: $hint,
+                silent: $silent,
             );
         } catch (OidcException $e) {
             return $this->redirect(self::ERROR_PATH . '?sso_error=' . $e->errorCode);
@@ -106,6 +114,11 @@ final class OidcAction
                 $userAgent,
             );
         } catch (OidcException $e) {
+            if ($e->interactiveRetry && isset($provider)) {
+                // Tiché obnovení potřebuje uživatele: druhý pokus už je běžné
+                // přihlášení bez `silent`, takže smyčka nevznikne.
+                return $this->redirect(self::interactiveLoginPath($provider->id, $e->returnTo));
+            }
             if ($e->purpose !== null && $e->purpose !== OidcFlowStore::PURPOSE_LOGIN) {
                 return $this->redirect(($e->returnTo ?? '/') . '#sso_error=' . $e->errorCode, [$clearBinding]);
             }
@@ -332,6 +345,14 @@ final class OidcAction
         $user = (array) $request->getAttribute(AuthMiddleware::ATTR_USER, []);
         $id = (int) ($user['id'] ?? 0);
         return $id > 0 ? $id : null;
+    }
+
+    /** Zahájení běžného (interaktivního) přihlášení se stejnou návratovou cestou. */
+    public static function interactiveLoginPath(string $providerId, ?string $returnTo): string
+    {
+        $path = '/api/auth/oidc/' . rawurlencode($providerId) . '/login';
+        $returnTo = self::safeReturnTo($returnTo);
+        return $returnTo !== null ? $path . '?return_to=' . rawurlencode($returnTo) : $path;
     }
 
     /**

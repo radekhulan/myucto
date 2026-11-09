@@ -19,6 +19,8 @@ import { createWorkspaceRoutes } from './workspaceRoutes'
 import { workspaceShellRoutes } from './workspaceShellRoutes'
 import { switchSupplierForDeepLink } from './supplierDeepLink'
 import { isInstanceAdminRouteName } from '@/security/instanceAdminRoutePolicy'
+import { beginSsoRenewal, ssoRenewalDue, ssoRenewalPending } from '@/security/ssoRenewal'
+import { getWindowSupplierScope } from '@/workspace/supplierContext'
 import { payrollStartPeriodGuard } from './payrollStartPeriodGuard'
 import {
   canonicalDomainLoginHandoffPath,
@@ -482,6 +484,8 @@ export async function authorizationGuard(
     // vrací false, ale známou identitu si záměrně drží.
     await auth.refresh()
     if (!auth.isAuthenticated) {
+      // Prohlížeč už odchází k tichému obnovení přihlášení (api/client.ts).
+      if (ssoRenewalPending()) return false
       if (auth.domainContext?.mode === 'canonical' && hasPendingCanonicalDomainLogin()) {
         return { name: 'login', query: pendingCanonicalDomainLoginQuery() ?? {} }
       }
@@ -504,6 +508,17 @@ export async function authorizationGuard(
       return auth.domainContext?.locked
         ? { name: 'login' }
         : { name: 'login', query: { return_to: to.fullPath } }
+    }
+  }
+
+  // Sezení z Entra ID brzy vyprší: obnoví se při přechodu na jinou stránku, ne
+  // až uprostřed rozpracovaného formuláře. Jen v hlavním okně, ne v panelech.
+  if (requiresAuth && auth.isAuthenticated && !auth.lockedSession && !auth.domainContext?.locked
+      && options.allowGlobalSideEffects !== false && getWindowSupplierScope() === null && ssoRenewalDue()) {
+    const renewal = beginSsoRenewal(to.fullPath)
+    if (renewal.action === 'renew') {
+      window.location.assign(renewal.url)
+      return false
     }
   }
 

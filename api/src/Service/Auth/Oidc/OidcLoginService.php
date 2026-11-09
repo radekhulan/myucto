@@ -23,6 +23,14 @@ class OidcLoginService
     /** Čerstvost přihlášení u poskytovatele pro ověření citlivé operace. */
     private const STEP_UP_MAX_AUTH_AGE = 600;
     private const AUTH_TIME_SKEW = 60;
+    /**
+     * Odpovědi na `prompt=none`, kterými poskytovatel říká, že bez uživatele
+     * přihlášení nedokončí (OIDC Core 3.1.2.6). Tiché obnovení pak pokračuje
+     * interaktivně, ostatní chyby končí stejně jako u běžného přihlášení.
+     */
+    private const SILENT_INTERACTION_ERRORS = [
+        'login_required', 'interaction_required', 'consent_required', 'account_selection_required',
+    ];
 
     public function __construct(
         private readonly Connection $db,
@@ -51,6 +59,10 @@ class OidcLoginService
 
     /**
      * Zahájí přihlášení a vrátí adresu poskytovatele.
+     *
+     * `$silent` = tiché obnovení po vypršení sezení (`prompt=none`). Platí jen pro
+     * přihlášení u silného poskytovatele bez pozvánky, jinak se zahájí běžně.
+     * Poskytovatel uživatele ověří i tak, zablokovaný účet tedy neprojde.
      */
     public function start(
         OidcProvider $provider,
@@ -62,7 +74,10 @@ class OidcLoginService
         ?string $stepUpOperation = null,
         #[\SensitiveParameter] ?string $inviteToken = null,
         ?string $loginHint = null,
+        bool $silent = false,
     ): string {
+        $silent = $silent && $purpose === OidcFlowStore::PURPOSE_LOGIN && $provider->isStrong()
+            && ($inviteToken === null || $inviteToken === '');
         $inviteId = null;
         if ($inviteToken !== null && $inviteToken !== '') {
             $inviteId = $this->invites->findValid($inviteToken, $provider->id);
@@ -95,11 +110,15 @@ class OidcLoginService
             $sessionToken,
             $stepUpOperation,
             $inviteId,
+            $silent,
         );
 
         // Výběr účtu dokumentují jen Microsoft a Google; Apple a Seznam neznámé
         // parametry přihlášení nepotřebují.
         $extra = in_array($provider->id, ['entra', 'google'], true) ? ['prompt' => 'select_account'] : [];
+        if ($silent) {
+            $extra = ['prompt' => 'none'];
+        }
         if ($purpose === OidcFlowStore::PURPOSE_STEP_UP) {
             // Vynutí nové zadání údajů u poskytovatele, ne jen tiché SSO. Při
             // `max_age` musí poskytovatel vrátit `auth_time` (OIDC Core 3.1.2.1),
@@ -144,6 +163,11 @@ class OidcLoginService
         } catch (OidcException $e) {
             $e->purpose = $flow->purpose;
             $e->returnTo = $flow->returnTo;
+            // Tiché obnovení, u kterého poskytovatel vrátil jiný přihlášený účet,
+            // než je propojený: uživatel si vybere účet sám.
+            if ($flow->silent && $e->errorCode === OidcException::NOT_LINKED) {
+                $e->interactiveRetry = true;
+            }
             throw $e;
         }
     }
@@ -159,12 +183,14 @@ class OidcLoginService
     ): OidcResult {
         $error = $query['error'] ?? null;
         if (is_string($error) && $error !== '') {
-            throw new OidcException(
-                in_array($error, ['access_denied', 'login_required', 'interaction_required', 'consent_required'], true)
+            $exception = new OidcException(
+                $error === 'access_denied' || in_array($error, self::SILENT_INTERACTION_ERRORS, true)
                     ? OidcException::CANCELLED
                     : OidcException::PROVIDER_ERROR,
                 'Poskytovatel přihlášení nedokončil.',
             );
+            $exception->interactiveRetry = $flow->silent && in_array($error, self::SILENT_INTERACTION_ERRORS, true);
+            throw $exception;
         }
         $code = is_string($query['code'] ?? null) ? $query['code'] : '';
         $identity = null;

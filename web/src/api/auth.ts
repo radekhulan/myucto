@@ -221,6 +221,11 @@ export interface AuthSessionContract {
 }
 
 export interface MeResponse extends AuthSessionContract {
+  /**
+   * Sezení z poskytovatele, který nahrazuje celé přihlášení (Entra ID), a jeho
+   * pevné vypršení. Po něm se přihlášení tiše obnoví (security/ssoRenewal.ts).
+   */
+  sso_session?: { provider: string; expires_at: string } | null
   current_supplier_id: number
   suppliers: SupplierBrief[]
   permissions: Record<string, 0 | 1 | 2>

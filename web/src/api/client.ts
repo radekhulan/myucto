@@ -6,6 +6,7 @@ import { safeReturnPath } from '@/utils/returnPath'
 import { getWindowSupplierScope, requestSupplierId } from '@/workspace/supplierContext'
 import { postWindowFrameMessage } from '@/workspace/frameProtocol'
 import { ssoRequiredLoginPath } from '@/security/oidc'
+import { beginSsoRenewal } from '@/security/ssoRenewal'
 
 const SSO_LOGIN_ENDPOINTS = ['/auth/login', '/auth/webauthn/login/options', '/auth/webauthn/login/verify']
 
@@ -73,6 +74,15 @@ api.interceptors.request.use((config) => {
   return config
 })
 
+/** Cesta hlavního okna aplikace, ve kterém běží okno pracovní plochy. */
+function parentAppPath(): string | null {
+  try {
+    return `${window.parent.location.pathname}${window.parent.location.search}`
+  } catch {
+    return null
+  }
+}
+
 /** Příznak pro přihlašovací stránku: relaci ukončilo novější přihlášení jinde. */
 export const SESSION_SUPERSEDED_KEY = 'myucto:session-superseded'
 
@@ -119,6 +129,25 @@ api.interceptors.response.use(
         try { sessionStorage.setItem(SESSION_SUPERSEDED_KEY, '1') } catch { /* soukromé okno */ }
       }
       const windowScope = getWindowSupplierScope()
+      // Sezení z Entra ID vyprší po pevné době. Místo formuláře se aplikace tiše
+      // přihlásí znovu u poskytovatele a vrátí uživatele na stejnou stránku
+      // (security/ssoRenewal.ts). Neplatí pro zákaznickou doménu ani rozběhnuté
+      // přihlášení vlastní domény, ani pro relaci ukončenou přihlášením jinde.
+      if (code === 'unauthenticated' && domainSupplierLock === null && !domainLoginContinuationQuery()) {
+        const appPath = windowScope ? parentAppPath() : `${window.location.pathname}${window.location.search}`
+        if (appPath !== null && !appPath.startsWith('/login') && !appPath.startsWith('/setup')) {
+          const renewal = beginSsoRenewal(appPath)
+          if (renewal.action === 'wait') return Promise.reject(error)
+          if (renewal.action === 'renew') {
+            if (windowScope) {
+              postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: renewal.url, mode: 'assign' })
+            } else {
+              window.location.href = renewal.url
+            }
+            return Promise.reject(error)
+          }
+        }
+      }
       if (windowScope) {
         postWindowFrameMessage({ type: 'myucto-window-global', id: windowScope.windowId, to: '/login' })
         return Promise.reject(error)

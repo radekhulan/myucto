@@ -213,7 +213,7 @@ e-mailem. Odkaz předejte jen majiteli účtu.
 | Pozvánka | Platí 3 dny, jednou; přijme ji jen účet se stejnou e-mailovou adresou jako pozvaný uživatel |
 | Neznámá identita | Přihlášení se odmítne, účet se nezakládá |
 | Hosté B2B | Smí se přihlásit jen s `allow_guests = true` (ENV `MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS=1`) a přiřazením k aplikaci |
-| Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin |
+| Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin; po vypršení se aplikace sama znovu přihlásí přes Microsoft a vrátí vás na stejnou stránku, pokud jste tam zůstali přihlášení |
 | Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení skončí nejpozději vypršením |
 | Instalace vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód nepustí nikoho, ani správce instance |
 | Nouzový přístup | Jen vypnutím vynucení v konfiguraci, aplikace výjimku nemá |

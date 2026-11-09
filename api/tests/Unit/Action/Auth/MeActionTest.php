@@ -191,6 +191,8 @@ final class MeActionTest extends TestCase
             ->withAttribute(AuthMiddleware::ATTR_SESSION, [
                 'csrf_token' => str_repeat('b', 64),
                 'assurance_level' => 'strong',
+                'auth_method' => 'oidc:entra',
+                'expires_at' => (string) (new \DateTimeImmutable('2026-07-24 20:00:00 UTC'))->getTimestamp(),
                 'last_user_activity_at' => '2026-07-24 11:58:00.000000',
             ])
             ->withAttribute(SupplierScopeMiddleware::ATTR_CURRENT_ID, 0);
@@ -233,6 +235,8 @@ final class MeActionTest extends TestCase
         self::assertSame('2026-07-24T12:03:00.000000Z', $body['idle_expires_at']);
         self::assertSame(str_repeat('b', 64), $body['csrf_token']);
         self::assertSame('past_due', $body['license']['subscription_state']);
+        // Podle tohohle frontend po vypršení sezení z Entra tiše obnoví přihlášení.
+        self::assertSame(['provider' => 'entra', 'expires_at' => '2026-07-24T20:00:00.000000Z'], $body['sso_session']);
     }
 
     /**
@@ -304,6 +308,7 @@ final class MeActionTest extends TestCase
         // Nabídka NIC neblokuje — `must_setup_mfa` musí zůstat false i pro setup session.
         self::assertFalse($body['user']['must_setup_mfa']);
         self::assertFalse($body['require_mfa']);
+        self::assertNull($body['sso_session'], 'Sezení bez poskytovatele identity se tiše neobnovuje.');
     }
 
     public function testClientAccountDoesNotReceiveSubscriptionState(): void

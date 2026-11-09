@@ -14,6 +14,7 @@ import { clearVatReportPeriodSession } from '@/utils/vatReportPeriodSession'
 import { useSupplierStore } from './supplier'
 import { accessLevelValue, type AccessLevel, type PermissionKey, type PermissionValue } from '@/security/permissions'
 import { ssoEnforcementPolicy } from '@/security/oidc'
+import { forgetSsoSession, rememberSsoSession, setSsoRenewalPolicy } from '@/security/ssoRenewal'
 
 export const useAuthStore = defineStore('auth', () => {
   const user = ref<User | null>(null)
@@ -108,6 +109,7 @@ export const useAuthStore = defineStore('auth', () => {
   async function fetchSetupStatus() {
     setupStatus.value = await authApi.setupStatus()
     setOverdueIncludesToday(setupStatus.value.overdue_includes_today === true)
+    setSsoRenewalPolicy(setupStatus.value)
     // Na úplně čerstvé instalaci ještě nemusí existovat tabulka domén a setup
     // záměr schválně povoluje přístup i z LAN hostname odlišného od app.url.
     // Tenant kontext proto načítáme až po dokončení prvotního setupu.
@@ -158,6 +160,7 @@ export const useAuthStore = defineStore('auth', () => {
       permissions.value = data.permissions || {}
       permissionCatalogVersion.value = data.permission_catalog_version || ''
       license.value = data.license || null
+      rememberSsoSession(data.sso_session, data.server_time)
       submissionTestEnvironmentAllowed.value = data.submission_test_environment_allowed === true
       invoicePublicLinksEnabled.value = data.invoice_public_links_enabled !== false
       lockedSession.value = null
@@ -267,6 +270,7 @@ export const useAuthStore = defineStore('auth', () => {
     const requestCsrfToken = logoutRetryCsrfToken || csrfToken.value
     if (requestCsrfToken) setCsrfToken(requestCsrfToken)
 
+    forgetSsoSession()
     try {
       await authApi.logout()
       logoutRetryCsrfToken = ''

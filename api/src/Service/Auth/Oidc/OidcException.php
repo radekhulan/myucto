@@ -33,6 +33,11 @@ final class OidcException extends \RuntimeException
     /** Účel a návratová adresa spotřebovaného přihlášení, je-li už známé. */
     public ?string $purpose = null;
     public ?string $returnTo = null;
+    /**
+     * Tiché obnovení nešlo dokončit bez uživatele. Návrat pak nekončí chybou,
+     * ale pokračuje běžným interaktivním přihlášením se stejným `returnTo`.
+     */
+    public bool $interactiveRetry = false;
 
     public function __construct(public readonly string $errorCode, string $message = '')
     {

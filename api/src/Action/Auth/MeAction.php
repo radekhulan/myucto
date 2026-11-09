@@ -24,6 +24,7 @@ use MyInvoice\Service\Invoice\DefaultInvoiceNote;
 use MyInvoice\Service\Invoice\InvoiceRounding;
 use MyInvoice\Service\Invoice\InvoicePublicLinkFeature;
 use MyInvoice\Service\Auth\MfaPolicyService;
+use MyInvoice\Service\Auth\SessionAuthContext;
 use MyInvoice\Service\Auth\SessionLockPolicy;
 use MyInvoice\Service\Tenant\TenantDomainContext;
 use MyInvoice\Service\License\LicenseService;
@@ -278,6 +279,20 @@ final class MeAction
                 : null;
         }
 
+        // Sezení z poskytovatele, který nahrazuje celé přihlášení, má pevnou
+        // platnost (SessionManager::externalSessionLifetimeSeconds). Frontend podle
+        // toho po vypršení přihlášení u poskytovatele tiše obnoví.
+        $authMethod = (string) ($session['auth_method'] ?? '');
+        $ssoSession = null;
+        if ($assurance === 'strong' && SessionAuthContext::isExternalMethod($authMethod)
+            && (int) ($session['expires_at'] ?? 0) > 0
+        ) {
+            $ssoSession = [
+                'provider' => substr($authMethod, strlen(SessionAuthContext::EXTERNAL_PREFIX)),
+                'expires_at' => self::isoUtc((new \DateTimeImmutable('@' . (int) $session['expires_at']))),
+            ];
+        }
+
         $licenseSummary = $isInstanceAdmin ? null
             : (LicenseMiddleware::state($request) ?? $this->license->current())->toMeSummary();
         if ($effectiveRole->isClientType()) {
@@ -317,6 +332,7 @@ final class MeAction
             'lock_after_minutes'  => $effectiveTimeout,
             'server_time'         => self::isoUtc($now),
             'idle_expires_at'     => $idleExpiresAt,
+            'sso_session'         => $ssoSession,
             // Stav licence (E4) pro FE bannery (trial odpočet, overage, degraded).
             'license'             => $licenseSummary,
             // Výběr testovacího prostředí podání úřadům (ČSSZ, ZP, ISDS). Mimo

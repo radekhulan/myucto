@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace MyInvoice\Tests\Integration;
 
+use MyInvoice\Action\Auth\OidcAction;
 use MyInvoice\Infrastructure\Config\Config;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\PasskeyCredentialRepository;
@@ -22,8 +23,14 @@ use MyInvoice\Service\Auth\Oidc\OidcInviteService;
 use MyInvoice\Service\Auth\Oidc\OidcLoginService;
 use MyInvoice\Service\Auth\Oidc\OidcProviderRegistry;
 use MyInvoice\Service\Auth\SessionAuthContext;
+use MyInvoice\Service\Auth\LoginSessionIssuer;
+use MyInvoice\Service\Auth\SensitiveOperationReauth;
 use MyInvoice\Service\Auth\SessionManager;
+use MyInvoice\Service\IpMatcher;
 use MyInvoice\Tests\Support\FakeOidcIdp;
+use Psr\Http\Message\ResponseInterface;
+use Slim\Psr7\Factory\ResponseFactory;
+use Slim\Psr7\Factory\ServerRequestFactory;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -389,6 +396,176 @@ final class OidcLoginFlowTest extends TestCase
         $session = $this->sessions->create($this->userId, self::IP, self::UA, SessionAuthContext::basic('password'));
         $this->lockForCallback($session['token']);
         $this->expectOidcError(OidcException::FLOW_INVALID, fn () => $this->stepUpRoundTrip($session['token'], $oid));
+    }
+
+    public function testSilentRenewalSendsPromptNoneAndSignsInLinkedUser(): void
+    {
+        $oid = self::guid();
+        $this->loginRoundTrip($oid, invite: $this->invites->issue($this->userId, 'entra', null));
+
+        $binding = OidcFlowStore::newBinding();
+        $url = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LOGIN, $binding, '/invoices', silent: true);
+        self::assertSame('none', self::queryParam($url, 'prompt'));
+        $this->idp->nextClaims = $this->idp->claims($oid, (string) $this->idp->lastNonce, ['preferred_username' => $this->email]);
+        $result = $this->complete(self::queryParam($url, 'state'), $binding);
+        self::assertSame(OidcFlowStore::PURPOSE_LOGIN, $result->purpose);
+        self::assertSame('/invoices', $result->returnTo);
+        self::assertSame($this->userId, (int) $result->user['id']);
+
+        // Zablokovaný uživatel tichým obnovením neprojde.
+        $this->db->pdo()->prepare('UPDATE users SET is_active = 0 WHERE id = ?')->execute([$this->userId]);
+        $binding = OidcFlowStore::newBinding();
+        $url = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LOGIN, $binding, '/invoices', silent: true);
+        $this->idp->nextClaims = $this->idp->claims($oid, (string) $this->idp->lastNonce);
+        try {
+            $this->complete(self::queryParam($url, 'state'), $binding);
+            self::fail('Deaktivovaný účet se tiše přihlásil.');
+        } catch (OidcException $e) {
+            self::assertSame(OidcException::USER_INACTIVE, $e->errorCode);
+            self::assertFalse($e->interactiveRetry);
+        }
+    }
+
+    public function testSilentRenewalIsOnlyForStrongProviderLoginWithoutInvite(): void
+    {
+        $plain = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LOGIN, OidcFlowStore::newBinding(), null);
+        self::assertSame('select_account', self::queryParam($plain, 'prompt'));
+
+        $google = $this->service->start(FakeOidcIdp::googleProvider(), OidcFlowStore::PURPOSE_LOGIN, OidcFlowStore::newBinding(), null, silent: true);
+        self::assertSame('select_account', self::queryParam($google, 'prompt'));
+
+        $invite = $this->invites->issue($this->userId, 'entra', null);
+        $invited = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LOGIN, OidcFlowStore::newBinding(), null, inviteToken: $invite, silent: true);
+        self::assertSame('select_account', self::queryParam($invited, 'prompt'));
+    }
+
+    public function testSilentRenewalInteractionErrorsContinueInteractively(): void
+    {
+        foreach (['login_required', 'interaction_required', 'consent_required', 'account_selection_required'] as $error) {
+            $binding = OidcFlowStore::newBinding();
+            $url = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LOGIN, $binding, '/invoices', silent: true);
+            try {
+                $this->service->complete(FakeOidcIdp::provider(), ['state' => self::queryParam($url, 'state'), 'error' => $error], $binding, null, self::IP, self::UA);
+                self::fail('Návrat s chybou ' . $error . ' prošel.');
+            } catch (OidcException $e) {
+                self::assertTrue($e->interactiveRetry, $error);
+                self::assertSame('/invoices', $e->returnTo);
+            }
+        }
+
+        // Jiný účet přihlášený u poskytovatele: uživatel si vybere účet sám.
+        $binding = OidcFlowStore::newBinding();
+        $url = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LOGIN, $binding, '/invoices', silent: true);
+        $this->idp->nextClaims = $this->idp->claims(self::guid(), (string) $this->idp->lastNonce);
+        try {
+            $this->complete(self::queryParam($url, 'state'), $binding);
+            self::fail('Nepropojená identita prošla.');
+        } catch (OidcException $e) {
+            self::assertSame(OidcException::NOT_LINKED, $e->errorCode);
+            self::assertTrue($e->interactiveRetry);
+        }
+
+        // Odmítnutí uživatelem ani chyba poskytovatele se interaktivně neopakují.
+        foreach (['access_denied', 'server_error'] as $error) {
+            $binding = OidcFlowStore::newBinding();
+            $url = $this->service->start(FakeOidcIdp::provider(), OidcFlowStore::PURPOSE_LOGIN, $binding, '/invoices', silent: true);
+            try {
+                $this->service->complete(FakeOidcIdp::provider(), ['state' => self::queryParam($url, 'state'), 'error' => $error], $binding, null, self::IP, self::UA);
+                self::fail('Návrat s chybou ' . $error . ' prošel.');
+            } catch (OidcException $e) {
+                self::assertFalse($e->interactiveRetry, $error);
+            }
+        }
+    }
+
+    public function testSilentRenewalLoginRequiredRedirectsToInteractiveLoginWithSameReturnTo(): void
+    {
+        $first = $this->actionLogin(['silent' => '1', 'return_to' => '/invoices?status=unpaid']);
+        self::assertSame('none', self::queryParam($first['location'], 'prompt'));
+
+        $callback = $this->actionCallback($first, ['error' => 'login_required']);
+        self::assertSame(302, $callback->getStatusCode());
+        self::assertSame('/api/auth/oidc/entra/login?return_to=%2Finvoices%3Fstatus%3Dunpaid', $callback->getHeaderLine('Location'));
+
+        // Druhý pokus je běžné přihlášení: výběr účtu a při stejné chybě hláška, ne další kolo.
+        parse_str((string) parse_url($callback->getHeaderLine('Location'), PHP_URL_QUERY), $query);
+        $second = $this->actionLogin($query, $first['binding']);
+        self::assertSame('select_account', self::queryParam($second['location'], 'prompt'));
+        $again = $this->actionCallback($second, ['error' => 'login_required']);
+        self::assertSame('/login?sso_error=' . OidcException::CANCELLED, $again->getHeaderLine('Location'));
+    }
+
+    public function testSilentRenewalDropsReturnToOutsideApp(): void
+    {
+        foreach (['https://evil.example/', '//evil.example/x', '/api/auth/logout'] as $returnTo) {
+            $start = $this->actionLogin(['silent' => '1', 'return_to' => $returnTo]);
+            self::assertSame('none', self::queryParam($start['location'], 'prompt'));
+            $callback = $this->actionCallback($start, ['error' => 'login_required']);
+            self::assertSame('/api/auth/oidc/entra/login', $callback->getHeaderLine('Location'), $returnTo);
+        }
+        self::assertNull(OidcAction::safeReturnTo('https://evil.example/'));
+        self::assertSame('/api/auth/oidc/entra/login', OidcAction::interactiveLoginPath('entra', '//evil.example'));
+    }
+
+    /**
+     * @param array<string,mixed> $query
+     * @return array{location:string,binding:string}
+     */
+    private function actionLogin(array $query, ?string $binding = null): array
+    {
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/auth/oidc/entra/login')
+            ->withQueryParams($query);
+        if ($binding !== null) {
+            $request = $request->withCookieParams([$this->bindingCookieName() => $binding]);
+        }
+        $response = $this->oidcAction()->login($request, (new ResponseFactory())->createResponse(), ['provider' => 'entra']);
+        self::assertSame(302, $response->getStatusCode());
+        $cookie = $response->getHeaderLine('Set-Cookie');
+        self::assertMatchesRegularExpression('/^' . preg_quote($this->bindingCookieName(), '/') . '=([a-f0-9]{64});/', $cookie);
+        preg_match('/=([a-f0-9]{64});/', $cookie, $match);
+        return ['location' => $response->getHeaderLine('Location'), 'binding' => $match[1]];
+    }
+
+    /**
+     * @param array{location:string,binding:string} $start
+     * @param array<string,string> $query
+     */
+    private function actionCallback(array $start, array $query): ResponseInterface
+    {
+        $request = (new ServerRequestFactory())->createServerRequest('GET', '/api/auth/oidc/entra/callback', ['REMOTE_ADDR' => self::IP])
+            ->withQueryParams(['state' => self::queryParam($start['location'], 'state')] + $query)
+            ->withCookieParams([$this->bindingCookieName() => $start['binding']]);
+        return $this->oidcAction()->callback($request, (new ResponseFactory())->createResponse(), ['provider' => 'entra']);
+    }
+
+    private function bindingCookieName(): string
+    {
+        return OidcFlowStore::bindingCookieName((string) $this->config->get('session.cookie_name', '__Host-myinvoice_session'));
+    }
+
+    /** Akce s reálnou službou; přihlášení a ověření citlivé operace se na chybové cestě nevolají. */
+    private function oidcAction(): OidcAction
+    {
+        $clock = new class implements \Psr\Clock\ClockInterface {
+            public function now(): \DateTimeImmutable
+            {
+                return new \DateTimeImmutable();
+            }
+        };
+        return new OidcAction(
+            $this->service,
+            $this->identities,
+            (new \ReflectionClass(LoginSessionIssuer::class))->newInstanceWithoutConstructor(),
+            $this->sessions,
+            (new \ReflectionClass(SensitiveOperationReauth::class))->newInstanceWithoutConstructor(),
+            $this->policy,
+            new ActivityLogger($this->db),
+            new IpMatcher($this->config),
+            $this->config,
+            $clock,
+            new ResponseFactory(),
+            new OidcFlowStore($this->db),
+        );
     }
 
     private function startLink(): array
