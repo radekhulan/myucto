@@ -1919,6 +1919,9 @@ Instalace může mít jednoduchý zápis jako **výchozí formu nových firem** 
 proměnná prostředí `MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single`). Firma, která pak vstoupí do podvojného
 účetnictví (založení, převod z jiného programu, aktivace účetnictví), účtuje po dvojicích od začátku, pro všechna
 data. Stávající firmy a firmy, které už mají zápisy v deníku, se nezmění.
+Obnova firmy z Kompletního exportu dat MyÚčta se výchozí formou instalace neřídí: zachová formu zápisu zdroje
+včetně historie formy, čísel dvojic, storen dvojic a posouzení zápisů bez dvojic. Export bez historie formy je
+celý ve složeném zápisu. Má-li cílová firma vlastní, jinou volbu formy, obnova skončí chybou a nic nezapíše.
 Jednoduchý zápis mají obchodní společnosti, podnikatelé a společenství vlastníků jednotek. Spolky a ostatní neziskové organizace ho zatím nemají.
 
 #### 52.14.16.2 Krok za krokem: ruční zápis po dvojicích

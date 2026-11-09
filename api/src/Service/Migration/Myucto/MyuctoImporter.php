@@ -7,7 +7,10 @@ namespace MyInvoice\Service\Migration\Myucto;
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Infrastructure\Database\SchemaMetadataProvider;
 use MyInvoice\Repository\AccountingFrameworkRepository;
+use MyInvoice\Repository\AccountingModeRepository;
+use MyInvoice\Security\FrameworkScopePolicy;
 use MyInvoice\Service\Accounting\AccountingFrameworkService;
+use MyInvoice\Service\Accounting\EntryForm\EntryForm;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\UnusedAccountingPeriods;
 use MyInvoice\Service\ActivityLogger;
@@ -49,6 +52,12 @@ final class MyuctoImporter
             throw new RuntimeException('Import vyžaduje vlastní transakci.');
         }
         $tables = $package['tables'];
+        // Export bez formy zápisu (starší verze) a export firmy bez volby mají stejný otisk dat.
+        foreach ([MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE, ...MyuctoImportProfile::KEYLESS_JOURNAL_TABLES] as $table) {
+            if (($tables[$table] ?? null) === []) {
+                unset($tables[$table]);
+            }
+        }
         // Preserve the source history order, including entries with identical timestamps.
         if (isset($tables['de_movement_classification_history'])) {
             ksort($tables['de_movement_classification_history'], SORT_NUMERIC);
@@ -58,6 +67,7 @@ final class MyuctoImporter
         $schema = SchemaMetadataProvider::load($pdo);
         $this->validateRows($tables, $sourceSupplier, $schema);
         MyuctoAccountingGraph::validate($tables);
+        $entryFormHistory = $this->assertExportEntryForm($tables, $sourceSupplier, $schema);
         $sourceKey = 'myucto:' . hash('sha256', $source . ':' . $sourceSupplier);
         $digest = MyuctoImportProfile::VERSION . ':' . hash('sha256', serialize([$tables, $package['assets'] ?? []]));
         $pdo->exec('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ');
@@ -94,7 +104,6 @@ final class MyuctoImporter
             }
             $this->assertVatHistory($pdo, $tables['supplier_vat_status_history'] ?? null, $sourceSupplier, $supplierId);
             $this->assertAccountingFramework($tables, $package['context']['supplier_accounting_frameworks'] ?? null, $sourceSupplier, $supplierId);
-            $this->assertEntryForm($pdo, $tables, $supplierId);
             $stmt = $pdo->prepare('SELECT id FROM users WHERE id = ? AND is_active = 1');
             $stmt->execute([$actorId]);
             if ($stmt->fetchColumn() === false) {
@@ -113,6 +122,7 @@ final class MyuctoImporter
             if ($previous !== false && $previous !== $digest) {
                 throw new RuntimeException('Tento zdroj již byl importován s jinými daty. Opakovaný import nesmí přepsat existující doklady.');
             }
+            $this->restoreEntryForm($pdo, $entryFormHistory, $supplierId, $actorId, $previous === false);
             $replacedPeriods = [];
             if ($previous === false) {
                 $replacedPeriods = $this->replaceUnusedPeriods($pdo, $supplierId, ($tables['accounting_periods'] ?? []) !== []);
@@ -245,6 +255,7 @@ final class MyuctoImporter
                 $this->activity->log('accounting.posted', $actorId, 'journal_entry', (int) $entryId,
                     ['source' => 'myucto_import', 'source_entry_id' => (int) $sourceEntryId], null, null, $supplierId);
             }
+            $this->restoreKeylessJournal($pdo, $tables, $map, $supplierId, $actorId, $previous === false, $schema, $report);
             foreach ($deferred as [$table, $id, $values]) {
                 $set = implode(', ', array_map(static fn (string $c): string => '`' . $c . '` = ?', array_keys($values)));
                 if (isset($schema['columns'][$table]['updated_at'])) {
@@ -315,6 +326,8 @@ final class MyuctoImporter
             }
             $this->files->rollback();
             throw $e;
+        } finally {
+            EntryFormService::forgetShared($supplierId);
         }
     }
 
@@ -357,36 +370,53 @@ final class MyuctoImporter
     }
 
     /**
-     * Nese-li export účetnictví, musí cíl vést v každém okamžiku stejný účetní rámec
-     * (vyhláška 500, nebo 504 u neziskových organizací). Osnova i deník se přebírají
-     * beze změny, takže deník podle vyhlášky 504 ve firmě s rámcem 500 (a naopak) by
-     * dal chybné výkazy. Den bez záznamu má rámec 500 jako {@see AccountingFrameworkService::forDate()};
-     * export bez historie rámce je proto celý v rámci 500.
+     * Forma účetního zápisu z exportu musí sedět na převáděný deník: v období jednoduchého
+     * zápisu má každý zápis řádky po dvojicích, nebo posouzení bez dvojic, ve složeném
+     * žádný řádek číslo dvojice nemá. Obnova přenáší řádky beze změny a invariant dvojic
+     * za ni nikdo jiný nehlídá, proto nesoulad odmítne celý, dřív než cokoli zapíše.
+     * Export bez historie formy (starší verze, firma bez volby) je celý ve složeném zápisu.
      *
      * @param array<string,array<int|string,array<string,mixed>>> $tables
-     * @param array<int|string,array<string,mixed>>|null $source
+     * @return list<array<string,mixed>> historie formy zdroje vzestupně podle valid_from
      */
-    /**
-     * Forma účetního zápisu cílové firmy musí sedět na převáděný deník: ve formě single
-     * (i výchozí formě instalace) má každý řádek číslo dvojice, ve složené žádný.
-     * Obnova přenáší řádky beze změny a invariant dvojic za ni nikdo jiný nehlídá, proto
-     * neshodu odmítne celou, dřív než cokoli zapíše.
-     *
-     * @param array<string,array<int|string,array<string,mixed>>> $tables
-     */
-    private function assertEntryForm(PDO $pdo, array $tables, int $supplierId): void
+    private function assertExportEntryForm(array $tables, int $sourceSupplier, array $schema): array
     {
-        $entries = $tables['journal_entries'] ?? [];
-        if ($entries === []) {
-            return;
+        $history = [];
+        $dates = [];
+        foreach ($tables[MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE] ?? [] as $row) {
+            $from = $row['valid_from'] ?? null;
+            if (MyuctoExportReader::id($row['supplier_id'] ?? null) !== $sourceSupplier
+                || !is_string($from) || !preg_match('/\A\d{4}-\d{2}-\d{2}\z/D', $from) || isset($dates[$from])
+                || EntryForm::tryFrom((string) ($row['entry_form'] ?? '')) === null
+                || array_diff_key($row, $schema['columns'][MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE] ?? []) !== []) {
+                throw new RuntimeException('Neplatná historie formy účetního zápisu v exportu.');
+            }
+            $dates[$from] = true;
+            $history[] = $row;
         }
-        $stmt = $pdo->prepare('SELECT valid_from, entry_form FROM accounting_entry_form_history WHERE supplier_id = ? ORDER BY valid_from');
-        $stmt->execute([$supplierId]);
-        $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        usort($history, static fn (array $a, array $b): int => strcmp($a['valid_from'], $b['valid_from']));
+        $entries = $tables['journal_entries'] ?? [];
+        foreach (MyuctoImportProfile::KEYLESS_JOURNAL_TABLES as $table) {
+            foreach ($tables[$table] ?? [] as $row) {
+                if (MyuctoExportReader::id($row['supplier_id'] ?? null) !== $sourceSupplier
+                    || array_diff_key($row, $schema['columns'][$table] ?? []) !== []) {
+                    throw new RuntimeException('Export obsahuje neplatný řádek ' . $table . '.');
+                }
+                foreach (MyuctoImportProfile::KEYLESS_ENTRY_REFERENCES[$table] as $column) {
+                    if (!isset($entries[MyuctoExportReader::id($row[$column] ?? null)])) {
+                        throw new RuntimeException('Graf nemá zdrojový zápis deníku: ' . $table . '.' . $column . '.');
+                    }
+                }
+            }
+        }
+        $assessed = [];
+        foreach ($tables['journal_entry_pair_status'] ?? [] as $row) {
+            $assessed[MyuctoExportReader::id($row['entry_id'])] = true;
+        }
         $paired = [];
         $unpaired = [];
         foreach ($tables['journal_entry_lines'] ?? [] as $line) {
-            $entryId = (string) MyuctoExportReader::id($line['entry_id'] ?? null);
+            $entryId = MyuctoExportReader::id($line['entry_id'] ?? null);
             if (($line['pair_no'] ?? null) !== null && $line['pair_no'] !== '') {
                 $paired[$entryId] = true;
             } else {
@@ -397,28 +427,146 @@ final class MyuctoImporter
         $composite = 0;
         foreach ($entries as $id => $entry) {
             $isSingle = $history !== [] && EntryFormService::formFromHistory($history, (string) ($entry['entry_date'] ?? ''))->isSingle();
-            if ($isSingle && isset($unpaired[(string) $id])) {
+            if ($isSingle && isset($unpaired[(int) $id]) && !isset($assessed[(int) $id])) {
                 $single++;
-            } elseif (!$isSingle && isset($paired[(string) $id])) {
+            } elseif (!$isSingle && isset($paired[(int) $id])) {
                 $composite++;
             }
         }
         if ($single > 0) {
             throw new RuntimeException(sprintf(
-                'Cílová firma účtuje jednoduchým zápisem (po dvojicích), ale %d převáděných zápisů deníku dvojice nemá (složený zápis). '
-                . 'Obnova řádky deníku nemění; obnovte firmu do firmy se složeným zápisem a na jednoduchý zápis ji převeďte v nastavení účetnictví.',
+                'Export není úplný: %d zápisů deníku v období jednoduchého zápisu nemá dvojice ani posouzení zápisu bez dvojic.',
                 $single,
             ));
         }
         if ($composite > 0) {
             throw new RuntimeException(sprintf(
-                'Cílová firma účtuje složeným zápisem, ale %d převáděných zápisů deníku je po dvojicích (jednoduchý zápis). '
-                . 'Před obnovou nastavte cílové firmě jednoduchý zápis od data prvního takového zápisu.',
+                'Export není úplný: %d zápisů deníku je po dvojicích, ale export pro jejich datum nenese jednoduchý zápis (historii formy zápisu).',
                 $composite,
             ));
         }
+        return $history;
     }
 
+    /**
+     * Obnova zachovává formu účetního zápisu zdroje, výchozí formou instalace se neřídí.
+     * Firmě, do které se obnovuje poprvé a která nemá zápis v deníku ani vlastní volbu
+     * formy (nanejvýš výchozí formu instalace z založení), nahradí historii historií zdroje.
+     * Jinak (opakovaná obnova, firma s vlastní volbou) musí forma ke každému datu sedět;
+     * skutečný rozpor obnovu odmítne dřív, než cokoli zapíše.
+     *
+     * @param list<array<string,mixed>> $source historie formy z exportu
+     */
+    private function restoreEntryForm(PDO $pdo, array $source, int $supplierId, int $actorId, bool $firstRestore): void
+    {
+        $stmt = $pdo->prepare('SELECT valid_from, entry_form, note FROM accounting_entry_form_history WHERE supplier_id = ? ORDER BY valid_from FOR UPDATE');
+        $stmt->execute([$supplierId]);
+        $target = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $journal = $pdo->prepare('SELECT 1 FROM journal_entries WHERE supplier_id = ? LIMIT 1');
+        $journal->execute([$supplierId]);
+        $replaceable = $firstRestore && $journal->fetchColumn() === false
+            && array_filter($target, static fn (array $row): bool => !EntryFormService::isInstallationDefaultRow($row)) === [];
+        if ($replaceable) {
+            (new EntryFormService($this->db, $this->activity, new AccountingModeRepository($this->db), new FrameworkScopePolicy($this->db)))
+                ->restoreHistory($supplierId, $source, $actorId, ['source' => 'myucto_import']);
+            return;
+        }
+        $expected = EntryFormService::effectiveChanges($source);
+        $actual = EntryFormService::effectiveChanges($target);
+        if ($expected === $actual) {
+            return;
+        }
+        $source = $this->sortedHistory($source);
+        $dates = array_unique([...array_column($expected, 0), ...array_column($actual, 0)]);
+        sort($dates);
+        foreach ($dates as $date) {
+            $exported = EntryFormService::formFromHistory($source, $date);
+            $current = EntryFormService::formFromHistory($target, $date);
+            if ($exported !== $current) {
+                break;
+            }
+        }
+        $label = static fn (EntryForm $form): string => $form->isSingle() ? 'jednoduchým zápisem (po dvojicích)' : 'složeným zápisem';
+        throw new RuntimeException(sprintf(
+            'Forma účetního zápisu cílové firmy se liší od exportu k %s: export účtuje %s, cílová firma %s. '
+            . 'Obnova formu zdroje zachovává; obnovte firmu do nové firmy bez vlastní volby formy zápisu.',
+            $date,
+            $label($exported),
+            $label($current),
+        ));
+    }
+
+    /** @param list<array<string,mixed>> $history */
+    private function sortedHistory(array $history): array
+    {
+        usort($history, static fn (array $a, array $b): int => strcmp((string) $a['valid_from'], (string) $b['valid_from']));
+        return $history;
+    }
+
+    /**
+     * Posouzení zápisů bez dvojic a storna dvojic patří k deníku a nemají vlastní `id`:
+     * po zapsání zápisů se přemapují na nové zápisy a ověří. Vazba na běh převodu
+     * (`run_id`) se nepřenáší, běhy převodu jsou provozní historie zdrojové instalace.
+     *
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     * @param array<string,array<int|string,int>> $map
+     */
+    private function restoreKeylessJournal(PDO $pdo, array $tables, array $map, int $supplierId, int $actorId, bool $firstRestore, array $schema, array &$report): void
+    {
+        foreach (MyuctoImportProfile::KEYLESS_JOURNAL_TABLES as $table) {
+            $key = $table === 'journal_entry_pair_status' ? ['supplier_id', 'entry_id'] : ['supplier_id', 'entry_id', 'pair_no'];
+            foreach ($tables[$table] ?? [] as $row) {
+                $out = $row;
+                $out['supplier_id'] = $supplierId;
+                foreach (MyuctoImportProfile::KEYLESS_ENTRY_REFERENCES[$table] as $column) {
+                    $out[$column] = $map['journal_entries'][MyuctoExportReader::id($row[$column])]
+                        ?? throw new RuntimeException('Chybí zdrojová vazba ' . $table . '.' . $column . ' → journal_entries.');
+                }
+                if (array_key_exists('run_id', $out)) {
+                    $out['run_id'] = null;
+                }
+                if (($out['created_by'] ?? null) !== null) {
+                    $out['created_by'] = $actorId;
+                }
+                $stmt = $pdo->prepare('SELECT * FROM `' . $table . '` WHERE ' . implode(' AND ', array_map(static fn (string $c): string => '`' . $c . '` = ?', $key)) . ' FOR UPDATE');
+                $params = array_map(static fn (string $c): mixed => $out[$c], $key);
+                $stmt->execute($params);
+                $actual = $stmt->fetch(PDO::FETCH_ASSOC);
+                if ($actual === false) {
+                    if (!$firstRestore) {
+                        throw new RuntimeException('Rekonciliace: cílový řádek chybí (' . $table . ').');
+                    }
+                    $columns = array_keys($out);
+                    $pdo->prepare('INSERT INTO `' . $table . '` (`' . implode('`, `', $columns) . '`) VALUES (' . implode(', ', array_fill(0, count($columns), '?')) . ')')
+                        ->execute(array_values($out));
+                    $report['created'][$table] = ($report['created'][$table] ?? 0) + 1;
+                    $stmt->execute($params);
+                    $actual = $stmt->fetch(PDO::FETCH_ASSOC);
+                } elseif ($firstRestore) {
+                    throw new RuntimeException('Cílová firma už obsahuje vlastní data: ' . $table . '.');
+                } else {
+                    $report['existing'][$table] = ($report['existing'][$table] ?? 0) + 1;
+                }
+                foreach ($out as $column => $value) {
+                    if (!$this->same($value, $actual[$column] ?? null, $schema['columns'][$table][$column]['DATA_TYPE'])) {
+                        throw new RuntimeException('Rekonciliace: liší se ' . $table . '.' . $column . '.');
+                    }
+                }
+                $report['reconciliation'][$table] = ($report['reconciliation'][$table] ?? 0) + 1;
+            }
+        }
+    }
+
+    /**
+     * Nese-li export účetnictví, musí cíl vést v každém okamžiku stejný účetní rámec
+     * (vyhláška 500, nebo 504 u neziskových organizací). Osnova i deník se přebírají
+     * beze změny, takže deník podle vyhlášky 504 ve firmě s rámcem 500 (a naopak) by
+     * dal chybné výkazy. Den bez záznamu má rámec 500 jako {@see AccountingFrameworkService::forDate()};
+     * export bez historie rámce je proto celý v rámci 500.
+     *
+     * @param array<string,array<int|string,array<string,mixed>>> $tables
+     * @param array<int|string,array<string,mixed>>|null $source
+     */
     private function assertAccountingFramework(
         array $tables,
         ?array $source,

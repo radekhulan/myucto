@@ -98,7 +98,10 @@ final class MyuctoExportReader
                         || !is_int($info['rows'] ?? null) || $info['rows'] < 0 || isset($tables[$table])) {
                         throw new RuntimeException('Neplatná definice tabulky v exportu.');
                     }
-                    $supported = in_array($table, [...MyuctoImportProfile::TABLES, ...MyuctoImportProfile::CONFIG_TABLES, ...MyuctoImportProfile::CONTEXT_TABLES, 'supplier', ...array_keys(MyuctoImportProfile::GLOBAL_KEYS)], true);
+                    $supported = in_array($table, [...MyuctoImportProfile::TABLES, ...MyuctoImportProfile::CONFIG_TABLES, ...MyuctoImportProfile::CONTEXT_TABLES,
+                        MyuctoImportProfile::ENTRY_FORM_HISTORY_TABLE, ...MyuctoImportProfile::KEYLESS_JOURNAL_TABLES,
+                        'supplier', ...array_keys(MyuctoImportProfile::GLOBAL_KEYS)], true);
+                    $keyless = in_array($table, MyuctoImportProfile::KEYLESS_JOURNAL_TABLES, true);
                     // Kontextová tabulka se jen čte ke kontrole a v protokolu zůstává mimo rozsah převodu.
                     if (in_array($table, MyuctoImportProfile::CONTEXT_TABLES, true) && $info['rows'] > 0) {
                         $skipped[$table] = $info['rows'];
@@ -154,7 +157,7 @@ final class MyuctoExportReader
                                     throw new RuntimeException('Nepodporovaná strukturovaná hodnota exportu.');
                                 }
                             }
-                            $id = self::id($row['id'] ?? null);
+                            $id = $keyless ? count($tables[$table]) + 1 : self::id($row['id'] ?? null);
                             if (isset($tables[$table][$id])) {
                                 throw new RuntimeException('Duplicitní ID v exportu: ' . $table . '.');
                             }

@@ -311,7 +311,7 @@ final class EntryFormService
     /**
      * Výchozí forma instalace pro NOVOU firmu: řádek historie od
      * {@see INSTALLATION_DEFAULT_FROM}, takže forma platí pro všechna data účetnictví
-     * včetně převzaté historie. Druhá a poslední zápisová cesta do historie vedle
+     * včetně převzaté historie. Druhá zápisová cesta do historie vedle
      * {@see schedule()}; pravidla změny (otevřené období, zámek) se tu neuplatní,
      * protože firma ještě nic nezaúčtovala.
      *
@@ -361,6 +361,92 @@ final class EntryFormService
         $this->forget($supplierId);
 
         return $id;
+    }
+
+    /** Je řádek historie výchozí formou instalace zapsanou při založení firmy ({@see seedInstallationDefault()})? */
+    public static function isInstallationDefaultRow(array $row): bool
+    {
+        return (string) ($row['valid_from'] ?? '') === self::INSTALLATION_DEFAULT_FROM
+            && (string) ($row['entry_form'] ?? '') === EntryForm::Single->value
+            && ($row['note'] ?? null) === self::INSTALLATION_DEFAULT_NOTE;
+    }
+
+    /**
+     * Skutečné změny formy v historii: [valid_from, forma] jen tam, kde se forma oproti
+     * předchozímu stavu (na počátku složený zápis) mění. Dvě historie se stejnými změnami
+     * dávají formu stejnou ke každému datu.
+     *
+     * @param iterable<array{valid_from:string, entry_form:string}> $history libovolné pořadí
+     * @return list<array{0:string, 1:string}>
+     */
+    public static function effectiveChanges(iterable $history): array
+    {
+        $rows = [];
+        foreach ($history as $row) {
+            $rows[(string) $row['valid_from']] = EntryForm::from((string) $row['entry_form'])->value;
+        }
+        ksort($rows, SORT_STRING);
+        $changes = [];
+        $current = EntryForm::Composite->value;
+        foreach ($rows as $from => $form) {
+            if ($form !== $current) {
+                $changes[] = [(string) $from, $form];
+                $current = $form;
+            }
+        }
+        return $changes;
+    }
+
+    /**
+     * Obnova firmy z exportu: nahradí celou historii formy historií zdroje (třetí zápisová
+     * cesta vedle {@see schedule()} a {@see seedInstallationDefault()}). Obnova zachovává
+     * systém zdroje, proto se pravidla změny ani výchozí forma instalace neuplatní; volající
+     * ručí za to, že firma ještě nemá zápis v deníku. Běží v transakci volajícího, autor
+     * řádku ze zdroje se nahradí aktérem obnovy, datum pořízení zůstává.
+     *
+     * @param list<array{valid_from:string, entry_form:string, note?:?string, created_at?:?string, created_by?:mixed}> $rows
+     * @param array<string,mixed> $auditContext
+     */
+    public function restoreHistory(int $supplierId, array $rows, int $actor, array $auditContext = []): void
+    {
+        $pdo = $this->db->pdo();
+        if (!$pdo->inTransaction()) {
+            throw new \LogicException('Obnova historie formy zápisu vyžaduje transakci volajícího.');
+        }
+        $stmt = $pdo->prepare('SELECT valid_from, entry_form FROM accounting_entry_form_history WHERE supplier_id = ? ORDER BY valid_from FOR UPDATE');
+        $stmt->execute([$supplierId]);
+        $replaced = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        if ($replaced === [] && $rows === []) {
+            return;
+        }
+        $pdo->prepare('DELETE FROM accounting_entry_form_history WHERE supplier_id = ?')->execute([$supplierId]);
+        $insert = $pdo->prepare(
+            'INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, created_by, created_at, note)
+             VALUES (?, ?, ?, ?, COALESCE(?, CURRENT_TIMESTAMP), ?)'
+        );
+        foreach ($rows as $row) {
+            $insert->execute([
+                $supplierId,
+                (string) $row['valid_from'],
+                EntryForm::from((string) $row['entry_form'])->value,
+                ($row['created_by'] ?? null) !== null && $actor > 0 ? $actor : null,
+                $row['created_at'] ?? null,
+                $row['note'] ?? null,
+            ]);
+        }
+        $this->logger->log(
+            self::AUDIT_ACTION,
+            $actor > 0 ? $actor : null,
+            'supplier',
+            $supplierId,
+            [
+                ...$auditContext,
+                'from' => self::effectiveChanges($replaced),
+                'to'   => self::effectiveChanges($rows),
+            ],
+            supplierId: $supplierId,
+        );
+        $this->forget($supplierId);
     }
 
     /**
