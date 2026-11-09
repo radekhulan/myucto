@@ -1171,7 +1171,8 @@
         "2265_entry_form_history.sql",
         "2266_journal_entry_pairs.sql",
         "2267_invoice_item_posting_accounts.sql",
-        "2268_number_series_codebook.sql"
+        "2268_number_series_codebook.sql",
+        "2269_internal_document_line_pairs.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7040,6 +7041,8 @@
                 "dimensions_json": "longtext NULL DEFAULT NULL",
                 "internal_document_id": "bigint(20) unsigned NOT NULL",
                 "is_red_storno": "tinyint(1) NOT NULL DEFAULT 0",
+                "line_text": "varchar(255) NULL DEFAULT NULL",
+                "pair_no": "smallint(5) unsigned NULL DEFAULT NULL",
                 "position": "smallint(5) unsigned NOT NULL",
                 "side": "enum('debit','credit') NOT NULL",
                 "supplier_id": "int(10) unsigned NOT NULL"

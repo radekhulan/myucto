@@ -94,7 +94,7 @@ final class InternalDocumentRepository
     public function lines(int $supplierId, int $id): array
     {
         $stmt = $this->db->pdo()->prepare(
-            'SELECT position, account_code, side, amount, is_red_storno, cost_center, dimensions_json
+            'SELECT position, account_code, side, amount, is_red_storno, cost_center, dimensions_json, pair_no, line_text
                FROM internal_document_lines
               WHERE supplier_id = ? AND internal_document_id = ?
               ORDER BY position'
@@ -102,7 +102,7 @@ final class InternalDocumentRepository
         $stmt->execute([$supplierId, $id]);
         return array_map(static function (array $row): array {
             $dims = $row['dimensions_json'] !== null ? json_decode((string) $row['dimensions_json'], true) : null;
-            return [
+            $line = [
                 'account_code' => (string) $row['account_code'],
                 'side' => (string) $row['side'],
                 'amount' => (float) $row['amount'],
@@ -110,6 +110,14 @@ final class InternalDocumentRepository
                 'cost_center' => $row['cost_center'] !== null ? (string) $row['cost_center'] : null,
                 'dimensions' => is_array($dims) ? $dims : [],
             ];
+            // Dvojice jen u konceptu zadaného po dvojicích; složený koncept má tvar beze změny.
+            if ($row['pair_no'] !== null) {
+                $line['pair_no'] = (int) $row['pair_no'];
+                if ($row['line_text'] !== null) {
+                    $line['line_text'] = (string) $row['line_text'];
+                }
+            }
+            return $line;
         }, $stmt->fetchAll(PDO::FETCH_ASSOC));
     }
 
@@ -122,8 +130,8 @@ final class InternalDocumentRepository
         $stmt = $pdo->prepare(
             'INSERT INTO internal_document_lines
                (supplier_id, internal_document_id, position, account_code, side, amount,
-                is_red_storno, cost_center, dimensions_json)
-             VALUES (?,?,?,?,?,?,?,?,?)'
+                is_red_storno, cost_center, dimensions_json, pair_no, line_text)
+             VALUES (?,?,?,?,?,?,?,?,?,?,?)'
         );
         foreach (array_values($lines) as $position => $line) {
             $dims = $line['dimensions'] ?? [];
@@ -131,6 +139,8 @@ final class InternalDocumentRepository
                 $supplierId, $id, $position + 1, $line['account_code'], $line['side'], $line['amount'],
                 !empty($line['is_red_storno']) ? 1 : 0, $line['cost_center'] ?? null,
                 $dims !== [] ? json_encode((object) $dims, JSON_THROW_ON_ERROR) : null,
+                isset($line['pair_no']) ? (int) $line['pair_no'] : null,
+                isset($line['pair_no'], $line['line_text']) ? (string) $line['line_text'] : null,
             ]);
         }
     }

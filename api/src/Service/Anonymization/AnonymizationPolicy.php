@@ -395,7 +395,7 @@ final class AnonymizationPolicy
         'income_tax_return_snapshots' => ['business_errors' => 'json', 'snapshot_json' => 'json', 'source_manifest' => 'json', 'source_sha256' => 'keep', 'xml_content' => 'text', 'xml_sha256' => 'keep'],
         'income_tax_returns' => ['computed' => 'json', 'inputs' => 'json'],
         'instance_storage_usage' => ['breakdown' => 'keep'],
-        'internal_document_lines' => ['account_code' => 'keep', 'cost_center' => 'keep', 'dimensions_json' => 'keep'],
+        'internal_document_lines' => ['account_code' => 'keep', 'cost_center' => 'keep', 'dimensions_json' => 'keep', 'line_text' => 'text'],
         'internal_documents' => ['document_links_json' => 'json', 'document_no' => 'keep', 'kind' => 'keep', 'note' => 'text', 'partner_name' => 'party_name', 'reversal_reason' => 'text', 'title' => 'text'],
         'integration_change_log' => ['entity_type' => 'keep'],
         'integration_connections' => ['connection_uuid' => 'keep', 'connector_key' => 'keep', 'credentials_enc' => 'wipe', 'field_ownership_json' => 'keep', 'last_error_code' => 'keep', 'mappings_json' => 'json', 'name' => 'text', 'webhook_secret_enc' => 'wipe', 'webhook_secret_hash' => 'wipe'],
