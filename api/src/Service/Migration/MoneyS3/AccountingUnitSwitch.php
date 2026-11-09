@@ -87,6 +87,18 @@ final class AccountingUnitSwitch
     }
 
     /**
+     * Výchozí forma zápisu instalace ({@see EntryFormInstallationDefault}) pro firmu, kterou
+     * převod zakládá nebo do podvojného účetnictví teprve uvádí. Volá se PŘED prvním zápisem
+     * deníku: firmě, která už v deníku něco má, se forma nezapíše a převzaté zápisy by
+     * zůstaly složené. Firma s historií formy nebo se zápisy v deníku zůstává beze změny.
+     * Ve zkoušce nanečisto se zápis vrátí s transakcí zkoušky.
+     */
+    public function applyEntryFormDefault(int $supplierId): void
+    {
+        $this->entryFormDefault->apply($supplierId, null, activating: true);
+    }
+
+    /**
      * Podvojné účetnictví od začátku prvního převáděného období — jinak by historické
      * roky spadly do daňové evidence. Začátek účetnictví se jen posouvá dozadu, nikdy
      * dopředu (firma mohla v MyÚčtu účtovat už dřív).
@@ -106,8 +118,9 @@ final class AccountingUnitSwitch
                   WHERE supplier_id = ? AND effective_from > ? AND effective_from <= ? AND accounting_mode <> 'double_entry'"
             )->execute([$supplierId, $since, $until]);
         }
-        // Výchozí forma zápisu instalace dřív, než převod zapíše první zápis deníku.
-        $this->entryFormDefault->apply($supplierId, null, activating: true);
+        // Pojistka pro převody, které deník zapisují až po přepnutí režimu; převod, který
+        // deník zapisuje dřív, volá applyEntryFormDefault() před ním.
+        $this->applyEntryFormDefault($supplierId);
         if (!$onSupplier) {
             $this->modes->record($supplierId, $since, 'double_entry');
             return;

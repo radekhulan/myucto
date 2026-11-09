@@ -8,11 +8,13 @@ use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\MoneyS3ImportRepository;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\Migration\Shared\MigrationPeriods;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Migration\Shared\SourceJournalPairs;
 
 /**
  * Účetní období a účetní deník z Money.
@@ -44,6 +46,7 @@ final class JournalImporter
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalEntryRepository $journal,
         private readonly MoneyS3ImportRepository $map,
+        private readonly EntryFormService $entryForms,
     ) {
         $this->plans = new \WeakMap();
     }
@@ -204,6 +207,10 @@ final class JournalImporter
             'year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0,
             'skipped_rows' => 0, 'swapped_rows' => 0, 'deleted_rows' => $table?->skippedDeleted() ?? 0, 'moved' => [],
         ];
+        // Forma zápisu firmy. Výchozí jednoduchou formu instalace zapsal převod před prvním
+        // zápisem deníku; deník Money pak jde po dvojicích přímo ze zdroje.
+        $forms = SourceJournalPairs::load($this->entryForms, $ctx->supplierId);
+        $sameAccountRows = 0;
         $now = date('Y-m-d H:i:s');
         $done = 0;
         $total = count($groups);
@@ -239,7 +246,7 @@ final class JournalImporter
                 continue;
             }
 
-            [$lines, $skipped, $swapped] = $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on']);
+            [$lines, $skipped, $swapped, $texts] = $this->groupLines($ctx, $groupRows, $groupKey, $fxAccounts, $isOpening, $period['starts_on']);
             $stats['skipped_rows'] += $skipped;
             $stats['swapped_rows'] += $swapped;
             if ($lines === []) {
@@ -264,6 +271,13 @@ final class JournalImporter
                 $documentDate ??= $entryDate;
                 $entryDate = $entryDate < $period['starts_on'] ? $period['starts_on'] : $period['ends_on'];
                 $stats['moved'][] = trim((string) ($first['Doklad'] ?? '')) ?: $groupKey;
+            }
+            if ($forms->singleAt($entryDate)) {
+                ['lines' => $lines, 'same_account' => $sameAccount] = SourceJournalPairs::pair($lines, $texts);
+                $sameAccountRows += $sameAccount;
+                if ($lines === []) {
+                    continue;
+                }
             }
             $docNo = $isOpening ? null : (mb_substr(trim((string) ($first['Doklad'] ?? '')), 0, 50) ?: null);
             // Money veze v řádku deníku jen `Popis`, který je u celé řady dokladů
@@ -307,6 +321,10 @@ final class JournalImporter
         $p->count(self::STEP, 'entries', $stats['entries']);
         $p->count(self::STEP, 'existing', $stats['existing']);
         $p->count(self::STEP, 'lines', $stats['lines']);
+        if ($sameAccountRows > 0) {
+            $stats['same_account_rows'] = $sameAccountRows;
+            $p->info(self::STEP, 'same_account_rows', "Rok {$year}: {$sameAccountRows} řádků Money účtuje na straně MD i Dal na účet, který MyÚčto vede jako jeden. Na zůstatek účtu nemají vliv a v jednoduchém zápisu nejsou platná dvojice, proto se nepřenesly.", ['year' => $year, 'rows' => $sameAccountRows]);
+        }
         if ($stats['swapped_rows'] > 0) {
             $p->info(self::STEP, 'negative_amounts', "Rok {$year}: {$stats['swapped_rows']} řádků se zápornou částkou přeneseno s prohozenými stranami (účetně totéž).", ['year' => $year]);
         }
@@ -333,7 +351,10 @@ final class JournalImporter
      *
      * @param list<array<string,mixed>> $groupRows
      * @param array<int,array{currency:string,code:string,opening:?array{foreign:float,rate:float}}> $fxAccounts
-     * @return array{0:list<array<string,mixed>>,1:int,2:int} řádky, vynechané řádky Money, řádky s prohozenými stranami
+     * Text každého převzatého řádku Money (`Popis`) jde zvlášť: ve firmě s jednoduchou formou
+     * je řádek Money jedna dvojice s tímto textem ({@see SourceJournalPairs}).
+     *
+     * @return array{0:list<array<string,mixed>>,1:int,2:int,3:list<string>} řádky, vynechané řádky Money, řádky s prohozenými stranami, texty řádků
      */
     private function groupLines(ImportContext $ctx, array $groupRows, string $groupKey, array $fxAccounts, bool $isOpening, string $periodStart): array
     {
@@ -342,6 +363,7 @@ final class JournalImporter
         $lineNo = 0;
         $skipped = 0;
         $swapped = 0;
+        $texts = [];
         foreach ($groupRows as $r) {
             $effect = Ms3Journal::effect($r);
             if ($effect === null) {
@@ -364,11 +386,12 @@ final class JournalImporter
             $fx = $fxAccounts !== [] ? self::rowForeign($r) : null;
             $lines[] = self::withForeign(['account_id' => $debitId, 'side' => 'debit', 'amount' => $amount, 'cost_center' => $cc, 'line_no' => ++$lineNo], $fxAccounts, $fx);
             $lines[] = self::withForeign(['account_id' => $creditId, 'side' => 'credit', 'amount' => $amount, 'cost_center' => $cc, 'line_no' => ++$lineNo], $fxAccounts, $fx);
+            $texts[] = (string) ($r['Popis'] ?? '');
         }
         if ($isOpening && $lines !== [] && $fxAccounts !== []) {
             $lines = $this->openingForeign($ctx, $lines, $fxAccounts, $periodStart);
         }
-        return [$lines, $skipped, $swapped];
+        return [$lines, $skipped, $swapped, $texts];
     }
 
     /**
