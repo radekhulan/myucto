@@ -30,18 +30,21 @@ test('detail zápisu předá dvojice, formu a pair_no beze ztráty', async () =>
   const description = TOOLS_BY_NAME.get('get_journal_entry').description;
   assert.match(description, /pairs/);
   assert.match(description, /pair_no/);
-  assert.doesNotMatch(description, /`entry_form`/);
+  assert.match(description, /`entry_form`/);
   assert.match(description, /journal_entry_form/);
 });
 
-test('deník nenabízí filtr pair_status, který backend nezná, a odmítne ho', async () => {
+test('deník předá filtr pair_status a popisuje posouzení zápisu', async () => {
   const tool = TOOLS_BY_NAME.get('list_journal_entries');
-  assert.equal(tool.inputSchema.properties.pair_status, undefined);
-  assert.throws(() => validateToolArguments(tool, { pair_status: 'composite_mn' }));
-  const { request } = await call('list_journal_entries', { entry_id: 7 });
+  assert.deepEqual(tool.inputSchema.properties.pair_status.enum, ['composite_mn', 'ineligible']);
+  assert.throws(() => validateToolArguments(tool, { pair_status: 'paired' }));
+  const { request } = await call('list_journal_entries', { entry_id: 7, pair_status: 'composite_mn' });
   assert.equal(request.path, '/accounting/journal');
   assert.equal(request.query.entry_id, 7);
-  assert.equal('pair_status' in request.query, false);
+  assert.equal(request.query.pair_status, 'composite_mn');
+  const plain = await call('list_journal_entries', { entry_id: 7 });
+  assert.equal(plain.request.query.pair_status, undefined);
+  assert.match(tool.description, /pair_status/);
   assert.match(tool.description, /get_journal_entry/);
 });
 

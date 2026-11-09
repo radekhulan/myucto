@@ -3381,7 +3381,8 @@ export const TOOLS = [
     description:
       'Účetní zápisy s filtry na období, datum, zdrojový doklad a text. '
       + 'Pro dotazy „jak se zaúčtovala tahle faktura" použij `source_type` + `source_id`. '
-      + 'Seznam nese jen hlavičky zápisů; dvojice (`pairs`) a posouzení zápisu M : N (`pair_status`) jsou v detailu zápisu (`get_journal_entry`).',
+      + 'U firmy s jednoduchým zápisem nese každý zápis `pair_status` (`composite_mn` = M : N k ruční úpravě, `ineligible` = převod nepřipadá v úvahu, jinak null) '
+      + 'a filtr `pair_status` vybere jen takové zápisy. Dvojice (`pairs`) jsou v detailu zápisu (`get_journal_entry`).',
     inputSchema: schema({
       query: str('Fulltext přes popis zápisu.'),
       period_id: int('ID účetního období.'),
@@ -3394,6 +3395,7 @@ export const TOOLS = [
       automation: str('Původ zaúčtování.', { enum: ['auto', 'approved', 'manual'] }),
       reversal: str('Stav storna.', { enum: ['reversed', 'reversal', 'any', 'none'] }),
       integrity: str('Jen zjištěné rozdíly částek dokladu a deníku.', { enum: ['amount_mismatch'] }),
+      pair_status: str('Jednoduchý zápis: jen zápisy bez dvojic s daným posouzením.', { enum: ['composite_mn', 'ineligible'] }),
       account_from: str('Účet od, včetně; stačí začátek kódu (5, 501).'),
       account_to: str('Účet do, včetně analytik (5 až 5 = celá třída 5).'),
       amount_from: num('Částka od, včetně.'),
@@ -3416,6 +3418,7 @@ export const TOOLS = [
       automation: a.automation,
       reversal: a.reversal,
       integrity: a.integrity,
+      pair_status: a.pair_status,
       account_from: a.account_from,
       account_to: a.account_to,
       amount_from: a.amount_from,
@@ -3434,7 +3437,8 @@ export const TOOLS = [
     title: 'Detail účetního zápisu',
     description:
       'Řádky zápisu (MD / D), účty, částky a vazba na zdrojový doklad. U firmy s jednoduchým zápisem také `pairs` '
-      + '(dvojice: číslo, účet MD, účet Dal, částka, text, případný opravný zápis `reversed_by_entry_id`) a `pair_no` / `line_text` na řádcích. '
+      + '(dvojice: číslo, účet MD a Dal s názvy, částka, text, případný opravný zápis `reversed_by_entry_id`), `pair_no` / `line_text` na řádcích '
+      + 'a `entry_form` (forma zápisu k datu zápisu). '
       + 'Zápis bez dvojic nese případně `pair_status` = `{status, reason}` (`composite_mn` = M : N k ruční úpravě, `ineligible` = převod nepřipadá v úvahu). '
       + 'Formu zápisu firmy vrací `journal_entry_form`.',
     inputSchema: schema({ id: int('ID účetního zápisu.') }, ['id']),

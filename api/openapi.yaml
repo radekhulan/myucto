@@ -13936,6 +13936,16 @@ paths:
           type: string
           enum:
           - amount_mismatch
+      - in: query
+        name: pair_status
+        description: >-
+          Jednoduchý zápis: jen zápisy bez dvojic s daným posouzením (`composite_mn` = M : N k ruční
+          úpravě, `ineligible` = převod nepřipadá v úvahu).
+        schema:
+          type: string
+          enum:
+          - composite_mn
+          - ineligible
       - $ref: '#/components/parameters/DimensionValueId'
       - $ref: '#/components/parameters/DimensionDescendants'
       responses:
@@ -13949,7 +13959,21 @@ paths:
                   items:
                     type: array
                     items:
-                      $ref: '#/components/schemas/JournalEntry'
+                      allOf:
+                      - $ref: '#/components/schemas/JournalEntry'
+                      - type: object
+                        properties:
+                          pair_status:
+                            type:
+                            - string
+                            - 'null'
+                            enum:
+                            - composite_mn
+                            - ineligible
+                            - null
+                            description: >-
+                              Posouzení zápisu bez dvojic (význam jako `pair_status.status` v detailu), jinak null.
+                              Klíč je jen u firmy s jednoduchým zápisem, u ostatních chybí.
                   total:
                     type: integer
                   page:
@@ -46688,6 +46712,12 @@ components:
             lines:
               type: array
               items: { $ref: '#/components/schemas/JournalLineDetail' }
+            entry_form:
+              type: string
+              enum: [composite, single]
+              description: >-
+                Forma zápisu firmy k datu zápisu. Klíč je jen u firmy, která má jednoduchý zápis aspoň od
+                nějakého data; u ostatních chybí.
             pairs:
               type: array
               description: >-
@@ -46719,6 +46749,8 @@ components:
         credit_line_id: { type: [integer, "null"] }
         debit_account_code: { type: [string, "null"] }
         credit_account_code: { type: [string, "null"] }
+        debit_account_name: { type: [string, "null"], description: Název účtu MD z účtové osnovy (detail zápisu). }
+        credit_account_name: { type: [string, "null"], description: Název účtu Dal z účtové osnovy (detail zápisu). }
         amount: { type: number, format: float, description: "Velikost částky dvojice; u červeného storna je `is_red_storno` true." }
         is_red_storno: { type: boolean }
         line_text: { type: [string, "null"], description: Text dvojice (zapsaný na oba řádky dvojice). }
