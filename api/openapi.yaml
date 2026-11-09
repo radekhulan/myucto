@@ -13170,6 +13170,78 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '403': { $ref: '#/components/responses/Forbidden' }
 
+  /api/v1/accounting/entry-form:
+    get:
+      tags: [Accounting]
+      summary: Forma účetního zápisu firmy (jednoduchý / složený) a její historie
+      description: >
+        Forma zápisu platí k datu účetního případu. `composite` = složený zápis,
+        `single` = jednoduchý (párový) zápis, kde každý řádek deníku patří do dvojice
+        `pair_no`. Firma bez historie účtuje složeně. Změna formy přes token dostupná není.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  entry_form: { type: string, enum: [composite, single], description: 'Forma k dnešnímu dni' }
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        valid_from: { type: string, format: date }
+                        entry_form: { type: string, enum: [composite, single] }
+                        created_by: { type: [integer, "null"] }
+                        created_at: { type: string }
+                        note: { type: [string, "null"] }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/pair-conversion:
+    get:
+      tags: [Accounting]
+      summary: Poslední běhy převodu starších zápisů na dvojice
+      description: >
+        Běhy náhledu nanečisto (`preview`) a převodu (`apply`) starších zápisů na dvojice
+        jednoduchého zápisu, nejnovější první. Spuštění je mutace a přes token dostupné není.
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  runs:
+                    type: array
+                    items: { $ref: '#/components/schemas/JournalPairConversionRun' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/v1/accounting/pair-conversion/{id}:
+    get:
+      tags: [Accounting]
+      summary: Stav běhu převodu zápisů na dvojice
+      parameters:
+        - $ref: '#/components/parameters/SupplierIdHeader'
+        - { name: id, in: path, required: true, schema: { type: integer } }
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/JournalPairConversionRun' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
   /api/v1/accounting/setup-assistant:
     get:
       tags: [Accounting]
@@ -51104,6 +51176,28 @@ components:
           description: Všechny protizápisy původní skupiny; prázdné pole při přepisu na místě.
         entry_date: { type: string, format: date }
         date_shifted: { type: boolean }
+
+    JournalPairConversionRun:
+      type: object
+      description: Běh náhledu nebo převodu starších zápisů na dvojice jednoduchého zápisu.
+      properties:
+        id: { type: integer }
+        mode: { type: string, enum: [preview, apply] }
+        status: { type: string, enum: [queued, running, done, failed, cancelled] }
+        date_from: { type: [string, "null"], format: date }
+        date_to: { type: [string, "null"], format: date }
+        counts:
+          type: [object, "null"]
+          description: Počty zápisů podle klasifikace (paired, auto, derived, composite_mn, ineligible) a druhu zdroje.
+          additionalProperties: true
+        sample:
+          type: [array, "null"]
+          description: Prvních 100 zápisů M:N nebo nezpůsobilých k převodu.
+          items: { type: object, additionalProperties: true }
+        error: { type: [string, "null"] }
+        created_by: { type: [integer, "null"] }
+        created_at: { type: string }
+        finished_at: { type: [string, "null"] }
 
     JournalPostingOrigin:
       type: object

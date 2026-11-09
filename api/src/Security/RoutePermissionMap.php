@@ -821,6 +821,9 @@ final class RoutePermissionMap
         // obecné `/api/accounting` níž: je to zápis do deníku, ne čtení nastavení.
         ['GET', '#^/api/accounting/posting-backfill(/|$)#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/posting-backfill(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
+        // Převod starších zápisů na dvojice fyzicky dělí řádky deníku → právo účtovat.
+        ['GET', '#^/api/accounting/pair-conversion(/|$)#', 'accounting', AccessLevel::READ],
+        ['*', '#^/api/accounting/pair-conversion(/|$)#', 'accounting.journal.post', AccessLevel::WRITE],
         ['GET', '#^/api/accounting/setup-assistant(/|$)#', 'accounting', AccessLevel::READ],
         ['PUT', '#^/api/accounting/setup-assistant/runs/[0-9]+/proposals/[0-9]+$#', 'accounting.templates', AccessLevel::WRITE],
         ['POST', '#^/api/accounting/setup-assistant/(analysis|runs/[0-9]+/approve)$#', 'accounting.templates', AccessLevel::WRITE],

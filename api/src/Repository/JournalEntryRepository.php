@@ -1190,6 +1190,25 @@ final class JournalEntryRepository
     }
 
     /**
+     * Fyzicky rozdělí řádky zaúčtovaného zápisu na dvojice (převod starších zápisů).
+     *
+     * Kontrakt (implementace navazuje): `$pairedLines` je výstup JournalPairer::pair()
+     * nad řádky zápisu, kde každý díl nese `id` původního řádku. První díl řádku zůstane
+     * na původním řádku (stejné `id` a `line_no`, UPDATE `amount`, `amount_foreign`,
+     * `pair_no`, `line_text`), další díly se vloží s novými `line_no` za maximem a se
+     * zkopírovanými dimenzemi a rozpady; řádky se nikdy nemažou. Optimistická
+     * konkurence přes `row_version` (zvýší se), výsledek projde invariantem dvojic.
+     * Volající drží transakci a zámek období a zapisuje audit.
+     *
+     * @param list<array<string,mixed>> $pairedLines
+     * @throws \LogicException dokud není implementováno
+     */
+    public function splitIntoPairs(int $entryId, int $supplierId, int $expectedRowVersion, array $pairedLines): void
+    {
+        throw new \LogicException('JournalEntryRepository::splitIntoPairs() zatím není implementováno.');
+    }
+
+    /**
      * @param list<array{account_id:int, side:'debit'|'credit', amount:float|string, is_red_storno?:bool, cost_center?:?string, project_id?:?int, line_no?:int}> $lines
      */
     private function insertLines(\PDO $pdo, int $entryId, int $supplierId, array $lines): void

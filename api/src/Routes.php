@@ -2790,6 +2790,19 @@ final class Routes
             $g->post  ('/setup-assistant/jobs/{id:[0-9]+}/rollback', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'rollback']);
             $g->delete('/setup-assistant/jobs/{id:[0-9]+}/snapshot', [\MyInvoice\Action\Accounting\AccountingSetupAssistantAction::class, 'deleteSnapshot']);
             $g->post  ('/journal/{id:[0-9]+}/reverse',        [JournalAction::class, 'reverse']);
+            // Jednoduchý (párový) zápis: storno vybraných dvojic a přeúčtování jedné dvojice.
+            // KONKRÉTNÍ cesty PŘED generickým /journal/{id}.
+            $g->post  ('/journal/{id:[0-9]+}/pairs/reverse',                [\MyInvoice\Action\Accounting\JournalPairAction::class, 'reverse']);
+            $g->post  ('/journal/{id:[0-9]+}/pairs/{pairNo:[0-9]+}/repost', [\MyInvoice\Action\Accounting\JournalPairAction::class, 'repost']);
+            // Forma účetního zápisu firmy v čase (jednoduchý / složený).
+            $g->get   ('/entry-form', [\MyInvoice\Action\Accounting\EntryFormAction::class, 'get']);
+            $g->post  ('/entry-form', [\MyInvoice\Action\Accounting\EntryFormAction::class, 'schedule']);
+            // Převod starších zápisů na dvojice (náhled nanečisto, provedení, stav běhu).
+            $g->get   ('/pair-conversion',                      [\MyInvoice\Action\Accounting\PairConversionAction::class, 'list']);
+            $g->post  ('/pair-conversion/preview',              [\MyInvoice\Action\Accounting\PairConversionAction::class, 'preview']);
+            $g->post  ('/pair-conversion/apply',                [\MyInvoice\Action\Accounting\PairConversionAction::class, 'apply']);
+            $g->get   ('/pair-conversion/{id:[0-9]+}',          [\MyInvoice\Action\Accounting\PairConversionAction::class, 'get']);
+            $g->post  ('/pair-conversion/{id:[0-9]+}/cancel',   [\MyInvoice\Action\Accounting\PairConversionAction::class, 'cancel']);
             // Smazání celé storno dvojice (zápis + protizápis) v otevřeném období.
             $g->delete('/journal/{id:[0-9]+}/reversal-pair', [JournalAction::class, 'deleteReversalPair']);
             $g->delete('/journal/{id:[0-9]+}',                [JournalAction::class, 'delete']);
