@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace MyInvoice\Tests\Integration\Accounting\Pair;
 
 use MyInvoice\Service\Accounting\Reports\AccountStatementService;
+use MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService;
+use MyInvoice\Service\Accounting\Reports\GeneralLedgerService;
 use MyInvoice\Service\Accounting\Reports\JournalLineContext;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
@@ -169,6 +171,31 @@ final class AccountStatementPairsTest extends TestCase
             }
             $this->assertCounterTotalsMatchTurnover($data);
         }
+    }
+
+    public function testGeneralLedgerDetailShowsSingleCounterAccountForPairs(): void
+    {
+        $entries = $this->postScenario();
+        $this->switchToSingle(self::YEAR . '-01-01');
+        $this->pairAllInPlace($entries);
+        $this->entryForms->forget();
+
+        $ledger = $this->container->get(GeneralLedgerService::class)->build($this->supplierId, $this->periodId, null, null, false, [], false, true);
+        $lines = [];
+        foreach ($this->container->get(GeneralLedgerDetailService::class)->events($this->supplierId, $ledger, [], false) as $event) {
+            if ($event['kind'] === 'line') {
+                $lines[] = $event['item'];
+            }
+        }
+        self::assertNotSame([], $lines);
+        foreach ($lines as $line) {
+            if ($line['entry_id'] === $entries['mn']) {
+                continue;
+            }
+            self::assertStringNotContainsString(',', (string) $line['counter_accounts'], 'Rozpis hlavní knihy: jediný protiúčet u dvojice.');
+        }
+        $bulk = array_values(array_filter($lines, static fn (array $l): bool => $l['entry_id'] === $entries['bulk'] && $l['account_code'] === '221'));
+        self::assertSame(['321', '321', '568'], array_column($bulk, 'counter_accounts'));
     }
 
     /** @return array<string,mixed> */
