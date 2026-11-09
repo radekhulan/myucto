@@ -46,11 +46,12 @@ final class CashFlowPairsTest extends TestCase
 
     public function testSameLinesWithoutPairsKeepTodaysComputation(): void
     {
-        $this->switchToSingle(self::YEAR . '-01-01');
+        // Starší složený zápis (pořízený před přepnutím), který převod nerozdělil.
         $this->manual(self::YEAR . '-02-01', 'PD-9', 'Prodej za hotové', [
             ['311', 'debit', '1000.00'], ['602', 'credit', '1000.00'], ['311', 'debit', '210.00'],
             ['343.200', 'credit', '210.00'], ['211', 'debit', '1210.00'], ['311', 'credit', '1210.00'],
         ]);
+        $this->switchToSingle(self::YEAR . '-01-01');
 
         $data = $this->build();
         self::assertSame([
