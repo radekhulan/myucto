@@ -526,6 +526,46 @@ final class EmailProfileRepositoryTest extends TestCase
         self::assertSame('strict-same-draft@example.test', $draft['from_email']);
     }
 
+    public function testClientCanSwitchStoredImapPasswordToMicrosoft365(): void
+    {
+        $profileId = $this->profiles->createProfile($this->supplierId, [
+            'name' => 'Syntetický IMAP profil',
+            'code' => 'itest_imap_switch_' . bin2hex(random_bytes(4)),
+            'from_email' => 'synthetic@example.test',
+            'imap_sent_enabled' => true,
+            'imap_host' => 'legacy.example.test',
+            'imap_username' => 'legacy-login',
+            'imap_password' => 'stored-imap-password',
+        ], $this->userId);
+        $this->createdEmailProfiles[] = $profileId;
+
+        $changes = [
+            'imap_auth_mode' => 'microsoft365',
+            'imap_username' => 'shared@example.test',
+            'imap_password' => null,
+            'imap_oauth_tenant_id' => '11111111-1111-4111-8111-111111111111',
+            'imap_oauth_client_id' => '22222222-2222-4222-8222-222222222222',
+            'imap_oauth_client_secret' => 'synthetic-client-secret',
+        ];
+
+        $probe = $this->profiles->imapProbeSettingsForDraft($this->supplierId, $changes, $profileId, true);
+        $draft = $this->profiles->profileForDraftTest($this->supplierId, $changes, $profileId, true);
+        foreach ([$probe, $draft] as $settings) {
+            self::assertSame('outlook.office365.com', $settings['imap_host']);
+            self::assertSame('shared@example.test', $settings['imap_username']);
+            self::assertSame('synthetic-client-secret', $settings['imap_oauth_client_secret']);
+            self::assertNull($settings['imap_password']);
+        }
+        self::assertTrue($this->profiles->findProfile($this->supplierId, $profileId)['has_imap_password']);
+
+        self::assertTrue($this->profiles->updateProfile($this->supplierId, $profileId, $changes, true));
+        $saved = $this->profiles->findProfile($this->supplierId, $profileId);
+        self::assertSame('microsoft365', $saved['imap_auth_mode']);
+        self::assertSame('shared@example.test', $saved['imap_username']);
+        self::assertTrue($saved['has_imap_oauth_client_secret']);
+        self::assertFalse($saved['has_imap_password']);
+    }
+
     public function testImapProbeSettingsCanReuseStoredSecretWithoutWholeProfile(): void
     {
         $profileId = $this->profiles->createProfile($this->supplierId, [

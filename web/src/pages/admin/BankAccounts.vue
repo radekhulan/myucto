@@ -195,6 +195,14 @@ watch(() => currencyDraft.bank_code, (code) => {
 })
 const imapDraft = reactive<BankEmailImapPayload>(defaultImapDraft())
 const imapUsesMicrosoft = computed(() => imapDraft.auth_mode === 'microsoft365')
+const imapOAuthSecretSaved = computed(() => {
+  const account = imapAccounts.value.find(row => row.id === editingImapId.value)
+  const normalize = (value: string | null | undefined) => (value ?? '').trim().toLowerCase()
+  return account?.has_oauth_client_secret === true
+    && normalize(imapDraft.username) === normalize(account.username)
+    && normalize(imapDraft.oauth_tenant_id) === normalize(account.oauth_tenant_id)
+    && normalize(imapDraft.oauth_client_id) === normalize(account.oauth_client_id)
+})
 watch(() => [imapDraft.auth_mode, imapDraft.username, imapDraft.oauth_tenant_id, imapDraft.oauth_client_id], () => {
   folderOptions.value = []
 })
@@ -553,7 +561,16 @@ function imapPayload(): BankEmailImapPayload {
   }
 }
 
+function validateImapOAuthSecret(): boolean {
+  if (imapUsesMicrosoft.value && !imapOAuthSecretSaved.value && !imapDraft.oauth_client_secret?.trim()) {
+    toast.error(t('settings.imap_oauth_secret_required'))
+    return false
+  }
+  return true
+}
+
 async function saveImapAccount() {
+  if (!validateImapOAuthSecret()) return
   if (imapDraft.require_email_auth && !imapDraft.email_auth_serv_id?.trim()) {
     toast.error(t('bank_accounts.email_auth_serv_id_hint'))
     return
@@ -590,6 +607,7 @@ async function testImapAccount(account: BankEmailImapSettings) {
 }
 
 async function browseImapFolders() {
+  if (!validateImapOAuthSecret()) return
   browsingFolders.value = true
   folderOptions.value = []
   try {
@@ -1298,7 +1316,7 @@ async function deleteMessage(m: BankEmailProcessedMessage) {
             </label>
             <ImapOAuthFields v-if="imapUsesMicrosoft"
               v-model:tenant-id="imapDraft.oauth_tenant_id" v-model:client-id="imapDraft.oauth_client_id"
-              v-model:client-secret="imapDraft.oauth_client_secret" :secret-saved="imapDraft.has_oauth_client_secret" />
+              v-model:client-secret="imapDraft.oauth_client_secret" :secret-saved="imapOAuthSecretSaved" />
             <div v-else>
               <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('bank_accounts.password') }}</label>
               <input v-model="imapDraft.password" type="password" :placeholder="imapDraft.has_password ? t('bank_accounts.password_saved_placeholder') : ''"

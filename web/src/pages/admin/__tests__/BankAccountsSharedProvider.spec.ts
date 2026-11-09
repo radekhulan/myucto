@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import type { BankEmailProvider } from '@/api/settings'
+import type { BankEmailImapSettings, BankEmailProvider } from '@/api/settings'
 
 // Společný (globální) provider — např. seedovaná Česká spořitelna — nepatří žádné
 // firmě, takže se jeho definice needituje a UI u něj nenabízí Editovat. Zapnout ho
@@ -18,6 +18,8 @@ const m = vi.hoisted(() => ({
   getBankEmailOverview: vi.fn(),
   updateBankEmailProvider: vi.fn(),
   createBankEmailImapAccount: vi.fn(),
+  updateBankEmailImapAccount: vi.fn(),
+  browseBankEmailImapFolders: vi.fn(),
   toastSuccess: vi.fn(),
   toastError: vi.fn(),
 }))
@@ -29,6 +31,8 @@ vi.mock('@/api/settings', () => ({
     getBankEmailOverview: m.getBankEmailOverview,
     updateBankEmailProvider: m.updateBankEmailProvider,
     createBankEmailImapAccount: m.createBankEmailImapAccount,
+    updateBankEmailImapAccount: m.updateBankEmailImapAccount,
+    browseBankEmailImapFolders: m.browseBankEmailImapFolders,
   },
 }))
 
@@ -89,12 +93,12 @@ function sharedProvider(overrides: Partial<BankEmailProvider> = {}): BankEmailPr
   }
 }
 
-async function mountWith(providers: BankEmailProvider[], currencies: unknown[] = []) {
+async function mountWith(providers: BankEmailProvider[], currencies: unknown[] = [], imapAccounts: Partial<BankEmailImapSettings>[] = []) {
   m.getSupplier.mockResolvedValue({ id: 1 })
   m.listCurrencies.mockResolvedValue(currencies)
   m.getBankEmailOverview.mockResolvedValue({
     imap: null,
-    imap_accounts: [],
+    imap_accounts: imapAccounts,
     providers,
     mappings: [],
     messages: [],
@@ -140,6 +144,52 @@ describe('BankAccounts — společný parser provider', () => {
       oauth_client_id: '22222222-2222-4222-8222-222222222222',
       oauth_client_secret: 'synthetic-client-secret',
       password: undefined,
+    }))
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['settings.imap_oauth_mailbox', 'shared@example.test', 'other@example.test'],
+    ['settings.imap_oauth_tenant_id', '11111111-1111-4111-8111-111111111111', '33333333-3333-4333-8333-333333333333'],
+    ['settings.imap_oauth_client_id', '22222222-2222-4222-8222-222222222222', '44444444-4444-4444-8444-444444444444'],
+  ])('po změně %s vyžádá Client Secret před uložením i načtením složek', async (field, original, changed) => {
+    const wrapper = await mountWith([], [], [{
+      id: 7,
+      name: 'Syntetická schránka',
+      auth_mode: 'microsoft365',
+      username: 'shared@example.test',
+      oauth_tenant_id: '11111111-1111-4111-8111-111111111111',
+      oauth_client_id: '22222222-2222-4222-8222-222222222222',
+      has_oauth_client_secret: true,
+      require_email_auth: false,
+    }])
+    const button = (key: string) => wrapper.findAll('button').find(item => item.text() === key)!
+    const input = (key: string) => wrapper.findAll('label').find(item => item.text().startsWith(key))!.get('input')
+    await button('common.edit').trigger('click')
+    const target = input(field)
+    const secret = input('settings.imap_oauth_client_secret')
+    expect(secret.attributes('placeholder')).toBe('settings.imap_oauth_secret_saved')
+
+    await target.setValue(changed)
+    expect(secret.attributes('required')).toBeDefined()
+    expect(secret.attributes('placeholder')).toBeUndefined()
+    await button('bank_accounts.save_imap').trigger('click')
+    await button('bank_accounts.browse').trigger('click')
+    expect(m.updateBankEmailImapAccount).not.toHaveBeenCalled()
+    expect(m.browseBankEmailImapFolders).not.toHaveBeenCalled()
+    expect(m.toastError).toHaveBeenCalledWith('settings.imap_oauth_secret_required')
+
+    await target.setValue(original)
+    expect(secret.attributes('required')).toBeUndefined()
+    expect(secret.attributes('placeholder')).toBe('settings.imap_oauth_secret_saved')
+
+    await target.setValue(changed)
+    await secret.setValue('synthetic-new-secret')
+    m.updateBankEmailImapAccount.mockResolvedValueOnce({})
+    await button('bank_accounts.save_imap').trigger('click')
+    await flushPromises()
+    expect(m.updateBankEmailImapAccount).toHaveBeenCalledWith(7, expect.objectContaining({
+      oauth_client_secret: 'synthetic-new-secret',
     }))
     wrapper.unmount()
   })

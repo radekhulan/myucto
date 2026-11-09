@@ -293,7 +293,9 @@ final class EmailProfileRepository
             );
             $merged['smtp_password'] = $currentWithSecret['smtp_password'] ?? null;
         }
-        if ($currentWithSecret !== null
+        if (!empty($merged['imap_sent_enabled'])
+            && ($merged['imap_auth_mode'] ?? ImapAuthSettings::PASSWORD) === ImapAuthSettings::PASSWORD
+            && $currentWithSecret !== null
             && (!array_key_exists('imap_password', $changes) || trim((string) ($changes['imap_password'] ?? '')) === '')
         ) {
             $this->assertSecretTargetUnchanged(
@@ -449,7 +451,9 @@ final class EmailProfileRepository
                 );
                 $draft['smtp_password'] = $currentWithSecret['smtp_password'] ?? null;
             }
-            if ($currentWithSecret !== null
+            if (!empty($draft['imap_sent_enabled'])
+                && ($draft['imap_auth_mode'] ?? ImapAuthSettings::PASSWORD) === ImapAuthSettings::PASSWORD
+                && $currentWithSecret !== null
                 && (!array_key_exists('imap_password', $data) || trim((string) ($data['imap_password'] ?? '')) === '')
             ) {
                 $this->assertSecretTargetUnchanged(
@@ -505,7 +509,8 @@ final class EmailProfileRepository
             foreach ($data as $key => $value) {
                 $draft[$key] = $value;
             }
-            if ($currentWithSecret !== null
+            if (($draft['imap_auth_mode'] ?? ImapAuthSettings::PASSWORD) === ImapAuthSettings::PASSWORD
+                && $currentWithSecret !== null
                 && (!array_key_exists('imap_password', $data) || trim((string) ($data['imap_password'] ?? '')) === '')
             ) {
                 $this->assertSecretTargetUnchanged(
