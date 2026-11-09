@@ -270,6 +270,16 @@ final class RequestAuthorization
     }
 
     /**
+     * Formu účetního zápisu firmy (jednoduchý / složený od data) mění jen správce firmy:
+     * přepíná, jak se účtují všechny zápisy od data, a spouští převod starších zápisů.
+     * Delegovaná role s právem účtovat ji nemění.
+     */
+    public static function canChangeEntryForm(Request $request): bool
+    {
+        return self::isCompanyAdmin($request);
+    }
+
+    /**
      * Dokončit aktivaci podvojného účetnictví přes zbývající chyby doúčtování smí jen
      * správce firmy. Delegovaná role s právem spravovat účetní období průvodce projde,
      * ale rozhodnutí, že část historie zůstane nedoúčtovaná, za firmu nedělá.

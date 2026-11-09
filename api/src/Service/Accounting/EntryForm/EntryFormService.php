@@ -22,9 +22,11 @@ use MyInvoice\Service\ActivityLogger;
  * Čtenáři deníku (opis, cash flow, exporty) se ptají nejdřív {@see hasAnySingle()}:
  * firma bez jediného řádku `single` jde beze změny dnešní cestou (i dnešním SQL).
  *
- * Paměť v instanci: history() a hasAnySingle() se v rámci požadavku čtou jednou.
- * Zaúčtování uvnitř transakce pod zámkem období volá formAt(..., currentRead: true),
- * které paměť obchází, aby nečetlo stav starší než souběžná změna formy.
+ * Paměť: history() se v instanci čte jednou. Odpověď hasAnySingle() sdílí celý proces
+ * (webový požadavek; v dlouho běžícím workeru nejvýš {@see ANY_SINGLE_TTL} s), takže firma
+ * bez jednoduchého zápisu po prvním dotazu neplatí za zaúčtování ani zápis řádků deníku
+ * žádný dotaz navíc. schedule() paměť zahodí. Firma, která jednoduchý zápis má, čte
+ * formu k datu s currentRead pokaždé znovu (pod zámkem období zaúčtování).
  */
 final class EntryFormService
 {
@@ -33,8 +35,11 @@ final class EntryFormService
     /** @var array<int, list<array{id:int, valid_from:string, entry_form:string, created_by:?int, created_at:string, note:?string}>> */
     private array $historyMemo = [];
 
-    /** @var array<int,bool> */
-    private array $anySingleMemo = [];
+    /** Jak dlouho (s) smí proces věřit odpovědi hasAnySingle() (dlouho běžící workery). */
+    private const ANY_SINGLE_TTL = 60.0;
+
+    /** @var array<int, array{0:bool, 1:float}> supplier_id => [má jednoduchý zápis, platí do] */
+    private static array $anySingleShared = [];
 
     public function __construct(
         private readonly Connection $db,
@@ -46,6 +51,9 @@ final class EntryFormService
     /** Forma zápisu firmy k datu (YYYY-MM-DD). Bez řádku historie = složený zápis. */
     public function formAt(int $supplierId, string $date, bool $currentRead = false): EntryForm
     {
+        if (!$this->hasAnySingle($supplierId)) {
+            return EntryForm::Composite;
+        }
         if ($currentRead) {
             $stmt = $this->db->pdo()->prepare(
                 'SELECT entry_form FROM accounting_entry_form_history
@@ -55,9 +63,6 @@ final class EntryFormService
             $stmt->execute([$supplierId, $date]);
             $form = $stmt->fetchColumn();
             return is_string($form) ? EntryForm::from($form) : EntryForm::Composite;
-        }
-        if (!$this->hasAnySingle($supplierId)) {
-            return EntryForm::Composite;
         }
         return self::formFromHistory($this->history($supplierId), $date);
     }
@@ -115,8 +120,10 @@ final class EntryFormService
      */
     public function hasAnySingle(int $supplierId): bool
     {
-        if (isset($this->anySingleMemo[$supplierId])) {
-            return $this->anySingleMemo[$supplierId];
+        $now = microtime(true);
+        $cached = self::$anySingleShared[$supplierId] ?? null;
+        if ($cached !== null && $cached[1] > $now) {
+            return $cached[0];
         }
         $stmt = $this->db->pdo()->prepare(
             "SELECT 1 FROM accounting_entry_form_history
@@ -124,7 +131,9 @@ final class EntryFormService
         );
         $stmt->execute([$supplierId]);
 
-        return $this->anySingleMemo[$supplierId] = $stmt->fetchColumn() !== false;
+        $any = $stmt->fetchColumn() !== false;
+        self::$anySingleShared[$supplierId] = [$any, $now + self::ANY_SINGLE_TTL];
+        return $any;
     }
 
     /**
@@ -325,9 +334,9 @@ final class EntryFormService
     {
         if ($supplierId === null) {
             $this->historyMemo = [];
-            $this->anySingleMemo = [];
+            self::$anySingleShared = [];
             return;
         }
-        unset($this->historyMemo[$supplierId], $this->anySingleMemo[$supplierId]);
+        unset($this->historyMemo[$supplierId], self::$anySingleShared[$supplierId]);
     }
 }

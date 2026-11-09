@@ -1331,7 +1331,7 @@ final class PostingService
                     isset($meta['user_id']) ? (int) $meta['user_id'] : null,
                 );
                 $this->activity->log(
-                    'accounting.pairs_reversed',
+                    'accounting.reversed',
                     $meta['user_id'] ?? null,
                     'journal_entry',
                     $reversalId,
