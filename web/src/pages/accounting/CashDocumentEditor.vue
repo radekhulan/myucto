@@ -20,6 +20,7 @@ import { ICONS, btnFilled, btnOutline, disabledTitle, BTN_DISABLED_NOTE } from '
 import { appIsoDate } from '@/utils/date'
 import DateInput from '@/components/ui/DateInput.vue'
 import DimensionFields from '@/components/dimensions/DimensionFields.vue'
+import NumberSeriesSelect from '@/components/numberSeries/NumberSeriesSelect.vue'
 import { useDocumentDimensions } from '@/composables/useDocumentDimensions'
 import { useEetCapabilities } from '@/composables/useEetCapabilities'
 import { eetApi, type EetCreditNoteRefundInfo } from '@/api/eet'
@@ -354,6 +355,10 @@ function vatLinesInDocumentCurrency(doc: CashDocument): CashVatLine[] {
  * pro ruční přepnutí uživatelem a při plnění formuláře by vzápětí vymazaly vazbu
  * na fakturu, kontaci i protiúčet, které se právě načetly.
  */
+// Řada z číselníku (víc řad v jedné pokladně, např. hotovostní účtenky vedle PPD).
+// undefined = beze změny, null = výchozí řada pokladny / uživatele.
+const numberSeriesId = ref<number | null | undefined>(undefined)
+
 async function loadDocument(id: number): Promise<void> {
   hydrating.value = true
   void docDims.load(id)
@@ -376,6 +381,7 @@ async function loadDocument(id: number): Promise<void> {
     form.purchase_invoice_id = doc.purchase_invoice_id
     form.rule_key = doc.rule_key ?? ''
     form.counter_account_code = doc.counter_account_code ?? ''
+    numberSeriesId.value = doc.doc_number ? undefined : (doc.number_series_id ?? undefined)
     vatLines.value = vatLinesInDocumentCurrency(doc)
     if (doc.status !== 'draft') error.value = t('cash.error.doc_not_draft')
   } catch (e: any) {
@@ -390,6 +396,8 @@ async function loadDocument(id: number): Promise<void> {
 watch([() => form.doc_type, () => form.register_id], () => {
   if (hydrating.value) return
   if (!purposeOptions.value.includes(form.purpose)) form.purpose = purposeOptions.value[0]
+  // Řada patří směru a pokladně.
+  if (numberSeriesId.value != null) numberSeriesId.value = null
   // Předvolby jsou směrové (211 na MD = příjem, na D = výdej) — po přepnutí
   // PPD/VPD by zvolená kontace mířila na opačnou stranu.
   form.rule_key = ''
@@ -700,6 +708,7 @@ async function save(post = true, next = false) {
   const payload: CreateCashDocumentPayload = {
     register_id: Number(form.register_id),
     doc_type: form.doc_type,
+    number_series_id: numberSeriesId.value,
     purpose: form.purpose,
     issue_date: form.issue_date,
     description: form.description.trim(),
@@ -861,6 +870,9 @@ async function startNextDocument(): Promise<void> {
             <RouterLink v-if="registers.length === 0" to="/accounting/cash"
               class="text-xs text-primary-600 hover:text-primary-700 mt-1 inline-block">{{ t('cash.registers_manage') }}</RouterLink>
           </div>
+          <NumberSeriesSelect v-if="form.register_id !== '' && loadedStatus !== 'posted' && loadedStatus !== 'reversed'"
+            :scope="{ module: 'cash-documents', docType: form.doc_type, registerId: Number(form.register_id) }"
+            v-model="numberSeriesId" />
           <div>
             <label class="block text-sm font-medium text-neutral-700 mb-1">{{ t('cash.col.date') }}</label>
             <DateInput v-model="form.issue_date" class="w-full h-10 px-3 border border-neutral-300 rounded-md text-sm" />

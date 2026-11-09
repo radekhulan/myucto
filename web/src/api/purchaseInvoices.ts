@@ -656,6 +656,8 @@ export interface PurchaseMonthGroup {
 }
 
 export interface PurchaseInvoicePayload {
+  /** Řada z číselníku (jen doklad bez čísla); vynechané = beze změny, null = výchozí řada. */
+  number_series_id?: number | null
   /** Staging originál, který účetní tímto ručním zápisem zpracovává. */
   submission_id?: number
   /** Vědomě potvrzená shoda čísla dokladu u dodavatele (platby platebního kalendáře). */

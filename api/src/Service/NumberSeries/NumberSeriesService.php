@@ -12,6 +12,7 @@ use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\ActivityLogger;
 use MyInvoice\Service\Invoice\InvoiceSeriesCompletenessService;
 use MyInvoice\Service\Invoice\VarsymbolGenerator;
+use MyInvoice\Service\Invoice\VarsymbolSeriesCollisionChecker;
 use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
 use MyInvoice\Http\IsoDate;
 use PDO;
@@ -171,7 +172,7 @@ final class NumberSeriesService
             'valid_to'   => self::validTo($input['valid_to'] ?? null),
             'sort_order' => (int) ($input['sort_order'] ?? 0),
         ];
-        $this->assertTemplate($supplierId, $data, null);
+        $digitCollisions = $this->assertTemplate($supplierId, $data, null);
 
         $pdo = $this->db->pdo();
         $ownTx = !$pdo->inTransaction();
@@ -191,7 +192,7 @@ final class NumberSeriesService
             throw $e;
         }
         $this->audit('number_series.created', $userId, $supplierId, $id, $data);
-        return $this->get($supplierId, $id, $userId);
+        return $this->get($supplierId, $id, $userId) + ['warnings' => $this->digitWarnings($digitCollisions)];
     }
 
     /**
@@ -206,6 +207,7 @@ final class NumberSeriesService
     {
         $row = $this->require($supplierId, $id);
         $patch = [];
+        $digitCollisions = [];
         if (array_key_exists('name', $input)) {
             $patch['name'] = $row['storage'] === 'legacy'
                 ? mb_substr(trim((string) $input['name']), 0, 100)
@@ -242,7 +244,7 @@ final class NumberSeriesService
                 if ($this->series->hasCounters($id) || $this->hasDocuments($supplierId, $row)) {
                     throw new NumberSeriesException('series_in_use', 'Z řady už vznikla čísla dokladů, její tvar nejde změnit. Založte novou řadu a tuto ukončete.', 409);
                 }
-                $this->assertTemplate($supplierId, $next, $id);
+                $digitCollisions = $this->assertTemplate($supplierId, $next, $id);
                 $patch += ['prefix' => $next['prefix'], 'template' => $next['template'], 'period' => $next['period']];
             }
         }
@@ -260,7 +262,7 @@ final class NumberSeriesService
             throw $e;
         }
         $this->audit('number_series.updated', $userId, $supplierId, $id, $patch + array_intersect_key($input, ['next_number' => true]));
-        return $this->get($supplierId, $id, $userId);
+        return $this->get($supplierId, $id, $userId) + ['warnings' => $this->digitWarnings($digitCollisions)];
     }
 
     /** Nastaví řadu jako výchozí pro její druh (a pokladnu). */
@@ -584,9 +586,11 @@ final class NumberSeriesService
      * číselného prostoru (vzorek čísla jedné řady nesmí projít vzorem druhé, oběma směry).
      *
      * @param array<string,mixed> $data doc_kind, prefix, template, period
+     * @return list<int> řady vydaných dokladů se stejnými číslicemi (jen varování)
      */
-    private function assertTemplate(int $supplierId, array $data, ?int $selfId): void
+    private function assertTemplate(int $supplierId, array $data, ?int $selfId): array
     {
+        $digitCollisions = [];
         $errors = NumberSeriesTemplate::validate((string) $data['doc_kind'], (string) $data['template'], $data['prefix'], (string) $data['period']);
         if ($errors !== []) {
             throw new NumberSeriesException('template_invalid', self::templateMessage($errors[0]));
@@ -609,7 +613,18 @@ final class NumberSeriesService
                     'Čísla řady by se mohla plést s řadou „' . $this->label($row, $this->scopeNames($supplierId)) . '" (' . $other['template'] . '). Zvolte jiný prefix nebo tvar čísla.',
                 );
             }
+            // Bankovní párování bere z variabilního symbolu jen číslice ({@see VarsymbolSeriesCollisionChecker}).
+            // Řady vydaných dokladů lišící se jen písmenem jsou platné, ale platby by šly přiřadit
+            // k oběma; stejně jako nastavení číslování to jen hlásí.
+            if ($space === 'invoices') {
+                $a = VarsymbolSeriesCollisionChecker::digitSkeleton(str_replace('{PREFIX}', (string) $mine['prefix'], $mine['template']));
+                $b = VarsymbolSeriesCollisionChecker::digitSkeleton(str_replace('{PREFIX}', (string) $theirs['prefix'], $theirs['template']));
+                if ($a !== '' && $a === $b) {
+                    $digitCollisions[] = $row['id'];
+                }
+            }
         }
+        return $digitCollisions;
     }
 
     /** @param array{template:string, prefix:?string} $a @param array{template:string, prefix:?string} $b */
@@ -622,6 +637,15 @@ final class NumberSeriesService
             }
         }
         return false;
+    }
+
+    /**
+     * @param list<int> $seriesIds
+     * @return list<array{code:string, series_id:int}>
+     */
+    private function digitWarnings(array $seriesIds): array
+    {
+        return array_map(static fn (int $id): array => ['code' => 'digit_overlap', 'series_id' => $id], $seriesIds);
     }
 
     private static function templateMessage(string $code): string

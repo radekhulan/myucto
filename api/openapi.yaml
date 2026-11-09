@@ -47144,6 +47144,8 @@ components:
         client_name: { type: [string, "null"] }
         revenue_category_id: { type: integer }
         revenue_category_name: { type: [string, "null"] }
+        number_series_id: { type: integer, description: "Přítomno u řady založené v číselníku řad; její doklady se do dosavadních řad nepočítají." }
+        series_name: { type: string, description: "Název řady z číselníku (jen s `number_series_id`)." }
         period: { type: string, enum: [year, month, none] }
         template_by_type: { type: object, additionalProperties: { type: string } }
         buckets:

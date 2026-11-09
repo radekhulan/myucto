@@ -436,6 +436,8 @@ ID. Rozdělení je idempotentní a administrátor ho může vzít zpět.
 2. V tabulce řad per účetní rok upravte **Prefix** (1 až 10 znaků A až Z a 0 až 9, uloží se velkými písmeny), **Tvar čísla** a **Další číslo**. Sloupec **Náhled** rovnou ukazuje, jak bude příští číslo vypadat.
 3. Uložte.
 
+Tyto řady jsou zároveň v číselníku řad firmy (`Firma → Nastavení`, záložka **Číselník řad**, [§ 95.6.1](95_Multi_supplier.md#9561-ciselnik-rad-vic-rad-pro-jeden-druh-dokladu)), kde jde pro pokladní a interní doklady založit další řady, nastavit výchozí řadu pokladny nebo uživatele a zkontrolovat úplnost po řadách.
+
 Tabulka drží řady dokladů per účetní rok:
 
 <!-- cols: 56 20 24 -->
