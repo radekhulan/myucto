@@ -144,7 +144,7 @@ function accountName(code: string): string {
 
 const SOURCE_TYPES = [
   'manual', 'invoice', 'purchase_invoice', 'other_item', 'bank', 'gopay', 'cash',
-  'depreciation', 'asset', 'asset_disposal', 'unit_charge',
+  'depreciation', 'payroll', 'asset', 'asset_disposal', 'unit_charge',
   'closing', 'opening', 'fx_revaluation', 'stock',
   'offset', 'settlement', 'vat_clearing', 'card_settlement', 'card_writeoff',
 ] as const
