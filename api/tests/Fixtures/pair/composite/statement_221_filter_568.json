@@ -1,0 +1,105 @@
+{
+    "account": {
+        "id": "account:221",
+        "code": "221",
+        "name": "Peněžní prostředky na účtech",
+        "type": "asset",
+        "normal_side": "debit",
+        "balance_sign": 1
+    },
+    "opening_balance": 0.0,
+    "opening_balance_signed": 0.0,
+    "opening_balance_unusual": false,
+    "items": [
+        {
+            "entry_id": "entry:bulk",
+            "entry_date": "2099-01-25",
+            "document_no": "BV-2",
+            "description": "Hromadná platba",
+            "source_type": "manual",
+            "source_id": null,
+            "side": "credit",
+            "is_red_storno": false,
+            "amount": 1830.0,
+            "balance": -620.0,
+            "balance_signed": -620.0,
+            "balance_unusual": true,
+            "account_id": "account:221",
+            "account_code": "221",
+            "account_name": "Peněžní prostředky na účtech",
+            "source_statement_id": null,
+            "source_bank_ref": null,
+            "source_doc_number": null,
+            "source_register_id": null,
+            "source_asset_id": null,
+            "source_asset_name": null,
+            "source_settlement_doc_type": null,
+            "source_settlement_doc_id": null,
+            "line_id": "line:12",
+            "line_no": 3,
+            "amount_foreign": null,
+            "counter_accounts": "321, 568",
+            "partner": null,
+            "variable_symbol": null,
+            "currency": "CZK",
+            "pairing_id": null
+        }
+    ],
+    "total": 1,
+    "page": 1,
+    "per_page": 50,
+    "closing_balance": 24380.0,
+    "closing_balance_signed": 24380.0,
+    "closing_balance_unusual": false,
+    "turnover_md": 51210.0,
+    "turnover_d": 26830.0,
+    "counter_totals": [
+        {
+            "account_id": "account:211",
+            "account_code": "211",
+            "name": "Pokladna",
+            "parent_id": null,
+            "md": 0.0,
+            "d": 5000.0
+        },
+        {
+            "account_id": "account:311",
+            "account_code": "311",
+            "name": "Pohledávky z obchodních vztahů (odběratelé)",
+            "parent_id": null,
+            "md": 1210.0,
+            "d": 0.0
+        },
+        {
+            "account_id": "account:321",
+            "account_code": "321",
+            "name": "Závazky z obchodních vztahů (dodavatelé)",
+            "parent_id": null,
+            "md": 0.0,
+            "d": 21815.0
+        },
+        {
+            "account_id": "account:461",
+            "account_code": "461",
+            "name": "Dlouhodobé závazky k úvěrovým institucím",
+            "parent_id": null,
+            "md": 50000.0,
+            "d": 0.0
+        },
+        {
+            "account_id": "account:568",
+            "account_code": "568",
+            "name": "Ostatní finanční náklady",
+            "parent_id": null,
+            "md": 0.0,
+            "d": 15.0
+        }
+    ],
+    "counter_filter": {
+        "account_id": "account:568",
+        "account_code": "568",
+        "name": "Ostatní finanční náklady",
+        "md": 0.0,
+        "d": 15.0
+    }
+}
