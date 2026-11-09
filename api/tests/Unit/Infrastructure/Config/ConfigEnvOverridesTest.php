@@ -132,6 +132,16 @@ PHP);
         self::assertFalse(Config::load($this->tmpDir)->get('invoices.overdue_includes_today'));
     }
 
+    public function testSaveAndPostDefaultsToOffAndCanBeEnabledByEnvironment(): void
+    {
+        $this->unsetEnv('MYINVOICE_ACCOUNTING_SAVE_AND_POST');
+        self::assertFalse(Config::load($this->tmpDir)->get('accounting.save_and_post'));
+        $this->setEnv('MYINVOICE_ACCOUNTING_SAVE_AND_POST', '1');
+        self::assertTrue(Config::load($this->tmpDir)->get('accounting.save_and_post'));
+        $this->setEnv('MYINVOICE_ACCOUNTING_SAVE_AND_POST', '0');
+        self::assertFalse(Config::load($this->tmpDir)->get('accounting.save_and_post'));
+    }
+
     public function testInvoicePublicLinksDefaultOnAndCanBeDisabledByEnvironment(): void
     {
         $this->unsetEnv('MYINVOICE_INVOICE_PUBLIC_LINKS');

@@ -19,7 +19,8 @@ export function useEditorPosting() {
 
   const enabled = computed(() => supplierStore.currentSupplier?.accounting_mode === 'double_entry'
     && !auth.isClientRole && auth.canRead('accounting'))
-  const canPost = computed(() => enabled.value && auth.canWrite('accounting.journal.post'))
+  const canPost = computed(() => enabled.value && auth.saveAndPostEnabled === true
+    && auth.canWrite('accounting.journal.post'))
 
   function load(): Promise<void> {
     if (!enabled.value) return Promise.resolve()

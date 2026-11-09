@@ -236,6 +236,8 @@ export interface MeResponse extends AuthSessionContract {
   submission_test_environment_allowed?: boolean
   /** Je na instalaci zapnutá web faktura (veřejný odkaz na fakturu)? */
   invoice_public_links_enabled?: boolean
+  /** Je na instalaci zapnuté tlačítko Uložit a zaúčtovat v editorech faktur? */
+  save_and_post_enabled?: boolean
 }
 
 export interface DomainLoginStart {

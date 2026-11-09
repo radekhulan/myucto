@@ -831,7 +831,10 @@ aplikaci označíte akcí **Označit jako vyplaceno**.
 Editor má dole tlačítko **Vytvořit** u nové faktury, **Uložit** u úpravy konceptu.
 Faktura se uloží jako koncept, zůstane neviditelná pro klienta.
 
-V podvojném účetnictví vidí uživatel s právem zaúčtovat vedle něj i **Uložit a zaúčtovat**. Uloží
+Je-li na instalaci zapnutá volba `accounting.save_and_post` v `cfg.php` (proměnná prostředí
+`MYINVOICE_ACCOUNTING_SAVE_AND_POST=1`, ve výchozím stavu je vypnutá), vidí v podvojném účetnictví uživatel
+s právem zaúčtovat vedle něj i **Uložit a zaúčtovat**. Bez volby tlačítko v editoru není a doklad zaúčtujete
+z jeho detailu. Náhled zápisu pod položkami je v editoru vždy. Tlačítko uloží
 doklad stejně jako Uložit, koncept rovnou vystaví (stejně jako **Vystavit** v detailu) a zaúčtuje
 ho podle náhledu zápisu. Když zaúčtování selže, doklad zůstane uložený a aplikace ukáže důvod.
 Tlačítko je jen u druhů dokladu, které se účtují do deníku, a u konceptu jen s právem vystavit.

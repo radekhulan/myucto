@@ -1915,6 +1915,10 @@ Formu zápisu mění **správce firmy** na stránce `Nástroje → Uzávěrka` v
 
 Zpět na složený zápis jde přejít stejným postupem. Zápisy, které už jsou po dvojicích, zůstanou po dvojicích.
 
+Tlačítko **Uložit a zaúčtovat** v editorech vydané a přijaté faktury je volba instalace (konfigurace
+`accounting.save_and_post`, proměnná prostředí `MYINVOICE_ACCOUNTING_SAVE_AND_POST=1`), ve výchozím stavu vypnutá.
+Zaúčtování z detailu dokladu funguje vždy.
+
 Instalace může mít jednoduchý zápis jako **výchozí formu nových firem** (konfigurace `accounting.default_entry_form`,
 proměnná prostředí `MYINVOICE_ACCOUNTING_DEFAULT_ENTRY_FORM=single`). Firma, která pak vstoupí do podvojného
 účetnictví (založení, převod z jiného programu, aktivace účetnictví), účtuje po dvojicích od začátku, pro všechna

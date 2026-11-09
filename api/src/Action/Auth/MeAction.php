@@ -340,6 +340,9 @@ final class MeAction
             'submission_test_environment_allowed' => !$isInstanceAdmin && (new SubmissionEnvironmentPolicy($this->config))->testAllowed(),
             // Web faktura (veřejný odkaz) — vypnutá instalace UI tlačítko skryje.
             'invoice_public_links_enabled' => !$isInstanceAdmin && (new InvoicePublicLinkFeature($this->config))->isEnabled(),
+            // Tlačítko „Uložit a zaúčtovat“ v editorech faktur (volba instalace, výchozí vypnuto).
+            'save_and_post_enabled' => !$isInstanceAdmin
+                && filter_var($this->config->get('accounting.save_and_post', false), FILTER_VALIDATE_BOOL),
         ]);
     }
 
