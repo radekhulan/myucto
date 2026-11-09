@@ -106,8 +106,10 @@ final class ItemPostingAccounts
             throw new PostingException(
                 'mixed_counter_accounts',
                 'Řádky dokladu mají různé protiúčty (' . implode(', ', array_keys($codes)) . '). '
-                    . 'Doklad musí mít jeden ' . ($direction === 'purchase' ? 'závazek' : 'pohledávku')
-                    . ', aby ho úhrada mohla uzavřít.',
+                    . ($direction === 'purchase'
+                        ? 'Všechny řádky přijaté faktury musí mít stejný účet závazku'
+                        : 'Všechny řádky vydané faktury musí mít stejný účet pohledávky')
+                    . ', jinak by doklad úhrada neuzavřela.',
                 422,
             );
         }
@@ -132,7 +134,21 @@ final class ItemPostingAccounts
         $stmt->execute([$supplierId, $code]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row === false) {
-            throw new PostingException('invalid_counter_account', 'Protiúčet ' . $code . ' není aktivní v účtové osnově firmy.', 422);
+            throw new PostingException(
+                'invalid_counter_account',
+                'Protiúčet ' . $code . ' není v účtové osnově firmy nebo je deaktivovaný.',
+                422,
+            );
+        }
+
+        // Úhrada vydané faktury v pokladně, zápočtem a vyrovnáním odúčtuje pohledávku podle
+        // předkontace úhrady, ne podle zápisu dokladu (na rozdíl od přijaté strany, která má
+        // {@see PurchasePayableAccount::forPayment}). Protiúčet proto smí jen na tutéž
+        // syntetiku (typicky analytika 311), jinak by saldo zůstalo otevřené.
+        $receivable = null;
+        if ($direction === 'sale') {
+            $payment = $this->rules->resolve($supplierId, 'payment.receivable.settlement');
+            $receivable = substr(self::text($payment['credit_account_code'] ?? null) ?? '311', 0, 3);
         }
         $expectedType = $direction === 'purchase' ? 'liability' : 'asset';
         if ((string) $row['account_type'] !== $expectedType
@@ -142,27 +158,18 @@ final class ItemPostingAccounts
             throw new PostingException(
                 'invalid_counter_account',
                 $direction === 'purchase'
-                    ? 'Protiúčet ' . $code . ' není účet závazku. Zvolte závazkový účet třídy 3, například 321 nebo 325.'
-                    : 'Protiúčet ' . $code . ' není účet pohledávky. Zvolte pohledávkový účet třídy 3, například 311 nebo 315.',
+                    ? 'Protiúčet ' . $code . ' není účet závazku. Přijatá faktura potřebuje závazkový účet třídy 3, například 321 nebo 325.'
+                    : 'Protiúčet ' . $code . ' není účet pohledávky. Vydaná faktura potřebuje pohledávku ' . $receivable . ' nebo její analytiku.',
                 422,
             );
         }
-
-        // Úhrada vydané faktury v pokladně, zápočtem a vyrovnáním odúčtuje pohledávku podle
-        // předkontace úhrady, ne podle zápisu dokladu (na rozdíl od přijaté strany, která má
-        // {@see PurchasePayableAccount::forPayment}). Protiúčet proto smí jen na tutéž
-        // syntetiku (typicky analytika 311), jinak by saldo zůstalo otevřené.
-        if ($direction === 'sale') {
-            $payment = $this->rules->resolve($supplierId, 'payment.receivable.settlement');
-            $receivable = self::text($payment['credit_account_code'] ?? null) ?? '311';
-            if (substr($code, 0, 3) !== substr($receivable, 0, 3)) {
-                throw new PostingException(
-                    'invalid_counter_account',
-                    'Protiúčet vydané faktury musí být na pohledávce ' . substr($receivable, 0, 3)
-                        . ' nebo její analytice, jinak by ji úhrada neuzavřela.',
-                    422,
-                );
-            }
+        if ($receivable !== null && substr($code, 0, 3) !== $receivable) {
+            throw new PostingException(
+                'invalid_counter_account',
+                'Protiúčet ' . $code . ' nejde u vydané faktury použít. Zvolte pohledávku ' . $receivable
+                    . ' nebo její analytiku, jinak by fakturu úhrada neuzavřela.',
+                422,
+            );
         }
 
         return (string) $row['account_code'];

@@ -180,6 +180,10 @@ final class InvoiceLinePostingTest extends TestCase
             self::fail('Různé protiúčty řádků musí zaúčtování odmítnout.');
         } catch (PostingException $e) {
             self::assertSame('mixed_counter_accounts', $e->errorCode);
+            self::assertSame(
+                'Řádky dokladu mají různé protiúčty (325, 321). Všechny řádky přijaté faktury musí mít stejný účet závazku, jinak by doklad úhrada neuzavřela.',
+                $e->getMessage(),
+            );
         }
     }
 
@@ -216,6 +220,10 @@ final class InvoiceLinePostingTest extends TestCase
             self::fail('Protiúčet mimo pohledávku 311 musí zaúčtování odmítnout.');
         } catch (PostingException $e) {
             self::assertSame('invalid_counter_account', $e->errorCode);
+            self::assertSame(
+                'Protiúčet 315 nejde u vydané faktury použít. Zvolte pohledávku 311 nebo její analytiku, jinak by fakturu úhrada neuzavřela.',
+                $e->getMessage(),
+            );
         }
     }
 
