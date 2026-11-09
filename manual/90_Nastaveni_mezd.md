@@ -455,7 +455,7 @@ jak se mzdový předpis zapíše do deníku:
 Účty a částky jsou v obou případech stejné. Volba se uloží do snímku běhu při
 výpočtu, takže platí pro běhy přepočítané po uložení; už zaúčtované revize se
 nemění. Jména zaměstnanců deník nenese, ukazuje je sestava
-[Podrobné zaúčtování mezd](81_Shoda_uctovani_mezd.md).
+[Podrobné zaúčtování mezd](81_Shoda_uctovani_mezd.md#8155-podrobne-zauctovani-mezd).
 
 ### 90.14.6 Předkontace pro zvláštní mzdové situace
 

@@ -1571,7 +1571,7 @@ final class PayrollPostingLineBuilder
     /**
      * Řádek vstupu párovače z jedné alokace se znaménkovou částkou.
      *
-     * @param array{account_code:string,allocation_key:string,cost_center:?string,dimensions:array<int,int>} $source
+     * @param array{account_code:string,allocation_key:string,description:string,cost_center:?string,dimensions:array<int,int>} $source
      * @return array{account_code:string,side:'debit'|'credit',amount:string,cost_center?:string,dimensions?:array<int,int>,employee:?array{sort:string,label:string}}
      */
     private function pairLine(array $source, int $signedMinor, ?PayrollPostingEmployees $employees): array
@@ -1590,8 +1590,69 @@ final class PayrollPostingLineBuilder
             $line['dimensions'] = $source['dimensions'];
         }
         $line['employee'] = $employees?->forAllocationKey($source['allocation_key']);
+        $line['allocation_key'] = $source['allocation_key'];
+        $line['allocation_description'] = $source['description'];
 
         return $line;
+    }
+
+    /**
+     * Dvojice cílového stavu revize pro sestavu podrobného zaúčtování mezd.
+     *
+     * Každá vyrovnaná jednotka alokací (složka mzdy, srážka, pojistné …) se rozdělí
+     * na dvojice stejným párovačem jako zaúčtování ve formě single, ale nic se
+     * neslučuje: řádek sestavy tak nese jednotku (a z ní druh mzdy) i osobu. Součet
+     * dvojic po účtech dává tentýž zůstatek jako cílové alokace, tedy jako deník
+     * všech zaúčtovaných revizí běhu. Jednotku, kterou dvojicemi rozdělit nejde,
+     * vrátí po řádcích s jedinou vyplněnou stranou.
+     *
+     * @param list<array<string,mixed>> $target cílové alokace účinné revize
+     * @return list<array{
+     *   unit:string,
+     *   amount_minor:int,
+     *   debit:?array<string,mixed>,
+     *   credit:?array<string,mixed>
+     * }>
+     */
+    public function reportPairs(array $target, PayrollPostingEmployees $employees): array
+    {
+        $current = $this->allocationVector($target, 'cílové alokace');
+        /** @var array<string,list<array<string,mixed>>> $units */
+        $units = [];
+        foreach ($current as $source) {
+            if ($source['signed_minor'] === 0) {
+                continue;
+            }
+            $unit = self::pairUnit($source['allocation_key']) ?? $source['allocation_key'];
+            $units[$unit][] = $this->pairLine($source, $source['signed_minor'], $employees);
+        }
+        ksort($units, SORT_STRING);
+
+        $rows = [];
+        foreach ($units as $unit => $lines) {
+            $pairs = self::pairsOf($lines);
+            if ($pairs === null) {
+                foreach ($lines as $line) {
+                    $rows[] = [
+                        'unit' => $unit,
+                        'amount_minor' => JournalLineAmount::cents($line['amount']),
+                        'debit' => $line['side'] === 'debit' ? $line : null,
+                        'credit' => $line['side'] === 'credit' ? $line : null,
+                    ];
+                }
+                continue;
+            }
+            foreach ($pairs as [$debit, $credit]) {
+                $rows[] = [
+                    'unit' => $unit,
+                    'amount_minor' => JournalLineAmount::cents($debit['amount']),
+                    'debit' => $debit,
+                    'credit' => $credit,
+                ];
+            }
+        }
+
+        return $rows;
     }
 
     /**

@@ -74,6 +74,79 @@ final class PayrollPostingByEmployeeFlowTest extends TestCase
         }
     }
 
+    /**
+     * Sestava podrobného zaúčtování: zůstatek po účtech i obrat sedí na mzdový
+     * zápis období v deníku, souhrn za firmu na rozpad po zaměstnancích, druh mzdy
+     * je název složky a osoba nese osobní číslo a jméno ze zmrazené revize.
+     *
+     * @param 'summary'|'employee' $granularity
+     */
+    #[\PHPUnit\Framework\Attributes\TestWith(['summary', true])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['employee', true])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['employee', false])]
+    #[\PHPUnit\Framework\Attributes\TestWith(['summary', false])]
+    public function testDetailReportMatchesTheJournal(string $granularity, bool $single): void
+    {
+        if (!$single) {
+            $this->db->pdo()->prepare('DELETE FROM accounting_entry_form_history WHERE supplier_id = ?')
+                ->execute([$this->supplierId]);
+            \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($this->supplierId);
+        }
+        $this->setGranularity($granularity);
+        [$revisionId] = $this->postRun();
+        $entryId = $this->entryId($revisionId);
+
+        $report = $this->service(\MyInvoice\Service\Payroll\Report\PayrollPostingDetailReportService::class)
+            ->report($this->supplierId, '2026-06');
+
+        $journal = $this->db->pdo()->prepare(
+            "SELECT account.account_code,
+                    SUM(CASE WHEN line.side = 'debit' THEN 1 ELSE -1 END * ROUND(line.amount * 100)) AS net,
+                    SUM(CASE WHEN line.side = 'debit' THEN ROUND(line.amount * 100) ELSE 0 END) AS debit
+               FROM journal_entry_lines line
+               JOIN chart_of_accounts account
+                 ON account.supplier_id = line.supplier_id AND account.id = line.account_id
+              WHERE line.supplier_id = ? AND line.entry_id = ?
+              GROUP BY account.account_code"
+        );
+        $journal->execute([$this->supplierId, $entryId]);
+        $journalNet = [];
+        $journalDebit = 0;
+        foreach ($journal->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+            if ((int) $row['net'] !== 0) {
+                $journalNet[(string) $row['account_code']] = (int) $row['net'];
+            }
+            $journalDebit += (int) $row['debit'];
+        }
+        ksort($journalNet);
+
+        $reportNet = [];
+        foreach ($report['rows'] as $row) {
+            $reportNet[$row['debit_account']] = ($reportNet[$row['debit_account']] ?? 0) + $row['amount_minor'];
+            $reportNet[$row['credit_account']] = ($reportNet[$row['credit_account']] ?? 0) - $row['amount_minor'];
+        }
+        $reportNet = array_filter($reportNet, static fn (int $value): bool => $value !== 0);
+        ksort($reportNet);
+
+        self::assertSame($journalNet, $reportNet, 'Zůstatek sestavy po účtech je zůstatek deníku.');
+        self::assertSame($journalDebit, $report['totals']['amount_minor'], 'Součet sestavy je obrat mzdového zápisu.');
+        self::assertSame(
+            $report['totals']['amount_minor'],
+            array_sum(array_column($report['summary'], 'amount_minor')),
+        );
+        self::assertSame([$entryId], array_column($report['runs'], 'journal_entry_id'));
+        $wage = array_values(array_filter(
+            $report['rows'],
+            static fn (array $row): bool => $row['debit_account'] === '521',
+        ));
+        self::assertCount(1, $wage);
+        self::assertSame('Měsíční mzda', $wage[0]['label']);
+        self::assertSame('331', $wage[0]['credit_account']);
+        self::assertSame('SYN-HPP', $wage[0]['personal_number']);
+        self::assertSame('Syntetický Zaměstnanec', $wage[0]['name']);
+        self::assertSame(3_500_000, $wage[0]['amount_minor']);
+    }
+
     private function setGranularity(string $granularity): void
     {
         $this->db->pdo()->prepare(

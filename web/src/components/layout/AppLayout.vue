@@ -802,6 +802,7 @@ const navSections = computed<NavSection[]>(() => {
         { to: '/payroll/quick-inputs', label: t('nav.payroll_quick_inputs'), icon: ICONS.log, permission: 'payroll' as PermissionKey },
         { to: '/payroll/runs', label: t('nav.payroll_runs'), icon: ICONS.approvals, permission: 'payroll' as PermissionKey },
         { to: '/payroll/posting-reconciliation', label: t('nav.payroll_posting_reconciliation'), icon: ICONS.accounting, permission: 'payroll.post' as PermissionKey },
+        { to: '/payroll/posting-detail', label: t('nav.payroll_posting_detail'), icon: ICONS.reports, permission: 'payroll.reports' as PermissionKey },
         { to: '/payroll/payments', label: t('nav.payroll_payments'), icon: ICONS.payment_orders, permission: 'payroll.payments' as PermissionKey },
         { to: '/payroll/documents', label: t('nav.payroll_documents'), icon: ICONS.documents, permission: 'payroll.documents' as PermissionKey },
         // Roční zúčtování stojí hned za dokumenty, protože je to jejich roční

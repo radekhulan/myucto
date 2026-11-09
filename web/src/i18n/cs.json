@@ -1962,6 +1962,7 @@
     "payroll_runs": "Mzdové běhy",
     "payroll_payments": "Mzdové příkazy a úhrady",
     "payroll_posting_reconciliation": "Shoda účtování mezd",
+    "payroll_posting_detail": "Zaúčtování mezd",
     "payroll_people": "Zaměstnanci",
     "payroll_quick_inputs": "Rychlý měsíční vstup",
     "payroll_components": "Mzdové složky a vstupy",
@@ -3718,6 +3719,35 @@
         "open_institution_accounts": "Otevřít účty institucí",
         "open_person_accounts": "Otevřít výplatní účty zaměstnance",
         "unknown_posting_reason": "Důvod nezaúčtování aplikace neumí vysvětlit. Požádejte správce o kontrolu a předejte mu technické podrobnosti níže."
+      }
+    },
+    "posting_detail": {
+      "title": "Podrobné zaúčtování mezd",
+      "subtitle": "Zaúčtování mzdového předpisu za měsíc po zaměstnancích a druzích mezd: účet MD, účet Dal, osobní číslo, druh mzdy, hodiny a částka. Nahoře je souhrn za firmu. Součet sedí na mzdové zápisy měsíce v deníku.",
+      "period": "Období",
+      "reload": "Načíst znovu",
+      "retry": "Zkusit znovu",
+      "load_failed": "Sestavu zaúčtování mezd se nepodařilo načíst.",
+      "export_xlsx": "Export XLSX",
+      "export_csv": "Export CSV",
+      "export_failed": "Export zaúčtování mezd se nepodařilo stáhnout.",
+      "summary_title": "Souhrn za firmu",
+      "rows_title": "Po zaměstnancích a druzích mezd",
+      "company_wide": "Celá firma",
+      "total": "Celkem",
+      "open_runs": "Otevřít mzdové běhy",
+      "empty": {
+        "title": "Za měsíc není nic zaúčtováno",
+        "message": "Sestava se plní ze zaúčtovaných mzdových běhů. Schvalte a zaúčtujte běh měsíce na stránce Mzdové běhy."
+      },
+      "table": {
+        "person": "Osobní číslo a jméno",
+        "label": "Druh mzdy",
+        "debit": "Účet MD",
+        "credit": "Účet Dal",
+        "cost_center": "Středisko",
+        "hours": "Hodiny",
+        "amount": "Částka"
       }
     },
     "posting_reconciliation": {

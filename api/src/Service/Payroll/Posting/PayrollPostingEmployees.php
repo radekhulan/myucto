@@ -70,7 +70,7 @@ final class PayrollPostingEmployees
     }
 
     /**
-     * @return array{sort:string,label:string}|null řadicí klíč a text řádku osoby
+     * @return array{id:int,sort:string,label:string}|null osoba, řadicí klíč a text řádku
      */
     public function forAllocationKey(string $allocationKey): ?array
     {
@@ -80,6 +80,7 @@ final class PayrollPostingEmployees
         }
 
         return [
+            'id' => $employeeId,
             'sort' => sprintf('%010d', $employeeId),
             'label' => self::label($this->codes[$employeeId] ?? (string) $employeeId),
         ];

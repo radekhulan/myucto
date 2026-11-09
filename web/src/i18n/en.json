@@ -1962,6 +1962,7 @@
     "payroll_runs": "Payroll runs",
     "payroll_payments": "Payroll payment orders",
     "payroll_posting_reconciliation": "Payroll posting reconciliation",
+    "payroll_posting_detail": "Payroll posting",
     "payroll_people": "Employees",
     "payroll_quick_inputs": "Quick monthly input",
     "payroll_components": "Payroll components and inputs",
@@ -3718,6 +3719,35 @@
         "open_institution_accounts": "Open institution accounts",
         "open_person_accounts": "Open employee payout accounts",
         "unknown_posting_reason": "The application cannot explain why this payment was not posted. Ask your administrator to investigate and share the technical details below."
+      }
+    },
+    "posting_detail": {
+      "title": "Detailed payroll posting",
+      "subtitle": "Posting of the monthly payroll charge per employee and wage type: debit account, credit account, personal number, wage type, hours and amount. The company summary is on top. The total matches the payroll entries of the month in the journal.",
+      "period": "Period",
+      "reload": "Reload",
+      "retry": "Try again",
+      "load_failed": "The payroll posting report could not be loaded.",
+      "export_xlsx": "Export XLSX",
+      "export_csv": "Export CSV",
+      "export_failed": "The payroll posting export could not be downloaded.",
+      "summary_title": "Company summary",
+      "rows_title": "Per employee and wage type",
+      "company_wide": "Whole company",
+      "total": "Total",
+      "open_runs": "Open payroll runs",
+      "empty": {
+        "title": "Nothing is posted for the month",
+        "message": "The report is filled from posted payroll runs. Approve and post the run of the month on the Payroll runs page."
+      },
+      "table": {
+        "person": "Personal number and name",
+        "label": "Wage type",
+        "debit": "Debit account",
+        "credit": "Credit account",
+        "cost_center": "Cost centre",
+        "hours": "Hours",
+        "amount": "Amount"
       }
     },
     "posting_reconciliation": {

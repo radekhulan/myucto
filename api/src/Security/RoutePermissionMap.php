@@ -339,6 +339,7 @@ final class RoutePermissionMap
         ['POST', '#^/api/payroll/year-close/[0-9]{4}/reopen$#', 'payroll.reopen', AccessLevel::WRITE],
         ['GET', '#^/api/payroll/reports/annual/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
         ['GET', '#^/api/payroll/reports/dimension-costs/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
+        ['GET', '#^/api/payroll/reports/posting-detail(?:/export\.(?:xlsx|csv))?$#', 'payroll.reports', AccessLevel::READ],
         // Kontrola přepočtu proti mzdám převzatým z původního systému — čtení
         // mzdových dat osob, tedy stejné právo jako ostatní mzdové sestavy.
         ['GET', '#^/api/payroll/reports/migration-reconciliation/[0-9]{4}$#', 'payroll.reports', AccessLevel::READ],
