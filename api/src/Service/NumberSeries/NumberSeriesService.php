@@ -167,7 +167,7 @@ final class NumberSeriesService
             'scope_id'   => $scopeId,
             'name'       => self::name($input['name'] ?? ''),
             'prefix'     => self::prefix($input['prefix'] ?? null),
-            'template'   => trim((string) ($input['template'] ?? '')) ?: NumberSeriesKinds::DEFAULT_NATIVE_TEMPLATE,
+            'template'   => NumberTemplateRules::normalize(trim((string) ($input['template'] ?? ''))) ?: NumberSeriesKinds::DEFAULT_NATIVE_TEMPLATE,
             'period'     => (string) ($input['period'] ?? 'year'),
             'valid_to'   => self::validTo($input['valid_to'] ?? null),
             'sort_order' => (int) ($input['sort_order'] ?? 0),
@@ -236,7 +236,7 @@ final class NumberSeriesService
             $next = [
                 'doc_kind' => $row['doc_kind'],
                 'prefix'   => array_key_exists('prefix', $input) ? self::prefix($input['prefix']) : $row['prefix'],
-                'template' => array_key_exists('template', $input) ? trim((string) $input['template']) : (string) $row['template'],
+                'template' => array_key_exists('template', $input) ? NumberTemplateRules::normalize(trim((string) $input['template'])) : (string) $row['template'],
                 'period'   => array_key_exists('period', $input) ? (string) $input['period'] : (string) $row['period'],
             ];
             $changed = $next['prefix'] !== $row['prefix'] || $next['template'] !== $row['template'] || $next['period'] !== $row['period'];
@@ -593,7 +593,7 @@ final class NumberSeriesService
         $digitCollisions = [];
         $errors = NumberSeriesTemplate::validate((string) $data['doc_kind'], (string) $data['template'], $data['prefix'], (string) $data['period']);
         if ($errors !== []) {
-            throw new NumberSeriesException('template_invalid', self::templateMessage($errors[0]));
+            throw new NumberSeriesException('template_invalid', self::templateMessage($errors[0], (string) $data['doc_kind']));
         }
         $space = NumberSeriesKinds::space((string) $data['doc_kind']);
         $date = new \DateTimeImmutable(self::SAMPLE_DATE);
@@ -653,16 +653,16 @@ final class NumberSeriesService
         return array_map(static fn (int $id): array => ['code' => 'digit_overlap', 'series_id' => $id], $seriesIds);
     }
 
-    private static function templateMessage(string $code): string
+    private static function templateMessage(string $code, string $kind): string
     {
         return match ($code) {
-            'template_length'      => 'Tvar čísla musí mít 1 až ' . NumberSeriesTemplate::MAX_LENGTH . ' znaků.',
             'period_invalid'       => 'Období řady musí být rok, měsíc nebo bez resetu.',
-            'template_placeholder' => 'Tvar čísla obsahuje neznámý zástupný symbol. Dovolené: {PREFIX} {YYYY} {YY} {MM} {C…} (u přijatých dokladů i {PP}).',
-            'template_whitespace'  => 'Tvar čísla nesmí obsahovat mezery.',
-            'template_counter'     => 'Tvar čísla musí obsahovat právě jeden čítač {C…}, např. {CCCC}.',
             'prefix_invalid'       => 'Prefix řady musí mít 1 až 10 znaků A-Z nebo 0-9.',
-            'template_period'      => 'Tvar čísla musí obsahovat rok (u roční řady) nebo rok i měsíc (u měsíční řady), jinak by se čísla po resetu opakovala.',
+            'template_length'      => NumberTemplateRules::message('length', true, $kind === 'purchase'),
+            'template_placeholder' => NumberTemplateRules::message('placeholder', true, $kind === 'purchase'),
+            'template_whitespace'  => NumberTemplateRules::message('whitespace', true, $kind === 'purchase'),
+            'template_counter'     => NumberTemplateRules::message('counter', true, $kind === 'purchase'),
+            'template_period'      => NumberTemplateRules::message('period', true, $kind === 'purchase'),
             default                => 'Neplatný tvar čísla.',
         };
     }

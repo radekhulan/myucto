@@ -7,6 +7,8 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { numberSeriesApi, SELECTABLE_KINDS, type NumberSeries, type NumberSeriesCompleteness, type NumberSeriesKind, type NumberSeriesPeriod } from '@/api/numberSeries'
 import { cashApi, type CashRegister } from '@/api/cash'
 import { numberSeriesLabel } from '@/utils/numberSeries'
+import { normalizeInputBrackets, numberTemplateMessage, validateNumberTemplate, type NumberTemplateOptions } from '@/utils/numberTemplate'
+import { renderVarsymbolTemplate } from '@/utils/varsymbol'
 import { formatDate } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
@@ -97,18 +99,32 @@ function openEdit(s: NumberSeries) {
 
 const isRegisterKind = computed(() => form.doc_kind === 'cash_in' || form.doc_kind === 'cash_out')
 
-/** Náhled čísla podle rozeditované šablony (rok a měsíc z dneška). */
-const formPreview = computed(() => {
-  const now = new Date()
+/** Pravidla tvaru čísla stejná jako na backendu: {PREFIX} jen v řadě, {PP} u přijatých dokladů, období řady. */
+const templateOptions = computed<NumberTemplateOptions>(() => ({
+  allowPrefix: true,
+  allowPp: form.doc_kind === 'purchase',
+  period: form.period,
+}))
+
+/** Stav šablony rozeditované řady (chyba, náhled čísla pro dnešek a zadaný čítač). */
+const templateState = computed(() => {
+  const raw = form.template.trim()
+  if (raw === '') return { error: t('number_template.errors.length'), warning: '', preview: '', invalid: true }
+  const { period, ...strict } = templateOptions.value
+  const errors = validateNumberTemplate(raw, templateOptions.value)
+  if (errors.length > 0) {
+    return { error: numberTemplateMessage(t, errors[0], strict), warning: '', preview: '', invalid: true }
+  }
   const n = Math.max(1, Number(form.next_number) || 1)
-  return form.template
-    .replace(/\{PREFIX\}/g, form.prefix.trim().toUpperCase())
-    .replace(/\{PP\}/g, 'PF')
-    .replace(/\{YYYY\}/g, String(now.getFullYear()))
-    .replace(/\{YY\}/g, String(now.getFullYear()).slice(-2))
-    .replace(/\{MM\}/g, String(now.getMonth() + 1).padStart(2, '0'))
-    .replace(/\{(C+)\}/g, (_m, c: string) => String(n).padStart(c.length, '0'))
+  const preview = renderVarsymbolTemplate(raw.replaceAll('{PREFIX}', form.prefix.trim().toUpperCase()), new Date(), n)
+  return { error: '', warning: '', preview, invalid: false }
 })
+const templateEditable = computed(() => !editing.value || editing.value.can_edit_template)
+const canSaveForm = computed(() => !templateEditable.value || !templateState.value.invalid)
+
+function onTemplateInput(e: Event) {
+  form.template = normalizeInputBrackets(e)
+}
 
 async function saveForm() {
   saving.value = true
@@ -439,8 +455,13 @@ const completenessRows = computed(() => (completeness.value?.series ?? []).map(c
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('number_series.field_template') }}</label>
-            <input v-model="form.template" type="text" maxlength="60" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm font-mono" />
-            <p class="text-xs text-neutral-500 mt-1">{{ t('number_series.template_hint') }}</p>
+            <input :value="form.template" type="text" maxlength="60" autocomplete="off" spellcheck="false"
+              :aria-invalid="templateState.invalid" data-test="series-template"
+              class="w-full h-9 px-3 border rounded-md text-sm font-mono"
+              :class="templateState.invalid ? 'border-danger-500 bg-danger-50' : 'border-neutral-300'"
+              @input="onTemplateInput" />
+            <p v-if="templateState.error" class="text-xs text-danger-500 mt-1" role="alert">{{ templateState.error }}</p>
+            <p v-else class="text-xs text-neutral-500 mt-1">{{ t('number_series.template_hint') }}</p>
           </div>
           <div>
             <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('number_series.field_period') }}</label>
@@ -466,8 +487,8 @@ const completenessRows = computed(() => (completeness.value?.series ?? []).map(c
           <input v-model="form.is_default" type="checkbox" class="rounded border-neutral-300" />
           {{ t('number_series.field_is_default') }}
         </label>
-        <p v-if="!editing || editing.can_edit_template" class="md:col-span-2 text-xs text-success-600">
-          {{ t('number_series.preview') }}: <code class="font-mono font-semibold">{{ formPreview }}</code>
+        <p v-if="templateEditable && templateState.preview" class="md:col-span-2 text-xs text-success-600">
+          {{ t('number_series.preview') }}: <code class="font-mono font-semibold">{{ templateState.preview }}</code>
         </p>
       </div>
       <template #footer>
@@ -476,7 +497,7 @@ const completenessRows = computed(() => (completeness.value?.series ?? []).map(c
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
             {{ t('common.cancel') }}
           </button>
-          <button type="button" :class="btnFilled('primary')" class="whitespace-nowrap" :disabled="saving" @click="saveForm">
+          <button type="button" :class="btnFilled('primary')" class="whitespace-nowrap" data-test="series-save" :disabled="saving || !canSaveForm" @click="saveForm">
             <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.check" /></svg>
             {{ saving ? t('common.saving') : t('common.save') }}
           </button>

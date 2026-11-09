@@ -27518,7 +27518,6 @@
     },
     "numbering_preview": "Next number preview",
     "numbering_preview_fallback": "(global cfg.php will be used)",
-    "numbering_must_have_counter": "Missing counter — add e.g. CCC in curly braces.",
     "numbering_next_number": "Next number",
     "numbering_next_number_placeholder": "e.g. 56",
     "numbering_next_number_apply": "Set counter",
@@ -27882,9 +27881,7 @@
     "numbering_period_year": "Yearly (January 1)",
     "numbering_period_month": "Monthly",
     "numbering_period_none": "Never (single global counter)",
-    "numbering_placeholders_hint": "Placeholders (always wrap in curly braces): YYYY 4-digit year · YY 2-digit year · MM month · C+ sequence number; count of C controls padding (CCCC = 4 chars). Year and month accept an offset: YY+30 · MM-1 · YYYY+1. The offset only changes the printed number, not when the series resets.",
-    "numbering_preview": "Preview",
-    "numbering_must_have_counter": "Missing counter — add e.g. CCC in curly braces."
+    "numbering_placeholders_hint": "Placeholders (always wrap in curly braces): YYYY 4-digit year · YY 2-digit year · MM month · C+ sequence number; count of C controls padding (CCCC = 4 chars). Year and month accept an offset: YY+30 · MM-1 · YYYY+1. The offset only changes the printed number, not when the series resets."
   },
   "codebooks": {
     "title": "Codebooks",
@@ -42301,6 +42298,17 @@
     "prepare_transfer": "Prepare transfer",
     "ready_to_save": "Ready to save",
     "no_period": "No period"
+  },
+  "number_template": {
+    "preview": "Number preview",
+    "hint": "Placeholders: {'{YYYY}'} / {'{YY}'} year, {'{MM}'} month (dates accept an offset, e.g. {'{YY+1}'}) and exactly one counter {'{CCCC}'}. Round and square brackets are converted to {'{}'}.",
+    "errors": {
+      "length": "The number format must be 1 to 60 characters long.",
+      "placeholder": "The number format contains an unknown placeholder. Allowed: {allowed}, dates accept an offset, e.g. {'{YY+1}'}.",
+      "whitespace": "The number format must not contain spaces.",
+      "counter": "The number format must contain exactly one counter {'{C…}'}, e.g. {'{CCCC}'}.",
+      "period": "The number format must contain the year (yearly series) or both year and month (monthly series), otherwise numbers would repeat after the reset."
+    }
   },
   "number_series": {
     "title": "Number series",

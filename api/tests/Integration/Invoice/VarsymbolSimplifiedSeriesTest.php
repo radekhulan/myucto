@@ -169,7 +169,7 @@ final class VarsymbolSimplifiedSeriesTest extends TestCase
             $this->issue('simplified');
             self::fail('Neplatná šablona musí vystavení odmítnout.');
         } catch (\InvalidArgumentException $e) {
-            self::assertStringContainsString('neznámý placeholder', $e->getMessage());
+            self::assertStringContainsString('neznámý zástupný symbol', $e->getMessage());
         }
         self::assertSame(0, $this->counter('simplified'), 'Odmítnuté číslo nesmí posunout počítadlo.');
     }

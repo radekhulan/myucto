@@ -17,6 +17,8 @@ import InvoiceCounterField from '@/components/settings/InvoiceCounterField.vue'
 import EntityDimensionDefaults from '@/components/dimensions/EntityDimensionDefaults.vue'
 import { formatDate } from '@/composables/useFormat'
 import { addDaysIso, appIsoDate } from '@/utils/date'
+import NumberTemplateInput from '@/components/ui/NumberTemplateInput.vue'
+import { numberTemplateState, type NumberTemplateOptions } from '@/utils/numberTemplate'
 import {
   CLIENT_EMAIL_DEFAULT_ATTACHMENT_NAME,
   CLIENT_EMAIL_DEFAULT_SUBJECT,
@@ -502,6 +504,12 @@ function warnDuplicateCandidates(candidates?: ClientDuplicateMatch[]) {
     toast.warning(t('client.duplicate_candidate_warning', { name: c.company_name }))
   }
 }
+
+/** Chybný tvar čísla v řadě klienta; do opravy nejde uložit. Období se posuzuje jen u vlastního přepsání. */
+const numberingOptions = computed<NumberTemplateOptions>(() => ({ period: form.value.invoice_number_period || null }))
+const numberingInvalid = computed(() =>
+  [form.value.invoice_number_format, form.value.proforma_number_format, form.value.credit_note_number_format]
+    .some((v) => numberTemplateState(t, v).invalid))
 
 async function submit() {
   if (blockDemoMutation()) return
@@ -1122,8 +1130,7 @@ if (!props.embedded) {
           <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.invoice_number_format') }}</label>
-              <input v-model="form.invoice_number_format" type="text" maxlength="60" placeholder="{YY}{CCCC}"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <NumberTemplateInput v-model="form.invoice_number_format" :options="numberingOptions" placeholder="{YY}{CCCC}" input-class="h-10 px-3 rounded-md text-sm" />
               <!--
                 Počítadlo vlastní řady klienta (issue #74) — jen u už uloženého klienta:
                 endpoint míří na jeho id a na šablonu, kterou zná server.
@@ -1133,15 +1140,13 @@ if (!props.embedded) {
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.proforma_number_format') }}</label>
-              <input v-model="form.proforma_number_format" type="text" maxlength="60" placeholder="9{YY}{CCCC}"
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <NumberTemplateInput v-model="form.proforma_number_format" :options="numberingOptions" placeholder="9{YY}{CCCC}" input-class="h-10 px-3 rounded-md text-sm" />
               <InvoiceCounterField v-if="clientId" type="proforma" :template="form.proforma_number_format"
                 :period="form.invoice_number_period" :client-id="clientId" />
             </div>
             <div>
               <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('client.credit_note_number_format') }}</label>
-              <input v-model="form.credit_note_number_format" type="text" maxlength="60" placeholder=""
-                class="w-full h-10 px-3 border border-neutral-300 rounded-md font-mono text-sm focus:ring-2 focus:ring-primary-500/20 focus:border-primary-500 outline-none" />
+              <NumberTemplateInput v-model="form.credit_note_number_format" :options="numberingOptions" placeholder="" input-class="h-10 px-3 rounded-md text-sm" />
               <InvoiceCounterField v-if="clientId" type="credit_note" :template="form.credit_note_number_format"
                 :period="form.invoice_number_period" :client-id="clientId" />
             </div>
@@ -1173,7 +1178,7 @@ if (!props.embedded) {
         <button v-if="embedded" type="button" @click="emit('cancel')"
           class="px-4 h-10 border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface text-sm font-medium">{{ t('common.cancel') }}</button>
         <RouterLink v-else to="/clients" class="px-4 h-10 leading-10 border border-neutral-300 rounded-md text-neutral-700 hover:bg-surface text-sm font-medium">{{ t('common.cancel') }}</RouterLink>
-        <button type="submit" :disabled="submitting"
+        <button type="submit" :disabled="submitting || numberingInvalid"
           class="px-5 h-10 bg-primary-600 hover:bg-primary-700 disabled:bg-neutral-300 text-white text-sm font-medium rounded-md">
           {{ submitting ? t('common.saving') : (isEdit ? t('common.save') : t('common.create')) }}
         </button>

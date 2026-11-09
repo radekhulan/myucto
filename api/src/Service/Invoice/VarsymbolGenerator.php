@@ -252,7 +252,7 @@ final class VarsymbolGenerator
         }
         // Šablona uložená před validací placeholderů (`{1YY}{CCC}`) by dala číslo
         // s doslovnými závorkami — vystavení raději odmítne, než aby číslo použilo.
-        InvoiceNumberFormat::templateOrNull($template, "Číselná řada ({$invoiceType}) „{$template}\"");
+        InvoiceNumberFormat::assertRenderable($template, "Číselná řada ({$invoiceType}) „{$template}\"");
 
         $for       = $for ?? new \DateTimeImmutable('today');
         $periodKey = $this->makePeriodKey($period, $for);

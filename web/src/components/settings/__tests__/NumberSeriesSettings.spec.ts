@@ -62,4 +62,27 @@ describe('NumberSeriesSettings', () => {
 
     expect(m.update).toHaveBeenCalledWith(5, { valid_to: date.value })
   })
+
+  it('tvar čísla {YYx} hned ohlásí chybu a zablokuje Uložit, závorky převede na složené', async () => {
+    const wrapper = await mountSettings([series()])
+    ;(wrapper.vm as any).openCreate()
+    await flushPromises()
+    const input = document.body.querySelector('[data-test="series-template"]') as HTMLInputElement
+    const save = document.body.querySelector('[data-test="series-save"]') as HTMLButtonElement
+    expect(save.disabled).toBe(false)
+
+    input.value = '{PREFIX}{YYx}{CCCC}'
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+    expect(input.getAttribute('aria-invalid')).toBe('true')
+    expect(document.body.textContent).toContain('number_template.errors.placeholder')
+    expect(save.disabled).toBe(true)
+
+    input.value = '[PREFIX](YY)[CCCC]'
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+    expect(input.value).toBe('{PREFIX}{YY}{CCCC}')
+    expect(input.getAttribute('aria-invalid')).toBe('false')
+    expect(save.disabled).toBe(false)
+  })
 })

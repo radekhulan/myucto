@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace MyInvoice\Service\Invoice;
 
+use MyInvoice\Service\NumberSeries\NumberTemplateRules;
+
 /**
  * Validace číselné řady faktur — jediné volatelné místo pro pravidla, která musí
  * platit všude, kde jde template/období nastavit.
@@ -18,7 +20,7 @@ namespace MyInvoice\Service\Invoice;
  */
 final class InvoiceNumberFormat
 {
-    public const MAX_TEMPLATE_LENGTH = 60;
+    public const MAX_TEMPLATE_LENGTH = NumberTemplateRules::MAX_LENGTH;
 
     public const PERIODS = ['year', 'month', 'none'];
 
@@ -83,28 +85,37 @@ final class InvoiceNumberFormat
 
     /**
      * Template override číselné řady. Prázdná hodnota → NULL (dědí se z nadřazené
-     * úrovně). Whitelistne placeholdery a délku — uživatel nesmí protlačit template,
-     * který by VarsymbolGenerator odmítl až při vystavení faktury.
+     * úrovně). Závorky `()` a `[]` převede na složené a vrací už normalizovaný tvar;
+     * pravidla (symboly, mezery, právě jeden čítač, délka) drží {@see NumberTemplateRules}
+     * stejně jako číselník řad, takže hlášky jsou všude shodné. `$allowPp` jen u přijatých dokladů.
      *
-     * @throws \InvalidArgumentException neplatná délka nebo neznámý placeholder
+     * @throws \InvalidArgumentException neplatný tvar čísla
      */
-    public static function templateOrNull(mixed $value, string $key): ?string
+    public static function templateOrNull(mixed $value, string $key, bool $allowPp = false): ?string
     {
         $v = self::trimmedOrNull($value);
         if ($v === null) {
             return null;
         }
-        if (strlen($v) > self::MAX_TEMPLATE_LENGTH) {
-            throw new \InvalidArgumentException("{$key} smí mít max " . self::MAX_TEMPLATE_LENGTH . ' znaků.');
-        }
-        $stripped = preg_replace(['/\{(YYYY|YY|MM)([+-]\d{1,3})?\}/', '/\{C+\}/'], '', $v) ?? '';
-        if (preg_match('/[{}]/', $stripped)) {
-            throw new \InvalidArgumentException(
-                "{$key} obsahuje neznámý placeholder. Dovolené: {YYYY} {YY} {MM} {C+},"
-                . ' u datumových volitelně s posunem, např. {YY+30} nebo {MM-1}.'
-            );
+        $v = NumberTemplateRules::normalize($v);
+        $errors = NumberTemplateRules::check($v, false, $allowPp);
+        if ($errors !== []) {
+            throw new \InvalidArgumentException(NumberTemplateRules::message($errors[0], false, $allowPp));
         }
         return $v;
+    }
+
+    /**
+     * Kontrola už uložené šablony při vystavení dokladu: jen zástupné symboly, aby číslo
+     * nedostalo doslovné závorky. Mezery ani počet čítačů tu nevadí (uloženo před validací).
+     *
+     * @throws \InvalidArgumentException neznámý zástupný symbol
+     */
+    public static function assertRenderable(string $template, string $key): void
+    {
+        if (NumberTemplateRules::placeholderErrors($template, false, false) !== []) {
+            throw new \InvalidArgumentException($key . ': ' . NumberTemplateRules::message('placeholder', false, false));
+        }
     }
 
     /**

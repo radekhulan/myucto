@@ -20,7 +20,7 @@ use MyInvoice\Service\PurchaseInvoice\PurchaseNumberSeries;
  */
 final class NumberSeriesTemplate
 {
-    public const MAX_LENGTH = 60;
+    public const MAX_LENGTH = NumberTemplateRules::MAX_LENGTH;
 
     public const PERIODS = ['year', 'month', 'none'];
 
@@ -34,36 +34,18 @@ final class NumberSeriesTemplate
     public static function validate(string $kind, string $template, ?string $prefix, string $period): array
     {
         $errors = [];
-        if ($template === '' || strlen($template) > self::MAX_LENGTH) {
-            $errors[] = 'template_length';
-        }
-        if (!in_array($period, self::PERIODS, true)) {
+        $period_ = in_array($period, self::PERIODS, true) ? $period : null;
+        if ($period_ === null) {
             $errors[] = 'period_invalid';
         }
-        $allowed = ['/\{(YYYY|YY|MM)([+-]\d{1,3})?\}/', '/\{C+\}/', '/\{PREFIX\}/'];
-        if ($kind === 'purchase') {
-            $allowed[] = '/\{PP\}/';
-        }
-        $stripped = preg_replace($allowed, '', $template) ?? '';
-        if (preg_match('/[{}]/', $stripped)) {
-            $errors[] = 'template_placeholder';
-        }
-        if (preg_match('/\s/', $template)) {
-            $errors[] = 'template_whitespace';
-        }
-        if (preg_match_all('/\{C+\}/', $template) !== 1) {
-            $errors[] = 'template_counter';
+        foreach (NumberTemplateRules::check($template, true, $kind === 'purchase', $period_) as $code) {
+            $errors[] = 'template_' . $code;
         }
         if (str_contains($template, '{PREFIX}') && ($prefix === null || preg_match(self::PREFIX_PATTERN, $prefix) !== 1)) {
             $errors[] = 'prefix_invalid';
         }
         if ($prefix !== null && $prefix !== '' && preg_match(self::PREFIX_PATTERN, $prefix) !== 1) {
             $errors[] = 'prefix_invalid';
-        }
-        $hasYear  = (bool) preg_match('/\{(YYYY|YY)([+-]\d{1,3})?\}/', $template);
-        $hasMonth = (bool) preg_match('/\{MM([+-]\d{1,3})?\}/', $template);
-        if (($period === 'year' && !$hasYear) || ($period === 'month' && (!$hasYear || !$hasMonth))) {
-            $errors[] = 'template_period';
         }
         return array_values(array_unique($errors));
     }
