@@ -15,7 +15,7 @@ export const PERMISSION_KEYS = [
   'documents.restore', 'documents.requests', 'documents.inbox', 'documents.inbox.delete',
   'documents.submit',
   'accounting', 'other_items', 'accounting.journal.write', 'accounting.journal.post',
-  'accounting.periods.manage', 'accounting.periods.close', 'accounting.periods.close_override', 'accounting.offsets',
+  'accounting.periods.manage', 'accounting.periods.close', 'accounting.periods.close_override', 'accounting.period_lock', 'accounting.offsets',
   'accounting.templates',
   'tax_evidence', 'tax_evidence.classification.write', 'tax_evidence.export',
   'reports', 'reports.submissions', 'reports.submissions.manage', 'reports.finalize', 'reports.submit', 'reports.reopen', 'reports.export',

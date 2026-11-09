@@ -235,6 +235,38 @@ final class ManualPairEntryTest extends TestCase
         self::assertSame(2, (int) $stmt->fetchColumn());
     }
 
+    public function testFullReversalAfterPairRepostAlsoReversesReplacementPair(): void
+    {
+        $this->switchToSingle();
+        $entryId = $this->postPairs([
+            ['debit_account_code' => '568', 'credit_account_code' => '221', 'amount' => 15],
+            ['debit_account_code' => '518', 'credit_account_code' => '221', 'amount' => 100],
+        ]);
+        $this->posting->reversePairs($this->supplierId, $entryId, [1], ['user_id' => $this->userId],
+            ['debit_account_code' => '549', 'credit_account_code' => '221']);
+        self::assertSame(['221' => '-115.00', '518' => '100.00', '549' => '15.00'], $this->balances());
+
+        $this->posting->reverse($this->supplierId, $entryId, ['user_id' => $this->userId]);
+
+        // Storno celého dokladu ruší všechny dvojice včetně přeúčtované: nic nezůstane.
+        self::assertSame([], $this->balances());
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId)['reversed_by']);
+    }
+
+    /** @return array<string,string> účet => zůstatek MD − Dal (jen nenulové) */
+    private function balances(): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.account_code,
+                    SUM(CASE WHEN (l.side = 'debit') <> (l.is_red_storno = 1) THEN l.amount ELSE -l.amount END) AS balance
+               FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.supplier_id = ?
+              GROUP BY a.account_code HAVING balance <> 0 ORDER BY a.account_code"
+        );
+        $stmt->execute([$this->supplierId]);
+        return array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'balance', 'account_code');
+    }
+
     public function testAutomaticManyToManyEntryInSingleFormIsRejectedAndNothingIsPosted(): void
     {
         $this->switchToSingle();

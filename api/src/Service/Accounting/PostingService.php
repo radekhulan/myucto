@@ -1380,6 +1380,9 @@ final class PostingService
                 return $reversalId;
             }
             $reversalId = $this->journal->insertReversal($header, $mirror, $entryId);
+            if ($reversedPairs !== []) {
+                $this->reverseReplacementPairs($supplierId, $entryId, ['entry_date' => $reversalDate] + $meta);
+            }
             if (in_array((string) $original['source_type'], ['bank', 'cash'], true)
                 && $original['source_id'] !== null) {
                 $column = $original['source_type'] === 'bank' ? 'bank_transaction_id' : 'cash_document_id';
@@ -1414,6 +1417,51 @@ final class PostingService
                 $pdo->rollBack();
             }
             throw $e;
+        }
+    }
+
+    /**
+     * Storno celého zápisu po přeúčtování dvojice opravným zápisem: originál zrcadlí jen
+     * dvojice, které nikdo nestornoval, ale nová dvojice přeúčtování žije v opravném
+     * zápisu. Aby storno zrušilo CELÝ doklad (všechny dvojice), stornuje se i ona, a pokud
+     * byla sama přeúčtovaná dál, pak její poslední náhrada. Čisté storno dvojice (bez
+     * náhrady) už je zrušené a nic dalšího nepotřebuje. Složený zápis sem nevstoupí.
+     *
+     * @param array<string,mixed> $meta
+     */
+    private function reverseReplacementPairs(int $supplierId, int $entryId, array $meta): void
+    {
+        $links = $this->db->pdo()->prepare(
+            'SELECT r.reversal_entry_id, r.replacement_pair_no
+               FROM journal_pair_reversals r
+               JOIN journal_entries e ON e.supplier_id = r.supplier_id AND e.id = r.reversal_entry_id
+              WHERE r.supplier_id = ? AND r.entry_id = ? AND r.replacement_pair_no IS NOT NULL
+                AND e.reversed_by IS NULL
+              ORDER BY r.pair_no'
+        );
+        $links->execute([$supplierId, $entryId]);
+        foreach ($links->fetchAll(PDO::FETCH_ASSOC) as $link) {
+            $this->reverseLivePair($supplierId, (int) $link['reversal_entry_id'], (int) $link['replacement_pair_no'], $meta);
+        }
+    }
+
+    /** @param array<string,mixed> $meta */
+    private function reverseLivePair(int $supplierId, int $entryId, int $pairNo, array $meta): void
+    {
+        $next = $this->db->pdo()->prepare(
+            'SELECT r.reversal_entry_id, r.replacement_pair_no
+               FROM journal_pair_reversals r
+               JOIN journal_entries e ON e.supplier_id = r.supplier_id AND e.id = r.reversal_entry_id
+              WHERE r.supplier_id = ? AND r.entry_id = ? AND r.pair_no = ? AND e.reversed_by IS NULL'
+        );
+        $next->execute([$supplierId, $entryId, $pairNo]);
+        $link = $next->fetch(PDO::FETCH_ASSOC);
+        if ($link === false) {
+            $this->reverseOnce($supplierId, $entryId, $meta, [$pairNo]);
+            return;
+        }
+        if ($link['replacement_pair_no'] !== null) {
+            $this->reverseLivePair($supplierId, (int) $link['reversal_entry_id'], (int) $link['replacement_pair_no'], $meta);
         }
     }
 

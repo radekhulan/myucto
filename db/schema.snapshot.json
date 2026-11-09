@@ -1172,7 +1172,8 @@
         "2266_journal_entry_pairs.sql",
         "2267_invoice_item_posting_accounts.sql",
         "2268_number_series_codebook.sql",
-        "2269_internal_document_line_pairs.sql"
+        "2269_internal_document_line_pairs.sql",
+        "2270_accounting_period_lock_permission.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

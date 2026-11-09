@@ -1207,19 +1207,25 @@ měsících funguje beze změny, chráněná je jen minulost před zamčeným da
 explicitním označení validního snapshotu za skončené období jako **odeslaného**, a to
 jen **dopředu** (nikdy ho automaticky nezmenší). V Archivu podání tuto akci
 spustíte tlačítkem **Označit jako podané**; zámek lze alternativně nastavit ručně
-administrátorem.
+(viz níže).
 
 **Co uvidíte.** Pokus o zaúčtování, přeúčtování nebo storno dokladu s datem v zamčeném
 rozsahu skončí chybou, že datum je zamčené. Storno zaúčtovaného zápisu, jehož datum už
 je zamčené, samo o sobě projde, ale protizápis se automaticky zaúčtuje k dnešnímu
 (otevřenému) datu, ne k datu originálu.
 
-**Ruční nastavení a posun.** Zámek může nastavit, posunout dopředu i vrátit zpátky jen
-**administrátor** - na stránce [**Účetnictví → Měsíční kontrola**](62_Mesicni_kontrola.md)
-tlačítkem „Uzamknout k datu", vždy s
-povinným písemným zdůvodněním (min. 5 znaků); změna se zaznamená do auditní stopy
-(hodnota před/po + důvod). Stejná akce je dostupná i přímo přes administrátorské API
+**Ruční nastavení a posun.** Zámek nastavuje, posouvá dopředu i vrací zpátky
+**administrátor** (právo „Spravovat období") nebo role s právem **„Posunout zámek účtování
+k datu"**, které správce přidělí v editoru rolí třeba roli hlavní účetní. Slouží k tomu
+stránka [**Účetnictví → Měsíční kontrola**](62_Mesicni_kontrola.md), tlačítko
+„Uzamknout k datu", vždy s povinným písemným zdůvodněním (min. 5 znaků); změna se
+zaznamená do auditní stopy (hodnota před/po + důvod). Stejná akce je dostupná i přes API
 (`PUT /api/accounting/period-lock`).
+
+Role, která má jen právo posunout zámek, ho nevrátí zpátky přes **podané období DPH**
+(přiznání, kontrolní hlášení nebo OSS ve stavu podáno) ani přes **uzavřené účetní
+období**; to smí jen administrátor. Podané se opravuje opravným zápisem do otevřeného
+data. Zámek platí stejně pro složený i jednoduchý zápis (dvojice).
 
 ### 52.14.11 Kontrola integrity deníku (noční job)
 
@@ -1298,7 +1304,7 @@ leží v jiném kalendářním roce, zápis se vytvoří, ale odpověď vrátí 
   předchozí verzi - spárování s konkrétním uživatelem je orientační (časová blízkost
   v auditním logu), ne přesná vazba.
 - Kromě otevřenosti období hlídá zaúčtování/přeúčtování/storno i **zámek k datu**
-  ([§ 52.14.10](#521410-zamek-uctovani-k-datu)). Ručně jej nastaví administrátor; po
+  ([§ 52.14.10](#521410-zamek-uctovani-k-datu)). Ručně jej nastaví administrátor nebo role s právem posunout zámek; po
   doloženém podání jej posune i označení snapshotu DPH nebo KH tlačítkem **Označit jako
   podané** v `Daně → EPO podání a archív`.
 
