@@ -8,6 +8,7 @@ use MyInvoice\Repository\AccountingPeriodRepository;
 use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\LedgerReportRepository;
 use MyInvoice\Service\Accounting\AccountBalanceSign;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\JournalLineAmount;
 
 /**
@@ -16,6 +17,13 @@ use MyInvoice\Service\Accounting\JournalLineAmount;
  * `*_signed` = se znaménkem podle typu účtu ({@see AccountBalanceSign}).
  * Řazení entry_date, entry_id, line_no (deterministické) — running_delta počítá
  * window funkce nad celým rozsahem, takže stránkování ani filtr protiúčtu zůstatky nemění.
+ *
+ * Jednoduchý zápis (firma má {@see EntryFormService::hasAnySingle()}): pohyb nese jediný
+ * protiúčet (`counter_account_id`, `pair_no`, `pair_status`, viz {@see JournalLineContext}),
+ * filtr a součty jdou podle dvojic. Řádek staršího zápisu 1 : N se rozbalí na pohyby po
+ * dílech (`pair_piece` 1..n) s průběžným zůstatkem dopočteným v PHP; nic se nezapisuje.
+ * Stránkování zůstává po řádcích deníku, rozbalení stránku jen prodlouží. Firma bez
+ * jednoduchého zápisu dostane přesně dnešní výstup i SQL.
  */
 final class AccountStatementService
 {
@@ -24,6 +32,7 @@ final class AccountStatementService
         private readonly ChartOfAccountsRepository $accounts,
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalLineContext $context,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     /**
@@ -52,12 +61,14 @@ final class AccountStatementService
         // otevírací zápis započítá dvakrát a KS vyjde jako dvojnásobek PS.
         $excludeClosing = !$afterClosing;
 
+        $pairs = $this->entryForms->hasAnySingle($supplierId);
+
         $opening = $this->ledger->accountOpening($supplierId, $accountId, $from, $periodStart, $excludeClosing);
-        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing, $counterAccountId);
+        $total   = $this->ledger->accountLinesTotal($supplierId, $accountId, $from, $to, $excludeClosing, $counterAccountId, $pairs);
 
         $page = max(1, $page);
         $perPage = max(1, $perPage);
-        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing, $counterAccountId);
+        $lines = $this->ledger->accountLines($supplierId, $accountId, $from, $to, $perPage, ($page - 1) * $perPage, $excludeClosing, $counterAccountId, $pairs);
 
         $items = [];
         foreach ($lines as $l) {
@@ -98,12 +109,15 @@ final class AccountStatementService
                 ]),
             ];
         }
-        $items = $this->context->enrich($supplierId, $items);
+        $items = $this->context->enrich($supplierId, $items, $pairs);
+        if ($pairs) {
+            $items = self::expandPieces($items, $counterAccountId, $type, $normalSide);
+        }
 
         $turnovers = $this->ledger->accountTurnovers($supplierId, $accountId, $from, $to, $excludeClosing);
         // Součty jdou přes všechny pohyby účtu a stránkováním se nemění, stačí první stránka.
         $counterTotals = $page === 1
-            ? self::reconcileCounterTotals($this->ledger->accountCounterTotals($supplierId, $accountId, $from, $to, $excludeClosing), $turnovers)
+            ? self::reconcileCounterTotals($this->ledger->accountCounterTotals($supplierId, $accountId, $from, $to, $excludeClosing, $pairs), $turnovers)
             : null;
         $closing = round($opening + $turnovers['md'] - $turnovers['d'], 2);
 
@@ -131,6 +145,56 @@ final class AccountStatementService
             'counter_totals'  => $counterTotals,
             'counter_filter'  => $counterAccount === null || $counterTotals === null ? null : self::counterFilter($counterAccount, $counterTotals),
         ];
+    }
+
+    /**
+     * Rozbalí řádky starších zápisů 1 : N na pohyby po dílech (jediný protiúčet na pohyb).
+     * Zůstatek po každém dílu se dopočte od zůstatku před řádkem; poslední díl končí na
+     * zůstatku řádku. S filtrem protiúčtu zůstanou jen díly filtrovaného účtu (a jeho
+     * analytik), zůstatek je dál zůstatek celého účtu.
+     *
+     * @param list<array<string,mixed>> $items
+     * @return list<array<string,mixed>>
+     */
+    private static function expandPieces(array $items, ?int $counterAccountId, string $type, ?string $normalSide): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            $pieces = $item['pair_pieces'] ?? null;
+            unset($item['pair_pieces']);
+            if ($pieces === null) {
+                $out[] = $item + ['pair_piece' => null];
+                continue;
+            }
+            $red = !empty($item['is_red_storno']);
+            $debit = $item['side'] === 'debit';
+            $effect = static fn (int $signedCents): int => $debit ? $signedCents : -$signedCents;
+            $lineSigned = (int) round((float) $item['amount'] * 100);
+            $balance = (int) round((float) $item['balance'] * 100) - $effect($lineSigned);
+            foreach ($pieces as $n => $piece) {
+                $signed = $red ? -$piece['amount_cents'] : $piece['amount_cents'];
+                $balance += $effect($signed);
+                if ($counterAccountId !== null
+                    && $piece['counter_account_id'] !== $counterAccountId
+                    && $piece['counter_parent_id'] !== $counterAccountId
+                ) {
+                    continue;
+                }
+                $row = $item;
+                $row['amount'] = round($signed / 100, 2);
+                if ($row['amount_foreign'] !== null && $piece['amount_foreign_cents'] !== null) {
+                    $row['amount_foreign'] = round(($red ? -$piece['amount_foreign_cents'] : $piece['amount_foreign_cents']) / 100, 2);
+                }
+                $row['balance'] = round($balance / 100, 2);
+                $row['balance_signed'] = AccountBalanceSign::signed($row['balance'], $type);
+                $row['balance_unusual'] = AccountBalanceSign::isUnusual($row['balance'], $normalSide);
+                $row['counter_accounts'] = $piece['counter_account_code'];
+                $row['counter_account_id'] = $piece['counter_account_id'];
+                $row['pair_piece'] = $n + 1;
+                $out[] = $row;
+            }
+        }
+        return $out;
     }
 
     /**
