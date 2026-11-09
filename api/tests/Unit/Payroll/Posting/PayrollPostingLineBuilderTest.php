@@ -1970,6 +1970,57 @@ final class PayrollPostingLineBuilderTest extends TestCase
         );
     }
 
+    /**
+     * Zaúčtování po zaměstnancích zmrazené ve snapshotu rozdělí náklad 524 na
+     * pracovní vztahy i bez středisek. Snapshot bez volby (souhrnně) dává dál
+     * byte-identické otisky jako dřív.
+     */
+    public function testPostingByEmployeeSplitsEmployerInsuranceOnlyWhenFrozen(): void
+    {
+        $snapshot = $this->snapshot();
+        $snapshot['employer'] = ['posting_granularity' => 'employee'];
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $byEmployee = $this->builder->build(
+            $snapshot,
+            $result,
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+        $keys = array_column($byEmployee->targetAllocations, 'allocation_key');
+        self::assertContains('employer-insurance:social:employment:101:debit', $keys);
+        self::assertContains('employer-insurance:health:employment:103:debit', $keys);
+        self::assertNotContains('employer-insurance:social:debit', $keys);
+
+        $summary = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySetsWithRelationships(),
+            PayrollAccountingDefaults::codes(),
+        );
+        self::assertSame(
+            [self::PRE_F3_PLAIN_TARGET_HASH, self::PRE_F3_PLAIN_DELTA_HASH],
+            [$summary->targetHash, $summary->deltaHash],
+        );
+        self::assertSame($this->lineTotals($summary->lines), $this->lineTotals($byEmployee->lines));
+    }
+
+    /**
+     * @param list<array<string,mixed>> $lines
+     * @return array<string,int> účet|strana => haléře
+     */
+    private function lineTotals(array $lines): array
+    {
+        $map = [];
+        foreach ($lines as $line) {
+            $key = $line['account_code'] . '|' . $line['side'];
+            $map[$key] = ($map[$key] ?? 0) + $line['amount_minor'];
+        }
+        ksort($map);
+
+        return $map;
+    }
+
     private const PRE_F3_EVERY_PATH_TARGET_HASH = '5d0b8703cbcdef5c84af0b47f061a6c9a7109c4ea058f20b9069277e9666fb34';
     private const PRE_F3_EVERY_PATH_DELTA_HASH = '07b9765b167129a27fc6c49f2877afc6f8fec1f86749b6513dc4786e5377c1cc';
     private const PRE_F3_EVERY_PATH_CORRECTION_HASH = '9fd4870ad7ac306252552a65cd630916f5a80c71ca117e352d8c05ad40688d19';

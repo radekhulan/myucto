@@ -126,6 +126,7 @@ final class PayrollEmployerSettingsRepository
                     settings.payroll_contact_email,
                     settings.payroll_contact_phone,
                     settings.wage_rounding,
+                    settings.posting_granularity,
                     {$columns},
                     settings.row_version, settings.created_at, settings.updated_at
                FROM payroll_employer_settings settings
@@ -148,6 +149,7 @@ final class PayrollEmployerSettingsRepository
                 'payroll_contact_email' => null,
                 'payroll_contact_phone' => null,
                 'wage_rounding' => 'ceil',
+                'posting_granularity' => 'summary',
                 'accounts' => $this->defaultAccounts($supplierId),
                 'offices' => [],
                 'row_version' => 0,
@@ -164,6 +166,7 @@ final class PayrollEmployerSettingsRepository
             $result[$column] = $row[$column] === null ? null : (string) $row[$column];
         }
         $result['wage_rounding'] = (string) $row['wage_rounding'];
+        $result['posting_granularity'] = (string) $row['posting_granularity'];
         $result['accounts'] = [];
         foreach (self::ACCOUNT_COLUMNS as $key => $column) {
             $result['accounts'][$key] = (string) $row[$column];
@@ -186,6 +189,7 @@ final class PayrollEmployerSettingsRepository
      *   payroll_contact_email:?string,
      *   payroll_contact_phone:?string,
      *   wage_rounding?:?string,
+     *   posting_granularity?:?string,
      *   accounts:array<string,string>,
      *   offices:list<array{
      *     code:string,
@@ -449,11 +453,16 @@ final class PayrollEmployerSettingsRepository
     private function insertSettings(int $supplierId, int $defaultOfficeId, array $data): void
     {
         $columns = array_merge(
-            ['supplier_id', 'default_office_id', 'wage_rounding'],
+            ['supplier_id', 'default_office_id', 'wage_rounding', 'posting_granularity'],
             self::STRING_COLUMNS,
             array_values(self::ACCOUNT_COLUMNS),
         );
-        $values = [$supplierId, $defaultOfficeId, $data['wage_rounding'] ?? 'ceil'];
+        $values = [
+            $supplierId,
+            $defaultOfficeId,
+            $data['wage_rounding'] ?? 'ceil',
+            $data['posting_granularity'] ?? 'summary',
+        ];
         foreach (self::STRING_COLUMNS as $column) {
             $values[] = $data[$column];
         }
@@ -479,6 +488,10 @@ final class PayrollEmployerSettingsRepository
         if (($data['wage_rounding'] ?? null) !== null) {
             $assignments[] = 'wage_rounding = ?';
             $values[] = $data['wage_rounding'];
+        }
+        if (($data['posting_granularity'] ?? null) !== null) {
+            $assignments[] = 'posting_granularity = ?';
+            $values[] = $data['posting_granularity'];
         }
         foreach (self::STRING_COLUMNS as $column) {
             $assignments[] = "{$column} = ?";

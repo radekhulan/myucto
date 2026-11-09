@@ -336,10 +336,13 @@ final class PayrollPostingLineBuilder
         // Rozpad 524 na vztahy má smysl jen tam, kde aspoň jeden vztah nese
         // středisko, firemní dimenzi nebo procentní rozpad. Bez toho zůstává
         // jedna firemní dvojice přesně jako dřív.
-        $splitEmployerInsurance = array_filter(
-            $partsByEmployment,
-            fn (array $parts): bool => !$this->isPlainParts($parts),
-        ) !== [];
+        // Firma, která účtuje po zaměstnancích, potřebuje náklad 524 u každé
+        // osoby, takže se rozpadá vždy (jde-li doložit z výsledků vztahů).
+        $splitEmployerInsurance = self::postsByEmployee($snapshot)
+            || array_filter(
+                $partsByEmployment,
+                fn (array $parts): bool => !$this->isPlainParts($parts),
+            ) !== [];
         $this->addEmployerInsurance(
             $allocations,
             'employer-insurance:social',
@@ -686,6 +689,21 @@ final class PayrollPostingLineBuilder
             $debit,
             $credit,
         );
+    }
+
+    /**
+     * Zvolila firma zaúčtování předpisu po zaměstnancích? Rozhoduje zmrazený
+     * snapshot revize, ne aktuální nastavení, takže opakované zaúčtování revize
+     * dá vždy tentýž cílový otisk.
+     *
+     * @param array<string,mixed> $snapshot
+     */
+    public static function postsByEmployee(array $snapshot): bool
+    {
+        $employer = $snapshot['employer'] ?? null;
+
+        return is_array($employer)
+            && ($employer['posting_granularity'] ?? null) === 'employee';
     }
 
     /**

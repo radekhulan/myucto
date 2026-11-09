@@ -2393,7 +2393,8 @@ final class PayrollRunSnapshotBuilder
      * @return array{
      *   name:string,
      *   identification_number:string,
-     *   accounting_accounts:array<string,string>
+     *   accounting_accounts:array<string,string>,
+     *   posting_granularity?:'employee'
      * }
      */
     private function employerSnapshot(int $supplierId): array
@@ -2446,11 +2447,18 @@ final class PayrollRunSnapshotBuilder
         }
         ksort($accountSnapshot, SORT_STRING);
 
-        return [
+        $employer = [
             'name' => trim($row['name']),
             'identification_number' => trim($row['ic']),
             'accounting_accounts' => $accountSnapshot,
         ];
+        // Zaúčtování po zaměstnancích se zmrazí jen tam, kde ho firma zvolila;
+        // ostatním zůstává snímek i otisk vstupu beze změny.
+        if (($settings['posting_granularity'] ?? 'summary') === 'employee') {
+            $employer['posting_granularity'] = 'employee';
+        }
+
+        return $employer;
     }
 
     /**

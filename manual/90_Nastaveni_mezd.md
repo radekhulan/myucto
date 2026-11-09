@@ -441,6 +441,22 @@ Nové předkontace se do zaúčtovaných revizí nepromítají. Zmrazený sníme
 vlastní sadu účtů, takže opakované zaúčtování staršího období vypadá přesně jako
 poprvé.
 
+**Zaúčtování mezd souhrnně, nebo po zaměstnancích.** Pod předkontacemi zvolíte,
+jak se mzdový předpis zapíše do deníku:
+
+- **Souhrnně za firmu a středisko** (výchozí). Řádky, ve formě jednoduchého
+  zápisu dvojice 521/331, 524/336, 331/336, 331/342 a další, jsou za celou firmu
+  a středisko.
+- **Po zaměstnancích.** Každý zaměstnanec má vlastní řádky, ve formě
+  jednoduchého zápisu vlastní dvojice, s osobním číslem v textu řádku. Pojistné
+  zaměstnavatele (524) se rozdělí na pracovní vztahy, souhrnně zůstane jen
+  závazek vůči institucím a haléřové zaokrouhlení. Hodí se pro controlling.
+
+Účty a částky jsou v obou případech stejné. Volba se uloží do snímku běhu při
+výpočtu, takže platí pro běhy přepočítané po uložení; už zaúčtované revize se
+nemění. Jména zaměstnanců deník nenese, ukazuje je sestava
+[Podrobné zaúčtování mezd](81_Shoda_uctovani_mezd.md).
+
 ### 90.14.6 Předkontace pro zvláštní mzdové situace
 
 Tyto předkontace se použijí jen v konkrétní situaci. Nevyplněná předkontace

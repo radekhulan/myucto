@@ -3412,6 +3412,7 @@ export interface PayrollEmployerSettings {
   payroll_contact_email: string | null
   payroll_contact_phone: string | null
   wage_rounding: PayrollWageRounding
+  posting_granularity?: PayrollPostingGranularity
   default_office_code: string | null
   accounts: PayrollEmployerAccounts
   offices: PayrollOffice[]
@@ -3441,11 +3442,15 @@ export interface PayrollEmployerSettingsPayload {
   payroll_contact_email: string | null
   payroll_contact_phone: string | null
   wage_rounding: PayrollWageRounding
+  posting_granularity?: PayrollPostingGranularity
   accounts: PayrollEmployerAccounts
   offices: PayrollOfficePayload[]
 }
 
 export type PayrollWageRounding = 'ceil' | 'half_up'
+
+/** Zaúčtování mzdového předpisu: souhrnně za firmu a středisko, nebo po zaměstnancích. */
+export type PayrollPostingGranularity = 'summary' | 'employee'
 
 export type PayrollRegzelEnvironment = 'production' | 'test'
 

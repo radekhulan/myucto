@@ -219,6 +219,32 @@ final class PayrollEmployerSettingsApiTest extends TestCase
         self::assertSame(422, $this->put($this->supplierId, $payload)->getStatusCode());
     }
 
+    public function testPostingGranularityIsSavedKeptWhenOmittedAndValidated(): void
+    {
+        $payload = $this->payload('VZOROV', 'Vzorová účtárna');
+        $first = $this->json($this->put($this->supplierId, $payload))['settings'];
+        self::assertSame('summary', $first['posting_granularity']);
+
+        $payload['row_version'] = 1;
+        $payload['posting_granularity'] = 'employee';
+        self::assertSame(
+            'employee',
+            $this->json($this->put($this->supplierId, $payload))['settings']['posting_granularity'],
+        );
+
+        // Klient, který volbu nezná, ji uložením jiných údajů nepřepíše.
+        unset($payload['posting_granularity']);
+        $payload['row_version'] = 2;
+        self::assertSame(
+            'employee',
+            $this->json($this->put($this->supplierId, $payload))['settings']['posting_granularity'],
+        );
+
+        $payload['row_version'] = 3;
+        $payload['posting_granularity'] = 'person';
+        self::assertSame(422, $this->put($this->supplierId, $payload)->getStatusCode());
+    }
+
     public function testLegacyOfficeVariableSymbolCannotBeOverwrittenByBulkSettings(): void
     {
         $created = $this->put($this->supplierId, $this->payload('MAIN', 'Mzdová účtárna'));
