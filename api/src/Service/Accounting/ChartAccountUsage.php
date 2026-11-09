@@ -94,6 +94,19 @@ final class ChartAccountUsage
                                         WHERE p.supplier_id = ? AND i.expense_account_code = ?)',
             'label' => 'položky přijatých faktur',
         ],
+        // Protiúčet řádku (zaúčtování při zadání faktury) drží účet stejně jako účet nákladu.
+        [
+            'sql'   => 'SELECT EXISTS (SELECT 1 FROM purchase_invoice_items i
+                                         JOIN purchase_invoices p ON p.id = i.purchase_invoice_id
+                                        WHERE p.supplier_id = ? AND i.counter_account_code = ?)',
+            'label' => 'položky přijatých faktur',
+        ],
+        [
+            'sql'   => 'SELECT EXISTS (SELECT 1 FROM invoice_items i
+                                         JOIN invoices v ON v.id = i.invoice_id
+                                        WHERE v.supplier_id = ? AND i.counter_account_code = ?)',
+            'label' => 'položky vydaných faktur',
+        ],
     ];
 
     public function __construct(private readonly Connection $db) {}

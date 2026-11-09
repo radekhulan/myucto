@@ -282,9 +282,9 @@ final class BulkReissueAction
                    (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                     vat_rate_id, vat_rate_snapshot,
                     total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                    stock_item_id, warehouse_id, revenue_account_code'
+                    stock_item_id, warehouse_id, revenue_account_code, counter_account_code, posting_rule_key'
                 . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?'
+                . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?'
                 . str_repeat(', ?', count($ossColumns))
                 . ')'
             );
@@ -329,6 +329,9 @@ final class BulkReissueAction
                     $item['warehouse_id'] ?? null,
                     // Výnosový účet položky (F1) je vlastností plnění, kopie ho nese dál.
                     $item['revenue_account_code'] ?? null,
+                    // Protiúčet a předkontace řádku patří k zaúčtování plnění stejně jako účet.
+                    $item['counter_account_code'] ?? null,
+                    $item['posting_rule_key'] ?? null,
                 ];
                 if ($supportsOss) {
                     $ossApplicable = !empty($item['oss_applicable']);

@@ -71,12 +71,12 @@ final class PristineChart500
      */
     public const SUPPLIER_CODE_REFERENCES = ['receipt_payable_account_code'];
 
-    /** Kódy účtů v řádcích dokladů bez supplier_id: tabulka => [sloupec, rodič, FK na rodiče]. */
+    /** Kódy účtů v řádcích dokladů bez supplier_id: tabulka => [sloupce, rodič, FK na rodiče]. */
     public const CHILD_CODE_REFERENCES = [
-        'invoice_items' => ['revenue_account_code', 'invoices', 'invoice_id'],
-        'purchase_invoice_items' => ['expense_account_code', 'purchase_invoices', 'purchase_invoice_id'],
-        'recurring_invoice_template_items' => ['revenue_account_code', 'recurring_invoice_templates', 'template_id'],
-        'journal_entry_template_lines' => ['account_code', 'journal_entry_templates', 'template_id'],
+        'invoice_items' => [['revenue_account_code', 'counter_account_code'], 'invoices', 'invoice_id'],
+        'purchase_invoice_items' => [['expense_account_code', 'counter_account_code'], 'purchase_invoices', 'purchase_invoice_id'],
+        'recurring_invoice_template_items' => [['revenue_account_code'], 'recurring_invoice_templates', 'template_id'],
+        'journal_entry_template_lines' => [['account_code'], 'journal_entry_templates', 'template_id'],
     ];
 
     /**
@@ -126,9 +126,10 @@ final class PristineChart500
                 return false;
             }
         }
-        foreach (self::CHILD_CODE_REFERENCES as $table => [$column, $parent, $foreignKey]) {
+        foreach (self::CHILD_CODE_REFERENCES as $table => [$columns, $parent, $foreignKey]) {
+            $any = implode(' OR ', array_map(static fn (string $c): string => "c.{$c} IS NOT NULL", $columns));
             $sql = "SELECT 1 FROM {$parent} p JOIN {$table} c ON c.{$foreignKey} = p.id
-                     WHERE p.supplier_id = ? AND c.{$column} IS NOT NULL LIMIT 1";
+                     WHERE p.supplier_id = ? AND ({$any}) LIMIT 1";
             if ($this->exists($sql, [$supplierId])) {
                 return false;
             }
