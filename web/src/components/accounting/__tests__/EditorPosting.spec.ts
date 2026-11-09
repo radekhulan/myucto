@@ -130,4 +130,18 @@ describe('DraftPostingPreviewPanel', () => {
     expect(wrapper.find('[data-test="draft-posting-error"]').exists()).toBe(false)
     expect(wrapper.find('[data-test="draft-posting-invalid"]').exists()).toBe(true)
   })
+
+  it('chybu zaúčtování ze serveru (422, stage posting) ukáže v boxu s textem serveru', async () => {
+    m.draftPostingPreview.mockRejectedValue({ response: { status: 422, data: { error: {
+      code: 'mixed_counter_accounts', stage: 'posting', message: 'Řádky dokladu mají různé protiúčty (325, 321).',
+    } } } })
+    const wrapper = mount(DraftPostingPreviewPanel, { props: { source: 'purchase-invoices', docId: null, payload: { items: [1] } } })
+
+    await vi.advanceTimersByTimeAsync(800)
+    await flushPromises()
+
+    expect(wrapper.find('[data-test="draft-posting-error"]').text()).toBe('Řádky dokladu mají různé protiúčty (325, 321).')
+    expect(wrapper.find('[data-test="draft-posting-invalid"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('accounting.editor_posting.incomplete')
+  })
 })

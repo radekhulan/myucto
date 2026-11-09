@@ -46,8 +46,14 @@ async function load(): Promise<void> {
     if (controller !== current || e?.code === 'ERR_CANCELED') return
     preview.value = null
     const status = Number(e?.response?.status)
-    invalid.value = status >= 400 && status < 500 && status !== 401 && status !== 403
-    error.value = invalid.value ? '' : postingErrorMessage(t, e)
+    // Chybu zaúčtování (`stage: posting`) ukážeme hned s textem ze serveru; neutrální věta
+    // patří jen neúplnému dokladu, který se ještě nedá uložit.
+    const err = e?.response?.data?.error
+    const postingStage = err?.stage === 'posting'
+    invalid.value = !postingStage && status >= 400 && status < 500 && status !== 401 && status !== 403
+    error.value = invalid.value ? ''
+      : postingStage && typeof err?.message === 'string' && err.message !== '' ? err.message
+        : postingErrorMessage(t, e)
   } finally {
     if (controller === current) loading.value = false
   }

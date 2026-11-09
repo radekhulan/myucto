@@ -326,6 +326,25 @@ final class InvoiceLinePostingTest extends TestCase
         self::assertSame(400, $preview['status']);
     }
 
+    /** Chyba zaúčtování (smíšené protiúčty) nese `stage: posting`, chyba uložení ne. */
+    public function testDraftPreviewMarksPostingErrorStage(): void
+    {
+        $preview = $this->draftPreview('purchase-invoices', null, $this->purchasePayload([
+            $this->purchaseItem(['counter_account_code' => '325']),
+            $this->purchaseItem(['counter_account_code' => '321']),
+        ]));
+
+        self::assertSame(422, $preview['status'], json_encode($preview['body'], JSON_UNESCAPED_UNICODE));
+        self::assertSame('mixed_counter_accounts', $preview['body']['error']['code']);
+        self::assertSame('posting', $preview['body']['error']['stage']);
+        self::assertStringContainsString('různé protiúčty', $preview['body']['error']['message']);
+
+        $payload = $this->purchasePayload([$this->purchaseItem()]);
+        unset($payload['vendor_id']);
+        $saveError = $this->draftPreview('purchase-invoices', null, $payload);
+        self::assertArrayNotHasKey('stage', $saveError['body']['error'] ?? []);
+    }
+
     /** Zaúčtovaný doklad se nesimuluje, náhled jen odkáže na živý zápis. */
     public function testDraftPreviewOfPostedDocumentReturnsEntry(): void
     {

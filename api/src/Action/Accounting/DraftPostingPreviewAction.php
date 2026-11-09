@@ -183,7 +183,13 @@ final class DraftPostingPreviewAction
                 $entryDate,
             );
         } catch (PostingException|UnbalancedEntryException $e) {
-            return $this->mapPostingError($response, $e);
+            // `stage: posting` odliší chybu zaúčtování (smíšené protiúčty, neplatný účet...)
+            // od chyby uložení dokladu (neúplný formulář), aby ji editor ukázal hned v náhledu.
+            $failed = $this->mapPostingError($response, $e);
+            $failed->getBody()->rewind();
+            $decoded = (array) json_decode((string) $failed->getBody(), true);
+            $decoded['error']['stage'] = 'posting';
+            return Json::ok(new Psr7Response(), $decoded, $failed->getStatusCode());
         }
 
         return Json::ok($response, self::payload(
