@@ -16569,7 +16569,10 @@ paths:
       tags: [Accounting]
       summary: Nastaví/posune měkký zámek účtování
       description: |
-        Admin-only. Důvod se ukládá do auditu.
+        Smí role s právem `accounting.periods.manage` (správci) nebo `accounting.period_lock`
+        (např. hlavní účetní). Důvod se ukládá do auditu. Posun zpět přes podané období DPH
+        (`period_lock_filed_vat`) nebo přes uzavřené účetní období (`period_lock_closed_period`)
+        smí jen správce, ostatní dostanou 409.
 
         Jednohodnotová akce: klíč `locked_until` je povinný. Chybí-li, vrací 400
         `validation_failed`; `null` zámek zruší.
@@ -16588,6 +16591,7 @@ paths:
       responses:
         '200': { description: OK, content: { application/json: { schema: { type: object, properties: { locked_until: { type: [string, "null"], format: date } } } } } }
         '403': { $ref: '#/components/responses/Forbidden' }
+        '409': { description: 'Posun zpět přes podané období DPH (`period_lock_filed_vat`) nebo uzavřené účetní období (`period_lock_closed_period`) bez práva správce', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '422': { $ref: '#/components/responses/ValidationFailed' }
 
   /api/v1/accounting/fx-rate-settings:

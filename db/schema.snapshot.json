@@ -1174,7 +1174,8 @@
         "2268_number_series_codebook.sql",
         "2269_internal_document_line_pairs.sql",
         "2270_payroll_posting_granularity.sql",
-        "2271_payroll_statutory_nonpartner_account.sql"
+        "2271_payroll_statutory_nonpartner_account.sql",
+        "2272_accounting_period_lock_permission.sql"
     ],
     "tables": {
         "abra_flexi_connections": {

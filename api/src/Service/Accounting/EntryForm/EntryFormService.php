@@ -32,6 +32,11 @@ final class EntryFormService
 {
     public const AUDIT_ACTION = 'accounting.entry_form_changed';
 
+    /** Počátek výchozí formy instalace: forma platí pro všechna data firmy. */
+    public const INSTALLATION_DEFAULT_FROM = '1900-01-01';
+
+    public const INSTALLATION_DEFAULT_NOTE = 'Výchozí forma zápisu instalace';
+
     /** @var array<int, list<array{id:int, valid_from:string, entry_form:string, created_by:?int, created_at:string, note:?string}>> */
     private array $historyMemo = [];
 
@@ -298,6 +303,61 @@ final class EntryFormService
             throw $e;
         }
 
+        $this->forget($supplierId);
+
+        return $id;
+    }
+
+    /**
+     * Výchozí forma instalace pro NOVOU firmu: řádek historie od
+     * {@see INSTALLATION_DEFAULT_FROM}, takže forma platí pro všechna data účetnictví
+     * včetně převzaté historie. Druhá a poslední zápisová cesta do historie vedle
+     * {@see schedule()}; pravidla změny (otevřené období, zámek) se tu neuplatní,
+     * protože firma ještě nic nezaúčtovala.
+     *
+     * Zapíše jen firmě, která historii formy nemá vůbec, nemá žádný zápis v deníku
+     * a jednoduchý zápis smí mít ({@see supportsSingle()}). Jinak nic a vrací null,
+     * takže opakované volání (založení, aktivace, převod) je bezpečné.
+     */
+    public function seedInstallationDefault(int $supplierId, EntryForm $form, ?int $actor = null): ?int
+    {
+        if ($form !== EntryForm::Single) {
+            return null;
+        }
+        $pdo = $this->db->pdo();
+        $history = $pdo->prepare('SELECT 1 FROM accounting_entry_form_history WHERE supplier_id = ? LIMIT 1');
+        $history->execute([$supplierId]);
+        if ($history->fetchColumn() !== false) {
+            return null;
+        }
+        $journal = $pdo->prepare('SELECT 1 FROM journal_entries WHERE supplier_id = ? LIMIT 1');
+        $journal->execute([$supplierId]);
+        if ($journal->fetchColumn() !== false || !$this->supportsSingle($supplierId)) {
+            return null;
+        }
+
+        $pdo->prepare(
+            'INSERT IGNORE INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, created_by, note)
+             VALUES (?, ?, ?, ?, ?)'
+        )->execute([$supplierId, self::INSTALLATION_DEFAULT_FROM, $form->value, $actor !== null && $actor > 0 ? $actor : null, self::INSTALLATION_DEFAULT_NOTE]);
+        $id = (int) $pdo->lastInsertId();
+        if ($id === 0) {
+            return null;
+        }
+        $this->logger->log(
+            self::AUDIT_ACTION,
+            $actor !== null && $actor > 0 ? $actor : null,
+            'supplier',
+            $supplierId,
+            [
+                'valid_from'            => self::INSTALLATION_DEFAULT_FROM,
+                'from'                  => EntryForm::Composite->value,
+                'to'                    => $form->value,
+                'conversion_preview_id' => null,
+                'installation_default'  => true,
+            ],
+            supplierId: $supplierId,
+        );
         $this->forget($supplierId);
 
         return $id;

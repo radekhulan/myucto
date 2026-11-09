@@ -164,8 +164,10 @@ final class JournalPairer
     }
 
     /**
-     * Řádky bez řídicích klíčů a bez `pair_no` / `line_text` — tvar složeného zápisu,
-     * když volající zápis nerozdělí (unpairable, složená firma).
+     * Řádky bez klíčů dvojice (`pair_no`, `pair_group`, `pair_role`, `pair_link`) — tvar
+     * složeného zápisu, když volající zápis nerozdělí (unpairable, složená firma).
+     * Text řádku (`line_text`) zůstává, poslal-li ho builder výslovně (např. mzdy po
+     * zaměstnancích s osobním číslem); dnešní buildery ho ve složené formě neposílají.
      *
      * @param list<array<string,mixed>> $lines
      * @return list<array<string,mixed>>
@@ -173,11 +175,86 @@ final class JournalPairer
     public static function stripPairKeys(array $lines): array
     {
         return array_map(static function (array $line): array {
-            foreach ([...self::CONTROL_KEYS, 'pair_no', 'line_text'] as $key) {
+            foreach ([...self::CONTROL_KEYS, 'pair_no', 'pair_link'] as $key) {
                 unset($line[$key]);
             }
             return $line;
         }, array_values($lines));
+    }
+
+    /**
+     * Středisko, zakázka a dimenze na OBOU řádcích dvojice (jednoduchý zápis): co nese
+     * jeden řádek dvojice a druhému chybí, dostane i druhý, typicky saldokontní strana
+     * (311, 321, 331, 221) od výsledkového řádku dokladu. Doplňuje se jen chybějící:
+     * středisko a zakázka, když je řádek nemá, dimenze a rozpady po typech, které řádek
+     * nemá ani jako hodnotu, ani jako rozpad (s původem přiřazení). Co řádek už má,
+     * se nepřepisuje. Řádky bez `pair_no` (složený zápis) zůstávají beze změny.
+     *
+     * Volá ho jen zaúčtování v jednoduché formě, ne zobrazení ani převod starších zápisů.
+     *
+     * @param list<array<string,mixed>> $lines řádky s `pair_no`
+     * @return list<array<string,mixed>>
+     */
+    public static function shareAnalytics(array $lines): array
+    {
+        $byPair = [];
+        foreach ($lines as $i => $line) {
+            if (isset($line['pair_no'])) {
+                $byPair[(int) $line['pair_no']][] = $i;
+            }
+        }
+        $out = $lines;
+        foreach ($byPair as $indexes) {
+            if (count($indexes) !== 2) {
+                continue;
+            }
+            [$a, $b] = $indexes;
+            $out[$a] = self::fillAnalytics($lines[$a], $lines[$b]);
+            $out[$b] = self::fillAnalytics($lines[$b], $lines[$a]);
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string,mixed> $target
+     * @param array<string,mixed> $source
+     * @return array<string,mixed>
+     */
+    private static function fillAnalytics(array $target, array $source): array
+    {
+        foreach (['cost_center', 'project_id'] as $key) {
+            if (($target[$key] ?? null) === null && ($source[$key] ?? null) !== null) {
+                $target[$key] = $source[$key];
+            }
+        }
+        $dims = (array) ($target['dimensions'] ?? []);
+        $splits = (array) ($target['dimension_splits'] ?? []);
+        $addedDims = $addedSplits = false;
+        foreach ((array) ($source['dimensions'] ?? []) as $typeId => $valueId) {
+            if (!isset($dims[$typeId]) && !isset($splits[$typeId])) {
+                $target['dimensions'][$typeId] = $valueId;
+                $addedDims = true;
+                if (isset($source['dimension_origins'][$typeId])) {
+                    $target['dimension_origins'][$typeId] = $source['dimension_origins'][$typeId];
+                }
+            }
+        }
+        foreach ((array) ($source['dimension_splits'] ?? []) as $typeId => $split) {
+            if (!isset($dims[$typeId]) && !isset($splits[$typeId])) {
+                $target['dimension_splits'][$typeId] = $split;
+                $addedSplits = true;
+                if (isset($source['dimension_split_origins'][$typeId])) {
+                    $target['dimension_split_origins'][$typeId] = $source['dimension_split_origins'][$typeId];
+                }
+            }
+        }
+        if ($addedDims) {
+            ksort($target['dimensions']);
+        }
+        if ($addedSplits) {
+            ksort($target['dimension_splits']);
+        }
+        return $target;
     }
 
     /**

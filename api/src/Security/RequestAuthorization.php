@@ -270,6 +270,29 @@ final class RequestAuthorization
     }
 
     /**
+     * Ruční posun zámku účtování k datu (§ 52.14.10): kdo spravuje účetní období
+     * (`accounting.periods.manage`, správci), nebo interní role s vlastním právem
+     * `accounting.period_lock` (typicky hlavní účetní). Klient ho nedostane.
+     */
+    public static function canChangePeriodLock(Request $request): bool
+    {
+        return self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE)
+            || (!self::isClientType($request) && self::allows($request, 'accounting.period_lock', AccessLevel::WRITE));
+    }
+
+    /**
+     * Posunout zámek ZPĚT přes podané období DPH nebo přes uzavřené účetní období smí jen
+     * ten, kdo to směl před zavedením práva `accounting.period_lock`: správce účetních
+     * období, nebo správce firmy ({@see canChangeFiledVatPeriod()}). Hlavní účetní s právem
+     * jen na zámek posouvá zámek vpřed a zpět jen v nepodaném a otevřeném rozsahu.
+     */
+    public static function canUnlockProtectedPeriods(Request $request): bool
+    {
+        return self::allows($request, 'accounting.periods.manage', AccessLevel::WRITE)
+            || self::canChangeFiledVatPeriod($request);
+    }
+
+    /**
      * Formu účetního zápisu firmy (jednoduchý / složený od data) mění jen správce firmy:
      * přepíná, jak se účtují všechny zápisy od data, a spouští převod starších zápisů.
      * Delegovaná role s právem účtovat ji nemění.

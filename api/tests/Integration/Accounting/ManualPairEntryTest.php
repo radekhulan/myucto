@@ -12,7 +12,9 @@ use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
 use MyInvoice\Service\Accounting\EntryForm\EntryForm;
 use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\ManualJournalEntryException;
+use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\ManualJournalEntryService;
+use MyInvoice\Service\Accounting\Pair\JournalPairCorrectionService;
 use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Accounting\PostingException;
 use MyInvoice\Service\Accounting\PostingService;
@@ -235,9 +237,115 @@ final class ManualPairEntryTest extends TestCase
         self::assertSame(2, (int) $stmt->fetchColumn());
     }
 
-    public function testAutomaticManyToManyEntryIsPostedCompositeAndMarked(): void
+    public function testFullReversalAfterPairRepostAlsoReversesReplacementPair(): void
     {
         $this->switchToSingle();
+        $entryId = $this->postPairs([
+            ['debit_account_code' => '568', 'credit_account_code' => '221', 'amount' => 15],
+            ['debit_account_code' => '518', 'credit_account_code' => '221', 'amount' => 100],
+        ]);
+        $this->posting->reversePairs($this->supplierId, $entryId, [1], ['user_id' => $this->userId],
+            ['debit_account_code' => '549', 'credit_account_code' => '221']);
+        self::assertSame(['221' => '-115.00', '518' => '100.00', '549' => '15.00'], $this->balances());
+
+        $this->posting->reverse($this->supplierId, $entryId, ['user_id' => $this->userId]);
+
+        // Storno celého dokladu ruší všechny dvojice včetně přeúčtované: nic nezůstane.
+        self::assertSame([], $this->balances());
+        self::assertNotNull($this->journal->find($entryId, $this->supplierId)['reversed_by']);
+    }
+
+    public function testHistoryShowsAuthorTimeAndFullLinesOfEveryVersionIncludingInPlacePairRepost(): void
+    {
+        $this->switchToSingle();
+        $entryId = $this->postPairs([
+            ['debit_account_code' => '568', 'credit_account_code' => '221', 'amount' => 15],
+            ['debit_account_code' => '518', 'credit_account_code' => '221', 'amount' => 100],
+        ]);
+        $result = Bootstrap::buildContainer()->get(JournalPairCorrectionService::class)
+            ->repostPair($this->supplierId, $entryId, 2, ['debit_account_code' => '549', 'credit_account_code' => '221'], ['user_id' => $this->userId]);
+        self::assertSame('in_place', $result['mode']);
+
+        $history = Bootstrap::buildContainer()->get(JournalHistoryService::class)->build($entryId, $this->supplierId);
+        self::assertNotNull($history);
+        self::assertCount(2, $history['versions']);
+        [$current, $created] = $history['versions'];
+
+        foreach ([$current, $created] as $version) {
+            self::assertNotNull($version['changed_by'], 'Každá verze má autora.');
+            self::assertSame($this->userId, $version['changed_by']['user_id']);
+            self::assertNotEmpty($version['valid_from']);
+        }
+        self::assertSame('accounting.posted', $created['changed_by']['action']);
+        self::assertSame('accounting.pair_reposted', $current['changed_by']['action']);
+
+        $codes = static fn (array $lines): array => array_map(
+            static fn (array $l): string => $l['account_code'] . '/' . $l['side'] . '/' . ($l['pair_no'] ?? '-'), $lines);
+        self::assertSame(['568/debit/1', '221/credit/1', '518/debit/2', '221/credit/2'], $codes($created['lines']));
+        self::assertSame(['568/debit/1', '221/credit/1', '549/debit/2', '221/credit/2'], $codes($current['lines']),
+            'Verze po přeúčtování dvojice ukazuje celý zápis, ne jen novou dvojici.');
+    }
+
+    /** @return array<string,string> účet => zůstatek MD − Dal (jen nenulové) */
+    private function balances(): array
+    {
+        $stmt = $this->db->pdo()->prepare(
+            "SELECT a.account_code,
+                    SUM(CASE WHEN (l.side = 'debit') <> (l.is_red_storno = 1) THEN l.amount ELSE -l.amount END) AS balance
+               FROM journal_entry_lines l JOIN chart_of_accounts a ON a.id = l.account_id
+              WHERE l.supplier_id = ?
+              GROUP BY a.account_code HAVING balance <> 0 ORDER BY a.account_code"
+        );
+        $stmt->execute([$this->supplierId]);
+        return array_column($stmt->fetchAll(\PDO::FETCH_ASSOC), 'balance', 'account_code');
+    }
+
+    public function testAutomaticManyToManyEntryInSingleFormIsRejectedAndNothingIsPosted(): void
+    {
+        $this->switchToSingle();
+        $before = $this->entryCount();
+        $manyToMany = [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 30],
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 10],
+            ['account_code' => '518', 'side' => 'credit', 'amount' => 15],
+            ['account_code' => '568', 'side' => 'credit', 'amount' => 25],
+        ];
+        try {
+            $this->posting->postDocument($this->supplierId, 'opening', null, $manyToMany,
+                ['entry_date' => self::YEAR . '-03-10', 'user_id' => $this->userId]);
+            self::fail('Nerozdělitelný automatický zápis se v jednoduché formě zapsal.');
+        } catch (PostingException $e) {
+            self::assertSame(PostingService::AUTOMATIC_PAIRING_FAILED, $e->errorCode);
+            self::assertSame(422, $e->httpStatus);
+            self::assertSame('many_to_many', $e->context['reason'] ?? null);
+        }
+        self::assertSame($before, $this->entryCount());
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            'SELECT COUNT(*) FROM journal_entry_pair_status WHERE supplier_id = ' . $this->supplierId
+        )->fetchColumn());
+
+        // Další zápis téhož běhu automatiky projde: chyba se týká jen nerozdělitelného dokladu.
+        $entryId = $this->posting->postDocument($this->supplierId, 'opening', null, [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 40],
+            ['account_code' => '518', 'side' => 'credit', 'amount' => 15],
+            ['account_code' => '568', 'side' => 'credit', 'amount' => 25],
+        ], ['entry_date' => self::YEAR . '-03-10', 'user_id' => $this->userId]);
+        self::assertSame([1, 1, 2, 2], array_column($this->lineRows($entryId), 3));
+    }
+
+    public function testCompositeFormKeepsExplicitLineTextAndDropsPairKeys(): void
+    {
+        $entryId = $this->posting->postDocument($this->supplierId, 'opening', null, [
+            ['account_code' => '521', 'side' => 'debit', 'amount' => 30, 'line_text' => 'Os. č. 7 hrubá mzda', 'pair_group' => 'g1'],
+            ['account_code' => '331', 'side' => 'credit', 'amount' => 30, 'pair_group' => 'g1'],
+        ], ['entry_date' => self::YEAR . '-03-10', 'user_id' => $this->userId]);
+
+        self::assertSame([['521', 'debit', '30.00', null, 'Os. č. 7 hrubá mzda'], ['331', 'credit', '30.00', null, null]],
+            $this->lineRows($entryId));
+    }
+
+    public function testAutomaticManyToManyEntryInCompositeFormIsPostedUnchanged(): void
+    {
         $entryId = $this->posting->postDocument($this->supplierId, 'opening', null, [
             ['account_code' => '221', 'side' => 'debit', 'amount' => 30],
             ['account_code' => '211', 'side' => 'debit', 'amount' => 10],
@@ -246,8 +354,14 @@ final class ManualPairEntryTest extends TestCase
         ], ['entry_date' => self::YEAR . '-03-10', 'user_id' => $this->userId]);
 
         self::assertSame([null, null, null, null], array_column($this->lineRows($entryId), 3));
-        self::assertSame(['pair_status' => ['status' => 'composite_mn', 'reason' => 'many_to_many']],
-            $this->journal->pairView($this->supplierId, $entryId, []));
+        self::assertSame([], $this->journal->pairView($this->supplierId, $entryId, []));
+    }
+
+    private function entryCount(): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ?');
+        $stmt->execute([$this->supplierId]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function switchToSingle(): void

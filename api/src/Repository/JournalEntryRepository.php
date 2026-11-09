@@ -2305,7 +2305,7 @@ final class JournalEntryRepository
 
         $lineStmt = $pdo->prepare(
             'SELECT jel.id, jel.account_id, jel.side, jel.amount, jel.is_red_storno, jel.cost_center, jel.line_no,
-                    c.account_code, c.name AS account_name,
+                    jel.pair_no, c.account_code, c.name AS account_name,
                     ROW_START AS valid_from, ROW_END AS valid_to
                FROM journal_entry_lines FOR SYSTEM_TIME ALL jel
                JOIN chart_of_accounts c ON c.id = jel.account_id
@@ -2331,6 +2331,7 @@ final class JournalEntryRepository
                 $r['amount'] = (float) $r['amount'];
                 $r['is_red_storno'] = (bool) $r['is_red_storno'];
                 $r['line_no'] = (int) $r['line_no'];
+                $r['pair_no'] = $r['pair_no'] === null ? null : (int) $r['pair_no'];
                 return $r;
             }, $lines),
         ];

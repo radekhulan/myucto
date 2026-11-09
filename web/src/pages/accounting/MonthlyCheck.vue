@@ -268,7 +268,7 @@ async function saveLock() {
         <h1 class="text-2xl font-semibold">{{ t('accounting.monthly_check.title') }}</h1>
         <p class="text-sm text-neutral-500 mt-0.5">{{ t('accounting.monthly_check.subtitle') }}</p>
       </div>
-      <button v-if="auth.canWrite('accounting.periods.close')" :class="btnOutline('primary')" @click="openLockDialog">
+      <button v-if="auth.canWrite('accounting.periods.manage') || auth.canWrite('accounting.period_lock')" :class="btnOutline('primary')" @click="openLockDialog">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
         {{ t('accounting.monthly_check.lock_button') }}
       </button>
