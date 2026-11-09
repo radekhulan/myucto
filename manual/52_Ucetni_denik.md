@@ -73,6 +73,10 @@ Z bankovního výpisu použijte u pohybu **Otevřít v účetním deníku**. Ote
 
 **Jak poznáte, že je hotovo:** Zápis je v seznamu deníku se stavem **Zaúčtováno**. Tlačítko **Zaúčtovat** je aktivní, až když je zápis vyrovnaný a žádný řádek nemá prázdný účet nebo nekladnou částku.
 
+> [!NOTE]
+> Má-li firma k datu zápisu zapnutý jednoduchý zápis, místo tabulky řádků zadáváte dvojice Účet MD, Účet Dal a Částka
+> ([§ 52.14.16.2](#5214162-krok-za-krokem-rucni-zapis-po-dvojicich)). Firma se složeným zápisem vidí formulář beze změny.
+
 > [!TIP]
 > Opakuje-li se zápis, klikněte v rozbaleném zápisu na **Kopírovat jako nový**. Otevře se formulář s týmiž řádky a dnešním datem. Příklad ručního zápisu je v [§ 52.14.5.5](#521455-priklad-rucni-zapis-se-dvema-radky).
 
@@ -216,6 +220,8 @@ Podrobnosti jsou v [§ 52.14.14](#521414-ostatni-pohledavky-a-zavazky).
 | Pro cizoměnový doklad vidíte kurzový rozdíl na 663 nebo 563 | Přecenění k rozvahovému dni | Nejde o chybu ([§ 52.14.6.1](#521461-kurzove-preceneni-a-kurzove-rozdily)). |
 | Karta **Zkontroluj integritu deníku** na přehledu | Noční kontrola našla nesrovnalost | Klikněte na kartu, nebo v deníku nastavte filtr **Nesrovnalosti doklad ↔ deník** na **Částka zápisu nesedí na doklad** ([§ 52.14.11](#521411-kontrola-integrity-deniku-nocni-job)). |
 | Doklad po importu není v deníku | Automatika účtování neprojde doklady, které už v systému leží | Viz [§ 52.9](#529-krok-za-krokem-douctovani-dokladu-z-jineho-systemu). |
+| Hláška o dvojici (chybí účet, stejné účty, nekladná částka) nebo že zápis nejde rozdělit na dvojice | Firma účtuje jednoduchým zápisem a dvojice neprošla kontrolou | Opravte uvedenou dvojici, zápis s více účty na obou stranách zadejte po dvojicích ([§ 52.14.16.2](#5214162-krok-za-krokem-rucni-zapis-po-dvojicich)). |
+| U zápisu je odznak **M : N** | Zápis má víc účtů na obou stranách a nejde jednoznačně rozdělit na dvojice | Přeúčtujte jeho dvojice po jedné ([§ 52.14.16.5](#5214165-storno-a-preuctovani-dvojice)). |
 
 ## 52.14 Podrobnosti a pravidla
 
@@ -1879,6 +1885,95 @@ Po potvrzení vznikne koncept, nebo rovnou zaúčtovaný doklad, stejnou cestou 
 **Nový interní doklad**. Podrobnosti v
 [AI extrakci, § 25.3](25_AI_extrakce.md#253-krok-za-krokem-nastavit-poskytovatele-ai).
 
+### 52.14.16 Jednoduchý zápis po dvojicích
+
+Firma si může zvolit **jednoduchý (párový) zápis**. Deník pak neukládá jeden zápis se všemi účty, ale zápis složený
+z **dvojic**: každá dvojice je jeden účet MD proti jednomu účtu Dal se stejnou částkou. Faktura se sazbami 21 % a 12 %
+se tak zapíše jako čtyři dvojice (311/602, 311/343.200, 311/604, 311/343.200) a hromadná platba jako dvojice
+321/221 za každou uhrazenou fakturu. Obraty účtů, rozvaha, výsledovka, předvaha a přiznání k DPH vycházejí stejně jako
+při složeném zápisu, mění se jen tvar zápisu a jeho zobrazení. Firma, která volbu nezapne, účtuje složeným zápisem
+a nepozná žádnou změnu.
+
+#### 52.14.16.1 Krok za krokem: zapnout jednoduchý zápis
+
+Formu zápisu mění **správce firmy** na stránce `Nástroje → Uzávěrka` v bloku **Forma účetního zápisu**
+([§ 72.8](72_Uzaverka.md#728-krok-za-krokem-ciselne-rady-a-nastaveni-uzaverky)).
+
+1. Klikněte na **Změnit formu zápisu**.
+2. Zvolte **Jednoduchý zápis (po dvojicích)** a datum **Platí od**. Datum musí ležet v otevřeném a nezamčeném účetním
+   období, předvyplněný je první den období. Rozhoduje datum zápisu, ne datum jeho pořízení.
+3. Klikněte na **Spustit náhled**. Náhled převodu nanečisto spočítá, kolik zápisů od zvoleného data se rozdělí na dvojice
+   automaticky, kolik se zobrazí po dvojicích beze změny dat, kolik zůstane složených (M : N) a kolik se nezmění vůbec
+   (uzavřené období, vazby na úhrady, mzdy). Náhled nic nezapisuje.
+4. Klikněte na **Uložit změnu formy**. Změna je v auditním logu (`accounting.entry_form_changed`) a v historii formy.
+
+Zpět na složený zápis jde přejít stejným postupem. Zápisy, které už jsou po dvojicích, zůstanou po dvojicích.
+Jednoduchý zápis zatím není dostupný pro společenství vlastníků jednotek a neziskové organizace.
+
+#### 52.14.16.2 Krok za krokem: ruční zápis po dvojicích
+
+Má-li firma k datu zápisu jednoduchý zápis, místo tabulky řádků vidíte **Dvojice**.
+
+1. V ručním zápisu vyplňte **Účet MD**, **Účet Dal**, **Částku** a volitelně **Text** dvojice a středisko.
+2. Další dvojici přidáte tlačítkem **Přidat dvojici**, dvojici odeberete křížkem.
+3. Zápis je vyrovnaný vždy, takže se nezobrazuje rozdíl stran, jen součet dvojic.
+4. Klikněte na **Zaúčtovat**.
+
+Změníte-li datum na období s jinou formou zápisu, rozepsané řádky se převedou na dvojice a zpět, kde je převod
+jednoznačný. Středisko a dimenze patří k výsledkovému účtu dvojice. **Kopírovat jako nový**, **Uložit a nový** i nový
+zápis ze šablony nesou dvojice.
+
+Server odmítne dvojici, která nemá účet MD, nemá účet Dal, má oba účty stejné nebo má nulovou či zápornou částku.
+Hláška ukazuje číslo dvojice:
+
+<!-- cols: 34 66 -->
+| Hláška | Význam |
+|---|---|
+| Dvojici chybí účet MD / Dal | Doplňte chybějící účet. |
+| Účet MD a účet Dal dvojice musí být různé | Dvojice se stejnými účty nemá účetní smysl. |
+| Částka dvojice musí být kladná | Zápornou částku vyjádřete červeným stornem, nikoli znaménkem. |
+| Zápis nejde jednoznačně rozdělit na dvojice | Řádky s více účty na obou stranách zadejte po dvojicích. |
+| Firma k datu zápisu účtuje složeným zápisem | Zápis nemůže mít dvojice, použijte řádky. |
+
+Interní doklad ve firmě s jednoduchým zápisem posílá řádky jako dnes a server je při zaúčtování rozdělí na dvojice,
+kde je rozdělení jednoznačné (jedna strana má jediný řádek, nebo si částky odpovídají). Zápis s více účty na obou
+stranách odmítne a doklad je třeba rozdělit.
+
+#### 52.14.16.3 Šablony po dvojicích
+
+V `Účetnictví → Šablony` firma s jednoduchým zápisem edituje šablonu po dvojicích: **Účet MD**, **Účet Dal**,
+výchozí částka, text a středisko. Starší řádkovou šablonu převede tlačítko **Převést na dvojice**, pokud je párování
+jednoznačné. Šablona po dvojicích vloží do ručního zápisu rovnou dvojice. CSV import mzdové rekapitulace
+vyplní řádky a v jednoduchém zápisu se převedou na dvojice podle stejného pravidla.
+
+#### 52.14.16.4 Deník, opis účtu a export
+
+- V rozbaleném zápisu je tabulka **Dvojice zápisu** s číslem, účty, částkou a textem. Stornovaná nebo přeúčtovaná
+  dvojice odkazuje na opravný zápis.
+- Zápis, který nejde jednoznačně rozdělit (M : N), má v seznamu odznak **M : N**. Filtr **Dvojice** vybere jen tyto
+  zápisy k ruční úpravě. Filtr se nabízí jen firmě, která jednoduchý zápis používá.
+- **Opis účtu** ukazuje u řádku z dvojice jediný protiúčet. Starší složený zápis 1 : N se v opisu zobrazí rozložený na
+  pohyby (odznak **rozloženo**) a data zůstanou beze změny; zápis M : N zůstane v původním tvaru s odznakem **M : N**.
+  Podle protiúčtu jde opis filtrovat a sčítat ([§ 55.8.5](55_Hlavni_kniha.md#5585-opis-uctu)).
+- **Export deníku** má ve firmě s jednoduchým zápisem jeden řádek na dvojici (číslo, účet MD, účet Dal, částka, text).
+  Zápisy M : N zůstávají v původním tvaru s označením. Limit 5 000 zápisů se nemění.
+- **Cash flow** počítá u zápisů po dvojicích tok podle protiúčtu dvojice ([§ 70.5.2](70_Vykazy_podle_paragrafu_18.md#7052-prehled-o-peneznich-tocich)).
+
+#### 52.14.16.5 Storno a přeúčtování dvojice
+
+V tabulce **Dvojice zápisu** zaškrtněte dvojice a použijte lištu akcí:
+
+- **Přeúčtovat dvojici** (právě jedna vybraná dvojice) změní účty MD a Dal při zachované částce. V otevřeném
+  nezamčeném období se dvojice přepíše na místě a původní obsah zůstane v historii zápisu. V zamčeném datu s daňově
+  neutrální změnou se použije stejná cesta jako u přeúčtování dokladu. Jinak vznikne opravný zápis se stornem dvojice
+  a novou dvojicí. Po uložení aplikace řekne, která cesta se použila.
+- **Storno dvojice** (jedna nebo víc vybraných dvojic) vytvoří opravný zápis se zrcadlem dvojic. Původní zápis zůstane
+  nestornovaný. Pozdější storno celého zápisu zrcadlí jen dvojice, které ještě stornované nejsou.
+
+U zápisů vzniklých zaúčtováním dokladu (faktura, banka, pokladna) jde dvojici **jen přeúčtovat**, protože čisté
+storno dvojice by rozešlo zápis s dokladem. Čisté storno dvojice je jen u ručních a interních zápisů. U mzdových
+zápisů, stornovaných zápisů a protizápisů se obě akce nenabízejí.
+
 ## 52.15 Související kapitoly
 
 - [Průvodce účetního](50_Pruvodce_ucetniho.md) - jak se zápisy tvoří a kdy co dělat
@@ -1888,3 +1983,4 @@ Po potvrzení vznikne koncept, nebo rovnou zaúčtovaný doklad, stejnou cestou 
 - [Uzávěrka](72_Uzaverka.md) - období a znovuotevření knih
 - [Účtový rozvrh](66_Ucetni_osnova.md) a [Předkontace](73_Ucetni_nastroje.md#735-krok-za-krokem-predkontace)
 - [Banka](29_Banka.md), [Pokladna](32_Pokladna.md), [Faktury](14_Faktury.md), [Přijaté faktury](23_Prijate_faktury.md) - zdroje zápisů
+- [Forma účetního zápisu](72_Uzaverka.md#728-krok-za-krokem-ciselne-rady-a-nastaveni-uzaverky) - zapnutí jednoduchého zápisu od data

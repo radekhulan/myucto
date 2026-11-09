@@ -87,6 +87,10 @@ U víceřádkového zápisu se částka nerozmnoží spojením s každým proti�
 | **Provozní** | ostatní účty tříd 1, 2, 3, 5, 6, 7 a 8 |
 | **Nezařazené** | kód, který nesplní žádné pravidlo |
 
+U zápisů po dvojicích ([§ 52.14.16](52_Ucetni_denik.md#521416-jednoduchy-zapis-po-dvojicich)) se nepeněžní řádek počítá
+jen tehdy, je-li jeho protějšek ve dvojici peněžní účet. Tok je tak přesný i v zápisu, který se dotýká peněz jen jednou
+dvojicí. Firma se složeným zápisem se počítá beze změny.
+
 Převod mezi peněžními účty se neukáže jako příjem ani výdaj, protože nemá nepeněžní protiřádek. Bankovní
 poplatek ve stejném převodu se naopak vykáže. Otevírací a závěrkové zápisy nejsou peněžní tok a vylučují se.
 
