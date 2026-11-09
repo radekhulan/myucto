@@ -329,6 +329,8 @@ async function saveDraft() {
       doc.value = await stockApi.createDocument(payload)
       router.replace(`/stock/documents/${doc.value.id}`)
     }
+    // Částky už jsou v extra_cost řádků, další uložení by je přičetlo znovu.
+    landedCosts.value = []
     toast.success(t('common.saved'))
     await loadDocument()
   } catch (e: any) {
