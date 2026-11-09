@@ -200,22 +200,15 @@ final class JournalPairInvariantTest extends TestCase
         self::assertFails(JournalPairInvariant::NUMBERING, $garbage, EntryForm::Single);
     }
 
-    public function testI5PairNumbersFollowLineOrder(): void
+    public function testI5PairNumbersNeedNotFollowLineOrder(): void
     {
+        // Přeúčtování dvojice na místě ponechá číslo dvojice, nové řádky ale jdou na konec.
         $swapped = self::validEntry();
         foreach ($swapped as &$line) {
             $line['pair_no'] = $line['pair_no'] === 1 ? 2 : 1;
         }
         unset($line);
-        self::assertFails(JournalPairInvariant::NUMBERING, $swapped, EntryForm::Single);
-
-        // Pořadí řádků určuje line_no, ne pořadí v poli.
-        $byLineNo = self::validEntry();
-        foreach ($byLineNo as $i => &$line) {
-            $line['line_no'] = $i;
-        }
-        unset($line);
-        JournalPairInvariant::assert([], array_reverse($byLineNo), EntryForm::Single);
+        JournalPairInvariant::assert([], $swapped, EntryForm::Single);
         $this->addToAssertionCount(1);
     }
 

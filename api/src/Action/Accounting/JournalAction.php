@@ -406,6 +406,9 @@ final class JournalAction
             $line['dimension_splits'] = (object) ($lineSplits[(int) $line['id']] ?? []);
             return $line;
         }, $entry['lines']);
+        // Jednoduchý zápis: dvojice a posouzení zápisu bez dvojic. Složený zápis bez
+        // posouzení klíče nedostane, odpověď zůstává jako dřív.
+        $entry += $this->journal->pairView($supplierId, $id, $entry['lines']);
         $entry['automation'] = $this->automationProvenance->forJournalEntries($supplierId, [$id])[$id] ?? null;
         // Měkké vazby na doklady (migrace 1514) — detail zápisu je jediné místo, kde
         // je uživatel spravuje, takže chodí rovnou s ním, ne dalším requestem.
@@ -437,8 +440,15 @@ final class JournalAction
 
         // Tvar řádků, dimenze i volitelné měkké vazby na doklady (migrace 1514) ověřuje
         // sdílená služba ručních zápisů, stejnou cestou účtují i interní doklady.
+        // Jednoduchý zápis: `pairs` (účet MD, účet Dal, částka). Ve složené formě se dvojice
+        // převedou na řádky bez čísla dvojice; `lines` zůstává pro oba tvary.
+        if (array_key_exists('pairs', $body) && array_key_exists('lines', $body)) {
+            return Json::error($response, 'validation_failed', 'Zadejte buď pairs, nebo lines.', 422);
+        }
         try {
-            $lines = $this->manualEntries->normalizeLines($supplierId, $body['lines'] ?? null);
+            $lines = array_key_exists('pairs', $body)
+                ? $this->manualEntries->normalizePairs($supplierId, $body['pairs'], $this->manualEntries->singleAt($supplierId, $entryDate))
+                : $this->manualEntries->normalizeLines($supplierId, $body['lines'] ?? null);
             $links = $this->manualEntries->normalizeLinks($supplierId, $body['links'] ?? []);
         } catch (ManualJournalEntryException $e) {
             return Json::error($response, $e->errorCode, $e->getMessage(), $e->httpStatus);

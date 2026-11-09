@@ -13,6 +13,8 @@ use MyInvoice\Repository\JournalEntryDocumentLinkRepository;
 use MyInvoice\Service\Accounting\Closing\DocumentSeriesService;
 use MyInvoice\Service\Accounting\Dimension\DimensionException;
 use MyInvoice\Service\Accounting\Dimension\DimensionService;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 
 /**
  * Ruční zápis deníku - jediná cesta pro `POST /accounting/journal` i zaúčtování
@@ -32,7 +34,14 @@ final class ManualJournalEntryService
         private readonly AccountingSupplierSettingsRepository $settings,
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalEntryDocumentLinkRepository $documentLinks,
+        private readonly EntryFormService $entryForms,
     ) {}
+
+    /** Účtuje firma k datu zápisu po dvojicích? */
+    public function singleAt(int $supplierId, string $entryDate): bool
+    {
+        return $this->entryForms->formAt($supplierId, $entryDate)->isSingle();
+    }
 
     /**
      * Řádky z těla požadavku do tvaru pro PostingService. Účty a vyváženost
@@ -87,6 +96,17 @@ final class ManualJournalEntryService
                     }
                 }
             }
+            // Jednoduchý zápis: řádek může nést číslo a text dvojice (ověří je invariant dvojic).
+            if (isset($l['pair_no']) && $l['pair_no'] !== '') {
+                $pairNo = JournalPairInvariant::pairNoOf(['pair_no' => $l['pair_no']]);
+                if ($pairNo === null || $pairNo < 1) {
+                    throw new ManualJournalEntryException('validation_failed', "Řádek #{$i}: pair_no musí být kladné celé číslo.");
+                }
+                $line['pair_no'] = $pairNo;
+            }
+            if (isset($l['line_text']) && is_string($l['line_text']) && trim($l['line_text']) !== '') {
+                $line['line_text'] = mb_substr(trim($l['line_text']), 0, 255);
+            }
             foreach ($line['dimensions'] ?? [] as $typeId => $_) {
                 $line['dimension_origins'][$typeId] = ['origin' => 'explicit', 'ref' => null];
             }
@@ -98,6 +118,80 @@ final class ManualJournalEntryService
             $lines[] = $line;
         }
         return $lines;
+    }
+
+    /**
+     * Ruční zápis po dvojicích: `pairs: [{debit_account_code, credit_account_code, amount,
+     * is_red_storno?, line_text?, cost_center?, dimensions?, dimension_splits?}]` → dva
+     * řádky na dvojici. Kritérium b) se kontroluje tady (srozumitelná chyba s indexem
+     * dvojice) a znovu v invariantu dvojic při zápisu.
+     *
+     * Středisko a dimenze dvojice se zapíší na výsledkový řádek (5xx/6xx) jako u automatiky;
+     * dvojice bez výsledkového účtu je nese na obou řádcích. Text dvojice jde na oba řádky.
+     * Ve složené formě (`$single` false) vzniknou řádky bez `pair_no`, takže API klient
+     * nemůže firmu přepnout do dvojic.
+     *
+     * @return list<array<string,mixed>> řádky ve tvaru {@see normalizeLines()}
+     */
+    public function normalizePairs(int $supplierId, mixed $rawPairs, bool $single): array
+    {
+        if (!is_array($rawPairs) || $rawPairs === []) {
+            throw new ManualJournalEntryException('validation_failed', 'pairs musí obsahovat alespoň jednu dvojici.');
+        }
+        $raw = [];
+        $pairNo = 0;
+        foreach (array_values($rawPairs) as $i => $pair) {
+            $index = $i + 1;
+            if (!is_array($pair)) {
+                throw new ManualJournalEntryException('validation_failed', "Dvojice #{$index} má neplatný formát.");
+            }
+            $debit = is_scalar($pair['debit_account_code'] ?? null) ? trim((string) $pair['debit_account_code']) : '';
+            $credit = is_scalar($pair['credit_account_code'] ?? null) ? trim((string) $pair['credit_account_code']) : '';
+            if ($debit === '') {
+                throw new ManualJournalEntryException(JournalPairInvariant::MISSING_DEBIT_ACCOUNT, "Dvojice #{$index}: chybí účet MD.");
+            }
+            if ($credit === '') {
+                throw new ManualJournalEntryException(JournalPairInvariant::MISSING_CREDIT_ACCOUNT, "Dvojice #{$index}: chybí účet Dal.");
+            }
+            if ($debit === $credit) {
+                throw new ManualJournalEntryException(JournalPairInvariant::SAME_ACCOUNT, "Dvojice #{$index}: účet MD a účet Dal musí být různé.");
+            }
+            $amount = $pair['amount'] ?? null;
+            try {
+                $cents = is_int($amount) || is_float($amount) || is_string($amount) ? JournalLineAmount::cents($amount) : 0;
+            } catch (\InvalidArgumentException) {
+                $cents = 0;
+            }
+            if ($cents <= 0) {
+                throw new ManualJournalEntryException(JournalPairInvariant::AMOUNT_NOT_POSITIVE, "Dvojice #{$index}: částka musí být kladná.");
+            }
+            if (array_key_exists('is_red_storno', $pair) && !is_bool($pair['is_red_storno'])) {
+                throw new ManualJournalEntryException('validation_failed', "Dvojice #{$index}: is_red_storno musí být boolean.");
+            }
+            $pairNo++;
+            $analytics = array_intersect_key($pair, array_flip(['cost_center', 'dimensions', 'dimension_splits']));
+            $result = static fn (string $code): bool => in_array(substr($code, 0, 1), ['5', '6'], true);
+            $onBoth = !$result($debit) && !$result($credit);
+            foreach (['debit' => $debit, 'credit' => $credit] as $side => $code) {
+                $line = [
+                    'account_code'  => $code,
+                    'side'          => $side,
+                    'amount'        => $cents / 100,
+                    'is_red_storno' => (bool) ($pair['is_red_storno'] ?? false),
+                ];
+                if ($single) {
+                    $line['pair_no'] = $pairNo;
+                }
+                if (isset($pair['line_text'])) {
+                    $line['line_text'] = $pair['line_text'];
+                }
+                if ($onBoth || $result($code)) {
+                    $line += $analytics;
+                }
+                $raw[] = $line;
+            }
+        }
+        return $this->normalizeLines($supplierId, $raw);
     }
 
     /**

@@ -237,6 +237,8 @@ final class GlobalSeedTables
         // VatStatusService; bez ní by firma byla neplátce za všechna období.
         'supplier_vat_status_history', 'supplier_tax_representation_history',
         'supplier_osvc_month_statuses', 'vat_classifications',
+        // Forma účetního zápisu (jednoduchý / složený) v čase je nastavení firmy, ne účetní data.
+        'accounting_entry_form_history',
         // Hraniční: zálohový koeficient § 76 zadává účetní ručně a z dat ho dopočítat
         // nejde; vypořádání (final_percent) se při novém výpočtu přepíše.
         'vat_coefficients',
@@ -417,6 +419,9 @@ final class GlobalSeedTables
         'joint_allocation_batches', 'joint_allocation_cancellations', 'joint_allocation_source_claims',
         'joint_allocation_audit',
         'journal_line_pairings',
+        // Jednoduchý zápis: storna dvojic, posouzení zápisů bez dvojic a běhy převodu
+        // patří k deníku a mažou se s ním.
+        'journal_pair_reversals', 'journal_entry_pair_status', 'journal_pair_conversion_runs',
         'logbook_fuel_scans',
         'login_attempts',
         'mail_outbox', 'mail_rate_limit_events', 'mail_send_log',

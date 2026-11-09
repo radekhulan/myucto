@@ -22,8 +22,9 @@ use MyInvoice\Service\Accounting\JournalLineAmount;
  *    (červené storno účinnou stranu obrací);
  *  - I3 oba řádky mají stejnou kladnou částku (v haléřích) a stejné `is_red_storno`;
  *  - I4 účty řádků dvojice se liší;
- *  - I5 čísla dvojic jsou 1..n bez mezer a v pořadí řádků (`line_no`, jinak pořadí pole)
- *    se poprvé objevují vzestupně;
+ *  - I5 čísla dvojic jsou právě 1..n bez mezer. Pořadí řádků se nevynucuje: přeúčtování
+ *    dvojice na místě dvojici ponechá číslo (na ni odkazují storna a vazby), ale nové
+ *    řádky přidá na konec zápisu;
  *  - I6 firma ve složené formě nesmí dostat `pair_no`. Výjimka: storno nebo přeúčtování
  *    dvojice z jednoduchého období datované do složeného (hlavička `pairs_inherited`).
  *
@@ -102,6 +103,7 @@ final class JournalPairInvariant
             }
             $groups[$pairNo][] = $line;
         }
+        sort($order);
         if ($order !== range(1, count($order))) {
             self::fail(self::NUMBERING);
         }
