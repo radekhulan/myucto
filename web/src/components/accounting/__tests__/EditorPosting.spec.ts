@@ -40,13 +40,33 @@ describe('ItemPostingFields', () => {
 
   it('vyplněný protiúčet předkontace nepřepíše; vydaná faktura bere stranu MD', async () => {
     const wrapper = mount(ItemPostingFields, {
-      props: { direction: 'sale', ruleKey: null, counterAccount: '311.100', rules: [{ ...rule, debit_account_code: '311' }], accounts: [] } as any,
+      props: { direction: 'sale', ruleKey: null, counterAccount: '311.100', rules: [{ ...rule, debit_account_code: '311', credit_account_code: '602' }], accounts: [] } as any,
       global: { stubs: { ChartAccountSelect } },
     })
 
     await wrapper.find('[data-test="item-posting-rule"] select').setValue('test.material')
 
     expect(wrapper.emitted('update:counterAccount')).toBeUndefined()
+  })
+})
+
+describe('ItemPostingFields: předkontace podle typu dokladu', () => {
+  const sale = { ...rule, rule_key: 'test.sale', debit_account_code: '311', credit_account_code: '384' }
+  const purchase = { ...rule, rule_key: 'test.purchase', debit_account_code: '518', credit_account_code: '321' }
+  function keys(direction: 'purchase' | 'sale'): string[] {
+    const wrapper = mount(ItemPostingFields, {
+      props: { direction, ruleKey: null, counterAccount: null, rules: [sale, purchase], accounts: [] } as any,
+      global: { stubs: { ChartAccountSelect } },
+    })
+    return wrapper.findAll('[data-test="item-posting-rule"] option').map(o => (o.element as HTMLOptionElement).value).filter(Boolean)
+  }
+
+  it('přijatá faktura nenabízí předkontaci vydané faktury', () => {
+    expect(keys('purchase')).toEqual(['test.purchase'])
+  })
+
+  it('vydaná faktura nenabízí předkontaci přijaté faktury', () => {
+    expect(keys('sale')).toEqual(['test.sale'])
   })
 })
 
