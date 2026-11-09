@@ -15,6 +15,7 @@ use MyInvoice\Repository\PostingRuleRepository;
 use MyInvoice\Repository\TaxConstantsRepository;
 use MyInvoice\Service\Accounting\FiscalCalendar;
 use MyInvoice\Service\Accounting\PostingException;
+use MyInvoice\Service\Accounting\Pair\PairGroups;
 use MyInvoice\Service\Accounting\PostingService;
 use MyInvoice\Service\TaxEvidence\TaxEvidenceYearLock;
 
@@ -726,7 +727,7 @@ final class AssetService
                 $lines[] = ['account_code' => (string) $asset['asset_account_code'], 'side' => 'credit', 'amount' => $increasedPc];
             }
 
-            $disposalEntryId = $this->posting->postDocument($supplierId, 'asset_disposal', $id, $lines, [
+            $disposalEntryId = $this->posting->postDocument($supplierId, 'asset_disposal', $id, PairGroups::consecutive($lines, 'asset_disposal'), [
                 'entry_date' => $date,
                 'document_no' => (string) $asset['inventory_number'],
                 'description' => 'Vyřazení majetku ' . $asset['name'],

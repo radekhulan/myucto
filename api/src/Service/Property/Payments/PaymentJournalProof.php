@@ -73,7 +73,7 @@ final class PaymentJournalProof
             $dims=$repo->lineDimensions($supplier,$ids,$currentRead);$splits=$repo->lineSplits($supplier,$ids,$currentRead);$origins=$repo->lineOrigins($supplier,$ids,$currentRead);$splitOrigins=$repo->lineSplitOrigins($supplier,$ids,$currentRead);
             foreach($lines as $l)$out[(int)$l['entry_id']]['lines'][]=['id'=>(int)$l['id'],'account_code'=>$l['account_code'],'side'=>$l['side'],'amount'=>JournalLineAmount::decimal($l['amount']),
                 'currency_code'=>$l['currency_code'],'amount_foreign'=>$l['amount_foreign'],'fx_rate'=>$l['fx_rate'],'is_red_storno'=>(bool)$l['is_red_storno'],
-                'dimensions'=>$dims[$l['id']]??[],'dimension_splits'=>$splits[$l['id']]??[],'dimension_origins'=>$origins[$l['id']]??[],'dimension_split_origins'=>$splitOrigins[$l['id']]??[]]+self::legacyContext($l);
+                'dimensions'=>$dims[$l['id']]??[],'dimension_splits'=>$splits[$l['id']]??[],'dimension_origins'=>$origins[$l['id']]??[],'dimension_split_origins'=>$splitOrigins[$l['id']]??[]]+self::legacyContext($l)+self::pairContext($l);
         }
         return $out;
     }
@@ -88,6 +88,32 @@ final class PaymentJournalProof
             'currency_code'=>$l['currency_code']??null,'amount_foreign'=>$l['amount_foreign']??null,'fx_rate'=>$l['fx_rate']??null,'is_red_storno'=>(bool)($l['is_red_storno']??false),
             'dimensions'=>$l['dimensions']??[],'dimension_splits'=>$l['dimension_splits']??[],'dimension_origins'=>$l['dimension_origins']??[],'dimension_split_origins'=>$l['dimension_split_origins']??[]]+self::legacyContext($l);
         return $out;
+    }
+
+    /**
+     * Číslo dvojice jednoduchého zápisu jen u řádku, který ho nese. Zápisy složené formy
+     * mají důkaz beze změny, takže uložené otisky dokladů SVJ zůstávají platné.
+     */
+    private static function pairContext(array $line): array
+    {
+        return ($line['pair_no']??null)!==null?['pair_no'=>(int)$line['pair_no']]:[];
+    }
+
+    /**
+     * Odpovídá zaúčtovaný zápis očekávaným řádkům? Zápis jednoduché formy je rozdělený
+     * na dvojice tímtéž deterministickým párovačem, jakým prošlo zaúčtování, takže se
+     * s ním porovnají očekávané řádky po rozdělení. Bez dvojic beze změny řádek po řádku.
+     *
+     * @param list<array<string,mixed>> $expected řádky, které se posílaly k zaúčtování
+     * @param list<array<string,mixed>> $actual řádky důkazu ({@see current()})
+     */
+    public static function matches(array $expected, array $actual): bool
+    {
+        $hash=static fn(array $lines):string=>PropertyInput::hash(self::canonicalLines($lines));
+        if($hash($expected)===$hash($actual))return true;
+        if(array_filter($actual,static fn(array $line):bool=>isset($line['pair_no']))===[])return false;
+        $paired=\MyInvoice\Service\Accounting\Pair\JournalPairer::pair($expected);
+        return $paired['status']===\MyInvoice\Service\Accounting\Pair\JournalPairer::STATUS_PAIRED&&$hash($paired['lines'])===$hash($actual);
     }
 
     private static function legacyContext(array $line): array

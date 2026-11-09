@@ -10,6 +10,7 @@ use MyInvoice\Service\Accounting\JournalLineAmount;
 use MyInvoice\Service\Accounting\Pair\JournalPairer;
 use MyInvoice\Service\Accounting\Pair\JournalPairInvariant;
 use MyInvoice\Service\Accounting\Pair\PairGroups;
+use MyInvoice\Service\Accounting\Payroll\PayrollCalculator;
 use MyInvoice\Service\Accounting\Vat\VatClearingService;
 use PHPUnit\Framework\TestCase;
 
@@ -95,6 +96,28 @@ final class AutomaticEntryPairsTest extends TestCase
             [['321', '221', '2600.00'], ['321', '221', '1250.00'], ['321', '663', '50.00']],
             self::pairs($paired),
         );
+    }
+
+    /**
+     * Ruční mzdový zápis (měsíční rekapitulace): bez skupin M : N (331 na obou stranách,
+     * 336 rozdělená na sociální a zdravotní), se skupinami dvojice předkontací.
+     */
+    public function testLegacyPayrollEntryIsPairedByOperation(): void
+    {
+        $lines = PayrollCalculator::lines([
+            'gross' => 40000, 'employer_total' => 13520, 'employer_social' => 9920, 'employer_health' => 3600,
+            'employee_deductions' => 4640, 'employee_social' => 2840, 'employee_health' => 1800,
+            'advance_tax_withheld' => 3930, 'net' => 31430,
+        ], PayrollCalculator::TYPE_EMPLOYEE, '365.100');
+        self::assertSame('unpairable', JournalPairer::pair($lines)['status']);
+
+        $paired = $this->assertPairedTotals(PayrollCalculator::pairGroups($lines), $lines);
+        $pairs = array_map(static fn (array $p): string => $p[0] . '/' . $p[1] . ' ' . $p[2], self::pairs($paired));
+        self::assertContains('521/331 40000.00', $pairs);
+        self::assertContains('524/336.100 9920.00', $pairs);
+        self::assertContains('331/336.200 1800.00', $pairs);
+        self::assertContains('331/342.100 3930.00', $pairs);
+        self::assertContains('331/365.100 31430.00', $pairs);
     }
 
     public function testConsecutiveLeavesNonPairInputUntouched(): void

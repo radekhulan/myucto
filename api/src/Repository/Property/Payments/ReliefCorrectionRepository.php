@@ -183,7 +183,7 @@ final class ReliefCorrectionRepository
         $row['request']=json_decode($row['request_json'],true,flags:JSON_THROW_ON_ERROR);$row['snapshot']=json_decode($row['snapshot_json'],true,flags:JSON_THROW_ON_ERROR);unset($row['request_json'],$row['snapshot_json']);
         $row['credit_id']=$row['operation_id']===null?null:$this->payments->operation($supplier,$row['operation_id'])['credit_id'];return $row;
     }
-    private function assertLedger(int $supplier,int $entry,array $lines):void{$actual=(new PaymentJournalProof($this->db))->current($supplier,$entry);if(PropertyInput::hash(PaymentJournalProof::canonicalLines($actual['lines']))!==PropertyInput::hash(PaymentJournalProof::canonicalLines($lines)))PaymentException::reject('ledger_mismatch');}
+    private function assertLedger(int $supplier,int $entry,array $lines):void{$actual=(new PaymentJournalProof($this->db))->current($supplier,$entry);if(!PaymentJournalProof::matches($lines,$actual['lines']))PaymentException::reject('ledger_mismatch');}
     private function transaction(int $supplier,callable $work):mixed{return (new DimensionPeriodGuard($this->db))->transaction(function()use($supplier,$work){(new PaymentLocks($this->db))->acquire($supplier);return $work();});}
     private function execute(string $sql,array $params):\PDOStatement{$q=$this->db->pdo()->prepare($sql);$q->execute($params);return $q;}
     private function one(string $sql,array $params):?array{return $this->execute($sql,$params)->fetch(PDO::FETCH_ASSOC)?:null;}
