@@ -18966,7 +18966,7 @@
       "repost_pick_one": "Select exactly one pair to repost.",
       "reverse_pick_some": "Select the pairs you want to reverse.",
       "document_repost_only": "The entry comes from posting a document, so a pair can only be reposted. Reversing a pair without replacement is possible for manual and internal entries only.",
-      "reverse_confirm": "Reverse the selected pairs ({nos}) with a correcting entry? The original entry stays unchanged.",
+      "reverse_confirm": "Reverse the pair | Reverse 1 pair (no. {nos}) with a correcting entry? The original entry stays unchanged. | Reverse {n} pairs (no. {nos}) with a correcting entry? The original entry stays unchanged.",
       "reversed": "The pairs were reversed by correcting entry #{id}.",
       "repost_title": "Repost pair {n}",
       "repost_hint": "The pair amount ({amount}) stays, only the accounts change. In an open period the pair is rewritten in place, otherwise a correcting entry is created.",

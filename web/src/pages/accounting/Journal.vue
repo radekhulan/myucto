@@ -42,6 +42,7 @@ import JournalSourceDrawer from '@/components/accounting/JournalSourceDrawer.vue
 import JournalEntryDetailPanel from '@/components/accounting/JournalEntryDetailPanel.vue'
 import JournalPairsTable from '@/components/accounting/JournalPairsTable.vue'
 import Modal from '@/components/ui/Modal.vue'
+import ConfirmDialog from '@/components/ui/ConfirmDialog.vue'
 import type { ActionItem } from '@/components/ui/ActionBar.vue'
 import { apiErrorText, hasAnySingle } from '@/utils/entryForm'
 import LockedPeriodAckModal from '@/components/accounting/LockedPeriodAckModal.vue'
@@ -657,15 +658,25 @@ function pairActions(d: JournalEntryDetail): ActionItem[] {
       key: 'pair-reverse', label: t('accounting.pairs.action_reverse'), icon: 'uturn', tier: 'secondary', variant: 'danger',
       show: pairsEditable(d) && canPureReverse, disabled: picked.length === 0 || pairBusy.value,
       disabledReason: picked.length === 0 ? t('accounting.pairs.reverse_pick_some') : undefined,
-      run: () => void reversePairs(d),
+      run: () => reversePairs(d),
     },
   ]
 }
 
-async function reversePairs(d: JournalEntryDetail) {
+/** Čeká na potvrzení stylovaným dialogem (místo nativního confirm()). */
+const reversePairsConfirm = reactive({ open: false, entry: null as JournalEntryDetail | null, nos: [] as number[] })
+
+function reversePairs(d: JournalEntryDetail) {
   const nos = selectedPairs(d.id)
   if (nos.length === 0) return
-  if (!confirm(t('accounting.pairs.reverse_confirm', { n: nos.length, nos: nos.join(', ') }))) return
+  Object.assign(reversePairsConfirm, { open: true, entry: d, nos })
+}
+
+async function confirmReversePairs() {
+  const d = reversePairsConfirm.entry
+  const nos = reversePairsConfirm.nos
+  reversePairsConfirm.open = false
+  if (!d || nos.length === 0) return
   pairBusy.value = true
   try {
     const created = await accountingApi.reversePairs(d.id, { pair_nos: nos })
@@ -1470,6 +1481,12 @@ function entryRange(entry: JournalEntryDetail): { from: string; to: string } {
     <JournalSourceDrawer v-if="sourceDrawerEntryId" :entry-id="sourceDrawerEntryId"
       @close="sourceDrawerEntryId = null" @focus-entry="onFocusEntry" />
     <LockedPeriodAckModal :ref="(el: any) => { lockedAck.modal.value = el }" />
+
+    <ConfirmDialog v-if="reversePairsConfirm.open"
+      :title="t('accounting.pairs.action_reverse')"
+      :message="t('accounting.pairs.reverse_confirm', { n: reversePairsConfirm.nos.length, nos: reversePairsConfirm.nos.join(', ') }, reversePairsConfirm.nos.length)"
+      :confirm-label="t('accounting.pairs.action_reverse')" variant="danger"
+      @confirm="confirmReversePairs" @cancel="reversePairsConfirm.open = false" />
 
     <!-- Přeúčtování jedné dvojice: nové účty MD/Dal, částka zůstává. Na místě, nebo opravným zápisem
          rozhodne server podle zámků a období. -->

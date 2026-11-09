@@ -43,7 +43,7 @@ vi.mock('vue-router', () => ({
 }))
 vi.mock('vue-i18n', async importOriginal => ({
   ...await importOriginal<typeof import('vue-i18n')>(),
-  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string) => key }),
+  useI18n: () => ({ locale: { value: 'cs' }, t: (key: string, p?: unknown) => (p && typeof p === 'object' ? `${key}${JSON.stringify(p)}` : key) }),
 }))
 vi.mock('@/stores/auth', () => ({ useAuthStore: () => ({ canWrite: () => true, canRead: () => true, isDemo: false }) }))
 vi.mock('@/stores/supplier', () => ({ useSupplierStore: () => ({ currentSupplier: { accounting_framework: 'cz_500', entity_profile: 'unknown' } }) }))
@@ -126,7 +126,7 @@ async function openEntry(detail: JournalEntryDetail, listPatch: Record<string, u
 describe('Journal: dvojice jednoduchého zápisu', () => {
   it('ruční zápis nabídne přeúčtování i storno vybraných dvojic; storno pošle pair_nos', async () => {
     m.reversePairs.mockResolvedValue({ id: 99 })
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const confirmSpy = vi.spyOn(window, 'confirm')
     const wrapper = await openEntry(entry(7))
     expect(wrapper.find('[data-test="journal-entry-pairs"]').exists()).toBe(true)
     // Detail je v DOM dvakrát (desktopová tabulka a mobilní karta), proto se čte první tabulka.
@@ -139,6 +139,12 @@ describe('Journal: dvojice jednoduchého zápisu', () => {
     const boxes = wrapper.findAll('[data-test="journal-pairs-table"]')[0].findAll('tbody input[type="checkbox"]')
     await boxes[1].setValue(true)
     await wrapper.get('[data-key="pair-reverse"]').trigger('click')
+    await flushPromises()
+    // Potvrzení je stylovaný dialog aplikace, ne nativní confirm(); storno čeká na jeho potvrzení.
+    expect(confirmSpy).not.toHaveBeenCalled()
+    expect(m.reversePairs).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="confirm-message"]').text()).toContain('"n":1,"nos":"2"')
+    await wrapper.get('[data-test="confirm-ok"]').trigger('click')
     await flushPromises()
     expect(m.reversePairs).toHaveBeenCalledWith(7, { pair_nos: [2] })
     wrapper.unmount()

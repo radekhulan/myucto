@@ -18966,7 +18966,7 @@
       "repost_pick_one": "Vyberte právě jednu dvojici, kterou chcete přeúčtovat.",
       "reverse_pick_some": "Vyberte dvojice, které chcete stornovat.",
       "document_repost_only": "Zápis vznikl zaúčtováním dokladu, proto jde dvojici jen přeúčtovat. Storno dvojice bez náhrady je možné jen u ručních a interních zápisů.",
-      "reverse_confirm": "Stornovat vybrané dvojice ({nos}) opravným zápisem? Původní zápis zůstane beze změny.",
+      "reverse_confirm": "Stornovat dvojici | Stornovat 1 dvojici (č. {nos}) opravným zápisem? Původní zápis zůstane beze změny. | Stornovat {n} dvojice (č. {nos}) opravným zápisem? Původní zápis zůstane beze změny. | Stornovat {n} dvojic (č. {nos}) opravným zápisem? Původní zápis zůstane beze změny.",
       "reversed": "Dvojice byly stornovány opravným zápisem #{id}.",
       "repost_title": "Přeúčtovat dvojici {n}",
       "repost_hint": "Částka dvojice ({amount}) zůstane, změní se jen účty. V otevřeném období se dvojice přepíše na místě, jinak vznikne opravný zápis.",
