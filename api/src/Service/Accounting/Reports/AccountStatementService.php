@@ -121,7 +121,7 @@ final class AccountStatementService
             : null;
         $closing = round($opening + $turnovers['md'] - $turnovers['d'], 2);
 
-        return [
+        $out = [
             'account' => [
                 'id'           => (int) $account['id'],
                 'code'         => (string) $account['account_code'],
@@ -145,6 +145,10 @@ final class AccountStatementService
             'counter_totals'  => $counterTotals,
             'counter_filter'  => $counterAccount === null || $counterTotals === null ? null : self::counterFilter($counterAccount, $counterTotals),
         ];
+        if ($pairs) {
+            $out['layout'] = 'pairs';
+        }
+        return $out;
     }
 
     /**

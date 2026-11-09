@@ -8,6 +8,8 @@ use MyInvoice\Service\Accounting\Reports\AccountStatementService;
 use MyInvoice\Service\Accounting\Reports\GeneralLedgerDetailService;
 use MyInvoice\Service\Accounting\Reports\GeneralLedgerService;
 use MyInvoice\Service\Accounting\Reports\JournalLineContext;
+use MyInvoice\Service\Accounting\Reports\ReportXlsxExporter;
+use MyInvoice\Service\Pdf\AccountStatementPdfRenderer;
 use PHPUnit\Framework\Attributes\Group;
 use PHPUnit\Framework\TestCase;
 
@@ -171,6 +173,39 @@ final class AccountStatementPairsTest extends TestCase
             }
             $this->assertCounterTotalsMatchTurnover($data);
         }
+    }
+
+    public function testStatementExportsShowSingleCounterAndMarkManyToMany(): void
+    {
+        $entries = $this->postScenario();
+        $this->switchToSingle(self::YEAR . '-01-01');
+        $this->pairEntryInPlace($entries['cash']);
+        $data = $this->build('211');
+        $data['from'] = self::YEAR . '-01-01';
+        $data['to'] = self::YEAR . '-12-31';
+        self::assertSame('pairs', $data['layout']);
+
+        $renderer = $this->container->get(AccountStatementPdfRenderer::class);
+        $html = (string) (new \ReflectionMethod($renderer, 'renderTemplate'))->invoke($renderer, 'account_statement.twig', $data);
+        self::assertSame(1, substr_count($html, '512, 513 (M : N)'), 'Řádek zápisu M : N nese značku.');
+        self::assertStringContainsString('<td class="col-counter">512</td>', $html);
+        self::assertStringStartsWith('%PDF', $renderer->render($data));
+
+        $bytes = $this->container->get(ReportXlsxExporter::class)->accountStatement($data)['bytes'];
+        $tmp = tempnam(sys_get_temp_dir(), 'pairstmt_');
+        file_put_contents($tmp, $bytes);
+        $sheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($tmp)->getActiveSheet();
+        @unlink($tmp);
+        $counters = [];
+        foreach ($sheet->getRowIterator(6) as $row) {
+            $value = (string) $sheet->getCell('F' . $row->getRowIndex())->getValue();
+            if ($value !== '') {
+                $counters[] = $value;
+            }
+        }
+        self::assertContains('512, 513 (M : N)', $counters);
+        self::assertContains('512', $counters);
+        self::assertContains('221', $counters);
     }
 
     public function testGeneralLedgerDetailShowsSingleCounterAccountForPairs(): void

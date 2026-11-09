@@ -412,7 +412,9 @@ final class ReportXlsxExporter
             $sheet->setCellValueExplicit([3, $r], (string) $item['description'], DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([4, $r], (string) ($item['partner'] ?? ''), DataType::TYPE_STRING);
             $sheet->setCellValueExplicit([5, $r], (string) ($item['variable_symbol'] ?? ''), DataType::TYPE_STRING);
-            $sheet->setCellValueExplicit([6, $r], (string) ($item['counter_accounts'] ?? ''), DataType::TYPE_STRING);
+            // Jednoduchý zápis: složený zápis M : N, který nejde rozložit, nese značku.
+            $counterLabel = (string) ($item['counter_accounts'] ?? '') . (($item['pair_status'] ?? null) === JournalLineContext::PAIR_STATUS_COMPOSITE ? ' (M : N)' : '');
+            $sheet->setCellValueExplicit([6, $r], $counterLabel, DataType::TYPE_STRING);
             if (($item['side'] ?? '') === 'debit') {
                 $sheet->setCellValue([7, $r], (float) $item['amount']);
             } else {
@@ -438,7 +440,9 @@ final class ReportXlsxExporter
 
         if (($data['counter_totals'] ?? []) !== []) {
             $tr = $r + 2;
-            $sheet->setCellValue("A{$tr}", 'Součty podle protiúčtu (dvojice se shodnou částkou patří své dvojici, ostatní řádky se dělí poměrem)');
+            $sheet->setCellValue("A{$tr}", ($data['layout'] ?? null) === 'pairs'
+                ? 'Součty podle protiúčtu (dvojice jednoduchého zápisu celou částkou, starší zápisy po dílech, M : N poměrem)'
+                : 'Součty podle protiúčtu (dvojice se shodnou částkou patří své dvojici, ostatní řádky se dělí poměrem)');
             $sheet->getStyle("A{$tr}")->getFont()->setBold(true);
             $tr++;
             foreach ($data['counter_totals'] as $row) {
