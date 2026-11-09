@@ -915,7 +915,11 @@ function populate(inv: PurchaseInvoice) {
   form.value.project_id = inv.project_id ?? null
   form.value.vat_classification_code = inv.vat_classification_code ?? null
   form.value.parent_purchase_invoice_id = inv.parent_purchase_invoice_id ?? null
-  form.value.items = inv.items.length > 0 ? inv.items : []
+  form.value.items = inv.items.map(it => ({
+    ...it,
+    expense_account_code: it.expense_account_code ?? null,
+    vat_classification_code: it.vat_classification_code ?? null,
+  }))
   // Faktura s už zadaným časovým rozlišením → odkryj celý blok (jinak by řádek s pickery byl schovaný).
   showAccrual.value = form.value.items.some(it => !!it.accrual_from || !!it.accrual_to)
   // §DM legacy: doklad označený hlavičkovým `is_fixed_asset` z doby před item-level
@@ -1095,6 +1099,10 @@ function addItem(hideDropzone = true) {
     vat_rate_id: vatRates.value.find(v => v.is_default)?.id || vatRates.value[0]?.id || 1,
     order_index: form.value.items.length,
     expense_kind: null,
+    // Výběry na řádku mají volbu s hodnotou null („Účet podle druhu nákladu", „Automaticky…");
+    // bez explicitního null by select zůstal prázdný.
+    expense_account_code: null,
+    vat_classification_code: null,
     counter_account_code: null,
     posting_rule_key: null,
     accrual_from: null,
