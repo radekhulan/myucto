@@ -327,7 +327,7 @@ export interface JournalEntryPair {
   reversed_by_entry_id?: number | null
 }
 
-export interface JournalEntryDetail extends JournalEntry {
+export interface JournalEntryDetail extends Omit<JournalEntry, 'pair_status'> {
   lines: JournalLine[]
   /** Forma zápisu k datu zápisu; backend ji v detailu dnes nevrací (forma firmy je v GET /accounting/entry-form). */
   entry_form?: EntryForm
