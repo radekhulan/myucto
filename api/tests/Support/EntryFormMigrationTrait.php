@@ -50,8 +50,57 @@ trait EntryFormMigrationTrait
         }
     }
 
+    /** Firma, do které jde převod (daňová evidence, převod ji přepne). */
+    protected function migrationFirm(PDO $pdo, string $name, string $ico, bool $vatPayer = false): int
+    {
+        $scalar = static fn (string $sql): int => (int) ($pdo->query($sql)->fetchColumn() ?: 0);
+        $pdo->prepare(
+            'INSERT INTO supplier (company_name, street, city, zip, country_id, email, ic, dic, is_vat_payer, default_currency_id, default_vat_rate_id, accounting_mode)
+             VALUES (?, "Účetní 12", "Brno", "60200", ?, "prevod@example.invalid", ?, ?, ?, ?, ?, "tax_evidence")'
+        )->execute([$name, $scalar("SELECT id FROM countries WHERE iso2 = 'CZ' LIMIT 1"), $ico, $vatPayer ? 'CZ' . $ico : null, $vatPayer ? 1 : 0,
+            $scalar("SELECT id FROM currencies WHERE code = 'CZK' ORDER BY id LIMIT 1"), $scalar('SELECT id FROM vat_rates ORDER BY id LIMIT 1')]);
+        $id = (int) $pdo->lastInsertId();
+        $pdo->prepare(
+            "INSERT INTO currencies (supplier_id, code, label, symbol, name_cs, name_en, decimals, is_active, is_default)
+             VALUES (?, 'CZK', 'CZK', 'Kč', 'Česká koruna', 'Czech Koruna', 2, 1, 1)"
+        )->execute([$id]);
+        $pdo->prepare('UPDATE supplier SET default_currency_id = ? WHERE id = ?')->execute([(int) $pdo->lastInsertId(), $id]);
+        return $id;
+    }
+
+    protected function firstUserId(PDO $pdo): int
+    {
+        return (int) ($pdo->query('SELECT id FROM users ORDER BY id LIMIT 1')->fetchColumn() ?: 0);
+    }
+
     /**
-     * Otisk deníku firmy: obraty po účtech a stranách, počty řádků s dvojicí a bez ní,
+     * Složená forma bez nastavení instalace a jednoduchá s ním: deník (řádky bez čísla
+     * dvojice), obraty po účtech a další srovnávané údaje musí vyjít stejně, jednoduchá
+     * forma má všechny řádky po dvojicích a žádný zápis s posouzením bez dvojic.
+     *
+     * @param callable(ContainerInterface, PDO): array{fingerprint:array<string,mixed>,lines:array<string,list<string>>,compare?:mixed} $convert
+     */
+    protected function assertSingleMatchesComposite(callable $convert): void
+    {
+        $composite = $this->withDefaultEntryForm(null, $convert);
+        $single = $this->withDefaultEntryForm('single', $convert);
+
+        self::assertSame([], $composite['fingerprint']['history']);
+        self::assertSame(0, $composite['fingerprint']['paired'], 'Složená forma bez nastavení instalace dvojice netvoří.');
+        self::assertSame(0, $composite['fingerprint']['pair_status']);
+
+        self::assertSame(['single'], $single['fingerprint']['history'], 'Forma single musí být zapsaná dřív, než převod zapíše deník.');
+        self::assertGreaterThan(0, $single['fingerprint']['lines']);
+        self::assertSame(0, $single['fingerprint']['unpaired'], 'Ve formě single má každý řádek deníku číslo dvojice.');
+        self::assertSame(0, $single['fingerprint']['pair_status'], 'Žádný zápis nesmí zůstat složený (ineligible / composite_mn).');
+
+        self::assertSame($composite['fingerprint']['turnover'], $single['fingerprint']['turnover'], 'Obraty po účtech musí být stejné jako ve složené formě.');
+        self::assertSame($composite['lines'], $single['lines'], 'Převzaté řádky deníku (bez čísla dvojice) musí být stejné jako ve složené formě.');
+        self::assertSame($composite['compare'] ?? null, $single['compare'] ?? null);
+    }
+
+    /**
+     * Otisk deníku firmy:obraty po účtech a stranách, počty řádků s dvojicí a bez ní,
      * posouzení zápisů bez dvojic a historie formy.
      *
      * @return array{turnover:array<string,array{debit:string,credit:string}>,paired:int,unpaired:int,pair_status:int,history:list<string>,lines:int}

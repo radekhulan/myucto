@@ -10,6 +10,7 @@ use MyInvoice\Repository\ChartOfAccountsRepository;
 use MyInvoice\Repository\JournalEntryRepository;
 use MyInvoice\Repository\PohodaImportRepository;
 use MyInvoice\Service\Accounting\ChartOfAccountsSeeder;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
 use MyInvoice\Service\Accounting\Dimension\SystemDimensionCatalog;
 use MyInvoice\Service\Accounting\JournalDescriptionBuilder;
 use MyInvoice\Service\Accounting\PostingService;
@@ -17,6 +18,7 @@ use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 use MyInvoice\Service\Migration\Shared\MigrationPeriods;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Migration\Shared\SourceJournalPairs;
 
 /**
  * Účtová osnova, účetní období a účetní deník z Pohody.
@@ -41,6 +43,7 @@ final class ChartJournalImporter
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalEntryRepository $journal,
         private readonly PohodaImportRepository $map,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     public function chart(PohodaContext $ctx): void
@@ -172,6 +175,10 @@ final class ChartJournalImporter
         $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0, 'relocated' => 0, 'later_year_skipped' => 0];
         $moved = [];
         $later = [];
+        // Forma zápisu firmy: deník POHODY (řádek = účet MD, účet Dal, částka) jde ve formě
+        // single po dvojicích přímo ze zdroje.
+        $forms = SourceJournalPairs::load($this->entryForms, $ctx->supplierId);
+        $sameAccountRows = 0;
         $now = date('Y-m-d H:i:s');
         $done = 0;
         $total = count($groups);
@@ -212,6 +219,7 @@ final class ChartJournalImporter
             $number = PohodaJournal::number($first);
 
             $lines = [];
+            $texts = [];
             $lineNo = 0;
             foreach ($rows as $item) {
                 $effect = PohodaJournal::effect($item);
@@ -236,6 +244,7 @@ final class ChartJournalImporter
                 }
                 $lines[] = ['account_id' => $debitId, 'side' => 'debit', 'amount' => $amount, 'line_no' => ++$lineNo, 'cost_center' => $centre !== '' ? $centre : null] + $activityFor((string) $effect['debit']);
                 $lines[] = ['account_id' => $creditId, 'side' => 'credit', 'amount' => $amount, 'line_no' => ++$lineNo, 'cost_center' => $centre !== '' ? $centre : null] + $activityFor((string) $effect['credit']);
+                $texts[] = PohodaXml::text($item, 'text');
             }
             if ($lines === []) {
                 continue;
@@ -258,6 +267,13 @@ final class ChartJournalImporter
                 $documentDate ??= $entryDate;
                 $entryDate = $entryDate < $period['starts_on'] ? $period['starts_on'] : $period['ends_on'];
                 $moved[] = $number ?: $groupKey;
+            }
+            if ($forms->singleAt($entryDate)) {
+                ['lines' => $lines, 'same_account' => $sameAccount] = SourceJournalPairs::pair($lines, $texts);
+                $sameAccountRows += $sameAccount;
+                if ($lines === []) {
+                    continue;
+                }
             }
             // Pohoda veze v řádku deníku JEN volný text (`act:text`), který je u celé
             // řady dokladů shodný („Fakturujeme Vám za …"). Do popisu proto jde i
@@ -323,6 +339,9 @@ final class ChartJournalImporter
                 $stats['relocated'] > 0 ? " (z toho {$stats['relocated']} dříve převzatých zápisů přesunuto z " . self::day($period['ends_on']) . ')' : '',
                 $year, $periodYear,
             ), ['year' => $periodYear, 'period_id' => $target['id'], 'entries' => $later[$periodYear] ?? 0]);
+        }
+        if ($sameAccountRows > 0) {
+            $p->info(self::STEP_JOURNAL, 'same_account_rows', "{$sameAccountRows} řádků POHODY účtuje na straně MD i Dal na účet, který MyÚčto vede jako jeden. Na zůstatek účtu nemají vliv a v jednoduchém zápisu nejsou platná dvojice, proto se nepřenesly.", ['year' => $year, 'rows' => $sameAccountRows]);
         }
         if ($stats['swapped_rows'] > 0) {
             $p->info(self::STEP_JOURNAL, 'negative_amounts', "{$stats['swapped_rows']} řádků se zápornou částkou přeneseno s prohozenými stranami (účetně totéž).");

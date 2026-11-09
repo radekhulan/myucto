@@ -16,6 +16,8 @@ use MyInvoice\Service\Migration\MoneyS3\AccountCode;
 use MyInvoice\Service\Migration\Shared\ChartAccountCreator;
 use MyInvoice\Service\Migration\Shared\MigrationPeriods;
 use MyInvoice\Service\Migration\Shared\ReconciliationTolerance;
+use MyInvoice\Service\Accounting\EntryForm\EntryFormService;
+use MyInvoice\Service\Migration\Shared\SourceJournalPairs;
 
 /**
  * Účtová osnova, účetní období, počáteční stavy a účetní deník roku z PREMIER.
@@ -47,6 +49,7 @@ final class ChartJournalImporter
         private readonly AccountingPeriodRepository $periods,
         private readonly JournalEntryRepository $journal,
         private readonly PremierImportRepository $map,
+        private readonly EntryFormService $entryForms,
     ) {}
 
     public function chart(PremierContext $ctx): void
@@ -136,8 +139,12 @@ final class ChartJournalImporter
         $moneyCurrencies = self::moneyAccountCurrencies($ctx);
         $stats = ['year' => $year, 'entries' => 0, 'existing' => 0, 'lines' => 0, 'debit' => 0.0, 'credit' => 0.0, 'skipped_rows' => 0, 'swapped_rows' => 0];
         $now = date('Y-m-d H:i:s');
+        // Forma zápisu firmy: deník PREMIER (řádek = účet MD, účet Dal, částka) jde ve formě
+        // single po dvojicích přímo ze zdroje.
+        $forms = SourceJournalPairs::load($this->entryForms, $ctx->supplierId);
+        $sameAccountRows = 0;
 
-        $this->openingEntry($ctx, $period, $existing, $now);
+        $this->openingEntry($ctx, $period, $existing, $now, $forms);
 
         $documents = $ctx->journal->documents($year);
         $done = 0;
@@ -154,6 +161,7 @@ final class ChartJournalImporter
             }
             $first = $rows[0];
             $lines = [];
+            $texts = [];
             $lineNo = 0;
             foreach ($rows as $r) {
                 $effect = PremierJournal::effect($r);
@@ -180,11 +188,19 @@ final class ChartJournalImporter
                     }
                     $lines[] = $line;
                 }
+                $texts[] = (string) ($r['text'] ?? '');
             }
             if ($lines === []) {
                 continue;
             }
             PostingService::assertBalanced($lines);
+            if ($forms->singleAt((string) $first['date'])) {
+                ['lines' => $lines, 'same_account' => $sameAccount] = SourceJournalPairs::pair($lines, $texts);
+                $sameAccountRows += $sameAccount;
+                if ($lines === []) {
+                    continue;
+                }
+            }
             $number = trim($first['series'] . ' ' . $first['number']);
             $description = JournalDescriptionBuilder::composeParts([$number, $first['text'] !== '' ? $first['text'] : $first['partner_name']]);
             $entryId = $this->journal->insert([
@@ -214,6 +230,9 @@ final class ChartJournalImporter
         foreach (['entries', 'existing', 'lines', 'skipped_rows'] as $k) {
             $p->setCount(self::STEP_JOURNAL, $k, $stats[$k]);
         }
+        if ($sameAccountRows > 0) {
+            $p->info(self::STEP_JOURNAL, 'same_account_rows', "{$sameAccountRows} řádků PREMIER účtuje na straně MD i Dal na účet, který MyÚčto vede jako jeden. Na zůstatek účtu nemají vliv a v jednoduchém zápisu nejsou platná dvojice, proto se nepřenesly.", ['year' => $year, 'rows' => $sameAccountRows]);
+        }
         if ($stats['swapped_rows'] > 0) {
             $p->info(self::STEP_JOURNAL, 'negative_amounts', "{$stats['swapped_rows']} řádků se zápornou částkou přeneseno s prohozenými stranami (účetně totéž).");
         }
@@ -239,7 +258,7 @@ final class ChartJournalImporter
      * @param array{id:int,starts_on:string,ends_on:string,status:string,locked:bool} $period
      * @param array<string,int> $existing
      */
-    private function openingEntry(PremierContext $ctx, array $period, array $existing, string $now): void
+    private function openingEntry(PremierContext $ctx, array $period, array $existing, string $now, SourceJournalPairs $forms): void
     {
         $p = $ctx->protocol;
         $key = $ctx->year . '|PS';
@@ -288,6 +307,10 @@ final class ChartJournalImporter
             $lines[] = ['account_id' => $balance > 0 ? $openingId : $accountId, 'side' => 'credit', 'amount' => $amount, 'line_no' => ++$lineNo];
         }
         PostingService::assertBalanced($lines);
+        if ($forms->singleAt($period['starts_on'])) {
+            // Počáteční stav účtu proti 701 je jedna dvojice.
+            $lines = SourceJournalPairs::pair($lines, [])['lines'];
+        }
         $net = round(array_sum($balances), 2);
         if (abs($net) >= 0.005) {
             $p->warn(self::STEP_JOURNAL, 'opening_701_not_zero', sprintf('Počáteční stavy roku %d nejsou vyrovnané (701 zůstává %s Kč) - deník minulých let obsahuje zápisy mimo třídy 0-6.', $ctx->year, number_format($net, 2, ',', ' ')));

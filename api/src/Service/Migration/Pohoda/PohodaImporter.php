@@ -418,6 +418,10 @@ final class PohodaImporter
             } elseif ($dryRun && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
+            if ($dryRun) {
+                // Forma zápisu zapsaná zkouškou se vrátila s ní; sdílená odpověď procesu taky.
+                \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($supplierId);
+            }
         }
         return $protocol;
     }
@@ -445,7 +449,11 @@ final class PohodaImporter
     {
         return [
             ChartJournalImporter::STEP_CHART => fn () => $this->journal->chart($ctx),
-            ChartJournalImporter::STEP_JOURNAL => fn () => $this->journal->journal($ctx),
+            ChartJournalImporter::STEP_JOURNAL => function () use ($ctx): void {
+                // Forma zápisu nové firmy dřív, než do deníku přijde první převzatý zápis.
+                $this->unit->applyEntryFormDefault($ctx->supplierId);
+                $this->journal->journal($ctx);
+            },
             self::STEP_ACCOUNTING_MODE => fn () => $this->switchMode($ctx),
             PartnerImporter::STEP_PARTNERS => fn () => $this->partners->importPartners($ctx),
             PartnerImporter::STEP_POSTING_RULES => fn () => $this->partners->importPostingRules($ctx),
