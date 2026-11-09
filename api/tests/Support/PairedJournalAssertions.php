@@ -23,6 +23,7 @@ trait PairedJournalAssertions
             "INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form, note)
              VALUES (?, ?, 'single', 'test') ON DUPLICATE KEY UPDATE entry_form = 'single'"
         )->execute([$supplierId, $validFrom]);
+        \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($supplierId);
     }
 
     /**

@@ -329,6 +329,19 @@ final class EntryFormService
         return !$this->frameworkScope->allows($supplierId, FrameworkScopePolicy::NONPROFIT_504);
     }
 
+    /**
+     * Zahodí sdílenou odpověď hasAnySingle() celého procesu. Pro kód (testy, převody),
+     * který zapisuje historii formy mimo {@see schedule()}.
+     */
+    public static function forgetShared(?int $supplierId = null): void
+    {
+        if ($supplierId === null) {
+            self::$anySingleShared = [];
+            return;
+        }
+        unset(self::$anySingleShared[$supplierId]);
+    }
+
     /** Zahodí paměť instance (po změně formy, v dlouho běžících workerech mezi dávkami). */
     public function forget(?int $supplierId = null): void
     {

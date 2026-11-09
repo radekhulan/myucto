@@ -133,6 +133,7 @@ trait PairConversionFixture
         $this->db->pdo()->prepare(
             "INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form) VALUES (?, ?, 'single')"
         )->execute([$this->supplierId, $date]);
+        \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($this->supplierId);
     }
 
     /** @return list<array<string,mixed>> */

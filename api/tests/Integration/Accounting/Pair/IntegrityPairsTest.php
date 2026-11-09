@@ -93,6 +93,7 @@ final class IntegrityPairsTest extends TestCase
         $this->db->pdo()->prepare(
             "INSERT INTO accounting_entry_form_history (supplier_id, valid_from, entry_form) VALUES (?, '2098-06-01', 'composite')"
         )->execute([$this->supplierId]);
+        \MyInvoice\Service\Accounting\EntryForm\EntryFormService::forgetShared($this->supplierId);
         $inside = $this->invoiceOneToMany('2098-03-01');
         $this->invoiceOneToMany('2098-07-01');
 
