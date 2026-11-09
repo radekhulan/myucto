@@ -95,6 +95,7 @@ final class PostingPairCoverageTest extends TestCase
             'Service/Accounting/DocumentJournalSync.php::repostForceEdit::postDocument' => ['shape' => 'builder', 'test' => self::PAIR . 'InvoicePairsTest::testPurchaseInvoiceIsPairedAgainst321'],
             'Service/Accounting/DocumentRepostService.php::repostOnce::postDocument' => ['shape' => 'user', 'test' => $user],
             'Service/Accounting/GoPay/GoPayMovementPoster.php::postOnce::postDocument' => ['shape' => 'one', 'test' => $one],
+            'Service/Accounting/InvoicePostingProposal.php::prepared::prepareDocumentLines' => ['shape' => 'builder', 'test' => self::PAIR . 'InvoicePairsTest::testIssuedInvoiceWithTwoVatRatesIsPairedAgainst311'],
             'Service/Accounting/InvoiceSettlementService.php::create::postDocument' => ['shape' => 'one', 'test' => $one],
             'Service/Accounting/InvoiceSettlementService.php::postRow::postDocument' => ['shape' => 'one', 'test' => $one],
             'Service/Accounting/ManualJournalEntryService.php::post::postDocument' => ['shape' => 'user', 'test' => $user],

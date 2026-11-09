@@ -235,9 +235,41 @@ final class ManualPairEntryTest extends TestCase
         self::assertSame(2, (int) $stmt->fetchColumn());
     }
 
-    public function testAutomaticManyToManyEntryIsPostedCompositeAndMarked(): void
+    public function testAutomaticManyToManyEntryInSingleFormIsRejectedAndNothingIsPosted(): void
     {
         $this->switchToSingle();
+        $before = $this->entryCount();
+        $manyToMany = [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 30],
+            ['account_code' => '211', 'side' => 'debit', 'amount' => 10],
+            ['account_code' => '518', 'side' => 'credit', 'amount' => 15],
+            ['account_code' => '568', 'side' => 'credit', 'amount' => 25],
+        ];
+        try {
+            $this->posting->postDocument($this->supplierId, 'opening', null, $manyToMany,
+                ['entry_date' => self::YEAR . '-03-10', 'user_id' => $this->userId]);
+            self::fail('Nerozdělitelný automatický zápis se v jednoduché formě zapsal.');
+        } catch (PostingException $e) {
+            self::assertSame(PostingService::AUTOMATIC_PAIRING_FAILED, $e->errorCode);
+            self::assertSame(422, $e->httpStatus);
+            self::assertSame('many_to_many', $e->context['reason'] ?? null);
+        }
+        self::assertSame($before, $this->entryCount());
+        self::assertSame(0, (int) $this->db->pdo()->query(
+            'SELECT COUNT(*) FROM journal_entry_pair_status WHERE supplier_id = ' . $this->supplierId
+        )->fetchColumn());
+
+        // Další zápis téhož běhu automatiky projde: chyba se týká jen nerozdělitelného dokladu.
+        $entryId = $this->posting->postDocument($this->supplierId, 'opening', null, [
+            ['account_code' => '221', 'side' => 'debit', 'amount' => 40],
+            ['account_code' => '518', 'side' => 'credit', 'amount' => 15],
+            ['account_code' => '568', 'side' => 'credit', 'amount' => 25],
+        ], ['entry_date' => self::YEAR . '-03-10', 'user_id' => $this->userId]);
+        self::assertSame([1, 1, 2, 2], array_column($this->lineRows($entryId), 3));
+    }
+
+    public function testAutomaticManyToManyEntryInCompositeFormIsPostedUnchanged(): void
+    {
         $entryId = $this->posting->postDocument($this->supplierId, 'opening', null, [
             ['account_code' => '221', 'side' => 'debit', 'amount' => 30],
             ['account_code' => '211', 'side' => 'debit', 'amount' => 10],
@@ -246,8 +278,14 @@ final class ManualPairEntryTest extends TestCase
         ], ['entry_date' => self::YEAR . '-03-10', 'user_id' => $this->userId]);
 
         self::assertSame([null, null, null, null], array_column($this->lineRows($entryId), 3));
-        self::assertSame(['pair_status' => ['status' => 'composite_mn', 'reason' => 'many_to_many']],
-            $this->journal->pairView($this->supplierId, $entryId, []));
+        self::assertSame([], $this->journal->pairView($this->supplierId, $entryId, []));
+    }
+
+    private function entryCount(): int
+    {
+        $stmt = $this->db->pdo()->prepare('SELECT COUNT(*) FROM journal_entries WHERE supplier_id = ?');
+        $stmt->execute([$this->supplierId]);
+        return (int) $stmt->fetchColumn();
     }
 
     private function switchToSingle(): void

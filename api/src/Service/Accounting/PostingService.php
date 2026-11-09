@@ -71,6 +71,9 @@ use PDO;
  */
 final class PostingService
 {
+    /** Automatický zápis v jednoduché formě nejde rozložit na dvojice (doklad zůstal nezaúčtovaný). */
+    public const AUTOMATIC_PAIRING_FAILED = 'automatic_pairing_failed';
+
     public const POSTABLE_ISSUED_INVOICE_TYPES = ['invoice', 'credit_note', 'tax_document', 'penalty'];
 
     /**
@@ -303,8 +306,10 @@ final class PostingService
      *
      * Složená forma: řídicí klíče builderu (`pair_group`, `pair_role`) i `pair_no` se
      * zahodí a řádky jsou přesně jako dřív. Nerozdělitelný zápis (M : N bez pravidla):
-     * ruční zápis se odmítne (`pairing_required`), automatický se zaúčtuje složeně
-     * a výsledek posouzení si přečte postDocumentOnce() z {@see $pairOutcome}.
+     * ruční zápis se odmítne (`pairing_required`), automatický taky
+     * ({@see AUTOMATIC_PAIRING_FAILED}) a doklad zůstane nezaúčtovaný. Výjimkou je mzdový
+     * předpis, který se zaúčtuje složeně a posouzení si přečte postDocumentOnce()
+     * z {@see $pairOutcome}.
      * Typovaní vlastníci (SVJ předpisy) a importy (`$keepComposite`) zůstávají složené.
      *
      * @param list<array<string,mixed>> $resolved
@@ -350,8 +355,29 @@ final class PostingService
                 ['reason' => $reason],
             );
         }
-        $this->pairOutcome = ['status' => 'composite_mn', 'reason' => $reason];
-        return JournalPairer::stripPairKeys($resolved);
+        if ($sourceType === 'payroll') {
+            // Mzdový předpis skládá dvojice sám (PayrollPostingLineBuilder::singleEntryLines);
+            // co z něj zbude M : N, zůstává zatím složené s označením.
+            $this->pairOutcome = ['status' => 'composite_mn', 'reason' => $reason];
+            return JournalPairer::stripPairKeys($resolved);
+        }
+        throw self::automaticPairingFailed($sourceType, $reason);
+    }
+
+    /**
+     * Automatický zápis v jednoduché formě, který nejde rozložit na dvojice, se do deníku
+     * nezapíše: doklad zůstane nezaúčtovaný (fronta doúčtování, ruční zaúčtování po
+     * dvojicích) a automatika ho zaloguje jako každou jinou chybu zaúčtování.
+     */
+    public static function automaticPairingFailed(string $sourceType, string $reason): PostingException
+    {
+        return new PostingException(
+            self::AUTOMATIC_PAIRING_FAILED,
+            'Zápis dokladu nejde v jednoduché formě rozložit na dvojice MD/Dal. Doklad zůstal nezaúčtovaný: '
+                . 'zaúčtujte ho ručně po dvojicích nebo upravte předkontaci.',
+            422,
+            ['reason' => $reason, 'source_type' => $sourceType],
+        );
     }
 
     /**
@@ -631,7 +657,7 @@ final class PostingService
                 $pairOutcome = null;
                 if (array_filter($resolved, static fn (array $l): bool => isset($l['pair_no'])) === []
                     && $this->entryForms()->formAt($supplierId, $entryDate, true)->isSingle()) {
-                    $pairOutcome = ['status' => 'composite_mn', 'reason' => JournalPairer::REASON_MANY_TO_MANY];
+                    throw self::automaticPairingFailed($sourceType, JournalPairer::REASON_MANY_TO_MANY);
                 }
             } else {
                 $resolved = $this->prepareDocumentLines($supplierId, $sourceType, $sourceId, $lines, $entryDate, true, $keepComposite);
