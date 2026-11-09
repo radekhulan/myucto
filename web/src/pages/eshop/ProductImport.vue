@@ -826,6 +826,8 @@ function changedFields(item: CatalogImportItems['items'][number]): string[] {
   return Object.keys({ ...before, ...after })
     .filter(field => !HIDDEN_DIFF_FIELDS.has(field))
     .filter(field => {
+      // Ceny nesou i čas a kontext výpočtu; změnou je jen to, co se uživateli liší.
+      if (field === 'prices') return displayFieldValue(field, before[field]) !== displayFieldValue(field, after[field])
       const normalize = (value: unknown) => value == null || value === '' || (Array.isArray(value) && value.length === 0) ? null : value
       return JSON.stringify(normalize(before[field])) !== JSON.stringify(normalize(after[field]))
     })
