@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\PostingService;
+use MyInvoice\Service\Accounting\ItemPostingAccounts;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Invoice\CzkRecap;
 use MyInvoice\Service\Invoice\InvoiceCalendar;
@@ -718,6 +719,7 @@ final class InvoiceRepository
                     ii.order_index, ii.item_kind,
                     ii.vat_classification_code, ii.stock_item_id, ii.warehouse_id,
                     ii.small_asset_id, ii.asset_id, ii.accrual_from, ii.accrual_to, ii.revenue_account_code,
+                    ii.counter_account_code, ii.posting_rule_key,
                     ii.seller_item_code,
                     sa.name AS small_asset_name, a.name AS asset_name' . $ossSelect . ',
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en
@@ -1893,6 +1895,17 @@ final class InvoiceRepository
                 throw new \InvalidArgumentException('Položka ' . ($i + 1) . ': ' . $e->getMessage(), 0, $e);
             }
         }
+        // Protiúčet a předkontace řádku: jen tvar, PŘED smazáním starých řádků.
+        $postingFields = [];
+        foreach ($items as $i => $item) {
+            try {
+                $postingFields[$i] = InvoiceItemKind::of($item) === InvoiceItemKind::STANDARD
+                    ? ItemPostingAccounts::normalizeInput($item)
+                    : ['counter_account_code' => null, 'posting_rule_key' => null];
+            } catch (\InvalidArgumentException $e) {
+                throw new \InvalidArgumentException('Položka ' . ($i + 1) . ': ' . $e->getMessage(), 0, $e);
+            }
+        }
         // Víceúčelový poukaz (§ 37c ZDPH) se při prodeji nedaní: nenulová sazba je chyba
         // vstupu, nic se tiše nepřepočítává. Ověří se PŘED smazáním starých řádků.
         $standardItems = array_filter($items, static fn (array $item): bool => InvoiceItemKind::of($item) === InvoiceItemKind::STANDARD);
@@ -1950,9 +1963,10 @@ final class InvoiceRepository
                 (invoice_id, description, quantity, duration_minutes, unit, unit_price_without_vat,
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index, item_kind, vat_classification_code,
-                 stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to, revenue_account_code, seller_item_code'
+                 stock_item_id, warehouse_id, small_asset_id, asset_id, accrual_from, accrual_to, revenue_account_code, seller_item_code,
+                 counter_account_code, posting_rule_key'
             . ($ossColumns !== [] ? ', ' . implode(', ', $ossColumns) : '')
-            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'
+            . ') VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?'
             . str_repeat(', ?', count($ossColumns))
             . ')'
         );
@@ -2001,7 +2015,7 @@ final class InvoiceRepository
                 $params = [
                     $invoiceId, (string) $item['description'], 0.0, null, '', 0.0,
                     $vatRateId, $vatRates[$vatRateId] ?? 0.0, $orderIndex, InvoiceItemKind::TEXT,
-                    null, null, null, null, null, null, null, null, null,
+                    null, null, null, null, null, null, null, null, null, null, null,
                 ];
                 if ($supportsOss) {
                     $params = array_merge($params, self::ossItemParams($item, $supportsManualReview));
@@ -2077,6 +2091,10 @@ final class InvoiceRepository
                 ...self::accrualPeriod($item),
                 $revenueAccounts[$i] ?? null,
                 self::sellerItemCode($item['seller_item_code'] ?? null),
+                // Protiúčet a předkontace řádku (zaúčtování při zadání faktury). Platnost
+                // účtů vůči osnově ověřuje PostingService při zaúčtování.
+                $postingFields[$i]['counter_account_code'],
+                $postingFields[$i]['posting_rule_key'],
             ];
             $accrualPeriods[implode('|', self::accrualPeriod($item))] = self::accrualPeriod($item);
             if ($supportsOss) {
@@ -2238,6 +2256,9 @@ final class InvoiceRepository
                 ...$accrualPeriod,
                 // Výnosový účet (F1): sleva vlastní účet nemá, zaúčtování ji rozpustí do účtů
                 // zlevněných položek (IssuedDiscountAllocation).
+                null,
+                null,
+                // Protiúčet ani předkontaci sleva nemá, dědí je doklad.
                 null,
                 null,
             ];

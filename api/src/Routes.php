@@ -2754,6 +2754,9 @@ final class Routes
             // `source` je `invoices` nebo `purchase-invoices`.
             $g->get   ('/journal/posting-preview/{source:invoices|purchase-invoices}/{id:[0-9]+}',
                 [JournalAction::class, 'postingPreview']);
+            // Náhled zápisu v editoru faktury z neuloženého stavu (uložení v odvolané transakci).
+            $g->post  ('/journal/draft-posting-preview/{source:invoices|purchase-invoices}',
+                \MyInvoice\Action\Accounting\DraftPostingPreviewAction::class);
             // Přeúčtování už zaúčtovaného dokladu — plán (co se stane) + provedení.
             // KONKRÉTNÍ cesty PŘED generickým /journal/{id} (segmenty nejsou číselné).
             // `bank-transactions` = bankovní pohyb (v deníku zdroj `bank`); bankovní

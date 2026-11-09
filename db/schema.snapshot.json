@@ -1169,7 +1169,8 @@
         "2263_payroll_employment_relation_type_changed_event.sql",
         "2264_payroll_employment_merged_event.sql",
         "2265_entry_form_history.sql",
-        "2266_journal_entry_pairs.sql"
+        "2266_journal_entry_pairs.sql",
+        "2267_invoice_item_posting_accounts.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -7198,6 +7199,7 @@
                 "accrual_from": "date NULL DEFAULT NULL",
                 "accrual_to": "date NULL DEFAULT NULL",
                 "asset_id": "bigint(20) unsigned NULL DEFAULT NULL",
+                "counter_account_code": "varchar(10) NULL DEFAULT NULL",
                 "description": "text NOT NULL",
                 "duration_minutes": "int(11) NULL DEFAULT NULL",
                 "id": "bigint(20) unsigned NOT NULL AUTO_INCREMENT",
@@ -7217,6 +7219,7 @@
                 "oss_supply_type": "enum('goods','services') NULL DEFAULT NULL",
                 "oss_taxable_amount_return": "decimal(14,2) NULL DEFAULT NULL",
                 "oss_vat_amount_return": "decimal(14,2) NULL DEFAULT NULL",
+                "posting_rule_key": "varchar(64) NULL DEFAULT NULL",
                 "quantity": "decimal(10,3) NOT NULL DEFAULT 1.000",
                 "revenue_account_code": "varchar(10) NULL DEFAULT NULL",
                 "seller_item_code": "varchar(64) NULL DEFAULT NULL",
@@ -23174,6 +23177,7 @@
             "columns": {
                 "accrual_from": "date NULL DEFAULT NULL",
                 "accrual_to": "date NULL DEFAULT NULL",
+                "counter_account_code": "varchar(10) NULL DEFAULT NULL",
                 "description": "text NOT NULL",
                 "duration_minutes": "int(11) NULL DEFAULT NULL",
                 "expense_account_code": "varchar(10) NULL DEFAULT NULL",
@@ -23188,6 +23192,7 @@
                 "import_tax_vat_czk": "decimal(12,2) NULL DEFAULT NULL",
                 "is_fixed_asset": "tinyint(1) NOT NULL DEFAULT 0",
                 "order_index": "int(11) NOT NULL DEFAULT 0",
+                "posting_rule_key": "varchar(64) NULL DEFAULT NULL",
                 "purchase_invoice_id": "bigint(20) unsigned NOT NULL",
                 "purchase_order_line_id": "bigint(20) unsigned NULL DEFAULT NULL",
                 "quantity": "decimal(10,3) NOT NULL DEFAULT 1.000",

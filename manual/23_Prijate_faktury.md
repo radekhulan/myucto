@@ -212,6 +212,9 @@ v kapitole [Platební příkazy](26_Platebni_prikazy.md).
 **Jak poznáte, že je hotovo:** u faktury je účetní ikona **Zaúčtováno** (datum je v tooltipu)
 a funguje proklik **Zobrazit v deníku**.
 
+Zaúčtovat jde i rovnou z editoru: zkontrolujte box **Náhled zápisu** pod položkami a klikněte na
+**Uložit a zaúčtovat**. Koncept se při tom zároveň přijme (viz [§ 23.11.18](#231118-zauctovani-do-deniku-a-tlacitko-zauctovat)).
+
 Tlačítko se u dokladu typu **Záloha** nezobrazuje: zálohová výzva není účetní předpis, účtuje se
 až její skutečná úhrada. Kromě ručního zaúčtování lze zapnout automatické zaúčtování při přijetí
 (viz [§ 96.11](96_Nastaveni.md#969-krok-za-krokem-automaticke-uctovani)).
@@ -631,6 +634,22 @@ Dříve uložený účet zůstává zachovaný. Bez vlastního účtu se účet 
 Má-li syntetický účet více způsobilých analytik, aplikace z nich sama první nevybere. Konkrétní analytiku určí účet
 položky nebo pravidlo; jediná způsobilá analytika se může doplnit automaticky. Již uložený konkrétní účet se zachová.
 Pravidlo v režimu **Jen navrhovat** nabídne také analytický účet, i když se druh nákladu nemění.
+
+#### Předkontace a účet Dal na řádku
+
+V podvojném účetnictví jsou v podrobnostech položky vedle nákladového účtu (strana MD) ještě dvě
+pole, takže řádek nese celou dvojici účtů:
+
+- **Předkontace** vybere předkontaci řádku. Doplní nákladový účet (MD) a závazek (Dal), pokud je
+  řádek ještě nemá. Vyplněný účet má vždy přednost.
+- **Účet Dal (závazek)** je protiúčet řádku, například 325 u účtenky. Prázdné pole použije závazek
+  z předkontace dokladu (obvykle 321). Zadat lze aktivní závazkový účet třídy 3 mimo DPH a zálohy.
+  Všechny řádky dokladu musí mít stejný protiúčet, protože úhrada z banky nebo pokladny uzavírá
+  jeden závazek dokladu. U finální faktury navázané na zálohu a u daňového dokladu k platbě se
+  protiúčet z řádku použít nedá.
+
+Středisko, zakázku a další dimenze řádku zadáte ikonou dimenzí u popisu položky (viz
+[Dimenze](114_Dimenze.md)), do deníku se propíšou na řádky zápisu.
 
 U uložených řádků může aplikace zobrazit návrh se zdrojem, jistotou a stručným důvodem. Druh i účet se do řádku zapíšou až
 po kliknutí na **Použít**, nejasný nebo rozporný návrh se sám neaplikuje. Ruční volba má přednost a u dobropisu se zachová
@@ -1110,6 +1129,17 @@ potvrzovací dialog, zápis podle [předkontace](73_Ucetni_nastroje.md#735-krok-
 (s datem v tooltipu) a proklik **Zobrazit v deníku**. Stejná tabulka chybových hlášek (chybějící kurz, uzavřené období,
 nevyvážený zápis, chybějící účet v osnově) platí i tady, viz [§ 16.1.3](16_Faktura_PDF.md#16103-zauctovani-do-deniku).
 Zaúčtovat smí jen administrátor nebo účetní.
+
+**Náhled zápisu v editoru.** Pod položkami editoru je box **Náhled zápisu**. Ukazuje účty MD a Dal
+s částkami přesně tak, jak se doklad zaúčtuje, včetně DPH a závazku, a přepočítá se chvíli po každé
+změně dokladu. Server ho počítá stejným výpočtem jako **Zaúčtovat**, doklad přitom neuloží. Chybu,
+kvůli které by se doklad neuložil nebo nezaúčtoval (zamčené období, podané DPH, neplatný účet), ukáže
+rovnou v boxu. U zaúčtovaného dokladu náhled jen odkáže na zápis v deníku, změnu kontace pak udělejte
+přes **Přeúčtovat** (viz [§ 23.11.19](#231119-nakladove-pravidlo-a-preuctovani)).
+
+**Uložit a zaúčtovat.** Vedle tlačítka Uložit v editoru, jen s právem zaúčtovat. Uloží doklad,
+koncept přijme (stejně jako **Označit jako přijaté**) a zaúčtuje ho podle náhledu. Když zaúčtování
+selže, doklad zůstane uložený a aplikace ukáže důvod.
 
 **Hromadné zaúčtování.** Označte více faktur a klikněte na **Zaúčtovat (N)**. Nabídne se jen z vybraných ty přijaté,
 zaúčtované nebo uhrazené, dosud nezaúčtované a jiné než zálohové. Doklady se účtují jeden po druhém (chyba jednoho neblokuje

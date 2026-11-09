@@ -811,6 +811,9 @@ final class RoutePermissionMap
         ['POST', '#^/api/accounting/periods/[0-9]+/closing/fx-preview$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/periods/[0-9]+/(closing|close|open-next|revert)(/|$)#', 'accounting.periods.close', AccessLevel::WRITE],
         ['*', '#^/api/accounting/periods(/|$)#', 'accounting.periods.manage', AccessLevel::WRITE],
+        // Náhled zápisu v editoru faktury nic nezapíše (uložení se odvolá). Čtení účetnictví
+        // stačí, právo uložit doklad ověřuje akce stejně jako uložení samo.
+        ['POST', '#^/api/accounting/journal/draft-posting-preview/(invoices|purchase-invoices)$#', 'accounting', AccessLevel::READ],
         ['*', '#^/api/accounting/journal/(post|transfer)|^/api/accounting/journal/post-(invoice|purchase)/#', 'accounting.journal.post', AccessLevel::WRITE],
         // Přeúčtování dokladu je zápis do deníku, ne editace zápisu — TOTÉŽ právo jako
         // zaúčtování výš. Bez explicitního pravidla by spadlo na obecné

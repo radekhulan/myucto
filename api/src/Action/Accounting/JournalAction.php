@@ -33,7 +33,7 @@ use MyInvoice\Service\Accounting\JournalEntryDeletionRules;
 use MyInvoice\Service\Accounting\JournalHistoryService;
 use MyInvoice\Service\Accounting\JournalIntegrityService;
 use MyInvoice\Service\Accounting\JournalLinkService;
-use MyInvoice\Service\Accounting\JournalLineAmount;
+use MyInvoice\Service\Accounting\InvoicePostingProposal;
 use MyInvoice\Service\Accounting\InternalDocumentException;
 use MyInvoice\Service\Accounting\InternalDocumentService;
 use MyInvoice\Service\Accounting\ManualJournalEntryException;
@@ -122,6 +122,7 @@ final class JournalAction
         private readonly OtherItemService $otherItems,
         private readonly ManualJournalEntryService $manualEntries,
         private readonly InternalDocumentService $internalDocuments,
+        private readonly InvoicePostingProposal $proposal,
     ) {}
 
     public function list(Request $request, Response $response): Response
@@ -817,18 +818,14 @@ final class JournalAction
         }
 
         // Override z AI klasifikace je součástí NÁVRHU, ne až zaúčtování — jinak by
-        // uživatel potvrzoval jiné řádky, než jaké se nakonec zapíšou.
+        // uživatel potvrzoval jiné řádky, než jaké se nakonec zapíšou. Řádky skládá
+        // sdílený návrh ({@see InvoicePostingProposal}), tentýž jako zaúčtování.
         $aiOverride = $sourceType === 'purchase_invoice'
             ? $this->aiOverrides->debitOverrideForPurchase($supplierId, $docId)
             : null;
 
         try {
-            $lines = $sourceType === 'invoice'
-                ? $this->posting->buildFromInvoice($supplierId, $docId, ['entry_date' => $docDate])
-                : $this->posting->buildFromPurchaseInvoice($supplierId, $docId, array_filter([
-                    'entry_date' => $docDate,
-                    'debit_account_code' => $aiOverride,
-                ], static fn (mixed $value): bool => $value !== null));
+            $lines = $this->proposal->lines($supplierId, $sourceType, $docId, $docDate);
         } catch (\Throwable $e) {
             return $this->mapPostingError($response, $e);
         }
@@ -916,49 +913,13 @@ final class JournalAction
      */
     private function describeLines(int $supplierId, array $lines): array
     {
-        $codes = array_values(array_unique(array_map(
-            static fn (array $l): string => (string) $l['account_code'],
-            $lines,
-        )));
-        if ($codes === []) {
-            return [];
-        }
-
-        $ph = implode(',', array_fill(0, count($codes), '?'));
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT account_code, name FROM chart_of_accounts
-              WHERE supplier_id = ? AND account_code IN ({$ph})"
-        );
-        $stmt->execute(array_merge([$supplierId], $codes));
-        $names = [];
-        foreach ($stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
-            $names[(string) $r['account_code']] = (string) $r['name'];
-        }
-
-        return array_map(static function (array $l) use ($names): array {
-            $code = (string) $l['account_code'];
-
-            return [
-                'account_code' => $code,
-                'account_name' => $names[$code] ?? null,
-                'side'         => (string) $l['side'],
-                'amount'       => round((float) $l['amount'], 2),
-                'is_red_storno' => (bool) ($l['is_red_storno'] ?? false),
-                'cost_center'  => $l['cost_center'] ?? null,
-            ];
-        }, $lines);
+        return $this->proposal->describe($supplierId, $lines);
     }
 
     /** @param list<array<string,mixed>> $lines */
     private static function linesBalanced(array $lines): bool
     {
-        $delta = 0;
-        foreach ($lines as $l) {
-            $cents = JournalLineAmount::signedCents($l);
-            $delta += (string) $l['side'] === 'debit' ? $cents : -$cents;
-        }
-
-        return $delta === 0;
+        return InvoicePostingProposal::balanced($lines);
     }
 
     /** Id už existujícího zápisu dokladu, nebo null. Náhled tím řekne, že je zaúčtováno. */
@@ -1055,12 +1016,7 @@ final class JournalAction
         }
 
         try {
-            $lines = $customLines ?? ($sourceType === 'invoice'
-                ? $this->posting->buildFromInvoice($supplierId, $docId, ['entry_date' => $entryDate ?? $docDate])
-                : $this->posting->buildFromPurchaseInvoice($supplierId, $docId, array_filter([
-                    'entry_date' => $entryDate ?? $docDate,
-                    'debit_account_code' => $this->aiOverrides->debitOverrideForPurchase($supplierId, $docId),
-                ], static fn (mixed $value): bool => $value !== null)));
+            $lines = $customLines ?? $this->proposal->lines($supplierId, $sourceType, $docId, $entryDate ?? $docDate);
 
             $effectiveEntryDate = $entryDate ?? $docDate;
             $meta = array_merge($this->auditMeta($request), [
@@ -1901,13 +1857,7 @@ final class JournalAction
     /** Datum účetního případu z dokladu (DUZP / vystavení). NULL = doklad neexistuje. */
     private function fetchDocDate(string $table, int $supplierId, int $id): ?string
     {
-        // Whitelisted table names (interní volání) — ne z uživatelského vstupu.
-        $stmt = $this->db->pdo()->prepare(
-            "SELECT COALESCE(tax_date, issue_date) AS d FROM {$table} WHERE id = ? AND supplier_id = ?"
-        );
-        $stmt->execute([$id, $supplierId]);
-        $d = $stmt->fetchColumn();
-        return $d === false || $d === null ? null : (string) $d;
+        return $this->proposal->documentDate($supplierId, $table === 'invoices' ? 'invoice' : 'purchase_invoice', $id);
     }
 
     private function nullableString(mixed $v): ?string

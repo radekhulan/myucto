@@ -50550,6 +50550,8 @@ components:
         revenue_account_code: { type: [string, "null"], maxLength: 10, example: "604", description: "Účet položky: výnosový, nebo u přefakturace rozvahový či nákladový; saldokontní, daňové a peněžní účty (311, 314, 321, 324, 325, 33x, 34x, 211, 221) nejsou povolené. NULL = účet produktu (stock_item_id) > jeho kategorie > předkontace dokladu. Prodej majetku (asset_id / small_asset_id) má přednost." }
         small_asset_name: { type: [string, "null"], description: "Název navázané karty drobného majetku (read-only, z JOINu)." }
         asset_name: { type: [string, "null"], description: "Název navázané karty dlouhodobého majetku (read-only, z JOINu)." }
+        counter_account_code: { type: [string, "null"], maxLength: 10, example: "311.100", description: "Protiúčet řádku (strana MD, pohledávka). Musí být pohledávkou na téže syntetice jako pohledávka z předkontace úhrady (typicky analytika 311). Všechny řádky dokladu musí mít stejný protiúčet. NULL = z předkontace řádku, jinak z předkontace dokladu." }
+        posting_rule_key: { type: [string, "null"], maxLength: 64, example: "invoice.goods.issued", description: "Předkontace řádku (klíč z /accounting/posting-rules). Doplní výnosový účet a protiúčet, které řádek sám nemá; vyplněný účet má přednost." }
         oss_applicable: { type: boolean }
         oss_consumer_country: { type: [string, "null"], minLength: 2, maxLength: 2 }
         oss_rate_type: { type: [string, "null"], enum: [standard, reduced, second_reduced, parking, null] }
@@ -50995,6 +50997,16 @@ components:
         expense_account_code:
           type: [string, "null"]
           description: "Nákladový účet položky, včetně analytiky. NULL odvodí účet z druhu nákladu."
+        counter_account_code:
+          type: [string, "null"]
+          maxLength: 10
+          example: "325"
+          description: "Protiúčet řádku (strana Dal, závazek): aktivní závazkový účet třídy 3 mimo DPH a zálohy. Všechny řádky dokladu musí mít stejný protiúčet, jinak zaúčtování vrátí 422 `mixed_counter_accounts`. NULL = z předkontace řádku, jinak z předkontace dokladu."
+        posting_rule_key:
+          type: [string, "null"]
+          maxLength: 64
+          example: "invoice.material.received"
+          description: "Předkontace řádku (klíč z /accounting/posting-rules). Doplní nákladový účet a protiúčet, které řádek sám nemá; vyplněný účet má přednost."
         accrual_from: { type: [string, "null"], format: date, description: "Časové rozlišení nákladu (381): začátek období, do kterého náklad řádku patří. NULL = bez rozlišení." }
         accrual_to: { type: [string, "null"], format: date, description: "Konec období nákladu řádku. Část nákladu za koncem účetního období odloží uzávěrka na 381." }
         is_fixed_asset:

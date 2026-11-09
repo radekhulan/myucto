@@ -190,6 +190,10 @@ export interface InvoiceItem {
   accrual_to?: string | null
   /** Výnosový účet položky (6xx); null = produkt > kategorie > předkontace dokladu. Round-trip jako ostatní pole položky. */
   revenue_account_code?: string | null
+  /** Účet MD řádku (pohledávka, analytika 311); NULL = z předkontace řádku nebo dokladu. Jeden na doklad. */
+  counter_account_code?: string | null
+  /** Předkontace řádku — doplní účty, které řádek sám nemá. */
+  posting_rule_key?: string | null
   /** Kód položky prodávajícího z importu (ISDOC SellersItemIdentification), páruje podle něj pravidla výnosů. */
   seller_item_code?: string | null
   /** Název karty z JOINu (read-only) — našeptávač jím zobrazí vybranou položku bez dalšího dotazu. */

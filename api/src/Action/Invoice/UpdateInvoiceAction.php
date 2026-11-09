@@ -686,7 +686,11 @@ final class UpdateInvoiceAction
         // Invalidate cached PDF — data faktury se změnila, starý soubor je nepoužitelný.
         // Cache freshness check v rendereru zohledňuje jen mtime šablon/CSS, ne dat,
         // takže bez explicit invalidate by se starý PDF dál servíroval.
-        $this->pdf->invalidate($id, 'invalidate_update');
+        // Náhled zápisu v editoru ukládá v transakci, která se odvolá: soubor PDF
+        // mimo databázi se mu proto zahazovat nesmí.
+        if ($request->getAttribute(\MyInvoice\Action\Accounting\DraftPostingPreviewAction::ATTR) !== true) {
+            $this->pdf->invalidate($id, 'invalidate_update');
+        }
 
         // Hotovostní vyrovnání (migrace 1327): forma úhrady „Hotově" + zvolená pokladna →
         // příjmový pokladní doklad; odebraná volba ten dřívější zruší. Na draftu se volba

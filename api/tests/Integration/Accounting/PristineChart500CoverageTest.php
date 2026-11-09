@@ -56,8 +56,8 @@ final class PristineChart500CoverageTest extends TestCase
         foreach (PristineChart500::ACCOUNT_CODE_REFERENCES as $table => $columns) {
             foreach ($columns as $column) $known[] = $table . '.' . $column;
         }
-        foreach (PristineChart500::CHILD_CODE_REFERENCES as $table => [$column]) {
-            $known[] = $table . '.' . $column;
+        foreach (PristineChart500::CHILD_CODE_REFERENCES as $table => [$columns]) {
+            foreach ($columns as $column) $known[] = $table . '.' . $column;
         }
         foreach (PristineChart500::SUPPLIER_CODE_REFERENCES as $column) {
             $known[] = 'supplier.' . $column;

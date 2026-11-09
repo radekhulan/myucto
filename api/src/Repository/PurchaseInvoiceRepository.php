@@ -6,6 +6,7 @@ namespace MyInvoice\Repository;
 
 use MyInvoice\Infrastructure\Database\Connection;
 use MyInvoice\Service\Accounting\Expense\ExpenseKind;
+use MyInvoice\Service\Accounting\ItemPostingAccounts;
 use MyInvoice\Service\Bank\VariableSymbolNormalizer;
 use MyInvoice\Service\Vat\VatStatusService;
 use MyInvoice\Service\Invoice\OverduePolicy;
@@ -535,7 +536,7 @@ final class PurchaseInvoiceRepository
                     pii.unit_price_without_vat, pii.vat_rate_id, pii.vat_rate_snapshot,
                     pii.total_without_vat, pii.total_vat, pii.total_with_vat,
                     pii.order_index, pii.vat_classification_code, pii.is_fixed_asset,
-                    pii.expense_kind, pii.expense_account_code,
+                    pii.expense_kind, pii.expense_account_code, pii.counter_account_code, pii.posting_rule_key,
                     pii.accrual_from, pii.accrual_to,
                     pii.stock_item_id, si.sku AS stock_sku, si.name AS stock_name,
                     vr.code AS vat_code, vr.label_cs AS vat_label_cs, vr.label_en AS vat_label_en,
@@ -2172,8 +2173,9 @@ final class PurchaseInvoiceRepository
                  vat_rate_id, vat_rate_snapshot,
                  total_without_vat, total_vat, total_with_vat, order_index,
                  vat_classification_code, is_fixed_asset, expense_kind, expense_account_code,
+                 counter_account_code, posting_rule_key,
                  accrual_from, accrual_to, stock_item_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?)'
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 0, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
         );
 
         $vatRates = $this->vatRateMap();
@@ -2287,6 +2289,7 @@ final class PurchaseInvoiceRepository
             }
 
             [$accrualFrom, $accrualTo] = self::normalizeAccrualRange($item['accrual_from'] ?? null, $item['accrual_to'] ?? null);
+            $posting = ItemPostingAccounts::normalizeInput($item);
 
             $stmt->execute([
                 $purchaseInvoiceId,
@@ -2306,6 +2309,8 @@ final class PurchaseInvoiceRepository
                 isset($item['expense_account_code']) && trim((string) $item['expense_account_code']) !== ''
                     ? trim((string) $item['expense_account_code'])
                     : null,
+                $posting['counter_account_code'],
+                $posting['posting_rule_key'],
                 // Časové rozlišení nákladu (§DČR) — období od–do. Prázdné → NULL (bez rozlišení).
                 // Odklad na 381 dělá až uzávěrka; tady se jen ULOŽÍ zadané období.
                 $accrualFrom,
