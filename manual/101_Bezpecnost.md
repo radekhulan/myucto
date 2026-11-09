@@ -214,8 +214,8 @@ e-mailem. Odkaz předejte jen majiteli účtu.
 | Neznámá identita | Přihlášení se odmítne, účet se nezakládá |
 | Hosté B2B | Smí se přihlásit jen s `allow_guests = true` (ENV `MYINVOICE_OIDC_ENTRA_ALLOW_GUESTS=1`) a přiřazením k aplikaci |
 | Platnost sezení | `auth.oidc.session_lifetime_hours`, výchozí 12 hodin od posledního přihlášení přes Entra ID, i při `skip_mfa = false` |
-| API tokeny a MCP připojení z přihlášení přes Entra ID | Platí, jen dokud se vlastník přes Entra ID přihlásil v posledních `session_lifetime_hours` |
-| Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení, API tokeny i MCP připojení přestanou platit nejpozději po `session_lifetime_hours` od jeho posledního přihlášení přes Entra ID |
+| API tokeny a MCP připojení z přihlášení přes Entra ID | S `tokens_follow_identity = true` (ENV `MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY=1`) platí, jen dokud se vlastník přes Entra ID přihlásil v posledních `session_lifetime_hours`. Výchozí je `false`: platí do své vlastní expirace |
+| Zablokovaný uživatel v Entra ID | Znovu se nepřihlásí, otevřené sezení přestane platit nejpozději po `session_lifetime_hours` od jeho posledního přihlášení přes Entra ID, API tokeny a MCP připojení také, je-li zapnuté `tokens_follow_identity` |
 | Instalace vyžaduje Microsoft | Heslo, přístupový klíč ani záložní kód nepustí nikoho, ani správce instance |
 | Nouzový přístup | Jen vypnutím vynucení v konfiguraci, aplikace výjimku nemá |
 | Citlivé operace | Při `skip_mfa = true` je potvrdíte novým přihlášením u Microsoftu; při `false` místním přístupovým klíčem nebo TOTP, při vynucení nikdy heslem |
@@ -229,12 +229,15 @@ až při dalším přihlášení, které Microsoft odmítne. Proto platí strop
 - otevřené sezení z přihlášení přes Entra ID skončí nejpozději po uplynutí stropu.
   Strop platí i při `skip_mfa = false`, kdy druhý faktor ověřuje MyÚčto, a odemčení
   zamčené obrazovky ani přechod na vlastní doménu firmy ho neprodlouží,
-- API token a MCP připojení vystavené ze sezení přes Entra ID přestanou fungovat
-  nejpozději po uplynutí stropu (`401 invalid_token`, obnova MCP připojení se
+- je-li zapnuté `auth.oidc.tokens_follow_identity` (ENV
+  `MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY=1`), API token a MCP připojení vystavené
+  ze sezení přes Entra ID přestanou fungovat nejpozději po uplynutí stropu (`401 invalid_token`, obnova MCP připojení se
   odmítne). Token má dál svou vlastní expiraci, ale používat jde jen tehdy, když
   se jeho vlastník přes Entra ID přihlásil v posledních `session_lifetime_hours`.
   Kdo tokeny používá k automatickému napojení, musí se proto přes Microsoft
-  přihlašovat alespoň jednou za tuto dobu, nebo si strop prodloužit,
+  přihlašovat alespoň jednou za tuto dobu, nebo si strop prodloužit. Bez
+  `tokens_follow_identity` (výchozí) platí token do své expirace a zablokovanému
+  uživateli ho ukončí deaktivace účtu v MyÚčto,
 - tokeny a sezení vzniklé bez Entra ID (heslo, TOTP, přístupový klíč, Google)
   se tím nemění. Bez vynucení se uživatel, který zná heslo, přihlásí heslem dál.
   Blokace v Entra ID tedy celý přístup uzavře jen s `required_provider = 'entra'`.

@@ -278,10 +278,13 @@ return [
         'oidc' => [
             'enabled'                => false,
             'required_provider'      => '', // 'entra' = přihlášení jen přes Entra ID
-            // Strop platnosti sezení z Entra ID od posledního ověření u Entra. Stejný
-            // strop platí pro API tokeny a MCP připojení vydané z takového sezení,
-            // takže uživatel zablokovaný v Entra ID přestane mít přístup nejpozději po něm.
+            // Strop platnosti sezení z Entra ID od posledního ověření u Entra.
             'session_lifetime_hours' => 12,
+            // true = stejný strop platí i pro API tokeny a MCP připojení vydané ze sezení
+            // přes Entra ID, takže uživatel zablokovaný v Entra ID přestane mít přístup
+            // nejpozději po něm (ENV MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY=1).
+            // false = tokeny platí do své vlastní expirace, přístup ukončí deaktivace účtu.
+            'tokens_follow_identity' => false,
             'providers' => [
                 'entra' => [
                     'enabled'       => false,

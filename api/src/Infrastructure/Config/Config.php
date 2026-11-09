@@ -333,6 +333,11 @@ final class Config
                 'oidc' => [
                     'enabled' => false,
                     'session_lifetime_hours' => 12,
+                    // API tokeny a MCP připojení vydané z přihlášení přes Entra ID platí
+                    // jen do session_lifetime_hours od posledního ověření v Entra ID, takže
+                    // uživatele zablokovaného v Entra ID nepřežijí. Vypnuto = tokeny platí
+                    // do své vlastní expirace a přístup se odebírá deaktivací účtu.
+                    'tokens_follow_identity' => false,
                     // Poskytovatel povinný pro celou instalaci (např. 'entra'). Platí
                     // pro všechny firmy i uživatele včetně správce instance, heslo
                     // se pak nepoužívá. Prázdné = přihlášení heslem i přes poskytovatele.
@@ -537,6 +542,7 @@ final class Config
             'MYINVOICE_OIDC_ENABLED'                 => ['auth.oidc.enabled', 'bool'],
             'MYINVOICE_OIDC_SESSION_LIFETIME_HOURS'  => ['auth.oidc.session_lifetime_hours', 'int'],
             'MYINVOICE_OIDC_REQUIRED'                => ['auth.oidc.required_provider', 'string'],
+            'MYINVOICE_OIDC_TOKENS_FOLLOW_IDENTITY'  => ['auth.oidc.tokens_follow_identity', 'bool'],
             'MYINVOICE_OIDC_ENTRA_ENABLED'           => ['auth.oidc.providers.entra.enabled', 'bool'],
             'MYINVOICE_OIDC_ENTRA_LABEL'             => ['auth.oidc.providers.entra.label', 'string'],
             'MYINVOICE_OIDC_ENTRA_TENANT_ID'         => ['auth.oidc.providers.entra.tenant_id', 'string'],

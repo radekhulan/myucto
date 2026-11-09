@@ -207,9 +207,15 @@ final class ApiTokenService
      * zablokovaného v Entra ID tak token přežije nejvýš o stejný strop jako
      * sezení. Po dalším přihlášení přes Entra ID token zase funguje, dokud
      * neskončí jeho vlastní platnost. Tokeny vydané jinak se nemění.
+     *
+     * Platí jen se zapnutým `auth.oidc.tokens_follow_identity`; bez něj
+     * token platí do své vlastní expirace.
      */
     public function issuingIdentityFresh(int $userId, ?string $issuedAuthMethod, ?PDO $pdo = null): bool
     {
+        if (!(bool) $this->config?->get('auth.oidc.tokens_follow_identity', false)) {
+            return true;
+        }
         if (!SessionAuthContext::isOrganizationIdentityMethod($issuedAuthMethod)) {
             return true;
         }

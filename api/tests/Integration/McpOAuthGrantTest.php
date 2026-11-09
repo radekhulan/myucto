@@ -201,9 +201,28 @@ final class McpOAuthGrantTest extends TestCase
         self::assertNull($this->oauth->refresh($second['refresh_token'], $client));
     }
 
+    public function testEntraIssuedTokensOutliveEntraVerificationWhenSwitchedOff(): void
+    {
+        $pdo = $this->db->pdo();
+        $pdo->prepare(
+            "INSERT INTO user_external_identities
+                (user_id, provider, issuer, tenant_id, subject, linked_by, last_used_at)
+             VALUES (?, 'entra', 'https://login.example.test/v2.0', 'synthetic-tenant', ?, 'admin', UTC_TIMESTAMP(6) - INTERVAL 13 HOUR)"
+        )->execute([$this->userId, 'synthetic-oid-' . bin2hex(random_bytes(6))]);
+        $tokens = new ApiTokenService($this->db, new RedisFactory(Config::load(dirname(__DIR__, 3))), null, Config::load(dirname(__DIR__, 3)));
+        $pat = $tokens->generate($this->userId, $this->supplierId, 'Entra PAT', 'read', new \DateTimeImmutable('+90 days'));
+        $pdo->prepare("UPDATE api_tokens SET issued_auth_method = 'oidc:entra' WHERE id = ?")->execute([$pat['id']]);
+
+        // Bez auth.oidc.tokens_follow_identity platí token do své vlastní expirace.
+        self::assertNotNull($tokens->validate($pat['plaintext']));
+    }
+
     public function testEntraIssuedTokensFollowEntraVerificationWithinSessionCap(): void
     {
         $pdo = $this->db->pdo();
+        $strict = new Config(['auth' => ['oidc' => ['tokens_follow_identity' => true, 'session_lifetime_hours' => 12]]]);
+        $this->tokens = new ApiTokenService($this->db, new RedisFactory(Config::load(dirname(__DIR__, 3))), null, $strict);
+        $this->oauth = new McpOAuth($this->db, $this->tokens, Bootstrap::buildContainer()->get(\MyInvoice\Service\Mcp\McpResourcePolicy::class));
         $pdo->prepare(
             "INSERT INTO user_external_identities
                 (user_id, provider, issuer, tenant_id, subject, linked_by, last_used_at)

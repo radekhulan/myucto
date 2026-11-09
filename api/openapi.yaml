@@ -43,8 +43,9 @@ info:
     ze sezení přihlášeného přes Entra. Token vydaný dřív ze sezení s heslem skončí
     `401 sso_required`.
 
-    Token i připojení MCP vydané ze sezení přihlášeného přes Microsoft Entra ID
-    (bez ohledu na vynucení) platí jen, dokud se jeho vlastník přes Entra ID
+    Má-li instalace zapnuté `auth.oidc.tokens_follow_identity`, token i připojení
+    MCP vydané ze sezení přihlášeného přes Microsoft Entra ID (bez ohledu na
+    vynucení) platí jen, dokud se jeho vlastník přes Entra ID
     úspěšně ověřil v posledních `auth.oidc.session_lifetime_hours` (výchozí 12 h,
     stejný strop jako sezení). Jinak volání skončí `401 invalid_token` a obnova
     MCP připojení `invalid_grant`. Po dalším přihlášení přes Entra ID token zase
