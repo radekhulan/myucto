@@ -7,6 +7,7 @@ import { ICONS, btnFilled, btnOutline } from '@/components/ui/buttonStyles'
 import { numberSeriesApi, SELECTABLE_KINDS, type NumberSeries, type NumberSeriesCompleteness, type NumberSeriesKind, type NumberSeriesPeriod } from '@/api/numberSeries'
 import { cashApi, type CashRegister } from '@/api/cash'
 import { numberSeriesLabel } from '@/utils/numberSeries'
+import { formatDate } from '@/composables/useFormat'
 import { useAuthStore } from '@/stores/auth'
 import { useSupplierStore } from '@/stores/supplier'
 import { useToast } from '@/composables/useToast'
@@ -150,6 +151,29 @@ async function saveForm() {
   }
 }
 
+// ── ukončení řady ─────────────────────────────────────────────────────────────
+const endDialog = reactive({ open: false, series: null as NumberSeries | null, date: '', saving: false })
+
+function openEnd(s: NumberSeries) {
+  Object.assign(endDialog, { open: true, series: s, date: today, saving: false })
+}
+
+async function submitEnd() {
+  const s = endDialog.series
+  if (!s || !endDialog.date) return
+  endDialog.saving = true
+  try {
+    await numberSeriesApi.update(s.id, { valid_to: endDialog.date })
+    endDialog.open = false
+    toast.success(t('number_series.ended'))
+    await load()
+  } catch (e: any) {
+    toast.error(e?.response?.data?.error?.message || t('common.error'))
+  } finally {
+    endDialog.saving = false
+  }
+}
+
 // ── řádkové akce ──────────────────────────────────────────────────────────────
 async function run(fn: () => Promise<unknown>, success: string) {
   try {
@@ -189,7 +213,7 @@ function rowActions(s: NumberSeries): RowAction[] {
     {
       key: 'end', label: t('number_series.action_end'), icon: 'lock', variant: 'warning', menuOnly: true,
       show: canWrite.value && s.can_end && s.valid_to === null,
-      run: () => { openEdit(s); form.valid_to = today },
+      run: () => openEnd(s),
     },
     {
       key: 'reopen', label: t('number_series.action_reopen'), icon: 'uturn', variant: 'neutral', menuOnly: true,
@@ -250,7 +274,7 @@ const completenessRows = computed(() => (completeness.value?.series ?? []).map(c
     <div v-else class="space-y-5">
       <div v-for="g in groups" :key="g.group">
         <h3 class="text-sm font-semibold text-neutral-700 mb-2">{{ t(`number_series.groups.${g.group}`) }}</h3>
-        <div class="border border-neutral-200 rounded-lg overflow-x-auto">
+        <div class="hidden md:block border border-neutral-200 rounded-lg overflow-x-auto" data-test="series-table">
           <table class="w-full text-sm">
             <thead class="bg-neutral-50 text-xs text-neutral-500 uppercase tracking-wide">
               <tr>
@@ -279,7 +303,7 @@ const completenessRows = computed(() => (completeness.value?.series ?? []).map(c
                   <div class="flex flex-wrap gap-1">
                     <span v-if="s.is_default" class="text-xs px-1.5 py-0.5 rounded bg-success-50 text-success-700 whitespace-nowrap">{{ t('number_series.badge_default') }}</span>
                     <span v-if="s.is_user_default" class="text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 whitespace-nowrap">{{ t('number_series.badge_user_default') }}</span>
-                    <span v-if="s.valid_to" class="text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-700 whitespace-nowrap">{{ t('number_series.badge_ended', { date: s.valid_to }) }}</span>
+                    <span v-if="s.valid_to" class="text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-700 whitespace-nowrap">{{ t('number_series.badge_ended', { date: formatDate(s.valid_to) }) }}</span>
                   </div>
                 </td>
                 <td class="px-3 py-2 text-right">
@@ -289,6 +313,35 @@ const completenessRows = computed(() => (completeness.value?.series ?? []).map(c
             </tbody>
           </table>
         </div>
+        <ul class="md:hidden space-y-2" data-test="series-cards">
+          <li v-for="s in g.rows" :key="`m-${s.id}`" class="border border-neutral-200 rounded-lg p-3"
+            :class="isEnded(s) ? 'text-neutral-400' : ''">
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <div class="font-medium break-words">{{ label(s) }}</div>
+                <div class="text-xs text-neutral-500">
+                  {{ t(`number_series.kinds.${s.doc_kind}`) }}
+                  <template v-if="s.scope_type === 'cash_register'"> · {{ t('number_series.scopes.cash_register') }} {{ s.scope_name }}</template>
+                  · {{ s.storage === 'legacy' ? t('number_series.storage_legacy') : t('number_series.storage_native') }}
+                </div>
+              </div>
+              <RowActionsMenu :actions="rowActions(s)" :inline-count="1" icon-only />
+            </div>
+            <dl class="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 text-xs">
+              <dt class="text-neutral-500">{{ t('number_series.col_template') }}</dt>
+              <dd class="font-mono text-right break-all">{{ templateShown(s) || '-' }}</dd>
+              <dt class="text-neutral-500">{{ t('number_series.col_period') }}</dt>
+              <dd class="text-right">{{ s.period ? t(`number_series.periods.${s.period}`) : '-' }}</dd>
+              <dt class="text-neutral-500">{{ t('number_series.col_next') }}</dt>
+              <dd class="font-mono text-right">{{ s.next_preview ?? '-' }}</dd>
+            </dl>
+            <div v-if="s.is_default || s.is_user_default || s.valid_to" class="mt-2 flex flex-wrap gap-1">
+              <span v-if="s.is_default" class="text-xs px-1.5 py-0.5 rounded bg-success-50 text-success-700 whitespace-nowrap">{{ t('number_series.badge_default') }}</span>
+              <span v-if="s.is_user_default" class="text-xs px-1.5 py-0.5 rounded bg-primary-50 text-primary-700 whitespace-nowrap">{{ t('number_series.badge_user_default') }}</span>
+              <span v-if="s.valid_to" class="text-xs px-1.5 py-0.5 rounded bg-warning-50 text-warning-700 whitespace-nowrap">{{ t('number_series.badge_ended', { date: formatDate(s.valid_to) }) }}</span>
+            </div>
+          </li>
+        </ul>
       </div>
     </div>
 
@@ -335,6 +388,28 @@ const completenessRows = computed(() => (completeness.value?.series ?? []).map(c
         </p>
       </div>
     </div>
+
+    <Modal v-if="endDialog.open && endDialog.series" :title="t('number_series.end_title')" widthClass="max-w-md" @close="endDialog.open = false">
+      <div class="space-y-3">
+        <p class="text-sm text-neutral-700">{{ t('number_series.end_hint', { name: label(endDialog.series) }) }}</p>
+        <div>
+          <label class="block text-xs font-medium text-neutral-700 mb-1">{{ t('number_series.field_valid_to') }}</label>
+          <input v-model="endDialog.date" type="date" class="w-full h-9 px-3 border border-neutral-300 rounded-md text-sm" data-test="end-date" />
+        </div>
+      </div>
+      <template #footer>
+        <div class="flex flex-wrap justify-end gap-2">
+          <button type="button" :class="btnOutline('neutral')" class="whitespace-nowrap" @click="endDialog.open = false">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.x" /></svg>
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" :class="btnFilled('warning')" class="whitespace-nowrap" :disabled="endDialog.saving || !endDialog.date" data-test="end-save" @click="submitEnd">
+            <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" :d="ICONS.lock" /></svg>
+            {{ endDialog.saving ? t('common.saving') : t('number_series.action_end') }}
+          </button>
+        </div>
+      </template>
+    </Modal>
 
     <Modal v-if="formOpen" :title="editing ? t('number_series.edit') : t('number_series.new')" widthClass="max-w-2xl" @close="formOpen = false">
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
