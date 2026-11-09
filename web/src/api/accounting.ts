@@ -901,6 +901,10 @@ export interface PostingRule {
   credit_account_code: string | null
   priority: number
   is_active: boolean
+  /** Hodí se na řádek přijaté faktury (určuje server z předkontace). */
+  line_purchase?: boolean
+  /** Hodí se na řádek vydané faktury. */
+  line_sale?: boolean
 }
 
 /** GET /posting-rules vrací objekt keyed rule_key → pravidlo (prázdné → {}). */

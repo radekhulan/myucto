@@ -21,7 +21,7 @@ const ChartAccountSelect = {
 
 const rule = {
   id: 1, supplier_id: null, rule_key: 'test.material', description: 'Materiál', debit_account_code: '501',
-  credit_account_code: '325', priority: 0, is_active: true,
+  credit_account_code: '325', priority: 0, is_active: true, line_purchase: true, line_sale: true,
 }
 
 describe('ItemPostingFields', () => {
@@ -51,11 +51,12 @@ describe('ItemPostingFields', () => {
 })
 
 describe('ItemPostingFields: předkontace podle typu dokladu', () => {
-  const sale = { ...rule, rule_key: 'test.sale', debit_account_code: '311', credit_account_code: '384' }
-  const purchase = { ...rule, rule_key: 'test.purchase', debit_account_code: '518', credit_account_code: '321' }
+  const sale = { ...rule, rule_key: 'test.sale', debit_account_code: '311', credit_account_code: '602', line_purchase: false, line_sale: true }
+  const purchase = { ...rule, rule_key: 'test.purchase', debit_account_code: '518', credit_account_code: '321', line_purchase: true, line_sale: false }
+  const neither = { ...rule, rule_key: 'test.accrual', debit_account_code: '518', credit_account_code: '321', line_purchase: false, line_sale: false }
   function keys(direction: 'purchase' | 'sale'): string[] {
     const wrapper = mount(ItemPostingFields, {
-      props: { direction, ruleKey: null, counterAccount: null, rules: [sale, purchase], accounts: [] } as any,
+      props: { direction, ruleKey: null, counterAccount: null, rules: [sale, purchase, neither], accounts: [] } as any,
       global: { stubs: { ChartAccountSelect } },
     })
     return wrapper.findAll('[data-test="item-posting-rule"] option').map(o => (o.element as HTMLOptionElement).value).filter(Boolean)
@@ -63,6 +64,11 @@ describe('ItemPostingFields: předkontace podle typu dokladu', () => {
 
   it('přijatá faktura nenabízí předkontaci vydané faktury', () => {
     expect(keys('purchase')).toEqual(['test.purchase'])
+  })
+
+  it('předkontace bez příznaku použitelnosti na řádku se nenabízí vůbec', () => {
+    expect(keys('purchase')).not.toContain('test.accrual')
+    expect(keys('sale')).not.toContain('test.accrual')
   })
 
   it('vydaná faktura nenabízí předkontaci přijaté faktury', () => {
