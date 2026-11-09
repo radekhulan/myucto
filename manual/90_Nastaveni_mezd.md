@@ -470,6 +470,7 @@ použije bezpečnou výchozí hodnotu; vyplňte ji tam, kde se vaše osnova liš
 | **Nedaňová část benefitu** | osvobozená část nepeněžního benefitu | 528 |
 | **Cestovní náhrady** | vyúčtování pracovní cesty promítnuté do mzdy | 512 proti 331 nebo 366 |
 | **Zákonné pojištění odpovědnosti** | čtvrtletní předpis pojistného podle vyhlášky č. 125/1993 Sb. | 548 / 379.400 |
+| **Odměna jednatele, který není společníkem** | odměna za výkon funkce u vztahu bez příznaku společníka | 523 / 331 (prázdné = 523 / 366) |
 
 Příspěvek na spoření u rizikové práce se zaměstnanci nevyplácí a penzijní
 společnost není institucí sociálního ani zdravotního pojištění, proto nejde na

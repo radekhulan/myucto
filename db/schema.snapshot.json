@@ -1172,7 +1172,9 @@
         "2266_journal_entry_pairs.sql",
         "2267_invoice_item_posting_accounts.sql",
         "2268_number_series_codebook.sql",
-        "2269_internal_document_line_pairs.sql"
+        "2269_internal_document_line_pairs.sql",
+        "2270_payroll_posting_granularity.sql",
+        "2271_payroll_statutory_nonpartner_account.sql"
     ],
     "tables": {
         "abra_flexi_connections": {
@@ -13075,6 +13077,7 @@
                 "payroll_contact_email": "varchar(190) NULL DEFAULT NULL",
                 "payroll_contact_name": "varchar(190) NULL DEFAULT NULL",
                 "payroll_contact_phone": "varchar(40) NULL DEFAULT NULL",
+                "posting_granularity": "varchar(16) NOT NULL DEFAULT 'summary'",
                 "risky_savings_credit_account": "varchar(16) NOT NULL DEFAULT '379'",
                 "risky_savings_debit_account": "varchar(16) NOT NULL DEFAULT '527'",
                 "row_version": "int(10) unsigned NOT NULL DEFAULT 1",
@@ -13082,6 +13085,7 @@
                 "social_security_office_code": "varchar(16) NULL DEFAULT NULL",
                 "statutory_gross_credit_account": "varchar(10) NOT NULL DEFAULT '366'",
                 "statutory_gross_debit_account": "varchar(10) NOT NULL DEFAULT '523'",
+                "statutory_nonpartner_gross_credit_account": "varchar(10) NOT NULL DEFAULT ''",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "travel_expense_debit_account": "varchar(16) NOT NULL DEFAULT '512'",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()",
@@ -13097,6 +13101,7 @@
                 "fk_payroll_employer_supplier": "(supplier_id) -> supplier (id) ON UPDATE RESTRICT ON DELETE CASCADE"
             },
             "checks": {
+                "chk_payroll_employer_posting_granularity": "`posting_granularity` in ('summary','employee')",
                 "chk_payroll_employer_wage_rounding": "`wage_rounding` in ('ceil','half_up')"
             }
         },
@@ -13596,6 +13601,7 @@
                 "start_date": "date NULL DEFAULT NULL",
                 "start_estimated": "tinyint(1) NOT NULL DEFAULT 0",
                 "status": "enum('planned','preregistered','active','suspended','ended','archived','no_show') NOT NULL DEFAULT 'planned'",
+                "statutory_partner": "tinyint(1) NOT NULL DEFAULT 0",
                 "supplier_id": "int(10) unsigned NOT NULL",
                 "updated_at": "timestamp NOT NULL DEFAULT current_timestamp() ON UPDATE CURRENT_TIMESTAMP()"
             },

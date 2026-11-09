@@ -804,6 +804,13 @@ final class PayrollRunSnapshotBuilder
                     'is_primary' => $row['term_is_primary'] === null
                         ? null
                         : (bool) $row['term_is_primary'],
+                    // Člen orgánu, který je zároveň společníkem (odměna za výkon
+                    // funkce proti 366). Klíč jen u takového vztahu, ostatním
+                    // zůstává snímek i otisk vstupu beze změny.
+                    ...((int) ($row['statutory_partner'] ?? 0) === 1
+                        && (string) $row['relation_type'] === 'statutory_body'
+                        ? ['statutory_partner' => true]
+                        : []),
                 ],
                 'term' => $termSnapshot,
                 ...(!isset($hourlyFrozen['latest'][$employmentId]) ? [] : ['hourly_wage_claims' => $hourlyFrozen['latest'][$employmentId]]),
@@ -1567,6 +1574,7 @@ final class PayrollRunSnapshotBuilder
                     employment.office_id,
                     employment.code AS employment_code,
                     employment.relation_type,
+                    employment.statutory_partner,
                     employment.effective_status AS employment_status,
                     employment.start_date,
                     employment.actual_start_date,

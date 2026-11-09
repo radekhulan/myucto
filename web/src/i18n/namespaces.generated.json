@@ -626,6 +626,9 @@
     "payroll-posting-reconciliation": [
       "payroll"
     ],
+    "payroll-posting-detail": [
+      "payroll"
+    ],
     "payroll-people": [
       "payroll"
     ],

@@ -17,6 +17,7 @@ vi.mock('@/api/payroll', () => ({
     changeEmploymentRelationType: vi.fn(),
     mergeEmployment: vi.fn(),
     setEmploymentMealEntitlementBasis: vi.fn(),
+    setEmploymentStatutoryPartner: vi.fn(),
     remunerationOptions: vi.fn().mockResolvedValue({ minimum_hourly_40h_minor: null, ruleset_id: null }),
     addEmploymentTerms: vi.fn(),
     correctEmploymentTerms: vi.fn(),
@@ -1088,6 +1089,25 @@ describe('EmploymentCard', () => {
 
     expect(payrollApi.setEmploymentMealEntitlementBasis)
       .toHaveBeenCalledWith(10, 1, 'calendar_day')
+    expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[1]).toBe(2)
+  })
+
+  /** Příznak společníka je jen u výkonu funkce a ukládá se týmž tlačítkem jako podmínky. */
+  it('uloží u výkonu funkce, že je člen orgánu společníkem', async () => {
+    expect((await mountCard()).find('[data-test="employment-statutory-partner"]').exists()).toBe(false)
+
+    const statutory = { ...employment(), relation_type: 'statutory_body' as const, statutory_partner: false }
+    const afterFlag = { ...statutory, statutory_partner: true, row_version: 2 }
+    vi.mocked(payrollApi.setEmploymentStatutoryPartner).mockResolvedValue(afterFlag)
+    vi.mocked(payrollApi.correctEmploymentTerms).mockResolvedValue({ employment: afterFlag, warnings: [] })
+    const wrapper = await mountCard(statutory)
+
+    await wrapper.get('[data-test="employment-statutory-partner"]').setValue(true)
+    await wrapper.get('[data-test="terms-weekly-hours"]').setValue('38.00')
+    await wrapper.get('form[data-test="employment-terms"]').trigger('submit')
+    await flushPromises()
+
+    expect(payrollApi.setEmploymentStatutoryPartner).toHaveBeenCalledWith(10, 1, true)
     expect(vi.mocked(payrollApi.correctEmploymentTerms).mock.calls.at(-1)?.[1]).toBe(2)
   })
 

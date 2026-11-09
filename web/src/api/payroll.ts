@@ -271,6 +271,8 @@ export interface PayrollEmployment {
   office_name: string | null
   code: string
   relation_type: PayrollRelationType
+  /** Jen u výkonu funkce: člen orgánu je zároveň společníkem (523/366). Starší server klíč nemá. */
+  statutory_partner?: boolean
   meal_entitlement_basis: PayrollMealEntitlementBasis
   status: PayrollEmploymentStatus
   is_primary: boolean
@@ -3254,6 +3256,11 @@ export interface PayrollEmployerAccounts {
    * 648). Prázdný řetězec = nenastaveno, paušál zůstává na závazku jako dřív.
    */
   enforcement_fee_revenue_credit: string
+  /**
+   * Závazek z odměny za výkon funkce jednatele, který není společníkem (523/331).
+   * Prázdný řetězec = nenastaveno, odměna jednatele jde proti 366 jako dřív.
+   */
+  statutory_nonpartner_gross_credit: string
   partner_settlement_credit: string
   /**
    * Povinný příspěvek zaměstnavatele na spoření u rizikové práce
@@ -8889,6 +8896,12 @@ export const payrollApi = {
     api.patch<{ employment: PayrollEmployment }>(
       `/payroll/employments/${employmentId}/meal-entitlement-basis`,
       { row_version: rowVersion, meal_entitlement_basis: mealEntitlementBasis },
+    ).then(response => response.data.employment),
+  /** Člen orgánu je zároveň společníkem: odměna za výkon funkce proti 366, ne 331. */
+  setEmploymentStatutoryPartner: (employmentId: number, rowVersion: number, statutoryPartner: boolean) =>
+    api.patch<{ employment: PayrollEmployment }>(
+      `/payroll/employments/${employmentId}/statutory-partner`,
+      { row_version: rowVersion, statutory_partner: statutoryPartner },
     ).then(response => response.data.employment),
   /** Nástup odhadnutý z hlášení je ověřený a platí beze změny. */
   confirmEmploymentStart: (employmentId: number, rowVersion: number) =>

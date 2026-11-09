@@ -141,7 +141,7 @@ final class PayrollEmploymentRepository
         $stmt = $this->db->pdo()->prepare(
             'SELECT employment.id, employment.employee_id, employment.office_id,
                     office.code AS office_code, office.name AS office_name,
-                    employment.code, employment.relation_type,
+                    employment.code, employment.relation_type, employment.statutory_partner,
                     employment.meal_entitlement_basis, employment.status,
                     employment.is_primary, employment.start_date,
                     employment.actual_start_date, employment.start_estimated,
@@ -209,6 +209,7 @@ final class PayrollEmploymentRepository
                 'office_name' => $row['office_name'] === null ? null : (string) $row['office_name'],
                 'code' => (string) $row['code'],
                 'relation_type' => $relationType,
+                'statutory_partner' => (bool) $row['statutory_partner'],
                 'meal_entitlement_basis' => (string) $row['meal_entitlement_basis'],
                 'status' => (string) $row['status'],
                 'is_primary' => (bool) $row['is_primary'],
@@ -1412,6 +1413,76 @@ final class PayrollEmploymentRepository
             );
 
             return $this->find($supplierId, (int) $employment['employee_id'], $employmentId);
+        });
+    }
+
+    /**
+     * Člen statutárního orgánu je zároveň společníkem: odměna za výkon funkce
+     * se účtuje proti závazku ke společníkům (366), ne proti 331. Platí pro běhy
+     * přepočítané po změně, zaúčtované revize nese jejich zmrazený snímek.
+     *
+     * @return array<string,mixed>
+     */
+    public function setStatutoryPartner(
+        int $supplierId,
+        int $employmentId,
+        bool $partner,
+        int $expectedVersion,
+        ?int $userId,
+        ?string $ip,
+        ?string $userAgent,
+    ): array {
+        return $this->transaction(function () use (
+            $supplierId,
+            $employmentId,
+            $partner,
+            $expectedVersion,
+            $userId,
+            $ip,
+            $userAgent,
+        ): array {
+            $owner = $this->db->pdo()->prepare(
+                'SELECT employee_id, relation_type, statutory_partner
+                   FROM payroll_employments
+                  WHERE supplier_id = ? AND id = ?'
+            );
+            $owner->execute([$supplierId, $employmentId]);
+            $row = $owner->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row)) {
+                throw new PayrollEmploymentNotFoundException('Pracovní vztah nebyl nalezen.');
+            }
+            if ((string) $row['relation_type'] !== 'statutory_body') {
+                throw new \InvalidArgumentException(
+                    'Společníka lze vyznačit jen u vztahu odměny za výkon funkce člena orgánu.',
+                );
+            }
+            $this->lockEmployee($supplierId, (int) $row['employee_id']);
+            $this->lockEmployment($supplierId, $employmentId, $expectedVersion);
+            $previous = (int) $row['statutory_partner'] === 1;
+            if ($previous === $partner) {
+                return $this->find($supplierId, (int) $row['employee_id'], $employmentId);
+            }
+            $update = $this->db->pdo()->prepare(
+                'UPDATE payroll_employments
+                    SET statutory_partner = ?, row_version = row_version + 1
+                  WHERE supplier_id = ? AND id = ? AND row_version = ?'
+            );
+            $update->execute([(int) $partner, $supplierId, $employmentId, $expectedVersion]);
+            if ($update->rowCount() !== 1) {
+                throw new PayrollEmploymentConflictException($expectedVersion);
+            }
+            $this->activityLogger->log(
+                'payroll.employment.statutory_partner_changed',
+                $userId,
+                'payroll_employment',
+                $employmentId,
+                ['from' => $previous, 'to' => $partner],
+                $ip,
+                $userAgent,
+                $supplierId,
+            );
+
+            return $this->find($supplierId, (int) $row['employee_id'], $employmentId);
         });
     }
 

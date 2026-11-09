@@ -17,6 +17,7 @@ final class PayrollEmployerSettingsRepository
         'partner_gross_credit' => 'partner_gross_credit_account',
         'statutory_gross_debit' => 'statutory_gross_debit_account',
         'statutory_gross_credit' => 'statutory_gross_credit_account',
+        'statutory_nonpartner_gross_credit' => 'statutory_nonpartner_gross_credit_account',
         'employer_insurance_debit' => 'employer_insurance_debit_account',
         'social_insurance_credit' => 'social_insurance_credit_account',
         'health_insurance_credit' => 'health_insurance_credit_account',
@@ -74,7 +75,13 @@ final class PayrollEmployerSettingsRepository
      */
     private function defaultAccounts(int $supplierId): array
     {
+        // Nově zakládaná firma dostane nabídnuté i předkontace, které se jinak
+        // zapínají jen výslovně (odměna jednatele bez podílu 523/331); stávající
+        // firma je má uložené prázdné a nemění se jí nic.
         $codes = PayrollAccountingDefaults::codes();
+        foreach (PayrollAccountingDefaults::EXPLICIT_ONLY_ACCOUNTS as $key) {
+            $codes[$key] = (string) PayrollAccountingDefaults::defaultCode($key);
+        }
         $analytics = [];
         foreach ($codes as $key => $code) {
             if (str_contains($code, '.') || PayrollAccountingDefaults::isNullable($key)) {

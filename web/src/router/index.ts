@@ -158,6 +158,7 @@ const routePermissions: Record<string, [PermissionKey | readonly PermissionKey[]
   'payroll-runs': ['payroll'],
   'payroll-payments': ['payroll.payments'],
   'payroll-posting-reconciliation': ['payroll.post'],
+  'payroll-posting-detail': ['payroll.reports'],
   'payroll-people': ['payroll'],
   // Adresa karty člověka jen přesměruje na seznam; práva musí být stejná, jinak
   // by odkaz končil na homepage dřív, než se přesměrování vůbec provede.

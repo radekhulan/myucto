@@ -78,6 +78,94 @@ final class PayrollPostingLineBuilderTest extends TestCase
         ));
     }
 
+    /**
+     * Odměna za výkon funkce jednatele, který není společníkem, jde proti 331
+     * (523/331), u společníka (příznak vztahu) zůstává 523/366. Platí jen se
+     * zmrazenou předkontací; bez ní zápis jako dřív (523/366 pro všechny, viz
+     * testKeepsDirectorEmploymentPartnerIncomeAndOfficeRewardSeparate).
+     */
+    public function testStatutoryBodyWithoutPartnerShareIsPostedAgainstEmployeePayable(): void
+    {
+        $accounts = PayrollAccountingDefaults::codes()
+            + ['statutory_nonpartner_gross_credit' => '331'];
+        $preview = $this->builder->build($this->snapshot(), $this->calculatedResult(), $this->statutorySets(), $accounts);
+        self::assertSame(
+            [['523', 300_000], ['331', -300_000]],
+            $this->grossOf($preview->targetAllocations, 103),
+        );
+        self::assertSame(
+            ['331|credit' => 400_000, '366|credit' => 200_000],
+            array_intersect_key($this->lineMap($preview->lines), ['331|credit' => 0, '366|credit' => 0]),
+        );
+
+        $snapshot = $this->snapshot();
+        $snapshot['people'][0]['employments'][2]['employment']['statutory_partner'] = true;
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $partner = $this->builder->build($snapshot, $result, $this->statutorySets(), $accounts);
+        self::assertSame(
+            [['523', 300_000], ['366', -300_000]],
+            $this->grossOf($partner->targetAllocations, 103),
+        );
+
+        $legacy = $this->builder->build(
+            $this->snapshot(),
+            $this->calculatedResult(),
+            $this->statutorySets(),
+            PayrollAccountingDefaults::codes(),
+        );
+        self::assertSame(
+            [['523', 300_000], ['366', -300_000]],
+            $this->grossOf($legacy->targetAllocations, 103),
+            'Snímek bez předkontace (nenastavená se nezmrazí) = dosavadní zápis.',
+        );
+    }
+
+    /**
+     * Dvojice společníků a jednatelů ve formě single, souhrnně i po zaměstnancích:
+     * 522/366 předpis, 366/336 pojistné, 366/342 daň, 523/366 odměna jednatele
+     * společníka, 366/365 zápočet čisté mzdy na účet společníka.
+     */
+    public function testPartnerPostingPairsInSingleForm(): void
+    {
+        $snapshot = $this->snapshotWithSettlementRule();
+        $snapshot['people'][0]['employments'][2]['employment']['statutory_partner'] = true;
+        $result = $this->calculatedResult();
+        $result['source_snapshot_hash'] = $this->snapshotHash($snapshot);
+        $accounts = PayrollAccountingDefaults::codes()
+            + ['statutory_nonpartner_gross_credit' => '331'];
+        $preview = $this->builder->build($snapshot, $result, $this->statutorySets(), $accounts);
+
+        foreach ([null, \MyInvoice\Service\Payroll\Posting\PayrollPostingEmployees::fromSnapshot($snapshot)] as $employees) {
+            $lines = $this->builder->singleEntryLines($preview->targetAllocations, [], $employees);
+            self::assertNotNull($lines);
+            $this->assertValidPairsWithTheSameTotals($preview->lines, $lines);
+            $pairs = [];
+            for ($i = 0; $i < count($lines); $i += 2) {
+                $pairs[$lines[$i]['account_code'] . '/' . $lines[$i + 1]['account_code']] = true;
+            }
+            foreach (['522/366', '523/366', '366/336.100', '366/336.200', '366/342.100', '366/365.100'] as $expected) {
+                self::assertArrayHasKey($expected, $pairs, $expected);
+            }
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $allocations
+     * @return list<array{string,int}>
+     */
+    private function grossOf(array $allocations, int $employmentId): array
+    {
+        $result = [];
+        foreach ($allocations as $allocation) {
+            if (str_starts_with($allocation['allocation_key'], "gross:employment:{$employmentId}:")) {
+                $result[] = [$allocation['account_code'], $allocation['signed_minor']];
+            }
+        }
+
+        return $result;
+    }
+
     public function testUsesTenantRelationAccountsAsSingleSourceOfDefaults(): void
     {
         $accounts = PayrollAccountingDefaults::codes();

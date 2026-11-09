@@ -466,11 +466,17 @@ final class PayrollPaymentPostingService
                     return null;
                 }
                 try {
-                    $keys = PayrollAccountingDefaults::relationAccountKeys($relationType);
+                    // Tentýž závazkový účet, na který předpis vztah zaúčtoval
+                    // (jednatel bez podílu 331 jen se zmrazenou předkontací).
+                    $code = PayrollAccountingDefaults::relationGrossCredit(
+                        $relationType,
+                        $accounts,
+                        $accounts,
+                        $identity,
+                    );
                 } catch (\InvalidArgumentException) {
                     return null;
                 }
-                $code = $accounts[$keys['gross_credit']] ?? null;
                 if (!is_string($code) || $code === '') {
                     return null;
                 }

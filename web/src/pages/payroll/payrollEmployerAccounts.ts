@@ -13,6 +13,7 @@ export const PAYROLL_ACCOUNT_TYPES: Record<PayrollAccountKey, PayrollAccountOpti
   partner_gross_credit: 'liability',
   statutory_gross_debit: 'expense',
   statutory_gross_credit: 'liability',
+  statutory_nonpartner_gross_credit: 'liability',
   employer_insurance_debit: 'expense',
   social_insurance_credit: 'liability',
   health_insurance_credit: 'liability',
@@ -41,6 +42,7 @@ export const PAYROLL_ACCOUNT_TYPES: Record<PayrollAccountKey, PayrollAccountOpti
  */
 export const NULLABLE_PAYROLL_ACCOUNT_KEYS: ReadonlySet<PayrollAccountKey> = new Set<PayrollAccountKey>([
   'enforcement_fee_revenue_credit',
+  'statutory_nonpartner_gross_credit',
 ])
 
 export function normalizedPayrollAccountCode(value: string): string {

@@ -7800,6 +7800,10 @@
         "done": "Vztah je sloučený.",
         "timeline": "Sloučeno ze vztahu {code}"
       },
+      "statutory_partner": {
+        "label": "Člen orgánu je zároveň společníkem",
+        "hint": "Odměna za výkon funkce společníka se účtuje 523/366 (závazek ke společníkům), jednatele bez podílu 523/331, je-li v nastavení mezd vyplněná předkontace odměny jednatele, který není společníkem. Platí pro běhy přepočítané po uložení."
+      },
       "meal_entitlement_basis": {
         "label": "Režim nároku na stravování",
         "shift": "Práce rozvržená na směny",
@@ -10768,6 +10772,7 @@
         "employment_gross": "Mzda zaměstnance mimo výkon funkce",
         "partner_gross": "Závislý příjem společníka",
         "statutory_gross": "Odměna za výkon funkce",
+        "statutory_nonpartner_gross": "Odměna jednatele, který není společníkem",
         "employer_insurance": "Pojistné hrazené zaměstnavatelem",
         "social_insurance": "Závazek sociálního pojištění",
         "health_insurance": "Závazek zdravotního pojištění",
@@ -10866,6 +10871,7 @@
         "terminate_hint": "Dimenzi nejde smazat, protože je použitá v historii - ukončete její účinnost nastavením konce platnosti."
       },
       "accounting_row_hint": {
+        "statutory_nonpartner_gross": "Závazek z odměny za výkon funkce jednatele nebo člena orgánu, který není společníkem: věřitelem je jako zaměstnanec, proto 523/331. U jednatele, který je společníkem (příznak na kartě vztahu), zůstává 523/366 z řádku Odměna za výkon funkce. Nechte prázdné, pokud má odměna všech jednatelů dál jít proti 366.",
         "withholding_tax": "Daň zvláštní sazbou podle § 6 odst. 4 ZDP (dohody do limitu bez prohlášení, drobné příjmy). Odvádí se jinou platbou než záloha (předčíslí 7720 místo 7704), v jiném termínu a vykazuje se vlastním hlášením, takže na společném účtu se závazky slijí a saldo proti platbám nejde přiřadit k jedné z daní. Bonus i doplatek z ročního zúčtování patří na účet ZÁLOHY, ne sem - vracejí se ze záloh.",
         "risky_savings": "Zákonný příspěvek zaměstnavatele na spoření na stáří u rizikové práce (4 % vyměřovacího základu od 1. 1. 2026). Zaměstnanci se nevyplácí, posílá se penzijní společnosti - proto zákonný sociální náklad (527) proti jinému závazku (379), ne pojistné na 336.",
         "employee_receivable": "Kam se překlopí záporná čistá mzda - typicky doplatek zdravotního pojištění do minimálního vyměřovacího základu v měsíci bez peněžního příjmu. Zaměstnanec dluží zaměstnavateli, takže jde o pohledávku (335), ne o závazek.",

@@ -126,7 +126,32 @@ final class PayrollEmployerSettingsApiTest extends TestCase
             'travel_expense_debit' => '512',
             'accident_insurance_debit' => '548',
             'accident_insurance_credit' => '379.400',
+            // Nově zakládané firmě se nabídne 523/331 u jednatele bez podílu.
+            'statutory_nonpartner_gross_credit' => '331',
         ],$settings['accounts']);
+    }
+
+    /**
+     * Odměna jednatele bez podílu (523/331) se zapíná jen výslovně: klient, který
+     * předkontaci neposlal (import, převod, starší klient), ji stávající firmě
+     * nezapne a zápis odměny jednatele zůstane 523/366.
+     */
+    public function testStatutoryNonPartnerAccountIsOnlySwitchedOnExplicitly(): void
+    {
+        $payload = $this->payload('VZOROV', 'Vzorová účtárna');
+        unset($payload['accounts']['statutory_nonpartner_gross_credit']);
+        $first = $this->json($this->put($this->supplierId, $payload))['settings'];
+        self::assertSame('', $first['accounts']['statutory_nonpartner_gross_credit']);
+
+        $payload['row_version'] = 1;
+        $payload['accounts']['statutory_nonpartner_gross_credit'] = '331';
+        $second = $this->json($this->put($this->supplierId, $payload))['settings'];
+        self::assertSame('331', $second['accounts']['statutory_nonpartner_gross_credit']);
+
+        $payload['row_version'] = 2;
+        unset($payload['accounts']['statutory_nonpartner_gross_credit']);
+        $third = $this->json($this->put($this->supplierId, $payload))['settings'];
+        self::assertSame('', $third['accounts']['statutory_nonpartner_gross_credit'], 'Klient, který klíč nezná, ho vypne jako dřív nenastavený.');
     }
 
     /**

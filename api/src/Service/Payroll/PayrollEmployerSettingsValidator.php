@@ -286,6 +286,15 @@ final class PayrollEmployerSettingsValidator
             // PayrollAccountingDefaults::NULLABLE_ACCOUNTS). Výchozí účet se
             // doplní jen klientovi, který klíč vůbec neposlal — a jen když ho
             // firma v osnově má.
+            // Předkontaci, která by stávající firmě změnila zápis (odměna
+            // jednatele bez podílu), nezapne klient, který ji neposlal.
+            if ($code === ''
+                && PayrollAccountingDefaults::isExplicitOnly($key)
+                && !array_key_exists($key, $value)
+            ) {
+                $result[$key] = '';
+                continue;
+            }
             if ($code === ''
                 && PayrollAccountingDefaults::isNullable($key)
                 && (array_key_exists($key, $value)

@@ -114,6 +114,14 @@ final class PayrollPostingLineBuilder
                     $relationType,
                     $accounts,
                 );
+                // Jednatel, který není společníkem: závazek 331 místo 366, jen
+                // když snapshot předkontaci nese (jinak zápis jako dřív).
+                $relationAccounts['gross_credit'] = PayrollAccountingDefaults::relationGrossCredit(
+                    $relationType,
+                    $configuredAccounts,
+                    $accounts,
+                    $employmentSnapshot['employment'],
+                );
                 // Závazkový účet vztahu s NEJNIŽŠÍM employment_id (vztahy jsou
                 // seřazené) je náhradní protiúčet osoby pro případ, že nemá
                 // žádný peněžní příjem — viz addEmployeeCharge().

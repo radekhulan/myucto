@@ -48,6 +48,7 @@ const ACCOUNT_GROUPS: Record<PayrollPostingMapKey, string> = {
   partner_gross_credit: 'partner_gross',
   statutory_gross_debit: 'statutory_gross',
   statutory_gross_credit: 'statutory_gross',
+  statutory_nonpartner_gross_credit: 'statutory_nonpartner_gross',
   employer_insurance_debit: 'employer_insurance',
   social_insurance_credit: 'social_insurance',
   health_insurance_credit: 'health_insurance',
